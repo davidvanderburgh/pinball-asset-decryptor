@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build AppImage for Pinball Asset Decryptor.
-# Requirements: Python 3.10+ with tkinter, wget (for appimagetool), file.
+# Requirements: Python 3.10+, wget (for appimagetool), file.
 # Tested on Ubuntu 22.04 / 24.04.
 set -euo pipefail
 
@@ -26,7 +26,7 @@ echo "Installing build deps..."
 # AppImage silently ships without it (this is how Stern's unicorn/capstone/
 # numpy went missing on the frozen builds).  Absolute path: this runs before
 # the `cd "$ROOT_DIR"` below.
-pip3 install --user -r "$ROOT_DIR/requirements.txt" -r "$ROOT_DIR/requirements-build.txt"
+pip3 install --user -r "$ROOT_DIR/requirements.txt" -r "$ROOT_DIR/requirements-build.txt" -r "$ROOT_DIR/requirements-ui.txt"
 
 echo "Running PyInstaller..."
 cd "$ROOT_DIR"
@@ -37,15 +37,22 @@ cd "$ROOT_DIR"
 # packages added via --paths; the explicit per-plugin list is the
 # bulletproof mechanism.
 #
-# Pillow gets --collect-all, not a couple of --hidden-imports.  Naming
-# only PIL + PIL.Image bundles enough to *open* an image and not enough
-# to *show* one: every preview canvas in the app goes through
-# PIL.ImageTk, whose Tk glue pulls in PIL._tkinter_finder and the
-# _imagingtk extension module, and neither is reachable by static
-# analysis.  This AppImage shipped without them and every video frame
-# preview came up "No module named 'PIL._tkinter_finder'" (a tester, v0.86
-# through v0.88).  --collect-all takes the submodules, the data AND the
-# native .so files, so the whole of Pillow is there.
+# Pillow gets --collect-all, not a couple of --hidden-imports: the plugins
+# are loaded by name and the native .so files are not reachable by static
+# analysis (v0.86-v0.88 shipped half a Pillow).  tkinter is EXCLUDED: the
+# app is a web page in a native window since the web UI cut-over, and
+# PIL.ImageTk would otherwise drag Tcl/Tk into the bundle for nothing.
+# The web UI's modules: its tabs are imported by name (webui/tabs/__init__.py
+# TABS), which PyInstaller's tracer cannot see, so every module is named here.
+WEBUI_HIDDEN=""
+for f in "$ROOT_DIR"/pinball_decryptor/webui/*.py "$ROOT_DIR"/pinball_decryptor/webui/tabs/*.py; do
+    rel="${f#"$ROOT_DIR"/}"
+    mod="${rel%.py}"
+    mod="${mod//\//.}"
+    mod="${mod%.__init__}"
+    WEBUI_HIDDEN="$WEBUI_HIDDEN --hidden-import $mod"
+done
+
 pyinstaller \
     --name "pinball-decryptor" \
     --windowed \
@@ -86,8 +93,8 @@ pyinstaller \
     --collect-all "fsb5" \
     --collect-all "pyogg" \
     --collect-all "PIL" \
-    --hidden-import "PIL.ImageTk" \
-    --hidden-import "PIL._tkinter_finder" \
+    --exclude-module "tkinter" \
+    --exclude-module "_tkinter" \
     --hidden-import "pinball_decryptor.plugins.pb" \
     --hidden-import "pinball_decryptor.plugins.ap" \
     --hidden-import "pinball_decryptor.plugins.spooky" \
@@ -99,6 +106,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.dp" \
     --hidden-import "pinball_decryptor.plugins.stern" \
     --hidden-import "pinball_decryptor.plugins.stern.engine" \
+    --hidden-import "pinball_decryptor.plugins.stern.cards" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_adjustments" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_emulate" \
@@ -176,6 +184,25 @@ pyinstaller \
     --collect-all "certifi" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
+    `# The web UI: its page files, every module, and pywebview's own js.` \
+    --add-data "$ROOT_DIR/pinball_decryptor/webui/static:pinball_decryptor/webui/static" \
+    --collect-submodules "pinball_decryptor.webui" \
+    $WEBUI_HIDDEN \
+    --collect-data "webview" \
+    --hidden-import "webview" \
+    --hidden-import "bottle" \
+    --hidden-import "proxy_tools" \
+    `# Linux draws the page with Qt WebEngine (PySide6), bundled whole.` \
+    --hidden-import "webview.platforms.qt" \
+    --hidden-import "qtpy" \
+    --collect-submodules "qtpy" \
+    --hidden-import "PySide6.QtCore" \
+    --hidden-import "PySide6.QtGui" \
+    --hidden-import "PySide6.QtWidgets" \
+    --hidden-import "PySide6.QtNetwork" \
+    --hidden-import "PySide6.QtWebChannel" \
+    --hidden-import "PySide6.QtWebEngineCore" \
+    --hidden-import "PySide6.QtWebEngineWidgets" \
     --noconfirm \
     --clean \
     --distpath "$BUILD_DIR/dist" \

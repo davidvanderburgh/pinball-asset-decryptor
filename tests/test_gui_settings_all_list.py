@@ -1,4 +1,4 @@
-"""GUI guards for the Defaults tab's "All settings" list (a tester).
+"""Guards for the Defaults tab's "All settings" list (a tester).
 
 Covers what the list promises: every setting is listed with the machine's own
 caption, the Menu column separates the three cases, the filter leaves only what
@@ -8,26 +8,18 @@ so instead of flagging anything.
 Then the two things a tester asked for on top of it — setting the default of a
 setting the curated form doesn't draw (including the hidden ones), and staging
 the firmware patch that makes the machine's own menu show them.
+
+Driven through the web UI's Defaults service (webui/tabs/defaults.py); the
+list is the ``all`` state the page draws.
 """
 import json
 import os
 
-import pytest
-
-from tests.conftest import HAS_DISPLAY
-from tests.test_gui_smoke import app  # noqa: F401  (fixture)
-
-pytestmark = [
-    pytest.mark.gui,
-    pytest.mark.skipif(not HAS_DISPLAY, reason="no Tk display available"),
-]
+from tests.webui_harness import web_app
 
 
-def _stern(app):
-    mfr = next(m for m in app._manufacturers if m.key == "stern")
-    app._on_manufacturer_change(mfr)
-    app.root.update()
-    return app.window
+def _svc(w):
+    return w.window.service("defaults")
 
 
 def _row(label, status, default=0, lo=0, hi=1, adj_id=1):
@@ -45,69 +37,75 @@ ROWS = [
 
 
 def _fill(w, rows):
-    w._settings_all_rows = list(rows)
-    w._settings_fill_all_tree()
-    tree = w._settings_all_tree
-    return [(tree.item(k, "text"), tree.item(k, "values"))
-            for k in tree.get_children()]
+    svc = _svc(w)
+
+    def _do():
+        svc._all_rows = list(rows)
+        svc._fill_all()
+    w.run(_do)
+    return list(w.state("defaults")["all"])
 
 
-def test_lists_every_setting_with_caption_id_and_menu_column(app):
-    w = _stern(app)
-    got = _fill(w, ROWS)
-    assert len(got) == len(ROWS)
-    texts = [t for t, _v in got]
-    # The machine's own caption, plus the id a tester cross-references against.
-    assert "ALLOW TOPPER CHEATS  (0xD4)" in texts
-    by_label = {t.split("  (")[0]: v for t, v in got}
-    assert by_label["FREE PLAY"][3] == "Adjustments"
-    assert by_label["MASTER VOLUME SETTING"][3] == "Service menu"
-    assert by_label["THIS IS THE WAY DEBUG"][3] == "Debug"
-    # A 0/1 setting reads as Off/On, not as a bare number.
-    assert by_label["FREE PLAY"][0] == "Off"
-    assert by_label["FREE PLAY"][2] == "off / on"
-    assert by_label["MASTER VOLUME SETTING"][2] == "0 - 64"
-    # Nothing edited yet, so the "New default" column is empty throughout.
-    assert {v[1] for _t, v in got} == {""}
+def _by_label(got):
+    return {o["caption"].split("  (")[0]: o for o in got}
 
 
-def test_filter_leaves_only_what_the_adjustments_menu_cannot_reach(app):
-    w = _stern(app)
-    _fill(w, ROWS)
-    w._settings_hidden_only.set(True)
-    w._settings_fill_all_tree()
-    got = [w._settings_all_tree.item(k, "values")[3]
-           for k in w._settings_all_tree.get_children()]
-    assert sorted(got) == ["Debug", "Debug", "Service menu"]
-    assert "3 listed" in w._settings_all_legend.cget("text")
+def test_lists_every_setting_with_caption_id_and_menu_column(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        got = _fill(w, ROWS)
+        assert len(got) == len(ROWS)
+        texts = [o["caption"] for o in got]
+        # The machine's own caption, plus the id a tester cross-references
+        # against.
+        assert "ALLOW TOPPER CHEATS  (0xD4)" in texts
+        by_label = _by_label(got)
+        assert by_label["FREE PLAY"]["menu"] == "Adjustments"
+        assert by_label["MASTER VOLUME SETTING"]["menu"] == "Service menu"
+        assert by_label["THIS IS THE WAY DEBUG"]["menu"] == "Debug"
+        # A 0/1 setting reads as Off/On, not as a bare number.
+        assert by_label["FREE PLAY"]["value"] == "Off"
+        assert by_label["FREE PLAY"]["range"] == "off / on"
+        assert by_label["MASTER VOLUME SETTING"]["range"] == "0 - 64"
+        # Nothing edited yet, so the "New default" column is empty throughout.
+        assert {o["new"] for o in got} == {""}
 
 
-def test_unreadable_menu_flags_nothing_and_says_so(app):
+def test_filter_leaves_only_what_the_adjustments_menu_cannot_reach(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        _fill(w, ROWS)
+        w.call("ui.set", "defaults", "hidden_only", True)
+        w.drain()
+        got = [o["menu"] for o in w.state("defaults")["all"]]
+        assert sorted(got) == ["Debug", "Debug", "Service menu"]
+        assert "3 listed" in w.state("defaults")["all_legend"]
+
+
+def test_unreadable_menu_flags_nothing_and_says_so(tmp_path):
     """James Bond 60th's shape: statuses is None, so no row may claim a
     verdict — the complement of a half-read menu is not a fact."""
-    w = _stern(app)
-    rows = [dict(r, status=None) for r in ROWS]
-    got = _fill(w, rows)
-    assert [v[3] for _t, v in got] == ["", "", "", ""]
-    legend = w._settings_all_legend.cget("text")
-    assert "couldn't be read" in legend
-    assert "Debug" not in legend
+    with web_app(tmp_path, mfr="stern") as w:
+        rows = [dict(r, status=None) for r in ROWS]
+        got = _fill(w, rows)
+        assert [o["menu"] for o in got] == ["", "", "", ""]
+        legend = w.state("defaults")["all_legend"]
+        assert "couldn't be read" in legend
+        assert "Debug" not in legend
 
 
-def test_clearing_the_form_takes_the_list_away(app):
-    w = _stern(app)
-    _fill(w, ROWS)
-    w._settings_clear_form()
-    assert w._settings_all_tree.get_children() == ()
-    assert not w._settings_all_frame.winfo_ismapped()
+def test_clearing_the_form_takes_the_list_away(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        _fill(w, ROWS)
+        w.run(_svc(w)._clear_form)
+        assert w.state("defaults")["all"] == []
+        assert w.state("defaults")["all_total"] == 0
 
 
-def test_empty_list_leaves_no_stale_legend(app):
-    w = _stern(app)
-    _fill(w, ROWS)
-    got = _fill(w, [])
-    assert got == []
-    assert w._settings_all_legend.cget("text") == ""
+def test_empty_list_leaves_no_stale_legend(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        _fill(w, ROWS)
+        got = _fill(w, [])
+        assert got == []
+        assert w.state("defaults")["all_legend"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -115,23 +113,29 @@ def test_empty_list_leaves_no_stale_legend(app):
 # hidden/debug values").
 # ---------------------------------------------------------------------------
 
-def _editable(w, tmp_path, rows=ROWS):
-    """A loaded-looking tab whose staged changes land in *tmp_path*."""
-    w.write_assets_var.set(str(tmp_path))
-    w._settings_table = object()          # only its not-None-ness is used
-    w._settings_every = list(rows)
-    _fill(w, rows)
-    return w
+def _editable(w, folder, rows=ROWS, plan=None):
+    """A loaded-looking tab whose staged changes land in *folder*."""
+    svc = _svc(w)
+    folder.mkdir(exist_ok=True)
+
+    def _do():
+        w.window.write_assets_var.set(str(folder))
+        svc._table = object()          # only its not-None-ness is used
+        svc._every = list(rows)
+        svc._menu_plan = plan
+        svc._all_rows = list(rows)
+        svc._fill_all()
+    w.run(_do)
+    return svc
 
 
 def _item(w, label):
-    tree = w._settings_all_tree
-    return next(k for k in tree.get_children()
-                if tree.item(k, "text").startswith(label))
+    return next(o for o in w.state("defaults")["all"]
+                if o["caption"].startswith(label))
 
 
-def _staged(tmp_path):
-    p = os.path.join(str(tmp_path), ".staged_changes.json")
+def _staged(folder):
+    p = os.path.join(str(folder), ".staged_changes.json")
     if not os.path.isfile(p):
         return {}
     with open(p, encoding="utf-8") as f:
@@ -139,60 +143,59 @@ def _staged(tmp_path):
 
 
 def test_editing_a_hidden_setting_stages_it_and_shows_it_in_the_list(
-        app, tmp_path, monkeypatch):
-    w = _editable(_stern(app), tmp_path)
-    item = _item(w, "ALLOW TOPPER CHEATS")
-    w._settings_all_tree.focus(item)
-    monkeypatch.setattr(w, "_settings_ask_value", lambda row: 1)
-    w._settings_all_edit()
-    # Staged under the adjustment's own name, in the firmware's units.
-    assert _staged(tmp_path)["settings"] == {"AD_ALLOW_TOPPER_CHEATS": 1}
-    # ...and the list says so, without losing the card's own value.
-    vals = w._settings_all_tree.item(_item(w, "ALLOW TOPPER CHEATS"), "values")
-    assert (vals[0], vals[1]) == ("Off", "On")
-    assert w._settings_all_tree.item(_item(w, "FREE PLAY"), "values")[1] == ""
+        tmp_path):
+    folder = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _editable(w, folder)
+        assert w.call("defaults.edit_apply", "AD_ALLOW_TOPPER_CHEATS", 1)
+        # Staged under the adjustment's own name, in the firmware's units.
+        assert _staged(folder)["settings"] == {"AD_ALLOW_TOPPER_CHEATS": 1}
+        # ...and the list says so, without losing the card's own value.
+        vals = _item(w, "ALLOW TOPPER CHEATS")
+        assert (vals["value"], vals["new"]) == ("Off", "On")
+        assert _item(w, "FREE PLAY")["new"] == ""
 
 
-def test_an_edited_setting_reports_itself_in_the_log(app, tmp_path,
-                                                     monkeypatch):
+def test_an_edited_setting_reports_itself_in_the_log(tmp_path, monkeypatch):
     """The list has no field to leave, so the edit has to narrate itself —
     and the FIRST edit after a load counts (it used to be swallowed as
     "the first look at this card")."""
-    w = _editable(_stern(app), tmp_path)
-    w._settings_apply_staged_overlay()
-    lines = []
-    monkeypatch.setattr(w, "append_log", lambda msg, *a, **k: lines.append(msg))
-    monkeypatch.setattr(w, "_settings_ask_value", lambda row: 1)
-    w._settings_all_tree.focus(_item(w, "THIS IS THE WAY DEBUG"))
-    w._settings_all_edit()
-    assert any("THIS IS THE WAY DEBUG" in ln and "staged" in ln
-               for ln in lines), lines
+    folder = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _editable(w, folder)
+        w.run(svc._apply_staged_overlay)
+        lines = []
+        monkeypatch.setattr(svc, "log",
+                            lambda msg, *a, **k: lines.append(msg))
+        w.call("defaults.edit_apply", "AD_THIS_IS_THE_WAY_DEBUG", 1)
+        assert any("THIS IS THE WAY DEBUG" in ln and "staged" in ln
+                   for ln in lines), lines
 
 
-def test_back_to_the_card_value_unstages_it(app, tmp_path, monkeypatch):
-    w = _editable(_stern(app), tmp_path)
-    w._settings_all_tree.focus(_item(w, "ALLOW TOPPER CHEATS"))
-    monkeypatch.setattr(w, "_settings_ask_value", lambda row: 1)
-    w._settings_all_edit()
-    assert _staged(tmp_path).get("settings")
-    monkeypatch.setattr(w, "_settings_ask_value", lambda row: row["default"])
-    w._settings_all_edit()
-    assert not _staged(tmp_path).get("settings")
-    assert w._settings_all_tree.item(_item(w, "ALLOW TOPPER CHEATS"),
-                                     "values")[1] == ""
+def test_back_to_the_card_value_unstages_it(tmp_path):
+    folder = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _editable(w, folder)
+        w.call("defaults.edit_apply", "AD_ALLOW_TOPPER_CHEATS", 1)
+        assert _staged(folder).get("settings")
+        w.call("defaults.edit_apply", "AD_ALLOW_TOPPER_CHEATS", None, True)
+        assert not _staged(folder).get("settings")
+        assert _item(w, "ALLOW TOPPER CHEATS")["new"] == ""
 
 
-def test_staged_edits_come_back_when_the_card_is_reloaded(app, tmp_path):
+def test_staged_edits_come_back_when_the_card_is_reloaded(tmp_path):
     """A setting the curated form doesn't draw still gets its row back, or
     the next Build would bake in a value the tab no longer shows."""
-    w = _editable(_stern(app), tmp_path)
-    from pinball_decryptor.core import staged_changes
-    staged_changes.save(str(tmp_path), {"settings": {"AD_ALLOW_TOPPER_CHEATS": 1}})
-    w._settings_build_form([])            # no curated rows for this build
-    assert w._settings_all_tree.item(_item(w, "ALLOW TOPPER CHEATS"),
-                                     "values")[1] == "On"
-    assert w.staged_default_settings(str(tmp_path)) == {
-        "AD_ALLOW_TOPPER_CHEATS": 1}
+    folder = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _editable(w, folder)
+        from pinball_decryptor.core import staged_changes
+        staged_changes.save(str(folder),
+                            {"settings": {"AD_ALLOW_TOPPER_CHEATS": 1}})
+        w.run(svc._build_form, [])        # no curated rows for this build
+        assert _item(w, "ALLOW TOPPER CHEATS")["new"] == "On"
+        assert w.window.staged_default_settings(str(folder)) == {
+            "AD_ALLOW_TOPPER_CHEATS": 1}
 
 
 # ---------------------------------------------------------------------------
@@ -204,40 +207,50 @@ PLAN = {"first": 0x7F, "last": 0xD2, "call": 0, "off": 0, "form": "mov",
                        {"id": 0xD4, "name": "AD_ALLOW_TOPPER_CHEATS"}]}
 
 
-def test_the_menu_button_follows_whether_this_build_can_be_widened(app,
-                                                                   tmp_path):
-    w = _editable(_stern(app), tmp_path)
-    w._settings_menu_plan = None
-    w._settings_build_form([])
-    assert str(w._settings_menu_btn["state"]) == "disabled"
-    w._settings_menu_plan = PLAN
-    w._settings_build_form([])
-    assert str(w._settings_menu_btn["state"]) == "normal"
+def test_the_menu_button_follows_whether_this_build_can_be_widened(tmp_path):
+    folder = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _editable(w, folder)
+        w.run(svc._build_form, [])
+        assert w.state("defaults")["menu_enabled"] is False
+
+        def _plan():
+            svc._menu_plan = PLAN
+        w.run(_plan)
+        w.run(svc._build_form, [])
+        assert w.state("defaults")["menu_enabled"] is True
 
 
-def test_menu_widening_stages_by_name_and_says_so(app, tmp_path):
-    w = _editable(_stern(app), tmp_path)
-    assert w._settings_stage_menu_expose("AD_ALLOW_TOPPER_CHEATS")
-    # By NAME, never by id: the same id means something else in another build.
-    assert _staged(tmp_path)["menu_expose_through"] == "AD_ALLOW_TOPPER_CHEATS"
-    assert w.staged_menu_expose(str(tmp_path)) == "AD_ALLOW_TOPPER_CHEATS"
-    w._settings_apply_staged_overlay()
-    assert "ALLOW TOPPER CHEATS" in w._settings_status.cget("text")
+def test_menu_widening_stages_by_name_and_says_so(tmp_path):
+    folder = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _editable(w, folder, plan=PLAN)
+        assert w.call("defaults.menu_apply", "AD_ALLOW_TOPPER_CHEATS")
+        # By NAME, never by id: the same id means something else in another
+        # build.
+        assert _staged(folder)["menu_expose_through"] == \
+            "AD_ALLOW_TOPPER_CHEATS"
+        assert w.window.staged_menu_expose(str(folder)) == \
+            "AD_ALLOW_TOPPER_CHEATS"
+        w.run(svc._apply_staged_overlay)
+        assert "ALLOW TOPPER CHEATS" in w.state("defaults")["status"]
 
 
-def test_reset_fields_clears_the_menu_widening_too(app, tmp_path, monkeypatch):
-    w = _editable(_stern(app), tmp_path)
-    w._settings_stage_menu_expose("AD_ALLOW_TOPPER_CHEATS")
-    monkeypatch.setattr(w, "_settings_ask_value", lambda row: 1)
-    w._settings_all_tree.focus(_item(w, "ALLOW TOPPER CHEATS"))
-    w._settings_all_edit()
-    w._settings_reset()
-    assert w.staged_menu_expose(str(tmp_path)) == ""
-    assert w.staged_default_settings(str(tmp_path)) == {}
+def test_reset_fields_clears_the_menu_widening_too(tmp_path):
+    folder = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _editable(w, folder, plan=PLAN)
+        w.call("defaults.menu_apply", "AD_ALLOW_TOPPER_CHEATS")
+        w.call("defaults.edit_apply", "AD_ALLOW_TOPPER_CHEATS", 1)
+        w.call("defaults.reset")
+        assert w.window.staged_menu_expose(str(folder)) == ""
+        assert w.window.staged_default_settings(str(folder)) == {}
 
 
-def test_no_project_folder_stages_nothing_and_says_why(app):
-    w = _stern(app)
-    w.write_assets_var.set("")
-    assert w._settings_stage_menu_expose("AD_ALLOW_TOPPER_CHEATS") is False
-    assert "project folder" in w._settings_status.cget("text")
+def test_no_project_folder_stages_nothing_and_says_why(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        w.run(w.window.write_assets_var.set, "")
+        assert w.run(svc._stage_menu_expose,
+                     "AD_ALLOW_TOPPER_CHEATS") is False
+        assert "project folder" in w.state("defaults")["status"]

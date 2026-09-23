@@ -1452,20 +1452,23 @@ pad_win_pythonw() {
     fi
 }
 
-# A Windows Python that can actually DRAW the playfield window, or "".
+# The Windows Python the playfield window is best drawn with, or "".
 #
-# BOTH IMPORTS, because either one missing is the same blank desktop: tkinter
-# is the window and Pillow is the artwork (playfield.py's Field.__init__ imports
-# it unguarded, and the LCD panel decodes its clips with it). A python.org
-# install has tkinter and no Pillow, which is exactly the machine PAD-99 came
-# from, so probing for tkinter alone would have found the broken one and passed.
+# THE WINDOW IS A WEB PAGE since the app's cut-over from Tk (2026-09-23):
+# playfield.py serves it and pfweb.py shows it. pywebview is what makes it a
+# NATIVE window (Edge WebView2), and Pillow composes the villain vision's
+# frames - PAD's own bundled Python carries both, because the app's own window
+# is drawn with them. A Python with neither still WORKS (pfweb falls back to an
+# Edge app window, and the villain vision to its stills), which is why this is
+# a preference and pad_win_pf_python_any() below is the fallback. PAD-99's
+# lesson stands: ask for what the window really uses, not a proxy for it.
 pad_win_pf_python() {
     pad_win_pythons | while IFS= read -r c; do
         # bounded and with stdin closed, for the reasons pad_win_python gives:
         # a dead-interop exec hangs forever, and a Windows child will drain the
         # stdin of whatever asked it.
         if pad_win_python_usable "$c" \
-           && pad_bounded "$c" -c "import tkinter, PIL.ImageTk" \
+           && pad_bounded "$c" -c "import webview, PIL.Image" \
                 >/dev/null 2>&1 </dev/null
         then
             pad_win_pythonw "$c"
@@ -1476,12 +1479,12 @@ pad_win_pf_python() {
 
 # The first Windows Python AT ALL, in the spelling the playfield wants.
 #
-# THE FALLBACK, AND IT IS NOT DECORATION. If no candidate can import both, the
-# window still gets launched with the best one there is - because a launch that
-# fails leaves a traceback in the playfield log, which watch.sh prints, and
-# that names the missing package to the one person who can act on it. Refusing
-# to launch would replace a diagnosable failure with a silent one, which is the
-# state PAD-99 was reported from.
+# THE FALLBACK, AND IT IS NOT DECORATION. If no candidate has pywebview and
+# Pillow, the window still gets launched with the best one there is - and the
+# web window needs nothing else: pfweb.py opens it as an Edge app window, and a
+# launch that does fail leaves a traceback in the playfield log, which watch.sh
+# prints. Refusing to launch would replace a working window (or a diagnosable
+# failure) with a silent one, which is the state PAD-99 was reported from.
 #
 # "CAN BE RUN", NOT "IS A FILE", and that distinction is the whole difference
 # between this and pad_win_python_any. -x and -s say the .exe is THERE; on a

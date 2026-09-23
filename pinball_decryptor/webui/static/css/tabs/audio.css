@@ -1,0 +1,97 @@
+/* Replace Audio (js/tabs/audio.js).  Tokens and components come from
+   css/app.css; this sheet only lays the tab out. */
+
+.aud-page { gap: 12px; }
+.aud-folder { gap: 8px; margin-top: -4px; min-width: 0; }
+.aud-folder a { color: var(--accent); cursor: pointer; text-decoration: none; }
+.aud-folder a:hover { text-decoration: underline; }
+
+.aud-card { flex: 1 1 auto; min-height: 440px; }
+.aud-card > .bd.aud-body { flex: 1 1 auto; min-height: 0; gap: 0; }
+.aud-tools { gap: 8px 12px; }
+.aud-tools .search { flex: 0 1 240px; }
+.aud-tools .chk { font-size: 13px; }
+.aud-seg { gap: 6px; }
+.aud-seg .seg button { padding: 5px 10px; font-size: 13px; }
+
+/* the slot table */
+.aud-tblwrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.aud-tblwrap:focus-within .tbl .tr.sel { background: var(--sel); }
+.aud-tbl { flex: 1 1 auto; min-height: 160px; font-size: 13px; }
+.aud-tbl .tr { gap: 10px; padding: 0 12px 0 8px; }
+/* headers: the core Table's (sort button + a .col-grip on the column's right
+   edge); numeric ones sit right over their right-aligned values, Loop / Full
+   centred over their boxes as the Tk headings were; the play column has no
+   grip (it is not a Tk column and never resizes) */
+.aud-tbl .th .c { overflow: visible; display: flex; align-items: center; align-self: stretch; }  /* full height, so the grip's line shows */
+.aud-tbl .th .c.num { justify-content: flex-end; font-family: var(--cond); font-size: 12px; }
+.aud-tbl .th .c:has(.aud-hc) { justify-content: center; }
+.aud-tbl .th .c > button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aud-tbl .th .c:first-child .col-grip { display: none; }
+.aud-tbl .col-grip::after { left: 10px; }   /* the divider in the middle of the 10px column gap, clear of right-aligned text */
+.aud-pc { display: flex; align-items: center; justify-content: center; }
+.aud-rowplay { all: unset; display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 5px; color: var(--ink-3); cursor: pointer; }
+.aud-rowplay:hover, .aud-rowplay:focus-visible { background: var(--panel-3); color: var(--accent); }
+.aud-rowplay .i { width: 13px; height: 13px; fill: currentColor; }
+.aud-caret { display: inline-flex; color: var(--ink-3); }
+.aud-name .mono { font-size: 12px; }
+.aud-child { padding-left: 18px; }
+.aud-grp { background: var(--panel-2); }
+.aud-grp .aud-glabel { font-weight: 600; font-family: var(--cond); font-size: 13.5px; }
+.aud-stray .aud-name { color: var(--warn); }
+.aud-stray .aud-name .muted { color: var(--warn); opacity: .75; }
+.aud-rep { all: unset; display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; border-radius: 4px; }
+.aud-rep.choose { color: var(--ink-3); }
+.aud-rep:hover { text-decoration: underline; }
+.aud-rep.choose:hover { color: var(--accent); }
+.aud-rep:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.aud-flagc { display: flex; align-items: center; justify-content: center; }
+.aud-flag { all: unset; box-sizing: border-box; width: 17px; height: 17px; border: 1.5px solid var(--line-2); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; background: var(--bg); }
+.aud-flag:hover { border-color: var(--accent); }
+.aud-flag.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.aud-flag .i { width: 12px; height: 12px; stroke-width: 2.6; }
+.aud-empty { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 40px 20px; color: var(--ink-3); text-align: center; }
+.aud-empty.busy { font-family: var(--cond); font-size: 20px; font-weight: 600; color: var(--ink-2); }
+.aud-empty.busy .spin { width: 20px; height: 20px; flex-basis: 20px; }
+
+/* the two preview panes */
+.aud-card > .ft { padding: 12px 16px 14px; }
+.aud-panes { display: flex; gap: 18px; align-items: stretch; width: 100%; min-width: 0; }
+.aud-vsep { width: 1px; background: var(--line); flex: 0 0 1px; }
+.aud-pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.aud-pane-hd { gap: 8px; min-height: 28px; flex-wrap: nowrap; }
+.aud-pane-hd .btn { flex: 0 0 auto; }
+.aud-pane-hd .ellip { flex: 0 1 auto; }
+.aud-strip { position: relative; height: 60px; border-radius: 6px; background: #0a0c10; border: 1px solid var(--line); overflow: hidden; user-select: none; }
+.aud-strip.live { cursor: pointer; }
+.aud-strip.tall { height: auto; min-height: 60px; }
+.aud-strip img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: block; pointer-events: none; }
+.aud-hint { position: relative; display: flex; align-items: center; justify-content: center; min-height: 58px; padding: 6px 12px; color: #8b9196; font-size: 12.5px; text-align: center; line-height: 1.4; }
+.aud-cut { position: absolute; top: 0; bottom: 0; right: 0; border-left: 1px dashed #ff6b6b; background: repeating-linear-gradient(135deg, rgba(0,0,0,.62) 0 3px, rgba(0,0,0,.34) 3px 6px); pointer-events: none; }
+.aud-cut b, .aud-grow b { position: absolute; top: 2px; left: 4px; font: 500 11px var(--sans); white-space: nowrap; }
+.aud-cut b { color: #ff9d9d; }
+.aud-grow { position: absolute; top: 0; bottom: 0; border-left: 1px dashed #7fd98a; pointer-events: none; }
+.aud-grow b { color: #9de8a6; }
+.aud-gain { position: absolute; top: 2px; right: 6px; font: 600 11px var(--sans); color: #9dd7ff; pointer-events: none; }
+.aud-head { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid #ffffff; pointer-events: none; box-shadow: 0 0 4px rgba(0,0,0,.6); }
+.aud-transport { gap: 8px; flex-wrap: wrap; min-height: 30px; }
+.aud-transport .btn.sm .i { width: 13px; height: 13px; }
+.aud-clock { min-width: 84px; }
+.aud-loud { flex-wrap: wrap; }
+.aud-db { width: 84px; flex: 0 0 84px; gap: 4px; }
+.aud-db input { width: 44px; text-align: right; }
+.aud-num { width: 72px; flex: 0 0 72px; }
+.aud-num input { width: 100%; text-align: right; }
+
+/* Advanced Audio Options */
+.aud-adv hr { border: 0; height: 1px; background: var(--line); margin: 4px 0; width: 100%; }
+.aud-adv .aud-p { margin: 0; color: var(--ink); }
+.aud-adv .aud-expl { margin: 0; font-size: 12.5px; color: var(--ink-3); font-style: italic; line-height: 1.5; white-space: pre-line; }
+.aud-kv { grid-template-columns: 190px minmax(0, 1fr); }
+
+/* was @media (max-width: 1020px) */
+html.bp-1020 .aud-panes { flex-direction: column; gap: 14px; }
+html.bp-1020 .aud-vsep { display: none; }
+html.bp-1020 .aud-card { min-height: 520px; }
+/* was @media (max-width: 760px) */
+html.bp-760 .aud-kv { grid-template-columns: minmax(0, 1fr); }

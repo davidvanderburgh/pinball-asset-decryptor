@@ -1,0 +1,55 @@
+/* The Scenes window (js/tabs/text_scenes.js loads this itself, so it is
+   styled whichever tab is showing; its frame, ToolWindow, is styled in
+   text_fonts.css).  Tokens and components from app.css. */
+
+.scenes-win > .bd { overflow: hidden; }
+.scenes-body { display: grid; grid-template-columns: minmax(290px, 460px) minmax(0, 1fr); gap: 14px; flex: 1 1 auto; min-height: 0; }
+.scenes-left { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.scenes-list { flex: 1 1 auto; min-height: 160px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.scenes-list .tr { padding: 0 10px; gap: 6px; }
+.scenes-list .th { letter-spacing: .02em; }
+.scenes-right { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
+.scenes-contents { flex: 1 1 auto; min-height: 120px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 4px 0; }
+.sc-head { padding: 4px 12px 2px; }
+.sc-gh { all: unset; display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-family: var(--cond); font-weight: 600; font-size: 13px; color: var(--ink-2); cursor: pointer; width: calc(100% - 20px); }
+.sc-gh:hover { color: var(--ink); }
+.sc-gh:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+.sc-item { display: grid; grid-template-columns: 12px minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; align-items: center; padding: 3px 12px 3px 26px; min-height: 26px; cursor: default; font-size: 13px; }
+.sc-item:hover { background: var(--panel-2); }
+.sc-item.sel { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
+.sc-item.note { color: var(--ink-3); font-style: italic; }
+.sc-sw { width: 12px; height: 12px; border-radius: 3px; }
+.scenes-preview { display: flex; gap: 12px; align-items: flex-start; flex: 0 0 auto; }
+.scenes-canvas { flex: 1 1 400px; max-width: 540px; aspect-ratio: 1360 / 768; min-width: 240px; border-radius: 8px; border: 1px solid var(--line-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.scenes-canvas img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.scenes-msg { color: #6b6b76; font-size: 13px; }
+.scenes-side { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; min-width: 0; flex: 0 0 272px; }
+.scenes-side > .btn { min-width: 160px; justify-content: flex-start; }
+.scenes-ctl { display: flex; align-items: center; gap: 4px; margin-top: 4px; flex-wrap: nowrap; }
+.scenes-ctl .lbl { width: 46px; }
+.scenes-ctl .field { width: 136px; flex: 0 0 136px; }
+.scenes-caption { gap: 6px; min-height: 22px; }
+.scenes-bottom { gap: 10px; align-items: center; }
+.scenes-thumb { width: 160px; height: 90px; flex: 0 0 160px; }
+.scenes-detail { overflow-wrap: anywhere; min-width: 0; }
+.scenes-color { width: 72px; height: 44px; border: 1px solid var(--line-2); border-radius: 6px; background: transparent; padding: 2px; cursor: pointer; }
+/* Move… / Font size…: a strip under the preview (never over it) */
+.scenes-edit { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel-2); padding: 7px 10px; }
+.scenes-edit-t { font-family: var(--cond); font-weight: 600; font-size: 13.5px; color: var(--ink); max-width: 260px; }
+.scenes-ly-f { width: 88px; flex: 0 0 88px; }
+.scenes-edit-n { flex: 1 0 100%; }
+
+/* a narrow window (the app's, or this one sized down): one column */
+@container (max-width: 1000px) {
+  .scenes-body { grid-template-columns: minmax(0, 1fr); overflow: auto; }
+  .scenes-list { min-height: 200px; max-height: 260px; }
+  .scenes-contents { max-height: 240px; }
+  .scenes-preview { flex-wrap: wrap; }
+}
+/* was @media (max-width: 1020px); kept for engines without container queries */
+html.bp-1020 .scenes-body { grid-template-columns: minmax(0, 1fr); overflow: auto; }
+html.bp-1020 .scenes-list { min-height: 200px; max-height: 260px; }
+html.bp-1020 .scenes-contents { max-height: 240px; }
+html.bp-1020 .scenes-preview { flex-wrap: wrap; }
+/* was @media (max-height: 760px) */
+html.bph-760 .scenes-canvas { max-width: 420px; }

@@ -21,5 +21,5 @@ if __name__ == "__main__":
         from pinball_decryptor.core.elevated_flash import run_helper_main
         sys.exit(run_helper_main(sys.argv))
 
-    from pinball_decryptor.app import App
-    App().run()
+    from pinball_decryptor.webui.host import main
+    sys.exit(main(sys.argv[1:]))

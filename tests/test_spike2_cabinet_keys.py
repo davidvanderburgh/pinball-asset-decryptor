@@ -376,35 +376,17 @@ class _Pipe:
         self.calls.append(("close",))
 
 
-class _Root:
-    def __init__(self):
-        self.bound, self.unbound, self.pending, self._n = {}, [], {}, 0
+# THE WINDOW IS A WEB PAGE NOW (2026-09-23). The page sends each key's edge
+# once (it drops KeyboardEvent.repeat and keys typed into a text box) as
+# api_key(code, key, down); KeyInput.key(keysym, down) is what those land on.
+# The Tk tests drove bindings on a fake root; these drive the model directly,
+# and pin the page's two filters at the source.
 
-    def bind(self, seq, fn):
-        self.bound[seq] = fn
-
-    def unbind(self, seq):
-        self.unbound.append(seq)
-        self.bound.pop(seq, None)
-
-    def after(self, ms, fn):
-        self._n += 1
-        self.pending[self._n] = fn
-        return self._n
-
-    def after_cancel(self, i):
-        self.pending.pop(i, None)
-
-    def settle(self):
-        """Let every release that was waiting for its auto-repeat press commit."""
-        fns, self.pending = list(self.pending.values()), {}
-        for fn in fns:
-            fn()
-
-
-def _ev(keysym, widget_class="Canvas"):
-    w = types.SimpleNamespace(winfo_class=lambda: widget_class)
-    return types.SimpleNamespace(keysym=keysym, widget=w)
+def _ctl(made=False):
+    return types.SimpleNamespace(
+        view=types.SimpleNamespace(sw=types.SimpleNamespace(
+            is_made=lambda s: made)),
+        drv=None)
 
 
 @pytest.fixture
@@ -415,31 +397,33 @@ def pf(monkeypatch):
 
 
 def _keys(pf, rows):
-    root = _Root()
-    ki = pf.KeyInput(pf._RootOnly(root), rows)
-    return ki, root
+    return pf.KeyInput(_ctl(), rows)
 
 
-def _tap(ki, root, keysym):
-    ki._on_down(_ev(keysym))
-    ki._on_up(_ev(keysym))
-    root.settle()
+def _tap(ki, keysym):
+    assert ki.key(keysym, True) is not None
+    ki.key(keysym, False)
+
+
+def _page_js():
+    return open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "tools", "spike2_emu", "pfpage", "pf.js"),
+        encoding="utf8").read()
 
 
 def test_the_waiting_state_takes_the_buttons_and_nothing_else(pf):
     """No rows at all - the 'WAITING for tables' window: the buttons still go."""
-    ki, root = _keys(pf, [])
-    assert set(root.bound) == {"<KeyPress>", "<KeyRelease>"}
+    ki = _keys(pf, [])
     for keysym, button in [("Left", "left"), ("Right", "right"), ("1", "start"),
                            ("space", "action"), ("Return", "select"),
                            ("KP_Enter", "select"), ("equal", "plus"),
                            ("minus", "minus"), ("BackSpace", "back"),
                            ("Escape", "back")]:
         ki.pipe.calls.clear()
-        _tap(ki, root, keysym)
+        _tap(ki, keysym)
         assert ki.pipe.calls == [("cab", button, 1), ("cab", button, 0)], keysym
     ki.pipe.calls.clear()
-    _tap(ki, root, "q")                                   # a playfield key, no title yet
+    assert ki.key("q", True) is False                     # a playfield key, no title yet
     assert ki.pipe.calls == []
 
 
@@ -447,12 +431,12 @@ def test_a_key_with_a_title_row_presses_both(pf, keybinds):
     """The Left arrow is also the title's left flipper once its list exists: the
     switch AND the button, and the button follows the same release."""
     rows = keybinds.parse(["Left\t-\t56\tLEFT FLIPPER BUTTON\n", "Q\t-\t46\tSkill Shot\n"])
-    ki, root = _keys(pf, rows)
-    _tap(ki, root, "Left")
+    ki = _keys(pf, rows)
+    _tap(ki, "Left")
     assert ki.pipe.calls == [("sw", 56, 1), ("cab", "left", 1),
                              ("sw", 56, 0), ("cab", "left", 0)]
     ki.pipe.calls.clear()
-    _tap(ki, root, "q")                                   # a non-button key: switch only
+    _tap(ki, "q")                                         # a non-button key: switch only
     assert ki.pipe.calls == [("sw", 46, 1), ("sw", 46, 0)]
 
 
@@ -460,58 +444,67 @@ def test_a_row_the_title_does_not_have_still_reaches_the_button(pf, keybinds):
     """An n/a row (ids 0) presses no switch - but the menu's button is not the
     title's to withhold."""
     rows = keybinds.parse(["Left\t-\t0\tLeft Flipper\n"])
-    ki, root = _keys(pf, rows)
-    _tap(ki, root, "Left")
+    ki = _keys(pf, rows)
+    _tap(ki, "Left")
     assert ki.pipe.calls == [("cab", "left", 1), ("cab", "left", 0)]
 
 
 def test_an_auto_repeat_pair_keeps_the_button_held(pf):
-    """X delivers a held key as Release-then-Press at one instant; the release
-    only commits if no press follows. The button must not flutter."""
-    ki, root = _keys(pf, [])
-    ki._on_down(_ev("Right"))
-    ki._on_up(_ev("Right"))                               # ...auto-repeat...
-    ki._on_down(_ev("Right"))
-    root.settle()
+    """A held key must not flutter the button. The page drops the browser's
+    repeat events; a second down that does arrive (two tabs, a stale page) is
+    still one press, and one up lets go."""
+    assert "if (e.repeat) return;" in _page_js()
+    ki = _keys(pf, [])
+    ki.key("Right", True)
+    ki.key("Right", True)                                 # ...a repeat...
     assert ki.pipe.calls == [("cab", "right", 1)]
-    ki._on_up(_ev("Right"))
-    root.settle()
+    ki.key("Right", False)
+    assert ki.pipe.calls == [("cab", "right", 1), ("cab", "right", 0)]
+    ki.key("Right", False)                                # a stray up: nothing
     assert ki.pipe.calls == [("cab", "right", 1), ("cab", "right", 0)]
 
 
-def test_a_text_field_keeps_its_keys(pf):
-    """Typing a slot name must not move the menu."""
-    ki, root = _keys(pf, [])
-    ki._on_down(_ev("Left", widget_class="Entry"))
-    ki._on_up(_ev("Left", widget_class="Entry"))
-    root.settle()
-    assert ki.pipe.calls == []
+def test_a_text_field_keeps_its_keys():
+    """Typing a slot name must not move the menu: the page never sends a key
+    whose target is a text box."""
+    js = _page_js()
+    assert 't.tagName === "INPUT"' in js and 't.tagName === "TEXTAREA"' in js
+    assert "typing(e)" in js
 
 
 def test_a_toggle_row_is_unchanged(pf, keybinds):
     """The door key is not a menu button and behaves as it always did."""
     rows = keybinds.parse(["C\tct\t33\tCoin Door Closed\n"])
-    root = _Root()
-    view = types.SimpleNamespace(root=root, sw=types.SimpleNamespace(is_made=lambda s: False),
-                                 drv=None)
-    ki = pf.KeyInput(view, rows)
-    ki._on_down(_ev("c"))
+    ki = pf.KeyInput(_ctl(made=False), rows)
+    ki.key("c", True)
+    assert ki.pipe.calls == [("sw", 33, 1)]
+    ki.key("c", False)                                    # a toggle's up is nothing
     assert ki.pipe.calls == [("sw", 33, 1)]
 
 
 def test_detach_lets_go_of_the_window(pf):
     """The WAITING window's keyboard is replaced when the real view arrives:
-    its bindings go, a release in flight is cancelled, the pipe closes (that EOF
-    is what releases whatever is still held)."""
-    ki, root = _keys(pf, [])
-    ki._on_down(_ev("Left"))
-    ki._on_up(_ev("Left"))                                # a release now pending
-    assert root.pending
+    it forgets what is down and the pipe closes (that EOF is what releases
+    whatever is still held), so no late release is written."""
+    ki = _keys(pf, [])
+    ki.key("Left", True)
     ki.detach()
-    assert sorted(root.unbound) == ["<KeyPress>", "<KeyRelease>"]
-    assert not root.pending and not root.bound
     assert ki.pipe.calls[-1] == ("close",)
     assert ("cab", "left", 0) not in ki.pipe.calls        # the EOF does it, not a late write
+    assert ki.down == set()
+
+
+def test_a_lost_focus_lets_go_of_every_key(pf):
+    """The page sends a blur when the window loses focus; a flipper held while
+    alt-tabbing away must not stay up for good."""
+    assert 'addEventListener("blur", () => api("blur"));' in _page_js()
+    ki = _keys(pf, [])
+    ki.key("Left", True)
+    ki.key("Right", True)
+    ki.release_all()
+    assert ("cab", "left", 0) in ki.pipe.calls
+    assert ("cab", "right", 0) in ki.pipe.calls
+    assert ki.down == set()
 
 
 def test_the_pipe_writes_the_lines_swkeys_reads(monkeypatch):
@@ -542,17 +535,54 @@ def test_a_dead_pipe_reports_the_edge_undelivered(monkeypatch):
     assert pipe.set_cab("left", 1) is False
 
 
-def test_the_waiting_window_wires_its_keyboard_in_main():
-    """main() cannot run without a display, so the wiring is read: the
-    placeholder gets a rows-less KeyInput, the real view's arrival detaches it
-    BEFORE anything else, and closing the window closes it."""
-    src = _text("playfield.py")
-    main = src[src.index("\ndef main("):]
-    assert "waiting_keys = None" in main
-    make = main.index("waiting_keys = KeyInput(_RootOnly(root), [])")
-    assert main.index("waiting.pack()") < make < main.index("def _swap_in(fresh):")
-    swap = main[main.index("def _swap_in(fresh):"):]
-    assert swap.index("waiting_keys.detach()") < swap.index("waiting.destroy()")
-    assert "nonlocal view, waiting_keys" in swap
-    bye = main[main.index("def bye():"):main.index("root.protocol(")]
-    assert "waiting_keys.close()" in bye
+def test_the_waiting_window_wires_its_keyboard_in_main(pf, monkeypatch, tmp_path):
+    """The WAITING page (no tables yet) gets a rows-less KeyInput, so the boot
+    menu's buttons work by name; the real view's arrival detaches it BEFORE
+    anything else is built; and closing the window closes it. The window is a
+    web page now (2026-09-23), so this drives the real controller - the page's
+    key events arrive as api_key(code, key, down) - with everything that could
+    reach WSL or a run's files faked first."""
+    monkeypatch.setattr(pf, "wsl_run", lambda *a, **k: None)
+    monkeypatch.setattr(pf, "state_run", lambda *a, **k: None)
+    monkeypatch.setattr(pf, "state_slots", lambda *a, **k: {})
+    monkeypatch.setattr(pf, "SAVESTATES", False)
+    monkeypatch.setattr(pf, "layout_is_usable", lambda: False)
+    for name in ("LED_PATH", "LCD_PATH", "SW_PATH", "BINDS_PATH", "BALL_PATH"):
+        monkeypatch.setattr(pf, name, str(tmp_path / ("absent_" + name)))
+    monkeypatch.setattr(pf, "STATE", str(tmp_path / "state.json"))
+    tables = {"rows": []}
+    monkeypatch.setattr(pf, "load_switch_list",
+                        lambda *a, **k: list(tables["rows"]))
+
+    # ---- the placeholder has a keyboard, and it is ONLY the buttons ----------
+    ctl = pf.Playfield()
+    assert ctl.kind == "waiting" and ctl.view is None
+    keys = ctl.keys
+    assert isinstance(keys, pf.KeyInput)
+    assert keys.map and all(r["ids"] == [] and r.get("cab")
+                            for r in keys.map.values())
+    assert ctl.api_key("ArrowLeft", "ArrowLeft", True) is True
+    assert ctl.api_key("ArrowLeft", "ArrowLeft", False) is True
+    assert ctl.api_key("KeyQ", "q", True) is False      # no title rows yet
+    assert keys.pipe.calls == [("cab", "left", 1), ("cab", "left", 0)]
+
+    # ---- the tables land: detach FIRST, then build ---------------------------
+    order = []
+    real_detach, real_build = keys.detach, ctl._build_view
+    keys.detach = lambda: (order.append("detach"), real_detach())
+    ctl._build_view = lambda rows=None: (order.append("build"),
+                                         real_build(rows))
+    tables["rows"] = [dict(id=77, num=15, node=8, bit=37, name="Trough 1")]
+    ctl.swap_in(tables["rows"])
+    assert order == ["detach", "build"]
+    assert keys.pipe.calls[-1] == ("close",)           # EOF releases the rest
+    assert ctl.kind == "schematic" and ctl.keys is not keys
+
+    # ---- closing the window closes the placeholder's keyboard ----------------
+    tables["rows"] = []
+    ctl2 = pf.Playfield()
+    assert ctl2.kind == "waiting"
+    k2 = ctl2.keys
+    ctl2.api_key("ArrowRight", "ArrowRight", True)     # still held at close
+    ctl2.bye()
+    assert k2.pipe.calls[-2:] == [("cab", "right", 0), ("close",)]

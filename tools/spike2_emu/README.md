@@ -1096,8 +1096,9 @@ the result out of a `PAD_COIL_PROBE=1` capture.
 
 **Linux, or Windows with WSL.** `qemu-user-static` (binfmt `qemu-arm`
 registered with the **F** flag), `gcc-arm-linux-gnueabihf`, `gcc` +
-`libc6-dev`, `e2fsprogs`, `fuse3`, `ffmpeg`, and `python3-tk` for the playfield
-window. Then, once:
+`libc6-dev`, `e2fsprogs`, `fuse3`, `ffmpeg`, and `python3-gi` +
+`gir1.2-webkit2-4.1` for the playfield window (on Windows the window is
+PAD's own Python with pywebview, in Edge WebView2). Then, once:
 
 ```bash
 rootfs.sh <card.raw>    # the guest rootfs, from the card. No root needed.

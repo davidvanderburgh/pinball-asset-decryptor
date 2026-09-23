@@ -15,10 +15,10 @@ import sys
 
 import pytest
 
-from pinball_decryptor.gui import multiboot_docker as mac_docker
-from pinball_decryptor.gui import multiboot_tab as mt
-from pinball_decryptor.gui.multiboot_backend import JJP, STERN, backend_for
-from pinball_decryptor.gui.multiboot_tab import (ImageRow, MultibootForm, wsl)
+from pinball_decryptor.webui import multiboot_docker as mac_docker
+from pinball_decryptor.webui import multiboot_core as mt
+from pinball_decryptor.webui.multiboot_backend import JJP, STERN, backend_for
+from pinball_decryptor.webui.multiboot_core import (ImageRow, MultibootForm, wsl)
 
 ISO0 = "D:/Pinball/images/JJP/GunsNRoses-v03.03.iso"          # forward slashes: read on Linux CI too
 ISO1 = "D:/Pinball/images/JJP/CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.iso"

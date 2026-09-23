@@ -34,7 +34,7 @@ cd "$ROOT_DIR"
 # UnityPy/fsb5/pyogg but never unicorn/capstone/numpy, so all 4 Stern prereqs
 # showed missing in a bundle that pip can't fix.  No `|| true` -- a failed dep
 # install must abort the build, not silently ship a broken bundle.
-pip3 install -r "$ROOT_DIR/requirements.txt" -r "$ROOT_DIR/requirements-build.txt"
+pip3 install -r "$ROOT_DIR/requirements.txt" -r "$ROOT_DIR/requirements-build.txt" -r "$ROOT_DIR/requirements-ui.txt"
 
 # --add-data lines bundle the per-plugin Dockerfiles so the macOS
 # DockerExecutor in spooky / jjp can find them at runtime.
@@ -53,15 +53,22 @@ pip3 install -r "$ROOT_DIR/requirements.txt" -r "$ROOT_DIR/requirements-build.tx
 # __init__.py → manufacturer.py → pipeline.py chain once we tell
 # it to start from the package root.)
 #
-# Pillow gets --collect-all, not a couple of --hidden-imports.  Naming
-# only PIL + PIL.Image bundles enough to *open* an image and not enough
-# to *show* one: every preview canvas in the app goes through
-# PIL.ImageTk, whose Tk glue pulls in PIL._tkinter_finder and the
-# _imagingtk extension module, and neither is reachable by static
-# analysis.  The Linux AppImage shipped without them and every video
-# frame preview came up "No module named 'PIL._tkinter_finder'" (a tester,
-# v0.86 through v0.88).  --collect-all takes the submodules, the data
-# AND the native .so/.dylib files, so the whole of Pillow is there.
+# Pillow gets --collect-all, not a couple of --hidden-imports: the plugins
+# are loaded by name and the native .so files are not reachable by static
+# analysis (v0.86-v0.88 shipped half a Pillow).  tkinter is EXCLUDED: the
+# app is a web page in a native window since the web UI cut-over, and
+# PIL.ImageTk would otherwise drag Tcl/Tk into the bundle for nothing.
+# The web UI's modules: its tabs are imported by name (webui/tabs/__init__.py
+# TABS), which PyInstaller's tracer cannot see, so every module is named here.
+WEBUI_HIDDEN=""
+for f in "$ROOT_DIR"/pinball_decryptor/webui/*.py "$ROOT_DIR"/pinball_decryptor/webui/tabs/*.py; do
+    rel="${f#"$ROOT_DIR"/}"
+    mod="${rel%.py}"
+    mod="${mod//\//.}"
+    mod="${mod%.__init__}"
+    WEBUI_HIDDEN="$WEBUI_HIDDEN --hidden-import $mod"
+done
+
 pyinstaller \
     --name "Pinball Asset Decryptor" \
     --windowed \
@@ -96,8 +103,8 @@ pyinstaller \
     --collect-all "fsb5" \
     --collect-all "pyogg" \
     --collect-all "PIL" \
-    --hidden-import "PIL.ImageTk" \
-    --hidden-import "PIL._tkinter_finder" \
+    --exclude-module "tkinter" \
+    --exclude-module "_tkinter" \
     --hidden-import "pinball_decryptor.plugins.pb" \
     --hidden-import "pinball_decryptor.plugins.ap" \
     --hidden-import "pinball_decryptor.plugins.spooky" \
@@ -109,6 +116,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.dp" \
     --hidden-import "pinball_decryptor.plugins.stern" \
     --hidden-import "pinball_decryptor.plugins.stern.engine" \
+    --hidden-import "pinball_decryptor.plugins.stern.cards" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_adjustments" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_emulate" \
@@ -185,6 +193,23 @@ pyinstaller \
     --collect-all "certifi" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
+    `# The web UI: its page files, every module, and pywebview's own js.` \
+    --add-data "$ROOT_DIR/pinball_decryptor/webui/static:pinball_decryptor/webui/static" \
+    --collect-submodules "pinball_decryptor.webui" \
+    $WEBUI_HIDDEN \
+    --collect-data "webview" \
+    --hidden-import "webview" \
+    --hidden-import "bottle" \
+    --hidden-import "proxy_tools" \
+    `# macOS draws the page with WKWebView through pyobjc.` \
+    --hidden-import "webview.platforms.cocoa" \
+    --hidden-import "objc" \
+    --hidden-import "Foundation" \
+    --hidden-import "AppKit" \
+    --hidden-import "WebKit" \
+    --hidden-import "Quartz" \
+    --hidden-import "Security" \
+    --hidden-import "UniformTypeIdentifiers" \
     --noconfirm \
     --clean \
     --distpath "$SCRIPT_DIR/build/dist" \

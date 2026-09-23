@@ -18,27 +18,22 @@ which rows those were — it logs them — so keep the set and say it per row.
 """
 
 import os
+from types import SimpleNamespace
 
 import pytest
 
 from pinball_decryptor.core.video_slots import VideoSlot
-from tests.conftest import HAS_DISPLAY
-from tests.test_gui_smoke import app  # noqa: F401  (fixture)
-
-
-pytestmark = [
-    pytest.mark.gui,
-    pytest.mark.skipif(not HAS_DISPLAY, reason="no Tk display available"),
-]
+from pinball_decryptor.webui import video_helpers as vh
+from pinball_decryptor.webui.tabs import video as video_mod
+from tests.webui_harness import web_app
 
 _BUILD_PROMISE = "what the next build puts on the card"
 
 
-def _stern(app):
-    mfr = next(m for m in app._manufacturers if m.key == "stern")
-    app._on_manufacturer_change(mfr)
-    app.root.update(); app.root.update()
-    return app.window
+@pytest.fixture
+def w(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        yield w
 
 
 def _slot(rel):
@@ -47,91 +42,94 @@ def _slot(rel):
                      probed=True)
 
 
-def _load_video_rows(w, rels):
-    w._video_slots = [_slot(r) for r in rels]
-    w._video_slots_by_rel = {s.rel_path: s for s in w._video_slots}
-    w._video_assignments = {}
+def _load_video_rows(v, rels, changed=(), foreign=()):
+    v._slots = [_slot(r) for r in rels]
+    v._by_rel = {s.rel_path: s for s in v._slots}
+    v._assign = {}
+    v._changed = set(changed)
+    v._foreign = set(foreign)
 
 
-def test_a_stray_row_is_not_marked_as_a_change_that_will_build(app):
+def _rows(w):
+    return {r["rel"]: r for r in w.state("video")["rows"]}
+
+
+def test_a_stray_row_is_not_marked_as_a_change_that_will_build(w):
     """The Replacement column separates "changed, and it builds" from
     "this file isn't on the card at all"."""
-    w = _stern(app)
+    v = w.window.service("video")
     real, stray = "video/JUKEBOX_LOOP6.mov", "video/JUKEBOX_LOOP6f.mov"
-    _load_video_rows(w, [real, stray])
+
     # Both differ from the baseline (a rel that ISN'T in it counts as changed —
     # see checksums.changed_rels), but only one of them is a slot.
-    w._video_changed_on_disk = {real, stray}
-    w._video_foreign_rels = {stray}
-    w._refresh_video_list()
+    def _go():
+        _load_video_rows(v, [real, stray], changed={real, stray},
+                         foreign={stray})
+        v._refresh_list()
+    w.run(_go)
 
-    vals = {r: w._video_tree.item(r, "values") for r in (real, stray)}
-    assert vals[real][4] == "✓ changed on disk"
-    assert vals[stray][4] == w._NOT_ON_CARD_MARK
-    assert "changed" in w._video_tree.item(real, "tags")
-    assert "foreign" in w._video_tree.item(stray, "tags")
+    rows = _rows(w)
+    assert rows[real]["rep"] == "✓ changed on disk"
+    assert rows[stray]["rep"] == vh.NOT_ON_CARD_MARK
+    assert rows[real]["rep_cls"] == "ondisk"
+    assert rows[stray]["rep_cls"] == "stray"
 
 
-def test_the_metadata_pass_keeps_the_stray_mark(app):
+def test_the_metadata_pass_keeps_the_stray_mark(w):
     """ffprobe fills Length/Resolution/Format in behind the list; that rewrite
     used to be where a row's mark got dropped (batch 34), so it has to know
     about this state too."""
-    w = _stern(app)
+    v = w.window.service("video")
     stray = "video/JUKEBOX_LOOP6f.mov"
-    _load_video_rows(w, [stray])
-    w._video_changed_on_disk = {stray}
-    w._video_foreign_rels = {stray}
-    w._refresh_video_list()
 
-    w._apply_video_meta(w._video_scan_id, stray, None)
-    assert w._video_tree.item(stray, "values")[4] == w._NOT_ON_CARD_MARK
+    def _go():
+        _load_video_rows(v, [stray], changed={stray}, foreign={stray})
+        v._refresh_list()
+        v._apply_meta(v._scan_id, stray, None)
+    w.run(_go)
+
+    assert _rows(w)[stray]["rep"] == vh.NOT_ON_CARD_MARK
 
 
-def test_the_replacement_pane_does_not_promise_a_build_for_a_stray(app):
-    w = _stern(app)
+def test_the_replacement_pane_does_not_promise_a_build_for_a_stray(w):
+    v = w.window.service("video")
     stray = "video/JUKEBOX_LOOP6f.mov"
-    _load_video_rows(w, [stray])
-    w._video_changed_on_disk = {stray}
-    w._video_foreign_rels = {stray}
+    w.run(lambda: _load_video_rows(v, [stray], changed={stray},
+                                   foreign={stray}))
 
-    text = w._rep_pane_empty_text("video", stray, "no replacement assigned")
+    text = w.run(v._rep_pane_empty_text, stray, "no replacement assigned")
     assert _BUILD_PROMISE not in text
     assert "not part of this extract" in text
     assert "Transfer Mods" in text
 
 
-def test_a_real_changed_slot_still_reads_as_before(app):
+def test_a_real_changed_slot_still_reads_as_before(w):
     """The snapshot-less-but-real case (batch 31) keeps its wording — that one
     IS what the next build writes."""
-    w = _stern(app)
+    v = w.window.service("video")
     real = "video/JUKEBOX_LOOP6.mov"
-    _load_video_rows(w, [real])
-    w._video_changed_on_disk = {real}
-    w._video_foreign_rels = set()
+    w.run(lambda: _load_video_rows(v, [real], changed={real}))
 
-    text = w._rep_pane_empty_text("video", real, "no replacement assigned")
+    text = w.run(v._rep_pane_empty_text, real, "no replacement assigned")
     assert _BUILD_PROMISE in text
 
 
-def test_an_untouched_slot_keeps_the_default_text(app):
-    w = _stern(app)
+def test_an_untouched_slot_keeps_the_default_text(w):
+    v = w.window.service("video")
     rel = "video/JUKEBOX_LOOP6.mov"
-    _load_video_rows(w, [rel])
-    w._video_changed_on_disk = set()
-    w._video_foreign_rels = set()
+    w.run(lambda: _load_video_rows(v, [rel]))
 
-    assert w._rep_pane_empty_text("video", rel, "no replacement assigned") \
+    assert w.run(v._rep_pane_empty_text, rel, "no replacement assigned") \
         == "no replacement assigned"
 
 
-def test_the_change_diff_records_which_rows_are_strays(app, tmp_path):
+def test_the_change_diff_records_which_rows_are_strays(w, tmp_path,
+                                                        monkeypatch):
     """End to end: the background diff that flags changed-on-disk rows is what
     answers the question, so it has to keep the set rather than only log it."""
-    import threading
-
     from pinball_decryptor.core import checksums
 
-    w = _stern(app)
+    v = w.window.service("video")
     assets = str(tmp_path / "extract")
     vid = os.path.join(assets, "video")
     os.makedirs(vid)
@@ -144,41 +142,48 @@ def test_the_change_diff_records_which_rows_are_strays(app, tmp_path):
     with open(os.path.join(vid, "JUKEBOX_LOOP6f.mov"), "wb") as f:
         f.write(b"my modded clip")
 
-    w.write_assets_var.set(assets)
-    _load_video_rows(w, ["video/JUKEBOX_LOOP6.mov", "video/ATTRACT_LOOP1.mov",
-                         "video/JUKEBOX_LOOP6f.mov"])
-    w._video_changed_on_disk = set()
-    w._video_foreign_rels = set()
+    def _set_folder():
+        try:
+            w.window.write_assets_var.set(assets)
+        except Exception:                                # noqa: BLE001
+            pass
+    w.run(_set_folder)
+    w.drain()
+    w.run(lambda: _load_video_rows(
+        v, ["video/JUKEBOX_LOOP6.mov", "video/ATTRACT_LOOP1.mov",
+            "video/JUKEBOX_LOOP6f.mov"]))
 
-    # Run the worker inline instead of on a thread, then let the after()
-    # callbacks it queues land.
-    real_thread = threading.Thread
+    # Run the worker inline instead of on a thread, then let the callback it
+    # posts to the UI loop land.
+    def _inline(target=None, **_kw):
+        return SimpleNamespace(start=target)
 
-    def _inline(target=None, **kw):
-        return type("T", (), {"start": staticmethod(target)})()
+    with monkeypatch.context() as m:
+        m.setattr(video_mod, "threading", SimpleNamespace(Thread=_inline))
+        w.run(v._start_change_scan)
+    w.drain()
 
-    threading.Thread = _inline
-    try:
-        w._start_change_scan("video")
-        for _ in range(6):
-            app.root.update(); app.root.update_idletasks()
-    finally:
-        threading.Thread = real_thread
-
-    assert w._video_foreign_rels == {"video/JUKEBOX_LOOP6f.mov"}
-    assert "video/JUKEBOX_LOOP6f.mov" in w._video_changed_on_disk
-    assert "video/JUKEBOX_LOOP6.mov" not in w._video_changed_on_disk
+    assert v._foreign == {"video/JUKEBOX_LOOP6f.mov"}
+    assert "video/JUKEBOX_LOOP6f.mov" in v._changed
+    assert "video/JUKEBOX_LOOP6.mov" not in v._changed
 
 
-def test_audio_and_image_rows_get_the_same_treatment(app):
+def test_audio_and_image_rows_get_the_same_treatment(w):
     """The same import scatters sounds and art; all three tabs share the diff."""
-    w = _stern(app)
+    a = w.window.service("audio")
     stray = "audio/idx0001 - old name.wav"
-    w._audio_changed_on_disk = {stray}
-    w._audio_foreign_rels = {stray}
-    assert _BUILD_PROMISE not in w._rep_pane_empty_text("audio", stray, "x")
 
+    def _audio():
+        a._changed = {stray}
+        a._foreign = {stray}
+        return a._rep_pane_empty_text(stray, "x")
+    assert _BUILD_PROMISE not in w.run(_audio)
+
+    img = w.window.service("images")
     stray_img = "images/scene_textures/old_name.png"
-    w._image_changed_on_disk = {stray_img}
-    w._image_foreign_rels = {stray_img}
-    assert _BUILD_PROMISE not in w._rep_pane_empty_text("image", stray_img, "x")
+
+    def _images():
+        img._changed_on_disk = {stray_img}
+        img._foreign_rels = {stray_img}
+        return img._rep_pane_empty_text(stray_img, "x")
+    assert _BUILD_PROMISE not in w.run(_images)

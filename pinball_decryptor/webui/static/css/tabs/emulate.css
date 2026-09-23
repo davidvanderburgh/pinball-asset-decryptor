@@ -1,0 +1,71 @@
+/* Emulate (Stern Spike 2).  Layout only: every colour, font and control
+   comes from app.css. */
+
+.emu { gap: 14px; container-type: inline-size; }
+/* Stack the two columns when the PAGE is narrow, whatever made it so: a
+   small window, or the global zoom (which the viewport media queries do not
+   see). */
+@container (max-width: 900px) {
+  .emu-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@container (max-width: 560px) {
+  .emu-machine { grid-template-columns: minmax(0, 1fr); }
+}
+.emu-notices { gap: 8px; }
+.emu-nhead { color: var(--ink); font-weight: 600; }
+.emu-cols { align-items: start; }
+.emu-col { gap: 16px; }
+
+/* card image to run */
+.emu-card > .bd { gap: 12px; }
+.emu-src { gap: 8px; }
+.emu-machine { gap: 10px 20px; }
+.emu-lblf { gap: 4px; }
+.emu-flags { gap: 18px; flex-wrap: wrap; }
+.emu-ovr { flex-direction: column; align-items: stretch; gap: 8px; }
+.emu-ovr .chk { color: var(--ink); }
+.emu-ovr-row { padding-left: 24px; gap: 10px; }
+.emu-ovr-hint { padding-left: 24px; line-height: 1.45; }
+.emu-card > .ft { gap: 12px; row-gap: 10px; }
+.emu-run { min-width: 168px; }
+.emu-hint { flex: 1 0 100%; order: 3; min-width: 0; white-space: pre-line;
+  overflow-wrap: anywhere; line-height: 1.4; }
+.emu-vol { gap: 8px; flex: 0 0 auto; margin-left: auto; }
+.emu-vol input[type=range] { width: 110px; }
+.emu-volpct { width: 38px; color: var(--ink-2); text-align: right; }
+
+/* save states: the button column goes under the table when the card is
+   narrow (a 1024 px window, or zoomed in) */
+.emu-states { container-type: inline-size; }
+@container (max-width: 600px) {
+  .emu-states-row { flex-direction: column; gap: 10px; }
+  .emu-states-btns { flex-direction: row; flex-wrap: wrap; padding: 0 0 0 14px; }
+}
+.emu-states > .bd.emu-states-bd { padding: 0 12px 12px 0; }
+.emu-states-row { display: flex; gap: 12px; min-width: 0; }
+.emu-states-tbl { flex: 1 1 auto; min-width: 0; gap: 8px; }
+.emu-states-tbl > .tbl { border-bottom-left-radius: 0; }
+.emu-sum { padding: 0 14px; }
+.emu-states-btns { flex: 0 0 auto; gap: 6px; padding-top: 10px; }
+.emu-states-btns .btn { justify-content: flex-start; min-width: 88px; }
+.emu-empty { padding: 14px; }
+
+/* status */
+.emu-kv { grid-template-columns: 150px minmax(0, 1fr); gap: 8px 14px; }
+.emu-kv > span { min-width: 0; overflow-wrap: anywhere; }
+.emu-state { gap: 8px; }
+
+/* windows the emulator opens */
+.emu-wins > .bd { gap: 10px; }
+.emu-win { flex-direction: column; align-items: stretch; gap: 4px; }
+.emu-win .emu-wt { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.emu-win .mono.emu-wt { font-family: var(--sans); font-size: 14px; }
+
+/* the card cache window */
+.emu-cache .tbl { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.emu-cache-hint { flex: 1 1 240px; min-width: 0; }
+
+/* was @media (max-width: 1020px) */
+html.bp-1020 .emu-vol { margin-left: 0; }
+/* was @media (max-width: 720px) */
+html.bp-720 .emu-kv { grid-template-columns: 120px minmax(0, 1fr); }

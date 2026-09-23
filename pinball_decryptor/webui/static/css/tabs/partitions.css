@@ -1,0 +1,77 @@
+/* Partitions tab.  Tokens and components come from app.css; this only lays
+   the page out: source card, tree + preview, the busy overlay. */
+
+.pex { gap: 12px; --pex-type-w: 150px; --pex-chg-w: 130px; }
+/* the page scrolls instead of squeezing the tree below a usable height */
+.pex.page.fill { overflow: auto; }
+.pex > .pagehead, .pex > .pex-src { flex: 0 0 auto; }
+.pex .pex-src > .bd { padding: 12px 16px; }
+.pex-grid { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px 12px; align-items: center; }
+.pex-grid > .lbl { font-size: 13px; }
+.pex-prow { gap: 12px; row-gap: 8px; }
+.pex-prow .pex-part { flex: 0 1 380px; min-width: 220px; }
+.pex-find { flex: 0 1 320px; min-width: 220px; }
+
+.pex-body { flex: 1 1 auto; min-height: 380px; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); }
+.pex-tree { min-height: 0; }
+.pex-tree > .bd { flex: 1 1 auto; min-height: 0; }
+.pex-tablewrap { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.pex-tablewrap > .tbl { flex: 1 1 auto; min-height: 0; }
+.pex-tree > .ft { min-height: 54px; }
+/* the status stays on the buttons' line (Tk packed it beside them): it
+   ellipsizes (the full text is its title) instead of wrapping under them,
+   so the tree never changes height when a status comes or goes */
+.pex-status { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.pex-status.ok-ink { color: var(--ok); }
+.pex-status.err-ink { color: var(--err); }
+.pex-tree .tbl .tr { user-select: none; }
+/* rows are exactly the Table's 32 px pitch (the stock .tr min-height is 34,
+   which overlapped each row onto the next and left a revealed row's foot
+   under the bottom edge) */
+.pex-tree .tbl .tr:not(.th) { min-height: 0; }
+
+.pex-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.pex-tw { width: 18px; height: 18px; flex: 0 0 18px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--ink-3); padding: 0; border-radius: 4px; cursor: pointer; }
+.pex-tw:hover { background: var(--panel-3); color: var(--ink); }
+span.pex-tw { cursor: default; }
+.pex-tw .i { width: 14px; height: 14px; }
+.pex-ic-dir { color: var(--accent); }
+.pex-ic-file { color: var(--ink-3); }
+.tbl .pex-type { color: var(--ink-2); }
+.tbl .pex-changed { color: var(--warn); font-family: var(--cond); }
+/* a replaced file is drawn in the warning colour across the whole row (Tk
+   tag pex_changed); "not on the card now" stays red */
+.tbl .pex-row-changed .c, .tbl .pex-row-changed .pex-name { color: var(--warn); }
+.tbl .pex-row-missing .pex-type { color: var(--err); }
+
+/* The Tk tab placed only a spinner label in the middle of the tree and left
+   the tree usable (select, preview, expand, Find, right-click Properties… /
+   Copy path) while an extract ran: the pill never takes a click, the rows
+   under it do. */
+.pex-busy { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 3; pointer-events: none; display: inline-flex; align-items: center; gap: 12px; max-width: calc(100% - 32px); padding: 10px 18px; border-radius: 999px; background: var(--panel-3); border: 1px solid var(--line-2); box-shadow: var(--shadow); font-family: var(--cond); font-size: 18px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.pex-busy > span:last-child { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pex-busy .spin { width: 20px; height: 20px; flex: 0 0 20px; border-width: 3px; }
+
+.pex-prev { min-height: 0; }
+.pex-prev > .hd .muted { font-family: var(--mono); font-size: 12px; }
+.pex-prev > .bd { flex: 1 1 auto; min-height: 0; padding: 12px; }
+.pex-prev > .ft { gap: 8px; flex-wrap: nowrap; }
+.pex-prevbox { flex: 1 1 auto; min-height: 200px; display: flex; min-width: 0; }
+.pex-img { flex: 1 1 auto; min-height: 0; }
+.pex-img img { width: 100%; height: 100%; object-fit: contain; }
+.pex-text { flex: 1 1 auto; margin: 0; min-height: 0; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--ink); white-space: pre; user-select: text; }
+.pex-noprev { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; text-align: center; border: 1px dashed var(--line-2); border-radius: 6px; padding: 16px; }
+
+.pex-props { grid-template-columns: 110px minmax(0, 1fr); align-items: start; }
+.pex-props .pex-pv { overflow-wrap: anywhere; user-select: text; }
+
+/* was @media (max-width: 1280px) */
+html.bp-1280 .pex { --pex-type-w: 120px; --pex-chg-w: 110px; }
+/* was @media (max-width: 1100px) */
+html.bp-1100 .pex-body { grid-template-columns: minmax(0, 1fr); flex: 0 0 auto; }
+html.bp-1100 .pex-tree { height: 440px; }
+html.bp-1100 .pex-prev { height: 340px; }
+/* was @media (max-width: 1020px) */
+html.bp-1020 .pex-grid { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+/* was @media (max-height: 760px) */
+html.bph-760 .pex .pagehead p { display: none; }

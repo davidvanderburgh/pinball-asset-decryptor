@@ -234,6 +234,23 @@ def _save_consumed(fp, reads):
         pass
 
 
+def _save_grown_consumed(gr_path, staged, reads, log):
+    """File the consumed map :func:`_derive_grown` captured under the STAGED
+    bank's fingerprint, so :func:`_restore_masterdir_consumed` finds it.
+
+    Best effort like every other cache write here: a cache that cannot be
+    written costs the next build a cold derive, never the build itself.
+    ``reads`` is ``None`` when the derive could not install its hook, and an
+    empty map is not filed either (the cached path treats it as a miss)."""
+    if not reads:
+        return
+    try:
+        _save_consumed(_fingerprint(gr_path, staged), reads)
+    except Exception as e:                                  # noqa: BLE001
+        log("The grown bank's master-directory map could not be kept for "
+            "the next build (%s); it will be derived again then." % e, "info")
+
+
 def _load_consumed(game_real_path, image_path):
     """Sorted consumed-offset array for this card, or ``None`` if not cached."""
     path = _consumed_cache_path(_fingerprint(game_real_path, image_path))
@@ -4865,7 +4882,7 @@ _NothingToWrite = NothingToWrite
 
 def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                      phase=None, label=None, dest_is_device=False,
-                     boot_screen=True):
+                     boot_screen=True, sound_ok=None):
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
     edits, and resolve them to a flat list of absolute on-disk writes
     ``[(disk_offset, bytes), ...]`` (offsets relative to the start of
@@ -4878,7 +4895,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     (:func:`write_device`), so the exact same patch set is produced whether the
     destination is an image copy or the card itself.  ``boot_screen=False``
     leaves a replaced boot screen out (an override set: the emulator starts
-    the game without it).
+    the game without it).  ``sound_ok=False`` closes the modes' own-sound
+    gate for this build alone (they are left out with the reason); ``None``
+    consults the environment gate exactly as before.
 
     Returns ``(writes, counts, grow_plan, audio_mode, valpatch_mode)`` where
     ``counts`` is
@@ -4960,6 +4979,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # on exactly as one without the family would.
     from . import mode_write as _MW
     _family = _mode_family_on()
+    # The own-sound gate, decided ONCE for this build.  A caller that closes
+    # it (Try it's fast run) passes sound_ok=False, so a quick set can be
+    # built beside a full Write without either touching the environment the
+    # other one reads (the env gate is process-wide).
+    _sound_gate = ((False, "left out of this run") if sound_ok is False
+                   else _MW.sound_gate())
     mode_list, code_list = [], []
     mode_sound = None
     mode_own = []              # the start / shot sounds and music on carriers (item 150)
@@ -4995,9 +5020,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             except _MW.ModeWriteError as e:
                 raise RuntimeError("Modes: %s Nothing was written." % e) from None
             mode_sound = _MW.choose_end_sound(assets_dir, mode_list,
-                                              _MW.sound_gate(), log)
+                                              _sound_gate, log)
             mode_own = _MW.choose_own_sounds(assets_dir, mode_list,
-                                             _MW.sound_gate(), end_sound=mode_sound,
+                                             _sound_gate, end_sound=mode_sound,
                                              log=log)
     # The CODE modes (modes/<slug>/<slug>.c) travel too, with their own clip,
     # screen, music and calls (modes/<slug>/assets.json): compiled into the
@@ -5026,7 +5051,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             if mode_sound and mode_sound.get("request"):
                 _req.append(int(mode_sound["request"]))
             mode_own = list(mode_own) + _MW.choose_code_sounds(
-                assets_dir, code_list, _MW.sound_gate(), _cprof, taken=_req,
+                assets_dir, code_list, _sound_gate, _cprof, taken=_req,
                 taken_beds=_beds, log=log)
 
     if (not audio_edits and not music_edits and not video_edits
@@ -5261,6 +5286,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     # into a build that could have kept it whole.
                     grows = {}
                     grow_places = None
+                    _greads = None      # the staged bank's consumed map, once derived
                     _fits, _grows = _classify_audio_edits(
                         {p["idx"]: p for p in params}, audio_edits, assets_dir)
                     if _grows:
@@ -5324,6 +5350,44 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites, audio_edits,
                             grows, mode_own, os.path.join(grow_work, "own_sounds"),
                             log)
+                    # The records that loop (the modes' music beds): the
+                    # chain encode's loops, and part of the grown bank's key.
+                    _loop_idx = {int(u["idx"]) for u in (mode_own_used or ())
+                                 if u.get("music") and u.get("idx") is not None}
+                    # A grown bank the last build derived, encoded and
+                    # verified from these same sounds is replayed
+                    # (_GrownBankCache).  Its key is taken HERE, before the
+                    # stage moves the stock bank out from under its
+                    # fingerprint.  Try it's fast run (sound_ok=False) keeps
+                    # out of it, and so does a build whose bodies would not
+                    # be the restored ones kept (the blip-free cave, or the
+                    # restore skipped by hand).  BEHIND THE PREVIEW SWITCH
+                    # (_family) for now: its replay is proven on the synthetic
+                    # mode card only, and a copy of the app without a code
+                    # must write what main writes until a real-card Write has
+                    # taken the hit path and booted.
+                    grown_cache = grown_key = grown_hit = None
+                    if (grows and assets_dir and sound_ok is not False
+                            and _family
+                            and not _pathA_enabled()
+                            and os.environ.get(
+                                "PAD_STERN_SKIP_MASTERDIR_FIX") != "1"
+                            and os.environ.get(
+                                "PAD_STERN_AUDIO_CACHE") != "0"):
+                        try:
+                            grown_cache = _GrownBankCache(
+                                assets_dir, gr_path, img_path, stock_ident)
+                            grown_key = grown_cache.key_for(
+                                _family, _grown_cache_sounds(
+                                    assets_dir, audio_edits, grows,
+                                    slot_gains, _loop_idx,
+                                    list(mode_own_used or ())
+                                    + ([mode_sound_used] if mode_sound_used
+                                       else [])))
+                        except Exception as e:
+                            log("Grown-bank cache unavailable (%s); deriving "
+                                "the grown bank again." % e, "info")
+                            grown_cache = grown_key = None
                     if grows:
                         t0 = time.monotonic()
                         grow_work = grow_work or _work_dir(
@@ -5337,18 +5401,96 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 "original ran %.2f s; the sound bank grows to "
                                 "keep it whole." % (idx, want / 44100.0,
                                                     room / 44100.0), "info")
-                        if progress:
-                            progress(12, 100,
-                                     "Deriving the grown sound bank...")
-                        params, _greads = _derive_grown(
-                            gr_path, img_path, params, log, progress)
-                        if progress:
-                            progress(14, 100, "Re-pointing the game's play "
-                                     "tables at the longer sounds...")
-                        _repoint_descriptors(gr_path, img_path, params,
-                                             desc_sites, log)
-                        _stage_done(log, "staging a sound bank with %d longer "
-                                    "sound(s)" % len(grows), t0)
+                        # Each of the next two steps boots the emulator; a
+                        # Cancel is answered between them rather than after
+                        # the stage, the way the encode below answers one.
+                        if cancel():
+                            return None, None, None, None
+                        if grown_cache is not None:
+                            try:
+                                grown_hit = grown_cache.load(grown_key)
+                            except Exception as e:                # noqa: BLE001
+                                log("Grown-bank cache: the kept result could "
+                                    "not be read (%s); deriving the grown bank "
+                                    "again." % e, "info")
+                                grown_hit = None
+                            if grown_hit is not None:
+                                _why = _grown_cache_mismatch(grown_hit,
+                                                             grow_places)
+                                if _why:
+                                    # Never ship a table for another bank: the
+                                    # cold derive is the only honest answer.
+                                    log("Grown-bank cache: the kept result is "
+                                        "not this staged bank's (%s); deriving "
+                                        "it again." % _why, "warning")
+                                    grown_hit = None
+                        if grown_hit is not None:
+                            # The derive and the chain encode are skipped:
+                            # the kept table is the one the finished bank
+                            # derives, with every appended record's chain
+                            # key.  The play tables are still re-pointed from
+                            # it (they are the staged bank's bytes), and the
+                            # integrity check below still boots the result.
+                            params = grown_hit["params"]
+                            _greads = grown_hit["reads"]
+                            if progress:
+                                progress(12, 100, "Reusing the last grown "
+                                         "sound bank...")
+                            log("Grown bank: these %d longer sound(s) are "
+                                "exactly the set the last build derived, "
+                                "encoded and verified, so its derived table "
+                                "and restored bodies are reused and the "
+                                "derive, the chain encode and the "
+                                "master-directory restore are skipped; the "
+                                "play tables are re-pointed from that table "
+                                "and the firmware integrity check still runs "
+                                "(PAD_STERN_AUDIO_CACHE=0 runs everything "
+                                "again)." % len(grows), "info")
+                            if progress:
+                                progress(14, 100, "Re-pointing the game's "
+                                         "play tables at the longer sounds...")
+                            _repoint_descriptors(
+                                gr_path, img_path, params, desc_sites, log,
+                                templates=_mode_bed_templates(
+                                    gr_path, img_path, mode_own_used, log))
+                            if cancel():
+                                return None, None, None, None
+                            _save_grown_consumed(gr_path, img_path, _greads,
+                                                 log)
+                            _stage_done(log, "staging a sound bank with %d "
+                                        "longer sound(s) from the kept derive"
+                                        % len(grows), t0)
+                        else:
+                            if progress:
+                                progress(12, 100,
+                                         "Deriving the grown sound bank...")
+                            params, _greads = _derive_grown(
+                                gr_path, img_path, params, log, progress)
+                            if cancel():
+                                return None, None, None, None
+                            if progress:
+                                progress(14, 100, "Re-pointing the game's "
+                                         "play tables at the longer sounds...")
+                            _repoint_descriptors(gr_path, img_path, params,
+                                                 desc_sites, log)
+                            if cancel():
+                                return None, None, None, None
+                            # The derive above walked the firmware's whole
+                            # decode chain over the STAGED bank, which is
+                            # exactly the pass _restore_masterdir_consumed
+                            # re-runs cold when it has no consumed map for
+                            # the bank it is handed.  Keeping the map (it
+                            # used to be discarded here) is what lets a mixed
+                            # build - an own sound beside a replaced stock
+                            # sound - take that function's cached path
+                            # instead of a second multi-minute boot.  Saved
+                            # after the re-point, because the fingerprint
+                            # covers the head of the bank and that is the
+                            # bank the restore will be looking at.
+                            _save_grown_consumed(gr_path, img_path, _greads,
+                                                 log)
+                            _stage_done(log, "staging a sound bank with %d "
+                                        "longer sound(s)" % len(grows), t0)
                     t0 = time.monotonic()
                     # Item 150 follow-up: the APPENDED records (grown sounds, the
                     # modes' own sounds) are encoded along the firmware's chain,
@@ -5362,14 +5504,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                   if _family else set())
                     _chain_edits = {i: w for i, w in audio_edits.items()
                                     if i in _grown_idx}
-                    _loop_idx = {int(u["idx"]) for u in (mode_own_used or ())
-                                 if u.get("music") and u.get("idx") is not None}
-                    audio_patches, _askip = _encode_cat0_sounds(
-                        gr_path, img_path, params,
-                        {i: w for i, w in audio_edits.items()
-                         if i not in _chain_edits}, np, log,
-                        progress, cancel, assets_dir=assets_dir,
-                        gains=slot_gains, cache_img_ident=stock_ident)
+                    if grown_hit is not None:
+                        # The kept bodies are the whole verified set, the
+                        # replaced stock sounds' included (every one of them
+                        # is in the key), already restored.
+                        audio_patches = dict(grown_hit["patches"])
+                        _chain_edits = {}
+                    else:
+                        audio_patches, _askip = _encode_cat0_sounds(
+                            gr_path, img_path, params,
+                            {i: w for i, w in audio_edits.items()
+                             if i not in _chain_edits}, np, log,
+                            progress, cancel, assets_dir=assets_dir,
+                            gains=slot_gains, cache_img_ident=stock_ident)
                     if audio_patches is None:
                         return None, None, None, None
                     if _chain_edits:
@@ -5388,6 +5535,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites, log,
                             templates=_mode_bed_templates(gr_path, img_path,
                                                           mode_own_used, log))
+                        # The re-point may move a key inside the region the
+                        # fingerprint covers: file the map under the bank as
+                        # it now stands too, so the restore below still hits.
+                        _save_grown_consumed(gr_path, img_path, _greads, log)
                     _stage_done(log, "re-encoding %d replaced sound(s)"
                                 % len(audio_edits), t0)
                     # Keep the firmware's master-directory forward-chain intact.
@@ -5498,15 +5649,34 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 "integrity check and the final decode are "
                                 "skipped (PAD_STERN_AUDIO_CACHE=0 runs them "
                                 "again)." % len(replayed), "info")
+                        elif grown_hit is not None:
+                            # The kept bodies were restored by the build that
+                            # kept them; the integrity check is the one stage
+                            # a hit never skips, because it is what proves
+                            # the bank on the card boots with every sound's
+                            # codec parameters intact.
+                            t0 = time.monotonic()
+                            if cancel():
+                                return None, None, None, None
+                            _assert_param_integrity(gr_path, img_path,
+                                                    audio_patches, params, np,
+                                                    log, work, progress)
+                            _stage_done(log, "the firmware integrity check "
+                                        "of the reused grown bank", t0)
                         else:
                             t0 = time.monotonic()
+                            # The two slowest emulator passes of a build come
+                            # next; a Cancel pressed while the encode was
+                            # finishing is honoured HERE, not minutes later.
+                            if cancel():
+                                return None, None, None, None
                             audio_patches = _restore_masterdir_consumed(
                                 gr_path, img_path, audio_patches, log,
                                 progress, cancel,
                                 skip_offsets=_appended_body_offsets(
                                     audio_patches, grow_places,
                                     last_only=not _family))
-                            if audio_patches is None:
+                            if audio_patches is None or cancel():
                                 return None, None, None, None
                             _assert_param_integrity(gr_path, img_path,
                                                     audio_patches, params, np,
@@ -5515,6 +5685,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                         "and firmware integrity check", t0)
                             if final_cache is not None and not cancel():
                                 final_cache.store(final_key, audio_patches)
+                            # A grown bank that got this far derived,
+                            # encoded, restored and verified cleanly: keep
+                            # the lot for the next build of the same sounds.
+                            if grown_cache is not None and not cancel():
+                                grown_cache.store(grown_key, params,
+                                                  grow_places, audio_patches,
+                                                  _greads)
                     if audio_patches:
                         why = pathA_why or "see the build log"
                         if os.environ.get(
@@ -7221,7 +7398,7 @@ def card_title_index(path):
 
 
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
-                    cancel=None, label=None, run_card=None):
+                    cancel=None, label=None, run_card=None, sound_ok=None):
     """Build an OVERRIDE SET: the card files the user's edits touch, patched,
     and nothing else — so the emulator can run those edits without a rebuild.
 
@@ -7260,6 +7437,11 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     manifest, because a set carrying one card's program is not the set for
     another.
 
+    *sound_ok* is the modes' own-sound gate for THIS build: ``None`` reads
+    the environment gate as :func:`write_image` does, ``False`` leaves the
+    own sounds out with a reason in the log.  A parameter rather than the
+    environment because a Try it can run beside a Write in the same process.
+
     *out_dir* is emptied first when it cannot be patched, and only if it is
     empty or already an override set (it carries :data:`OVERRIDE_MANIFEST`)
     — a stale file left behind would still be bound over the card, so "what is
@@ -7296,7 +7478,11 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     try:
         writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, label=label,
-            boot_screen=False)
+            boot_screen=False,
+            # Only when the caller decided the gate: the default call stays
+            # exactly the call it was (the tests' stand-ins for
+            # _compute_patches pin its signature).
+            **({} if sound_ok is None else {"sound_ok": sound_ok}))
         if writes is None:                  # cancelled mid-compute
             _rmtree_grow_plan(grow_plan)
             return None, None, None, None
@@ -7409,13 +7595,32 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                 # no longer fit their slot, and in a set a file is just a file.
                 # AFTER the in-place writes, exactly as write_image orders
                 # them, so a file that is both ends up the same either way.
-                # Always written whole: they are built into a scratch dir on
-                # every run, so there is no earlier version to patch and no
-                # mtime worth believing.
+                # Written whole when they are written: they are built into a
+                # scratch dir on every run, so there is no earlier version to
+                # patch and no mtime worth believing.  EXCEPT that a build
+                # whose grown file came out byte-for-byte what the last one
+                # put here (the ordinary second Try it: the same own sound on
+                # the same card) leaves that file as it is and out of the
+                # delta.  The rig's stage keeps a file the delta does not
+                # name and only checks its size (tools/spike2_emu/
+                # overrides.sh), so a 1.65 GB grown bank is neither rewritten
+                # here nor copied over 9p again.
                 for j, (card_rel, source) in enumerate(
                         (grow_plan or {}).get("jobs", ())):
                     card_path = "/" + card_rel.lstrip("/")
                     dest = _override_path(out_dir, card_path)
+                    if card_path in have and _same_file_bytes(source, dest):
+                        size = _size(_lp(dest))
+                        log("Override: %s (%.1f MB, full size — left as it "
+                            "was: this build's copy is byte-identical to "
+                            "the one already in the set)"
+                            % (card_path, size / 1e6), "info")
+                        written.append((card_path, size))
+                        records.append(_override_record(dest, card_path, []))
+                        if progress:
+                            progress(len(by_file) + j, max(total, 1),
+                                     "Keeping %s" % os.path.basename(card_path))
+                        continue
                     os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
                     shutil.copyfile(_lp(source), _lp(dest))
                     try:
@@ -7521,7 +7726,10 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     _write_override_delta(out_dir, generation, parent, delta + new_delta,
                           removed + new_removed)
     patched = sum(n for _p, rs in delta if rs is not None for _o, n in rs)
-    copied = sum(n for (_p, n), (_q, rs) in zip(written, delta) if rs is None)
+    # By path, not by position: a grown file left as it was is in `written`
+    # (it is part of the set) but has no line in the delta.
+    _sizes = dict(written)
+    copied = sum(_sizes.get(p, 0) for p, rs in delta if rs is None)
     log("%s the emulator override set in %s: %d file(s), %.0f MB written "
         "(%d sound(s), %d video(s), %d image(s), %d display string(s))."
         % ("Updated" if parent else "Built",
@@ -7838,6 +8046,27 @@ def _override_reuse(out_dir, manifest, original_path):
             return None
         have[path] = rec
     return have
+
+
+def _same_file_bytes(a, b):
+    """True when *a* and *b* are both files of the same size and the same
+    bytes.  The size test first, because the common miss is a different
+    length; the byte compare is chunked, never a whole-file read."""
+    try:
+        if not (os.path.isfile(_lp(a)) and os.path.isfile(_lp(b))):
+            return False
+        if os.path.getsize(_lp(a)) != os.path.getsize(_lp(b)):
+            return False
+        with open(_lp(a), "rb") as fa, open(_lp(b), "rb") as fb:
+            while True:
+                x = fa.read(1 << 20)
+                y = fb.read(1 << 20)
+                if x != y:
+                    return False
+                if not x:
+                    return True
+    except OSError:
+        return False
 
 
 def _override_record(dest, card_path, ranges):
@@ -9984,6 +10213,172 @@ class _FinalAudioCache:
             pass
 
 
+#: Bump whenever the grow, the chain encode, the re-point or the restore
+#: changes what it writes for the same inputs: a kept grown-bank result from
+#: before the change would otherwise replay bytes the new code never makes.
+_GROWN_CACHE_REV = 1
+
+
+def _grown_cache_sounds(assets_dir, audio_edits, grows, gains, loop_idx, own_used):
+    """One tuple per sound the grow stage is handed, the part of the
+    :class:`_GrownBankCache` key that names the sounds themselves.
+
+    *audio_edits* is the ``{idx: wav}`` map as it enters the grow (the user's
+    replacements after :func:`_classify_audio_edits`, plus the modes' own
+    sounds :func:`_mode_sound_grow` and :func:`_mode_own_sounds_grow` put on
+    their carriers, a music bed already tiled into its loop file), *grows*
+    ``{idx: (room, wanted)}``, *gains* the per-clip loudness map, *loop_idx*
+    the records that loop and *own_used* the modes' sounds with their carrier
+    ``idx`` and ``request`` / ``sid``.  Every replacement is in here, not only
+    the ones that grow: the kept result is the whole verified set, and a
+    replaced stock sound that fits its slot changes those bytes too.  The WAV
+    is named by a digest of its bytes, so a re-export of the same file with
+    one sample different is a different sound."""
+    names = {}
+    for u in own_used or ():
+        if u.get("idx") is None:
+            continue
+        names[int(u["idx"])] = (("sid", int(u["sid"])) if u.get("sid")
+                                else ("request", int(u["request"])))
+    out = []
+    for idx, wav in audio_edits.items():
+        h = hashlib.sha256()
+        with open(_lp(_asset_path(assets_dir, wav)), "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        _room, want = grows.get(idx, (None, None))
+        out.append((int(idx), names.get(int(idx)), h.hexdigest(),
+                    round(float((gains or {}).get(idx, 0.0)), 3),
+                    idx in (loop_idx or ()),
+                    None if want is None else int(want)))
+    return tuple(sorted(out))
+
+
+class _GrownBankCache:
+    """The last DERIVED AND VERIFIED grown sound bank, under
+    ``<assets>/.write_cache/audio_grown.bin``.
+
+    A build that grows the bank (a longer callout, or the modes' own sounds,
+    which are always appended records) never took :class:`_FinalAudioCache`,
+    so every press spent three emulator passes over a bank nothing had
+    changed: the derive of the staged bank, the chain encode of the appended
+    records and the master-directory restore -- 3 min 35 s of a 4 min Try it
+    for ONE unchanged six-second end sound (the Modes tab audit, 2026-09-22).
+    Their result depends on nothing but the stock card, the engine, the
+    family switch and the exact sounds going in, so when those are what the
+    last build derived from, its derived table, the verified bodies and the
+    consumed map are replayed: the staged bank is still built (cheap), the
+    play tables are still re-pointed from the kept table, and
+    :func:`_assert_param_integrity` still boots the finished bank -- it is the
+    always-on safety net, and a hit must not weaken it.
+
+    One entry, keyed by :func:`_audio_cache_base_key` (the card, the encode
+    environment, the app version), the stock card's :func:`_fingerprint`
+    (taken BEFORE the grow moves the bank), the derive revision and
+    :data:`_GROWN_CACHE_REV`, the family switch and
+    :func:`_grown_cache_sounds`.  ``PAD_STERN_AUDIO_CACHE=0`` disables it
+    with the other two.  A build with the blip-free cave on, or with the
+    restore skipped, never uses it: the kept bodies are restored ones."""
+
+    _MAGIC = b"PADAG1\n"
+
+    def __init__(self, assets_dir, gr_path, stock_img_path, stock_ident):
+        self.dir = os.path.join(assets_dir, ".write_cache")
+        os.makedirs(self.dir, exist_ok=True)
+        self.path = os.path.join(self.dir, "audio_grown.bin")
+        self.base_key = _audio_cache_base_key(gr_path, stock_ident)
+        self.stock_fp = _fingerprint(gr_path, stock_img_path)
+
+    def key_for(self, family, sounds):
+        """The digest of one grow: *family* is the mode editor family switch
+        and *sounds* what :func:`_grown_cache_sounds` returned."""
+        h = hashlib.md5()
+        h.update(self.base_key.encode())
+        h.update(self.stock_fp.encode())
+        h.update(b"derive%d grown%d " % (_DERIVE_REV, _GROWN_CACHE_REV))
+        h.update(b"family1" if family else b"family0")
+        for entry in sounds:
+            h.update(repr(entry).encode())
+        return h.hexdigest()
+
+    def load(self, key):
+        """The kept result under *key* as ``{"params", "places", "patches",
+        "reads"}``, or ``None`` when there is none (no file, another key, an
+        older format).  Raises ``ValueError`` when the entry for THIS key
+        cannot be read whole, so the caller can say so and derive again."""
+        try:
+            with open(self.path, "rb") as f:
+                if f.read(len(self._MAGIC)) != self._MAGIC:
+                    return None
+                if f.readline().strip() != key.encode():
+                    return None
+                try:
+                    data = pickle.load(f)
+                except Exception as e:                        # noqa: BLE001
+                    raise ValueError("the entry is damaged (%s)" % e) from None
+        except OSError:
+            return None
+        try:
+            params = [dict(p) for p in data["params"]]
+            places = [tuple(pl) for pl in data["places"]]
+            patches = {int(k): bytes(v) for k, v in data["patches"].items()}
+            reads = data.get("reads")
+        except (TypeError, KeyError, ValueError, AttributeError) as e:
+            raise ValueError("the entry has the wrong shape (%s)" % e) from None
+        if not params or not places or not patches:
+            raise ValueError("the entry is empty")
+        return {"params": params, "places": places, "patches": patches,
+                "reads": set(int(r) for r in reads) if reads else None}
+
+    def store(self, key, params, places, patches, reads):
+        """Record this build's derived *params*, the staged *places*, the
+        verified *patches* and the derive's consumed *reads* under *key*
+        (advisory, like every cache write here)."""
+        if not params or not places or not patches:
+            return
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                f.write(self._MAGIC)
+                f.write(key.encode() + b"\n")
+                pickle.dump({"params": [dict(p) for p in params],
+                             "places": [tuple(pl) for pl in places],
+                             "patches": dict(patches),
+                             "reads": sorted(int(r) for r in reads)
+                             if reads else None}, f, 4)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+
+def _grown_cache_mismatch(kept, places):
+    """Why a kept grown-bank result does not describe the bank just staged,
+    or ``""`` when it does.  The staged geometry (one placement per grown
+    sound: its record, body offset and length) must be the one the kept
+    table was derived from, and each grown row of that table must sit where
+    the placement puts it; anything else is a table for another bank, and
+    the cold derive is the only honest answer."""
+    fresh = [tuple(pl) for pl in places or ()]
+    if fresh != list(kept["places"]):
+        return "the staged bank's layout differs from the kept one"
+    by_idx = {pl[0]: pl for pl in fresh}
+    for p in kept["params"]:
+        if not p.get("grown"):
+            continue
+        pl = by_idx.get(p["idx"])
+        if pl is None:
+            return "idx %d is grown in the kept table but not staged" % p["idx"]
+        if int(p["body_off"]) != int(pl[2]) or int(p["length"]) != int(pl[3]):
+            return ("idx %d sits at %#x (%d samples) in the kept table but at "
+                    "%#x (%d) in the staged bank"
+                    % (p["idx"], p["body_off"], p["length"], pl[2], pl[3]))
+    grown = {p["idx"] for p in kept["params"] if p.get("grown")}
+    missing = sorted(set(by_idx) - grown)
+    if missing:
+        return "idx %d is staged but not grown in the kept table" % missing[0]
+    return ""
+
+
 def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                         cancel, gains=None):
     """Single-process cat-0 re-encode (the fallback + correctness reference).
@@ -11365,10 +11760,6 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
     if not patches:
         return patches
     skip_offsets = set(skip_offsets or ())
-    from unicorn import UC_HOOK_MEM_READ
-
-    from .spike2 import emulator as EM
-    from .spike2.emulator import Spike2Emu
     if cancel and cancel():
         return None
     if progress:
@@ -11408,9 +11799,23 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
                     % (off, n), "info")
         return patches
 
-    _note_cold_consumed(log)
     # body_off -> consumed file offsets
     reads = {off: set() for off in patches if off not in skip_offsets}
+    if not reads:
+        # The ordinary own-sound build: every patch is an appended body, and
+        # the docstring above says why none of those is restored.  Before this
+        # return the emulator was still booted and the whole record chain
+        # re-derived to restore NOTHING - 1 min 41 s of a 4-minute Try it
+        # for one unchanged 6-second end sound (owner session, 2026-09-22).
+        log("Master-directory restore: every patch is an appended body, so "
+            "there is nothing of the master directory to restore.", "info")
+        return patches
+
+    _note_cold_consumed(log)
+    from unicorn import UC_HOOK_MEM_READ
+
+    from .spike2 import emulator as EM
+    from .spike2.emulator import Spike2Emu
 
     def _mk(b0, e0, acc):
         def on_read(mu, access, addr, size, value, ud):

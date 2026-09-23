@@ -113,19 +113,44 @@ def test_a_door_inside_the_array_still_reads_both_ways(pf, watch, monkeypatch):
     assert watch.door is True               # bit clear = the door is open
 
 
-def test_the_switch_list_view_dims_a_row_it_cannot_address(pf):
-    """Source-level, like the rest of the window's rules: an unaddressable row
-    is drawn dim, is not put in the click map, and gets no state dot."""
-    src = open(os.path.join(RIG, "playfield.py"), encoding="utf-8",
-               errors="replace").read()
-    i = src.index("class Schematic")          # the switch-list view
-    body = src[i:]
-    assert 'live = 0 <= d["id"] < padsw.MAX_ID' in body
-    assert 'fill="#d8d8d8" if live else "#5a5a5a"' in body
-    # the click map and the dot are both AFTER the guard, so neither is built
-    guard = body.index("if not live:")
-    assert body.index('self.info[i] = dict(kind="switch"', guard) > guard
-    assert body.index("self.sw_dots.append", guard) > guard
+def test_the_switch_list_view_dims_a_row_it_cannot_address(pf, monkeypatch,
+                                                           tmp_path):
+    """An unaddressable row is drawn dim, takes no click, and gets no state
+    dot. The window is a web page now (2026-09-23), so the rule has two
+    halves: the Schematic model marks the row dead and never publishes a dot
+    for it - driven here through the controller's REAL paced switch read with
+    every switch made - and the page (pfpage/pf.js) draws a dead row dim and
+    binds a press and a dot only on a live one."""
+    import types
+    import padsw
+    monkeypatch.setattr(pf, "load_switch_list", lambda *a, **k: [])
+    monkeypatch.setattr(pf, "SW_PATH", str(tmp_path / "absent_padsw"))
+    rows = [dict(id=34, num=1, node=0, bit=23, name="Coin Door Closed"),
+            dict(id=583, num=2, node=0, bit=24, name="Past The End")]
+    view = pf.Schematic(types.SimpleNamespace(), rows)
+    live = {e["id"]: e["live"] for e in view.entries if "id" in e}
+    assert live == {34: True, 583: False}
+
+    # the dot: every switch made, one real poll; the dead row gets nothing
+    monkeypatch.setattr(pf, "read_merged", lambda: bytes([1]) * padsw.MAX_ID)
+    ctl = types.SimpleNamespace(key_panel=None, _binds_next=float("inf"))
+    frame = {}
+    assert pf.Playfield.poll_switches(ctl, view, frame) is True
+    assert frame["sw"] == {"34": True}
+    assert 583 not in view._dot_drawn and "583" not in view.dyn()["sw"]
+
+    # the page: dim, and the press and the dot both behind the live guard
+    with open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf-8") as f:
+        js = f.read()
+    sch = js[js.index("function schematicView("):js.index("function waitingView(")]
+    assert 'el("div", "r" + (e.live ? "" : " dead"))' in sch
+    guard = sch.index("if (e.live) {")
+    assert sch.index("dots[String(e.id)]", guard) > guard
+    assert sch.index('r.addEventListener("pointerdown"', guard) > guard
+    assert sch.count('addEventListener("pointerdown"') == 1
+    with open(os.path.join(RIG, "pfpage", "pf.css"), encoding="utf-8") as f:
+        css = f.read()
+    assert ".pf-rows .r.dead { color: #5a5a5a;" in css
 
 
 def test_the_bar_counts_them_so_the_list_stops_looking_incomplete(pf):

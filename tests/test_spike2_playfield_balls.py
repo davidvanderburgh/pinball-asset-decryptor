@@ -20,6 +20,11 @@ WHAT THESE GUARD:
   * the buttons do what they say, and the dots are no longer a gesture - on the
     key panel. The fallback strip keeps its clickable dots (no panel, no
     buttons, and a drain has to exist somewhere).
+
+THE WINDOW IS A WEB PAGE NOW (2026-09-23). The section is `KeyPanel`'s model
+(`spec()` / `dyn()`: the line, Drain's live flag, the note, the dots) drawn by
+pf.js, and its buttons come back as the controller's `api_ball(what)`. So the
+section is tested as that model plus the controller call, on a fake driver.
 """
 import os
 import sys
@@ -38,6 +43,10 @@ if RIG not in sys.path:
 GZ_TROUGH = [dict(pos=i + 1, id=71 - i, name="TROUGH %d" % (i + 1))
              for i in range(6)]
 
+PANEL_BINDS = ["C\tct\t33\tCoin Door Closed",
+               "Left\t-\t60\tLeft Flipper",
+               "B\tt\t66,67,68,69,70,71\t6 balls in trough"]
+
 
 def _watch(playfield, made, lane=None):
     """A SwitchWatch over a hand-written merged array - no block, no run."""
@@ -49,13 +58,82 @@ def _watch(playfield, made, lane=None):
     return w
 
 
+class FakeReply:
+    def __init__(self, out=b"", err=b""):
+        self.stdout, self.stderr, self.returncode = out, err, 0
+
+
+class FakeDrv:
+    """Records presses, releases and spawned helpers; spawns nothing. A set
+    `reply` is answered through `done`, the way the real driver delivers a
+    helper's output."""
+
+    def __init__(self):
+        self.pressed, self.released, self.ran = [], [], []
+        self.reply = None
+
+    def press(self, sw):
+        self.pressed.append(sw)
+
+    def release(self, sw):
+        self.released.append(sw)
+
+    def spin(self, sw, on):
+        pass
+
+    def release_all(self):
+        pass
+
+    def run_script(self, script, *args, done=None):
+        self.ran.append((script, args))
+        if done is not None and self.reply is not None:
+            done(self.reply)
+
+
 @pytest.fixture()
 def playfield(monkeypatch, tmp_path):
-    tk = pytest.importorskip("tkinter")                  # playfield imports it
-    del tk
     monkeypatch.setenv("PAD_ROOT", str(tmp_path))
     import playfield as mod
     return mod
+
+
+#: Every wsl_run a test let through. The window fixture fails on any.
+_WSL = []
+
+
+@pytest.fixture()
+def window(playfield, monkeypatch, tmp_path):
+    """Builds the controller the page talks to, offline: every way out to
+    WSL stubbed BEFORE the SwitchDriver exists, every file it reads pinned
+    under tmp_path, and padbinds written (so the key panel - and with it the
+    BALLS section - is up) unless the test asks for none."""
+    del _WSL[:]
+    monkeypatch.setattr(playfield, "wsl_run", lambda *a: _WSL.append(a))
+    monkeypatch.setattr(playfield, "state_run", lambda *a, **k: None)
+    monkeypatch.setattr(playfield, "state_slots", lambda: {})
+    monkeypatch.setattr(playfield.SwitchPipe, "_ensure", lambda self: False)
+    monkeypatch.setattr(playfield, "SwitchDriver", FakeDrv)
+    binds = tmp_path / "padbinds"
+    monkeypatch.setattr(playfield, "BINDS_PATH", str(binds))
+    for name in ("LED_PATH", "SW_PATH", "BALL_PATH", "LCD_PATH"):
+        monkeypatch.setattr(playfield, name, str(tmp_path / name.lower()))
+    monkeypatch.setattr(playfield, "STATE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(playfield, "SAVESTATES", False)
+    rows = [dict(id=r["id"], num=r["id"], node=8, bit=r["pos"],
+                 name="Trough %d" % r["pos"]) for r in GZ_TROUGH]
+    monkeypatch.setattr(playfield, "load_switch_list", lambda: rows)
+    monkeypatch.setattr(playfield, "load_led_names", lambda: {})
+    monkeypatch.setattr(playfield, "layout_is_usable", lambda: False)
+
+    def build(panel=True):
+        if panel:
+            binds.write_text("\n".join(PANEL_BINDS) + "\n", encoding="utf8")
+        elif binds.exists():
+            binds.unlink()
+        return playfield.Playfield()
+
+    yield build
+    assert _WSL == [], "a test reached wsl_run: %r" % (_WSL,)
 
 
 # --- the line ---------------------------------------------------------------
@@ -119,42 +197,39 @@ def test_only_the_lines_after_the_overlap_are_new(playfield):
         ["x", "y", "z"]
 
 
-# --- the section itself, real Tk --------------------------------------------
+# --- the section itself: the model and the controller -----------------------
 
-def _panel(playfield, on_ball):
-    import tkinter as tk
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:                         # no display / no Tcl
-        pytest.skip("Tk unavailable: %s" % exc)
-    root.attributes("-alpha", 0)
-    root.geometry("+10000+10000")
+def _panel(playfield, drv=None):
+    """The section as the model holds it: a key panel with its read-only
+    trough dots added."""
     import keybinds
-    rows = keybinds.parse(["C\tct\t33\tCoin Door Closed",
-                           "Left\t-\t60\tLeft Flipper",
-                           "B\tt\t66,67,68,69,70,71\t6 balls in trough"])
-    panel = playfield.KeyPanel(root, rows, drv=None)
-    panel.cv.pack()
-    dots = panel.add_trough(GZ_TROUGH, "named", on_ball)
-    root.update()
-    return root, panel, dots
+    panel = playfield.KeyPanel(keybinds.parse(PANEL_BINDS), drv)
+    dots = panel.add_trough(GZ_TROUGH, "named")
+    return panel, dots
 
 
-def test_plunge_drain_and_reset_are_buttons_that_say_what_they_do(playfield):
+def test_plunge_drain_and_reset_are_buttons_that_say_what_they_do(window):
     """Reset balls moved in from the bottom action row, which the key panel
-    retires (PAD-134)."""
-    said = []
-    root, panel, dots = _panel(playfield, said.append)
-    try:
-        assert [b.cget("text") for b in panel.ball_btns] == \
-            ["Plunge", "Drain", "Reset balls"]
-        panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67], lane=62),
-                         None, [])                     # a ball in play
-        for b in panel.ball_btns:
-            b.invoke()
-        assert said == ["plunge", "drain", "reset"]
-    finally:
-        root.destroy()
+    retires (PAD-134).
+
+    The three buttons are pf.js's (labelled Plunge / Drain / Reset balls,
+    each sending api_ball with its verb); this pins the controller's half:
+    the three verbs, and only those, reach plunge.py - and the helper's
+    answer lands in the section's own note, under the button that asked."""
+    pf = window()
+    assert pf.key_panel is not None and pf.state("main")["acts"] == []
+    pf.drv.reply = FakeReply(b"shooter lane opened (ball launched)\n")
+    # a ball in play, so Drain is live (a greyed Drain refusing is
+    # test_a_grey_drain_press_is_nothing)
+    pf.key_panel._drain_live = True
+    for what in ("plunge", "drain", "reset"):
+        assert pf.api_ball(what) is True
+    assert pf.drv.ran == [("plunge.py", (w,))
+                          for w in ("plunge", "drain", "reset")]
+    assert pf.api_ball("take") is False, "an unknown verb reached plunge.py"
+    assert len(pf.drv.ran) == 3
+    assert pf.key_panel.dyn()["note"][-1] == \
+        "reset: shooter lane opened (ball launched)"
 
 
 # --- Drain is greyed until a ball is in play (PAD-153) ----------------------
@@ -177,73 +252,102 @@ def test_drain_is_ready_only_with_a_ball_in_play(playfield):
 
 def test_drain_is_greyed_while_the_ball_waits_and_lights_once_launched(
         playfield):
-    said = []
-    root, panel, dots = _panel(playfield, said.append)
-    try:
-        drain = panel.ball_btns[1]
-        assert drain is panel.drain_btn
-        assert drain.cget("state") == "disabled"        # nothing read yet
-        panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67, 62], lane=62),
-                         1, [])
-        assert drain.cget("state") == "disabled"
-        drain.invoke()
-        assert said == []                               # a grey press is nothing
-        assert panel.ball_btns[0].cget("state") == "normal"   # Plunge is live
-        panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67], lane=62),
-                         1, [])
-        assert drain.cget("state") == "normal"
-        drain.invoke()
-        assert said == ["drain"]
-        panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67, 66], lane=62),
-                         1, [])
-        assert drain.cget("state") == "disabled"        # home again
-    finally:
-        root.destroy()
+    """The model's `drain` flag is what pf.js sets the button's disabled
+    state from (`drain.disabled = !d.drain`); Plunge has no such flag and is
+    always live."""
+    panel, _dots = _panel(playfield)
+    assert panel.dyn()["drain"] is False                # nothing read yet
+    panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67, 62], lane=62),
+                     1, [])
+    assert panel.dyn()["drain"] is False
+    panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67], lane=62), 1, [])
+    assert panel.dyn()["drain"] is True
+    panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67, 66], lane=62),
+                     1, [])
+    assert panel.dyn()["drain"] is False                # home again
 
 
-def test_the_dots_on_the_panel_are_no_longer_a_gesture(playfield):
-    said = []
-    root, panel, dots = _panel(playfield, said.append)
-    try:
-        assert not dots.cv.tag_bind(dots.balls[0], "<Button-1>")
-    finally:
-        root.destroy()
+def test_a_grey_drain_press_is_nothing(window):
+    """The Tk test pressed the greyed button and saw nothing run, because a
+    disabled Tk button cannot be invoked. On the page the button is disabled
+    too - but the controller is the one that runs plunge.py, and it must
+    refuse a drain the panel is showing as not valid, whatever sent it (a
+    frame the page had not applied yet, a stale page after a reload): a
+    drain with nothing in play is the endless cycle PAD-153 was about."""
+    pf = window()
+    assert pf.key_panel.dyn()["drain"] is False          # nothing in play
+    assert pf.api_ball("drain") is False
+    assert pf.drv.ran == []
+    assert pf.api_ball("plunge") is True                 # Plunge stays live
+    assert pf.drv.ran == [("plunge.py", ("plunge",))]
+
+
+def test_the_dots_on_the_panel_are_no_longer_a_gesture(window):
+    """On the panel the dots are read-only: the model marks them so, the
+    view hands the page no clickable strip, and a trough click that arrives
+    anyway runs nothing. Without a panel the strip is the fallback control
+    and still is one."""
+    pf = window()
+    dots = pf.key_panel.ball_dots
+    assert pf.view.trough is dots and not dots.clickable
+    st = pf.state("main")
+    assert st["panel"]["spec"]["balls"]["clickable"] is False
+    assert st["view"]["trough"] is None
+    assert pf.api_trough(0) is None
+    assert pf.drv.ran == []
+
+    bare = window(panel=False)
+    assert bare.key_panel is None
+    assert bare.view.trough.clickable
+    assert bare.state("main")["view"]["trough"]["clickable"] is True
+    assert bare.api_trough(0) == "drain"
+    assert bare.drv.ran == [("plunge.py", ("drain",))]
 
 
 def test_the_note_keeps_the_newest_three_and_folds_in_new_feeder_lines(
         playfield):
-    root, panel, dots = _panel(playfield, lambda w: None)
-    try:
-        w = _watch(playfield, [71, 70, 69, 68, 67], lane=62)
-        panel.show_balls(w, 2, ["fed ball one", "fed ball two"])
-        panel.ball_say("drain: ball home")
-        # The feeder's window slides by one; only the new line may arrive.
-        panel.show_balls(w, 3, ["fed ball two", "fed ball three"])
-        text = panel.cv.itemcget(panel.ball_note, "text").splitlines()
-        assert text == ["fed ball two", "drain: ball home", "fed ball three"]
-        assert panel.cv.itemcget(panel.ball_state, "text") == \
-            "balls 5/6 trough   in play 1   fed 3"
-    finally:
-        root.destroy()
+    panel, _dots = _panel(playfield)
+    w = _watch(playfield, [71, 70, 69, 68, 67], lane=62)
+    panel.show_balls(w, 2, ["fed ball one", "fed ball two"])
+    panel.ball_say("drain: ball home")
+    # The feeder's window slides by one; only the new line may arrive.
+    panel.show_balls(w, 3, ["fed ball two", "fed ball three"])
+    assert panel.dyn()["note"] == \
+        ["fed ball two", "drain: ball home", "fed ball three"]
+    assert panel.dyn()["ball"] == "balls 5/6 trough   in play 1   fed 3"
 
 
 def test_a_long_reply_keeps_its_opening_words_and_drops_older_messages(
         playfield):
     """The first note kept the newest ROWS, so a Plunge reply that wrapped
     past three rows showed "launch   the game puts one there..." with the
-    outcome cut off the front."""
-    root, panel, dots = _panel(playfield, lambda w: None)
-    try:
-        width = panel._w - 2 * panel.PAD
-        panel.ball_say("an older message")
-        long_reply = "plunge: nothing in the shooter lane to launch " + \
-            " ".join(["because of a reason"] * 12)
-        assert len(playfield.wrap_rows(panel._f8, long_reply, width)) > 3
-        panel.ball_say(long_reply)
-        rows = panel.cv.itemcget(panel.ball_note, "text").splitlines()
-        assert len(rows) == 3
-        assert rows[0].startswith("plunge: nothing")
-        assert rows[-1].endswith("…")
-        assert "an older message" not in rows
-    finally:
-        root.destroy()
+    outcome cut off the front.
+
+    The fix has two halves and the WRAP is the page's now. pf.js fitNote()
+    renders the note's messages into three rows, DROPPING WHOLE MESSAGES,
+    OLDEST FIRST, and a message that alone needs more rows is line-clamped to
+    its FIRST three with the browser's ellipsis at the end - so the outcome,
+    at the start, is what shows. It measures the rendered font, which Python
+    cannot, so it is not tested here.
+
+    The MODEL's half is tested here: the note hands the page WHOLE messages,
+    never a row-cut fragment, at most NOTE_LINES of them, newest last and
+    oldest dropped first - so the long reply reaches the page intact, opening
+    words and all, and the page has what it needs to drop the older one."""
+    panel, _dots = _panel(playfield)
+    long_reply = "plunge: nothing in the shooter lane to launch " + \
+        " ".join(["because of a reason"] * 12)
+    panel.ball_say("an older message")
+    panel.ball_say(long_reply)
+    note = panel.dyn()["note"]
+    assert note == ["an older message", long_reply], "whole messages, in order"
+    assert note[-1].startswith("plunge: nothing")
+    # Newest NOTE_LINES messages; the oldest go first, whole.
+    n = playfield.KeyPanel.NOTE_LINES
+    for k in range(n + 2):
+        panel.ball_say("msg %d" % k)
+    assert panel.dyn()["note"] == ["msg %d" % k for k in range(2, n + 2)]
+    assert long_reply not in panel.dyn()["note"]
+    # A batch that alone overflows keeps its newest, still whole.
+    panel.ball_say(*["batch %d" % k for k in range(n + 1)])
+    assert panel.dyn()["note"] == ["batch %d" % k for k in range(1, n + 1)]

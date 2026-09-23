@@ -4,15 +4,13 @@
 
 .DESCRIPTION
     Downloads a Python embeddable distribution that matches the local
-    Python version, copies tkinter from the local install (the
-    embeddable doesn't ship with it), pip-installs the runtime
-    dependencies into the bundle, then compiles the Inno Setup
-    installer (.exe).
+    Python version, pip-installs the runtime dependencies into the
+    bundle (the UI is a web page in an Edge WebView2 window, so no
+    tkinter is bundled), then compiles the Inno Setup installer (.exe).
 
 .NOTES
     Prerequisites:
-    - Python 3.10+ with tkinter installed locally (the source for the
-      bundled tkinter files)
+    - Python 3.10+ installed locally (its version picks the embeddable)
     - Inno Setup 6 (https://jrsoftware.org/isinfo.php)
     - Internet access (downloads the Python embeddable + pip + deps)
 #>
@@ -26,18 +24,15 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 $BuildDir = Join-Path $ScriptDir "build"
 
-# --- Detect local Python and tkinter source paths -------------------------
+# --- Detect the local Python version --------------------------------------
 Write-Host "Detecting local Python installation..." -ForegroundColor Cyan
 try {
-    $pyInfo = python -c "import sys, os, _tkinter, tkinter; base = os.path.dirname(os.path.dirname(_tkinter.__file__)); print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}'); print(base); print(_tkinter.__file__); print(os.path.dirname(tkinter.__file__))" 2>&1
+    $pyInfo = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Python not found" }
     $pyLines = $pyInfo -split "`n" | ForEach-Object { $_.Trim() }
     $PythonVersion = $pyLines[0]
-    $pyBase = $pyLines[1]
-    $tkinterPydPath = $pyLines[2]
-    $tkinterPkgDir = $pyLines[3]
 } catch {
-    Write-Error "Python with tkinter is required to build the installer. Install Python 3.10+ from python.org."
+    Write-Error "Python is required to build the installer. Install Python 3.10+ from python.org."
     exit 1
 }
 
@@ -92,31 +87,8 @@ Invoke-WebRequest -Uri $embedUrl -OutFile $embedZip -UseBasicParsing
 Write-Host "Extracting embeddable zip..." -ForegroundColor Cyan
 Expand-Archive -Path $embedZip -DestinationPath $PythonDir -Force
 
-# --- Copy tkinter files from local Python installation --------------------
-Write-Host "`nCopying tkinter files from local Python..." -ForegroundColor Cyan
-
-$tkinterDllDir = Split-Path -Parent $tkinterPydPath
-foreach ($file in @("_tkinter.pyd", "tcl86t.dll", "tk86t.dll", "zlib1.dll")) {
-    $src = Join-Path $tkinterDllDir $file
-    $dst = Join-Path $PythonDir $file
-    if ((Test-Path $src) -and -not (Test-Path $dst)) {
-        Copy-Item $src -Destination $dst -Force
-        Write-Host "  Copied $file"
-    }
-}
-
 $libDir = Join-Path $PythonDir "Lib"
 if (-not (Test-Path $libDir)) { New-Item -ItemType Directory -Path $libDir | Out-Null }
-Copy-Item $tkinterPkgDir -Destination (Join-Path $libDir "tkinter") -Recurse -Force
-Write-Host "  Copied Lib/tkinter/"
-
-$tclSrcDir = Join-Path $pyBase "tcl"
-if (Test-Path $tclSrcDir) {
-    Copy-Item $tclSrcDir -Destination (Join-Path $PythonDir "tcl") -Recurse -Force
-    Write-Host "  Copied tcl/"
-} else {
-    Write-Warning "tcl/ directory not found at $tclSrcDir"
-}
 
 # --- Enable import site, install pip + deps ------------------------------
 Write-Host "`nInstalling pip and dependencies into bundled Python..." -ForegroundColor Cyan
@@ -175,9 +147,10 @@ $sitePackages = Join-Path $PythonDir "Lib\site-packages"
 # app on one platform only.  Both files pin exact versions - see their headers.
 $reqFile = Join-Path $ProjectDir "requirements.txt"
 $winFile = Join-Path $ProjectDir "requirements-windows.txt"
-Write-Host "  Installing pinned deps from requirements.txt + requirements-windows.txt..."
+$uiFile = Join-Path $ProjectDir "requirements-ui.txt"
+Write-Host "  Installing pinned deps from requirements.txt + requirements-windows.txt + requirements-ui.txt..."
 $ErrorActionPreference = "Continue"
-& $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile -r $winFile 2>&1 | ForEach-Object { Write-Host "    $_" }
+& $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile -r $winFile -r $uiFile 2>&1 | ForEach-Object { Write-Host "    $_" }
 $ErrorActionPreference = "Stop"
 if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip dependencies"; exit 1 }
 Write-Host "  Dependencies installed successfully" -ForegroundColor Green
@@ -197,16 +170,6 @@ $pthContent -join "`r`n" | Set-Content -Path $pthFile -Encoding ASCII -NoNewline
 
 # --- Smoke tests ----------------------------------------------------------
 Write-Host "`nSmoke testing the bundled Python..." -ForegroundColor Cyan
-$env:TCL_LIBRARY = Join-Path $PythonDir "tcl\tcl8.6"
-$env:TK_LIBRARY = Join-Path $PythonDir "tcl\tk8.6"
-
-$testTk = & $pythonExe -c "import tkinter; print('tkinter OK')" 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "  $testTk" -ForegroundColor Green
-} else {
-    Write-Warning "tkinter smoke test failed: $testTk"
-}
-
 $testDeps = & $pythonExe -c "import Crypto, UnityPy, PIL, numpy, unicorn, capstone; print('deps OK')" 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  $testDeps" -ForegroundColor Green
@@ -222,9 +185,6 @@ if ($LASTEXITCODE -eq 0) {
 } else {
     Write-Warning "Bundled ffmpeg smoke test failed: $testFfmpeg"
 }
-
-Remove-Item Env:\TCL_LIBRARY -ErrorAction SilentlyContinue
-Remove-Item Env:\TK_LIBRARY -ErrorAction SilentlyContinue
 
 # --- Compile Inno Setup installer -----------------------------------------
 Write-Host "`nCompiling installer..." -ForegroundColor Cyan

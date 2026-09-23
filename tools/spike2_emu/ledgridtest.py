@@ -36,6 +36,17 @@ evidence:
 It drives the REAL `Schematic` view, against the REAL padled writer this rig
 already validated (ledratetest.Feed - imported, not copied: two writers of one
 block is the drift this repo keeps paying for).
+
+HEADLESS SINCE THE WINDOW BECAME A WEB PAGE (2026-09-23): the grid is a model
+(`playfield.LedGrid`) and the page lays out and paints what it publishes. So
+this builds the real controller (`playfield.Playfield()`, no page attached),
+runs the window's own tick (`Playfield._tick`) at the schematic's POLL_MS
+pace, and reads the grid's cells - `C["drawn"]` is 0 when dark, else
+[r, g, b, alpha], exactly what the page is sent. Where the Tk version counted
+canvas items and read their coordinates, this checks the model property those
+stood in for (cells REUSED across rebuilds; one cell per roster entry in the
+spec the page lays out). To SEE the grid, run `python playfield.py <game>`
+beside a run of a title with no artwork.
 """
 import os
 import sys
@@ -58,11 +69,17 @@ CHANS = [(8, 0), (8, 3), (8, 4), (8, 17), (8, 40), (8, 63),
          (9, 1), (9, 2), (9, 19), (9, 45), (9, 61), (9, 70)]
 
 
-def settle(root, ms):
+def settle(ctl, ms, sample=None):
+    """Run the window's own tick for `ms` at its schematic pace, calling
+    `sample()` after each tick when given."""
+    import playfield
     end = time.perf_counter() + ms / 1000.0
     while time.perf_counter() < end:
-        root.update()
-        time.sleep(0.004)
+        with ctl.lock:
+            ctl._tick()
+            if sample is not None:
+                sample()
+        time.sleep(playfield.POLL_MS / 1000.0)
 
 
 def main():
@@ -82,22 +99,17 @@ def main():
     print("fake block: %s" % path)
     print("title     : %s (no device table - the case the grid is for)\n" % GAME)
 
-    import tkinter as tk
     import playfield
 
     playfield.fine_timers()
-    root = tk.Tk()
-    try:
-        root.attributes("-alpha", 0.0)
-    except tk.TclError:
-        pass
-    root.title("ledgridtest")
-    rows = playfield.load_switch_list()
-    if not rows:
-        sys.exit("ledgridtest: %s has no switch_list.txt, so the Schematic "
-                 "view cannot be built" % GAME)
-    view = playfield.Schematic(root, rows)
-    root.update()
+    ctl = playfield.Playfield()
+    if ctl.kind != "schematic":
+        sys.exit("ledgridtest: %s opens as the %s view here, not the switch "
+                 "list the grid lives in%s"
+                 % (GAME, ctl.kind,
+                    " (it has no switch_list.txt)" if ctl.kind == "waiting"
+                    else ""))
+    view = ctl.view
 
     feed = Feed(path, CHANS)
     fail = []
@@ -108,7 +120,7 @@ def main():
     feed.gen += 1
     feed.dec += len(CHANS)
     feed._flush()
-    settle(root, 500)
+    settle(ctl, 500)
 
     got = {k for C in view.leds.cells for k in C["channels"].values()}
     want = set(CHANS)
@@ -129,37 +141,51 @@ def main():
     # ★ THIS CASE EXISTS BECAUSE THE FIRST GRID FAILED IT AND NOTHING ELSE
     # NOTICED. Lighting every channel at once is ONE rebuild, and the bug -
     # fresh cell dicts per rebuild, so a new rectangle per cell each time and
-    # the old generation orphaned on the canvas - only appears from the second
-    # rebuild on. It showed up as blue node headers buried under stale
-    # swatches, i.e. as a layout problem, which is not where the fault was.
-    # Counting canvas items is what makes it a test rather than an opinion.
-    items_before = len(view.cv.find_all())
+    # the old generation orphaned on the Tk canvas - only appeared from the
+    # second rebuild on, as blue node headers buried under stale swatches.
+    # The page redraws the grid from spec() on every layout, so it has
+    # nothing to orphan; what is left to check is the model half of the fix:
+    # cells are REUSED across rebuilds (keyed by node and name, so a lit lamp
+    # keeps its state when an unrelated board is discovered), and the spec
+    # the page lays out lists every cell exactly once, under its own node.
+    before = list(view.leds.cells)
+    gen0 = view.leds.gen
     extra = [(8, 71), (8, 72), (9, 80), (9, 81)]
     for n, (node, idx) in enumerate(extra):
         feed.buf[LED_HDR + node * 96 + idx] = 140
         feed.gen += 1
         feed.dec += 1
         feed._flush()
-        settle(root, 200)
-    grew = len(view.cv.find_all()) - items_before
+        settle(ctl, 200)
+    rebuilds = view.leds.gen - gen0
     print("--- ROSTER GROWTH ---")
-    print("  4 channels arrived in 4 separate rebuilds: %d cells, %d new "
-          "canvas items" % (len(view.leds.cells), grew))
+    print("  4 channels arrived in %d separate rebuilds: %d cells"
+          % (rebuilds, len(view.leds.cells)))
     if len(view.leds.cells) != len(CHANS) + len(extra):
         fail.append("roster is %d cells after %d + %d channels"
                     % (len(view.leds.cells), len(CHANS), len(extra)))
-    # One rectangle per new cell, and nothing else. A per-rebuild leak shows
-    # here as tens of items rather than four.
-    if grew > len(extra) + 1:
-        fail.append("%d canvas items created for %d new cells - stale items "
-                    "are being left behind on every rebuild"
-                    % (grew, len(extra)))
-    for node, block in view.leds.by_node.items():
-        hy = view.cv.coords(view.leds._hdrs[node])[1]
-        top = min(view.cv.coords(C["item"])[1] for C in block)
-        if top <= hy:
-            fail.append("node %d's cells (y=%.0f) sit on top of its header "
-                        "(y=%.0f)" % (node, top, hy))
+    if rebuilds < 2:
+        fail.append("the growth took %d rebuild(s) - the case needs several "
+                    "to mean anything" % rebuilds)
+    live = {id(C) for C in view.leds.cells}
+    lost = [C["key"] for C in before if id(C) not in live]
+    print("  cells kept across the rebuilds: %d of %d"
+          % (len(before) - len(lost), len(before)))
+    if lost:
+        fail.append("%d cells were REPLACED by a rebuild (%s...) - a rebuild "
+                    "must reuse them" % (len(lost), lost[:3]))
+    spec = view.leds.spec()
+    keys = [c["k"] for b in spec["blocks"] for c in b["cells"]]
+    if len(keys) != len(set(keys)) or len(keys) != len(view.leds.cells):
+        fail.append("the page is sent %d cell entries (%d distinct) for %d "
+                    "cells" % (len(keys), len(set(keys)),
+                               len(view.leds.cells)))
+    for b in spec["blocks"]:
+        strays = [c["k"] for c in b["cells"]
+                  if not c["k"].startswith("%d:" % b["node"])]
+        if strays:
+            fail.append("node %d's block carries other boards' cells %s"
+                        % (b["node"], strays[:3]))
 
     # ---- 3: tracking, the churn control, and stickiness -------------------
     target = next(C for C in view.leds.cells
@@ -169,7 +195,7 @@ def main():
     feed.gen += 1
     feed.dec += 1
     feed._flush()
-    settle(root, 300)
+    settle(ctl, 300)
     lit = target["drawn"]
     if lit == base:
         fail.append("a channel driven to 255 did not repaint its cell")
@@ -179,7 +205,7 @@ def main():
         feed.gen += 1
         feed.dec += 1
         feed._flush()
-        settle(root, 20)
+        settle(ctl, 20)
     if (view.leds.cells[0]["drawn"], target["drawn"]) != before:
         fail.append("cells repainted for writes that changed no value")
 
@@ -188,7 +214,7 @@ def main():
     feed.gen += 1
     feed.dec += 1
     feed._flush()
-    settle(root, 300)
+    settle(ctl, 300)
     print("--- TRACKING ---")
     print("  at 90 %s -> at 255 %s -> at 0 %s"
           % (base, lit, target["drawn"]))
@@ -212,13 +238,13 @@ def main():
     env_base = tuple(C["drawn"] for C in env_cells)
     feed.fade(9, 1, 2, 0x00, 0xFF, 20, 20)
     swing = []
-    end = time.perf_counter() + (40 * playfield.FADE_UNIT_MS + 500) / 1000.0
-    while time.perf_counter() < end:
-        root.update()
+
+    def sample():
         s = tuple(C["drawn"] for C in env_cells)
         if not swing or swing[-1] != s:
             swing.append(s)
-        time.sleep(0.004)
+
+    settle(ctl, 40 * playfield.FADE_UNIT_MS + 500, sample)
     print("--- PULSE ---")
     print("  %d distinct paints over the %d enveloped cells, ended %s"
           % (len(swing), len(env_cells),
@@ -242,7 +268,7 @@ def main():
     if fresh in view.leds.seen:
         fail.append("test bug: %r was already in the roster" % (fresh,))
     feed.fade(fresh[0], fresh[1], fresh[1], 0x00, 0xFF, 20, 20)
-    settle(root, 400)
+    settle(ctl, 400)
     print("--- PULSE-ONLY LAMP ---")
     got = fresh in view.leds.seen
     print("  channel %r never written to val[], only pulsed: %s"
@@ -252,27 +278,35 @@ def main():
                     "roster (%d cells before, %d after)"
                     % (n_before, len(view.leds.cells)))
 
-    # ---- 6: A DARK CELL MUST BE HIT-TESTABLE ------------------------------
-    # ★ Tk excludes the INTERIOR of an unfilled rectangle from
-    # find_overlapping, so a dark swatch drawn with fill="" cannot be hovered
-    # and its tooltip - the only thing naming the lamp on a table-less title -
-    # is unreachable. Query the centre of a dark cell the way _hit_led does.
-    dark = next((C for C in view.leds.cells if C["state"][0] is None), None)
+    # ---- 6: A DARK CELL MUST STILL NAME ITS LAMP --------------------------
+    # ★ Under Tk a dark swatch drawn with fill="" could not be hovered (the
+    # interior of an unfilled rectangle is not in find_overlapping), so its
+    # tooltip - the only thing naming the lamp on a table-less title - was
+    # unreachable. On the page every cell is an element with its own hover,
+    # lit or dark; what the model owes it is that a dark cell is still SENT,
+    # with its tooltip, and paints as dark (0) rather than disappearing.
+    dark = next((C for C in view.leds.cells
+                 if C["state"] and C["state"][0] is None), None)
+    print("--- DARK CELL ---")
     if dark is None:
-        fail.append("no dark cell to hit-test")
+        fail.append("no dark cell to check")
     else:
-        x0, y0, x1, y1 = view.cv.coords(dark["item"])
-        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-        hits = view.cv.find_overlapping(cx, cy, cx, cy)
-        print("--- DARK CELL HIT TEST ---")
-        print("  centre of a dark swatch (%s): %d item(s) under the point"
-              % (dark["name"], len(hits)))
-        if dark["item"] not in hits:
-            fail.append("the centre of a DARK cell hit-tests to nothing, so "
-                        "its tooltip is unreachable - the one thing that names "
-                        "the lamp on a title with no table")
+        sent = {c["k"]: c["tip"] for b in view.leds.spec()["blocks"]
+                for c in b["cells"]}
+        tip = sent.get(dark["key"], "")
+        print("  dark swatch %s: sent %s, painted %r"
+              % (dark["name"], "with its tooltip" if tip else "WITHOUT a tip",
+                 view.leds.dyn().get(dark["key"])))
+        if dark["name"] not in tip:
+            fail.append("a DARK cell is not sent with a tooltip naming it - "
+                        "the one thing that names the lamp on a title with "
+                        "no table")
+        if view.leds.dyn().get(dark["key"]) != 0:
+            fail.append("a dark cell is not painted dark")
 
-    root.destroy()
+    ctl.stop()
+    if ctl.keys is not None:
+        ctl.keys.close()
     print("\n" + "=" * 62)
     if fail:
         for f in fail:
@@ -280,8 +314,8 @@ def main():
         return 1
     print("PASS  the grid shows the wire and only the wire:")
     print("      12 written channels become exactly 12 cells out of 1536")
-    print("      addresses, four more arriving one at a time cost four canvas")
-    print("      items and leave no stale swatch over the headers, a lamp's")
+    print("      addresses, four more arriving over several rebuilds reuse")
+    print("      every cell and are sent to the page once each, a lamp's")
     print("      cell tracks its value up and back to dark, writes that")
     print("      change nothing repaint nothing, a cell survives its lamp")
     print("      going out, and an a2 pulse sweeps and lands on the base.")

@@ -515,3 +515,134 @@ def test_a_bad_display_priority_or_lit_shots_value_is_named(field, value, words)
     spec = MP.ModeSpec(name="BAD")
     setattr(spec, field, value)
     assert any(words in p for p in MP.validate(spec)), MP.validate(spec)
+
+# ---- the family's one version comparison, and which card a project is for ----------------
+def test_version_key_is_one_tuple_of_ints_for_every_spelling():
+    """The three private copies (mode_project, mode_tryit, mode_runtime) are one function: a
+    card's index name, a profile's port version and a port file's name compare by VALUE, so
+    jaws_le's ``1_02_0`` on the card is the ``1.02`` in the port's name."""
+    for spelling in ("1.16.0", "1.16", "1_16_0", "1_16", "v1.16.0", "1.16.0.0"):
+        assert MP.version_key(spelling) == (1, 16), spelling
+    assert MP.version_key("1_02_0") == MP.version_key("1.02") == (1, 2)
+    assert MP.version_key("1.15.1") == (1, 15, 1) != MP.version_key("1.15")
+    assert MP.version_key("") == MP.version_key(None) == ()
+    assert MP._version_key is MP.version_key                       # the old name still works
+    from pinball_decryptor.plugins.stern import mode_runtime as MR
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    assert not hasattr(MR, "_version_key") and not hasattr(MT, "_version_key")
+    assert MR.port_file("jaws_le", "1.02.0") and MR.port_file("jaws_le", "1_02_0")
+    assert MR.port_file("jaws_le", "1.02.0") == MR.port_file("jaws_le", "1.02")
+    assert MR.port_file("jaws_le", "1.2.1") is None
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_the_no_project_sentence_is_one_for_the_family():
+    assert MP.NO_PROJECT_HELP.startswith("Open or extract a card project first (Extract tab).")
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    with pytest.raises(MT.TryItError, match="Extract tab"):
+        MT.new_code_mode("", "Blitz")
+    with pytest.raises(CM.CodeModeError, match="Extract tab"):
+        CM.add_example("", CM.EXAMPLES[0]["name"])
+    with pytest.raises(MW.ModeWriteError, match="Extract tab"):
+        MW.build_tryit_set("", "card.raw", "base")
+
+
+def _record(project, name, card_version=None, input_path=None):
+    rec = {"input_path": input_path or ("D:\\cards\\" + name), "input_name": name,
+           "size": 1, "mtime": 1}
+    if card_version:
+        rec["card_version"] = card_version
+    with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
+        json.dump(rec, f)
+
+
+def _anchor(project, image):
+    from pinball_decryptor.core import project_file
+    project_file.save(os.path.join(project, ".pinproj"), manufacturer_key="stern",
+                      paths={"write_original": image, "write_assets": project},
+                      extract_options={})
+
+
+def test_the_extract_record_wins_over_the_anchor_even_when_its_name_does_not_parse(
+        tmp_path, monkeypatch):
+    """The card the project was MEASURED on is the extract record's, whatever it is called.
+    A renamed record used to lose to the anchor's stock image when that parsed, so a set
+    could be prepared for a card the project was never measured on. Now the record's image
+    is the answer with ``game_dir`` "" until probed - project_card never opens it - and the
+    anchor's paths count only when there is no record at all."""
+    project = str(tmp_path)
+    renamed = str(tmp_path / "my card.raw")
+    with open(renamed, "wb") as f:
+        f.write(bytes(1024))
+    _record(project, "my card.raw", "1.16.0", input_path=renamed)
+    _anchor(project, r"D:\Pinball\turtles_pro-1_58_0.Release.8G.sdcard.raw")
+    card = MP.project_card(project)
+    assert (card.image, card.game_dir, card.version) == (renamed, "", "1.16.0")
+    # the probe fills it in (off the UI thread), and the record's exact version is kept
+    monkeypatch.setitem(MP._PROBED, MP._probe_key(renamed), ("godzilla_le", "1.16.0"))
+    card = MP.project_card(project)
+    assert (card.game_dir, card.version, card.source) == ("godzilla_le", "1.16.0",
+                                                          "the card's own index")
+    # a record whose name parses is still the record, with its exact version
+    _record(project, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    card = MP.project_card(project)
+    assert (card.game_dir, card.version) == ("godzilla_le", "1.16.0")
+    assert card.source == "the extract's record of the card"
+    # no record: the anchor's paths, as before
+    os.remove(os.path.join(project, ".extract_source.json"))
+    card = MP.project_card(project)
+    assert (card.game_dir, card.version) == ("turtles_pro", "1.58.0")
+    assert card.source == "the card's file name"
+
+
+def test_project_cards_names_the_two_roles_without_opening_an_image(tmp_path, monkeypatch):
+    """made_for is the project's card; try_on is the image handed in - the live Emulate
+    card, never the anchor's copy - known by its Stern name or an earlier probe, else ""."""
+    project = str(tmp_path / "proj")
+    os.makedirs(project)
+    _record(project, "godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw", "1.15.0")
+
+    def never(path):
+        raise AssertionError("project_cards must not open an image")
+    monkeypatch.setattr(MP, "probe_card_title", never)
+    made_for, try_on = MP.project_cards(project)
+    assert made_for.game_dir == "godzilla_pro" and try_on is None
+    made_for, try_on = MP.project_cards(project, r"E:\built\godzilla_le-1_16_0_built.raw")
+    assert (made_for.game_dir, made_for.version) == ("godzilla_pro", "1.15.0")
+    assert (try_on.game_dir, try_on.version) == ("godzilla_le", "1.16.0")
+    assert try_on.image == r"E:\built\godzilla_le-1_16_0_built.raw"
+    renamed = str(tmp_path / "picked.raw")
+    with open(renamed, "wb") as f:
+        f.write(bytes(64))
+    _made, try_on = MP.project_cards(project, renamed)
+    assert (try_on.game_dir, try_on.version, try_on.image) == ("", "", renamed)
+    monkeypatch.setitem(MP._PROBED, MP._probe_key(renamed), ("turtles_pro", "1.59.0"))
+    _made, try_on = MP.project_cards(project, renamed)
+    assert (try_on.game_dir, try_on.version) == ("turtles_pro", "1.59.0")
+    assert MP.project_cards(str(tmp_path / "bare"), renamed)[0] is None
+
+
+
+def test_a_save_survives_a_reader_holding_the_file(tmp_path, monkeypatch):
+    """On Windows a reader holding mode.json (OneDrive, antivirus, the
+    indexer) makes the swap-in fail for a moment; the save retries instead of
+    losing the edit."""
+    spec = _kaiju()
+    MP.save(str(tmp_path), "kaiju_rush", spec)
+    real = os.replace
+    fails = {"n": 2}
+
+    def flaky(src, dst):
+        if fails["n"]:
+            fails["n"] -= 1
+            raise PermissionError(5, "Access is denied")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    spec2 = MP.ModeSpec.from_json(dict(spec.to_json(), name="SAVED ANYWAY"))
+    path = MP.save(str(tmp_path), "kaiju_rush", spec2)
+    assert fails["n"] == 0
+    assert MP.load(path).name == "SAVED ANYWAY"
+    assert not os.path.exists(path + ".tmp")

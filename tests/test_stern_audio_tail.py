@@ -1542,8 +1542,8 @@ def test_a_default_era_settings_file_cannot_re_arm_the_cave(monkeypatch):
     therefore a new one and the old value is inert."""
     import os
     from pinball_decryptor.app import App
-    from pinball_decryptor.gui.main_window import MainWindow
     from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.webui.tabs import audio as audio_tab
 
     monkeypatch.delenv("PAD_STERN_SKIP_KEYPATCH", raising=False)
     monkeypatch.delenv("PAD_STERN_BLIP_FREE", raising=False)
@@ -1563,7 +1563,7 @@ def test_a_default_era_settings_file_cannot_re_arm_the_cave(monkeypatch):
 
     # Both defaults tables agree, so the dialog and the engine can't drift.
     assert App._AUDIO_ADV_DEFAULTS["blip_free_optin"] is False
-    assert MainWindow._AUDIO_ADV_DEFAULTS["blip_free_optin"] is False
+    assert audio_tab.ADV_DEFAULTS["blip_free_optin"] is False
     assert "blip_free" not in App._AUDIO_ADV_DEFAULTS
 
 

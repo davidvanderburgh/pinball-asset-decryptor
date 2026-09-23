@@ -95,15 +95,18 @@ def test_the_off_reason_names_the_option_the_dialog_really_has(monkeypatch):
     it is the only place a Write tells the user the option exists (PAD-174:
     a whole song cut to its slot's 38 s loop, found by extracting the card).
     It quotes the checkbox, so the quote has to be the checkbox's text."""
-    import inspect
+    import pinball_decryptor.webui as webui_pkg
 
-    from pinball_decryptor.gui.main_window import MainWindow
     monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
     _ok, why = engine._audio_grow_gate(False)
     label = "Allow replacements longer than the original"
     assert '"%s"' % label in why and "Advanced" in why
-    src = inspect.getsource(MainWindow._open_audio_advanced)
-    assert 'text="%s' % label in src
+    js = os.path.join(os.path.dirname(webui_pkg.__file__),
+                      "static", "js", "tabs", "audio.js")
+    with open(js, encoding="utf-8") as f:
+        src = f.read()
+    assert 'label="%s' % label in src
+    assert 'title="Advanced Audio Options"' in src
 
 
 def test_the_trim_notice_names_every_clip_biggest_cut_first():
@@ -726,7 +729,7 @@ def test_the_gui_option_is_the_only_thing_that_opens_the_gate(monkeypatch):
     worker already makes — they inherit os.environ without ever seeing the
     dialog, so whatever "unset" means is what they build."""
     from pinball_decryptor.app import App
-    from pinball_decryptor.gui.main_window import MainWindow
+    from pinball_decryptor.webui.tabs import audio as audio_tab
 
     monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
     monkeypatch.setattr(ext4_grow, "available", lambda: (True, "test"))
@@ -745,7 +748,7 @@ def test_the_gui_option_is_the_only_thing_that_opens_the_gate(monkeypatch):
 
     # Both defaults tables agree, so the dialog and the engine can't drift.
     assert App._AUDIO_ADV_DEFAULTS["audio_grow"] is False
-    assert MainWindow._AUDIO_ADV_DEFAULTS["audio_grow"] is False
+    assert audio_tab.ADV_DEFAULTS["audio_grow"] is False
 
 
 @pytest.mark.parametrize("grow,seconds", [(True, 3.0), (False, 1.0)])

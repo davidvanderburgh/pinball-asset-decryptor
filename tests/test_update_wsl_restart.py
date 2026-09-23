@@ -10,6 +10,8 @@ These run with no WSL and no Tk: the distro listing, the registry and the
 shutdown are stood in for.
 """
 
+import types
+
 from pinball_decryptor import app as app_mod
 from pinball_decryptor.core import updater, wsl_disk
 
@@ -142,13 +144,16 @@ class _Window:
     def append_log(self, text, level="info"):
         self.log.append((level, text))
 
+    def close(self):
+        self.order.append("close")
 
-class _Root:
+
+class _Dialogs:
     def __init__(self, order):
         self.order = order
 
-    def destroy(self):
-        self.order.append("destroy")
+    def cancel_all(self):
+        self.order.append("cancel")
 
 
 class _App:
@@ -160,8 +165,11 @@ class _App:
     def __init__(self):
         self.order = []
         self.window = _Window(self.order)
-        self.root = _Root(self.order)
+        self.ctx = types.SimpleNamespace(dialogs=_Dialogs(self.order))
         self._project_path = None
+
+    def _capture_run(self):
+        return False
 
     def _save_settings(self):
         self.order.append("settings")
@@ -185,7 +193,8 @@ def test_installing_an_update_restarts_wsl_after_the_emulators(monkeypatch):
                         lambda: app.order.append("wsl") or "the WSL line")
     app = _App()
     app._launch_downloaded_installer(_Dialog(), "C:\\Temp\\setup.exe", "9.0.0")
-    assert app.order == ["settings", "settings", "emulators", "wsl", "destroy"]
+    assert app.order == ["settings", "settings", "emulators", "close", "wsl",
+                         "cancel"]
     assert ("info", "the WSL line") in app.window.log
 
 
@@ -218,4 +227,4 @@ def test_a_restart_that_raises_does_not_stop_the_quit(monkeypatch):
     app = _App()
     app._restart_wsl_on_close = True
     app._on_close()
-    assert app.order[-1] == "destroy"
+    assert app.order[-1] == "cancel"

@@ -1,0 +1,46 @@
+/* Compare tab: the two image rows, the action footer, the report table. */
+
+.cmp { gap: 12px; }
+.cmp > .pagehead, .cmp > .cmp-src { flex: 0 0 auto; }
+.cmp.page.fill { overflow: auto; }
+.cmp .cmp-src > .bd { padding: 12px 16px; }
+.cmp-grid { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px 12px; align-items: center; }
+.cmp-grid > .lbl { font-size: 13px; }
+.cmp-status { min-width: 0; flex: 1 1 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+
+.cmp-report { flex: 1 1 auto; min-height: 340px; }
+.cmp-report > .bd { flex: 1 1 auto; min-height: 0; }
+.cmp-tablewrap { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.cmp-tablewrap > .tbl { flex: 1 1 auto; min-height: 0; }
+/* rows are exactly the Table's 30 px pitch (the stock .tr min-height is 34,
+   which overlapped each row onto the next) */
+.cmp-report .tbl .tr:not(.th) { min-height: 0; }
+
+.tbl .tr.cmp-r-section { background: var(--panel-2); border-bottom-color: var(--line-2); }
+.tbl .tr.cmp-r-section.click:hover { background: var(--panel-3); }
+.cmp-sec-title { display: inline-flex; align-items: center; gap: 6px; font-family: var(--cond); font-weight: 600; font-size: 14.5px; color: var(--ink); min-width: 0; }
+.cmp-tw { width: 20px; height: 20px; flex: 0 0 20px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--ink-3); padding: 0; border-radius: 4px; cursor: pointer; }
+.cmp-tw:hover { background: var(--panel); color: var(--ink); }
+.cmp-tw .i { width: 14px; height: 14px; }
+.cmp-head { padding-left: 26px; font-family: var(--cond); font-weight: 500; color: var(--ink-2); }
+.cmp-head.cmp-ok { color: var(--ok); }
+.cmp-head.cmp-warn { color: var(--warn); }
+.cmp-head.cmp-err { color: var(--err); }
+.cmp-head.cmp-muted { color: var(--ink-3); }
+.tbl .tr.cmp-r-head .c:last-child { color: var(--ink); }
+.tbl .tr.cmp-r-item .c:last-child, .tbl .tr.cmp-r-more .c:last-child { padding-left: 14px; }
+.cmp-itemtxt { color: var(--ink-2); font-family: var(--mono); font-size: 12.5px; }
+.cmp-file { display: inline-flex; align-items: center; gap: 6px; color: var(--info); font-family: var(--mono); font-size: 12.5px; min-width: 0; max-width: 100%; }
+.cmp-file .i { width: 13px; height: 13px; opacity: .7; }
+.tbl .tr.cmp-openable:hover .cmp-file { text-decoration: underline; }
+.cmp-more { all: unset; cursor: pointer; color: var(--ink-3); font-style: italic; font-size: 13px; }
+.cmp-more:hover { color: var(--accent); text-decoration: underline; }
+.cmp-more:focus-visible { outline: 2px solid var(--accent); border-radius: 3px; }
+
+.cmp-busy { position: absolute; inset: 32px 0 0 0; display: flex; align-items: center; justify-content: center; gap: 14px; font-family: var(--cond); font-size: 20px; font-weight: 600; color: var(--ink-3); z-index: 3; background: color-mix(in srgb, var(--panel) 72%, transparent); }
+.cmp-busy .spin { width: 22px; height: 22px; flex: 0 0 22px; border-width: 3px; }
+
+/* was @media (max-width: 1020px) */
+html.bp-1020 .cmp-grid { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+/* was @media (max-height: 760px) */
+html.bph-760 .cmp .pagehead p { display: none; }

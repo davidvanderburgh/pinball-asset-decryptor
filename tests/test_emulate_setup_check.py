@@ -31,11 +31,12 @@ import pytest
 
 from tests.conftest import HAS_BASH
 
-from pinball_decryptor.gui import emulate_tab
-from pinball_decryptor.gui.emulate_tab import (setup_env_faults, setup_fixable,
-                                               setup_fix_steps, setup_notice,
-                                               setup_ok, setup_report,
-                                               setup_settled)
+from pinball_decryptor.webui import emulate_core
+from pinball_decryptor.webui.emulate_core import (setup_env_faults,
+                                                  setup_fixable,
+                                                  setup_fix_steps,
+                                                  setup_notice, setup_ok,
+                                                  setup_report, setup_settled)
 
 LF = chr(10)
 
@@ -56,26 +57,13 @@ def facts(**over):
 
 @pytest.fixture(autouse=True)
 def _no_real_setup_probe(monkeypatch):
-    """Same rule as test_emulate_tab: building a panel must not shell out.
-
-    BOTH probes, and the second one is why v0.151.0's CI went red on macOS
-    while Windows and Linux passed.  Only ``setup_state`` was stubbed here, so
-    ``docker_state`` still asked the real machine - and on a macOS runner with
-    no Docker but a usable install route the panel CORRECTLY packs “Set up
-    emulator…”, which is exactly what ``test_check_setup_is_always_there``
-    asserts does not happen.  The code was right and the test's premise was
-    false: on that machine there IS something to fix.  It passed on Windows and
-    Linux because the Docker notice is a macOS path, and it had passed on macOS
-    before only because whether the probe answers inside the single
-    ``root.update()`` is a race.
-
-    "ok" rather than None: None is "could not ask", which leaves the panel
-    saying nothing, while "ok" is the healthy machine these tests mean when
-    they say there is nothing to fix.  The two tests that are ABOUT the Docker
-    notice patch this again with states of their own.
-    """
-    monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
-    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
+    """Same rule as test_emulate_tab: nothing here may shell out to ask the
+    real machine.  BOTH probes (a macOS runner with no Docker has a real
+    answer to give, which is how v0.151.0's CI once went red); "ok" rather
+    than None is the healthy machine these tests mean when they say there is
+    nothing to fix."""
+    monkeypatch.setattr(emulate_core, "setup_state", lambda: None)
+    monkeypatch.setattr(emulate_core, "docker_state", lambda: "ok")
 
 
 # --------------------------------------------------------------------------
@@ -191,134 +179,35 @@ def test_the_report_survives_no_answer_at_all():
 # The button
 # --------------------------------------------------------------------------
 
-def _panel():
-    tk = pytest.importorskip("tkinter")
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip("Tk unavailable: %s" % exc)
-    root.attributes("-alpha", 0)
-    # Off-screen too, not just transparent: a transparent window is still
-    # MAPPED - it takes the foreground and gets a taskbar button, which is
-    # what drags a fullscreen game around on the developer's own machine.
-    # Parking it is the half that actually works.
-    root.geometry("+10000+10000")
-    frame = tk.Frame(root)
-    frame.pack()
-    panel = emulate_tab.EmulatePanel(frame)
-    panel.build(frame)
-    root.update()
-    return root, panel
-
-
-def test_check_setup_is_always_there():
-    """Unlike “Set up emulator…”, which packs itself only when it has something
-    to change.  This one is the surface a user can be pointed at."""
-    root, panel = _panel()
-    try:
-        assert panel._check_btn.winfo_manager(), "not packed"
-        assert not panel._setup_btn.winfo_manager(), \
-            "the fixer packed itself with nothing to fix"
-    finally:
-        root.destroy()
-
-
-def _settle(root, panel, tries=200):
-    """Run the main loop until the press has been answered.
-
-    The drain reschedules itself with ``after(250, ...)`` and ``update()`` does
-    NOT wait for a timer, so a tight loop of updates can run out long before
-    the probe is ever collected - a race that only ever fell the right way
-    because the probes here are monkeypatched to return instantly.  This gives
-    the timers real time to fire and stops the moment nothing is armed.
-    """
-    for _ in range(tries):
-        root.update()
-        if not (panel._setup_busy or panel._docker_busy
-                or panel._setup_report_next or panel._docker_report_next):
-            return
-        time.sleep(0.02)
-
-
-def test_check_setup_reports_and_re_enables(monkeypatch):
-    """The press-to-answer loop, including the case where the probe fails."""
-    root, panel = _panel()
-    try:
-        said = []
-        monkeypatch.setattr(panel, "_log", said.append)
-        monkeypatch.setattr(emulate_tab, "setup_state", lambda: HEALTHY)
-        monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
-        panel._setup_recheck_now()
-        _settle(root, panel)
-        # EACH PLATFORM IS ASKED ITS OWN QUESTION and answers in its own words:
-        # a Mac has no WSL and no packages to install, so "this PC can run the
-        # emulator" is not a sentence its probe can honestly print.  What is
-        # the same everywhere is that the press is ANSWERED and the button
-        # comes back, which is the whole reason the button exists.
-        want = ("this Mac can run the emulator." if sys.platform == "darwin"
-                else "this PC can run the emulator.")
-        assert any(want in s for s in said), said
-        assert str(panel._check_btn["text"]) == "Check setup…"
-        assert str(panel._check_btn["state"]) == "normal"
-    finally:
-        root.destroy()
-
-
-def test_check_setup_answers_even_when_there_is_no_probe_to_run(monkeypatch):
-    """★ THE FAULT THIS BUTTON EXISTS TO FIX, TURNED ON THE BUTTON ITSELF.
-
-    A press that goes unanswered leaves it DISABLED and reading "Checking…"
-    for the rest of the session, which is worse than the silence it replaced.
-    Every Mac got exactly that: ``setup_state`` answers None on macOS by
-    design, so ``_setup_check`` returned without starting a probe at all and
-    nothing ever called back.  Whatever this machine is, and whether or not
-    anything can be asked of it, the button must come back with words.
-    """
-    root, panel = _panel()
-    try:
-        said = []
-        monkeypatch.setattr(panel, "_log", said.append)
-        monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
-        monkeypatch.setattr(emulate_tab, "docker_state", lambda: "absent")
-        panel._setup_recheck_now()
-        _settle(root, panel)
-        assert str(panel._check_btn["state"]) == "normal", said
-        assert str(panel._check_btn["text"]) == "Check setup…"
-        assert len(said) > 1, said       # more than the "checking…" line
-        assert any("cannot run the emulator" in s or "no answer" in s
-                   for s in said), said
-    finally:
-        root.destroy()
-
 
 def test_setup_report_darwin_never_asks_a_mac_about_wsl():
     """setup_report's no-answer line names WSL, which on a Mac would accuse a
     perfect machine of missing something it is not supposed to have."""
     for state in ("ok", "stopped", "absent", None):
-        lines = " ".join(emulate_tab.setup_report_darwin(state))
+        lines = " ".join(emulate_core.setup_report_darwin(state))
         assert "WSL" not in lines, lines
         assert "packages" in lines, lines
     assert "can run the emulator." in " ".join(
-        emulate_tab.setup_report_darwin("ok"))
+        emulate_core.setup_report_darwin("ok"))
     for state in ("stopped", "absent", "engineless", None):
         assert "cannot run the emulator yet." in " ".join(
-            emulate_tab.setup_report_darwin(state))
+            emulate_core.setup_report_darwin(state))
 
 
 def test_the_mac_report_says_which_docker_and_where_it_looked():
     """★ PAD-74.  The bug was a docker in /opt/local/bin that the app could
     not see, and no line of any report said where it had looked - so the one
     paste a user is asked for could not settle it either way."""
-    lines = " ".join(emulate_tab.setup_report_darwin(
+    lines = " ".join(emulate_core.setup_report_darwin(
         "engineless", "/opt/local/bin/docker", None))
     assert "/opt/local/bin/docker" in lines, lines
     assert "none installed" in lines, lines
     # Nothing found: say where it looked, not just that it failed.
-    lines = " ".join(emulate_tab.setup_report_darwin("absent"))
+    lines = " ".join(emulate_core.setup_report_darwin("absent"))
     assert "/opt/local/bin" in lines, lines
     assert "not found on PATH" in lines, lines
     # And an engine that IS there is named with its path.
-    lines = " ".join(emulate_tab.setup_report_darwin(
+    lines = " ".join(emulate_core.setup_report_darwin(
         "stopped", "/opt/local/bin/docker",
         ("Colima", "cli", "/opt/local/bin/colima")))
     assert "Colima (/opt/local/bin/colima)" in lines, lines
@@ -883,7 +772,8 @@ def test_the_tab_says_it_before_the_run_rather_than_after():
     # console twin is what gets typed.
     assert 'cd "C:\\Users\\d\\AppData\\Local\\Programs\\Python\\Python313"' \
         in todo, todo
-    assert ".\\python.exe -m pip install --user Pillow" in todo, todo
+    assert ".\\python.exe -m pip install --user pywebview Pillow" in todo, \
+        todo
     assert "pythonw.exe -m pip" not in todo, todo
     # ...and it is not a machine that "cannot run the emulator".
     assert not setup_settled(bad)

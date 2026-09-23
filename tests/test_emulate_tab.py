@@ -6,10 +6,10 @@ being read as a fault cost this project a whole pass of believing the emulator
 was hung when it was doing exactly what the real machine does; a test is the
 cheapest way to stop that regressing into "Stuck".
 
-The source-picker tests at the bottom DO build widgets, on an invisible root,
-because what they check is the translation from what the user picked into the
-environment the rig is handed — and that only exists once the widgets do.  They
-skip rather than fail when Tk is unusable.
+The subject is ``webui/emulate_core.py`` (the rig's Tk-free helpers) and
+``webui/emulate_rig.py`` (the tab's word lists).  The web tab itself is
+driven in tests/test_webui_emulate.py; a few tests here borrow one of its
+methods on a bare instance, where the method reads nothing but a variable.
 """
 
 import json
@@ -23,17 +23,19 @@ import pytest
 
 from tests.conftest import HAS_BASH
 
-from pinball_decryptor.gui import _runtime_ui, emulate_tab
+from pinball_decryptor.webui import runtime_prompt as _runtime_ui
+from pinball_decryptor.webui import emulate_core, emulate_rig
+from pinball_decryptor.webui.tabs import emulate as emulate_web
 
-from pinball_decryptor.gui.emulate_tab import (DEFAULT_RIG_DIR, parse_status,
-                                               rig_cmd_root, setup_extras,
-                                               setup_notice, setup_ok,
-                                               setup_settled, setup_state,
-                                               setup_summary, state_text,
-                                               _NEEDS_WSL_RESTART, _wsl_path)
+from pinball_decryptor.webui.emulate_core import (DEFAULT_RIG_DIR, parse_status,
+                                                  rig_cmd_root, setup_extras,
+                                                  setup_notice, setup_ok,
+                                                  setup_settled, setup_state,
+                                                  setup_summary, state_text,
+                                                  _NEEDS_WSL_RESTART, _wsl_path)
 
 # ``setup_state`` is imported BY VALUE here on purpose.  The autouse fixture
-# below replaces ``emulate_tab.setup_state`` so that building a panel never
+# below replaces ``emulate_core.setup_state`` so that building a panel never
 # shells out to WSL, and the two tests that are about the probe itself have to
 # reach the real one - through this binding, which monkeypatch does not touch.
 # Without it they exercised the stub and one of them passed for that reason.
@@ -46,7 +48,7 @@ def _no_real_setup_probe(monkeypatch):
     which is deliberately the same as "nothing to say" - so the default panel
     in every test below carries no prerequisite notice.  Tests that are about
     the notice patch this again with facts of their own."""
-    monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
+    monkeypatch.setattr(emulate_core, "setup_state", lambda: None)
 
 
 @pytest.fixture(autouse=True)
@@ -60,9 +62,9 @@ def _no_runtime_unless_asked(monkeypatch):
     runner passed: the worst shape a test can have.  So the default here is
     "no runtime", and the tests that are ABOUT routing patch it themselves.
     """
-    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+    monkeypatch.setattr(emulate_core.runtime, "wsl_distro",
                         lambda runner=None: None)
-    monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: None)
+    monkeypatch.setattr(emulate_core.runtime, "known_state", lambda: None)
     # AND NOTHING HERE MAY REACH THE NETWORK OR A REAL DISTRO.  `_fix_setup`
     # calls `_install_runtime`, which on a machine whose runtime is a version
     # behind falls straight through to `runtime.install()` - a 371 MB download
@@ -78,8 +80,8 @@ def _no_runtime_unless_asked(monkeypatch):
         raise AssertionError(
             "a test reached the real payload downloader - patch it")
 
-    monkeypatch.setattr(emulate_tab.runtime, "install", _refuse_install)
-    monkeypatch.setattr(emulate_tab.runtime, "status",
+    monkeypatch.setattr(emulate_core.runtime, "install", _refuse_install)
+    monkeypatch.setattr(emulate_core.runtime, "status",
                         lambda *a, **kw: ("unsupported", "not in tests"))
     from pinball_decryptor.core import payloads as _core_payloads
     monkeypatch.setattr(_core_payloads, "ensure", _refuse_payloads)
@@ -282,7 +284,10 @@ def _restore(folder, settings=None):
         _set_loaded_project=lambda p: None,
         _settings=settings if settings is not None else {},
         window=SimpleNamespace(apply_manufacturer=lambda mfr: None,
-                               emulate_card_var=var),
+                               emulate_card_var=var,
+                               # no Emulate service: the machine row is
+                               # left alone (its own test is below)
+                               service=lambda name: None),
     )
     # Bound by hand rather than stubbed out: BOTH halves have to be the real
     # code or this stops testing the thing that was broken, which was the call
@@ -357,6 +362,7 @@ def test_the_global_is_written_on_every_settings_save(tmp_path, monkeypatch):
                         str(tmp_path / "settings.json"))
     settings = {}
     stub = SimpleNamespace(
+        _capture_run=lambda: False,
         _current_mfr=None,
         _settings=settings,
         root=SimpleNamespace(winfo_geometry=lambda: "1x1"),
@@ -400,6 +406,7 @@ def test_the_machine_row_is_saved_globally(tmp_path, monkeypatch):
                         str(tmp_path / "settings.json"))
     settings = {}
     stub = SimpleNamespace(
+        _capture_run=lambda: False,
         _current_mfr=None,
         _settings=settings,
         root=SimpleNamespace(winfo_geometry=lambda: "1x1"),
@@ -423,12 +430,15 @@ def test_the_machine_row_comes_back_whatever_the_project(tmp_path):
     cabinet does not become a US one because another project was opened -
     and a value this build does not offer is ignored rather than shown."""
     from pinball_decryptor.app import App
+    from pinball_decryptor.webui.tabs.emulate import EmulateTab
     country, power = _Var("As set in the game"), _Var("60 Hz mains")
+    svc = object.__new__(EmulateTab)        # machine_choices reads no state
     stub = SimpleNamespace(
         _settings={"emulate_country": "Germany",
                    "emulate_power": "50 Hz mains, US machine"},
         window=SimpleNamespace(emulate_country_var=country,
-                               emulate_power_var=power))
+                               emulate_power_var=power,
+                               service=lambda name: svc))
     App._restore_emulate_machine(stub)
     assert (country.get(), power.get()) == ("Germany",
                                             "50 Hz mains, US machine")
@@ -439,108 +449,69 @@ def test_the_machine_row_comes_back_whatever_the_project(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# Source picker
+# The machine row (PAD-149): what the country and power picks hand the rig
 # --------------------------------------------------------------------------
 
-def _panel(tmp_path):
-    """A built panel on an invisible root, or a skip when Tk is unusable."""
-    tk = pytest.importorskip("tkinter")
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:                          # no display / no Tcl
-        pytest.skip("Tk unavailable: %s" % exc)
-    root.attributes("-alpha", 0)
-    # Off-screen too, not just transparent: a transparent window is still
-    # MAPPED - it takes the foreground and gets a taskbar button, which is
-    # what drags a fullscreen game around on the developer's own machine.
-    # Parking it is the half that actually works.
-    root.geometry("+10000+10000")
-    frame = tk.Frame(root)
-    frame.pack()
-    panel = emulate_tab.EmulatePanel(frame)
-    panel.build(frame)
-    root.update()
-    return root, panel
+def _machine_tab(country=None, power=None):
+    """The web Emulate tab's ``_machine_env`` over two plain variables (it
+    reads nothing else), without a page or a loop."""
+    from pinball_decryptor.webui.tabs.emulate import EmulateTab
+    tab = object.__new__(EmulateTab)
+    tab.emulate_country_var = _Var(
+        emulate_rig.COUNTRY_GAME if country is None else country)
+    tab.emulate_power_var = _Var(
+        emulate_rig.POWER_CHOICES[0][0] if power is None else power)
+    return tab
 
 
 _RIG = pathlib.Path(__file__).resolve().parents[1] / "tools" / "spike2_emu"
 
 
-def test_an_untouched_machine_row_adds_nothing_to_start(tmp_path):
+def test_an_untouched_machine_row_adds_nothing_to_start():
     """PAD-149: a US machine on 60 Hz is the rig's own default, so the row
     says nothing unless it is overruling it - Start hands watch.sh exactly
     what it handed it before the row existed."""
-    root, panel = _panel(tmp_path)
-    try:
-        assert panel._country_var.get() == "As set in the game"
-        assert panel._power_var.get() == "60 Hz mains"
-        assert panel._machine_env() == []
-        env = panel._launch_env(["PAD_CARD=/mnt/d/x.raw"])
-        assert not any(e.startswith(("PAD_CAB_DIP=", "PAD_COUNTRY=",
-                                     "PAD_MAINS_HZ=", "PAD_FACTORY_HZ="))
-                       for e in env), env
-    finally:
-        root.destroy()
+    assert emulate_rig.COUNTRY_GAME == "As set in the game"
+    assert emulate_rig.POWER_CHOICES[0] == ("60 Hz mains", ())
+    assert _machine_tab()._machine_env() == []
 
 
-def test_a_country_is_the_dip_value_the_game_reads(tmp_path):
+def test_a_country_is_the_dip_value_the_game_reads():
     """The position in the game's own country table IS the number the CPU
     board's DIP switches report - 6 read back as FRANCE's index off a live
     stranger_things 1.12.0 - so the list must never be sorted."""
-    countries = emulate_tab.EmulatePanel.COUNTRIES
+    countries = emulate_rig.COUNTRIES
     assert len(countries) == len(set(countries)) == 30
     assert (countries[0], countries[6], countries[14], countries[29]) == \
         ("U.S.A.", "France", "U.K.", "Indonesia")
-    root, panel = _panel(tmp_path)
-    try:
-        assert tuple(panel._country_cb.tk.splitlist(
-            panel._country_cb.cget("values"))) == \
-            ("As set in the game",) + countries
-        panel._country_var.set("Indonesia")
-        env = panel._launch_env(["PAD_CARD=/mnt/d/x.raw"])
-        assert "PAD_CAB_DIP=29" in env and "PAD_COUNTRY=29" in env
-        # A value this build does not offer reads as the untouched default.
-        panel._country_var.set("Atlantis")
-        assert panel._machine_env() == []
-    finally:
-        root.destroy()
+    env = _machine_tab("Indonesia")._machine_env()
+    assert "PAD_CAB_DIP=29" in env and "PAD_COUNTRY=29" in env
+    # A value this build does not offer reads as the untouched default.
+    assert _machine_tab("Atlantis")._machine_env() == []
 
 
-def test_a_picked_country_sets_what_the_boot_screen_shows(tmp_path):
+def test_a_picked_country_sets_what_the_boot_screen_shows():
     """David picked Denmark and D&D's boot screen still said U.S.A.: the
     switches only flag the stored country, and the boot screen reads the
     stored one.  So a pick sets both - and U.S.A. sends its 0 too, because
     the stored country outlives the run and a silent U.S.A. could never put
     a machine back from Denmark."""
-    root, panel = _panel(tmp_path)
-    try:
-        panel._country_var.set("Denmark")
-        assert panel._machine_env() == ["PAD_CAB_DIP=9", "PAD_COUNTRY=9"]
-        panel._country_var.set("U.S.A.")
-        assert panel._machine_env() == ["PAD_CAB_DIP=0", "PAD_COUNTRY=0"]
-        panel._country_var.set("As set in the game")
-        assert panel._machine_env() == []
-    finally:
-        root.destroy()
+    assert _machine_tab("Denmark")._machine_env() == [
+        "PAD_CAB_DIP=9", "PAD_COUNTRY=9"]
+    assert _machine_tab("U.S.A.")._machine_env() == [
+        "PAD_CAB_DIP=0", "PAD_COUNTRY=0"]
+    assert _machine_tab("As set in the game")._machine_env() == []
 
 
-def test_power_picks_the_mains_and_the_board(tmp_path):
+def test_power_picks_the_mains_and_the_board():
     """The mains (run_game.sh) and the board the machine was built for (the
     shim) move together: a European machine is a 50 Hz board on 50 Hz, and a
     US machine on 50 Hz is the refusal Sam described."""
-    root, panel = _panel(tmp_path)
-    try:
-        labels = [label for label, _env in panel.POWER_CHOICES]
-        assert list(panel._power_cb.tk.splitlist(
-            panel._power_cb.cget("values"))) == labels
-        panel._power_var.set("50 Hz mains, European machine")
-        assert panel._machine_env() == ["PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=50"]
-        panel._power_var.set("50 Hz mains, US machine")
-        panel._country_var.set("Germany")
-        assert panel._machine_env() == ["PAD_CAB_DIP=7", "PAD_COUNTRY=7",
-                                        "PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=60"]
-    finally:
-        root.destroy()
+    assert _machine_tab(power="50 Hz mains, European machine")._machine_env() \
+        == ["PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=50"]
+    assert _machine_tab("Germany", "50 Hz mains, US machine")._machine_env() \
+        == ["PAD_CAB_DIP=7", "PAD_COUNTRY=7",
+            "PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=60"]
 
 
 def test_the_rig_carries_the_machine_row_to_the_game():
@@ -662,81 +633,6 @@ def test_pad_mains_lock_is_a_us_board_on_50_hz():
     assert not locked(None, "60")
 
 
-def test_card_source_becomes_pad_card(tmp_path):
-    """A card image is handed to the rig as PAD_CARD, in WSL form."""
-    img = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
-    img.write_bytes(bytes(16))
-    root, panel = _panel(tmp_path)
-    try:
-        panel._src_path.set(str(img))
-        env = panel._source_env()
-        assert len(env) == 1 and env[0].startswith("PAD_CARD=")
-        assert env[0].endswith(img.name)
-        assert "\\" not in env[0]      # a Windows path would not mount
-    finally:
-        root.destroy()
-
-
-def test_missing_image_is_refused_on_the_tab(tmp_path):
-    """A bad path is a sentence on the tab, not a shell error in the log."""
-    root, panel = _panel(tmp_path)
-    try:
-        panel._src_path.set(str(tmp_path / "nope.raw"))
-        assert panel._source_env() is None
-        assert "No such image" in panel._hint.cget("text")
-        panel._src_path.set("")
-        assert panel._source_env() is None
-        assert "Pick a card image" in panel._hint.cget("text")
-    finally:
-        root.destroy()
-
-
-def test_no_folder_or_rig_options(tmp_path):
-    """An extracted folder is the wrong shape for the rig and the rig's own
-    copy is internal state; neither is offered any more."""
-    root, panel = _panel(tmp_path)
-    try:
-        assert not hasattr(panel, "_src_kind")
-        texts = []
-        def walk(w):
-            for child in w.winfo_children():
-                try:
-                    texts.append(str(child.cget("text")))
-                except Exception:                        # noqa: BLE001
-                    pass
-                walk(child)
-        walk(root)
-        blob = " ".join(texts)
-        assert "Extracted folder" not in blob
-        assert "Rig's own copy" not in blob
-        # And no buttons guessing which of the project's images you meant.
-        assert "Use stock image" not in blob
-        assert "Use modded image" not in blob
-    finally:
-        root.destroy()
-
-
-def test_keys_help_is_gone(tmp_path):
-    """The rig's own Controls window is the single source of truth for the key
-    bindings; a copy on this tab could only drift."""
-    root, panel = _panel(tmp_path)
-    try:
-        texts = []
-        def walk(w):
-            for child in w.winfo_children():
-                try:
-                    texts.append(str(child.cget("text")))
-                except Exception:                        # noqa: BLE001
-                    pass
-                walk(child)
-        walk(root)
-        blob = " ".join(texts)
-        assert "Service Plus" not in blob
-        assert "shooter lane" not in blob
-    finally:
-        root.destroy()
-
-
 # --- item 56: master PC-side volume + Mute -----------------------------------
 #
 # "master pc volume knob for emulator (not for in game, but for the emulator
@@ -756,22 +652,22 @@ def test_keys_help_is_gone(tmp_path):
 
 def _isolated_ctl(monkeypatch, tmp_path):
     path = str(tmp_path / "audio_ctl.json")
-    monkeypatch.setattr(emulate_tab, "AUDIO_CTL_FILE", path)
+    monkeypatch.setattr(emulate_core, "AUDIO_CTL_FILE", path)
     return path
 
 
 def test_audio_ctl_round_trips(monkeypatch, tmp_path):
     _isolated_ctl(monkeypatch, tmp_path)
-    emulate_tab._write_audio_ctl(0.35, False)
-    assert emulate_tab._load_audio_ctl() == (0.35, False)
-    emulate_tab._write_audio_ctl(0.0, True)
-    assert emulate_tab._load_audio_ctl() == (0.0, True)
+    emulate_core._write_audio_ctl(0.35, False)
+    assert emulate_core._load_audio_ctl() == (0.35, False)
+    emulate_core._write_audio_ctl(0.0, True)
+    assert emulate_core._load_audio_ctl() == (0.0, True)
 
 
 def test_audio_ctl_defaults_to_unity_unmuted_when_absent(monkeypatch, tmp_path):
     path = _isolated_ctl(monkeypatch, tmp_path)
     assert not os.path.exists(path)
-    assert emulate_tab._load_audio_ctl() == (1.0, False)
+    assert emulate_core._load_audio_ctl() == (1.0, False)
 
 
 def test_audio_ctl_survives_a_corrupt_file(monkeypatch, tmp_path):
@@ -780,117 +676,14 @@ def test_audio_ctl_survives_a_corrupt_file(monkeypatch, tmp_path):
     path = _isolated_ctl(monkeypatch, tmp_path)
     with open(path, "w", encoding="utf-8") as f:
         f.write("{not json")
-    assert emulate_tab._load_audio_ctl() == (1.0, False)
+    assert emulate_core._load_audio_ctl() == (1.0, False)
 
 
 def test_audio_ctl_clamps_an_out_of_range_gain(monkeypatch, tmp_path):
     path = _isolated_ctl(monkeypatch, tmp_path)
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"gain": 4.0, "muted": False}, f)
-    assert emulate_tab._load_audio_ctl() == (1.0, False)
-
-
-def test_panel_shows_the_remembered_volume(monkeypatch, tmp_path):
-    """The slider reflects the file at construction — the acceptance test's
-    "the level survives an app restart", read from the GUI side."""
-    _isolated_ctl(monkeypatch, tmp_path)
-    emulate_tab._write_audio_ctl(0.6, False)
-    root, panel = _panel(tmp_path)
-    try:
-        assert round(panel._volume_var.get()) == 60
-        assert panel._mute_var.get() is False
-    finally:
-        root.destroy()
-
-
-def test_panel_shows_remembered_mute(monkeypatch, tmp_path):
-    _isolated_ctl(monkeypatch, tmp_path)
-    emulate_tab._write_audio_ctl(0.6, True)
-    root, panel = _panel(tmp_path)
-    try:
-        assert panel._mute_var.get() is True
-    finally:
-        root.destroy()
-
-
-def test_moving_the_slider_writes_the_control_file_live(monkeypatch, tmp_path):
-    """No restart, no Start press — the write happens the moment the var
-    changes, which is what lets a running padplay.py pick it up inside one
-    poll interval."""
-    _isolated_ctl(monkeypatch, tmp_path)
-    root, panel = _panel(tmp_path)
-    try:
-        panel._volume_var.set(25)
-        panel._on_volume_change()
-        assert emulate_tab._load_audio_ctl() == (0.25, False)
-        panel._mute_var.set(True)
-        panel._on_volume_change()
-        assert emulate_tab._load_audio_ctl() == (0.25, True)
-    finally:
-        root.destroy()
-
-
-def test_building_the_panel_seeds_the_file_on_a_fresh_machine(monkeypatch,
-                                                              tmp_path):
-    """A machine that has never touched the knob must still have the file
-    present before the first Start — padplay.py's own default (unity) would
-    otherwise happen to agree, but the file existing is what makes it a real
-    control channel rather than two defaults coinciding."""
-    path = _isolated_ctl(monkeypatch, tmp_path)
-    assert not os.path.exists(path)
-    root, panel = _panel(tmp_path)
-    try:
-        assert emulate_tab._load_audio_ctl() == (1.0, False)
-    finally:
-        root.destroy()
-
-
-def test_volume_and_mute_are_never_disabled_by_a_run(monkeypatch, tmp_path):
-    """The whole point of item 56's slider is that it works WITHOUT a
-    restart, so it must stay live through exactly the state that disables
-    its neighbours (Reset windows is the sanity probe for "a run disables
-    things" — the Sound/Auto-attract tickboxes that used to be it were
-    removed on 2026-08-24: both behaviours are simply always on)."""
-    _isolated_ctl(monkeypatch, tmp_path)
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    root, panel = _panel(tmp_path)
-    try:
-        panel._apply({"state": "running", "running": "1", "procs": "5"})
-        assert str(panel._winreset_btn.cget("state")) == "disabled"   # sanity
-        assert str(panel._vol_scale.cget("state")) != "disabled"
-        assert str(panel._mute_chk.cget("state")) != "disabled"
-    finally:
-        root.destroy()
-
-
-def test_start_tells_the_rig_where_the_control_file_is(monkeypatch, tmp_path):
-    import time
-    _isolated_ctl(monkeypatch, tmp_path)
-    img = tmp_path / "godzilla_pro-1_15_0.Release.8G.sdcard.raw"
-    img.write_bytes(bytes(16))
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
-    captured = {}
-
-    def fake_watch_cmd(minutes, env, savestates=True):
-        captured["env"] = env
-        return ["true"]
-
-    monkeypatch.setattr(emulate_tab, "watch_cmd", fake_watch_cmd)
-    monkeypatch.setattr(
-        emulate_tab.subprocess, "Popen",
-        lambda *a, **kw: SimpleNamespace(stdout=iter(()),
-                                         wait=lambda timeout=None: 0))
-    root, panel = _panel(tmp_path)
-    try:
-        panel._src_path.set(str(img))
-        panel.start()
-        deadline = time.time() + 5
-        while "env" not in captured and time.time() < deadline:
-            time.sleep(0.01)
-        assert "PAD_AUDIO_CTL=" + emulate_tab.AUDIO_CTL_FILE in captured["env"]
-    finally:
-        root.destroy()
+    assert emulate_core._load_audio_ctl() == (1.0, False)
 
 
 # --- how each platform reaches the rig ---------------------------------------
@@ -900,9 +693,9 @@ def test_start_tells_the_rig_where_the_control_file_is(monkeypatch, tmp_path):
 # total on the other two, which is exactly what a test is for.
 
 def _cmd_on(monkeypatch, platform, tmp_path, *args, **kw):
-    monkeypatch.setattr(emulate_tab.sys, "platform", platform)
+    monkeypatch.setattr(emulate_core.sys, "platform", platform)
     monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
-    return emulate_tab.rig_cmd(*args, **kw)
+    return emulate_core.rig_cmd(*args, **kw)
 
 
 def test_linux_runs_the_rig_directly(monkeypatch, tmp_path):
@@ -955,14 +748,14 @@ def _home(monkeypatch, value):
     app can install its own Linux mid-session, and a cache that outlived the
     switch would hand one distro's home to a rig running in another.  "" is
     the machine's default, which is where these tests run."""
-    monkeypatch.setattr(emulate_tab, "_WSL_HOME", [value, ""])
+    monkeypatch.setattr(emulate_core, "_WSL_HOME", [value, ""])
 
 
 def test_windows_start_is_the_checkpointable_launch(monkeypatch, tmp_path):
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
     monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
     _home(monkeypatch, "/home/somebody")
-    cmd = emulate_tab.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"])
+    cmd = emulate_core.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"])
     assert cmd[:3] == ["wsl.exe", "-u", "root"]
     assert "PAD_PIVOT=1" in cmd
     assert "HOME=/home/somebody" in cmd
@@ -975,18 +768,18 @@ def test_windows_start_is_the_checkpointable_launch(monkeypatch, tmp_path):
 def test_a_failed_home_probe_degrades_to_the_ordinary_launch(monkeypatch,
                                                              tmp_path):
     """No save states rather than a root run pointed at /root/spike2root."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
     monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
     _home(monkeypatch, None)
-    cmd = emulate_tab.watch_cmd(120, [])
+    cmd = emulate_core.watch_cmd(120, [])
     assert cmd[:2] == ["wsl.exe", "-e"]
     assert "-u" not in cmd and "PAD_PIVOT=1" not in cmd
 
 
 def _account_probe(monkeypatch, whoami, passwd=""):
     """Answer the two wsl.exe probes wsl_account() makes, and nothing else."""
-    monkeypatch.setattr(emulate_tab, "_WSL_ACCOUNT", [("", ""), False])
-    monkeypatch.setattr(emulate_tab, "_WSL_HOME", [None, False])
+    monkeypatch.setattr(emulate_core, "_WSL_ACCOUNT", [("", ""), False])
+    monkeypatch.setattr(emulate_core, "_WSL_HOME", [None, False])
     # False = never probed, so the probes below actually run.
 
     def fake_run(argv, **kw):
@@ -996,7 +789,7 @@ def _account_probe(monkeypatch, whoami, passwd=""):
             return SimpleNamespace(returncode=0, stdout=passwd.encode())
         raise AssertionError("unexpected probe: %r" % (argv,))
 
-    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
+    monkeypatch.setattr(emulate_core.subprocess, "run", fake_run)
 
 
 def test_the_account_probe_names_a_root_default_distro(monkeypatch):
@@ -1011,12 +804,12 @@ def test_the_account_probe_names_a_root_default_distro(monkeypatch):
     _account_probe(monkeypatch,
                    "wsl: your 131072x1 screen size is bogus\nroot\n",
                    "root:x:0:0:root:/root:/bin/bash\n")
-    assert emulate_tab.wsl_account() == ("root", "/root")
-    assert emulate_tab.wsl_home() is None
+    assert emulate_core.wsl_account() == ("root", "/root")
+    assert emulate_core.wsl_home() is None
     _account_probe(monkeypatch, "david\n",
                    "david:x:1000:1000::/home/david:/bin/bash\n")
-    assert emulate_tab.wsl_account() == ("david", "/home/david")
-    assert emulate_tab.wsl_home() == "/home/david"
+    assert emulate_core.wsl_account() == ("david", "/home/david")
+    assert emulate_core.wsl_home() == "/home/david"
 
 
 def test_the_account_probe_is_empty_when_wsl_says_nothing(monkeypatch):
@@ -1024,11 +817,11 @@ def test_the_account_probe_is_empty_when_wsl_says_nothing(monkeypatch):
     Multi-boot tab's build tells the two apart (PAD-114).  An account whose
     passwd row cannot be read keeps its name and loses only the home."""
     _account_probe(monkeypatch, "")
-    assert emulate_tab.wsl_account() == ("", "")
-    assert emulate_tab.wsl_home() is None
+    assert emulate_core.wsl_account() == ("", "")
+    assert emulate_core.wsl_home() is None
     _account_probe(monkeypatch, "david\n", "")
-    assert emulate_tab.wsl_account() == ("david", "")
-    assert emulate_tab.wsl_home() is None
+    assert emulate_core.wsl_account() == ("david", "")
+    assert emulate_core.wsl_home() is None
 
 
 def test_savestates_off_is_the_ordinary_launch(monkeypatch, tmp_path):
@@ -1037,10 +830,10 @@ def test_savestates_off_is_the_ordinary_launch(monkeypatch, tmp_path):
     root and not PAD_PIVOT, so a run costs nothing it did not cost before
     item 13.  watch.sh then starts the playfield without its Save/Load
     state controls (no --savestates), so nothing on screen can only refuse."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
     monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
     _home(monkeypatch, "/home/somebody")
-    cmd = emulate_tab.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"],
+    cmd = emulate_core.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"],
                                 savestates=False)
     assert cmd[:2] == ["wsl.exe", "-e"]
     assert "-u" not in cmd and "PAD_PIVOT=1" not in cmd
@@ -1052,10 +845,10 @@ def test_other_platforms_keep_their_launch(monkeypatch, tmp_path):
     """The pivot boot is a WSL arrangement; macOS's container and a Linux
     desktop keep the launch they had."""
     for platform in ("linux", "darwin"):
-        monkeypatch.setattr(emulate_tab.sys, "platform", platform)
+        monkeypatch.setattr(emulate_core.sys, "platform", platform)
         monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
         _home(monkeypatch, "/home/somebody")
-        cmd = emulate_tab.watch_cmd(30, [])
+        cmd = emulate_core.watch_cmd(30, [])
         assert "wsl.exe" not in cmd, (platform, cmd)
         assert "PAD_PIVOT=1" not in cmd, (platform, cmd)
 
@@ -1065,10 +858,10 @@ def test_launch_from_slot_loads_as_root_with_the_desktop_home(monkeypatch,
     """The tab's Launch button restores a slot: root (criu), the desktop
     HOME (padpath's rootfs), and PAD_RESTORE_KILL so the booted guest is
     replaced by the restored one."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
     monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
     _home(monkeypatch, "/home/somebody")
-    cmd = emulate_tab.load_cmd("slot3")
+    cmd = emulate_core.load_cmd("slot3")
     assert cmd[:3] == ["wsl.exe", "-u", "root"]
     assert "HOME=/home/somebody" in cmd
     assert "PAD_RESTORE_KILL=1" in cmd
@@ -1079,14 +872,14 @@ def test_launch_from_slot_loads_as_root_with_the_desktop_home(monkeypatch,
 def test_stop_kills_as_root_on_windows(monkeypatch, tmp_path):
     """A PAD_PIVOT guest is a root process: the ordinary user's pkill reports
     success and kills nothing.  Root's kill reaches both kinds of run."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
     monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
     _home(monkeypatch, "/home/somebody")
-    cmd = emulate_tab.kill_cmd()
+    cmd = emulate_core.kill_cmd()
     assert cmd[:3] == ["wsl.exe", "-u", "root"]
     assert any(c.endswith("killgame.sh") for c in cmd)
     _home(monkeypatch, None)
-    cmd = emulate_tab.kill_cmd()
+    cmd = emulate_core.kill_cmd()
     assert cmd[:2] == ["wsl.exe", "-e"], cmd
 
 
@@ -1123,23 +916,23 @@ def test_docker_state_tells_absent_from_stopped(monkeypatch):
     # probe itself gives.  Finding it is its own question and its own test
     # below - a machine with no docker at all answers "absent" before running
     # anything, which is the point of that one.
-    monkeypatch.setattr(emulate_tab, "docker_cli",
+    monkeypatch.setattr(emulate_core, "docker_cli",
                         lambda: "/usr/local/bin/docker")
     # AND THE ENGINE IS FOUND, because on darwin a failing `docker info` is
     # only "stopped" when there is something behind the client to have
     # stopped - the engineless split below is what this same call answers
     # otherwise, and it has its own test.  Unpinned, this read "engineless"
     # on the macOS CI runner, which ships neither an engine nor colima.
-    monkeypatch.setattr(emulate_tab, "docker_engine",
+    monkeypatch.setattr(emulate_core, "docker_engine",
                         lambda: ("Docker Desktop", "app",
                                  "/Applications/Docker.app"))
-    monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=0))
-    assert emulate_tab.docker_state() == "ok"
-    monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=1))
-    assert emulate_tab.docker_state() == "stopped"
-    monkeypatch.setattr(emulate_tab.subprocess, "run",
+    monkeypatch.setattr(emulate_core.subprocess, "run", _fake_run(rc=0))
+    assert emulate_core.docker_state() == "ok"
+    monkeypatch.setattr(emulate_core.subprocess, "run", _fake_run(rc=1))
+    assert emulate_core.docker_state() == "stopped"
+    monkeypatch.setattr(emulate_core.subprocess, "run",
                         _fake_run(raises=FileNotFoundError()))
-    assert emulate_tab.docker_state() == "absent"
+    assert emulate_core.docker_state() == "absent"
 
 
 def test_docker_is_looked_for_where_a_mac_actually_keeps_it(tmp_path,
@@ -1151,19 +944,19 @@ def test_docker_is_looked_for_where_a_mac_actually_keeps_it(tmp_path,
     Desktop was required while /opt/local/bin/docker sat on his disk."""
     tool = tmp_path / "docker"
     tool.write_text("#!/bin/sh\n", encoding="utf-8")
-    monkeypatch.setattr(emulate_tab.shutil, "which", lambda *a, **kw: None)
-    assert emulate_tab.which_tool("docker", (str(tmp_path),)) == str(tool)
-    assert emulate_tab.which_tool("nosuchtool", (str(tmp_path),)) is None
+    monkeypatch.setattr(emulate_core.shutil, "which", lambda *a, **kw: None)
+    assert emulate_core.which_tool("docker", (str(tmp_path),)) == str(tool)
+    assert emulate_core.which_tool("nosuchtool", (str(tmp_path),)) is None
     # PATH still wins when it has an answer: someone who launched the app from
     # a terminal has already said which docker they mean.
-    monkeypatch.setattr(emulate_tab.shutil, "which", lambda *a, **kw: "/p/d")
-    assert emulate_tab.which_tool("docker", (str(tmp_path),)) == "/p/d"
+    monkeypatch.setattr(emulate_core.shutil, "which", lambda *a, **kw: "/p/d")
+    assert emulate_core.which_tool("docker", (str(tmp_path),)) == "/p/d"
     # The list itself is the fix, so the places it must name are the test.
     for d in ("/usr/local/bin",                     # Docker Desktop's symlink
               "/opt/homebrew/bin",                  # Homebrew, Apple Silicon
               "/opt/local/bin",                     # MacPorts - the reporter
               "~/.docker/bin"):                     # Desktop, no symlink
-        assert d in emulate_tab.DOCKER_DIRS, d
+        assert d in emulate_core.DOCKER_DIRS, d
 
 
 def test_pad_docker_overrides_and_a_wrong_one_is_not_ignored(tmp_path,
@@ -1174,9 +967,9 @@ def test_pad_docker_overrides_and_a_wrong_one_is_not_ignored(tmp_path,
     tool = tmp_path / "docker"
     tool.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setenv("PAD_DOCKER", str(tool))
-    assert emulate_tab.docker_cli() == str(tool)
+    assert emulate_core.docker_cli() == str(tool)
     monkeypatch.setenv("PAD_DOCKER", str(tmp_path / "nope"))
-    assert emulate_tab.docker_cli() is None
+    assert emulate_core.docker_cli() is None
 
 
 def test_a_client_with_no_engine_is_not_a_missing_docker(monkeypatch):
@@ -1185,26 +978,26 @@ def test_a_client_with_no_engine_is_not_a_missing_docker(monkeypatch):
     ships none (MacPorts says so of its own port).  That Mac is neither
     "Docker is stopped" - there is nothing to start - nor "not installed",
     which is what it used to be told."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
-    monkeypatch.setattr(emulate_tab, "docker_cli",
+    monkeypatch.setattr(emulate_core.sys, "platform", "darwin")
+    monkeypatch.setattr(emulate_core, "docker_cli",
                         lambda: "/opt/local/bin/docker")
-    monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=1))
-    monkeypatch.setattr(emulate_tab, "docker_engine", lambda: None)
-    assert emulate_tab.docker_state() == "engineless"
+    monkeypatch.setattr(emulate_core.subprocess, "run", _fake_run(rc=1))
+    monkeypatch.setattr(emulate_core, "docker_engine", lambda: None)
+    assert emulate_core.docker_state() == "engineless"
     # An engine that IS installed makes the same failure "start it".
-    monkeypatch.setattr(emulate_tab, "docker_engine",
+    monkeypatch.setattr(emulate_core, "docker_engine",
                         lambda: ("Colima", "cli", "/opt/local/bin/colima"))
-    assert emulate_tab.docker_state() == "stopped"
+    assert emulate_core.docker_state() == "stopped"
 
 
 def test_engineless_is_macos_only(monkeypatch):
     """Everywhere else the daemon is local, so "installed but not running" is
     the whole of the question and a fourth answer would be a wrong one."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "linux")
-    monkeypatch.setattr(emulate_tab, "docker_cli", lambda: "/usr/bin/docker")
-    monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=1))
-    monkeypatch.setattr(emulate_tab, "docker_engine", lambda: None)
-    assert emulate_tab.docker_state() == "stopped"
+    monkeypatch.setattr(emulate_core.sys, "platform", "linux")
+    monkeypatch.setattr(emulate_core, "docker_cli", lambda: "/usr/bin/docker")
+    monkeypatch.setattr(emulate_core.subprocess, "run", _fake_run(rc=1))
+    monkeypatch.setattr(emulate_core, "docker_engine", lambda: None)
+    assert emulate_core.docker_state() == "stopped"
 
 
 def test_the_setup_plan_follows_the_package_manager_already_working(
@@ -1213,11 +1006,11 @@ def test_the_setup_plan_follows_the_package_manager_already_working(
     MacPorts user to install Homebrew first is a second package manager for a
     problem the first one solves - and MacPorts' own docker port points at
     colima for exactly this."""
-    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
-    monkeypatch.setattr(emulate_tab, "which_tool",
+    monkeypatch.setattr(emulate_core, "homebrew", lambda: None)
+    monkeypatch.setattr(emulate_core, "which_tool",
                         lambda name, dirs=None: ("/opt/local/bin/port"
                                                  if name == "port" else None))
-    plan = emulate_tab.engine_setup_plan("/opt/local/bin/docker")
+    plan = emulate_core.engine_setup_plan("/opt/local/bin/docker")
     assert plan["manager"] == "MacPorts"
     # THE PLAN IS THE WORK, not a sentence about the work: this argv is what
     # the button runs, and -N so nothing it cannot see asks a question.
@@ -1226,22 +1019,22 @@ def test_the_setup_plan_follows_the_package_manager_already_working(
     assert plan["steps"] and all(isinstance(s, str) for s in plan["steps"])
     # No client at all: colima is the Linux machine, not the docker command,
     # so that Mac needs both.
-    assert emulate_tab.engine_setup_plan(None)["packages"] == ["docker",
+    assert emulate_core.engine_setup_plan(None)["packages"] == ["docker",
                                                                "colima"]
     # Homebrew's docker gets Homebrew's colima - and NEVER as root, which
     # Homebrew refuses outright.
-    monkeypatch.setattr(emulate_tab, "homebrew",
+    monkeypatch.setattr(emulate_core, "homebrew",
                         lambda: "/opt/homebrew/bin/brew")
-    monkeypatch.setattr(emulate_tab, "which_tool",
+    monkeypatch.setattr(emulate_core, "which_tool",
                         lambda name, dirs=None: None)
-    plan = emulate_tab.engine_setup_plan("/opt/homebrew/bin/docker")
+    plan = emulate_core.engine_setup_plan("/opt/homebrew/bin/docker")
     assert plan["manager"] == "Homebrew"
     assert plan["install"] == ["/opt/homebrew/bin/brew", "install", "colima"]
     assert plan["admin"] is False
     # Neither package manager: there is nothing this app can drive, so there
     # is no plan and the tab must not grow a button that cannot work.
-    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
-    assert emulate_tab.engine_setup_plan("/opt/local/bin/docker") is None
+    monkeypatch.setattr(emulate_core, "homebrew", lambda: None)
+    assert emulate_core.engine_setup_plan("/opt/local/bin/docker") is None
 
 
 def test_no_step_of_the_mac_setup_asks_anyone_to_type_a_command(monkeypatch):
@@ -1249,16 +1042,16 @@ def test_no_step_of_the_mac_setup_asks_anyone_to_type_a_command(monkeypatch):
     in the terminal".  The plan's sentences are what the consent dialog and the
     tab's notice are both built from, so this is the one place to hold the
     line - and the notice is built from the plan for exactly that reason."""
-    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
-    monkeypatch.setattr(emulate_tab, "which_tool",
+    monkeypatch.setattr(emulate_core, "homebrew", lambda: None)
+    monkeypatch.setattr(emulate_core, "which_tool",
                         lambda name, dirs=None: ("/opt/local/bin/port"
                                                  if name == "port" else None))
     banned = ("terminal", "sudo ", "type this", "brew install", "port install")
     for cli in ("/opt/local/bin/docker", None):
-        plan = emulate_tab.engine_setup_plan(cli)
+        plan = emulate_core.engine_setup_plan(cli)
         assert plan, cli
         words = " ".join(plan["steps"]).lower()
-        words += " " + emulate_tab.EmulatePanel._plan_sentence(plan).lower()
+        words += " " + emulate_rig.plan_sentence(plan).lower()
         for phrase in banned:
             assert phrase not in words, (phrase, words)
         # It says what WILL HAPPEN, in the app's own voice.
@@ -1273,420 +1066,11 @@ def test_a_slow_docker_is_starting_not_missing(monkeypatch):
     # The client has to be found for the probe to run at all - without this
     # the answer is "absent" before subprocess is reached, which is what the
     # macOS CI runner (no docker installed) actually returned.
-    monkeypatch.setattr(emulate_tab, "docker_cli",
+    monkeypatch.setattr(emulate_core, "docker_cli",
                         lambda: "/usr/local/bin/docker")
-    monkeypatch.setattr(emulate_tab.subprocess, "run",
+    monkeypatch.setattr(emulate_core.subprocess, "run",
                         _fake_run(raises=sp.TimeoutExpired("docker", 12)))
-    assert emulate_tab.docker_state() == "stopped"
-
-
-def test_the_docker_button_is_macos_only(tmp_path):
-    """Windows reaches Linux through WSL and Linux is already Linux, so a
-    Docker button there is a control that cannot do anything."""
-    root, panel = _panel(tmp_path)
-    try:
-        import sys
-        if sys.platform != "darwin":
-            assert not panel._docker_btn.winfo_ismapped()
-    finally:
-        root.destroy()
-
-
-def _quiesce(panel):
-    """Stop the panel's own background probing before driving it by hand.
-
-    ON MACOS THE TAB PROBES DOCKER FOR REAL at build time, and its drain
-    callback runs inside any root.update() — so a test that sets a state and
-    then pumps the event loop has its state overwritten by the live answer.
-    That is not hypothetical: it passed on Windows and Linux, where the darwin
-    branch never runs, and failed only on the macOS CI runner.
-    """
-    panel._on_destroy(None)          # sets _stopped; drain and poll return early
-    panel._docker_busy = False
-    panel._docker_result = None
-
-
-def _bare_mac(monkeypatch):
-    """A Mac with no package manager at all, so “Set up emulator…” has nothing
-    to install and the Docker button is the one that packs.
-
-    Pinned rather than assumed: every macOS CI runner ships Homebrew, so
-    engine_setup_plan() answers there and the two buttons swap places.  Which
-    button appears for which machine is its own test below; these are about
-    the notice packing and unpacking at all."""
-    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
-    monkeypatch.setattr(emulate_tab, "which_tool",
-                        lambda name, dirs=None: None)
-
-
-def test_a_ready_docker_leaves_no_notice_behind(tmp_path, monkeypatch):
-    """The button and the message pack themselves only when there is something
-    to say.  A Mac with Docker running should look like every other machine."""
-    root, panel = _panel(tmp_path)
-    _quiesce(panel)
-    _bare_mac(monkeypatch)
-    try:
-        panel._docker_apply("absent")
-        root.update()
-        assert panel._docker_btn.winfo_ismapped()
-        assert "required" in panel._docker_msg.cget("text")
-        panel._docker_apply("stopped")
-        root.update()
-        assert "not running" in panel._docker_msg.cget("text")
-        assert panel._docker_btn.cget("text") == "Start Docker"
-        panel._docker_apply("ok")
-        root.update()
-        assert not panel._docker_btn.winfo_ismapped()
-        assert not panel._docker_msg.winfo_ismapped()
-    finally:
-        root.destroy()
-
-
-def _macports_mac(monkeypatch):
-    """A Mac with MacPorts and nothing else docker-ish: the reporter's."""
-    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
-    monkeypatch.setattr(emulate_tab, "which_tool",
-                        lambda name, dirs=None: ("/opt/local/bin/port"
-                                                 if name == "port" else None))
-
-
-def test_the_engineless_notice_says_what_is_there_and_what_is_missing(
-        tmp_path, monkeypatch):
-    """★ PAD-74.  The reporter's Mac was told "Docker Desktop is required"
-    with /opt/local/bin/docker installed, so the notice names the command it
-    found - and names the thing that is actually missing, which is the Linux
-    machine behind it and not Docker Desktop.  The button under it is “Set up
-    emulator…”, the same one Windows presses, because on both platforms that
-    is the button that CHANGES the machine."""
-    root, panel = _panel(tmp_path)
-    _quiesce(panel)
-    _macports_mac(monkeypatch)
-    try:
-        panel._docker_cli = "/opt/local/bin/docker"
-        panel._docker_engine = None
-        panel._docker_apply("engineless")
-        root.update()
-        text = panel._docker_msg.cget("text")
-        assert "/opt/local/bin/docker" in text, text
-        assert "Set up emulator" in text, text
-        assert "Colima" in text and "MacPorts" in text, text
-        # The three things it must NOT say to this machine.
-        assert "not running" not in text, text
-        assert "Docker Desktop is required" not in text, text
-        assert "Terminal" not in text, text
-        assert panel._setup_btn.winfo_ismapped()
-        assert not panel._docker_btn.winfo_ismapped()
-    finally:
-        root.destroy()
-
-
-def test_a_mac_with_no_package_manager_is_offered_a_download_not_a_command(
-        tmp_path, monkeypatch):
-    """There the app cannot do it FOR them, and the honest offer is a page and
-    an installer to double-click - never a line to copy into a shell."""
-    root, panel = _panel(tmp_path)
-    _quiesce(panel)
-    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
-    monkeypatch.setattr(emulate_tab, "which_tool", lambda name, dirs=None: None)
-    try:
-        panel._docker_cli = "/opt/local/bin/docker"
-        panel._docker_engine = None
-        panel._docker_apply("engineless")
-        root.update()
-        text = panel._docker_msg.cget("text")
-        assert "download page" in text, text
-        assert "Terminal" not in text and "sudo" not in text, text
-        assert panel._docker_btn.cget("text") == "Get Docker…"
-        assert panel._docker_btn.winfo_ismapped()
-        assert not panel._setup_btn.winfo_ismapped()
-    finally:
-        root.destroy()
-
-
-def test_the_mac_setup_button_installs_and_starts_it_here(tmp_path,
-                                                          monkeypatch):
-    """★ David, 2026-08-19.  The button does the work: a package-manager
-    install (with macOS's own password dialog when it needs root) and then
-    Colima started, both drained into the log pane - no Terminal window and
-    nothing for the user to type."""
-    import time as _t
-    root, panel = _panel(tmp_path)
-    _quiesce(panel)
-    _macports_mac(monkeypatch)
-    ran = []
-    monkeypatch.setattr(panel, "_log", lambda *a: None)
-    monkeypatch.setattr(panel, "_run_step",
-                        lambda label, argv, admin: ran.append((argv, admin))
-                        or True)
-    monkeypatch.setattr(emulate_tab.messagebox, "askyesno",
-                        lambda *a, **kw: True)
-    monkeypatch.setattr(panel, "_colima_argv",
-                        lambda: ["/opt/local/bin/colima", "start"])
-    try:
-        panel._docker = "engineless"
-        panel._docker_cli = "/opt/local/bin/docker"
-        panel._setup_fix_darwin()
-        for _ in range(300):                    # the work is on a thread
-            if len(ran) == 2:
-                break
-            _t.sleep(0.01)
-        assert ran == [(["/opt/local/bin/port", "-N", "install", "colima"],
-                        True),
-                       (["/opt/local/bin/colima", "start"], False)], ran
-    finally:
-        root.destroy()
-
-
-def test_the_mac_setup_button_changes_nothing_on_a_no(tmp_path, monkeypatch):
-    """Same rule as its Windows twin: every step is named first, and a No
-    leaves the machine exactly as it was."""
-    import time as _t
-    root, panel = _panel(tmp_path)
-    _quiesce(panel)
-    _macports_mac(monkeypatch)
-    ran = []
-    monkeypatch.setattr(panel, "_run_step", lambda *a: ran.append(a) or True)
-    monkeypatch.setattr(emulate_tab.messagebox, "askyesno",
-                        lambda *a, **kw: False)
-    try:
-        panel._docker_cli = "/opt/local/bin/docker"
-        panel._setup_fix_darwin()
-        _t.sleep(0.05)
-        assert not ran, ran
-        assert not panel._setup_fixing
-    finally:
-        root.destroy()
-
-
-def test_start_docker_starts_the_engine_this_mac_actually_has(tmp_path,
-                                                              monkeypatch):
-    """`open -a Docker` was the only thing the button could do, on a platform
-    where the engine is as likely to be Colima - and on a Mac without Docker
-    Desktop it opened nothing while the log said it had started something."""
-    root, panel = _panel(tmp_path)
-    _quiesce(panel)
-    opened, steps = [], []
-    monkeypatch.setattr(emulate_tab.subprocess, "Popen",
-                        lambda a, *r, **kw: opened.append(a) or SimpleNamespace())
-    monkeypatch.setattr(panel, "_run_engine_setup",
-                        lambda phases: steps.extend(phases))
-    monkeypatch.setattr(panel, "_log", lambda *a: None)
-    try:
-        panel._docker = "stopped"
-        panel._docker_engine = ("Colima", "cli", "/opt/local/bin/colima")
-        panel._docker_fix()
-        # Run HERE, into the log pane - not handed to Terminal to watch.
-        assert [p[1] for p in steps] == [["/opt/local/bin/colima", "start"]]
-        assert not opened, opened
-        # An .app is opened, by its own path - OrbStack is not "Docker".
-        steps[:] = []
-        panel._docker_engine = ("OrbStack", "app", "/Applications/OrbStack.app")
-        panel._docker_fix()
-        assert opened == [["open", "-a", "/Applications/OrbStack.app"]], opened
-        assert not steps, steps
-    finally:
-        root.destroy()
-
-
-def test_start_on_a_mac_without_docker_launches_nothing(tmp_path, monkeypatch):
-    """It used to launch, say "Starting…", and report the real reason as one
-    line of the container script's stderr part way down the log pane."""
-    import time
-    img = tmp_path / "godzilla_pro-1_15_0.Release.8G.sdcard.raw"
-    img.write_bytes(bytes(16))
-    root, panel = _panel(tmp_path)
-    # The status poll goes through the container too, so silence it: this test
-    # is about what Start does, and a poll firing into a faked Popen is noise
-    # from a thread nobody is waiting on.
-    panel._on_destroy(None)
-    launched = []
-    monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
-    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "absent")
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    monkeypatch.setattr(emulate_tab.subprocess, "Popen",
-                        lambda *a, **kw: launched.append(a) or SimpleNamespace())
-    try:
-        panel._src_path.set(str(img))
-        panel.start()
-        deadline = time.time() + 5
-        while panel._starting and time.time() < deadline:
-            time.sleep(0.01)
-        root.update()
-        # Only watch.sh: subprocess.run() goes through Popen too, so the status
-        # poll lands in the same list.
-        watch = [c for c in launched if any("watch.sh" in str(a) for a in c)]
-        assert not watch, "watch.sh was started with no Docker to run it in"
-        # What lands ON THE TAB is checked by _docker_apply's own test instead:
-        # the worker hands its answer back through `after`, and `after` from a
-        # non-main thread needs a running mainloop, which this fixture has not
-        # got.  Asserting it here would test the fixture, not the panel.
-        assert not panel._starting
-    finally:
-        root.destroy()
-
-
-def test_start_builds_the_launch_off_the_ui_thread(tmp_path, monkeypatch):
-    """watch_cmd() asks WSL for the desktop user's home (wsl_home: two
-    wsl.exe probes), and the first wsl.exe after a Windows reboot boots the
-    whole WSL VM — tens of seconds.  start() used to build the command on
-    the main thread, which was the window frozen solid for that boot
-    (David, 2026-08-09, read it as a crashed app).  The boot is simulated
-    with an Event rather than a reboot."""
-    import threading as _th
-    import time
-    img = tmp_path / "godzilla_pro-1_15_0.Release.8G.sdcard.raw"
-    img.write_bytes(bytes(16))
-    root, panel = _panel(tmp_path)
-    panel._on_destroy(None)              # silence the status poll
-    boot = _th.Event()                   # a cold WSL boot, in miniature
-    built = {}
-
-    def cold_watch_cmd(minutes, env, savestates=True):
-        built["thread"] = _th.current_thread()
-        boot.wait(10)
-        return ["watch.sh-stand-in"]
-
-    launched = []
-    monkeypatch.setattr(emulate_tab, "watch_cmd", cold_watch_cmd)
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    # Pinned so a macOS runner's Start worker does not go asking a real
-    # Docker before it ever reaches watch_cmd.
-    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
-    monkeypatch.setattr(
-        emulate_tab.subprocess, "Popen",
-        lambda *a, **kw: launched.append(a[0]) or
-        SimpleNamespace(stdout=iter(()), wait=lambda timeout=None: 0))
-    try:
-        panel._src_path.set(str(img))
-        # Item 74: picking a card fires ONE `cardmount.sh --precache` spawn —
-        # from a worker thread, because the card-path stat must stay off the
-        # UI thread (a UNC path to a sleeping NAS blocks for seconds).  It is
-        # not a launch, so it comes off the ledger before Start is policed.
-        # macOS is the one platform _precache_kick deliberately skips (the
-        # rig lives in a container there and the card's host path is not
-        # the container's — see its own docstring), so nothing to wait for
-        # on that platform: this branch is what a real macOS CI run needs,
-        # not a hypothetical (found 2026-08-24 when v0.160.0's release CI
-        # failed here — the assertion below had never been exercised on
-        # Darwin at all).
-        if sys.platform == "darwin":
-            time.sleep(0.2)
-            assert not launched, "macOS must not pre-cache (see _precache_kick)"
-        else:
-            deadline = time.time() + 5
-            while not launched and time.time() < deadline:
-                time.sleep(0.01)
-            assert launched and launched[0][-1] == "--precache", \
-                "picking a card should start the background pre-cache"
-        launched.clear()
-        panel.start()        # must come back with the "boot" still running
-        assert not launched, "start() sat through the WSL boot on the UI thread"
-        boot.set()
-        deadline = time.time() + 5
-        while not launched and time.time() < deadline:
-            time.sleep(0.01)
-        assert launched and launched[0] == ["watch.sh-stand-in"]
-        assert built["thread"] is not _th.main_thread(), \
-            "the launch command was built on the UI thread"
-    finally:
-        boot.set()
-        root.destroy()
-
-
-def test_a_cold_wsl_says_so_instead_of_freezing(tmp_path, monkeypatch):
-    """The build-time setup probe is one wsl.exe call, and after a Windows
-    reboot that call boots the whole WSL VM.  The tab used to show a dash
-    and say nothing for the duration; now it names the wait and its bound.
-    A warm probe answers inside one drain pass, so the line never flashes
-    on an ordinary start."""
-    import threading as _th
-    import time
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    boot = _th.Event()
-    monkeypatch.setattr(emulate_tab, "setup_state",
-                        lambda: (boot.wait(10), None)[1])
-    root, panel = _panel(tmp_path)
-    # AFTER the build (so the tab came up normally): keep the 2 s status poll
-    # from reaching a real wsl.exe once the gate opens, and from writing over
-    # the state row this test is reading.
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: False)
-    try:
-        deadline = time.time() + 5
-        while ("take a minute" not in panel._hint.cget("text")
-               and time.time() < deadline):
-            root.update()
-            time.sleep(0.02)
-        assert "Starting WSL" in panel._vals["state"].cget("text")
-        assert "take a minute" in panel._hint.cget("text")
-        # And nothing has claimed "Not running" over it: the poll is gated
-        # behind this very probe.
-        boot.set()
-        deadline = time.time() + 5
-        while ("take a minute" in panel._hint.cget("text")
-               and time.time() < deadline):
-            root.update()
-            time.sleep(0.02)
-        assert "take a minute" not in panel._hint.cget("text")
-        assert panel._vals["state"].cget("text") == "—"
-    finally:
-        boot.set()
-        root.destroy()
-
-
-def test_polls_do_not_stack_behind_a_booting_wsl(tmp_path, monkeypatch):
-    """Each status poll is a wsl.exe worker with a 20 s timeout.  While the
-    setup probe is still out (= WSL may be booting), a poll every 2 s just
-    queues more of them behind the boot, and the first one back would time
-    out empty and write "Not running" over the honest "Starting WSL" line -
-    a claim about a machine nobody has seen yet."""
-    import time
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    root, panel = _panel(tmp_path)
-    ran = []
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    monkeypatch.setattr(
-        emulate_tab.subprocess, "run",
-        lambda *a, **kw: ran.append(a[0]) or
-        SimpleNamespace(stdout=b"", returncode=0))
-    try:
-        panel._setup_busy = True
-        panel._poll()
-        time.sleep(0.2)
-        root.update()
-        assert not ran, "a status poll went out while WSL was still booting"
-        panel._setup_busy = False
-        panel._poll()
-        deadline = time.time() + 5
-        while not ran and time.time() < deadline:
-            time.sleep(0.01)
-        assert any("status.sh" in " ".join(map(str, c)) for c in ran)
-    finally:
-        root.destroy()
-
-
-def test_the_docker_probe_survives_having_no_mainloop_yet(tmp_path,
-                                                          monkeypatch):
-    """The first probe runs at tab BUILD time, before root.mainloop().  A
-    worker calling `after` then raises "main thread is not in main loop" and
-    the answer vanishes, so the worker leaves it in a field and the main loop
-    collects it."""
-    import time
-    # Patched BEFORE the panel is built, so the build-time probe IS the fake
-    # one.  Patching afterwards left the real probe in flight: its answer and
-    # the test's raced, and on a runner with no Docker the real one won.  This
-    # way every platform exercises the darwin path instead of only macOS CI.
-    monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
-    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "stopped")
-    root, panel = _panel(tmp_path)
-    try:
-        deadline = time.time() + 5
-        while panel._docker != "stopped" and time.time() < deadline:
-            root.update()               # stands in for the mainloop
-            time.sleep(0.01)
-        assert panel._docker == "stopped"
-        assert panel._docker_btn.cget("text") == "Start Docker"
-    finally:
-        root.destroy()
+    assert emulate_core.docker_state() == "stopped"
 
 
 # ----------------------------------------------------------------------
@@ -1924,7 +1308,7 @@ def test_the_button_offers_to_install_the_save_state_package():
     package invisible."""
     text = setup_notice(_facts(busybox="0"), can_fix=True)
     assert "installs those in WSL" in text
-    steps = emulate_tab.setup_fix_steps(_facts(busybox="0"))
+    steps = emulate_core.setup_fix_steps(_facts(busybox="0"))
     assert any("busybox-static" in s for s in steps), (
         "the consent list must name what the button is about to install")
 
@@ -1985,7 +1369,7 @@ def test_the_menu_program_tool_costs_a_card_and_not_the_emulator():
 
 
 def test_the_button_offers_to_install_the_menu_program_tool():
-    steps = emulate_tab.setup_fix_steps(_facts(make="0"))
+    steps = emulate_core.setup_fix_steps(_facts(make="0"))
     assert any(s.startswith("Install in WSL:") and "make" in s
                for s in steps), steps
 
@@ -2009,7 +1393,7 @@ def test_the_two_features_are_named_apart_when_both_are_missing():
     assert ("The emulator runs on this PC. Save states and multi-boot cards "
             "do not yet.") in text
     assert "Save states need:" in text and "Multi-boot cards need:" in text
-    groups = emulate_tab.setup_extra_groups(facts)
+    groups = emulate_core.setup_extra_groups(facts)
     assert [feat for feat, _rows in groups] == ["Save states",
                                                 "Multi-boot cards"]
     assert [pkg for _f, rows in groups for pkg, _why in rows] == [
@@ -2034,7 +1418,7 @@ def test_the_notice_survives_a_machine_whose_only_repair_is_wsl_conf():
     notice was “Internal error: list index out of range”.
     """
     facts = _facts(wslconf="0", user="root")
-    assert emulate_tab.setup_fix_steps(facts), "there IS a step to consent to"
+    assert emulate_core.setup_fix_steps(facts), "there IS a step to consent to"
     text = setup_notice(facts, can_fix=True)
     assert "systemd on in /etc/wsl.conf" in text
     assert "stay BLACK" in text, "the warning it is on screen for"
@@ -2106,18 +1490,18 @@ def test_probe_failure_is_none_rather_than_a_wrong_answer(monkeypatch):
     """A probe that cannot run must not read as "everything is missing"."""
     def boom(*a, **kw):
         raise FileNotFoundError("wsl.exe")
-    monkeypatch.setattr(emulate_tab.subprocess, "run", boom)
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.subprocess, "run", boom)
+    monkeypatch.setattr(emulate_core, "rig_available", lambda: True)
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
     assert setup_state() is None
 
 
 def test_probe_reads_the_rig_s_key_value_output(monkeypatch):
     out = (b"qemu=0\nbinfmt=0\n"
            b"advice=sudo apt install qemu-user-static\n")
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab.subprocess, "run",
+    monkeypatch.setattr(emulate_core, "rig_available", lambda: True)
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.subprocess, "run",
                         lambda *a, **kw: SimpleNamespace(returncode=0,
                                                          stdout=out))
     facts = setup_state()
@@ -2131,12 +1515,12 @@ def test_root_commands_are_wsl_only_and_actually_ask_for_root(monkeypatch):
     0 with no password, which is why the Windows path may repair and the Linux
     one may only advise - so this must never quietly produce a non-root
     command on a platform where root is not free."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
     cmd = rig_cmd_root("setupfix.sh")
     assert cmd[:4] == ["wsl.exe", "-u", "root", "-e"]
     assert cmd[-1].endswith("/setupfix.sh")
     for plat in ("linux", "darwin"):
-        monkeypatch.setattr(emulate_tab.sys, "platform", plat)
+        monkeypatch.setattr(emulate_core.sys, "platform", plat)
         with pytest.raises(RuntimeError):
             rig_cmd_root("setupfix.sh")
 
@@ -2166,8 +1550,8 @@ def test_the_repair_installs_exactly_the_packages_the_tab_names():
     # supply at all, which is what the fourth field says.  criu is on no
     # Ubuntu, so its seam is with getcriu.sh instead, and its package field in
     # setupcheck.sh is `-` precisely so it never reaches `need`.
-    rows = ([t + ("apt", "") for t in emulate_tab._SETUP_TOOLS]
-            + list(emulate_tab._SETUP_OPTIONAL))
+    rows = ([t + ("apt", "") for t in emulate_core._SETUP_TOOLS]
+            + list(emulate_core._SETUP_OPTIONAL))
     for key, pkg, _why, how, _feat in rows:
         assert 'sudo' not in pkg
         assert "%s:" % key in check
@@ -2195,7 +1579,7 @@ def test_the_repair_keeps_no_list_of_its_own_to_prove_itself_with():
     fix = _rig_text("setupfix.sh")
     proof = fix.split("# ---- 4.")[-1]
     assert '-z "$(_get "$facts" need)"' in proof
-    for key, _pkg, _why in emulate_tab._SETUP_TOOLS:
+    for key, _pkg, _why in emulate_core._SETUP_TOOLS:
         assert '_get "$facts" %s' % key not in proof, (
             "setupfix.sh is naming %s itself again" % key)
 
@@ -2284,8 +1668,8 @@ def test_a_rig_that_never_heard_of_nocand_accuses_nobody():
     """The fact is new.  An older setupcheck.sh, or a probe that timed out,
     must read as "nothing known against them" and not as "none of them can be
     installed"."""
-    assert emulate_tab.setup_unavailable(_facts(qemu="0")) == []
-    assert emulate_tab.setup_unavailable(None) == []
+    assert emulate_core.setup_unavailable(_facts(qemu="0")) == []
+    assert emulate_core.setup_unavailable(None) == []
     assert "cannot install" not in setup_notice(_facts(qemu="0", binfmt="0"),
                                                 can_fix=True)
 
@@ -2367,10 +1751,10 @@ def test_the_app_fetches_the_package_rather_than_telling_him_to_move_distro():
     from an Ubuntu that publishes it installs cleanly on one that does not -
     and the app doing that beats the app printing two wsl commands."""
     facts = _facts(**_NOCAND)
-    assert emulate_tab.setup_fetchable(facts) == ["qemu-user-static"]
-    assert emulate_tab.setup_fixable(facts), "the button can still do this"
+    assert emulate_core.setup_fetchable(facts) == ["qemu-user-static"]
+    assert emulate_core.setup_fixable(facts), "the button can still do this"
     text = setup_notice(facts, can_fix=True)
-    assert "Ubuntu %s's archive" % emulate_tab.FALLBACK_RELEASE in text
+    assert "Ubuntu %s's archive" % emulate_core.FALLBACK_RELEASE in text
     assert "depends on nothing" in text
     # ...and it must NOT fall back to telling him to move distro.
     assert "wsl --set-default" not in text
@@ -2379,9 +1763,9 @@ def test_the_app_fetches_the_package_rather_than_telling_him_to_move_distro():
 def test_the_fetch_is_named_in_the_dialog_that_consents_to_it():
     """Fetching from another release is not `apt install`, and the dialog is
     the only place the user agrees to any of it."""
-    steps = emulate_tab.setup_fix_steps(_facts(**_NOCAND))
+    steps = emulate_core.setup_fix_steps(_facts(**_NOCAND))
     fetch = [s for s in steps if "Ubuntu %s's archive"
-             % emulate_tab.FALLBACK_RELEASE in s]
+             % emulate_core.FALLBACK_RELEASE in s]
     assert len(fetch) == 1, steps
     assert "depends on nothing" in fetch[0]
     assert "sources are not changed" in fetch[0]
@@ -2394,22 +1778,22 @@ def test_a_package_that_cannot_be_fetched_still_takes_the_button_away():
     """The fetch is allowed for one package because it depends on nothing.
     Everything else is still a dead end, and must still read like one."""
     facts = _facts(**_NOCAND_HARD)
-    assert emulate_tab.setup_fetchable(facts) == []
-    assert not emulate_tab.setup_fixable(facts)
+    assert emulate_core.setup_fetchable(facts) == []
+    assert not emulate_core.setup_fixable(facts)
     text = setup_notice(facts, can_fix=True)
     assert "installs those in WSL" not in text
-    assert "wsl --install -d %s" % emulate_tab.KNOWN_GOOD_DISTRO in text
-    assert "wsl --set-default %s" % emulate_tab.KNOWN_GOOD_DISTRO in text
+    assert "wsl --install -d %s" % emulate_core.KNOWN_GOOD_DISTRO in text
+    assert "wsl --set-default %s" % emulate_core.KNOWN_GOOD_DISTRO in text
 
 
 def test_a_rig_that_never_heard_of_xrel_promises_nothing():
     """`xrel` is new.  An older setupcheck.sh must not have its silence read
     as "yes, fetch it" - that would promise a repair that never happens."""
-    assert emulate_tab.setup_fetchable(_facts(qemu="0")) == []
-    assert emulate_tab.setup_fetchable(None) == []
+    assert emulate_core.setup_fetchable(_facts(qemu="0")) == []
+    assert emulate_core.setup_fetchable(None) == []
     old = _facts(**dict(_NOCAND, xrel=None))
     del old["xrel"]
-    assert not emulate_tab.setup_fixable(old)
+    assert not emulate_core.setup_fixable(old)
 
 
 def test_the_button_stays_when_any_of_it_can_still_be_installed():
@@ -2417,7 +1801,7 @@ def test_the_button_stays_when_any_of_it_can_still_be_installed():
     other is still progress, and one at a time is what the rig now does."""
     facts = _facts(qemu="0", armgcc="0", binfmt="0",
                    nocand="qemu-user-static", universe="1", indexed="1")
-    assert emulate_tab.setup_fixable(facts)
+    assert emulate_core.setup_fixable(facts)
     assert "installs those in WSL" in setup_notice(facts, can_fix=True)
 
 
@@ -2425,7 +1809,7 @@ def test_universe_is_still_the_repair_it_was_made_in_pad_41():
     """The new dead-end path must not swallow the case that HAS a fix."""
     facts = _facts(qemu="0", binfmt="0", nocand="qemu-user-static",
                    universe="0", indexed="1")
-    assert emulate_tab.setup_fixable(facts)
+    assert emulate_core.setup_fixable(facts)
     assert "turns universe back on" in setup_notice(facts, can_fix=True)
 
 
@@ -2486,8 +1870,8 @@ def test_the_two_halves_agree_on_the_fallback_release():
     """One release, three spellings: the distro name a user types at wsl.exe,
     the suite apt knows it by, and the version the tab says out loud."""
     fix = _rig_text("setupfix.sh")
-    assert "PAD_KNOWN_GOOD_DISTRO=%s" % emulate_tab.KNOWN_GOOD_DISTRO in fix
-    assert emulate_tab.FALLBACK_RELEASE == "24.04"
+    assert "PAD_KNOWN_GOOD_DISTRO=%s" % emulate_core.KNOWN_GOOD_DISTRO in fix
+    assert emulate_core.FALLBACK_RELEASE == "24.04"
     assert "PAD_FALLBACK_SUITE=noble" in fix
 
 
@@ -2510,7 +1894,7 @@ def test_the_installer_puts_a_machine_on_the_release_the_app_names():
     it, which is the property this test was written for."""
     ps1 = (pathlib.Path(DEFAULT_RIG_DIR).parent.parent / "installer"
            / "install_prerequisites.ps1").read_text(encoding="utf-8")
-    assert '$PadKnownGoodDistro = "%s"' % emulate_tab.KNOWN_GOOD_DISTRO in ps1
+    assert '$PadKnownGoodDistro = "%s"' % emulate_core.KNOWN_GOOD_DISTRO in ps1
     assert ("if (@($Online) -contains $PadKnownGoodDistro) "
             "{ return $PadKnownGoodDistro }") in ps1, (
         "the pinned release must still be what gets installed on any machine "
@@ -2581,10 +1965,10 @@ def test_the_tab_names_the_package_this_release_installs():
     assert "installs those in WSL" in text
     # Not one word of what the reporter was told.
     for said in ("qemu-user-static", "does not publish",
-                 "Ubuntu %s's archive" % emulate_tab.FALLBACK_RELEASE):
+                 "Ubuntu %s's archive" % emulate_core.FALLBACK_RELEASE):
         assert said not in text, (said, text)
     # THE CONSENT IS THE NAME apt WILL BE GIVEN, and nothing fetched.
-    assert emulate_tab.setup_fix_steps(facts) == [
+    assert emulate_core.setup_fix_steps(facts) == [
         "Install in WSL:  qemu-user-binfmt"]
     # ...and the command a Linux desktop is told to type is one apt accepts.
     assert "sudo apt install qemu-user-binfmt" in setup_notice(facts,
@@ -2595,7 +1979,7 @@ def test_a_rig_that_never_heard_of_pkg_keeps_the_tables_spelling():
     """Absent keys accuse nobody - and rename nothing."""
     missing, _ = setup_summary(_facts(qemu="0"))
     assert [pkg for pkg, _ in missing] == ["qemu-user-static"]
-    assert emulate_tab._apt_name(None, "qemu", "qemu-user-static") == \
+    assert emulate_core._apt_name(None, "qemu", "qemu-user-static") == \
         "qemu-user-static"
 
 
@@ -2752,8 +2136,9 @@ def test_the_tab_and_the_run_agree_on_what_a_usable_compiler_is():
 # ---------------------------------------------------------------------------
 
 def _tab_with_card(path):
-    tab = object.__new__(emulate_tab.EmulatePanel)
-    tab._src_path = SimpleNamespace(get=lambda: path)
+    from pinball_decryptor.webui.tabs.emulate import EmulateTab
+    tab = object.__new__(EmulateTab)
+    tab.emulate_card_var = SimpleNamespace(get=lambda: path)
     return tab
 
 
@@ -2769,7 +2154,7 @@ def test_card_game_survives_suffixed_and_upscaled_names():
 
 
 def test_card_game_is_case_insensitive_and_strips_quotes():
-    t = _tab_with_card('  "d:\y\GODZILLA_PRO-1_15_0_spike2.raw"  ')
+    t = _tab_with_card(r'  "d:\y\GODZILLA_PRO-1_15_0_spike2.raw"  ')
     assert t._card_game() == "godzilla_pro"
 
 
@@ -2797,7 +2182,7 @@ def _pf_state(monkeypatch, tmp_path, text):
             p.unlink()
     else:
         p.write_text(text)
-    monkeypatch.setattr(emulate_tab.EmulatePanel, "PF_STATE", str(p))
+    monkeypatch.setattr(emulate_rig, "PF_STATE", str(p))
     return p
 
 
@@ -2807,7 +2192,7 @@ def test_forget_playfield_pos_takes_only_that_key(monkeypatch, tmp_path):
     import json as _json
     p = _pf_state(monkeypatch, tmp_path,
                   '{"playfield_pos": [-1800, 300], "keep_me": 7}')
-    msg = emulate_tab.EmulatePanel._forget_playfield_pos()
+    msg = emulate_rig.forget_playfield_pos()
     assert msg and "-1800" in msg
     assert _json.loads(p.read_text()) == {"keep_me": 7}
 
@@ -2817,44 +2202,18 @@ def test_forget_playfield_pos_is_quiet_when_there_is_nothing_to_forget(
     """Absent key, absent file and junk all answer None rather than raising -
     the button runs on machines that have never opened a playfield."""
     _pf_state(monkeypatch, tmp_path, '{"keep_me": 7}')
-    assert emulate_tab.EmulatePanel._forget_playfield_pos() is None
+    assert emulate_rig.forget_playfield_pos() is None
     _pf_state(monkeypatch, tmp_path, None)
-    assert emulate_tab.EmulatePanel._forget_playfield_pos() is None
+    assert emulate_rig.forget_playfield_pos() is None
     _pf_state(monkeypatch, tmp_path, "not json at all")
-    assert emulate_tab.EmulatePanel._forget_playfield_pos() is None
+    assert emulate_rig.forget_playfield_pos() is None
 
 
 def test_forget_playfield_pos_leaves_a_non_dict_alone(monkeypatch, tmp_path):
     """Valid JSON that is not an object is still not ours to rewrite."""
     p = _pf_state(monkeypatch, tmp_path, '[1, 2, 3]')
-    assert emulate_tab.EmulatePanel._forget_playfield_pos() is None
+    assert emulate_rig.forget_playfield_pos() is None
     assert p.read_text() == '[1, 2, 3]'
-
-
-def test_reset_windows_button_is_on_the_tab(tmp_path):
-    """Every platform, unlike the two buttons beside it: a second monitor
-    going away is not a Windows-only event."""
-    root, panel = _panel(tmp_path)
-    try:
-        assert panel._winreset_btn.cget("text") == "Reset windows"
-        assert panel._winreset_btn.winfo_manager() == "pack"
-    finally:
-        root.destroy()
-
-
-def test_reset_windows_greys_out_while_a_run_is_up(monkeypatch, tmp_path):
-    """The gate, and it is the whole reason the button is not always live:
-    padglhost re-saves the geometry as the windows move and again at close, so
-    a reset during a run is undone by the run itself."""
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    root, panel = _panel(tmp_path)
-    try:
-        panel._apply({"state": "running", "running": "1", "procs": "5"})
-        assert str(panel._winreset_btn.cget("state")) == "disabled"
-        panel._apply({"state": "off", "running": "0", "procs": "0"})
-        assert str(panel._winreset_btn.cget("state")) == "normal"
-    finally:
-        root.destroy()
 
 
 # ----------------------------------------------------------------------
@@ -2877,7 +2236,7 @@ _LAUNCH = (r"PAD_PLAYFIELD_WINDOWS_LAUNCH game=godzilla_pro savestates=1 "
 
 
 def test_the_launch_token_carries_the_title_and_both_paths():
-    got = emulate_tab.playfield_launch(_LAUNCH)
+    got = emulate_core.playfield_launch(_LAUNCH)
     assert got["game"] == "godzilla_pro"
     assert got["savestates"] == "1"
     # The paths are the pair WSLENV's /p would have translated during the
@@ -2890,12 +2249,12 @@ def test_the_launch_token_carries_the_title_and_both_paths():
 def test_the_token_is_found_inside_the_log_line_it_arrives_on():
     """It is read off watch.sh's stdout, which the tab has already prefixed
     for its log pane."""
-    assert emulate_tab.playfield_launch("[emulate] " + _LAUNCH)["game"] \
+    assert emulate_core.playfield_launch("[emulate] " + _LAUNCH)["game"] \
         == "godzilla_pro"
 
 
 def test_a_path_with_a_space_survives_the_parse():
-    got = emulate_tab.playfield_launch(
+    got = emulate_core.playfield_launch(
         r"PAD_PLAYFIELD_WINDOWS_LAUNCH game=jaws_pro savestates=0 "
         r"root=\\wsl.localhost\Ubuntu\home\d v\spike2root tables=")
     assert got["root"].endswith(r"\home\d v\spike2root")
@@ -2906,9 +2265,9 @@ def test_an_ordinary_log_line_is_not_a_launch_request():
     """Every line of the run's output goes through this."""
     for line in ("[watch] virtual playfield window opening",
                  "[watch] the game never started.", "", "state=attract"):
-        assert emulate_tab.playfield_launch(line) is None
+        assert emulate_core.playfield_launch(line) is None
     # ...and neither is the token with nothing to launch.
-    assert emulate_tab.playfield_launch(
+    assert emulate_core.playfield_launch(
         "PAD_PLAYFIELD_WINDOWS_LAUNCH savestates=1") is None
 
 
@@ -2920,7 +2279,7 @@ def test_an_ordinary_log_line_is_not_a_launch_request():
 # ----------------------------------------------------------------------
 
 def test_a_copy_progress_line_becomes_a_state_label():
-    got = emulate_tab.card_copy_progress(
+    got = emulate_core.card_copy_progress(
         "[card] copying godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw: "
         "3121 / 7497 MB (41%)")
     assert got == "Copying card: 3121 / 7497 MB (41%)"
@@ -2928,7 +2287,7 @@ def test_a_copy_progress_line_becomes_a_state_label():
 
 def test_a_card_name_with_spaces_survives_the_parse():
     """'Heisei Custom Image Premium V1.raw' is a real card on the desk."""
-    got = emulate_tab.card_copy_progress(
+    got = emulate_core.card_copy_progress(
         "[card] copying Heisei Custom Image Premium V1.raw: 0 / 7497 MB (0%)")
     assert got == "Copying card: 0 / 7497 MB (0%)"
 
@@ -2943,7 +2302,7 @@ def test_ordinary_card_lines_are_not_copy_progress():
                  "[card] copy stalled - booting from the original instead "
                  "(copy continues)",
                  "", "state=attract"):
-        assert emulate_tab.card_copy_progress(line) is None
+        assert emulate_core.card_copy_progress(line) is None
 
 
 # ----------------------------------------------------------------------
@@ -2960,7 +2319,7 @@ _CACHE_LIST = (
 
 
 def test_cache_list_parses_and_sorts_biggest_first():
-    entries, disk = emulate_tab.parse_cache_list(_CACHE_LIST)
+    entries, disk = emulate_core.parse_cache_list(_CACHE_LIST)
     assert [e["label"] for e in entries] == ["beta card", "alpha", "gamma"]
     assert entries[0]["real_kb"] == 5242880
     assert entries[0]["src"] == "/mnt/c/spaced dir/beta card.raw"
@@ -2970,17 +2329,17 @@ def test_cache_list_parses_and_sorts_biggest_first():
 
 
 def test_cache_list_survives_garbage_and_emptiness():
-    assert emulate_tab.parse_cache_list("") == ([], None)
-    entries, disk = emulate_tab.parse_cache_list(
+    assert emulate_core.parse_cache_list("") == ([], None)
+    entries, disk = emulate_core.parse_cache_list(
         "noise\nentry\tbad\tNaN\t1\t2\tx\ndisk\ta\tb\n" + _CACHE_LIST)
     assert len(entries) == 3 and disk is not None
 
 
 def test_cache_sizes_and_boot_render_for_humans():
-    assert emulate_tab.human_size(5242880) == "5.0 GB"
-    assert emulate_tab.human_size(2048) == "2 MB"
-    assert emulate_tab.cache_boot_text(0) == "never"
-    assert emulate_tab.cache_boot_text(1787000000).startswith("20")
+    assert emulate_core.human_size(5242880) == "5.0 GB"
+    assert emulate_core.human_size(2048) == "2 MB"
+    assert emulate_core.cache_boot_text(0) == "never"
+    assert emulate_core.cache_boot_text(1787000000).startswith("20")
 
 
 # ----------------------------------------------------------------------
@@ -2989,111 +2348,17 @@ def test_cache_sizes_and_boot_render_for_humans():
 # semantic kinds and the window renders them.  These test the dispatch.
 # ----------------------------------------------------------------------
 
-def test_the_footer_follows_the_emulation_state(monkeypatch, tmp_path):
-    _isolated_ctl(monkeypatch, tmp_path)
-    root, panel = _panel(tmp_path)
-    pushes = []
-    panel._footer_cb = lambda kind, pct=None, text="": \
-        pushes.append((kind, pct, text))
-    try:
-        panel._apply({"state": "off", "running": "0", "procs": "0"})
-        assert pushes[-1][0] == "idle"
-        panel._apply({"state": "booting", "running": "1", "procs": "5"})
-        assert pushes[-1][0] == "boot"
-        assert "Starting" in pushes[-1][2]
-        # Tech Alerts is its OWN chip on the ladder — still loading, never
-        # done, and never the same chip as the boot.
-        panel._apply({"state": "techalerts", "running": "1", "procs": "5"})
-        assert pushes[-1][0] == "techalerts"
-        panel._apply({"state": "attract", "running": "1", "procs": "5"})
-        assert pushes[-1][0] == "run"
-        # A copy in flight outranks everything the poll says (the guest is
-        # deliberately not running yet) — and carries its real percent.
-        panel._copying = "Copying card: 3121 / 7497 MB (41%)"
-        panel._copying_pct = 41
-        panel._apply({"state": "off", "running": "0", "procs": "0"})
-        assert pushes[-1] == ("copy", 41, "Copying card: 3121 / 7497 MB (41%)")
-        # ...except during a Stop, when the copy stops narrating.
-        panel._stopping = True
-        panel._apply({"state": "off", "running": "0", "procs": "0"})
-        assert pushes[-1][0] == "idle"
-    finally:
-        root.destroy()
-
-
-def test_the_sound_and_skip_toggles_are_gone_and_env_is_clean(
-        monkeypatch, tmp_path):
-    """David, 2026-08-24: the volume slider owns loudness and boots land in
-    attract on their own — the two start-time tickboxes are removed, and
-    Start's environment no longer carries either override."""
-    root, panel = _panel(tmp_path)
-    try:
-        assert not hasattr(panel, "_audio_chk")
-        assert not hasattr(panel, "_auto_chk")
-    finally:
-        root.destroy()
-
-
-def test_cache_manager_lists_and_drops(tmp_path, monkeypatch):
-    """The dialog end to end against a canned rig: rows land biggest-first,
-    Delete confirms and shells one --cache-drop per selected label, then
-    reloads.  All rig calls are captured — nothing reaches a real WSL."""
-    import time as _time
-    root, panel = _panel(tmp_path)
-    panel._on_destroy(None)
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    calls = []
-
-    def fake_run(cmd, **_kw):
-        calls.append(cmd)
-        text = _CACHE_LIST if "--cache-list" in cmd else "[card] dropped\n"
-        return SimpleNamespace(stdout=text.encode())
-
-    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
-    monkeypatch.setattr(emulate_tab.messagebox, "askyesno",
-                        lambda *a, **k: True)
-    try:
-        panel._open_cache_manager()
-        tree = panel._cache_ui["tree"]
-        deadline = _time.time() + 5
-        while not tree.get_children() and _time.time() < deadline:
-            root.update()
-        assert list(tree.get_children()) == ["beta card", "alpha", "gamma"]
-        assert "5.0 GB" in panel._cache_ui["head"].cget("text")
-        # A second open LIFTS the same window instead of stacking another.
-        win = panel._cache_win
-        panel._open_cache_manager()
-        assert panel._cache_win is win
-        # Drop the spaced-label entry.
-        tree.selection_set("beta card")
-        root.update()
-        panel._cache_delete()
-        deadline = _time.time() + 5
-        while not any("--cache-drop" in c for c in calls) \
-                and _time.time() < deadline:
-            root.update()
-        drops = [c for c in calls if "--cache-drop" in c]
-        assert len(drops) == 1 and drops[0][-1] == "beta card"
-        # ...and the reload after the drop asked for a fresh list.
-        deadline = _time.time() + 5
-        while sum("--cache-list" in c for c in calls) < 2 \
-                and _time.time() < deadline:
-            root.update()
-        assert sum("--cache-list" in c for c in calls) >= 2
-    finally:
-        root.destroy()
-
 
 def test_the_interpreter_is_never_the_frozen_app_itself(monkeypatch):
     """sys.executable is the answer on the Windows build (the app runs on the
     Python bundled beside it) and a TRAP in a frozen one, where it is PAD.exe
     - handing that a script path starts a second copy of PAD."""
-    monkeypatch.setattr(emulate_tab.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(emulate_tab.sys, "executable",
+    monkeypatch.setattr(emulate_core.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(emulate_core.sys, "executable",
                         r"C:\Program Files\PAD\PAD.exe")
-    monkeypatch.setattr(emulate_tab.os.path, "isfile", lambda p: True)
-    monkeypatch.setattr(emulate_tab.shutil, "which", lambda n: None)
-    got = emulate_tab.windows_python()
+    monkeypatch.setattr(emulate_core.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(emulate_core.shutil, "which", lambda n: None)
+    got = emulate_core.windows_python()
     assert got and got.lower().endswith("pythonw.exe"), got
     assert "PAD.exe" not in got
 
@@ -3101,19 +2366,19 @@ def test_the_interpreter_is_never_the_frozen_app_itself(monkeypatch):
 def test_the_interpreter_prefers_the_windowed_twin_of_the_running_one(
         monkeypatch):
     """python.exe would put a black console beside the playfield."""
-    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
-    monkeypatch.setattr(emulate_tab.sys, "executable", r"C:\Py\python.exe")
-    monkeypatch.setattr(emulate_tab.os.path, "isfile", lambda p: True)
-    assert emulate_tab.windows_python() == r"C:\Py\pythonw.exe"
+    monkeypatch.setattr(emulate_core.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_core.sys, "executable", r"C:\Py\python.exe")
+    monkeypatch.setattr(emulate_core.os.path, "isfile", lambda p: True)
+    assert emulate_core.windows_python() == r"C:\Py\pythonw.exe"
 
 
 def test_no_interpreter_at_all_is_said_rather_than_guessed(monkeypatch):
     """A wrong guess here launches something that is not Python."""
-    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
-    monkeypatch.setattr(emulate_tab.sys, "executable", "")
-    monkeypatch.setattr(emulate_tab.os.path, "isfile", lambda p: False)
-    monkeypatch.setattr(emulate_tab.shutil, "which", lambda n: None)
-    assert emulate_tab.windows_python() is None
+    monkeypatch.setattr(emulate_core.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_core.sys, "executable", "")
+    monkeypatch.setattr(emulate_core.os.path, "isfile", lambda p: False)
+    monkeypatch.setattr(emulate_core.shutil, "which", lambda n: None)
+    assert emulate_core.windows_python() is None
 
 
 def test_the_path_search_does_not_go_through_a_platform_aware_helper(
@@ -3129,111 +2394,21 @@ def test_the_path_search_does_not_go_through_a_platform_aware_helper(
         raise AttributeError("'NoneType' object has no attribute "
                              "'NeedCurrentDirectoryForExePath'")
 
-    monkeypatch.setattr(emulate_tab.shutil, "which", boom)
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
-    monkeypatch.setattr(emulate_tab.sys, "executable", "")
+    monkeypatch.setattr(emulate_core.shutil, "which", boom)
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_core.sys, "executable", "")
     monkeypatch.setenv("PATH", str(tmp_path))
     # Nothing on PATH is an ANSWER, not a crash.
-    assert emulate_tab.windows_python() is None
+    assert emulate_core.windows_python() is None
     # ...and with the interpreter there, PATH is what finds it.
     exe = tmp_path / "python.exe"
     exe.write_text("")
-    assert emulate_tab.windows_python(console=True) == str(exe)
+    assert emulate_core.windows_python(console=True) == str(exe)
     # Which is what makes the whole Windows launch shape reachable from any
     # host again - the thing the fake platform is there to test.
     monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
-    assert emulate_tab.rig_cmd("watch.sh", 30)[:2] == ["wsl.exe", "-e"]
-
-
-class _FakeProc:
-    """Just enough Popen for the playfield handling: alive until killed."""
-
-    def __init__(self):
-        self.waited = None
-        self.killed = False
-
-    def poll(self):
-        return None
-
-    def wait(self, timeout=None):
-        self.waited = timeout
-        raise RuntimeError("still open")
-
-    def kill(self):
-        self.killed = True
-
-
-def test_the_run_that_asks_gets_a_playfield_window(monkeypatch, tmp_path):
-    """End to end through the panel: the token in the log stream becomes one
-    Popen of playfield.py, with the title, the save-state flag and both paths
-    the run worked out."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab, "windows_python",
-                        lambda console=False: r"C:\py\pw.exe")
-    seen = {}
-
-    def _popen(cmd, env=None, **kw):
-        seen["cmd"], seen["env"] = cmd, env
-        return _FakeProc()
-
-    monkeypatch.setattr(emulate_tab.subprocess, "Popen", _popen)
-    root, panel = _panel(tmp_path)
-    try:
-        panel._open_playfield(emulate_tab.playfield_launch(_LAUNCH))
-        assert seen["cmd"][0] == r"C:\py\pw.exe"
-        assert seen["cmd"][1].endswith("playfield.py")
-        assert seen["cmd"][2] == "godzilla_pro"
-        assert seen["cmd"][3] == "--savestates"
-        assert seen["env"]["PAD_ROOT"].startswith("\\\\wsl.localhost")
-        assert seen["env"]["PAD_TABLES"].endswith("\\dump\\tables")
-        # ONE window, not one per line of output.
-        seen.clear()
-        panel._open_playfield(emulate_tab.playfield_launch(_LAUNCH))
-        assert not seen
-    finally:
-        root.destroy()
-
-
-def test_a_run_without_save_states_gets_no_save_buttons(monkeypatch, tmp_path):
-    """PF_STATES is watch.sh's answer, not this side's guess - a run whose
-    pivot was withdrawn must not show buttons that can only fail."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab, "windows_python",
-                        lambda console=False: r"C:\py\pw.exe")
-    seen = {}
-
-    def _popen(cmd, env=None, **kw):
-        seen["cmd"] = cmd
-        return _FakeProc()
-
-    monkeypatch.setattr(emulate_tab.subprocess, "Popen", _popen)
-    root, panel = _panel(tmp_path)
-    try:
-        panel._open_playfield(emulate_tab.playfield_launch(
-            "PAD_PLAYFIELD_WINDOWS_LAUNCH game=jaws_pro savestates=0"))
-        assert "--savestates" not in seen["cmd"]
-    finally:
-        root.destroy()
-
-
-def test_pad_closes_the_window_it_opened(tmp_path):
-    """Whoever owns the launch owns the teardown: the rig's forced close is a
-    powershell.exe call, which is the interop this machine does not have."""
-    root, panel = _panel(tmp_path)
-    try:
-        proc = _FakeProc()
-        panel._pf_proc = proc
-        panel._close_playfield()
-        # The polite exit gets its chance first - that is what saves the
-        # window position - and only then is it closed here.
-        assert proc.waited and proc.killed
-        assert panel._pf_proc is None
-        # And nothing to close is not an error: the ordinary machine's window
-        # is watch.sh's child and never passes through here.
-        panel._close_playfield()
-    finally:
-        root.destroy()
+    assert emulate_core.rig_cmd("watch.sh", 30)[:2] == ["wsl.exe", "-e"]
 
 
 def test_a_playfield_that_stops_leaves_something_to_read():
@@ -3300,7 +2475,7 @@ def test_a_machine_missing_only_criu_still_runs_the_emulator():
 def test_criu_is_never_offered_as_a_package_to_install():
     """No Ubuntu publishes it: `apt install criu` cannot work anywhere, and
     naming it beside a real package fails that one too."""
-    steps = emulate_tab.setup_fix_steps(_CRIU_FACTS)
+    steps = emulate_core.setup_fix_steps(_CRIU_FACTS)
     assert steps and all("Install in WSL:  criu" not in s for s in steps)
     assert any("Build criu from source" in s for s in steps), steps
     # The consent has to say what a build costs - it is minutes and a
@@ -3311,7 +2486,7 @@ def test_criu_is_never_offered_as_a_package_to_install():
 
 def test_the_button_stays_for_a_machine_whose_only_gap_is_criu():
     """It can build it, so there is something to press."""
-    assert emulate_tab.setup_fixable(_CRIU_FACTS)
+    assert emulate_core.setup_fixable(_CRIU_FACTS)
     assert "Set up emulator" in setup_notice(_CRIU_FACTS, can_fix=True)
 
 
@@ -3319,7 +2494,7 @@ def test_both_save_state_pieces_are_named_when_both_are_missing():
     facts = dict(_CRIU_FACTS, busybox="0")
     extras = [p for p, _ in setup_extras(facts)]
     assert extras == ["busybox-static", "criu"]
-    steps = emulate_tab.setup_fix_steps(facts)
+    steps = emulate_core.setup_fix_steps(facts)
     assert any(s.startswith("Install in WSL:") and "busybox-static" in s
                for s in steps)
     assert any("Build criu" in s for s in steps)
@@ -3340,7 +2515,7 @@ def test_a_rig_that_never_heard_of_criu_accuses_nobody():
     facts = dict(_CRIU_FACTS)
     del facts["criu"]
     assert setup_extras(facts) == []
-    assert emulate_tab.setup_built(facts) == []
+    assert emulate_core.setup_built(facts) == []
     assert setup_settled(facts)
 
 
@@ -3361,138 +2536,6 @@ def test_a_rig_that_never_heard_of_criu_accuses_nobody():
 # hidden, and what the user got instead was a wall of guest log text telling
 # him to edit /etc/wsl.conf by hand.
 # ----------------------------------------------------------------------
-
-def _restart_rig(tmp_path, monkeypatch, survives):
-    """Build a panel over a WSL whose `--shutdown` costs the ARM handler (or
-    not, when `survives`), and hand back the panel, the log and the root."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    machine = {"binfmt": "1", "probes": 0}
-
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-
-    def probe():
-        machine["probes"] += 1
-        return _facts(binfmt=machine["binfmt"], wslconf="0")
-
-    monkeypatch.setattr(emulate_tab, "setup_state", probe)
-
-    def fake_run(cmd, *a, **kw):
-        # THE FACT BEING SIMULATED, and it is one line: a distro without
-        # systemd comes back from `wsl --shutdown` with an empty
-        # binfmt_misc.  Everything else about the machine is unchanged -
-        # qemu-user-static is still installed, which is why the tab cannot
-        # infer this and has to ask.
-        if not survives and any("--shutdown" in str(c) for c in cmd):
-            machine["binfmt"] = "0"
-        return SimpleNamespace(stdout=b"", returncode=0)
-
-    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
-    root, panel = _panel(tmp_path)
-    logged = []
-    panel._log_sink = logged.append
-    return root, panel, logged, machine
-
-
-def _pump(root, want, seconds=10):
-    """Wait for *want* under a REAL mainloop, and say whether it came true.
-
-    NOT ``root.update()`` in a loop, which is what every other panel test
-    here uses and what this one cannot: the restart worker hands its answer
-    back with ``after`` FROM ANOTHER THREAD, and tkinter refuses that unless
-    the mainloop is genuinely running in the thread that made the
-    interpreter.  ``update()`` does not count - the worker's ``after`` raises
-    RuntimeError, the panel swallows it exactly as it must in a torn-down
-    tab, and the test then watches a tab that nothing ever reached.  (Both
-    of the log lines the worker writes travel the same way, so this is the
-    production path, not a test-only one.)
-    """
-    import time
-    deadline = time.time() + seconds
-    got = {"v": False}
-
-    def tick():
-        got["v"] = bool(want())
-        if got["v"] or time.time() > deadline:
-            root.quit()
-        else:
-            root.after(20, tick)
-
-    root.after(0, tick)
-    root.mainloop()
-    return got["v"]
-
-
-def test_a_wsl_restart_re_probes_what_it_left_behind(tmp_path, monkeypatch):
-    """The button that restarts WSL is one of the two ways a machine that
-    could emulate a minute ago stops being one, so the answer it invalidates
-    is asked again - and the notice and its button come back with it."""
-    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
-                                                survives=False)
-    try:
-        assert _pump(root, lambda: panel._setup is not None), \
-            "the build-time probe never answered"
-        assert not panel._setup_msg.winfo_ismapped(), \
-            "a healthy machine was given a notice before anything happened"
-
-        panel._restart_wsl("the test's own reason")
-        assert _pump(root, lambda: panel._setup_msg.winfo_ismapped()), \
-            ("the tab still shows the machine it probed BEFORE the restart - "
-             "the next Start is the only thing that would say otherwise")
-        assert panel._setup_btn.winfo_ismapped(), \
-            "nothing on the tab offers to put the handler back"
-        assert "32-bit ARM" in panel._setup_msg.cget("text")
-        # ...and in the log too, which is where the user is looking while a
-        # restart runs.
-        assert any("ARM handler" in m for m in logged), logged
-    finally:
-        root.destroy()
-
-
-def test_a_machine_that_came_back_intact_is_told_nothing(tmp_path,
-                                                         monkeypatch):
-    """David's own WSL boots systemd, so its handler survives - and a restart
-    there must not leave a notice or an accusation behind.  The re-probe is
-    allowed to cost one wsl.exe and nothing else."""
-    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
-                                                survives=True)
-    try:
-        assert _pump(root, lambda: machine["probes"] >= 1)
-        # SNAPSHOT, not a fixed count: a panel from an earlier test in this
-        # file can still have a probe worker in flight, and monkeypatch has
-        # by now pointed `setup_state` at THIS test's counter - so an
-        # absolute `>= 2` can be satisfied by someone else's straggler.
-        before = machine["probes"]
-        panel._restart_wsl("the test's own reason")
-        assert _pump(root, lambda: any("what the restart left behind" in m
-                                       for m in logged)), \
-            "the restart did not re-probe at all"
-        assert _pump(root, lambda: machine["probes"] > before)
-        # ...and then let the answer be applied before insisting on silence.
-        _pump(root, lambda: False, seconds=1)
-        assert not panel._setup_msg.winfo_ismapped()
-        assert not panel._setup_btn.winfo_ismapped()
-        assert not any("took the 32-bit ARM handler" in m for m in logged), \
-            logged
-    finally:
-        root.destroy()
-
-
-def test_the_restart_says_why_it_is_looking_before_it_looks(tmp_path,
-                                                            monkeypatch):
-    """The re-probe is what boots WSL back up, and on a cold VM that is tens
-    of seconds - which would read as the restart itself hanging.  So the
-    reason goes up first, whatever the answer turns out to be."""
-    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
-                                                survives=True)
-    try:
-        assert _pump(root, lambda: machine["probes"] >= 1)
-        panel._restart_wsl("the test's own reason")
-        assert _pump(root, lambda: any("what the restart left behind" in m
-                                       for m in logged)), logged
-        said = [m for m in logged if "what the restart left behind" in m][0]
-        assert "systemd" in said
-    finally:
-        root.destroy()
 
 
 # ----------------------------------------------------------------------
@@ -3515,21 +2558,15 @@ def _guest_binfmt_message():
                      if not ln.lstrip().startswith("#"))
 
 
-def test_the_guest_message_names_the_button_that_does_all_of_it(tmp_path,
-                                                                monkeypatch):
+def test_the_guest_message_names_the_button_that_does_all_of_it():
     """One string, two languages: the rig prints the name of a button this
-    module packs, so the two must not drift.  It is checked without its
-    ellipsis - the shell writes three dots and Tk one character."""
+    tab shows, so the two must not drift.  It is checked without its
+    ellipsis - the shell writes three dots and the tab one character."""
     said = _guest_binfmt_message()
     assert "Set up emulator" in said
-    # No probe: this test is about a label, and the build-time one is a real
-    # wsl.exe on a Windows runner.
-    monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
-    root, panel = _panel(tmp_path)
-    try:
-        assert panel._setup_btn.cget("text").startswith("Set up emulator")
-    finally:
-        root.destroy()
+    # The tab's button carries that name (a web label, not a widget now).
+    src = pathlib.Path(emulate_web.__file__).read_text(encoding="utf-8")
+    assert 'setup_label="Set up emulator…"' in src
 
 
 def test_the_button_is_offered_before_the_commands_and_only_on_wsl():
@@ -3543,42 +2580,6 @@ def test_the_button_is_offered_before_the_commands_and_only_on_wsl():
     # The by-hand route is still printed, for a terminal run and for anyone
     # who wants to see what is being done.
     assert "wsl.conf" in said and "systemd=true" in said
-
-
-def test_the_notice_asks_the_window_to_make_room_for_it(tmp_path, monkeypatch):
-    """FOUND IN THE PROOF SHOTS, not here: the first cut of the re-probe put
-    the button up beside a sentence nobody could read.
-
-    ttk.Notebook pins its pane to the selected tab's requested height, and
-    that is measured when the tab is selected.  Every other notice on this
-    panel is already there by then; this one appears LATER, while the user is
-    sitting on the tab - and pack gives a slave that no longer fits no space
-    at all and leaves it unmapped.  So the panel says it is taller now.
-    """
-    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
-                                                survives=False)
-    asked = []
-    panel._resize_fn = lambda: asked.append(1)
-    try:
-        assert _pump(root, lambda: panel._setup is not None)
-        panel._restart_wsl("the test's own reason")
-        assert _pump(root, lambda: panel._setup_msg.winfo_ismapped())
-        assert asked, ("the notice was packed into a pane measured without "
-                       "it, so it is there and invisible")
-    finally:
-        root.destroy()
-
-
-def test_the_window_hands_the_panel_something_to_ask_with():
-    """The panel's half is useless without the wiring, and the wiring is one
-    keyword nobody would miss until a notice went missing again."""
-    import inspect
-    from pinball_decryptor.gui.main_window import MainWindow
-    src_ = inspect.getsource(MainWindow._build_emulate_tab)
-    assert "resize_fn=" in src_
-    assert "_resize_notebook_to_current_tab" in src_
-    # ...and it must be the real method, not a name that has moved on.
-    assert callable(MainWindow._resize_notebook_to_current_tab)
 
 
 # --- PAD's own Python, handed to the rig (PAD-95) ----------------------------
@@ -3595,11 +2596,11 @@ def test_the_sound_bridge_asks_for_the_console_twin(monkeypatch):
     sound bridge wants python.exe - it is a stdio program with the guest's PCM
     piped into it, and python.exe is also the spelling the rig's own search
     produces, so the path handed over and the path reported back match."""
-    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
-    monkeypatch.setattr(emulate_tab.sys, "executable", r"C:\Py\pythonw.exe")
-    monkeypatch.setattr(emulate_tab.os.path, "isfile", lambda p: True)
-    assert emulate_tab.windows_python() == r"C:\Py\pythonw.exe"
-    assert emulate_tab.windows_python(console=True) == r"C:\Py\python.exe"
+    monkeypatch.setattr(emulate_core.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_core.sys, "executable", r"C:\Py\pythonw.exe")
+    monkeypatch.setattr(emulate_core.os.path, "isfile", lambda p: True)
+    assert emulate_core.windows_python() == r"C:\Py\pythonw.exe"
+    assert emulate_core.windows_python(console=True) == r"C:\Py\python.exe"
 
 
 def test_the_rig_is_handed_pads_own_python_on_windows(monkeypatch, tmp_path):
@@ -3611,7 +2612,7 @@ def test_the_rig_is_handed_pads_own_python_on_windows(monkeypatch, tmp_path):
     lives on a default install."""
     ours = r"C:\Program Files\PAD\python\python.exe"
     said = "PAD_WINPYTHON=/mnt/c/Program Files/PAD/python/python.exe"
-    monkeypatch.setattr(emulate_tab, "windows_python",
+    monkeypatch.setattr(emulate_core, "windows_python",
                         lambda console=False: ours)
     cmd = _cmd_on(monkeypatch, "win32", tmp_path, "setupcheck.sh")
     assert said in cmd, cmd
@@ -3626,7 +2627,7 @@ def test_the_rig_is_handed_pads_own_python_on_windows(monkeypatch, tmp_path):
     # here rather than by rig_cmd - a run started without it is a run whose
     # sound quietly takes the WSLg path.
     _home(monkeypatch, "/home/somebody")
-    cmd = emulate_tab.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"])
+    cmd = emulate_core.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"])
     assert cmd[:3] == ["wsl.exe", "-u", "root"], cmd
     assert said in cmd, cmd
     assert cmd[-1] == "120", cmd
@@ -3635,7 +2636,7 @@ def test_the_rig_is_handed_pads_own_python_on_windows(monkeypatch, tmp_path):
 def test_nothing_of_the_sort_off_windows(monkeypatch, tmp_path):
     """There is no interop boundary to hand a Windows .exe across, and the
     container forwards its own variables - so this must not appear at all."""
-    monkeypatch.setattr(emulate_tab, "windows_python",
+    monkeypatch.setattr(emulate_core, "windows_python",
                         lambda console=False: r"C:\Py\python.exe")
     for platform in ("linux", "darwin"):
         cmd = _cmd_on(monkeypatch, platform, tmp_path, "watch.sh", 30)
@@ -3647,7 +2648,7 @@ def test_no_interpreter_to_name_leaves_the_rig_as_it_was(monkeypatch,
                                                          tmp_path):
     """Running from a checkout with nothing to point at is not a fault: an
     absent variable is the rig's own search, unchanged."""
-    monkeypatch.setattr(emulate_tab, "windows_python",
+    monkeypatch.setattr(emulate_core, "windows_python",
                         lambda console=False: None)
     cmd = _cmd_on(monkeypatch, "win32", tmp_path, "setupcheck.sh")
     assert not any(c.startswith("PAD_WINPYTHON") for c in cmd), cmd
@@ -3669,28 +2670,28 @@ def test_multiboot_cmd_asks_the_rigs_own_tool(monkeypatch, tmp_path):
     """The one definition lives in parts.py; the tab shells it rather than
     re-implementing the test, so the tickbox and the run cannot disagree."""
     monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    cmd = emulate_tab.multiboot_cmd("D:\\cards\\multi.raw")
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
+    cmd = emulate_core.multiboot_cmd("D:\\cards\\multi.raw")
     assert cmd[:3] == ["wsl.exe", "-e", "python3"], cmd
     assert cmd[3].endswith("/parts.py"), cmd
     assert cmd[-2] == "--multiboot"
     # A Windows path never crosses: WSL is handed the POSIX spelling.
     assert not any("\\" in c for c in cmd), cmd
-    monkeypatch.setattr(emulate_tab.sys, "platform", "linux")
-    cmd = emulate_tab.multiboot_cmd("/cards/multi.raw")
+    monkeypatch.setattr(emulate_core.sys, "platform", "linux")
+    cmd = emulate_core.multiboot_cmd("/cards/multi.raw")
     assert cmd[0] == "python3" and cmd[1].endswith("parts.py")
     assert cmd[-2:] == ["--multiboot", "/cards/multi.raw"]
     # macOS: the rig is in a container whose filesystem is not this one, so
     # the card's host path is not a path the probe could open.
-    monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
-    assert emulate_tab.multiboot_cmd("/cards/multi.raw") is None
+    monkeypatch.setattr(emulate_core.sys, "platform", "darwin")
+    assert emulate_core.multiboot_cmd("/cards/multi.raw") is None
 
 
 def test_parse_multiboot_reads_the_line_and_nothing_else():
     """wsl.exe is entitled to prepend its own warnings to stdout (see
     parse_status); one of those turning a yes into an unknown would switch a
     menu off silently."""
-    p = emulate_tab.parse_multiboot
+    p = emulate_core.parse_multiboot
     assert p("your 131072x1 screen size is bogus\n"
              "multiboot: yes - selector installed, 2 images in images.conf\n") \
         == ("yes", "selector installed, 2 images in images.conf")
@@ -3703,370 +2704,6 @@ def test_parse_multiboot_reads_the_line_and_nothing_else():
         assert p(junk)[0] == "unknown", junk
 
 
-class _InlineThread:
-    """A ``threading.Thread`` stand-in that runs its target on the spot.
-
-    THE PROBE'S ANSWER COMES BACK THROUGH ``after()``, and Tk refuses an
-    ``after()`` from a worker thread unless a main loop is actually running
-    ("main thread is not in main loop") - in the app one always is, in a test
-    one never is.  Driving the worker inline instead keeps the whole path
-    under test on the one thread the test owns, with no ``mainloop()`` to
-    hang on and no leftover timers to fire into a later test.  That the work
-    really does happen OFF the UI thread is a separate test below, where it
-    is the only thing being asked.
-    """
-
-    def __init__(self, target=None, daemon=None, **_kw):
-        self._target = target
-
-    def start(self):
-        self._target()
-
-
-def _select_panel(tmp_path, monkeypatch, answer=None, inline=True):
-    """A built panel over a rig that answers *answer* to --multiboot."""
-    rig = tmp_path / "rig"
-    rig.mkdir()
-    for name in ("watch.sh", "killgame.sh", "status.sh", "parts.py"):
-        (rig / name).write_text("", encoding="utf-8")
-    monkeypatch.setenv("PAD_EMU_DIR", str(rig))
-    # macOS asks no probe by design (multiboot_cmd: the rig lives in a
-    # container there); these tests are about the probe, so on a Mac runner
-    # they drive the tab as Linux.
-    if sys.platform == "darwin":
-        monkeypatch.setattr(emulate_tab.sys, "platform", "linux")
-    calls = []
-
-    def fake_run(cmd, **_kw):
-        calls.append(cmd)
-        return SimpleNamespace(returncode=0,
-                               stdout=(answer or "").encode("utf-8"))
-
-    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
-    # Picking a card also fires the item 74 pre-cache; it must not reach a
-    # real wsl.exe from a unit test.
-    monkeypatch.setattr(emulate_tab.subprocess, "Popen",
-                        lambda *_a, **_kw: SimpleNamespace(
-                            stdout=iter(()), wait=lambda timeout=None: 0))
-    root, panel = _panel(tmp_path)
-    # Patched AFTER the build, so building the panel is the ordinary thing it
-    # always was and only what the test drives afterwards runs inline.
-    if inline:
-        monkeypatch.setattr(emulate_tab.threading, "Thread", _InlineThread)
-    return root, panel, calls
-
-
-def test_a_card_with_a_menu_ticks_the_box_itself(tmp_path, monkeypatch):
-    img = tmp_path / "multi.raw"
-    img.write_bytes(bytes(16))
-    root, panel, calls = _select_panel(
-        tmp_path, monkeypatch,
-        "multiboot: yes - selector installed, 2 images in images.conf\n")
-    try:
-        panel._src_path.set(str(img))
-        root.update()          # the after() the worker queued
-        assert any("--multiboot" in c for c in calls), calls
-        assert panel._select_var.get(), "a multi-boot card ticks the box"
-        assert str(panel._select_chk.cget("state")) != "disabled"
-        # The hint says why, and it is the CARD's reason, not a guess.
-        assert "carries a boot menu" in panel._select_tip.text
-        assert "2 images" in panel._select_tip.text
-        # ...and Start says NOTHING, because an auto-ticked box is the card's
-        # own answer read back. Repeating it as PAD_SELECT=1 would make this
-        # tab's reading an ORDER: the rig would stop asking the card, and
-        # every gate downstream would refuse rather than degrade when it
-        # could not give the menu (2026-09-02, the review of the tri-state).
-        env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
-        assert not any(e.startswith("PAD_SELECT") for e in env), env
-        # Unticking it is the OVERRIDE, and has to be said out loud: without
-        # the 0 the rig's own probe would put the menu back up.
-        panel._select_var.set(False)
-        panel._select_touch()
-        assert "PAD_SELECT=0" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
-        # ...and ticking it again is the other override, out loud too.
-        panel._select_var.set(True)
-        panel._select_touch()
-        assert "PAD_SELECT=1" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
-    finally:
-        root.destroy()
-
-
-def test_a_card_without_a_menu_leaves_the_box_off_and_says_nothing(tmp_path,
-                                                                   monkeypatch):
-    """A plain card must send no PAD_SELECT at all: 0 and unset behave the
-    same on the rig today, and the silence is what keeps the decision in one
-    place if that ever changes.
-
-    THE BOX STAYS ENABLED on a 'no'. Greying it out made PAD_SELECT=1
-    unreachable from the tab over a card the rig would happily show a menu for
-    if asked - and watch.sh's own log advertises exactly that ("PAD_SELECT=1
-    forces one"). The tooltip already says there is nothing to choose
-    between."""
-    img = tmp_path / "stock.raw"
-    img.write_bytes(bytes(16))
-    root, panel, _calls = _select_panel(
-        tmp_path, monkeypatch,
-        "multiboot: no - no /usr/local/codeselect/codeselect in the rootfs\n")
-    try:
-        panel._src_path.set(str(img))
-        root.update()
-        assert not panel._select_var.get()
-        assert str(panel._select_chk.cget("state")) != "disabled"
-        assert "no boot menu" in panel._select_tip.text
-        env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
-        assert not any(e.startswith("PAD_SELECT") for e in env), env
-        # ...and it can still be ticked, which the rig honours as an order.
-        panel._select_var.set(True)
-        panel._select_touch()
-        assert "PAD_SELECT=1" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
-    finally:
-        root.destroy()
-
-
-def test_a_slot_launch_never_asks_for_the_menu(tmp_path, monkeypatch):
-    """★ A SAVE HAS ALREADY CHOSEN ITS IMAGE (2026-09-02).
-
-    _slot_launch sets _launch_slot and calls start(); on a multi-boot card the
-    auto-ticked box used to send PAD_SELECT=1, so the run stopped at a menu
-    nobody was watching for - and a different pick there restores the state
-    into the WRONG image's game binary."""
-    img = tmp_path / "multi.raw"
-    img.write_bytes(bytes(16))
-    root, panel, _calls = _select_panel(
-        tmp_path, monkeypatch,
-        "multiboot: yes - selector installed, 2 images in images.conf\n")
-    try:
-        panel._src_path.set(str(img))
-        root.update()
-        assert panel._select_var.get(), "the card ticked it, as it should"
-        panel._launch_slot = "slot1"
-        env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
-        assert "PAD_SELECT=0" in env, env
-        assert "PAD_SELECT=1" not in env
-        # ...even when the box was deliberately ticked: the save's image is
-        # not a thing the menu can be right about.
-        panel._select_touch()
-        assert "PAD_SELECT=0" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
-        # and an ordinary Start after the slot has been cleared is silent again
-        panel._launch_slot = None
-        panel._select_touched = False
-        assert not any(e.startswith("PAD_SELECT")
-                       for e in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"]))
-    finally:
-        root.destroy()
-
-
-def test_unticking_after_the_multiboot_tabs_run_button_is_heard(tmp_path,
-                                                                monkeypatch):
-    """launch_card marks the tick as the caller's, which used to make
-    _select_apply drop the probe's reply entirely - so _select_menu stayed
-    None, unticking the box sent NOTHING instead of 0, and the rig's own probe
-    put the menu straight back up with no way to switch it off.
-
-    The verdict is recorded always; only the WIDGET is left alone."""
-    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
-    started = []
-    try:
-        panel.start = lambda: started.append(True)
-        panel.launch_card("/cards/multi.raw", select=True)
-        assert started and panel._select_var.get()
-        panel._select_apply("/cards/multi.raw", "yes", "2 images")
-        assert panel._select_var.get(), "the caller's tick still wins the widget"
-        assert panel._select_menu is True, "...but the verdict was recorded"
-        assert "2 images" in panel._select_tip.text
-        # Now untick it by hand: that is an override and it is said out loud.
-        panel._select_var.set(False)
-        panel._select_touch()
-        assert "PAD_SELECT=0" in panel._launch_env(["PAD_CARD=/x"])
-    finally:
-        root.destroy()
-
-
-def test_the_tooltip_never_sticks_on_looking_at_the_card(tmp_path, monkeypatch):
-    """Every exit path of the probe re-texts. A silent return left the box
-    saying "Looking at the card for a boot menu…" for ever, which is how "the
-    probe is slow" and "the probe never happened" came to look the same."""
-    img = tmp_path / "who.raw"
-    img.write_bytes(bytes(16))
-    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
-    busy = panel._SELECT_TIP_BUSY
-    try:
-        # 1. the card cannot be opened at all
-        panel._src_path.set(str(tmp_path / "gone.raw"))
-        root.update()
-        assert panel._select_tip.text != busy
-        assert panel._select_menu is None
-        # 2. the probe itself blows up
-        def boom(*_a, **_k):
-            raise OSError("wsl.exe is not here")
-        monkeypatch.setattr(emulate_tab.subprocess, "run", boom)
-        panel._src_path.set(str(img))
-        root.update()
-        assert panel._select_tip.text != busy
-        assert panel._select_menu is None, "unaskable is never 'no'"
-        # 3. an answer nobody can read
-        monkeypatch.setattr(emulate_tab.subprocess, "run",
-                            lambda *_a, **_k: SimpleNamespace(
-                                returncode=0, stdout=b"bash: no parts.py"))
-        img.write_bytes(bytes(32))          # new bytes, so it is asked again
-        panel._src_path.set(str(img) + " ")   # same card, a fresh trace
-        root.update()
-        assert panel._select_tip.text != busy
-    finally:
-        root.destroy()
-
-
-def test_a_rebuilt_card_at_the_same_path_is_asked_again(tmp_path, monkeypatch):
-    """The Multi-boot tab writes the very cards this tab points at, so a
-    verdict cached against a PATH outlived the card it was about. The identity
-    is (path, mtime, size) and it is taken in the worker - a stat on the Tk
-    thread is this app's known freeze class."""
-    img = tmp_path / "card.raw"
-    img.write_bytes(bytes(16))
-    answers = ["multiboot: no - no /usr/local/codeselect/codeselect in the rootfs\n",
-               "multiboot: yes - selector installed, 2 images in images.conf\n"]
-    calls = []
-
-    root, panel, _c = _select_panel(tmp_path, monkeypatch, "")
-
-    def fake_run(cmd, **_kw):
-        calls.append(cmd)
-        return SimpleNamespace(returncode=0,
-                               stdout=answers[min(len(calls) - 1,
-                                                  len(answers) - 1)]
-                               .encode("utf-8"))
-
-    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
-    try:
-        panel._src_path.set(str(img))
-        root.update()
-        assert len(calls) == 1 and panel._select_menu is False
-        # The same path again, unchanged: no second probe, and the tooltip
-        # still says what it said.
-        panel._select_probe_kick()
-        root.update()
-        assert len(calls) == 1, "an unchanged card was asked twice"
-        assert panel._select_menu is False
-        # Now REBUILD it in place. Same path, different bytes.
-        img.write_bytes(bytes(4096))
-        panel._select_probe_kick()
-        root.update()
-        assert len(calls) == 2, "a rebuilt card was answered from the cache"
-        assert panel._select_menu is True
-        assert panel._select_var.get(), "and the box caught up"
-    finally:
-        root.destroy()
-
-
-def test_a_card_nobody_could_ask_about_leaves_the_box_alone(tmp_path,
-                                                            monkeypatch):
-    """No rig, no WSL, macOS, an unreadable image: 'unknown' is not 'no'.
-    The tab says nothing and watch.sh decides for itself."""
-    img = tmp_path / "who.raw"
-    img.write_bytes(bytes(16))
-    root, panel, _calls = _select_panel(
-        tmp_path, monkeypatch,
-        "multiboot: unknown - who.raw: no MBR signature - not a card image?\n")
-    try:
-        panel._src_path.set(str(img))
-        root.update()
-        assert panel._select_menu is None
-        assert not panel._select_var.get()
-        assert str(panel._select_chk.cget("state")) != "disabled"
-        env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
-        assert not any(e.startswith("PAD_SELECT") for e in env), env
-    finally:
-        root.destroy()
-
-
-def test_a_hand_on_the_box_outranks_a_late_answer(tmp_path, monkeypatch):
-    """The probe takes a moment; a tick made in that moment must survive it."""
-    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
-    try:
-        panel._select_probed = "/cards/multi.raw"
-        panel._select_var.set(True)
-        panel._select_touch()
-        panel._select_apply("/cards/multi.raw", "no", "no selector")
-        assert panel._select_var.get(), "the probe overrode a deliberate tick"
-        # A reply about a card that is no longer in the box is dropped too.
-        panel._select_touched = False
-        panel._select_apply("/cards/other.raw", "no", "no selector")
-        assert panel._select_var.get()
-    finally:
-        root.destroy()
-
-
-def test_changing_the_card_forgets_the_previous_answer(tmp_path, monkeypatch):
-    """The old card's verdict must not ride along on the next Start."""
-    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
-    try:
-        panel._select_probed = "/cards/multi.raw"
-        panel._select_apply("/cards/multi.raw", "yes", "2 images")
-        assert panel._select_var.get() and panel._select_menu is True
-        panel._src_path.set("/cards/another.raw")
-        root.update()
-        assert panel._select_menu is None
-        assert not panel._select_var.get()
-        assert str(panel._select_chk.cget("state")) != "disabled"
-    finally:
-        root.destroy()
-
-
-def test_the_multiboot_tabs_run_button_still_asks_for_the_menu(tmp_path,
-                                                               monkeypatch):
-    """'Run in emulator' names the menu explicitly, and the probe it kicks
-    off on the way must not untick it a moment later."""
-    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
-    started = []
-    try:
-        panel.start = lambda: started.append(True)
-        panel.launch_card("/cards/multi.raw", select=True)
-        assert started and panel._select_var.get()
-        panel._select_apply("/cards/multi.raw", "no", "no selector")
-        assert panel._select_var.get()
-        assert "PAD_SELECT=1" in panel._launch_env(["PAD_CARD=/x"])
-    finally:
-        root.destroy()
-
-
-def test_the_probe_never_blocks_the_tab(tmp_path, monkeypatch):
-    """It shells wsl.exe, so it may NOT run where the UI does.
-
-    A card path can be UNC to a sleeping NAS and this app's known freeze
-    class is exactly that stat done on the Tk thread (see _precache_kick).
-    So: with the probe wedged, setting the card path still comes straight
-    back, and the call that is wedged is on a thread of its own."""
-    import threading as _th
-    import time
-    img = tmp_path / "slow.raw"
-    img.write_bytes(bytes(16))
-    gate = _th.Event()
-    seen = {}
-
-    def wedged_run(_cmd, **_kw):
-        seen["thread"] = _th.current_thread()
-        gate.wait(10)
-        # Leave without an answer, so nothing is marshalled back into a Tk
-        # widget this test is about to destroy.
-        raise OSError("the test is over")
-
-    root, panel, _calls = _select_panel(tmp_path, monkeypatch, inline=False)
-    monkeypatch.setattr(emulate_tab.subprocess, "run", wedged_run)
-    try:
-        t0 = time.time()
-        panel._src_path.set(str(img))
-        assert time.time() - t0 < 2, "picking a card sat on the UI thread"
-        deadline = time.time() + 5
-        while "thread" not in seen and time.time() < deadline:
-            time.sleep(0.01)
-        assert seen.get("thread") is not None, "the probe never ran"
-        assert seen["thread"] is not _th.main_thread(), \
-            "the probe ran on the UI thread"
-    finally:
-        gate.set()
-        root.destroy()
-
-
 # ------------------------------------------- the Linux this rig talks to ----
 
 def test_every_wsl_call_in_this_module_goes_to_the_same_distro(monkeypatch):
@@ -4075,29 +2712,29 @@ def test_every_wsl_call_in_this_module_goes_to_the_same_distro(monkeypatch):
     is, whether its binaries are built there.  One head asking a different
     machine than the rest gives answers that are each true and together
     nonsense, so they all go through _wsl_head."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.runtime, "wsl_distro",
                         lambda runner=None: "PAD-Runtime")
-    assert emulate_tab._wsl_head() == ["wsl.exe", "-d", "PAD-Runtime", "-e"]
-    assert emulate_tab._wsl_head(root=True) == [
+    assert emulate_core._wsl_head() == ["wsl.exe", "-d", "PAD-Runtime", "-e"]
+    assert emulate_core._wsl_head(root=True) == [
         "wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e"]
-    assert emulate_tab.rig_cmd("watch.sh")[:4] == [
+    assert emulate_core.rig_cmd("watch.sh")[:4] == [
         "wsl.exe", "-d", "PAD-Runtime", "-e"]
-    assert emulate_tab.rig_cmd_root("run_game.sh")[:6] == [
+    assert emulate_core.rig_cmd_root("run_game.sh")[:6] == [
         "wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e"]
 
     # ...and with no runtime installed, nothing changes from how it has always
     # worked: the machine's default distro, no -d at all.
-    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+    monkeypatch.setattr(emulate_core.runtime, "wsl_distro",
                         lambda runner=None: None)
-    assert emulate_tab._wsl_head() == ["wsl.exe", "-e"]
-    assert emulate_tab.rig_cmd("watch.sh")[:2] == ["wsl.exe", "-e"]
+    assert emulate_core._wsl_head() == ["wsl.exe", "-e"]
+    assert emulate_core.rig_cmd("watch.sh")[:2] == ["wsl.exe", "-e"]
 
 
 def test_no_call_site_spells_out_its_own_wsl_head():
     """A new `["wsl.exe", "-e", ...]` typed into this module would silently
     talk to the default distro while the rest of the rig ran in ours."""
-    src = pathlib.Path(emulate_tab.__file__).read_text(encoding="utf-8")
+    src = pathlib.Path(emulate_core.__file__).read_text(encoding="utf-8")
     stray = [ln.strip() for ln in src.splitlines()
              if '"wsl.exe", "-' in ln and "_wsl_head" not in ln
              and not ln.strip().startswith("#")]
@@ -4106,45 +2743,15 @@ def test_no_call_site_spells_out_its_own_wsl_head():
     assert not [s for s in stray if "--shutdown" not in s and "copies of" not in s], stray
 
 
-def test_the_first_run_in_the_apps_own_linux_says_what_it_will_rebuild(
-        monkeypatch):
-    """The rig keeps real work in whichever distro it runs in: a card cache of
-    gigabytes, save-state slots, and the binaries it builds for itself.  A
-    silent re-copy of all that looks exactly like losing it."""
-    panel = emulate_tab.EmulatePanel.__new__(emulate_tab.EmulatePanel)
-    panel._runtime_noted = False
-    logged = []
-    panel._log = lambda m: logged.append(m)
-    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
-                        lambda runner=None: "PAD-Runtime")
-    monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: "ready")
-
-    panel._note_the_runtime_is_a_different_machine()
-    assert any("PAD_RUNTIME=0" in m and "untouched" in m for m in logged), logged
-
-    # Once per app run, not once per Start: a line repeated on every press is
-    # noise, and this one is only news the first time.
-    logged.clear()
-    panel._note_the_runtime_is_a_different_machine()
-    assert not logged
-
-    # And silence entirely when the rig is where it has always been.
-    panel._runtime_noted = False
-    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
-                        lambda runner=None: None)
-    panel._note_the_runtime_is_a_different_machine()
-    assert not logged
-
-
 def test_the_wsl_account_belongs_to_the_distro_it_was_probed_in(monkeypatch):
     """★ The app can install its own Linux MID-SESSION.  Probe the Spike 2 tab
     once (caching the default distro's user and home), press Fix setup on the
     Spike 1 tab, and every later Spike 2 run is `wsl -d PAD-Runtime` carrying
     the OTHER distro's account - a rig looking for its work in a home that
     belongs to nobody there.  The cache is keyed by distro now."""
-    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
     where = {"distro": None}
-    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+    monkeypatch.setattr(emulate_core.runtime, "wsl_distro",
                         lambda runner=None: where["distro"])
     probes = []
 
@@ -4155,15 +2762,15 @@ def test_the_wsl_account_belongs_to_the_distro_it_was_probed_in(monkeypatch):
         return SimpleNamespace(stdout=b"david:x:1000:1000::/home/david:/bin/sh\n",
                                returncode=0)
 
-    monkeypatch.setattr(emulate_tab, "_WSL_ACCOUNT", [("", ""), False])
-    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
-    assert emulate_tab.wsl_account() == ("david", "/home/david")
+    monkeypatch.setattr(emulate_core, "_WSL_ACCOUNT", [("", ""), False])
+    monkeypatch.setattr(emulate_core.subprocess, "run", fake_run)
+    assert emulate_core.wsl_account() == ("david", "/home/david")
     n = len(probes)
-    emulate_tab.wsl_account()
+    emulate_core.wsl_account()
     assert len(probes) == n, "the same distro must be answered from cache"
 
     where["distro"] = "PAD-Runtime"          # Fix setup ran
-    emulate_tab.wsl_account()
+    emulate_core.wsl_account()
     assert len(probes) > n, "a different distro must be asked again"
     assert probes[-1][:3] == ["wsl.exe", "-d", "PAD-Runtime"], probes[-1]
 
@@ -4187,170 +2794,9 @@ def test_the_wsl_account_belongs_to_the_distro_it_was_probed_in(monkeypatch):
 # cure on a tab they had no reason to open.
 
 
-def _packed(w):
-    """Is this widget packed?  Asked of the GEOMETRY MANAGER, not the window.
-
-    NOT winfo_ismapped(), which was the first spelling and failed on macOS CI:
-    these tests build an alpha-0 root parked off-screen, and macOS never maps
-    it, so every widget on it reports ismapped()==0 no matter what the panel
-    did.  That failed the three positive assertions outright and, worse, made
-    every NEGATIVE one pass without testing anything.  winfo_manager() returns
-    "pack" while packed and "" after pack_forget(), on every platform, with no
-    window manager and no timing in the way.
-    """
-    return bool(w.winfo_manager())
-
 def _rt(monkeypatch, state, detail="because"):
     monkeypatch.setattr(_runtime_ui.runtime, "status",
                         lambda *a, **k: (state, detail))
-
-
-def test_a_stale_runtime_puts_a_notice_and_a_button_on_the_tab(tmp_path,
-                                                               monkeypatch):
-    root, panel = _panel(tmp_path)
-    try:
-        monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
-        panel._runtime_apply(("stale", "version 3; expects 6"))
-        root.update()
-        assert _packed(panel._rt_msg), "the tab says nothing"
-        assert _packed(panel._rt_btn), "there is nothing to press"
-        said = panel._rt_msg.cget("text")
-        # The three things the user is actually holding.
-        assert "own WSL distro" in said, said
-        assert "Nothing has been lost" in said, said
-        assert "Update emulator Linux" in said, said
-    finally:
-        root.destroy()
-
-
-def test_a_current_runtime_carries_no_notice_and_no_button(tmp_path,
-                                                           monkeypatch):
-    """A machine that is fine must not be told anything at all."""
-    root, panel = _panel(tmp_path)
-    try:
-        panel._runtime_apply(("stale", "old"))
-        root.update()
-        panel._runtime_apply(("ready", "Runtime 6 (full)"))
-        root.update()
-        assert not _packed(panel._rt_msg)
-        assert not _packed(panel._rt_btn)
-    finally:
-        root.destroy()
-
-
-def test_a_machine_that_never_had_a_runtime_is_not_nagged(tmp_path,
-                                                          monkeypatch):
-    """★ THE LINE BETWEEN WARNING AND NAGGING.
-
-    ``absent`` is not a fault: it is how every Spike 2 user has run since
-    before the app had a Linux of its own, in the machine's own distro, and it
-    works.  A permanent orange banner offering a 414 MB download to a setup
-    that works is noise - and a machine that really is missing tools already
-    hears about it from the prerequisite notice, which knows WHICH tools.
-
-    ``stale`` is different in kind and that is why it is the one that speaks:
-    nothing about that machine changed, WE changed, and the emulator moved out
-    from under them.
-    """
-    root, panel = _panel(tmp_path)
-    try:
-        monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
-        panel._runtime_apply(("absent", "not installed"))
-        root.update()
-        assert not _packed(panel._rt_msg), \
-            "a working machine is being nagged to download 414 MB"
-        assert not _packed(panel._rt_btn)
-    finally:
-        root.destroy()
-
-
-def test_a_foreign_distro_is_explained_but_never_offered(tmp_path, monkeypatch):
-    """A WSL distro of our name that we did not build is SOMEBODY ELSE'S, and
-    the fix would be to delete it.  So it is named and the button stays away -
-    the same rule the setup button follows, for the same reason: a press that
-    must refuse is an invitation to press it twice."""
-    root, panel = _panel(tmp_path)
-    try:
-        monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
-        panel._runtime_apply(("foreign", "not ours"))
-        root.update()
-        assert _packed(panel._rt_msg)
-        assert not _packed(panel._rt_btn), \
-            "the app must not offer to delete a distro it did not build"
-        assert "will not touch it" in panel._rt_msg.cget("text")
-    finally:
-        root.destroy()
-
-
-def test_not_being_able_to_ask_is_not_an_answer(tmp_path, monkeypatch):
-    """None is "the poll could not ask", which is not "nothing is wrong".
-    Clearing the notice there would blink the warning off every time a wsl.exe
-    call timed out - which is exactly when it is most likely to time out."""
-    root, panel = _panel(tmp_path)
-    try:
-        monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
-        panel._runtime_apply(("stale", "old"))
-        root.update()
-        panel._runtime_apply(None)
-        root.update()
-        assert _packed(panel._rt_msg), \
-            "a failed probe wiped a warning that is still true"
-    finally:
-        root.destroy()
-
-
-def test_the_update_refuses_while_the_emulator_is_running(tmp_path, monkeypatch):
-    """Replacing the distro a run lives in kills the run and takes its work
-    with it.  _last_up alone is blind between polls, so a Start pressed two
-    seconds ago has to refuse too."""
-    root, panel = _panel(tmp_path)
-    try:
-        started = []
-        monkeypatch.setattr(_runtime_ui, "ensure",
-                            lambda **kw: started.append(1))
-        logged = []
-        monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-        for flag in ("_last_up", "_starting"):
-            setattr(panel, flag, True)
-            panel._runtime_fix()
-            setattr(panel, flag, False)
-        assert not started, "it would have replaced the Linux under a run"
-        assert len(logged) == 2 and "stop it first" in logged[0]
-    finally:
-        root.destroy()
-
-
-def test_a_replaced_runtime_gets_the_work_disk_before_the_rig_writes(
-        tmp_path, monkeypatch):
-    """★ The half that keeps the NEXT replacement cheap.
-
-    A replaced runtime is an empty Linux, and whatever the rig puts back into
-    it - the card cache, the save-state slots - is inside the thing the app
-    replaces.  Making the work disk here is free of the usual objection: there
-    is nothing left in that distro to strand.
-    """
-    root, panel = _panel(tmp_path)
-    try:
-        made = []
-        monkeypatch.setattr(_runtime_ui, "ensure", lambda **kw: "ready")
-        monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
-                            lambda runner=None: "PAD-Runtime")
-        monkeypatch.setattr(emulate_tab.rigdata, "ensure",
-                            lambda d, log=None: made.append(d) or "/mnt/x")
-        monkeypatch.setattr(emulate_tab.rigdata, "free_bytes",
-                            lambda d: 500 * 1024 ** 3)
-        monkeypatch.setattr(panel, "_log", lambda m: None)
-        monkeypatch.setattr(panel, "_timer",
-                            lambda: SimpleNamespace(after=lambda ms, fn: fn()))
-        panel._runtime_fix()
-        for _ in range(200):                # it runs on a worker
-            if made:
-                break
-            time.sleep(0.01)
-        assert made == ["PAD-Runtime"], \
-            "the rig would put its save states back inside the replaceable one"
-    finally:
-        root.destroy()
 
 
 def test_the_work_disk_is_not_made_behind_a_plain_start(tmp_path):
@@ -4362,7 +2808,7 @@ def test_the_work_disk_is_not_made_behind_a_plain_start(tmp_path):
     and the next Start would re-copy several GB.  Nothing lost, and it would
     look exactly like losing it.  A migration is not a side effect of Start.
     """
-    src = pathlib.Path(emulate_tab.__file__).read_text(encoding="utf-8",
+    src = pathlib.Path(emulate_web.__file__).read_text(encoding="utf-8",
                                                        errors="replace")
     callers = [ln.strip() for ln in src.splitlines()
                if "self._ensure_data_disk()" in ln]
@@ -4372,18 +2818,18 @@ def test_the_work_disk_is_not_made_behind_a_plain_start(tmp_path):
     # ...and that one caller is inside the runtime install, not somewhere a
     # Start can reach.  Sliced by method rather than by line order, which a
     # tidy-up would reorder without changing anything that matters.
-    j = src.index("def _runtime_fix(self)")
+    j = src.index("def runtime_fix(self)")
     fix = src[j:src.index("\n    def ", j + 1)]
     assert "self._ensure_data_disk()" in fix, \
         "the work disk is no longer made where the distro has just been replaced"
 
 
-def test_the_poll_asks_which_linux_off_the_tk_thread(tmp_path, monkeypatch):
-    """The answer costs two wsl.exe launches when cold, and asking on the Tk
-    thread is one of the four ways this window has been frozen.  On the main
+def test_the_poll_asks_which_linux_off_the_ui_loop(tmp_path, monkeypatch):
+    """The answer costs two wsl.exe launches when cold, and asking on the UI
+    loop is one of the four ways this window has been frozen.  On the main
     thread runtime.status() deliberately answers "not known yet" instead, so
     asking there would never see a stale runtime at all."""
-    src = pathlib.Path(emulate_tab.__file__).read_text(encoding="utf-8",
+    src = pathlib.Path(emulate_web.__file__).read_text(encoding="utf-8",
                                                        errors="replace")
     i = src.index("def _poll(self)")
     # To the END of the method, not a byte window: _poll is long, and a window
@@ -4464,8 +2910,8 @@ def test_more_than_one_tab_can_move_a_user_off_a_stale_runtime():
     three call sites and every one was in the Spike 1 tab - so the first bump
     of the version stamp would have left a Spike 2 user with a broken emulator
     and the cure on a tab they had no reason to open."""
-    gui = pathlib.Path(emulate_tab.__file__).parent
-    users = sorted(p.name for p in gui.glob("*.py")
+    webui = pathlib.Path(emulate_core.__file__).parent
+    users = sorted(p.name for p in webui.rglob("*.py")
                    if "_runtime_ui.ensure(" in p.read_text(encoding="utf-8",
                                                            errors="replace"))
     assert len(users) >= 2, (
@@ -4477,115 +2923,17 @@ def test_more_than_one_tab_can_move_a_user_off_a_stale_runtime():
 # Item 127: launch_with - the Modes tab's Try it through this tab's own Start
 # --------------------------------------------------------------------------
 
-def _launch_with_panel(tmp_path, monkeypatch):
-    img = tmp_path / "godzilla_pro-1_15_0.Release.8G.sdcard.raw"
-    img.write_bytes(bytes(16))
-    root, panel = _panel(tmp_path)
-    _quiesce(panel)
-    panel._precache_kick = lambda *a, **kw: None
-    panel._select_probe_kick = lambda *a, **kw: None
-    panel._reattach_data_disk = lambda *a, **kw: None
-    panel._note_the_runtime_is_a_different_machine = lambda *a, **kw: None
-    logged = []
-    panel._log = lambda msg: logged.append(msg)
-    built, launched = [], []
-    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
-    monkeypatch.setattr(emulate_tab, "watch_cmd",
-                        lambda minutes, env, savestates=True: built.append(list(env))
-                        or ["watch.sh-stand-in"])
-    monkeypatch.setattr(
-        emulate_tab.subprocess, "Popen",
-        lambda *a, **kw: launched.append(a[0]) or
-        SimpleNamespace(stdout=iter(()), wait=lambda timeout=None: 0))
-    panel._src_path.set(str(img))
-    return root, panel, str(img), built, launched, logged
+
+# --------------------------------------------------------------------------
+# feature/emulate-prepare: the launch API the Modes tab's Try it drives -
+# every refusal says why, a preparation narrates and can be cancelled, and
+# the window is told when a run goes down
+# --------------------------------------------------------------------------
 
 
-def _wait_started(panel):
-    deadline = time.time() + 5
-    while panel._starting and time.time() < deadline:
-        time.sleep(0.01)
-
-
-def test_launch_with_appends_the_prepared_env_to_the_ordinary_start(tmp_path, monkeypatch):
-    root, panel, img, built, launched, _logged = _launch_with_panel(tmp_path, monkeypatch)
-    seen = []
-    try:
-        assert panel.launch_with(lambda card: seen.append(card) or
-                                 ["PAD_OVERRIDE_DIR=/x/set", "PAD_MODE_SO=/lib/pad_mode.so"])
-        _wait_started(panel)
-        assert seen == [img]                      # the card in the box, read on the main loop
-        assert launched == [["watch.sh-stand-in"]]
-        env = built[0]
-        assert any(e.startswith("PAD_CARD=") for e in env)
-        assert env[-2:] == ["PAD_OVERRIDE_DIR=/x/set", "PAD_MODE_SO=/lib/pad_mode.so"]
-        assert panel._launch_prepare is None      # one-shot
-    finally:
-        root.destroy()
-
-
-def test_launch_with_a_refusing_preparation_starts_nothing(tmp_path, monkeypatch):
-    root, panel, _img, built, launched, logged = _launch_with_panel(tmp_path, monkeypatch)
-    try:
-        assert panel.launch_with(lambda card: None)
-        _wait_started(panel)
-        assert not built and not launched
-        assert not panel._starting
-        # ...and one that raises is a refusal too, said in the log
-        assert panel.launch_with(lambda card: 1 / 0)
-        _wait_started(panel)
-        assert not launched
-        assert any("could not be prepared" in m for m in logged)
-    finally:
-        root.destroy()
-
-
-def test_launch_with_never_rides_along_on_a_later_start(tmp_path, monkeypatch):
-    root, panel, _img, built, launched, _logged = _launch_with_panel(tmp_path, monkeypatch)
-    try:
-        monkeypatch.setattr(emulate_tab, "rig_available", lambda: False)
-        # no rig: start() returns early, and launch_with says the preparation will not run
-        assert panel.launch_with(lambda card: ["PAD_MODE_SO=/lib/pad_mode.so"]) is False
-        assert not launched
-        monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
-        panel.start()                              # an ordinary Start afterwards
-        _wait_started(panel)
-        assert launched and not any("PAD_MODE_SO" in e for e in built[0])
-    finally:
-        root.destroy()
-
-
-def test_launch_with_refuses_beside_the_edits_set_and_a_live_run(tmp_path, monkeypatch):
-    root, panel, _img, built, launched, logged = _launch_with_panel(tmp_path, monkeypatch)
-    called = []
-    try:
-        panel._overrides_wanted = lambda: ("card", "assets")
-        panel._overrides_refuse = lambda msg: logged.append(msg)
-        assert panel.launch_with(lambda card: called.append(card) or []) is False
-        assert any("untick it" in m for m in logged)
-        panel._overrides_wanted = lambda: None
-        panel._last_up = True
-        assert panel.launch_with(lambda card: called.append(card) or []) is False
-        assert any("already running" in m for m in logged)
-        time.sleep(0.05)
-        assert not called and not launched and panel._launch_prepare is None
-    finally:
-        root.destroy()
-
-
-def test_launch_with_the_preparation_reads_its_own_launch_number(tmp_path, monkeypatch):
-    """Item 127: the Modes tab ties what Try it put in the rig to the launch its
-    preparation ran in. Every Start is numbered BEFORE its worker, so the preparation reads
-    its own launch's number, and a later ordinary Start (no modes in it) has another."""
-    root, panel, _img, _built, launched, _logged = _launch_with_panel(tmp_path, monkeypatch)
-    seen = []
-    try:
-        assert panel.launch_with(lambda card: seen.append(panel._launch_serial) or [])
-        _wait_started(panel)
-        assert launched and seen == [panel._launch_serial]
-        panel.start()                              # the Emulate tab's own Start, later
-        _wait_started(panel)
-        assert len(launched) == 2 and panel._launch_serial == seen[0] + 1
-    finally:
-        root.destroy()
+def test_the_card_functions_are_the_plugins(tmp_path):
+    """PAD-161's choice of card moved to plugins/stern/cards.py so Try it can share it
+    without a Tk import; the tab reads them back from there, one definition."""
+    from pinball_decryptor.plugins.stern import cards
+    assert emulate_core.override_base_card is cards.override_base_card
+    assert emulate_core._title_label is cards._title_label

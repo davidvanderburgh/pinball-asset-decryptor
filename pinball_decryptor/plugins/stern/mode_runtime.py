@@ -53,22 +53,26 @@ def sources_file():
     return os.path.join(sdk_dir(), "prebuilt", "SOURCES.sha256")
 
 
-def _version_key(version):
-    """``1.15``, ``1_15``, ``1.15.0`` and ``1_15_0`` are all the port version ``1.15``.
-    A nonzero third part is kept, so ``1.15.1`` never silently takes ``1.15``'s port."""
-    parts = [p for p in re.split(r"[._]", str(version or "").strip()) if p != ""]
-    if len(parts) == 3 and parts[2].strip("0") == "":
-        parts = parts[:2]
-    return ".".join(parts)
-
-
 def port_file(game_dir, version):
     """The port for one game build, ``sdk/ports/<game_dir>-<version>.port``, or None when
-    the SDK has no port for it (then no mode can run on that build)."""
+    the SDK has no port for it (then no mode can run on that build).
+
+    ``1.15``, ``1_15``, ``1.15.0`` and ``1_15_0`` are all the port version ``1.15``, and a
+    nonzero third part is kept, so ``1.15.1`` never silently takes ``1.15``'s port. The
+    match is by VALUE (:func:`.mode_project.version_key`, the family's one comparison),
+    not by the spelling of the file name: ``jaws_le-1.02.port`` is the port for a card
+    whose index says ``1_02_0``."""
     if not game_dir or not version:
         return None
-    path = os.path.join(sdk_dir(), "ports", "%s-%s.port" % (game_dir, _version_key(version)))
-    return path if os.path.isfile(path) else None
+    from .mode_project import version_key
+    want = version_key(version)
+    if not want:
+        return None
+    for game, named in ports():
+        if game == game_dir and version_key(named) == want:
+            path = os.path.join(sdk_dir(), "ports", "%s-%s.port" % (game, named))
+            return path if os.path.isfile(path) else None
+    return None
 
 
 def ports():

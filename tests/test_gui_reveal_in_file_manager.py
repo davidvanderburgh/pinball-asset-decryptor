@@ -1,17 +1,18 @@
 """Guard for the Replace tabs' "Show in File Explorer" context-menu action.
 
-``MainWindow._reveal_in_file_manager`` shells out to the native file manager
+``shellx_common.reveal_in_file_manager`` (the web UI's home of the old
+``MainWindow._reveal_in_file_manager``) shells out to the native file manager
 (Explorer / Finder / xdg-open) with the original asset selected.  These tests
-exercise it headlessly -- it touches no ``self`` state, so we call it unbound
-with a stub ``self`` and stub the launcher -- to confirm it dispatches the right
-tool for an existing file, falls back to the folder for a missing one, and
-no-ops on an empty path (instead of raising into the Tk callback).
+stub the launcher to confirm it dispatches the right tool for an existing
+file, falls back to the folder for a missing one, and no-ops on an empty path
+(instead of raising into the caller).
 """
 
 import os
 import subprocess
 
-from pinball_decryptor.gui import main_window as mw
+from pinball_decryptor.core import desktop
+from pinball_decryptor.webui import shellx_common
 
 
 def _capture(monkeypatch):
@@ -24,7 +25,7 @@ def _capture(monkeypatch):
     # Linux goes through core.desktop (bundle-scrubbed env + real opener
     # search) rather than a bare xdg-open, so stub that hop as well --
     # otherwise the CI runner's actual file manager would be launched.
-    monkeypatch.setattr(mw.desktop, "open_path",
+    monkeypatch.setattr(desktop, "open_path",
                         lambda p, env=None: (calls.append(p), (True, ""))[1])
     return calls
 
@@ -46,7 +47,7 @@ def test_reveal_existing_file_launches_with_path(tmp_path, monkeypatch):
     f.write_bytes(b"\x00")
     calls = _capture(monkeypatch)
 
-    mw.MainWindow._reveal_in_file_manager(object(), str(f))
+    shellx_common.reveal_in_file_manager(str(f))
 
     assert calls, "no file-manager launcher was invoked"
     flat = _flat(calls)
@@ -58,7 +59,7 @@ def test_reveal_missing_file_falls_back_to_folder(tmp_path, monkeypatch):
     missing = tmp_path / "gone.wav"          # folder exists, file does not
     calls = _capture(monkeypatch)
 
-    mw.MainWindow._reveal_in_file_manager(object(), str(missing))
+    shellx_common.reveal_in_file_manager(str(missing))
 
     assert calls, "missing file should still open the containing folder"
     assert str(tmp_path) in _flat(calls)
@@ -66,6 +67,6 @@ def test_reveal_missing_file_falls_back_to_folder(tmp_path, monkeypatch):
 
 def test_reveal_empty_path_is_noop(monkeypatch):
     calls = _capture(monkeypatch)
-    mw.MainWindow._reveal_in_file_manager(object(), "")
-    mw.MainWindow._reveal_in_file_manager(object(), None)
+    shellx_common.reveal_in_file_manager("")
+    shellx_common.reveal_in_file_manager(None)
     assert calls == []

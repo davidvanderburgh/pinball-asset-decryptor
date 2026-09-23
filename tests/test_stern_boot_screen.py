@@ -268,8 +268,7 @@ def test_find_in_partition_explorer_knows_where_it_lives(tmp_path):
 
 
 def test_the_source_column_calls_it_the_boot_screen():
-    from pinball_decryptor.gui.main_window import MainWindow
-    label = MainWindow._image_source_label
+    from pinball_decryptor.webui.tabs.images import source_label as label
     assert label("images/boot_screen/SternLogo.png") == "Boot screen"
     # a game's own folder that happens to share the name is still a file
     assert label("images/godzilla_pro/boot_screen/a.png") == "File"

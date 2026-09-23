@@ -15,23 +15,22 @@ Two things, both "the app forgets what I told it":
   acknowledgement is written against the source image's current signature so
   it survives a restart without silencing a later, genuinely new change.
 
-The banner tests drive MainWindow's methods against duck-typed stubs and no
-Tk window, the way test_gui_batch26 / test_gui_batch30 do it; the dialog
-tests need a real window and follow test_gui_batch18.
+The banner tests drive the shell service's methods
+(webui/tabs/shell_extras.py) against duck-typed stubs; the choices and
+flashed-image memory drive the Write tab service's (webui/tabs/write.py);
+the dialog tests build the Build / flash dialog's logic
+(webui/write_dialogs.FlashDialog) on its own, with drive enumeration off.
 """
 
 import os
-import tkinter as tk
+import threading
+import types
 
 import pytest
 
 from pinball_decryptor.core import extract_source
-from pinball_decryptor.gui.main_window import MainWindow
-
-from tests.conftest import HAS_DISPLAY
-from tests.test_gui_smoke import app  # noqa: F401  (fixture)
-
-W = MainWindow
+from pinball_decryptor.webui.tabs.shell_extras import ShellExtras
+from pinball_decryptor.webui.tabs.write import WriteTab
 
 FAKE_BUILD = os.path.join(os.sep + "builds", "game-modified.raw")
 
@@ -119,81 +118,61 @@ def test_dismissing_a_vanished_source_changes_nothing(tmp_path):
 
 # ---- the banner itself ----------------------------------------------------
 
-class _FakeBanner:
+class _ImmediateLoop:
+    """`post` runs the callback right away: these tests are about the
+    banner's decisions, not the UI loop."""
+
+    def post(self, fn, *args):
+        fn(*args)
+
+
+class _BannerWindow:
     def __init__(self):
-        self.mapped = False
+        self.banners = {}
 
-    def winfo_ismapped(self):
-        return self.mapped
-
-    def pack(self, **_kw):
-        self.mapped = True
-
-    def pack_forget(self):
-        self.mapped = False
-
-
-class _FakeLabel:
-    def __init__(self):
-        self.text = ""
-
-    def configure(self, text=None, **_kw):
-        self.text = text
-
-    def cget(self, _key):
-        return self.text
-
-
-class _ImmediateRoot:
-    """`after` runs the callback right away — these tests are about the
-    banner's decisions, not Tk's timer wheel."""
-
-    def after(self, _delay, fn=None, *args):
-        if fn is not None:
-            fn(*args)
+    def set_banner(self, banner_id, spec):
+        if spec is None:
+            self.banners.pop(banner_id, None)
+        else:
+            self.banners[banner_id] = spec
 
 
 class _BannerHost:
-    """Just the surface _refresh/_dismiss_stale_source_banner touch.
+    """Just the surface the shell service's stale-source banner touches.
 
-    The refresh is ASYNC now — the staleness probe stats the source image,
-    which can live on OneDrive/NAS, so the real method moved it to a worker
-    (a frozen post-reboot tab switch, 2026-08-09).  The host joins the probe
-    before returning so every assertion below still reads the settled
-    answer, exactly as it did when the method was synchronous."""
+    The refresh is ASYNC: the staleness probe stats the source image, which
+    can live on OneDrive/NAS, so it runs on a worker (a frozen post-reboot
+    tab switch, 2026-08-09).  The host joins the probe before returning so
+    every assertion below reads the settled answer."""
 
     def __init__(self, assets_dir):
         self.write_assets_var = _Var(assets_dir)
-        self._stale_source_banner = _FakeBanner()
-        self._stale_source_banner_text = _FakeLabel()
-        self._stale_source_dismissed = None
-        self._top_bar = None
-        self.root = _ImmediateRoot()
+        self.window = _BannerWindow()
+        self.ctx = types.SimpleNamespace(loop=_ImmediateLoop())
+        self._stale_token = 0
+        self._stale_dismissed = None
+        self._stale_shown = None
+
+    def _var_or_none(self, name):
+        return self.write_assets_var if name == "write_assets_var" else None
 
     def _apply_stale_source_banner(self, *a):
         try:
-            return W._apply_stale_source_banner(self, *a)
+            return ShellExtras._apply_stale_source_banner(self, *a)
         finally:
             self._applied.set()
 
     def refresh(self):
-        import threading as _th
-        self._applied = _th.Event()
-        W._refresh_stale_source_banner(self)
+        self._applied = threading.Event()
+        ShellExtras._refresh_stale_source_banner(self)
         assert self._applied.wait(5), "the staleness probe never answered"
 
-    dismiss = W._dismiss_stale_source_banner
+    def dismiss(self):
+        return ShellExtras._stale_banner_action(self, "dismiss_source")
 
-
-def test_banner_shows_then_stays_down_once_dismissed(tmp_path):
-    _img, out = _stale_project(tmp_path)
-    host = _BannerHost(out)
-    host.refresh()
-    assert host._stale_source_banner.mapped
-    host.dismiss()
-    assert not host._stale_source_banner.mapped
-    host.refresh()
-    assert not host._stale_source_banner.mapped
+    @property
+    def mapped(self):
+        return "stale_source" in self.window.banners
 
 
 def test_dismissal_survives_the_next_launch(tmp_path):
@@ -203,7 +182,7 @@ def test_dismissal_survives_the_next_launch(tmp_path):
     _BannerHost(out).dismiss()
     fresh = _BannerHost(out)        # new session, nothing in memory
     fresh.refresh()
-    assert not fresh._stale_source_banner.mapped
+    assert not fresh.mapped
 
 
 def test_a_new_change_gets_through_a_previous_dismissal(tmp_path):
@@ -212,7 +191,7 @@ def test_a_new_change_gets_through_a_previous_dismissal(tmp_path):
     _touch_later(img, 900)
     fresh = _BannerHost(out)
     fresh.refresh()
-    assert fresh._stale_source_banner.mapped
+    assert fresh.mapped
 
 
 def test_dismissing_one_project_does_not_silence_another(tmp_path):
@@ -226,7 +205,7 @@ def test_dismissing_one_project_does_not_silence_another(tmp_path):
     # Same window, user switches project folder: the other one still warns.
     host.write_assets_var.set(b)
     host.refresh()
-    assert host._stale_source_banner.mapped
+    assert host.mapped
 
 
 def test_unwritable_folder_still_hides_it_for_the_session(tmp_path,
@@ -236,15 +215,28 @@ def test_unwritable_folder_still_hides_it_for_the_session(tmp_path,
     def _boom(_dir):
         raise OSError("read-only share")
 
-    # main_window imports the name directly, so that's the binding to replace.
-    monkeypatch.setattr("pinball_decryptor.gui.main_window."
-                        "dismiss_stale_source", _boom)
+    # the service imports the name from the module at call time
+    monkeypatch.setattr(extract_source, "dismiss_stale_source", _boom)
     host = _BannerHost(out)
     host.refresh()
     host.dismiss()                  # must not raise
-    assert not host._stale_source_banner.mapped
+    assert not host.mapped
     host.refresh()
-    assert not host._stale_source_banner.mapped
+    assert not host.mapped
+
+
+def test_the_stale_banner_dismiss_is_a_labelled_button(tmp_path):
+    """It had one all along — an unlabelled ✕ at the far right of a wide
+    window, two rows under the window's own ✕, which is why the tester asked
+    for a dismiss button while looking straight at it."""
+    _img, out = _stale_project(tmp_path)
+    host = _BannerHost(out)
+    host.refresh()
+    spec = host.window.banners["stale_source"]
+    labels = [a["label"] for a in spec["actions"]]
+    assert "Dismiss" in labels, labels
+    assert "✕" not in labels
+    assert spec["dismiss"] is False, "no bare close cross beside it"
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +246,10 @@ def test_unwritable_folder_still_hides_it_for_the_session(tmp_path,
 class _ChoicesHost:
     def __init__(self, saved=None, sink=None):
         self._saved_flash_choices = dict(saved or {})
-        self._on_flash_choices_change = sink
+        cb = {"on_flash_choices_change": sink} if sink else {}
+        self.window = types.SimpleNamespace(cb=cb)
 
-    remember = W._remember_flash_choices
+    remember = WriteTab._remember_flash_choices
 
 
 def test_window_forwards_the_pair_for_persistence():
@@ -293,141 +286,96 @@ def test_an_unchanged_pair_is_not_re_persisted():
     assert seen == []
 
 
-# ---- the dialog (needs a real window) -------------------------------------
+# ---- the dialog's logic ----------------------------------------------------
 
-gui_only = pytest.mark.skipif(not HAS_DISPLAY,
-                              reason="no Tk display available")
-
-
-def _pick(app, key):
-    mfr = next(m for m in app._manufacturers if m.key == key)
-    app._on_manufacturer_change(mfr)
-    app.root.update(); app.root.update()
-    return app.window
+class _NoLoop:
+    def post(self, fn, *args):
+        pass
 
 
-def _make_dialog(app, monkeypatch, **kw):
-    from pinball_decryptor.gui.flash_dialog import FlashImageDialog
-    monkeypatch.setattr(FlashImageDialog, "_refresh_drives",
-                        lambda self: None)
+def _mfr(key):
+    from pinball_decryptor.core.registry import get_manufacturer, load_plugins
+    load_plugins()
+    mfr = get_manufacturer(key)
+    assert mfr is not None, key
+    return mfr
+
+
+def _make_dialog(monkeypatch, key="stern", **kw):
+    from pinball_decryptor.webui.write_dialogs import FlashDialog
+    monkeypatch.setattr(FlashDialog, "refresh_drives", lambda self: None)
     defaults = dict(
-        parent=app.root, manufacturer=app._current_mfr, theme_name="light",
-        on_flash=lambda i, d: None, on_build_flash=lambda b, d: None,
+        host=_NoLoop(), manufacturer=_mfr(key),
+        on_flash=lambda i, d, **k: None, on_build_flash=lambda b, d: None,
         build_target=FAKE_BUILD, can_build=True, has_pending_changes=True)
     defaults.update(kw)
-    return FlashImageDialog(**defaults)
+    return FlashDialog(**defaults)
 
 
-@pytest.mark.gui
-@gui_only
-def test_dialog_opens_on_the_pair_you_last_ran(app, monkeypatch):
+def _answer_modals(monkeypatch, asked=None, warned=None):
+    from pinball_decryptor.webui import compat
+    asked = [] if asked is None else asked
+    monkeypatch.setattr(compat.messagebox, "askyesno",
+                        lambda title, *a, **k: asked.append(title) or True)
+    if warned is not None:
+        monkeypatch.setattr(compat.messagebox, "showwarning",
+                            lambda title, *a, **k: warned.append(title))
+    return asked
+
+
+def test_dialog_opens_on_the_pair_you_last_ran(monkeypatch):
     """The exact report: build only, come back, both boxes ticked again."""
-    _pick(app, "stern")
-    dlg = _make_dialog(app, monkeypatch,
+    dlg = _make_dialog(monkeypatch,
                        initial_choices={"build": True, "write": False})
-    try:
-        assert dlg._build_var.get() is True
-        assert dlg._write_var.get() is False
-        assert dlg._start_btn.cget("text") == "Build image"
-    finally:
-        dlg._cancel()
+    assert dlg.build is True
+    assert dlg.write is False
+    assert dlg.start_label() == "Build image"
 
 
-@pytest.mark.gui
-@gui_only
-def test_start_records_the_pair_and_cancel_does_not(app, monkeypatch):
-    _pick(app, "stern")
+def test_start_records_the_pair_and_cancel_does_not(monkeypatch):
     seen = []
-    dlg = _make_dialog(app, monkeypatch, on_choices=seen.append)
-    dlg._write_var.set(False); dlg._sync_sections()
-    dlg._cancel()
+    dlg = _make_dialog(monkeypatch, on_choices=seen.append)
+    dlg.set("write", False)
+    dlg.close()
     assert seen == [], "a cancelled dialog must not rewrite the memory"
 
-    dlg = _make_dialog(app, monkeypatch, on_choices=seen.append)
-    dlg._write_var.set(False); dlg._sync_sections()
-    dlg._do_start()
+    dlg = _make_dialog(monkeypatch, on_choices=seen.append)
+    dlg.set("write", False)
+    assert dlg.start() is True
     assert seen == [{"write": False, "build": True}]
 
 
-@pytest.mark.gui
-@gui_only
-def test_a_disabled_build_box_is_not_a_choice(app, monkeypatch):
+def test_a_disabled_build_box_is_not_a_choice(monkeypatch):
     """Build unavailable (Write tab not set up) forces the box off — recording
     that would open build-less next time, once the tab IS set up."""
-    _pick(app, "stern")
     seen = []
-    dlg = _make_dialog(app, monkeypatch, can_build=False,
-                       on_choices=seen.append)
+    dlg = _make_dialog(monkeypatch, can_build=False, on_choices=seen.append)
     dlg._remember_choices()
     assert seen == [{"write": True}]
-    dlg._cancel()
 
 
-@pytest.mark.gui
-@gui_only
-def test_nothing_remembered_keeps_the_original_defaults(app, monkeypatch):
-    _pick(app, "stern")
-    dlg = _make_dialog(app, monkeypatch, has_pending_changes=False)
-    try:
-        # Unchanged behaviour: no edits ⇒ flash-only, the old Flash dialog.
-        assert dlg._build_var.get() is False
-        assert dlg._write_var.get() is True
-    finally:
-        dlg._cancel()
-
-
-@pytest.mark.gui
-@gui_only
-def test_a_remembered_pair_beats_the_no_changes_default(app, monkeypatch):
+def test_a_remembered_pair_beats_the_no_changes_default(monkeypatch):
     """Having run build-only before outranks "nothing is modified"; the
     "Nothing modified — build anyway?" confirm still catches an accident."""
-    _pick(app, "stern")
-    dlg = _make_dialog(app, monkeypatch, has_pending_changes=False,
+    dlg = _make_dialog(monkeypatch, has_pending_changes=False,
                        initial_choices={"build": True, "write": False})
-    try:
-        assert dlg._build_var.get() is True
-        assert dlg._write_var.get() is False
-    finally:
-        dlg._cancel()
+    assert dlg.build is True
+    assert dlg.write is False
 
 
-@pytest.mark.gui
-@gui_only
-def test_an_all_off_memory_falls_back_to_the_defaults(app, monkeypatch):
+def test_an_all_off_memory_falls_back_to_the_defaults(monkeypatch):
     """A dialog that opens with Start greyed out looks broken."""
-    _pick(app, "stern")
-    dlg = _make_dialog(app, monkeypatch,
+    dlg = _make_dialog(monkeypatch,
                        initial_choices={"build": False, "write": False})
-    try:
-        assert dlg._build_var.get() is True
-        assert dlg._write_var.get() is True
-        assert "disabled" not in dlg._start_btn.state()
-    finally:
-        dlg._cancel()
+    assert dlg.build is True
+    assert dlg.write is True
+    assert dlg.state()["start_enabled"] is True
 
 
-@pytest.mark.gui
-@gui_only
-def test_a_remembered_build_cannot_tick_an_impossible_box(app, monkeypatch):
-    _pick(app, "stern")
-    dlg = _make_dialog(app, monkeypatch, can_build=False,
+def test_a_remembered_build_cannot_tick_an_impossible_box(monkeypatch):
+    dlg = _make_dialog(monkeypatch, can_build=False,
                        initial_choices={"build": True, "write": True})
-    try:
-        assert dlg._build_var.get() is False
-    finally:
-        dlg._cancel()
-
-
-@pytest.mark.gui
-@gui_only
-def test_the_stale_banner_dismiss_is_a_labelled_button(app):
-    """It had one all along — an unlabelled ✕ at the far right of a wide
-    window, two rows under the window's own ✕, which is why the tester asked
-    for a dismiss button while looking straight at it."""
-    banner = app.window._stale_source_banner
-    labels = [str(c.cget("text")) for c in banner.winfo_children()]
-    assert "Dismiss" in labels, labels
-    assert "✕" not in labels
+    assert dlg.build is False
 
 
 # ---- the menu-only write, where someone about to wait an hour will find it ----------
@@ -452,114 +400,49 @@ def _spike_image_for(tmp_path):
     return str(p)
 
 
-@pytest.mark.gui
-@gui_only
-def test_the_flash_dialog_offers_the_menu_only_write(app, monkeypatch,
-                                                     tmp_path):
+def test_the_flash_dialog_offers_the_menu_only_write(monkeypatch, tmp_path):
     """A 14.7 GB image on an ordinary card is forty minutes; its MENU is one
     partition and about a minute.  The option defaults ON for an image that
     has one and that a flash has already put onto an SD card (David, twice:
     "flashing the whole thing takes over an hour with my slow sd card"; the
     never-flashed case is PAD-145's test below)."""
-    _pick(app, "stern")
     img = _spike_image_for(tmp_path)
-    dlg = _make_dialog(app, monkeypatch,
+    dlg = _make_dialog(monkeypatch,
                        initial_choices={"build": False, "write": True},
                        flashed_fn=lambda i: True)
-    try:
-        dlg._image_var.set(img)
-        dlg._sync_sections()
-        assert dlg._menu_var.get() is True, "on by default when it can be"
-        assert str(dlg._menu_chk.state()).find("disabled") < 0
-        assert "menu partition only" in dlg._menu_note.cget("text")
-        # ...and never for a build+flash: a fresh image was never on that card
-        dlg._build_var.set(True)
-        dlg._sync_sections()
-        assert dlg._menu_var.get() is False
-        assert "has to be written" in dlg._menu_note.cget("text")
-        # ...nor for something that is not a card image at all
-        dlg._build_var.set(False)
-        plain = tmp_path / "notacard.raw"
-        plain.write_bytes(b"\x00" * 4096)
-        dlg._image_var.set(str(plain))
-        dlg._sync_sections()
-        assert dlg._menu_var.get() is False
-    finally:
-        dlg._dlg.destroy()
+    dlg.set("image_path", img)
+    assert dlg.menu is True, "on by default when it can be"
+    assert dlg.menu_enabled is True
+    assert "menu partition only" in dlg.menu_note
+    # ...and never for a build+flash: a fresh image was never on that card
+    dlg.set("build", True)
+    assert dlg.menu is False
+    assert "has to be written" in dlg.menu_note
+    # ...nor for something that is not a card image at all
+    dlg.set("build", False)
+    plain = tmp_path / "notacard.raw"
+    plain.write_bytes(b"\x00" * 4096)
+    dlg.set("image_path", str(plain))
+    assert dlg.menu is False
 
 
-@pytest.mark.gui
-@gui_only
 @pytest.mark.parametrize("key", ["jjp", "cgc"])
 def test_the_menu_only_write_is_only_offered_where_the_flash_has_one(
-        app, monkeypatch, tmp_path, key):
+        monkeypatch, tmp_path, key):
     """PAD-138: the tick asked the IMAGE whether it had a menu partition and
     never the BRAND, so a JJP USB stick's dialog carried a Stern promise ("the
     machine keeps its settings and scores"), and a CGC image with a Linux
     second partition would have ticked it ON for a flash that cannot do it.
     Same image as the Stern test above - only the brand differs."""
-    _pick(app, key)
     img = _spike_image_for(tmp_path)
-    dlg = _make_dialog(app, monkeypatch,
-                       initial_choices={"build": False, "write": True})
-    try:
-        dlg._image_var.set(img)
-        dlg._sync_sections()
-        assert not dlg._menu_chk.winfo_manager(), "not even on the dialog"
-        assert not dlg._menu_note.winfo_manager()
-        assert dlg._menu_var.get() is False
-    finally:
-        dlg._dlg.destroy()
-
-
-@pytest.mark.gui
-@gui_only
-def test_a_window_short_of_its_content_still_shows_start_and_cancel(
-        app, monkeypatch, tmp_path):
-    """A DIALOG CAN BE WRONG ABOUT ITS HEIGHT; IT MUST NOT BE ABLE TO EAT THE
-    TWO CONTROLS THAT END IT.  pack() hands out space in the order things
-    were packed, so whatever went in LAST is what gets squeezed when the
-    window ends up short of its content - and that was the row carrying
-    Start and Cancel (David: "the confirm and cancel buttons in this modal
-    are squeezed to be too tiny to see" - his were 10 px of a wanted 25,
-    two coloured slivers with no text in them).
-
-    The row is packed FIRST now, against the bottom, so the body is what
-    gives way instead.  Forcing the window 90 px short is this test: it is
-    the state the screenshot was in, and it reproduced at exactly 10 px."""
-    _pick(app, "stern")
-    img = _spike_image_for(tmp_path)
-    dlg = _make_dialog(app, monkeypatch,
-                       initial_choices={"build": False, "write": True})
-    try:
-        dlg._image_var.set(img)
-        dlg._sync_sections()
-        app.root.update()
-        w, start = dlg._dlg, dlg._start_btn
-        # ...as it opens: the window is as tall as everything inside it
-        assert w.winfo_height() >= w.winfo_reqheight()
-        assert start.winfo_height() >= start.winfo_reqheight()
-        # ...and 90 px short of that, which is what a note growing a line
-        # after the geometry was pinned does to it
-        w.geometry("%dx%d" % (w.winfo_width(), w.winfo_reqheight() - 90))
-        app.root.update()
-        assert w.winfo_height() < w.winfo_reqheight(), "the force worked"
-        assert start.winfo_height() >= start.winfo_reqheight(), \
-            "Start is squeezed: %d of %d" % (start.winfo_height(),
-                                             start.winfo_reqheight())
-        # every state of the ticks keeps it that way: each one changes the
-        # note, and the readout changes with them
-        for build, write, menu in ((True, True, False), (False, True, True),
-                                   (False, False, False)):
-            dlg._build_var.set(build)
-            dlg._write_var.set(write)
-            dlg._menu_var.set(menu)
-            dlg._sync_sections()
-            app.root.update()
-            assert start.winfo_height() >= start.winfo_reqheight(), \
-                "build=%s write=%s menu=%s" % (build, write, menu)
-    finally:
-        dlg._dlg.destroy()
+    dlg = _make_dialog(monkeypatch, key=key,
+                       initial_choices={"build": False, "write": True},
+                       flashed_fn=lambda i: True)
+    dlg.set("image_path", img)
+    st = dlg.state()
+    assert st["menu_offered"] is False, "not even on the dialog"
+    assert st["menu_enabled"] is False
+    assert st["menu"] is False
 
 
 # ---- a card the Multi-boot tab hands in is only written (PAD-144) -----------
@@ -570,53 +453,40 @@ def _reader():
                          size_bytes=15_931_539_456, bus_type="USB")
 
 
-@pytest.mark.gui
-@gui_only
-def test_a_card_from_the_multiboot_tab_is_only_written(app, monkeypatch,
-                                                       tmp_path):
+def test_a_card_from_the_multiboot_tab_is_only_written(monkeypatch, tmp_path):
     """The tester's screenshot: the dialog the Multi-boot tab opens still
     carried the Write tab's "Build a fresh image" section and its single-game
     build path ("Could you even use this option to create a fresh build of a
     multigame?"), and Start asked "Nothing modified" - a check on Write-tab
     edits the card never came from ("its not really true since I am not
     rebuilding but pointing to a custom image")."""
-    from tkinter import messagebox
-    _pick(app, "stern")
     img = _spike_image_for(tmp_path)
-    asked, flashed, remembered = [], [], []
-    monkeypatch.setattr(messagebox, "askyesno",
-                        lambda title, *a, **k: asked.append(title) or True)
+    asked = _answer_modals(monkeypatch)
+    flashed, remembered = [], []
     dlg = _make_dialog(
-        app, monkeypatch, initial_image=img, handed_in="Multi-boot",
+        monkeypatch, initial_image=img, handed_in="Multi-boot",
         has_pending_changes=False, on_choices=remembered.append,
         initial_choices={"build": True, "write": True},
         on_flash=lambda i, d, menu_only=False: flashed.append(
             (i, d, menu_only)))
-    try:
-        # no Build section, and no write tick to untick into a dead Start
-        assert not dlg._build_box.winfo_manager()
-        assert not dlg._write_chk.winfo_manager()
-        assert (dlg._build_var.get(), dlg._write_var.get()) == (False, True)
-        assert dlg._image_var.get() == img
-        assert dlg._start_btn.cget("text") == "Flash image"
-        # unticked, the note says what the whole write is for
-        dlg._menu_var.set(False)
-        dlg._sync_sections()
-        assert "first time" in dlg._menu_note.cget("text")
-        dlg._selected = _reader()
-        dlg._do_start()
-        assert asked == ["Erase the SD card and continue?"]
-        assert flashed == [(img, r"\\.\PHYSICALDRIVE9", False)]
-        # ...and writing that card is not the Write tab's choice to remember
-        assert remembered == []
-    finally:
-        if dlg._dlg.winfo_exists():
-            dlg._dlg.destroy()
+    st = dlg.state()
+    # no Build section, and no write tick to untick into a dead Start
+    assert st["handed_in"] is True and st["can_build"] is False
+    assert (dlg.build, dlg.write) == (False, True)
+    assert dlg.image_path == img
+    assert dlg.start_label() == "Flash image"
+    # unticked, the note says what the whole write is for
+    dlg.set("menu", False)
+    assert "first time" in dlg.menu_note
+    dlg.selected = _reader()
+    assert dlg.start() is True
+    assert asked == ["Erase the SD card and continue?"]
+    assert flashed == [(img, r"\\.\PHYSICALDRIVE9", False)]
+    # ...and writing that card is not the Write tab's choice to remember
+    assert remembered == []
 
 
-@pytest.mark.gui
-@gui_only
-def test_a_card_just_built_is_written_whole(app, monkeypatch, tmp_path):
+def test_a_card_just_built_is_written_whole(monkeypatch, tmp_path):
     """"Only the boot menu" came up ticked on a card the Multi-boot tab had
     only just built.  That write refuses any SD card the image was not
     already flashed onto, so on a fresh card the default could only cost a
@@ -624,74 +494,62 @@ def test_a_card_just_built_is_written_whole(app, monkeypatch, tmp_path):
     card, it would pass its check and leave the old games on the SD card.
     Any OTHER image picked in the box is offered it as before.  (Every image
     is "flashed" here, so the fresh card is kept off even against that.)"""
-    _pick(app, "stern")
     img = _spike_image_for(tmp_path)
-    dlg = _make_dialog(app, monkeypatch, initial_image=img,
+    dlg = _make_dialog(monkeypatch, initial_image=img,
                        handed_in="Multi-boot", fresh_image=True,
                        flashed_fn=lambda i: True)
-    try:
-        assert dlg._menu_var.get() is False
-        assert "disabled" in dlg._menu_chk.state()
-        assert "no SD card holds it yet" in dlg._menu_note.cget("text")
-        (tmp_path / "older").mkdir()
-        dlg._image_var.set(_spike_image_for(tmp_path / "older"))
-        dlg._sync_sections()
-        assert dlg._menu_var.get() is True
-        assert "disabled" not in dlg._menu_chk.state()
-    finally:
-        dlg._dlg.destroy()
+    assert dlg.menu is False
+    assert dlg.menu_enabled is False
+    assert "no SD card holds it yet" in dlg.menu_note
+    (tmp_path / "older").mkdir()
+    dlg.set("image_path", _spike_image_for(tmp_path / "older"))
+    assert dlg.menu is True
+    assert dlg.menu_enabled is True
 
 
 # ---- ...and only a card an SD card already has is ticked for it (PAD-145) ---
-@pytest.mark.gui
-@gui_only
-def test_a_card_no_sd_card_has_had_is_not_ticked_for_the_menu(app, monkeypatch,
+def test_a_card_no_sd_card_has_had_is_not_ticked_for_the_menu(monkeypatch,
                                                               tmp_path):
     """"I found that 'only boot menu' was still checked off" - on a card
     built in an EARLIER run and flashed on its own, which PAD-144's fresh
     flag never sees (it is only set when the build runs in the same Start).
     The tick now waits for a flash of that image to have finished; until
     then it is offered, unticked, with a note saying why."""
-    _pick(app, "stern")
     img = _spike_image_for(tmp_path)
     flashed = set()
     kw = dict(initial_image=img, handed_in="Multi-boot",
               flashed_fn=lambda i: i in flashed)
-    dlg = _make_dialog(app, monkeypatch, **kw)
-    try:
-        assert dlg._menu_var.get() is False
-        assert "disabled" not in dlg._menu_chk.state(), "still one tick away"
-        assert "not been flashed onto an SD card" in dlg._menu_note.cget("text")
-        dlg._menu_var.set(True)
-        dlg._sync_sections()
-        assert "menu partition only" in dlg._menu_note.cget("text")
-    finally:
-        dlg._dlg.destroy()
+    dlg = _make_dialog(monkeypatch, **kw)
+    assert dlg.menu is False
+    assert dlg.menu_enabled is True, "still one tick away"
+    assert "not been flashed onto an SD card" in dlg.menu_note
+    dlg.set("menu", True)
+    assert "menu partition only" in dlg.menu_note
+    dlg.close()
     # once a flash of it has finished, the next dialog ticks it again
     flashed.add(img)
-    dlg = _make_dialog(app, monkeypatch, **kw)
-    try:
-        assert dlg._menu_var.get() is True
-        dlg._menu_var.set(False)
-        dlg._sync_sections()
-        assert "first time this image goes onto it" in \
-            dlg._menu_note.cget("text")
-    finally:
-        dlg._dlg.destroy()
+    dlg = _make_dialog(monkeypatch, **kw)
+    assert dlg.menu is True
+    dlg.set("menu", False)
+    assert "first time this image goes onto it" in dlg.menu_note
 
 
-@pytest.mark.gui
-@gui_only
-def test_the_window_remembers_a_flashed_image_by_what_is_in_it(app,
-                                                              monkeypatch,
-                                                              tmp_path):
+class _FlashedHost:
+    def __init__(self, sink):
+        self._flashed_images = []
+        self.window = types.SimpleNamespace(
+            cb={"on_flashed_images_change": sink})
+
+    _remember_flashed_image = WriteTab._remember_flashed_image
+    _image_was_flashed = WriteTab._image_was_flashed
+
+
+def test_the_window_remembers_a_flashed_image_by_what_is_in_it(tmp_path):
     """The record the dialog asks: an image's identity, not its path, so a
     menu edit keeps it and a games tree written into loses it by itself."""
-    win = app.window
     img = _spike_image_for(tmp_path)
     saved = []
-    monkeypatch.setattr(win, "_flashed_images", [])
-    monkeypatch.setattr(win, "_on_flashed_images_change", saved.append)
+    win = _FlashedHost(saved.append)
     assert win._image_was_flashed(img) is False
     win._remember_flashed_image(img)
     assert win._image_was_flashed(img) is True
@@ -715,215 +573,146 @@ def test_the_window_remembers_a_flashed_image_by_what_is_in_it(app,
     assert win._image_was_flashed(str(plain)) is False
 
 
-@pytest.mark.gui
-@gui_only
-def test_only_a_flash_that_finishes_is_recorded(app, monkeypatch, tmp_path):
+def test_only_a_flash_that_finishes_is_recorded(monkeypatch, tmp_path):
     """The app's side: a failed flash leaves no SD card holding the image,
     so it must not tick the menu write next time; a finished one is saved
     in settings, since the flash is often the last thing before closing."""
-    import queue
-    from pinball_decryptor.core.messages import UiCallMsg
-    _pick(app, "stern")
+    import time
+    from tests.webui_harness import web_app
     img = _spike_image_for(tmp_path)
-    win = app.window
     dones = []
 
     class _Idle:
         def run(self):
             pass
-    monkeypatch.setattr(
-        app._current_mfr, "make_flash_pipeline",
-        lambda i, d, log, phase, prog, done, **kw: dones.append(done)
-        or _Idle())
-    monkeypatch.setattr(win, "_flashed_images", [])
 
-    def finish(success):
-        app._start_flash_image(img, r"\\.\PHYSICALDRIVE9")
-        dones[-1](success, "summary")
-        while True:
-            try:
-                msg = app.msg_queue.get_nowait()
-            except queue.Empty:
-                break
-            if isinstance(msg, UiCallMsg):
-                msg.fn()
-        win.set_running(False, mode="write")
-        app.pipeline, app._active_mode = None, None
+    with web_app(tmp_path, mfr="stern") as w:
+        app = w.app
+        monkeypatch.setattr(
+            app._current_mfr, "make_flash_pipeline",
+            lambda i, d, log, phase, prog, done, **kw: dones.append(done)
+            or _Idle())
 
-    finish(False)
-    assert win._image_was_flashed(img) is False
-    finish(True)
-    assert win._image_was_flashed(img) is True
-    assert app._settings["flashed_images"] == win._flashed_images
+        def finish(success):
+            w.run(app._start_flash_image, img, r"\\.\PHYSICALDRIVE9")
+            dones[-1](success, "summary")
+            end = time.time() + 10
+            while w.window._running and time.time() < end:
+                time.sleep(0.05)
+            w.drain()
+            assert not w.window._running, "the flash never ended"
 
-
-@pytest.mark.gui
-@gui_only
-def test_the_multiboot_hand_off_reaches_the_dialog(app, monkeypatch,
-                                                   tmp_path):
-    """The wiring: the Multi-boot tab's flash_fn names the tab and passes
-    fresh on; the Write tab's own button hands nothing in."""
-    from pinball_decryptor.gui import flash_dialog
-    _pick(app, "stern")
-    win = app.window
-    panel = getattr(win, "_multiboot_panel", None)
-    if panel is None:
-        pytest.skip("no Multi-boot tab in this build")
-    img = _spike_image_for(tmp_path)
-    opened = []
-    monkeypatch.setattr(flash_dialog, "FlashImageDialog",
-                        lambda *a, **kw: opened.append(kw))
-    panel._flash_fn(img, fresh=True)
-    win._open_flash_dialog()
-    assert [(kw["handed_in"], kw["fresh_image"]) for kw in opened] == [
-        ("Multi-boot", True), ("", False)]
-    assert opened[0]["initial_image"] == img
+        finish(False)
+        assert w.window._image_was_flashed(img) is False
+        finish(True)
+        assert w.window._image_was_flashed(img) is True
+        svc = w.window.service("write")
+        assert app._settings["flashed_images"] == svc._flashed_images
 
 
-@pytest.mark.gui
-@gui_only
-def test_a_jjp_iso_can_go_straight_onto_the_games_disk(app, monkeypatch, tmp_path):
+def test_a_jjp_iso_can_go_straight_onto_the_games_disk(monkeypatch, tmp_path):
     """Item 123: the dialog's second place for a JJP install ISO - the game's SSD in a
     dock.  Choosing it swaps the drive picker to disks, words the confirmation as an
     install that wipes the disk, and hands ``target="disk"`` to the app; the stick, the
     default, hands nothing new."""
-    import sys
-    from tkinter import messagebox
-    if sys.platform not in ("win32", "linux"):
-        pytest.skip("the disk target is Windows/Linux only")
-    _pick(app, "jjp")
     img = tmp_path / "GunsNRoses-v03.03.multi.iso"
     img.write_bytes(b"iso")
-    asked, flashed = [], []
-    monkeypatch.setattr(messagebox, "askyesno",
-                        lambda title, *a, **k: asked.append(title) or True)
-    dlg = _make_dialog(
-        app, monkeypatch, initial_image=str(img), handed_in="Multi-boot",
-        has_pending_changes=False,
-        on_flash=lambda i, d, menu_only=False, **kw: flashed.append((i, d, kw)))
-    try:
-        assert dlg._target_row is not None, "JJP offers the disk as a second place"
-        assert [t[0] for t in dlg._targets] == ["stick", "disk"]
-        assert dlg._target_var.get() == "stick" and not dlg._to_disk()
-        assert dlg._words["target_kind"] == "usb_stick"
-        # the disk: the picker's kind and label follow, the readout says what happens
-        dlg._target_var.set("disk")
-        dlg._on_target_changed()
-        assert dlg._to_disk()
-        assert dlg._words["target_kind"] == "ssd"
-        assert dlg._target_label.cget("text") == "Target disk:"
-        dlg._selected = _reader()
-        dlg._update_readout()
-        assert "erased" in dlg._readout.cget("text")
-        dlg._do_start()
-        assert asked == ["Erase the disk and install onto it?"]
-        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {"target": "disk"})]
-    finally:
-        if dlg._dlg.winfo_exists():
-            dlg._dlg.destroy()
+    asked = _answer_modals(monkeypatch)
+    flashed = []
+
+    def dialog():
+        return _make_dialog(
+            monkeypatch, key="jjp", initial_image=str(img),
+            handed_in="Multi-boot", has_pending_changes=False,
+            on_flash=lambda i, d, menu_only=False, **kw: flashed.append(
+                (i, d, kw)))
+
+    dlg = dialog()
+    assert [t[0] for t in dlg._targets] == ["stick", "disk"], \
+        "JJP offers the disk as a second place"
+    assert dlg.target == "stick" and not dlg.to_disk()
+    assert dlg.words["target_kind"] == "usb_stick"
+    # the disk: the picker's kind and label follow, the readout says what happens
+    dlg.set("target", "disk")
+    assert dlg.to_disk()
+    assert dlg.words["target_kind"] == "ssd"
+    assert dlg.words["target_label"] == "Target disk:"
+    dlg.selected = _reader()
+    assert "erased" in dlg.readout()[0]
+    assert dlg.start() is True
+    assert asked == ["Erase the disk and install onto it?"]
+    assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {"target": "disk"})]
     # ...and back on the stick nothing new travels
     asked.clear()
     flashed.clear()
-    dlg = _make_dialog(
-        app, monkeypatch, initial_image=str(img), handed_in="Multi-boot",
-        has_pending_changes=False,
-        on_flash=lambda i, d, menu_only=False, **kw: flashed.append((i, d, kw)))
-    try:
-        dlg._selected = _reader()
-        dlg._do_start()
-        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {})]
-        assert asked and asked[0].startswith("Erase the USB stick")
-    finally:
-        if dlg._dlg.winfo_exists():
-            dlg._dlg.destroy()
+    dlg = dialog()
+    dlg.selected = _reader()
+    assert dlg.start() is True
+    assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {})]
+    assert asked and asked[0].startswith("Erase the USB stick")
 
 
-@pytest.mark.gui
-@gui_only
-def test_the_disk_target_offers_the_menu_alone_and_one_image_alone(app, monkeypatch, tmp_path):
+def test_the_disk_target_offers_the_menu_alone_and_one_image_alone(monkeypatch, tmp_path):
     """Item 124: with the disk chosen, a Write choice appears - everything, only the menu,
     only image 0/1 (named by the tab's titles) from its own ISO - and each reaches the app as
     ``disk_mode`` (+ ``image`` and ``from_iso``); the image write refuses to start without
     its ISO."""
-    import sys
-    from tkinter import messagebox
-    if sys.platform not in ("win32", "linux"):
-        pytest.skip("the disk target is Windows/Linux only")
-    _pick(app, "jjp")
     img = tmp_path / "GunsNRoses-v03.03.multi.iso"
     img.write_bytes(b"iso")
     new = tmp_path / "CHAKAs_v2.iso"
     new.write_bytes(b"iso")
-    asked, flashed, warned = [], [], []
-    monkeypatch.setattr(messagebox, "askyesno", lambda title, *a, **k: asked.append(title) or True)
-    monkeypatch.setattr(messagebox, "showwarning", lambda title, *a, **k: warned.append(title))
+    flashed, warned = [], []
+    asked = _answer_modals(monkeypatch, warned=warned)
 
     def dialog():
         return _make_dialog(
-            app, monkeypatch, initial_image=str(img), handed_in="Multi-boot",
-            has_pending_changes=False, image_titles=["GUNS N' ROSES 3.03", "CHAKA'S LOTLJ"],
-            on_flash=lambda i, d, menu_only=False, **kw: flashed.append((i, d, kw)))
+            monkeypatch, key="jjp", initial_image=str(img),
+            handed_in="Multi-boot", has_pending_changes=False,
+            image_titles=["GUNS N' ROSES 3.03", "CHAKA'S LOTLJ"],
+            on_flash=lambda i, d, menu_only=False, **kw: flashed.append(
+                (i, d, kw)))
 
     dlg = dialog()
-    try:
-        assert not dlg._disk_mode_row.winfo_manager(), "no Write row for the stick"
-        dlg._target_var.set("disk")
-        dlg._on_target_changed()
-        assert dlg._disk_mode_row.winfo_manager() and not dlg._from_row.winfo_manager()
-        labels = dlg._disk_mode_labels()
-        assert labels[0].startswith("everything") and labels[1].startswith("only the boot menu")
-        assert labels[2] == "only image 0: GUNS N' ROSES 3.03, from its own ISO"
-        assert labels[3] == "only image 1: CHAKA'S LOTLJ, from its own ISO"
-        # the menu alone
-        dlg._disk_mode_combo.current(1)
-        dlg._on_disk_mode_changed()
-        assert dlg._disk_mode() == "menu" and not dlg._from_row.winfo_manager()
-        dlg._selected = _reader()
-        dlg._update_readout()
-        assert "only the boot menu" in dlg._readout.cget("text")
-        dlg._do_start()
-        assert asked == ["Replace the boot menu?"]
-        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {"target": "disk", "disk_mode": "menu"})]
-    finally:
-        if dlg._dlg.winfo_exists():
-            dlg._dlg.destroy()
+    assert dlg.state()["show_disk_mode"] is False, "no Write row for the stick"
+    dlg.set("target", "disk")
+    st = dlg.state()
+    assert st["show_disk_mode"] is True and st["show_from"] is False
+    labels = [lbl for _k, lbl in dlg.disk_modes()]
+    assert labels[0].startswith("everything") and labels[1].startswith("only the boot menu")
+    assert labels[2] == "only image 0: GUNS N' ROSES 3.03, from its own ISO"
+    assert labels[3] == "only image 1: CHAKA'S LOTLJ, from its own ISO"
+    # the menu alone
+    dlg.set("disk_mode", "menu")
+    assert dlg.current_disk_mode() == "menu" and not dlg.state()["show_from"]
+    dlg.selected = _reader()
+    assert "only the boot menu" in dlg.readout()[0]
+    assert dlg.start() is True
+    assert asked == ["Replace the boot menu?"]
+    assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {"target": "disk", "disk_mode": "menu"})]
     asked.clear()
     flashed.clear()
     dlg = dialog()
-    try:
-        dlg._target_var.set("disk")
-        dlg._on_target_changed()
-        dlg._disk_mode_combo.current(3)
-        dlg._on_disk_mode_changed()
-        assert dlg._disk_mode() == "image1" and dlg._from_row.winfo_manager()
-        dlg._selected = _reader()
-        dlg._update_readout()
-        assert "still to pick" in dlg._readout.cget("text")
-        dlg._do_start()
-        assert warned == ["No ISO for the image"] and flashed == []
-        dlg._from_var.set(str(new))
-        assert "CHAKAs_v2.iso" in dlg._readout.cget("text")
-        dlg._do_start()
-        assert asked == ["Replace image 1?"]
-        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9",
-                            {"target": "disk", "disk_mode": "image", "image": 1, "from_iso": str(new)})]
-    finally:
-        if dlg._dlg.winfo_exists():
-            dlg._dlg.destroy()
+    dlg.set("target", "disk")
+    dlg.set("disk_mode", "image1")
+    assert dlg.current_disk_mode() == "image1" and dlg.state()["show_from"]
+    dlg.selected = _reader()
+    assert "still to pick" in dlg.readout()[0]
+    assert dlg.start() is False
+    assert warned == ["No ISO for the image"] and flashed == []
+    dlg.set("from_path", str(new))
+    assert "CHAKAs_v2.iso" in dlg.readout()[0]
+    assert dlg.start() is True
+    assert asked == ["Replace image 1?"]
+    assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9",
+                        {"target": "disk", "disk_mode": "image", "image": 1, "from_iso": str(new)})]
     # back on the stick the Write row goes away and nothing new travels
     flashed.clear()
     asked.clear()
     dlg = dialog()
-    try:
-        dlg._target_var.set("disk")
-        dlg._on_target_changed()
-        dlg._target_var.set("stick")
-        dlg._on_target_changed()
-        assert not dlg._disk_mode_row.winfo_manager() and not dlg._from_row.winfo_manager()
-        dlg._selected = _reader()
-        dlg._do_start()
-        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {})]
-    finally:
-        if dlg._dlg.winfo_exists():
-            dlg._dlg.destroy()
-
+    dlg.set("target", "disk")
+    dlg.set("target", "stick")
+    st = dlg.state()
+    assert not st["show_disk_mode"] and not st["show_from"]
+    dlg.selected = _reader()
+    assert dlg.start() is True
+    assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {})]

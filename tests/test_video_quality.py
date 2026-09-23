@@ -343,16 +343,22 @@ class _Var:
 
 
 class _Win:
-    """Just enough MainWindow for _video_quality_default_card."""
+    """Just enough window for the Video tab's _quality_default_card."""
 
     def __init__(self, assets="", picked=""):
         self.write_assets_var = _Var(assets)
         self.extract_input_var = _Var(picked)
 
 
+def _default_card(win):
+    from pinball_decryptor.webui.tabs.video import VideoTab
+    tab = VideoTab.__new__(VideoTab)
+    tab.window = win
+    return VideoTab._quality_default_card(tab)
+
+
 def test_default_card_prefers_the_projects_own_source(tmp_path):
     from pinball_decryptor.core.extract_source import write_extract_source
-    from pinball_decryptor.gui.main_window import MainWindow
     built = tmp_path / "built.raw"
     built.write_bytes(b"\x00" * 16)
     other = tmp_path / "stock.raw"
@@ -362,17 +368,15 @@ def test_default_card_prefers_the_projects_own_source(tmp_path):
     write_extract_source(str(project), str(built))
 
     win = _Win(assets=str(project), picked=str(other))
-    assert MainWindow._video_quality_default_card(win) == str(built)
+    assert _default_card(win) == str(built)
 
 
 def test_default_card_falls_back_to_the_extract_tab_pick(tmp_path):
-    from pinball_decryptor.gui.main_window import MainWindow
     picked = tmp_path / "stock.raw"
     picked.write_bytes(b"\x00" * 16)
     win = _Win(assets=str(tmp_path / "no-such-project"), picked=str(picked))
-    assert MainWindow._video_quality_default_card(win) == str(picked)
+    assert _default_card(win) == str(picked)
 
 
 def test_default_card_is_empty_when_nothing_is_known():
-    from pinball_decryptor.gui.main_window import MainWindow
-    assert MainWindow._video_quality_default_card(_Win()) == ""
+    assert _default_card(_Win()) == ""

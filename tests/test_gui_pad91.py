@@ -13,263 +13,227 @@ plus a Level column, both Stern-only (the capability), the values persist in
 the folder's sidecar for the write pipeline to read, and "Apply to all shown"
 covers the case in between one clip and everything — set Type to Music and
 only the songs move.
+
+Driven through the web UI's Replace Audio service (webui/tabs/audio.py).
 """
 
 import json
-
-import pytest
+import os
+import struct
+import time
+import wave
 
 from pinball_decryptor.core import staged_changes
-from pinball_decryptor.core.audio_slots import AudioSlot
-from tests.conftest import HAS_DISPLAY
-from tests.test_gui_smoke import app  # noqa: F401  (fixture)
-
-pytestmark = [
-    pytest.mark.gui,
-    pytest.mark.skipif(not HAS_DISPLAY, reason="no Tk display available"),
-]
+from tests.webui_harness import web_app
 
 RELS = ["audio/idx0006.wav", "audio/idx0007.wav",
         "audio/music_cat07_0003.wav"]
 
 
-def _stern_with_slots(app, manufacturers_by_key, folder, rels=RELS):
-    """A Stern window with *rels* scanned out of *folder* (which is also the
-    Write destination, so _save_staged_changes writes its sidecar)."""
-    app._on_manufacturer_change(manufacturers_by_key["stern"])
-    app.root.update()
-    win = app.window
-    (folder / "audio").mkdir(parents=True, exist_ok=True)
+def _wav(path, seconds=0.2, rate=8000, amp=2000):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    n = int(seconds * rate)
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(struct.pack("<h", amp if i % 16 < 8 else -amp)
+                               for i in range(n)))
+
+
+def _wait(w, pred, timeout=15.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        w.drain()
+        if pred():
+            return True
+        time.sleep(0.02)
+    return pred()
+
+
+def _folder(folder, rels=RELS):
     for rel in rels:
-        (folder / rel).write_bytes(b"RIFF")
-    win.write_assets_var.set(str(folder))
-    win._audio_slots = [
-        AudioSlot(rel_path=r, abs_path=str(folder / r), ext=".wav",
-                  info=None, size=4) for r in rels]
-    win._audio_slots_by_rel = {s.rel_path: s for s in win._audio_slots}
-    win._audio_scan_dir = str(folder)
-    win._refresh_audio_list()
-    app.root.update()
-    return win
+        _wav(str(folder / rel))
+    return folder
 
 
-def _select(app, win, rel):
-    win._audio_tree.selection_set(rel)
-    app.root.update()
+def _scan(w, folder):
+    """Scan *folder* (which is also the Write destination, so the sidecar
+    lands there) onto the audio tab; the audio service."""
+    w.run(lambda: w.window.write_assets_var.set(str(folder)))
+    w.call("ui.select_tab", "audio")
+    assert _wait(w, lambda: len(w.state("audio")["rows"]) > 0
+                 and not w.state("audio")["scanning"]), w.state("audio")
+    assert _wait(w, lambda: "still checking" not in
+                 (w.state("audio")["status"] or ""))
+    svc = w.window.service("audio")
+    w.run(svc._cancel_select_job)
+    return svc
 
 
-def test_the_level_column_and_db_box_are_stern_only(app, manufacturers_by_key,
-                                                    tmp_path):
+def _lvl(w, rel):
+    return {r["k"]: r for r in w.state("audio")["rows"]}[rel]["lvl"]
+
+
+def _select(w, rel):
+    w.call("audio.select", [rel])
+
+
+def test_the_level_column_and_db_box_are_stern_only(tmp_path):
     """An inert control is worse than none: the box and the column ride the
     audio_level_offset capability, like Loop (BOF) and Full (JJP) do."""
-    win = _stern_with_slots(app, manufacturers_by_key, tmp_path / "ex")
-    assert "lvl" in win._audio_tree["displaycolumns"]
-    assert win._audio_level_row.winfo_manager() == "grid"
+    with web_app(tmp_path, mfr="stern") as w:
+        st = w.state("audio")
+        assert st["col"] == "lvl"
+        assert st["level_cap"] is True
 
-    app._on_manufacturer_change(manufacturers_by_key["cgc"])
-    app.root.update()
-    assert "lvl" not in win._audio_tree["displaycolumns"]
-    assert win._audio_level_row.winfo_manager() != "grid"
+        w.call("ui.pick_manufacturer", "cgc")
+        w.drain()
+        st = w.state("audio")
+        assert st["col"] != "lvl"
+        assert st["level_cap"] is False
 
 
-def test_a_clips_level_is_its_own_and_lands_in_the_sidecar(
-        app, manufacturers_by_key, tmp_path):
+def test_a_clips_level_is_its_own_and_lands_in_the_sidecar(tmp_path):
     """The report, answered: setting the box on one row must move that row and
     nothing else, and must survive the app being closed."""
-    folder = tmp_path / "ex"
-    win = _stern_with_slots(app, manufacturers_by_key, folder)
+    folder = _folder(tmp_path / "ex")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _scan(w, folder)
 
-    _select(app, win, RELS[0])
-    win._audio_level_var.set("6")
-    app.root.update()
+        _select(w, RELS[0])
+        assert w.call("audio.set_level", RELS[0], "6") is True
 
-    assert win._audio_level_db == {RELS[0]: 6}
-    assert win._audio_tree.set(RELS[0], "lvl") == "+6 dB"
-    assert win._audio_tree.set(RELS[1], "lvl") == ""     # the neighbour
-    saved = staged_changes.load(str(folder))
-    assert saved["audio_levels"] == {RELS[0]: 6}
+        assert svc._level == {RELS[0]: 6}
+        assert _lvl(w, RELS[0]) == "+6 dB"
+        assert _lvl(w, RELS[1]) == ""                    # the neighbour
+        saved = staged_changes.load(str(folder))
+        assert saved["audio_levels"] == {RELS[0]: 6}
 
-    # Selecting another row shows ITS value, not the one still on screen —
-    # otherwise the next keystroke would land on the wrong slot.
-    _select(app, win, RELS[1])
-    assert win._audio_level_var.get() == "0"
-    _select(app, win, RELS[0])
-    assert win._audio_level_var.get() == "6"
+        # Selecting another row shows ITS value, not the one still on screen
+        # — otherwise the next keystroke would land on the wrong slot.
+        _select(w, RELS[1])
+        assert w.state("audio")["level"] == "0"
+        _select(w, RELS[0])
+        assert w.state("audio")["level"] == "6"
 
-    # Back to 0 clears the entry rather than storing a zero.
-    win._audio_level_var.set("0")
-    app.root.update()
-    assert win._audio_level_db == {}
-    assert staged_changes.load(str(folder))["audio_levels"] == {}
+        # Back to 0 clears the entry rather than storing a zero.
+        w.call("audio.set_level", RELS[0], "0")
+        assert svc._level == {}
+        assert staged_changes.load(str(folder))["audio_levels"] == {}
 
 
-def test_a_half_typed_value_never_lands_on_a_slot(app, manufacturers_by_key,
-                                                  tmp_path):
+def test_a_half_typed_value_never_lands_on_a_slot(tmp_path):
     """The box is typed into, so it passes through "-" on the way to "-4"."""
-    win = _stern_with_slots(app, manufacturers_by_key, tmp_path / "ex")
-    _select(app, win, RELS[0])
-    win._audio_level_var.set("-")
-    app.root.update()
-    assert RELS[0] not in win._audio_level_db
-    win._audio_level_var.set("-4")
-    app.root.update()
-    assert win._audio_level_db[RELS[0]] == -4
-    # …and it is held to the range the encoder honours.
-    win._audio_level_var.set("40")
-    app.root.update()
-    assert win._audio_level_db[RELS[0]] == 12
+    folder = _folder(tmp_path / "ex")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _scan(w, folder)
+        _select(w, RELS[0])
+        assert w.call("audio.set_level", RELS[0], "-") is False
+        assert RELS[0] not in svc._level
+        w.call("audio.set_level", RELS[0], "-4")
+        assert svc._level[RELS[0]] == -4
+        # …and it is held to the range the encoder honours.
+        w.call("audio.set_level", RELS[0], "40")
+        assert svc._level[RELS[0]] == 12
 
 
-def test_apply_to_all_shown_follows_the_type_filter(app, manufacturers_by_key,
-                                                    tmp_path, monkeypatch):
+def test_apply_to_all_shown_follows_the_type_filter(tmp_path):
     """The middle ground between one clip and the whole build: with the list
     filtered to Music, "Apply to all shown" lifts the songs and leaves the
     callouts where they are."""
-    from pinball_decryptor.gui import main_window as mw
-    folder = tmp_path / "ex"
-    win = _stern_with_slots(app, manufacturers_by_key, folder)
-    monkeypatch.setattr(mw.messagebox, "askyesno", lambda *a, **k: True)
+    folder = _folder(tmp_path / "ex")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _scan(w, folder)
 
-    win.audio_search_var.set("music_cat")       # the same narrowing the
-    app.root.update()                           # Type filter does
-    assert win._audio_visible_rels() == [RELS[2]]
+        w.call("ui.set", "audio", "search", "music_cat")   # the same
+        w.drain()                                   # narrowing Type does
+        assert svc._visible_rels == [RELS[2]]
 
-    win._audio_level_var.set("4")
-    win._audio_level_apply_all()
-    app.root.update()
-    assert win._audio_level_db == {RELS[2]: 4}
+        w.answers.append("yes")
+        assert w.call("audio.level_apply_all", "4") is True
+        assert svc._level == {RELS[2]: 4}
 
-    win.audio_search_var.set("")
-    app.root.update()
-    assert win._audio_tree.set(RELS[2], "lvl") == "+4 dB"
-    assert win._audio_tree.set(RELS[0], "lvl") == ""
+        w.call("ui.set", "audio", "search", "")
+        w.drain()
+        assert _lvl(w, RELS[2]) == "+4 dB"
+        assert _lvl(w, RELS[0]) == ""
 
-    # The whole list, cleared the same way.
-    win._audio_level_var.set("0")
-    win._audio_level_apply_all()
-    app.root.update()
-    assert win._audio_level_db == {}
+        # The whole list, cleared the same way.
+        w.answers.append("yes")
+        w.call("audio.level_apply_all", "0")
+        assert svc._level == {}
 
 
-def test_levels_come_back_from_the_sidecar_on_the_next_scan(
-        app, manufacturers_by_key, tmp_path):
+def test_levels_come_back_from_the_sidecar_on_the_next_scan(tmp_path):
     """A level set weeks ago has to be there when the folder is re-opened —
     and a slot that has since vanished must not be resurrected."""
-    folder = tmp_path / "ex"
-    (folder / "audio").mkdir(parents=True)
+    folder = _folder(tmp_path / "ex")
     (folder / staged_changes.SIDE_CAR).write_text(json.dumps({
         "audio_levels": {RELS[0]: -3, "audio/idx9999.wav": 5}}),
         encoding="utf-8")
-    win = _stern_with_slots(app, manufacturers_by_key, folder, rels=RELS)
-    # _stern_with_slots fakes the scan; drive the real restore path.
-    win._audio_scan_dir = ""
-    win._populate_audio_after_scan(win._audio_slots, win._audio_scan_id,
-                                   str(folder))
-    app.root.update()
-    assert win._audio_level_db == {RELS[0]: -3}
-    assert win._audio_tree.set(RELS[0], "lvl") == "-3 dB"
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _scan(w, folder)
+        assert svc._level == {RELS[0]: -3}
+        assert _lvl(w, RELS[0]) == "-3 dB"
 
 
-def test_the_advanced_dialog_says_it_is_the_build_wide_one(
-        app, manufacturers_by_key, tmp_path):
-    """What he actually asked ("will it affect every single clip?") is now
-    answered where he asked it, with a pointer to the per-clip box."""
-    import tkinter as tk
-
-    win = _stern_with_slots(app, manufacturers_by_key, tmp_path / "ex")
-    win._open_audio_advanced()
-    app.root.update()
-    dlg = [c for c in win.root.winfo_children()
-           if isinstance(c, tk.Toplevel)][-1]
-
-    def texts(w):
-        out = [str(w.cget("text"))] if "text" in w.keys() else []
-        for c in w.winfo_children():
-            out += texts(c)
-        return out
-
-    blob = "\n".join(texts(dlg))
-    assert "WHOLE build" in blob
-    assert "Loudness for this clip" in blob
-    dlg.destroy()
-
-
-def test_the_preview_is_drawn_and_played_at_the_clips_level(
-        app, manufacturers_by_key, tmp_path, monkeypatch):
+def test_the_preview_is_drawn_and_played_at_the_clips_level(tmp_path,
+                                                            monkeypatch):
     """"the spectrum image shows the db adjustment? it's hard to tell" — it
     didn't: the strip was the file exactly as handed over.  Now the offset
-    goes through the render and through playback, so the box is something you
-    can see and hear."""
-    import threading
-
-    from pinball_decryptor.core import audio as _audio
-    folder = tmp_path / "ex"
-    win = _stern_with_slots(app, manufacturers_by_key, folder)
+    goes through the render and through playback (the page's player plays a
+    pane at its ``gain``), so the box is something you can see and hear."""
+    from pinball_decryptor.webui import audio_media
+    folder = _folder(tmp_path / "ex")
     rep = folder / "mine.wav"
-    rep.write_bytes(b"RIFF")
+    _wav(str(rep))
 
-    drawn, rendered = [], threading.Event()
+    drawn = []
 
-    def fake_render(path, width=700, height=90, gain_db=0.0):
+    def fake_render(path, width=800, height=90, gain_db=0.0):
         drawn.append((path, gain_db))
-        rendered.set()
         return None
-    monkeypatch.setattr(_audio, "render_spectrogram_png", fake_render)
-    monkeypatch.setattr(_audio, "probe_duration", lambda p: 1.0)
+    monkeypatch.setattr(audio_media, "spectrogram_file", fake_render)
 
-    win._audio_assignments[RELS[0]] = str(rep)
-    win._audio_level_db[RELS[0]] = 6
-    win._audio_load_track(RELS[0])
-    assert rendered.wait(5)
-    app.root.update()
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _scan(w, folder)
 
-    assert win._audio_pane_rep.gain_db == 6
-    assert (str(rep), 6) in drawn
-    # the Original is the card's own sound and is never levelled
-    assert win._audio_pane_orig.gain_db == 0
-    # …and the strip says so, so a brighter picture can't read as a different
-    # file.  The hand-back half is driven directly: outside a mainloop the
-    # render thread's own after() raises "main thread is not in main loop",
-    # so the draw is exercised where it actually runs — on the main thread.
-    pane = win._audio_pane_rep
-    pane._show_spectrogram(None, pane._render_id, 400, 90)
-    app.root.update()
-    assert pane.spec_canvas.find_withtag("gainbadge")
+        def _load():
+            svc._assign[RELS[0]] = str(rep)
+            svc._level[RELS[0]] = 6
+            svc._load_track(RELS[0])
+        w.run(_load)
+        assert _wait(w, lambda: (str(rep), 6) in drawn)
 
-    played = []
-
-    class _Proc:
-        def poll(self):
-            return None
-
-        def terminate(self):
-            pass
-    monkeypatch.setattr(_audio, "play_audio_file",
-                        lambda path, start=0.0, limit=None, gain_db=0.0:
-                        played.append(gain_db) or _Proc())
-    win._audio_pane_rep.start_playback(0.0)
-    assert played == [6]
-    win._audio_pane_rep.stop_playback()
+        panes = w.state("audio")["panes"]
+        assert panes["rep"]["gain"] == 6
+        assert panes["rep"]["path"] == str(rep)
+        # the Original is the card's own sound and is never levelled
+        assert panes["orig"]["gain"] == 0
 
 
-def test_moving_the_box_redraws_the_loaded_clip(app, manufacturers_by_key,
-                                                tmp_path, monkeypatch):
+def test_moving_the_box_redraws_the_loaded_clip(tmp_path, monkeypatch):
     """The redraw is debounced (it is an ffmpeg render per keystroke
     otherwise), and only re-renders when the number actually moved."""
-    from pinball_decryptor.core import audio as _audio
-    folder = tmp_path / "ex"
-    win = _stern_with_slots(app, manufacturers_by_key, folder)
-    win._audio_current_rel = RELS[0]
-    win._audio_pane_rep.path = str(folder / RELS[0])
-    win._audio_pane_rep.gain_db = 0.0
-    monkeypatch.setattr(_audio, "render_spectrogram_png",
+    from pinball_decryptor.webui import audio_media
+    monkeypatch.setattr(audio_media, "spectrogram_file",
                         lambda *a, **k: None)
+    folder = _folder(tmp_path / "ex")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _scan(w, folder)
+        _select(w, RELS[0])
+        w.run(svc._cancel_select_job)
 
-    _select(app, win, RELS[0])
-    win._audio_level_var.set("4")
-    app.root.update()
-    assert win._audio_pane_rep.gain_db == 0.0      # not yet — debounced
-    assert win._audio_level_render_job is not None
-    win.root.after(400, win.root.quit)
-    win.root.mainloop()                            # let the debounce land
-    assert win._audio_pane_rep.gain_db == 4
+        def _loaded():
+            svc._current_rel = RELS[0]
+            pane = dict(svc._panes["rep"])
+            pane["path"] = str(folder / RELS[0])
+            pane["gain"] = 0.0
+            svc._panes["rep"] = pane
+        w.run(_loaded)
+
+        w.call("audio.set_level", RELS[0], "4")
+        assert svc._panes["rep"]["gain"] == 0.0     # not yet — debounced
+        assert svc._level_job is not None
+        assert _wait(w, lambda: svc._panes["rep"]["gain"] == 4, timeout=3)

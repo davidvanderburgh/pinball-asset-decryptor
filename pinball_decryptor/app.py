@@ -1,14 +1,13 @@
-"""Application controller — wires the GUI to manufacturer plugins."""
+"""Application controller — wires the web UI to manufacturer plugins."""
 
 import json
+import logging
 import os
 import queue
 import re
 import sys
 import threading
 import time
-import tkinter as tk
-from tkinter import filedialog, messagebox
 
 from . import __version__
 from .core import build_output, desktop, modpack
@@ -21,48 +20,10 @@ from .core.registry import all_manufacturers, get_manufacturer, load_plugins
 from .core.updater import (check_for_update, download_installer,
                            install_update_macos, launch_installer_windows,
                            restart_wsl_for_update)
-from .gui.main_window import MainWindow
+from .webui import compat
+from .webui.compat import filedialog, messagebox
 
-
-#: Pixels per point on a 96-dpi display, which is what Windows Tk uses and
-#: therefore what every hardcoded point size in this GUI was chosen against.
-_WINDOWS_TK_SCALING = 96.0 / 72.0
-
-
-def _match_windows_text_size(root):
-    """Make a point size mean the same thing on macOS as it does on Windows.
-
-    THE GUI SIZES ITS TEXT IN POINTS — ``font=(_SANS_FONT, 9)`` appears
-    hundreds of times — and Tk converts points to pixels with its ``scaling``
-    factor, which it takes from the display.  Windows reports 96 dpi, so a
-    9-point font is 12 pixels; macOS reports 72, so the same 9 points is 9
-    pixels.  Every label in the app is therefore about a quarter smaller on a
-    Mac than the layout was drawn for, which is what "the font sizes are
-    inconsistent with the Windows releases" is.
-
-    Setting the factor is the only central fix available.  The alternative is
-    editing several hundred size literals, which trades one platform's
-    inconsistency for a permanent maintenance tax and would still leave the
-    next platform wrong.
-
-    NOT APPLIED ON WINDOWS OR LINUX: both already resolve points against a real
-    display dpi, and overriding that would fight a user's own display scaling.
-    ``PAD_TK_SCALING`` overrides the number for anyone whose display makes this
-    the wrong call.
-    """
-    override = (os.environ.get("PAD_TK_SCALING") or "").strip()
-    if override:
-        try:
-            root.tk.call("tk", "scaling", float(override))
-        except Exception:                               # noqa: BLE001
-            pass
-        return
-    if sys.platform != "darwin":
-        return
-    try:
-        root.tk.call("tk", "scaling", _WINDOWS_TK_SCALING)
-    except Exception:                                   # noqa: BLE001
-        pass            # a wrong text size is not a reason to fail to start
+log = logging.getLogger(__name__)
 
 
 def _resolve_startup_manufacturer(manufacturers, settings):
@@ -157,7 +118,7 @@ def replacement_mismatch_message(assets_dir, mismatches, recorded,
     """Body text for the Build / Export "these assignments were made against
     another folder" warning.
 
-    *mismatches* is ``MainWindow.replacement_folder_mismatches()`` output —
+    *mismatches* is ``window.replacement_folder_mismatches()`` output —
     ``[(kind, count, folder), ...]``; *recorded* is
     :func:`recorded_replacement_counts` for *assets_dir*.
 
@@ -206,7 +167,15 @@ def replacement_mismatch_message(assets_dir, mismatches, recorded,
 
 
 class App:
-    def __init__(self):
+    """The run logic behind the web window.  Constructed ON the UI loop
+    (``webui.host.build``) with the web UI's context: ``ctx.loop`` is the
+    thread the event loop runs on, ``self.root`` (:class:`webui.compat.Root`) its
+    ``after`` timers and title, ``self.window`` (:class:`webui.window.
+    WebWindow`) the page."""
+
+    def __init__(self, ctx):
+        self.ctx = ctx
+        ctx.app = self
         # Expose the bundled ffmpeg (imageio-ffmpeg, in the frozen Mac/Linux
         # apps) under the plain name "ffmpeg" on PATH before anything probes
         # for it -- so the per-plugin ffmpeg finders (some verbatim-upstream,
@@ -221,8 +190,11 @@ class App:
             raise RuntimeError(
                 "No manufacturer plugins registered.  Check the install.")
 
-        self.root = tk.Tk()
-        _match_windows_text_size(self.root)
+        self.root = compat.Root(ctx)
+        # The UI loop is this interface's thread: nothing on it may wait on
+        # wsl.exe (core.runtime answers from its cache there).
+        from .core import runtime as _runtime
+        _runtime.ui_thread_check = ctx.loop.in_loop
         self.msg_queue = queue.Queue()
         self.pipeline = None
         self._active_mode = "extract"
@@ -235,7 +207,7 @@ class App:
         # Pending (debounced) prereq-check timer id — see
         # _kick_off_prereq_check.  Startup restores the saved input path
         # (which can trigger an era-switch recheck) AND _apply_manufacturer
-        # kicks its own check, all within one Tk tick; coalescing them keeps
+        # kicks its own check, all within one loop tick; coalescing them keeps
         # the log from showing the "Checking N prerequisites…" block twice.
         self._prereq_after_id = None
         # Replacement-staging failures from the most recent Write run
@@ -256,7 +228,7 @@ class App:
         # Path of the loaded/saved .pinproj (shown in the title bar), or None.
         self._project_path = None
         # Detected-game caption for the title bar ("Led Zeppelin v1.22 LE"),
-        # or None while nothing is detected.  Set BEFORE MainWindow exists:
+        # or None while nothing is detected.  Set BEFORE the window exists:
         # its construction restores saved paths, whose traces can fire the
         # detected-game callback immediately.
         self._detected_caption = None
@@ -295,65 +267,82 @@ class App:
         self._apply_text_grow_env(self._text_grow_setting())
         # PREVIEW FEATURES (the mode maker ships dark): the codes in settings.json
         # are checked ONCE, here, and the answer is cached for the whole run
-        # (core/preview.py).  Before MainWindow, whose Modes tab asks it.
+        # (core/preview.py).  Before the window, whose Modes tab asks it.
         self._load_preview_codes()
 
         # First-launch disclaimer.  Boolean flag, unversioned: once the
         # user accepts, they never see it again — including across app
         # updates and reinstalls (the settings dir lives outside the
-        # install dir).  Declining or closing the dialog exits cleanly
-        # before we even build the main window.
-        #
-        # We CANNOT withdraw the root before showing the modal — on
-        # Windows pythonw a transient Toplevel whose parent is withdrawn
-        # never gets mapped, the grab fails silently, the dialog
-        # destroys immediately, and the app exits with no traceback (the
-        # "just crashing before the GUI shows" failure mode).  Instead
-        # we size root tiny + off-screen-ish + title-only so it's barely
-        # visible behind the modal, then hand it off to MainWindow.
-        #
-        # CI / test harnesses set ``PINBALL_SKIP_DISCLAIMER=1`` so the
-        # GUI smoke tests don't hang waiting for a user click against a
-        # modal that nobody can dismiss on a headless runner.
+        # install dir).  The page shows it over everything until it is
+        # answered (accept_disclaimer); the session starts after that.
+        # Test harnesses set ``PINBALL_SKIP_DISCLAIMER=1``.
         skip_disclaimer = (os.environ.get("PINBALL_SKIP_DISCLAIMER")
                            or "PYTEST_CURRENT_TEST" in os.environ)
-        need_disclaimer = (not skip_disclaimer
-                           and not self._settings.get("disclaimer_accepted"))
-        # Keep the window hidden until it's positioned + populated, so the user
-        # never sees a flash of the default-geometry empty white box before the
-        # saved placement lands (it's revealed with deiconify() at the end of
-        # __init__).  The first-launch disclaimer modal can't run over a
-        # withdrawn parent — on Windows pythonw a transient over a withdrawn
-        # root never maps — so that path withdraws only after the modal closes.
-        if not need_disclaimer:
-            self.root.withdraw()
-        if need_disclaimer:
-            from .gui.disclaimer import show_disclaimer_dialog
-            self.root.title(APP_NAME)
-            self.root.geometry("1x1+0+0")  # minimal pre-dialog footprint
-            self.root.update_idletasks()
-            accepted = show_disclaimer_dialog(
-                self.root, theme_name=(saved_theme or "light"))
-            if not accepted:
-                self.root.destroy()
-                raise SystemExit(0)
-            self._settings["disclaimer_accepted"] = True
-            # Persist immediately, before MainWindow exists — we can't
-            # use _save_settings() yet (it touches self.window).
-            try:
-                os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-                with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(self._settings, f, indent=2)
-            except OSError:
-                pass
-            # Modal dismissed — hide the tiny pre-dialog root now, before we
-            # build + position the real window, so it reveals cleanly too.
-            self.root.withdraw()
+        self._need_disclaimer = (not skip_disclaimer and not
+                                 self._settings.get("disclaimer_accepted"))
 
-        self.window = MainWindow(
-            self.root,
+        from .webui.window import WebWindow, _system_theme
+        self.window = WebWindow(ctx, self, self._manufacturers,
+                                self._window_callbacks(saved_theme))
+        self.window._current_theme = saved_theme or _system_theme()
+        ctx.loop.error_hook = self._report_ui_error
+        # Per-picker-type last-used folders (see WebWindow.last_browse_dir).
+        saved_dirs = self._settings.get("browse_dirs")
+        if isinstance(saved_dirs, dict):
+            self.window._last_browse_dirs = {
+                k: v for k, v in saved_dirs.items() if isinstance(v, str)}
+        # Tracks whether the run in flight is a Direct-SSD pipeline,
+        # so we can auto-acknowledge the macOS FDA banner after a
+        # successful run (empirical proof that Full Disk Access is
+        # actually working — that's a more reliable signal than the
+        # TCC.db, which is SIP-protected and can't be queried).
+        self._current_run_is_direct_ssd = False
+        # (input_path, output_dir) of the extract in flight, so a successful
+        # run can stamp the output folder with the source image's identity
+        # (see core.extract_source / the stale-source banner).
+        self._last_extract_io = None
+        # Project folder mid-hydrate: set when an extract into an archived
+        # project starts (its edits are parked in .hydrate/), consumed by
+        # the done-handler to move them back.  See _start_extract.
+        self._pending_post_hydrate = None
+        # The window's last un-maximized "WxH+X+Y", kept by the desktop host
+        # as the user resizes (webui.host); saved in settings on the way out.
+        self._last_normal_geometry = None
+        ctx.store.set("shell", zoom=float(self._settings.get("ui_zoom")
+                                          or 1.0),
+                      theme=self.window._current_theme,
+                      disclaimer=bool(self._need_disclaimer),
+                      badge=self._checkout_badge or "")
+
+        if not self._need_disclaimer:
+            self._start_session()
+
+    def _report_ui_error(self, text):
+        """An exception escaping a UI job (a button's handler, an ``after``
+        callback) is REPORTED, never swallowed: a half-finished action with
+        no word about it is how a tester's F2 rename renamed the file but
+        skipped the list refresh, leaving a row that clicked into nothing
+        (batch 23).  One line in the log, the traceback in the session log
+        for a bug report.  Wired to the UI loop's ``error_hook``; it never
+        raises out of itself."""
+        from .core import session_log
+        try:
+            session_log.append(text)
+            last = (text or "").strip().splitlines()[-1:] or ["?"]
+            name, _, msg = last[0].partition(": ")
+            self.window.append_log(
+                "Internal error in %s: %s — the action may be half done; "
+                "re-scan the folder to be sure of what the list shows. "
+                "The details are in the session log."
+                % (name.rsplit(".", 1)[-1], msg or name), "error")
+        except Exception:                               # noqa: BLE001
+            pass
+
+    def _window_callbacks(self, saved_theme):
+        """What the window calls back into the run logic, by name."""
+        s = self._settings
+        return dict(
             app_title=APP_NAME,
-            manufacturers=self._manufacturers,
             on_manufacturer_change=self._on_manufacturer_change,
             on_extract=self._start_extract,
             on_extract_cancel=self._cancel,
@@ -375,10 +364,9 @@ class App:
             recent_projects_provider=self._recent_projects,
             on_project_folder_picked=self._on_project_folder_picked,
             on_folder_state_written=self._on_folder_state_written,
-            initial_show_log_history=bool(
-                self._settings.get("show_log_history", True)),
+            initial_show_log_history=bool(s.get("show_log_history", True)),
             on_show_log_history_change=self._on_show_log_history_change,
-            initial_compare_row_limit=self._settings.get("compare_row_limit"),
+            initial_compare_row_limit=s.get("compare_row_limit"),
             on_compare_row_limit_change=self._on_compare_row_limit_change,
             on_stage_pending=self.stage_pending_replacements,
             preview_codes_provider=self._preview_codes,
@@ -395,19 +383,19 @@ class App:
             on_check_updates=self._check_for_update_now,
             on_install_update=self._install_update,
             initial_fda_acknowledged=bool(
-                self._settings.get("macos_fda_acknowledged", False)),
+                s.get("macos_fda_acknowledged", False)),
             on_fda_acknowledge=self._on_fda_acknowledge,
-            initial_column_widths=self._settings.get("column_widths", {}),
+            initial_column_widths=s.get("column_widths", {}),
             on_column_widths_change=self._on_column_widths_change,
             initial_admin_warning_collapsed=bool(
-                self._settings.get("admin_warning_collapsed", False)),
+                s.get("admin_warning_collapsed", False)),
             on_admin_warning_collapsed_change=(
                 self._on_admin_warning_collapsed_change),
-            initial_voice_quality=self._settings.get("voice_quality"),
+            initial_voice_quality=s.get("voice_quality"),
             on_voice_quality_change=self._on_voice_quality_change,
-            initial_update_interval=self._settings.get("update_check_hours"),
+            initial_update_interval=s.get("update_check_hours"),
             on_update_interval_change=self._on_update_interval_change,
-            initial_audio_advanced=self._settings.get("audio_advanced") or {},
+            initial_audio_advanced=s.get("audio_advanced") or {},
             on_audio_advanced_change=self._on_audio_advanced_change,
             initial_text_grow=self._text_grow_setting(),
             on_text_grow_change=self._on_text_grow_change,
@@ -416,44 +404,18 @@ class App:
             on_partition_image_opened=self._on_partition_image_opened,
             on_compare_run=self._on_compare_run,
             on_extract_both=self._start_extract_both,
-            initial_default_presets=self._settings.get(
-                "default_settings_presets", {}),
+            initial_default_presets=s.get("default_settings_presets", {}),
             on_default_presets_change=self._on_default_presets_change,
-            initial_flash_choices=self._settings.get("flash_choices", {}),
+            initial_flash_choices=s.get("flash_choices", {}),
             on_flash_choices_change=self._on_flash_choices_change,
-            initial_flashed_images=self._settings.get("flashed_images", []),
+            initial_flashed_images=s.get("flashed_images", []),
             on_flashed_images_change=self._on_flashed_images_change,
+            on_ui_zoom_change=self._on_ui_zoom_change,
         )
-        # Per-picker-type last-used folders (see MainWindow.last_browse_dir).
-        saved_dirs = self._settings.get("browse_dirs")
-        if isinstance(saved_dirs, dict):
-            self.window._last_browse_dirs = {
-                k: v for k, v in saved_dirs.items() if isinstance(v, str)}
-        # Tracks whether the run in flight is a Direct-SSD pipeline,
-        # so we can auto-acknowledge the macOS FDA banner after a
-        # successful run (empirical proof that Full Disk Access is
-        # actually working — that's a more reliable signal than the
-        # TCC.db, which is SIP-protected and can't be queried).
-        self._current_run_is_direct_ssd = False
-        # (input_path, output_dir) of the extract in flight, so a successful
-        # run can stamp the output folder with the source image's identity
-        # (see core.extract_source / the stale-source banner).
-        self._last_extract_io = None
-        # Project folder mid-hydrate: set when an extract into an archived
-        # project starts (its edits are parked in .hydrate/), consumed by
-        # the done-handler to move them back.  See _start_extract.
-        self._pending_post_hydrate = None
 
-        # Restore the user's last window size + position over MainWindow's
-        # default (a tester: the app "does not remember my preferred sizing
-        # and position").  Clamped to the current screen so a geometry saved on
-        # a since-disconnected monitor can't open off-screen.  The last
-        # un-maximized geometry, tracked live, is what gets saved — see
-        # _on_root_configure.
-        self._last_normal_geometry = None
-        self._restore_window_geometry()
-        self.root.bind("<Configure>", self._on_root_configure, add="+")
-
+    def _start_session(self):
+        """Everything after the window exists: at startup, or once the
+        first-launch disclaimer has been accepted."""
         # Start where the user left off: most users work one machine at a
         # time, so the saved last_manufacturer opens directly (the header's
         # home button returns to the picker; the always-visible manufacturer
@@ -465,29 +427,39 @@ class App:
             self._apply_manufacturer(last_mfr)
         else:
             self.window.show_picker()
-
-        # Reveal the window now that it's at its saved geometry and the picker
-        # is laid out — the first thing the user sees is the real UI, not a
-        # default-size empty frame flashing into its saved position.
-        self.root.update_idletasks()
-        self.root.deiconify()
-        self._restore_window_maximized()
-
         self._poll_queue()
-
         # Compose (not overwrite) the title: the manufacturer restore above
         # may already have detected the saved card and set its caption —
         # a bare title() here would clobber it, and the caption-change guard
         # in _on_detected_game_change would then suppress every identical
         # re-detection (caught in the v0.79.0 screenshot pass).
         self._refresh_title()
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._log_preview_startup()
-
         self.root.after(1500, self._check_for_update)
 
-    def run(self):
-        self.root.mainloop()
+    def accept_disclaimer(self, accepted):
+        """The first-launch disclaimer, answered on the page.  Declining
+        quits."""
+        if not accepted:
+            self.ctx.host.quit() if self.ctx.host else None
+            return False
+        self._settings["disclaimer_accepted"] = True
+        try:
+            os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._settings, f, indent=2)
+        except OSError:
+            pass
+        self._need_disclaimer = False
+        self.ctx.store.set("shell", disclaimer=False)
+        self._start_session()
+        return True
+
+    def _capture_run(self):
+        """Captures and tests (PAD_UI_CAPTURE) run against copies of the
+        user's settings but REAL project folders: nothing may be written back
+        into a project or the settings on the way out."""
+        return bool(os.environ.get("PAD_UI_CAPTURE"))
 
     def _save_session_state(self):
         """Everything this session would otherwise lose: the open project's
@@ -501,8 +473,11 @@ class App:
         and it must not sit behind anything that can be interrupted.
 
         Best-effort and idempotent: safe to call twice, and a failure here may
-        never stop the close (or the update) that asked for it.
+        never stop the close (or the update) that asked for it.  A capture
+        run (:meth:`_capture_run`) writes nothing.
         """
+        if self._capture_run():
+            return
         try:
             from .core import project_file
             folder = self._project_path
@@ -570,12 +545,17 @@ class App:
         # because the emulators stop through wsl.exe above and would boot the
         # VM again, and after the settings, because the installer may close
         # this process while the shutdown runs.
+        try:
+            self.window.close()
+        except Exception:
+            pass
         if getattr(self, "_restart_wsl_on_close", False):
             self._restart_wsl_for_update()
-        self.root.destroy()
+        # A question still open on the page must not hold the loop.
+        self.ctx.dialogs.cancel_all()
 
     # ------------------------------------------------------------------
-    # Queue polling — bridge background threads to the Tk main loop.
+    # Queue polling — bridge background threads to the UI loop.
     # ------------------------------------------------------------------
 
     def _poll_queue(self):
@@ -596,10 +576,12 @@ class App:
                 elif isinstance(msg, DoneMsg):
                     self._on_done(msg.success, msg.summary)
                 elif isinstance(msg, UiCallMsg):
+                    # A UI call whose target went away while it was queued
+                    # must not stop the polling.
                     try:
                         msg.fn()
-                    except tk.TclError:
-                        pass    # widget torn down while the msg was queued
+                    except Exception:
+                        log.exception("a queued UI call failed")
                 elif isinstance(msg, PrereqMsg):
                     # Drop stale results if the user switched mfrs while
                     # the worker was still running.
@@ -679,21 +661,19 @@ class App:
         into a US one because another project was opened.  A value this build
         does not offer (a later build's settings, a hand edit) is ignored, so
         the row keeps its default rather than holding a choice it cannot make.
+        The allowed values are the Emulate service's (``machine_choices``).
         """
-        from .gui.emulate_tab import EmulatePanel
         settings = getattr(self, "_settings", None) or {}
-        powers = [label for label, _env in EmulatePanel.POWER_CHOICES]
-        for key, name, allowed in (
-                ("emulate_country", "emulate_country_var",
-                 (EmulatePanel.COUNTRY_GAME,) + EmulatePanel.COUNTRIES),
-                ("emulate_power", "emulate_power_var", powers)):
+        svc = self.window.service("emulate")
+        allowed = getattr(svc, "machine_choices", None)
+        if svc is None or allowed is None:
+            return
+        for key, name in (("emulate_country", "emulate_country_var"),
+                          ("emulate_power", "emulate_power_var")):
             var = getattr(self.window, name, None)
             value = settings.get(key)
-            if var is not None and value in allowed:
-                try:
-                    var.set(value)
-                except tk.TclError:
-                    pass
+            if var is not None and value in allowed(key):
+                var.set(value)
 
     def _restore_emulate_card(self, project_folder):
         """Put the Emulate tab's "Card image to run" back after a restart.
@@ -796,14 +776,25 @@ class App:
             s1_var.set(_rmd(s1_card) if s1_card else "")
 
     def multiboot_state(self):
-        """The Multi-boot tab's form as a document (see
-        :meth:`..gui.multiboot_tab.MultibootPanel.state`), or ``{}``.
+        """The Multi-boot tab's form as a document (the panel's ``state()``),
+        or ``{}``.
 
-        Read defensively: this also runs on the way out, and a Tk variable
-        read after the interpreter has gone raises rather than returning."""
+        Read defensively: this also runs on the way out.  With no Multi-boot
+        panel at all, answer what is SAVED (the open project's form, else
+        the global one), never {} - an empty answer is written over the
+        saved form on the next quit."""
         panel = getattr(self.window, "_multiboot_panel", None)
         if panel is None:
-            return {}
+            try:
+                folder = self._project_folder() or ""
+                from .core import project_file
+                if folder and project_file.has_anchor(folder):
+                    data = project_file.load_anchor(folder)
+                    if "multiboot" in data:
+                        return data.get("multiboot") or {}
+            except Exception:
+                pass
+            return self._settings.get("multiboot_state") or {}
         try:
             return panel.state()
         except Exception:
@@ -824,7 +815,9 @@ class App:
         actually changed: this must never be what turns a folder into one,
         and it must not touch the anchor's mtime for a tab nobody opened.
         Best-effort - a NAS hiccup on the way OUT of a project must not
-        stop the one being opened."""
+        stop the one being opened.  A capture run writes nothing."""
+        if self._capture_run():
+            return
         folder = (project_folder or "").strip()
         if not folder:
             return
@@ -896,14 +889,19 @@ class App:
     def _kick_off_prereq_check(self, mfr):
         """Coalesce prereq-check requests, then run the probe worker.
 
-        Several call sites can fire within a single Tk tick at startup /
+        Several call sites can fire within a single loop tick at startup /
         on an era switch (restore-saved-path → era recheck, plus
         ``_apply_manufacturer``'s own kick).  Running each immediately
         spams the log with duplicate "Checking N prerequisites…" blocks
         and double-launches the probe threads.  Debouncing through a
         short ``after`` window collapses a same-tick burst into one
         check while leaving a user-initiated Re-check (spaced out in
-        time) firing normally."""
+        time) firing normally.
+
+        Captures and tests set PAD_UI_NO_PREREQS=1: no wsl.exe / tool
+        probes."""
+        if os.environ.get("PAD_UI_NO_PREREQS"):
+            return
         if self._prereq_after_id is not None:
             try:
                 self.root.after_cancel(self._prereq_after_id)
@@ -1009,9 +1007,6 @@ class App:
 
     def _launch_install_prereqs(self):
         """Spawn install_prerequisites.ps1 in an elevated PowerShell."""
-        import sys
-        from tkinter import messagebox
-
         if sys.platform == "darwin":
             messagebox.showinfo(
                 "Install Prerequisites",
@@ -1533,18 +1528,11 @@ class App:
         # match; setting the var alone would leave the drive picker on screen.
         src_var = getattr(self.window, "extract_input_source_var", None)
         if src_var is not None:
-            try:
-                src_var.set("iso")
-                self.window._on_input_source_change("extract")
-            except tk.TclError:
-                pass
+            src_var.set("iso")
+            self.window._on_input_source_change("extract")
         self.window.extract_input_var.set(os.path.normpath(path_a))
         self.window.extract_output_var.set(os.path.normpath(out_a))
-        try:
-            self.window._notebook.select(self.window._tab_extract)
-        except tk.TclError:
-            # The run still happens; only the view is left where the user was.
-            pass
+        self.window._notebook.select(self.window._tab_extract)
         self.window.append_log(
             "Extract Both: two cards, one after the other.\n"
             "  1. %s  ->  %s\n  2. %s  ->  %s"
@@ -1613,7 +1601,7 @@ class App:
             self.msg_queue.put(LogMsg(
                 "Extract done; chaining auto-transcribe...", "info"))
             # wrapped() runs on the Extract pipeline's worker thread.
-            # Hop to the main thread before touching any Tk widgets
+            # Hop to the UI loop before touching the window
             # inside _start_transcribe (set_running, reset_steps, etc.)
             # -- root.after(0, ...) is the cheapest cross-thread hand-off.
             self.root.after(0, lambda: self._start_transcribe(
@@ -2245,7 +2233,7 @@ class App:
         (:func:`core.rawdevice.flash_menu_to_device`).
 
         The image + target card were collected and confirmed by the flash
-        dialog (``gui.flash_dialog.FlashImageDialog``); this just runs the
+        dialog (``webui/write_dialogs.py``); this just runs the
         manufacturer's flash pipeline through the normal status area.  Admin and
         the destructive-write confirmation are enforced in the dialog before we
         get here."""
@@ -2334,7 +2322,7 @@ class App:
         """Save a whole card into a raw image file (the inverse of a flash).
 
         The card + destination were collected and checked by the read-card
-        dialog (``gui.read_card_dialog.ReadCardDialog``); this runs the read
+        dialog (``webui/tabs/extract.py``); this runs the read
         through the normal status area.  It reports as an *extract*: it reads
         a card into a file, so the Extract button is the run's Cancel and the
         Extract phase row carries its steps."""
@@ -2370,7 +2358,7 @@ class App:
         Called from ``_start_extract`` (chained) when the user ticked
         the auto-transcribe checkbox.  ``assets_dir_override`` is the
         Extract output dir (passed directly to bypass any race with
-        the Tk var); ``outer_done_summary`` + ``outer_done_cb`` let us
+        the window's var); ``outer_done_summary`` + ``outer_done_cb`` let us
         defer the Extract's "Complete" modal until transcribe finishes
         so the user sees one terminal dialog instead of two.
         """
@@ -2408,8 +2396,8 @@ class App:
         # Give Auto-transcribe its OWN status block: swap the phase row to the
         # transcribe step list ("Load model / Transcribe / Rename / Write CSV")
         # and let phase_cb drive it, instead of leaving the Extract row's last
-        # chip stuck active.  (Runs on the main thread -- chained via root.after,
-        # standalone is a direct call -- so touching Tk here is safe.)
+        # chip stuck active.  (Runs on the UI loop -- chained via root.after,
+        # standalone is a direct call -- so touching the window is safe.)
         self.window.show_chained_phases(
             getattr(self._current_mfr, "transcribe_phases", ()))
 
@@ -4358,7 +4346,10 @@ class App:
         — this is the *background* check; users who want explicit
         confirmation either way click the "Check for updates" button,
         which calls :meth:`_check_for_update_now` instead.
+        PAD_UI_NO_UPDATE_CHECK=1 (captures, tests) turns it off.
         """
+        if os.environ.get("PAD_UI_NO_UPDATE_CHECK"):
+            return
         self._run_update_check(show_up_to_date_toast=False)
 
     def _schedule_update_recheck(self):
@@ -4379,18 +4370,18 @@ class App:
         if after_id:
             try:
                 self.root.after_cancel(after_id)
-            except (tk.TclError, ValueError):
+            except ValueError:
                 pass
         try:
             hours = int(self.window.update_interval_var.get())
-        except (AttributeError, ValueError, tk.TclError):
+        except (AttributeError, ValueError):
             return
         if hours <= 0:
             return
         try:
             self._update_recheck_after = self.root.after(
                 hours * 3600 * 1000, self._recheck_for_update)
-        except (tk.TclError, RuntimeError):
+        except RuntimeError:
             pass                       # window gone
 
     def _recheck_for_update(self):
@@ -4400,8 +4391,8 @@ class App:
 
     def _on_update_interval_change(self, hours):
         """Persist the ⚙ "Check automatically" pick and re-arm the timer."""
-        from .gui.main_window import (UPDATE_INTERVAL_CHOICES,
-                                      normalize_update_interval)
+        from .webui.update_interval import (UPDATE_INTERVAL_CHOICES,
+                                            normalize_update_interval)
         hours = normalize_update_interval(hours)
         self._settings["update_check_hours"] = hours
         self._save_settings()
@@ -4452,11 +4443,10 @@ class App:
                     0, self._handle_update_check_result,
                     result, show_up_to_date_toast, failed,
                     publishing[0] if publishing else None)
-            except (tk.TclError, RuntimeError):
+            except RuntimeError:
                 # The app closed while the check was in flight.  There is
                 # nothing left to tell, and raising here only surfaces as a
-                # stray worker-thread traceback at shutdown — which is also
-                # enough to break the NEXT GUI test's Tk interpreter.
+                # stray worker-thread traceback at shutdown.
                 pass
         threading.Thread(target=_run, daemon=True).start()
 
@@ -4694,14 +4684,10 @@ class App:
         mfr_repo = (self._current_mfr.update_repo
                     if self._current_mfr else None)
         # One 5-second-capped request on the click that is about to start a
-        # download anyway; paint the reason first so the pause is explained.
+        # download anyway; log the reason first so the pause is explained.
         self.window.append_log(
             "Checking whether %s is still the newest release..." % version,
             "info")
-        try:
-            self.root.update_idletasks()
-        except tk.TclError:
-            pass
         try:
             fresh = check_for_update(__version__, repo=mfr_repo)
         except Exception as e:
@@ -4846,98 +4832,37 @@ class App:
         return {}
 
     def _window_is_maximized(self):
-        """True when the window is maximized right now.
+        """True when the desktop host's window is maximized right now."""
+        host = self.ctx.host
+        return bool(host and host.is_maximized())
 
-        Tk exposes that two different ways: ``wm state`` is "zoomed" on
-        Windows and macOS, while on X11 a maximized window still reports
-        "normal" and only the ``-zoomed`` attribute knows."""
-        try:
-            if self.root.state() == "zoomed":
-                return True
-        except tk.TclError:
-            return False
-        try:
-            return bool(self.root.attributes("-zoomed"))
-        except tk.TclError:
-            return False
-
-    def _maximize_window(self):
-        """Maximize the window, whichever mechanism this platform's Tk has."""
-        try:
-            self.root.state("zoomed")
-            return True
-        except tk.TclError:
-            pass
-        try:
-            self.root.attributes("-zoomed", True)
-            return True
-        except tk.TclError:
-            return False
-
-    def _on_root_configure(self, event):
-        """Track the window's UN-maximized size + position.
-
-        ``winfo_geometry()`` on a maximized window returns the maximized
-        rectangle, so saving it as the plain geometry would restore a
-        screen-sized ordinary window the next time the user un-maximizes.
-        Only geometry seen while the window is normal is remembered; the
-        maximized state itself is a separate saved flag."""
-        if event.widget is not self.root:
-            return
-        try:
-            if not self._window_is_maximized():
-                self._last_normal_geometry = self.root.winfo_geometry()
-        except tk.TclError:
-            pass
-
-    def _restore_window_geometry(self):
-        """Re-apply the saved window geometry ("WxH+X+Y"), clamped to the
-        current screen.  No-op when there's no saved geometry (first launch).
-
-        The saved maximized state is applied separately, after the window is
-        revealed (see ``_restore_window_maximized``) — zooming a window that
-        is still withdrawn is not something every platform's Tk agrees on."""
-        geo = self._settings.get("window_geometry")
-        if not isinstance(geo, str):
-            return
-        # Seed the normal-geometry tracker so a session that never leaves the
-        # maximized state still writes back a sane un-maximized size.
-        self._last_normal_geometry = geo
-        m = re.fullmatch(r"\s*(\d+)x(\d+)([+-]\d+)([+-]\d+)\s*", geo)
+    def saved_geometry(self):
+        """(width, height, x, y, maximized) from settings.json ("WxH+X+Y"),
+        for the desktop host to open the window where it was left; None
+        when nothing usable is saved."""
+        geo = self._settings.get("window_geometry") or ""
+        m = re.match(r"(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?", geo)
         if not m:
-            return
-        w, h, x, y = (int(m.group(1)), int(m.group(2)),
-                      int(m.group(3)), int(m.group(4)))
-        try:
-            sw = self.root.winfo_screenwidth()
-            sh = self.root.winfo_screenheight()
-        except tk.TclError:
-            return
-        # Clamp size to the screen, and position so a good chunk of the window
-        # (incl. the titlebar) stays on-screen and reachable.
-        w = max(720, min(w, sw))
-        h = max(700, min(h, sh))
-        x = max(-(w - 120), min(x, sw - 120))
-        y = max(0, min(y, sh - 120))
-        try:
-            self.root.geometry("%dx%d+%d+%d" % (w, h, x, y))
-        except tk.TclError:
-            pass
+            return None
+        w, h = int(m.group(1)), int(m.group(2))
+        x = int(m.group(3)) if m.group(3) is not None else None
+        y = int(m.group(4)) if m.group(4) is not None else None
+        return (w, h, x, y, bool(self._settings.get("window_maximized")))
 
-    def _restore_window_maximized(self):
-        """Re-maximize the window when that's how the user left it.
-
-        Size and position alone don't restore a maximized window: it comes
-        back as an ordinary window that merely happens to be screen-sized,
-        which is what an auto-update restart handed a tester back every time
-        ("I always have my app maximized. After it updates it does not put it
-        back to maximize", 2026-08-11).  Called after ``deiconify()`` so the
-        zoom lands on a mapped window."""
-        if not self._settings.get("window_maximized"):
+    def _on_ui_zoom_change(self, zoom):
+        """The page's zoom (Ctrl +/-), kept in settings."""
+        try:
+            zoom = float(zoom)
+        except (TypeError, ValueError):
             return
-        self._maximize_window()
+        zoom = max(0.6, min(2.0, zoom))
+        self._settings["ui_zoom"] = zoom
+        self.ctx.store.set("shell", zoom=zoom)
+        self._save_settings()
 
     def _save_settings(self):
+        if self._capture_run():
+            return
         if self._current_mfr is not None:
             self._save_manufacturer_paths(self._current_mfr.key)
             self._settings["last_manufacturer"] = self._current_mfr.key
@@ -4953,12 +4878,12 @@ class App:
         # having no project, which the anchor save cannot cover because it is
         # skipped outright when the folder has no anchor.  Read defensively:
         # _save_settings also runs on the way out, and a var read after the
-        # interpreter has gone raises rather than returning "".
+        # window has gone raises rather than returning "".
         card_var = getattr(self.window, "emulate_card_var", None)
         if card_var is not None:
             try:
                 self._settings["emulate_card"] = card_var.get().strip()
-            except tk.TclError:
+            except Exception:
                 pass
         # The JJP emulator's game ISO rides the same rail but under its OWN
         # key: a Stern .raw card and a JJP .iso in one setting is a bug waiting
@@ -4967,19 +4892,19 @@ class App:
         if jjp_iso_var is not None:
             try:
                 self._settings["jjp_emulate_iso"] = jjp_iso_var.get().strip()
-            except tk.TclError:
+            except Exception:
                 pass
         # The Spike 1 card image, its own key (see the restore side).
         s1_var = getattr(self.window, "spike1_emulate_card_var", None)
         if s1_var is not None:
             try:
                 self._settings["spike1_emulate_card"] = s1_var.get().strip()
-            except tk.TclError:
+            except Exception:
                 pass
         # The Multi-boot tab's form, globally — the fallback for having no
         # project, which the anchor save cannot cover.  multiboot_state()
-        # swallows a var read after the interpreter has gone, the way the
-        # try/except above each of these does.
+        # swallows a failed read, the way the try/except above each of these
+        # does.
         multi = self.multiboot_state()
         if multi:
             self._settings["multiboot_state"] = multi
@@ -4987,13 +4912,13 @@ class App:
         if states_var is not None:
             try:
                 self._settings["emulate_savestates"] = bool(states_var.get())
-            except tk.TclError:
+            except Exception:
                 pass
         ovr_var = getattr(self.window, "emulate_overrides_var", None)
         if ovr_var is not None:
             try:
                 self._settings["emulate_overrides"] = bool(ovr_var.get())
-            except tk.TclError:
+            except Exception:
                 pass
         # PAD-149: the Emulate tab's machine row, globally and only globally
         # (see _restore_emulate_machine).
@@ -5003,15 +4928,15 @@ class App:
             if var is not None:
                 try:
                     self._settings[key] = var.get()
-                except tk.TclError:
+                except Exception:
                     pass
         # Remember the window size + position for next launch, and whether it
         # was maximized — a maximized window has to come back maximized, not
         # as a loose window of the same size (a tester, after every auto
         # update).  While maximized the geometry to keep is the last NORMAL
-        # one seen (_on_root_configure), not the maximized rectangle.  Skip
-        # odd/tiny geometries (e.g. the 1x1 pre-dialog footprint) so we never
-        # persist a window the user can't see.
+        # one seen (the host's resize events), not the maximized rectangle.
+        # Skip odd/tiny geometries so we never persist a window the user
+        # can't see.
         try:
             maximized = self._window_is_maximized()
             geo = (self._last_normal_geometry if maximized
@@ -5020,7 +4945,7 @@ class App:
             if gm and int(gm.group(1)) >= 400 and int(gm.group(2)) >= 400:
                 self._settings["window_geometry"] = geo
             self._settings["window_maximized"] = bool(maximized)
-        except tk.TclError:
+        except Exception:
             pass
         try:
             os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
@@ -5398,7 +5323,7 @@ class App:
         self._refresh_title()
 
     def _on_detected_game_change(self, caption):
-        """MainWindow detected a game on the Extract input (or lost it —
+        """The window detected a game on the Extract input (or lost it —
         *caption* None): show it in the title bar.  Batch 20 (a tester): the
         tab's "Detected: …" badge repeated the game name, the platform pill,
         and "card image"; the title bar states it once, with the firmware
@@ -5407,6 +5332,7 @@ class App:
         if caption != self._detected_caption:
             self._detected_caption = caption
             self._refresh_title()
+        self._publish_project()
 
     def _refresh_title(self):
         """Compose the title bar: app + version, the dev checkout badge if
@@ -5423,34 +5349,54 @@ class App:
             title += " — %s" % (os.path.basename(path.rstrip("\\/")) or path)
         elif self._detected_caption:
             title += " — %s" % self._detected_caption
-        try:
-            self.root.title(title)
-        except tk.TclError:
-            pass
+        self.root.title(title)
+        self._publish_project()
 
-    # The New/Save As/Properties/Projects… dialogs live in gui.projects_ui
-    # (one module = one .iss manifest entry); each gets the app instance —
-    # they orchestrate across window + settings + registry.
+    def _publish_project(self):
+        """The top bar's project chip and the recent-projects menu."""
+        try:
+            folder = self._project_folder() or ""
+        except Exception:
+            folder = ""
+        name = os.path.basename(os.path.normpath(folder)) if folder else ""
+        recents = []
+        try:
+            for entry in (self._recent_projects() or [])[:10]:
+                path = entry.get("folder") if isinstance(entry, dict) \
+                    else str(entry)
+                if not path:
+                    continue
+                recents.append({
+                    "folder": path,
+                    "name": os.path.basename(os.path.normpath(path)),
+                    "caption": (entry.get("caption") or ""
+                                if isinstance(entry, dict) else ""),
+                })
+        except Exception:
+            recents = []
+        self.ctx.store.set("shell", project={
+            "folder": folder, "name": name,
+            "caption": self._detected_caption or "",
+            "is_project": bool(self._project_path),
+        }, recent_projects=recents)
+
+    # The New/Save As/Properties/Projects… dialogs live on the page
+    # (webui/shellx_projects.py answers them); these only open them.
 
     def _new_project(self):
-        from .gui import projects_ui
-        projects_ui.new_project_dialog(self)
+        self.ctx.bus.publish("open_dialog", name="project_new")
 
     def _save_project_as(self):
-        from .gui import projects_ui
-        projects_ui.save_project_as(self)
+        self.ctx.bus.publish("open_dialog", name="project_save_as")
 
     def _open_project_properties(self):
-        from .gui import projects_ui
-        projects_ui.open_properties(self)
+        self.ctx.bus.publish("open_dialog", name="project_properties")
 
     def _open_project_relink(self):
-        from .gui import projects_ui
-        projects_ui.open_relink(self)
+        self.ctx.bus.publish("open_dialog", name="project_relink")
 
     def _open_project_manager(self):
-        from .gui import projects_ui
-        projects_ui.open_manager(self)
+        self.ctx.bus.publish("open_dialog", name="project_manager")
 
     def _on_show_log_history_change(self, show):
         """Persist the ⚙ "Show previous sessions in the log" toggle."""
@@ -5852,13 +5798,13 @@ class App:
                 "first.", "warning"))
             return
 
-        # Runs on the Tk thread (button command), so touching the widget
+        # Runs on the UI loop (button command), so touching the button
         # directly here is safe; the worker re-enables it via UiCallMsg.
         btn = getattr(self.window, "_audio_profile_btn", None)
         if btn is not None:
             if str(btn.cget("state")) == "disabled":
                 return          # already profiling — ignore the double-click
-            btn.configure(state=tk.DISABLED)
+            btn.configure(state="disabled")
 
         def _log(msg, level="info"):
             self.msg_queue.put(LogMsg(msg, level))
@@ -5882,7 +5828,7 @@ class App:
                 self.msg_queue.put(ProgressMsg(0, 1, "Ready"))
                 if btn is not None:
                     self.msg_queue.put(UiCallMsg(
-                        lambda: btn.configure(state=tk.NORMAL)))
+                        lambda: btn.configure(state="normal")))
 
         self.msg_queue.put(LogMsg(
             "Profiling sounds under %s ..." % assets_dir, "info"))

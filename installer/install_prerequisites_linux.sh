@@ -47,7 +47,7 @@ else
     echo "  BOF:    gnupg tar curl unzip xvfb (xorg-server-xvfb) webp (libwebp) + GDRE Tools (download from GitHub)"
     echo "  JJP:    partclone e2fsprogs xorriso (libisoburn) pigz ffmpeg python3-zstandard (python-zstandard) gcc libc6-dev (glibc)"
     echo "  CGC:    e2fsprogs xxd (tinyxxd, or vim's) + pip (python-pip)"
-    echo "  Stern:  qemu-user-static (+ qemu-user-static-binfmt) gcc-arm-linux-gnueabihf (arm-linux-gnueabihf-gcc, AUR) gcc libc6-dev (glibc) make e2fsprogs fuse3 python3-tk (tk) ffmpeg busybox-static (busybox)"
+    echo "  Stern:  qemu-user-static (+ qemu-user-static-binfmt) gcc-arm-linux-gnueabihf (arm-linux-gnueabihf-gcc, AUR) gcc libc6-dev (glibc) make e2fsprogs fuse3 python3-gi (python-gobject) gir1.2-webkit2-4.1 (webkit2gtk-4.1) ffmpeg busybox-static (busybox)"
     exit 1
 fi
 
@@ -95,9 +95,11 @@ declare -A MFR_PACKAGES=(
     #   fuse3                     fusermount3, so a card mounts read-only
     #                             without root (fuse2fs itself is fetched by
     #                             cardmount.sh into a private prefix)
-    #   python3-tk                the virtual playfield window. Separate from
-    #                             python3 on Debian and Ubuntu, and its
-    #                             absence reads as a puzzling ImportError.
+    #   python3-gi                the virtual playfield window: a web page
+    #   gir1.2-webkit2-4.1        since the app left Tk (2026-09-23), shown in
+    #                             a GTK WebKit window. Without them it still
+    #                             opens, as a browser window, so these buy the
+    #                             native window rather than the feature.
     #   ffmpeg                    decodes the game's video AND its audio. The
     #                             game does neither itself - its gstreamer has
     #                             no software H.264 element - so without this
@@ -123,7 +125,7 @@ declare -A MFR_PACKAGES=(
     #                             refused to start at all without it - the rig
     #                             now runs the ordinary boot instead, and this
     #                             is what buys the feature back.
-    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev make e2fsprogs fuse3 python3-tk ffmpeg busybox-static"
+    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev make e2fsprogs fuse3 python3-gi gir1.2-webkit2-4.1 ffmpeg busybox-static"
 )
 
 # The same manifest in pacman's spelling, one entry per manufacturer above - a
@@ -137,7 +139,8 @@ declare -A MFR_PACKAGES=(
 #   xxd               -> tinyxxd, BUT vim and gvim also provide xxd and tinyxxd
 #                        conflicts with them, so it is skipped when an xxd is
 #                        already on the PATH (PM_CMD_OF below)
-#   python3-tk        -> tk (Arch's python grows tkinter once tk is present)
+#   python3-gi        -> python-gobject
+#   gir1.2-webkit2-4.1 -> webkit2gtk-4.1
 #   qemu-user-static  -> qemu-user-static + qemu-user-static-binfmt.  Arch
 #                        splits the binfmt registration into its own package,
 #                        and the rig needs the registration, with the F flag:
@@ -156,7 +159,7 @@ declare -A MFR_PACMAN_PACKAGES=(
     # python-pip: Arch's python does not carry pip, and the pip step below is
     # how CGC's transcribe button gets faster-whisper.
     [5]="e2fsprogs tinyxxd python-pip"
-    [6]="qemu-user-static qemu-user-static-binfmt gcc make e2fsprogs fuse3 tk ffmpeg busybox"
+    [6]="qemu-user-static qemu-user-static-binfmt gcc make e2fsprogs fuse3 python-gobject webkit2gtk-4.1 ffmpeg busybox"
 )
 
 # What pacman cannot supply.  The AUR is not a repository, it is recipes, and

@@ -1459,6 +1459,12 @@ if [ "$DROP" = 1 ]; then
     chown "$PAD_USER" "$LED_HOST" 2>/dev/null
     chown "$PAD_USER" "$LCD_HOST" 2>/dev/null
     chown "$PAD_USER" "$ROOT/dump" 2>/dev/null
+    # And the lib DIRECTORY itself, not its contents: modes/tryit.sh install puts
+    # pad_mode.so in it as the desktop user, and a first root run that UNPACKED
+    # the guest (PAD-140) or created it left the directory root-owned - so the
+    # user's next Try it was refused with "lib belongs to root, not pad" after
+    # a four-minute build. The guest is root and ignores who owns it.
+    chown "$PAD_USER" "$ROOT/lib" 2>/dev/null
 fi
 
 # HOW LONG THIS WSL SESSION HAS BEEN UP, because it predicts a fault nothing
@@ -2115,17 +2121,19 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     fi
     if [ "$IS_WSL" = 0 ]; then
         PF_PY=${PAD_PF_PYTHON:-python3}
-        if "$PF_PY" -c 'import tkinter' >/dev/null 2>&1; then
+        # THE WINDOW IS A WEB PAGE (2026-09-23): playfield.py needs nothing
+        # but python3 itself, and pfweb.py picks how to show it - GTK WebKit
+        # (the macOS container installs it; most Linux desktops have it),
+        # else a Chromium-family browser's app window, else a browser tab.
+        # So the only thing to check here is that python3 runs at all.
+        if "$PF_PY" -c 'import json' >/dev/null 2>&1; then
             : > "$PFLOG" 2>/dev/null
             setsid_as_user "$PF_PY" "$RIG/playfield.py" "$GAME" $PF_STATES </dev/null >>"$PFLOG" 2>&1 &
             PF_LAUNCHED=1
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
-            # Say what to install rather than just what is missing: on Debian
-            # and Ubuntu tkinter is a separate package from python3 itself, so
-            # "no module named tkinter" is a packaging surprise, not a mistake.
-            echo "[watch] no tkinter, so no playfield window." >&2
-            echo "[watch]   sudo apt-get install python3-tk   (or python3-tkinter)" >&2
+            echo "[watch] $PF_PY does not run, so no playfield window." >&2
+            echo "[watch]   set PAD_PF_PYTHON to a working python3" >&2
         fi
     else
         # ★ PAD-99: CHOSEN, NOT WHATEVER PATH HANDS OVER.
@@ -2185,10 +2193,10 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_MS"
         if [ -n "$PF_PY" ] && command -v "$PF_PY" >/dev/null 2>&1; then
             if [ "$PF_BEST" = 0 ]; then
-                echo "[watch] no Windows Python on this PC can import tkinter"
-                echo "[watch]   and Pillow, which is what the playfield window"
-                echo "[watch]   is drawn with. Trying $PF_PY anyway; if no"
-                echo "[watch]   window appears, the reason is below."
+                echo "[watch] no Windows Python on this PC has pywebview and"
+                echo "[watch]   Pillow (PAD's own does), so the playfield opens"
+                echo "[watch]   with $PF_PY as an Edge app window instead; if"
+                echo "[watch]   no window appears, the reason is below."
             fi
             # TRUNCATE, then append: one run's log, not every run's. The window
             # is a Windows process here and its traceback would otherwise go

@@ -23,12 +23,13 @@ emulator shutdown, which is what being killed mid-quit looks like from here
 """
 
 import json
+import types
 
 import pytest
 
 from pinball_decryptor import app as app_mod
-from pinball_decryptor.gui import multiboot_tab as mb
-from pinball_decryptor.gui.multiboot_tab import (ImageRow, MemberRow, is_group,
+from pinball_decryptor.webui import multiboot_core as mb
+from pinball_decryptor.webui.multiboot_core import (ImageRow, MemberRow, is_group,
                                                  rows_from_state)
 
 
@@ -56,20 +57,23 @@ class _Window:
     def append_log(self, text, level="info"):
         self.log.append((level, text))
 
+    def close(self):
+        self.order.append("close")
 
-class _Root:
+
+class _Dialogs:
     def __init__(self, order):
         self.order = order
 
-    def destroy(self):
-        self.order.append("destroy")
+    def cancel_all(self):
+        self.order.append("cancel")
 
 
 class _App:
     """The real close and the real update hand-offs, over a stub window.
 
     ``_save_settings`` is the real one's multiboot line plus a JSON write:
-    everything Tk touches in it is beside the point here, and the point is
+    everything else in it is beside the point here, and the point is
     which side of the hand-off the file lands on.
     """
 
@@ -81,12 +85,15 @@ class _App:
     def __init__(self, settings_file, kill_at=None, state=None, boom=False):
         self.order = []
         self.window = _Window(self.order, kill_at)
-        self.root = _Root(self.order)
+        self.ctx = types.SimpleNamespace(dialogs=_Dialogs(self.order))
         self._project_path = None
         self._settings = {}
         self._settings_file = str(settings_file)
         self._state = state or {}
         self._boom = boom
+
+    def _capture_run(self):
+        return False
 
     def multiboot_state(self):
         return self._state
@@ -189,7 +196,7 @@ def test_an_ordinary_quit_writes_the_state_before_the_shutdown(tmp_path):
     save writes, so there is no reason for the save to wait behind it."""
     app = _App(tmp_path / "settings.json", state=_his_form())
     app._on_close()
-    assert app.order == ["settings", "preview", "emulators", "destroy"]
+    assert app.order == ["settings", "preview", "emulators", "close", "cancel"]
 
 
 def test_a_state_write_that_raises_does_not_stop_the_close(tmp_path):
@@ -198,7 +205,7 @@ def test_a_state_write_that_raises_does_not_stop_the_close(tmp_path):
     either."""
     app = _App(tmp_path / "settings.json", boom=True)
     app._on_close()
-    assert app.order == ["settings", "preview", "emulators", "destroy"]
+    assert app.order == ["settings", "preview", "emulators", "close", "cancel"]
 
 
 # ---------------------------------------------------------------------------

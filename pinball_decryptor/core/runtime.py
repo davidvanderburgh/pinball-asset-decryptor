@@ -261,7 +261,7 @@ def status(runner=None, refresh: bool = False) -> Tuple[str, str]:
             # their commands on worker threads, so the ordinary status poll
             # fills this cache within a tick - and a background thread started
             # from here would race with anything that patches subprocess.
-            if threading.current_thread() is threading.main_thread():
+            if _on_ui_thread():
                 return cached or (
                     "unknown",
                     "The runtime has not been looked at on this machine yet.")
@@ -269,6 +269,22 @@ def status(runner=None, refresh: bool = False) -> Tuple[str, str]:
     if runner is None:
         _STATUS_CACHE.update(when=time.monotonic(), value=answer)
     return answer
+
+
+#: Set by the web UI to a function that is True on ITS interface thread (the
+#: UI loop, which is not the main thread): that thread must never wait on
+#: wsl.exe either.  None in the Tk app, whose interface thread is the main one.
+ui_thread_check = None
+
+
+def _on_ui_thread():
+    if threading.current_thread() is threading.main_thread():
+        return True
+    fn = ui_thread_check
+    try:
+        return bool(fn is not None and fn())
+    except Exception:                                   # noqa: BLE001
+        return False
 
 
 def _status(runner=None) -> Tuple[str, str]:

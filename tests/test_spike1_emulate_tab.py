@@ -1,5 +1,6 @@
 """Spike 1 Emulate tab: the pure pieces (state wording, status mapping, command
-builders, wiring) plus widget smoke tests on an invisible Tk root.
+builders, wiring), from ``webui/emulate_spike1_core.py``.  The web tab itself is
+driven in tests/test_webui_emulate_spike1.py.
 
 A sibling of tests/test_jjp_emulate_tab.py — same shape, no dongle.  The wording
 is tested because the FIRST thing a user is told has to be the first thing that
@@ -12,11 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from pinball_decryptor.gui import _rig, spike1_emulate_tab
-from pinball_decryptor.gui.spike1_emulate_tab import (DEFAULT_RIG_DIR,
-                                                      Spike1EmulatePanel,
-                                                      rig_cmd, rig_cmd_root,
-                                                      rig_dir, state_text)
+from pinball_decryptor.webui import rig as _rig
+from pinball_decryptor.webui import emulate_spike1_core as spike1_emulate_tab
+from pinball_decryptor.webui.emulate_spike1_core import (DEFAULT_RIG_DIR,
+                                                         rig_cmd,
+                                                         rig_cmd_root,
+                                                         rig_dir, state_text)
 
 
 # ---------------------------------------------------------------- plumbing --
@@ -92,7 +94,7 @@ def test_rig_dir_defaults_into_the_repo():
 def test_rig_cmd_root_refuses_off_windows(monkeypatch):
     """Root is honest only on WSL; a Linux desktop's sudo wants a password a GUI
     app has nowhere to ask for."""
-    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "linux")
+    monkeypatch.setattr(_rig.sys, "platform", "linux")
     with pytest.raises(RuntimeError):
         rig_cmd_root("start.sh")
 
@@ -104,7 +106,7 @@ def test_rig_cmd_root_targets_wsl_root(monkeypatch):
     # whether the person running it had the runtime installed.  The routing
     # itself is tested against an injected runner in tests/test_runtime.py;
     # what is tested here is the root part, so the distro is held still.
-    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(_rig.sys, "platform", "win32")
     monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: None)
     cmd = rig_cmd_root("start.sh")
     assert cmd[:4] == ["wsl.exe", "-u", "root", "-e"]
@@ -113,7 +115,7 @@ def test_rig_cmd_root_targets_wsl_root(monkeypatch):
 def test_rig_cmd_root_names_the_runtime_distro(monkeypatch):
     """And when there IS one, it is named before the root switch - a machine
     with our runtime must not run the root half in someone else's Linux."""
-    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(_rig.sys, "platform", "win32")
     monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: "PAD-Runtime")
     cmd = rig_cmd_root("start.sh")
     assert cmd[:6] == ["wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e"]
@@ -122,7 +124,7 @@ def test_rig_cmd_root_names_the_runtime_distro(monkeypatch):
 def test_status_is_ordinary_user_not_root(monkeypatch):
     """A read-only status poll must not need root — that would prompt or fail on
     a locked-down box, and the poll runs every couple of seconds."""
-    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(_rig.sys, "platform", "win32")
     cmd = rig_cmd("status.sh")
     assert "root" not in cmd
 
@@ -176,196 +178,7 @@ def test_state_empty_is_checking():
 
 # ------------------------------------------------------------------ widgets --
 
-@pytest.fixture(scope="module")
-def root():
-    """ONE Tk root for the whole module (matches tests/test_jjp_emulate_tab.py).
-    A second tk.Tk() in one process throws on some hosts, so Tk tests may skip in
-    a full local run; CI (Linux) creates one per module cleanly."""
-    tk = pytest.importorskip("tkinter")
-    from tests.conftest import make_tk_root
-    try:
-        # retried: one transient Tcl-script read miss must not skip the
-        # whole module (pytest caches a module fixture's skip) - see
-        # make_tk_root
-        r = make_tk_root(tk)
-    except Exception:                                       # noqa: BLE001
-        pytest.skip("no usable Tk display")
-    r.withdraw()
-    yield r
-    try:
-        r.destroy()
-    except Exception:                                       # noqa: BLE001
-        pass
-
-
-@pytest.fixture
-def panel(root, monkeypatch):
-    """A built panel whose poller never shells out to WSL."""
-    import tkinter as tk
-    monkeypatch.setattr(Spike1EmulatePanel, "_schedule_poll",
-                        lambda self, ms=None: None)
-    frame = tk.Frame(root)
-    p = Spike1EmulatePanel(frame, card_var=tk.StringVar())
-    p.build(frame)
-    yield p
-    p._stopped = True
-    try:
-        frame.destroy()
-    except Exception:                                       # noqa: BLE001
-        pass
-
-
-def test_go_button_is_leftmost(panel):
-    assert panel._go_btn.pack_info()["side"] == "left"
-    # Restart WSL sits next to Start, but only where WSL exists (Windows).
-    if panel._reset_btn.winfo_manager():
-        assert panel._reset_btn.pack_info()["side"] == "left"
-
-
-def test_apply_running_flips_the_button(panel):
-    panel._apply({"wsl": "1", "game_procs": "2", "game_uptime_s": "30",
-                  "cpu": "140", "rss_mb": "512",
-                  "dmd_frames": "300", "nodes_registered": "1",
-                  "qemu_built": "1", "hwshim_built": "1", "game_ready": "1"})
-    assert panel._last_up is True
-    assert panel._go_btn["text"] == "Stop"
-    assert panel._vals["dmd"]["text"] == "300"
-    assert panel._vals["boards"]["text"] == "yes"
-    assert "512 MB" in panel._vals["cpu"]["text"]
-
-
-def test_apply_stopped_flips_back(panel):
-    panel._apply({"wsl": "1", "game_procs": "2"})
-    panel._apply({"wsl": "1", "game_procs": "0", "qemu_built": "1",
-                  "game_ready": "1"})
-    assert panel._last_up is False
-    assert panel._go_btn["text"] == "Start emulator"
-
-
-def test_note_reports_running_and_registered(panel):
-    """While running with boards registered, the note says the game boots to
-    attract and the switch window is clickable."""
-    panel._apply({"wsl": "1", "game_procs": "2", "nodes_registered": "1"})
-    text = panel._note["text"].lower()
-    assert "registered" in text and ("attract" in text or "switch" in text)
-
-
-def test_apply_drives_the_footer_ladder(panel):
-    """The tab feeds the shared footer ladder (Extract / Boot / Node boards /
-    Ready) through footer_cb, like the Spike 2 tab."""
-    seen = []
-    panel._footer_cb = lambda kind, pct=None, text="": seen.append(kind)
-    panel._busy = False
-    panel._apply({"wsl": "1", "game_procs": "2", "nodes_registered": "1"})
-    assert "run" in seen
-    seen.clear()
-    panel._apply({"wsl": "1", "game_procs": "2", "nodes_registered": "0"})
-    assert "boot" in seen
-    seen.clear()
-    panel._apply({"wsl": "1", "game_procs": "0", "qemu_built": "1",
-                  "game_ready": "1"})
-    assert "idle" in seen
-
-
-def test_start_without_a_card_or_a_game_asks(panel, monkeypatch):
-    """Pressing Start with nothing selected and no extracted game must ask, not
-    launch."""
-    called = []
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: called.append(a) or SimpleNamespace(
-                            returncode=0, stdout=b""))
-    shown = []
-    monkeypatch.setattr(spike1_emulate_tab.messagebox, "showinfo",
-                        lambda *a, **k: shown.append(a))
-    panel._info = {"game_ready": "0"}
-    panel._start_async()
-    assert shown and not called
-
-
-def test_start_allows_no_card_once_a_game_is_extracted(panel, monkeypatch):
-    """A game already extracted means Start needs no card — it reuses it."""
-    ran = []
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
-                        lambda target=None, **k: SimpleNamespace(
-                            start=(lambda: ran.append(1)), daemon=True))
-    shown = []
-    monkeypatch.setattr(spike1_emulate_tab.messagebox, "showinfo",
-                        lambda *a, **k: shown.append(a))
-    panel._info = {"game_ready": "1"}
-    panel._start_async()
-    assert ran and not shown
-
-
-def test_fix_state_shuts_down_wsl_when_confirmed(panel, monkeypatch):
-    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(spike1_emulate_tab.messagebox, "askyesno",
-                        lambda *a, **k: True)
-    calls = []
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: calls.append(a[0]) or SimpleNamespace(
-                            returncode=0, stdout=b""))
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
-                        lambda target=None, **k: SimpleNamespace(
-                            start=(target or (lambda: None)), daemon=True))
-    panel._fix_state()
-    assert calls == [["wsl.exe", "--shutdown"]]
-
-
-def test_shutdown_sync_is_a_noop_when_nothing_ran(panel, monkeypatch):
-    called = []
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: called.append(a))
-    panel._last_up = False
-    panel._info = {"responder": "0"}
-    panel.shutdown_sync()
-    assert not called
-
-
 # --------------------------------------------------------------- log streaming --
-
-class _FakeStdout:
-    def __init__(self, lines):
-        self._it = iter(lines)
-
-    def __iter__(self):
-        return self._it
-
-    def close(self):
-        pass
-
-
-class _FakeProc:
-    def __init__(self, lines, rc):
-        self.stdout = _FakeStdout(lines)
-        self.returncode = rc
-
-    def kill(self):
-        pass
-
-    def wait(self):
-        return self.returncode
-
-
-def test_run_streaming_logs_each_line(panel, monkeypatch):
-    logged = []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    lines = ["Setup: building the patched ARM emulator…\n",
-             "Node-bus responder up.\n", "READY\n"]
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda *a, **k: _FakeProc(lines, rc=0))
-    rc = panel._run_streaming(["start.sh"], timeout=1800)
-    assert rc == 0
-    assert any("Node-bus responder up" in m for m in logged)
-    assert any("READY" in m for m in logged)
-
-
-def test_run_streaming_survives_a_popen_failure(panel, monkeypatch):
-    monkeypatch.setattr(panel, "_log", lambda m: None)
-
-    def boom(*a, **k):
-        raise OSError("wsl.exe not found")
-
-    monkeypatch.setattr(subprocess, "Popen", boom)
-    assert panel._run_streaming(["start.sh"], timeout=1800) is None
 
 
 # ------------------------------------------------------------- DMD preview --
@@ -378,29 +191,13 @@ def test_load_dmd_decoder_from_rig_dir():
     assert m.FRAME_BYTES == 2048
 
 
-def test_open_viewers_is_inert_without_run_dir(panel):
-    """A running game with no work/distro yet must not try to open windows."""
-    panel._info = {"game_procs": "2"}     # no work/distro
-    panel._open_viewers()                 # must not raise
-    # the manager may be created, but with nothing to point it at
-    assert panel._viewers is None or panel._viewers._io is None
-
-
-def test_window_reset_when_idle_just_says_so(panel, monkeypatch):
-    logged = []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    panel._last_up = False
-    panel._window_reset()
-    assert logged and "start" in logged[-1].lower()
-
-
 # ------------------------------------------------------------------- cache --
 
 def test_parse_cache_reads_entries_and_free():
     text = ("entry\tgot_le-1_37\t204800\t1700000000\tGOT_LE\t1\n"
             "entry\tghostbusters_le-1_17\t153600\t1699990000\tghostbusters_le\t0\n"
             "disk\t98566144\n")
-    rows, free = Spike1EmulatePanel._parse_cache(text)
+    rows, free = spike1_emulate_tab.parse_cache(text)
     assert free == "98566144"
     assert [r["label"] for r in rows] == ["got_le-1_37",
                                           "ghostbusters_le-1_17"]  # newest first
@@ -409,14 +206,14 @@ def test_parse_cache_reads_entries_and_free():
 
 
 def test_parse_cache_empty_is_no_rows():
-    rows, free = Spike1EmulatePanel._parse_cache("disk\t500\n")
+    rows, free = spike1_emulate_tab.parse_cache("disk\t500\n")
     assert rows == [] and free == "500"
 
 
 def test_human_kb_scales():
-    assert Spike1EmulatePanel._human_kb(512) == "512 KB"
-    assert Spike1EmulatePanel._human_kb(153600) == "150.0 MB"
-    assert Spike1EmulatePanel._human_kb("bad") == "?"
+    assert spike1_emulate_tab.human_kb(512) == "512 KB"
+    assert spike1_emulate_tab.human_kb(153600) == "150.0 MB"
+    assert spike1_emulate_tab.human_kb("bad") == "?"
 
 
 # -------------------------------------------------------------- integration --
@@ -436,18 +233,8 @@ def test_spike2_era_does_not_get_the_spike1_flag():
     assert SternManufacturer._SPIKE2_CAPS.emulate_spike1 is False
 
 
-def test_main_window_wires_the_spike1_tab():
-    import inspect
-    from pinball_decryptor.gui import main_window
-    src = inspect.getsource(main_window)
-    assert '(self._tab_spike1_emulate, "Emulate", "Emulate Spike1")' in src
-    assert "self._build_spike1_emulate_tab()" in src
-    assert '_configure_tab("Emulate Spike1"' in src
-    assert "_spike1_emulate_panel" in src
-
-
 def test_help_has_an_entry_for_the_spike1_tab():
-    from pinball_decryptor.gui.help_dialog import HELP_CONTENT
+    from pinball_decryptor.webui.help_content import HELP_CONTENT
     body = " ".join(t + " " + b for t, b in HELP_CONTENT["Emulate Spike1"])
     assert "dot-matrix" in body.lower() or "dmd" in body.lower()
     assert "card" in body.lower()
@@ -495,7 +282,10 @@ def _restore_s1(folder, settings=None, anchor_card=None):
         # the real window always has the Spike 2 var too (tabs build eagerly);
         # without it the method returns before reaching the Spike 1 block
         window=SimpleNamespace(emulate_card_var=_Var(),
-                               spike1_emulate_card_var=var),
+                               spike1_emulate_card_var=var,
+                               # no Emulate service: the machine row is
+                               # left alone
+                               service=lambda name: None),
     )
     App._restore_emulate_card(stub, str(folder) if folder else "")
     return var.value
@@ -527,59 +317,12 @@ def test_spike1_card_restores_from_global_with_no_project(tmp_path):
 # item 87: the slot manager is live — it lists s1slots.sh's pipe protocol,
 # and Save now refuses politely when no game is running.
 
-def _inline_threads(monkeypatch):
-    """Make the panel's worker threads run inline, so a test sees the result
-    without sleeping."""
-    class _T:
-        def __init__(self, target=None, daemon=None):
-            self._target = target
-
-        def start(self):
-            self._target()
-
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread", _T)
-
-
-def test_slots_refresh_parses_the_pipe_protocol(panel, root, monkeypatch):
-    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(spike1_emulate_tab, "rig_available", lambda: True)
-    _inline_threads(monkeypatch)
-    out = (b"root|/home/d/s1emu/saves\n"
-           b"slot|ghostbusters_le-1_17/quicksave|44362327|"
-           b"ghostbusters_le-1_17|mid-ball test |1788199042\n"
-           b"slot|GOT_LE-1_37/s2|13000000|GOT_LE-1_37||1788100000\n"
-           b"total|57362327\n"
-           b"free|100980350976\n")
-    monkeypatch.setattr(
-        spike1_emulate_tab.subprocess, "run",
-        lambda *a, **kw: SimpleNamespace(stdout=out))
-    panel._slots_refresh()
-    root.update()          # flush the after(0) apply
-    assert [r["ref"] for r in panel._slots_rows] == [
-        "ghostbusters_le-1_17/quicksave", "GOT_LE-1_37/s2"]
-    assert panel._slots_rows[0]["label"] == "mid-ball test"
-    rows = panel._slots_tree.get_children()
-    assert list(rows) == ["ghostbusters_le-1_17/quicksave", "GOT_LE-1_37/s2"]
-    assert "2 slots" in panel._slots_sum.cget("text")
-
-
-def test_save_now_refuses_without_a_running_game(panel, monkeypatch):
-    told = {}
-    monkeypatch.setattr(spike1_emulate_tab.messagebox, "showinfo",
-                        lambda *a, **kw: told.setdefault("msg", a))
-    ran = {}
-    monkeypatch.setattr(spike1_emulate_tab.subprocess, "run",
-                        lambda *a, **kw: ran.setdefault("cmd", a))
-    panel._info = {"game_procs": "0"}
-    panel._slot_save()
-    assert told and not ran     # a message, never a root shell-out
-
 
 def test_slot_size_and_date_formatting():
-    assert Spike1EmulatePanel._fmt_size("44362327") == "42.3 MB"
-    assert Spike1EmulatePanel._fmt_size("512") == "512 B"
-    assert Spike1EmulatePanel._fmt_size("junk") == "?"
-    assert Spike1EmulatePanel._fmt_when("not-a-number") == "?"
+    assert spike1_emulate_tab.fmt_size("44362327") == "42.3 MB"
+    assert spike1_emulate_tab.fmt_size("512") == "512 B"
+    assert spike1_emulate_tab.fmt_size("junk") == "?"
+    assert spike1_emulate_tab.fmt_when("not-a-number") == "?"
 
 
 def test_dead_keeper_is_named_not_masked():
@@ -605,57 +348,6 @@ def test_dead_keeper_is_named_not_masked():
 # rig's WSL side runs only fifo + relay (PAD_AUDIO_SINK=relay), because a
 # Windows exec from WSL rides an interop socket that dies with start.sh's
 # wsl.exe - the probe hung forever and a fresh app + fresh Start was silent.
-
-def test_player_cmd_is_padplay_via_pads_own_python(panel, monkeypatch):
-    monkeypatch.setattr(spike1_emulate_tab, "windows_python",
-                        lambda console=False: r"C:\Py\python.exe")
-    monkeypatch.setattr(spike1_emulate_tab.os.path, "isfile", lambda p: True)
-    cmd = panel._player_cmd()
-    assert cmd[0] == r"C:\Py\python.exe"
-    assert cmd[1].replace("\\", "/").endswith("tools/spike2_emu/padplay.py")
-    assert cmd[2:] == ["127.0.0.1", "45998", "44100", "2"]
-
-
-def test_player_relaunch_backs_off(panel, monkeypatch):
-    """A dead player is relaunched, but at most once per 5 s - connection
-    refused while the rig boots must not spin."""
-    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
-    spawned = []
-
-    class _Proc:
-        def poll(self):
-            return 1                       # exited
-
-        def kill(self):
-            pass
-
-    monkeypatch.setattr(panel, "_player_cmd", lambda: ["py", "padplay"])
-    monkeypatch.setattr(spike1_emulate_tab.subprocess, "Popen",
-                        lambda *a, **kw: spawned.append(a) or _Proc())
-    t = {"v": 100.0}
-    monkeypatch.setattr(spike1_emulate_tab.time, "monotonic", lambda: t["v"])
-    panel._ensure_player()
-    panel._ensure_player()                 # same instant: backoff holds
-    assert len(spawned) == 1
-    t["v"] += 6.0
-    panel._ensure_player()                 # dead + past backoff: relaunched
-    assert len(spawned) == 2
-
-
-def test_stop_player_kills_and_forgets(panel):
-    killed = {}
-
-    class _Proc:
-        def poll(self):
-            return None
-
-        def kill(self):
-            killed["v"] = True
-
-    panel._player = _Proc()
-    panel._stop_player()
-    assert killed.get("v") is True
-    assert panel._player is None
 
 
 # ------------------------------------------------- whose guest is it? (98) --
@@ -748,267 +440,21 @@ def test_helper_runs_and_answers_nothing_when_no_guest_is_ours(tmp_path):
 # starves it - the player wants 176400 B/s while the game makes 96000 - so
 # nothing is heard at all (PAD-101).
 
-def test_audio_format_comes_from_the_run_dir(panel, tmp_path, monkeypatch):
-    (tmp_path / "s1audio").write_text("24000 2\n", encoding="utf-8")
-    panel._info = {"work": "/home/david/s1emu", "distro": "Ubuntu"}
-    monkeypatch.setattr(spike1_emulate_tab, "wsl_unc",
-                        lambda distro, p: str(tmp_path / p.rsplit("/", 1)[-1]))
-    assert panel._audio_format() == ("24000", "2")
-
-
-def test_audio_format_falls_back_when_the_rig_has_not_said(panel, tmp_path,
-                                                           monkeypatch):
-    panel._info = {"work": "/home/david/s1emu", "distro": "Ubuntu"}
-    monkeypatch.setattr(spike1_emulate_tab, "wsl_unc",
-                        lambda distro, p: str(tmp_path / "missing"))
-    assert panel._audio_format() == panel.DEFAULT_AUDIO == ("44100", "2")
-
-
-def test_audio_format_ignores_a_malformed_marker(panel, tmp_path, monkeypatch):
-    (tmp_path / "s1audio").write_text("garbage\n", encoding="utf-8")
-    panel._info = {"work": "/home/david/s1emu", "distro": "Ubuntu"}
-    monkeypatch.setattr(spike1_emulate_tab, "wsl_unc",
-                        lambda distro, p: str(tmp_path / p.rsplit("/", 1)[-1]))
-    assert panel._audio_format() == ("44100", "2")
-
 
 # ------------------------------------------------- the one-time build fails --
 
-def test_a_failed_one_time_build_points_at_the_lines_that_name_the_fix(
-        panel, monkeypatch):
-    """start.sh's exit 2 is the BUILD, and the rig's preflight has just printed
-    what this machine is missing and the command that installs it.  A bare
-    "start failed (exit 2)" under that is what sent a user's whole log to the
-    author on 2026-09-08 instead of sending them to apt."""
-    logged = []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    monkeypatch.setattr(panel, "_run_streaming", lambda *a, **k: 2)
-    monkeypatch.setattr(panel, "_release", lambda: None)
-    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd_root",
-                        lambda *a, **k: ["cmd"])
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
-                        lambda target, daemon=None: SimpleNamespace(
-                            start=target))
-    panel._info = {"game_ready": "1", "qemu_built": "0"}
-    panel._start_async()
-    assert any("did not finish" in m and "press Start again" in m
-               for m in logged), logged
-    assert not any("exit 2" in m for m in logged), logged
-
-
-def test_any_other_failure_still_names_its_exit_code(panel, monkeypatch):
-    """Everything past the build keeps the code: 4 is "no card", 5 is the
-    extraction, 6 is the node-bus responder, and the number is how the log
-    says which."""
-    logged = []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    monkeypatch.setattr(panel, "_run_streaming", lambda *a, **k: 5)
-    monkeypatch.setattr(panel, "_release", lambda: None)
-    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd_root",
-                        lambda *a, **k: ["cmd"])
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
-                        lambda target, daemon=None: SimpleNamespace(
-                            start=target))
-    panel._info = {"game_ready": "1", "qemu_built": "1"}
-    panel._start_async()
-    assert any("start failed (exit 5)" in m for m in logged), logged
-
 
 # ---------------------------------------- the emulator we ship, not build --
-
-def test_start_installs_the_shipped_emulator_before_it_runs_anything(
-        panel, monkeypatch):
-    """Self-healing without being asked.  A machine missing the emulator gets
-    the binaries we built and verified as part of pressing Start — the Fix
-    setup button is for the machine where THAT fails, not for the ordinary
-    one."""
-    calls = []
-    monkeypatch.setattr(panel, "_log", lambda m: None)
-    monkeypatch.setattr(panel, "_install_payloads",
-                        lambda log=None: calls.append("payloads") or [])
-    monkeypatch.setattr(panel, "_run_streaming",
-                        lambda *a, **k: calls.append("start.sh") or 0)
-    monkeypatch.setattr(panel, "_release", lambda: None)
-    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd_root", lambda *a, **k: ["cmd"])
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
-                        lambda target, daemon=None: SimpleNamespace(start=target))
-    panel._info = {"game_ready": "1", "qemu_built": "1"}
-    panel._start_async()
-    assert calls == ["payloads", "start.sh"], calls
-
-
-def test_a_blocked_download_does_not_stop_start(panel, monkeypatch):
-    """The rig can still build from source, and its preflight names what that
-    needs — so a firewall costs the user the fast path, not the emulator."""
-    logged, ran = [], []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-
-    def boom(log=None):
-        raise RuntimeError("could not download qemu-arm: blocked")
-
-    monkeypatch.setattr(panel, "_install_payloads", boom)
-    monkeypatch.setattr(panel, "_run_streaming",
-                        lambda *a, **k: ran.append(1) or 0)
-    monkeypatch.setattr(panel, "_release", lambda: None)
-    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd_root", lambda *a, **k: ["cmd"])
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
-                        lambda target, daemon=None: SimpleNamespace(start=target))
-    panel._info = {"game_ready": "1", "qemu_built": "0"}
-    panel._start_async()
-    assert ran, "start.sh must still run when the download is blocked"
-    assert any("Falling back to building it" in m for m in logged), logged
-
-
-def test_fix_setup_installs_then_reports_what_is_left(panel, monkeypatch):
-    """One button: it installs what it can and then prints the rig's own
-    read-only verdict, so the user never has to type anything."""
-    logged, cmds = [], []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    monkeypatch.setattr(panel, "_install_payloads", lambda log=None: ["spike1-qemu"])
-    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd",
-                        lambda *a, **k: cmds.append(a) or ["cmd"])
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
-                        lambda target, daemon=None: SimpleNamespace(start=target))
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda *a, **k: SimpleNamespace(
-            returncode=0, stdout=b"The emulator is ready - nothing to install.\n"))
-    panel._fix_setup()
-    assert ("prereqcheck.sh",) in cmds, cmds
-    assert any("installed spike1-qemu" in m for m in logged), logged
-    assert any("nothing to install" in m for m in logged), logged
 
 
 def test_the_panel_only_asks_for_payloads_the_app_actually_pins():
     """A key the registry does not carry would raise KeyError the first time a
     user pressed Start on a fresh machine."""
     from pinball_decryptor.core import payloads as core_payloads
-    for key in Spike1EmulatePanel.PAYLOAD_KEYS:
+    for key in spike1_emulate_tab.PAYLOAD_KEYS:
         assert key in core_payloads.PAYLOADS
-
-
-def test_a_first_run_in_the_apps_own_linux_says_where_the_old_work_is(
-        panel, monkeypatch):
-    """Installing the runtime moves the rig to a distro where the machine's
-    earlier extractions are not.  Nothing is deleted, but a silent re-extract
-    looks exactly like losing gigabytes of work, so it is said first."""
-    logged = []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: "PAD-Runtime")
-    monkeypatch.setattr(panel, "_default_distro_has_a_game", lambda: True)
-    panel._info = {"game_ready": "0"}
-    panel._note_where_the_old_extraction_went()
-    assert any("PAD_RUNTIME=0" in m and "untouched" in m for m in logged), logged
-
-    # ...and it stays quiet when there is nothing to explain: no runtime in
-    # use, or the runtime already holds the game.
-    logged.clear()
-    monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: None)
-    panel._note_where_the_old_extraction_went()
-    monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: "PAD-Runtime")
-    panel._info = {"game_ready": "1"}
-    panel._note_where_the_old_extraction_went()
-    assert not logged, logged
 
 
 # ------------------------------- what the adversarial review found here ----
 
-def test_the_fix_button_is_dead_where_it_could_only_do_harm(root, monkeypatch):
-    """★ Off Windows the button was left enabled, and pressing it would
-    download 6 MB of x86-64 Linux ELF, write it into the user's home and report
-    "installed" - for a rig that cannot run on that machine at all.  Two of the
-    four installers we ship are macOS."""
-    import tkinter as tk
-    monkeypatch.setattr(spike1_emulate_tab, "rig_available", lambda: True)
-    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "darwin")
-    monkeypatch.setattr(Spike1EmulatePanel, "_schedule_poll",
-                        lambda self, ms=None: None)
-    frame = tk.Frame(root)
-    p = Spike1EmulatePanel(frame, card_var=tk.StringVar())
-    p.build(frame)
-    try:
-        assert str(p._fix_btn.cget("state")) == "disabled"
-        assert str(p._go_btn.cget("state")) == "disabled"
-    finally:
-        p._stopped = True
-        frame.destroy()
 
-
-def test_removing_the_runtime_names_what_it_deletes_and_refuses_mid_run(
-        panel, monkeypatch):
-    """★ Nothing in the app or the Windows uninstaller ever removed the
-    runtime: a user who tried the emulator once kept a registered WSL distro
-    and ~1.5 GB for ever, with only a terminal command as a way out.  And the
-    removal must name the save states it destroys, and never run under a live
-    game."""
-    logged, asked, removed = [], {}, []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    monkeypatch.setattr(spike1_emulate_tab.runtime, "status",
-                        lambda *a, **k: ("ready", "Runtime 3 (full)"))
-    monkeypatch.setattr(spike1_emulate_tab.runtime, "uninstall",
-                        lambda: removed.append(1) or True)
-    monkeypatch.setattr(spike1_emulate_tab.messagebox, "askyesno",
-                        lambda title, body: asked.update(body=body) or True)
-    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
-                        lambda target, daemon=None: SimpleNamespace(start=target))
-
-    panel._last_up = True                      # a game is running
-    panel._remove_runtime()
-    assert not removed, "it must refuse while the emulator is running"
-    assert any("stop it first" in m for m in logged), logged
-
-    panel._last_up = False
-    panel._remove_runtime()
-    assert removed, "it must actually remove it"
-    assert "SAVE STATES" in asked["body"], asked
-    assert "untouched" in asked["body"]
-
-
-def test_a_blocked_runtime_download_offers_the_file_picker(panel, monkeypatch):
-    """★ The image is the download most likely to be refused - 370 MB from a
-    host some proxies do not allow - and it was the one with no way round."""
-    offered = []
-    monkeypatch.setattr(panel, "_log", lambda m: None)
-    monkeypatch.setattr(spike1_emulate_tab.runtime, "status",
-                        lambda *a, **k: ("absent", "not installed"))
-
-    def boom(*a, **kw):
-        raise RuntimeError("could not download pad-runtime-full.tar.gz: blocked")
-
-    monkeypatch.setattr(spike1_emulate_tab.runtime, "install", boom)
-    monkeypatch.setattr(panel, "_timer",
-                        lambda: SimpleNamespace(after=lambda ms, fn: offered.append(fn)))
-    panel._install_runtime()
-    assert offered, "a blocked runtime download must offer the file picker"
-
-
-def test_a_runtime_that_is_already_installed_reaches_the_consent_dialog(
-        panel, monkeypatch):
-    """★ The dialog was UNREACHABLE when it was first written.
-    RuntimeNeedsReplacing is a RuntimeError, so a broad `except RuntimeError`
-    above it caught the refusal, and the `raise` inside that handler left the
-    whole try statement rather than falling through to its sibling - so the
-    user saw the refusal in the log and was never asked.  This walks the path
-    the button actually takes."""
-    asked, installed, logged = [], [], []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    monkeypatch.setattr(spike1_emulate_tab.runtime, "status",
-                        lambda *a, **k: ("stale", "version 2; expects 3"))
-
-    def install(log=None, progress=None, replace=False, **kw):
-        if not replace:
-            raise spike1_emulate_tab.runtime.RuntimeNeedsReplacing("already there")
-        installed.append("replaced")
-
-    monkeypatch.setattr(spike1_emulate_tab.runtime, "install", install)
-    monkeypatch.setattr(panel, "_ask_before_replacing",
-                        lambda: asked.append(1) or True)
-    assert panel._install_runtime() == "ready"
-    assert asked, "the user must be asked before the distro is destroyed"
-    assert installed == ["replaced"]
-
-    # ...and a NO leaves it exactly as it was.
-    asked.clear(); installed.clear()
-    monkeypatch.setattr(panel, "_ask_before_replacing", lambda: False)
-    assert panel._install_runtime() == "stale"
-    assert not installed, "a refusal must not destroy anything"

@@ -36,7 +36,7 @@ def test_compute_patches_is_defined_with_expected_signature():
     params = list(inspect.signature(engine._compute_patches).parameters)
     assert params == [
         "disk_f", "parts", "assets_dir", "log", "progress", "cancel", "phase",
-        "label", "dest_is_device", "boot_screen"]
+        "label", "dest_is_device", "boot_screen", "sound_ok"]
 
 
 def test_empty_assets_dir_raises_filenotfound_not_nameerror(tmp_path):

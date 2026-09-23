@@ -1,4 +1,4 @@
-"""GUI guards for the Defaults tab's editable settings form (a tester b23).
+"""Guards for the Defaults tab's editable settings form (a tester b23).
 
 The batch-23 report: two settings he had never opened were staged for the next
 Build while he typed a player name, and the log said so again on every
@@ -10,23 +10,11 @@ minimum of 5,000,000), which the form clamped and then read back as an edit.
 Also covers what the form now promises about arrangement: score adjustments
 live under High Scores whether or not the ELF carries a name record for them,
 and the rest are drawn under their group heading.
+
+Driven through the web UI's Defaults service (webui/tabs/defaults.py).
 """
-import pytest
-
-from tests.conftest import HAS_DISPLAY
-from tests.test_gui_smoke import app  # noqa: F401  (fixture)
-
-pytestmark = [
-    pytest.mark.gui,
-    pytest.mark.skipif(not HAS_DISPLAY, reason="no Tk display available"),
-]
-
-
-def _stern(app):
-    mfr = next(m for m in app._manufacturers if m.key == "stern")
-    app._on_manufacturer_change(mfr)
-    app.root.update()
-    return app.window
+from pinball_decryptor.webui.tabs.defaults import range_text
+from tests.webui_harness import web_app
 
 
 def _row(name, label, group, default, lo, hi, kind="number", status=""):
@@ -48,124 +36,131 @@ ROWS = [
 ]
 
 
-def _build(app, rows=ROWS):
-    w = _stern(app)
-    w._settings_table = object()          # only truthiness is used here
-    w._settings_hstd = None               # no name records in this fixture
-    w._settings_every = []
-    w._settings_build_form(list(rows))
-    app.root.update()
-    return w
+def _build(w, rows=ROWS):
+    svc = w.window.service("defaults")
+
+    def _do():
+        svc._table = object()          # only truthiness is used here
+        svc._hstd = None               # no name records in this fixture
+        svc._every = []
+        svc._build_form([dict(r) for r in rows])
+    w.run(_do)
+    return svc
 
 
-def test_a_default_outside_its_own_range_is_not_an_edit(app):
+def _changes(w, svc):
+    return w.run(svc._changes)
+
+
+def test_a_default_outside_its_own_range_is_not_an_edit(tmp_path):
     """The whole batch-23 bug in one line: nothing was touched, so nothing is
     staged — not even the row the firmware ships out of range."""
-    w = _build(app)
-    assert w._settings_changes() == {}
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _build(w)
+        assert _changes(w, svc) == {}
 
 
-def test_editing_one_row_stages_only_that_row(app):
-    w = _build(app)
-    row = next(r for r in w._settings_rows if r["name"] == "AD_FREE_PLAY")
-    row["var"].set(1)
-    assert w._settings_changes() == {"AD_FREE_PLAY": 1}
+def test_editing_one_row_stages_only_that_row(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _build(w)
+        w.call("defaults.set_value", "AD_FREE_PLAY", 1)
+        assert _changes(w, svc) == {"AD_FREE_PLAY": 1}
 
 
-def test_out_of_range_row_still_edits_and_clamps_into_range(app):
+def test_out_of_range_row_still_edits_and_clamps_into_range(tmp_path):
     """It is editable like any other; the value written is pulled into the
     range the firmware itself declares, because patched_bytes rejects
     anything else."""
-    w = _build(app)
-    row = next(r for r in w._settings_rows
-               if r["name"] == "AD_ELECTRIC_MAGIC_FRENZY_CHAMPION")
-    row["var"].set(3_000_000)             # still under the 5,000,000 minimum
-    assert w._settings_changes() == {
-        "AD_ELECTRIC_MAGIC_FRENZY_CHAMPION": 5_000_000}
-    row["var"].set(row["default"])        # back to the card's own value
-    assert w._settings_changes() == {}
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _build(w)
+        name = "AD_ELECTRIC_MAGIC_FRENZY_CHAMPION"
+        w.call("defaults.set_value", name, 3_000_000)   # still under 5,000,000
+        assert _changes(w, svc) == {name: 5_000_000}
+        default = next(r for r in svc._rows if r["name"] == name)["default"]
+        w.call("defaults.set_value", name, default)   # back to the card's own
+        assert _changes(w, svc) == {}
 
 
-def test_reset_fields_does_not_introduce_a_change(app):
-    w = _build(app)
-    next(r for r in w._settings_rows
-         if r["name"] == "AD_FREE_PLAY")["var"].set(1)
-    w._settings_reset()
-    assert w._settings_changes() == {}
+def test_reset_fields_does_not_introduce_a_change(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _build(w)
+        w.call("defaults.set_value", "AD_FREE_PLAY", 1)
+        w.call("defaults.reset")
+        assert _changes(w, svc) == {}
 
 
-def test_range_names_a_default_the_firmware_ships_out_of_range(app):
-    w = _build(app)
+def test_range_names_a_default_the_firmware_ships_out_of_range():
     rows = {r["name"]: r for r in ROWS}
-    txt = w._settings_range_text(rows["AD_ELECTRIC_MAGIC_FRENZY_CHAMPION"])
+    txt = range_text(rows["AD_ELECTRIC_MAGIC_FRENZY_CHAMPION"])
     assert "outside its own range" in txt and "2,000,000" in txt
-    assert "outside" not in w._settings_range_text(
-        rows["AD_BLACK_DOG_CHAMPION"])
+    assert "outside" not in range_text(rows["AD_BLACK_DOG_CHAMPION"])
 
 
-def _form_texts(w):
-    """Every label/heading the form drew, in no particular order."""
-    out = []
-    for child in w._settings_form.winfo_children():
-        try:
-            out.append(child.cget("text"))
-        except Exception:
-            pass
-    return out
+def _form_labels(w):
+    return [it["label"] for it in w.state("defaults")["form"]]
 
 
-def test_score_rows_leave_the_settings_grid_for_high_scores(app):
+def test_score_rows_leave_the_settings_grid_for_high_scores(tmp_path):
     """Every champion belongs with the board, including the ones the ELF has
     no initials/player-name record for (a tester's red circle)."""
-    w = _build(app)
-    texts = _form_texts(w)
-    assert "High Scores" in texts          # the block's own heading
-    assert "Black Dog Champion" in texts   # drawn inside it, score-only
-    # Registered as an ordinary row, so staging/presets/Reset still reach it.
-    assert any(r["name"] == "AD_BLACK_DOG_CHAMPION"
-               for r in w._settings_rows)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _build(w)
+        hs = w.state("defaults")["hs"]
+        # drawn inside the High Scores block, score-only
+        assert "Black Dog Champion" in [it["display"] for it in hs
+                                        if it["type"] == "score"]
+        assert "Black Dog Champion" not in _form_labels(w)
+        # Registered as an ordinary row, so staging/presets/Reset still reach
+        # it.
+        assert any(r["name"] == "AD_BLACK_DOG_CHAMPION" for r in svc._rows)
 
 
-def test_group_headings_are_drawn(app):
-    w = _build(app)
-    texts = _form_texts(w)
-    assert "Game" in texts and "Sound" in texts
+def test_group_headings_are_drawn(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        _build(w)
+        groups = [it["label"] for it in w.state("defaults")["form"]
+                  if it["type"] == "group"]
+        assert "Game" in groups and "Sound" in groups
 
 
-def test_log_names_the_setting_and_both_values(app):
+def _logging(w, svc, monkeypatch):
+    def _adopt():
+        svc._logged = svc._log_state()      # adopt the loaded state
+    w.run(_adopt)
+    lines = []
+    monkeypatch.setattr(svc, "log", lambda msg, *_a, **_k: lines.append(msg))
+    return lines
+
+
+def test_log_names_the_setting_and_both_values(tmp_path, monkeypatch):
     """a tester: "the log might be more useful if it states the previous
     value and the new value"."""
-    w = _build(app)
-    w._settings_logged = w._settings_log_state()      # adopt the loaded state
-    lines = []
-    w.append_log = lambda msg, *_a, **_k: lines.append(msg)
-    next(r for r in w._settings_rows
-         if r["name"] == "AD_SOUND_MASTER_VOLUME_SETTING")["var"].set(48)
-    w._settings_flush_log()
-    assert len(lines) == 1
-    assert "Master Volume" in lines[0]
-    assert "64" in lines[0] and "48" in lines[0]
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _build(w)
+        lines = _logging(w, svc, monkeypatch)
+        w.call("defaults.set_value", "AD_SOUND_MASTER_VOLUME_SETTING", 48)
+        w.run(svc._flush_log)
+        assert len(lines) == 1
+        assert "Master Volume" in lines[0]
+        assert "64" in lines[0] and "48" in lines[0]
 
 
-def test_log_says_when_a_field_goes_back_to_the_card_value(app):
-    w = _build(app)
-    w._settings_logged = w._settings_log_state()
-    lines = []
-    w.append_log = lambda msg, *_a, **_k: lines.append(msg)
-    row = next(r for r in w._settings_rows
-               if r["name"] == "AD_SOUND_MASTER_VOLUME_SETTING")
-    row["var"].set(48)
-    w._settings_flush_log()
-    row["var"].set(64)
-    w._settings_flush_log()
-    assert "no longer staged" in lines[-1]
+def test_log_says_when_a_field_goes_back_to_the_card_value(tmp_path,
+                                                           monkeypatch):
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _build(w)
+        lines = _logging(w, svc, monkeypatch)
+        w.call("defaults.set_value", "AD_SOUND_MASTER_VOLUME_SETTING", 48)
+        w.run(svc._flush_log)
+        w.call("defaults.set_value", "AD_SOUND_MASTER_VOLUME_SETTING", 64)
+        w.run(svc._flush_log)
+        assert "no longer staged" in lines[-1]
 
 
-def test_log_stays_quiet_when_nothing_moved(app):
-    w = _build(app)
-    w._settings_logged = w._settings_log_state()
-    lines = []
-    w.append_log = lambda msg, *_a, **_k: lines.append(msg)
-    w._settings_flush_log()
-    w._settings_flush_log()
-    assert lines == []
+def test_log_stays_quiet_when_nothing_moved(tmp_path, monkeypatch):
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _build(w)
+        lines = _logging(w, svc, monkeypatch)
+        w.run(svc._flush_log)
+        w.run(svc._flush_log)
+        assert lines == []

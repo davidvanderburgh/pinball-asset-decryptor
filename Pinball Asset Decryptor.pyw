@@ -13,5 +13,11 @@ if __name__ == "__main__":
     # instead of this checkout (no-op everywhere else — see worktree_picker).
     from pinball_decryptor.worktree_picker import dev_pick_checkout
     if dev_pick_checkout():
-        from pinball_decryptor.app import App
-        App().run()
+        # The web UI is the app; PAD_UI=tk starts the old Tk window until the
+        # cut-over release removes it.
+        if os.environ.get("PAD_UI", "").lower() == "tk":
+            from pinball_decryptor.app import App
+            App().run()
+        else:
+            from pinball_decryptor.webui.host import main
+            sys.exit(main(sys.argv[1:]))

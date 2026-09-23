@@ -5,21 +5,24 @@ David (2026-09-07): "on the TEXT tab, it still gives me grief that it is too
 long with a Max column still persisting. Ideally, changes here would
 propagate everywhere and I would be able to easily view them to confirm it
 looks good."  The engine side (plans/spike2_longer_program_text.md) places a
-longer program string in a new area of the game program; this is the GUI
+longer program string in a new area of the game program; this is the UI
 half: the Max column shows the manifest's budget (96 for a growable row),
 Apply accepts anything within it, "Replace everywhere…" changes a word in
 every row at once, and the Write tab says which pending edit grows the
 program and whether the Advanced option lets it.
+
+The rules live in webui/text_rules.py; the tabs are driven through the web
+UI's Text and Write services (webui/tabs/text.py, webui/tabs/write.py).
 """
 
 import json
 import os
+import time
 
 from pinball_decryptor.core import text_manifest as tm
-from pinball_decryptor.gui.main_window import MainWindow
-from tests.test_gui_smoke import app  # noqa: F401  (fixture)
+from pinball_decryptor.webui import text_rules as R
+from tests.webui_harness import web_app
 
-W = MainWindow
 GAME = "/godzilla_le/game"
 SCENE = "/godzilla_le/assets/lcd/auto_loaded/aaaa1111bbbb2222/scene.radium"
 
@@ -38,28 +41,52 @@ def _row(path, original, replacement="", budget=None, grow=False,
     return r
 
 
+def _wait(w, pred, timeout=15.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        w.drain()
+        if pred():
+            return True
+        time.sleep(0.02)
+    return pred()
+
+
 def _load(w, assets, rows):
     tm.save(assets, rows)
-    w._set_tab_scanning("text", True)
-    w._populate_text_after_scan(tm.load(assets), None, w._text_scan_id,
-                                assets)
-    w.write_assets_var.set(assets)
+
+    def _set():
+        try:
+            w.window.write_assets_var.set(assets)
+        except Exception:                            # noqa: BLE001
+            pass
+    w.run(_set)
+    w.call("ui.select_tab", "text")
+    svc = w.window.service("text")
+    assert _wait(w, lambda: not w.state("text")["scanning"]
+                 and svc._text_scan_dir == assets
+                 and len(svc._text_rows) == len(rows))
+    return svc
 
 
-def _select(w, original):
-    iid = next(str(i) for i, r in enumerate(w._text_rows)
-               if r["original"] == original)
-    w._text_tree.selection_set(iid)
-    w._text_on_tree_select()
-    return iid
+def _select(w, svc, original):
+    i = next(i for i, r in enumerate(svc._text_rows)
+             if r["original"] == original)
+    assert w.call("text.select", i) is True
+    return i
 
 
-def _state(widget):
-    return str(widget.cget("state"))
+def _list_row(w, original):
+    return next(r for r in w.state("text")["rows"] if r["o"] == original)
+
+
+def _type(w, new):
+    w.call("ui.set", "text", "new", new)
+    w.drain()
+    return w.state("text")
 
 
 # ---------------------------------------------------------------------------
-# Tk-free
+# The rules
 # ---------------------------------------------------------------------------
 
 def test_grow_and_unused_flags_round_trip_in_the_manifest(tmp_path):
@@ -97,28 +124,28 @@ def test_max_label_budget_and_outgrows_are_tk_free():
     fixed = _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=28,
                  fixed=True)
     scene = _row(SCENE, "TILT")
-    assert W._text_row_budget(grow) == 96
-    assert W._text_row_max_label(grow) == "96 (grows)"
-    assert W._text_row_max_label(fixed) == "28"
+    assert R.row_budget(grow) == 96
+    assert R.row_max_label(grow) == "96 (grows)"
+    assert R.row_max_label(fixed) == "28"
     # A scene row grows too (Write rewrites the scene at the new length):
     # its Max is the 96-byte line cap, or its own length when that is longer.
-    assert W._text_row_max_label(scene) == "96 (grows)"
-    assert W._text_row_budget(scene) == 96
-    assert W._text_row_grows(scene) and not W._text_row_grows(fixed)
-    assert W._text_row_budget(_row(SCENE, "X" * 120)) == 120
-    assert W._text_row_outgrows(scene, "TILT!")
-    assert "longest a line can be is 96" in W._text_too_long_message(
+    assert R.row_max_label(scene) == "96 (grows)"
+    assert R.row_budget(scene) == 96
+    assert R.row_grows(scene) and not R.row_grows(fixed)
+    assert R.row_budget(_row(SCENE, "X" * 120)) == 120
+    assert R.row_outgrows(scene, "TILT!")
+    assert "longest a line can be is 96" in R.too_long_message(
         scene, "T" * 97)
-    assert "can't move" in W._text_too_long_message(fixed, "X" * 29)
-    assert W._text_row_outgrows(grow, "GODZILLA VS BIOLLANTE")
-    assert not W._text_row_outgrows(grow, "GODZILLA VS GIGAN!")
+    assert "can't move" in R.too_long_message(fixed, "X" * 29)
+    assert R.row_outgrows(grow, "GODZILLA VS BIOLLANTE")
+    assert not R.row_outgrows(grow, "GODZILLA VS GIGAN!")
     # \n is one byte on a budgeted row
     two = _row(GAME, "GODZILLA\\nVS. EBIRAH", budget=96, grow=True)
-    assert W._text_row_len(two, "GODZILLA\\nVS. EBIRAH") == 19
-    assert "not used" in W._text_program_note(
+    assert R.row_len(two, "GODZILLA\\nVS. EBIRAH") == 19
+    assert "not used" in R.program_note(
         _row(GAME, "GEORGE GOMEZ", budget=12, unused=True))
-    assert "new area of the game program" in W._text_program_note(grow)
-    assert "edit both rows" in W._text_program_note(fixed)
+    assert "new area of the game program" in R.program_note(grow)
+    assert "edit both rows" in R.program_note(fixed)
 
 
 def test_replace_plan_scopes_on_originals_and_reports_fits():
@@ -131,7 +158,7 @@ def test_replace_plan_scopes_on_originals_and_reports_fits():
         _row(GAME, "TILT", budget=4, fixed=True),
         _row(GAME, "EBIRAH!", budget=7, fixed=True),      # fixed slot
     ]
-    plan = W._text_replace_plan(rows, "EBIRAH", "BIOLLANTE")
+    plan = R.replace_plan(rows, "EBIRAH", "BIOLLANTE")
     assert [p["index"] for p in plan] == [0, 1, 2, 3, 6]
     assert [p["new"] for p in plan] == [
         "GODZILLA VS BIOLLANTE", "BIOLLANTE", "BATTLE VS BIOLLANTE SHOT TIMER",
@@ -139,27 +166,27 @@ def test_replace_plan_scopes_on_originals_and_reports_fits():
     assert [p["fits"] for p in plan] == [True, True, True, True, False]
     # Match case off reaches the lower-case original too — matched on the
     # ORIGINAL, never the edit — and keeps the rest of the string intact.
-    loose = W._text_replace_plan(rows, "ebirah", "BIOLLANTE", match_case=False)
+    loose = R.replace_plan(rows, "ebirah", "BIOLLANTE", match_case=False)
     assert [p["index"] for p in loose] == [0, 1, 2, 3, 4, 6]
     assert loose[4]["new"] == "BIOLLANTE wins"
     assert loose[4]["fits"] is True                # a scene row grows
     assert loose[5]["fits"] is False               # 10 bytes in a 7 slot
-    assert W._text_replace_plan(rows, "", "X") == []
+    assert R.replace_plan(rows, "", "X") == []
     # every occurrence in a line is replaced
-    assert W._text_replace_plan(
+    assert R.replace_plan(
         [_row(GAME, "EBIRAH VS EBIRAH", budget=96, grow=True)],
         "EBIRAH", "GIGAN")[0]["new"] == "GIGAN VS GIGAN"
 
 
 def test_split_edit_finds_the_one_changed_word():
-    assert W._text_split_edit("GODZILLA VS EBIRAH STARTED",
-                              "GODZILLA VS BIOLLANTE STARTED") == (
+    assert R.split_edit("GODZILLA VS EBIRAH STARTED",
+                        "GODZILLA VS BIOLLANTE STARTED") == (
         "EBIRAH", "BIOLLANTE")
-    assert W._text_split_edit("MEGALON", "SPACE GODZILLA") == (
+    assert R.split_edit("MEGALON", "SPACE GODZILLA") == (
         "MEGALON", "SPACE GODZILLA")
-    assert W._text_split_edit("EBIRAH", "EBIRAH") is None
-    assert W._text_split_edit("", "X") is None
-    assert W._text_split_edit("AB", "AXB") is None         # pure insertion
+    assert R.split_edit("EBIRAH", "EBIRAH") is None
+    assert R.split_edit("", "X") is None
+    assert R.split_edit("AB", "AXB") is None         # pure insertion
 
 
 def test_pending_text_status_names_the_grow_path():
@@ -167,235 +194,217 @@ def test_pending_text_status_names_the_grow_path():
                   grow=True)
     same = _row(GAME, "TILT", "TOLT", 96, grow=True)
     fixed = _row(GAME, "EBIRAH", "GIGAN!", 18, fixed=True)
-    assert W._pending_text_status(longer) == W._PENDING_TEXT_GROWS
-    assert W._pending_text_status(longer, grow_on=False) == \
-        W._PENDING_TEXT_GROW_OFF
-    assert W._pending_text_status(same) == W._PENDING_TEXT
-    assert W._pending_text_status(fixed) == W._PENDING_TEXT
+    assert R.pending_text_status(longer) == R.PENDING_TEXT_GROWS
+    assert R.pending_text_status(longer, grow_on=False) == \
+        R.PENDING_TEXT_GROW_OFF
+    assert R.pending_text_status(same) == R.PENDING_TEXT
+    assert R.pending_text_status(fixed) == R.PENDING_TEXT
     # a scene row: longer = the scene is rewritten; same length = in place
     scene_longer = _row(SCENE, "TILT", "TILT WARNING")
     scene_same = _row(SCENE, "REPLAY", "SAVED!")
-    assert W._pending_text_status(scene_longer) == W._PENDING_TEXT_GROWS_SCENE
-    assert W._pending_text_status(scene_longer, grow_on=False) == \
-        W._PENDING_TEXT_GROW_OFF
-    assert W._pending_text_status(scene_same) == W._PENDING_TEXT
+    assert R.pending_text_status(scene_longer) == R.PENDING_TEXT_GROWS_SCENE
+    assert R.pending_text_status(scene_longer, grow_on=False) == \
+        R.PENDING_TEXT_GROW_OFF
+    assert R.pending_text_status(scene_same) == R.PENDING_TEXT
 
 
 # ---------------------------------------------------------------------------
-# Tk
+# The tabs
 # ---------------------------------------------------------------------------
 
-def test_apply_accepts_35_bytes_on_a_96_row_and_refuses_97(app, tmp_path,
-                                                             monkeypatch):
-    assets = str(tmp_path)
-    w = app.window
-    _load(w, assets, [
-        _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=96, grow=True)])
-    iid = _select(w, "BATTLE VS MEGALON SHOT TIMER")
-    assert w._text_tree.set(iid, "max") == "96 (grows)"
-    assert "can grow" in w._text_scene_full_var.get()
+def test_apply_accepts_35_bytes_on_a_96_row_and_refuses_97(tmp_path):
+    assets = str(tmp_path / "proj")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _load(w, assets, [
+            _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=96,
+                 grow=True)])
+        _select(w, svc, "BATTLE VS MEGALON SHOT TIMER")
+        assert _list_row(w, "BATTLE VS MEGALON SHOT TIMER")["mx"] == \
+            "96 (grows)"
+        assert "can grow" in w.state("text")["scene_note"]
 
-    new = "BATTLE VS SPACE GODZILLA SHOT TIMER"
-    assert len(new) == 35
-    w.text_new_var.set(new)
-    w._text_update_budget()
-    assert w.text_budget_var.get().startswith("35 / 96 bytes")
-    assert "new area of the game program" in w.text_budget_var.get()
-    assert "too long" not in w.text_budget_var.get()
-    assert _state(w._text_apply_btn) == "normal"
-    w._text_apply_edit()
-    assert tm.changed(assets) == {
-        GAME: [("BATTLE VS MEGALON SHOT TIMER", new)]}
-    assert w._text_tree.set(iid, "new") == new
+        new = "BATTLE VS SPACE GODZILLA SHOT TIMER"
+        assert len(new) == 35
+        st = _type(w, new)
+        assert st["budget"].startswith("35 / 96 bytes")
+        assert "new area of the game program" in st["budget"]
+        assert "too long" not in st["budget"]
+        assert st["budget_over"] is False
+        assert w.call("text.apply") is True
+        assert tm.changed(assets) == {
+            GAME: [("BATTLE VS MEGALON SHOT TIMER", new)]}
+        assert _list_row(w, "BATTLE VS MEGALON SHOT TIMER")["n"] == new
 
-    warned = []
-    monkeypatch.setattr(
-        "pinball_decryptor.gui.main_window.messagebox.showwarning",
-        lambda title, msg, **kw: warned.append(msg))
-    w.text_new_var.set("X" * 97)
-    w._text_update_budget()
-    assert "too long" in w.text_budget_var.get()
-    assert _state(w._text_apply_btn) == "disabled"
-    w._text_apply_edit()
-    assert warned and "96" in warned[0] and "longest a line" in warned[0]
-    assert tm.changed(assets) == {
-        GAME: [("BATTLE VS MEGALON SHOT TIMER", new)]}   # unchanged
+        st = _type(w, "X" * 97)
+        assert "too long" in st["budget"]
+        assert st["budget_over"] is True
+        assert w.call("text.apply") is False
+        warned = w.asked[-1]
+        assert warned["icon"] == "warning"
+        assert "96" in warned["message"]
+        assert "longest a line" in warned["message"]
+        assert tm.changed(assets) == {
+            GAME: [("BATTLE VS MEGALON SHOT TIMER", new)]}   # unchanged
 
 
-def test_apply_refuses_30_bytes_on_a_28_byte_row_that_cannot_grow(
-        app, tmp_path, monkeypatch):
-    assets = str(tmp_path)
-    w = app.window
-    _load(w, assets, [
-        _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=28,
-                   fixed=True)])
-    iid = _select(w, "BATTLE VS MEGALON SHOT TIMER")
-    assert w._text_tree.set(iid, "max") == "28"
-    assert "can grow" not in w._text_scene_full_var.get()
-    warned = []
-    monkeypatch.setattr(
-        "pinball_decryptor.gui.main_window.messagebox.showwarning",
-        lambda title, msg, **kw: warned.append(msg))
-    w.text_new_var.set("BATTLE VS BIOLLANTE SHOT TIMER")     # 30 bytes
-    w._text_update_budget()
-    assert w.text_budget_var.get().startswith("30 / 28 bytes")
-    assert "too long" in w.text_budget_var.get()
-    assert _state(w._text_apply_btn) == "disabled"
-    w._text_apply_edit()
-    assert warned and "only 28 fit" in warned[0]
-    assert "patched in place" in warned[0]
-    assert tm.changed(assets) == {}
+def test_apply_refuses_30_bytes_on_a_28_byte_row_that_cannot_grow(tmp_path):
+    assets = str(tmp_path / "proj")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _load(w, assets, [
+            _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=28,
+                 fixed=True)])
+        _select(w, svc, "BATTLE VS MEGALON SHOT TIMER")
+        assert _list_row(w, "BATTLE VS MEGALON SHOT TIMER")["mx"] == "28"
+        assert "can grow" not in w.state("text")["scene_note"]
+        st = _type(w, "BATTLE VS BIOLLANTE SHOT TIMER")     # 30 bytes
+        assert st["budget"].startswith("30 / 28 bytes")
+        assert "too long" in st["budget"]
+        assert st["budget_over"] is True
+        assert w.call("text.apply") is False
+        msg = w.asked[-1]["message"]
+        assert "only 28 fit" in msg
+        assert "patched in place" in msg
+        assert tm.changed(assets) == {}
 
 
-def test_unused_row_says_so(app, tmp_path):
-    assets = str(tmp_path)
-    w = app.window
-    _load(w, assets, [_row(GAME, "GEORGE GOMEZ", budget=12, unused=True)])
-    _select(w, "GEORGE GOMEZ")
-    assert "(not used by the game)" in w._text_scene_full_var.get()
-    assert "(not used by the game)" in w.text_budget_var.get()
+def test_unused_row_says_so(tmp_path):
+    assets = str(tmp_path / "proj")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _load(w, assets, [_row(GAME, "GEORGE GOMEZ", budget=12,
+                                     unused=True)])
+        _select(w, svc, "GEORGE GOMEZ")
+        st = w.state("text")
+        assert "(not used by the game)" in st["scene_note"]
+        assert "(not used by the game)" in st["budget"]
 
 
-def test_replace_everywhere_updates_three_rows_and_skips_one(
-        app, tmp_path, monkeypatch):
-    assets = str(tmp_path)
-    w = app.window
-    _load(w, assets, [
-        _row(GAME, "GODZILLA VS EBIRAH", budget=96, grow=True),
-        _row(GAME, "EBIRAH", budget=96, grow=True),
-        _row(GAME, "BATTLE VS EBIRAH SHOT TIMER", budget=96, grow=True),
-        _row(SCENE, "EBIRAH RULES"),                    # scene: grows
-        _row(SCENE, "TILT"),
-        _row(GAME, "EBIRAH!", budget=7, fixed=True),    # fixed 7-byte slot
-    ])
-    fp_before = w._current_write_fingerprint()
-    # Opened from a row whose New text changed one word: Find / Replace are
-    # pre-filled with that word.
-    _select(w, "GODZILLA VS EBIRAH")
-    w.text_new_var.set("GODZILLA VS BIOLLANTE")
-    dlg = w._text_replace_everywhere()
-    assert dlg is w._text_replace_dlg
-    assert dlg.find_var.get() == "EBIRAH"
-    assert dlg.repl_var.get() == "BIOLLANTE"
-    assert dlg.case_var.get() is True
-    assert dlg.count_var.get().startswith("4 of 5 matching rows fit")
-    assert _state(dlg.apply_btn) == "normal"
-    misfits = dlg.misfit_tree.get_children()
-    assert len(misfits) == 1
-    assert dlg.misfit_tree.item(misfits[0], "text") == "EBIRAH!"
-    assert dlg.misfit_tree.item(misfits[0], "values")[0] == "BIOLLANTE!"
+def test_replace_everywhere_updates_three_rows_and_skips_one(tmp_path):
+    assets = str(tmp_path / "proj")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _load(w, assets, [
+            _row(GAME, "GODZILLA VS EBIRAH", budget=96, grow=True),
+            _row(GAME, "EBIRAH", budget=96, grow=True),
+            _row(GAME, "BATTLE VS EBIRAH SHOT TIMER", budget=96, grow=True),
+            _row(SCENE, "EBIRAH RULES"),                    # scene: grows
+            _row(SCENE, "TILT"),
+            _row(GAME, "EBIRAH!", budget=7, fixed=True),    # fixed 7-byte slot
+        ])
+        write = w.window.service("write")
+        fp_before = w.run(write._fingerprint)
+        # Opened from a row whose New text changed one word: Find / Replace
+        # are pre-filled with that word.
+        _select(w, svc, "GODZILLA VS EBIRAH")
+        _type(w, "GODZILLA VS BIOLLANTE")
+        pre = w.call("text.replace_open")
+        assert pre == {"find": "EBIRAH", "repl": "BIOLLANTE"}
+        plan = w.call("text.replace_plan", pre["find"], pre["repl"], True)
+        assert plan["text"].startswith("4 of 5 matching rows fit")
+        assert plan["can_apply"] is True
+        assert len(plan["misfits"]) == 1
+        assert plan["misfits"][0]["o"] == "EBIRAH!"
+        assert plan["misfits"][0]["n"] == "BIOLLANTE!"
 
-    told = []
-    monkeypatch.setattr(
-        "pinball_decryptor.gui.main_window.messagebox.showinfo",
-        lambda title, msg, **kw: told.append(msg))
-    fits, skipped = dlg.apply()
-    assert len(fits) == 4 and len(skipped) == 1
-    assert not dlg.dlg.winfo_exists()
-    assert w._text_replace_dlg is None
-    assert tm.changed(assets) == {
-        GAME: [
-            ("GODZILLA VS EBIRAH", "GODZILLA VS BIOLLANTE"),
-            ("EBIRAH", "BIOLLANTE"),
-            ("BATTLE VS EBIRAH SHOT TIMER",
-             "BATTLE VS BIOLLANTE SHOT TIMER")],
-        SCENE: [("EBIRAH RULES", "BIOLLANTE RULES")]}
-    assert told and "4 row(s) changed" in told[0]
-    assert "EBIRAH!" in told[0] and "Max 7" in told[0]
-    assert w._current_write_fingerprint() != fp_before
-    # the list shows the new text on every changed row
-    shown = {w._text_tree.item(i, "text"): w._text_tree.set(i, "new")
-             for i in w._text_tree.get_children()}
-    assert shown["EBIRAH"] == "BIOLLANTE"
-    assert shown["EBIRAH RULES"] == "BIOLLANTE RULES"
-    assert shown["EBIRAH!"] == ""
-    app.root.update()
+        n_asked = len(w.asked)
+        res = w.call("text.replace_apply", "EBIRAH", "BIOLLANTE", True)
+        assert res == {"applied": 4, "skipped": 1}
+        assert tm.changed(assets) == {
+            GAME: [
+                ("GODZILLA VS EBIRAH", "GODZILLA VS BIOLLANTE"),
+                ("EBIRAH", "BIOLLANTE"),
+                ("BATTLE VS EBIRAH SHOT TIMER",
+                 "BATTLE VS BIOLLANTE SHOT TIMER")],
+            SCENE: [("EBIRAH RULES", "BIOLLANTE RULES")]}
+        told = [a["message"] for a in w.asked[n_asked:]]
+        assert told and "4 row(s) changed" in told[0]
+        assert "EBIRAH!" in told[0] and "Max 7" in told[0]
+        assert w.run(write._fingerprint) != fp_before
+        # the list shows the new text on every changed row
+        assert _list_row(w, "EBIRAH")["n"] == "BIOLLANTE"
+        assert _list_row(w, "EBIRAH RULES")["n"] == "BIOLLANTE RULES"
+        assert _list_row(w, "EBIRAH!")["n"] == ""
 
-    # A word nothing matches plans nothing; an empty Find is not a search.
-    dlg = w._text_replace_everywhere()
-    dlg.find_var.set("MOTHRA")
-    assert dlg.count_var.get().startswith("0 of 0")
-    assert _state(dlg.apply_btn) == "disabled"
-    assert dlg.apply() is None
-    dlg.close()
-    app.root.update()
+        # A word nothing matches plans nothing; an empty Find is not a search.
+        plan = w.call("text.replace_plan", "MOTHRA", "X", True)
+        assert plan["text"].startswith("0 of 0")
+        assert plan["can_apply"] is False
+        assert w.call("text.replace_apply", "MOTHRA", "X", True) is None
 
 
-def test_grow_setting_round_trips_and_lands_in_the_environment(
-        app, tmp_path, monkeypatch):
+def test_grow_setting_round_trips_and_lands_in_the_environment(tmp_path,
+                                                               monkeypatch):
     import pinball_decryptor.app as app_mod
     monkeypatch.setenv("PAD_STERN_TEXT_GROW", os.environ.get(
         "PAD_STERN_TEXT_GROW", "1"))
-    w = app.window
-    # default on, mirrored at startup
-    assert w.write_text_grow_var.get() is True
-    assert w.text_grow_enabled() is True
-    assert os.environ["PAD_STERN_TEXT_GROW"] == "1"
+    with web_app(tmp_path, mfr="stern") as w:
+        app, win = w.app, w.window
+        # default on, mirrored at startup
+        assert win.write_text_grow_var.get() is True
+        assert win.text_grow_enabled() is True
+        assert os.environ["PAD_STERN_TEXT_GROW"] == "1"
 
-    w.write_text_grow_var.set(False)
-    w._on_write_text_grow_toggle()
-    assert app._settings["text_grow"] is False
-    assert os.environ["PAD_STERN_TEXT_GROW"] == "0"
-    with open(app_mod.SETTINGS_FILE, encoding="utf-8") as f:
-        assert json.load(f)["text_grow"] is False
-    assert app._text_grow_setting() is False
+        w.call("ui.set", "write", "text_grow", False)
+        w.drain()
+        assert app._settings["text_grow"] is False
+        assert os.environ["PAD_STERN_TEXT_GROW"] == "0"
+        with open(app_mod.SETTINGS_FILE, encoding="utf-8") as f:
+            assert json.load(f)["text_grow"] is False
+        assert app._text_grow_setting() is False
 
-    w.write_text_grow_var.set(True)
-    w._on_write_text_grow_toggle()
-    assert os.environ["PAD_STERN_TEXT_GROW"] == "1"
-    with open(app_mod.SETTINGS_FILE, encoding="utf-8") as f:
-        assert json.load(f)["text_grow"] is True
-    # a settings file that never saw the key reads as on
-    app._settings.pop("text_grow", None)
-    assert app._text_grow_setting() is True
+        w.call("ui.set", "write", "text_grow", True)
+        w.drain()
+        assert os.environ["PAD_STERN_TEXT_GROW"] == "1"
+        with open(app_mod.SETTINGS_FILE, encoding="utf-8") as f:
+            assert json.load(f)["text_grow"] is True
+        # a settings file that never saw the key reads as on
+        app._settings.pop("text_grow", None)
+        assert app._text_grow_setting() is True
 
 
-def test_write_tab_pending_row_says_the_game_program_grows(app, tmp_path):
-    from pinball_decryptor.core.registry import all_manufacturers
-    assets = str(tmp_path)
-    stern = next(m for m in all_manufacturers() if m.key == "stern")
-    app._on_manufacturer_change(stern)
-    app.root.update()
-    w = app.window
-    assert w._write_text_grow_row.winfo_manager() == "pack"
-    _load(w, assets, [
-        _row(GAME, "GODZILLA VS EBIRAH", "GODZILLA VS BIOLLANTE", 96,
-             grow=True),
-        _row(GAME, "TILT", "TOLT", 96, grow=True),
-        _row(SCENE, "REPLAY", "SAVED!"),
-        _row(SCENE, "GAME OVER", "GAME OVER, MAN"),     # longer: scene grows
-    ])
-    w.write_text_grow_var.set(True)
-    sid = w._write_preview_scan_id
-    n = w._add_pending_preview_rows(assets, sid)
-    assert n == 4
-    by_status = {}
-    for rel, ext, status, tag in w._write_preview_rows:
-        by_status.setdefault(status, []).append(rel)
-    assert by_status[W._PENDING_TEXT_GROWS] == [
-        "GODZILLA VS EBIRAH  →  GODZILLA VS BIOLLANTE"]
-    assert by_status[W._PENDING_TEXT_GROWS_SCENE] == [
-        "GAME OVER  →  GAME OVER, MAN"]
-    assert sorted(by_status[W._PENDING_TEXT]) == [
-        "REPLAY  →  SAVED!", "TILT  →  TOLT"]
+def test_write_tab_pending_row_says_the_game_program_grows(tmp_path):
+    assets = str(tmp_path / "proj")
+    with web_app(tmp_path, mfr="stern") as w:
+        assert w.state("write")["text_grow_cap"] is True
+        _load(w, assets, [
+            _row(GAME, "GODZILLA VS EBIRAH", "GODZILLA VS BIOLLANTE", 96,
+                 grow=True),
+            _row(GAME, "TILT", "TOLT", 96, grow=True),
+            _row(SCENE, "REPLAY", "SAVED!"),
+            _row(SCENE, "GAME OVER", "GAME OVER, MAN"),  # longer: scene grows
+        ])
+        write = w.window.service("write")
+        w.call("ui.set", "write", "text_grow", True)
+        w.run(write._refresh_pending_text_rows)
 
-    # Advanced off: the over-long edits are listed as skipped, the rest stay
-    w.write_text_grow_var.set(False)
-    w._on_write_text_grow_toggle()
-    statuses = sorted(s for _r, e, s, _t in w._write_preview_rows
-                      if e == "text")
-    assert statuses == sorted([W._PENDING_TEXT, W._PENDING_TEXT,
-                               W._PENDING_TEXT_GROW_OFF,
-                               W._PENDING_TEXT_GROW_OFF])
-    assert len(w._write_preview_tree.get_children()) == 4
-    w.write_text_grow_var.set(True)
-    w._on_write_text_grow_toggle()
-    assert W._PENDING_TEXT_GROWS in [
-        s for _r, _e, s, _t in w._write_preview_rows]
+        def _text_rows():
+            return [(rel, status) for rel, ext, status, _tag in write._rows
+                    if ext == "text"]
+        rows = _text_rows()
+        assert len(rows) == 4
+        by_status = {}
+        for rel, status in rows:
+            by_status.setdefault(status, []).append(rel)
+        assert by_status[R.PENDING_TEXT_GROWS] == [
+            "GODZILLA VS EBIRAH  →  GODZILLA VS BIOLLANTE"]
+        assert by_status[R.PENDING_TEXT_GROWS_SCENE] == [
+            "GAME OVER  →  GAME OVER, MAN"]
+        assert sorted(by_status[R.PENDING_TEXT]) == [
+            "REPLAY  →  SAVED!", "TILT  →  TOLT"]
+
+        # Advanced off: the over-long edits are listed as skipped, the rest
+        # stay
+        w.call("ui.set", "write", "text_grow", False)
+        w.drain()
+        statuses = sorted(s for _r, s in _text_rows())
+        assert statuses == sorted([R.PENDING_TEXT, R.PENDING_TEXT,
+                                   R.PENDING_TEXT_GROW_OFF,
+                                   R.PENDING_TEXT_GROW_OFF])
+        w.call("ui.set", "write", "text_grow", True)
+        w.drain()
+        assert R.PENDING_TEXT_GROWS in [s for _r, s in _text_rows()]
 
 
 def test_a_program_row_from_an_older_project_still_takes_longer_text(
-        app, tmp_path):
+        tmp_path):
     """David, 2026-09-07, on a project extracted by an older build: "on the
     text tab, it still shows too long in red".
 
@@ -404,33 +413,34 @@ def test_a_program_row_from_an_older_project_still_takes_longer_text(
     move" — so the tab refused text the Write step would have placed.  No
     flag now means nobody has measured yet: the row offers the 96-byte line
     cap, and Write checks the string against the card."""
-    assets = str(tmp_path)
-    w = app.window
-    _load(w, assets, [_row(GAME, "BATTLE VS SPACE G TIMER", budget=23)])
-    iid = _select(w, "BATTLE VS SPACE G TIMER")
-    assert w._text_tree.set(iid, "max") == "96 (grows)"
-    note = w._text_scene_full_var.get()
-    assert "can grow" in note and "checked against the card" in note
-    w.text_new_var.set("BATTLE VS SPACE GODZILLA TIMER")        # 30 bytes
-    w._text_update_budget()
-    assert w.text_budget_var.get().startswith("30 / 96 bytes")
-    assert "too long" not in w.text_budget_var.get()
-    assert _state(w._text_apply_btn) == "normal"
-    w._text_apply_edit()
-    assert tm.changed(assets) == {
-        GAME: [("BATTLE VS SPACE G TIMER", "BATTLE VS SPACE GODZILLA TIMER")]}
+    assets = str(tmp_path / "proj")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _load(w, assets, [_row(GAME, "BATTLE VS SPACE G TIMER",
+                                     budget=23)])
+        _select(w, svc, "BATTLE VS SPACE G TIMER")
+        assert _list_row(w, "BATTLE VS SPACE G TIMER")["mx"] == "96 (grows)"
+        note = w.state("text")["scene_note"]
+        assert "can grow" in note and "checked against the card" in note
+        st = _type(w, "BATTLE VS SPACE GODZILLA TIMER")        # 30 bytes
+        assert st["budget"].startswith("30 / 96 bytes")
+        assert "too long" not in st["budget"]
+        assert st["budget_over"] is False
+        assert w.call("text.apply") is True
+        assert tm.changed(assets) == {
+            GAME: [("BATTLE VS SPACE G TIMER",
+                    "BATTLE VS SPACE GODZILLA TIMER")]}
 
 
 def test_an_unflagged_row_grows_but_a_scanned_fixed_one_does_not():
-    """Tk-free twin of the above, and the line it must not blur: a row the
+    """The rules twin of the above, and the line it must not blur: a row the
     scan measured and found immovable carries ``fixed`` and keeps its slot."""
     old = _row(GAME, "BATTLE VS SPACE G TIMER", budget=23)
     scanned = _row(GAME, "BATTLE VS SPACE G TIMER", budget=23, fixed=True)
-    assert W._text_row_grows(old) and W._text_row_budget(old) == 96
-    assert W._text_row_max_label(old) == "96 (grows)"
-    assert not W._text_row_grows(scanned)
-    assert W._text_row_budget(scanned) == 23
-    assert W._text_row_max_label(scanned) == "23"
+    assert R.row_grows(old) and R.row_budget(old) == 96
+    assert R.row_max_label(old) == "96 (grows)"
+    assert not R.row_grows(scanned)
+    assert R.row_budget(scanned) == 23
+    assert R.row_max_label(scanned) == "23"
     # and the fixed flag survives a manifest round trip
     import tempfile
     with tempfile.TemporaryDirectory() as d:

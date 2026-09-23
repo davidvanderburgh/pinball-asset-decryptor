@@ -8,9 +8,16 @@ console window appears:
     pythonw tools\\spike2_emu\\playfield.py
 
 WHY WINDOWS AND NOT WSL, because the obvious choice does not work: WSL here has
-no Python GUI toolkit at all - no tkinter, no gi/Gtk, no Qt - and installing one
-needs a sudo this rig does not have. Windows has tkinter and Pillow already,
-because the decryptor's own GUI uses them.
+no GUI toolkit at all - no tkinter, no gi/Gtk, no Qt - and installing one needs
+a sudo this rig does not have. PAD's own bundled Windows Python carries what
+the window needs, because the app's own window is drawn with it.
+
+THE WINDOW IS A WEB PAGE (2026-09-23, the app's cut-over from Tk): pfpage/ is
+the page, drawn in the app's own design, and pfweb.py shows it - a native
+WebView2 window on Windows (pywebview), GTK WebKit in the macOS container and
+on Linux desktops, a browser app window or a plain tab as the fallbacks. This
+file keeps every decision; the page only draws what it is told and sends back
+what was pressed.
 
 HOW IT REACHES THE GAME, and both halves are deliberate:
 
@@ -54,9 +61,9 @@ with a soft glow behind it.
 WHAT BRIGHTNESS LOOKS LIKE. A lit insert is drawn at a SIZE and an OPACITY
 that both follow its duty cycle, so a half-lit lamp reads as half-lit at a
 glance instead of as fully on: markers run 3.8 px at 5% duty to 5.5 px at
-100%, blended 57% to 100% over the artwork behind them. Tk canvas items have
-no alpha at all, so the "opacity" is the fill colour mixed toward the pixels
-the marker covers, sampled from the artwork once at build time. Both scales
+100%, drawn at 57% to 100% opacity over the artwork behind them (real alpha
+on the page; the Tk window had to fake it by mixing each marker's colour
+toward an artwork pixel sampled at build time). Both scales
 have a floor on purpose - a lamp at 5% duty is ON, and must not render as a
 ghost. The HUE is still brightness-lifted so a dim insert keeps its colour.
 
@@ -121,9 +128,6 @@ import subprocess
 import sys
 import threading
 import time
-import tkinter as tk
-import tkinter.font as tkfont
-from tkinter import ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ballmodel
@@ -135,6 +139,7 @@ import keybinds
 import mktables
 import padpath
 import padsw
+import pfweb
 import trough
 
 HERE = padpath.RIG
@@ -220,9 +225,8 @@ LCD_PATH = os.path.join(padpath.dump() or "", "padlcd")
 #: stripped environment degrades instead of crashing the window.
 try:
     from PIL import Image as _PILImage
-    from PIL import ImageTk as _PILImageTk
 except Exception:                                           # noqa: BLE001
-    _PILImage = _PILImageTk = None
+    _PILImage = None
 
 #: PAD_PF_LOG=<path> turns on the once-a-second loop report (see Field._log).
 #: Unset in normal use; this is the instrument the frame-rate claim rests on.
@@ -531,51 +535,6 @@ def helper_message(script, r):
     return text
 
 
-def run_helper(view, script, arg=None):
-    """Run one helper for a view and put its own answer in the status bar.
-
-    ONE FUNCTION RATHER THAN A METHOD ON EACH, for the same reason
-    `poll_switches()` is one: both views had a two-line `run_action` /
-    `run_plunge` pair, they have to agree about what a press does, and this rig
-    has been bitten twice by two copies of one fact drifting.
-
-    `arg` is None for a helper that takes none, which is what keeps
-    WINDOW_ACTIONS a plain table rather than a table with a special case in it.
-    The driver runs these on their own thread because they take seconds -
-    "Clear switch alerts" takes about twelve - so the reply arrives on that
-    thread and
-    hops back through `after(0)`; a TclError there is a window that closed
-    while its helper was still running.
-    """
-    def done(r):
-        text = helper_message(script, r)
-
-        def show():
-            try:
-                view._flash(text)
-            except (AttributeError, tk.TclError):       # pragma: no cover
-                pass
-            # A ball action's answer also lands in the BALLS note (PAD-134),
-            # beside the feeder's own lines and under the button that asked -
-            # the JJP window's run_plan logs its "drain:"/"plunge:" the same
-            # way. The status bar keeps it too; it is the one place every
-            # action reports.
-            panel = getattr(view, "key_panel", None)
-            if script == "plunge.py" and panel is not None:
-                try:
-                    panel.ball_say("%s: %s" % (arg, text) if arg else text)
-                except (AttributeError, tk.TclError):   # pragma: no cover
-                    pass
-        try:
-            view.status.after(0, show)
-        except tk.TclError:                             # pragma: no cover
-            pass
-
-    if arg is None:
-        view.drv.run_script(script, done=done)
-    else:
-        view.drv.run_script(script, arg, done=done)
-
 
 def emu_gone(view, readable):
     """Track LED-block readability; True when a once-seen emulator has left."""
@@ -854,41 +813,6 @@ def state_run(script, slot="quicksave", label=None):
         return None
 
 
-def pick_scale(root, img_h, chrome=170):
-    """Fit the artwork to the screen.
-
-    A flat 2x is 1420 px tall and puts the flippers and the trough off the
-    bottom of a 1080p screen with no way to reach them. PAD_PF_SCALE overrides.
-
-    `chrome` is what the window needs AROUND the artwork: the title bar, the
-    button row and the status bar. It was 130 and that was about 40 px short -
-    measured on a 5120x1440 screen, the artwork claimed 1310 px, the window's
-    client area was 1362, and the status bar did not fit. Being wrong in this
-    direction costs a strip of artwork nobody looks at; being wrong the other
-    way costs the only line of text the window prints about itself.
-
-    STILL 170 AFTER THE BUTTON ROW WENT AWAY, AND THAT IS DELIBERATE - it was
-    tried at 140 and MEASURED (REMAINING item 25). The row claimed ~30 px, so
-    reclaiming it is arithmetic and it works: the artwork goes 1270 -> 1300 on
-    a 5120x1440 screen with the status bar still fitting. What it also does is
-    move every marker, and `_hit()` at a marker's own CENTRE resolves to
-    whatever NEIGHBOUR happens to overlap there - a switch oval is unfilled, so
-    a click in its middle never finds the switch itself. Diffed offline over 51
-    switch and coil centres, 20 of them changed what a press lands on, and one
-    was a real loss: the POP BUMPER coil centre stopped resolving to a switch
-    and started resolving to an insert, i.e. a click there would do nothing.
-    2.3% more artwork is not worth perturbing the hit test item 24 just
-    stabilised. Reclaim it only with that diff re-run and clean.
-    """
-    env = os.environ.get("PAD_PF_SCALE")
-    if env:
-        try:
-            return max(1.0, float(env))
-        except ValueError:
-            pass
-    return max(1.0, (root.winfo_screenheight() - chrome) / float(img_h))
-
-
 def _rows(path, at_least):
     out = []
     if not os.path.exists(path):
@@ -1160,41 +1084,6 @@ def load_switch_list():
     return trough.load_list(os.path.join(TDIR, "switch_list.txt"))
 
 
-class Tip:
-    """A tooltip that appears at once and follows the cursor.
-
-    Tk's own `after`-delayed tooltips feel broken on a dense diagram - by the
-    time one appears the cursor has moved on - so this shows immediately and is
-    repositioned on every motion event.
-    """
-
-    def __init__(self, root):
-        self.win = tk.Toplevel(root)
-        self.win.wm_overrideredirect(True)
-        self.win.attributes("-topmost", True)
-        # A Toplevel inherits the app title, so a screenshot tool matching on
-        # "virtual playfield" grabs the TOOLTIP instead of the window. Name it.
-        self.win.title("playfield tooltip")
-        self.lbl = tk.Label(self.win, justify="left", bg="#ffffe0", fg="#000",
-                            relief="solid", borderwidth=1,
-                            font=("Consolas", 9), padx=5, pady=2)
-        self.lbl.pack()
-        self.win.withdraw()
-        self.shown = False
-
-    def show(self, text, x, y):
-        self.lbl.config(text=text)
-        self.win.geometry("+%d+%d" % (x + 16, y + 12))
-        if not self.shown:
-            self.win.deiconify()
-            self.shown = True
-
-    def hide(self):
-        if self.shown:
-            self.win.withdraw()
-            self.shown = False
-
-
 def read_merged():
     """The whole merged switch array - what the GAME is being handed - or None.
 
@@ -1345,188 +1234,6 @@ class SwitchWatch:
         return bool(self.mrg[sw_id])
 
 
-class TroughPanel:
-    """Six ball positions in trough order, drawn straight onto a canvas.
-
-    THE NUMBERS UNDER THE BALLS ARE THE POINT, not decoration. The question
-    David is asking - "are the trough switches correctly closed or open" - is
-    about WHICH position is empty, because item 20 was a wrong-end bug that a
-    count could never have shown. Position 1 is the eject end and is drawn
-    first, so the row reads left to right in the direction a ball travels, and
-    the caption says which end is which in words as well.
-
-    NOTHING HERE GOES INTO `info`, and that is a promise about clicking rather
-    than a detail. `Field._hit()` walks find_overlapping and returns the
-    topmost item that is IN `self.info`; these items are not, so they are
-    skipped exactly as the artwork image and the action buttons are. Item 24
-    measured that a click at the centre of RIGHT SCOOP lands on the COIL
-    marker rather than the switch, and coilact.py depends on it - a panel that
-    joined the hit test could quietly change which device a click reaches.
-
-    ★ THE BALLS ARE CLICKABLE, and that is why the promise above still holds:
-    the binding is a per-ITEM `tag_bind` that returns "break", not a place in
-    `info`, so the window's own hit test is untouched and a click on a ball
-    never reaches it.
-
-    WHY A CLICK HERE AND NOT ON THE TROUGH SWITCH ITSELF. David, 2026-08-11,
-    mid-Mechagodzilla-Multiball: "how do i drain a ball? pressing one of the
-    trough switches doesn't drain the ball. is there a way to just click on
-    the ball indicators to add or remove it". Pressing the switch cannot work
-    and never could: item 24's press-and-hold is MOMENTARY - it opens again on
-    release - and a ball in a trough holds its switch closed for as long as it
-    sits there. So a press is a ball that arrives and leaves, which the game
-    correctly ignores. A ball is a LATCHED closure, and these six dots are the
-    only place in the window that means "a ball is here" rather than "a switch
-    is being pressed".
-
-    THE STACK DECIDES WHICH SWITCH MOVES, NOT WHICH DOT WAS CLICKED, and that
-    is deliberate rather than a shortcut. A trough is a ramp: balls sit
-    contiguously from the eject end, so the only two things that can physically
-    happen are "one more" and "one fewer". Clicking the third dot of four
-    therefore removes a ball from the FAR end - the hole appears at position 4,
-    which is exactly the geometry item 20 was a bug in and exactly what this
-    panel was built to show. Honouring the clicked position instead would put
-    a gap in the middle of the stack, which is a state no machine can be in
-    and which ballmodel.Trough.anomaly() would then report as a fault.
-    """
-
-    R = 7                 # ball radius, screen px
-    GAP = 5               # between balls
-    PAD = 5               # inside the panel's own background
-    #: The panel's own background, named because the per-ball hit pads have to
-    #: be filled with EXACTLY it to stay invisible - two hard-coded copies of a
-    #: colour is how a hit target becomes a visible grey square on one view.
-    BG = "#101010"
-    #: Room under the balls for the position numbers. 9 clipped their
-    #: descenders against the panel edge (offline check, 2026-08-10) - the
-    #: numbers are the part that makes the ORDER checkable, so they get room.
-    NUM_H = 12
-
-    def __init__(self, cv, positions, how, x, y, anchor="sw", on_ball=None,
-                 label_below=False, wrap=0):
-        self.cv = cv
-        self.positions = positions
-        self.how = how
-        self.on_ball = on_ball
-        self.label_below = label_below
-        self.items = []
-        self.balls = []
-        self.drawn = []
-        step = 2 * self.R + self.GAP
-        w = self.PAD * 2 + step * len(positions) - self.GAP + 2
-        h = self.PAD * 2 + 2 * self.R + self.NUM_H
-        x0 = x if "w" in anchor else x - w
-        y0 = y - h if "s" in anchor else y
-        self.bg = cv.create_rectangle(x0, y0, x0 + w, y0 + h,
-                                      fill=self.BG, outline="#3a3a3a")
-        self.items.append(self.bg)
-        cy = y0 + self.PAD + self.R
-        for i, P in enumerate(positions):
-            cx = x0 + self.PAD + self.R + i * step
-            # ★ THE HIT TARGET IS THE WHOLE CELL, AND IT IS ITS OWN ITEM.
-            # David, 2026-08-11: "when hovering over the circles, it's not
-            # always indicating that i can click on it." The cause is a Tk
-            # rule rather than a mis-binding: an item with `fill=""` is
-            # hittable ONLY ON ITS OUTLINE, and an EMPTY position is drawn
-            # hollow - so a ball with a ball in it was a 14 px disc and an
-            # empty one was a 1 px ring. Exactly "not always".
-            #
-            # Filling the empty ones would fix the hover and lose the thing
-            # the panel is for (hollow reads as no ball). So the target is a
-            # rectangle covering the ball AND its number, filled with the
-            # panel's own background so it is invisible, drawn BEFORE them so
-            # it stays underneath. The cell is ~19x26 px instead of a ring.
-            pad = cv.create_rectangle(cx - step / 2.0 + 1, y0 + 1,
-                                      cx + step / 2.0 - 1, y0 + h - 1,
-                                      fill=self.BG, outline="")
-            self.items.append(pad)
-            b = cv.create_oval(cx - self.R, cy - self.R, cx + self.R,
-                               cy + self.R, fill="", outline="#666",
-                               width=1)
-            self.balls.append(b)
-            self.drawn.append(None)
-            self.items.append(b)
-            num = cv.create_text(cx, y0 + h - self.PAD, anchor="s",
-                                 fill="#8a8a8a", font=("Consolas", 7),
-                                 text=str(P["pos"]))
-            self.items.append(num)
-            if on_ball is not None:
-                # All three, because Enter/Leave fire per ITEM: crossing from
-                # the pad onto the ball is a Leave and an Enter, and binding
-                # only the pad would drop the cursor the moment the pointer
-                # reached the thing it was aiming at.
-                for it in (pad, b, num):
-                    cv.tag_bind(it, "<Button-1>",
-                                lambda e, i=i: self._click(i))
-                    cv.tag_bind(it, "<Enter>",
-                                lambda e: cv.configure(cursor="hand2"))
-                    cv.tag_bind(it, "<Leave>",
-                                lambda e: cv.configure(cursor=""))
-        # The caption sits to the RIGHT of the balls rather than above them:
-        # this panel is pinned to the bottom of the artwork and a line above
-        # the balls would be the line closest to the playfield markers.
-        # UNLESS label_below (item 39): on the key panel there is no room to
-        # the right, so the caption wraps UNDER the balls at `wrap` px.
-        if label_below:
-            self.label = cv.create_text(x0 + 1, y0 + h + 4, anchor="nw",
-                                        fill="#ddd", font=("Consolas", 8),
-                                        text="", width=wrap or 0)
-        else:
-            self.label = cv.create_text(x0 + w + 6, cy, anchor="w", fill="#ddd",
-                                        font=("Consolas", 8), text="")
-        self.items.append(self.label)
-        self._box = (x0, y0, x0 + w, y0 + h)
-        self._text = None
-
-    #: A ball is silver and unmistakably solid; an empty position is a hollow
-    #: ring, not a dark ball, so "no ball here" cannot read as "a ball I drew
-    #: badly". The colours are the only two states this panel has.
-    BALL = ("#d8d8d8", "#ffffff")          # fill, outline - occupied
-    EMPTY = ("", "#555555")                # fill, outline - open
-
-    def _click(self, i):
-        """A dot was clicked: one ball more, or one ball fewer.
-
-        Reads the state this panel last DREW rather than asking anything, so
-        the decision is the one the user could see when they clicked. Returns
-        "break" so the click stops here and the window's hit test never runs -
-        see the class docstring's promise about `info`.
-        """
-        occupied = bool(self.drawn[i]) if i < len(self.drawn) else False
-        self.on_ball("take" if occupied else "drain")
-        return "break"
-
-    def update(self, flags, text):
-        for i, on in enumerate(flags[:len(self.balls)]):
-            if self.drawn[i] == on:
-                continue
-            self.drawn[i] = on
-            fill, outline = self.BALL if on else self.EMPTY
-            self.cv.itemconfig(self.balls[i], fill=fill, outline=outline)
-        if text != self._text:
-            self._text = text
-            self.cv.itemconfig(self.label, text=text)
-            # THE BACKGROUND GROWS TO COVER THE WORDS. This panel is drawn on
-            # top of a WHITE line drawing, and grey text straight onto it is
-            # unreadable - which is exactly how the first version came out
-            # (offline check, 2026-08-10). The width is not known until Tk has
-            # laid the text out, so it is asked for afterwards rather than
-            # guessed at, and the rect was created first so it stays behind.
-            # A label_below panel skips this: it only ever draws on the key
-            # panel, whose background is already the readable dark.
-            if not self.label_below:
-                b = self.cv.bbox(self.label)
-                x0, y0, x1, y1 = self._box
-                if b:
-                    x1 = max(x1, b[2] + 5)
-                self.cv.coords(self.bg, x0, y0, x1, y1)
-
-    def destroy(self):
-        for i in self.items:
-            self.cv.delete(i)
-        self.items, self.balls, self.drawn = [], [], []
-
-
 #: A made switch, drawn in the middle of its ring (artwork) or beside its row
 #: (schematic).
 #:
@@ -1538,74 +1245,6 @@ class TroughPanel:
 #: picture - the coil marker's red and its magenta fire flash - and of the
 #: orange insert ramp, so a made switch cannot be mistaken for a fired coil.
 SW_MADE = "#00c853"
-
-
-def poll_switches(view):
-    """The paced switch read and everything that hangs off it, for both views.
-
-    ONE FUNCTION RATHER THAN A METHOD ON EACH, because the artwork window and
-    the schematic keep the same four things (`sw`, `sw_dots`, `_dot_drawn`,
-    `trough_panel`) and this rig's standing rule is that two readers of one
-    fact drift. Returns True when this tick actually read the block.
-
-    Every draw is change-gated: a still machine costs the read and no canvas
-    work at all.
-    """
-    if not view.sw.poll():
-        return False
-    for dot, sw_id in view.sw_dots:
-        made = view.sw.is_made(sw_id)
-        if view._dot_drawn.get(dot) == made:
-            continue
-        view._dot_drawn[dot] = made
-        view.cv.itemconfig(dot, fill=SW_MADE if made else "")
-    if view.trough_panel is not None:
-        # The key panel's dots are read-only (PAD-134) and say which end is
-        # which; the fallback strip's are still the control and say so.
-        on_panel = (view.key_panel is not None and view.trough_panel
-                    is getattr(view.key_panel, "ball_dots", None))
-        view.trough_panel.update(view.sw.closed(),
-                                 dots_caption(view.sw) if on_panel
-                                 else trough_text(view.sw))
-    # The key panel (item 39) rides the same read. It can be missing at
-    # window open - padbinds is written by padglhost, which may be seconds
-    # behind - so keep asking for it on the switch table's cadence.
-    #
-    # ★ ITEM 49: AND IT CAN CHANGE MID-RUN. On a title's first run padglhost
-    # exports padbinds with the playfield rows withheld ('0': the switch
-    # table has not arrived), then RE-exports the moment it has - so a panel
-    # read once at construction would show dim dead keys for the rest of a
-    # session whose keys came alive a minute in. Watch the file's mtime on
-    # the same cadence and rebuild; tmp+rename on the writer's side means a
-    # changed mtime is always a WHOLE new file.
-    if time.monotonic() >= view._binds_next:
-        view._binds_next = time.monotonic() + SWITCH_POLL_S
-        if view.key_panel is None:
-            view.key_panel = attach_key_panel(view)
-            view._binds_mtime = _binds_mtime()
-        else:
-            m = _binds_mtime()
-            if m != getattr(view, "_binds_mtime", None):
-                view._binds_mtime = m
-                if getattr(view, "keys", None) is not None:
-                    view.keys.close()
-                    view.keys = None
-                # The trough panel lives inside the key panel's canvas and
-                # dies with it; forget it BEFORE the destroy so
-                # attach_key_panel does not touch a dead widget.
-                view.trough_panel = None
-                view.key_panel.cv.destroy()
-                view.key_panel = attach_key_panel(view)
-    if view.key_panel is not None:
-        view.key_panel.update(view.sw)
-        # The BALLS section (PAD-134): the line off this same read, and the
-        # feeder's status file on its own slower cadence.
-        if time.monotonic() >= getattr(view, "_ball_next", 0.0):
-            view._ball_next = time.monotonic() + BALL_POLL_S
-            view._ball_status = read_ball_status()
-        fed, lines = getattr(view, "_ball_status", (None, []))
-        view.key_panel.show_balls(view.sw, fed, lines)
-    return True
 
 
 def _binds_mtime():
@@ -1716,568 +1355,6 @@ def new_lines(prev, cur):
     return list(cur)
 
 
-def wrap_rows(font, text, width):
-    """`text` as rows no wider than `width` px, broken at spaces where it can.
-
-    Rows rather than a Tk wrap width, because the note is pinned to a fixed
-    number of ROWS (so the panel never shuffles) and only a caller that knows
-    where the breaks fall can keep the newest ones.
-    """
-    rows, cur = [], ""
-    for word in text.split(" "):
-        cand = word if not cur else cur + " " + word
-        if font.measure(cand) <= width:
-            cur = cand
-            continue
-        if cur:
-            rows.append(cur)
-        while len(word) > 1 and font.measure(word) > width:
-            n = len(word) - 1
-            while n > 1 and font.measure(word[:n]) > width:
-                n -= 1
-            rows.append(word[:n])
-            word = word[n:]
-        cur = word
-    if cur:
-        rows.append(cur)
-    return rows or [""]
-
-
-class KeyPanel:
-    """The keyboard -> switches reference, docked beside the playfield.
-
-    ★ ITEM 39. This IS the retired Controls window's content - David: "i do
-    like the feedback and interface of the small switch window" - moved into
-    this window so a run opens two windows instead of three. The rows come
-    from dump/padbinds, which padglhost exports after resolving binds[] for
-    the title (keybinds.py parses it), so which key does what still has
-    exactly one home and it is still the C file.
-
-    THE HIGHLIGHT IS SWITCH STATE, NOT KEY STATE, and that is an upgrade
-    rather than a compromise. The old legend inverse-videoed a row off
-    key_down[] - the X event, this side of everything that can go wrong. This
-    panel reads the MERGED array (the same paced read the dots and the trough
-    panel hang off), which is what the GAME is being handed - so a row lights
-    when the game can see the press, whoever made it: a key, a click on the
-    artwork, or a script. Item 17 exists because those two answers differ.
-
-    KEYS WORK IN THIS WINDOW TOO (KeyInput + SwitchPipe): the same exported
-    rows that draw this panel bind the window's keys, and the edges ride a
-    persistent WSL helper instead of the ~80 ms-per-action spawn path, so a
-    flipper key is playable from here. The game window keeps its own X
-    keyboard exactly as before; the guest merges the two writers by last
-    edge, which is the machinery item 7 built.
-
-    ★ THE SERVICE BUTTONS ARE CLICKABLE, drawn as the coin-door cluster on the
-    real machine (David's reference photo: green BACK, red -/+, black SELECT,
-    "Press SELECT for SERVICE MENU"). Press-and-hold, exactly like a switch
-    marker on the artwork - the mouse button's length IS the closure - through
-    the same SwitchDriver, so the ~80 ms spawn cost is fine here: service
-    navigation is not a flipper. The ids come from the exported rows, not from
-    a second table. And the COIN DOOR is a click toggle, because on the real
-    machine the door is a thing that stays where you put it: open kills 48V
-    (the game says so on its own screen), close restores it.
-
-    ★ ONE CONTROL PER ACTION, NOT A ROW AND A BUTTON (David: "we need to
-    consolidate the keyboard inputs and the button inputs for the service
-    buttons since it looks weird to have them duplicated. maybe put the
-    keyboard inputs on or around the buttons somehow?"). The four service
-    binds, the door and the trough latch do NOT appear in the key list; their
-    key labels sit ON their widgets instead - under each service button, on
-    the door bar, beside the BALLS header - in the same blue every other key
-    wears, so the key column and the widgets read as one system.
-
-    THE BALL CONTROLS LIVE HERE TOO (David: "move the ball controls to the
-    right panel as well") - add_trough() puts the six clickable ball positions
-    at the panel's bottom, and the view keeps pointing its `trough_panel` at
-    whatever was built, so poll_switches() has one update path wherever the
-    trough is drawn.
-    """
-
-    ROW_H = 17
-    PAD = 10
-    #: The panel's own colours. Background matches the window's bars (#111);
-    #: the key column takes the schematic's node-header blue so "the thing you
-    #: press" reads apart from "what it does" at a glance; the made highlight
-    #: is the legend's inverse video, kept because its punch is the feedback
-    #: David asked to keep.
-    BG, KEY_FG, LAB_FG, DIM = "#111", "#7ecbff", "#d8d8d8", "#555"
-    HIT_BG, HIT_FG = "#e8e8e8", "#000"
-
-    #: The binds that are drawn as WIDGETS rather than list rows - the
-    #: consolidation above. Labels, because that is the identity the export
-    #: carries; the C table never renames its platform rows.
-    SVC_ORDER = ("Service Back", "Service Minus", "Service Plus",
-                 "Service Select")
-    #: The key-list rows a MOUSE can press too (PAD-134). They are the two the
-    #: bottom action row's Insert coin and Start stood in for, and without
-    #: them a mouse-only player - DragonRR's whole session - could not get a
-    #: game going once that row went. Press-and-hold, like the service
-    #: buttons: the mouse button's length is the closure.
-    CLICK_ROWS = ("Start Button", "Left Coin")
-    DOOR_LABEL = "Coin Door Closed"
-
-    def __init__(self, parent, rows, drv, on_action=None):
-        """`on_action(script, arg)` runs a WINDOW_ACTIONS helper - the view's
-        run_action - and is what the SERVICE section's Clear switch alerts
-        calls. None (a panel built without a view) leaves that button out."""
-        self.drv = drv
-        f9 = tkfont.Font(family="Consolas", size=9)
-        f9b = tkfont.Font(family="Consolas", size=9, weight="bold")
-        f8 = tkfont.Font(family="Consolas", size=8)
-        self._f8, self._f9, self._f9b = f8, f9, f9b
-        self._svc_rows = {r["label"]: r for r in rows
-                          if r["label"] in self.SVC_ORDER and r["ids"]}
-        self._door_row = next((r for r in rows
-                               if r["label"] == self.DOOR_LABEL and r["ids"]),
-                              None)
-        self._trough_row = next((r for r in rows
-                                 if r["toggle"] and len(r["ids"]) > 1), None)
-        widget_rows = (set(map(id, self._svc_rows.values()))
-                       | {id(self._door_row), id(self._trough_row)})
-        self.rows = [r for r in rows if id(r) not in widget_rows]
-        keyw = max([f9b.measure("/".join(r["keys"])) for r in self.rows] + [30])
-        labw = max([f9.measure(r["label"]) for r in self.rows] + [30])
-        sufw = f9.measure("[off]")
-        w = self.PAD + 10 + keyw + 10 + labw + 8 + sufw + self.PAD
-        # The service cluster needs room for a key label under each button
-        # ("Enter/KP Ent" is the widest); the list must not be what caps it.
-        if self._svc_rows:
-            need = max(f8.measure("/".join(r["keys"])) + 14
-                       for r in self._svc_rows.values())
-            w = max(w, 2 * self.PAD + 4 * max(need, 66))
-        # The BALLS section's three buttons (PAD-134) share the width in
-        # thirds, and a short key list must not make "Reset balls" clip.
-        bf = tkfont.Font(family="Segoe UI", size=9, weight="bold")
-        w = max(w, 2 * self.PAD + 3 * (bf.measure("Reset balls") + 24) + 12)
-        self._w = w
-        # Two section headers at most (cabinet first in the file, playfield
-        # after), a title line and a hint line under the rows.
-        nhdr = len(set(r["cabinet"] for r in self.rows))
-        h = 30 + nhdr * (self.ROW_H + 6) + len(self.rows) * self.ROW_H + 26
-        self.cv = tk.Canvas(parent, width=w, height=h, bg=self.BG,
-                            highlightthickness=0)
-        self._items, self._drawn = [], []
-        self._idle_fill = {}           # row index -> resting box fill
-        self._clickable = False
-        self._row_held = None
-
-        x_dot = self.PAD + 3
-        x_key = self.PAD + 10 + keyw            # right edge of the key column
-        x_lab = x_key + 10
-        x_suf = w - self.PAD
-        y = 20
-        self.cv.create_text(self.PAD, y, anchor="w", fill=self.KEY_FG,
-                            font=f9b, text="KEYBOARD")
-        self.cv.create_text(x_suf, y, anchor="e", fill="#777", font=f8,
-                            text="works here and in the game window")
-        y += 8
-        section = None
-        for r in self.rows:
-            if r["cabinet"] != section:
-                section = r["cabinet"]
-                y += 8
-                self.cv.create_text(self.PAD, y + 4, anchor="w",
-                                    fill="#8a8a8a", font=f8,
-                                    text="CABINET" if section else "PLAYFIELD")
-                y += self.ROW_H
-            box = self.cv.create_rectangle(self.PAD - 4, y - 8, w - self.PAD + 4,
-                                           y + 9, fill="", outline="")
-            fg = self.DIM if r["na"] else None
-            dot = self.cv.create_oval(x_dot - 3, y - 3 + 1, x_dot + 3, y + 3 + 1,
-                                      fill="", outline="")
-            key = self.cv.create_text(x_key, y + 1, anchor="e",
-                                      fill=fg or self.KEY_FG, font=f9b,
-                                      text="/".join(r["keys"]))
-            lab = self.cv.create_text(x_lab, y + 1, anchor="w",
-                                      fill=fg or self.LAB_FG, font=f9,
-                                      text=r["label"])
-            suf = self.cv.create_text(x_suf, y + 1, anchor="e",
-                                      fill=self.DIM, font=f9,
-                                      text="n/a" if r["na"] else "")
-            if r["label"] in self.CLICK_ROWS and not r["na"] and r["ids"]:
-                # The whole row is the target, so its box is filled with the
-                # panel's own colour: a fill="" item is hittable only on its
-                # outline, which is the TroughPanel hover lesson again.
-                self._idle_fill[len(self._items)] = self.BG
-                self.cv.itemconfig(box, fill=self.BG)
-                self._bind_row(r["ids"][0], (box, dot, key, lab, suf))
-                self._clickable = True
-            self._items.append((box, dot, key, lab, suf))
-            self._drawn.append(None)
-            y += self.ROW_H
-        self.cv.create_text(self.PAD, y + 10, anchor="w", fill="#777", font=f8,
-                            text="green dot = switch made")
-        y += 24
-        if self._clickable:
-            self.cv.create_text(self.PAD, y - 1, anchor="w", fill="#777",
-                                font=f8,
-                                text="click Start Button or Left Coin to "
-                                     "press it")
-            y += 13
-
-        # ---- THE SERVICE CLUSTER, drawn as the real coin-door panel -------
-        # ONE control per action: each button wears its own key label in the
-        # key column's blue, and these binds are NOT in the list above.
-        self._svc_held = None
-        self._svc_btns = []            # (oval, switch id, base ring colour)
-        svc = [("Service Back", "BACK", "", "#1f9d4e", "#0d5c2a", "#dff5e6"),
-               ("Service Minus", "< -", "-", "#d43535", "#7a1717", "#ffffff"),
-               ("Service Plus", "+ >", "+", "#d43535", "#7a1717", "#ffffff"),
-               ("Service Select", "SELECT", "", "#1c1c1c", "#777", "#d8d8d8")]
-        if len(self._svc_rows) == 4:
-            y += 12
-            self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
-                                font=f8, text="SERVICE  -  click and hold")
-            y += 28
-            step = (w - 2 * self.PAD) // 4
-            r = 14
-            for k, (lbl, sub, glyph, fill, ring, subfg) in enumerate(svc):
-                row = self._svc_rows[lbl]
-                cx = self.PAD + step // 2 + k * step
-                btn = self.cv.create_oval(cx - r, y - r, cx + r, y + r,
-                                          fill=fill, outline=ring, width=3)
-                gly = self.cv.create_text(cx, y, fill="#fff", font=f9b,
-                                          text=glyph)
-                cap = self.cv.create_text(cx, y + r + 10, fill=subfg, font=f8,
-                                          text=sub)
-                keys = self.cv.create_text(cx, y + r + 22, fill=self.KEY_FG,
-                                           font=f8,
-                                           text="/".join(row["keys"]))
-                for it in (btn, gly, cap, keys):
-                    self.cv.tag_bind(it, "<ButtonPress-1>",
-                                     lambda e, s=row["ids"][0], b=btn:
-                                     self._svc_press(s, b))
-                    self.cv.tag_bind(it, "<ButtonRelease-1>",
-                                     lambda e: self._svc_release())
-                self._svc_btns.append((btn, row["ids"][0], ring))
-            y += r + 34
-            self.cv.create_text(self.PAD, y, anchor="w", fill="#777", font=f8,
-                                text="press SELECT for the service menu")
-            y += 8
-
-        # ---- CLEAR SWITCH ALERTS, under SERVICE (PAD-134) ----------------
-        # It was the last button on the bottom action row as "Clear alerts",
-        # and the one that row had that nothing else in the window does: it
-        # works every safe switch once so the game's no-usage audit stops
-        # listing CHECK SWITCH rows. It belongs with the service controls
-        # because that is the screen it clears, and David named it.
-        self.clear_btn = None
-        if on_action is not None:
-            label, script, arg = next(a for a in WINDOW_ACTIONS
-                                      if a[1] == "swexercise.py")
-            if len(self._svc_rows) != 4:
-                y += 12
-                self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
-                                    font=f8, text="SERVICE")
-            y += 12
-            bg, fg, active = self.BALL_BTN
-            self.clear_btn = tk.Button(
-                self.cv, text=label, font=("Segoe UI", 9, "bold"), pady=3,
-                bg=bg, fg=fg, activebackground=active, activeforeground=fg,
-                relief="raised", bd=1, highlightthickness=0,
-                command=lambda: on_action(script, arg))
-            self.cv.create_window(self.PAD, y, anchor="nw",
-                                  window=self.clear_btn, width=w - 2 * self.PAD)
-            y += 36
-            self.cv.create_text(self.PAD, y, anchor="w", fill="#777", font=f8,
-                                text="presses every safe switch once, about "
-                                     "12 s")
-            y += 6
-
-        # ---- THE COIN DOOR, a toggle because the real door STAYS ----------
-        self._door_id = self._door_row["ids"][0] if self._door_row else None
-        self.door_btn = self.door_txt = None
-        self._door_drawn = None
-        if self._door_id:
-            y += 14
-            self.door_btn = self.cv.create_rectangle(
-                self.PAD - 4, y, w - self.PAD + 4, y + 26,
-                fill="#1a2e1a", outline="#2e7d32", width=1)
-            door_key = self.cv.create_text(
-                self.PAD + 6, y + 13, anchor="w", fill=self.KEY_FG, font=f9b,
-                text="/".join(self._door_row["keys"]))
-            self.door_txt = self.cv.create_text(
-                w // 2 + 6, y + 13, fill="#d8d8d8", font=f9,
-                text="COIN DOOR  closed - 48V on")
-            for it in (self.door_btn, self.door_txt, door_key):
-                self.cv.tag_bind(it, "<Button-1>", lambda e: self._door_click())
-            y += 30
-
-        self._y = y
-        self.cv.config(height=y + 12)
-        self._last_sw = None
-        self._svc_drawn = [None] * len(self._svc_btns)
-
-    # ---- the service buttons: press-and-hold through the same driver ------
-    def _svc_press(self, sw_id, btn):
-        if self._svc_held is not None:
-            return
-        self._svc_held = (sw_id, btn)
-        self.cv.itemconfig(btn, width=5)
-        self.drv.press(sw_id)
-
-    def _svc_release(self):
-        """Open whatever the press closed - by what we HELD, the same rule as
-        the artwork markers: the canvas freezes its current item for the
-        length of a click, so the release lands here whatever is under the
-        cursor by then."""
-        if self._svc_held is None:
-            return
-        sw_id, btn = self._svc_held
-        self._svc_held = None
-        self.cv.itemconfig(btn, width=3)
-        self.drv.release(sw_id)
-
-    # ---- Start Button / Left Coin rows: press-and-hold (PAD-134) ----------
-    def _bind_row(self, sw_id, items):
-        for it in items:
-            self.cv.tag_bind(it, "<ButtonPress-1>",
-                             lambda e, s=sw_id: self._row_press(s))
-            self.cv.tag_bind(it, "<ButtonRelease-1>",
-                             lambda e: self._row_release())
-            self.cv.tag_bind(it, "<Enter>",
-                             lambda e: self.cv.configure(cursor="hand2"))
-            self.cv.tag_bind(it, "<Leave>",
-                             lambda e: self.cv.configure(cursor=""))
-
-    def _row_press(self, sw_id):
-        if self._row_held is not None:
-            return
-        self._row_held = sw_id
-        self.drv.press(sw_id)
-
-    def _row_release(self):
-        """Open what the press closed, by what was HELD - the service
-        buttons' rule, for the same reason (the canvas freezes its current
-        item for the length of a click)."""
-        if self._row_held is None:
-            return
-        sw_id, self._row_held = self._row_held, None
-        self.drv.release(sw_id)
-
-    def _door_click(self):
-        """Toggle off the last DRAWN state, the TroughPanel._click rule: the
-        decision is the one the user could see when they clicked."""
-        if self._door_id is None or self._last_sw is None:
-            return
-        if self._last_sw.is_made(self._door_id):
-            self.drv.release(self._door_id)
-        else:
-            self.drv.press(self._door_id)
-
-    #: The JJP window's button colours (jjpsw.py BTN_BG/BTN_FG/BTN_ACTIVE), so
-    #: the two virtual playfields' ball controls read as one design.
-    BALL_BTN = ("#33507a", "#eaf2ff", "#456ba1")
-    #: A ball button with nothing to do (PAD-153): background, text.
-    BALL_BTN_OFF = ("#2a2e35", "#6b7280")
-    NOTE_FG = "#8a93a2"
-    #: How many of the newest ball messages the section shows.
-    NOTE_LINES = 3
-
-    def set_drain(self, live):
-        """Grey Drain out, or light it - change-gated like every draw here.
-
-        A disabled Tk button still wears its bg, so the grey is set as well as
-        the state, or a dead Drain would look like the two live buttons."""
-        if live == self._drain_live:
-            return
-        self._drain_live = live
-        bg = self.BALL_BTN[0] if live else self.BALL_BTN_OFF[0]
-        self.drain_btn.config(state="normal" if live else "disabled", bg=bg,
-                              relief="raised" if live else "flat")
-
-    def add_trough(self, positions, how, on_ball):
-        """The BALLS section, at the panel's bottom - in the JJP window's shape.
-
-        ★ PAD-134, DAVID: "i think our ball in and out feedback on the switch
-        matrix is a little confusing from the ui perspective too. what we did
-        on the jjp virtual playfield does look much better." What was here was
-        six dots that WERE the control: click a full one for a ball out, an
-        empty one for a ball in, with the stack rather than the dot deciding
-        which switch moved - so clicking dot 6 could empty dot 5, and the
-        caption had to explain the gesture. The JJP window says where the
-        balls are in ONE LINE, gives the two things a person actually wants
-        their own buttons, and shows what the ball keeper just did under them.
-        This is that, top to bottom:
-
-          * the line - `balls 5/6 trough   lane 1   in play 1   fed 3`. The
-            denominator is the trough's POSITIONS, as JJP's is: the learned
-            complement (trough.Balls) read "0 in play" whenever the window
-            opened with a ball out, which is exactly when someone looks.
-          * the dots, READ-ONLY. Which position is empty is still worth seeing
-            (item 20 was a wrong-end bug a count cannot show), it just stops
-            being a gesture.
-          * Plunge, Drain and Reset balls, equal thirds of the panel (Reset
-            moved in from the bottom action row, which the panel retires -
-            see Field._layout_actions). NO KEY SHORTCUTS for the first two,
-            unlike JJP's Space and D: on Spike 2 those are already the Action
-            Button and Right Scoop in padglhost's table, and the playfield
-            rows are re-derived per title, so no letter is safely free.
-          * the note - the feeder's newest lines (dump/padball, ballfeed.py)
-            and this window's own Plunge/Drain replies, newest last, pinned to
-            three one-line rows so the panel does not shuffle as they arrive.
-
-        Returns the dots' TroughPanel; the caller stores it as its
-        `trough_panel`, so poll_switches() keeps ONE update path wherever the
-        trough is drawn. The artwork corner and the schematic strip - drawn
-        only when there are no padbinds to build this panel from - keep their
-        clickable dots, because there they are the only drain there is.
-        """
-        y = self._y + 14
-        self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
-                            font=self._f8, text="BALLS")
-        if self._trough_row is not None:
-            # The trough latch's key, worn here instead of a list row - the
-            # same consolidation as the service buttons and the door.
-            self.cv.create_text(self.PAD + 44, y, anchor="w",
-                                fill=self.KEY_FG, font=self._f8,
-                                text="/".join(self._trough_row["keys"])
-                                     + " = all six in / out")
-        y += 18
-        self._f10 = tkfont.Font(family="Consolas", size=10)
-        self.ball_state = self.cv.create_text(self.PAD, y, anchor="w",
-                                              fill="#e8e8ea", font=self._f10,
-                                              text="")
-        y += 12
-        t = TroughPanel(self.cv, positions, how, self.PAD - 4, y, anchor="nw")
-        y += 2 * TroughPanel.PAD + 2 * TroughPanel.R + TroughPanel.NUM_H + 8
-        bg, fg, active = self.BALL_BTN
-        gap = 6
-        verbs = (("Plunge", "plunge"), ("Drain", "drain"),
-                 ("Reset balls", "reset"))
-        bw = (self._w - 2 * self.PAD - gap * (len(verbs) - 1)) // len(verbs)
-        self.ball_btns = []
-        for k, (label, what) in enumerate(verbs):
-            b = tk.Button(self.cv, text=label, font=("Segoe UI", 9, "bold"),
-                          pady=3, bg=bg, fg=fg, activebackground=active,
-                          activeforeground=fg, relief="raised", bd=1,
-                          highlightthickness=0,
-                          disabledforeground=self.BALL_BTN_OFF[1],
-                          command=lambda w=what: on_ball(w))
-            self.cv.create_window(self.PAD + k * (bw + gap), y, anchor="nw",
-                                  window=b, width=bw)
-            self.ball_btns.append(b)
-        # Drain starts greyed and show_balls() lights it once a read shows a
-        # ball in play (drain_ready, PAD-153).
-        self.drain_btn = self.ball_btns[1]
-        self._drain_live = None
-        self.set_drain(False)
-        y += 34
-        self.ball_note = self.cv.create_text(self.PAD, y, anchor="nw",
-                                             fill=self.NOTE_FG, font=self._f8,
-                                             text="")
-        self._note = []                # what the note shows, oldest first
-        self._feed_seen = []           # the feeder's lines as last read
-        self._ball_drawn = None
-        self.ball_dots = t
-        self._y = y + self.NOTE_LINES * self._f8.metrics("linespace") + 4
-        self.cv.config(height=self._y + 12)
-        return t
-
-    def show_balls(self, sw, fed, feeder_lines):
-        """Repaint the line and fold any NEW feeder lines into the note.
-
-        Change-gated like every other draw on this panel. The feeder's file is
-        a sliding window of its newest lines, so what is new is whatever
-        follows the longest overlap with the last read (new_lines()).
-        """
-        if getattr(self, "ball_state", None) is None:
-            return
-        text = ball_line(sw, fed)
-        if text != self._ball_drawn:
-            self._ball_drawn = text
-            self.cv.itemconfig(self.ball_state, text=text)
-        self.set_drain(drain_ready(sw))
-        fresh = new_lines(self._feed_seen, feeder_lines)
-        self._feed_seen = list(feeder_lines)
-        if fresh:
-            self.ball_say(*fresh)
-
-    def ball_say(self, *lines):
-        """Add messages to the note, newest last, in at most NOTE_LINES rows.
-
-        WHOLE MESSAGES ARE DROPPED, OLDEST FIRST - never the head of one. The
-        first version kept the newest ROWS, and a Plunge reply that wrapped to
-        four rows lost its opening words: the shot read "launch   the game
-        puts one there..." with the outcome gone. A message that alone needs
-        more rows than there are keeps its FIRST rows, and the last one is
-        marked cut, because the start of a sentence is the part that says what
-        happened.
-        """
-        if getattr(self, "ball_note", None) is None:
-            return
-        self._note.extend(lines)
-        del self._note[:-self.NOTE_LINES]
-        width = self._w - 2 * self.PAD
-        rows = []
-        for msg in reversed(self._note):
-            wrapped = wrap_rows(self._f8, msg, width)
-            if not rows and len(wrapped) > self.NOTE_LINES:
-                rows = wrapped[:self.NOTE_LINES]
-                rows[-1] = rows[-1].rstrip() + " …"
-                break
-            if len(rows) + len(wrapped) > self.NOTE_LINES:
-                break
-            rows = wrapped + rows
-        self.cv.itemconfig(self.ball_note, text="\n".join(rows))
-
-    def update(self, sw):
-        """Repaint rows whose switch state moved; a still machine costs the
-        comparison and nothing else - the same change-gate as everything on
-        this window."""
-        self._last_sw = sw
-        # The service buttons wear their made-state as a gold ring - the rows
-        # that used to carry it are gone from the list, so the button is now
-        # the one place that answers "did the game see that press".
-        for k, (btn, sid, ring) in enumerate(self._svc_btns):
-            made = bool(sw.is_made(sid))
-            if self._svc_drawn[k] != made:
-                self._svc_drawn[k] = made
-                self.cv.itemconfig(btn, outline="#ffd400" if made else ring)
-        if self._door_id is not None:
-            closed = bool(sw.is_made(self._door_id))
-            if self._door_drawn != closed:
-                self._door_drawn = closed
-                if closed:
-                    self.cv.itemconfig(self.door_btn, fill="#1a2e1a",
-                                       outline="#2e7d32")
-                    self.cv.itemconfig(self.door_txt,
-                                       text="COIN DOOR  closed - 48V on")
-                else:
-                    # Amber, not red: an open door is a legitimate state you
-                    # chose, but the game will not fire a single coil while it
-                    # lasts, and that is worth reading at a glance.
-                    self.cv.itemconfig(self.door_btn, fill="#33270f",
-                                       outline="#c07000")
-                    self.cv.itemconfig(self.door_txt,
-                                       text="COIN DOOR  OPEN - 48V off, "
-                                            "coils dead")
-        for i, r in enumerate(self.rows):
-            if r["na"]:
-                continue
-            made = [bool(sw.is_made(sid)) for sid in r["ids"]]
-            n = sum(made)
-            if len(r["ids"]) > 1:
-                state = (n == len(made), "%d/%d" % (n, len(made)))
-            elif r["toggle"]:
-                state = (n > 0, "[ON]" if n else "[off]")
-            else:
-                state = (n > 0, "")
-            if self._drawn[i] == state:
-                continue
-            self._drawn[i] = state
-            on, suffix = state
-            box, dot, key, lab, suf = self._items[i]
-            self.cv.itemconfig(box, fill=self.HIT_BG if on
-                               else self._idle_fill.get(i, ""))
-            self.cv.itemconfig(dot, fill=SW_MADE if n else "")
-            self.cv.itemconfig(key, fill=self.HIT_FG if on else self.KEY_FG)
-            self.cv.itemconfig(lab, fill=self.HIT_FG if on else self.LAB_FG)
-            self.cv.itemconfig(suf, text=suffix,
-                               fill=self.HIT_FG if on else self.DIM)
-
-
 class SwitchPipe:
     """ONE persistent WSL helper for keyboard edges, instead of a spawn each.
 
@@ -2346,222 +1423,6 @@ class SwitchPipe:
             pass
 
 
-class KeyInput:
-    """Keyboard play with THIS window focused.
-
-    ★ ITEM 39, DAVID: "the keyboard inputs are not working unless the
-    emulator window is focused. it should work with the virtual playfield
-    focused." The bindings come from the SAME exported rows the panel draws -
-    one table, two windows that honour it - and the edges ride SwitchPipe,
-    with the per-action spawn as the fallback.
-
-    TWO TRAPS THIS ALREADY KNOWS ABOUT:
-    * X auto-repeat arrives as Release-then-Press at the same instant, which
-      naively makes a held flipper flutter (padglhost swallows the pair with
-      XPeekEvent). Windows Tk repeats differ - repeated KeyPress, one real
-      KeyRelease - but the container runs this window under X, so a release
-      is committed only after a few ms with no matching press: the same
-      swallow, spelled in `after`.
-    * A key typed into a real text widget (the save-slot picker) must not
-      fire a flipper - the handler drops events whose focus widget takes
-      text input.
-    """
-
-    #: How long a release waits for the press that would mark it auto-repeat.
-    REPEAT_MS = 10
-
-    def __init__(self, view, rows):
-        self.view = view
-        self.pipe = SwitchPipe()
-        self.map = {}
-        for r in rows:
-            if r["na"] or not r["ids"]:
-                continue
-            for k in r["keys"]:
-                for sym in keybinds.tk_keysyms(k):
-                    self.map[sym] = r
-        # ★ THE BOOT MENU'S BUTTONS RIDE ALONG BY NAME, whatever rows there
-        # are. A title's first run has no switch list, so the rows above are
-        # only the platform ones (no flippers, no Action) - or none at all, in
-        # the "WAITING for tables" state - and the boot menu of a multi-image
-        # card runs before the game that would build the list: David, 2026-09-19,
-        # "the first time loading a multi image won't let me use arrow keys (or
-        # select) since the virtual playfield isn't initialized yet". A key that
-        # already has a row keeps it (a COPY carries the button: rows are shared
-        # between the keysyms of one key); one that has none gets a row that
-        # presses no switch, only the button.
-        for sym, button in keybinds.cabinet_keysyms().items():
-            row = dict(self.map.get(sym) or dict(
-                keys=[sym], label=button, ids=[], na=False, toggle=False,
-                cabinet=True))
-            row["cab"] = button
-            self.map[sym] = row
-        self.down = set()
-        self._pending = {}             # keysym -> after id, releases in flight
-        # Pre-warm the helper: spawned lazily, the FIRST press of a session
-        # pays the ~90-200 ms wsl.exe start (measured live: a 2000 ms hold
-        # reached the guest as 1907 ms, the whole shortfall on the press
-        # side). Spawning now moves that cost to window open, where nobody
-        # is holding a flipper.
-        self.pipe._ensure()
-        view.root.bind("<KeyPress>", self._on_down)
-        view.root.bind("<KeyRelease>", self._on_up)
-
-    def _row(self, ev):
-        try:
-            if ev.widget.winfo_class() in ("Entry", "TEntry", "TCombobox",
-                                           "Text", "Spinbox", "TSpinbox"):
-                return None
-        except Exception:                                   # noqa: BLE001
-            pass
-        return self.map.get(ev.keysym)
-
-    def _on_down(self, ev):
-        r = self._row(ev)
-        if r is None:
-            return
-        pend = self._pending.pop(ev.keysym, None)
-        if pend is not None:
-            self.view.root.after_cancel(pend)   # auto-repeat pair: still held
-            return
-        if ev.keysym in self.down:
-            return                              # Windows-style repeat
-        self.down.add(ev.keysym)
-        if r["toggle"]:
-            # The toggle flips off the MERGED state - the same rule as the
-            # door button: the state acted on is the one on screen.
-            target = 0 if all(bool(self.view.sw.is_made(s))
-                              for s in r["ids"]) else 1
-            for s in r["ids"]:
-                self._set(s, target)
-        else:
-            if r["ids"]:
-                self._set(r["ids"][0], 1)
-            if r.get("cab"):
-                self.pipe.set_cab(r["cab"], 1)
-
-    def _on_up(self, ev):
-        r = self._row(ev)
-        if r is None or r["toggle"]:
-            self.down.discard(ev.keysym)
-            return
-        if ev.keysym in self._pending:
-            return
-        self._pending[ev.keysym] = self.view.root.after(
-            self.REPEAT_MS, lambda: self._commit_up(ev.keysym, r))
-
-    def _commit_up(self, keysym, r):
-        self._pending.pop(keysym, None)
-        self.down.discard(keysym)
-        if r["ids"]:
-            self._set(r["ids"][0], 0)
-        if r.get("cab"):
-            self.pipe.set_cab(r["cab"], 0)
-
-    def _set(self, sw, val):
-        if not self.pipe.set(sw, val):
-            (self.view.drv.press if val else self.view.drv.release)(sw)
-
-    def close(self):
-        self.pipe.close()
-
-    def detach(self):
-        """Stop listening altogether: the window's key bindings go, releases in
-        flight are cancelled, and closing the pipe is the EOF that lets the
-        helper release whatever is still held. For a KeyInput that is being
-        REPLACED (the "WAITING for tables" one, when the real view arrives);
-        the window closing needs only close()."""
-        for seq in ("<KeyPress>", "<KeyRelease>"):
-            try:
-                self.view.root.unbind(seq)
-            except Exception:                               # noqa: BLE001
-                pass
-        for after_id in self._pending.values():
-            try:
-                self.view.root.after_cancel(after_id)
-            except Exception:                               # noqa: BLE001
-                pass
-        self._pending.clear()
-        self.down.clear()
-        self.close()
-
-
-class _RootOnly:
-    """The one thing a KeyInput needs of a view that does not exist yet: the
-    window whose keys it takes. Every row-driven path (toggles, the spawn
-    fallback) reads other attributes, and a KeyInput built with no rows has no
-    such row to reach them."""
-
-    def __init__(self, root):
-        self.root = root
-
-
-def show_action_row(view, visible):
-    """Show or hide a view's bottom action row (PAD-134). A no-op when the
-    row is already in that state, so the poll can call it on every attach.
-
-    The artwork view re-lays its canvas windows (Field._layout_actions); the
-    schematic's row is packed on its top bar, so it is forgotten and re-packed
-    in WINDOW_ACTIONS order - the bar's left edge, where it always was.
-    """
-    acts = getattr(view, "_acts", None)
-    if not acts or getattr(view, "_acts_shown", True) == visible:
-        return
-    view._acts_shown = visible
-    if hasattr(view, "_layout_actions"):
-        view._layout_actions()
-        return
-    for b in acts:
-        if visible:
-            b.pack(side="left", padx=(0, 4), pady=2)
-        else:
-            b.pack_forget()
-
-
-def attach_key_panel(view):
-    """The panel, packed to the right of the view's canvas, or None.
-
-    None is the NORMAL state for the first seconds of a session: watch.sh
-    clears dump/padbinds at start and padglhost rewrites it once it is up, so
-    a window that opened first has nothing to read yet. poll_switches() keeps
-    asking on the same cadence the switch table uses, and the panel appears
-    when the file does - the same late-arrival shape as _pick_up_switches().
-
-    THE BALL CONTROLS MOVE IN WITH IT. A trough drawn before the panel
-    existed - the artwork corner, or the schematic's old strip - is destroyed
-    and rebuilt at the panel's bottom, so there is never a moment with two
-    trough displays disagreeing about where the balls are.
-    """
-    rows = keybinds.load(BINDS_PATH)
-    if not rows:
-        # No panel: the bottom action row is the only way in, so it is shown.
-        # key_panel is cleared FIRST - a re-shown row re-lays the artwork's
-        # trough corner, and that must not reach for a panel just destroyed.
-        view.key_panel = None
-        show_action_row(view, True)
-        return None
-    panel = KeyPanel(view.root, rows, view.drv, on_action=view.run_action)
-    panel.cv.pack(side="right", fill="y", before=view.cv)
-    if view.trough_panel is not None:
-        view.trough_panel.destroy()
-        view.trough_panel = None
-    strip = getattr(view, "_trough_strip", None)
-    if strip is not None:
-        strip.destroy()
-        view._trough_strip = None
-    if view.sw.positions:
-        view.trough_panel = panel.add_trough(view.sw.positions, view.sw.how,
-                                             view.run_plunge)
-    # The keyboard arrives with the rows (item 39): the same table that drew
-    # the panel binds this window's keys, so the two can never disagree.
-    view.keys = KeyInput(view, rows)
-    # ★ PAD-134: every action on the bottom row has a home on this panel now,
-    # so the row goes - see Field._layout_actions for the list.
-    view.key_panel = panel
-    show_action_row(view, False)
-    return panel
-
-
 def state_slots():
     """slots.sh list, parsed: {slot: label} for THIS GAME's existing slots.
 
@@ -2595,236 +1456,6 @@ def state_slots():
         if len(p) >= 6 and p[0] == "slot" and p[3] == GAME:
             out[p[1].rsplit("/", 1)[-1]] = p[4]
     return out
-
-
-class StateOps:
-    """Save state / Load state (item 13), shared by BOTH views - a title with
-    no artwork still saves and loads, because savegame.sh/loadgame.sh know
-    nothing about drawings. Each view calls `_build_state_widgets()` and
-    places the returned picker + buttons in its own layout (Field: canvas
-    windows bottom-left; Schematic: the top bar) and wires `_state_status()`
-    into its own tick's status writes. Nothing is built at all when the boot
-    is not checkpointable (module flag SAVESTATES).
-
-    TEN SLOTS, NAMED. The picker lists slot1..slot10 with each slot's label
-    (or "(empty)"); Save asks for a name first and passes it to savegame.sh,
-    which stores it IN the slot - so names survive sessions and machines and
-    the app's own slot manager shows the same truth."""
-
-    SLOT_IDS = ["slot%d" % i for i in range(1, 11)]
-
-    #: What a label may contain. The label crosses wsl.exe's re-parse on its
-    #: way into bash argv, and wsl.exe expands $ and backticks even in -e
-    #: argv (the executor lesson this repo already paid for) - so the dialog
-    #: simply never lets those characters exist.
-    _LABEL_OK = ("abcdefghijklmnopqrstuvwxyz"
-                 "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _.()!-")
-
-    def _build_state_widgets(self, parent, compact=False):
-        """The slot picker and the two buttons, for a view to place.
-
-        ``compact`` is the artwork view's shape: its cluster shares the
-        bottom edge with Start/Plunge/Reset, and the full-width version
-        CROWDED them into each other on a scaled-down window (tester
-        screenshot, 2026-08-10). Short labels and a narrower picker keep
-        the two clusters apart; the slot names still read in full in the
-        picker's dropdown, and the picker right beside Save/Load is what
-        keeps the short labels unambiguous. The Schematic bar has the
-        room, so it keeps the full labels."""
-        self._slot_labels = {}
-        self._slot_box = ttk.Combobox(parent, width=12 if compact else 17,
-                                      state="readonly",
-                                      values=self._slot_values())
-        self._slot_box.current(0)
-        save_txt, load_txt, bw = (("Save", "Load", 6) if compact
-                                  else ("Save state", "Load state", 11))
-        self._state_btns = [
-            tk.Button(parent, text=save_txt, width=bw,
-                      command=self._save_clicked),
-            tk.Button(parent, text=load_txt, width=bw,
-                      command=self._load_clicked),
-        ]
-        self._slots_refresh()
-        return [self._slot_box] + self._state_btns
-
-    def _slot_values(self):
-        """One line per slot. Every slot listed is THIS game's now (slots
-        are stored per game and state_slots filters), so ten slots means
-        ten of this title's slots - the "1 · [godzilla_pro]" foreign-slot
-        marking this method briefly carried is gone with the shared
-        namespace that made it necessary."""
-        vals = []
-        for i, sid in enumerate(self.SLOT_IDS):
-            label = getattr(self, "_slot_labels", {}).get(sid)
-            if label is None:
-                vals.append("%d · (empty)" % (i + 1))
-            else:
-                vals.append("%d · %s" % (i + 1, label or "unnamed"))
-        return vals
-
-    def _current_slot(self):
-        try:
-            return self.SLOT_IDS[self._slot_box.current()]
-        except (ValueError, IndexError, tk.TclError):
-            return self.SLOT_IDS[0]
-
-    def _slots_refresh(self, pick_first_empty=False):
-        """Re-read the slots off the rig, on a worker thread."""
-        def work():
-            info = state_slots()
-
-            def apply():
-                try:
-                    keep = self._slot_box.current()
-                    self._slot_labels = {s: info[s] for s in info}
-                    self._slot_box.configure(values=self._slot_values())
-                    if pick_first_empty:
-                        empty = [i for i, sid in enumerate(self.SLOT_IDS)
-                                 if sid not in self._slot_labels]
-                        self._slot_box.current(empty[0] if empty else 0)
-                    elif 0 <= keep < len(self.SLOT_IDS):
-                        self._slot_box.current(keep)
-                except tk.TclError:
-                    pass          # window torn down while we were reading
-            # The slot box's after(), NOT self.cv's: Schematic builds its bar
-            # (and these widgets) before its canvas exists, and the worker
-            # can finish inside that gap.
-            try:
-                self._slot_box.after(0, apply)
-            except (tk.TclError, RuntimeError):
-                pass          # window (or the whole interp) is gone
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _save_clicked(self):
-        """Ask for a name, then save. The dialog is the naming surface David
-        asked for; empty keeps the slot unnamed, Escape/Cancel aborts."""
-        slot = self._current_slot()
-        top = self.cv.winfo_toplevel()
-        dlg = tk.Toplevel(top)
-        dlg.title("Save state")
-        dlg.transient(top)
-        dlg.resizable(False, False)
-        n = self.SLOT_IDS.index(slot) + 1
-        tk.Label(dlg, text="Save to slot %d - name (optional):" % n,
-                 anchor="w").pack(fill="x", padx=10, pady=(10, 2))
-        var = tk.StringVar(value=self._slot_labels.get(slot) or "")
-        ent = tk.Entry(dlg, textvariable=var, width=34)
-        ent.pack(padx=10, pady=2)
-        row = tk.Frame(dlg)
-        row.pack(pady=(6, 10))
-
-        def go(_e=None):
-            label = "".join(ch for ch in var.get() if ch in self._LABEL_OK)
-            label = label.strip()[:40]
-            dlg.destroy()
-            self.run_state("savegame.sh", slot, label or None)
-
-        tk.Button(row, text="Save", width=9, command=go).pack(side="left",
-                                                              padx=4)
-        tk.Button(row, text="Cancel", width=9,
-                  command=dlg.destroy).pack(side="left", padx=4)
-        ent.bind("<Return>", go)
-        dlg.bind("<Escape>", lambda _e: dlg.destroy())
-        ent.focus_set()
-        # Centre over the parent - a dialog at 0,0 on a big desktop is lost.
-        dlg.update_idletasks()
-        dlg.geometry("+%d+%d" % (
-            top.winfo_rootx() + (top.winfo_width() - dlg.winfo_reqwidth()) // 2,
-            top.winfo_rooty() + 120))
-        dlg.grab_set()
-
-    def _load_clicked(self):
-        slot = self._current_slot()
-        if slot not in getattr(self, "_slot_labels", {}):
-            n = self.SLOT_IDS.index(slot) + 1
-            self._flash("slot %d is empty - nothing to load" % n, 5.0)
-            return
-        self.run_state("loadgame.sh", slot)
-
-    def run_state(self, script, slot, label=None):
-        """One at a time, off the Tk thread.
-
-        The spawn takes seconds (a save dumps ~500 MB; a load is a criu
-        restore), so it runs on its own thread with both buttons disabled -
-        NOT on SwitchDriver's queue, where it would block a held flipper's
-        release behind a 10 s restore. Tk is only ever touched back on the Tk
-        thread via after(), which is the cross-thread rule this repo has paid
-        for before (the Partition Explorer lockup).
-        """
-        if getattr(self, "_state_busy", False):
-            return
-        self._state_busy = True
-        for b in self._state_btns:
-            b.config(state="disabled")
-        verb = "saving" if script.startswith("save") else "loading"
-        self._flash("%s state..." % verb, None)
-
-        def work():
-            r = state_run(script, slot, label)
-
-            def done():
-                self._state_busy = False
-                for b in self._state_btns:
-                    b.config(state="normal")
-                # The wrappers' own last tagged line is the best one-line
-                # answer ("saved to slot...", "this run is not
-                # checkpointable..."), and a bare "FAILED" is the WORST one -
-                # David's first real button press showed exactly
-                # "[savegame] FAILED" while the criu reason sat one line
-                # above it. So prefer the last tagged line that says
-                # something, and fall back down the ladder from there.
-                if r is None:
-                    text = "%s did not run" % script
-                else:
-                    lines = [ln.strip() for ln in
-                             (r.stdout or b"").decode("utf8", "replace").splitlines()
-                             + (r.stderr or b"").decode("utf8", "replace").splitlines()
-                             if ln.strip()]
-                    tagged = [ln for ln in lines
-                              if ln.startswith(("[savegame]", "[loadgame]",
-                                                "[save]", "[restore]",
-                                                "savegame:", "loadgame:"))]
-                    saying = [ln for ln in tagged
-                              if not ln.rstrip().endswith("FAILED")]
-                    text = (saying or tagged or lines
-                            or ["%s: no output" % script])[-1]
-                self._flash(text)
-                # The picker's labels just changed (a save filled or renamed
-                # a slot); show the new truth without a manual refresh.
-                self._slots_refresh()
-
-            self.cv.after(0, done)
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _flash(self, text, secs=8.0):
-        """Put one line in this view's status bar, over the tick's own.
-
-        ONE OVERRIDE SLOT PER WINDOW, and that is deliberate rather than
-        laziness: a save's result and a ball action's result are the same kind
-        of thing - what the last thing you pressed did - and two slots would
-        race for the one label with no rule about which won. `secs=None` holds
-        it until something replaces it, which is what a "saving state..."
-        in-progress line wants.
-        """
-        self._state_msg = (text, None if secs is None
-                           else time.monotonic() + secs)
-
-    def _state_status(self):
-        """The status-bar override while a save/load runs, and its result for
-        a few seconds after - both ticks rewrite the bar every pass, so a
-        plain config() here would survive for one frame at most. Reads its
-        OWN monotonic clock: Field's tick t0 is perf_counter, a different
-        epoch from the monotonic stamp `until` carries."""
-        m = getattr(self, "_state_msg", None)
-        if not m:
-            return None
-        text, until = m
-        if until is not None and time.monotonic() > until:
-            self._state_msg = None
-            return None
-        return text
 
 
 #: What a fixture blends toward when there is no artwork behind it, and the
@@ -3074,1002 +1705,12 @@ class LedRing:
         return out
 
 
-class Field(StateOps, LedRing):
-    def __init__(self, root):
-        from PIL import Image, ImageTk
-        self.root = root
-        self.switches = load_switches()
-        self.leds = load_leds()
-        self.coils = load_coils()
-        self.last = None
-
-        # ARTWORK IF IT FITS THE COORDINATES, A BLANK FIELD OTHERWISE. Both
-        # draw the same markers in the same places; the picture behind them is
-        # the only difference, and a title without one is no longer pushed all
-        # the way down to the switch list (item 50).
-        art = layout_art()
-        img = Image.open(art).convert("RGB") if art else None
-        base = (img.width, img.height) if img else layout_extent()
-        self.scale = pick_scale(root, base[1])
-        w, h = int(base[0] * self.scale), int(base[1] * self.scale)
-        # KEPT, not discarded after the PhotoImage is made: each fixture blends
-        # toward the pixel that is actually behind it (see blend()), and that
-        # pixel has to be sampled from somewhere. Sampled once at build time,
-        # never during a tick. None with no artwork, and _sample() answers the
-        # flat background instead.
-        self._art = img.resize((w, h), Image.LANCZOS) if img else None
-        self.bg = ImageTk.PhotoImage(self._art) if self._art else None
-
-        # THE STATUS BAR IS PACKED FIRST, AND side="bottom", AND THAT IS A FIX
-        # RATHER THAN A STYLE CHOICE. Packed after the canvas it is last in
-        # line for space, and the canvas is sized from the ARTWORK: on David's
-        # 5120x1440 screen the sum came to about 2 px more than the window had,
-        # so Tk simply did not show the label at all. Everything this window
-        # reports about itself - inserts lit, LED writes decoded, frames not
-        # decoded, the frame rate - lives in that label, so the one part that
-        # says whether the thing is working was invisible on the machine it was
-        # built for. Claiming space before the canvas cannot go wrong that way.
-        #
-        # width=1 SO THE TEXT CAN NEVER SIZE THE WINDOW. A Label asks for the
-        # width of its text, the window is the max of its children's asks, and
-        # the bar's text changes width as its counters grow - so the whole
-        # window widened and narrowed with the wording, which David saw the day
-        # the two-rate bar shipped. One nominal character keeps its ask below
-        # the canvas's always; fill="x" then stretches it to the artwork's
-        # width, and text longer than that clips at the right instead of
-        # resizing the playfield.
-        self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
-                               font=("Consolas", 9), width=1)
-        self.status.pack(side="bottom", fill="x")
-        # side="left", NOT "top" (item 39): the key panel docks on the RIGHT -
-        # the playfield is tall and screens are wide, so the horizontal space
-        # is the free direction - and a side="top" canvas would centre itself
-        # over the panel's column when the window is stretched.
-        self.cv = tk.Canvas(root, width=w, height=h, highlightthickness=0,
-                            bg="black" if self.bg
-                               else "#%02x%02x%02x" % NO_ART_BG)
-        self.cv.pack(side="left")
-        if self.bg is not None:
-            self.cv.create_image(0, 0, anchor="nw", image=self.bg)
-        # ★ ITEM 39: the key panel attaches AFTER SwitchDriver exists, below -
-        # its service buttons and door toggle press through the same driver
-        # the artwork markers use.
-        self.key_panel, self.keys = None, None
-
-        self.info = {}          # canvas item -> dict describing it
-        self.fixtures = group_fixtures(self.leds)
-        self.coil_items = {}    # (node, index) -> canvas item
-        self.coil_seen = {}     # (node, index) -> last fire counter read
-        self.coil_until = {}    # (node, index) -> ms after which the flash ends
-        self.coil_drawn = {}    # (node, index) -> last hot/cold drawn
-        self.fps = 0.0          # measured, EWMA, shown in the status bar
-        self._t_last = None
-        self._read_ms = 0.0     # last tick's transport cost, for PAD_PF_LOG
-        self._redrawn = 0       # fixtures actually reconfigured since the log
-        self._log_t, self._log_n = time.perf_counter(), 0
-        # THE TWO RATES BEHIND THE STATUS BAR (see the module docstring). Both
-        # are deques of the tick times at which the thing happened, trimmed to
-        # RATE_WIN_S - a count over a window rather than a smoothed number,
-        # because these events are sparse and an EWMA of a sparse event reports
-        # the last gap rather than the rate.
-        self._draw_ev = collections.deque()   # ticks that changed the picture
-        self._data_ev = collections.deque()   # ticks that read a moved counter
-        self._decoded = None                  # last `decoded` seen, to diff it
-        self._gap_worst = 0.0                 # longest still stretch, for the log
-        self._draw_last = None
-        # THE FADE LAYER (padled.h version 3), shared with the swatch grid -
-        # see LedRing, which owns both it and the base-layer read.
-        self._init_ring()
-        # channel -> fixtures drawn from it, so a fade range finds its dots
-        # without walking all 81 fixtures per lamp.
-        self.chan_fix = {}
-        for F in self.fixtures:
-            for key in F["channels"].values():
-                self.chan_fix.setdefault(key, []).append(F)
-
-        # Every glow before any core marker: fixtures overlap on this picture
-        # (the three SCOOP BB inserts share one XY), and interleaving would put
-        # one fixture's halo over its neighbour's dot.
-        for F in self.fixtures:
-            x, y, r = F["x"] * self.scale, F["y"] * self.scale, LED_GLOW_R
-            F["glow"] = self.cv.create_oval(x - r, y - r, x + r, y + r,
-                                            fill="", outline="",
-                                            stipple="gray50")
-        for F in self.fixtures:
-            x, y, r = F["x"] * self.scale, F["y"] * self.scale, LED_R
-            i = self.cv.create_oval(x - r, y - r, x + r, y + r,
-                                    fill="#1a1a1a", outline="#3a3a3a")
-            F["item"] = i
-            F["cx"], F["cy"] = x, y
-            F["bg"] = self._sample(x, y)
-            # What is on screen right now, so a tick can skip a fixture that
-            # has not changed. See draw_fixtures().
-            F["drawn"] = None
-            # The tween's state (see draw_fixtures / animate_fixtures):
-            # `state` is the last (rgb, level) decoded off the wire - the
-            # empty tuple compares unequal to every real state, so the first
-            # read always paints; `vis` is what is on screen NOW as floats
-            # (r, g, b, alpha, radius); `v0`/`vt`/`t0` are the running fade.
-            F["state"] = ()
-            F["vis"] = (0.0, 0.0, 0.0, 0.0, float(LED_R))
-            F["v0"] = F["vt"] = None
-            F["t0"] = 0.0
-            self.info[i] = dict(kind="led", d=F)
-
-        for C in self.coils:
-            x, y, r = C["x"] * self.scale, C["y"] * self.scale, 7
-            i = self.cv.create_rectangle(x - r, y - r, x + r, y + r,
-                                         outline="#ff4040", width=2)
-            self.coil_items[(C["node"], C["index"])] = i
-            self.info[i] = dict(kind="coil", d=C)
-
-        # LIVE SWITCH STATE, all of it off one read (item 21). The dots inside
-        # the switch rings, the trough panel and the coin-door warning are
-        # three readings of the same 256 bytes.
-        self.sw_dots, self._dot_drawn = [], {}
-        self.trough_panel, self._panel_at = None, (self.ACT_PAD, 0)
-        self.sw = SwitchWatch(self.switches)
-        if not self.sw.positions:
-            # The artwork table only carries switches that have a POSITION,
-            # and a trough lives under the playfield - Godzilla places all six
-            # and another title need not. The full switch list is the same
-            # data without the coordinates, so ask it before giving up.
-            self.sw.set_rows(load_switch_list())
-        self._add_switches(self.switches)
-        # When to look for a switch table that did not exist when this window
-        # opened. See _pick_up_switches().
-        self._sw_next = time.monotonic() + SWITCH_POLL_S
-
-        self._place_actions(w, h)
-
-        self.tip = Tip(root)
-        self.drv = SwitchDriver()
-        # ★ ITEM 39: the retired Controls window's content, beside the art -
-        # keys, clickable service buttons, the door toggle, and the trough
-        # (attach moves the corner one in when the panel exists).
-        self._binds_next = time.monotonic() + SWITCH_POLL_S
-        self.key_panel = attach_key_panel(self)
-        self.holding = None            # (canvas item, switch id) while held
-        self.ripping = None            # (canvas item, switch id) while ripped
-        # PRESS and RELEASE, not <Button-1>: a switch is closed for as long as
-        # the mouse is down. Tk's implicit grab delivers the release to this
-        # canvas even if the pointer has left it, so a drag off the marker still
-        # opens the switch.
-        self.cv.bind("<ButtonPress-1>", self.on_press)
-        self.cv.bind("<ButtonRelease-1>", self.on_release)
-        # RIGHT-hold RIPS a switch (item 26) - closures for as long as the
-        # button is down, the way a ball spinning a spinner does.
-        self.cv.bind("<ButtonPress-3>", self.on_rip)
-        self.cv.bind("<ButtonRelease-3>", self.on_rip_end)
-        self.cv.bind("<Motion>", self.on_move)
-        self.cv.bind("<Leave>", lambda e: self.tip.hide())
-        self.tick()
-
-    def _add_switches(self, rows):
-        """Draw a clickable marker for each switch, above everything else.
-
-        TWO ITEMS PER SWITCH, AND ONLY THE RING IS CLICKABLE. The ring is the
-        hit target and carries the hold highlight; the dot inside it is live
-        state off the merged array, and it is NOT put into `self.info`.
-        That is what keeps this generalisation free: `_hit()` returns the
-        topmost item that is in `info`, so a filled dot cannot become the
-        thing a click lands on. Filling the RING instead would have changed
-        the hit test everywhere a switch and a coil share a spot - item 24
-        measured that the centre of RIGHT SCOOP lands on the coil, and
-        coilact.py depends on it.
-
-        DRAWING ALL OF THEM COSTS WHAT DRAWING SIX WOULD. The item asked for
-        the trough; the merged array arrives in one read for all 256 ids, so
-        every other switch is free transport and only its own itemconfig -
-        and a window that shows which switches the game currently has made is
-        the honest version of the one that showed none of them.
-        """
-        for S in rows:
-            x, y, r = S["x"] * self.scale, S["y"] * self.scale, 6
-            i = self.cv.create_oval(x - r, y - r, x + r, y + r,
-                                    outline="#2a8cff", width=2)
-            self.info[i] = dict(kind="switch", d=S)
-            dot = self.cv.create_oval(x - 3, y - 3, x + 3, y + 3,
-                                      fill="", outline="")
-            self.sw_dots.append((dot, S["id"]))
-
-    def _pick_up_switches(self):
-        """Take the switch table if it arrives while this window is open.
-
-        THE SWITCH TABLE IS THE ONE PART THAT NEEDS A RUN - the game builds it
-        on the heap, so it reaches the outside world only as the shim's dump
-        about a minute in, and mktables.py is behind this window waiting for
-        exactly that. Loading the tables once at build time therefore meant the
-        first run of a title ALWAYS showed a playfield with no switches on it,
-        and the fix was to close the window and run the title again, which is a
-        strange thing to have to know. The window is already polling fast;
-        this is one os.path.exists a couple of seconds while a table is missing,
-        and nothing at all once it is there.
-        """
-        if self.switches or time.monotonic() < self._sw_next:
-            return
-        self._sw_next = time.monotonic() + SWITCH_POLL_S
-        rows = load_switches()
-        if not rows:
-            return
-        self.switches = rows
-        # The trough is worth re-asking for at the same moment: a first run of
-        # a title opens this window before the game has published its switch
-        # table, so "no trough" at window open is usually just "not yet".
-        if not self.sw.positions and not self.sw.set_rows(rows):
-            self.sw.set_rows(load_switch_list())
-        self._add_switches(rows)
-        self._make_trough_panel()
-
-    def _sample(self, x, y):
-        """The artwork's colour under a marker, averaged over its footprint.
-
-        One pixel is not enough: inserts sit on high-contrast art, and a
-        single sample that lands on a black outline makes the whole fixture
-        blend toward black while its neighbour blends toward white. A small
-        box average is stable and costs nothing here - this runs once per
-        fixture at build time, never in a tick.
-        """
-        if self._art is None:
-            return NO_ART_BG        # blank field: one flat colour behind all
-        w, h = self._art.size
-        r = int(LED_GLOW_R)
-        x0, y0 = max(0, int(x) - r), max(0, int(y) - r)
-        x1, y1 = min(w, int(x) + r + 1), min(h, int(y) + r + 1)
-        if x1 <= x0 or y1 <= y0:
-            return (0, 0, 0)
-        box = self._art.crop((x0, y0, x1, y1))
-        n = box.width * box.height
-        px = box.getdata()
-        tot = [0, 0, 0]
-        for p in px:
-            tot[0] += p[0]; tot[1] += p[1]; tot[2] += p[2]
-        return (tot[0] // n, tot[1] // n, tot[2] // n)
-
-    # ---- hit testing and tooltips ----------------------------------------
-    def _hit(self, ev):
-        """Topmost element under the cursor. Switches and coils sit above the
-        inserts, so a marker overlapping a dot still wins."""
-        for i in reversed(self.cv.find_overlapping(ev.x - 3, ev.y - 3,
-                                                   ev.x + 3, ev.y + 3)):
-            if i in self.info:
-                return i
-        return None
-
-    def _describe(self, i):
-        e = self.info[i]
-        d = e["d"]
-        if e["kind"] == "switch":
-            return ("SWITCH  %s\nid %d   node %d  bit %d\n"
-                    "hold to keep it closed\nright-hold to RIP it (spinners)"
-                    % (d["name"], d["id"], d["node"], d["bit"]))
-        if e["kind"] == "coil":
-            where = ("node %d index %d" % (d["node"], d["index"])
-                     if d["node"] is not None
-                     else "group %d index %d (board unknown)" % (d["group"],
-                                                                 d["index"]))
-            fires, lvl = self._coil_state(d)
-            live = ("\nfired %d time%s, drive %d"
-                    % (fires, "" if fires == 1 else "s", lvl)
-                    if fires is not None else "\nno coil data")
-            act = coilact.describe(d["name"])
-            # "hold" where it now holds and "click" where it still pulses, so
-            # the tooltip never promises the gesture the marker does not take.
-            how = "hold" if coilact.hold_switch(d["name"]) is not None else "click"
-            return "COIL  %s\n%s%s\n%s: %s" % (
-                d["name"], where, live, how, act or "nothing wired")
-        vals = self._chan_vals(d, self.last)
-        fmt = lambda v: "%d" % v if v is not None else "no data"
-        # ★ node IS None FOR A LAMP THE TABLE POSITIONS AND THE WIRE CANNOT
-        # ADDRESS (item 50/53), and "%d" % None is a TypeError. The coil branch
-        # above has carried this guard all along; the LED branch did not, so
-        # every insert on james_bond_60th_le - all 73 of its lamps are in
-        # groups 8 and 9, which GROUP_NODE cannot map - raised inside the
-        # <Motion> binding. That does not show as a crash: the exception is
-        # swallowed by Tk's event loop, the tooltip freezes on whatever it last
-        # showed, and the window looks merely stuck.
-        where = lambda node, idx: (
-            "node %d  index %d" % (node, idx) if node is not None
-            else "group %d  index %d  - no wire address for this board"
-                 % (d.get("group", -1), idx))
-        if "W" in d["channels"]:
-            node, idx = d["channels"]["W"]
-            return ("LED  %s\n%s\nvalue %s"
-                    % (d["name"], where(node, idx), fmt(vals.get("W"))))
-        lines = ["LED  %s   (RGB fixture)" % d["name"]]
-        for chan in "RGB":
-            if chan in d["channels"]:
-                node, idx = d["channels"][chan]
-                lines.append("%s  %s  value %s"
-                             % (chan, where(node, idx), fmt(vals.get(chan))))
-        return "\n".join(lines)
-
-    def on_move(self, ev):
-        i = self._hit(ev)
-        if i is None:
-            self.tip.hide()
-            return
-        self.tip.show(self._describe(i), ev.x_root, ev.y_root)
-
-    # ---- actions ---------------------------------------------------------
-    def on_press(self, ev):
-        i = self._hit(ev)
-        if i is None:
-            return
-        e = self.info[i]
-        if e["kind"] == "switch":
-            self._hold(i, e["d"]["id"], "#2a8cff")
-        elif e["kind"] == "coil":
-            # A COIL MARKER IS THE ONE THE SCOOP ACTUALLY GETS. It is drawn over
-            # the switch marker, so the middle of RIGHT SCOOP hit-tests to the
-            # coil - measured, not assumed. Where the coil follows a switch,
-            # hold that switch; where it MOVES a ball (trough eject, auto
-            # plunger) there is nothing to hold and it stays a click.
-            sw = coilact.hold_switch(e["d"]["name"])
-            if sw is not None:
-                self._hold(i, sw, "#ff4040")
-            elif coilact.describe(e["d"]["name"]):
-                self.drv.run_script("coilact.py", e["d"]["name"])
-
-    def _hold(self, item, sw_id, restore):
-        self.cv.itemconfig(item, outline="#ffd400", width=3)
-        self.holding = (item, sw_id, restore)
-        self.drv.press(sw_id)
-
-    def on_release(self, ev):
-        """Open whatever the press closed - by what we HELD, not by what is
-        under the cursor now. A drag off the marker before letting go would
-        otherwise hit-test to nothing and leave the switch made."""
-        if self.holding is None:
-            return
-        item, sw_id, restore = self.holding
-        self.holding = None
-        self.drv.release(sw_id)
-        self.cv.itemconfig(item, outline=restore, width=2)
-
-    def on_rip(self, ev):
-        """Right-hold RIPS a switch (item 26): repeated closures for as long
-        as the button is down, shim-side, at the game's own scan rate. Only a
-        switch marker rips - a coil has no level to alternate."""
-        i = self._hit(ev)
-        if i is None:
-            return
-        e = self.info[i]
-        if e["kind"] != "switch":
-            return
-        self.cv.itemconfig(i, outline="#ff9500", width=3)
-        self.ripping = (i, e["d"]["id"], "#2a8cff")
-        self.drv.spin(e["d"]["id"], True)
-
-    def on_rip_end(self, ev):
-        """Stop the rip we STARTED, same argument as on_release: the pointer
-        may have left the marker, but the flag we set is the one to clear."""
-        if self.ripping is None:
-            return
-        item, sw_id, restore = self.ripping
-        self.ripping = None
-        self.drv.spin(sw_id, False)
-        self.cv.itemconfig(item, outline=restore, width=2)
-
-    #: The gap between the action buttons, and their inset from the canvas
-    #: corner, in screen pixels. Not scaled: these space WIDGETS, which are sized
-    #: in points by the theme, not in table units.
-    ACT_PAD, ACT_GAP = 6, 4
-
-    def _place_actions(self, w, h):
-        """Start / Plunge / Reset balls, on the artwork beside the plunger.
-
-        THEY USED TO BE A TOOLBAR ROW ABOVE THE CANVAS and are down here now
-        because that is where the hand already is (REMAINING item 25): the
-        shooter lane is switch 62 at table 283,608 of a 313x710 picture, so the
-        plunger IS the bottom-right corner and the toolbar was the far end of a
-        1300 px window from it.
-
-        REAL tk.Button WIDGETS THROUGH create_window, NOT CANVAS ITEMS. A canvas
-        item would land in find_overlapping and therefore in `_hit()`, which is
-        the switch/coil hit test - the button would press whatever marker it was
-        drawn over. A window item is in find_overlapping too, but it is not in
-        `self.info`, so `_hit()` skips it, and the widget eats the click before
-        the canvas binding ever runs.
-
-        A ROW PINNED TO THE BOTTOM EDGE, NOT A STACK UP THE RIGHT SIDE, and the
-        reason is the markers rather than taste. The lowest marker on this
-        picture is RIGHT FLIPPER BUTTON at table y=656, which leaves 54*scale px
-        under it: a three-high stack (~86 px) covers that marker on a 1080p
-        screen, where one row (~26 px) clears it at every scale this window
-        runs at, including PAD_PF_SCALE=1. Widths are asked of the widgets
-        rather than assumed, so a different theme or DPI still lines up.
-
-        THE STATE CONTROLS TAKE A SECOND ROW WHEN THE FIRST CANNOT HOLD BOTH
-        CLUSTERS, and that is the one case worth the extra ~30 px: see the fit
-        test below for the window it was measured on. Two rows can graze the
-        lowest marker on a small screen; the alternative there is buttons drawn
-        on top of other buttons, which is what the tester actually got.
-        """
-        self._acts = []
-        for label, script, arg in WINDOW_ACTIONS:
-            self._acts.append(tk.Button(
-                self.cv, text=label, width=max(11, len(label)),
-                command=lambda s=script, a=arg: self.run_action(s, a)))
-
-        # Save/Load state, bottom-LEFT (item 13's GUI half, David 2026-08-08:
-        # "i'd like to have gui controls to set and load a save state", surface
-        # asked and answered - the playfield, over the game window's legend and
-        # the Emulate tab). The LEFT corner, not more buttons on the right:
-        # game actions stay by the plunger where the hand is, state controls
-        # stay apart from them - a misclicked "Load state" yanks the whole game
-        # back to the save, which is not a neighbour "Plunge" wants.
-        # Only on a checkpointable boot: no flag, no controls at all.
-        #
-        # BUILT BEFORE ANYTHING IS PLACED, because where each cluster goes now
-        # depends on how wide the OTHER one is - see the fit test below.
-        self._state_btns = []
-        state = (self._build_state_widgets(self.cv, compact=True)
-                 if SAVESTATES else [])
-        self._state_cluster, self._act_wh, self._act_items = state, (w, h), []
-        self._layout_actions()
-
-    def _layout_actions(self):
-        """Place the action row and the state cluster; re-run to show or hide
-        the row.
-
-        ★ PAD-134: THE ROW IS ONLY DRAWN WHEN THERE IS NO KEY PANEL. David,
-        looking at Insert coin / Start / Plunge / Reset balls / Clear alerts:
-        "do we still need any of these buttons on the virtual playfield? most
-        of them are covered by the keyboard shortcuts anyways." Once the key
-        panel is up every one of them has a home on it - Start Button and
-        Left Coin are clickable rows, Plunge / Drain / Reset balls are the
-        BALLS section's buttons, and Clear switch alerts sits under SERVICE -
-        so a second copy down here was one control in two places. Without a
-        panel (no padbinds yet, or never) the row is the only way in, so it
-        stays. show_action_row() flips `_acts_shown` and calls this; the
-        widgets are built once in _place_actions() and only their canvas
-        windows are recreated, so hide-then-show is the same layout twice.
-        With the row hidden the state cluster has the bottom edge to itself.
-        """
-        w, h = self._act_wh
-        for item in self._act_items:
-            self.cv.delete(item)
-        self._act_items = []
-        acts = self._acts if getattr(self, "_acts_shown", True) else []
-        state = self._state_cluster
-        row_h = max([wdg.winfo_reqheight()
-                     for wdg in acts + state] or [0])
-
-        # ★ TWO ROWS WHEN ONE CANNOT HOLD BOTH CLUSTERS, AND THAT IS MEASURED
-        # RATHER THAN ASSUMED (PAD-119, C FB 2026-09-08, beatles on a 1080p
-        # screen). The two clusters grow from opposite edges of the canvas -
-        # state controls rightwards from the left, actions leftwards from the
-        # right - and NOTHING STOPPED THEM MEETING IN THE MIDDLE. On his
-        # window the picker sat on top of "Start" and "Load" sat on top of
-        # "Plunge": four buttons drawn, two of them unreachable, and no sign
-        # from here that anything was wrong.
-        #
-        # IT SURVIVED BECAUSE THE CANVAS IS SIZED FROM THE SCREEN. Its width is
-        # the artwork's times pick_scale(), which is the screen height over the
-        # artwork's - so a tall desk monitor makes a canvas wide enough for
-        # both clusters and a 1080p laptop does not. beatles' artwork is
-        # 336x710: at scale 1.25 the canvas is 420 px and the two clusters ask
-        # for 570. The short compact labels were the last answer to this
-        # (2026-08-10, the same collision one action button ago) and "Clear
-        # alerts" spent the room they bought.
-        #
-        # THE ACTIONS KEEP THE BOTTOM ROW. They are down here because the
-        # plunger is (see the docstring above); the state controls are down
-        # here only to be far from them, and one row up is still far.
-        def span(widgets):
-            """What one cluster asks for, its own gaps included."""
-            if not widgets:
-                return 0
-            return (sum(wdg.winfo_reqwidth() for wdg in widgets)
-                    + self.ACT_GAP * (len(widgets) - 1))
-
-        # ★ AND THE ACTIONS WRAP AMONG THEMSELVES (PAD-128). PAD-119 moved the
-        # OTHER cluster when the two could not share the bottom edge, which was
-        # the whole fault then, because four buttons still fitted a 420 px
-        # canvas by themselves (372 px of 408). "Insert coin" makes five, they
-        # ask for ~470, and nothing here stopped a button being placed at a
-        # NEGATIVE x - off the left edge of the canvas, clipped, no overlap for
-        # the PAD-119 test to catch and no sign from this side that a control
-        # had gone missing. Exactly the shape of the bug it fixed, one button
-        # later.
-        #
-        # FILLED FROM THE BOTTOM ROW UP, RIGHT TO LEFT, so the hand keeps
-        # finding the last action in the corner the plunger is in, and the
-        # reading order (top to bottom, left to right) is still
-        # WINDOW_ACTIONS' order. Only the BOTTOM row pays for the state
-        # cluster; the rows above it have the whole width, which is what keeps
-        # a 420 px canvas at two rows instead of three - the state controls and
-        # two actions share the bottom edge, three actions sit above them.
-        avail = max(1, w - 2 * self.ACT_PAD)
-        state_cost = (span(state) + self.ACT_GAP) if state else 0
-        todo, act_rows = list(acts), []
-        while todo:
-            budget = avail - (state_cost if not act_rows else 0)
-            take = [todo.pop()]
-            while todo:
-                cand = [todo[-1]] + take
-                if span(cand) > budget:
-                    break
-                take = cand
-                todo.pop()
-            act_rows.append(take)               # bottom row first
-        # A single action too wide even for the reduced bottom budget: the
-        # state cluster cannot share that row, and gets its own below-the-
-        # actions row exactly as it did before.
-        bottom_fits = (not state or not act_rows
-                       or self.ACT_PAD + state_cost
-                       + span(act_rows[0]) + self.ACT_PAD <= w)
-
-        y = h - self.ACT_PAD
-        for depth, chunk in enumerate(act_rows):
-            cy = y - depth * (row_h + self.ACT_GAP)
-            x = w - self.ACT_PAD
-            for b in reversed(chunk):
-                self._act_items.append(
-                    self.cv.create_window(x, cy, anchor="se", window=b))
-                x -= b.winfo_reqwidth() + self.ACT_GAP
-
-        rows = len(act_rows) if bottom_fits else len(act_rows) + 1
-        if state:
-            rows = max(rows, 1)       # the row hidden: the state row is one
-            x = self.ACT_PAD
-            sy = y - (0 if bottom_fits
-                      else len(act_rows) * (row_h + self.ACT_GAP))
-            for wdg in state:
-                self._act_items.append(
-                    self.cv.create_window(x, sy, anchor="sw", window=wdg))
-                x += wdg.winfo_reqwidth() + self.ACT_GAP
-
-        # THE TROUGH PANEL GOES ABOVE THE BOTTOM ROW, not into it: that row is
-        # already two clusters wide (state controls left, game actions right)
-        # and on a scaled-down window they have crowded each other once
-        # already. Above them it is clear of both at every scale, and it is
-        # still down at the apron end of the artwork, which is where the real
-        # trough is - the physical position and the readable position agree.
-        # ABOVE ALL the rows, not one of them: the row count is the thing the
-        # fit test above decides, and a panel that assumed one would land on
-        # the state controls on exactly the windows that needed two.
-        self._panel_at = (self.ACT_PAD, y - rows * (row_h + self.ACT_GAP))
-        self._make_trough_panel()
-
-    def _make_trough_panel(self):
-        """Build the panel once the trough is known. Idempotent.
-
-        On the KEY PANEL when there is one (item 39, the ball controls moved
-        there); the artwork corner stays as the fallback for a window with no
-        padbinds to read - an old renderer, or a by-hand launch."""
-        if self.trough_panel is not None or not self.sw.positions:
-            return
-        if self.key_panel is not None:
-            self.trough_panel = self.key_panel.add_trough(
-                self.sw.positions, self.sw.how, self.run_plunge)
-            return
-        x, y = self._panel_at
-        self.trough_panel = TroughPanel(self.cv, self.sw.positions,
-                                        self.sw.how, x, y, anchor="sw",
-                                        on_ball=self.run_plunge)
-
-    def run_plunge(self, what):
-        run_helper(self, "plunge.py", what)
-
-    def run_action(self, script, arg=None):
-        """One action row entry (item 59) - see `run_helper()`, which both
-        views share so a press cannot mean two different things."""
-        run_helper(self, script, arg)
-
-    # ---- live LED and coil state -----------------------------------------
-    def read_leds(self):
-        """(raw, d): `raw` is the block's bytes whenever dump/padled could be
-        READ at all - the emulator is there - and `d` is those same bytes only
-        once the shim has stamped its magic, i.e. once LED data has actually
-        been decoded. The Schematic learned this distinction on item 50; this
-        view folding "readable but unstamped" into "no emulator" is what had
-        the status bar calling a live run down for the whole boot (David,
-        2026-08-22: the shim stamps the block at the FIRST lamp write it
-        decodes, which on a normal boot is the attract light show - so the
-        window read "no emulator" across Tech Alerts, exactly when a human is
-        watching for signs of life)."""
-        try:
-            with open(LED_PATH, "rb") as f:
-                raw = f.read(PADLED_READ)
-        except OSError:
-            return None, None
-        if len(raw) < LED_HDR or struct.unpack_from("<I", raw, 0)[0] != PADLED_MAGIC:
-            return raw, None
-        return raw, raw
-
-    def door_open(self):
-        """True when the coin door is open, so 48V is off and coils are dead.
-
-        NO READ OF ITS OWN ANY MORE. This used to be the only reason this
-        window touched the switch block, on its own cadence and reading a
-        single byte; the trough display needs the same block at a higher rate,
-        and a 9p round trip costs what it costs regardless of how many bytes
-        it carries (3.35 ms either way, measured). So the door is now one
-        answer out of SwitchWatch's one read - see read_merged() for why the
-        keyboard's half stands in until the guest has published.
-        """
-        return self.sw.door
-
-    def _coil_state(self, d):
-        """(fire count, drive byte) for a coil, or (None, None) with no data."""
-        node = d["node"]
-        if node is None or not self.last or len(self.last) < PADLED_READ:
-            return None, None
-        if struct.unpack_from("<I", self.last, 4)[0] < 2:      # version
-            return None, None
-        o = node * COIL_N + d["index"]
-        return self.last[COIL_OFF + o], self.last[LVL_OFF + o]
-
-    def _tick_coils(self, d, now):
-        """Flash a coil marker when its fire counter moves.
-
-        The counter, rather than an on/off bit, is what makes this reliable: a
-        slingshot pulse is ~30 ms and would fall between two 50 ms polls about
-        half the time. A counter cannot miss one.
-        """
-        fired = 0
-        for key, item in self.coil_items.items():
-            node, idx = key
-            if node is None:
-                continue
-            c = d[COIL_OFF + node * COIL_N + idx]
-            if key in self.coil_seen and c != self.coil_seen[key]:
-                self.coil_until[key] = now + COIL_FLASH_MS
-            self.coil_seen[key] = c
-            hot = self.coil_until.get(key, 0) > now
-            fired += hot
-            # Same only-what-changed rule as the inserts: a coil is cold in
-            # almost every frame, and reconfiguring a cold coil 30 times a
-            # second is pure Tcl round trips for no pixels.
-            if self.coil_drawn.get(key) == hot:
-                continue
-            self.coil_drawn[key] = hot
-            # MAGENTA, not a hotter orange. Single-channel inserts run
-            # #ff3c00..#fffb00, so an orange coil flash is the one colour that
-            # cannot be told apart from the thing next to it at a glance - and
-            # it is ALSO exactly the ambiguity that made "did the flash
-            # render?" unanswerable from a screenshot. An RGB fixture can now
-            # compose to magenta, but a coil is a filled SQUARE; no dot is one.
-            self.cv.itemconfig(item, fill="#ff00c0" if hot else "",
-                               outline="#ff80ff" if hot else "#ff4040",
-                               width=3 if hot else 2)
-        return fired
-
-    def draw_fixtures(self, d, now):
-        """Set each fixture's fade TARGET from the wire. Returns (lit, changed).
-
-        ONLY WHAT CHANGED. This used to reconfigure all 81 fixtures - two
-        canvas items each, 162 calls - every single tick, whether or not a
-        single byte had moved, and a Tk itemconfig is a round trip into the
-        Tcl interpreter. On a real attract frame a handful of inserts change
-        and the rest are identical, so the (rgb, level) compare turns almost
-        all of that work into a dict lookup. That, and not the transport, is
-        what makes the frame rate affordable.
-
-        NOTHING IS PAINTED HERE ANY MORE. The wire carries steps, the real
-        boards render the ramps (module docstring), so a state change only
-        RETARGETS the fixture's tween and animate_fixtures() draws the frames.
-        `changed` counts fixtures whose decoded state moved - the honest
-        "picture rate" for the status bar, which must NOT count tween frames:
-        a 200 ms fade drawn at 60 fps is one update, not twelve.
-        """
-        lit = 0
-        changed = 0
-        for F in self.fixtures:
-            rgb, level = fixture_color(self._chan_vals(F, d, now))
-            if rgb:
-                lit += 1
-            st = (rgb, level)
-            if st == F["state"]:
-                continue
-            F["state"] = st
-            # An ENVELOPED fixture changes every tick because the envelope is
-            # feeding it the ramp: track it with no extra smoothing (the ramp
-            # IS the animation) and do not count the frames as picture
-            # updates - the pulse was counted once when its command arrived.
-            if F.get("env"):
-                F["dur"] = 0.0
-            else:
-                changed += 1
-                F["dur"] = FADE_MS / 1000.0
-            v = F["vis"]
-            if rgb:
-                rs, alpha = level_shape(level)
-                if v[3] <= 0.0:
-                    # A fade IN starts from the target's own hue at zero
-                    # alpha, not from black - lerping the colour up from
-                    # (0,0,0) sweeps it through mud on the way.
-                    v = (float(rgb[0]), float(rgb[1]), float(rgb[2]),
-                         0.0, v[4])
-                    F["vis"] = v
-                F["vt"] = (float(rgb[0]), float(rgb[1]), float(rgb[2]),
-                           alpha, LED_R * rs)
-            else:
-                # A fade OUT keeps the hue it had on the way down, growing
-                # back to the resting radius so the dark dots stay one size
-                # however each one went out.
-                F["vt"] = (v[0], v[1], v[2], 0.0, float(LED_R))
-            F["v0"] = v
-            F["t0"] = now
-        return lit, changed
-
-    def animate_fixtures(self, now):
-        """Advance every mid-fade fixture and paint the ones that moved.
-
-        Linear, deliberately: a PWM ramp is linear in duty, and at 60 fps an
-        80 ms step is ~5 frames - an easing curve would be invisible. The
-        duration is per fixture: a base step gets FADE_MS, an enveloped
-        fixture gets 0 because the a2 pulse itself is feeding the ramp.
-        """
-        for F in self.fixtures:
-            vt = F["vt"]
-            if vt is None:
-                continue
-            dur = F.get("dur", FADE_MS / 1000.0)
-            t = 1.0 if dur <= 0 else min(1.0, (now - F["t0"]) / dur)
-            v0 = F["v0"]
-            vis = tuple(a + (b - a) * t for a, b in zip(v0, vt))
-            F["vis"] = vis
-            if t >= 1.0:
-                F["vt"] = None          # arrived; stop paying for this one
-            self._paint(F, vis)
-
-    def _paint(self, F, vis):
-        """Put one visual state (r, g, b, alpha, radius floats) on the canvas.
-
-        QUANTISED before the change-gate, so a tween costs a handful of
-        itemconfigs rather than one per frame: alpha in 1/32 steps (finer
-        than blend()'s 8-bit output can show), radius in 0.25 px (finer than
-        the eye, and the same step the old PWM-jitter guard used).
-        """
-        alpha, rad = vis[3], vis[4]
-        if alpha <= 1.0 / 64:
-            want = ("#1a1a1a", "", 0.0)
-        else:
-            a_q = round(alpha * 32) / 32.0
-            r_q = round(rad * 4) / 4.0
-            rgb = (int(vis[0]), int(vis[1]), int(vis[2]))
-            want = (blend(rgb, F["bg"], a_q),
-                    blend([c // 2 for c in rgb], F["bg"], a_q * 0.7), r_q)
-        if want == F["drawn"]:
-            return
-        prev = F["drawn"]
-        F["drawn"] = want
-        self._redrawn += 1
-        fill, glow, r = want
-        if r:
-            self.cv.itemconfig(F["item"], fill=fill, outline="")
-            self.cv.itemconfig(F["glow"], fill=glow)
-            if prev is None or prev[2] != r:
-                x, y = F["cx"], F["cy"]
-                self.cv.coords(F["item"], x - r, y - r, x + r, y + r)
-                g = LED_GLOW_R * (r / LED_R)
-                self.cv.coords(F["glow"], x - g, y - g, x + g, y + g)
-        else:
-            self.cv.itemconfig(F["item"], fill=fill, outline="#3a3a3a")
-            self.cv.itemconfig(F["glow"], fill="")
-            # An insert that fades out from dim would otherwise keep the
-            # SMALL radius it had while lit, so the dark dots would be
-            # different sizes depending on how each one last went out.
-            if prev is not None and prev[2] != LED_R:
-                x, y = F["cx"], F["cy"]
-                self.cv.coords(F["item"], x - LED_R, y - LED_R,
-                               x + LED_R, y + LED_R)
-                self.cv.coords(F["glow"], x - LED_GLOW_R, y - LED_GLOW_R,
-                               x + LED_GLOW_R, y + LED_GLOW_R)
-
-    def _mark(self, dq, t):
-        """Record an event and return its rate over the last RATE_WIN_S."""
-        dq.append(t)
-        return self._rate(dq, t)
-
-    @staticmethod
-    def _rate(dq, t):
-        while dq and t - dq[0] > RATE_WIN_S:
-            dq.popleft()
-        if not dq:
-            return 0.0
-        # Divide by the window, NOT by the span of the events in it: dividing by
-        # the span reports 30 Hz for two redraws 33 ms apart inside an otherwise
-        # dead three seconds, which is the exact overclaim this field exists to
-        # stop making.
-        return len(dq) / RATE_WIN_S
-
-    def tick(self):
-        t0 = time.perf_counter()
-        # The achieved rate is measured from tick START to tick START, which is
-        # the interval a human actually sees. Measuring the work alone would
-        # report a rate this window has never run at.
-        if self._t_last:
-            dt = t0 - self._t_last
-            self.fps = 1.0 / dt if not self.fps else self.fps * 0.9 + 0.1 / dt
-        self._t_last = t0
-        self._pick_up_switches()
-
-        # ONE PACED READ OF THE SWITCH BLOCK feeds three things: the dot in
-        # every switch ring, the trough panel, and the coin-door warning that
-        # used to do this read on its own.
-        poll_switches(self)
-
-        t_read = time.perf_counter()
-        raw, d = self.read_leds()
-        self._read_ms = (time.perf_counter() - t_read) * 1000.0
-        self.last = d
-        # `raw is not None`, NOT the stamped block: the emulator is "there"
-        # when its ring file can be read (watch.sh removes it at teardown
-        # precisely so this can tell), same as the Schematic's test. Keying
-        # this on the magic made an unstamped boot look like a torn-down run.
-        if emu_gone(self, raw is not None):
-            # SAVE FIRST. Leaving with the run is the COMMON way this window
-            # closes - the human closes the emulator, not the playfield - so a
-            # destroy without this meant the remembered position only ever came
-            # from the rare manual close, and a dragged playfield drifted back
-            # to where it was two runs ago.
-            save_state(self.root)
-            self.root.destroy()             # the run ended; leave with it
-            return
-        state_msg = self._state_status()
-        if d is None:
-            self.status.config(text=state_msg
-                               or ("emulator up, no LED writes decoded yet"
-                                   " (normal through boot and Tech Alerts:"
-                                   " the attract light show is the first)"
-                                   if raw is not None else
-                                   "no emulator (dump/padled not readable)"))
-        else:
-            decoded = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
-            skipped = struct.unpack_from("<I", d, LED_SKIPPED_OFF)[0]
-            # DID NEW BYTES ARRIVE THIS TICK? Diffed rather than trusted: the
-            # counter is written by the shim inside the guest and read across
-            # the VM boundary, so "the number moved" is the only evidence this
-            # side has that the block is live at all.
-            if self._decoded is not None and decoded != self._decoded:
-                self._mark(self._data_ev, t0)
-            self._decoded = decoded
-            # The fade ring first: a pulse command is both data arriving and
-            # one picture update, however many frames its envelope spans.
-            nfades = self._take_fades(d, t0)
-            for _ in range(nfades):
-                self._draw_ev.append(t0)
-                self._data_ev.append(t0)
-            lit, changed = self.draw_fixtures(d, t0)
-            if changed:
-                self._mark(self._draw_ev, t0)
-            if changed or nfades:
-                if self._draw_last is not None:
-                    self._gap_worst = max(self._gap_worst, t0 - self._draw_last)
-                self._draw_last = t0
-            self.animate_fixtures(t0)
-            coils = ""
-            if len(d) >= PADLED_READ and struct.unpack_from("<I", d, 4)[0] >= 2:
-                self._tick_coils(d, time.monotonic() * 1000.0)
-                coils = "   %d coils addressed" % struct.unpack_from(
-                    "<I", d, COIL_GEN_OFF + 4)[0]
-                if self.door_open():
-                    coils += "   COIN DOOR OPEN: 48V off, no coil can fire"
-            # THE DROPPED FRAMES ARE ON SCREEN TOO, and they are the honest
-            # answer to "are the LEDs working". A still picture here has two
-            # completely different causes - the game is not driving the lamps,
-            # or it is driving them through frames this rig cannot decode yet
-            # (handoff item 1b) - and the window used to look identical either
-            # way. Shown only once any have been dropped, so a clean run stays
-            # uncluttered.
-            drops = ", %d dropped" % skipped if skipped else ""
-            # SAY SO WHEN THERE IS NO TROUGH TO DRAW. A missing panel with
-            # nothing to explain it reads as a window that forgot, and the
-            # titles it happens on are the `?`-name ones (item 29) where the
-            # user most needs to know the rig cannot find the balls.
-            if not self.sw.positions:
-                coils += "   no trough switches identified"
-            # BOTH RATES ARE ON SCREEN, and which is which is spelled out. The
-            # loop is not the picture: see the module docstring, and item 31,
-            # which is this window reading 30 fps over a 2.83 s freeze. The
-            # data field is ALWAYS shown - the first version showed it only
-            # when the two disagreed, and the toggling width resized the whole
-            # window (the label's width=1 is the belt to this brace).
-            draw_hz = self._rate(self._draw_ev, t0)
-            data_hz = self._rate(self._data_ev, t0)
-            self.status.config(
-                text=state_msg
-                     or " %d of %d inserts lit   LED %.1f Hz   data %.1f Hz"
-                        " (%d writes%s)%s   poll %.0f fps"
-                        % (lit, len(self.fixtures), draw_hz, data_hz, decoded,
-                           drops, coils, self.fps))
-
-        # PACED, not slept. after(FRAME_MS) would add the frame's own cost to
-        # every interval and land at 20-25 fps while claiming 30; subtracting
-        # the work keeps the START-to-START interval at the target. The 1 ms
-        # floor keeps Tk's event loop breathing when a frame overruns.
-        spent = (time.perf_counter() - t0) * 1000.0
-        self._log(t0, spent)
-        self.root.after(max(1, int(FRAME_MS - spent)), self.tick)
-
-    def _log(self, t0, spent):
-        """PAD_PF_LOG=<path>: one line a second of what the loop is doing.
-
-        The status bar shows the rate to the human; this exists so the rate
-        can be MEASURED rather than read off a screenshot of a smoothed
-        number, and so the split between the read and the drawing is on the
-        record. Off unless the variable is set, and it costs one compare when
-        it is off.
-
-        IT CARRIES THE PICTURE RATE AND THE WORST FREEZE, not just the loop.
-        Item 31's acceptance asks for the achieved visual updates a second and
-        the longest still stretch, and getting those off a screen recording
-        costs a recording, a frame extraction and a differ. This answers the
-        same question from inside the window, on any run, for one line a
-        second - and `worst` is a MAXIMUM SINCE THE LAST LINE rather than a
-        smoothed figure, because a 2.8 s freeze inside a second-long average is
-        exactly what averaging hides.
-        """
-        if not PF_LOG:
-            return
-        self._log_n += 1
-        if t0 - self._log_t < 1.0:
-            return
-        try:
-            with open(PF_LOG, "a") as f:
-                f.write("%.1f fps over %d ticks   frame %.1f ms "
-                        "(read %.1f, draw %.1f)   %d fixtures redrawn   "
-                        "LED %.1f Hz  data %.1f Hz  worst gap %.2f s\n"
-                        % (self._log_n / (t0 - self._log_t), self._log_n,
-                           spent, self._read_ms, spent - self._read_ms,
-                           self._redrawn, self._rate(self._draw_ev, t0),
-                           self._rate(self._data_ev, t0), self._gap_worst))
-        except OSError:
-            pass
-        self._log_t, self._log_n, self._redrawn = t0, 0, 0
-        self._gap_worst = 0.0
-
-
 def load_state():
     try:
         with open(STATE) as f:
             return json.load(f)
     except Exception:
         return {}
-
-
-#: The live LcdPanel, set by main() - save_state() records its window's
-#: position alongside the root's without every call site having to know the
-#: panel exists. (The item-83 review caught the docstring PROMISING position
-#: persistence via padwinpos, which is a passive diagnostic recorder nothing
-#: restores from - this is the mechanism that actually delivers it.)
-LCD_PANEL = None
-
-
-def save_state(root, lcd=None):
-    """Remember where the windows were, so they open there next time.
-
-    Position only, not size: the canvas is sized from the artwork and the
-    screen, so restoring a stale WxH would letterbox or clip it after a
-    resolution change. The villain vision window rides along under its own
-    key whenever it exists - callers that don't know about it (the views'
-    death paths, bye()) get it through LCD_PANEL; the panel itself passes
-    `lcd` so its close box works without the global.
-    """
-    try:
-        st = load_state()
-        st["playfield_pos"] = [root.winfo_x(), root.winfo_y()]
-        p = lcd if lcd is not None else LCD_PANEL
-        if p is not None and p.win is not None:
-            st["villain_pos"] = [p.win.winfo_x(), p.win.winfo_y()]
-        with open(STATE, "w") as f:
-            json.dump(st, f, indent=1)
-    except Exception:
-        pass
-
-
-def _onscreen(root, x, y):
-    """Reject a remembered position that is off every monitor.
-
-    Unplugging a second display otherwise leaves the window permanently at
-    -1800,300 with no way to drag it back.
-    """
-    return (-50 <= x <= root.winfo_screenwidth() - 120
-            and -20 <= y <= root.winfo_screenheight() - 80)
 
 
 #: The swatch grid's geometry in screen pixels: the cell, the pitch between
@@ -4089,1512 +1730,6 @@ LED_GRID_BG = (16, 16, 16)
 #: - it exists only so the rectangle has an interior for Tk to hit-test. See
 #: LedGrid.tick().
 LED_GRID_DARK = "#%02x%02x%02x" % LED_GRID_BG
-
-
-class LedGrid(LedRing):
-    """Every LED the wire has shown, as a field of colour, grouped by node.
-
-    ★ THE ROSTER COMES FROM THE RING, NOT FROM A TABLE, and that is the whole
-    design (item 50). Four of the nine titles with tables on this machine -
-    star_wars_le, stranger_things_le, turtles_pro, led_zeppelin_le - carry `0
-    records` in device_xy.txt: no names, no positions, nothing. A grid built
-    from a table shows them an empty box over a running light show. A grid
-    built from the block shows what the game is actually doing, and the table
-    is then only ever a LOOKUP for the name.
-
-    It also needs no group -> node map, which is what makes it the answer for
-    the titles item 53 currently costs (Bond addresses 0 of its 73 lamps). The
-    grid is keyed by the wire's own (node, index), so it cannot be wrong about
-    which lamp moved - only about what that lamp is called.
-
-    A CHANNEL EARNS ITS CELL BY BEING WRITTEN, AND KEEPS IT. Sticky on purpose:
-    a lamp that pulses once and goes dark would otherwise have its cell appear
-    and vanish, and a grid that reflows while you watch it is unreadable. So
-    the roster only ever grows, and a dark cell means "this lamp exists and is
-    off" - which is the same promise the artwork view makes.
-
-    ONE CELL PER FIXTURE WHERE THE NAMES ALLOW IT. An RGB insert is three
-    channels with -R/-G/-B stems, and joining them shows one cell in the
-    lamp's true colour instead of three in red, green and blue. That join
-    needs names, so it happens on titles that have a table and not on titles
-    that do not; an unnamed channel gets its own cell called `node.index`.
-    NOTHING IS INFERRED from consecutive indices - guessing which three
-    channels are one lamp is precisely the kind of invention this project
-    keeps having to undo, and being wrong would show a colour the game never
-    lit.
-    """
-
-    def __init__(self, cv, x0, y0, height, names):
-        self.cv, self.x0, self.y0, self.height = cv, x0, y0, height
-        self.names = names or {}
-        self.cells = []                 # one dict per drawn fixture
-        self.by_node = {}               # node -> [cell], in index order
-        self.seen = set()               # every (node, idx) the ring has shown
-        self.info = {}                  # canvas item -> cell, for tooltips
-        self.cols = 1                   # how many columns the flow needed
-        self._decoded = None            # last `decoded`, to gate discovery
-        self._init_ring()
-        self._note = cv.create_text(
-            x0, y0, anchor="nw", fill="#7a7a7a", font=("Consolas", 9),
-            text="LEDs\n\nwaiting for the first\nLED write from the game")
-
-    def reserved_width(self):
-        """What to add to the canvas width for the grid, before it has any."""
-        return LED_PER_ROW * LED_PITCH + 24
-
-    # ---- roster ----------------------------------------------------------
-    def _discover(self, d):
-        """Add a cell for every channel the block shows and we have not seen.
-
-        Returns True when the roster grew, i.e. when the layout must be redone.
-
-        THE SCAN IS PER NODE AND STARTS WITH A C-LEVEL TEST. `val` is
-        16 nodes x 96 indices; a node whose 96 bytes are all zero cannot
-        contribute and `bytes.count(0)` answers that in one call, so the Python
-        loop only runs over boards that have data. padled.h says only the
-        insert boards are decoded today - this deliberately does NOT hard-code
-        which those are, so a shim that starts decoding another board shows up
-        here with no change.
-
-        ★ `seen` IS SCANNED TOO, AND IT IS THE HALF THAT MAKES A BOARD APPEAR.
-        `val` only ever shows a lamp that is LIT RIGHT NOW, so the roster it
-        builds is really "lamps that happened to be on while somebody was
-        watching" - and on the swelf generation (batman) that is not a roster
-        at all: half its lamp commands address a set of LEDs and carry no level
-        byte, and its brightest boards spend most of attract at zero. Version 4
-        publishes the membership answer directly, so a board earns its cells
-        from being SPOKEN TO. Missing on a version-3 block, which is why the
-        slice is length-checked rather than assumed.
-        """
-        grew = False
-        for node in range(coilmap.NODES):
-            for base in (LED_HDR + node * LED_IDX, SEEN_OFF + node * LED_IDX):
-                s = d[base:base + LED_IDX]
-                if len(s) < LED_IDX or s.count(0) == LED_IDX:
-                    continue
-                for idx, v in enumerate(s):
-                    if v and (node, idx) not in self.seen:
-                        self.seen.add((node, idx))
-                        grew = True
-        return grew
-
-    def _rebuild(self):
-        """Group the roster into fixtures and lay the blocks out.
-
-        Called only when the roster GREW, never per tick: it is a few hundred
-        coordinate computations, which is nothing once but real at 30 Hz.
-
-        ★ CELLS ARE REUSED ACROSS REBUILDS, KEYED BY (node, name), AND THE
-        FIRST VERSION OF THIS DID NOT DO THAT. It built fresh dicts with
-        `item=None` every time, so each growth of the roster created a NEW
-        rectangle for every cell and left the previous generation on the canvas
-        for ever - invisible in a test that lights every channel at once (one
-        rebuild), and on a real run a pile of stale swatches that covered the
-        node headers and leaked a canvas item per cell per rebuild. Reusing the
-        dict also keeps `drawn`/`state` - so a lamp that was already lit does
-        not flash off and on when some unrelated board is discovered - and
-        keeps `self.info` pointing at objects that still exist.
-        """
-        # Group by node, then by name stem where a name exists.
-        by_node = {}
-        for node, idx in sorted(self.seen):
-            by_node.setdefault(node, []).append(idx)
-        old = {(C["node"], C["name"]): C for C in self.cells}
-        cells, self.by_node, live = [], {}, set()
-        for node in sorted(by_node):
-            stems, order = {}, []
-            for idx in by_node[node]:
-                name = self.names.get((node, idx))
-                if name:
-                    stem, chan = split_channel(name)
-                else:
-                    stem, chan = "%d.%d" % (node, idx), "W"
-                # A stem that repeats a channel letter is two lamps sharing a
-                # name, not one lamp with two reds: give the second its own
-                # cell rather than silently dropping it.
-                C = stems.get(stem)
-                if C is not None and chan in C["channels"]:
-                    stem = "%s (%d.%d)" % (stem, node, idx)
-                    C = stems.get(stem)
-                if C is None:
-                    C = old.get((node, stem))
-                    if C is None:
-                        C = dict(name=stem, node=node, item=None, drawn=None,
-                                 state=(), named=bool(name))
-                    C["channels"], C["idxs"] = {}, []
-                    stems[stem] = C
-                    order.append(C)
-                C["channels"][chan] = (node, idx)
-                C["idxs"].append(idx)
-            for C in order:
-                C["sort"] = min(C["idxs"])
-            order.sort(key=lambda C: C["sort"])
-            self.by_node[node] = order
-            cells.extend(order)
-            live.update((node, C["name"]) for C in order)
-        # A cell whose stem no longer exists (its channels regrouped under a
-        # different name) takes its canvas item with it.
-        for key, C in old.items():
-            if key not in live and C["item"] is not None:
-                self.info.pop(C["item"], None)
-                self.cv.delete(C["item"])
-        self.cells = cells
-
-        # THE FLOW. A node's block is a header plus ceil(n/PER_ROW) rows, and a
-        # block that does not fit the remaining height starts a new column -
-        # the same shape as the switch list beside it, for the same reason
-        # (clipped is unreachable, not merely offscreen).
-        col_w = LED_PER_ROW * LED_PITCH + 24
-        x, y, self.cols = self.x0, self.y0, 1
-        for node in sorted(self.by_node):
-            block = self.by_node[node]
-            rows = (len(block) + LED_PER_ROW - 1) // LED_PER_ROW
-            need = LED_GRID_HDR + rows * LED_PITCH + LED_GRID_GAP
-            if y > self.y0 and y + need > self.y0 + self.height:
-                x += col_w
-                y = self.y0
-                self.cols += 1
-            hdr = self._hdr(node)
-            self.cv.coords(hdr, x, y)
-            self.cv.itemconfig(hdr, text="node %d  (%d)" % (node, len(block)))
-            y += LED_GRID_HDR
-            for i, C in enumerate(block):
-                cx = x + (i % LED_PER_ROW) * LED_PITCH
-                cy = y + (i // LED_PER_ROW) * LED_PITCH
-                if C["item"] is None:
-                    C["item"] = self.cv.create_rectangle(
-                        0, 0, 0, 0, fill=LED_GRID_DARK, outline="#333333")
-                    self.info[C["item"]] = C
-                self.cv.coords(C["item"], cx, cy,
-                               cx + LED_CELL, cy + LED_CELL)
-            y += rows * LED_PITCH + LED_GRID_GAP
-        if self._note is not None:
-            self.cv.delete(self._note)
-            self._note = None
-
-    def _hdr(self, node):
-        h = self.__dict__.setdefault("_hdrs", {})
-        if node not in h:
-            h[node] = self.cv.create_text(0, 0, anchor="nw", fill="#7ecbff",
-                                          font=("Consolas", 9, "bold"), text="")
-        return h[node]
-
-    # ---- the tick --------------------------------------------------------
-    def tick(self, d, now):
-        """Repaint the cells whose value moved. Returns (lit, total)."""
-        if not d or len(d) < LED_HDR:
-            return 0, len(self.cells)
-        self._take_fades(d, now)
-        # ★ THE FADE RING IS A SECOND SOURCE OF CHANNELS, AND val[] ALONE MISSES
-        # THEM (item 50). An a2 pulse writes ONLY the fade ring - padled.h says
-        # "val[] is NOT touched here" in as many words - so a lamp the game
-        # animates purely with pulses, whose base level never leaves 0, is
-        # invisible to a scan of val[] however long you watch. Every key in the
-        # overlay is a channel the wire has addressed, which is exactly the
-        # membership test the roster wants, so they are folded in here. This
-        # also makes the class docstring's "the roster comes from the ring"
-        # true, which it was not when the ring meant val[] only.
-        grew = False
-        for key in self.overlay:
-            if key not in self.seen:
-                self.seen.add(key)
-                grew = True
-        # Discovery is gated on the block's own write counters, so an idle rig
-        # costs two unpacks per tick instead of a scan of every board. BOTH
-        # counters, because they move independently: a swelf frame that
-        # addresses lamps without setting a level grows `seen` and leaves
-        # `decoded` exactly where it was, and gating on `decoded` alone would
-        # leave those cells undiscovered until some other frame happened to
-        # move it. wide_decoded is absent on a version-3 block - hence the
-        # length check rather than a version test, which is the same shape the
-        # rest of this reader uses.
-        dec = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
-        if len(d) >= PADLED_READ:
-            dec += struct.unpack_from("<I", d, WIDE_DECODED_OFF)[0]
-        if dec != self._decoded:
-            self._decoded = dec
-            grew = self._discover(d) or grew
-        if grew:
-            self._rebuild()
-        lit = 0
-        for C in self.cells:
-            rgb, level = fixture_color(self._chan_vals(C, d, now))
-            if rgb:
-                lit += 1
-            st = (rgb, level)
-            if st == C["state"]:
-                continue
-            C["state"] = st
-            # SAME ONLY-WHAT-CHANGED RULE AS THE ARTWORK VIEW, and for the same
-            # reason: an itemconfig is a round trip into Tcl, and on a real
-            # frame a handful of lamps move while the rest are identical.
-            if rgb:
-                _rs, alpha = level_shape(level)
-                want = (blend(rgb, LED_GRID_BG, alpha),
-                        blend(rgb, LED_GRID_BG, min(1.0, alpha * 1.3)))
-            else:
-                # ★ A DARK CELL IS FILLED, NOT EMPTY, AND THAT IS A HIT-TESTING
-                # FIX RATHER THAN A COLOUR CHOICE (item 50). Tk excludes the
-                # INTERIOR of an unfilled rectangle from find_overlapping, so
-                # with fill="" a point query inside a dark swatch returns
-                # nothing and only the ~1 px outline responds - measured here
-                # as 0 of 121 interior points hitting. _hit_led() is a point
-                # query, so the tooltip was unreachable on exactly the cells
-                # that need it most: on a table-less title the tooltip is the
-                # ONLY thing that says which lamp a swatch is. The fill matches
-                # the canvas, so nothing looks different.
-                want = (LED_GRID_DARK, "#333333")
-            if want != C["drawn"]:
-                C["drawn"] = want
-                self.cv.itemconfig(C["item"], fill=want[0], outline=want[1])
-        return lit, len(self.cells)
-
-    def describe(self, C):
-        where = ", ".join("%s=node %d index %d" % (c, n, i)
-                          for c, (n, i) in sorted(C["channels"].items()))
-        return ("LED  %s\n%s\n%s"
-                % (C["name"], where,
-                   "named by the title's device table" if C["named"]
-                   else "no name in this title's table - shown by wire address"))
-
-
-class LcdPanel:
-    """VILLAIN VISION - the lcdnode's LCD inserts, in their OWN window.
-
-    batman's node 24 drives the fixture the ELF calls "3 LCD INSERT" - three
-    320x240 playfield TVs (item 83). Nothing crosses the bus but ASSET
-    NUMBERS naming stored clips; padlcd.h carries the frame table and the
-    disassembly addresses it was read off.
-
-    ★ ONE SCREEN HERE, NOT THREE, and the correction is worth stating plainly
-    because this window shipped with three. The game addresses ONE logical
-    display (fixture display count 1; all 299 LCD call sites pass the same
-    device) driving ONE physical TV - David's video of the real machine
-    shows a single set with "Villain Vision" on its bezel, so the old
-    "three TVs fed from one display" line here was invented too. The
-    first cut read one command as three display ids and drew 54, 928 and 106
-    side by side, which looked convincing and was wrong: 106 is a frame-rate
-    code, and 928 is a companion field. David spotted the shape of it live
-    ("there are still two empty slots to the right") before the disassembly
-    confirmed it.
-
-    ★ AND THE SECOND CUT INVENTED A RANGE. Having stopped believing in three
-    screens, it started captioning that command "range 54-928 @ 12 fps" -
-    which is the same mistake wearing a different hat, a name for a field
-    read off one capture. The dispatcher settles it: every content form
-    carries the clip in the SAME struct field, the one the single-asset
-    command sends as the asset. So `asset` is always what to draw, and the
-    companion number is now shown as "aux N" because that is all anybody has
-    earned the right to call it.
-
-    So this draws what the one display was told to show: a looping 10 fps
-    LOSSLESS WEBP excerpt of the named clip, advanced one frame per poll so
-    encode rate = display rate. The art is extracted LAZILY by lcdart.py into
-    <tables>/<game>/lcd/<id>.{png,webp} the first time an asset is seen
-    (3,069 assets up front would be minutes of mktables for art most runs
-    never show), cheap-first: the still paints the moment it lands, the
-    motion takes over when the encode finishes behind it. Until either lands
-    the cell says "asset <id>", which is honest - the id is live data off the
-    wire, the art is a cache filling in behind it. (The clips were GIF for
-    one afternoon; David spotted the 8-bit palette immediately - "the gif
-    color looks off ... like it's not rendering the correct bit depth" - and
-    lcdart.py's docstring carries the measurement that replaced it.)
-
-    THE CAPTION IS AN INSTRUMENT, not decoration. It names the asset, the
-    verb the game sent (printed as a number past the two that are known -
-    a bare 3, 4 or 5 arrives with no content and is almost certainly stop,
-    pause or clear, and showing nothing for those made a stop look identical
-    to "carry on playing"), and any companion fields. Twice now this display
-    has been drawn from a confident reading of a payload nobody had traced
-    to a filler; printing the raw numbers is what lets the next wrong
-    reading be caught from a photograph.
-
-    A SEPARATE WINDOW, not a strip in the playfield view - David's ask,
-    2026-08-24: every other second-display title already gets its screen as
-    its own desktop window (item 44's "<game> [display N] - Stern Spike 2
-    emulator"), and this IS batman's second display, the game just drives it
-    by asset number instead of by pixels. The title deliberately joins that
-    family so screenrec.py's backbox default skips it like any second display
-    (record it on purpose with PAD_REC_TITLE="[villain vision]"); padwinpos
-    and zorder each key "[villain vision]" AHEAD of their generic "] -" game2
-    row, so this Tk window can never claim a padglhost display window's slot
-    in a diagnostic. Position persistence is NATIVE, not the needle's doing -
-    "villain_pos" in the same state file as the root's "playfield_pos",
-    restored in _build(), recorded by save_state() and on close (an earlier
-    docstring credited padwinpos with this; padwinpos is a passive recorder
-    nothing restores from - the item-83 review caught the false claim).
-    Closing it HIDES it for the run, which is item 44's close behaviour too.
-    Owning a window instead of a slot in a view's layout is also what puts it
-    on BOTH playfield shapes - Field and Schematic - instead of only the one
-    that had room for a strip.
-
-    LAZY BY CONSTRUCTION: no window exists until the padlcd block's magic
-    stamps, which only an lcdnode title's shim ever does - every other title
-    pays one 56-byte read per poll and shows nothing. The reopen-per-poll
-    read matches LED_PATH's rule: a held handle over \\\\wsl.localhost reads a
-    frozen cache.
-    """
-
-    READ = 56                       # header .. ms; the ring beyond is RE fuel
-    MAGIC = 0x44434c50              # 'PLCD'
-    #: The screen. The store's clips are 240x180; a dedicated window has room
-    #: to show them at native size (the in-view strip this replaced halved
-    #: them).
-    CW, CH = 244, 184
-    #: THE CABINET. The real Villain Vision is a wood-cased 1960s portable
-    #: with a chrome bezel, two knobs on a right-hand panel and "Villain
-    #: Vision" in script under the screen - David's video of the machine
-    #: (2026-08-25) is the reference. Drawing it costs one canvas and makes
-    #: the window instantly recognisable as THAT device rather than a black
-    #: rectangle floating on the desktop, which is the whole point of a
-    #: mirror. The screen keeps its native size; the case is padding
-    #: around it, so nothing about the picture changes.
-    PAD_L, PAD_T = 16, 14           # case around the screen
-    PAD_R, PAD_B = 62, 34           # right: knob panel; bottom: the script
-    #: THE FILMSTRIP: the last few clips the game asked for, oldest left,
-    #: current right. David's first report on this display was "it doesn't
-    #: feel like the right animations are showing up at the right times" -
-    #: a question about the SEQUENCE, which a window showing one frame can
-    #: never answer. Four thumbnails do, at a glance, without reading a log.
-    #: 60x45 is exactly subsample(4) of the native 240x180 still, so a
-    #: thumbnail costs no resampling and no extra file.
-    STRIP_N = 4
-    TW, TH = 60, 45
-    #: Re-ask backoff for lcdart, seconds. One subprocess per minute per id
-    #: whose art is still missing - see _show.
-    ASK_S = 60.0
-    #: THE BOARD IS AN ID -> STILL LOOKUP (2026-08-26, David's two tripod
-    #: videos of the real machine, segmented and matched frame-level; his
-    #: own find of the service menu's "update the images" diagnostic under
-    #: TV settings is the mechanism). The Villain Vision never plays
-    #: video: it holds ONE STILL per command, fading between them. The
-    #: attract cycle is 11 stills at ~5.3 s on a 62.7 s loop - the same
-    #: count and period as the wire's 11-command rotation - and the
-    #: alignment is anchored by the GAME: the whole of gameplay rests on
-    #: the green BATMAN logo card while the wire hammers asset 54, so
-    #: 54 = logo, and every other slot follows in cycle order (map.txt in
-    #: <art>/stills, derived by lcdstills.py, carries the table and each
-    #: entry's provenance). Two of yesterday's reconstructions died to
-    #: this measurement and are deliberately gone: the episode-walk "reel"
-    #: (the walk WAS the attract cycle stepping) and the attract-entry
-    #: logo interlude (the logo is simply id 54's still - the map shows
-    #: it wherever the wire commands 54, game and attract both, which is
-    #: exactly what the machine does). The stills themselves are frames
-    #: of the card's own clip store / scene textures, pinned by match
-    #: score against the footage; the board's byte-exact uploaded set is
-    #: capturable via that diagnostic on this rig and would replace the
-    #: pins wholesale (recorded in TODO).
-    #: THE DISSOLVE. Every brightness swap on the wire carries fade code 15
-    #: and the real set visibly FADES through clip changes - David watched
-    #: both and called ours out ("still frames with a slideshow fade
-    #: effect"): the hard cut was the panel's approximation, not the
-    #: machine's behaviour. Two darkened steps at poll rate ~= the 250 ms
-    #: the wire leaves before the swap. Fade-OUT only: the reveal rides in
-    #: with the asset change and an instant restore there is what the old
-    #: behaviour already did (ramping it would fight _show over the item).
-    #: The board's actual curve is still not decoded; this renders "it
-    #: dissolves", not a measured ramp.
-    FADE_STEPS = (0.62, 0.28)       # fraction of the picture per step
-
-    def __init__(self, root, game):
-        self.root, self.game = root, game
-        self.drv = None             # assigned once the view's SwitchDriver exists
-        self.win = None
-        self.cv = self.cap = self.nm = None
-        self.item = None            # the persistent canvas image item
-        self.img = None
-        self.id = None              # asset currently drawn
-        self.have = False           # ... and whether that is real art
-        self.state = None           # (asset, aux, rate, verb)
-        self.cycle = None           # (first, last) while a block command is live
-        self.bright = 255           # last 0x80 brightness; <128 blanks the screen
-        self.stillmap = None        # {id: (file, label)} from stills/map.txt;
-        self._map_tried = False     # non-empty = this display is a stills board
-        self._still_imgs = {}       # id -> composed PhotoImage, loaded once
-        self._pic_pil = None        # PIL of the PICTURE on screen (for _fade)
-        self._fadeq = []            # pending dissolve steps, one per poll
-        self._fade_ref = None       # current step's PhotoImage (keep-alive)
-        self.names = None           # {id: name} from lcdnames.py, loaded once
-        self._named = False         # ... and whether the load has been tried
-        self.strip = None           # the filmstrip canvas
-        #: THE GAME'S OWN TV, if lcdframe.py pulled it off the card: a PIL
-        #: RGBA sprite with a transparent screen hole, plus that hole's
-        #: rect. When present the picture is composited INTO it and the
-        #: hand-drawn cabinet is not used - card artwork beats a drawing,
-        #: and this one is the actual Villain Vision set. None = the
-        #: drawing, which is also what every non-batman title would get.
-        self.tv = None
-        self.tv_hole = None
-        self._tv_tried = False
-        #: [(id, PhotoImage)] oldest first. The PhotoImages are held HERE and
-        #: nowhere else - a canvas image item does not own its image, so
-        #: dropping the reference blanks the thumbnail (the same rule the
-        #: main picture obeys via self.img).
-        self._recent = []
-        #: Animation state. None while no clip is on disk (kept retryable);
-        #: a dict once the clip's BYTES are read - in one go, so a
-        #: \\wsl.localhost hiccup can only fail the whole read (caught,
-        #: retried next tick) and never masquerade as end-of-clip. "n" is
-        #: the frame count; "dead": True marks an undecodable clip - honest,
-        #: because the bytes are complete in memory, so a decode failure is
-        #: the file, not the wire. Frames decode one per poll and cache; the
-        #: dict drops on asset change.
-        self.anim = None
-        #: id -> monotonic time of the last lcdart ask. A dict, not a set
-        #: (motion review): lcdart's contract says a missing store heals on
-        #: retry, so an id whose art is STILL missing re-asks after ASK_S -
-        #: bounded at one subprocess per minute per id, instead of a
-        #: once-per-session set that made that promise false.
-        self._asked = {}
-        self._hidden = False        # close box used; skip draw/decode work
-        self._next = 0.0
-        self._polls = 0
-        self._art = os.path.join(padpath.tables() or "", game, "lcd")
-
-    def start(self):
-        """Self-paced off root.after - the panel belongs to no view's tick.
-        50 ms so the timer never beats against poll()'s own 0.1 s gate.
-        The reschedule is in a finally on purpose: poll() crossing a live
-        run can always meet a surprise (a torn read, a broken pipe under
-        run_script), and one uncaught exception must cost one tick, not the
-        whole panel for the rest of the run."""
-        try:
-            self.poll()
-        finally:
-            self.root.after(50, self.start)
-
-    def _build(self):
-        self.win = tk.Toplevel(self.root)
-        self.win.title("%s [villain vision] - Stern Spike 2 emulator"
-                       % self.game)
-        self.win.configure(bg="#111")
-        self.win.resizable(False, False)
-        self.win.protocol("WM_DELETE_WINDOW", self._hide)
-        pos = load_state().get("villain_pos")
-        if pos and _onscreen(self.win, *pos):
-            self.win.geometry("+%d+%d" % (pos[0], pos[1]))
-        self._load_tv()
-        cw = self.tv.width if self.tv else self.CW + self.PAD_L + self.PAD_R
-        ch = self.tv.height if self.tv else self.CH + self.PAD_T + self.PAD_B
-        self.cv = tk.Canvas(self.win, width=cw, height=ch,
-                            bg="#000", highlightthickness=0)
-        self.cv.pack(padx=4, pady=(4, 2))
-        if self.tv is None:
-            self._cabinet()             # no card art: draw one instead
-        # The caption is not decoration: what the game sent is either ONE
-        # asset or a RANGE at a frame rate, and only one of those can be
-        # drawn faithfully today (see poll()). Saying which is on the wire
-        # is the difference between a picture and a measurement.
-        self.cap = tk.Label(self.win, text="", bg="#111", fg="#7ecbff",
-                            font=("Consolas", 8))
-        self.cap.pack()
-        # THE CLIP'S OWN NAME, from the card's scene file (lcdnames.py).
-        # "asset 54" is a number nobody can check; "S1E001 00:18:32" can be
-        # held up against a real Villain Vision, or against the episode.
-        # It is also the only independent check on the id->clip mapping
-        # there has ever been - asset 2 is named PhoneScenes and asset 2 is
-        # a picture of the Batphone.
-        self.nm = tk.Label(self.win, text="", bg="#111", fg="#7a8",
-                           font=("Consolas", 8))
-        self.nm.pack()
-        self.strip = tk.Canvas(
-            self.win, bg="#111", highlightthickness=0,
-            width=self.CW + self.PAD_L + self.PAD_R,
-            height=self.TH + 14)
-        self.strip.pack(pady=(2, 4))
-        self._redraw_strip()
-
-    def _load_tv(self):
-        """The card's own TV sprite + screen rect, once. Absent is normal
-        (no card mounted, a title with no such texture, PIL missing) and
-        silently leaves the drawn cabinet in place."""
-        if self._tv_tried:
-            return
-        self._tv_tried = True
-        if _PILImage is None:
-            return
-        png = os.path.join(self._art, "tvframe.png")
-        txt = os.path.join(self._art, "tvframe.txt")
-        try:
-            with open(txt, encoding="utf8") as f:
-                x, y, w, h = (int(v) for v in f.read().split()[:4])
-            tv = _PILImage.open(png).convert("RGBA")
-        except (OSError, ValueError):
-            return
-        if w <= 0 or h <= 0 or x + w > tv.width or y + h > tv.height:
-            return                      # a rect that is not inside its own
-        self.tv, self.tv_hole = tv, (x, y, w, h)   # sprite is not usable
-
-    def _compose(self, pil, stash=True):
-        """Put a clip frame behind the TV's screen hole and return the
-        whole set as one image. The clip is fitted to the hole KEEPING ITS
-        ASPECT - the hole is squarer than 4:3, and stretching 240x180 to
-        fill it would make every face on the Villain Vision subtly wrong,
-        which is the opposite of the point. `stash=False` is for _fade's
-        own darkened frames, which must not overwrite the record of what
-        the screen is showing."""
-        x, y, w, h = self.tv_hole
-        s = min(w / pil.width, h / pil.height)
-        nw, nh = max(1, int(pil.width * s)), max(1, int(pil.height * s))
-        out = _PILImage.new("RGBA", self.tv.size, (0, 0, 0, 255))
-        out.paste(pil.convert("RGB").resize((nw, nh)),
-                  (x + (w - nw) // 2, y + (h - nh) // 2))
-        out.alpha_composite(self.tv)    # the set, over the picture
-        if stash:
-            self._pic_pil = pil.convert("RGB")   # the PICTURE, pre-set,
-        return _PILImageTk.PhotoImage(out)       # for _fade's screen-only
-                                                 # dissolve
-
-    def _cabinet(self):
-        """Draw the TV around the screen, once, under everything else.
-
-        Tagged "case" and drawn before the picture, so _draw's image item
-        and the placeholder text both land on top without any explicit
-        raise/lower bookkeeping - canvas items stack in creation order.
-        Colours are eyeballed off the machine (warm walnut case, chrome
-        bezel, cream knob panel); the geometry is the PAD_* constants, so
-        the screen keeps its native 240x180 and only the case moves.
-        """
-        w = self.CW + self.PAD_L + self.PAD_R
-        h = self.CH + self.PAD_T + self.PAD_B
-        sx0, sy0 = self.PAD_L, self.PAD_T
-        sx1, sy1 = sx0 + self.CW, sy0 + self.CH
-        c = self.cv
-        c.create_rectangle(0, 0, w, h, fill="#4a3222", outline="", tags="case")
-        c.create_rectangle(2, 2, w - 3, h - 3, fill="#5d4130",
-                           outline="#2b1c12", tags="case")
-        # Chrome bezel: a light ring with a darker inner lip, which is what
-        # actually reads as "metal" at this size.
-        c.create_rectangle(sx0 - 8, sy0 - 8, sx1 + 8, sy1 + 8,
-                           fill="#b9b6ad", outline="#6f6c64", tags="case")
-        c.create_rectangle(sx0 - 3, sy0 - 3, sx1 + 3, sy1 + 3,
-                           fill="#2a2a2a", outline="#8d8a82", tags="case")
-        c.create_rectangle(sx0, sy0, sx1, sy1, fill="#000", outline="",
-                           tags="case")
-        # Right-hand knob panel: two tuning dials and the speaker slot.
-        px0 = sx1 + 12
-        c.create_rectangle(px0, sy0 - 8, w - 8, sy1 + 8, fill="#cfc9b8",
-                           outline="#6f6c64", tags="case")
-        for cy in (sy0 + 26, sy0 + 74):
-            c.create_oval(px0 + 8, cy - 15, px0 + 38, cy + 15,
-                          fill="#2b2b2b", outline="#111", tags="case")
-            c.create_oval(px0 + 15, cy - 8, px0 + 31, cy + 8,
-                          fill="#565656", outline="", tags="case")
-        c.create_rectangle(px0 + 8, sy1 - 34, w - 16, sy1 - 12,
-                           fill="#8c8579", outline="#6f6c64", tags="case")
-        # The script under the screen. Italic because the real one is, and
-        # it is the label that names the thing on David's playfield.
-        c.create_text((sx0 + sx1) // 2, sy1 + 18, text="Villain Vision",
-                      fill="#e8dfc8", font=("Georgia", 11, "italic"),
-                      tags="case")
-
-    def _fade(self, br):
-        """Start (or cut short) the brightness transition. Dark builds the
-        dissolve queue - FADE_STEPS darkened frames, then dark - applied
-        one per poll starting NOW; bright clears it and restores instantly
-        (the reveal rides in with the asset swap).
-
-        ★ THE SET NEVER DIMS. It is a physical cabinet on the machine and
-        only the SCREEN goes dark - the first cut of this dissolve blended
-        the whole composed image, so the wood and knobs faded with every
-        clip swap (David: "the TV outline should not be fading in and
-        out"). With the card's TV each step re-composes the darkened
-        PICTURE into the fully-lit set, and end-state "dark" is a black
-        screen in a visible set, never a hidden item. Without the TV
-        sprite the drawn cabinet lives in its own canvas items, so hiding
-        the picture item was always safe there and still is."""
-        self._fadeq = []
-        if self.item is None:
-            return
-        if br >= 128:
-            self.cv.itemconfig(self.item, image=self.img, state="normal")
-            return
-        if _PILImage is None or self._pic_pil is None:
-            if self.tv is None:
-                self.cv.itemconfig(self.item, state="hidden")
-            return                      # composed set, no frame record:
-        black = _PILImage.new("RGB", self._pic_pil.size, (0, 0, 0))
-        steps = [_PILImage.blend(black, self._pic_pil, a)
-                 for a in self.FADE_STEPS]
-        if self.tv is not None:
-            self._fadeq = [self._compose(s, stash=False) for s in steps]
-            self._fadeq.append(self._compose(black, stash=False))
-        else:
-            self._fadeq = [_PILImageTk.PhotoImage(s) for s in steps] + [None]
-        self._fade_step()
-
-    def _fade_step(self):
-        step = self._fadeq.pop(0)
-        if step is None:
-            self.cv.itemconfig(self.item, state="hidden")
-        else:
-            self._fade_ref = step       # keep-alive, like every PhotoImage
-            self.cv.itemconfig(self.item, image=step, state="normal")
-
-    def _hide(self):
-        # Item 44's contract for a second display's close box: hide, don't
-        # die. The ids keep updating behind it, so nothing is stale if a
-        # future change re-shows it. Record the position FIRST - a close is
-        # the one deliberate placement signal that must survive even a run
-        # that later dies without reaching save_state. _hidden stops the
-        # decode/draw work too - ids keep tracking (cheap), frames do not
-        # advance for a window nobody can see.
-        save_state(self.root, self)
-        self._hidden = True
-        self.win.withdraw()
-
-    def poll(self):
-        now = time.monotonic()
-        if now < self._next:
-            return
-        self._next = now + 0.1      # 10 Hz: one 48-byte reopen-read
-        self._polls += 1
-        try:
-            with open(LCD_PATH, "rb") as f:
-                d = f.read(self.READ)
-        except OSError:
-            return
-        if len(d) < self.READ or struct.unpack_from("<I", d)[0] != self.MAGIC:
-            return
-        if self.win is None:
-            self._build()
-        (_m, _v, _g, _dec, asset, aux, rate, verb, _x1, _x2, _x3,
-         br, _fd, _ms) = struct.unpack_from("<14I", d)
-        # BRIGHTNESS IS PART OF THE PICTURE (0x80|d family, 132 call
-        # sites): the game drops the TVs to 0 for ~250 ms around every
-        # clip swap and restores 255. The wire only ever carries those two
-        # values; going dark DISSOLVES (FADE_STEPS - the real set fades,
-        # David called out the hard cut) and 255 restores instantly with
-        # the swap. Ignoring brightness showed footage during moments the
-        # real TVs are black, which is exactly the class of infidelity
-        # this window exists to not have.
-        if br != self.bright:
-            self.bright = br
-            self._fade(br)
-        elif self._fadeq:
-            self._fade_step()
-        cmd = (asset, aux, rate, verb)
-        changed = cmd != self.state
-        self.state = cmd
-        # ONE display (padlcd.h documents why: display count 1, and all 299
-        # LCD call sites pass the same device), and ONE asset field - the
-        # dispatcher hands that struct field to the one-asset builder as
-        # THE asset. On a STILLS board (the map exists - see the class
-        # docstring) the id selects a stored still and nothing cycles; a
-        # block command selects by its FIRST id, which is measured: the
-        # game-start block 919..928 is the "IN COLOR" title card on the
-        # machine. Without a map, a companion u32 naming a LARGER id is
-        # still treated as the inclusive clip block asset..aux and
-        # _animate cycles it (the game's own duration helper 0x37e2fc
-        # computes (last - first + 1) x a period for exactly such a pair).
-        self.cycle = ((asset, aux) if asset and aux > asset
-                      and not self._map() else None)
-        if changed or not self.cycle:
-            want = asset
-        else:
-            # Mid-block the drawn id has advanced past the first clip ON
-            # PURPOSE; a poll must not snap it back while the command is
-            # unchanged.
-            want = (self.id if self.id and asset <= self.id <= aux
-                    else asset)
-        if want != self.id:
-            self._show(want)
-        elif self._polls % 10 == 0 and want and (
-                not self.have or self.anim is None):
-            # ~1 Hz retry while EITHER artifact is missing. A `not have`
-            # test alone stopped the moment a cached still painted, which
-            # froze the clip upgrade forever when the first sighting
-            # happened before drv existed (motion review finding 1); anim
-            # is None exactly while the clip has not landed.
-            self._show(want)
-        self._caption()
-        self._animate()                 # one frame per poll = 10 fps
-
-    def _caption(self):
-        asset, aux, rate, verb = self.state
-        # THE VERB IS PRINTED, NOT INTERPRETED, past 1 and 2. Five dispatch
-        # kinds send this byte and only two of them are known (they precede
-        # content, so they read as looping / once). 3, 4 and 5 arrive alone
-        # and are almost certainly stop / pause / clear - showing "" for
-        # them, as the previous cut did, made a stop look exactly like
-        # "carry on playing", which is half of why the panel could seem to
-        # lag the game.
-        how = {1: "loop", 2: "once"}.get(verb, "verb %d" % verb if verb else "")
-        # A block command names its whole span and which clip is up. `aux`
-        # was once captioned "range" on no evidence and then a bare number
-        # on principle; the block reading now rests on the game's own
-        # duration helper (see poll), so the caption says what the panel
-        # actually does with it.
-        if self.cycle:
-            what = "assets %d-%d" % self.cycle
-            if self.id and self.cycle[0] <= self.id <= self.cycle[1]:
-                what += " · showing %d" % self.id
-        elif asset:
-            what = "asset %d" % asset
-        else:
-            what = "idle"
-        extra = []
-        if aux and not self.cycle:
-            extra.append("aux %d" % aux)  # aux <= asset: NOT a block; shown raw
-        if rate:
-            extra.append("%d fps" % rate)
-        txt = " · ".join(x for x in [what, how] + extra if x)
-        if self.cap["text"] != txt:
-            self.cap.configure(text=txt)
-        # The name label names what is ON SCREEN: the board still's own
-        # label when the map has the id, the clip's episode+timecode when
-        # it does not.
-        nm = ""
-        if self.id:
-            hit = self._map().get(self.id)
-            nm = hit[1] if hit else self._name_for(self.id)
-        if self.nm is not None and self.nm["text"] != nm:
-            self.nm.configure(text=nm)
-
-    def _name_for(self, i):
-        """The clip's episode+timecode, e.g. "S1E001 00:18:32", or "".
-
-        Loaded once from <art>/names.txt, which lcdnames.py writes from the
-        card's own scene file at run start (watch.sh, beside the other
-        derived tables - it is a per-title TABLE, not a per-asset artifact,
-        so it does not belong on the panel's lazy lcdart path). Read at
-        most ONCE per run; absent is normal and silent, which is every
-        title without an lcdnode.
-        """
-        if not self._named:
-            self._named = True
-            path = os.path.join(self._art, "names.txt")
-            try:
-                with open(path, encoding="utf8") as f:
-                    self.names = dict(
-                        (int(a), b) for a, _, b in
-                        (ln.rstrip("\n").partition("\t") for ln in f)
-                        if a.isdigit() and b)
-            except (OSError, ValueError):
-                self.names = None
-        if not self.names:
-            return ""
-        raw = self.names.get(i, "")
-        # "S1E001_Clips.S1E001_00-18-32-21" -> "S1E001 00:18:32". The tail
-        # after the last dot is the useful part and the frame count is
-        # noise at this size; anything that does not fit the shape is shown
-        # as-is rather than mangled.
-        tail = raw.rsplit(".", 1)[-1]
-        m = re.match(r"^(S\d+E\d+)_(\d\d)-(\d\d)-(\d\d)-\d\d$", tail)
-        if m:
-            return "%s %s:%s:%s" % m.groups()
-        return tail[:34]
-
-    def _draw(self, img):
-        """One persistent image item, reconfigured per frame - a
-        delete/create pair per animation frame would churn canvas ids at
-        10 Hz for nothing."""
-        self.img = img                  # keep the reference: a PhotoImage
-        if self.item is None:           # nobody holds goes blank
-            # "case", not "all": the cabinet is drawn once and must survive
-            # every clip change. Deleting everything here is what would
-            # quietly erase the TV the first time an asset landed.
-            self.cv.delete("pic")
-            self.item = self.cv.create_image(
-                *self._mid(), image=img, tags="pic",
-                # a composed image CONTAINS the set: never hide it (the
-                # cabinet must not blink out with the screen)
-                state="hidden" if (self.bright < 128 and self.tv is None)
-                else "normal")
-        else:
-            self.cv.itemconfig(self.item, image=img)
-
-    def _screen_mid(self):
-        """Centre of the SCREEN, which is not the centre of the canvas once
-        a TV is around it (the knob panel is on one side only)."""
-        if self.tv_hole:
-            x, y, w, h = self.tv_hole
-            return (x + w // 2, y + h // 2)
-        return (self.PAD_L + self.CW // 2, self.PAD_T + self.CH // 2)
-
-    def _mid(self):
-        """Centre of the CANVAS - where a composed image (which already
-        contains the set) is placed, as opposed to a bare clip frame."""
-        if self.tv:
-            return (self.tv.width // 2, self.tv.height // 2)
-        return self._screen_mid()
-
-    def _push_recent(self, i, img):
-        """Remember a clip in the filmstrip. Called only when the DRAWN id
-        changes and real art exists, so a placeholder never enters the
-        history and a re-send of the same asset never duplicates an entry
-        (the game re-issues every attract command ~250 ms later - see
-        padlcd.h - and a strip that showed each twice would be a lie about
-        the sequence)."""
-        try:
-            thumb = img.subsample(4, 4)     # 240x180 -> 60x45, no resample
-        except tk.TclError:
-            return
-        self._recent.append((i, thumb))
-        del self._recent[:-self.STRIP_N]
-        self._redraw_strip()
-
-    def _redraw_strip(self):
-        if self.strip is None:
-            return
-        self.strip.delete("all")
-        n = self.STRIP_N
-        w = self.CW + self.PAD_L + self.PAD_R
-        gap = (w - n * self.TW) // (n + 1)
-        for k in range(n):
-            x = gap + k * (self.TW + gap)
-            # Oldest LEFT, current RIGHT: right-align the history so the
-            # newest entry is always in the same place rather than sliding.
-            idx = len(self._recent) - n + k
-            self.strip.create_rectangle(x - 1, 0, x + self.TW, self.TH + 1,
-                                        outline="#333")
-            if 0 <= idx < len(self._recent):
-                i, thumb = self._recent[idx]
-                self.strip.create_image(x + self.TW // 2, self.TH // 2 + 1,
-                                        image=thumb)
-                self.strip.create_text(x + self.TW // 2, self.TH + 8,
-                                       text=str(i), fill="#7ecbff" if
-                                       idx == len(self._recent) - 1 else "#666",
-                                       font=("Consolas", 7))
-
-    def _show(self, i):
-        # A stills board first: the mapped still IS the display for this
-        # id (measured - see the class docstring). Only an unreadable
-        # still file falls through to the clip-art path below.
-        if i and i in self._map() and self._show_still(i):
-            return
-        # Ask lcdart.py for whatever this id is missing, at most once per
-        # ASK_S per id. Checked against BOTH artifacts: a cache from before
-        # the GIF stage existed has the still but not the motion, and the
-        # old png-only test here silently left such an id frozen for ever.
-        # The backoff (not a once-per-session set) is what makes lcdart's
-        # "the panel retries" contract true: a 'no store' race heals once
-        # the card mounts, at one bounded subprocess per minute per id.
-        if (i and self.drv is not None
-                and time.monotonic() - self._asked.get(i, -1e9) > self.ASK_S
-                and not (
-                    os.path.isfile(os.path.join(self._art, "%d.png" % i))
-                    and os.path.isfile(os.path.join(self._art, "%d.webp" % i)))):
-            self._asked[i] = time.monotonic()
-            self.drv.run_script("lcdart.py", self.game, str(i))
-        if self.id != i:
-            self.anim = None            # new asset: the old clip's frames drop
-        png = os.path.join(self._art, "%d.png" % i)
-        if i and os.path.isfile(png):
-            img = thumb_src = None
-            try:
-                # The THUMBNAIL always comes from the bare still (a
-                # filmstrip of TV sets would be unreadable at 60x45); the
-                # SCREEN gets the composed set when the card art is there.
-                thumb_src = tk.PhotoImage(file=png)
-                img = (self._compose(_PILImage.open(png))
-                       if self.tv is not None else thumb_src)
-            except (tk.TclError, OSError, ValueError):
-                img = None
-            if img is not None:
-                if self.id != i and thumb_src is not None:
-                    self._push_recent(i, thumb_src)
-                self._draw(img)
-                self.id, self.have = i, True
-                return
-        if self.id != i:                    # placeholder, once per change
-            self.cv.delete("pic")           # NOT "all" - the cabinet stays
-            self.item = None
-            self.cv.create_text(*self._screen_mid(),
-                                text=("asset %d" % i) if i else "—",
-                                fill="#888", font=("Consolas", 9), tags="pic")
-        self.id, self.have = i, not i       # nothing named = nothing to fetch
-
-    def _open_clip(self, i):
-        """Read the id's WHOLE clip into memory and open a decoder over it.
-
-        One read, deliberately (motion review findings 2-4): the per-frame
-        decode used to re-open and re-parse the file from byte 0 over
-        \\\\wsl.localhost on every tick - measured at up to ~139 ms per frame
-        at a 150-frame clip's tail, on the UI thread. Reading once also
-        splits the failure modes honestly: an OSError here is the wire
-        (return None, the caller retries next tick); a decode failure PAST
-        this point is the file itself, and may be latched for good.
-
-        Returns the anim dict, {"dead": True} for undecodable bytes, or
-        None to retry.
-        """
-        if _PILImage is None:
-            return {"dead": True}       # stills only; see the import guard
-        try:
-            with open(os.path.join(self._art, "%d.webp" % i), "rb") as f:
-                data = f.read()
-        except OSError:
-            return None                 # not encoded yet, or a 9P hiccup
-        try:
-            im = _PILImage.open(io.BytesIO(data))
-            return {"pil": im, "n": getattr(im, "n_frames", 1),
-                    "i": 0, "frames": []}
-        except Exception:               # noqa: BLE001 - complete bytes, so
-            return {"dead": True}       # this is the clip, not the wire
-
-    def _decode(self, a, idx):
-        """Frame idx as a PhotoImage, or None if the clip ends early."""
-        try:
-            a["pil"].seek(idx)          # sequential: PIL steps ONE frame
-            if self.tv is not None:
-                return self._compose(a["pil"])
-            rgb = a["pil"].convert("RGB")
-            self._pic_pil = rgb         # what _fade dissolves from
-            return _PILImageTk.PhotoImage(rgb)
-        except Exception:               # noqa: BLE001 - corrupt tail: the
-            a["n"] = idx                # clip honestly ends here
-            return None
-
-    def _cycle_next(self):
-        """The clip after this one in a block command, or None when the
-        command names a single clip. A block plays each clip through once
-        (poll documents what that reading rests on): verb 1 wraps to the
-        block's first clip, verb 2 holds on the last (returned as self.id,
-        which _animate reads as 'stay'). An uncached clip along the way
-        stalls the cycle on its placeholder until lcdart lands it - the
-        block heals clip by clip, exactly like every other lazy artifact
-        here."""
-        if not self.cycle:
-            return None
-        first, last = self.cycle
-        verb = self.state[3] if self.state else 0
-        if self.id is None or self.id >= last or self.id < first:
-            return self.id if verb == 2 else first
-        return self.id + 1
-
-    def _map(self):
-        """{id: (path, label)} from <art>/stills/map.txt, loaded once.
-        Non-empty means this display is a STILLS BOARD (the class
-        docstring carries the measurement) and the panel selects stored
-        stills instead of playing clips. Absent is every other title, and
-        the panel behaves exactly as before the map existed."""
-        if not self._map_tried:
-            self._map_tried = True
-            self.stillmap = {}
-            path = os.path.join(self._art, "stills", "map.txt")
-            try:
-                with open(path, encoding="utf8") as f:
-                    for ln in f:
-                        if ln.startswith("#") or not ln.strip():
-                            continue
-                        parts = ln.rstrip("\n").split("\t")
-                        if len(parts) >= 3 and parts[0].isdigit():
-                            self.stillmap[int(parts[0])] = (parts[1], parts[2])
-            except OSError:
-                pass
-        return self.stillmap
-
-    def _show_still(self, i):
-        """Draw the board still the map holds for id i. The PhotoImage is
-        composed once and cached - stills swap every ~5 s and re-reading
-        a 1280x720 card per swap would be pure waste. Returns False when
-        the mapped file is unreadable, so the caller can fall back to the
-        clip art rather than leave the placeholder up."""
-        img = self._still_imgs.get(i)
-        if img is None:
-            path = os.path.join(self._art, "stills", self._map()[i][0])
-            if _PILImage is not None:
-                try:
-                    pil = _PILImage.open(path)
-                except OSError:
-                    return False
-                if self.tv is not None:
-                    img = self._compose(pil)
-                else:
-                    s = min(self.CW / pil.width, self.CH / pil.height)
-                    nw = max(1, int(pil.width * s))
-                    nh = max(1, int(pil.height * s))
-                    out = _PILImage.new("RGB", (self.CW, self.CH), (0,)*3)
-                    out.paste(pil.convert("RGB").resize((nw, nh)),
-                              ((self.CW - nw) // 2, (self.CH - nh) // 2))
-                    self._pic_pil = out
-                    img = _PILImageTk.PhotoImage(out)
-                thumb = _PILImageTk.PhotoImage(
-                    pil.convert("RGB").resize((self.TW, self.TH)))
-            else:
-                try:
-                    img = tk.PhotoImage(file=path)
-                except tk.TclError:
-                    return False
-                thumb = None
-            self._still_imgs[i] = img
-            self._still_imgs[(i, "t")] = thumb
-        if self.id != i:
-            thumb = self._still_imgs.get((i, "t"))
-            if thumb is not None:
-                self._recent.append((i, thumb))
-                del self._recent[:-self.STRIP_N]
-                self._redraw_strip()
-        self._draw(img)
-        self.id, self.have = i, True
-        self.anim = None                # a stills board never animates
-        return True
-
-    def _animate(self):
-        """Advance the screen one frame. lcdart.py encodes at 10 fps and
-        this runs once per 10 Hz poll, so encode rate = display rate by
-        construction. Skipped entirely while the window is hidden - nobody
-        is watching, and the decode pass is the one part of this panel with
-        a real per-tick cost."""
-        if self._hidden:
-            return
-        if self._fadeq:
-            return                      # a dissolve is mid-flight: one tick
-                                        # of held frame beats a fight over
-                                        # the canvas item
-        if self._map():
-            return                      # a stills board NEVER animates -
-                                        # that is the measurement this whole
-                                        # mode rests on
-        i, a = self.id, self.anim
-        # NOT gated on `have` (motion review finding 5): a corrupt still
-        # must not block a perfectly good clip from playing.
-        if not i:
-            return
-        if a is None:
-            a = self.anim = self._open_clip(i)
-            if a is None:
-                return                  # not encoded yet: retried next tick
-        if a.get("dead"):
-            return                      # undecodable clip: keep the still
-        idx = a["i"]
-        if idx >= a["n"]:
-            nxt = self._cycle_next()
-            if nxt is not None:
-                if nxt != self.id:
-                    self._show(nxt)     # block command: the next clip's
-                    return              # still paints now, motion next tick
-                return                  # verb 2 at the block's end: hold
-            # SINGLE clip: the verb decides. 2 = play ONCE - the wire said
-            # so, and looping it anyway was the panel's own last act of
-            # unfaithfulness (the game re-commands the display every
-            # attract beat precisely because a one-shot ENDS). 1 = loop.
-            if self.state and self.state[3] == 2:
-                return                  # hold the last frame
-            idx = a["i"] = 0            # verb 1 (or unknown): it loops
-        if idx < len(a["frames"]):
-            frame = a["frames"][idx]
-        else:
-            frame = self._decode(a, idx)
-            if frame is None:           # corrupt tail: _decode shortened n
-                if not a["frames"]:
-                    self.anim = {"dead": True}
-                    return
-                idx = a["i"] = 0
-                frame = a["frames"][0]  # wrap and draw THIS tick, so the
-            else:                       # seam costs no blank frame
-                a["frames"].append(frame)
-                if len(a["frames"]) >= a["n"]:
-                    a.pop("pil", None)  # decode pass over: drop the reader
-                                        # and its buffered bytes
-        self._draw(frame)
-        a["i"] = idx + 1
-
-
-class Schematic(StateOps):
-    """The window for a title with NO positions: every switch, by node, clickable.
-
-    This is not a lesser playfield, it is a different question answered. With no
-    device table there is nothing to place markers on and nothing to place them
-    from, and inventing coordinates from the names is exactly the guess this
-    project keeps having to undo. So it draws what the game actually knows: the
-    switch list it carries, in its own order, grouped by the board each switch is
-    wired to.
-
-    Clicking a row closes that switch through the same swpoke.py path the
-    artwork window uses, so a title with no drawing is still playable.
-
-    ★ ITEM 39 REFLOWED IT. The old form was one 300 px column PER NODE, width
-    unbounded and height capped at the screen - and with no scrolling anywhere,
-    whatever the cap clipped was unreachable by mouse, not merely offscreen.
-    David: "for games without a virtual playfield, we need to compact the view
-    since it is so large and overflows even on large monitors." Now the rows
-    FLOW: one ordered list (node headers inline), broken into columns of
-    however many rows the screen's height actually has, columns as wide as the
-    text actually measures. The height fits by construction; a pathological
-    width (hundreds of switches on a short screen) scrolls horizontally rather
-    than clipping, so every row stays reachable - that is the acceptance line.
-    """
-
-    ROW_H = 17
-    #: Room the window needs AROUND the switch canvas: title bar, top bar,
-    #: trough strip, status bar, taskbar. Same estimating job as pick_scale's
-    #: `chrome`, and like there, being generous costs a little empty space
-    #: while being short costs reachable rows.
-    CHROME = 250
-    NAME_W = 26
-
-    def __init__(self, root, switches):
-        self.root = root
-        self.switches = switches
-        self.last = None
-
-        bar = tk.Frame(root, bg="#111")
-        bar.pack(fill="x")
-        # ★ SAY HOW MANY OF THEM THIS BUILD CAN ACTUALLY WORK (2026-09-08).
-        # On a title read by the derived reader the id column is a position in
-        # the device array rather than a switch id, and anything past
-        # padsw.MAX_ID is an address the shim's arrays do not have - 89 of
-        # foo_fighters_le 1.04.0's 105 rows, 13 of munsters_le 1.28.0's 103.
-        # Those rows show no state and cannot be clicked, and until this line
-        # existed the window gave no hint of it: the list simply looked
-        # incomplete, which is exactly how it was reported. See
-        # SwitchWatch.addressable() for why they are not renumbered.
-        dead = sum(1 for sw in switches
-                   if not (0 <= sw["id"] < padsw.MAX_ID))
-        note = ("  - click a row to close that switch" if not dead else
-                "  - %d of them cannot be read or clicked on this build "
-                "(their ids are past the %d this rig addresses)"
-                % (dead, padsw.MAX_ID))
-        tk.Label(bar, text="  %s: %d switches, no playfield artwork in this "
-                           "title%s" % (GAME, len(switches), note),
-                 bg="#111", fg="#bbb", font=("Consolas", 9)).pack(side="left",
-                                                                  padx=4, pady=4)
-        # Save/Load state on the bar's right (item 13, same cluster as the
-        # artwork view's bottom-left): a title with no artwork still saves
-        # and loads - the wrappers know nothing about drawings. Packed
-        # side="right" in REVERSE so the cluster reads picker | Save | Load
-        # left-to-right, matching the artwork view. Only on a checkpointable
-        # boot (module flag SAVESTATES) - no flag, no controls.
-        self._state_btns = []
-        if SAVESTATES:
-            for wdg in reversed(self._build_state_widgets(bar)):
-                wdg.pack(side="right", padx=(0, 4), pady=2)
-
-        # ★ ITEM 60: START / PLUNGE / RESET BALLS, which this view never had.
-        # The artwork view builds them in `Field._place_actions()` as canvas
-        # widgets beside the plunger (item 25's placement, argued from marker
-        # coordinates and left exactly where it was measured); `Schematic` had
-        # `run_plunge()` and nothing that called it but the trough dots, which
-        # only ever pass "take" and "drain". So on a title that ships no device
-        # table - turtles_pro is the one to test on - nothing in the window
-        # reached `plunge.py start`, `plunge` or `reset`, and getting a ball
-        # into play meant the keyboard or a shell. Item 39's stated goal was
-        # that "the two shapes of this window agree about where the controls
-        # are"; the action row was the one thing it did not bring across.
-        #
-        # ON THE BAR'S LEFT, WITH THE SAVE/LOAD CLUSTER STILL ON ITS RIGHT, and
-        # that split is item 25's rather than a fresh taste call: a misclicked
-        # "Load state" yanks the whole game back to the save, which is not a
-        # neighbour "Plunge" wants. The bar rather than the grid for the same
-        # reason the trough got its own strip - the switch columns already fill
-        # the window, so anything placed over them lands on a node's rows.
-        self._acts = []
-        for label, script, arg in WINDOW_ACTIONS:
-            b = tk.Button(bar, text=label,
-                          command=lambda s=script, a=arg: self.run_action(s, a))
-            b.pack(side="left", padx=(0, 4), pady=2)
-            self._acts.append(b)
-
-        # THE TROUGH GETS ITS OWN STRIP HERE, not a corner of the switch grid.
-        # The grid is columns of text that already fill the window and the
-        # panel would land on top of a node's rows; a strip of its own cannot
-        # collide with anything, and this view is the one that runs on the
-        # `?`-name titles (item 29), where seeing that the trough is empty is
-        # the difference between "the game is broken" and "the game cannot
-        # find its balls".
-        self.sw_dots, self._dot_drawn = [], {}
-        self.sw = SwitchWatch(switches,
-                              every=round(1000.0 / POLL_MS / max(1.0, SW_HZ)))
-        # The strip is the FALLBACK now (item 39): when the key panel attaches
-        # it destroys this and rebuilds the trough at the panel's bottom, so a
-        # window with no padbinds to read still shows its balls.
-        self.trough_panel, self._trough_strip = None, None
-        if self.sw.positions:
-            strip = tk.Frame(root, bg="#111")
-            strip.pack(fill="x")
-            pcv = tk.Canvas(strip, height=38, bg="#111", highlightthickness=0)
-            pcv.pack(fill="x", padx=4, pady=(0, 3))
-            self._trough_strip = strip
-            self.trough_panel = TroughPanel(
-                pcv, self.sw.positions, self.sw.how, 2, 2, anchor="nw",
-                on_ball=self.run_plunge)
-
-        # THE FLOW. One entry list in node order, then columns cut to the
-        # height the screen has. A node header may not be the LAST row of a
-        # column - a label that labels nothing - so it is pushed to the top of
-        # the next one.
-        by_node = {}
-        for sw in switches:
-            by_node.setdefault(sw["node"], []).append(sw)
-        entries = []
-        for node in sorted(by_node):
-            entries.append(("hdr", node))
-            for sw in sorted(by_node[node], key=lambda s: s["bit"]):
-                entries.append(("sw", sw))
-        per_col = max(12, (root.winfo_screenheight() - self.CHROME)
-                      // self.ROW_H)
-        cols, col = [], []
-        for j, e in enumerate(entries):
-            col.append(e)
-            if len(col) >= per_col:
-                if col[-1][0] == "hdr" and j + 1 < len(entries):
-                    cols.append(col[:-1])
-                    col = [col[-1]]
-                else:
-                    cols.append(col)
-                    col = []
-        if col:
-            cols.append(col)
-
-        # Column width is MEASURED, not guessed: the text is monospaced, so
-        # the widest possible row is the format string at full name width.
-        f9 = tkfont.Font(family="Consolas", size=9)
-        colw = f9.measure("999  " + "M" * self.NAME_W) + 26
-        h = per_col * self.ROW_H + 16
-        # ★ ITEM 50: THE LED GRID GOES ON THE LEFT, AHEAD OF THE SWITCH
-        # COLUMNS, and that is a correction. It was first put to the RIGHT of
-        # them, which reads better - until turtles_pro, whose 93 switches flow
-        # into three columns and pushed the grid past the window edge, where it
-        # survived only behind the horizontal scrollbar. The window then
-        # reported "37 of 42 LEDs lit" in its status bar while showing the user
-        # nothing, which is the exact complaint this whole item exists to fix.
-        # The lamps are what this view is FOR on a title with no artwork; the
-        # switch list is what scrolls.
-        grid_w = LED_PER_ROW * LED_PITCH + 24
-        w = grid_w + len(cols) * colw + 8
-
-        # THE SCROLL BACKSTOP. Normally the flow fits with room to spare (a
-        # 108-switch title is two columns on this desktop); if it ever does
-        # not, the canvas scrolls horizontally instead of clipping - clipped
-        # rows were the old view's real fault, unreachable rather than just
-        # offscreen. The status bar and the bars above stay put; only the
-        # rows scroll.
-        maxw = max(colw + 8, root.winfo_screenwidth() - 420)
-        self._hbar = None
-        if w > maxw:
-            self._hbar = tk.Scrollbar(root, orient="horizontal")
-            self._hbar.pack(side="bottom", fill="x")
-
-        # width=1 for the same reason as Field's bar: the text must never be
-        # what sizes the window. Packed BEFORE the canvas, side="bottom", the
-        # lesson Field's bar carries (a bar packed after the canvas is last in
-        # line for space and can simply not be shown).
-        self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
-                               font=("Consolas", 9), width=1)
-        self.status.pack(side="bottom", fill="x")
-
-        self.cv = tk.Canvas(root, width=min(w, maxw), height=h, bg="#101010",
-                            highlightthickness=0, scrollregion=(0, 0, w, h))
-        if self._hbar is not None:
-            self.cv.configure(xscrollcommand=self._hbar.set)
-            self._hbar.configure(command=self.cv.xview)
-        self.cv.pack(side="left", fill="both", expand=True)
-        # ★ ITEM 39: the key panel attaches after SwitchDriver exists, below.
-        self.key_panel, self.keys = None, None
-
-        self.info = {}
-        for ci, entries_col in enumerate(cols):
-            x = grid_w + ci * colw + 18
-            for ri, (kind, d) in enumerate(entries_col):
-                y = 14 + ri * self.ROW_H
-                if kind == "hdr":
-                    self.cv.create_text(x, y, anchor="w", fill="#7ecbff",
-                                        font=("Consolas", 9, "bold"),
-                                        text="node %d" % d)
-                    continue
-                # A row this build cannot address is drawn dim and is NOT
-                # registered in `info`, so a click can never land on it - the
-                # same rule the live-state dots follow below, and for the same
-                # reason: an id past padsw.MAX_ID is not an address, so poking
-                # it would write outside the array the game reads.
-                live = 0 <= d["id"] < padsw.MAX_ID
-                i = self.cv.create_text(
-                    x, y, anchor="w", fill="#d8d8d8" if live else "#5a5a5a",
-                    font=("Consolas", 9),
-                    text="%3d  %s" % (d["id"], d["name"][:self.NAME_W]))
-                if not live:
-                    continue
-                self.info[i] = dict(kind="switch", d=d)
-                # The live-state dot beside the row, drawn OUTSIDE the text and
-                # not registered in `info` - the same rule as the artwork
-                # view's dots, so it can never become what a click lands on.
-                dot = self.cv.create_oval(x - 9, y - 3, x - 3, y + 3,
-                                          fill="", outline="")
-                self.sw_dots.append((dot, d["id"]))
-
-        # ★ ITEM 50. Names come from the device table where the title has one
-        # (any image - the grid has no picture, so it has no reason to drop a
-        # topper lamp); the ROSTER comes from the wire, which is what makes
-        # this work on the four titles whose table is empty.
-        self.leds = LedGrid(self.cv, 12, 14, h - 28, load_led_names())
-        self.led_lit, self.led_total = 0, 0
-
-        self.tip = Tip(root)
-        self.drv = SwitchDriver()
-        # ★ ITEM 39: the retired Controls window's content, docked right -
-        # the same panel the artwork view gets (keys, service buttons, door,
-        # trough), so the two shapes of this window agree about where the
-        # controls are.
-        self._binds_next = time.monotonic() + SWITCH_POLL_S
-        self.key_panel = attach_key_panel(self)
-        self.holding = None
-        self.ripping = None
-        self.cv.bind("<ButtonPress-1>", self.on_press)
-        self.cv.bind("<ButtonRelease-1>", self.on_release)
-        # RIGHT-hold RIPS a switch (item 26), same as the artwork view.
-        self.cv.bind("<ButtonPress-3>", self.on_rip)
-        self.cv.bind("<ButtonRelease-3>", self.on_rip_end)
-        self.cv.bind("<Motion>", self.on_move)
-        self.cv.bind("<Leave>", lambda e: self.tip.hide())
-        self.tick()
-
-    def run_plunge(self, what):
-        run_helper(self, "plunge.py", what)
-
-    def run_action(self, script, arg=None):
-        """One action row entry (item 59) - see `run_helper()`, which both
-        views share so a press cannot mean two different things."""
-        run_helper(self, script, arg)
-
-    def _hit(self, ev):
-        # canvasx, because the scroll backstop makes window x and canvas x
-        # different things the moment the view is scrolled. canvasy for
-        # symmetry; this view never scrolls vertically today.
-        #
-        # ★ ITEM 81 (David, live on avengers_infinity_le's list): the ±8 px
-        # search window plus the text's OWN bbox (~15 px for Consolas 9) is
-        # taller than ROW_H = 17, so most cursor positions overlap TWO rows'
-        # text - and reversed() resolved every such tie to the LOWER row,
-        # because canvas ids ascend down a column. Net effect: each row's
-        # hover/click zone sat shifted UP from its glyphs, and the lower half
-        # of a row's own text belonged to the row BELOW - a press there
-        # closed the wrong switch. Keep the generous window (no dead gaps
-        # between rows), but resolve the tie by GEOMETRY: the row whose text
-        # centre is nearest the cursor. The zone boundary then falls at the
-        # midpoint between rows, aligned with the text by construction
-        # rather than by whichever item Tk happened to create last.
-        x, y = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
-        best, best_d = None, None
-        for i in self.cv.find_overlapping(x - 2, y - 8, x + 2, y + 8):
-            if i not in self.info:
-                continue
-            bb = self.cv.bbox(i)
-            d = abs((bb[1] + bb[3]) / 2.0 - y)
-            if best is None or d < best_d:
-                best, best_d = i, d
-        return best
-
-    def _hit_led(self, ev):
-        """The swatch under the cursor, or None. SEPARATE from _hit(), so a
-        cell can never become something a press tries to close - the same rule
-        the live-state dots beside the rows follow."""
-        x, y = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
-        for i in reversed(self.cv.find_overlapping(x, y, x, y)):
-            if i in self.leds.info:
-                return self.leds.info[i]
-        return None
-
-    def on_move(self, ev):
-        i = self._hit(ev)
-        if i is None:
-            C = self._hit_led(ev)
-            if C is not None:
-                self.tip.show(self.leds.describe(C), ev.x_root, ev.y_root)
-                return
-            self.tip.hide()
-            return
-        d = self.info[i]["d"]
-        self.tip.show("SWITCH  %s\n"
-                      "id %d   num %d   node %d  bit %d\n"
-                      "hold to keep it closed\n"
-                      "right-hold to RIP it (spinners)"
-                      % (d["name"], d["id"], d["num"], d["node"], d["bit"]),
-                      ev.x_root, ev.y_root)
-
-    def on_press(self, ev):
-        i = self._hit(ev)
-        if i is None:
-            return
-        d = self.info[i]["d"]
-        self.cv.itemconfig(i, fill="#ffd400")
-        self.holding = (i, d["id"])
-        self.drv.press(d["id"])
-
-    def on_release(self, ev):
-        if self.holding is None:
-            return
-        item, sw_id = self.holding
-        self.holding = None
-        self.drv.release(sw_id)
-        self.cv.itemconfig(item, fill="#d8d8d8")
-
-    def on_rip(self, ev):
-        """Right-hold RIPS a switch (item 26) - see the artwork view."""
-        i = self._hit(ev)
-        if i is None:
-            return
-        d = self.info[i]["d"]
-        self.cv.itemconfig(i, fill="#ff9500")
-        self.ripping = (i, d["id"])
-        self.drv.spin(d["id"], True)
-
-    def on_rip_end(self, ev):
-        if self.ripping is None:
-            return
-        item, sw_id = self.ripping
-        self.ripping = None
-        self.drv.spin(sw_id, False)
-        self.cv.itemconfig(item, fill="#d8d8d8")
-
-    def tick(self):
-        """The LED block still says whether the emulator is up, which is the one
-        thing this view can honestly report about it."""
-        try:
-            with open(LED_PATH, "rb") as f:
-                d = f.read(PADLED_READ)
-        except OSError:
-            d = None
-        if emu_gone(self, bool(d)):
-            save_state(self.root)           # see Field.tick: this is the COMMON close
-            self.root.destroy()             # the run ended; leave with it
-            return
-        # The same paced read the artwork view does: the dot beside each row
-        # and the trough strip both come off it.
-        poll_switches(self)
-        state_msg = self._state_status()
-        # ★ THE MAGIC IS NOT THE TEST FOR "IS THERE AN EMULATOR" (item 50,
-        # caught on a live turtles_pro run). hwshim stamps the block on the
-        # FIRST LED write it decodes, so a title that decodes none leaves it
-        # zeroed for ever - and this window then reported "no emulator" over a
-        # game that was plainly running its attract, which is David's item-40
-        # complaint arriving by a second route. Worse, the grid lived in the
-        # else-branch, so the one view built for these titles could never draw
-        # on the one title that needed it.
-        #
-        # The three states are now distinct: the file is unreadable (no
-        # emulator), it is readable and unstamped (a run with no LED data - the
-        # switch half above still works and proves the run is there), or it is
-        # stamped.
-        if not d:
-            self.status.config(text=state_msg
-                               or "no emulator (dump/padled not readable)")
-        else:
-            # ★ ITEM 50: the swatch grid, driven off the same read. It is the
-            # only LED feedback this view can give - the title has no artwork
-            # and, on the four titles that land here, no table either. It runs
-            # on an unstamped block too, where it correctly finds nothing.
-            self.led_lit, self.led_total = self.leds.tick(d, time.perf_counter())
-        if d and struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
-            self.status.config(
-                text=state_msg
-                     or " emulator up   NO LED DATA on this title: the shim has"
-                        " decoded no LED writes at all   %s"
-                        % (self.sw.balls.text() if self.sw.positions
-                           else "no trough switches identified"))
-        elif d:
-            self.status.config(
-                text=state_msg
-                     or " emulator up   %d of %d LEDs lit   %d LED writes decoded"
-                        "   %d coils addressed   %s"
-                        % (self.led_lit, self.led_total,
-                           struct.unpack_from("<I", d, 12)[0],
-                           struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
-                           if len(d) >= PADLED_READ else 0,
-                           self.sw.balls.text() if self.sw.positions
-                           else "no trough switches identified"))
-        self.root.after(POLL_MS, self.tick)
 
 
 def raise_existing():
@@ -5622,197 +1757,2332 @@ def raise_existing():
         return False                        # never block on the guard failing
 
 
-def poll_for_tables(root, load, on_rows, every_ms=2000, timeout_s=900,
-                    _now=time.time):
-    """Watch for a title's switch list ARRIVING while this window is open.
 
-    THE SWITCH LIST CANNOT EXIST BEFORE A RUN AND THIS WINDOW OPENS DURING ONE.
-    The game builds its switch table on the heap, so the id behind a name only
-    reaches the outside world as the shim's `[sw]` dump a few seconds into a run
-    (mktables.py's header has the whole reasoning). watch.sh therefore rebuilds
-    the tables in the background, with --wait, while this window is already up.
+# ===========================================================================
+# THE WINDOW IS A WEB PAGE (2026-09-23).
+#
+# Everything above this line is the playfield's knowledge - the wire formats,
+# the tables, the switch driver, the trough and ball rules, the fade envelope -
+# and it is unchanged. Everything below used to be Tk widgets and is now
+# MODELS: the same state and the same decisions, published to a page
+# (pfweb/pf.js) that draws them in the app's own design. The rules that were
+# about Tk itself (canvas items with no alpha, fill="" hit-testing, PhotoImage
+# keep-alives, after() re-entrancy) went with it; every rule that was about
+# the GAME stayed, word for word where it could.
+# ===========================================================================
 
-    Everything that decides what this window SHOWS used to run once, at
-    construction. So a window that opened a few seconds too early stayed a
-    paragraph of explanatory text for the rest of the session, while the tables
-    it was describing sat complete on disk. The first run of any title was
-    therefore a run you could not click a switch in - and on a title with no
-    usable artwork, which is most of them, that is the whole window.
+class Blobs:
+    """Images the page fetches by key (/blob/<key>): the villain vision
+    frames. Bounded, oldest out, so a long run cannot grow it without end."""
 
-    David hit it on james_bond_60th_le's first run, 2026-08-14: "without the
-    switches here I can't test it". The tables were fine; only this window did
-    not know they had arrived.
+    CAP = 1200
 
-    A stat every two seconds costs nothing against a wasted run. `timeout_s`
-    stops an abandoned window polling forever; `_now` and the two intervals are
-    injected so a test can drive this in milliseconds with real Tk.
+    def __init__(self):
+        self._d = collections.OrderedDict()
+        self._n = 0
+        self._lock = threading.Lock()
+
+    def put(self, data, mime="image/png"):
+        with self._lock:
+            self._n += 1
+            key = "b%d" % self._n
+            self._d[key] = (data, mime)
+            while len(self._d) > self.CAP:
+                self._d.popitem(last=False)
+            return key
+
+    def get(self, key):
+        # a read keeps an entry fresh, so a looping clip's frames stay
+        with self._lock:
+            got = self._d.get(key)
+            if got is not None:
+                self._d.move_to_end(key)
+            return got
+
+
+BLOBS = Blobs()
+
+
+def _png(pil):
+    """A PIL image as PNG bytes in BLOBS; its key. Level 1: these are
+    re-encoded at 10 Hz and the compression ratio is not the point."""
+    buf = io.BytesIO()
+    pil.save(buf, "PNG", compress_level=1)
+    return BLOBS.put(buf.getvalue())
+
+
+def _png_file(path):
+    """A PNG file's own bytes in BLOBS, or None when it is not a readable
+    PNG - the stand-in for tk.PhotoImage(file=...) raising TclError."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    if not data.startswith(b"\x89PNG"):
+        return None
+    if _PILImage is not None:
+        try:
+            _PILImage.open(io.BytesIO(data)).verify()
+        except Exception:                                   # noqa: BLE001
+            return None
+    return BLOBS.put(data)
+
+
+class TroughDots:
+    """The trough's ball positions in trough order - ONE control, two homes.
+
+    THE NUMBERS UNDER THE BALLS ARE THE POINT: position 1 is the eject end and
+    is drawn first, so the row reads in the direction a ball travels (item 20
+    was a wrong-end bug a count could never have shown).
+
+    On the KEY PANEL the dots are read-only (PAD-134: Plunge / Drain / Reset
+    balls are its buttons). Without a panel - the artwork corner, the
+    schematic's strip - they are still the control, and THE STACK DECIDES
+    WHICH SWITCH MOVES, NOT WHICH DOT WAS CLICKED: a trough is a ramp, so the
+    only two things that can happen are one more ball or one fewer. Clicking a
+    full dot takes a ball out; an empty one drains one in. The decision reads
+    the state last SHOWN, so it is the one the user could see when they
+    clicked.
     """
-    deadline = _now() + timeout_s
 
-    def tick():
-        rows = load()
-        if rows:
-            on_rows(rows)
+    def __init__(self, positions, how, clickable=False):
+        self.positions, self.how, self.clickable = positions, how, clickable
+        self.drawn = [None] * len(positions)
+        self.text = None
+
+    def click(self, i):
+        occupied = bool(self.drawn[i]) if 0 <= i < len(self.drawn) else False
+        return "take" if occupied else "drain"
+
+    def update(self, flags, text):
+        changed = False
+        for i, on in enumerate(flags[:len(self.drawn)]):
+            if self.drawn[i] != on:
+                self.drawn[i] = on
+                changed = True
+        if text != self.text:
+            self.text = text
+            changed = True
+        return changed
+
+    def spec(self):
+        return {"pos": [P["pos"] for P in self.positions],
+                "clickable": self.clickable, "how": self.how}
+
+    def dyn(self):
+        return {"flags": [bool(x) for x in self.drawn], "text": self.text or ""}
+
+
+class KeyPanel:
+    """The keyboard -> switches reference, docked beside the playfield.
+
+    ★ ITEM 39. The retired Controls window's content, moved into this window
+    so a run opens two windows instead of three. The rows come from
+    dump/padbinds, which padglhost exports after resolving binds[] for the
+    title (keybinds.py parses it), so which key does what still has exactly
+    one home and it is still the C file.
+
+    THE HIGHLIGHT IS SWITCH STATE, NOT KEY STATE: a row lights off the MERGED
+    array - what the GAME is being handed - so it lights when the game can see
+    the press, whoever made it (a key, a click on the artwork, a script).
+
+    ★ ONE CONTROL PER ACTION (David: "consolidate the keyboard inputs and the
+    button inputs for the service buttons"): the four service binds, the door
+    and the trough latch are WIDGETS wearing their key labels, not list rows.
+    The service buttons are the real coin-door cluster (green BACK, red -/+,
+    black SELECT) and are press-and-hold; the COIN DOOR is a click toggle,
+    because the real door stays where you put it. Start Button and Left Coin
+    are clickable rows (PAD-134: a mouse-only player needs them).
+
+    THE BALLS SECTION (PAD-134, the JJP window's shape): one line, the
+    read-only dots, Plunge / Drain / Reset balls, and a note of the newest
+    three messages. Drain is live only with a ball IN PLAY (PAD-153).
+    """
+
+    SVC_ORDER = ("Service Back", "Service Minus", "Service Plus",
+                 "Service Select")
+    CLICK_ROWS = ("Start Button", "Left Coin")
+    DOOR_LABEL = "Coin Door Closed"
+    #: label, caption, glyph, fill, ring, caption colour - the real panel
+    SVC_LOOK = (("Service Back", "BACK", "", "#1f9d4e", "#0d5c2a", "#dff5e6"),
+                ("Service Minus", "< -", "-", "#d43535", "#7a1717", "#ffffff"),
+                ("Service Plus", "+ >", "+", "#d43535", "#7a1717", "#ffffff"),
+                ("Service Select", "SELECT", "", "#1c1c1c", "#777",
+                 "#d8d8d8"))
+    #: How many of the newest ball messages the section shows.
+    NOTE_LINES = 3
+
+    def __init__(self, rows, drv, on_action=None):
+        self.drv = drv
+        self.on_action = on_action
+        self._svc_rows = {r["label"]: r for r in rows
+                          if r["label"] in self.SVC_ORDER and r["ids"]}
+        self._door_row = next((r for r in rows
+                               if r["label"] == self.DOOR_LABEL and r["ids"]),
+                              None)
+        self._trough_row = next((r for r in rows
+                                 if r["toggle"] and len(r["ids"]) > 1), None)
+        widget_rows = (set(map(id, self._svc_rows.values()))
+                       | {id(self._door_row), id(self._trough_row)})
+        self.rows = [r for r in rows if id(r) not in widget_rows]
+        self._drawn = [None] * len(self.rows)
+        self._svc_ids = ([self._svc_rows[lbl]["ids"][0]
+                          for lbl in self.SVC_ORDER]
+                         if len(self._svc_rows) == 4 else [])
+        self._svc_drawn = [None] * len(self._svc_ids)
+        self._door_id = self._door_row["ids"][0] if self._door_row else None
+        self._door_drawn = None
+        self._last_sw = None
+        self._svc_held = None
+        self._row_held = None
+        self.ball_dots = None
+        self._ball_drawn = None
+        self._drain_live = None
+        self._note = []
+        self._feed_seen = []
+        self.clear_action = (next(a for a in WINDOW_ACTIONS
+                                  if a[1] == "swexercise.py")
+                             if on_action is not None else None)
+        self.dirty = True
+
+    # ---- what the page draws ------------------------------------------------
+    def spec(self):
+        rows = []
+        for r in self.rows:
+            click = (r["label"] in self.CLICK_ROWS and not r["na"]
+                     and bool(r["ids"]))
+            rows.append({"keys": "/".join(r["keys"]), "label": r["label"],
+                         "cabinet": bool(r["cabinet"]), "na": bool(r["na"]),
+                         "click": r["ids"][0] if click else None})
+        svc = []
+        if self._svc_ids:
+            for lbl, sub, glyph, fill, ring, subfg in self.SVC_LOOK:
+                row = self._svc_rows[lbl]
+                svc.append({"label": lbl, "sub": sub, "glyph": glyph,
+                            "fill": fill, "ring": ring, "subfg": subfg,
+                            "keys": "/".join(row["keys"]),
+                            "id": row["ids"][0]})
+        return {"rows": rows, "svc": svc,
+                "clear": self.clear_action[0] if self.clear_action else None,
+                "door": ("/".join(self._door_row["keys"])
+                         if self._door_row else None),
+                "trough_keys": ("/".join(self._trough_row["keys"])
+                                + " = all six in / out"
+                                if self._trough_row else None),
+                "balls": self.ball_dots.spec() if self.ball_dots else None}
+
+    def dyn(self):
+        return {"rows": self._drawn, "svc": self._svc_drawn,
+                "door": self._door_drawn, "ball": self._ball_drawn or "",
+                "drain": bool(self._drain_live), "note": list(self._note),
+                "dots": self.ball_dots.dyn() if self.ball_dots else None}
+
+    # ---- the service buttons: press-and-hold through the same driver --------
+    def svc_press(self, sw_id):
+        if self._svc_held is not None or sw_id not in self._svc_ids:
             return
-        if _now() < deadline:
-            root.after(every_ms, tick)
+        self._svc_held = sw_id
+        self.drv.press(sw_id)
 
-    root.after(every_ms, tick)
+    def svc_release(self):
+        """Open whatever the press closed - by what we HELD, whatever is under
+        the pointer by the time the button comes up."""
+        if self._svc_held is None:
+            return
+        sw_id, self._svc_held = self._svc_held, None
+        self.drv.release(sw_id)
+
+    # ---- Start Button / Left Coin rows: press-and-hold (PAD-134) ------------
+    def row_press(self, sw_id):
+        ok = any(r["label"] in self.CLICK_ROWS and not r["na"] and r["ids"]
+                 and r["ids"][0] == sw_id for r in self.rows)
+        if self._row_held is not None or not ok:
+            return
+        self._row_held = sw_id
+        self.drv.press(sw_id)
+
+    def row_release(self):
+        if self._row_held is None:
+            return
+        sw_id, self._row_held = self._row_held, None
+        self.drv.release(sw_id)
+
+    def release_held(self):
+        self.svc_release()
+        self.row_release()
+
+    def door_click(self):
+        """Toggle off the last SHOWN state, the trough dots' rule."""
+        if self._door_id is None or self._last_sw is None:
+            return
+        if self._last_sw.is_made(self._door_id):
+            self.drv.release(self._door_id)
+        else:
+            self.drv.press(self._door_id)
+
+    # ---- the BALLS section --------------------------------------------------
+    def set_drain(self, live):
+        if live != self._drain_live:
+            self._drain_live = live
+            self.dirty = True
+
+    def add_trough(self, positions, how):
+        """The BALLS section's read-only dots; returns them, and the view
+        keeps pointing its `trough` at them so the switch poll has ONE update
+        path wherever the trough is drawn."""
+        self.ball_dots = TroughDots(positions, how, clickable=False)
+        self._drain_live = None
+        self.set_drain(False)
+        self.dirty = True
+        return self.ball_dots
+
+    def show_balls(self, sw, fed, feeder_lines):
+        """The line off the switch read, Drain's state, and any NEW feeder
+        lines folded into the note (the feeder's file is a sliding window, so
+        what is new follows the longest overlap - new_lines())."""
+        if self.ball_dots is None:
+            return
+        text = ball_line(sw, fed)
+        if text != self._ball_drawn:
+            self._ball_drawn = text
+            self.dirty = True
+        self.set_drain(drain_ready(sw))
+        fresh = new_lines(self._feed_seen, feeder_lines)
+        self._feed_seen = list(feeder_lines)
+        if fresh:
+            self.ball_say(*fresh)
+
+    def ball_say(self, *lines):
+        """Messages for the note, newest last. The page fits them into
+        NOTE_LINES rows by the rule the Tk panel kept: WHOLE MESSAGES ARE
+        DROPPED, OLDEST FIRST - never the head of one; a message that alone
+        needs more rows keeps its FIRST rows, the last marked cut, because the
+        start of a sentence is the part that says what happened."""
+        if self.ball_dots is None:
+            return
+        self._note.extend(lines)
+        del self._note[:-self.NOTE_LINES]
+        self.dirty = True
+
+    def update(self, sw):
+        """Recompute the rows whose switch state moved (change-gated)."""
+        self._last_sw = sw
+        for k, sid in enumerate(self._svc_ids):
+            made = bool(sw.is_made(sid))
+            if self._svc_drawn[k] != made:
+                self._svc_drawn[k] = made
+                self.dirty = True
+        if self._door_id is not None:
+            closed = bool(sw.is_made(self._door_id))
+            if self._door_drawn != closed:
+                self._door_drawn = closed
+                self.dirty = True
+        for i, r in enumerate(self.rows):
+            if r["na"]:
+                continue
+            made = [bool(sw.is_made(sid)) for sid in r["ids"]]
+            n = sum(made)
+            if len(r["ids"]) > 1:
+                state = [n == len(made), "%d/%d" % (n, len(made)), n > 0]
+            elif r["toggle"]:
+                state = [n > 0, "[ON]" if n else "[off]", n > 0]
+            else:
+                state = [n > 0, "", n > 0]
+            if self._drawn[i] != state:
+                self._drawn[i] = state
+                self.dirty = True
+
+
+#: The page's key names -> the Tk keysym names the rows and the boot menu's
+#: buttons are keyed by (keybinds.tk_keysyms / cabinet_keysyms). The page
+#: sends KeyboardEvent.code; letters and digits map to themselves.
+CODE_KEYSYM = {"Enter": "Return", "NumpadEnter": "KP_Enter",
+               "Backspace": "BackSpace", "Escape": "Escape",
+               "Space": "space", "Equal": "equal", "Minus": "minus",
+               "ArrowLeft": "Left", "ArrowRight": "Right",
+               "ArrowUp": "Up", "ArrowDown": "Down"}
+
+
+def code_to_keysym(code, key=""):
+    """KeyboardEvent.code (+ .key) -> a Tk keysym name, or None."""
+    if not code:
+        return None
+    if code in CODE_KEYSYM:
+        return CODE_KEYSYM[code]
+    if code.startswith("Key") and len(code) == 4:
+        return code[3].lower()
+    if code.startswith("Digit") and len(code) == 6:
+        return code[5]
+    return None
+
+
+class KeyInput:
+    """Keyboard play with THIS window focused (item 39, David: "it should work
+    with the virtual playfield focused"). The bindings come from the SAME
+    exported rows the panel draws, and the edges ride SwitchPipe, with the
+    per-action spawn as the fallback.
+
+    The page drops auto-repeat itself (KeyboardEvent.repeat) and keys typed
+    into a text box (the save-slot name), which is what the Tk version's
+    release-then-press swallow and widget-class test were for. It also sends a
+    blur when the window loses focus, and that releases every key still down:
+    a flipper held while alt-tabbing away must not stay up for good.
+    """
+
+    def __init__(self, ctl, rows):
+        self.ctl = ctl
+        self.pipe = SwitchPipe()
+        self.map = {}
+        for r in rows:
+            if r["na"] or not r["ids"]:
+                continue
+            for k in r["keys"]:
+                for sym in keybinds.tk_keysyms(k):
+                    self.map[sym] = r
+        # ★ THE BOOT MENU'S BUTTONS RIDE ALONG BY NAME, whatever rows there
+        # are (David, 2026-09-19: "the first time loading a multi image won't
+        # let me use arrow keys (or select) since the virtual playfield isn't
+        # initialized yet"). A key that already has a row keeps it (a COPY
+        # carries the button); one that has none gets a row that presses no
+        # switch, only the button.
+        for sym, button in keybinds.cabinet_keysyms().items():
+            row = dict(self.map.get(sym) or dict(
+                keys=[sym], label=button, ids=[], na=False, toggle=False,
+                cabinet=True))
+            row["cab"] = button
+            self.map[sym] = row
+        self.down = set()
+        # Pre-warm the helper so the FIRST press does not pay the spawn.
+        self.pipe._ensure()
+
+    def key(self, sym, down):
+        r = self.map.get(sym)
+        if r is None:
+            return False
+        if down:
+            if sym in self.down:
+                return True
+            self.down.add(sym)
+            if r["toggle"]:
+                # The toggle flips off the MERGED state - the state acted on
+                # is the one on screen, the door button's rule.
+                sw = getattr(self.ctl.view, "sw", None)
+                target = 0 if sw is not None and all(
+                    bool(sw.is_made(s)) for s in r["ids"]) else 1
+                for s in r["ids"]:
+                    self._set(s, target)
+            else:
+                if r["ids"]:
+                    self._set(r["ids"][0], 1)
+                if r.get("cab"):
+                    self.pipe.set_cab(r["cab"], 1)
+            return True
+        if r["toggle"]:
+            self.down.discard(sym)
+            return True
+        if sym not in self.down:
+            return True
+        self.down.discard(sym)
+        if r["ids"]:
+            self._set(r["ids"][0], 0)
+        if r.get("cab"):
+            self.pipe.set_cab(r["cab"], 0)
+        return True
+
+    def release_all(self):
+        for sym in list(self.down):
+            self.key(sym, False)
+        self.down.clear()
+
+    def _set(self, sw, val):
+        if not self.pipe.set(sw, val):
+            (self.ctl.drv.press if val else self.ctl.drv.release)(sw)
+
+    def close(self):
+        self.pipe.close()
+
+    def detach(self):
+        """Stop acting on keys and let the helper release what it holds (EOF)
+        - for a KeyInput being REPLACED, as the "WAITING" one is."""
+        self.down.clear()
+        self.close()
+
+
+#: Save/Load state: ten named slots (item 13 / item 39). A label crosses
+#: wsl.exe's re-parse into bash argv, and wsl.exe expands $ and backticks
+#: even in -e argv, so a label may never contain them.
+SLOT_IDS = ["slot%d" % i for i in range(1, 11)]
+LABEL_OK = ("abcdefghijklmnopqrstuvwxyz"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _.()!-")
+
+
+def clean_label(text):
+    return "".join(ch for ch in (text or "") if ch in LABEL_OK).strip()[:40]
+
+
+def state_reply(script, r):
+    """The one-line answer to a save or load: the wrappers' last tagged line
+    that SAYS something - a bare "[savegame] FAILED" is the worst answer, and
+    David's first real press showed exactly that with the criu reason one
+    line above it."""
+    if r is None:
+        return "%s did not run" % script
+    lines = [ln.strip() for ln in
+             (r.stdout or b"").decode("utf8", "replace").splitlines()
+             + (r.stderr or b"").decode("utf8", "replace").splitlines()
+             if ln.strip()]
+    tagged = [ln for ln in lines
+              if ln.startswith(("[savegame]", "[loadgame]", "[save]",
+                                "[restore]", "savegame:", "loadgame:"))]
+    saying = [ln for ln in tagged if not ln.rstrip().endswith("FAILED")]
+    return (saying or tagged or lines or ["%s: no output" % script])[-1]
+
+
+class LedGrid(LedRing):
+    """Every LED the wire has shown, as a field of colour, grouped by node.
+
+    ★ THE ROSTER COMES FROM THE RING, NOT FROM A TABLE (item 50): four titles
+    carry `0 records` in device_xy.txt, and a grid built from the block shows
+    what the game is actually doing; the table is only ever a LOOKUP for the
+    name. It needs no group -> node map either, so it works on the titles
+    whose artwork cannot address its lamps.
+
+    A CHANNEL EARNS ITS CELL BY BEING WRITTEN (or addressed, version 4's
+    `seen` plane, or pulsed through the fade ring), AND KEEPS IT: a grid that
+    reflows while you watch is unreadable, so a dark cell means "this lamp
+    exists and is off". ONE CELL PER FIXTURE WHERE THE NAMES ALLOW IT, and
+    nothing is inferred from consecutive indices.
+    """
+
+    def __init__(self, names):
+        self.names = names or {}
+        self.cells = []
+        self.by_node = {}
+        self.seen = set()
+        self.gen = 0                    # bumps when the roster is rebuilt
+        self._decoded = None
+        self._init_ring()
+
+    def _discover(self, d):
+        """Add every channel the block shows (val or seen) and we have not.
+        Per node, with a C-level all-zero test first. True when it grew."""
+        grew = False
+        for node in range(coilmap.NODES):
+            for base in (LED_HDR + node * LED_IDX, SEEN_OFF + node * LED_IDX):
+                s = d[base:base + LED_IDX]
+                if len(s) < LED_IDX or s.count(0) == LED_IDX:
+                    continue
+                for idx, v in enumerate(s):
+                    if v and (node, idx) not in self.seen:
+                        self.seen.add((node, idx))
+                        grew = True
+        return grew
+
+    def _rebuild(self):
+        """Group the roster into fixtures. Cells are REUSED across rebuilds,
+        keyed by (node, name), so a lit lamp keeps its state when an unrelated
+        board is discovered; the page lays the blocks out."""
+        by_node = {}
+        for node, idx in sorted(self.seen):
+            by_node.setdefault(node, []).append(idx)
+        old = {(C["node"], C["name"]): C for C in self.cells}
+        cells, self.by_node = [], {}
+        for node in sorted(by_node):
+            stems, order = {}, []
+            for idx in by_node[node]:
+                name = self.names.get((node, idx))
+                if name:
+                    stem, chan = split_channel(name)
+                else:
+                    stem, chan = "%d.%d" % (node, idx), "W"
+                # A stem that repeats a channel letter is two lamps sharing a
+                # name, not one lamp with two reds.
+                C = stems.get(stem)
+                if C is not None and chan in C["channels"]:
+                    stem = "%s (%d.%d)" % (stem, node, idx)
+                    C = stems.get(stem)
+                if C is None:
+                    C = old.get((node, stem))
+                    if C is None:
+                        C = dict(name=stem, node=node, state=(), drawn=None,
+                                 named=bool(name))
+                    C["channels"], C["idxs"] = {}, []
+                    stems[stem] = C
+                    order.append(C)
+                C["channels"][chan] = (node, idx)
+                C["idxs"].append(idx)
+            for C in order:
+                C["sort"] = min(C["idxs"])
+                C["key"] = "%d:%s" % (node, C["name"])
+            order.sort(key=lambda C: C["sort"])
+            self.by_node[node] = order
+            cells.extend(order)
+        self.cells = cells
+        self.gen += 1
+
+    def tick(self, d, now):
+        """Recompute the cells whose value moved. Returns (lit, total,
+        changes, grew): changes maps a cell key to [r, g, b, alpha] or 0."""
+        changes = {}
+        if not d or len(d) < LED_HDR:
+            return 0, len(self.cells), changes, False
+        self._take_fades(d, now)
+        # The fade ring is a second source of channels (an a2 pulse writes
+        # only the ring, never val[]).
+        grew = False
+        for key in self.overlay:
+            if key not in self.seen:
+                self.seen.add(key)
+                grew = True
+        # Discovery gated on BOTH write counters (a swelf frame can grow
+        # `seen` without moving `decoded`).
+        dec = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
+        if len(d) >= PADLED_READ:
+            dec += struct.unpack_from("<I", d, WIDE_DECODED_OFF)[0]
+        if dec != self._decoded:
+            self._decoded = dec
+            grew = self._discover(d) or grew
+        if grew:
+            self._rebuild()
+        lit = 0
+        for C in self.cells:
+            rgb, level = fixture_color(self._chan_vals(C, d, now))
+            if rgb:
+                lit += 1
+            st = (rgb, level)
+            if st == C["state"] and C["drawn"] is not None:
+                continue
+            C["state"] = st
+            if rgb:
+                _rs, alpha = level_shape(level)
+                want = [rgb[0], rgb[1], rgb[2], round(alpha, 3)]
+            else:
+                want = 0
+            if want != C["drawn"]:
+                C["drawn"] = want
+                changes[C["key"]] = want
+        return lit, len(self.cells), changes, grew
+
+    def spec(self):
+        return {"gen": self.gen, "blocks": [
+            {"node": node,
+             "cells": [{"k": C["key"], "tip": self.describe(C)}
+                       for C in self.by_node[node]]}
+            for node in sorted(self.by_node)]}
+
+    def dyn(self):
+        return {C["key"]: C["drawn"] or 0 for C in self.cells}
+
+    def describe(self, C):
+        where = ", ".join("%s=node %d index %d" % (c, n, i)
+                          for c, (n, i) in sorted(C["channels"].items()))
+        return ("LED  %s\n%s\n%s"
+                % (C["name"], where,
+                   "named by the title's device table" if C["named"]
+                   else "no name in this title's table - shown by wire address"))
+
+
+
+class LcdPanel:
+    """VILLAIN VISION - the lcdnode's LCD insert, in its OWN window.
+
+    batman's node 24 drives the fixture the ELF calls "3 LCD INSERT" (item
+    83). Nothing crosses the bus but ASSET NUMBERS naming stored clips;
+    padlcd.h carries the frame table and the disassembly addresses.
+
+    ★ ONE SCREEN, NOT THREE: the game addresses ONE logical display (fixture
+    display count 1; all 299 LCD call sites pass the same device) driving ONE
+    physical TV - David's video of the real machine shows a single set with
+    "Villain Vision" on its bezel. And `asset` is always what to draw; the
+    companion number is shown as "aux N" because that is all anybody has
+    earned the right to call it.
+
+    The art is extracted LAZILY by lcdart.py into <tables>/<game>/lcd/<id>
+    .{png,webp} the first time an asset is seen, cheap-first: the still paints
+    the moment it lands, the motion takes over when the encode finishes. Until
+    either lands the screen says "asset <id>", which is honest.
+
+    THE CAPTION IS AN INSTRUMENT: it names the asset, the verb the game sent
+    (printed as a number past the two that are known), and any companion
+    fields - printing the raw numbers is what lets the next wrong reading be
+    caught from a photograph.
+
+    A SEPARATE WINDOW (David, 2026-08-24): every other second-display title
+    gets its screen as its own desktop window, and this IS batman's second
+    display. Closing it HIDES it for the run (item 44's contract). Its
+    position persists as "villain_pos" beside the playfield's.
+
+    LAZY BY CONSTRUCTION: no window exists until the padlcd block's magic
+    stamps, which only an lcdnode title's shim ever does.
+
+    THE BOARD IS AN ID -> STILL LOOKUP when <art>/stills/map.txt exists
+    (2026-08-26, matched frame-level against David's videos): the Villain
+    Vision holds ONE STILL per command, fading between them, and never plays
+    video. THE DISSOLVE: going dark fades out in FADE_STEPS; the set itself
+    never dims, only the screen.
+
+    WHAT CHANGED WITH THE WEB WINDOW, and nothing else did: a picture is a
+    PNG in BLOBS instead of a PhotoImage, and the hand-drawn cabinet is drawn
+    by the page (no card art); the decisions - which asset, which frame,
+    loop / once / block cycle, the dissolve, the filmstrip - are the same
+    code.
+    """
+
+    READ = 56                       # header .. ms; the ring beyond is RE fuel
+    MAGIC = 0x44434c50              # 'PLCD'
+    CW, CH = 244, 184               # the screen (clips are 240x180)
+    PAD_L, PAD_T = 16, 14           # the drawn case around the screen
+    PAD_R, PAD_B = 62, 34
+    STRIP_N = 4                     # the filmstrip: last clips, oldest left
+    TW, TH = 60, 45
+    ASK_S = 60.0                    # lcdart re-ask backoff per id
+    FADE_STEPS = (0.62, 0.28)       # fraction of the picture per step
+
+    def __init__(self, game, on_build=None):
+        self.game = game
+        self.on_build = on_build    # called once, when the window is due
+        self.drv = None             # assigned once the SwitchDriver exists
+        self.built = False
+        self.item = None            # truthy while a picture item exists
+        self.item_img = None        # what that item shows (a BLOBS key)
+        self.item_state = "normal"  # ... and whether it is shown
+        self.placeholder = None     # the "asset N" text, when no picture
+        self.img = None             # the current real picture (not a fade)
+        self.id = None
+        self.have = False
+        self.state = None           # (asset, aux, rate, verb)
+        self.cycle = None
+        self.bright = 255
+        self.stillmap = None
+        self._map_tried = False
+        self._still_imgs = {}
+        self._pic_pil = None
+        self._fadeq = []
+        self.names = None
+        self._named = False
+        self.tv = None              # the card's own TV sprite (PIL RGBA)
+        self.tv_hole = None
+        self._tv_tried = False
+        self._recent = []           # [(id, BLOBS key)] oldest first
+        self.anim = None
+        self._asked = {}
+        self._hidden = False
+        self._next = 0.0
+        self._polls = 0
+        self.cap_text = ""
+        self.nm_text = ""
+        self.dirty = False
+        self._art = os.path.join(padpath.tables() or "", game, "lcd")
+
+    # ---- what the page draws ------------------------------------------------
+    def spec(self):
+        if self.tv is not None:
+            size = list(self.tv.size)
+        else:
+            size = [self.CW + self.PAD_L + self.PAD_R,
+                    self.CH + self.PAD_T + self.PAD_B]
+        return {"built": self.built, "tv": self.tv is not None,
+                "size": size, "screen": list(self._screen_rect()),
+                "cw": self.CW, "ch": self.CH,
+                "pad": [self.PAD_L, self.PAD_T, self.PAD_R, self.PAD_B],
+                "tw": self.TW, "th": self.TH, "strip_n": self.STRIP_N,
+                "title": "%s [villain vision] - Stern Spike 2 emulator"
+                         % self.game}
+
+    def dyn(self):
+        return {"pic": self.item_img if self.item else None,
+                "shown": bool(self.item) and self.item_state == "normal",
+                "placeholder": self.placeholder,
+                "cap": self.cap_text, "nm": self.nm_text,
+                "strip": [[i, k] for i, k in self._recent],
+                "current": self._recent[-1][0] if self._recent else None}
+
+    def _screen_rect(self):
+        if self.tv_hole:
+            return self.tv_hole
+        return (self.PAD_L, self.PAD_T, self.CW, self.CH)
+
+    def _build(self):
+        self.built = True
+        self._load_tv()
+        self.dirty = True
+        if self.on_build is not None:
+            try:
+                self.on_build()
+            except Exception:                               # noqa: BLE001
+                pass
+
+    def _load_tv(self):
+        """The card's own TV sprite + screen rect, once. Absent is normal
+        and leaves the page's drawn cabinet in place."""
+        if self._tv_tried:
+            return
+        self._tv_tried = True
+        if _PILImage is None:
+            return
+        png = os.path.join(self._art, "tvframe.png")
+        txt = os.path.join(self._art, "tvframe.txt")
+        try:
+            with open(txt, encoding="utf8") as f:
+                x, y, w, h = (int(v) for v in f.read().split()[:4])
+            tv = _PILImage.open(png).convert("RGBA")
+        except (OSError, ValueError):
+            return
+        if w <= 0 or h <= 0 or x + w > tv.width or y + h > tv.height:
+            return
+        self.tv, self.tv_hole = tv, (x, y, w, h)
+
+    def _compose(self, pil, stash=True):
+        """A clip frame behind the TV's screen hole, KEEPING ITS ASPECT, the
+        whole set as one image. `stash=False` is for the dissolve's own
+        darkened frames, which must not overwrite the record of the picture."""
+        x, y, w, h = self.tv_hole
+        s = min(w / pil.width, h / pil.height)
+        nw, nh = max(1, int(pil.width * s)), max(1, int(pil.height * s))
+        out = _PILImage.new("RGBA", self.tv.size, (0, 0, 0, 255))
+        out.paste(pil.convert("RGB").resize((nw, nh)),
+                  (x + (w - nw) // 2, y + (h - nh) // 2))
+        out.alpha_composite(self.tv)
+        if stash:
+            self._pic_pil = pil.convert("RGB")
+        return _png(out.convert("RGB"))
+
+    def _fade(self, br):
+        """Start (or cut short) the brightness transition. Dark builds the
+        dissolve queue - FADE_STEPS darkened frames, then dark - applied one
+        per poll starting NOW; bright clears it and restores instantly.
+        ★ THE SET NEVER DIMS: only the screen goes dark."""
+        self._fadeq = []
+        if self.item is None:
+            return
+        if br >= 128:
+            self.item_img, self.item_state = self.img, "normal"
+            self.dirty = True
+            return
+        if _PILImage is None or self._pic_pil is None:
+            if self.tv is None:
+                self.item_state = "hidden"
+                self.dirty = True
+            return
+        black = _PILImage.new("RGB", self._pic_pil.size, (0, 0, 0))
+        steps = [_PILImage.blend(black, self._pic_pil, a)
+                 for a in self.FADE_STEPS]
+        if self.tv is not None:
+            self._fadeq = [self._compose(s, stash=False) for s in steps]
+            self._fadeq.append(self._compose(black, stash=False))
+        else:
+            self._fadeq = [_png(s) for s in steps] + [None]
+        self._fade_step()
+
+    def _fade_step(self):
+        step = self._fadeq.pop(0)
+        if step is None:
+            self.item_state = "hidden"
+        else:
+            self.item_img, self.item_state = step, "normal"
+        self.dirty = True
+
+    def hide(self):
+        """The close box: hide, don't die (item 44). The ids keep tracking;
+        the decode/draw work stops while nobody can see it."""
+        self._hidden = True
+
+    def show_again(self):
+        self._hidden = False
+
+    def poll(self):
+        now = time.monotonic()
+        if now < self._next:
+            return
+        self._next = now + 0.1      # 10 Hz: one 56-byte reopen-read
+        self._polls += 1
+        try:
+            with open(LCD_PATH, "rb") as f:
+                d = f.read(self.READ)
+        except OSError:
+            return
+        if len(d) < self.READ or struct.unpack_from("<I", d)[0] != self.MAGIC:
+            return
+        if not self.built:
+            self._build()
+        (_m, _v, _g, _dec, asset, aux, rate, verb, _x1, _x2, _x3,
+         br, _fd, _ms) = struct.unpack_from("<14I", d)
+        # BRIGHTNESS IS PART OF THE PICTURE: the game drops the TV to 0 for
+        # ~250 ms around every clip swap and restores 255.
+        if br != self.bright:
+            self.bright = br
+            self._fade(br)
+        elif self._fadeq:
+            self._fade_step()
+        cmd = (asset, aux, rate, verb)
+        changed = cmd != self.state
+        self.state = cmd
+        # ONE display, ONE asset field. On a STILLS board the id selects a
+        # stored still; a block command selects by its FIRST id. Without a
+        # map, a companion naming a LARGER id is the inclusive clip block
+        # asset..aux, cycled clip by clip.
+        self.cycle = ((asset, aux) if asset and aux > asset
+                      and not self._map() else None)
+        if changed or not self.cycle:
+            want = asset
+        else:
+            # mid-block the drawn id has advanced ON PURPOSE
+            want = (self.id if self.id and asset <= self.id <= aux
+                    else asset)
+        if want != self.id:
+            self._show(want)
+        elif self._polls % 10 == 0 and want and (
+                not self.have or self.anim is None):
+            self._show(want)    # ~1 Hz retry while either artifact is missing
+        self._caption()
+        self._animate()         # one frame per poll = 10 fps
+
+    def _caption(self):
+        asset, aux, rate, verb = self.state
+        how = {1: "loop", 2: "once"}.get(verb, "verb %d" % verb if verb else "")
+        if self.cycle:
+            what = "assets %d-%d" % self.cycle
+            if self.id and self.cycle[0] <= self.id <= self.cycle[1]:
+                what += " · showing %d" % self.id
+        elif asset:
+            what = "asset %d" % asset
+        else:
+            what = "idle"
+        extra = []
+        if aux and not self.cycle:
+            extra.append("aux %d" % aux)
+        if rate:
+            extra.append("%d fps" % rate)
+        txt = " · ".join(x for x in [what, how] + extra if x)
+        if self.cap_text != txt:
+            self.cap_text = txt
+            self.dirty = True
+        nm = ""
+        if self.id:
+            hit = self._map().get(self.id)
+            nm = hit[1] if hit else self._name_for(self.id)
+        if self.nm_text != nm:
+            self.nm_text = nm
+            self.dirty = True
+
+    def _name_for(self, i):
+        """The clip's episode+timecode ("S1E001 00:18:32"), or "". Loaded
+        once from <art>/names.txt (lcdnames.py); absent is normal."""
+        if not self._named:
+            self._named = True
+            path = os.path.join(self._art, "names.txt")
+            try:
+                with open(path, encoding="utf8") as f:
+                    self.names = dict(
+                        (int(a), b) for a, _, b in
+                        (ln.rstrip("\n").partition("\t") for ln in f)
+                        if a.isdigit() and b)
+            except (OSError, ValueError):
+                self.names = None
+        if not self.names:
+            return ""
+        raw = self.names.get(i, "")
+        tail = raw.rsplit(".", 1)[-1]
+        m = re.match(r"^(S\d+E\d+)_(\d\d)-(\d\d)-(\d\d)-\d\d$", tail)
+        if m:
+            return "%s %s:%s:%s" % m.groups()
+        return tail[:34]
+
+    def _draw(self, img):
+        """One persistent picture item; a new one starts hidden while the
+        screen is dark (with no TV sprite - a composed image CONTAINS the set
+        and must never blink out with the screen)."""
+        self.img = img
+        if self.item is None:
+            self.placeholder = None
+            self.item = True
+            self.item_state = ("hidden" if (self.bright < 128
+                                            and self.tv is None)
+                               else "normal")
+        self.item_img = img
+        self.dirty = True
+
+    def _push_recent(self, i, thumb):
+        """Remember a clip in the filmstrip, only when the DRAWN id changes
+        and real art exists (a re-send of the same asset never duplicates)."""
+        self._recent.append((i, thumb))
+        del self._recent[:-self.STRIP_N]
+        self.dirty = True
+
+    def _show(self, i):
+        # A stills board first: the mapped still IS the display for this id.
+        if i and i in self._map() and self._show_still(i):
+            return
+        # Ask lcdart.py for whatever this id is missing, at most once per
+        # ASK_S per id, checked against BOTH artifacts.
+        if (i and self.drv is not None
+                and time.monotonic() - self._asked.get(i, -1e9) > self.ASK_S
+                and not (
+                    os.path.isfile(os.path.join(self._art, "%d.png" % i))
+                    and os.path.isfile(os.path.join(self._art, "%d.webp" % i)))):
+            self._asked[i] = time.monotonic()
+            self.drv.run_script("lcdart.py", self.game, str(i))
+        if self.id != i:
+            self.anim = None
+        png = os.path.join(self._art, "%d.png" % i)
+        if i and os.path.isfile(png):
+            img = thumb_src = None
+            try:
+                # The THUMBNAIL always comes from the bare still; the SCREEN
+                # gets the composed set when the card art is there.
+                thumb_src = _png_file(png)
+                if thumb_src is not None:
+                    img = (self._compose(_PILImage.open(png))
+                           if self.tv is not None else thumb_src)
+            except (OSError, ValueError):
+                img = None
+            if img is not None:
+                if self.id != i and thumb_src is not None:
+                    self._push_recent(i, thumb_src)
+                self._draw(img)
+                self.id, self.have = i, True
+                return
+        if self.id != i:                    # placeholder, once per change
+            self.item = None
+            self.item_img = None
+            self.placeholder = ("asset %d" % i) if i else "—"
+            self.dirty = True
+        self.id, self.have = i, not i
+
+    def _open_clip(self, i):
+        """Read the id's WHOLE clip into memory and open a decoder over it.
+        An OSError is the wire (None: retried next tick); a decode failure
+        past this point is the file itself ({"dead": True})."""
+        if _PILImage is None:
+            return {"dead": True}
+        try:
+            with open(os.path.join(self._art, "%d.webp" % i), "rb") as f:
+                data = f.read()
+        except OSError:
+            return None
+        try:
+            im = _PILImage.open(io.BytesIO(data))
+            return {"pil": im, "n": getattr(im, "n_frames", 1),
+                    "i": 0, "frames": []}
+        except Exception:                                   # noqa: BLE001
+            return {"dead": True}
+
+    def _decode(self, a, idx):
+        """Frame idx as a picture key, or None if the clip ends early."""
+        try:
+            a["pil"].seek(idx)
+            if self.tv is not None:
+                return self._compose(a["pil"])
+            rgb = a["pil"].convert("RGB")
+            self._pic_pil = rgb
+            return _png(rgb)
+        except Exception:                                   # noqa: BLE001
+            a["n"] = idx
+            return None
+
+    def _cycle_next(self):
+        """The clip after this one in a block command, or None for a single
+        clip. Verb 1 wraps to the block's first clip, verb 2 holds on the
+        last (returned as self.id, which _animate reads as 'stay')."""
+        if not self.cycle:
+            return None
+        first, last = self.cycle
+        verb = self.state[3] if self.state else 0
+        if self.id is None or self.id >= last or self.id < first:
+            return self.id if verb == 2 else first
+        return self.id + 1
+
+    def _map(self):
+        """{id: (path, label)} from <art>/stills/map.txt, loaded once.
+        Non-empty means this display is a STILLS BOARD."""
+        if not self._map_tried:
+            self._map_tried = True
+            self.stillmap = {}
+            path = os.path.join(self._art, "stills", "map.txt")
+            try:
+                with open(path, encoding="utf8") as f:
+                    for ln in f:
+                        if ln.startswith("#") or not ln.strip():
+                            continue
+                        parts = ln.rstrip("\n").split("\t")
+                        if len(parts) >= 3 and parts[0].isdigit():
+                            self.stillmap[int(parts[0])] = (parts[1], parts[2])
+            except OSError:
+                pass
+        return self.stillmap
+
+    def _show_still(self, i):
+        """Draw the board still the map holds for id i, composed once and
+        cached. False when the mapped file is unreadable, so the caller falls
+        back to the clip art."""
+        img = self._still_imgs.get(i)
+        if img is None:
+            path = os.path.join(self._art, "stills", self._map()[i][0])
+            if _PILImage is not None:
+                try:
+                    pil = _PILImage.open(path)
+                    pil.load()
+                except OSError:
+                    return False
+                if self.tv is not None:
+                    img = self._compose(pil)
+                else:
+                    s = min(self.CW / pil.width, self.CH / pil.height)
+                    nw = max(1, int(pil.width * s))
+                    nh = max(1, int(pil.height * s))
+                    out = _PILImage.new("RGB", (self.CW, self.CH), (0,) * 3)
+                    out.paste(pil.convert("RGB").resize((nw, nh)),
+                              ((self.CW - nw) // 2, (self.CH - nh) // 2))
+                    self._pic_pil = out
+                    img = _png(out)
+                thumb = _png(pil.convert("RGB").resize((self.TW, self.TH)))
+            else:
+                img = _png_file(path)
+                if img is None:
+                    return False
+                thumb = None
+            self._still_imgs[i] = img
+            self._still_imgs[(i, "t")] = thumb
+        if self.id != i:
+            thumb = self._still_imgs.get((i, "t"))
+            if thumb is not None:
+                self._push_recent(i, thumb)
+        self._draw(img)
+        self.id, self.have = i, True
+        self.anim = None                # a stills board never animates
+        return True
+
+    def _animate(self):
+        """Advance the screen one frame (lcdart encodes at 10 fps and this
+        runs once per 10 Hz poll). Skipped while hidden, mid-dissolve, and on
+        a stills board."""
+        if self._hidden:
+            return
+        if self._fadeq:
+            return
+        if self._map():
+            return
+        i, a = self.id, self.anim
+        if not i:
+            return
+        if a is None:
+            a = self.anim = self._open_clip(i)
+            if a is None:
+                return
+        if a.get("dead"):
+            return
+        idx = a["i"]
+        if idx >= a["n"]:
+            nxt = self._cycle_next()
+            if nxt is not None:
+                if nxt != self.id:
+                    self._show(nxt)
+                    return
+                return                  # verb 2 at the block's end: hold
+            if self.state and self.state[3] == 2:
+                return                  # single clip, once: hold
+            idx = a["i"] = 0            # verb 1 (or unknown): it loops
+        if idx < len(a["frames"]):
+            frame = a["frames"][idx]
+        else:
+            frame = self._decode(a, idx)
+            if frame is None:
+                if not a["frames"]:
+                    self.anim = {"dead": True}
+                    return
+                idx = a["i"] = 0
+                frame = a["frames"][0]
+            else:
+                a["frames"].append(frame)
+                if len(a["frames"]) >= a["n"]:
+                    a.pop("pil", None)
+        self._draw(frame)
+        a["i"] = idx + 1
+
+
+
+def _rate(dq, t):
+    """Events per second over the last RATE_WIN_S. Divided by the WINDOW, not
+    by the span of the events in it: dividing by the span reports 30 Hz for
+    two redraws 33 ms apart inside an otherwise dead three seconds."""
+    while dq and t - dq[0] > RATE_WIN_S:
+        dq.popleft()
+    if not dq:
+        return 0.0
+    return len(dq) / RATE_WIN_S
+
+
+def _mark(dq, t):
+    dq.append(t)
+    return _rate(dq, t)
+
+
+class Field(LedRing):
+    """The positional view: the title's layout (on its artwork when the art
+    fits the coordinates, on a blank field otherwise), with every insert lit
+    from the wire, every coil flashing on its fire counter, and every
+    positioned switch clickable.
+
+    Markers keep the Tk window's semantics and colours: blue rings are
+    switches (hold one to close it, right-hold to RIP it), red squares are
+    coils (flash magenta when fired; a click holds the switch the coil
+    follows, or runs coilact.py where the coil MOVES a ball), dots are inserts
+    at a size and opacity that follow their duty cycle. A made switch shows a
+    green dot inside its ring. The page draws them; this computes them.
+    """
+
+    kind = "field"
+
+    def __init__(self, ctl):
+        self.ctl = ctl
+        self.switches = load_switches()
+        self.leds = load_leds()
+        self.coils = load_coils()
+        self.last = None
+        self.art = layout_art()
+        wh = gameinfo.png_size(self.art) if self.art else None
+        self.base = tuple(wh) if wh else layout_extent()
+
+        self.fixtures = group_fixtures(self.leds)
+        for n, F in enumerate(self.fixtures):
+            F["fid"] = n
+            F["state"] = ()
+            F["vis"] = (0.0, 0.0, 0.0, 0.0, float(LED_R))
+            F["v0"] = F["vt"] = None
+            F["t0"] = 0.0
+            F["drawn"] = None
+        self.coil_seen = {}     # (node, index) -> last fire counter read
+        self.coil_until = {}    # (node, index) -> ms after which the flash ends
+        self.coil_drawn = {}    # (node, index) -> last hot/cold published
+        self.fps = 0.0
+        self._t_last = None
+        self._read_ms = 0.0
+        self._redrawn = 0
+        self._log_t, self._log_n = time.perf_counter(), 0
+        self._draw_ev = collections.deque()
+        self._data_ev = collections.deque()
+        self._decoded = None
+        self._gap_worst = 0.0
+        self._draw_last = None
+        self._init_ring()
+        self.chan_fix = {}
+        for F in self.fixtures:
+            for key in F["channels"].values():
+                self.chan_fix.setdefault(key, []).append(F)
+
+        self.sw_rows = list(self.switches)
+        self._dot_drawn = {}
+        self.trough = None
+        self.sw = SwitchWatch(self.switches)
+        if not self.sw.positions:
+            # the trough lives under the playfield; the full switch list is
+            # the same data without the coordinates - ask it before giving up
+            self.sw.set_rows(load_switch_list())
+        self._sw_next = time.monotonic() + SWITCH_POLL_S
+        self.status = ""
+
+    # ---- what the page draws ------------------------------------------------
+    def spec(self):
+        return {
+            "kind": "field",
+            "art": "art" if self.art else None,
+            "base": list(self.base or (313, 710)),
+            "fixtures": [[F["fid"], round(F["x"], 2), round(F["y"], 2)]
+                         for F in self.fixtures],
+            "coils": [[k, C["x"], C["y"],
+                       "%s:%s" % (C["node"], C["index"])]
+                      for k, C in enumerate(self.coils)],
+            "switches": [[k, S["x"], S["y"], S["id"]]
+                         for k, S in enumerate(self.sw_rows)],
+            "trough": self.trough.spec() if (
+                self.trough is not None and self.trough.clickable) else None,
+        }
+
+    def dyn(self):
+        fx = {}
+        for F in self.fixtures:
+            if F["drawn"] is not None:
+                fx[F["fid"]] = F["drawn"]
+        return {"fx": fx,
+                "coil": {"%s:%s" % k: 1 if v else 0
+                         for k, v in self.coil_drawn.items()},
+                "sw": {str(s): v for s, v in self._dot_drawn.items()},
+                "trough": self.trough.dyn() if (
+                    self.trough is not None and self.trough.clickable)
+                else None}
+
+    # ---- the switch table arriving mid-run ----------------------------------
+    def _pick_up_switches(self):
+        """THE SWITCH TABLE IS THE ONE PART THAT NEEDS A RUN - the game builds
+        it on the heap, so the first run of a title opens this window without
+        it. A stat every SWITCH_POLL_S while it is missing, nothing after."""
+        if self.switches or time.monotonic() < self._sw_next:
+            return False
+        self._sw_next = time.monotonic() + SWITCH_POLL_S
+        rows = load_switches()
+        if not rows:
+            return False
+        self.switches = rows
+        if not self.sw.positions and not self.sw.set_rows(rows):
+            self.sw.set_rows(load_switch_list())
+        self.sw_rows = list(rows)
+        self.make_trough()
+        return True
+
+    def make_trough(self):
+        """The trough, once known: on the KEY PANEL when there is one (item
+        39), the artwork corner otherwise (the fallback for a window with no
+        padbinds - an old renderer, a by-hand launch). Idempotent."""
+        if self.trough is not None or not self.sw.positions:
+            return
+        if self.ctl.key_panel is not None:
+            self.trough = self.ctl.key_panel.add_trough(self.sw.positions,
+                                                        self.sw.how)
+            return
+        self.trough = TroughDots(self.sw.positions, self.sw.how,
+                                 clickable=True)
+
+    # ---- tooltips -----------------------------------------------------------
+    def describe(self, kind, k):
+        if kind == "switch":
+            d = self.sw_rows[k]
+            return ("SWITCH  %s\nid %d   node %d  bit %d\n"
+                    "hold to keep it closed\nright-hold to RIP it (spinners)"
+                    % (d["name"], d["id"], d["node"], d["bit"]))
+        if kind == "coil":
+            d = self.coils[k]
+            where = ("node %d index %d" % (d["node"], d["index"])
+                     if d["node"] is not None
+                     else "group %d index %d (board unknown)" % (d["group"],
+                                                                 d["index"]))
+            fires, lvl = self._coil_state(d)
+            live = ("\nfired %d time%s, drive %d"
+                    % (fires, "" if fires == 1 else "s", lvl)
+                    if fires is not None else "\nno coil data")
+            act = coilact.describe(d["name"])
+            how = "hold" if coilact.hold_switch(d["name"]) is not None else "click"
+            return "COIL  %s\n%s%s\n%s: %s" % (
+                d["name"], where, live, how, act or "nothing wired")
+        d = self.fixtures[k]
+        vals = self._chan_vals(d, self.last)
+        fmt = lambda v: "%d" % v if v is not None else "no data"  # noqa: E731
+        # node IS None for a lamp the table positions and the wire cannot
+        # address (item 50/53) - "%d" % None is a TypeError
+        where = lambda node, idx: (                              # noqa: E731
+            "node %d  index %d" % (node, idx) if node is not None
+            else "group %d  index %d  - no wire address for this board"
+                 % (d.get("group", -1), idx))
+        if "W" in d["channels"]:
+            node, idx = d["channels"]["W"]
+            return ("LED  %s\n%s\nvalue %s"
+                    % (d["name"], where(node, idx), fmt(vals.get("W"))))
+        lines = ["LED  %s   (RGB fixture)" % d["name"]]
+        for chan in "RGB":
+            if chan in d["channels"]:
+                node, idx = d["channels"][chan]
+                lines.append("%s  %s  value %s"
+                             % (chan, where(node, idx), fmt(vals.get(chan))))
+        return "\n".join(lines)
+
+    # ---- the coil marker press ----------------------------------------------
+    def coil_down(self, k):
+        """A COIL MARKER IS THE ONE THE SCOOP ACTUALLY GETS (item 24): where
+        the coil follows a switch, hold that switch; where it MOVES a ball
+        there is nothing to hold and it stays a click. Returns the held id."""
+        name = self.coils[k]["name"]
+        sw = coilact.hold_switch(name)
+        if sw is not None:
+            return sw
+        if coilact.describe(name):
+            self.ctl.drv.run_script("coilact.py", name)
+        return None
+
+    # ---- live LED and coil state --------------------------------------------
+    def read_leds(self):
+        """(raw, d): raw whenever dump/padled could be READ at all (the
+        emulator is there), d only once the shim has stamped its magic."""
+        try:
+            with open(LED_PATH, "rb") as f:
+                raw = f.read(PADLED_READ)
+        except OSError:
+            return None, None
+        if len(raw) < LED_HDR or struct.unpack_from("<I", raw, 0)[0] != PADLED_MAGIC:
+            return raw, None
+        return raw, raw
+
+    def door_open(self):
+        return self.sw.door
+
+    def _coil_state(self, d):
+        node = d["node"]
+        if node is None or not self.last or len(self.last) < PADLED_READ:
+            return None, None
+        if struct.unpack_from("<I", self.last, 4)[0] < 2:
+            return None, None
+        o = node * COIL_N + d["index"]
+        return self.last[COIL_OFF + o], self.last[LVL_OFF + o]
+
+    def _tick_coils(self, d, now, out):
+        """Flash a coil marker when its fire counter moves - a counter cannot
+        miss a ~30 ms pulse the way an on/off bit between polls can."""
+        fired = 0
+        for C in self.coils:
+            key = (C["node"], C["index"])
+            node, idx = key
+            if node is None:
+                continue
+            c = d[COIL_OFF + node * COIL_N + idx]
+            if key in self.coil_seen and c != self.coil_seen[key]:
+                self.coil_until[key] = now + COIL_FLASH_MS
+            self.coil_seen[key] = c
+            hot = self.coil_until.get(key, 0) > now
+            fired += hot
+            if self.coil_drawn.get(key) == hot:
+                continue
+            self.coil_drawn[key] = hot
+            out["%s:%s" % key] = 1 if hot else 0
+        return fired
+
+    def draw_fixtures(self, d, now):
+        """Set each fixture's fade TARGET from the wire. Returns (lit,
+        changed). The wire carries steps and the real boards render the
+        ramps, so a state change only RETARGETS the tween; `changed` counts
+        decoded state moves - the honest picture rate - not tween frames."""
+        lit = 0
+        changed = 0
+        for F in self.fixtures:
+            rgb, level = fixture_color(self._chan_vals(F, d, now))
+            if rgb:
+                lit += 1
+            st = (rgb, level)
+            if st == F["state"]:
+                continue
+            F["state"] = st
+            if F.get("env"):
+                F["dur"] = 0.0
+            else:
+                changed += 1
+                F["dur"] = FADE_MS / 1000.0
+            v = F["vis"]
+            if rgb:
+                rs, alpha = level_shape(level)
+                if v[3] <= 0.0:
+                    # a fade IN starts from the target's own hue at zero
+                    # alpha, not from black
+                    v = (float(rgb[0]), float(rgb[1]), float(rgb[2]),
+                         0.0, v[4])
+                    F["vis"] = v
+                F["vt"] = (float(rgb[0]), float(rgb[1]), float(rgb[2]),
+                           alpha, LED_R * rs)
+            else:
+                F["vt"] = (v[0], v[1], v[2], 0.0, float(LED_R))
+            F["v0"] = v
+            F["t0"] = now
+        return lit, changed
+
+    def animate_fixtures(self, now, out):
+        """Advance every mid-fade fixture and publish the ones that moved.
+        Linear, deliberately: a PWM ramp is linear in duty."""
+        for F in self.fixtures:
+            vt = F["vt"]
+            if vt is None:
+                continue
+            dur = F.get("dur", FADE_MS / 1000.0)
+            t = 1.0 if dur <= 0 else min(1.0, (now - F["t0"]) / dur)
+            v0 = F["v0"]
+            vis = tuple(a + (b - a) * t for a, b in zip(v0, vt))
+            F["vis"] = vis
+            if t >= 1.0:
+                F["vt"] = None
+            self._paint(F, vis, out)
+
+    def _paint(self, F, vis, out):
+        """One visual state, QUANTISED before the change-gate so a tween
+        costs a handful of updates rather than one per frame: alpha in 1/32
+        steps, radius in 0.25 px. The page blends with real alpha - what the
+        Tk window had to fake by mixing toward a sampled artwork pixel."""
+        alpha, rad = vis[3], vis[4]
+        if alpha <= 1.0 / 64:
+            want = 0
+        else:
+            want = [int(vis[0]), int(vis[1]), int(vis[2]),
+                    round(alpha * 32) / 32.0, round(rad * 4) / 4.0]
+        if want == F["drawn"]:
+            return
+        F["drawn"] = want
+        self._redrawn += 1
+        out[F["fid"]] = want
+
+    def tick(self, now_mono):
+        """One frame. Returns the changes for the page, or None when the run
+        has gone (the LED block disappeared after being seen)."""
+        t0 = time.perf_counter()
+        if self._t_last:
+            dt = t0 - self._t_last
+            self.fps = 1.0 / dt if not self.fps else self.fps * 0.9 + 0.1 / dt
+        self._t_last = t0
+        frame = {}
+        if self._pick_up_switches():
+            frame["layout"] = True
+
+        # ONE PACED READ OF THE SWITCH BLOCK feeds the dot in every switch
+        # ring, the trough, the key panel and the coin-door warning.
+        self.ctl.poll_switches(self, frame)
+
+        t_read = time.perf_counter()
+        raw, d = self.read_leds()
+        self._read_ms = (time.perf_counter() - t_read) * 1000.0
+        self.last = d
+        if emu_gone(self, raw is not None):
+            return None
+        state_msg = self.ctl.state_status()
+        if d is None:
+            status = (state_msg
+                      or ("emulator up, no LED writes decoded yet"
+                          " (normal through boot and Tech Alerts:"
+                          " the attract light show is the first)"
+                          if raw is not None else
+                          "no emulator (dump/padled not readable)"))
+        else:
+            decoded = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
+            skipped = struct.unpack_from("<I", d, LED_SKIPPED_OFF)[0]
+            if self._decoded is not None and decoded != self._decoded:
+                _mark(self._data_ev, t0)
+            self._decoded = decoded
+            nfades = self._take_fades(d, t0)
+            for _ in range(nfades):
+                self._draw_ev.append(t0)
+                self._data_ev.append(t0)
+            lit, changed = self.draw_fixtures(d, t0)
+            if changed:
+                _mark(self._draw_ev, t0)
+            if changed or nfades:
+                if self._draw_last is not None:
+                    self._gap_worst = max(self._gap_worst, t0 - self._draw_last)
+                self._draw_last = t0
+            fx = {}
+            self.animate_fixtures(t0, fx)
+            if fx:
+                frame["fx"] = fx
+            coils = ""
+            if len(d) >= PADLED_READ and struct.unpack_from("<I", d, 4)[0] >= 2:
+                cf = {}
+                self._tick_coils(d, time.monotonic() * 1000.0, cf)
+                if cf:
+                    frame["coil"] = cf
+                coils = "   %d coils addressed" % struct.unpack_from(
+                    "<I", d, COIL_GEN_OFF + 4)[0]
+                if self.door_open():
+                    coils += "   COIN DOOR OPEN: 48V off, no coil can fire"
+            drops = ", %d dropped" % skipped if skipped else ""
+            if not self.sw.positions:
+                coils += "   no trough switches identified"
+            draw_hz = _rate(self._draw_ev, t0)
+            data_hz = _rate(self._data_ev, t0)
+            status = (state_msg
+                      or " %d of %d inserts lit   LED %.1f Hz   data %.1f Hz"
+                         " (%d writes%s)%s   poll %.0f fps"
+                         % (lit, len(self.fixtures), draw_hz, data_hz,
+                            decoded, drops, coils, self.fps))
+        if status != self.status:
+            self.status = status
+            frame["status"] = status
+        self._log(t0, (time.perf_counter() - t0) * 1000.0)
+        return frame
+
+    def _log(self, t0, spent):
+        """PAD_PF_LOG=<path>: one line a second of what the loop is doing -
+        the rate MEASURED rather than read off a screenshot, the read/compute
+        split, the picture rate and the worst freeze since the last line."""
+        if not PF_LOG:
+            return
+        self._log_n += 1
+        if t0 - self._log_t < 1.0:
+            return
+        try:
+            with open(PF_LOG, "a") as f:
+                f.write("%.1f fps over %d ticks   frame %.1f ms "
+                        "(read %.1f, draw %.1f)   %d fixtures redrawn   "
+                        "LED %.1f Hz  data %.1f Hz  worst gap %.2f s\n"
+                        % (self._log_n / (t0 - self._log_t), self._log_n,
+                           spent, self._read_ms, spent - self._read_ms,
+                           self._redrawn, _rate(self._draw_ev, t0),
+                           _rate(self._data_ev, t0), self._gap_worst))
+        except OSError:
+            pass
+        self._log_t, self._log_n, self._redrawn = t0, 0, 0
+        self._gap_worst = 0.0
+
+
+class Schematic:
+    """The window for a title with NO usable positions: every switch, by node,
+    clickable, and the LED swatch grid beside it.
+
+    This is not a lesser playfield, it is a different question answered: with
+    no device table there is nothing to place markers on, and inventing
+    coordinates from names is exactly the guess this project keeps undoing.
+    The rows FLOW into columns the window's height actually has (item 39);
+    the page scrolls sideways rather than clip, so every row stays reachable.
+    The grid goes on the LEFT (item 50: the lamps are what this view is FOR on
+    a title with no artwork; the switch list is what scrolls).
+    """
+
+    kind = "schematic"
+
+    def __init__(self, ctl, switches):
+        self.ctl = ctl
+        self.switches = switches
+        self.last = None
+        # ★ SAY HOW MANY OF THEM THIS BUILD CAN ACTUALLY WORK (2026-09-08):
+        # ids past padsw.MAX_ID are positions in the device array, not
+        # addresses this rig has (SwitchWatch.addressable()).
+        dead = sum(1 for sw in switches
+                   if not (0 <= sw["id"] < padsw.MAX_ID))
+        note = ("  - click a row to close that switch" if not dead else
+                "  - %d of them cannot be read or clicked on this build "
+                "(their ids are past the %d this rig addresses)"
+                % (dead, padsw.MAX_ID))
+        self.bar = "%s: %d switches, no playfield artwork in this title%s" % (
+            GAME, len(switches), note)
+        self.sw = SwitchWatch(switches,
+                              every=round(1000.0 / POLL_MS / max(1.0, SW_HZ)))
+        self._dot_drawn = {}
+        self.trough = None
+        if self.sw.positions:
+            # the strip is the FALLBACK: the key panel takes it over
+            self.trough = TroughDots(self.sw.positions, self.sw.how,
+                                     clickable=True)
+        by_node = {}
+        for sw in switches:
+            by_node.setdefault(sw["node"], []).append(sw)
+        self.entries = []
+        for node in sorted(by_node):
+            self.entries.append({"hdr": node})
+            for sw in sorted(by_node[node], key=lambda s: s["bit"]):
+                live = 0 <= sw["id"] < padsw.MAX_ID
+                self.entries.append({
+                    "id": sw["id"], "name": sw["name"][:26], "live": live,
+                    "tip": ("SWITCH  %s\n"
+                            "id %d   num %d   node %d  bit %d\n"
+                            "hold to keep it closed\n"
+                            "right-hold to RIP it (spinners)"
+                            % (sw["name"], sw["id"], sw.get("num", -1),
+                               sw["node"], sw["bit"]))})
+        self.leds = LedGrid(load_led_names())
+        self.led_lit, self.led_total = 0, 0
+        self._grid_gen = 0
+        self.status = ""
+
+    def spec(self):
+        return {"kind": "schematic", "bar": self.bar, "entries": self.entries,
+                "grid": self.leds.spec(),
+                "trough": self.trough.spec() if (
+                    self.trough is not None and self.trough.clickable)
+                else None}
+
+    def dyn(self):
+        return {"sw": {str(s): v for s, v in self._dot_drawn.items()},
+                "grid": self.leds.dyn(),
+                "trough": self.trough.dyn() if (
+                    self.trough is not None and self.trough.clickable)
+                else None}
+
+    def make_trough(self):
+        """The strip, when the key panel that had taken the trough over goes
+        (padbinds withdrawn mid-run): the balls must not lose their only
+        control on a title with no artwork."""
+        if self.trough is None and self.sw.positions:
+            self.trough = TroughDots(self.sw.positions, self.sw.how,
+                                     clickable=True)
+
+    def describe(self, kind, k):
+        return ""
+
+    def tick(self, now_mono):
+        try:
+            with open(LED_PATH, "rb") as f:
+                d = f.read(PADLED_READ)
+        except OSError:
+            d = None
+        if emu_gone(self, bool(d)):
+            return None
+        frame = {}
+        self.ctl.poll_switches(self, frame)
+        state_msg = self.ctl.state_status()
+        # ★ THE MAGIC IS NOT THE TEST FOR "IS THERE AN EMULATOR" (item 50):
+        # readable-and-unstamped is a run with no LED data, not no run.
+        if d:
+            lit, total, changes, grew = self.leds.tick(d, time.perf_counter())
+            self.led_lit, self.led_total = lit, total
+            if grew:
+                frame["layout"] = True
+            if changes:
+                frame["grid"] = changes
+        if not d:
+            status = state_msg or "no emulator (dump/padled not readable)"
+        elif struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
+            status = (state_msg
+                      or " emulator up   NO LED DATA on this title: the shim"
+                         " has decoded no LED writes at all   %s"
+                         % (self.sw.balls.text() if self.sw.positions
+                            else "no trough switches identified"))
+        else:
+            status = (state_msg
+                      or " emulator up   %d of %d LEDs lit   %d LED writes"
+                         " decoded   %d coils addressed   %s"
+                         % (self.led_lit, self.led_total,
+                            struct.unpack_from("<I", d, 12)[0],
+                            struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
+                            if len(d) >= PADLED_READ else 0,
+                            self.sw.balls.text() if self.sw.positions
+                            else "no trough switches identified"))
+        if status != self.status:
+            self.status = status
+            frame["status"] = status
+        return frame
+
+
+
+WAITING_TEXT = ("No tables for %s yet - WAITING for them.\n\n"
+                "They are built from the title's own files, not\n"
+                "shipped: mktables.py reads the game binary for\n"
+                "positions and the run log for the switch list.\n\n"
+                "  tables : %s\n"
+                "  game   : %s\n\n"
+                "The switch list only exists once the game has\n"
+                "published its table, a few seconds into a run, so\n"
+                "the first start of a title lands here first. This\n"
+                "window picks them up by itself when they arrive.\n\n"
+                "A boot menu on this card already has the keyboard,\n"
+                "here or in the game window: arrows choose, 1 or\n"
+                "Space boots.")
+
+#: How long a window with no tables keeps looking for them (poll_for_tables'
+#: old timeout): a stat every two seconds costs nothing next to a wasted
+#: run, and the bound stops an abandoned window polling forever.
+TABLES_TIMEOUT_S = 900
+TABLES_EVERY_S = 2.0
+
+
+class Playfield:
+    """The window's one controller: which view, the loop, and the page's
+    actions. ONE SwitchDriver for the life of the window (every view, the key
+    panel, the keyboard fallback and the villain vision's art fetches ride
+    it), ONE key panel, ONE flash slot for "what the last thing you pressed
+    did" - the same single slot the Tk views each kept, for the same reason:
+    two slots would race for one status line with no rule about which won.
+
+    Everything the page can call arrives on server threads and everything
+    the loop does runs on its own thread; `lock` serialises the two, so a
+    model is never read half-updated.
+    """
+
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.host = None
+        self.drv = SwitchDriver()
+        self.view = None
+        self.kind = None
+        self.key_panel = None
+        self.keys = None
+        self.acts_shown = True
+        self._binds_next = time.monotonic() + SWITCH_POLL_S
+        self._binds_mtime = None
+        self._ball_next = 0.0
+        self._ball_status = (None, [])
+        self.holding = None
+        self.ripping = None
+        self.slot_labels = {}
+        self._state_busy = False
+        self._state_msg = None
+        self._stop = threading.Event()
+        self._closed = False
+        self.pos = {}
+        self.lcd = LcdPanel(GAME, on_build=self._open_lcd)
+        self.lcd.drv = self.drv
+        self._wait_deadline = time.time() + TABLES_TIMEOUT_S
+        self._wait_next = time.monotonic() + TABLES_EVERY_S
+        self._build_view()
+        if SAVESTATES:
+            self.slots_refresh()
+
+    # ---- which view --------------------------------------------------------
+    def _build_view(self, rows=None):
+        """ARTWORK (positions) IF THE TITLE HAS A USABLE LAYOUT, THE SWITCH
+        LIST IF IT DOES NOT, and a WAITING page while neither exists yet."""
+        if layout_is_usable():
+            self.view = Field(self)
+        else:
+            rows = rows if rows is not None else load_switch_list()
+            if rows:
+                self.view = Schematic(self, rows)
+            else:
+                self.view = None
+                self.kind = "waiting"
+                # ★ THE BOOT MENU RUNS BEFORE THE GAME, so on a multi-image
+                # card's first run this is the window on screen while the menu
+                # is: its buttons go by NAME, which needs no table.
+                self.keys = KeyInput(self, [])
+                return
+        self.kind = self.view.kind
+        self.view.make_trough()
+        self._binds_next = time.monotonic() + SWITCH_POLL_S
+        self.attach_key_panel(self.view)
+        self._binds_mtime = _binds_mtime()
+
+    def swap_in(self, rows):
+        """The tables landed while the WAITING page was up."""
+        if self.keys is not None:
+            self.keys.detach()
+            self.keys = None
+        self._build_view(rows)
+        self.publish("layout")
+
+    # ---- the key panel -----------------------------------------------------
+    def attach_key_panel(self, view):
+        """The panel beside the view, or None - the NORMAL state for the first
+        seconds of a session (padglhost writes padbinds once it is up). The
+        ball controls move in with it, and the bottom action row goes: every
+        action on it has a home on the panel (PAD-134)."""
+        rows = keybinds.load(BINDS_PATH)
+        if not rows:
+            self.key_panel = None
+            self.acts_shown = True
+            if view.trough is None:
+                view.make_trough()
+            return None
+        panel = KeyPanel(rows, self.drv, on_action=self.run_action)
+        if view.trough is not None and view.trough.clickable:
+            view.trough = None
+        self.key_panel = panel
+        if view.sw.positions:
+            view.trough = panel.add_trough(view.sw.positions, view.sw.how)
+        if self.keys is not None:
+            self.keys.close()
+        self.keys = KeyInput(self, rows)
+        self.acts_shown = False
+        return panel
+
+    def poll_switches(self, view, frame):
+        """The paced switch read and everything that hangs off it, for both
+        views: the dot in every switch marker, the trough, the key panel (and
+        its arrival or rebuild when padbinds appears or changes - ★ item 49:
+        padglhost RE-exports once the switch table arrives), the BALLS
+        section. Every change is gated: a still machine costs the read."""
+        if not view.sw.poll():
+            return False
+        ids = ([S["id"] for S in view.sw_rows] if view.kind == "field"
+               else [e["id"] for e in view.entries
+                     if "id" in e and e["live"]])
+        changes = {}
+        for sid in ids:
+            made = view.sw.is_made(sid)
+            if sid in view._dot_drawn and view._dot_drawn[sid] == made:
+                continue
+            view._dot_drawn[sid] = made
+            changes[str(sid)] = made
+        if changes:
+            frame["sw"] = changes
+        if view.trough is not None:
+            on_panel = (self.key_panel is not None
+                        and view.trough is self.key_panel.ball_dots)
+            if view.trough.update(view.sw.closed(),
+                                  dots_caption(view.sw) if on_panel
+                                  else trough_text(view.sw)):
+                if on_panel:
+                    self.key_panel.dirty = True
+                else:
+                    frame["trough"] = view.trough.dyn()
+        if time.monotonic() >= self._binds_next:
+            self._binds_next = time.monotonic() + SWITCH_POLL_S
+            if self.key_panel is None:
+                if self.attach_key_panel(view) is not None:
+                    self._binds_mtime = _binds_mtime()
+                    frame["layout"] = True
+            else:
+                m = _binds_mtime()
+                if m != self._binds_mtime:
+                    self._binds_mtime = m
+                    if self.keys is not None:
+                        self.keys.close()
+                        self.keys = None
+                    self.key_panel.release_held()
+                    view.trough = None
+                    self.key_panel = None
+                    self.attach_key_panel(view)
+                    frame["layout"] = True
+        if self.key_panel is not None:
+            self.key_panel.update(view.sw)
+            if time.monotonic() >= self._ball_next:
+                self._ball_next = time.monotonic() + BALL_POLL_S
+                self._ball_status = read_ball_status()
+            fed, lines = self._ball_status
+            self.key_panel.show_balls(view.sw, fed, lines)
+            if self.key_panel.dirty:
+                self.key_panel.dirty = False
+                frame["panel"] = self.key_panel.dyn()
+        return True
+
+    # ---- helpers and the status line's flash slot ----------------------------
+    def flash(self, text, secs=8.0):
+        """One line over the view's own status, for `secs` (None = until
+        replaced) - the result of the last thing pressed."""
+        self._state_msg = (text, None if secs is None
+                           else time.monotonic() + secs)
+
+    def state_status(self):
+        m = self._state_msg
+        if not m:
+            return None
+        text, until = m
+        if until is not None and time.monotonic() > until:
+            self._state_msg = None
+            return None
+        return text
+
+    def run_helper(self, script, arg=None):
+        """Run one helper and put ITS OWN ANSWER in the status line
+        (helper_message() carries why the answer used to be dropped). A
+        plunge.py reply also lands in the BALLS note, beside the feeder's
+        lines and under the button that asked (PAD-134)."""
+        def done(r):
+            text = helper_message(script, r)
+            with self.lock:
+                self.flash(text)
+                if script == "plunge.py" and self.key_panel is not None:
+                    self.key_panel.ball_say("%s: %s" % (arg, text)
+                                            if arg else text)
+        if arg is None:
+            self.drv.run_script(script, done=done)
+        else:
+            self.drv.run_script(script, arg, done=done)
+
+    def run_action(self, script, arg=None):
+        self.run_helper(script, arg)
+
+    def run_plunge(self, what):
+        self.run_helper("plunge.py", what)
+
+    # ---- save states ---------------------------------------------------------
+    def slot_values(self):
+        vals = []
+        for i, sid in enumerate(SLOT_IDS):
+            label = self.slot_labels.get(sid)
+            if label is None:
+                vals.append("%d · (empty)" % (i + 1))
+            else:
+                vals.append("%d · %s" % (i + 1, label or "unnamed"))
+        return vals
+
+    def slots_refresh(self):
+        def work():
+            info = state_slots()
+            with self.lock:
+                self.slot_labels = {s: info[s] for s in info}
+            self.publish("slots", {"values": self.slot_values(),
+                                   "labels": self.slot_labels,
+                                   "busy": self._state_busy})
+        threading.Thread(target=work, daemon=True).start()
+
+    def run_state(self, script, slot, label=None):
+        """One at a time, off every other thread that matters: a save dumps
+        ~500 MB and a load is a criu restore, so it must never sit on the
+        SwitchDriver queue behind a held flipper's release."""
+        if self._state_busy:
+            return False
+        self._state_busy = True
+        verb = "saving" if script.startswith("save") else "loading"
+        self.flash("%s state..." % verb, None)
+        self.publish("slots", {"values": self.slot_values(),
+                               "labels": self.slot_labels, "busy": True})
+
+        def work():
+            r = state_run(script, slot, label)
+            with self.lock:
+                self._state_busy = False
+                self.flash(state_reply(script, r))
+            self.slots_refresh()
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    # ---- the loop ------------------------------------------------------------
+    def publish(self, etype, data=None):
+        if self.host is not None:
+            self.host.publish(etype, data)
+
+    def start(self):
+        threading.Thread(target=self._loop, name="playfield-loop",
+                         daemon=True).start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _loop(self):
+        """PACED, not slept: the work is subtracted from the frame, so the
+        START-to-START interval is the target (60 fps on the artwork view,
+        POLL_MS on the schematic and the waiting page)."""
+        while not self._stop.is_set():
+            t0 = time.perf_counter()
+            with self.lock:
+                try:
+                    self._tick()
+                except Exception:                           # noqa: BLE001
+                    # one surprise costs one frame, never the window
+                    import traceback
+                    traceback.print_exc()
+            period = FRAME_MS if self.kind == "field" else POLL_MS
+            spent = (time.perf_counter() - t0) * 1000.0
+            self._stop.wait(max(0.001, (period - spent) / 1000.0))
+
+    def _tick(self):
+        now = time.monotonic()
+        if self.kind == "waiting":
+            if (now >= self._wait_next
+                    and time.time() < self._wait_deadline):
+                self._wait_next = now + TABLES_EVERY_S
+                rows = load_switch_list()
+                if rows:
+                    self.swap_in(rows)
+        elif self.view is not None:
+            frame = self.view.tick(now)
+            if frame is None:
+                self.gone()
+                return
+            if frame.pop("layout", False):
+                self.publish("layout")
+            if frame:
+                self.publish("frame", frame)
+        self.lcd.poll()
+        if self.lcd.dirty:
+            self.lcd.dirty = False
+            self.publish("lcd", self.lcd.dyn())
+
+    # ---- windows ---------------------------------------------------------------
+    def window_spec(self):
+        """The main window's first size and place. The artwork fits the
+        screen's height like the Tk window's pick_scale (PAD_PF_SCALE still
+        overrides), and the page rescales it to whatever the window becomes."""
+        sw_, sh_ = pfweb.screen_size()
+        panel_w = 340 if keybinds.load(BINDS_PATH) else 0
+        if self.kind == "field":
+            bw, bh = self.view.base
+            env = os.environ.get("PAD_PF_SCALE")
+            try:
+                scale = max(1.0, float(env)) if env else None
+            except ValueError:
+                scale = None
+            if scale is None:
+                scale = max(1.0, (sh_ - 170) / float(bh))
+                scale = min(scale, max(0.5, (sw_ - 80 - panel_w) / float(bw)))
+            w = int(bw * scale) + panel_w + 16
+            h = int(bh * scale) + 70
+        elif self.kind == "schematic":
+            w = min(sw_ - 160, 1500)
+            h = sh_ - 110
+        else:
+            w, h = 720, 620
+        st = load_state()
+        pos = st.get("playfield_pos")
+        spec = {"page": "main", "title": WINDOW_TITLE, "width": w,
+                "height": min(h, sh_ - 20), "min_size": (420, 360)}
+        if pos and _onscreen(sw_, sh_, *pos):
+            spec["x"], spec["y"] = pos
+        return spec
+
+    def _open_lcd(self):
+        spec = self.lcd.spec()
+        w, h = spec["size"]
+        win = {"page": "lcd", "title": spec["title"], "width": w + 24,
+               "height": h + spec["th"] + 118, "fixed": True,
+               "min_size": (200, 160)}
+        sw_, sh_ = pfweb.screen_size()
+        pos = load_state().get("villain_pos")
+        if pos and _onscreen(sw_, sh_, *pos):
+            win["x"], win["y"] = pos
+        if self.host is not None:
+            self.host.open_window("lcd", win, on_close=self._lcd_closed)
+
+    def _lcd_closed(self):
+        with self.lock:
+            self.save_state()
+            self.lcd.hide()
+
+    def save_state(self):
+        """Where the windows were, so they open there next time. Position only
+        - the artwork is sized from the screen, and a stale size would clip
+        it after a resolution change."""
+        try:
+            st = load_state()
+            for name, key in (("main", "playfield_pos"),
+                              ("lcd", "villain_pos")):
+                p = None
+                if self.host is not None:
+                    p = self.host.geometry(name)
+                p = p or self.pos.get(name)
+                if p:
+                    st[key] = [int(p[0]), int(p[1])]
+            with open(STATE, "w") as f:
+                json.dump(st, f, indent=1)
+        except Exception:                                   # noqa: BLE001
+            pass
+
+    def gone(self):
+        """The run ended (its LED block went): save first - leaving with the
+        run is the COMMON way this window closes - then close everything."""
+        self.save_state()
+        self.publish("close")
+        self._stop.set()
+        if self.host is not None:
+            threading.Thread(target=self.host.quit, daemon=True).start()
+
+    def bye(self):
+        """The window is closing, whoever closed it. OPEN ANYTHING STILL HELD
+        BEFORE THE PROCESS GOES: nothing on this side would exist any more to
+        clear a switch left made, and the game would see it stuck for the rest
+        of the run."""
+        if self._closed:
+            return
+        self._closed = True
+        with self.lock:
+            self._stop.set()
+            if self.holding is not None:
+                self.drv.release(self.holding)
+                self.holding = None
+            if self.ripping is not None:
+                self.drv.spin(self.ripping, False)
+                self.ripping = None
+            if self.key_panel is not None:
+                self.key_panel.release_held()
+            if self.keys is not None:
+                self.keys.release_all()
+                self.keys.close()
+            self.save_state()
+        self.drv.release_all()
+        self.publish("close")
+
+    # ---- what the page asks --------------------------------------------------
+    def state(self, page):
+        with self.lock:
+            if page == "lcd":
+                return {"lcd": self.lcd.spec(), "dyn": self.lcd.dyn()}
+            st = {"title": WINDOW_TITLE, "game": GAME, "kind": self.kind,
+                  "savestates": SAVESTATES, "slots": self.slot_values(),
+                  "state_busy": self._state_busy,
+                  "acts": ([[i, a[0]] for i, a in enumerate(WINDOW_ACTIONS)]
+                           if self.acts_shown and self.view is not None
+                           else []),
+                  "panel": ({"spec": self.key_panel.spec(),
+                             "dyn": self.key_panel.dyn()}
+                            if self.key_panel is not None else None)}
+            if self.kind == "waiting":
+                st["waiting"] = WAITING_TEXT % (GAME, TDIR,
+                                                gameinfo.game_dir(GAME))
+                st["status"] = ""
+            else:
+                st["view"] = self.view.spec()
+                st["dyn"] = self.view.dyn()
+                st["status"] = self.view.status
+            return st
+
+    def file(self, name):
+        if name == "art" and isinstance(self.view, Field) and self.view.art:
+            return self.view.art
+        return None
+
+    def blob(self, key):
+        return BLOBS.get(key)
+
+    def api(self, m, a):
+        fn = getattr(self, "api_" + str(m), None)
+        if fn is None:
+            raise ValueError("no such call: %s" % m)
+        with self.lock:
+            return fn(*a)
+
+    # switches on the artwork / schematic rows -- press is held until the
+    # page's release, and the release opens what was HELD (a drag off the
+    # marker before letting go must not leave the switch made)
+    def api_hold(self, sw_id):
+        if self.holding is not None:
+            self.drv.release(self.holding)
+        self.holding = int(sw_id)
+        self.drv.press(self.holding)
+        return True
+
+    def api_unhold(self):
+        if self.holding is None:
+            return False
+        sw_id, self.holding = self.holding, None
+        self.drv.release(sw_id)
+        return True
+
+    def api_rip(self, sw_id, on):
+        """Right-hold RIPS a switch (item 26): the shim alternates it at the
+        game's own scan rate for as long as the button is down."""
+        if on:
+            if self.ripping is not None:
+                self.drv.spin(self.ripping, False)
+            self.ripping = int(sw_id)
+            self.drv.spin(self.ripping, True)
+        elif self.ripping is not None:
+            self.drv.spin(self.ripping, False)
+            self.ripping = None
+        return True
+
+    def api_coil(self, k):
+        if not isinstance(self.view, Field):
+            return None
+        sw = self.view.coil_down(int(k))
+        if sw is not None:
+            self.api_hold(sw)
+        return sw
+
+    def api_tip(self, kind, k):
+        if self.view is None:
+            return ""
+        try:
+            return self.view.describe(kind, int(k))
+        except (IndexError, ValueError, KeyError):
+            return ""
+
+    def api_action(self, i):
+        label, script, arg = WINDOW_ACTIONS[int(i)]
+        self.run_action(script, arg)
+        return label
+
+    def api_trough(self, i):
+        """A click on a CLICKABLE trough dot (the fallback strip)."""
+        t = getattr(self.view, "trough", None)
+        if t is None or not t.clickable:
+            return None
+        what = t.click(int(i))
+        self.run_plunge(what)
+        return what
+
+    def api_ball(self, what):
+        if what not in ("plunge", "drain", "reset"):
+            return False
+        # A GREYED DRAIN IS NOTHING, whatever the page thought it showed
+        # (PAD-153: draining before plunging is an endless cycle). The page
+        # disables the button; this is the rule, so a stale page cannot
+        # press through it.
+        if (what == "drain" and self.key_panel is not None
+                and not self.key_panel._drain_live):
+            return False
+        self.run_plunge(what)
+        return True
+
+    def api_svc(self, sw_id, down):
+        if self.key_panel is None:
+            return False
+        if down:
+            self.key_panel.svc_press(int(sw_id))
+        else:
+            self.key_panel.svc_release()
+        return True
+
+    def api_row(self, sw_id, down):
+        if self.key_panel is None:
+            return False
+        if down:
+            self.key_panel.row_press(int(sw_id))
+        else:
+            self.key_panel.row_release()
+        return True
+
+    def api_door(self):
+        if self.key_panel is not None:
+            self.key_panel.door_click()
+        return True
+
+    def api_clear_alerts(self):
+        label, script, arg = next(a for a in WINDOW_ACTIONS
+                                  if a[1] == "swexercise.py")
+        self.run_action(script, arg)
+        return True
+
+    def api_key(self, code, key, down):
+        sym = code_to_keysym(code, key)
+        if sym is None or self.keys is None:
+            return False
+        return self.keys.key(sym, bool(down))
+
+    def api_blur(self):
+        if self.keys is not None:
+            self.keys.release_all()
+        self.api_unhold()
+        if self.ripping is not None:
+            self.api_rip(self.ripping, False)
+        if self.key_panel is not None:
+            self.key_panel.release_held()
+        return True
+
+    def api_save(self, idx, label):
+        if not SAVESTATES:
+            return False
+        slot = SLOT_IDS[int(idx)]
+        return self.run_state("savegame.sh", slot, clean_label(label) or None)
+
+    def api_load(self, idx):
+        if not SAVESTATES:
+            return False
+        slot = SLOT_IDS[int(idx)]
+        if slot not in self.slot_labels:
+            self.flash("slot %d is empty - nothing to load" % (int(idx) + 1),
+                       5.0)
+            return False
+        return self.run_state("loadgame.sh", slot)
+
+    def api_slots(self):
+        self.slots_refresh()
+        return self.slot_values()
+
+    def api_geom(self, page, x, y):
+        self.pos["lcd" if page == "lcd" else "main"] = (int(x), int(y))
+        return True
+
+    def api_lcd_close(self):
+        self.save_state()
+        self.lcd.hide()
+        if self.host is not None:
+            self.host.show_window("lcd", False)
+        return True
+
+
+def _onscreen(sw_, sh_, x, y):
+    """Reject a remembered position that is off every monitor - unplugging a
+    second display must not leave the window at -1800,300 for good."""
+    return -50 <= x <= sw_ - 120 and -20 <= y <= sh_ - 80
 
 
 def main():
     if raise_existing():
-        # SAY SO, because from the outside this is a launch that started and
-        # stopped with no window to show for it, and that is exactly what a
-        # crash looks like. watch.sh keeps the launch's output now
-        # (padplayfield.log) and reports a playfield that did not stay up, so
-        # this line is the difference between "your window is the one already
-        # on screen" and an unexplained failure.
-        #
-        # AND IT IS THE ONLY WAY TO SEE THE STRANDED-WINDOW CASE AT ALL (queue
-        # item 38): a wedged WSLg window keeps its title bar long after there
-        # is anything behind it, so FindWindowW answers about a window nobody
-        # can see and this returns True for a desktop that shows nothing.
-        # print() is a no-op under pythonw.exe with no redirection, and writes
-        # to the run's log when watch.sh launched it.
+        # SAY SO: from outside this is a launch that started and stopped
+        # with no window to show for it, which is what a crash looks like.
         print("playfield: a window called %r already exists, so it was raised "
               "instead of a second one being opened. If nothing came to the "
               "front, that window is a leftover from an earlier run that WSL "
               "can no longer draw - Stop offers the WSL restart that clears "
               "one." % WINDOW_TITLE)
         return
-    root = tk.Tk()
-    root.title(WINDOW_TITLE)
-    # VILLAIN VISION (item 83): the lcdnode's TVs, as their OWN window beside
-    # this one - main owns it because it belongs to the TITLE, not to
-    # whichever view shape the title happens to get. Lazy: no window until
-    # the padlcd block stamps, which only an lcdnode title's shim ever does,
-    # so every other title pays one 48-byte read per poll and shows nothing.
-    # Registered as LCD_PANEL so save_state() records its position.
-    global LCD_PANEL
-    lcd = LCD_PANEL = LcdPanel(root, GAME)
-    lcd.start()
-    # ARTWORK IF THE TITLE HAS IT, THE SWITCH LIST IF IT DOES NOT. Both are
-    # real answers; which one applies is a property of the game, not of this
-    # window. See load_switch_list() for why most titles are the second case.
-    view = None
-    waiting_keys = None         # the keyboard of the "WAITING for tables" state
-    # ARTWORK IF THERE IS ARTWORK AND ANYTHING TO DRAW ON IT.
-    #
-    # THIS USED TO ALSO REQUIRE SWITCH POSITIONS, and that is a different
-    # question from "is there a playfield to show". Switch positions are the
-    # one part of the table set that needs a RUN - the game builds its switch
-    # list on the heap, so the id behind a name only reaches us in the shim's
-    # dump about a minute in - while the artwork, the inserts and the coils all
-    # come straight from the card. Requiring all four meant Jaws, which ships a
-    # playfield drawing and 217 positioned devices, opened its FIRST run
-    # showing the "no tables" label, and only became a playfield on the second.
-    # Inserts and coils are worth looking at on their own.
-    # ★ THE ARTWORK IS NO LONGER THE GATE (item 50). What decides this is
-    # whether the title POSITIONS anything - the picture behind the markers is
-    # a bonus, and requiring it sent james_bond_60th_le, which positions 138
-    # devices, to the switch list. David: "if we can show them positionally
-    # that is ideal... even if we can't show the playfield artwork".
-    if layout_is_usable():
-        view = Field(root)
-    else:
-        rows = load_switch_list()
-        if not rows:
-            waiting = tk.Label(
-                root, padx=20, pady=20, justify="left", font=("Consolas", 10),
-                text=("No tables for %s yet - WAITING for them." '\n\n'
-                      "They are built from the title's own files, not" '\n'
-                      "shipped: mktables.py reads the game binary for" '\n'
-                      "positions and the run log for the switch list." '\n\n'
-                      "  tables : %s" '\n'
-                      "  game   : %s" '\n\n'
-                      "The switch list only exists once the game has" '\n'
-                      "published its table, a few seconds into a run, so" '\n'
-                      "the first start of a title lands here first. This" '\n'
-                      "window now picks them up by itself when they arrive." '\n\n'
-                      "A boot menu on this card already has the keyboard," '\n'
-                      "here or in the game window: arrows choose, 1 or" '\n'
-                      "Space boots.")
-                % (GAME, TDIR, gameinfo.game_dir(GAME)))
-            waiting.pack()
-
-            # ★ THE BOOT MENU RUNS BEFORE THE GAME, so on a multi-image card's
-            # first run THIS is the window on screen while the menu is - and it
-            # had no keyboard at all: every key handler here hangs off a view,
-            # and a view needs the tables. David, 2026-09-19: "the first time
-            # loading a multi image won't let me use arrow keys (or select)
-            # since the virtual playfield isn't initialized yet". The menu's
-            # buttons go by NAME (padsw.h cab[]), which needs no table; the
-            # real view's own KeyInput replaces this one when the tables land.
-            waiting_keys = KeyInput(_RootOnly(root), [])
-
-            # ★ THE TABLES LAND *DURING* THIS RUN, AND THIS WINDOW USED TO MISS
-            # THEM FOR GOOD.
-            #
-            # The switch list cannot be built before a run: the game builds its
-            # switch table on the heap, so the id behind a name only reaches us
-            # as the shim's [sw] dump a few seconds in (mktables.py's own header
-            # says so). watch.sh therefore rebuilds in the background with
-            # --wait while this window is already up. But everything above runs
-            # ONCE, at construction, so the window that opened a few seconds too
-            # early stayed a paragraph of text for the whole session - and the
-            # tables it was describing were sitting on disk the entire time.
-            #
-            # David hit exactly that on james_bond_60th_le's first run
-            # (2026-08-14): "without the switches here I can't test it". The
-            # tables were complete; only this window did not know.
-            #
-            # So poll. A stat every two seconds costs nothing next to a wasted
-            # run, and the swap is the same two branches as the construction
-            # above, so a title that has artwork still gets the artwork view.
-            def _swap_in(fresh):
-                nonlocal view, waiting_keys
-                # the placeholder's keyboard goes first: the view attaches its
-                # own KeyInput (with the title's rows AND the same buttons by
-                # name) as soon as padbinds has rows, and two would both act
-                waiting_keys.detach()
-                waiting_keys = None
-                waiting.destroy()
-                if layout_is_usable():
-                    view = Field(root)
-                else:
-                    view = Schematic(root, fresh)
-                lcd.drv = view.drv      # the panel's art fetches ride it
-
-            poll_for_tables(root, load_switch_list, _swap_in)
-        else:
-            view = Schematic(root, rows)
-    if view is not None:
-        lcd.drv = view.drv              # the panel's art fetches ride it
-    pos = load_state().get("playfield_pos")
-    if pos and _onscreen(root, *pos):
-        root.geometry("+%d+%d" % (pos[0], pos[1]))
-
-    def bye():
-        # OPEN ANYTHING STILL HELD BEFORE THE PROCESS GOES. Closing the window
-        # mid-hold otherwise leaves scr_held[] made, and nothing on this side
-        # exists any more to clear it - the game would see a stuck switch for
-        # the rest of the run. The keyboard pipe's close is its EOF, and the
-        # helper releases its own held set on the other side (swkeys.py).
-        if view is not None:
-            view.drv.release_all()
-            if getattr(view, "keys", None) is not None:
-                view.keys.close()
-        if waiting_keys is not None:
-            waiting_keys.close()
-        save_state(root)
-        root.destroy()
-
-    root.protocol("WM_DELETE_WINDOW", bye)
-    root.mainloop()
+    ctl = Playfield()
+    host = pfweb.WebHost(os.path.join(HERE, "pfpage"), ctl, title=WINDOW_TITLE)
+    ctl.host = host
+    host.start()
+    ctl.start()
+    try:
+        host.run(ctl.window_spec(), on_close=ctl.bye)
+    finally:
+        ctl.bye()
+        ctl.stop()
+        host.stop()
 
 
 if __name__ == "__main__":
-    # The finer timer is asked for around the WHOLE session and released after
-    # it, rather than per frame: timeBeginPeriod is a process-wide request with
-    # a reference count, and pairing it per tick would be 30 syscalls a second
-    # to say the same thing. try/finally so a crash still hands the system tick
-    # back - leaving it raised is a battery-life bug in every other process.
+    # The finer timer is asked for around the WHOLE session and released
+    # after it: Windows' default 15.6 ms tick makes the 60 fps loop
+    # unreachable (fine_timers() has the measurement).
     fine = fine_timers()
     try:
         main()

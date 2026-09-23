@@ -455,7 +455,7 @@ def test_collect_scenes_groups_manifests(tmp_path):
         {"path": "/g/scene2/scene.radium", "original": "WORLD",
          "replacement": ""},
     ])
-    from pinball_decryptor.gui.scene_browser import collect_scenes
+    from pinball_decryptor.webui.text_scenes import collect_scenes
     scenes = collect_scenes(str(tmp_path))
     s1 = scenes["/g/scene1"]
     assert [r for _o, r in s1["images"]] == [
@@ -506,7 +506,7 @@ def test_scene_font_size_speaks_the_font_lists_unit(tmp_path):
         "/g/small/scene.radium": {"stage": [10, 10, 60.0], "sprites": [],
                                   "texts": [{"font": "tf", "font_px": 40}]},
     }), encoding="utf-8")
-    from pinball_decryptor.gui.scene_browser import collect_scenes
+    from pinball_decryptor.webui.text_scenes import collect_scenes
     scenes = collect_scenes(str(tmp_path))
     assert scenes["/g/big"]["fonts"] == {"tf": ("Big", 94)}
     assert scenes["/g/small"]["fonts"] == {"tf": ("Big", 45)}

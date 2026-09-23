@@ -33,6 +33,10 @@ def _quiet(project, name, **kw):
     return MP.new_mode(project, name, MP.ModeSpec(name=name, **kw))
 
 
+#: The keyword arguments the last stand-in build was handed (progress, cancel, sound_ok).
+HANDED = {}
+
+
 def _writes_builder(monkeypatch, calls, files=None, end_sound=None, own_sounds=None):
     """Stand in for :func:`mode_write.build_tryit_set` and record what Try it handed it. It lays
     out what the real one does, from the project's own modes matched to its card: the set's
@@ -41,8 +45,11 @@ def _writes_builder(monkeypatch, calls, files=None, end_sound=None, own_sounds=N
     port and each slot's mode file."""
     from pinball_decryptor.plugins.stern import mode_write as MW
 
-    def build(project, card, base, log=None, progress=None, cancel=None, label=None):
+    def build(project, card, base, log=None, progress=None, cancel=None, label=None,
+              sound_ok=None):
         calls.append((project, card, base))
+        HANDED.clear()
+        HANDED.update(progress=progress, cancel=cancel, sound_ok=sound_ok)
         modes = MW.card_modes(project, MW.project_modes(project))
         prof = MP.profile(modes[0][1].title)
         s = os.path.join(base, MW.TRYIT_SET)
@@ -260,6 +267,87 @@ def test_the_title_is_read_from_the_card_itself():
     assert (game_dir, version) == ("godzilla_pro", "1.15.0")
 
 
+class _Entry:
+    def __init__(self, name, is_dir=False):
+        self.name, self.is_dir = name, is_dir
+
+
+class _Part:
+    def __init__(self, index, size, browsable=True):
+        self.index, self.size, self.browsable = index, size, browsable
+
+
+def _fake_card(monkeypatch, layout):
+    """A stand-in CardImage: *layout* is ``{partition index: (size, {"/": [...], "/spk/index":
+    [...]})}`` of :class:`_Entry` lists, so card_title can be read off a desk."""
+    from pinball_decryptor.plugins.stern import explorer
+
+    class Image:
+        def __init__(self, path):
+            self.path = path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def partitions(self):
+            return [_Part(i, size) for i, (size, _dirs) in layout.items()]
+
+        def list_dir(self, index, path):
+            dirs = layout[index][1]
+            if path not in dirs:
+                raise OSError(path)
+            return dirs[path]
+    monkeypatch.setattr(explorer, "CardImage", Image)
+
+
+def test_card_title_reads_the_index_name_so_a_multi_boot_card_is_its_title(monkeypatch):
+    """The title comes from ``/spk/index/<title>-<version>.sidx``, as probe_card_title and
+    the engine's card_title_index read it. A multi-boot card keeps img1/img2 beside the
+    title's directory; under the old one-directory rule that was "an unknown title" and
+    the title check refused the card the modes were made for."""
+    idx = [_Entry("godzilla_le-1_16_0.sidx"), _Entry("godzilla_le.sidx")]
+    root = [_Entry("godzilla_le", True), _Entry("img1", True), _Entry("img2", True),
+            _Entry("spk", True), _Entry("lost+found", True)]
+    _fake_card(monkeypatch, {3: (10 ** 9, {"/": root, "/spk/index": idx}),
+                             2: (10 ** 6, {"/": [_Entry("etc", True)]})})
+    assert MT.card_title("multi.raw") == ("godzilla_le", "1.16.0", 3)
+    MT.check_title(_le(), "godzilla_le", "1.16.0")
+    # no index name parses: the one title directory decides, as before, with the version
+    # the file name gives (none here)
+    _fake_card(monkeypatch, {3: (10 ** 9, {"/": [_Entry("jaws_le", True), _Entry("spk", True)],
+                                           "/spk/index": [_Entry("jaws.sidx")]})})
+    assert MT.card_title("renamed.raw") == ("jaws_le", "", 3)
+    _fake_card(monkeypatch, {3: (10 ** 9, {"/": [_Entry("a", True), _Entry("b", True)],
+                                           "/spk/index": []})})
+    assert MT.card_title("odd.raw") == ("", "", 3)
+    with pytest.raises(MT.TryItError, match="no games partition"):
+        _fake_card(monkeypatch, {2: (10 ** 6, {"/": []})})
+        MT.card_title("blank.raw")
+
+
+def test_build_set_hands_progress_cancel_and_the_sound_gate_to_writes_builder(tmp_path, monkeypatch):
+    """The tab's bar and its Cancel reach the engine's checkpoints through the one builder;
+    sound_ok goes along only when the caller set it (the builder's default is the gate)."""
+    project = str(tmp_path / "proj")
+    os.makedirs(project)
+    _quiet(project, "Alpha")
+    monkeypatch.setattr(MT, "card_title", lambda c: ("godzilla_pro", "1.15.0", 2))
+    calls = []
+    _writes_builder(monkeypatch, calls)
+    progress, cancel = (lambda d, t, s: None), (lambda: False)
+    MT.build_set(project, _card(tmp_path), base=str(tmp_path / "try"), progress=progress,
+                 cancel=cancel, sound_ok=False)
+    assert HANDED == {"progress": progress, "cancel": cancel, "sound_ok": False}
+    MT.build_set(project, _card(tmp_path), base=str(tmp_path / "try"))
+    assert HANDED == {"progress": None, "cancel": None, "sound_ok": None}
+    assert calls[0][1] == calls[1][1] == _card(tmp_path)          # the card to BOOT, unchanged
+    with pytest.raises(MT.TryItError, match="Extract tab"):
+        MT.build_set("", _card(tmp_path), base=str(tmp_path / "try"))
+
+
 def test_code_mode_text_renames_everything_the_template_names():
     template = open(os.path.join(MR.sdk_dir(), "template_mode.c"), encoding="utf-8").read()
     out = MT.code_mode_text(template, "Blitz Rush", "blitz_rush")
@@ -278,6 +366,143 @@ def test_new_code_mode_never_overwrites(tmp_path):
     slug2, path2 = MT.new_code_mode(str(tmp_path), "Blitz")
     assert (slug, slug2) == ("blitz", "blitz_2") and os.path.isfile(path) and os.path.isfile(path2)
     assert MT.code_mode_sources(str(tmp_path)) == [("blitz", path), ("blitz_2", path2)]
+
+
+def test_a_new_code_mode_gets_a_default_assets_file_that_keeps_the_compile_only_path(tmp_path, monkeypatch):
+    """A fresh template carries nothing of its own yet, so its assets.json names it and leaves
+    has_assets() False: Try it compiles it in without going through Write's set."""
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    project = str(tmp_path)
+    slug, _path = MT.new_code_mode(project, 'Blitz "Rush"')
+    assets = os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)
+    assert os.path.isfile(assets)
+    spec = CM.load(project, slug)
+    assert spec.name == "Blitz 'Rush'" and not spec.has_assets() and spec.screen is False
+    assert [s for s, _c in CM.list_code(project)] == [slug]
+    assert MT.code_modes_with_assets(project) == []
+
+    # the write is checked by reading it back: a file that does not load is said, by name
+    def refuse(project, slug):
+        raise ValueError("bad")
+    monkeypatch.setattr(CM, "load", refuse)
+    with pytest.raises(MT.TryItError, match="assets.json"):
+        MT.new_code_mode(project, "Other")
+
+
+def test_list_all_puts_the_form_modes_first_then_the_code_modes(tmp_path):
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    project = str(tmp_path / "proj")
+    os.makedirs(project)
+    assert MT.list_all(project) == [] and MT.list_all("") == []
+    _quiet(project, "Zeta")
+    _quiet(project, "Alpha")
+    MT.new_code_mode(project, "Blitz")                              # named by its assets.json
+    named = os.path.join(MP.mode_folder(project, "aaa"), "aaa.c")   # by its MODE_NAME define
+    os.makedirs(os.path.dirname(named))
+    open(named, "w").write('#define MODE_NAME "TRIPLE A"\n')
+    bare = os.path.join(MP.mode_folder(project, "zzz"), "zzz.c")    # by its folder
+    os.makedirs(os.path.dirname(bare))
+    open(bare, "w").write("/* no name */\n")
+    broken = MP.mode_folder(project, "gone")                        # a mode.json that does not load
+    os.makedirs(broken)
+    open(os.path.join(broken, MP.MODE_FILE), "w").write("{not json")
+    assert MT.list_all(project) == [("alpha", "form", "Alpha"), ("zeta", "form", "Zeta"),
+                                    ("aaa", "code", "TRIPLE A"), ("blitz", "code", "Blitz"),
+                                    ("zzz", "code", "ZZZ")]
+    # a code mode whose assets.json does not load is still listed, from its C file
+    open(os.path.join(MP.mode_folder(project, "blitz"), CM.ASSETS_FILE), "w").write("{not json")
+    assert ("blitz", "code", "Blitz") in MT.list_all(project)
+
+
+def test_duplicate_code_mode_builds_a_distinct_trigger_name(tmp_path):
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    project = str(tmp_path)
+    slug, path = MT.new_code_mode(project, "Blitz")
+    folder = MP.mode_folder(project, slug)
+    open(os.path.join(folder, "music.wav"), "wb").write(b"RIFF")   # a file of its own comes along
+    new_slug, new_path = MT.duplicate_code_mode(project, slug)
+    assert (new_slug, new_path) == ("blitz_copy", os.path.join(MP.mode_folder(project, "blitz_copy"),
+                                                              "blitz_copy.c"))
+    assert os.path.isfile(new_path) and os.path.isfile(path)
+    assert not os.path.exists(os.path.join(MP.mode_folder(project, new_slug), "blitz.c"))
+    assert os.path.isfile(os.path.join(MP.mode_folder(project, new_slug), "music.wav"))
+    out = open(new_path, encoding="utf-8").read()
+    assert '#define MODE_NAME        "Blitz COPY"' in out
+    assert '"PadMode_blitz_copy_Screen"' in out
+    assert 'pm_trigger("blitz_copy.start")' in out and 'pm_trigger("blitz_copy.stop")' in out
+    assert "/dump/blitz_copy.start" in out
+    assert "PM_REGISTER(blitz_copy_mode);" in out and "struct pm_mode blitz_copy_mode" in out
+    assert out.startswith("/* blitz_copy.c - ")
+    for gone in ('"blitz.start"', '"blitz.stop"', "PadMode_blitz_Screen", "/dump/blitz.", "blitz_mode"):
+        assert gone not in out, gone
+    assert CM.load(project, new_slug).name == "Blitz COPY" and not CM.load(project, new_slug).has_assets()
+    assert MT.code_mode_sources(project) == [("blitz", path), (new_slug, new_path)]
+    # the original is untouched
+    assert 'pm_trigger("blitz.start")' in open(path, encoding="utf-8").read()
+    # a name of the person's choosing, and never an overwrite
+    again, _p = MT.duplicate_code_mode(project, slug, name="Blitz")
+    assert again == "blitz_2"
+    third, _p = MT.duplicate_code_mode(project, slug)
+    assert third == "blitz_copy_2"
+    with pytest.raises(MT.TryItError, match="no code mode called nope"):
+        MT.duplicate_code_mode(project, "nope")
+
+
+def test_duplicate_code_mode_renames_an_examples_folder_define_and_struct(tmp_path):
+    """The SDK examples name their folder once (#define FOLDER) and their struct after it."""
+    project = str(tmp_path)
+    folder = MP.mode_folder(project, "ghidorah_heads")
+    os.makedirs(folder)
+    src = os.path.join(folder, "ghidorah_heads.c")
+    with open(src, "w", encoding="utf-8", newline="\n") as f:
+        f.write('/* ghidorah_heads.c - KING GHIDORAH: a boss battle.\n'
+                ' *   echo 1 > /dump/ghidorah_heads.start      start now\n */\n'
+                '#include "intricate_kit.h"\n'
+                '#define MODE_NAME          "KING GHIDORAH"\n'
+                '#define FOLDER             "ghidorah_heads"\n'
+                'static const struct pm_mode ghidorah_heads = { .name = MODE_NAME };\n'
+                'PM_REGISTER(ghidorah_heads);\n')
+    open(os.path.join(folder, "intricate_kit.h"), "w").write("/* kit */\n")
+    new_slug, new_path = MT.duplicate_code_mode(project, "ghidorah_heads", name="Ghidorah Two")
+    assert new_slug == "ghidorah_two"
+    out = open(new_path, encoding="utf-8").read()
+    assert out.startswith("/* ghidorah_two.c - KING GHIDORAH")
+    assert "/dump/ghidorah_two.start" in out
+    assert '#define MODE_NAME          "Ghidorah Two"' in out
+    assert '#define FOLDER             "ghidorah_two"' in out
+    assert "struct pm_mode ghidorah_two = " in out and "PM_REGISTER(ghidorah_two);" in out
+    assert "ghidorah_heads" not in out
+    assert os.path.isfile(os.path.join(MP.mode_folder(project, new_slug), "intricate_kit.h"))
+    # no assets.json to start with means none is invented: the name lives in the define
+    assert not os.path.exists(os.path.join(MP.mode_folder(project, new_slug), "assets.json"))
+    assert ("ghidorah_two", "code", "Ghidorah Two") in MT.list_all(project)
+
+
+def test_delete_code_mode_removes_only_a_code_mode_folder_under_modes(tmp_path):
+    project = str(tmp_path / "proj")
+    os.makedirs(project)
+    slug, path = MT.new_code_mode(project, "Blitz")
+    _quiet(project, "Form")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "elsewhere.c").write_text("/* not ours */\n")
+    for bad in ("../elsewhere", str(outside), "", "nope", "form"):
+        with pytest.raises(MT.TryItError):
+            MT.delete_code_mode(project, bad)
+    assert (outside / "elsewhere.c").is_file() and os.path.isdir(MP.mode_folder(project, "form"))
+    MT.delete_code_mode(project, slug)
+    assert not os.path.exists(MP.mode_folder(project, slug)) and not os.path.isfile(path)
+    assert [s for s, _k, _n in MT.list_all(project)] == ["form"]
+
+
+def test_code_trigger_names_are_what_tryit_sh_accepts():
+    assert MT.code_trigger_name("blitz_2") and MT.code_trigger_name("x9")
+    for bad in ("", "Blitz", "blitz rush", "blitz-rush", "blitz.start", "../x"):
+        assert not MT.code_trigger_name(bad), bad
+    codes = [("blitz", "/p/modes/blitz/blitz.c"), ("Made-By-Hand", "/p/modes/Made-By-Hand/Made-By-Hand.c")]
+    assert MT.unreachable_code_modes(codes) == ["Made-By-Hand"]
+    assert MT.unreachable_code_modes(["ok", "not ok"]) == ["not ok"]
+    assert MT.unreachable_code_modes([]) == [] and MT.unreachable_code_modes(None) == []
 
 
 def _bash():
@@ -581,3 +806,103 @@ def test_tryit_sh_install_names_a_root_owned_lib_and_the_fix(tmp_path):
                        text=True, timeout=60)
     assert r.returncode == 0, r.stderr
     assert (root / "lib" / "pad_mode.so").read_bytes() == b"\x7fELF"
+
+
+def _tryit_rig(tmp_path):
+    """A stand-in rootfs for tryit.sh, and a runner over it: (root, run)."""
+    import subprocess
+    script = os.path.join(os.path.dirname(MR.sdk_dir()), "tryit.sh")
+    root = tmp_path / "root"
+    (root / "lib").mkdir(parents=True)
+    (root / "dump").mkdir()
+    env = dict(os.environ, PAD_HOME=str(tmp_path), PAD_ROOT=str(root))
+
+    def run(*args, **extra_env):
+        e = dict(env, **{k: v for k, v in extra_env.items() if v is not None})
+        for k, v in extra_env.items():
+            if v is None:
+                e.pop(k, None)
+        return subprocess.run(["bash", script] + list(args), env=e, capture_output=True,
+                              text=True, timeout=60)
+    return root, run
+
+
+@pytest.mark.skipif(not _bash() or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="the rig script runs under Linux bash, as a user root does not stop")
+def test_tryit_sh_check_asks_the_ownership_question_before_any_build(tmp_path):
+    """``check`` is install's ownership test alone, so the app can ask it in a second
+    BEFORE a minutes-long build: ready is exit 0 and one line, blocked is exit 1 with
+    install's own sentence, and neither writes anything under the rig."""
+    root, run = _tryit_rig(tmp_path)
+    r = run("check")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "[tryit] the rig is ready for the modes"
+    assert os.listdir(root / "dump") == [] and os.listdir(root / "lib") == []
+    os.chmod(root / "lib", 0o555)
+    try:
+        r = run("check")
+    finally:
+        os.chmod(root / "lib", 0o755)
+    assert r.returncode == 1
+    assert "cannot put the modes in the emulator: %s belongs to" % (root / "lib") in r.stderr
+    assert "chown -R" in r.stderr and "ready" not in r.stdout, r.stderr
+    assert os.listdir(root / "dump") == [] and os.listdir(root / "lib") == []
+    # The fix line names the distro when the shell knows it (a machine with two distros
+    # runs a bare `wsl` in the DEFAULT one), and stays the plain form when it does not.
+    os.chmod(root / "dump", 0o555)
+    try:
+        named = run("check", WSL_DISTRO_NAME="PAD-Runtime")
+        plain = run("check", WSL_DISTRO_NAME=None)
+    finally:
+        os.chmod(root / "dump", 0o755)
+    assert named.returncode == 1 and plain.returncode == 1
+    assert "Hand it back with: wsl -d PAD-Runtime -u root chown -R " in named.stderr, named.stderr
+    assert named.stderr.rstrip().endswith(str(root / "dump")), named.stderr
+    assert "Hand it back with: wsl -u root chown -R " in plain.stderr, plain.stderr
+    assert " -d " not in plain.stderr
+
+
+@pytest.mark.skipif(not _bash(), reason="the rig script runs under Linux bash")
+def test_tryit_sh_start_code_touches_the_code_modes_own_trigger(tmp_path):
+    """A mode written in C reads only its own ``/dump/<folder>.start``; ``start-code
+    NAME`` touches exactly that, and a name that is not a plain [a-z0-9_] folder name
+    is refused before anything is written (the rule ``stop`` uses)."""
+    root, run = _tryit_rig(tmp_path)
+    r = run("start-code", "blitz_2")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "[tryit] blitz_2.start"
+    assert os.listdir(root / "dump") == ["blitz_2.start"]
+    os.unlink(root / "dump" / "blitz_2.start")
+    for bad in ("../lib/x", "Blitz", "a b", ""):
+        r = run("start-code", bad)
+        assert r.returncode != 0 and "[a-z0-9_] only" in r.stderr, bad
+        assert os.listdir(root / "dump") == [], bad
+    assert run("start-code").returncode != 0 and os.listdir(root / "dump") == []
+
+
+@pytest.mark.skipif(not _bash(), reason="the rig script runs under Linux bash")
+def test_tryit_sh_push_uses_a_temp_name_per_call(tmp_path):
+    """Two pushes of one slot at once (hot reload beside an install) each copy under
+    their OWN temporary name: both land whole, the slot holds one of them intact, no
+    temp file is left behind, and a push after them leaves the newest."""
+    import subprocess
+    script = os.path.join(os.path.dirname(MR.sdk_dir()), "tryit.sh")
+    root, run = _tryit_rig(tmp_path)
+    env = dict(os.environ, PAD_HOME=str(tmp_path), PAD_ROOT=str(root))
+    a = tmp_path / "a.cfg"
+    b = tmp_path / "b.cfg"
+    a.write_text("name A\n" * 2000)
+    b.write_text("name B\n" * 2000)
+    procs = [subprocess.Popen(["bash", script, "push", str(f), "1"], env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+             for f in (a, b) * 4]
+    for p in procs:
+        out, err = p.communicate(timeout=60)
+        assert p.returncode == 0, err
+    assert (root / "dump" / "mode1.cfg").read_text() in (a.read_text(), b.read_text())
+    assert os.listdir(root / "dump") == ["mode1.cfg"]
+    c = tmp_path / "c.cfg"
+    c.write_text("name C\n")
+    assert run("push", str(c), "1").returncode == 0
+    assert (root / "dump" / "mode1.cfg").read_text() == "name C\n"
+    assert os.listdir(root / "dump") == ["mode1.cfg"]

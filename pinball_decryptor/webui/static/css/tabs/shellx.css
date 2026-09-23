@@ -1,0 +1,135 @@
+/* The app-wide menus, windows and banners (service ns "shellx"): the
+   Tips panel, the Project menu's windows, Manage disk space, the log's
+   previous-session history, the prerequisites strip, the picker's cards and
+   the gear's dots.  Tokens and components come from app.css. */
+
+/* ------------------------------------------------------------ forms */
+.sx-form { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 14px; align-items: center; }
+.sx-row { display: contents; }
+.sx-row > .lbl { font-size: 13px; }
+.sx-form.kvs { align-items: start; gap: 6px 14px; }
+.sx-form.kvs .sx-row > .lbl { padding-top: 1px; }
+.sx-row.top > .lbl { align-self: start; padding-top: 7px; }
+.sx-val { min-width: 0; }
+.sx-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; font-size: 12.5px; }
+.sx-link:hover { filter: brightness(1.15); }
+.sx-wrap { overflow-wrap: anywhere; white-space: pre-line; }
+.sx-p { margin: 0; color: var(--ink-2); line-height: 1.5; white-space: pre-line; }
+.sx-hr { border: 0; height: 1px; background: var(--line); margin: 4px 0; width: 100%; }
+.sx-tree-preview { font-family: Consolas, Menlo, "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace; }
+.sx-tree-preview, .sx-logview { margin: 0; background: var(--log-bg); color: var(--log-ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5; white-space: pre; overflow: auto; }
+.sx-logview { max-height: min(56vh, 520px); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* the disclaimer shows whole when the window has the room (Tk sized its box
+   to the text "rather than relying on a scrollbar that hides content"); only
+   a short window scrolls the text, the header and buttons stay put */
+.sx-disclaimer { max-height: none; flex: 0 1 auto; min-height: 90px; overflow: auto; padding-right: 6px; }
+.modal.sx-disc { max-height: calc(100vh - 32px); }
+.modal.sx-disc > .bd { overflow: hidden; }
+.scrim.sx-gate { background: var(--bg); }
+/* was @media (max-width: 700px) */
+html.bp-700 .sx-form { grid-template-columns: minmax(0, 1fr); }
+html.bp-700 .sx-row > .lbl { padding-top: 4px; }
+
+/* ------------------------------------------------------ preview list */
+.sx-list { max-height: 180px; overflow: auto; padding: 4px; }
+.sx-list .li { display: flex; align-items: flex-start; gap: 10px; padding: 7px 10px; border: 0; background: transparent; width: 100%; text-align: left; color: var(--ink); font: inherit; font-size: 13.5px; border-radius: 6px; cursor: pointer; }
+.sx-list .li:hover { background: var(--panel-2); }
+.sx-list .li.sel { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
+.sx-list .li svg { margin-top: 2px; }
+
+/* ------------------------------------------------------------- tips */
+.sx-tips { position: fixed; z-index: 45; top: 60px; right: 14px; bottom: 58px; width: min(780px, calc(100vw - 96px)); background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 0; }
+.sx-tips > .hd { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); min-width: 0; }
+.sx-tips-mark { width: 26px; height: 26px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 26px; }
+.sx-tips-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+.sx-toc { border-right: 1px solid var(--line); overflow-y: auto; padding: 8px 6px; display: flex; flex-direction: column; gap: 1px; background: var(--bg-2); border-bottom-left-radius: 12px; }
+.sx-toc button { text-align: left; border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; line-height: 1.3; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.sx-toc button:hover { background: var(--panel); color: var(--ink); }
+.sx-toc .eyebrow { padding: 12px 10px 4px; }
+.sx-tips-text { overflow-y: auto; padding: 8px 20px 24px; position: relative; }
+.sx-tips-text section { padding: 8px 0 4px; }
+.sx-tips-text h3 { font-family: var(--cond); font-size: 15.5px; font-weight: 600; margin: 6px 0 4px; color: var(--ink); }
+.sx-tips-text p { margin: 0; color: var(--ink-2); line-height: 1.55; font-size: 13.5px; white-space: pre-line; }
+.sx-rule { margin: 18px 0 2px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* was @media (max-width: 900px) */
+html.bp-900 .sx-tips { left: 72px; width: auto; }
+html.bp-900 .sx-tips-body { grid-template-columns: minmax(0, 1fr); }
+html.bp-900 .sx-toc { display: none; }
+
+/* ------------------------------------------------------------- disk */
+.sx-usage { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; align-items: center; }
+.sx-bar { height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; border: 1px solid var(--line); }
+.sx-bar i { display: block; height: 100%; background: var(--ink-3); }
+.sx-bar.ok i { background: var(--ok); }
+.sx-bar.warn i { background: var(--warn); }
+.sx-bar.err i { background: var(--err); }
+.sx-tree { max-height: 260px; min-height: 90px; overflow: auto; padding: 0 0 4px; }
+.sx-tree-hd { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 12px; padding: 7px 14px; font-family: var(--cond); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); font-weight: 600; background: var(--panel-2); border-bottom: 1px solid var(--line); position: sticky; top: 0; }
+.sx-tree-hd span:last-child { text-align: right; }
+.sx-tree-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 12px; width: 100%; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; text-align: left; padding: 6px 14px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.sx-tree-row span:last-child { text-align: right; color: var(--ink-2); }
+.sx-tree-row:hover { background: var(--panel-2); }
+.sx-tree-row.sel { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
+.sx-tree-row.lv0 { font-weight: 600; font-family: var(--cond); font-size: 14px; }
+.sx-tree-row.lv1 { padding-left: 32px; }
+.sx-tree-row.lv2 { padding-left: 52px; color: var(--ink-2); }
+/* was @media (max-width: 700px) */
+html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+
+/* --------------------------------------------------- progress (busy) */
+.prog.busy { position: relative; }
+.prog.busy i { position: absolute; width: 30% !important; animation: sx-slide 1.1s ease-in-out infinite; }
+@keyframes sx-slide { 0% { left: -30%; } 100% { left: 100%; } }
+
+/* ---------------------------------------------------------- top bar */
+.sx-gear { position: relative; display: inline-flex; }
+.sx-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--bg-2); pointer-events: none; }
+.sx-dot.upd { top: 2px; right: 2px; background: var(--err); }
+.sx-dot.warn { bottom: 2px; right: 2px; background: var(--warn); }
+
+/* ------------------------------------------------------------ banners */
+.sx-bolt { font-size: 16px; line-height: 1; color: var(--warn); width: 16px; text-align: center; }
+.banner.info.sx-banner-update { background: var(--info-soft); border-bottom-color: var(--info); }
+.banner.warn.sx-banner-stale_source { border-bottom-color: var(--warn); }
+.sx-prereqs { gap: 10px; }
+.sx-prereq-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 300px; min-width: 0; }
+.sx-prereq-chips .chip { cursor: help; }
+
+/* ------------------------------------------------------------ the log */
+.logdrawer .sx-seed .line { opacity: .6; }
+.logdrawer .sx-cut { color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 2px 0; }
+
+/* ----------------------------------------------------------- picker */
+.sx-logo { width: 44px; height: 38px; flex: 0 0 44px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-family: var(--cond); font-weight: 600; font-size: 19px; letter-spacing: .02em; background: var(--panel-3); box-shadow: inset 0 -1px 0 rgba(0,0,0,.2); }
+.sx-logo.long { font-size: 13.5px; }
+.sx-badge { font-family: var(--cond); font-size: 11px; font-weight: 600; letter-spacing: .06em; padding: 1px 7px; border-radius: 4px; color: #fff; background: #546e7a; white-space: nowrap; }
+.sx-badge.beta { background: #b07d00; }
+.mfrcard .sx-unsup { color: var(--ink-3); text-decoration: line-through; opacity: .8; }
+
+/* ------------------------------------------- floating windows (no grab) */
+/* Projects and Relink moved files: Tk's plain Toplevels, so no scrim; drag
+   the title bar, resize from the corner.  Under the modal scrims (50) and
+   the Tips panel (45). */
+.sx-float { position: fixed; z-index: 44; top: 64px; left: 0; right: 0; margin: 0 auto; width: min(1000px, calc(100vw - 32px)); height: min(580px, calc(100vh - 96px)); min-width: min(440px, calc(100vw - 16px)); min-height: 300px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); resize: both; overflow: hidden; background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.sx-float:focus { outline: none; }
+.sx-float.moved { right: auto; margin: 0; }
+.sx-float > .hd { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); cursor: move; user-select: none; flex: 0 0 auto; }
+.sx-float > .hd .h2 { flex: 1 1 auto; font-size: 17px; }
+.sx-float > .bd { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1 1 auto; overflow: auto; }
+.sx-float > .ft { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; flex: 0 0 auto; }
+.sx-float .sx-fill { flex: 1 1 auto; min-height: 140px; }
+.sx-cell { display: block; }
+
+/* --------------------------------------------------------------- menus */
+/* the menus shell.js opens (openShellMenu): a submenu never wider than the
+   window */
+.sx-menuhost .menu .menu { max-width: calc(100vw - 16px); }
+
+/* ------------------------------------------------------ the log (rules) */
+/* the pane pins the reader's row itself (shell.js LogDrawer), so the
+   engines' own scroll anchoring is off: WebKit has none, and two
+   compensations would fight */
+.logdrawer .lines { overflow-anchor: none; position: relative; }
+.logdrawer .lines:focus { outline: none; }
+.logdrawer .lines:focus-visible { outline: 1px solid var(--line-2); outline-offset: -1px; border-radius: 0; }
+.logdrawer a:focus-visible { outline: 1px solid var(--info); }

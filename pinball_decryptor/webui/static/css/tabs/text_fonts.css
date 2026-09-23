@@ -1,0 +1,50 @@
+/* The Fonts window, and the floating tool-window frame it shares with the
+   Scenes window (js/tabs/text_fonts.js loads this itself, so it is styled
+   whichever tab is showing).  Tokens and components from app.css. */
+
+/* ---- the tool-window frame (ToolWindow): floats, never dims the app ---- */
+.toolwin-layer { position: fixed; inset: 0; pointer-events: none; }
+.toolwin { position: absolute; pointer-events: auto; display: flex; flex-direction: column;
+  width: min(1200px, calc(100% - 32px)); height: min(860px, calc(100% - 32px));
+  min-width: min(480px, 100%); min-height: min(320px, 100%); max-width: 100%; max-height: 100%;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow);
+  resize: both; overflow: hidden; }
+.toolwin:focus { outline: none; }
+.toolwin > .hd { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 7px 10px 7px 18px; border-bottom: 1px solid var(--line); cursor: move; user-select: none; background: var(--panel-2); }
+.toolwin > .hd .h2 { flex: 1 1 auto; font-size: 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolwin > .hd .btn { cursor: pointer; }
+.toolwin > .bd { flex: 1 1 auto; min-height: 0; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; overflow: auto; container-type: inline-size; }
+.toolwin > .ft { flex: 0 0 auto; padding: 10px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+/* the status bar's buttons for a window that stepped aside */
+.tool-dock { position: fixed; z-index: 43; display: flex; gap: 6px; }
+.tool-dock .btn { border-color: var(--accent); }
+
+/* ---- the Fonts window ---- */
+.fonts-body { display: grid; grid-template-columns: minmax(300px, 480px) minmax(0, 1fr); gap: 16px; flex: 1 1 auto; min-height: 0; }
+.fonts-left { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.fonts-list { flex: 1 1 auto; min-height: 200px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.fonts-list .tr { padding: 0 10px; gap: 8px; }
+.fonts-scenes { flex: 0 0 112px; height: 112px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 2px 0; }
+.fs-item { padding: 3px 10px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; user-select: none; }
+.fs-item:hover { background: var(--panel-2); }
+.fs-item.sel { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); color: var(--ink); }
+.fonts-right { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.fonts-prow { gap: 8px; row-gap: 6px; }
+.fonts-canvas { flex: 1 1 200px; min-height: 180px; max-height: 320px; overflow: auto; border: 1px solid var(--line-2); border-radius: 8px; padding: 8px; }
+.fonts-canvas img { display: block; image-rendering: pixelated; max-width: none; }
+.fonts-status { min-height: 18px; overflow-wrap: anywhere; }
+.fonts-import { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--panel-2); }
+.fonts-import .row { gap: 8px; row-gap: 6px; }
+.fonts-swatch { width: 34px; height: 24px; border: 1px solid var(--line-2); border-radius: 5px; background: transparent; padding: 1px; cursor: pointer; }
+.fonts-actions { gap: 8px; }
+
+/* a narrow window (the app's, or this one sized down): one column */
+@container (max-width: 860px) {
+  .fonts-body { grid-template-columns: minmax(0, 1fr); }
+  .fonts-list { min-height: 180px; max-height: 260px; }
+}
+/* was @media (max-width: 1020px); kept for engines without container queries */
+html.bp-1020 .fonts-body { grid-template-columns: minmax(0, 1fr); }
+html.bp-1020 .fonts-list { min-height: 180px; max-height: 260px; }
+/* a short app window: the frame fills it */
+html.bph-760 .toolwin { height: calc(100% - 16px); }

@@ -1,0 +1,105 @@
+/* Write tab (js/tabs/write.js, write_dialogs.js).  Tokens and components
+   come from css/app.css; only the tab's own layout lives here. */
+
+.wr-page { gap: 14px; }
+.wr-cols { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; flex: 1 0 auto; }
+.wr-left { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
+.wr-left > .card { flex: 0 0 auto; }
+
+/* Destination */
+.wr-dest { gap: 12px; }
+.wr-kv { grid-template-columns: 130px minmax(0, 1fr); align-items: baseline; gap: 8px 14px; }
+.wr-kv > .k { line-height: 1.4; }
+.wr-orig { display: block; min-width: 0; line-height: 1.5; }
+.wr-path { overflow-wrap: anywhere; min-width: 0; }
+/* the path's last characters and the ⓘ never part (Tk packed the badge
+   right after the path text) */
+.wr-tail { white-space: nowrap; }
+.wr-info { display: inline-flex; vertical-align: -3px; margin-left: 6px; cursor: pointer; }
+.wr-buildpath { overflow-wrap: anywhere; white-space: normal; padding: 6px 10px; line-height: 1.45; }
+/* Change... keeps a button's own height beside a path that wraps */
+.wr-build .row { align-items: flex-start; }
+/* the Tk lines packed under a row: the .checksums warning and BOF's tip under
+   Project Folder (value column), direct mode's notes under Game SSD (full) */
+.wr-under { min-width: 0; }
+.wr-hint { font-style: italic; line-height: 1.45; }
+.wr-wide { grid-column: 1 / -1; min-width: 0; }
+/* a path in a note (the parent-folder suggestion, a mismatch's folder)
+   wraps instead of running out of the card */
+.wr-under .body-text, .wr-wide .body-text, .wr-notes .body-text { overflow-wrap: anywhere; }
+.wr-link { all: unset; cursor: pointer; color: var(--accent); font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.wr-link:hover { text-decoration: underline; }
+.wr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+.wr-badge { font-size: 12.5px; font-style: italic; color: var(--warn); }
+.wr-badge-link { all: unset; font-size: 12.5px; font-style: italic; color: var(--warn); cursor: pointer; text-decoration: underline; }
+.wr-drive { gap: 8px; }
+.wr-version .row { gap: 12px; }
+.wr-build { gap: 4px; }
+.wr-note { min-width: 180px; line-height: 1.35; }
+
+/* Before you build; the direct-mode panels */
+.wr-notes { gap: 8px; }
+.wr-modal-host { display: contents; }
+.wr-panel .body-text { white-space: normal; }
+.wr-panel-hd { all: unset; cursor: pointer; display: flex; gap: 10px; align-items: center; width: 100%; }
+.wr-panel-hd b { flex: 1 1 auto; letter-spacing: .02em; }
+.wr-panel-bd { margin-top: 6px; white-space: pre-line; }
+.wr-install { line-height: 1.5; }
+
+/* Modified Files */
+/* The list scrolls inside its card: its rows never size the page (the
+   body is positioned, so 3 000 rows stay a virtual list), the card fills the
+   height the Destination column leaves, and never drops below a usable size. */
+.wr-files { min-height: 340px; }
+.wr-files > .hd .wr-legend { flex: 1 1 260px; min-width: 0; line-height: 1.35; }
+.wr-files > .bd.wr-files-bd { flex: 1 1 auto; position: relative; min-height: 240px; }
+.wr-files > .bd.wr-files-bd > * { position: absolute; inset: 0; }
+.wr-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.wr-file.mono { font-size: 12.5px; }
+.wr-file b { font-weight: 600; color: var(--ink); }
+.wr-status { display: flex; align-items: center; }
+.wr-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; display: inline-flex; }
+.wr-chip .dot { width: 7px; height: 7px; flex-basis: 7px; }
+.wr-scan { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 40px 16px; color: var(--ink-2); text-align: center; }
+.wr-scan .spin { width: 30px; height: 30px; border-width: 3px; flex-basis: 30px; }
+.wr-scan .msg { font-family: var(--cond); font-size: 18px; font-weight: 600; white-space: pre; }
+
+/* dialogs */
+.wr-sec { display: flex; flex-direction: column; gap: 6px; }
+.wr-ind { margin-left: 24px; }
+.wr-frow { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.wr-frow.top { align-items: start; }
+.wr-frow.top .lbl { padding-top: 6px; }
+.wr-frow > .lbl { font-size: 13px; }
+.wr-frow > .stack { grid-column: 2 / 4; }
+.wr-diag .wr-frow { grid-template-columns: 56px minmax(0, 1fr) auto auto auto; }
+.wr-readout { font-weight: 500; }
+.wr-report { margin: 0; min-height: 260px; max-height: 46vh; overflow: auto; background: var(--log-bg); color: var(--log-ink); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; white-space: pre; font-size: 12px; line-height: 1.5; user-select: text; }
+.wr-info-list { display: flex; flex-direction: column; gap: 14px; }
+.wr-info-hd { font-family: var(--cond); font-weight: 600; font-size: 14px; padding-bottom: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.wr-info-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 12px; padding: 3px 0; font-size: 13px; }
+.wr-info-row .k { color: var(--ink-3); font-family: var(--cond); }
+.wr-info-row .v { overflow-wrap: anywhere; user-select: text; }
+
+/* Responsive by the tab's own width (not the window's), so the global
+   zoom stacks the columns too: 150 % on a 1440 px window is a 960 px page. */
+.wr-body { flex: 1 0 auto; display: flex; flex-direction: column; container-type: inline-size; container-name: wrpage; }
+@container wrpage (max-width: 980px) {
+  .wr-cols { grid-template-columns: minmax(0, 1fr); }
+  .wr-files { min-height: 420px; }
+}
+@container wrpage (max-width: 700px) {
+  .wr-kv { grid-template-columns: 110px minmax(0, 1fr); }
+}
+@container wrpage (max-width: 560px) {
+  .wr-kv { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+}
+/* the dialogs sit outside .wr-body (a container is a containing block for
+   fixed descendants), so they follow the window */
+/* was @media (max-width: 1020px) */
+html.bp-1020 .wr-diag .wr-frow { grid-template-columns: 56px minmax(0, 1fr); }
+html.bp-1020 .wr-diag .wr-frow > .btn { grid-column: 2; justify-self: start; }
+/* was @media (max-width: 640px) */
+html.bp-640 .wr-info-row { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+html.bp-640 .wr-frow { grid-template-columns: minmax(0, 1fr) auto; }
+html.bp-640 .wr-frow > .lbl { grid-column: 1 / 3; }

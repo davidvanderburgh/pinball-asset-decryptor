@@ -1,0 +1,26 @@
+/* Emulate (JJP) - and the pieces the Spike 1 Emulate tab shares (it
+   @imports this sheet).  Tokens and classes from app.css only. */
+
+.emu-page { gap: 14px; }
+/* the page scrolls; nothing on it may shrink under its content (a grid
+   with min-height: 0 in the page's flex column would let the next card
+   ride over it) */
+.emu-page > * { flex: 0 0 auto; }
+.emu-cols { align-items: start; }
+.emu-col { gap: 16px; min-width: 0; }
+.emu-sp { flex: 1 1 auto; }
+.emu-src > .ft { row-gap: 10px; }
+
+/* the live volume knob */
+.emu-vol { gap: 8px; flex: 0 0 auto; }
+.emu-vol input[type=range] { width: 110px; margin: 0; }
+.emu-volv { min-width: 2.2em; text-align: right; font-size: 12px; }
+
+/* the Status card */
+.emu-hint { color: var(--ink-2); font-size: 13px; padding: 8px 10px; border-radius: 6px; background: var(--panel-2); }
+.emu-hint.warn { background: var(--warn-soft); color: var(--ink); }
+.emu-kv { grid-template-columns: 136px minmax(0, 1fr); row-gap: 5px; }
+.emu-kv .v { overflow-wrap: anywhere; }
+
+/* was @media (max-width: 1020px) */
+html.bp-1020 .emu-vol input[type=range] { width: 90px; }

@@ -1,0 +1,92 @@
+/* The Modes tab (static/js/tabs/modes.js): the list, the five-page editor and the pinned
+   Try it footer, in the design's layout (board Modes.html). Tokens and classes from
+   css/app.css only. */
+
+.modes-page { overflow: hidden; gap: 12px; padding-top: 16px; }
+.modes-head .h1 { line-height: 1.2; }
+.modes-sub { margin: 4px 0 0; color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* the body: the list beside the editor, both filling the height left over */
+.modes-body { display: flex; gap: 16px; flex: 1 1 auto; min-height: 0; }
+.modes-list { width: 236px; flex: 0 0 236px; }
+.modes-list > .hd { padding: 10px 12px; min-height: 46px; }
+.modes-list-bd { padding: 6px !important; gap: 0 !important; flex: 1 1 auto; overflow-y: auto; }
+.modes-list .li { min-height: 32px; padding: 6px 10px; }
+.modes-list .li .chip.sm { padding: 0 7px; }
+.modes-list-empty { padding: 10px 8px; }
+.modes-list-ft { flex-direction: column; align-items: flex-start !important; gap: 6px !important; padding: 8px 12px !important; }
+
+.modes-editor { flex: 1 1 auto; min-width: 0; }
+.modes-editor > .hd { padding: 10px 16px; flex-wrap: nowrap; }
+.modes-editor > .hd .h2 { min-width: 0; }
+.modes-editor > .hd .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.modes-editor-bd { gap: 14px !important; padding: 14px 18px 18px !important; flex: 1 1 auto; overflow-y: auto; }
+.modes-empty { justify-content: center; }
+.modes-status { padding: 7px 16px; font-size: 13px; border-bottom: 1px solid var(--line); white-space: pre-line; overflow-wrap: anywhere; }
+.modes-status.warn { background: var(--warn-soft); color: var(--ink); }
+.modes-status.info { background: var(--info-soft); color: var(--ink); }
+
+/* the pages' layout: two columns, each a stack of labelled groups */
+.modes-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 28px; align-items: start; }
+.modes-sec { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.modes-sec-hd { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.modes-sec-hd .lbl { font-size: 13px; color: var(--ink-2); font-weight: 600; }
+.modes-reason { color: var(--warn); line-height: 1.4; overflow-wrap: anywhere; }
+.modes-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; }
+.modes-kv.top { align-items: start; }
+.modes-kv.top > .lbl { padding-top: 6px; }
+.modes-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 0 12px; }
+.modes-shots .chk span { overflow: hidden; text-overflow: ellipsis; }
+.modes-shots .chk { min-width: 0; }
+.modes-points { display: grid; grid-template-columns: max-content minmax(90px, 140px) max-content minmax(90px, 140px); gap: 4px 10px; align-items: center; }
+.modes-points .lbl { max-width: 160px; }
+.field input.num { font-variant-numeric: tabular-nums; }
+
+.modes-swatch { position: relative; display: inline-flex; width: 30px; height: 26px; border-radius: 6px; border: 1px solid var(--line-2); overflow: hidden; cursor: pointer; flex: 0 0 30px; }
+.modes-swatch input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; border: 0; padding: 0; }
+.modes-swatch .chip-c { display: block; width: 100%; height: 100%; }
+.modes-swatch.disabled { opacity: .5; cursor: default; }
+.modes-swatch.disabled input { cursor: default; }
+.modes-swatch:focus-within { box-shadow: 0 0 0 2px var(--accent-soft); border-color: var(--accent-line); }
+
+.modes-preview { width: 100%; max-width: 380px; aspect-ratio: 4 / 1; min-height: 60px; }
+.modes-preview img { width: 100%; height: 100%; object-fit: contain; }
+
+/* the pinned Try it footer */
+.modes-foot { flex: 0 0 auto; position: sticky; bottom: 0; z-index: 3; box-shadow: 0 -8px 16px -12px rgba(0,0,0,.45); }
+.modes-foot-bd { padding: 10px 16px !important; gap: 8px !important; }
+.modes-tryon .lbl { width: 64px; flex: 0 0 64px; }
+.modes-tryrow { flex-wrap: wrap; row-gap: 6px; }
+.modes-tryrow .vsep { height: 24px; align-self: center; background: var(--line-2); }
+.modes-tryrow .chk span { white-space: normal; }
+/* the Try it line wraps, as the Tk label did (wraplength 900): a refusal ends with the
+   command that fixes it, so the whole sentence shows and can be selected and copied */
+.modes-tryline { min-height: 24px; align-items: flex-start; }
+.modes-tryline > .chip { flex: 0 0 auto; }
+.modes-tryline > .mono { line-height: 22px; flex: 0 0 auto; }
+.modes-tryhint { flex: 1 1 260px; min-width: 0; max-width: 520px; text-align: right; line-height: 1.35; }
+.modes-tryline-text { flex: 1 1 200px; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; padding-top: 2px; user-select: text; cursor: text; }
+.modes-bar { flex: 0 1 220px; min-width: 80px; height: 6px; margin-top: 8px; border-radius: 3px; background: var(--panel-2); overflow: hidden; position: relative; }
+.modes-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .2s ease; }
+.modes-bar.busy i { width: 30% !important; position: absolute; animation: slide 1.1s ease-in-out infinite; }
+
+/* dialogs */
+.modes-film { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; align-items: center; }
+.modes-film-frame { width: 320px; height: 180px; max-width: 100%; }
+.modes-stock .tr.changed .c:nth-child(3) { color: var(--accent); font-weight: 500; }
+.modes-stock .tr.readonly { color: var(--ink-3); }
+
+/* smaller windows: the pages go to one column, then the list sits above the editor */
+/* was @media (max-width: 1280px) */
+html.bp-1280 .modes-grid2 { grid-template-columns: minmax(0, 1fr); }
+/* was @media (max-width: 860px) */
+html.bp-860 .modes-page { overflow: auto; }
+html.bp-860 .modes-body { flex-direction: column; flex: 0 0 auto; }
+html.bp-860 .modes-list { width: auto; flex: 0 0 auto; }
+html.bp-860 .modes-list-bd { max-height: 180px; }
+html.bp-860 .modes-editor { min-height: 520px; }
+/* was @media (max-height: 760px) */
+html.bph-760 /* short windows: the page scrolls and the Try it footer stays pinned at its foot */
+  .modes-page { overflow: auto; padding-bottom: 0; }
+html.bph-760 .modes-body { flex: 1 0 400px; }
+html.bph-760 .modes-foot { margin-bottom: 10px; }

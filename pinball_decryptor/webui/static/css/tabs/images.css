@@ -1,0 +1,105 @@
+/* Replace Images tab (js/tabs/images.js).  Built on app.css; only what the
+   image table and the before/after panes need on top of it. */
+
+/* the page is the size container the preview pictures are sized against
+   (cqh), so an open log drawer shrinks them as it shrinks the page */
+.img-page { gap: 12px; container-type: size; }
+/* the card never shrinks below its own content: when the window is short
+   the page scrolls with the card whole, keep row included (Tk's tab
+   scrolled the same way), and when it is tall the list takes the room */
+.img-card { flex: 1 0 auto; }
+.img-card .toolbar .search { flex: 0 1 240px; }
+.img-seg { display: inline-flex; }
+
+/* the table fills what the card has left above the preview: at least five
+   rows, three when the page is very short (a small window with the log
+   open) so the preview's headings and keep-size row still show */
+.img-tbl { --img-tbl-min: clamp(150px, calc(100cqh - 300px), 220px); flex: 1 1 var(--img-tbl-min); min-height: var(--img-tbl-min); }
+.img-tbl .tr { gap: 10px; }
+.img-tbl .tr.img-grow { background: var(--panel-2); }
+.img-tbl .tr.img-grow.sel { background: var(--sel); }
+.img-thcell { display: flex; align-items: center; justify-content: center; overflow: visible !important; }
+
+/* per-row thumbnail: over a checkerboard, so transparency reads as such */
+.img-mini {
+  width: 36px; height: 28px; border-radius: 4px; overflow: hidden; display: inline-flex;
+  align-items: center; justify-content: center; border: 1px solid var(--line);
+  background-color: #999;
+  background-image: linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%);
+  background-size: 8px 8px; background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+.img-mini img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; image-rendering: auto; }
+.img-mini.img-ext {
+  background: var(--panel-3); color: var(--ink-3); font-family: var(--cond); font-size: 10.5px;
+  font-weight: 600; letter-spacing: .04em;
+}
+.img-chev {
+  all: unset; cursor: pointer; width: 26px; height: 26px; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: 5px; color: var(--ink-2);
+}
+.img-chev:hover { background: var(--panel-3); color: var(--ink); }
+.img-chev:focus-visible { outline: 2px solid var(--accent-line); }
+
+.img-name { display: flex; min-width: 0; }
+.img-dir { color: var(--ink-3); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.img-child { padding-left: 14px; }
+.img-base { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.img-grp { display: block; font-weight: 600; color: var(--ink); }
+.img-dim { color: var(--ink-2); }
+.img-stray, .img-stray .img-dir { color: var(--warn); }
+
+/* the Replacement cell is the row's "Choose…" button, as it was in Tk */
+.img-rep {
+  all: unset; box-sizing: border-box; display: block; max-width: 100%; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 0;
+}
+.img-rep:hover { text-decoration: underline; }
+.img-rep:focus-visible { outline: 2px solid var(--accent-line); border-radius: 3px; }
+.img-rep.muted { color: var(--ink-3); }
+.img-picked { color: var(--accent); }
+.img-ondisk { color: var(--info); }
+.img-rep.img-stray { color: var(--warn); }
+.img-keepcell { display: flex; justify-content: center; }
+.img-keep { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; margin: 0; }
+
+/* before / after: one grid, so the two pictures stay level whether or not
+   the "shared by N scenes" note or the keep-size row is showing */
+.card > .ft.img-prev {
+  display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  grid-template-areas: "oh sep rh" "on sep rk" "op sep rp";
+  column-gap: 18px; row-gap: 0; align-items: start; padding: 12px 16px;
+}
+.img-oh { grid-area: oh; }
+.img-rh { grid-area: rh; }
+.img-on { grid-area: on; margin-top: 2px; }
+.img-rk { grid-area: rk; }
+.img-op { grid-area: op; }
+.img-rp { grid-area: rp; }
+.card > .ft.img-prev > .img-vsep { grid-area: sep; align-self: stretch; }
+.img-panehd { min-height: 28px; }
+.img-repname { color: var(--accent); }
+.img-shared { color: var(--warn); }
+/* the keep-size tick sits right under the Replacement heading, so it is on
+   screen whenever the preview is */
+.img-keeprow { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; min-width: 0; }
+.img-keeprow .chk { min-height: 26px; }
+.img-keeprow > .small { line-height: 1.4; padding-bottom: 2px; }
+/* sized against the page's own height (the log drawer included), not the
+   window's */
+.img-pic {
+  height: clamp(90px, calc(30cqh - 70px), 260px); padding: 4px; position: relative; margin-top: 6px;
+}
+.img-pic img { image-rendering: auto; }
+/* the pane is always dark (a screen), in both themes */
+.img-empty { color: #9aa0a6; max-width: 90%; text-align: center; font-family: var(--sans); line-height: 1.45; }
+.img-note { margin: 0 2px; }
+.img-rename { width: 100%; }
+
+/* was @media (max-width: 1020px): the panes stack */
+html.bp-1020 .card > .ft.img-prev {
+  grid-template-columns: minmax(0, 1fr); grid-template-areas: "oh" "on" "op" "rh" "rk" "rp";
+}
+html.bp-1020 .card > .ft.img-prev > .img-vsep { display: none; }
+html.bp-1020 .img-rh { margin-top: 12px; }
+html.bp-1020 .img-pic { height: clamp(80px, calc(22cqh - 40px), 200px); }

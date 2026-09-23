@@ -1,0 +1,125 @@
+/* Emulate (Stern Spike 1).  The shared emulate pieces come from the JJP
+   tab's sheet; the rest is the display and the switch / LED panel (the two
+   Tk pop-out windows: their own windows in the app, cards in a browser). */
+@import url("./emulate_jjp.css");
+
+/* the switch panel's own colours: the Tk window's dark cells, and a light
+   set for the light theme (a black block on a light card read as a hole) */
+:root {
+  --emu-sw-open: #2c3038; --emu-sw-closed: #5adc78; --emu-coil-off: #2c2830; --emu-coil-on: #f0aa3c;
+  --emu-cell-line: #363a42; --emu-dead-bg: #2a2a2a; --emu-dead-ink: #8a8a8a; --emu-dead-line: #3a3a3a;
+}
+:root.light {
+  --emu-sw-open: #dfe1dc; --emu-sw-closed: #3fae5d; --emu-coil-off: #e6e1e8; --emu-coil-on: #e39a24;
+  --emu-cell-line: #c4c7c1; --emu-dead-bg: #e8e8e4; --emu-dead-ink: #8b9196; --emu-dead-line: #cfd1cc;
+}
+
+.emu-split { display: inline-flex; }
+.emu-split > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.emu-split > .btn.icon { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; padding: 0 9px; color: var(--ink-3); }
+
+/* save states */
+.emu-states-row { display: flex; gap: 12px; min-width: 0; }
+.emu-slots { flex: 1 1 auto; height: 150px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; min-width: 0; }
+.emu-slotbtns { flex: 0 0 auto; gap: 6px; }
+.emu-slotbtns .btn { min-width: 92px; }
+.emu-cache { height: 240px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+
+/* the display: black glass, the frame scaled with hard pixel edges */
+.emu-display > .bd.flush { padding: 12px; gap: 10px; }
+.emu-screen { background: #000; border-radius: 8px; border: 1px solid var(--line); min-height: 110px;
+  display: flex; align-items: center; justify-content: center; padding: 10px; outline: none; }
+.emu-screen:focus-visible { box-shadow: 0 0 0 2px var(--accent-soft); border-color: var(--accent-line); }
+.emu-screen img { width: 100%; height: auto; image-rendering: pixelated; display: block; }
+.emu-wait { color: #6a4718; font-family: var(--mono); font-size: 12.5px; }
+.emu-screen.alpha .emu-wait { color: #6a2a20; }
+.emu-readouts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; background: #000;
+  border-radius: 8px; padding: 8px 14px; }
+.emu-readout { display: flex; flex-direction: column; min-width: 0; }
+.emu-readout .big { font-family: var(--mono); font-weight: 500; font-size: 22px; color: #ff4a30; white-space: pre; overflow: hidden; }
+.emu-readout .cap { font-family: var(--cond); font-size: 11px; color: #8a8a8a; letter-spacing: .06em; }
+
+/* the switch / LED panel */
+.emu-switches > .hd { row-gap: 8px; }
+.emu-bar { gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.emu-swbody { display: flex; gap: 16px; align-items: flex-start; outline: none; min-width: 0; }
+.emu-swbody:focus-visible { box-shadow: 0 0 0 2px var(--accent-soft); border-radius: 6px; }
+.emu-kh { display: flex; align-items: baseline; gap: 10px; font-family: var(--mono); font-size: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+.emu-kh b { color: var(--info); font-weight: 600; letter-spacing: .04em; }
+.emu-kh .k { color: var(--info); }
+.emu-kh .muted { font-size: 11px; }
+.emu-swlist-wrap { flex: 1 1 auto; min-width: 0; }
+.emu-swlist { column-width: 230px; column-gap: 18px; }
+.emu-node { break-inside: avoid-column; margin-bottom: 8px; }
+.emu-nodeh { font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding: 2px 6px; letter-spacing: .04em; }
+.emu-sw { display: flex; gap: 8px; width: 100%; align-items: center; border: 0; background: transparent; color: var(--ink);
+  font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius: 4px; cursor: pointer; text-align: left; min-height: 20px; }
+.emu-sw:hover { background: var(--panel-2); }
+.emu-sw .pos { color: var(--info); font-weight: 600; min-width: 40px; text-align: right; flex: 0 0 auto; }
+.emu-sw .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.emu-sw.on, .emu-krow.on { background: var(--ink); color: var(--bg); }
+.emu-sw.on .pos, .emu-krow.on .key, .emu-krow.on .lab { color: var(--bg); }
+
+.emu-grid-wrap { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.emu-gsec { margin-bottom: 12px; }
+.emu-gh { font-family: var(--cond); font-weight: 600; font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
+.emu-grid { display: grid; gap: 3px; align-items: center; width: max-content; }
+.emu-grid .nl { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+.emu-grid .cell { width: 20px; height: 20px; border-radius: 3px; border: 1px solid var(--emu-cell-line); background: var(--emu-sw-open); }
+.emu-grid .cell.sw { cursor: pointer; }
+.emu-grid .cell.sw.on { background: var(--emu-sw-closed); }
+.emu-grid .cell.coil { background: var(--emu-coil-off); }
+.emu-grid .cell.coil.on { background: var(--emu-coil-on); }
+.emu-grid .cell.sw:hover { border-color: var(--accent-line); }
+
+.emu-keys { flex: 0 0 276px; width: 276px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+.emu-krow { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; font-family: var(--mono); font-size: 12px;
+  padding: 1px 4px; border-radius: 4px; }
+.emu-krow .key { color: var(--info); font-weight: 600; text-align: right; }
+.emu-krow.dead { color: var(--ink-3); opacity: .6; }
+.emu-krow.dead .key { color: var(--ink-3); }
+.emu-svc { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.emu-svcb { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.emu-svcb .svc { width: 100%; min-height: 26px; border: 1px solid #444; border-radius: 4px; color: #fff; font-family: var(--mono);
+  font-size: 11px; cursor: pointer; }
+.emu-svcb .svc:hover { filter: brightness(1.15); }
+.emu-svcb .svc.dead { background: var(--emu-dead-bg); color: var(--emu-dead-ink); border-color: var(--emu-dead-line); cursor: default; }
+.emu-svcb .svc.dead:hover { filter: none; }
+.emu-svcb .k { font-family: var(--mono); font-size: 10.5px; color: var(--info); min-height: 14px; }
+.emu-door { display: flex; align-items: center; justify-content: center; position: relative; margin-top: 6px; min-height: 24px;
+  border-radius: 4px; border: 1px solid #444; color: #d8d8d8; font-family: var(--mono); font-size: 11px; cursor: pointer; }
+.emu-door.closed { background: #2e5e2e; }
+.emu-door.open { background: #5e2e2e; }
+.emu-door.dead { background: var(--emu-dead-bg); color: var(--emu-dead-ink); border-color: var(--emu-dead-line); cursor: default; }
+.emu-door .k { position: absolute; right: 8px; color: #7ecbff; }
+.emu-balls { display: flex; gap: 8px; margin-top: 2px; }
+.emu-balls .ball { width: 18px; height: 18px; border-radius: 50%; background: #222; border: 1px solid #555; padding: 0; cursor: pointer; }
+.emu-balls .ball.in { background: #d8d8d8; border-color: #fff; }
+.emu-balls .ball.shooter { background: #7ecbff; border-color: #fff; }
+.emu-balls .ball.none { visibility: hidden; }
+.emu-rdo { font-family: var(--mono); font-size: 12px; min-height: 18px; }
+
+/* was @media (max-width: 1020px) */
+html.bp-1020 .emu-swbody { flex-direction: column; }
+html.bp-1020 .emu-keys { width: 100%; flex-basis: auto; }
+
+/* light theme: the trough's balls stay readable on a light panel */
+:root.light .emu-balls .ball { background: #d9dbd6; border-color: #9aa0a6; }
+:root.light .emu-balls .ball.in { background: #6f757b; border-color: #4a4f55; }
+:root.light .emu-balls .ball.shooter { background: #2f80ed; border-color: #2f5f8f; }
+
+/* ---- the two windows of their own (emulate_spike1_view.html) ---- */
+body.emu-view #app { height: 100%; }
+/* the display: all glass, the frame as wide as the window allows */
+body.emu-view-display { background: #000; }
+.emu-view-display { height: 100%; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
+.emu-view-display .emu-screen { flex: 1 1 auto; min-height: 0; border: 0; border-radius: 0; padding: 0; }
+.emu-view-display .emu-screen img { width: 100%; height: 100%; object-fit: contain; }
+.emu-view-display .emu-readouts { flex: 0 0 auto; padding: 0 12px 4px; }
+/* the switch panel: the play bar, the list and key panel (scrolling), the readout */
+.emu-view-switches { height: 100%; display: flex; flex-direction: column; background: var(--bg); }
+.emu-view-bar { flex: 0 0 auto; padding: 8px 12px 6px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+.emu-view-bar .emu-bar { margin-left: 0; }
+.emu-view-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 12px; }
+.emu-view-rdo { flex: 0 0 auto; padding: 5px 12px 7px; border-top: 1px solid var(--line); background: var(--bg-2); }

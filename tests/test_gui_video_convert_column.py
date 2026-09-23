@@ -7,13 +7,14 @@ pick Write would happily copy on but the machine cannot decode — which is how
 his attract video reached the card and played its sound over a black picture.
 
 The column now names both, so "why is only one file as-is?" is answered on the
-row instead of in a build log after the fact.
+row instead of in a build log after the fact.  The column's logic lives in
+webui/video_helpers.py.
 """
 import pytest
 
 from pinball_decryptor.core.video import VideoInfo
 from pinball_decryptor.core.video_slots import VideoSlot
-from pinball_decryptor.gui.main_window import MainWindow
+from pinball_decryptor.webui import video_helpers as VH
 
 
 def _slot(ext=".mov", w=1360, h=768, fps=30.0, codec="h264",
@@ -40,8 +41,8 @@ def _rep(codec="h264", w=1360, h=768, fps=30.0, pix_fmt="yuv420p"):
 def test_wrong_container_says_what_is_needed(monkeypatch):
     """His 27 .mp4-into-.mov rows.  Write refuses these, and the column used
     to go blank rather than saying so."""
-    got = MainWindow._video_conv_mode(_slot(".mov"), "/x/promo.mp4",
-                                      no_conversion=True, trim=False)
+    got = VH.conv_mode(_slot(".mov"), "/x/promo.mp4",
+                       no_conversion=True, trim=False)
     assert got == "✗ needs .mov"
 
 
@@ -49,8 +50,8 @@ def test_right_container_but_undecodable_codec_is_flagged(monkeypatch):
     """The one that got through: a .mov the machine can't decode is copied on
     byte-for-byte and plays black."""
     _probe(monkeypatch, _rep(codec="prores"))
-    got = MainWindow._video_conv_mode(_slot(".mov"), "/x/attract.mov",
-                                      no_conversion=True, trim=False)
+    got = VH.conv_mode(_slot(".mov"), "/x/attract.mov",
+                       no_conversion=True, trim=False)
     assert got == "✗ wrong format"
 
 
@@ -61,14 +62,14 @@ def test_right_container_but_undecodable_codec_is_flagged(monkeypatch):
 ])
 def test_other_undecodable_shapes_are_flagged(monkeypatch, kwargs):
     _probe(monkeypatch, _rep(**kwargs))
-    assert MainWindow._video_conv_mode(
+    assert VH.conv_mode(
         _slot(".mov"), "/x/attract.mov",
         no_conversion=True, trim=False) == "✗ wrong format"
 
 
 def test_a_real_drop_in_still_reads_as_as_is(monkeypatch):
     _probe(monkeypatch, _rep())
-    assert MainWindow._video_conv_mode(
+    assert VH.conv_mode(
         _slot(".mov"), "/x/attract.mov",
         no_conversion=True, trim=False) == "As-is"
 
@@ -76,7 +77,7 @@ def test_a_real_drop_in_still_reads_as_as_is(monkeypatch):
 def test_no_ffprobe_does_not_invent_a_problem(monkeypatch):
     """A file we can't measure is not evidence of a bad file."""
     _probe(monkeypatch, None)
-    assert MainWindow._video_conv_mode(
+    assert VH.conv_mode(
         _slot(".mov"), "/x/attract.mov",
         no_conversion=True, trim=False) == "As-is"
 
@@ -87,9 +88,9 @@ def test_playability_check_needs_the_slot_to_be_probed(monkeypatch):
     slot = _slot(".mov")
     slot.info = None
     _probe(monkeypatch, _rep(w=640, h=480))
-    assert MainWindow._video_playability_conflict(slot, "/x/a.mov") is None
+    assert VH.playability_conflict(slot, "/x/a.mov") is None
     _probe(monkeypatch, _rep(codec="hevc"))
-    assert "H.264" in MainWindow._video_playability_conflict(slot, "/x/a.mov")
+    assert "H.264" in VH.playability_conflict(slot, "/x/a.mov")
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +107,9 @@ def test_audio_on_a_silent_slot_is_flagged_but_still_plays(monkeypatch):
     rep = _rep()
     rep.has_audio = True
     _probe(monkeypatch, rep)
-    assert MainWindow._video_conv_mode(
+    assert VH.conv_mode(
         slot, "/x/a.mov", no_conversion=True, trim=False) == "As-is ⚠ audio"
-    why = MainWindow._video_extra_audio(slot, "/x/a.mov")
+    why = VH.extra_audio(slot, "/x/a.mov")
     assert "audio track" in why and "over the game's own sound" in why
 
 
@@ -119,8 +120,8 @@ def test_audio_is_fine_when_the_slot_itself_has_audio(monkeypatch):
     rep = _rep()
     rep.has_audio = True
     _probe(monkeypatch, rep)
-    assert MainWindow._video_extra_audio(slot, "/x/a.mov") is None
-    assert MainWindow._video_conv_mode(
+    assert VH.extra_audio(slot, "/x/a.mov") is None
+    assert VH.conv_mode(
         slot, "/x/a.mov", no_conversion=True, trim=False) == "As-is"
 
 
@@ -130,7 +131,7 @@ def test_a_black_picture_outranks_the_audio_note(monkeypatch):
     rep = _rep(codec="prores")
     rep.has_audio = True
     _probe(monkeypatch, rep)
-    assert MainWindow._video_conv_mode(
+    assert VH.conv_mode(
         slot, "/x/a.mov", no_conversion=True, trim=False) == "✗ wrong format"
 
 
@@ -219,13 +220,13 @@ def _convert_probe(monkeypatch, info, ffmpeg="ffmpeg"):
 
 def test_wrong_container_alone_reads_as_repackage(monkeypatch):
     _convert_probe(monkeypatch, _rep())
-    assert MainWindow._video_conv_mode(
+    assert VH.conv_mode(
         _slot(".mov"), "/x/newfrankic.mp4",
         no_conversion=False, trim=False) == "Repackage"
 
 
 def test_a_real_mismatch_still_reads_as_re_encode(monkeypatch):
     _convert_probe(monkeypatch, _rep(w=1920, h=1080))
-    assert MainWindow._video_conv_mode(
+    assert VH.conv_mode(
         _slot(".mov"), "/x/newfrankic.mp4",
         no_conversion=False, trim=False) == "Re-encode"

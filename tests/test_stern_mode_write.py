@@ -364,8 +364,10 @@ def test_the_install_runs_mode_install_with_the_clock_pinned():
 
 
 def test_a_code_mode_is_named_as_not_reaching_the_card(tmp_path):
-    """Item 127's New code mode (modes/<slug>/<slug>.c, no mode file) runs in Try it only: Write
-    ships the pinned runtime, so the build and the change scan say the code mode is left out."""
+    """Item 127's New code mode (modes/<slug>/<slug>.c, no mode file) is listed apart from the
+    form modes. Write carries it with them, so the change scan's note that it is not put on the
+    card is for a build that leaves every mode out, and says so - never that it runs only in
+    Try it."""
     project = _project(tmp_path)
     folder = os.path.join(MP.modes_dir(project), "blitz")
     os.makedirs(folder)
@@ -373,7 +375,11 @@ def test_a_code_mode_is_named_as_not_reaching_the_card(tmp_path):
         f.write("/* a mode */\n")
     assert MW.code_modes(project) == ["blitz"]
     assert [s for s, _m in MW.project_modes(project)] == ["atomic_breath", "kaiju_rush"]
-    assert "code mode(s) blitz are not put on the card" in MW.code_modes_note(["blitz"])
+    note = MW.code_modes_note(["blitz"])
+    assert "code mode(s) blitz are not put on the card" in note
+    assert "leaves every mode out" in note and "Try it" not in note
+    assert "Direct-SD" in note                       # no form-mode row to point at: it says why itself
+    assert "(%s=0 leaves modes out)" % MW.GATE_ENV in MW.code_modes_note(["blitz"], "%s=0 leaves modes out" % MW.GATE_ENV)
     assert MW.code_modes(str(tmp_path / "none")) == []
 
 
@@ -531,3 +537,191 @@ def test_the_log_and_the_scan_never_promise_a_screen_or_a_clip_the_title_cannot_
     assert "not its own screen (Jaws LE 1.02 cannot add one)" in line, line
     line = MW.describe([("m", spec)])[0]
     assert screen in line and clip in line and "not its own" not in line, line
+
+
+# ---- Try it's builder: the two card roles and the reuse sidecar (feature/emulate-prepare) ----
+def _engine_stub(monkeypatch, handed, files=()):
+    """A stand-in engine.write_overrides that lays down a finished manifest with the modes
+    in it (and the files it names, as the engine's own all-or-nothing reuse test reads
+    them), recording what it was handed."""
+    import json
+    from pinball_decryptor.plugins.stern import engine as E
+
+    def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
+                        cancel=None, label=None, run_card=None, **extra):
+        handed.append(dict(original=original_path, run_card=run_card, extra=extra,
+                           progress=progress, cancel=cancel))
+        stage = out_dir + E.OVERRIDE_MODES_SUFFIX
+        os.makedirs(stage, exist_ok=True)
+        for name in (E.OVERRIDE_MODES_OBJECT, "game.port"):    # what the install reads
+            with open(os.path.join(stage, name), "wb") as f:
+                f.write(b"stage")
+        # a set already there is patched in place: the manifest then names its parent
+        patched = os.path.isfile(os.path.join(out_dir, E.OVERRIDE_MANIFEST))
+        os.makedirs(out_dir, exist_ok=True)
+        records = []
+        for rel in files:
+            p = os.path.join(out_dir, *rel.split("/"))
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"set")
+            st = os.stat(p)
+            records.append({"path": "/" + rel, "size": st.st_size, "mtime": int(st.st_mtime),
+                            "out_size": st.st_size, "out_mtime": st.st_mtime})
+        st = os.stat(original_path)
+        with open(os.path.join(out_dir, E.OVERRIDE_MANIFEST), "w", encoding="utf-8") as f:
+            json.dump({"version": E.OVERRIDE_VERSION, "generation": "g1",
+                       "parent": "g0" if patched else "",
+                       "card": {"path": os.path.abspath(original_path), "size": st.st_size,
+                                "mtime": int(st.st_mtime)},
+                       "counts": {"audio": 1, "video": 0, "image": 0, "text": 2},
+                       "files": records,
+                       "modes": {"dir": stage, "files": ["mode.cfg", "mode1.cfg"],
+                                 "end_sound": {"name": "KAIJU RUSH", "request": 1295, "idx": 7}}},
+                      f)
+        return (1, 0, 0, 2), ("", ""), ("", ""), []
+    monkeypatch.setattr(E, "write_overrides", write_overrides)
+    return write_overrides
+
+
+def _two_cards(tmp_path):
+    picked, stock = str(tmp_path / "built.raw"), str(tmp_path / "stock.raw")
+    for p in (picked, stock):
+        with open(p, "wb") as f:
+            f.write(b"\0" * 4096)
+    return picked, stock
+
+
+def test_a_second_try_it_with_nothing_changed_hands_the_set_back_unbuilt(tmp_path, monkeypatch):
+    """The sidecar beside the set records both cards, the project, the gates, the build
+    options, the app version and the two fingerprints; when all of it is as it was, the
+    set's manifest is finished and the stage the install reads is there, the set comes
+    back from the manifest with reused=True, one log line and no engine call. A mode edit,
+    another card, another sound choice, a changed build option, an updated app, a lost
+    stage or a lost sidecar builds again - and a set the engine rebuilt (patched in place,
+    so its manifest names a parent) is never called reused."""
+    from pinball_decryptor.plugins.stern import cards
+    project = _project(tmp_path, sound_for=("KAIJU RUSH",))
+    picked, stock = _two_cards(tmp_path)
+    monkeypatch.setattr(cards, "override_base_card", lambda c, a, t: (stock, ""))
+    handed = []
+    _engine_stub(monkeypatch, handed, files=["godzilla_pro/game"])
+    base = str(tmp_path / "tryit")
+    said = []
+    log = lambda m, lvl="info": said.append(m)                  # noqa: E731
+    first = MW.build_tryit_set(project, picked, base, log=log)
+    assert len(handed) == 1 and first.reused is False
+    assert os.path.isfile(MW.tryit_sidecar(base))
+    assert not os.path.exists(os.path.join(first.set_dir, MW.TRYIT_SIDECAR))   # beside, never in
+    assert any("preparing the modes (there is no record of the last Try it)" in m for m in said)
+
+    said.clear()
+    again = MW.build_tryit_set(project, picked, base, log=log)
+    assert len(handed) == 1, "the engine was called although nothing changed"
+    assert again.reused is True and said == [MW.TRYIT_REUSED]
+    assert (again.set_dir, again.stage_dir, again.mode_files, again.slots, again.files) == (
+        first.set_dir, first.stage_dir, first.mode_files, first.slots, first.files)
+    assert again.end_sound == first.end_sound and again.counts == (1, 0, 0, 2)
+    assert again.game_dir == "godzilla_pro" and again.port == first.port
+
+    # the own-sound choice is part of what was built
+    MW.build_tryit_set(project, picked, base, log=log, sound_ok=False)
+    assert len(handed) == 2 and handed[-1]["extra"] == {"sound_ok": False}
+    assert any("the own-sound choice changed" in m for m in said)
+    MW.build_tryit_set(project, picked, base, log=log, sound_ok=False)
+    assert len(handed) == 2
+
+    # an edit to a mode
+    slug = MW.project_modes(project)[0][0]
+    spec = MP.load(os.path.join(MP.mode_folder(project, slug), MP.MODE_FILE))
+    spec.seconds = spec.seconds + 5
+    MP.save(project, slug, spec)
+    # the fingerprint is a stat walk (time and size): an edit that keeps the size and
+    # lands in the same coarse kernel clock tick as the last build (this test runs its
+    # stubbed builds in milliseconds; Linux stamps files at jiffy resolution) would not
+    # move it, and a person's edit is never that close - so the edit is dated
+    edited = os.path.join(MP.mode_folder(project, slug), MP.MODE_FILE)
+    later = os.stat(edited).st_mtime + 2
+    os.utime(edited, (later, later))
+    said.clear()
+    rebuilt = MW.build_tryit_set(project, picked, base, log=log, sound_ok=False)
+    assert len(handed) == 3 and any("the modes changed" in m for m in said)
+    # the engine patched the set already there (its manifest names a parent now), which
+    # is THIS build's set, not one handed back as it was
+    from pinball_decryptor.plugins.stern import engine as E
+    assert E.read_override_manifest(first.set_dir)["parent"] == "g0"
+    assert rebuilt.reused is False
+
+    # a build option the app mirrors into the environment: the engine would build other
+    # bytes under it, so the set is not the one this build would make
+    monkeypatch.setenv("PAD_STERN_TEXT_GROW", "1")
+    said.clear()
+    MW.build_tryit_set(project, picked, base, log=log, sound_ok=False)
+    assert len(handed) == 4 and any("a build option changed" in m for m in said)
+    MW.build_tryit_set(project, picked, base, log=log, sound_ok=False)
+    assert len(handed) == 4
+
+    # an updated app
+    import pinball_decryptor
+    monkeypatch.setattr(pinball_decryptor, "__version__", "999.0.0")
+    said.clear()
+    MW.build_tryit_set(project, picked, base, log=log, sound_ok=False)
+    assert len(handed) == 5 and any("the app was updated" in m for m in said)
+
+    # the stage the install reads is beside the set, not in its manifest: gone, the set
+    # cannot be handed back (the install would refuse it with nothing to make it rebuild)
+    os.remove(os.path.join(first.stage_dir, "game.port"))
+    said.clear()
+    MW.build_tryit_set(project, picked, base, log=log, sound_ok=False)
+    assert len(handed) == 6 and any("runtime folder is gone" in m for m in said)
+    assert os.path.isfile(os.path.join(first.stage_dir, "game.port"))
+    handed.clear()
+
+    # another card to run on, with the same base
+    other = str(tmp_path / "other.raw")
+    with open(other, "wb") as f:
+        f.write(b"\1" * 4096)
+    said.clear()
+    MW.build_tryit_set(project, other, base, log=log, sound_ok=False)
+    assert len(handed) == 1 and handed[-1]["run_card"] == other
+    assert any("prepared to run on a different card" in m for m in said)
+
+    # a set whose files moved under the sidecar is not the one the manifest describes
+    with open(os.path.join(first.set_dir, "godzilla_pro", "game"), "wb") as f:
+        f.write(b"someone else's bytes")
+    said.clear()
+    MW.build_tryit_set(project, other, base, log=log, sound_ok=False)
+    assert len(handed) == 2 and any("not as the build left them" in m for m in said)
+
+    # no sidecar, no reuse; a stub manifest (a build that died half way) never reuses
+    os.remove(MW.tryit_sidecar(base))
+    MW.build_tryit_set(project, other, base, log=log, sound_ok=False)
+    assert len(handed) == 3
+    import json
+    with open(os.path.join(first.set_dir, E.OVERRIDE_MANIFEST), "w", encoding="utf-8") as f:
+        json.dump({"version": E.OVERRIDE_VERSION, "building": True}, f)
+    said.clear()
+    MW.build_tryit_set(project, other, base, log=log, sound_ok=False)
+    assert len(handed) == 4 and any("never finished" in m for m in said)
+
+
+def test_the_reuse_test_reads_the_edits_after_the_build_and_never_hashes(tmp_path):
+    """The fingerprints are stat walks: every file under modes/ by path, time and size (posix
+    paths, so a sidecar from Windows reads on Linux), and the project's count and newest
+    time. A touched WAV or a new file moves them; a folder with no modes has an empty one."""
+    project = _project(tmp_path, sound_for=("KAIJU RUSH",))
+    fp = MW.modes_fingerprint(project)
+    assert fp and all(len(row) == 3 and "\\" not in row[0] for row in fp)
+    assert any(row[0].endswith("/end.wav") for row in fp)
+    assert fp == sorted(fp) == MW.modes_fingerprint(project)
+    slug = MW.project_modes(project)[1][0]
+    with open(os.path.join(MP.mode_folder(project, slug), "go.wav"), "wb") as f:
+        f.write(b"RIFF" * 4)
+    assert MW.modes_fingerprint(project) != fp
+    assert MW.modes_fingerprint(str(tmp_path / "none")) == []
+    edits = MW.assets_fingerprint(project)
+    count, newest = edits.split()
+    assert int(count) == len(MW.modes_fingerprint(project)) and float(newest) > 0
+    with open(os.path.join(project, "note.txt"), "w") as f:
+        f.write("x")
+    assert MW.assets_fingerprint(project).split()[0] == str(int(count) + 1)

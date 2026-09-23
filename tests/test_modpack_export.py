@@ -407,7 +407,7 @@ class _FakeRoot:
 
 
 def _make_app(monkeypatch):
-    a = appmod.App.__new__(appmod.App)      # skip Tk/window construction
+    a = appmod.App.__new__(appmod.App)      # skip window construction
     a.msg_queue = queue.Queue()
     a.root = _FakeRoot()
     monkeypatch.setattr(appmod, "messagebox",

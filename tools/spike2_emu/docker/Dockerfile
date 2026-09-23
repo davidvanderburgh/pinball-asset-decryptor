@@ -30,7 +30,9 @@ FROM ubuntu:24.04
 # gcc-arm-linux-gnueabihf builds the LD_PRELOAD hardware shim
 # e2fsprogs               rootfs.sh, which needs no root to extract a card
 # fuse3                   fusermount3, so a card mounts read-only without root
-# python3-tk              the virtual playfield window
+# gir1.2-webkit2-4.1      the virtual playfield window: a web page since the
+#   + python3-gi          app left Tk, shown in a GTK WebKit window (pfweb.py)
+# fonts-ibm-plex          the app's type, which the page is set in
 # xvfb + x11vnc           the display, per the header
 # libegl1 + mesa dri      llvmpipe, the software rasteriser padglhost renders on
 # ffmpeg                  the host-side H.264 decode the guest cannot do itself
@@ -54,7 +56,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         `# that path has nothing to resolve against and the run died at` \
         `# "could not get fuse2fs" on a box that could simply have had it.` \
         e2fsprogs fuse2fs fuse3 \
-        python3 python3-tk python3-pil python3-pil.imagetk \
+        python3 python3-pil python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
+        fonts-ibm-plex \
         `# openbox is NOT decoration. Bare Xvfb leaves X focus at PointerRoot,` \
         `# so keystrokes go to whichever window the mouse happens to hover -` \
         `# three overlapping windows made the keyboard look broken on the first` \

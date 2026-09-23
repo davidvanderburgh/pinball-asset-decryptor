@@ -25,7 +25,7 @@ class _FakePipeline:
 
 
 def _make_app():
-    a = appmod.App.__new__(appmod.App)   # skip Tk/window construction
+    a = appmod.App.__new__(appmod.App)   # skip window construction
     a.msg_queue = queue.Queue()
     a._staging_failures = []
     a._cancel_requested = False
@@ -121,20 +121,16 @@ def test_mixed_surfaces_some_staged_runs(monkeypatch):
 
 # --- replacement_folder_mismatches (the "assigned for another folder") guard ---
 
-from pinball_decryptor.gui.main_window import MainWindow
+from pinball_decryptor.webui.tabs.audio import AudioTab
 
 
 def _make_window(scan_dir, assignments, slots):
-    w = MainWindow.__new__(MainWindow)
-    w._audio_assignments = assignments
-    w._audio_slots_by_rel = slots
-    w._audio_scan_dir = scan_dir
-    w._video_assignments = {}
-    w._video_slots_by_rel = {}
-    w._video_scan_dir = ""
-    w._image_assignments = {}
-    w._image_slots_by_rel = {}
-    w._image_scan_dir = ""
+    """The Audio tab's half of the window's replacement_folder_mismatches."""
+    w = AudioTab.__new__(AudioTab)
+    w._assign = assignments
+    w._by_rel = slots
+    w._scan_dir = scan_dir
+    w._scan_dir_prev = ""
     return w
 
 

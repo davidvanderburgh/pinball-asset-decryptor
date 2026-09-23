@@ -12,6 +12,15 @@ evidence. This drives the REAL `Field` against a fake `dump/padled` that this
 script publishes at a rate IT chooses, so the right answer is known before the
 window is asked. No emulator, no card, ~20 s.
 
+HEADLESS SINCE THE WINDOW BECAME A WEB PAGE (2026-09-23): the view is a model
+now and a page draws what it publishes, so this builds the real controller
+(`playfield.Playfield()`, no page attached) and runs its REAL paced loop
+(`start()` / `stop()`, the same 60 fps thread the window runs) - the rates,
+the worst gap and the status line are the model's own numbers, read after the
+loop stops. What a fixture looks like is `F["drawn"]`: 0 when dark, else
+[r, g, b, alpha, radius], exactly what the page is sent. To SEE the window,
+run `python playfield.py <game>` beside a run.
+
 THE TWO CASES, and the second is the one that makes the first mean anything:
 
   1. PACED   - 5 Hz of genuinely new lamp values, then a deliberate 2 s freeze,
@@ -127,27 +136,39 @@ def build(root_dir):
     return p
 
 
+def controller():
+    """The real window controller, headless, on the artwork view - or a
+    reason there is none (the title fell back to the switch list, which has
+    no fixtures and so nothing for this test to measure)."""
+    import playfield
+    ctl = playfield.Playfield()
+    if ctl.kind != "field":
+        close(ctl)
+        sys.exit("ledratetest: %s opens as the %s view here, not the artwork -"
+                 " no fixtures to measure" % (GAME, ctl.kind))
+    return ctl, ctl.view
+
+
+def close(ctl):
+    """The window's close, minus the window: stop the loop and wait for its
+    last frame, close the keyboard helper."""
+    ctl.stop()
+    time.sleep(0.1)
+    if ctl.keys is not None:
+        ctl.keys.close()
+
+
 def run_case(name, script, secs, expect_led, expect_data, expect_gap,
              tables, root_dir, path, check_ledrate=False):
-    import tkinter as tk
     import playfield
 
-    # The real window asks for 1 ms timers in main(); without it Tk's `after`
-    # rounds up to Windows' 15.6 ms tick and the loop lands at 24-25 fps. The
-    # harness has to ask too, or it measures a slower loop than the thing it is
-    # standing in for - and "the poll rate is fine" is half of what this test
-    # is asserting.
+    # The real window asks for 1 ms timers around main(); without it the
+    # loop's waits round up to Windows' 15.6 ms tick and it lands at 24-25
+    # fps. The harness has to ask too, or it measures a slower loop than the
+    # thing it is standing in for - and "the poll rate is fine" is half of
+    # what this test is asserting.
     playfield.fine_timers()
-    root = tk.Tk()
-    # Invisible rather than withdrawn: a withdrawn window does not lay out, and
-    # the canvas has to be real for draw_fixtures to have anything to change.
-    try:
-        root.attributes("-alpha", 0.0)
-    except tk.TclError:
-        pass
-    root.title("ledratetest")
-    view = playfield.Field(root)
-    root.update()
+    ctl, view = controller()
 
     chans = []
     for F in view.fixtures:
@@ -165,17 +186,18 @@ def run_case(name, script, secs, expect_led, expect_data, expect_gap,
 
     th = threading.Thread(target=feed.run, args=(script,), daemon=True)
     th.start()
-    root.after(int(secs * 1000), root.quit)
-    root.mainloop()
+    ctl.start()                     # the window's own paced loop
+    time.sleep(secs)
+    close(ctl)
     feed.stop = True
     th.join(timeout=2)
 
-    t = time.perf_counter()
-    led = view._rate(view._draw_ev, t)
-    data = view._rate(view._data_ev, t)
-    gap = view._gap_worst
-    bar = view.status.cget("text")
-    root.destroy()
+    with ctl.lock:
+        t = time.perf_counter()
+        led = playfield._rate(view._draw_ev, t)
+        data = playfield._rate(view._data_ev, t)
+        gap = view._gap_worst
+        bar = view.status
 
     print("\n--- %s ---" % name)
     print("  fed        : %d frames, %d lamp writes in %.0f s"
@@ -232,18 +254,10 @@ def run_fade_case(path):
     a wrong final tuple means it animated somewhere other than the target.
     Runs with the default PAD_PF_FADE_MS so it tests what ships.
     """
-    import tkinter as tk
     import playfield
 
     playfield.fine_timers()
-    root = tk.Tk()
-    try:
-        root.attributes("-alpha", 0.0)
-    except tk.TclError:
-        pass
-    root.title("ledratetest-fade")
-    view = playfield.Field(root)
-    root.update()
+    ctl, view = controller()
 
     feed = Feed(path, [])
     node, idx = None, None
@@ -254,15 +268,16 @@ def run_fade_case(path):
             target = F
             break
     if target is None:
-        root.destroy()
+        close(ctl)
         return ["no single-channel fixture to drive"]
+    ctl.start()                     # the window's own paced loop
 
     def settle(ms):
-        """Pump real ticks for ms, collecting the drawn tuples seen."""
+        """Let the real loop tick for ms, collecting the drawn states seen:
+        0 when dark, [r, g, b, alpha, radius] when lit."""
         seen = []
         end = time.perf_counter() + ms / 1000.0
         while time.perf_counter() < end:
-            root.update()
             d = target["drawn"]
             if d is not None and (not seen or seen[-1] != d):
                 seen.append(d)
@@ -281,7 +296,7 @@ def run_fade_case(path):
         fail.append("fade IN drew %d distinct states - it snapped: %s"
                     % (len(up), up))
     want_on = up[-1] if up else None
-    if not want_on or not want_on[2]:
+    if not want_on:
         fail.append("fade IN never landed lit (last drawn %r)" % (want_on,))
 
     feed.buf[LED_HDR + node * 96 + idx] = 0
@@ -292,16 +307,16 @@ def run_fade_case(path):
     if len(down) < 4:
         fail.append("fade OUT drew %d distinct states - it snapped: %s"
                     % (len(down), down))
-    if not down or down[-1][2] != 0.0:
+    if not down or down[-1] != 0:
         fail.append("fade OUT never landed off (last drawn %r)"
                     % (down[-1] if down else None,))
 
     print("\n--- FADE  one step up, one step down (FADE_MS=%g) ---"
           % playfield.FADE_MS)
     print("  up  : %d distinct paints, landed %s"
-          % (len(up), "lit" if want_on and want_on[2] else "NOT LIT"))
+          % (len(up), "lit" if want_on else "NOT LIT"))
     print("  down: %d distinct paints, landed %s"
-          % (len(down), "off" if down and down[-1][2] == 0.0 else "NOT OFF"))
+          % (len(down), "off" if down and down[-1] == 0 else "NOT OFF"))
 
     # ---- THE a2 PULSE ENVELOPE (version 3 fade ring) ----------------------
     # One command: 00 -> ff, rise rate 20, fall rate 20. The fixture must
@@ -309,23 +324,24 @@ def run_fade_case(path):
     # further data, and END at the base state (off) - the envelope is an
     # overlay, so returning to base is the whole point. The window was primed
     # by the reads above (fade_seen is set), so this entry counts as new.
-    target["state"] = ()                    # force a clean resync
+    with ctl.lock:
+        target["state"] = ()                # force a clean resync
     feed.fade(node, idx, idx, 0x00, 0xFF, 20, 20)
     env_span = (40 * playfield.FADE_UNIT_MS + 400)
     swing = settle(env_span)
-    peak = max((s for s in swing if s[2]), default=None, key=lambda s: s[2])
+    peak = max((s for s in swing if s), default=None, key=lambda s: s[3])
     if len(swing) < 8:
         fail.append("envelope drew %d distinct states - no sweep: %s"
                     % (len(swing), swing[:6]))
     if not peak:
         fail.append("envelope never lit at all")
-    if not swing or swing[-1][2] != 0.0:
+    if not swing or swing[-1] != 0:
         fail.append("envelope did not return to base (last %r)"
                     % (swing[-1] if swing else None,))
     print("  env : %d distinct paints, peaked %s, ended %s"
           % (len(swing), "lit" if peak else "dark",
-             "at base" if swing and swing[-1][2] == 0.0 else "WRONG"))
-    root.destroy()
+             "at base" if swing and swing[-1] == 0 else "WRONG"))
+    close(ctl)
     return fail
 
 

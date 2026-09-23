@@ -23,8 +23,11 @@ Four things, all reproduced here:
   for images.  Would it be possible to preview common formats such as images?
   Not sure what else might fit, maybe fonts?"
 
-The tree/filter tests use duck-typed stubs and no Tk window, the way
-test_gui_batch26 / test_gui_batch28 / test_gui_batch29 do it.
+The tree/filter tests run the Partitions tab's own methods
+(``webui/tabs/partitions.py``) on duck-typed stubs, with no window.  Show:
+Changed listing only the replaced files under their folders, and Show:
+Unchanged leaving them out, are driven end to end in test_webui_partitions.py
+(test_replace_same_size_journals_and_marks).
 """
 
 import io
@@ -34,9 +37,7 @@ import pytest
 
 from pinball_decryptor.core import (build_output, card_edits, card_paths,
                                     extract_source, image)
-from pinball_decryptor.gui.main_window import MainWindow
-
-W = MainWindow
+from pinball_decryptor.webui.tabs.partitions import PartitionsTab
 
 LOGO = "/usr/local/spike/SternLogo.png"
 CLIP = "/godzilla_pro/assets/lcd/attract.asset"
@@ -258,32 +259,6 @@ class _Entry:
         self.inode = 1
 
 
-class _FakeTree:
-    """Just enough ttk.Treeview for the populate/fill helpers."""
-
-    def __init__(self):
-        self.rows = {}          # iid -> (parent, text, values, tags)
-        self.order = []
-
-    def get_children(self, parent=""):
-        return [i for i in self.order if self.rows[i][0] == parent]
-
-    def delete(self, *iids):
-        for i in iids:
-            self.rows.pop(i, None)
-            if i in self.order:
-                self.order.remove(i)
-
-    def insert(self, parent, _index, iid=None, text="", values=(), tags=(),
-               open=False):
-        self.rows[iid] = (parent, text, tuple(values), tuple(tags))
-        self.order.append(iid)
-        return iid
-
-    def values_of(self, iid):
-        return self.rows[iid][2]
-
-
 class _FakeCard:
     TREE = {
         "/usr/local/spike": [
@@ -309,57 +284,35 @@ def _win(show="All", marks=None, image_path="C:/cards/card.raw"):
         pass
 
     s = _Stub()
-    s._pex_tree = _FakeTree()
-    s._pex_card = _FakeCard()
-    s._pex_part_index = 1
-    s._pex_image_path = image_path
-    s._pex_dirs = set()
-    s._pex_populated = set()
-    s._pex_changed_marks = dict(marks or {})
+    s._card = _FakeCard()
+    s._part_index = 1
+    s._image_path = image_path
+    s._nodes = {}
+    s._children = {}
+    s._dirs = set()
+    s._populated = set()
+    s._open = set()
+    s._marks = dict(marks or {})
     s.partition_show_var = _Var(show)
-    s._pex_human = W._pex_human
-    s.append_log = lambda *a, **k: None
-    s._pex_action_status = type("L", (), {"configure": lambda *a, **k: None})()
+    s.log = lambda *a, **k: None
+    s.set = lambda **k: None
     return s
 
 
 def test_changed_column_marks_the_file_you_replaced():
     s = _win(marks={LOGO: "replaced 2026-08-07"})
-    W._pex_populate_dir(s, "", "/usr/local/spike")
-    assert s._pex_tree.values_of(LOGO)[2] == "replaced 2026-08-07"
-    assert "pex_changed" in s._pex_tree.rows[LOGO][3]
+    PartitionsTab._populate_dir(s, "", "/usr/local/spike")
+    assert s._nodes[LOGO]["changed"] == "replaced 2026-08-07"
     # An untouched file says nothing rather than claiming to be original — PAD
     # can only vouch for the edits it made itself.
-    assert s._pex_tree.values_of("/usr/local/spike/VeraMono.ttf")[2] == ""
-
-
-def test_show_unchanged_leaves_out_the_replaced_files():
-    s = _win(show="Unchanged", marks={LOGO: "replaced 2026-08-07"})
-    W._pex_populate_dir(s, "", "/usr/local/spike")
-    assert LOGO not in s._pex_tree.rows
-    assert "/usr/local/spike/VeraMono.ttf" in s._pex_tree.rows
-    # Folders stay: whether one still holds an unchanged file needs a walk.
-    assert "/usr/local/spike/spike_menu" in s._pex_tree.rows
-
-
-def test_show_changed_lists_only_them_under_their_own_folders():
-    s = _win(show="Changed", marks={LOGO: "replaced 2026-08-07"})
-    W._pex_fill_changed_only(s)
-    assert LOGO in s._pex_tree.rows
-    assert "/usr/local/spike/VeraMono.ttf" not in s._pex_tree.rows
-    # The path's folders are there, expanded, and marked loaded so the lazy
-    # filler never pulls the rest of the tree into a filtered view.
-    for d in ("/usr", "/usr/local", "/usr/local/spike"):
-        assert d in s._pex_tree.rows and d in s._pex_populated
-    assert s._pex_tree.rows[LOGO][0] == "/usr/local/spike"
-    assert s._pex_tree.values_of(LOGO)[0] == "188.0 KB"
+    assert s._nodes["/usr/local/spike/VeraMono.ttf"]["changed"] == ""
 
 
 def test_show_changed_keeps_a_file_that_is_no_longer_on_the_card():
     gone = "/usr/local/spike/OldLogo.png"
     s = _win(show="Changed", marks={gone: "replaced 2026-08-01"})
-    W._pex_fill_changed_only(s)
-    assert s._pex_tree.values_of(gone)[1] == "not on the card now"
+    PartitionsTab._fill_changed_only(s)
+    assert s._nodes[gone]["type"] == "not on the card now"
 
 
 def test_find_drops_the_filter_so_it_can_reveal_the_hit():
@@ -367,11 +320,11 @@ def test_find_drops_the_filter_so_it_can_reveal_the_hit():
     itself, so Find had to be able to get the whole tree back."""
     s = _win(show="Changed", marks={LOGO: "replaced 2026-08-07"})
     applied = []
-    s._pex_apply_show = lambda: applied.append(s.partition_show_var.get())
-    W._pex_unfilter_for_reveal(s)
+    s._apply_show = lambda: applied.append(s.partition_show_var.get())
+    PartitionsTab._unfilter_for_reveal(s)
     assert s.partition_show_var.get() == "All" and applied == ["All"]
     # Already unfiltered: nothing to rebuild.
-    W._pex_unfilter_for_reveal(s)
+    PartitionsTab._unfilter_for_reveal(s)
     assert applied == ["All"]
 
 
@@ -380,9 +333,9 @@ def test_marks_come_from_the_journal_for_this_image_and_partition(tmp_path):
     card_edits.record_replace(img, 1, LOGO, 166_000, 192_498)
     card_edits.record_replace(img, 2, CLIP, 1, 2)
     s = _win(image_path=img)
-    W._pex_refresh_changed_marks(s)
-    assert list(s._pex_changed_marks) == [LOGO]
-    assert s._pex_changed_marks[LOGO].startswith("replaced 20")
+    PartitionsTab._refresh_marks(s)
+    assert list(s._marks) == [LOGO]
+    assert s._marks[LOGO].startswith("replaced 20")
 
 
 # ---------------------------------------------------------------------------

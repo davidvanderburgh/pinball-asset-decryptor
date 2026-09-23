@@ -1,14 +1,17 @@
 """Feedback batch 26 — logic-level tests for the Images-search and Audio-stop
 fixes.
 
-No Tk window is built: the methods under test only touch plain attributes,
-so duck-typed ``self`` stubs exercise them the way the real window does.
+No window is built: the Images tab's grouping and search helpers only touch
+plain attributes, so duck-typed ``self`` stubs exercise them the way the real
+tab does.  (The Audio-stop half of this batch lives in the page's players
+now; the queued-step cancel it relied on is covered in test_gui_batch28.)
 """
 
 from types import SimpleNamespace
 
-from pinball_decryptor.gui.main_window import (_AudioPreviewPane,
-                                               _VideoPreviewPane, MainWindow)
+from pinball_decryptor.webui.tabs.images import (ImagesTab,
+                                                 compute_key_tails,
+                                                 scan_image_groups)
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +55,7 @@ def test_glyph_manifest_vets_atlases_without_the_glyphs_dir(tmp_path):
         f.write("scene_textures/glyphs/%s/U+0041_A.png\tscene_textures/%s"
                 "\t0x0041\t1\t1\t8\t8\tStern_FooFont\n"
                 % (_ATLAS[:-4], _ATLAS))
-    groups, _occ, _where = MainWindow._scan_image_groups(str(tmp_path))
+    groups, _occ, _where = scan_image_groups(str(tmp_path))
     assert groups["images/scene_textures/" + _NAMED][1] == \
         "Char_Select · aaaaaaaa"
     assert groups["images/scene_textures/" + _PLAIN][1] == "bbbbbbbb"
@@ -60,7 +63,7 @@ def test_glyph_manifest_vets_atlases_without_the_glyphs_dir(tmp_path):
 
 def test_pre_slicer_extract_trusts_no_hint_at_all(tmp_path):
     _seed_two_scenes(tmp_path)          # no glyphs dir, no glyph manifest
-    groups, _occ, where = MainWindow._scan_image_groups(str(tmp_path))
+    groups, _occ, where = scan_image_groups(str(tmp_path))
     for rel in ("images/scene_textures/" + _ATLAS,
                 "images/scene_textures/" + _NAMED,
                 "images/scene_textures/" + _PLAIN):
@@ -70,85 +73,17 @@ def test_pre_slicer_extract_trusts_no_hint_at_all(tmp_path):
     # And the search consequence: "stern" no longer matches any GROUP; a
     # scene hash still finds its scene.
     me = SimpleNamespace(
-        _image_group_tags={},
-        _image_group_key_tails=MainWindow._compute_image_key_tails(
-            groups, where))
+        _group_tags={},
+        _key_tails=compute_key_tails(groups, where))
     for g in groups.values():
-        assert not MainWindow._image_group_matches(me, g, "stern")
+        assert not ImagesTab._group_matches(me, g, "stern")
     named_group = groups["images/scene_textures/" + _NAMED]
-    assert MainWindow._image_group_matches(me, named_group, "aaaaaaaa1111")
+    assert ImagesTab._group_matches(me, named_group, "aaaaaaaa1111")
 
 
 def test_modern_extract_keeps_its_hint_labels(tmp_path):
     st = _seed_two_scenes(tmp_path)
     (st / "glyphs" / _ATLAS[:-4]).mkdir(parents=True)
-    groups, _occ, _where = MainWindow._scan_image_groups(str(tmp_path))
+    groups, _occ, _where = scan_image_groups(str(tmp_path))
     assert groups["images/scene_textures/" + _NAMED][1] == \
         "Char_Select · aaaaaaaa"
-
-
-# ---------------------------------------------------------------------------
-# Audio ■: sequential play moves the sound between the Original and
-# Replacement panes, so stop on the pane in front of you must silence BOTH
-# ("tie the stop buttons together (like slings!)" — a tester).  Only the
-# stopped pane rewinds; the sibling keeps its playhead.
-# ---------------------------------------------------------------------------
-
-class _WinStub:
-    """Only what stop_to_start reaches back into the window for."""
-
-    def __init__(self):
-        self.advance_cancels = 0
-
-    def _cancel_audio_advance(self):
-        self.advance_cancels += 1
-
-
-class _PaneStub:
-    stop_to_start = _AudioPreviewPane.stop_to_start
-
-    def __init__(self, pos=3.3):
-        self.pos = pos
-        self.sibling = None
-        self.stops = 0
-        self._win = _WinStub()
-
-    def stop_playback(self):
-        self.stops += 1
-
-    def _draw_playhead(self):
-        pass
-
-
-def test_stop_button_silences_both_audio_panes():
-    a, b = _PaneStub(pos=3.3), _PaneStub(pos=7.7)
-    a.sibling, b.sibling = b, a
-    a.stop_to_start()
-    assert a.stops == 1 and b.stops == 1
-    assert a.pos == 0.0
-    assert b.pos == 7.7                  # sibling keeps its playhead
-    # ...and it ends the audition rather than let the queued "next row" step
-    # restart the sound a moment after the press (batch 28).
-    assert a._win.advance_cancels == 1
-
-
-def test_stop_button_safe_before_the_sibling_is_wired():
-    a = _PaneStub()
-    a.stop_to_start()
-    assert a.stops == 1 and a.pos == 0.0
-
-
-class _VideoPaneStub(_PaneStub):
-    stop_to_start = _VideoPreviewPane.stop_to_start
-
-    def __init__(self, pos=3.3):
-        super().__init__(pos)
-        self.path = None                 # no poster re-render in the stub
-
-
-def test_video_stop_button_matches_the_audio_rule():
-    a, b = _VideoPaneStub(pos=1.1), _VideoPaneStub(pos=2.2)
-    a.sibling, b.sibling = b, a
-    a.stop_to_start()
-    assert a.stops == 1 and b.stops == 1
-    assert a.pos == 0.0 and b.pos == 2.2

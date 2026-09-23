@@ -6,43 +6,23 @@ machine with a day of emulator runs behind it.  py-spy caught the main thread
 inside ``Text.see`` / ``Text.configure`` under ``append_log`` on every sample.
 The cause was not WSL, not OneDrive and not any of the three things it was
 blamed on first: ``_seed_log_history`` pushed the ENTIRE on-disk history into
-a Tk Text widget (5,950 lines that day, 5,490 of them emulator event lines),
-and every log line after that paid for the size of the widget.
+the log pane (5,950 lines that day, 5,490 of them emulator event lines),
+and every log line after that paid for the size of the pane.
 
-So both ends are bounded now, and these are the tests that say so.  They use
-real widgets because the bug lives in the widget, and skip when Tk is
-unusable rather than failing the suite on a headless box.
+So both ends are bounded now, and these are the tests that say so.  The web
+UI's history seed is ``shellx._seed_log_history`` (webui/tabs/shell_extras.py)
+and the pane's lines are ``window._log`` (webui/window.py).
 """
 
-import pytest
-
-tk = pytest.importorskip("tkinter")
-
 from pinball_decryptor.core import session_log
-from pinball_decryptor.gui.main_window import MainWindow
+from pinball_decryptor.webui import window as window_mod
+from pinball_decryptor.webui.tabs import shell_extras
+from tests.webui_harness import web_app
 
 
-@pytest.fixture
-def root():
-    from tests.conftest import make_tk_root
-    try:
-        r = make_tk_root(tk)   # retried - see make_tk_root
-    except tk.TclError:
-        pytest.skip("no usable Tk display")
-    r.withdraw()
-    try:
-        yield r
-    finally:
-        try:
-            r.destroy()
-        except tk.TclError:
-            pass
-
-
-def _log_file(tmp_path, monkeypatch, n_history_lines):
+def _log_file(n_history_lines):
     """A session.log with *n_history_lines* of earlier-session history and a
     final banner, which is what previous_tail() splits on."""
-    monkeypatch.setattr(session_log, "LOG_DIR_OVERRIDE", str(tmp_path))
     path = session_log.log_path()
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("%s0.1.0 — session started earlier =====\n"
@@ -54,41 +34,41 @@ def _log_file(tmp_path, monkeypatch, n_history_lines):
     return path
 
 
-def test_seed_is_bounded_however_big_the_history_is(root, tmp_path,
-                                                    monkeypatch):
+def _seed(w, n_history_lines):
+    _log_file(n_history_lines)
+    svc = w.window.service("shellx")
+    w.run(svc.show_log_history_var.set, True)
+    w.run(svc._seed_log_history)
+    return w.state("shellx")["log_seed"]
+
+
+def test_seed_is_bounded_however_big_the_history_is(tmp_path):
     """The regression: a day of emulator logging must not land in the pane.
 
-    Against the pre-fix code this inserts all 6000 lines and fails.
+    Against the pre-fix code this seeds all 6000 lines and fails.
     """
-    _log_file(tmp_path, monkeypatch, 6000)
-    text = tk.Text(root)
-    win = MainWindow.__new__(MainWindow)
-    win.show_log_history_var = tk.BooleanVar(root, value=True)
+    with web_app(tmp_path, mfr="stern") as w:
+        seed = _seed(w, 6000)
 
-    MainWindow._seed_log_history(win, text)
-
-    n = int(str(text.index("end-1c")).split(".")[0])
-    assert n <= MainWindow.LOG_SEED_LINES + 5, (
-        "seeded %d lines from a 6000-line history — the pane is unbounded "
-        "again and startup will freeze" % n)
-    # The history is bounded, not silently cut: the cut line has to say so,
-    # or the oldest visible line reads as the beginning of time.
-    assert "full history in the log file" in text.get("1.0", tk.END)
+        n = len(seed["lines"])
+        assert n <= shell_extras.LOG_SEED_LINES + 5, (
+            "seeded %d lines from a 6000-line history — the pane is unbounded "
+            "again and startup will freeze" % n)
+        # The history is bounded, not silently cut: the cut line has to say
+        # so, or the oldest visible line reads as the beginning of time.
+        assert "full history in the log file" in seed["cut"]
 
 
-def test_a_short_history_is_still_shown_whole(root, tmp_path, monkeypatch):
+def test_a_short_history_is_still_shown_whole(tmp_path):
     """The cap must not cost the ordinary case its history, or the ⚙ toggle
     stops meaning anything for normal use."""
-    _log_file(tmp_path, monkeypatch, 12)
-    text = tk.Text(root)
-    win = MainWindow.__new__(MainWindow)
-    win.show_log_history_var = tk.BooleanVar(root, value=True)
+    with web_app(tmp_path, mfr="stern") as w:
+        seed = _seed(w, 12)
 
-    MainWindow._seed_log_history(win, text)
-
-    body = text.get("1.0", tk.END)
-    assert "line 0" in body and "line 11" in body
-    assert "full history in the log file" not in body   # nothing was dropped
+        body = "\n".join(seed["lines"])
+        assert "line 0" in body and "line 11" in body
+        # nothing was dropped
+        assert "full history in the log file" not in seed["cut"]
 
 
 def test_a_poisoned_giant_line_cannot_come_back_out_of_the_file(tmp_path,
@@ -138,19 +118,22 @@ def test_append_cleans_what_it_mirrors(tmp_path, monkeypatch):
     assert "[sw] still here" in body
 
 
-def test_a_long_run_cannot_grow_the_pane_without_bound(root):
-    """An emulator run appends thousands of lines; the widget must not keep
+def test_a_long_run_cannot_grow_the_pane_without_bound(tmp_path):
+    """An emulator run appends thousands of lines; the pane must not keep
     all of them, or every later line (and the next startup) pays for it."""
-    text = tk.Text(root)
-    win = MainWindow.__new__(MainWindow)
+    keep = window_mod.LOG_KEEP
+    with web_app(tmp_path, mfr="stern") as w:
+        win = w.window
 
-    for i in range(MainWindow.LOG_PANE_MAX_LINES * 2):
-        text.insert(tk.END, "[sw] event %d\n" % i)
-        MainWindow._trim_log_pane(win, text)
+        def _flood():
+            for i in range(keep * 2):
+                win._store_line("stern", {"id": -1 - i, "ts": "12:00:00",
+                                          "text": "[sw] event %d" % i,
+                                          "level": "info"})
+        w.run(_flood)
 
-    n = int(str(text.index("end-1c")).split(".")[0])
-    assert n <= MainWindow.LOG_PANE_MAX_LINES + MainWindow.LOG_PANE_CHECK_EVERY
-    # It keeps the NEWEST lines — trimming the wrong end would throw away
-    # what the user is actually watching.
-    assert "event %d" % (MainWindow.LOG_PANE_MAX_LINES * 2 - 1) in \
-        text.get("1.0", tk.END)
+        lines = list(win._log["stern"])
+        assert len(lines) <= keep
+        # It keeps the NEWEST lines — trimming the wrong end would throw away
+        # what the user is actually watching.
+        assert lines[-1]["text"] == "[sw] event %d" % (keep * 2 - 1)

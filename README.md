@@ -9,11 +9,11 @@ by **American Pinball**, **Barrels of Fun**, **Chicago Gaming Company**,
 130+ games across eleven manufacturers.
 
 This is a unified replacement for separate decryptor apps that all shared
-the same Tk GUI shell, queue-based pipeline contract, checksum tracking,
+the same GUI shell, queue-based pipeline contract, checksum tracking,
 and mod-pack workflow. Each manufacturer is a plugin under
 [pinball_decryptor/plugins/](pinball_decryptor/plugins/); the shared shell
-lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
-[pinball_decryptor/gui/](pinball_decryptor/gui/).
+lives in [pinball_decryptor/core/](pinball_decryptor/core/) and the
+web UI in [pinball_decryptor/webui/](pinball_decryptor/webui/).
 
 ## What it looks like
 
@@ -78,7 +78,7 @@ standard and plays a different set every power-up; and from v0.205.0 a compact
 card stores such a variant as only its changed songs, so those forty variants
 cost a few GB rather than forty copies of the sound library. From v0.209.0 the line across the top of the menu is yours to write, or to leave off altogether; every sound in the tab has a **Play** button that plays it here, on the spot; and a compact card that cannot be laid out names the SD card size the content wants instead of saying a check failed. From v0.210.0 every sound box in the tab also lists the sound files this menu already uses, so putting one clip on all of the images is a pick rather than a walk through the file dialog once per image. From v0.212.0, when the card you need is bigger than the games on it, the strip adds up the two numbers it already showed and says why - and the words and the bar carry the rest: what the smaller card really holds, that the free room is what lets an image be updated in place, and that **Compact build** is the tick that shrinks it; the two confirm-sound boxes also name each other now, so **Menu settings** names the images that carry a confirm sound of their own and will ignore the one in front of you.  From v0.223.1 every card in the menu draws its title and subtitle at ONE size, measured so the longest name on the card still fits and then used for all of them, so a single long title no longer shrinks only itself while the cards either side of it stay large; **Same text size on every card** in **Menu settings** is the tick, and clearing it puts every card back on a size of its own; and the **Confirm sound** box in **Edit image** carries a line under it naming the sound that image will play - the menu's own, the image's own, or nothing at all - so the box and the list's **Confirm** column say one thing.  From v0.225.0 **Edit image** fits any screen: **OK** and **Cancel** are packed against the bottom of the window and the fields above them scroll - bar, wheel and Page keys - when the desktop is too short for the whole form, which **Menu settings** and **Build / flash card** inherit as well; the dialog also draws the card it is editing beside the fields, exactly as the boot menu will draw it, following every keystroke; and what that card's picture comes from is a single list box rather than a column of choices, with the preview answering the question the column was there to answer. From v0.225.4 **SD card needed** counts the GAMES the card will carry, a random set's members included, so adding a random set no longer blanks the number and leaves it blank for the rest of the session; and the size strip is its own refresh button - click it and the list is measured again, which is the way back from a check that failed or an image that was not on this machine when the list last moved and is now.  From v0.226.0 the counter under the cards and the word in front of the countdown are the card owner’s: **Count the cards under them** in **Menu settings** takes the `<  2 / 5  >` line off the menu altogether, and **Countdown says** rewrites the word in front of `<title> in 9 s` - or empties it, leaving the title and the seconds on their own - with the example under the box drawn as the menu will draw it, and a longer word measured against the line it shares and shrunk to fit the glass rather than running off it; from v0.229.5 the loading screen the machine shows while the chosen image starts says that word too, in place of `LOADING`:
 
-![The Multi-boot tab: two TMNT images on one card, the boot menu previewed with art and a countdown, and the SD card size the images need](docs/screenshots/multi-boot.png)
+![The Multi-boot tab: three games and a random pick on one card, the boot menu drawn as the machine will show it, with its countdown](docs/screenshots/multi-boot.png)
 
 From v0.216.1 the tab does the same for a **Jersey Jack** machine: two JJP install ISOs of one game code (the stock code and a retheme built with this app, say) become one multi-boot install stick, and the machine shows the same menu at power-up, drawn by its own PC - flippers choose, START boots, the machine's own volume buttons and the Action button work, the menu keeps its sound to the speakers, and a maintenance reboot boots the same image again without showing it. The stick dialog's **Onto:** row can also install straight onto the game's SSD in a dock on this PC (no stick, no install run on the machine), and on a disk that already holds the install its **Write:** choice replaces only the boot menu, or only one image from that image's own ISO, with the machine's settings and scores kept.
 
@@ -786,7 +786,8 @@ follows; everything not listed is spelled the same:
 | xorriso | libisoburn |
 | xxd | tinyxxd, skipped when vim already provides `xxd` (the two conflict) |
 | gcc + libc6-dev | gcc (Arch's glibc ships its headers) |
-| python3-tk | tk |
+| python3-gi | python-gobject |
+| gir1.2-webkit2-4.1 | webkit2gtk-4.1 |
 | qemu-user-static | qemu-user-static + qemu-user-static-binfmt, which registers the ARM handler with the F flag the emulator needs, in the same transaction |
 | busybox-static | busybox (Arch's is static) |
 | gcc-arm-linux-gnueabihf | **not in the repositories.** AUR `arm-linux-gnueabihf-gcc` (or `arm-linux-gnueabihf-gcc-bin`, prebuilt). The installer names it rather than failing on it; only the Spike 2 emulator needs it |
@@ -1477,8 +1478,8 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in
    what it needs (`qemu-user-static`, an ARM cross-compiler, `gcc` +
-   `libc6-dev`, `make`, `e2fsprogs`, `fuse3`, `ffmpeg`, `python3-tk`,
-   `busybox-static`). Two
+   `libc6-dev`, `make`, `e2fsprogs`, `fuse3`, `ffmpeg`, `python3-gi` and
+   `gir1.2-webkit2-4.1` for the playfield window, `busybox-static`). Two
    compilers, because two different things get built: the hardware shim
    is ARM and the renderer that draws the picture is a native binary for
    your own PC, so having one of them says nothing about having the
@@ -1825,7 +1826,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    that meets root's leftovers names the cause it almost always is, an
    AppImage started under sudo, and carries on. It is a Linux program
    throughout: the Windows-looking parts are workarounds for what WSL
-   lacks (no Tk for the playfield window, a degraded audio hop), and the
+   lacks (no GUI toolkit for the playfield window, a degraded audio hop), and the
    Linux path skips them. macOS runs it in a container, because
    `qemu-user` translates Linux syscalls and the chroot needs Linux
    namespaces — there is no port to write, only Linux to run. It needs
@@ -2171,7 +2172,9 @@ declares — `__version__` is the single source of truth.
 
 ## Architecture
 
-The app is a thin Tk shell that loads manufacturer plugins:
+The app is a web page in a native window (Edge WebView2 on Windows,
+WKWebView on macOS, Qt WebEngine on Linux) over a thin Python shell that
+loads manufacturer plugins:
 
 ```
 pinball_decryptor/
@@ -2183,9 +2186,11 @@ pinball_decryptor/
 │   ├── updater.py                # GitHub release-check
 │   ├── clonezilla.py             # generic gunzip+debugfs ISO extraction
 │   └── registry.py               # Manufacturer ABC + plugin discovery
-├── gui/
-│   ├── main_window.py            # manufacturer-aware window
-│   └── emulate_tab.py            # control surface for the Spike 2 emulator rig
+├── webui/                        # the UI: a web page in a native window
+│   ├── host.py                   # local server + the native window (pywebview)
+│   ├── window.py                 # the shell: manufacturer, project, log, tabs
+│   ├── tabs/                     # one service per tab (Python), driving...
+│   └── static/                   # ...the page (plain JavaScript, no build step)
 ├── plugins/
 │   ├── ap/                       # American Pinball (AES-256 .pkg -> zip)
 │   ├── bof/                      # Barrels of Fun (gpg + GDRE Tools)
@@ -2206,7 +2211,8 @@ architecture docs in [docs/architecture/](docs/architecture/README.md).
 
 The Spike 2 emulator itself is deliberately *not* part of the app. It lives in
 [`tools/spike2_emu/`](tools/spike2_emu) as a rig of shell scripts, `LD_PRELOAD`
-hardware shims and a native GL host that run inside WSL; `gui/emulate_tab.py`
+hardware shims and a native GL host that run inside WSL; the Emulate tab
+(`webui/tabs/emulate.py`)
 only starts it, stops it and reports what it is doing. See that folder's README
 for how the shims work and which titles boot.
 
@@ -2295,10 +2301,10 @@ Back navigation), and `detect()` against synthetic filenames.
 
 [CI runs this matrix on every push + PR](.github/workflows/test.yml):
 
-| Runner | gpg | Tk display |
-|---|---|---|
-| `ubuntu-latest` | apt | `xvfb-run` wraps pytest |
-| `macos-latest` | brew | native |
+| Runner | gpg |
+|---|---|
+| `ubuntu-latest` | apt |
+| `macos-latest` | brew |
 
 There is no Windows runner: the release flow's ship gate is the full suite
 green on the developer's own Windows machine, and a Windows CI job only
@@ -2315,7 +2321,7 @@ should come with at least a detection test + a contract test in
 ### Windows
 
 ```powershell
-# Requires: Python 3.10+ with tkinter, Inno Setup 6
+# Requires: Python 3.10+, Inno Setup 6
 installer\build.ps1
 # Output: installer\Output\Pinball_Asset_Decryptor_vX.Y.Z_Windows.exe
 ```
@@ -2333,8 +2339,8 @@ bash installer/build_macos.sh
 ### Linux
 
 ```bash
-# Requires: Python 3.10+ with tkinter, wget (for appimagetool fetch)
-#   apt-get install python3-tk wget
+# Requires: Python 3.10+, wget (for appimagetool fetch)
+#   apt-get install wget
 bash installer/build_linux.sh
 # Output: installer/Output/Pinball_Asset_Decryptor_vX.Y.Z_Linux_x86_64.AppImage
 ```

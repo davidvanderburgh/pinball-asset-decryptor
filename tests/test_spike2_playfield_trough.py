@@ -13,8 +13,12 @@ all-`?` names - and the merged array is a bytearray written by hand, so what
 is being checked is the reading, not the machine. The real proof is a run with
 swshow.py beside the window; this is the part that answers in half a second.
 """
+import json
 import os
+import shutil
+import subprocess
 import sys
+import types
 
 import pytest
 
@@ -206,14 +210,55 @@ def test_the_playfield_reads_the_merged_array_not_the_keyboards():
     assert "padsw.OFF_MRG if struct.unpack_from" in src
 
 
+def _pf_js():
+    with open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf8") as f:
+        return f.read()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
 def test_state_markers_stay_out_of_the_hit_test():
     """Item 24 measured that the centre of RIGHT SCOOP hit-tests to the COIL
-    marker, and coilact.py depends on it. The live-state dots are drawn on
-    the same canvas and must never enter `self.info`, which is the only thing
-    `_hit()` will return."""
-    src = open(os.path.join(RIG, "playfield.py"), encoding="utf8",
-               errors="replace").read()
-    # The dots go into sw_dots, and nothing puts a dot into info.
-    assert "self.sw_dots.append((dot, S[\"id\"]))" in src
-    assert "self.info[dot]" not in src
-    assert "info[dot]" not in src
+    marker, and coilact.py depends on it. The live-state dot is drawn in the
+    middle of the switch ring and must never become what a press lands on -
+    filling the ring would have moved that press to the SWITCH.
+
+    On the page the hit test is pfHit() (pf.js), and made state is not one of
+    its inputs at all; this runs it under Node on RIGHT SCOOP's shape - the
+    coil a few pixels off its switch - and checks the switch's centre, where
+    the dot is drawn, still reaches the coil and a lone ring's centre still
+    reaches nothing."""
+    src = _pf_js()
+    i = src.index("function pfHit(view, fx, scale, px, py) {")
+    body = src[i:src.index("\n}\n", i)]
+    assert "made" not in body                   # the dots are not an input
+    scoop = {"switches": [[0, 100, 100, 53]], "coils": [[0, 107, 100, "6:8"]],
+             "fixtures": []}
+    lone = {"switches": [[0, 100, 100, 53]], "coils": [], "fixtures": []}
+    js = ("const { pfHit } = require(%s);\n"
+          "console.log(JSON.stringify([pfHit(%s, {}, 1, 100, 100),"
+          " pfHit(%s, {}, 1, 100, 100)]));\n"
+          % (json.dumps(os.path.join(RIG, "pfpage", "pf.js")),
+             json.dumps(scoop), json.dumps(lone)))
+    run = subprocess.run([shutil.which("node"), "-e", js],
+                         capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    assert json.loads(run.stdout) == [["coil", 0], None]
+    # The schematic's dot sits beside its row and takes no event of its own.
+    sch = src[src.index("function schematicView("):
+              src.index("function waitingView(")]
+    assert 'const d = el("span", "d");' in sch
+    assert "d.addEventListener" not in sch.split(
+        'const d = el("span", "d");', 1)[1]
+
+
+def test_made_state_travels_apart_from_the_markers():
+    """The model's half of the same rule: the markers the hit test reads come
+    from spec(), made state only ever from dyn() / a frame's "sw"."""
+    pf = pytest.importorskip("playfield")
+    ns = types.SimpleNamespace(
+        art=None, base=(313, 710), fixtures=[], coils=[], coil_drawn={},
+        sw_rows=[dict(id=53, x=250, y=357, name="Right Scoop")],
+        trough=None, _dot_drawn={53: True})
+    spec = pf.Field.spec(ns)
+    assert spec["switches"] == [[0, 250, 357, 53]]
+    assert pf.Field.dyn(ns)["sw"] == {"53": True}

@@ -8,7 +8,7 @@ they run anywhere (the module's actual WSL calls only happen on Windows).
 import pytest
 
 from pinball_decryptor.core import wsl_disk
-from pinball_decryptor.gui.disk_dialog import _fmt
+from pinball_decryptor.webui.shellx_common import fmt_binary as _fmt
 
 
 # --- classification --------------------------------------------------------
@@ -288,9 +288,9 @@ _CACHE_LIST = (
 
 
 def _patch_rig(monkeypatch, text, dropped=None):
-    """Point disk_dialog's rig helpers at canned output, recording drops."""
-    from pinball_decryptor.gui import disk_dialog
-    from pinball_decryptor.gui.emulate_tab import parse_cache_list
+    """Point emu_cache's rig helpers at canned output, recording drops."""
+    from pinball_decryptor.webui import emu_cache as disk_dialog
+    from pinball_decryptor.webui.emulate_core import parse_cache_list
     calls = []
 
     def _rig_cmd(script, *args):
@@ -320,7 +320,7 @@ def _patch_rig(monkeypatch, text, dropped=None):
 
 
 def test_emu_cache_scan_shapes_rows_like_the_other_scanners(monkeypatch):
-    from pinball_decryptor.gui import disk_dialog
+    from pinball_decryptor.webui import emu_cache as disk_dialog
     _patch_rig(monkeypatch, _CACHE_LIST)
 
     entries, usage = disk_dialog.scan_emu_cache()
@@ -343,14 +343,14 @@ def test_emu_cache_scan_shapes_rows_like_the_other_scanners(monkeypatch):
 
 def test_emu_cache_scan_is_silent_without_a_rig(monkeypatch):
     """No emulator must cost a greyed row, never a traceback."""
-    from pinball_decryptor.gui import disk_dialog
+    from pinball_decryptor.webui import emu_cache as disk_dialog
     monkeypatch.setattr(disk_dialog, "_emu_rig", lambda: None)
     assert disk_dialog.scan_emu_cache() == ([], None)
     assert disk_dialog.drop_emu_cache(["anything"], {"anything": 1}) == 0
 
 
 def test_emu_cache_drop_counts_only_what_actually_went(monkeypatch):
-    from pinball_decryptor.gui import disk_dialog
+    from pinball_decryptor.webui import emu_cache as disk_dialog
     dropped = []
     calls = _patch_rig(monkeypatch, _CACHE_LIST, dropped)
 
@@ -370,7 +370,7 @@ def test_emu_cache_drop_reports_zero_when_the_card_survives(monkeypatch):
     The number goes straight into the usage bar, so a hopeful total would
     draw a drop on a disk that never changed.
     """
-    from pinball_decryptor.gui import disk_dialog
+    from pinball_decryptor.webui import emu_cache as disk_dialog
     _patch_rig(monkeypatch, _CACHE_LIST)   # no `dropped` list: nothing leaves
     freed = disk_dialog.drop_emu_cache(
         ["turtles-1_59_0.store"], {"turtles-1_59_0.store": 7444889 * 1024})

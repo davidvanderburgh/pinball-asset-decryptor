@@ -442,7 +442,7 @@ def add_example(project, name, dirs=(), ffmpeg=None, log=None):
     if ex is None:
         raise CodeModeError("there is no example called %s" % name)
     if not project or not os.path.isdir(project):
-        raise CodeModeError("Open or extract a card project first: modes live in it.")
+        raise CodeModeError(MP.NO_PROJECT_HELP)
     folder = MP.mode_folder(project, ex["slug"])
     if os.path.exists(folder):
         raise CodeModeError("%s is already in this project (modes/%s)." % (ex["name"], ex["slug"]))

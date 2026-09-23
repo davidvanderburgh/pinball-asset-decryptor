@@ -106,7 +106,7 @@ foreground-block on a CI run, and never poll in a sleep loop.
    touch the GUI at all?
    ```
    git diff --stat $(git describe --tags --abbrev=0)..HEAD -- \
-       pinball_decryptor/gui pinball_decryptor/app.py
+       pinball_decryptor/webui pinball_decryptor/app.py
    ```
    - **Diff empty** → skip entirely.  Never re-capture on non-GUI
      releases: every capture differs at the byte level (log
@@ -114,7 +114,7 @@ foreground-block on a CI run, and never poll in a sleep loop.
    - **Diff non-empty** → confirm the screenshots kept pace:
      ```
      git log -1 --format='%ct %h' -- docs/screenshots
-     git log -1 --format='%ct %h' -- pinball_decryptor/gui pinball_decryptor/app.py
+     git log -1 --format='%ct %h' -- pinball_decryptor/webui pinball_decryptor/app.py
      ```
      If the screenshots' last commit is at or after the last
      GUI-touching commit, they're fresh — move on.
@@ -124,11 +124,11 @@ foreground-block on a CI run, and never poll in a sleep loop.
    ```
    python scripts/take_screenshots.py
    ```
-   - The script launches the real GUI on screen for about a minute and
-     captures the picker / Extract / Replace Audio / Replace Images /
-     Partition Explorer screens into `docs/screenshots/`, sourcing the
-     Stern card image + extract folder already saved in the app's
-     settings.json.  It aborts up front (leaving the existing PNGs
+   - The script serves the web UI on a COPY of the app's settings.json
+     (preview codes stripped, the log pane collapsed) and captures the
+     picker / Extract / Replace Audio / Replace Images / Partition Explorer
+     / Multi-boot screens headless into `docs/screenshots/`, sourcing the
+     Stern card image + extract folder saved in settings.json.  It aborts up front (leaving the existing PNGs
      untouched) if that data isn't on this machine — if it aborts, skip
      the refresh and say so in the release summary rather than blocking
      the release.
@@ -144,7 +144,7 @@ foreground-block on a CI run, and never poll in a sleep loop.
 5d. **Audit the in-app tab tips (the header "?" button).**  Same class
    of user-facing doc as the README (5b), and it drifts the same way.
    The tips live in `HELP_CONTENT` in
-   `pinball_decryptor/gui/help_dialog.py` — a `{tab-name: [(title,
+   `pinball_decryptor/webui/help_content.py` — a `{tab-name: [(title,
    body), ...]}` dict rendered by the "?" button for whichever notebook
    tab is showing (Extract / Audio / Video / Images / Text / Defaults /
    Write / Mod Pack / Partitions).  When a release adds, renames, moves,
@@ -154,7 +154,7 @@ foreground-block on a CI run, and never poll in a sleep loop.
    Gate on whether the GUI actually changed:
    ```
    git diff $(git describe --tags --abbrev=0)..HEAD -- \
-       pinball_decryptor/gui pinball_decryptor/app.py
+       pinball_decryptor/webui pinball_decryptor/app.py
    ```
    - **No GUI change** → skip.
    - **GUI changed** → for each control/label/button/flow this release

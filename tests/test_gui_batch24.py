@@ -1,7 +1,8 @@
 """Feedback batch 24 — logic-level tests for the Video/Audio tab fixes.
 
-No Tk window is built: the methods under test only touch plain attributes,
-so a duck-typed ``self`` exercises them the way the async workers do.
+No window is built: the tab-service methods under test only touch plain
+attributes, so a duck-typed ``self`` exercises them the way the async workers
+do.
 """
 
 import os
@@ -10,7 +11,9 @@ from types import SimpleNamespace
 
 from pinball_decryptor.core.video import VideoInfo
 from pinball_decryptor.core.video_slots import VideoSlot
-from pinball_decryptor.gui.main_window import MainWindow
+from pinball_decryptor.webui import video_helpers as vh
+from pinball_decryptor.webui.tabs.audio import AudioTab
+from pinball_decryptor.webui.tabs.video import VideoTab
 
 
 def _var(v):
@@ -33,18 +36,19 @@ def _slot(codec="h264", pix_fmt="yuv420p", ext=".mov", info=True):
 # ---------------------------------------------------------------------------
 
 class _ConvStub:
-    """Just enough of MainWindow for the Convert cache key.
+    """Just enough of the Video tab for the Convert cache key.
 
-    The key asks ``_video_asis_for`` rather than reading the tab-wide box
+    The key asks ``_asis_for`` rather than reading the tab-wide box
     directly, since batch 37 gave each clip its own optional conversion
     setting — with no per-clip flag set, the answer is still the box.
     """
-    _video_asis_for = MainWindow._video_asis_for
+    _asis_for = VideoTab._asis_for
 
     def __init__(self):
         self.video_no_conversion_var = _var(True)
         self.video_trim_var = _var(False)
-        self._video_asis_flags = {}
+        self._asis = {}
+        self._by_rel = {}
 
 
 def _conv_self():
@@ -54,10 +58,10 @@ def _conv_self():
 def test_conv_key_changes_when_the_file_is_rewritten(tmp_path):
     rep = tmp_path / "attract.mov"
     rep.write_bytes(b"PRORES-ISH BYTES")
-    k1 = MainWindow._video_conv_key(_conv_self(), "video/a.mov", str(rep))
+    k1 = VideoTab._conv_key(_conv_self(), "video/a.mov", str(rep))
     rep.write_bytes(b"H264 NOW, AND A DIFFERENT SIZE TOO")
     os.utime(rep, (time.time() + 5, time.time() + 5))
-    k2 = MainWindow._video_conv_key(_conv_self(), "video/a.mov", str(rep))
+    k2 = VideoTab._conv_key(_conv_self(), "video/a.mov", str(rep))
     assert k1 != k2
 
 
@@ -65,14 +69,14 @@ def test_conv_key_stable_for_an_untouched_file(tmp_path):
     rep = tmp_path / "attract.mov"
     rep.write_bytes(b"SAME BYTES")
     me = _conv_self()
-    assert (MainWindow._video_conv_key(me, "video/a.mov", str(rep))
-            == MainWindow._video_conv_key(me, "video/a.mov", str(rep)))
+    assert (VideoTab._conv_key(me, "video/a.mov", str(rep))
+            == VideoTab._conv_key(me, "video/a.mov", str(rep)))
 
 
 def test_conv_key_survives_a_missing_file(tmp_path):
     # A NAS blip mid-refresh must not raise out of a row repaint.
-    k = MainWindow._video_conv_key(_conv_self(), "video/a.mov",
-                                   str(tmp_path / "gone.mov"))
+    k = VideoTab._conv_key(_conv_self(), "video/a.mov",
+                           str(tmp_path / "gone.mov"))
     assert k[2] == (0, 0)
 
 
@@ -83,49 +87,48 @@ def test_conv_key_survives_a_missing_file(tmp_path):
 # ---------------------------------------------------------------------------
 
 class _SternStub:
-    """Just enough of MainWindow for the slot-playability helpers."""
-    _slot_unplayable = MainWindow._slot_unplayable
-    _video_fmt_cell = MainWindow._video_fmt_cell
-    _warn_unplayable_slot = MainWindow._warn_unplayable_slot
+    """Just enough of the Video tab for the unplayable-slot log line."""
+    _warn_unplayable = VideoTab._warn_unplayable
 
     def __init__(self, key="stern"):
-        self._current_mfr = SimpleNamespace(key=key)
-        self._video_scan_dir = "/assets"
-        self._video_unplayable_warned = set()
+        self._key = key
+        self._scan_dir = "/assets"
+        self._unplayable_warned = set()
         self.logs = []
 
-    def append_log(self, text, level="info"):
+    def _mfr_key(self):
+        return self._key
+
+    def log(self, text, level="info"):
         self.logs.append((text, level))
 
 
 def test_prores_in_the_slot_is_unplayable():
-    why = _SternStub()._slot_unplayable(_slot(codec="prores"))
+    why = vh.slot_unplayable("stern", _slot(codec="prores"))
     assert why and "PRORES" in why and "H.264" in why
 
 
 def test_ten_bit_in_the_slot_is_unplayable():
-    why = _SternStub()._slot_unplayable(_slot(pix_fmt="yuv422p10le"))
+    why = vh.slot_unplayable("stern", _slot(pix_fmt="yuv422p10le"))
     assert why and "8-bit" in why
 
 
 def test_stock_h264_is_fine_and_unprobed_makes_no_claim():
-    me = _SternStub()
-    assert me._slot_unplayable(_slot()) is None
-    assert me._slot_unplayable(_slot(info=False)) is None
+    assert vh.slot_unplayable("stern", _slot()) is None
+    assert vh.slot_unplayable("stern", _slot(info=False)) is None
 
 
 def test_non_stern_machines_make_no_claim():
-    assert _SternStub(key="jjp")._slot_unplayable(
-        _slot(codec="prores")) is None
+    assert vh.slot_unplayable("jjp", _slot(codec="prores")) is None
 
 
 def test_fmt_cell_carries_the_flag_and_log_fires_once():
     me = _SternStub()
     slot = _slot(codec="prores")
-    assert me._video_fmt_cell(slot).endswith("⚠")
-    assert not me._video_fmt_cell(_slot()).endswith("⚠")
-    me._warn_unplayable_slot(slot.rel_path, slot)
-    me._warn_unplayable_slot(slot.rel_path, slot)
+    assert vh.fmt_cell("stern", slot).endswith("⚠")
+    assert not vh.fmt_cell("stern", _slot()).endswith("⚠")
+    me._warn_unplayable(slot.rel_path, slot)
+    me._warn_unplayable(slot.rel_path, slot)
     assert len(me.logs) == 1
     text, level = me.logs[0]
     assert level == "error" and "black picture" in text
@@ -153,9 +156,9 @@ def test_dropped_warning_demotes_applied_slots(tmp_path):
     slots = {"video/a.mov": object(), "video/b.mov": object()}
     logs = []
     me = SimpleNamespace(
-        append_log=lambda text, level="info": logs.append((text, level)))
-    MainWindow._warn_dropped_assignments(me, "video", saved, slots,
-                                         str(assets))
+        _by_rel=slots, window=SimpleNamespace(),
+        log=lambda text, level="info": logs.append((text, level)))
+    VideoTab._warn_dropped(me, saved, str(assets))
     infos = [t for t, lv in logs if lv == "info"]
     errors = [t for t, lv in logs if lv == "error"]
     assert (len(infos), len(errors)) == (2, 1)
@@ -185,19 +188,19 @@ def test_audio_rep_available(tmp_path):
     (assets / "audio" / "stock.wav").write_bytes(b"stock")
 
     me = SimpleNamespace(
-        _audio_assignments={"audio/assigned.wav": str(rep_src)},
-        _audio_changed_on_disk={"audio/built.wav"},
-        _audio_scan_dir=str(assets),
-        _audio_slots_by_rel={
+        _assign={"audio/assigned.wav": str(rep_src)},
+        _changed={"audio/built.wav"},
+        _scan_dir=str(assets),
+        _by_rel={
             "audio/built.wav": SimpleNamespace(
                 abs_path=str(assets / "audio" / "built.wav")),
             "audio/stock.wav": SimpleNamespace(
                 abs_path=str(assets / "audio" / "stock.wav")),
         },
     )
-    avail = MainWindow._audio_rep_available
+    avail = AudioTab._rep_available
     assert avail(me, "audio/assigned.wav")        # live assignment
     assert avail(me, "audio/built.wav")           # changed on disk + snapshot
     assert not avail(me, "audio/stock.wav")       # nothing replaced
-    me._audio_assignments["audio/assigned.wav"] = str(tmp_path / "gone.mp3")
+    me._assign["audio/assigned.wav"] = str(tmp_path / "gone.mp3")
     assert not avail(me, "audio/assigned.wav")    # source vanished

@@ -1,0 +1,45 @@
+/* Replace Text + its Scenes window.  Tokens and components from app.css. */
+
+.text-page { gap: 12px; }
+.text-page .pagehead p { max-width: 980px; }
+.text-page .pagehead p .badge-i { vertical-align: -3px; margin-left: 4px; }
+
+/* the project folder mirror: a link that opens the folder */
+.text-folder { gap: 8px; min-height: 22px; margin-top: -4px; }
+.linkish { all: unset; cursor: pointer; color: var(--accent); min-width: 0; max-width: 100%; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.linkish:hover { text-decoration: underline; }
+.linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+
+/* The list takes what the page leaves it and shrinks first (Tk packed the
+   editor under it at a fixed height), so Apply stays in view; below the
+   list's own minimum the page scrolls. */
+.text-card { flex: 1 1 0; min-height: min-content; }
+.text-card > .bd.text-body { flex: 1 1 auto; min-height: 0; gap: 0; }
+.text-card .toolbar .text-scene { flex: 0 1 320px; min-width: 150px; }
+.text-card .toolbar .search { flex: 0 1 260px; }
+.text-table { flex: 1 1 0; min-height: 132px; }
+.tbl .c.pre { white-space: pre; }
+
+/* the editor under the list */
+.text-card > .ft { display: block; padding: 10px 16px; }
+.text-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.text-edit-grid { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px 10px; align-items: center; }
+/* was @media (max-width: 900px) */
+html.bp-900 .text-edit-grid { grid-template-columns: auto minmax(0, 1fr); }
+.text-edit-grid .grow { min-width: 0; }
+.pre-field input { white-space: pre; }
+.text-edit-actions { gap: 12px; row-gap: 6px; }
+.text-scene-note { font-style: italic; overflow-wrap: anywhere; }
+.text-saved { margin: 0; }
+.text-italic { font-style: italic; }
+
+/* Replace everywhere… */
+.text-find-grid { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "fl ff mc" "rl rf mc"; gap: 8px 10px; align-items: center; }
+.text-misfits { height: 220px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+
+/* a short window: the list keeps about three rows, and the saved-to note
+   moves onto an "i" by the byte count so the editor stays in view */
+.text-saved-i { display: none; }
+html.bph-760 .text-table { min-height: 118px; }
+html.bph-760 .text-saved { display: none; }
+html.bph-760 .text-saved-i { display: inline-flex; }

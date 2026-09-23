@@ -1,6 +1,7 @@
 """Worktree chooser logic — parsing, discovery filters, and the no-op
 guarantees that keep it invisible outside a dev tree with worktrees."""
 
+import json
 import os
 
 from pinball_decryptor import worktree_picker as wp
@@ -294,3 +295,124 @@ def test_pick_this_checkout_continues(monkeypatch):
                         lambda r: [("/wt/item-9", "item/9")])
     monkeypatch.setattr(wp, "_ask", lambda r, others: root)
     assert wp.dev_pick_checkout() is True
+
+
+# ----------------------------------------------------------------------
+# the chooser window (a pywebview page in a child process)
+# ----------------------------------------------------------------------
+ROWS = [("/wt/main", "main  —  this checkout"),
+        ("/wt/item-9", "item/9  —  Save <slots> & more")]
+
+
+def _fake_rows(monkeypatch):
+    monkeypatch.setattr(wp, "chooser_rows", lambda root, others: list(ROWS))
+
+
+def test_ask_without_pywebview_starts_this_checkout(monkeypatch, capsys):
+    _fake_rows(monkeypatch)
+    monkeypatch.setattr(wp, "_chooser_python", lambda root: None)
+    monkeypatch.setattr(wp.subprocess, "run", lambda *a, **k: (
+        _ for _ in ()).throw(AssertionError("no child without pywebview")))
+    assert wp._ask("/wt/main", [("/wt/item-9", "item/9")]) == "/wt/main"
+    assert "pywebview" in capsys.readouterr().err
+
+
+class _Done:
+    def __init__(self, returncode=0, stdout=b"", stderr=b""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def test_ask_runs_the_window_in_a_child(monkeypatch):
+    _fake_rows(monkeypatch)
+    monkeypatch.setattr(wp, "_chooser_python", lambda root: "py.exe")
+    seen = {}
+
+    def run(cmd, input=None, **kw):
+        seen["cmd"], seen["input"] = cmd, input
+        return _Done(stdout=b'noise\n{"choice": 1}\n')
+    monkeypatch.setattr(wp.subprocess, "run", run)
+    assert wp._ask("/wt/main", []) == "/wt/item-9"
+    assert seen["cmd"][0] == "py.exe"
+    assert seen["cmd"][-1] == "--choose"
+    assert os.path.samefile(seen["cmd"][1], wp.__file__)
+    labels = json.loads(seen["input"].decode("utf-8"))["labels"]
+    assert labels == [text for _, text in ROWS]
+
+
+def test_ask_cancelled_window_is_none(monkeypatch):
+    _fake_rows(monkeypatch)
+    monkeypatch.setattr(wp, "_chooser_python", lambda root: "py.exe")
+    monkeypatch.setattr(wp.subprocess, "run",
+                        lambda *a, **k: _Done(stdout=b'{"choice": null}\n'))
+    assert wp._ask("/wt/main", []) is None
+
+
+def test_failed_child_starts_this_checkout(monkeypatch, capsys):
+    monkeypatch.delenv(wp.ENV_PICKED, raising=False)
+    monkeypatch.setattr(wp, "discover_other_checkouts",
+                        lambda root: [("/wt/item-9", "item/9")])
+    _fake_rows(monkeypatch)
+    monkeypatch.setattr(wp, "_chooser_python", lambda root: "py.exe")
+    monkeypatch.setattr(wp.subprocess, "run",
+                        lambda *a, **k: _Done(returncode=1, stderr=b"boom"))
+    launched = []
+    monkeypatch.setattr(wp, "_launch", launched.append)
+    assert wp.dev_pick_checkout() is True
+    assert launched == []
+    assert "chooser failed" in capsys.readouterr().err
+
+
+def test_chooser_html_lists_the_rows_in_order_escaped():
+    page = wp.chooser_html([text for _, text in ROWS])
+    assert page.index("this checkout") < page.index("item/9")
+    assert "Save &lt;slots&gt; &amp; more" in page
+    assert "<slots>" not in page
+    assert page.count('class="row"') == 2
+    assert wp._CHOOSER_QUESTION in page
+
+
+def test_choose_main_answers_on_stdout(monkeypatch, capsys):
+    """The child: rows in on stdin, a click on the second row, the index
+    out on stdout."""
+    import io
+    import sys
+    import types
+    made = {}
+
+    class _Win:
+        destroyed = False
+
+        def destroy(self):
+            self.destroyed = True
+
+    def create_window(title, html=None, js_api=None, **kw):
+        made.update(title=title, html=html, api=js_api, kw=kw, win=_Win())
+        return made["win"]
+
+    def start(*a, **k):
+        made["api"].pick(1)
+    fake = types.SimpleNamespace(create_window=create_window, start=start)
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    payload = json.dumps({"labels": ["a", "b"]}).encode("utf-8")
+    monkeypatch.setattr(sys, "stdin",
+                        types.SimpleNamespace(buffer=io.BytesIO(payload)))
+    assert wp._choose_main() == 0
+    assert json.loads(capsys.readouterr().out.strip()) == {"choice": 1}
+    assert made["win"].destroyed
+    assert made["kw"]["on_top"] is True
+
+
+def test_choose_main_closed_window_is_null(monkeypatch, capsys):
+    import io
+    import sys
+    import types
+    fake = types.SimpleNamespace(
+        create_window=lambda *a, **k: types.SimpleNamespace(
+            destroy=lambda: None),
+        start=lambda *a, **k: None)
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    payload = json.dumps({"labels": ["a"]}).encode("utf-8")
+    monkeypatch.setattr(sys, "stdin",
+                        types.SimpleNamespace(buffer=io.BytesIO(payload)))
+    wp._choose_main()
+    assert json.loads(capsys.readouterr().out.strip()) == {"choice": None}

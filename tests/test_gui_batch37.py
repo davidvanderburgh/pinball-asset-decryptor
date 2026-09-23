@@ -21,19 +21,22 @@ that disagree about their change count can be compared), a per-clip answer to
 "use my files as-is" ("you can't mix and match. Any reason why?"), a log per
 project instead of one shared file, and the ▶ under Original honouring "Play
 replacements" the way the rest of the run already did.
+
+The Write list's sort and CSV export, the two preview boxes' names and the
+per-clip as-is row are covered by the web tabs' own tests
+(test_webui_write.py, test_webui_audio.py, test_webui_video.py); the
+changed-on-disk cell and the play redirect drive the web Audio tab
+(webui/tabs/audio.py) through tests/webui_harness.py.
 """
 
 import os
 import zipfile
 
-import pytest
-
 from pinball_decryptor.core import modpack
 from pinball_decryptor.core.video import VideoInfo
 from pinball_decryptor.core.video_slots import VideoSlot
-from pinball_decryptor.gui.main_window import MainWindow
-from tests.conftest import HAS_DISPLAY
-from tests.test_gui_smoke import app  # noqa: F401  (fixture)
+from pinball_decryptor.webui.video_helpers import playability_conflict
+from tests.webui_harness import web_app
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +127,7 @@ def test_a_30fps_pick_is_judged_against_the_stock_30fps_clip(monkeypatch):
               "/picks/new.mov": _info(fps=30.0)}
     monkeypatch.setattr("pinball_decryptor.core.video.detect_video_info",
                         lambda p: probes.get(p))
-    assert MainWindow._video_playability_conflict(
+    assert playability_conflict(
         _slot60(), "/picks/new.mov",
         "/stock/JUKEBOX_LOOP3.mov") is None
 
@@ -135,7 +138,7 @@ def test_without_a_stock_copy_the_slot_itself_is_still_the_reference(
     clip in the slot rather than judging nothing."""
     monkeypatch.setattr("pinball_decryptor.core.video.detect_video_info",
                         lambda p: _info(fps=30.0))
-    why = MainWindow._video_playability_conflict(_slot60(), "/picks/new.mov")
+    why = playability_conflict(_slot60(), "/picks/new.mov")
     assert "60 fps" in why and "stock" not in why
 
 
@@ -145,171 +148,9 @@ def test_a_pick_the_stock_clip_also_rejects_is_still_rejected(monkeypatch):
               "/picks/small.mov": _info(w=640, h=360)}
     monkeypatch.setattr("pinball_decryptor.core.video.detect_video_info",
                         lambda p: probes.get(p))
-    why = MainWindow._video_playability_conflict(
+    why = playability_conflict(
         _slot60(), "/picks/small.mov", "/stock/JUKEBOX_LOOP3.mov")
     assert "640x360" in why and "stock clip" in why
-
-
-# ---------------------------------------------------------------------------
-# GUI-backed halves.
-# ---------------------------------------------------------------------------
-
-pytestmark_gui = pytest.mark.skipif(not HAS_DISPLAY,
-                                    reason="no Tk display available")
-
-
-def _stern(app):
-    mfr = next(m for m in app._manufacturers if m.key == "stern")
-    app._on_manufacturer_change(mfr)
-    app.root.update()
-    app.root.update()
-    return app.window
-
-
-@pytest.mark.gui
-@pytestmark_gui
-def test_a_dragged_column_stops_stretching_so_ttk_cannot_take_it_back(app):
-    """ttk redistributes the difference between the total column width and the
-    widget across every stretchy column on the next layout pass — which is
-    what snapped his drag straight back."""
-    w = _stern(app)
-    tree = w._audio_tree
-    tree.column("#0", width=150)
-    assert str(tree.column("#0", "stretch")) in ("1", "True")
-    # A press on the separator, a wider column, a release: a real drag.
-    w._tree_drag_widths["audio"] = {c: int(tree.column(c, "width"))
-                                    for c in ("#0", "len", "fmt", "rep",
-                                              "loop", "keep", "type")}
-    tree.column("#0", width=420)
-    w._save_tree_columns(tree, "audio",
-                         ("#0", "len", "fmt", "rep", "loop", "keep", "type"))
-    assert w._saved_column_widths["audio"]["#0"] == 420
-    assert str(tree.column("#0", "stretch")) in ("0", "False")
-
-
-@pytest.mark.gui
-@pytestmark_gui
-def test_a_row_click_is_not_a_resize(app):
-    """Every click fires ButtonRelease.  Recording widths on all of them wrote
-    a width for every column the first time the user selected a row, which
-    then froze fit-to-content sizing for the whole tree."""
-    w = _stern(app)
-    w._saved_column_widths.pop("audio", None)
-    w._tree_drag_widths["audio"] = None          # press was on a cell
-    w._audio_tree.column("#0", width=333)
-    w._save_tree_columns(w._audio_tree, "audio", ("#0", "len"))
-    assert "audio" not in w._saved_column_widths
-
-
-@pytest.mark.gui
-@pytestmark_gui
-def test_the_wrong_format_callout_does_not_eat_the_options_row(app,
-                                                               monkeypatch):
-    """The notebook's pane height is pinned to the tab's height as it was when
-    the tab was selected, so the callout packed in afterwards left the options
-    row under it with no space at all — it vanished rather than overflowing."""
-    w = _stern(app)
-    w._notebook.select(w._tab_video)
-    for _ in range(4):
-        app.root.update()
-        app.root.update_idletasks()
-    pinned_before = int(w._notebook.cget("height"))
-    # Drive the real callout path, not a bare pack().
-    monkeypatch.setattr(w, "_slot_unplayable",
-                        lambda _s: "is ProRes and the machine plays H.264")
-    w._video_slots_by_rel = {"video/a.mov": object()}
-    w._video_current_rel = "video/a.mov"
-    w._video_update_preview_note("video/a.mov")
-    for _ in range(4):
-        app.root.update()
-        app.root.update_idletasks()
-    assert w._video_preview_note.winfo_ismapped()
-    assert int(w._notebook.cget("height")) > pinned_before
-    assert w._video_opts_row.winfo_ismapped()
-    assert w._video_no_conversion_cb.winfo_ismapped()
-
-
-@pytest.mark.gui
-@pytestmark_gui
-def test_the_write_list_sorts_and_returns_to_scan_order(app):
-    """"I want to compare the two apps and sort by type but there is no
-    sorting.  Can sorting be added to this screen?\""""
-    w = _stern(app)
-    w._write_preview_scan_id = 7
-    w._clear_write_preview_rows()
-    w._write_preview_tree.delete(*w._write_preview_tree.get_children())
-    for rel, ext, status in (("video/b.mov", "mov", "Pending (Replace Video)"),
-                             ("audio/a.wav", "wav", "Modified"),
-                             ("images/c.png", "png", "Modified")):
-        w._add_write_preview_row(rel, ext, status, 7)
-
-    def _names():
-        return [w._write_preview_tree.item(i, "text")
-                for i in w._write_preview_tree.get_children()]
-
-    assert _names() == ["video/b.mov", "audio/a.wav", "images/c.png"]
-    w._sort_click("_write_sort", "type", False,          # by type, ascending
-                  w._refresh_write_preview_list, True)
-    assert _names() == ["video/b.mov", "images/c.png", "audio/a.wav"]
-    w._sort_click("_write_sort", "type", False,          # descending
-                  w._refresh_write_preview_list, True)
-    assert _names() == ["audio/a.wav", "images/c.png", "video/b.mov"]
-    w._sort_click("_write_sort", "type", False,          # back to scan order
-                  w._refresh_write_preview_list, True)
-    assert _names() == ["video/b.mov", "audio/a.wav", "images/c.png"]
-
-
-@pytest.mark.gui
-@pytestmark_gui
-def test_the_write_list_exports_as_csv(app, tmp_path, monkeypatch):
-    """"I then thought maybe I could export a file and compare but that does
-    not exist.\""""
-    import pinball_decryptor.gui.main_window as mw
-    w = _stern(app)
-    w._write_preview_scan_id = 9
-    w._clear_write_preview_rows()
-    w._write_preview_tree.delete(*w._write_preview_tree.get_children())
-    w._write_sort = (None, False)
-    w._add_write_preview_row("audio/a.wav", "wav", "Modified", 9)
-    w._add_write_preview_row("video/b.mov", "mov", "Pending (Replace Video)", 9)
-    out = tmp_path / "changes.csv"
-    monkeypatch.setattr(mw.filedialog, "asksaveasfilename",
-                        lambda *a, **k: str(out))
-    w._write_export_csv()
-    text = out.read_text(encoding="utf-8-sig")
-    assert "File,Type,Status" in text
-    assert "audio/a.wav,wav,Modified" in text
-    assert "video/b.mov,mov,Pending (Replace Video)" in text
-
-
-@pytest.mark.gui
-@pytestmark_gui
-def test_the_two_preview_boxes_no_longer_read_identically(app, tmp_path):
-    """With a stock snapshot on the left and the folder's own file on the
-    right, both panes wore the slot's name and nothing else — "the two preview
-    boxes have the same file name which does not seem correct\"."""
-    from pinball_decryptor.core import staged_originals
-    from pinball_decryptor.core.audio_slots import AudioSlot
-    w = _stern(app)
-    rel = "audio/00m44s895 - idx0172 - Song Remains The Same Snippet.wav"
-    folder = tmp_path / "ex"
-    (folder / "audio").mkdir(parents=True)
-    (folder / rel).write_bytes(b"RIFFmodified")
-    snap = folder / staged_originals.ORIG_DIR / rel
-    snap.parent.mkdir(parents=True, exist_ok=True)
-    snap.write_bytes(b"RIFFstock")
-    w._audio_scan_dir = str(folder)
-    w._audio_slots = [AudioSlot(rel_path=rel, abs_path=str(folder / rel),
-                                ext=".wav", info=None, size=12)]
-    w._audio_slots_by_rel = {rel: w._audio_slots[0]}
-    w._audio_assignments = {}
-    w._audio_changed_on_disk = {rel}
-    w._audio_load_track(rel)
-    left = w._audio_pane_orig.title_var.get()
-    right = w._audio_pane_rep.title_var.get()
-    assert left != right
-    assert left.startswith("Original (stock)")
-    assert right.startswith("Replacement (your file)")
 
 
 # ---------------------------------------------------------------------------
@@ -363,50 +204,6 @@ def test_an_override_also_forces_a_conversion_the_box_would_skip(tmp_path,
         slots, {"video/a.mov": str(rep)}, no_conversion=True,
         asis_overrides={"video/a.mov": False})
     assert staged == [("video/a.mov", False)]
-
-
-@pytest.mark.gui
-@pytestmark_gui
-def test_the_per_clip_setting_wins_over_the_box_and_is_remembered(app,
-                                                                 tmp_path):
-    from pinball_decryptor.core import staged_changes
-    w = _stern(app)
-    rel = "video/JUKEBOX_LOOP3.mov"
-    folder = tmp_path / "ex"
-    folder.mkdir()
-    w.write_assets_var.set(str(folder))
-    w._video_scan_dir = str(folder)
-    w._video_slots_by_rel = {rel: _slot60()}
-    w._video_slots = [w._video_slots_by_rel[rel]]
-    w._video_assignments = {rel: str(tmp_path / "mine.mov")}
-    w._video_asis_flags = {}
-    w.video_no_conversion_var.set(False)
-    assert w._video_asis_for(rel) is False
-
-    w._video_set_asis(rel, True)
-    assert w._video_asis_for(rel) is True
-    assert staged_changes.load(str(folder))["video_asis_slots"] == {rel: True}
-
-    # Clearing it hands the row back to the box.
-    w._video_set_asis(rel, None)
-    assert w._video_asis_for(rel) is False
-    w.video_no_conversion_var.set(True)
-    assert w._video_asis_for(rel) is True
-
-
-@pytest.mark.gui
-@pytestmark_gui
-def test_an_overridden_row_is_marked_in_the_convert_column(app):
-    """One row set apart from the box has to be findable among a hundred."""
-    w = _stern(app)
-    rel = "video/JUKEBOX_LOOP3.mov"
-    w._video_slots_by_rel = {rel: _slot60()}
-    w._video_asis_flags = {}
-    w._video_conv_cache[w._video_conv_key(rel, "C:/x/mine.mov")] = "As-is"
-    assert w._video_conv_cell(rel, "C:/x/mine.mov") == "As-is"
-    w._video_asis_flags[rel] = True
-    w._video_conv_cache[w._video_conv_key(rel, "C:/x/mine.mov")] = "As-is"
-    assert w._video_conv_cell(rel, "C:/x/mine.mov") == "• As-is"
 
 
 # ---------------------------------------------------------------------------
@@ -489,23 +286,25 @@ def test_a_pack_carries_the_replacement_names(tmp_path):
         "audio/idx0172.wav": "Song Remains.wav"}
 
 
-@pytest.mark.gui
-@pytestmark_gui
-def test_changed_on_disk_names_the_file_it_was_changed_with(app, tmp_path):
+def test_changed_on_disk_names_the_file_it_was_changed_with(tmp_path):
     from pinball_decryptor.core import staged_changes
-    w = _stern(app)
     rel = "audio/00m44s895 - idx0172 - Song Remains The Same Snippet.wav"
     folder = tmp_path / "ex"
     folder.mkdir()
     staged_changes.save(str(folder),
                         {"replacement_names": {rel: "Song Remains.wav"}})
-    w._load_staged_changes(str(folder))
-    w._audio_scan_dir = str(folder)
-    assert w._changed_on_disk_cell("audio", rel) == \
-        "✓ changed on disk (Song Remains.wav)"
-    # A slot with nothing remembered still reads the way it always did.
-    assert w._changed_on_disk_cell("audio", "audio/other.wav") == \
-        "✓ changed on disk"
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = w.window.service("audio")
+
+        def _cells():
+            svc._load_staged_changes(str(folder))
+            svc._scan_dir = str(folder)
+            return (svc._changed_on_disk_cell(rel),
+                    svc._changed_on_disk_cell("audio/other.wav"))
+        named, plain = w.run(_cells)
+        assert named == "✓ changed on disk (Song Remains.wav)"
+        # A slot with nothing remembered still reads the way it always did.
+        assert plain == "✓ changed on disk"
 
 
 # ---------------------------------------------------------------------------
@@ -513,33 +312,45 @@ def test_changed_on_disk_names_the_file_it_was_changed_with(app, tmp_path):
 #    the rows the sequential run steps onto.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.gui
-@pytestmark_gui
-def test_play_replacements_redirects_the_original_play_button(app,
+def _audio_with_panes(w, monkeypatch, rep_available):
+    svc = w.window.service("audio")
+    played = []
+    monkeypatch.setattr(svc, "_rep_available", lambda _rel: rep_available)
+    monkeypatch.setattr(svc, "_publish",
+                        lambda name, **kw: played.append((name, kw)))
+
+    def _set():
+        svc._current_rel = "audio/a.wav"
+        svc._panes["orig"]["path"] = "C:/x/stock.wav"
+        svc._panes["rep"]["path"] = "C:/x/mine.wav"
+    w.run(_set)
+    return svc, played
+
+
+def test_play_replacements_redirects_the_original_play_button(tmp_path,
                                                               monkeypatch):
     """"If you select 'play replacements' but click start on the left original
     audio file, it plays the original and not the replacement."."""
-    w = _stern(app)
-    w._audio_current_rel = "audio/a.wav"
-    monkeypatch.setattr(w, "_audio_rep_available", lambda _rel: True)
-    started = []
-    w._audio_pane_rep.path = "C:/x/mine.wav"
-    monkeypatch.setattr(w._audio_pane_rep, "start_playback",
-                        lambda pos=0.0: started.append(pos))
+    with web_app(tmp_path, mfr="stern") as w:
+        svc, played = _audio_with_panes(w, monkeypatch, True)
 
-    w.audio_play_subst_var.set(False)
-    assert w._audio_play_intercept() is False    # off: the button means stock
-    w.audio_play_subst_var.set(True)
-    assert w._audio_play_intercept() is True
-    assert started == [0.0]
+        w.run(svc.audio_play_subst_var.set, False)
+        assert w.run(svc._play_intercept) is False  # off: the button means stock
+        assert w.call("audio.play", "orig") is True
+        assert played[-1][1]["pane"] == "orig"
+        w.run(svc.audio_play_subst_var.set, True)
+        assert w.call("audio.play", "orig") is True
+        assert played[-1][0] == "audio_play"
+        assert played[-1][1]["pane"] == "rep"
+        assert played[-1][1]["pos"] == 0.0
 
 
-@pytest.mark.gui
-@pytestmark_gui
-def test_a_row_with_no_replacement_still_plays_its_original(app, monkeypatch):
+def test_a_row_with_no_replacement_still_plays_its_original(tmp_path,
+                                                            monkeypatch):
     """Stock is what the card plays there, so nothing is redirected."""
-    w = _stern(app)
-    w._audio_current_rel = "audio/a.wav"
-    w.audio_play_subst_var.set(True)
-    monkeypatch.setattr(w, "_audio_rep_available", lambda _rel: False)
-    assert w._audio_play_intercept() is False
+    with web_app(tmp_path, mfr="stern") as w:
+        svc, played = _audio_with_panes(w, monkeypatch, False)
+        w.run(svc.audio_play_subst_var.set, True)
+        assert w.run(svc._play_intercept) is False
+        assert w.call("audio.play", "orig") is True
+        assert played[-1][1]["pane"] == "orig"

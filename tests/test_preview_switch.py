@@ -207,7 +207,7 @@ def test_the_start_up_check_is_quick():
 
 
 def test_the_words_people_see_have_no_em_dash():
-    from pinball_decryptor.gui import preview_dialog
+    from pinball_decryptor.webui import preview_text as preview_dialog
     from pinball_decryptor.plugins.stern import mode_write as MW
     texts = [preview_dialog.INTRO, MW.PREVIEW_REFUSAL,
              "\n".join(P.describe(P.check(make_code(), TODAY, KEYS), TODAY))]
@@ -533,7 +533,7 @@ def test_the_completion_notes_name_the_switch(tmp_path):
 
 
 def test_the_emulate_tab_rebuilds_a_set_when_the_switch_changes(tmp_path):
-    from pinball_decryptor.gui.emulate_tab import preview_modes_reason
+    from pinball_decryptor.webui.emulate_core import preview_modes_reason
     project = tmp_path / "p"
     _hold_modes(project)
     built_off = {"files": [], "modes_preview": False}

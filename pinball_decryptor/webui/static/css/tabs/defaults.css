@@ -1,0 +1,72 @@
+/* Defaults tab.  Design-system tokens and classes only (css/app.css). */
+
+/* the page is the one scroller: its cards keep their natural height */
+.dflt > * { flex-shrink: 0; }
+
+.dflt .dflt-kv { grid-template-columns: 110px minmax(0, 1fr); gap: 10px 14px; }
+.dflt .dflt-path { min-width: 0; display: block; }
+.dflt .dflt-presets { gap: 8px; }
+.dflt .dflt-presets .chk { white-space: normal; }
+/* the Preset picker: a field-look button that opens the saved names */
+.dflt .dflt-pick { width: 240px; max-width: 100%; appearance: none; cursor: pointer; text-align: left; }
+.dflt .dflt-pick:disabled { cursor: default; }
+.dflt .dflt-status { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); font-size: 13px;
+  padding-top: 10px; border-top: 1px solid var(--line); }
+.dflt .dflt-status .i { flex: 0 0 auto; margin-top: 2px; color: var(--info); }
+
+/* the settings form and the High Scores block: one grid template per row so
+   every row lines up, a sticky header, the page is the one scroller */
+.dflt .dflt-grid { display: flex; flex-direction: column; min-width: 0; overflow-x: auto; }
+.dflt .dflt-form { --cols: minmax(170px, 1.5fr) minmax(90px, 1fr) minmax(160px, 1.1fr) 16px minmax(110px, 1.4fr); }
+.dflt .dflt-hs { --cols: minmax(150px, 1.4fr) 84px minmax(150px, 1.3fr) minmax(96px, .9fr) minmax(160px, 1.1fr) 16px minmax(110px, 1.4fr); }
+.dflt .dflt-tr { display: grid; grid-template-columns: var(--cols); gap: 10px; align-items: center; min-height: 38px;
+  padding: 3px 4px; border-bottom: 1px solid var(--line); min-width: 0; }
+.dflt .dflt-form .dflt-tr { min-width: 560px; }
+.dflt .dflt-hs .dflt-tr { min-width: 830px; }
+.dflt .dflt-tr > * { min-width: 0; }
+.dflt .dflt-tr:not(.dflt-th):hover { background: var(--panel-2); }
+.dflt .dflt-tr.chg .dflt-lbl { color: var(--ink); font-weight: 500; }
+.dflt .dflt-th { min-height: 32px; font-family: var(--cond); font-size: 12px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink-3); font-weight: 600; background: var(--panel-2);
+  border-radius: 6px 6px 0 0; }
+.dflt .dflt-th [role=columnheader] { cursor: default; }
+.dflt .dflt-group { padding: 14px 4px 4px; border-bottom: 1px solid var(--line); color: var(--accent); }
+.dflt .dflt-lbl { color: var(--ink); overflow-wrap: anywhere; }
+.dflt .dflt-lbl.has-tip { cursor: help; text-decoration: underline dotted var(--ink-3); text-underline-offset: 3px;
+  text-decoration-thickness: 1px; }
+.dflt .dflt-st { font-family: var(--cond); font-size: 11.5px; margin-left: 6px; white-space: nowrap; }
+.dflt .dflt-card { color: var(--ink-3); font-family: var(--mono); font-size: 12.5px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.dflt .dflt-rng { color: var(--ink-3); font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }
+.dflt .dflt-dot { color: var(--accent); font-size: 12px; text-align: center; }
+.dflt .dflt-ed { display: flex; align-items: center; min-width: 0; }
+.dflt .dflt-ed .dflt-sel { min-width: 0; width: 100%; max-width: 280px; }
+.dflt .dflt-ed .dflt-sel .field { width: 100%; }
+.dflt .dflt-in { max-width: 100%; }
+.dflt .dflt-in input[type=number] { font-variant-numeric: tabular-nums; }
+.dflt .dflt-in.dflt-name { width: 100%; max-width: 260px; }
+.dflt .dflt-tog { min-height: 28px; }
+.dflt .dflt-msg { padding: 6px 2px; }
+.dflt .dflt-loading { padding: 40px 16px; }
+.dflt .dflt-loading .spin { width: 28px; height: 28px; border-width: 3px; }
+
+/* every setting on the image */
+.dflt .dflt-all { height: min(60vh, 560px); min-height: 240px; }
+.dflt .dflt-all .tr.dflt-staged .c:first-child { color: var(--ink); font-weight: 500; }
+.dflt .dflt-card-all > .hd { row-gap: 8px; }
+
+/* dialogs */
+.dflt-ws { white-space: pre-wrap; }
+.dflt-pre { white-space: pre-line; color: var(--ink-2); font-size: 13.5px; }
+.dflt-edit .row .field { flex: 0 1 auto; }
+.dflt-menu-tbl { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+
+/* A narrow window (shell.js applyBreakpoints: the EFFECTIVE width, so zoom
+   counts): the High Scores rows drop their fixed minimum width and each
+   Range goes onto a second line under its score, instead of the whole Range
+   column sliding into a side scroll at the foot of a 40-100 row block. */
+html.bp-1020 .dflt .dflt-hs { --cols: minmax(96px, 1.3fr) 64px minmax(96px, 1.2fr) minmax(84px, .9fr) minmax(112px, 1.1fr) 16px; }
+html.bp-1020 .dflt .dflt-hs .dflt-tr { min-width: 0; row-gap: 2px; }
+html.bp-1020 .dflt .dflt-hs .dflt-rng { grid-column: 4 / -1; padding-bottom: 2px; }
+html.bp-1020 .dflt .dflt-hs .dflt-rng:empty,
+html.bp-1020 .dflt .dflt-hs .dflt-h-rng { display: none; }

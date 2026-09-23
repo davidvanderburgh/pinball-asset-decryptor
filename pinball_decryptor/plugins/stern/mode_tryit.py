@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 
@@ -120,16 +122,14 @@ def profile_version(prof):
     return ""
 
 
-def _version_key(version):
-    parts = [p for p in str(version or "").replace("_", ".").split(".") if p]
-    if len(parts) == 3 and parts[2].strip("0") == "":
-        parts = parts[:2]
-    return ".".join(parts)
-
-
 def card_title(card):
-    """``(game_dir, version, partition index)`` of a card image, from its own
-    ``/spk/index/<title>-<version>.sidx`` and its one title directory."""
+    """``(game_dir, version, partition index)`` of a card image, read from its own
+    ``/spk/index/<title>-<version>.sidx`` name the way the other two title readers do
+    (:func:`.mode_project.card_from_name`, as ``probe_card_title`` and the engine's
+    ``card_title_index`` read it). A card's index survives a renamed file, and it names
+    the title whatever else sits beside it: a multi-boot card keeps ``img1``/``img2``
+    next to the title's directory, and the old one-directory rule made that "an unknown
+    title". Only when no ``.sidx`` parses does the one title directory decide."""
     from .explorer import CardImage
     from .info import version_from_filename
     try:
@@ -148,6 +148,10 @@ def card_title(card):
                 continue
             if not dirs:
                 continue
+            for name in sorted(names):
+                game, version = MP.card_from_name(name)
+                if game:
+                    return game, version, p.index
             version = version_from_filename(names[0])[0] if names else None
             return dirs[0] if len(dirs) == 1 else "", version or "", p.index
     raise TryItError("%s is not a Spike 2 card image this can read (no games partition)."
@@ -157,7 +161,7 @@ def card_title(card):
 def check_title(prof, game_dir, version):
     """Refuse, in a sentence, a card that is not the build the modes were made for."""
     want = profile_version(prof)
-    if game_dir != prof.game_dir or (want and _version_key(version) != _version_key(want)):
+    if game_dir != prof.game_dir or (want and MP.version_key(version) != MP.version_key(want)):
         raise TryItError(
             "These modes are made for %s, and the card in the Emulate tab is %s %s. Pick a "
             "%s card there." % (prof.label, game_dir or "an unknown title", version or "",
@@ -205,18 +209,24 @@ class TrySet:
     code_object: bool = False
 
 
-def build_set(project, card, base=None, ffmpeg=None, log=None):
-    """Build Try it's set for ``project`` against ``card`` - WRITE'S OWN CODE
+def build_set(project, card, base=None, ffmpeg=None, log=None, progress=None, cancel=None,
+              sound_ok=None):
+    """Build Try it's set for ``project`` against ``card`` (the image to BOOT; the builder
+    prepares the set from the card the project was measured on, PAD-161) - WRITE'S OWN CODE
     (:func:`.mode_write.build_tryit_set`) - with the object, port and mode files beside it in
     :func:`stage_dir`. Returns a :class:`TrySet`. ``ffmpeg`` is found by the build itself
-    and kept for callers. Raises :class:`TryItError` with a sentence for the person."""
+    and kept for callers. ``progress(done, total, text)`` and ``cancel()`` reach the engine's
+    own checkpoints, so the tab's bar moves and its Cancel is honoured mid-build; ``sound_ok``
+    (None = the environment gate, as a Write reads it; False = a mode's own sounds left out
+    of this build) is handed on as it is: None reaches the engine, which reads the gate.
+    Raises :class:`TryItError` with a sentence for the person."""
     from . import mode_write as MW
     log = log or (lambda msg: None)
     if not MW.preview_on():
         raise TryItError("Try it needs the mode maker, a preview feature that is not "
                          "switched on in this copy of the app (Settings > Preview features).")
     if not project or not os.path.isdir(project):
-        raise TryItError("Open or extract a card project first: modes live in it.")
+        raise TryItError(MP.NO_PROJECT_HELP)
     found, broken = MP.list_modes(project)
     if broken:
         raise TryItError("These modes could not be read: %s"
@@ -245,7 +255,8 @@ def build_set(project, card, base=None, ffmpeg=None, log=None):
     def say(msg, level="info"):
         log(msg)
     try:
-        ws = MW.build_tryit_set(project, card, base or tryit_dir(), log=say)
+        ws = MW.build_tryit_set(project, card, base or tryit_dir(), log=say, progress=progress,
+                                cancel=cancel, sound_ok=sound_ok)
     except MW.ModeWriteError as e:
         raise TryItError(str(e)) from None
     if ws is None:
@@ -281,13 +292,23 @@ def slot_of(project, slug):
     return None
 
 
+def _c_ident(slug):
+    """The C name a mode's folder gives its struct: a C name cannot start with a digit."""
+    return slug if slug[:1].isalpha() else "m_" + slug
+
+
+def _c_title(name, slug):
+    """A mode's name as a C string literal can hold it (no quote or backslash inside)."""
+    return (name or slug).replace("\\", "").replace('"', "'")
+
+
 def code_mode_text(template, name, slug):
     """``sdk/template_mode.c`` made into a code mode of its own: its name, its folder's
     screen names (``PadMode_<slug>_Screen``, the names a build gives a mode folder), its
     own test triggers (``/dump/<slug>.start``, ``<slug>.stop``) and its own struct name.
     Everything else is the template, comments and all, to change from there."""
-    ident = slug if slug[:1].isalpha() else "m_" + slug
-    title = (name or slug).replace("\\", "").replace('"', "'")
+    ident = _c_ident(slug)
+    title = _c_title(name, slug)
     out = template.replace('#define MODE_NAME        "TARGET RUSH"',
                            '#define MODE_NAME        "%s"' % title)
     out = out.replace("PadMode_template_", "PadMode_%s_" % slug)
@@ -301,15 +322,36 @@ def code_mode_text(template, name, slug):
     return out
 
 
-def new_code_mode(project, name):
-    """Copy ``sdk/template_mode.c`` into ``modes/<slug>/<slug>.c`` for a new code mode.
-    Returns ``(slug, path)``. Never overwrites a folder that exists."""
-    if not project or not os.path.isdir(project):
-        raise TryItError("Open or extract a card project first: modes live in it.")
-    base = MP.slugify(name)
+def _free_slug(project, base):
+    """``base``, or the first of ``base_2``, ``base_3`` ... whose folder is not there: the
+    numbering :func:`.mode_project.new_mode` and ``duplicate_mode`` give a form mode."""
     slug, n = base, 2
     while os.path.exists(MP.mode_folder(project, slug)):
         slug, n = "%s_%d" % (base, n), n + 1
+    return slug
+
+
+def _write_default_assets(project, slug, name):
+    """A fresh code mode's ``assets.json``: its name and nothing of its own (no screen, clip,
+    music or call), so ``has_assets()`` stays False and Try it keeps the compile-only path
+    for it. Read back at once, because a file this cannot load would stop every later list
+    of the project's code modes."""
+    from . import code_modes as CM
+    path = CM.save(project, slug, CM.CodeAssets(name=name, screen=False))
+    try:
+        CM.load(project, slug)
+    except (OSError, ValueError) as e:
+        raise TryItError("%s was written but does not load: %s" % (path, e)) from None
+    return path
+
+
+def new_code_mode(project, name):
+    """Copy ``sdk/template_mode.c`` into ``modes/<slug>/<slug>.c`` for a new code mode, with
+    a default ``assets.json`` beside it (the mode's name, nothing of its own yet).
+    Returns ``(slug, path)``. Never overwrites a folder that exists."""
+    if not project or not os.path.isdir(project):
+        raise TryItError(MP.NO_PROJECT_HELP)
+    slug = _free_slug(project, MP.slugify(name))
     with open(os.path.join(MR.sdk_dir(), "template_mode.c"), "r", encoding="utf-8") as f:
         template = f.read()
     folder = MP.mode_folder(project, slug)
@@ -317,7 +359,140 @@ def new_code_mode(project, name):
     path = os.path.join(folder, slug + ".c")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(code_mode_text(template, name, slug))
+    _write_default_assets(project, slug, _c_title(name, slug))
     return slug, path
+
+
+def _source_name(path):
+    """The ``MODE_NAME`` define of a code mode's C file, or ``""``."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            m = re.search(r'#define\s+MODE_NAME\s+"([^"]*)"', f.read())
+        return m.group(1) if m else ""
+    except OSError:
+        return ""
+
+
+def list_all(project):
+    """``[(slug, kind, name)]`` of every mode in the project: the form modes first, in the
+    order :func:`.mode_project.list_modes` gives them (``kind`` ``"form"``, the spec's
+    name), then the code modes in slug order (``kind`` ``"code"``, named by their
+    ``assets.json``, else by the ``MODE_NAME`` define in the C file, else by the folder in
+    capitals, as :func:`.code_modes.load` names one). A
+    folder whose ``mode.json`` does not load is skipped, as ``list_modes`` skips it; a code
+    mode whose ``assets.json`` does not load is still listed, named from its C file, so a
+    person can see it and take it out."""
+    from . import code_modes as CM
+    out = []
+    if not project:
+        return out
+    found, _broken = MP.list_modes(project)
+    for slug, spec in found:
+        out.append((slug, "form", spec.name))
+    for slug in CM.code_slugs(project):
+        try:
+            name = CM.load(project, slug).name
+        except (OSError, ValueError):
+            name = ""
+        out.append((slug, "code", name or _source_name(CM.source_path(project, slug)) or slug))
+    return out
+
+
+def _rename_code_text(text, slug, new_slug, name=None):
+    """A code mode's C text moved to another folder: every name the folder gives it
+    (:func:`code_mode_text`'s substitutions, and the examples' ``FOLDER`` define and
+    struct name) now says ``new_slug``, and, when ``name`` is given, ``MODE_NAME`` says
+    that. The rest of the text is untouched."""
+    ident, new_ident = _c_ident(slug), _c_ident(new_slug)
+    out = text.replace("PadMode_%s_" % slug, "PadMode_%s_" % new_slug)
+    for suffix in (".start", ".stop", ".shot"):
+        out = out.replace('"%s%s"' % (slug, suffix), '"%s%s"' % (new_slug, suffix))
+    out = out.replace("/dump/%s." % slug, "/dump/%s." % new_slug)
+    out = out.replace('this mode\'s folder is "%s"' % slug, 'this mode\'s folder is "%s"' % new_slug)
+    out = re.sub(r'(#define\s+FOLDER\s+)"%s"' % re.escape(slug), r'\g<1>"%s"' % new_slug, out)
+    out = re.sub(r"\b%s_mode\b" % re.escape(ident), "%s_mode" % new_ident, out)
+    out = re.sub(r"(struct pm_mode\s+)%s\b" % re.escape(ident), r"\g<1>%s" % new_ident, out)
+    out = re.sub(r"(PM_REGISTER\(\s*)%s\b" % re.escape(ident), r"\g<1>%s" % new_ident, out)
+    head = "/* %s.c - " % slug
+    if out.startswith(head):
+        out = "/* %s.c - " % new_slug + out[len(head):]
+    if name is not None:
+        out = re.sub(r'(#define\s+MODE_NAME\s+)"[^"]*"', lambda m: '%s"%s"' % (m.group(1), name),
+                     out, count=1)
+    return out
+
+
+def duplicate_code_mode(project, slug, name=None):
+    """Copy the code mode ``slug``'s whole folder (its C file, headers, picture, clip and
+    sounds) to a free slug, the way ``duplicate_mode`` copies a form mode: the copy is
+    named ``name``, or "<its name> COPY", and its C file is rewritten as ``<new_slug>.c``
+    with the new folder's names and triggers, so the two never answer to one trigger.
+    Returns ``(new_slug, path)``. Never overwrites a folder that exists."""
+    from . import code_modes as CM
+    if not project or not os.path.isdir(project):
+        raise TryItError(MP.NO_PROJECT_HELP)
+    src = CM.source_path(project, slug)
+    if not os.path.isfile(src):
+        raise TryItError("There is no code mode called %s in this project." % slug)
+    try:
+        old_name = CM.load(project, slug).name
+    except (OSError, ValueError):
+        old_name = _source_name(src) or slug
+    new_name = _c_title(name, slug) if name else old_name + " COPY"
+    new_slug = _free_slug(project, MP.slugify(new_name))
+    folder = MP.mode_folder(project, new_slug)
+    shutil.copytree(MP.mode_folder(project, slug), folder)
+    with open(os.path.join(folder, slug + ".c"), "r", encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    path = os.path.join(folder, new_slug + ".c")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(_rename_code_text(text, slug, new_slug, name=new_name))
+    os.remove(os.path.join(folder, slug + ".c"))
+    if os.path.isfile(os.path.join(folder, CM.ASSETS_FILE)):
+        try:
+            spec = CM.load(project, new_slug)
+        except (OSError, ValueError) as e:
+            raise TryItError("%s was copied, but its %s does not load: %s"
+                             % (old_name, CM.ASSETS_FILE, e)) from None
+        spec.name = new_name
+        CM.save(project, new_slug, spec)
+    return new_slug, path
+
+
+def delete_code_mode(project, slug):
+    """Remove the code mode ``slug``'s folder, and only that: the folder must sit in the
+    project's ``modes/`` and hold ``<slug>.c``, and a folder that also holds a mode file is
+    a form mode, which ``delete_mode`` owns."""
+    if not project or not os.path.isdir(project):
+        raise TryItError(MP.NO_PROJECT_HELP)
+    root = os.path.abspath(MP.modes_dir(project))
+    folder = os.path.abspath(MP.mode_folder(project, slug or ""))
+    if not slug or os.path.dirname(folder) != root or os.path.basename(folder) != slug:
+        raise TryItError("%r is not a mode folder of this project." % slug)
+    if not os.path.isfile(os.path.join(folder, slug + ".c")):
+        raise TryItError("There is no code mode called %s in this project." % slug)
+    if os.path.isfile(os.path.join(folder, MP.MODE_FILE)):
+        raise TryItError("%s is a mode made in the tab, not a code mode." % slug)
+    shutil.rmtree(folder)
+
+
+def code_trigger_name(slug):
+    """Whether ``slug`` can name a code mode's test triggers: ``tryit.sh`` writes
+    ``/dump/<slug>.start`` and ``.stop`` only for a plain ``[a-z0-9_]`` name (what New
+    code mode makes); a folder made by hand with other characters gets no trigger."""
+    return bool(re.fullmatch(r"[a-z0-9_]+", slug or ""))
+
+
+def unreachable_code_modes(codes):
+    """The code modes in ``codes`` (slugs, or ``(slug, ...)`` tuples as
+    :func:`code_mode_sources` gives them) that End mode cannot reach, by slug: those whose
+    folder name is not a trigger name (:func:`code_trigger_name`)."""
+    out = []
+    for c in codes or ():
+        slug = c[0] if isinstance(c, (tuple, list)) else c
+        if not code_trigger_name(slug):
+            out.append(slug)
+    return out
 
 
 def asset_signature(spec):

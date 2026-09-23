@@ -84,8 +84,8 @@ def test_tryit_install_takes_the_marker_out_with_the_files_it_replaces():
 def test_the_emulate_tab_shows_the_rigs_lines_unfiltered():
     """Start drains watch.sh's stdout line by line into the log pane with no filter of its
     own, so a line watch.sh prints is a line the user reads."""
-    with open(os.path.join(REPO, "pinball_decryptor", "gui", "emulate_tab.py"),
-              encoding="utf-8") as f:
+    with open(os.path.join(REPO, "pinball_decryptor", "webui", "tabs",
+                           "emulate.py"), encoding="utf-8") as f:
         src = f.read()
     drain = src[src.index("for raw in self._proc.stdout:"):]
     assert 'self._log("[emulate] " + line)' in drain[:400]

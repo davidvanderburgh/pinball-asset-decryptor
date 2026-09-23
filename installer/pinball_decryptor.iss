@@ -59,7 +59,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Name: "runprereqs"; Description: "Install prerequisites after setup (WSL2, partclone, debugfs, gpg)"; GroupDescription: "Prerequisites:"; Flags: unchecked
 
 [Files]
-; --- Bundled Python with tkinter and pip dependencies ---------------------
+; --- Bundled Python and pip dependencies ---------------------------------
 Source: "{#PythonDir}\*"; DestDir: "{app}\python"; Flags: recursesubdirs ignoreversion
 
 ; --- Application package (recursive — picks up core/, gui/, all plugins/) -

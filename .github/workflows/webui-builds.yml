@@ -1,0 +1,183 @@
+name: Web UI builds (manual)
+
+# Builds the macOS and Linux apps from feature/web-ui exactly as the release
+# does, then proves the FROZEN apps work: each one serves the web UI and every
+# tab of every manufacturer is captured in that platform's engine (WebKit on
+# macOS, Chromium on Linux), and the native window is opened and screenshotted.
+# Nothing is published: the captures are uploaded as a workflow artifact.
+#
+# MANUAL ONLY (David, 2026-09-23: "no expensive heavy testing slowing down
+# ci"). It gates nothing - not a push, not a release. Run it from the Actions
+# tab when the packaging moves (pywebview / pythonnet / PySide6 pins, the
+# build scripts, the rig's Dockerfile) and look at the captures.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: webui-builds-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y wget file desktop-file-utils \
+            xvfb x11-apps imagemagick libegl1 libgl1 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+            libxcb-xkb1 libnss3 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+            libasound2t64 libxtst6 libxshmfence1 fonts-dejavu-core
+          pip install -r requirements.txt -r requirements-build.txt -r requirements-ui.txt
+          pip install playwright pytest
+          python -m playwright install --with-deps chromium
+      - name: Web UI tests (source tree)
+        continue-on-error: true
+        run: python -m pytest -o addopts="" -p no:cacheprovider tests/test_webui_core.py -q
+      - name: Build AppImage
+        run: bash installer/build_linux.sh
+      - name: Capture every tab from the frozen app (Chromium)
+        run: |
+          python scripts/webui_shot.py --out shots/linux --all \
+            --app installer/build_linux/dist/pinball-decryptor/pinball-decryptor \
+            --engine chromium || echo "::warning::capture reported errors (see report.json)"
+          python scripts/webui_shot.py --out shots/linux-narrow --mfr stern \
+            --all-tabs --width 1024 --height 700 \
+            --app installer/build_linux/dist/pinball-decryptor/pinball-decryptor \
+            --engine chromium || true
+      - name: Open the native window (Qt WebEngine under Xvfb)
+        run: |
+          mkdir -p shots/linux-native "$RUNNER_TEMP/cfg/pinball_decryptor"
+          echo '{"disclaimer_accepted": true, "last_manufacturer": "stern"}' > "$RUNNER_TEMP/cfg/pinball_decryptor/settings.json"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/cfg" PAD_UI_NO_PREREQS=1 PAD_UI_NO_UPDATE_CHECK=1 PAD_UI_NO_RIG=1
+          export QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu"
+          xvfb-run -a -s "-screen 0 1440x900x24" bash -c '
+            installer/build_linux/dist/pinball-decryptor/pinball-decryptor > shots/linux-native/app.log 2>&1 &
+            APP=$!
+            sleep 40
+            import -window root shots/linux-native/native-window.png || true
+            kill $APP || true
+            sleep 3'
+          tail -50 shots/linux-native/app.log || true
+      - name: Virtual playfield page, every view (Chromium)
+        run: |
+          set -e
+          for mode in field schematic waiting; do
+            python scripts/playfield_demo.py $mode --lcd --window none --seconds 60 > "$RUNNER_TEMP/pf_$mode.log" 2>&1 &
+            python scripts/playfield_shot.py "$RUNNER_TEMP/pf_$mode.log" shots/playfield-linux/$mode chromium
+            cp "$RUNNER_TEMP/pf_$mode.log" shots/playfield-linux/$mode/demo.log
+          done
+      - name: Virtual playfield native window (pywebview under Xvfb)
+        run: |
+          mkdir -p shots/playfield-linux-native
+          export QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu"
+          xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '
+            python scripts/playfield_demo.py field --lcd --window webview --seconds 40 > shots/playfield-linux-native/demo.log 2>&1 &
+            sleep 30
+            import -window root shots/playfield-linux-native/windows.png || true
+            sleep 12'
+          tail -40 shots/playfield-linux-native/demo.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webui-linux
+          path: shots/
+          retention-days: 7
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build dependencies
+        run: |
+          pip install -r requirements.txt -r requirements-build.txt -r requirements-ui.txt
+          pip install playwright pytest
+          python -m playwright install webkit
+      - name: Web UI tests (source tree)
+        continue-on-error: true
+        run: python -m pytest -o addopts="" -p no:cacheprovider tests/test_webui_core.py -q
+      - name: Build the app
+        run: bash installer/build_macos.sh
+      - name: Capture every tab from the frozen app (WebKit)
+        run: |
+          APP="installer/build/dist/Pinball Asset Decryptor.app/Contents/MacOS/Pinball Asset Decryptor"
+          python scripts/webui_shot.py --out shots/macos --all --app "$APP" \
+            --engine webkit || echo "::warning::capture reported errors (see report.json)"
+          python scripts/webui_shot.py --out shots/macos-light --mfr stern \
+            --all-tabs --theme light --app "$APP" --engine webkit || true
+      - name: Open the native window (WKWebView)
+        run: |
+          mkdir -p shots/macos-native
+          HOME_SCRATCH="$RUNNER_TEMP/home"
+          mkdir -p "$HOME_SCRATCH/Library/Application Support/pinball_decryptor"
+          echo '{"disclaimer_accepted": true, "last_manufacturer": "stern"}' > "$HOME_SCRATCH/Library/Application Support/pinball_decryptor/settings.json"
+          HOME="$HOME_SCRATCH" PAD_UI_NO_PREREQS=1 PAD_UI_NO_UPDATE_CHECK=1 PAD_UI_NO_RIG=1 \
+            "installer/build/dist/Pinball Asset Decryptor.app/Contents/MacOS/Pinball Asset Decryptor" \
+            > shots/macos-native/app.log 2>&1 &
+          APP=$!
+          sleep 45
+          screencapture -x shots/macos-native/native-window.png || true
+          kill $APP || true
+          tail -50 shots/macos-native/app.log || true
+      - name: Virtual playfield page, every view (WebKit)
+        run: |
+          set -e
+          for mode in field schematic waiting; do
+            python scripts/playfield_demo.py $mode --lcd --window none --seconds 60 > "$RUNNER_TEMP/pf_$mode.log" 2>&1 &
+            python scripts/playfield_shot.py "$RUNNER_TEMP/pf_$mode.log" shots/playfield-macos/$mode webkit
+            cp "$RUNNER_TEMP/pf_$mode.log" shots/playfield-macos/$mode/demo.log
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webui-macos
+          path: shots/
+          retention-days: 7
+
+  # The macOS emulator runs in this container, and so does its playfield
+  # window: a GTK WebKit window on the container's Xvfb desktop, which the Mac
+  # sees through Screen Sharing. Built from the same Dockerfile padbox.sh
+  # builds, then the demo title's playfield opened in it and photographed.
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the rig's container image
+        run: docker build -t padrig tools/spike2_emu/docker
+      - name: Open the virtual playfield in the container (GTK WebKit on Xvfb)
+        run: |
+          mkdir -p shots/container
+          chmod 777 shots/container
+          # the entrypoint refuses a rig whose watch.sh is not executable, and
+          # git keeps these 100644 (the app sets the bit when it copies the rig)
+          chmod +x tools/spike2_emu/*.sh tools/spike2_emu/docker/*.sh
+          docker run --rm -v "$PWD:/src" -v "$PWD/tools/spike2_emu:/pad/rig" padrig bash -c '
+            cd /src
+            python3 scripts/playfield_demo.py field --lcd --window gtk --seconds 45 > shots/container/demo.log 2>&1 &
+            sleep 30
+            python3 -c "from PIL import ImageGrab; ImageGrab.grab(xdisplay=\":99\").save(\"shots/container/desktop.png\")" || echo "no screen grab"
+            tail -40 shots/container/demo.log
+            sleep 17'
+          ls -la shots/container
+          # a green job must mean a window was drawn, not that the box refused
+          test -s shots/container/desktop.png
+          ! grep -q Traceback shots/container/demo.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webui-container
+          path: shots/
+          retention-days: 7

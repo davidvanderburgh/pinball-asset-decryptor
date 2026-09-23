@@ -11,21 +11,33 @@
 
 INVOKED, NOT LOOKED AT, for the same reason as the playfield action row: a
 button that is drawn and wired to nothing is exactly what a screenshot cannot
-see.  Every assertion here goes through the real command or the real handler,
-and lands on a recorder standing in for the plugin / the desktop / the run.
+see.  Every assertion here goes through the real call the page makes or the
+real handler, and lands on a recorder standing in for the plugin / the
+desktop / the run.  Driven through the web UI (webui/tabs/compare.py,
+webui/text_scenes.py) and the run logic in app.py.
 """
 
 import os
+import time
 
 import pytest
 
-from tests.test_gui_smoke import app  # noqa: F401  (fixture)
+from pinball_decryptor.app import App
+from tests.webui_harness import web_app
 
 
-def _stern(app, manufacturers_by_key):
-    app._on_manufacturer_change(manufacturers_by_key["stern"])
-    app.root.update()
-    return app.window
+def _wait(w, pred, timeout=20.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        w.drain()
+        if pred():
+            return True
+        time.sleep(0.05)
+    return pred()
+
+
+def _svc(w):
+    return w.window.service("compare")
 
 
 # ---------------------------------------------------------------------------
@@ -45,144 +57,141 @@ _SECTIONS = [
 ]
 
 
-def test_only_the_file_rows_are_openable(app, manufacturers_by_key):
+def _render(w):
+    w.run(_svc(w).render, _SECTIONS)
+    return w.state("compare")["rows"]
+
+
+def test_only_the_file_rows_are_openable(tmp_path):
     """Section headers and count rows carry no ref, and the tab says so
     instead of swallowing the double-click."""
-    win = _stern(app, manufacturers_by_key)
-    win._compare_render(_SECTIONS)
+    with web_app(tmp_path, mfr="stern") as w:
+        rows = _render(w)
+        svc = _svc(w)
+        openable = set(svc._refs)
+        assert len(openable) == 2
+        # ...and they are marked, so the user can see which rows lead
+        # somewhere.
+        for r in rows:
+            assert r["open"] is (r["id"] in openable)
+        sections = [r for r in rows if r["kind"] == "section"]
+        heads = [r for r in rows if r["kind"] == "head"]   # "Added:" ...
+        assert sections and heads
+        assert not ({r["id"] for r in sections + heads} & openable)
 
-    tree = win._compare_tree
-    openable = set(win._compare_refs)
-    assert len(openable) == 2
-    # ...and they are marked, so the user can see which rows lead somewhere.
-    for iid in openable:
-        assert "openable" in tree.item(iid, "tags")
-    for section in tree.get_children(""):
-        assert section not in openable
-        head = [k for k in tree.get_children(section)
-                if tree.item(k, "text")]        # "Added:" / "Deleted:"
-        assert head and not (set(head) & openable)
-
-    win._compare_status.configure(text="")
-    assert win._compare_open_target(tree.get_children("")[0]) is None
-    assert "double-click one of the file rows" in \
-        win._compare_status.cget("text")
+        w.run(lambda: svc.set(status=""))
+        assert w.run(svc._open_target, sections[0]["id"]) is None
+        assert "double-click one of the file rows" in \
+            w.state("compare")["status"]
 
 
-def test_a_deleted_row_opens_image_a_and_the_rest_open_image_b(
-        app, manufacturers_by_key, tmp_path):
+def test_a_deleted_row_opens_image_a_and_the_rest_open_image_b(tmp_path):
     """THE SIDE IS THE WHOLE POINT.  A deleted file is on exactly one of the
     two cards; sending that row to image B would open nothing every time."""
-    win = _stern(app, manufacturers_by_key)
     a = tmp_path / "a.raw"
     b = tmp_path / "b.raw"
     a.write_bytes(b"A")
     b.write_bytes(b"B")
-    win.compare_a_var.set(str(a))
-    win.compare_b_var.set(str(b))
-    win._compare_render(_SECTIONS)
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "compare", "a", str(a))
+        w.call("ui.set", "compare", "b", str(b))
+        _render(w)
+        svc = _svc(w)
 
-    got = {}
-    for iid, ref in win._compare_refs.items():
-        side, image, back = win._compare_open_target(iid)
-        assert back is ref
-        got[ref["name"]] = (side, image)
-    assert got == {"new.png": ("B", str(b)), "old.png": ("A", str(a))}
-
-
-def test_a_card_that_moved_says_so_rather_than_opening_nothing(
-        app, manufacturers_by_key, tmp_path, monkeypatch):
-    win = _stern(app, manufacturers_by_key)
-    win.compare_a_var.set(str(tmp_path / "gone.raw"))
-    win.compare_b_var.set(str(tmp_path / "gone.raw"))
-    win._compare_render(_SECTIONS)
-    said = []
-    monkeypatch.setattr("tkinter.messagebox.showerror",
-                        lambda t, m, **k: said.append((t, m)))
-    iid = next(iter(win._compare_refs))
-    assert win._compare_open_target(iid) is None
-    assert said and "no longer at" in said[0][1]
+        got = {}
+        for rid, ref in dict(svc._refs).items():
+            side, image, back = w.run(svc._open_target, rid)
+            assert back is ref
+            got[ref["name"]] = (side, image)
+        assert got == {"new.png": ("B", str(b)), "old.png": ("A", str(a))}
 
 
-def test_the_opened_copy_is_handed_to_the_desktop(app, manufacturers_by_key,
-                                                  tmp_path, monkeypatch):
+def test_a_card_that_moved_says_so_rather_than_opening_nothing(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "compare", "a", str(tmp_path / "gone.raw"))
+        w.call("ui.set", "compare", "b", str(tmp_path / "gone.raw"))
+        _render(w)
+        svc = _svc(w)
+        rid = next(iter(svc._refs))
+        assert w.run(svc._open_target, rid) is None
+        assert w.asked and "no longer at" in w.asked[-1]["message"]
+
+
+def test_the_opened_copy_is_handed_to_the_desktop(tmp_path, monkeypatch):
     """The finish half: a success reports where it went, and a failure that
     reports nothing is the one outcome this must never produce."""
-    win = _stern(app, manufacturers_by_key)
     from pinball_decryptor.core import desktop
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        opened = []
+        monkeypatch.setattr(desktop, "open_path",
+                            lambda p, env=None: (opened.append(p),
+                                                 (True, ""))[1])
 
-    opened = []
-    monkeypatch.setattr(desktop, "open_path",
-                        lambda p, env=None: (opened.append(p), (True, ""))[1])
-    win._compare_open_busy = True
-    win._compare_open_finished("new.png", "B", str(tmp_path / "new.png"), None)
-    assert opened == [str(tmp_path / "new.png")]
-    assert win._compare_open_busy is False
-    assert "Opened new.png from image B" in win._compare_status.cget("text")
+        def _busy():
+            svc._open_busy = True
+        w.run(_busy)
+        w.run(svc._open_finished, "new.png", "B",
+              str(tmp_path / "new.png"), None)
+        assert opened == [str(tmp_path / "new.png")]
+        assert svc._open_busy is False
+        assert "Opened new.png from image B" in w.state("compare")["status"]
 
-    # A read that failed says which card it failed on, and unlatches the
-    # one-at-a-time guard so the next double-click still works.
-    said = []
-    monkeypatch.setattr("tkinter.messagebox.showerror",
-                        lambda t, m, **k: said.append(m))
-    win._compare_open_busy = True
-    win._compare_open_finished("old.png", "A", None,
-                               FileNotFoundError("not on the card"))
-    assert win._compare_open_busy is False
-    assert said and "image A" in said[0] and "not on the card" in said[0]
+        # A read that failed says which card it failed on, and unlatches the
+        # one-at-a-time guard so the next double-click still works.
+        w.run(_busy)
+        w.run(svc._open_finished, "old.png", "A", None,
+              FileNotFoundError("not on the card"))
+        assert svc._open_busy is False
+        said = w.asked[-1]["message"]
+        assert "image A" in said and "not on the card" in said
 
-    # So does a desktop that refuses to open it — with the path, so the user
-    # can still get at the file.
-    told = []
-    monkeypatch.setattr(desktop, "open_path",
-                        lambda p, env=None: (False, "no handler"))
-    monkeypatch.setattr("tkinter.messagebox.showinfo",
-                        lambda t, m, **k: told.append(m))
-    win._compare_open_finished("new.png", "B", r"C:\tmp\new.png", None)
-    assert told and "no handler" in told[0] and "new.png" in told[0]
+        # So does a desktop that refuses to open it — with the path, so the
+        # user can still get at the file.
+        monkeypatch.setattr(desktop, "open_path",
+                            lambda p, env=None: (False, "no handler"))
+        w.run(svc._open_finished, "new.png", "B", r"C:\tmp\new.png", None)
+        told = w.asked[-1]["message"]
+        assert "no handler" in told and "new.png" in told
 
 
 # ---------------------------------------------------------------------------
 # Compare tab: Extract Both
 # ---------------------------------------------------------------------------
 
-def test_extract_both_needs_two_different_real_images(
-        app, manufacturers_by_key, tmp_path, monkeypatch):
-    win = _stern(app, manufacturers_by_key)
-    asked = []
-    monkeypatch.setattr(app, "_start_extract_both",
-                        lambda a, b: asked.append((a, b)))
-    win._on_extract_both = app._start_extract_both
-    said = []
-    for name in ("showinfo", "showerror"):
-        monkeypatch.setattr("tkinter.messagebox." + name,
-                            lambda t, m, **k: said.append(t))
+def test_extract_both_needs_two_different_real_images(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        asked = []
+        w.window.cb["on_extract_both"] = lambda a, b: asked.append((a, b))
 
-    win.compare_a_var.set("")
-    win.compare_b_var.set("")
-    win._compare_extract_both()
-    assert asked == [] and said == ["Pick two images"]
+        def _said():
+            return [a["title"] for a in w.asked]
 
-    card = tmp_path / "turtles_pro-1_58_0.raw"
-    card.write_bytes(b"card")
-    win.compare_a_var.set(str(card))
-    win.compare_b_var.set(str(tmp_path / "not_there.raw"))
-    win._compare_extract_both()
-    assert asked == [] and said[-1] == "File not found"
+        w.call("ui.set", "compare", "a", "")
+        w.call("ui.set", "compare", "b", "")
+        w.call("compare.extract_both")
+        assert asked == [] and _said() == ["Pick two images"]
 
-    # The same card twice is one extract, not two.
-    win.compare_b_var.set(str(card))
-    win._compare_extract_both()
-    assert asked == [] and said[-1] == "Same image twice"
+        card = tmp_path / "turtles_pro-1_58_0.raw"
+        card.write_bytes(b"card")
+        w.call("ui.set", "compare", "a", str(card))
+        w.call("ui.set", "compare", "b", str(tmp_path / "not_there.raw"))
+        w.call("compare.extract_both")
+        assert asked == [] and _said()[-1] == "File not found"
 
-    other = tmp_path / "turtles_pro-1_59_0.raw"
-    other.write_bytes(b"card")
-    win.compare_b_var.set(str(other))
-    win._compare_extract_both()
-    assert asked == [(str(card), str(other))]
+        # The same card twice is one extract, not two.
+        w.call("ui.set", "compare", "b", str(card))
+        w.call("compare.extract_both")
+        assert asked == [] and _said()[-1] == "Same image twice"
+
+        other = tmp_path / "turtles_pro-1_59_0.raw"
+        other.write_bytes(b"card")
+        w.call("ui.set", "compare", "b", str(other))
+        w.call("compare.extract_both")
+        assert asked == [(str(card), str(other))]
 
 
-def test_each_card_gets_a_folder_named_after_the_card(app):
+def test_each_card_gets_a_folder_named_after_the_card():
     """A folder called "A" tells you nothing three days later; the card name
     already carries the title and the version.
 
@@ -192,7 +201,7 @@ def test_each_card_gets_a_folder_named_after_the_card(app):
     backslashes on the Linux and macOS CI runners, where ``basename`` then
     hands the whole string back.
     """
-    f = app._extract_both_folder
+    f = App._extract_both_folder
     out = os.path.join("out", "compare")
     assert f(out,
              os.path.join("img", "turtles_pro-1_58_0.Release.8G.sdcard.raw"),
@@ -209,76 +218,71 @@ def test_each_card_gets_a_folder_named_after_the_card(app):
 
 
 def test_the_second_card_is_queued_only_once_the_first_run_started(
-        app, manufacturers_by_key, tmp_path, monkeypatch):
+        tmp_path, monkeypatch):
     """_start_extract bails out at half a dozen guards (no output folder, an
     overwrite the user declines, nothing ticked).  A chain left armed by one
     of those would fire card B onto the end of a later, unrelated extract."""
-    win = _stern(app, manufacturers_by_key)
     a = tmp_path / "lz-1_20_0.raw"
     b = tmp_path / "lz-1_22_0.raw"
     a.write_bytes(b"A")
     b.write_bytes(b"B")
-    monkeypatch.setattr("tkinter.filedialog.askdirectory",
-                        lambda **k: str(tmp_path / "both"))
+    both = str(tmp_path / "both")
+    with web_app(tmp_path, mfr="stern") as w:
+        app, win = w.app, w.window
+        monkeypatch.setattr(app, "_start_extract", lambda: None)  # never starts
+        w.answers.append(both)
+        w.run(app._start_extract_both, str(a), str(b))
+        assert app._chain_extract_next is None
+        assert win.extract_input_var.get() == str(a)
+        assert win.extract_output_var.get() == os.path.join(both, "lz-1_20_0")
+        # A card image is a file: an Extract Both left on "From SSD" would
+        # send _start_extract down the physical-device branch with a path
+        # that is not a device.
+        assert win.extract_input_source_var.get() == "iso"
 
-    monkeypatch.setattr(app, "_start_extract", lambda: None)   # never starts
-    app._start_extract_both(str(a), str(b))
-    assert app._chain_extract_next is None
-    assert win.extract_input_var.get() == str(a)
-    assert win.extract_output_var.get() == str(tmp_path / "both" / "lz-1_20_0")
-    # A card image is a file: an Extract Both left on "From SSD" would send
-    # _start_extract down the physical-device branch with a path that is not
-    # a device.
-    assert win.extract_input_source_var.get() == "iso"
-
-    # A card image is a file: an Extract Both left on "From SSD" would send
-    # _start_extract down the physical-device branch with a path that is not
-    # a device.
-    assert win.extract_input_source_var.get() == "iso"
-
-    def _started():
-        app.pipeline = object()
-    monkeypatch.setattr(app, "_start_extract", _started)
-    app._start_extract_both(str(a), str(b))
-    assert app._chain_extract_next == (
-        str(b), str(tmp_path / "both" / "lz-1_22_0"))
-    # The source flip queues a notebook re-size with after_idle; run it here
-    # or the fixture destroys the widget with the idle callback still
-    # registered ("can't delete Tcl command" at teardown).
-    app.root.update()
+        def _started():
+            app.pipeline = object()
+        monkeypatch.setattr(app, "_start_extract", _started)
+        w.answers.append(both)
+        w.run(app._start_extract_both, str(a), str(b))
+        assert app._chain_extract_next == (
+            str(b), os.path.join(both, "lz-1_22_0"))
 
 
-def test_a_finished_first_card_starts_the_second(app, manufacturers_by_key,
-                                                 tmp_path, monkeypatch):
-    _stern(app, manufacturers_by_key)
-    ran = []
-    monkeypatch.setattr(app, "_run_chained_extract",
-                        lambda i, o: ran.append((i, o)))
-    app._active_mode = "extract"
-    app._last_extract_io = None
-    app._chain_extract_next = (str(tmp_path / "b.raw"), str(tmp_path / "outb"))
-    app._on_done(True, "Extract complete")
-    app.root.update()                # the chain is armed with after(0, …)
-    assert ran == [(str(tmp_path / "b.raw"), str(tmp_path / "outb"))]
-    assert app._chain_extract_next is None
+def test_a_finished_first_card_starts_the_second(tmp_path, monkeypatch):
+    with web_app(tmp_path, mfr="stern") as w:
+        app = w.app
+        ran = []
+        monkeypatch.setattr(app, "_run_chained_extract",
+                            lambda i, o: ran.append((i, o)))
+        pair = (str(tmp_path / "b.raw"), str(tmp_path / "outb"))
 
-    # A FAILED first card drops the pair; the second must not ride on
-    # whatever run finishes next.
-    ran.clear()
-    monkeypatch.setattr("tkinter.messagebox.showerror", lambda *a, **k: None)
-    app._active_mode = "extract"
-    app._chain_extract_next = (str(tmp_path / "b.raw"), str(tmp_path / "outb"))
-    app._on_done(False, "Extract failed")
-    app.root.update()
-    assert ran == []
-    assert app._chain_extract_next is None
+        def _arm():
+            app._active_mode = "extract"
+            app._last_extract_io = None
+            app._chain_extract_next = pair
+        w.run(_arm)
+        w.run(app._on_done, True, "Extract complete")
+        assert _wait(w, lambda: ran)       # the chain is armed with after(0)
+        assert ran == [pair]
+        assert app._chain_extract_next is None
+
+        # A FAILED first card drops the pair; the second must not ride on
+        # whatever run finishes next.
+        ran.clear()
+        w.run(_arm)
+        w.run(app._on_done, False, "Extract failed")
+        time.sleep(0.2)
+        w.drain()
+        assert ran == []
+        assert app._chain_extract_next is None
 
 
 # ---------------------------------------------------------------------------
 # Scenes window: save every listed preview
 # ---------------------------------------------------------------------------
 
-def _scene_window(app, tmp_path, scenes=("scene1", "scene2", "scene9")):
+def _scene_window(w, tmp_path, scenes=("scene1", "scene2", "scene9")):
     """A Scenes window over the shared three-scene font fixture, each scene
     given a layout that draws one real atlas PNG (a sprite always renders; the
     fixture's text needs a font key the layout would have to invent)."""
@@ -299,10 +303,9 @@ def _scene_window(app, tmp_path, scenes=("scene1", "scene2", "scene9")):
     with open(str(tmp_path / scene_render.SCENE_LAYOUT_MANIFEST), "w",
               encoding="utf-8") as f:
         json.dump(layout, f)
-    win = app.window
-    win.write_assets_var.set(str(tmp_path))
-    win._open_scene_browser()
-    return win._scene_browser
+    text = w.window.service("text")
+    assert w.run(text.open_scene_browser, str(tmp_path)) is True
+    return text.scenes
 
 
 class _NoWorker:
@@ -317,14 +320,8 @@ class _NoWorker:
 
 
 def _no_worker_thread(monkeypatch):
-    """Let the button dispatch a batch with no live thread behind it.
-
-    The two halves are driven by hand (see ``_run_bulk``) because a worker
-    cannot reach Tk outside ``mainloop()``.  If the real thread ALSO ran, the
-    same batch would render twice into one folder — which is how the Linux and
-    macOS runners caught it: the cancel test raced a live worker for the very
-    folder it asserts is empty, and Windows simply lost that race more often.
-    """
+    """Let the button dispatch a batch with no live thread behind it, so the
+    test can press it a second time (the cancel) before any work runs."""
     import threading as _real
 
     class _Shim:
@@ -333,67 +330,70 @@ def _no_worker_thread(monkeypatch):
         def __getattr__(self, name):       # Event, Lock, … stay real
             return getattr(_real, name)
 
-    monkeypatch.setattr("pinball_decryptor.gui.scene_browser.threading",
+    monkeypatch.setattr("pinball_decryptor.webui.text_scenes.threading",
                         _Shim())
-def _run_bulk(sb, out, monkeypatch):
-    """Click "Save all previews…" for real, then run the two halves the
-    worker thread would have.
-
-    THE BUTTON IS PART OF THE TEST — a command wired to nothing is exactly
-    what a screenshot cannot see.  The thread is not: a worker cannot reach Tk
-    outside ``mainloop()`` at all, so the hop is exercised by calling
-    ``_save_all_work`` and ``_save_all_done`` in order, which is what the
-    Scenes window's own render tests already do.
-    """
-    monkeypatch.setattr("tkinter.filedialog.askdirectory",
-                        lambda **k: str(out))
-    _no_worker_thread(monkeypatch)
-    sb._save_all_btn.invoke()
-    state = sb._bulk
-    assert state is not None, "the button did not start a batch"
-    assert str(sb._save_all_btn.cget("text")) == "Cancel"
-    written, skipped, err = sb._save_all_work(state)
-    sb._save_all_done(state, state["out"], written, skipped, err)
-    return written, skipped
 
 
-def test_save_all_previews_writes_one_png_per_listed_scene(app, tmp_path,
-                                                           monkeypatch):
-    sb = _scene_window(app, tmp_path / "extract")
-    out = tmp_path / "shots"
-    out.mkdir()
-    written, skipped = _run_bulk(sb, out, monkeypatch)
+def _run_bulk(w, sb, out):
+    """Click "Save all previews…" the way the page does and wait for the
+    batch to land.  THE CALL IS PART OF THE TEST — a command wired to nothing
+    is exactly what a screenshot cannot see."""
+    captured = {}
+    orig = sb._save_all_done
 
-    assert (written, skipped) == (3, 0)
-    assert sb._bulk is None
-    assert str(sb._save_all_btn.cget("text")) == "Save all previews…"
-    names = sorted(os.listdir(out))
-    assert len(names) == 3, names
-    assert all(n.lower().endswith(".png") for n in names)
-    assert "Saved 3 previews" in sb._caption_tip.text
-    assert "first frame of each" in sb._caption_tip.text
+    def _done(state, out_, written, skipped, err):
+        captured["r"] = (written, skipped)
+        return orig(state, out_, written, skipped, err)
+    sb._save_all_done = _done
+    try:
+        w.answers.append(str(out))
+        assert w.call("text_scenes.save_all") is True
+        assert w.state("text_scenes")["bulk"] is True, \
+            "the button did not start a batch"
+        assert _wait(w, lambda: "r" in captured and sb._bulk is None)
+    finally:
+        del sb._save_all_done
+    return captured["r"]
 
 
-def test_the_search_box_narrows_the_batch(app, tmp_path, monkeypatch):
+def test_save_all_previews_writes_one_png_per_listed_scene(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        sb = _scene_window(w, tmp_path / "extract")
+        out = tmp_path / "shots"
+        out.mkdir()
+        written, skipped = _run_bulk(w, sb, out)
+
+        assert (written, skipped) == (3, 0)
+        assert sb._bulk is None
+        assert w.state("text_scenes")["bulk"] is False
+        names = sorted(os.listdir(out))
+        assert len(names) == 3, names
+        assert all(n.lower().endswith(".png") for n in names)
+        full = w.state("text_scenes")["caption_full"]
+        assert "Saved 3 previews" in full
+        assert "first frame of each" in full
+
+
+def test_the_search_box_narrows_the_batch(tmp_path):
     """The list is the batch — silently exporting the scenes the user just
     filtered out is the same surprise as extra work nobody asked for."""
-    sb = _scene_window(app, tmp_path / "extract")
-    listed = list(sb._tree.get_children(""))
-    assert len(listed) == 3
-    sb._search_var.set(sb._scenes[listed[0]]["label"])
-    sb.app._tk_root().update()
-    assert len(sb._tree.get_children("")) == 1
+    with web_app(tmp_path, mfr="stern") as w:
+        sb = _scene_window(w, tmp_path / "extract")
+        listed = list(sb._listed)
+        assert len(listed) == 3
+        w.call("text_scenes.set_search", sb._scenes[listed[0]]["label"])
+        assert len(sb._listed) == 1
 
-    out = tmp_path / "one"
-    out.mkdir()
-    assert _run_bulk(sb, out, monkeypatch) == (1, 0)
-    assert len(os.listdir(out)) == 1
+        out = tmp_path / "one"
+        out.mkdir()
+        assert _run_bulk(w, sb, out) == (1, 0)
+        assert len(os.listdir(out)) == 1
 
 
 def test_two_scenes_that_sanitise_alike_do_not_overwrite_each_other():
     """An overwrite there would silently drop a scene from a folder that
     claims to hold them all."""
-    from pinball_decryptor.gui.scene_browser import _safe_stem, _unique_png
+    from pinball_decryptor.webui.text_scenes import _safe_stem, _unique_png
 
     used = set()
     assert _unique_png("Game · Intro", used) == "Game___Intro.png"
@@ -403,54 +403,69 @@ def test_two_scenes_that_sanitise_alike_do_not_overwrite_each_other():
     assert _safe_stem("///") == "___"
 
 
-def test_a_scene_with_no_layout_is_counted_not_guessed_at(app, tmp_path,
-                                                          monkeypatch):
+def test_a_scene_with_no_layout_is_counted_not_guessed_at(tmp_path):
     """A folder of 2 PNGs from a 3-scene list has to say what happened to the
     third."""
-    sb = _scene_window(app, tmp_path / "extract")
-    sb._layouts = {k: v for k, v in sb._layouts.items()
-                   if not k.endswith("/g/scene9/scene.radium")}
-    out = tmp_path / "partial"
-    out.mkdir()
-    assert _run_bulk(sb, out, monkeypatch) == (2, 1)
-    assert len(os.listdir(out)) == 2
-    assert "1 scene could not be drawn" in sb._caption_tip.text
+    with web_app(tmp_path, mfr="stern") as w:
+        sb = _scene_window(w, tmp_path / "extract")
+
+        def _drop():
+            sb._layouts = {k: v for k, v in sb._layouts.items()
+                           if not k.endswith("/g/scene9/scene.radium")}
+        w.run(_drop)
+        out = tmp_path / "partial"
+        out.mkdir()
+        assert _run_bulk(w, sb, out) == (2, 1)
+        assert len(os.listdir(out)) == 2
+        assert "1 scene could not be drawn" in \
+            w.state("text_scenes")["caption_full"]
 
 
-def test_a_cancelled_batch_reports_what_it_did_write(app, tmp_path,
-                                                     monkeypatch):
+def test_a_cancelled_batch_reports_what_it_did_write(tmp_path, monkeypatch):
     """Cancel stops the batch; it does not pretend the folder is empty."""
-    sb = _scene_window(app, tmp_path / "extract")
-    out = tmp_path / "stopped"
-    out.mkdir()
-    monkeypatch.setattr("tkinter.filedialog.askdirectory",
-                        lambda **k: str(out))
-    _no_worker_thread(monkeypatch)
-    sb._save_all_btn.invoke()
-    state = sb._bulk
-    # A second press IS the cancel (the button doubles as one, like the MP4
-    # export and Rebuild previews).
-    sb._save_all_btn.invoke()
-    assert state["cancel"] is True
-    written, skipped, err = sb._save_all_work(state)
-    assert (written, skipped, err) == (0, 0, None)
-    sb._save_all_done(state, state["out"], written, skipped, err)
-    assert "Stopped" in sb._caption_tip.text
-    assert os.listdir(out) == []
+    with web_app(tmp_path, mfr="stern") as w:
+        sb = _scene_window(w, tmp_path / "extract")
+        out = tmp_path / "stopped"
+        out.mkdir()
+        _no_worker_thread(monkeypatch)
+        w.answers.append(str(out))
+        w.call("text_scenes.save_all")
+        state = sb._bulk
+        assert state is not None
+        # A second press IS the cancel (the button doubles as one, like the
+        # MP4 export and Rebuild previews).
+        w.call("text_scenes.save_all")
+        assert state["cancel"] is True
+        written, skipped, err = sb._save_all_work(state)
+        assert (written, skipped, err) == (0, 0, None)
+        w.run(sb._save_all_done, state, state["out"], written, skipped, err)
+        assert "Stopped" in w.state("text_scenes")["caption_full"]
+        assert os.listdir(out) == []
 
 
-def test_closing_the_window_stops_a_bulk_save(app, tmp_path):
+def test_closing_the_window_stops_a_bulk_save(tmp_path):
     """It is the one background job here that writes files the user can see,
     so it must not keep dropping PNGs into a folder after the window is
     gone."""
-    sb = _scene_window(app, tmp_path / "extract")
-    sb._bulk = {"cancel": False}
-    sb._close()
-    assert sb._bulk["cancel"] is True
+    with web_app(tmp_path, mfr="stern") as w:
+        sb = _scene_window(w, tmp_path / "extract")
+        bulk = {"cancel": False}
+
+        def _arm():
+            sb._bulk = bulk
+        w.run(_arm)
+        w.call("text_scenes.close")
+        assert bulk["cancel"] is True
 
 
-def test_the_caption_line_leads_with_what_the_preview_cannot_show(app,
-                                                                  tmp_path):
+def _show(w, sb, layout):
+    from PIL import Image
+    w.run(sb._show_preview, sb._token, [Image.new("RGB", (320, 180))], [],
+          layout)
+    return w.state("text_scenes")
+
+
+def test_the_caption_line_leads_with_what_the_preview_cannot_show(tmp_path):
     """PAD-81, from the two files the tester sent in for Venom 1.07's
     7f71ddb3: PAD's PNG of that scene is 327 sprites composited on top of one
     another, and the line under it read "Still picture: 200 images on a
@@ -458,32 +473,33 @@ def test_the_caption_line_leads_with_what_the_preview_cannot_show(app,
     not be placed and that the scene holds 327 screens to step through — both
     sentences were behind the "?" while the visible one said all was well.
 
-    Through the real _show_preview, because the widget text is the thing that
+    Through the real _show_preview, because the caption is the thing that
     was wrong; the full paragraph must still be on the tooltip."""
     pytest.importorskip("PIL")
-    from PIL import Image
+    with web_app(tmp_path, mfr="stern") as w:
+        sb = _scene_window(w, tmp_path / "extract")
+        layout = {"stage": [1360, 768, 30.0], "partial": True,
+                  "unplaced": 309, "offstage": 0, "texts": [],
+                  "sprites": [{"name": "a", "x": 10, "y": 10,
+                               "image_off": 1}]}
+        st = _show(w, sb, layout)
 
-    sb = _scene_window(app, tmp_path / "extract")
-    layout = {"stage": [1360, 768, 30.0], "partial": True, "unplaced": 309,
-              "offstage": 0, "texts": [],
-              "sprites": [{"name": "a", "x": 10, "y": 10, "image_off": 1}]}
-    sb._show_preview(sb._preview_token, [Image.new("RGB", (320, 180))], layout)
-
-    assert sb._preview_lbl.cget("text") ==         "309 more images in this scene can't be placed yet."
-    # The summary is not lost, only moved behind the "?".
-    assert sb._caption_tip.text.startswith("Still picture:")
-    assert "can't be placed yet" in sb._caption_tip.text
+        assert st["caption"] == \
+            "309 more images in this scene can't be placed yet."
+        # The summary is not lost, only moved behind the "?".
+        assert st["caption_full"].startswith("Still picture:")
+        assert "can't be placed yet" in st["caption_full"]
 
 
-def test_a_scene_with_nothing_to_admit_still_says_what_it_is(app, tmp_path):
+def test_a_scene_with_nothing_to_admit_still_says_what_it_is(tmp_path):
     """The other half of the rule: with no caveat the line is the summary, so
     an ordinary scene reads exactly as it did before."""
     pytest.importorskip("PIL")
-    from PIL import Image
-
-    sb = _scene_window(app, tmp_path / "extract")
-    layout = {"stage": [1360, 768, 30.0], "partial": False, "unplaced": 0,
-              "offstage": 0, "texts": [],
-              "sprites": [{"name": "a", "x": 10, "y": 10, "image_off": 1}]}
-    sb._show_preview(sb._preview_token, [Image.new("RGB", (320, 180))], layout)
-    assert sb._preview_lbl.cget("text").startswith("Still picture:")
+    with web_app(tmp_path, mfr="stern") as w:
+        sb = _scene_window(w, tmp_path / "extract")
+        layout = {"stage": [1360, 768, 30.0], "partial": False,
+                  "unplaced": 0, "offstage": 0, "texts": [],
+                  "sprites": [{"name": "a", "x": 10, "y": 10,
+                               "image_off": 1}]}
+        st = _show(w, sb, layout)
+        assert st["caption"].startswith("Still picture:")

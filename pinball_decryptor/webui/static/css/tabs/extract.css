@@ -1,0 +1,110 @@
+/* Extract tab.  Tokens and classes from css/app.css only; everything here is
+   namespaced .x-* so it can't leak into another tab. */
+
+.x-page .x-cols { align-items: start; }
+.x-page .x-col { gap: 16px; min-width: 0; }
+.x-page .x-source > .bd { gap: 14px; }
+.x-page .x-source > .ft { flex-wrap: nowrap; }
+.x-page .x-source > .ft .small { min-width: 0; }
+
+.x-page .x-sec { gap: 5px; }
+.x-page .x-lblrow { gap: 8px; }
+.x-page .x-pathrow { gap: 8px; }
+.x-page .x-pathrow > .field { min-width: 0; }
+.x-page .x-checks { gap: 4px 18px; }
+.x-page .x-chips { gap: 6px 8px; }
+.x-page .x-dur { gap: 6px; flex: 0 0 auto; }
+.x-page .x-pre { white-space: pre-line; }
+.x-page .x-wrapany, .x-float .x-wrapany { overflow-wrap: anywhere; word-break: break-word; }
+
+/* the recent-paths caret inside a path box */
+.x-caret { border: 0; background: transparent; color: var(--ink-3); cursor: pointer; padding: 2px 2px 2px 6px;
+  font-size: 13px; line-height: 1; flex: 0 0 auto; }
+.x-caret:hover { color: var(--ink); }
+
+/* the detect badge: warnings only (the happy path is the chip row) */
+.x-badge { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--warn); line-height: 1.4; }
+.x-badge.info { color: var(--info); }
+.x-badge .i { margin-top: 1px; }
+button.x-badge { border: 0; background: transparent; padding: 0; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+button.x-badge span { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+button.x-badge:hover span { text-decoration-style: solid; }
+
+.x-page .x-drop { padding: 16px; gap: 4px; }
+.x-page .x-drop .i { width: 20px; height: 20px; color: var(--ink-3); }
+
+/* card mode: the drive list keeps the width its text needs; the buttons
+   wrap under it when both don't fit */
+.x-page .x-drvrow { flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.x-page .x-drvsel { flex: 1 1 440px; gap: 4px; }
+.x-page .x-drvpick { gap: 8px; }
+.x-page .x-drvbtns { flex: 0 0 auto; gap: 8px; }
+.x-page .x-drvfull { font-size: 12px; padding-left: 2px; }
+.x-page .x-cardline { font-weight: 600; font-size: 13px; }
+.x-page .x-safety { color: var(--err); font-size: 13px; line-height: 1.45; }
+.x-alert { border: 1.5px solid var(--err); background: var(--err-soft); border-radius: 8px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px; }
+.x-alert-hd { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; padding: 0;
+  font: inherit; font-family: var(--cond); font-weight: 600; letter-spacing: .04em; font-size: 14px; color: var(--err);
+  text-align: left; cursor: pointer; }
+.x-alert-hd.static { cursor: default; }
+.x-alert-bd { white-space: pre-line; font-size: 13px; color: var(--ink); line-height: 1.5; }
+.x-link { border: 0; background: transparent; padding: 0; font: inherit; font-size: 12.5px; color: var(--err);
+  text-decoration: underline; cursor: pointer; letter-spacing: 0; font-family: var(--sans); font-weight: 500; }
+
+/* capture */
+.x-page .x-help { font-size: 12.5px; color: var(--ink-3); font-style: italic; white-space: pre-line; line-height: 1.5; }
+.x-page .x-help.err { color: var(--err); font-style: normal; }
+.x-page .x-dmd { background: #000; border: 1px solid var(--line); border-radius: 8px; display: flex; align-items: center;
+  justify-content: center; padding: 10px; min-height: 96px; }
+.x-page .x-dmd img { display: block; width: 100%; max-width: 896px; height: auto; image-rendering: pixelated;
+  image-rendering: crisp-edges; }
+.x-page .x-dmd-empty { color: #8a6a3a; font-family: var(--cond); font-size: 13px; }
+.x-page .x-matrix { gap: 6px; }
+.x-page .x-mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 4px;
+  max-height: 220px; overflow: auto; padding-right: 2px; }
+.x-page .x-mgrid .btn { font-family: var(--mono); font-size: 12px; justify-content: flex-start; white-space: pre;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.x-page .x-msep { font-style: italic; margin-top: 4px; }
+
+/* right column */
+.x-page .x-kv, .x-float .x-kv { grid-template-columns: 116px minmax(0, 1fr); gap: 6px 12px; align-items: baseline; }
+.x-page .x-project > .ft { gap: 8px; }
+.x-page .x-rname { color: var(--ink); }
+.x-page .x-pad { padding: 8px 10px; }
+
+
+/* Image Info / Project Info: floating, non-modal windows (Tk Toplevels) */
+.x-float { position: fixed; z-index: 45; top: 96px; right: 24px; width: min(720px, calc(100vw - 48px));
+  min-width: min(360px, calc(100vw - 32px)); min-height: 180px; max-height: calc(100vh - 120px);
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; overflow: hidden; resize: both; }
+.x-float.x-pinfo { width: min(520px, calc(100vw - 48px)); }
+.x-float:focus { outline: none; }
+.x-float:focus-visible { box-shadow: var(--shadow), 0 0 0 2px var(--accent-soft); }
+.x-float > .hd { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line);
+  cursor: move; user-select: none; touch-action: none; flex: 0 0 auto; }
+.x-float > .hd .h2 { flex: 1 1 auto; font-size: 16px; }
+.x-float > .bd { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1 1 auto; }
+.x-float > .ft { padding: 10px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center;
+  flex-wrap: wrap; flex: 0 0 auto; }
+.x-float .x-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 36px 0;
+  color: var(--ink-3); font-family: var(--cond); font-size: 18px; font-weight: 600; }
+.x-float .x-isec { display: flex; flex-direction: column; gap: 6px; }
+.x-float .x-isec + .x-isec { border-top: 1px solid var(--line); padding-top: 10px; }
+.x-float .x-isec-t { font-size: 14.5px; }
+.x-float .x-ikv { grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 3px 14px; align-items: baseline;
+  font-size: 13px; }
+
+/* Save card as image (a page dialog) */
+.scrim .x-rcgrid { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+.scrim .x-readout { line-height: 1.45; }
+
+/* was @media (max-width: 1020px) */
+html.bp-1020 .x-page .x-source > .ft { flex-wrap: wrap; }
+/* was @media (max-width: 640px) */
+html.bp-640 .x-page .x-pathrow { flex-wrap: wrap; }
+html.bp-640 .scrim .x-rcgrid { grid-template-columns: minmax(0, 1fr); }
+html.bp-640 .x-float .x-ikv { grid-template-columns: minmax(0, 1fr); gap: 0 14px; }
+html.bp-640 .x-float .x-ikv > .k { margin-top: 5px; }
+.x-page .x-kv > span, .x-float .x-kv > span { min-width: 0; overflow-wrap: anywhere; }

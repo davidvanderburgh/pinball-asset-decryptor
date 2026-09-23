@@ -81,6 +81,24 @@ def test_a_code_mode_without_assets_json_carries_nothing_and_is_named_by_its_sou
     assert CM.list_code(project)[0][1].name == "BLITZ"
 
 
+def test_a_fresh_code_modes_default_assets_read_as_nothing_of_its_own(tmp_path):
+    """What New code mode writes beside the template (mode_tryit) is a file this module reads as
+    a code mode with no screen, clip, music or call, so Write's code path and Try it's compile-only
+    path both see it the way they saw a folder with no assets.json at all."""
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    project = str(tmp_path / "p")
+    os.makedirs(project)
+    slug, _path = MT.new_code_mode(project, "Blitz Rush")
+    with open(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE), encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["format"] == CM.FORMAT and data["name"] == "Blitz Rush" and data["screen"] is False
+    assert data["clip"] == "" and data["music"] == "" and data["calls"] == {}
+    (got, spec), = CM.list_code(project)
+    assert got == slug and spec.name == "Blitz Rush" and not spec.has_assets()
+    assert CM.validate(spec, MP.mode_folder(project, slug)) == []
+    assert MW.code_mode_list(project) == [(slug, spec)]
+
+
 def test_what_is_wrong_with_a_code_modes_assets_is_said(tmp_path):
     spec = CM.CodeAssets(name="X", seconds=0, calls={"Bad Cue": "a.wav", "ok": {"wav": "", "priority": 9}},
                          music="gone.wav")

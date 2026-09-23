@@ -104,27 +104,6 @@ def preview_modes_on(monkeypatch):
                         lambda feature: feature == "modes" or real(feature))
 
 
-def _tk_works():
-    """Return True if we can instantiate a hidden Tk root.
-
-    Headless Linux without xvfb has no DISPLAY and tk.Tk() raises
-    `_tkinter.TclError: no display name`.  Mac / Windows runners can
-    always open one.  Used to skip GUI smoke tests when no display is
-    available.
-    """
-    try:
-        import tkinter
-        root = tkinter.Tk()
-        root.withdraw()
-        root.destroy()
-        return True
-    except Exception:
-        return False
-
-
-HAS_DISPLAY = _tk_works()
-
-
 # ---------------------------------------------------------------------------
 # Plugin loading is process-wide.  Force it once per session.
 # ---------------------------------------------------------------------------
@@ -155,14 +134,15 @@ def _isolate_card_edits(tmp_path_factory):
 
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_audio_ctl(tmp_path_factory):
-    """Point the Emulate tab's volume/mute file (item 56) at a temp path for
+    """Point the Emulate tabs' volume/mute file (item 56) at a temp path for
     the whole run — same reason and same shape as ``_isolate_card_edits``
-    above.  ``EmulatePanel.__init__`` reads it unconditionally (to seed the
-    Volume slider), so a panel built anywhere in the suite would otherwise
-    read, and every slider/Mute test would otherwise WRITE, the developer's
-    own ``%APPDATA%/pinball_decryptor/audio_ctl.json``."""
-    from pinball_decryptor.gui import emulate_tab
-    emulate_tab.AUDIO_CTL_FILE = str(
+    above.  A JJP or Spike 1 tab reads it to seed its Volume slider, so a tab
+    built anywhere in the suite would otherwise read, and every slider/Mute
+    test would otherwise WRITE, the developer's own
+    ``%APPDATA%/pinball_decryptor/audio_ctl.json``.  The one definition is
+    ``webui/emulate_core.py``'s; the rigs' helpers read it from there."""
+    from pinball_decryptor.webui import emulate_core
+    emulate_core.AUDIO_CTL_FILE = str(
         tmp_path_factory.mktemp("audio_ctl") / "audio_ctl.json")
 
 
@@ -214,131 +194,6 @@ def sparse_image(path, size):
         else:
             f.truncate(size)
     return path
-
-# ---------------------------------------------------------------------------
-# Real-Tk tests ride a fixed, narrow set of xdist workers (--dist loadgroup).
-# ---------------------------------------------------------------------------
-# Under plain pytest the suite builds and destroys its Tk roots serially, and
-# has been stable that way for months.  Several xdist workers doing it
-# concurrently is the regime that crashed a macOS CI worker mid-Toplevel
-# (2026-08-31, the first -n auto runs) - and, measured 2026-09-01 on the
-# 16-core Windows dev box, it is SLOWER too: the Tk-touching subset ran
-# ~100-130s serial but 172s spread over 8 workers, because window
-# create/map/destroy serializes at the desktop layer whatever the process
-# count.  So Tk work never spreads freely; it rides named groups, and the
-# other workers parallelize the rest of the suite.  How many groups is the
-# question the hook below answers -- one on CI, two on a dev box, both
-# numbers measured rather than reasoned.
-#
-# MEMBERSHIP IS THE PART THAT WAS WRONG (2026-09-01).  The original sniff
-# looked only for the literal string "tkinter", which missed every file that
-# reaches Tk through the shared `app` fixture (they import it from
-# test_gui_smoke and never say "tkinter") - so the batch17/32/35/36/37
-# family had been racing UNGROUPED across workers since the day the group
-# was added.  That race is where the first -n auto run's one ERROR lived,
-# and racing Tk window churn is also a wall-clock tax on everything else.
-# The sniff now catches both ways a file reaches Tk.  It is still sniffed
-# from module source rather than hand-marked, so a new GUI test file is
-# grouped the day it appears; the marker is inert without xdist.
-
-_TK_SNIFF_CACHE = {}
-
-
-def _touches_tk(path):
-    p = str(path)
-    hit = _TK_SNIFF_CACHE.get(p)
-    if hit is None:
-        try:
-            with open(p, "r", encoding="utf-8", errors="replace") as f:
-                src = f.read()
-            hit = "tkinter" in src or "test_gui_smoke" in src
-        except OSError:
-            hit = False
-        _TK_SNIFF_CACHE[p] = hit
-    return hit
-
-
-# tryfirst: xdist's own pytest_collection_modifyitems (remote.py) is what
-# folds the marker into the scheduling id, so this hook must run before it
-# or the marker arrives after the train has left.
-@pytest.hookimpl(tryfirst=True)
-def pytest_collection_modifyitems(config, items):
-    # HOW MANY GROUPS.  a76064c split the lane two ways LOCALLY (232s -> 177s)
-    # and left CI on one group, reasoning "CI wall time is not the constraint".
-    # When CI wall time BECAME the constraint (2026-09-09: a release's windows
-    # job spent 8m33s in the test step and the lane was its whole critical
-    # path, 424s on gw0 while the other three workers idled 3m26s), the
-    # obvious move was to split CI too.  It was measured on the real runner
-    # and it does not work:
-    #
-    #     one group    lane 487s on one worker      -- test step 8m33s
-    #     two groups   tk-app 467s + tk-emu 395s    -- test step 8m15s
-    #
-    # Splitting grew the TOTAL Tk work from 487s to 862s -- 77% -- and bought
-    # 20 seconds of critical path, because window create/map/destroy
-    # serializes at the desktop layer no matter how many processes ask.  That
-    # is the same anti-scaling a76064c measured at 8 workers, and it is far
-    # steeper on a 4-core hosted runner than on the 16-core dev box, where a
-    # 2-way split still pays (177s) and stays the default.
-    #
-    # So CI keeps ONE group.  It is not leaving time on the table: there is no
-    # time there to take.  The lane is 4x slower on Windows than on macOS
-    # because of what Windows charges per window, and the only lever left is
-    # opening fewer of them -- a fixture-scope change, not a scheduling one.
-    #
-    # 2026-09-13: the Windows leg is gone from test.yml (its header says
-    # why), so CI is ubuntu + macOS.  One group stays because it has not
-    # been measured otherwise on THOSE runners; the numbers above are
-    # Windows numbers and must not be read as a macOS result.
-    #
-    # 2026-09-17: CI no longer RUNS the lane at all.  Every item the sniff
-    # catches also gets the `tk` marker (registered in pytest.ini), and
-    # test.yml deselects it with -m "not tk".  David's call, after the
-    # v0.218.2 release's tripwire went red on 23 test_multiboot_tab Tk tests
-    # whose only fault was pytest's unraisable-exception hook crashing on the
-    # macOS runner (a tracemalloc circular import) - an identical tree had
-    # passed a minute earlier - and a string of the same kind before it:
-    # "they are extremely flaky".  Since the release flow has no local gate
-    # either (see /release), the Tk tests now run only when a developer runs
-    # them; -m "not tk" is a CI setting, not a pytest.ini default.  The
-    # xdist_group marker stays for local runs, where the lane still rides
-    # its own workers.  Same hook, same sniff, so a new GUI test file is
-    # both grouped and excluded the day it appears.
-    single_group = bool(os.environ.get("CI"))
-    for item in items:
-        if _touches_tk(item.path):
-            if single_group:
-                group = "tk"
-            else:
-                group = "tk-app" if "test_gui" in str(item.path) else "tk-emu"
-            item.add_marker(pytest.mark.xdist_group(group))
-            item.add_marker(pytest.mark.tk)
-
-
-def make_tk_root(tk_mod, attempts=4):
-    """Create a Tk root, retrying the transient Tcl-script race.
-
-    Under parallel workers, Tk creation sources its runtime scripts from
-    disk every time, and on Windows those reads occasionally fail ENOENT on
-    files that demonstrably exist (the AV/indexer briefly in the way; one
-    2026-09-01 run caught init.tcl, ttk.tcl and vistaTheme.tcl each doing
-    it).  Measured, the failure is per-attempt, NOT poisoning: creates on
-    the same worker succeed immediately afterwards.  Before this helper, a
-    module-scoped root fixture that hit the race once skipped its WHOLE
-    module (pytest caches a module fixture's skip), which is how one
-    transient read miss became 25 silently-lost tests on the release gate.
-    Retry with a short backoff and only give up when it genuinely persists.
-    """
-    import time as _time
-    last = None
-    for i in range(attempts):
-        try:
-            return tk_mod.Tk()
-        except Exception as exc:                            # noqa: BLE001
-            last = exc
-            _time.sleep(0.1 * (i + 1))
-    raise last
-
 
 @pytest.fixture(scope="session")
 def all_manufacturers():

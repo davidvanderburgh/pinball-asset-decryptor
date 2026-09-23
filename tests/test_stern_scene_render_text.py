@@ -156,14 +156,14 @@ def test_render_scene_passes_text_edits_through(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The Scenes window's pending-text source, without a Tk root
+# The Scenes window's pending-text source (the web port's service)
 # ---------------------------------------------------------------------------
 
 class _Stub:
-    """Just the attributes ``SceneBrowserWindow._pending_texts`` reads, and
+    """Just the attributes ``TextScenesService._pending_texts`` reads, and
     the one helper it calls."""
 
-    from pinball_decryptor.gui.scene_browser import SceneBrowserWindow as _SB
+    from pinball_decryptor.webui.text_scenes import TextScenesService as _SB
     _load_text_changes = _SB._load_text_changes
 
     def __init__(self, assets_dir, layouts):
@@ -173,9 +173,9 @@ class _Stub:
 
 
 def _pending(assets, layouts, card, layout=None):
-    from pinball_decryptor.gui.scene_browser import SceneBrowserWindow
+    from pinball_decryptor.webui.text_scenes import TextScenesService
     stub = _Stub(assets, layouts)
-    return SceneBrowserWindow._pending_texts(stub, card, layout)
+    return TextScenesService._pending_texts(stub, card, layout)
 
 
 def _write_manifest(tmp_path, rows):
@@ -232,7 +232,8 @@ def test_pending_texts_decodes_program_rows_and_caches_the_manifest(tmp_path):
     """Program rows are manifest-encoded (a two-character ``\\n``); the
     layout's strings carry a real newline.  The manifest is read once per
     stand-in and again only after ``text_edits_changed``-style invalidation."""
-    from pinball_decryptor.gui.scene_browser import SceneBrowserWindow
+    from pinball_decryptor.webui.text_scenes import (
+        TextScenesService as SceneBrowserWindow)
     assets = _seed(tmp_path, "GODZILLA\nVS.\nMEGALON")
     layouts = scene_render.load_layouts(assets)
     _write_manifest(tmp_path, [

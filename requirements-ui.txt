@@ -1,0 +1,27 @@
+# The app's window, pinned: the web UI shown in a native web view.
+#
+# Every installer bundles these (installer/build.ps1 into the embedded
+# Python on Windows; the macOS and Linux PyInstaller builds via the release
+# workflows), so no user installs anything:
+#
+#   Windows  pywebview's Edge WebView2 backend, through pythonnet (the WebView2
+#            runtime itself ships with Windows 10/11).
+#   macOS    pywebview's WKWebView backend, through pyobjc (pywebview pulls the
+#            pyobjc frameworks it needs on darwin).
+#   Linux    pywebview's Qt backend with Qt WebEngine (PySide6), so the AppImage
+#            carries its own browser engine instead of needing webkit2gtk.
+#
+# The tests workflow does not install this file: nothing in the suite opens a
+# window.  If the web view cannot start, the app opens the same page in the
+# system browser and says why in the log.
+pywebview==6.2.1
+bottle==0.13.4
+proxy_tools==0.1.0
+typing_extensions==4.16.0
+pythonnet==3.1.0; sys_platform == "win32"
+clr_loader==0.3.1; sys_platform == "win32"
+cffi==2.1.1; sys_platform == "win32"
+pycparser==3.0; sys_platform == "win32"
+PySide6-Essentials==6.11.2; sys_platform == "linux"
+PySide6-Addons==6.11.2; sys_platform == "linux"
+QtPy==2.4.3; sys_platform == "linux"

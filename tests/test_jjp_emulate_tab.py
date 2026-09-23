@@ -6,8 +6,8 @@ be the first thing that is actually wrong: a run with no security key that says
 "Stopped" sends them looking in entirely the wrong place, and the key is the one
 thing about JJP that cannot be worked around.
 
-The widget tests build on an invisible root and skip rather than fail when Tk is
-unusable, matching tests/test_emulate_tab.py.
+The subject is ``webui/emulate_jjp_core.py`` (the rig facts the web JJP
+Emulate tab calls); the tab itself is driven in tests/test_webui_emulate_jjp.py.
 """
 
 import subprocess
@@ -15,12 +15,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from pinball_decryptor.gui import _rig, jjp_emulate_tab
-from pinball_decryptor.gui.jjp_emulate_tab import (DEFAULT_RIG_DIR,
-                                                   JJPEmulatePanel,
-                                                   attach_dongle_cmd, rig_cmd,
-                                                   rig_cmd_root, rig_dir,
-                                                   state_text)
+from pinball_decryptor.webui import rig as _rig
+from pinball_decryptor.webui import emulate_jjp_core as jjp_emulate_tab
+from pinball_decryptor.webui.emulate_jjp_core import (DEFAULT_RIG_DIR,
+                                                      attach_dongle_cmd,
+                                                      rig_cmd, rig_cmd_root,
+                                                      rig_dir, state_text)
+from pinball_decryptor.webui.tabs import emulate_jjp as jjp_web
+from pinball_decryptor.webui.tabs.emulate_jjp import EmulateJJPTab
 
 
 # ---------------------------------------------------------------- plumbing --
@@ -46,9 +48,9 @@ def test_emulate_tab_shares_one_definition():
     """The Stern panel must delegate, not keep a second copy — two panels each
     with their own idea of how to spell a WSL path is exactly the class of bug
     the rig's 'never let two scripts define the same fact' rule exists for."""
-    from pinball_decryptor.gui import emulate_tab
-    assert emulate_tab._wsl_path(r"c:\x") == _rig.wsl_path(r"c:\x")
-    assert emulate_tab.parse_status("a=1") == _rig.parse_status("a=1")
+    from pinball_decryptor.webui import emulate_core
+    assert emulate_core._wsl_path(r"c:\x") == _rig.wsl_path(r"c:\x")
+    assert emulate_core.parse_status("a=1") == _rig.parse_status("a=1")
 
 
 def test_rig_dir_is_overridable(monkeypatch):
@@ -128,10 +130,10 @@ def test_every_jjp_emulate_path_names_the_same_linux(monkeypatch):
 
     probe = []
     monkeypatch.setattr(
-        jjp_emulate_tab.subprocess, "run",
+        jjp_web.subprocess, "run",
         lambda cmd, *a, **kw: probe.append(list(cmd)) or SimpleNamespace(
             stdout=b"no", returncode=0))
-    JJPEmulatePanel._key_visible_in_wsl(object())
+    EmulateJJPTab._key_visible_in_wsl(object())
 
     named = {
         "usbipd attach": _distro_named(attach_dongle_cmd()),
@@ -187,183 +189,12 @@ def test_state_no_image():
     assert label == "No image mounted"
 
 
-# ------------------------------------------------------------------ widgets --
-
-@pytest.fixture(scope="module")
-def root():
-    """ONE Tk root for the whole module.
-
-    A root per test skipped intermittently with "no usable Tk display": Tk does
-    not enjoy being created and destroyed repeatedly in one process, and a test
-    that sometimes runs and sometimes silently skips is worse than one that
-    does not exist - it looks like coverage.
-    """
-    tk = pytest.importorskip("tkinter")
-    from tests.conftest import make_tk_root
-    try:
-        # retried: one transient Tcl-script read miss must not skip the
-        # whole module (pytest caches a module fixture's skip) - see
-        # make_tk_root
-        r = make_tk_root(tk)
-    except Exception:                                       # noqa: BLE001
-        pytest.skip("no usable Tk display")
-    r.withdraw()
-    yield r
-    try:
-        r.destroy()
-    except Exception:                                       # noqa: BLE001
-        pass
-
-
-@pytest.fixture
-def panel(root, monkeypatch):
-    """A built panel whose poller never actually shells out to WSL."""
-    import tkinter as tk
-    monkeypatch.setattr(JJPEmulatePanel, "_schedule_poll",
-                        lambda self, ms=None: None)
-    frame = tk.Frame(root)
-    p = JJPEmulatePanel(frame, iso_var=tk.StringVar())
-    p.build(frame)
-    yield p
-    p._stopped = True
-    try:
-        frame.destroy()
-    except Exception:                                       # noqa: BLE001
-        pass
-
-
-def test_there_is_no_screenshot_button(panel):
-    """Capturing the game is a RIG job: grab.sh knows about WSLg's RAIL, where
-    an x11grab of :0 returns a blank frame while the game draws perfectly.  A
-    panel button shelling out to the same script only added a file dialog."""
-    assert not hasattr(panel, "_shot_btn")
-    assert not hasattr(panel, "_screenshot")
-
-
-def test_recovery_sits_next_to_start(panel):
-    """Both are reached at the same moment and for the same reason - the run
-    will not come up - so the escalation belongs beside Start, not banished to
-    the opposite edge where it has to be gone looking for."""
-    assert panel._reset_btn.pack_info()["side"] == "left"
-    assert panel._go_btn.pack_info()["side"] == "left"
-
-
-def test_there_is_no_switch_matrix_button(panel):
-    """The matrix opens WITH the emulator now.  A button for it silently did
-    nothing when it was launched as the wrong user, and a control that lies
-    about having worked is worse than no control."""
-    assert not hasattr(panel, "_matrix_btn")
-
-
 def test_matrix_launch_is_root(monkeypatch):
     """swdump.py reads the game's memory and the game runs as root, so the
     ordinary-user form fails before it ever reaches the UI."""
     monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
     cmd = rig_cmd_root("jjpsw_launch.sh")
     assert cmd[:4] == ["wsl.exe", "-u", "root", "-e"]
-
-
-def test_apply_running_enables_controls_and_flips_the_button(panel):
-    panel._apply({"wsl": "1", "game_procs": "3", "game_rss_kb": "1048576",
-                  "game_uptime_s": "30", "board_nodes": "5",
-                  "frames_in": "10", "frames_out": "10", "led_writes": "99",
-                  "dongle_present": "1", "hasp_port_1947": "1",
-                  "image_mounted": "1", "game": "Wonka"})
-    assert panel._last_up is True
-    assert panel._go_btn["text"] == "Stop"
-    assert panel._cells["game"]["text"] == "Wonka"
-    assert panel._cells["led_writes"]["text"] == "99"
-
-
-def test_apply_stopped_flips_back(panel):
-    panel._apply({"wsl": "1", "game_procs": "3"})
-    panel._apply({"wsl": "1", "game_procs": "0", "dongle_present": "1",
-                  "image_mounted": "1"})
-    assert panel._last_up is False
-    assert panel._go_btn["text"] == "Start"
-
-
-def test_note_warns_when_running_without_boards(panel):
-    panel._apply({"wsl": "1", "game_procs": "3", "board_nodes": "0"})
-    assert "boards" in panel._note["text"].lower()
-
-
-def test_note_warns_about_the_key_when_stopped(panel):
-    panel._apply({"wsl": "1", "game_procs": "0", "dongle_present": "0"})
-    assert "key" in panel._note["text"].lower()
-
-
-def test_start_without_an_iso_or_a_mount_does_not_shell_out(panel, monkeypatch):
-    """Pressing Start with nothing selected must ask, not launch."""
-    called = []
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: called.append(a) or SimpleNamespace(
-                            returncode=0, stdout=b""))
-    shown = []
-    monkeypatch.setattr(jjp_emulate_tab.messagebox, "showinfo",
-                        lambda *a, **k: shown.append(a))
-    panel._info = {}
-    panel._start_async()
-    assert shown and not called
-
-
-def test_shutdown_sync_is_a_noop_when_nothing_ran(panel, monkeypatch):
-    """Quitting an app that never started the emulator must not spawn a WSL
-    teardown — that is a visible pause on every exit for no reason."""
-    called = []
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: called.append(a))
-    panel._last_up = False
-    panel._info = {"cuse_daemons": "0"}
-    panel.shutdown_sync()
-    assert not called
-
-
-def test_poll_does_not_stack(panel, monkeypatch):
-    """A slow poll must not be lapped by the timer that scheduled it: a second
-    tab polling WSL doubles the exposure the guard exists for."""
-    monkeypatch.setattr(jjp_emulate_tab, "rig_available", lambda: True)
-    started = []
-    monkeypatch.setattr(jjp_emulate_tab.threading, "Thread",
-                        lambda *a, **k: started.append(k) or SimpleNamespace(
-                            start=lambda: None, daemon=True))
-    panel._poll_busy = True
-    panel._poll()
-    assert not started
-
-
-def test_fix_state_button_exists(panel):
-    """The recovery button is the escalation past Stop for a wedged rig."""
-    assert hasattr(panel, "_reset_btn")
-
-
-def test_fix_state_shuts_down_wsl_when_confirmed(panel, monkeypatch):
-    """Confirming 'Fix stuck state' runs `wsl --shutdown` and nothing else."""
-    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(jjp_emulate_tab.messagebox, "askyesno",
-                        lambda *a, **k: True)
-    calls = []
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: calls.append(a[0]) or SimpleNamespace(
-                            returncode=0, stdout=b""))
-    # Run the worker synchronously so we can assert on the command it issued.
-    monkeypatch.setattr(jjp_emulate_tab.threading, "Thread",
-                        lambda target=None, **k: SimpleNamespace(
-                            start=(target or (lambda: None)), daemon=True))
-    panel._fix_state()
-    assert calls == [["wsl.exe", "--shutdown"]]
-
-
-def test_fix_state_does_nothing_when_declined(panel, monkeypatch):
-    """Declining the confirmation must not touch WSL, and must not wedge the
-    panel in a busy state."""
-    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(jjp_emulate_tab.messagebox, "askyesno",
-                        lambda *a, **k: False)
-    calls = []
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
-    panel._fix_state()
-    assert not calls
-    assert panel._busy is False
 
 
 # -------------------------------------------------------------- integration --
@@ -386,20 +217,9 @@ def test_stern_does_not_get_the_jjp_tab():
     assert caps.emulate is True
 
 
-def test_main_window_wires_both_emulate_tabs():
-    """Both tabs must be constructed, keyed distinctly, and gated separately."""
-    import inspect
-    from pinball_decryptor.gui import main_window
-    src = inspect.getsource(main_window)
-    assert '(self._tab_jjp_emulate, "Emulate", "Emulate JJP")' in src
-    assert 'self._build_jjp_emulate_tab()' in src
-    assert '_configure_tab("Emulate JJP"' in src
-    assert '_configure_tab("Emulate", ' in src
-
-
 def test_help_has_an_entry_for_the_new_tab():
     """A tab with no HELP_CONTENT entry opens an empty '?' window."""
-    from pinball_decryptor.gui.help_dialog import HELP_CONTENT
+    from pinball_decryptor.webui.help_content import HELP_CONTENT
     body = " ".join(t + " " + b for t, b in HELP_CONTENT["Emulate JJP"])
     assert "security key" in body.lower()
     assert "read only" in body.lower()
@@ -407,95 +227,8 @@ def test_help_has_an_entry_for_the_new_tab():
 
 # ------------------------------------------------------- dongle self-healing --
 
-def test_attach_returns_true_when_key_already_visible(panel, monkeypatch):
-    """If the key is already enumerated in WSL, attach is a no-op that
-    succeeds without calling usbipd at all."""
-    # usbipd-win IS NOT ON A CI RUNNER, and _attach_dongle()'s first guard
-    # returns False without it - so this and the test below passed on the
-    # developer's machine and failed on all three runners. Pin the lookup the
-    # way test_attach_dongle_cmd above already does.
-    monkeypatch.setattr(jjp_emulate_tab, "usbipd_path", lambda: "usbipd")
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: SimpleNamespace(returncode=0, stdout=b""))
-    monkeypatch.setattr(panel, "_key_visible_in_wsl", lambda: True)
-    assert panel._attach_dongle() is True
-
-
-def test_attach_waits_out_the_async_race(panel, monkeypatch):
-    """usbipd attach is async, so a key that is not visible at first but
-    appears shortly after must be waited for, not failed on."""
-    monkeypatch.setattr(jjp_emulate_tab, "usbipd_path", lambda: "usbipd")
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: SimpleNamespace(returncode=0,
-                                                        stdout=b"attached"))
-    # visible only from the 3rd check onward
-    seq = iter([False, False, False, True, True])
-    monkeypatch.setattr(panel, "_key_visible_in_wsl",
-                        lambda: next(seq, True))
-    monkeypatch.setattr("time.sleep", lambda *_a: None)
-    assert panel._attach_dongle() is True
-
-
-def test_attach_gives_up_cleanly_when_key_not_plugged_in(panel, monkeypatch):
-    """A key that is genuinely not on the PC is a clean False, not a hang or a
-    crash - usbipd says 'no device', and there is nothing to wait for."""
-    # Without this the test still PASSES on a runner with no usbipd-win, but
-    # vacuously: _attach_dongle() returns False at its first guard and the
-    # "no device" branch this test is about never runs.
-    monkeypatch.setattr(jjp_emulate_tab, "usbipd_path", lambda: "usbipd")
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: SimpleNamespace(
-                            returncode=1, stdout=b"usbipd: error: no device"))
-    monkeypatch.setattr(panel, "_key_visible_in_wsl", lambda: False)
-    monkeypatch.setattr("time.sleep", lambda *_a: None)
-    assert panel._attach_dongle() is False
-
-
-def test_start_skips_launch_when_key_never_appears(panel, monkeypatch):
-    """If the key cannot be made visible, do NOT shell out to watch.sh - that
-    would restore the image and wait another minute only to fail the same way."""
-    monkeypatch.setattr(panel, "_attach_dongle", lambda: False)
-    ran = []
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: ran.append(a) or SimpleNamespace(
-                            returncode=0, stdout=b""))
-    panel._iso_var.set("D:/x/Godfather.iso")
-    panel._info = {}
-    panel._start_async()
-    import time as _t
-    _t.sleep(0.3)          # let the worker thread run
-    assert not ran         # watch.sh was never invoked
-
 
 # ------------------------------------------------------------- wrong-title key --
-
-def test_wrong_key_sticks_in_the_headline(panel):
-    """A key verdict must not read as 'Stopped': the key IS present
-    (dongle_present=1) so the plain state would hide the real reason.  The
-    verdict is sticky until the next start, and it is the one the RIG
-    reported - not an assumed wrong-title."""
-    panel._mark_key_failure("Key not accepted", "the daemon never took it")
-    panel._apply({"wsl": "1", "game_procs": "0", "dongle_present": "1",
-                  "image_mounted": "1", "game": "Godfather"})
-    assert panel._state_lbl["text"] == "Key not accepted"
-    assert "daemon" in panel._hint_lbl["text"].lower()
-
-
-def test_wrong_key_clears_once_the_game_runs(panel):
-    """If a later poll shows the game up, the stale wrong-key text must not
-    override 'Running'."""
-    panel._wrong_key = True
-    panel._apply({"wsl": "1", "game_procs": "3", "board_nodes": "5"})
-    assert panel._state_lbl["text"] == "Running"
-
-
-def test_mark_key_failure_sets_the_sticky_flag(panel):
-    """The flag is set synchronously (the headline paint is marshalled to the
-    Tk loop), so a poll arriving right after still shows the real reason."""
-    panel._wrong_key = False
-    panel._mark_key_failure("No security key", "not visible in WSL")
-    assert panel._wrong_key is True
-    assert panel._key_verdict == ("No security key", "not visible in WSL")
 
 
 def test_h0007_is_not_always_a_wrong_title_key():
@@ -528,136 +261,8 @@ def test_h0007_is_not_always_a_wrong_title_key():
 
 # --------------------------------------------------------------- log streaming --
 
-class _FakeStdout:
-    def __init__(self, lines):
-        self._it = iter(lines)
-
-    def __iter__(self):
-        return self._it
-
-    def close(self):
-        pass
-
-
-class _FakeProc:
-    """A subprocess whose stdout yields pre-canned lines, for driving the
-    streaming reader without a real WSL launch."""
-
-    def __init__(self, lines, rc):
-        self.stdout = _FakeStdout(lines)
-        self.returncode = rc
-        self.killed = False
-
-    def kill(self):
-        self.killed = True
-
-    def wait(self):
-        return self.returncode
-
-
-def test_run_streaming_logs_each_line_as_it_arrives(panel, monkeypatch):
-    """The launch is logged line by line, not captured and dumped at the end —
-    that end-dump is exactly what made a working launch look frozen."""
-    logged = []
-    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
-    lines = ["== mount image ==\n", "== dongle ==\n", "== game (Wonka) ==\n",
-             "launched detached; pid=42\n"]
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda *a, **k: _FakeProc(lines, rc=0))
-    rc, wrong = panel._run_streaming(["watch.sh"], timeout=1800)
-    assert rc == 0 and wrong is False
-    assert [m for m in logged if "== dongle ==" in m]
-    assert [m for m in logged if "launched detached" in m]
-
-
-def test_run_streaming_flags_wrong_key_the_moment_it_prints(panel, monkeypatch):
-    """A WRONG KEY line flips the sticky flag during the stream, before the
-    process even exits — the headline does not wait for the launch to finish."""
-    monkeypatch.setattr(panel, "_log", lambda m: None)
-    lines = ["== dongle ==\n", "== game (GunsNRoses) ==\n",
-             "WRONG KEY: the plugged-in Sentinel key does not unlock GunsNRoses.\n"]
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda *a, **k: _FakeProc(lines, rc=7))
-    rc, wrong = panel._run_streaming(["watch.sh"], timeout=1800)
-    assert rc == 7 and wrong is True
-    assert panel._wrong_key is True
-
-
-def test_run_streaming_survives_a_popen_failure(panel, monkeypatch):
-    """If the launch cannot even start, the reader must report it rather than
-    raise out of the worker thread."""
-    monkeypatch.setattr(panel, "_log", lambda m: None)
-
-    def boom(*a, **k):
-        raise OSError("wsl.exe not found")
-
-    monkeypatch.setattr(subprocess, "Popen", boom)
-    rc, wrong = panel._run_streaming(["watch.sh"], timeout=1800)
-    assert rc is None and wrong is False
-
 
 # ----------------------------------------------------------- volume (item 118) --
-
-def test_volume_row_sits_with_start_and_writes_the_shared_file(panel, monkeypatch):
-    """The JJP tab had no Volume / Mute at all (David, 2026-09-13).  It is the
-    other Emulate tabs' knob and their file, beside Start."""
-    wrote = []
-    monkeypatch.setattr(jjp_emulate_tab, "_write_audio_ctl",
-                        lambda gain, muted: wrote.append((gain, muted)))
-    assert panel._vol_scale.master is panel._go_btn.master
-    assert panel._mute_chk.master is panel._go_btn.master
-    panel._volume_var.set(40)
-    panel._mute_var.set(True)
-    panel._on_volume_change()
-    assert wrote[-1] == (0.4, True)
-
-
-def test_start_hands_the_volume_file_to_the_rig(panel, monkeypatch):
-    """audio.sh starts jjpvol.py on PAD_AUDIO_CTL, so the file has to ride
-    into watch.sh or the knob moves nothing."""
-    import time as _t
-    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(panel, "_attach_dongle", lambda: True)
-    monkeypatch.setattr(jjp_emulate_tab, "rdp_client_running", lambda: True)
-    seen = []
-    monkeypatch.setattr(panel, "_run_streaming",
-                        lambda cmd, timeout=1800: (seen.append(cmd), (0, False))[1])
-    panel._iso_var.set("D:/Pinball/x.iso")
-    panel._start_async()
-    for _ in range(40):
-        if seen:
-            break
-        _t.sleep(0.05)
-    assert seen, "watch.sh was never launched"
-    assert "PAD_AUDIO_CTL=" + jjp_emulate_tab.AUDIO_CTL_FILE in seen[0]
-    assert seen[0][-1] == "D:/Pinball/x.iso"
-
-
-def test_footer_ladder_follows_the_launch_and_the_poll(root):
-    """JJP's own ladder (Restore image / Boot / Game / Ready), not Stern's
-    Node boards, moved by the launch's step lines and by the poll."""
-    import tkinter as tk
-    calls = []
-    frame = tk.Frame(root)
-    p = JJPEmulatePanel(frame, iso_var=tk.StringVar(),
-                        footer_cb=lambda k, pct=None, t="": calls.append((k, pct)))
-    p._schedule_poll = lambda ms=None: None
-    p.build(frame)
-    try:
-        for ln in ("== mount image ==", "  sda3: 40%", "== jail ==",
-                   "== display ==", "== game (GunsNRoses) =="):
-            p._footer_line(ln)
-        root.update()
-        assert calls == [("copy", 0), ("copy", 40), ("boot", None),
-                         ("boot", None), ("techalerts", None)]
-        del calls[:]
-        p._apply({"game_procs": "0", "selector_procs": "1", "dongle_present": "1"})
-        p._apply({"game_procs": "3", "selector_procs": "0", "dongle_present": "1"})
-        root.update()
-        assert [k for k, _ in calls] == ["techalerts", "run"]
-    finally:
-        p._stopped = True
-        frame.destroy()
 
 
 # ------------------------------------------------------ ghost windows (item 118) --
@@ -688,24 +293,6 @@ def test_hide_rig_ghosts_hides_what_it_found(monkeypatch):
     assert hidden == [7]
 
 
-def test_stop_hides_the_frames_a_clean_stop_left(panel, monkeypatch):
-    """Right after Stop says the display and the matrix are gone."""
-    import time as _t
-    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
-    calls = []
-    monkeypatch.setattr(jjp_emulate_tab, "hide_rig_ghosts", lambda: calls.append(1) or 2)
-
-    class _Done:
-        stdout = b"killed 3; still running: 0\ngame=0 matrix=0 xephyr=0 cuse=0\n"
-    monkeypatch.setattr(jjp_emulate_tab.subprocess, "run", lambda *a, **k: _Done())
-    panel._stop_async()
-    for _ in range(60):
-        if calls:
-            break
-        _t.sleep(0.05)
-    assert calls == [1]
-
-
 # ------------------------------------------------- key present but not shared --
 
 def test_a_key_in_the_pc_is_not_the_same_as_no_key():
@@ -730,36 +317,11 @@ def test_a_key_in_the_pc_is_not_the_same_as_no_key():
     assert state_text(unknown)[0] == "No security key"
 
 
-def test_the_panel_attaches_the_key_itself_and_only_once(panel, monkeypatch):
-    """Detecting it and telling the user to plug in a key they already plugged
-    in is the panel describing a problem it is holding the fix for."""
-    calls = []
-    monkeypatch.setattr(panel, "_attach_dongle",
-                        lambda: calls.append(1) or True)
-    monkeypatch.setattr(jjp_emulate_tab.threading, "Thread",
-                        lambda target=None, **k: SimpleNamespace(
-                            start=(target or (lambda: None)), daemon=True))
-    monkeypatch.setattr(panel, "_poll", lambda: None)
-
-    info = {"wsl": "1", "game_procs": "0", "dongle_present": "0",
-            "key_on_pc": "1", "image_mounted": "1"}
-    panel._apply(info)
-    panel._apply(info)
-    panel._apply(info)
-    assert len(calls) == 1, "auto-attach must not fire on every poll"
-
-    # A key that comes back re-arms it, so a pull-and-replace is picked up.
-    panel._apply(dict(info, dongle_present="1"))
-    assert panel._auto_attached is False
-    panel._apply(info)
-    assert len(calls) == 2
-
-
 def test_key_on_pc_is_only_asked_when_the_rig_cannot_see_the_key():
     """usbipd list is a Windows round trip; the happy path must not pay for it
     on every poll."""
     import inspect
-    src = inspect.getsource(JJPEmulatePanel._poll)
+    src = inspect.getsource(EmulateJJPTab._read_status)
     assert 'dongle_present") != "1"' in src
     assert src.index('dongle_present') < src.index('key_on_pc(')
 

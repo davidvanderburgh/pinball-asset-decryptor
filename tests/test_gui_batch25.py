@@ -1,7 +1,8 @@
 """Feedback batch 25 — logic-level tests for the Video/Audio/Images fixes.
 
-No Tk window is built: the methods under test only touch plain attributes,
-so duck-typed ``self`` stubs exercise them the way the real window does.
+No window is built: the tab-service methods under test only touch plain
+attributes, so duck-typed ``self`` stubs exercise them the way the real tabs
+do.
 """
 
 from types import SimpleNamespace
@@ -9,7 +10,10 @@ from types import SimpleNamespace
 from pinball_decryptor.core import staged_changes
 from pinball_decryptor.core.video import VideoInfo
 from pinball_decryptor.core.video_slots import VideoSlot
-from pinball_decryptor.gui.main_window import MainWindow
+from pinball_decryptor.webui import video_helpers as vh
+from pinball_decryptor.webui.tabs.audio import AudioTab
+from pinball_decryptor.webui.tabs.images import ImagesTab, compute_key_tails
+from pinball_decryptor.webui.tabs.video import VideoTab
 
 
 class _Var:
@@ -64,10 +68,9 @@ def test_dropped_warning_names_the_renamed_sibling(tmp_path):
     saved = {"video/a.mov": str(tmp_path / "Promos2.mp4")}
     logs = []
     me = SimpleNamespace(
-        append_log=lambda text, level="info": logs.append((text, level)))
-    MainWindow._warn_dropped_assignments(me, "video", saved,
-                                         {"video/a.mov": object()},
-                                         str(assets))
+        _by_rel={"video/a.mov": object()}, window=SimpleNamespace(),
+        log=lambda text, level="info": logs.append((text, level)))
+    VideoTab._warn_dropped(me, saved, str(assets))
     assert len(logs) == 2          # the note, then the relink hint (PAD-131)
     text, level = logs[0]
     assert level == "info"
@@ -83,8 +86,7 @@ def test_dropped_warning_names_the_renamed_sibling(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _changed_stub(assets, changed=()):
-    return SimpleNamespace(_video_changed_on_disk=set(changed),
-                           _video_scan_dir=str(assets))
+    return SimpleNamespace(_changed=set(changed), _scan_dir=str(assets))
 
 
 def test_snapshot_counts_as_changed_before_the_scan_lands(tmp_path):
@@ -92,18 +94,17 @@ def test_snapshot_counts_as_changed_before_the_scan_lands(tmp_path):
     (assets / ".orig" / "video").mkdir(parents=True)
     (assets / ".orig" / "video" / "AttractMode.mov").write_bytes(b"stock")
     me = _changed_stub(assets)                    # change scan not landed yet
-    assert MainWindow._slot_changed_on_disk(me, "video",
-                                            "video/AttractMode.mov")
+    assert VideoTab._slot_changed_on_disk(me, "video/AttractMode.mov")
 
 
 def test_change_scan_set_still_counts(tmp_path):
     me = _changed_stub(tmp_path, changed={"video/a.mov"})
-    assert MainWindow._slot_changed_on_disk(me, "video", "video/a.mov")
+    assert VideoTab._slot_changed_on_disk(me, "video/a.mov")
 
 
 def test_pristine_slot_is_not_changed(tmp_path):
     me = _changed_stub(tmp_path)
-    assert not MainWindow._slot_changed_on_disk(me, "video", "video/a.mov")
+    assert not VideoTab._slot_changed_on_disk(me, "video/a.mov")
 
 
 # ---------------------------------------------------------------------------
@@ -120,45 +121,43 @@ _RAD_B = "rad::/sternpinball/game/scenes/f6e5d4c3b2a1/scene.radium"
 def _search_stub():
     groups = {"images/a.png": (_RAD_A, "Logo · a1b2c3d4", 0),
               "images/b.png": (_RAD_B, "Drums · f6e5d4c3", 0)}
-    me = SimpleNamespace(
-        _image_group_tags={},
-        _image_group_key_tails=MainWindow._compute_image_key_tails(
-            groups, {}))
+    me = SimpleNamespace(_group_tags={},
+                         _key_tails=compute_key_tails(groups, {}))
     return me, groups
 
 
 def test_shared_prefix_word_matches_no_group():
     me, groups = _search_stub()
     for g in groups.values():
-        assert not MainWindow._image_group_matches(me, g, "stern")
-        assert not MainWindow._image_group_matches(me, g, "game")
+        assert not ImagesTab._group_matches(me, g, "stern")
+        assert not ImagesTab._group_matches(me, g, "game")
 
 
 def test_scene_hash_still_finds_its_group():
     me, groups = _search_stub()
     a, b = groups["images/a.png"], groups["images/b.png"]
-    assert MainWindow._image_group_matches(me, a, "a1b2c3d4e5f6")
-    assert not MainWindow._image_group_matches(me, b, "a1b2c3d4e5f6")
+    assert ImagesTab._group_matches(me, a, "a1b2c3d4e5f6")
+    assert not ImagesTab._group_matches(me, b, "a1b2c3d4e5f6")
 
 
 def test_label_and_user_tag_still_match():
     me, groups = _search_stub()
     a = groups["images/a.png"]
-    assert MainWindow._image_group_matches(me, a, "logo")
-    me._image_group_tags[_RAD_A] = "Attract logo"
-    assert MainWindow._image_group_matches(me, a, "attract")
+    assert ImagesTab._group_matches(me, a, "logo")
+    me._group_tags[_RAD_A] = "Attract logo"
+    assert ImagesTab._group_matches(me, a, "attract")
 
 
 def test_a_path_fragment_is_a_deliberate_full_key_search():
     me, groups = _search_stub()
     a = groups["images/a.png"]
-    assert MainWindow._image_group_matches(me, a, "sternpinball/game")
-    assert MainWindow._image_group_matches(me, a, "sternpinball\\game")
+    assert ImagesTab._group_matches(me, a, "sternpinball/game")
+    assert ImagesTab._group_matches(me, a, "sternpinball\\game")
 
 
 def test_lone_container_keeps_its_whole_path_searchable():
     groups = {"images/a.png": (_RAD_A, "Logo · a1b2c3d4", 0)}
-    tails = MainWindow._compute_image_key_tails(groups, {})
+    tails = compute_key_tails(groups, {})
     assert tails[_RAD_A.lower()] == \
         "/sternpinball/game/scenes/a1b2c3d4e5f6/scene.radium"
 
@@ -166,7 +165,7 @@ def test_lone_container_keeps_its_whole_path_searchable():
 def test_tails_cut_only_at_path_components():
     groups = {"images/a.png": ("rad::/game/scene_aaa/x.radium", "A", 0),
               "images/b.png": ("rad::/game/scene_bbb/x.radium", "B", 0)}
-    tails = MainWindow._compute_image_key_tails(groups, {})
+    tails = compute_key_tails(groups, {})
     # commonprefix is ".../scene_" — the cut must fall back to the last "/",
     # never split a component.
     assert tails["rad::/game/scene_aaa/x.radium"] == "scene_aaa/x.radium"
@@ -179,37 +178,27 @@ def test_tails_cut_only_at_path_components():
 # ---------------------------------------------------------------------------
 
 class _ScanStub:
-    _set_tab_scanning = MainWindow._set_tab_scanning
-    _cancel_scan = MainWindow._cancel_scan
-    _SCAN_LABELS = MainWindow._SCAN_LABELS
+    _set_scanning = ImagesTab._set_scanning
+    cancel_scan = ImagesTab.cancel_scan
 
     def __init__(self):
         self.logs = []
-        self._scan_reasons = {}
-        self._image_scan_id = 0
+        self._scan_id = 0
+        self._scan_t0 = None
 
-    def append_log(self, text, level="info"):
+    def log(self, text, level="info"):
         self.logs.append((text, level))
 
-    def _begin_scan_ui(self, tab_key):
-        pass
-
-    def _end_scan_ui(self, tab_key):
-        pass
-
-    def _stop_scan_spinner(self, tab_key):
-        pass
-
-    def _toggle_scan_button(self, tab_key, scanning):
+    def set(self, **_kw):
         pass
 
 
 def test_cancel_logs_and_clears_the_start_stamp():
     me = _ScanStub()
-    me._set_tab_scanning("image", True)
-    me._cancel_scan("image")
-    me._set_tab_scanning("image", True)       # restart must log again
-    me._set_tab_scanning("image", False)
+    me._set_scanning(True)
+    me.cancel_scan()
+    me._set_scanning(True)       # restart must log again
+    me._set_scanning(False)
     texts = [t for t, _lv in me.logs]
     assert sum("Images scan started" in t for t in texts) == 2
     assert sum("Images scan cancelled" in t for t in texts) == 1
@@ -220,21 +209,21 @@ def test_cancel_logs_and_clears_the_start_stamp():
 
 def test_cancel_bumps_the_scan_id_so_results_drop():
     me = _ScanStub()
-    me._set_tab_scanning("image", True)
-    before = me._image_scan_id
-    me._cancel_scan("image")
-    assert me._image_scan_id == before + 1
+    me._set_scanning(True)
+    before = me._scan_id
+    me.cancel_scan()
+    assert me._scan_id == before + 1
 
 
 def test_finish_measures_from_the_restart_not_the_first_start():
     me = _ScanStub()
-    me._set_tab_scanning("image", True)
-    t_first = me._scan_t0["image"]
-    me._cancel_scan("image")
-    me._set_tab_scanning("image", True)
-    assert me._scan_t0["image"] >= t_first
-    me._set_tab_scanning("image", False)
-    assert "image" not in me._scan_t0
+    me._set_scanning(True)
+    t_first = me._scan_t0
+    me.cancel_scan()
+    me._set_scanning(True)
+    assert me._scan_t0 >= t_first
+    me._set_scanning(False)
+    assert me._scan_t0 is None
 
 
 # ---------------------------------------------------------------------------
@@ -243,16 +232,16 @@ def test_finish_measures_from_the_restart_not_the_first_start():
 # ---------------------------------------------------------------------------
 
 def test_play_replacements_turns_on_sequential_play():
-    me = SimpleNamespace(audio_play_subst_var=_Var(True),
+    me = SimpleNamespace(audio_play_subst_var=_Var(False),
                          audio_play_through_var=_Var(False))
-    MainWindow._audio_on_play_subst_toggle(me)
+    AudioTab.set_play_subst(me, True)
     assert me.audio_play_through_var.get() is True
 
 
 def test_unticking_play_replacements_leaves_sequential_alone():
-    me = SimpleNamespace(audio_play_subst_var=_Var(False),
+    me = SimpleNamespace(audio_play_subst_var=_Var(True),
                          audio_play_through_var=_Var(True))
-    MainWindow._audio_on_play_subst_toggle(me)
+    AudioTab.set_play_subst(me, False)
     assert me.audio_play_through_var.get() is True
 
 
@@ -262,59 +251,36 @@ def test_unticking_play_replacements_leaves_sequential_alone():
 # explains why Format/Audio keep describing the old clip until the build.
 # ---------------------------------------------------------------------------
 
-class _FakeLabel:
-    def __init__(self):
-        self.text = ""
-        self.fg = None
-        self._mgr = ""
-
-    def configure(self, **kw):
-        self.text = kw.get("text", self.text)
-        self.fg = kw.get("foreground", self.fg)
-
-    def pack(self, **kw):
-        self._mgr = "pack"
-
-    def pack_forget(self):
-        self._mgr = ""
-
-    def winfo_manager(self):
-        return self._mgr
-
-
 class _NoteStub:
-    _video_update_preview_note = MainWindow._video_update_preview_note
-    _slot_unplayable = MainWindow._slot_unplayable
-    _video_conv_cached = MainWindow._video_conv_cached
-    _video_conv_key = MainWindow._video_conv_key
-    _video_asis_for = MainWindow._video_asis_for
-    _VIDEO_CONV_GOOD = MainWindow._VIDEO_CONV_GOOD
-    _VIDEO_CONV_REJECT = MainWindow._VIDEO_CONV_REJECT
-    _VIDEO_CONV_ASIS_NOISY = MainWindow._VIDEO_CONV_ASIS_NOISY
+    _update_note = VideoTab._update_note
+    _conv_cached = VideoTab._conv_cached
+    _conv_key = VideoTab._conv_key
+    _asis_for = VideoTab._asis_for
 
     def __init__(self, slot, rep=None, mode=None):
-        self._video_preview_note = _FakeLabel()
-        self._video_current_rel = slot.rel_path
-        self._video_slots_by_rel = {slot.rel_path: slot}
-        self._video_assignments = ({slot.rel_path: rep} if rep else {})
-        self._video_conv_cache = {}
-        self._current_mfr = SimpleNamespace(key="stern")
-        self._current_theme = "dark"
+        self._state = {"preview": {"note": None}}
+        self._current = slot.rel_path
+        self._by_rel = {slot.rel_path: slot}
+        self._assign = ({slot.rel_path: rep} if rep else {})
+        self._conv_cache = {}
         self.video_no_conversion_var = _Var(True)
         self.video_trim_var = _Var(False)
-        self._video_asis_flags = {}       # no per-clip overrides (batch 37)
-        self.retuned = 0
+        self._asis = {}                   # no per-clip overrides (batch 37)
         if rep and mode is not None:
-            self._video_conv_cache[
-                self._video_conv_key(slot.rel_path, rep)] = mode
+            self._conv_cache[self._conv_key(slot.rel_path, rep)] = mode
 
-    def _video_noconv_conflict(self, rel, path, deep=True):
-        return None
+    def _mfr_key(self):
+        return "stern"
 
-    def _retune_tab_height(self):
-        """Real one re-pins the notebook pane so a callout packed after the
-        tab was selected gets space (batch 37); here just count the calls."""
-        self.retuned += 1
+    def get(self, key):
+        return self._state.get(key)
+
+    def set(self, **kw):
+        self._state.update(kw)
+
+    @property
+    def note(self):
+        return self._state["preview"]["note"]
 
 
 def _vslot(codec="h264"):
@@ -328,41 +294,34 @@ def _vslot(codec="h264"):
 
 def test_note_flags_an_unplayable_slot_with_no_pick():
     me = _NoteStub(_vslot(codec="prores"))
-    me._video_update_preview_note()
-    lbl = me._video_preview_note
-    assert lbl.winfo_manager() == "pack"
-    assert "WRONG FORMAT" in lbl.text and "black picture" in lbl.text
-    # Packing the callout has to re-pin the tab height, or it takes the
-    # options row under it off screen until you switch tabs (batch 37).
-    assert me.retuned == 1
+    me._update_note()
+    assert me.note is not None
+    assert "WRONG FORMAT" in me.note["text"]
+    assert "black picture" in me.note["text"]
 
 
 def test_note_promises_the_fix_when_a_good_pick_is_assigned(tmp_path):
     rep = tmp_path / "fixed.mov"
     rep.write_bytes(b"h264 bytes")
-    me = _NoteStub(_vslot(codec="prores"), rep=str(rep),
-                   mode=MainWindow._VIDEO_CONV_ASIS)
-    me._video_update_preview_note()
-    lbl = me._video_preview_note
-    assert lbl.winfo_manager() == "pack"
-    assert "next build" in lbl.text and "Format" in lbl.text
-    assert "WRONG FORMAT" not in lbl.text
+    me = _NoteStub(_vslot(codec="prores"), rep=str(rep), mode=vh.CONV_ASIS)
+    me._update_note()
+    assert me.note is not None
+    assert "next build" in me.note["text"] and "Format" in me.note["text"]
+    assert "WRONG FORMAT" not in me.note["text"]
 
 
 def test_note_hidden_for_a_healthy_slot():
     me = _NoteStub(_vslot())
-    me._video_preview_note.pack()             # pretend it was showing
-    me._video_update_preview_note()
-    assert me._video_preview_note.winfo_manager() == ""
-    assert me.retuned == 1                    # removing it re-pins too
+    me._state["preview"] = {"note": {"kind": "err", "text": "old"}}
+    me._update_note()
+    assert me.note is None
 
 
 def test_note_flags_a_rejected_pick_on_a_healthy_slot(tmp_path):
     rep = tmp_path / "bad.mov"
     rep.write_bytes(b"prores bytes")
-    me = _NoteStub(_vslot(), rep=str(rep),
-                   mode=MainWindow._VIDEO_CONV_REJECT)
-    me._video_update_preview_note()
-    lbl = me._video_preview_note
-    assert lbl.winfo_manager() == "pack"
-    assert "WRONG FORMAT" in lbl.text and "as-is" in lbl.text.lower()
+    me = _NoteStub(_vslot(), rep=str(rep), mode=vh.CONV_REJECT)
+    me._update_note()
+    assert me.note is not None
+    assert "WRONG FORMAT" in me.note["text"]
+    assert "as-is" in me.note["text"].lower()

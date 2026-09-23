@@ -588,11 +588,10 @@ def test_extract_keeps_every_page_of_a_font_whose_atlas_was_already_sliced(
     assert os.path.isfile(fo["glyphs"][0x42]["abs"])
 
 
-# ---- GUI Source label ---------------------------------------------------------
+# ---- Replace Images Source label ---------------------------------------------------------
 
 def test_image_source_label_glyph():
-    from pinball_decryptor.gui.main_window import MainWindow
-    lbl = MainWindow._image_source_label
+    from pinball_decryptor.webui.tabs.images import source_label as lbl
     assert lbl("images/scene_textures/glyphs/atlas_x/U+0041_A.png") == "Glyph"
     assert lbl("images/scene_textures/radimg_a_8x8_00000001.png") == "Radium"
     assert lbl("images/scene_textures/other.png") == "Scene texture"

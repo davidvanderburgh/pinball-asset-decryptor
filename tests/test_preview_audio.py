@@ -25,7 +25,7 @@ import wave
 import numpy as np
 import pytest
 
-from pinball_decryptor.gui import preview_audio as pa
+from pinball_decryptor.webui import preview_audio as pa
 
 
 # --------------------------------------------------------------------------

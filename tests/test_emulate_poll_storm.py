@@ -12,13 +12,15 @@ Two properties keep it honest, and both are cheap to state:
   * never more than one status poll in flight;
   * an idle rig is polled slowly, not every two seconds forever.
 
-These drive the poll logic directly rather than through a live Tk app: the
-bug is in the scheduling, and scheduling is what is asserted.
+These drive the Emulate tab's poll logic directly (the web service's
+``_schedule_poll`` / ``_poll``, the port of the Tk panel's) rather than
+through a live app: the bug is in the scheduling, and scheduling is what is
+asserted.
 """
 
 import pytest
 
-from pinball_decryptor.gui.emulate_tab import EmulatePanel
+from pinball_decryptor.webui.tabs.emulate import EmulateTab
 
 
 class FakeTimer:
@@ -33,12 +35,12 @@ class FakeTimer:
 
 
 class PollHarness:
-    """The poll machinery of EmulatePanel with everything else stubbed."""
+    """The poll machinery of EmulateTab with everything else stubbed."""
 
-    POLL_MS = EmulatePanel.POLL_MS
-    POLL_IDLE_MS = EmulatePanel.POLL_IDLE_MS
-    _schedule_poll = EmulatePanel._schedule_poll
-    _poll = EmulatePanel._poll
+    POLL_MS = EmulateTab.POLL_MS
+    POLL_IDLE_MS = EmulateTab.POLL_IDLE_MS
+    _schedule_poll = EmulateTab._schedule_poll
+    _poll = EmulateTab._poll
 
     def __init__(self):
         self._stopped = False
@@ -53,25 +55,22 @@ class PollHarness:
         self.spawns = 0
         self.timer = FakeTimer()
 
-    def _timer(self):
-        return self.timer
+    def _after(self, ms, fn, *args):
+        return self.timer.after(ms, fn, *args)
+
+    def _thread(self, fn):
+        self.spawns += 1           # a poll worker == one wsl.exe spawn
+        # never answers: the in-flight case
 
 
 @pytest.fixture
 def harness(monkeypatch):
-    import pinball_decryptor.gui.emulate_tab as et
+    from pinball_decryptor.webui import emulate_rig
+    import pinball_decryptor.webui.tabs.emulate as et
     h = PollHarness()
-    monkeypatch.setattr(et, "rig_available", lambda: True)
+    monkeypatch.setattr(emulate_rig, "rig_available", lambda: True)
+    monkeypatch.setattr(et, "no_rig", lambda: False)
     monkeypatch.setattr(et.sys, "platform", "win32")
-
-    class FakeThread:
-        def __init__(self, target=None, daemon=None):
-            h.spawns += 1          # a poll worker == one wsl.exe spawn
-
-        def start(self):
-            pass                   # never answers: the in-flight case
-
-    monkeypatch.setattr(et.threading, "Thread", FakeThread)
     return h
 
 
@@ -111,12 +110,12 @@ def test_nothing_is_asked_of_wsl_while_the_setup_probe_is_out(harness):
 def test_an_idle_rig_is_polled_slowly_and_a_live_one_quickly(harness):
     harness._last_up = False
     harness._schedule_poll()
-    assert harness.timer.scheduled[-1][0] == EmulatePanel.POLL_IDLE_MS
+    assert harness.timer.scheduled[-1][0] == EmulateTab.POLL_IDLE_MS
 
     harness._last_up = True
     harness._schedule_poll()
-    assert harness.timer.scheduled[-1][0] == EmulatePanel.POLL_MS
-    assert EmulatePanel.POLL_IDLE_MS > EmulatePanel.POLL_MS
+    assert harness.timer.scheduled[-1][0] == EmulateTab.POLL_MS
+    assert EmulateTab.POLL_IDLE_MS > EmulateTab.POLL_MS
 
 
 def test_the_first_poll_is_fast_then_settles(harness):
@@ -130,7 +129,7 @@ def test_the_first_poll_is_fast_then_settles(harness):
     harness._polled_once = False
     harness._schedule_poll()
     first = harness.timer.scheduled[-1][0]
-    assert first < EmulatePanel.POLL_MS, (
+    assert first < EmulateTab.POLL_MS, (
         "the first poll waits %d ms - the slot list sits empty that long "
         "after every app start" % first)
     # Deferred behind the setup probe: fast retries, still ZERO spawns.
@@ -142,4 +141,4 @@ def test_the_first_poll_is_fast_then_settles(harness):
     harness._setup_busy = False
     harness._polled_once = True
     harness._schedule_poll()
-    assert harness.timer.scheduled[-1][0] == EmulatePanel.POLL_IDLE_MS
+    assert harness.timer.scheduled[-1][0] == EmulateTab.POLL_IDLE_MS

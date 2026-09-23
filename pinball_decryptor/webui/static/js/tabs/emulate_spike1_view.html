@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- The Spike 1 emulator's display (?view=display) or switch / LED panel
+     (?view=switches) in a window of its own, as the Tk app had them
+     (gui/spike1_windows.py).  Opened by webui/emulate_jjp_spike1view.py
+     ViewWindows; drawn by mountView() in emulate_spike1.js. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spike 1</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/css/tabs/emulate_spike1.css">
+<script type="module">
+  import { mountView } from "/static/js/tabs/emulate_spike1.js";
+  mountView(document.getElementById("app"));
+</script>
+</head>
+<body>
+<div id="app"></div>
+</body>
+</html>

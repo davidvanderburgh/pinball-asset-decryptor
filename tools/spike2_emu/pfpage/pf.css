@@ -1,0 +1,174 @@
+/* The virtual playfield's page, in Pinball Asset Decryptor's own design:
+   the app's dark tokens, IBM Plex, one amber accent. The playfield's own
+   colours (blue switch rings, red coils, magenta fire, green made-dots, the
+   insert ramp, the coin-door cluster) are the game's language and stay. */
+
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-display: swap; src: local("IBM Plex Sans"), url(/fonts/ibm-plex-sans-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 600; font-display: swap; src: local("IBM Plex Sans SemiBold"), url(/fonts/ibm-plex-sans-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Sans Condensed"; font-weight: 600; font-display: swap; src: local("IBM Plex Sans Condensed SemiBold"), url(/fonts/ibm-plex-sans-condensed-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: local("IBM Plex Mono"), url(/fonts/ibm-plex-mono-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-display: swap; src: local("IBM Plex Mono Medium"), url(/fonts/ibm-plex-mono-latin-500-normal.woff2) format("woff2"); }
+
+:root {
+  color-scheme: dark;
+  --bg: #15171a; --bg-2: #1b1e22; --panel: #22262b; --panel-2: #2a2f35; --panel-3: #323841;
+  --line: #333940; --line-2: #414951; --ink: #e9eae7; --ink-2: #b7bbb9; --ink-3: #8b9196;
+  --accent: #e8a33d; --accent-ink: #1b1d1f; --accent-soft: rgba(232,163,61,.14);
+  --ok: #6fc07a; --warn: #e0b34a; --warn-soft: rgba(224,179,74,.14); --err: #f0705f;
+  --info: #7fb0e6; --key: #7ecbff;
+  --field: #101010;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --sans: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
+  --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+body { font-family: var(--sans); font-size: 13px; line-height: 1.4; overflow: hidden; -webkit-font-smoothing: antialiased; user-select: none; }
+#app { height: 100%; display: flex; flex-direction: column; }
+.pf-boot { margin: auto; color: var(--ink-3); }
+button { font: inherit; color: inherit; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+.mono { font-family: var(--mono); }
+.eyebrow { font-family: var(--cond); text-transform: uppercase; letter-spacing: .08em; font-size: 11px; color: var(--ink-3); font-weight: 600; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--ink); font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .01em; cursor: pointer; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: var(--panel-3); border-color: var(--ink-3); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.btn.sm { height: 24px; padding: 0 9px; font-size: 12px; }
+select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); font: 12.5px var(--mono); padding: 0 6px; }
+
+/* ---------------------------------------------------------------- frame */
+.pf-body { flex: 1 1 auto; display: flex; min-height: 0; }
+.pf-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
+.pf-status { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 10px 4px 12px; border-top: 1px solid var(--line); background: var(--bg-2); }
+.pf-status .txt { flex: 1 1 auto; min-width: 0; font: 12px var(--mono); color: var(--ink-2); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.pf-status .txt.flash { color: var(--accent); }
+.pf-states { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+
+/* ---------------------------------------------------------------- artwork */
+.pf-stagewrap { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 8px; }
+.pf-stage { position: relative; flex: 0 0 auto; background: #000; border-radius: 4px; box-shadow: 0 0 0 1px var(--line), 0 10px 30px rgba(0,0,0,.4); }
+.pf-stage.noart { background: var(--field); }
+.pf-stage img.art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: auto; }
+.pf-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.pf-overlay { position: absolute; left: 6px; right: 6px; bottom: 6px; display: flex; flex-wrap: wrap-reverse; align-items: flex-end; justify-content: space-between; gap: 6px; pointer-events: none; }
+.pf-overlay > * { pointer-events: auto; }
+.pf-acts { display: flex; flex-wrap: wrap-reverse; justify-content: flex-end; gap: 4px; margin-left: auto; }
+.pf-acts .btn { background: rgba(34,38,43,.92); }
+
+/* the trough, when it is the control (no key panel) */
+.pf-trough { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px 3px; background: rgba(16,16,16,.92); border: 1px solid #3a3a3a; border-radius: 6px; }
+.pf-trough .balls { display: flex; gap: 3px; }
+.pf-trough .cell { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 0 2px; cursor: default; }
+.pf-trough.click .cell { cursor: pointer; }
+.pf-trough.click .cell:hover .ball { box-shadow: 0 0 0 2px var(--accent-soft); }
+.pf-trough .ball { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #555; }
+.pf-trough .ball.on { background: #d8d8d8; border-color: #fff; }
+.pf-trough .n { font: 9px var(--mono); color: #8a8a8a; }
+.pf-trough .cap { font: 11px var(--mono); color: #ddd; white-space: nowrap; }
+
+/* ---------------------------------------------------------------- schematic */
+.pf-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2); flex-wrap: wrap; }
+.pf-bar .txt { font: 12px var(--mono); color: var(--ink-2); margin-right: auto; }
+.pf-strip { flex: 0 0 auto; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.pf-schem { flex: 1 1 auto; min-height: 0; display: flex; gap: 0; }
+.pf-grid { flex: 0 0 auto; overflow-y: auto; padding: 10px 12px 10px 12px; border-right: 1px solid var(--line); background: var(--field); columns: 152px auto; column-gap: 14px; max-width: 520px; }
+.pf-grid .note { font: 12px var(--mono); color: #7a7a7a; white-space: pre-line; }
+.pf-grid .blk { break-inside: avoid; margin-bottom: 10px; }
+.pf-grid .hdr { font: 600 12px var(--mono); color: var(--key); height: 18px; }
+.pf-grid .cells { display: grid; grid-template-columns: repeat(8, 12px); gap: 4px; }
+.pf-grid .c { width: 12px; height: 12px; border: 1px solid #333; background: var(--field); }
+.pf-rows { flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 8px 10px; column-width: 250px; column-fill: auto; column-gap: 18px; background: var(--field); }
+.pf-rows .hdr { font: 600 12px var(--mono); color: var(--key); height: 19px; line-height: 19px; padding-left: 16px; break-after: avoid; }
+.pf-rows .r { display: flex; align-items: center; gap: 6px; height: 19px; font: 12px var(--mono); color: #d8d8d8; border-radius: 4px; padding: 0 4px; cursor: pointer; white-space: pre; break-inside: avoid; }
+.pf-rows .r:hover { background: rgba(255,255,255,.05); }
+.pf-rows .r.dead { color: #5a5a5a; cursor: default; }
+.pf-rows .r.dead:hover { background: none; }
+.pf-rows .r.held { color: #ffd400; }
+.pf-rows .r.rip { color: #ff9500; }
+.pf-rows .d { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px; }
+.pf-rows .d.on { background: #00c853; }
+
+/* ---------------------------------------------------------------- waiting */
+.pf-wait { margin: auto; max-width: 560px; padding: 24px; }
+.pf-wait pre { font: 12.5px/1.55 var(--mono); color: var(--ink-2); white-space: pre-wrap; margin: 0; }
+.pf-wait h1 { font: 600 20px var(--cond); margin: 0 0 12px; }
+
+/* ---------------------------------------------------------------- key panel */
+.pf-panel { flex: 0 0 330px; width: 330px; overflow-y: auto; border-left: 1px solid var(--line); background: var(--bg-2); padding: 12px 12px 16px; display: flex; flex-direction: column; gap: 14px; }
+.kp-sec { display: flex; flex-direction: column; gap: 4px; }
+.kp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.kp-head .h { font: 600 12.5px var(--mono); color: var(--key); letter-spacing: .04em; }
+.kp-head .s { font-size: 11px; color: var(--ink-3); }
+.kp-group { font: 600 10.5px var(--mono); color: #8a8a8a; margin: 6px 0 1px; letter-spacing: .06em; }
+.kp-row { display: grid; grid-template-columns: 8px auto 1fr auto; align-items: center; gap: 8px; height: 19px; padding: 0 6px; border-radius: 4px; font: 12px var(--mono); }
+.kp-row .d { width: 6px; height: 6px; border-radius: 50%; }
+.kp-row .d.on { background: #00c853; }
+.kp-row .k { font-weight: 500; color: var(--key); text-align: right; min-width: 42px; }
+.kp-row .l { color: #d8d8d8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-row .x { color: #666; }
+.kp-row.na .k, .kp-row.na .l { color: #555; }
+.kp-row.click { cursor: pointer; }
+.kp-row.click:hover { background: rgba(255,255,255,.06); }
+.kp-row.hit { background: #e8e8e8; }
+.kp-row.hit .k, .kp-row.hit .l, .kp-row.hit .x { color: #000; }
+.kp-hint { font-size: 11px; color: var(--ink-3); }
+.kp-svc { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 4px; }
+.kp-svc .b { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; }
+.kp-svc .o { width: 32px; height: 32px; border-radius: 50%; border: 3px solid; display: flex; align-items: center; justify-content: center; font: 600 13px var(--mono); color: #fff; }
+.kp-svc .b.down .o { border-width: 5px; }
+.kp-svc .o.made { border-color: #ffd400 !important; }
+.kp-svc .cap { font: 10.5px var(--mono); }
+.kp-svc .ks { font: 10.5px var(--mono); color: var(--key); }
+.kp-door { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 6px; border: 1px solid #2e7d32; background: #1a2e1a; cursor: pointer; font: 12px var(--mono); }
+.kp-door .k { color: var(--key); font-weight: 500; }
+.kp-door .t { flex: 1; text-align: center; color: #d8d8d8; }
+.kp-door.open { background: #33270f; border-color: #c07000; }
+.kp-ball { font: 12.5px var(--mono); color: #e8e8ea; }
+.kp-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.kp-btns .btn { background: #33507a; border-color: #456ba1; color: #eaf2ff; }
+.kp-btns .btn:hover:not(:disabled) { background: #456ba1; }
+.kp-btns .btn:disabled { background: #2a2e35; border-color: #2a2e35; color: #6b7280; opacity: 1; }
+.kp-wide { width: 100%; background: #33507a; border-color: #456ba1; color: #eaf2ff; }
+.kp-wide:hover:not(:disabled) { background: #456ba1 !important; }
+.kp-note { font: 11px/1.45 var(--mono); color: #8a93a2; min-height: calc(3 * 1.45em); }
+.kp-note .m { display: block; }
+.kp-note .m.cut { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ---------------------------------------------------------------- tooltip + modal */
+.pf-tip { position: fixed; z-index: 50; pointer-events: none; background: var(--panel); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 9px; font: 11.5px/1.45 var(--mono); white-space: pre; box-shadow: 0 8px 22px rgba(0,0,0,.45); max-width: 440px; }
+.pf-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 40; }
+.pf-modal { background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; padding: 16px; width: 360px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+.pf-modal h2 { margin: 0; font: 600 16px var(--cond); }
+.pf-modal input { height: 30px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); padding: 0 8px; font: 13px var(--sans); user-select: text; }
+.pf-modal input:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.pf-modal .ft { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---------------------------------------------------------------- villain vision */
+.lcd { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 12px 10px; background: var(--bg); }
+.lcd-set { position: relative; background: #000; }
+.lcd-set img.pic { position: absolute; display: block; }
+.lcd-set .ph { position: absolute; display: flex; align-items: center; justify-content: center; font: 12px var(--mono); color: #888; }
+.lcd-case { position: absolute; inset: 0; background: #4a3222; }
+.lcd-case .in { position: absolute; inset: 2px; background: #5d4130; border: 1px solid #2b1c12; }
+.lcd-case .bez { position: absolute; background: #b9b6ad; border: 1px solid #6f6c64; }
+.lcd-case .lip { position: absolute; background: #2a2a2a; border: 1px solid #8d8a82; }
+.lcd-case .scr { position: absolute; background: #000; }
+.lcd-case .knobs { position: absolute; background: #cfc9b8; border: 1px solid #6f6c64; }
+.lcd-case .knob { position: absolute; width: 30px; height: 30px; border-radius: 50%; background: #2b2b2b; border: 1px solid #111; }
+.lcd-case .knob::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: #565656; }
+.lcd-case .spk { position: absolute; background: #8c8579; border: 1px solid #6f6c64; }
+.lcd-case .script { position: absolute; left: 0; font: italic 15px Georgia, "Times New Roman", serif; color: #e8dfc8; text-align: center; }
+.lcd-cap { font: 11px var(--mono); color: var(--key); min-height: 15px; }
+.lcd-nm { font: 11px var(--mono); color: #77aa88; min-height: 15px; }
+.lcd-strip { display: flex; gap: 10px; justify-content: space-evenly; width: 100%; }
+.lcd-strip .t { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.lcd-strip .fbox { width: 62px; height: 47px; border: 1px solid #333; background: #000; }
+.lcd-strip .f { width: 60px; height: 45px; display: block; object-fit: fill; }
+.lcd-strip .i { font: 10px var(--mono); color: #666; }
+.lcd-strip .i.cur { color: var(--key); }

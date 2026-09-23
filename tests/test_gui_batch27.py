@@ -1,7 +1,7 @@
 """Feedback batch 27 — the Spike 2 tester's re-test round.
 
-Four fixes under test, all logic-level (no Tk window; duck-typed stubs the
-way test_gui_batch26 does it):
+Four fixes under test, all logic-level (no window; the Images tab's search
+helpers are called directly, the rest run on duck-typed stubs):
 
 * Images search on a FRESH extract: the pre-slicer fix (batch 26) stopped
   scene labels lying, but a sliced extract has thousands of glyph tiles at
@@ -28,7 +28,8 @@ import os
 from types import SimpleNamespace
 
 from pinball_decryptor.core import modpack
-from pinball_decryptor.gui.main_window import MainWindow
+from pinball_decryptor.webui.tabs.images import (search_hits_path,
+                                                 slot_search_hit)
 
 
 _GLYPH = ("images/scene_textures/glyphs/"
@@ -42,23 +43,23 @@ _PLAIN = "images/backgrounds/loading.png"
 # ---------------------------------------------------------------------------
 
 def test_glyph_does_not_match_through_its_atlas_folder():
-    assert not MainWindow._image_search_hits_path(_GLYPH, "stern")
+    assert not search_hits_path(_GLYPH, "stern")
 
 
 def test_glyph_still_matches_its_own_filename():
-    assert MainWindow._image_search_hits_path(_GLYPH, "u+0041")
-    assert MainWindow._image_search_hits_path(_GLYPH, "a.png")
+    assert search_hits_path(_GLYPH, "u+0041")
+    assert search_hits_path(_GLYPH, "a.png")
 
 
 def test_glyph_matches_a_deliberate_path_query():
-    assert MainWindow._image_search_hits_path(_GLYPH, "glyphs/radimg_stern")
+    assert search_hits_path(_GLYPH, "glyphs/radimg_stern")
 
 
 def test_non_glyph_rows_keep_full_path_matching():
     # The atlas itself is genuinely named Stern_… — it must keep matching.
-    assert MainWindow._image_search_hits_path(_ATLAS, "stern")
-    assert MainWindow._image_search_hits_path(_PLAIN, "backgrounds")
-    assert not MainWindow._image_search_hits_path(_PLAIN, "stern")
+    assert search_hits_path(_ATLAS, "stern")
+    assert search_hits_path(_PLAIN, "backgrounds")
+    assert not search_hits_path(_PLAIN, "stern")
 
 
 def test_glyph_gets_no_second_chance_through_its_container():
@@ -68,15 +69,13 @@ def test_glyph_gets_no_second_chance_through_its_container():
         calls.append(1)
         return True                      # the font-named dir:: group "hits"
 
-    assert not MainWindow._image_slot_search_hit(_GLYPH, "stern", group_hit)
+    assert not slot_search_hit(_GLYPH, "stern", group_hit)
     assert not calls                     # the container walk never even ran
 
 
 def test_normal_rows_still_reach_their_container():
-    assert MainWindow._image_slot_search_hit(
-        _PLAIN, "aaaaaaaa", lambda: True)
-    assert not MainWindow._image_slot_search_hit(
-        _PLAIN, "aaaaaaaa", lambda: False)
+    assert slot_search_hit(_PLAIN, "aaaaaaaa", lambda: True)
+    assert not slot_search_hit(_PLAIN, "aaaaaaaa", lambda: False)
 
 
 # ---------------------------------------------------------------------------
@@ -119,56 +118,45 @@ def test_restored_plain_folder_clears_the_title(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Archive of the ACTIVE project: runs + closes instead of refusing
+# Archive of a project that is NOT the open one leaves the open one alone.
+# (Archiving the OPEN project, which closes it: test_webui_shellx.py
+# test_archive_asks_and_closes_the_open_project.)
 # ---------------------------------------------------------------------------
 
-def _archive_active(tmp_path, monkeypatch, active):
-    from pinball_decryptor.gui import projects_ui
+def _archive(tmp_path, monkeypatch, active):
+    from pinball_decryptor.core import project_ops
+    from pinball_decryptor.webui import compat
+    from pinball_decryptor.webui.shellx_projects import ProjectsMixin
 
     target = str(tmp_path / "proj")
     os.makedirs(target)
     events = []
-    app = SimpleNamespace(
+    done = []
+    stub = SimpleNamespace(
+        _running=lambda: False,
+        _active_folder=lambda: (target if active else ""),
         window=SimpleNamespace(
-            _is_running=lambda: False,
             append_log=lambda *a, **k: events.append(("log", a[0]))),
-        _project_folder=lambda: (target if active else ""),
-        _close_active_project=lambda: events.append(("closed",)),
+        app=SimpleNamespace(
+            _close_active_project=lambda: events.append(("closed",))),
+        _projects_changed=lambda: done.append(1),
+        # The progress window: run the work inline and report back.
+        _start_job=lambda _title, _text, fn, on_done: on_done(
+            fn(lambda *a: None, lambda: False), None),
     )
-    monkeypatch.setattr(projects_ui.messagebox, "askyesno",
+    monkeypatch.setattr(compat.messagebox, "askyesno",
                         lambda *a, **k: events.append(("confirm", a, k))
                         or True)
-    monkeypatch.setattr(projects_ui.messagebox, "showinfo",
-                        lambda *a, **k: events.append(("refused", a)))
-    monkeypatch.setattr(projects_ui.project_ops, "archive",
+    monkeypatch.setattr(project_ops, "archive",
                         lambda t, build_dir=None, progress=None, cancel=None:
                         (3, 4096, False))
-
-    class _FakeProgress:
-        def __init__(self, _app, _title, _text, fn, on_done):
-            on_done(fn(lambda *a: None, lambda: False), None)
-    monkeypatch.setattr(projects_ui, "_ProgressDialog", _FakeProgress)
-
-    done = []
-    projects_ui._archive_flow(app, target, on_done=lambda: done.append(1))
+    assert ProjectsMixin.project_archive(stub, target) is True
     return events, done
-
-
-def test_archiving_the_open_project_archives_and_closes(tmp_path,
-                                                        monkeypatch):
-    events, done = _archive_active(tmp_path, monkeypatch, active=True)
-    kinds = [e[0] for e in events]
-    assert "refused" not in kinds        # the old dead-end box is gone
-    assert "closed" in kinds             # the open project was closed
-    assert done == [1]
-    # And the confirm SAID it would close the project.
-    confirm = next(e for e in events if e[0] == "confirm")
-    assert "closes it" in confirm[1][1]
 
 
 def test_archiving_another_project_leaves_the_open_one_alone(tmp_path,
                                                              monkeypatch):
-    events, done = _archive_active(tmp_path, monkeypatch, active=False)
+    events, done = _archive(tmp_path, monkeypatch, active=False)
     kinds = [e[0] for e in events]
     assert "closed" not in kinds
     assert done == [1]

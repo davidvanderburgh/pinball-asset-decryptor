@@ -467,12 +467,21 @@ def profiles(ports_dir=None):
     return dict(out)
 
 
-def _version_key(version):
-    """``1.16.0`` / ``1.16`` / ``1_16_0`` -> (1, 16); a patch level other than 0 is kept."""
-    parts = [int(x) for x in re.findall(r"\d+", version or "")]
+def version_key(version):
+    """``1.16.0`` / ``1.16`` / ``1_16_0`` -> ``(1, 16)``; a patch level other than 0 is kept
+    (``1.15.1`` never passes for ``1.15``). THE ONE version comparison of the mode family:
+    a card's index name, a profile's port version, a port file's name and the Emulate
+    card's title all go through here, so ``jaws_le`` 1.02 on the card and ``1.02`` in the
+    port's name are the same build (as ints, not as strings). Empty or unreadable -> ``()``.
+    """
+    parts = [int(x) for x in re.findall(r"\d+", str(version or ""))]
     while len(parts) > 2 and parts[-1] == 0:
         parts.pop()
     return tuple(parts)
+
+
+#: The old private name, kept for callers that still say it.
+_version_key = version_key
 
 
 def profile_for_card(game_dir, version, ports_dir=None):
@@ -493,6 +502,11 @@ NO_PORT_HELP = ("There is no port for %s, so modes cannot be made for this card 
                 "tools/spike2_emu/modes/sdk/MODE_SDK.md, section \"Making a port for another "
                 "game or version\", says how to make one; a new port file shows up here by "
                 "itself.")
+
+#: The family's one sentence for a call made with no project open: Try it, Write's set,
+#: a new code mode and an example all say this, so the person reads the same fix each time.
+NO_PROJECT_HELP = ("Open or extract a card project first (Extract tab). Modes are saved in "
+                   "it.")
 
 _CARD_NAME = re.compile(r"^([A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)-(\d+)_(\d+)_(\d+)")
 
@@ -575,20 +589,41 @@ def probe_card_title(image):
     return answer
 
 
+def _card_by_name_or_probe(image, exact="", source_from_record=False):
+    """A :class:`ProjectCard` for *image* without opening it: its Stern name, else what
+    :func:`probe_card_title` has already read of it, else ``game_dir`` "" until a probe."""
+    game, version = card_from_name(image)
+    if game:
+        if exact and source_from_record:
+            return ProjectCard(image, game, exact, "the extract's record of the card")
+        return ProjectCard(image, game, version, "the card's file name")
+    probed = probed_card_title(image)
+    if probed and probed[0]:
+        return ProjectCard(image, probed[0], exact or probed[1], "the card's own index")
+    return ProjectCard(image, "", exact, "")
+
+
 def project_card(project):
     """Which card ``project`` was made from, or None when it names none (a bare folder:
-    the tab keeps Godzilla Pro 1.15). Reads what the project records, never the image:
-    the extract's ``.extract_source.json`` (its file name, and the ``card_version`` read
-    from the card's own index), then the ``.pinproj`` anchor's stock image and Write
-    original. A card whose file was renamed comes back with ``game_dir`` "" until
-    :func:`probe_card_title` has read it (off the UI thread)."""
+    the tab keeps Godzilla Pro 1.15). Reads what the project records, never the image.
+
+    THE EXTRACT'S RECORD WINS. ``.extract_source.json`` names the card every offset in the
+    project was measured on (and the ``card_version`` read from that card's own index), so
+    it is the answer whenever it is there - even when its file name does not parse (a
+    renamed card): then ``game_dir`` is "" until :func:`probe_card_title` has read the
+    card's index, off the UI thread (:func:`project_profile` with ``probe=True``). Before
+    2026-09-22 a renamed record lost to the ``.pinproj`` anchor's stock image or Write
+    original when one of those parsed, and a set could be prepared for a card the project
+    was never measured on. The anchor's paths are read only when the record is absent."""
     if not project or not os.path.isdir(project):
         return None
     from ...core import extract_source, project_file
     rec = extract_source.read_extract_source(project) or {}
+    exact = rec.get("card_version") or ""
+    recorded = rec.get("input_path") or rec.get("input_name")
+    if recorded:
+        return _card_by_name_or_probe(str(recorded), exact, source_from_record=True)
     images = []
-    if rec.get("input_path") or rec.get("input_name"):
-        images.append(rec.get("input_path") or rec.get("input_name"))
     if project_file.has_anchor(project):
         try:
             data = project_file.load_anchor(project)
@@ -600,20 +635,26 @@ def project_card(project):
     images = [str(i) for i in images if i]
     if not images:
         return None
-    exact = rec.get("card_version") or ""
-    recorded = file_name(str(rec.get("input_name") or rec.get("input_path") or ""))
     for image in images:
         game, version = card_from_name(image)
         if game:
-            same = file_name(image).lower() == recorded.lower()
-            if exact and same:
-                return ProjectCard(image, game, exact, "the extract's record of the card")
             return ProjectCard(image, game, version, "the card's file name")
-    image = images[0]
-    probed = probed_card_title(image)
-    if probed and probed[0]:
-        return ProjectCard(image, probed[0], exact or probed[1], "the card's own index")
-    return ProjectCard(image, "", exact, "")
+    return _card_by_name_or_probe(images[0])
+
+
+def project_cards(project, try_on=None):
+    """``(made_for, try_on)``: the two card ROLES of a Try it (feature/emulate-prepare).
+
+    *made_for* is the card the project's modes and edits were measured on
+    (:func:`project_card`: the extract's record first, probed when its name does not
+    parse, the anchor's paths only when the record is absent) - the card a set is
+    PREPARED FROM. *try_on* is the image to boot, always the path handed in (the live
+    Emulate card, never the anchor's lagging copy), as a :class:`ProjectCard` with its
+    game and version from its Stern name or an earlier probe, else "" until probed; None
+    when no path was given. Neither opens an image, so this can run on the UI thread."""
+    made_for = project_card(project)
+    run = _card_by_name_or_probe(str(try_on)) if try_on else None
+    return made_for, run
 
 
 def project_profile(project, probe=False):
@@ -791,7 +832,10 @@ def save(project, slug, spec):
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(spec.to_json(), f, indent=2)
         f.write("\n")
-    os.replace(tmp, path)
+    # a reader holding mode.json open (OneDrive, antivirus, the indexer)
+    # makes a bare os.replace fail on Windows, and the save is lost
+    from ...core.audio_slots import replace_with_retry
+    replace_with_retry(tmp, path)
     return path
 
 

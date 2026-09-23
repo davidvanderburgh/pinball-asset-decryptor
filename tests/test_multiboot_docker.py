@@ -18,9 +18,9 @@ import sys
 
 import pytest
 
-from pinball_decryptor.gui import multiboot_docker as D
-from pinball_decryptor.gui import multiboot_tab as mt
-from pinball_decryptor.gui.multiboot_tab import ImageRow, MultibootForm
+from pinball_decryptor.webui import multiboot_docker as D
+from pinball_decryptor.webui import multiboot_core as mt
+from pinball_decryptor.webui.multiboot_core import ImageRow, MultibootForm
 
 ISO0 = "/Volumes/Mac SSD/Sonichedge/Sonic-v00.930.iso"
 ISO1 = "/Volumes/Mac SSD/sonichedgehogcode/build/Sonic-v00.930-modified.iso"

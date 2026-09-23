@@ -1,8 +1,9 @@
 """Feedback batch 33 — the scan log, and reading a card back into a .raw file.
 
-No Tk window is built: the methods under test only touch plain attributes, so
-duck-typed ``self`` stubs exercise them the way the real window does (same
-approach as batch 25's scan-log tests, which these extend).
+No window is built: the Write tab service's scan-log methods
+(webui/tabs/write.py) only touch plain attributes, so duck-typed ``self``
+stubs exercise them the way the real tab does (same approach as batch 25's
+scan-log tests, which these extend).
 """
 
 import os
@@ -13,8 +14,8 @@ from pinball_decryptor.core import rawdevice
 from pinball_decryptor.core.pipeline_base import ReadCardPipeline
 from pinball_decryptor.core.rawdevice import (FlashCancelled, FlashError,
                                               read_device_to_image)
-from pinball_decryptor.gui.main_window import MainWindow
-from pinball_decryptor.gui.read_card_dialog import ReadCardDialog
+from pinball_decryptor.webui import extract_helpers
+from pinball_decryptor.webui.tabs.write import WriteTab
 
 
 # ---------------------------------------------------------------------------
@@ -25,29 +26,38 @@ from pinball_decryptor.gui.read_card_dialog import ReadCardDialog
 # ---------------------------------------------------------------------------
 
 class _ScanStub:
-    _set_tab_scanning = MainWindow._set_tab_scanning
-    _cancel_scan = MainWindow._cancel_scan
-    _SCAN_LABELS = MainWindow._SCAN_LABELS
+    """The Write tab's change scan: _begin_scan_ui is a scan starting (or
+    superseding the one running), _end_scan_ui its finish."""
+    _log_scan = WriteTab._log_scan
+    _begin_scan_ui = WriteTab._begin_scan_ui
+    _end_scan_ui = WriteTab._end_scan_ui
+    _cancel_scan = WriteTab._cancel_scan
 
     def __init__(self):
         self.logs = []
-        self._scan_reasons = {}
-        self._write_preview_scan_id = 0
+        self._scan_reason = None
+        self._scan_t0 = None
+        self._scan_id = 0
+        self._rows = []
+        self._scanning = False
 
-    def append_log(self, text, level="info"):
+    def log(self, text, level="info"):
         self.logs.append((text, level))
 
-    def _begin_scan_ui(self, tab_key):
+    def set(self, **_kw):
         pass
 
-    def _end_scan_ui(self, tab_key):
+    def _publish_rows(self):
         pass
 
-    def _stop_scan_spinner(self, tab_key):
+    def _sync_buttons(self):
         pass
 
-    def _toggle_scan_button(self, tab_key, scanning):
-        pass
+    def scan(self, on):
+        if on:
+            self._begin_scan_ui()
+        else:
+            self._end_scan_ui()
 
 
 def _texts(me):
@@ -56,11 +66,11 @@ def _texts(me):
 
 def test_superseded_scan_logs_its_replacement_and_the_new_start():
     me = _ScanStub()
-    me._scan_reasons["write_preview"] = "write destination changed"
-    me._set_tab_scanning("write_preview", True)
-    me._scan_reasons["write_preview"] = "Refresh clicked"
-    me._set_tab_scanning("write_preview", True)     # supersedes the first
-    me._set_tab_scanning("write_preview", False)
+    me._scan_reason = "write destination changed"
+    me.scan(True)
+    me._scan_reason = "Refresh clicked"
+    me.scan(True)                                   # supersedes the first
+    me.scan(False)
     texts = _texts(me)
     assert sum("Write change scan started" in t for t in texts) == 2
     assert sum("scan replaced after" in t for t in texts) == 1
@@ -74,32 +84,32 @@ def test_superseded_scan_logs_its_replacement_and_the_new_start():
 
 def test_superseding_scan_is_timed_from_its_own_start():
     me = _ScanStub()
-    me._set_tab_scanning("write_preview", True)
-    first_t0 = me._scan_t0["write_preview"]
-    me._set_tab_scanning("write_preview", True)
-    assert me._scan_t0["write_preview"] >= first_t0
-    me._set_tab_scanning("write_preview", False)
-    assert "write_preview" not in me._scan_t0
+    me.scan(True)
+    first_t0 = me._scan_t0
+    me.scan(True)
+    assert me._scan_t0 >= first_t0
+    me.scan(False)
+    assert me._scan_t0 is None
 
 
 def test_a_reason_is_never_carried_over_to_a_later_scan():
-    """The suppressed start left its reason in _scan_reasons, so the NEXT
-    scan's line claimed a cause that belonged to a scan it never logged."""
+    """The suppressed start left its reason behind, so the NEXT scan's line
+    claimed a cause that belonged to a scan it never logged."""
     me = _ScanStub()
-    me._scan_reasons["write_preview"] = "write destination changed"
-    me._set_tab_scanning("write_preview", True)
-    me._scan_reasons["write_preview"] = "Refresh clicked"
-    me._set_tab_scanning("write_preview", True)
-    me._set_tab_scanning("write_preview", False)
-    me._set_tab_scanning("write_preview", True)      # unrelated later scan
-    assert me._scan_reasons == {}
+    me._scan_reason = "write destination changed"
+    me.scan(True)
+    me._scan_reason = "Refresh clicked"
+    me.scan(True)
+    me.scan(False)
+    me.scan(True)                                    # unrelated later scan
+    assert me._scan_reason is None
     assert _texts(me)[-1] == "Write change scan started."
 
 
 def test_first_scan_still_logs_exactly_one_pair():
     me = _ScanStub()
-    me._set_tab_scanning("write_preview", True)
-    me._set_tab_scanning("write_preview", False)
+    me.scan(True)
+    me.scan(False)
     texts = _texts(me)
     assert len(texts) == 2
     assert "started" in texts[0] and "finished" in texts[1]
@@ -110,10 +120,10 @@ def test_a_cancel_between_scans_still_reads_as_a_cancel():
     """The Cancel button clears the stamp itself (batch 25), so a restart
     after one is a plain start, not a "replaced"."""
     me = _ScanStub()
-    me._set_tab_scanning("write_preview", True)
-    me._cancel_scan("write_preview")
-    me._set_tab_scanning("write_preview", True)
-    me._set_tab_scanning("write_preview", False)
+    me.scan(True)
+    me._cancel_scan()
+    me.scan(True)
+    me.scan(False)
     texts = _texts(me)
     assert sum("cancelled after" in t for t in texts) == 1
     assert not any("replaced after" in t for t in texts)
@@ -251,7 +261,7 @@ def test_pipeline_reports_the_saved_size_on_success(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Dialog helpers (pure functions — no Tk).
+# Read-card dialog helpers (pure functions, webui/extract_helpers.py).
 # ---------------------------------------------------------------------------
 
 class _Drive:
@@ -263,17 +273,16 @@ class _Drive:
 
 
 def test_default_image_name_says_which_card_it_came_off():
-    from pinball_decryptor.gui.read_card_dialog import _default_image_name
-    assert _default_image_name(_Drive(), "SD card") == \
+    assert extract_helpers.default_image_name(_Drive(), "SD card") == \
         "Generic-MassStorageClass-8GB.raw"
-    assert _default_image_name(None, "SD card") == "SD-card.raw"
+    assert extract_helpers.default_image_name(None, "SD card") == \
+        "SD-card.raw"
 
 
-def test_saving_onto_the_card_being_read_is_refused(monkeypatch):
-    monkeypatch.setattr("pinball_decryptor.gui.read_card_dialog.sys.platform",
-                        "win32")
+def test_saving_onto_the_card_being_read_is_refused():
+    on = extract_helpers.destination_is_on
     drive = _Drive(mount_label="E: F:")
-    assert ReadCardDialog._destination_is_on(drive, r"E:\backups")
-    assert ReadCardDialog._destination_is_on(drive, r"f:\x\y")
-    assert not ReadCardDialog._destination_is_on(drive, r"D:\backups")
-    assert not ReadCardDialog._destination_is_on(_Drive(), r"D:\backups")
+    assert on(drive, r"E:\backups", platform="win32")
+    assert on(drive, r"f:\x\y", platform="win32")
+    assert not on(drive, r"D:\backups", platform="win32")
+    assert not on(_Drive(), r"D:\backups", platform="win32")

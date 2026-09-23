@@ -33,6 +33,9 @@ ARCH_NAMES = {
     "xxd": "tinyxxd",
     "libc6-dev": "",
     "python3-tk": "tk",
+    # the virtual playfield's window (GTK WebKit) since the Tk cut-over
+    "python3-gi": "python-gobject",
+    "gir1.2-webkit2-4.1": "webkit2gtk-4.1",
     "qemu-user-static": "qemu-user-static qemu-user-static-binfmt",
     "busybox-static": "busybox",
     # The Spike 1 rig's BUILD tools (tools/spike1_emu/prereqs.sh, which is

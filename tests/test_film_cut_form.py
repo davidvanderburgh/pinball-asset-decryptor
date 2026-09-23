@@ -1,4 +1,4 @@
-"""Tests for the "From a film" dialog's logic, :class:`gui.film_cut_dialog.FilmCutForm`
+"""Tests for the "From a film" dialog's logic, :class:`webui.modes_filmcut.FilmCutForm`
 (item 142). The form is driven directly: no window is ever shown. The film is the
 synthetic lavfi one from ``tests/test_stern_film_cut.py``; tests needing it skip without
 the app's ffmpeg.
@@ -12,8 +12,8 @@ import numpy as np
 import pytest
 
 from pinball_decryptor.core import audio
-from pinball_decryptor.gui import film_cut_dialog as D
-from pinball_decryptor.gui.film_cut_dialog import PROVENANCE, FilmCutForm, describe
+from pinball_decryptor.webui import modes_filmcut as D
+from pinball_decryptor.webui.modes_filmcut import PROVENANCE, FilmCutForm, describe
 from pinball_decryptor.plugins.stern import film_cut as FC
 from pinball_decryptor.plugins.stern import mode_assets as MA
 from pinball_decryptor.plugins.stern import mode_project as MP

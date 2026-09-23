@@ -33,6 +33,7 @@ second mode also has one, the mode ends with the game's own time-up call.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -138,8 +139,11 @@ def sound_enabled():
 
 def code_modes(project):
     """``[slug]`` of the project's CODE modes - ``modes/<slug>/<slug>.c`` with no mode file
-    (item 127's New code mode). Write ships the PINNED runtime with the mode files, so a code
-    mode does not reach a card; the build log and the change scan say so."""
+    (item 127's New code mode). Write carries them as it carries the form modes: compiled
+    into the card's ``mode.so`` (:func:`code_plan`), each with its ``<slug>.assets`` and its
+    own screen, clip and sounds through the same set. The change scan names them beside the
+    form modes (:func:`pending_lines`); only a build that leaves every mode out says they
+    are not put on the card (:func:`code_modes_note`)."""
     root = MP.modes_dir(project) if project else ""
     try:
         names = sorted(os.listdir(root))
@@ -150,9 +154,17 @@ def code_modes(project):
             and not os.path.isfile(os.path.join(root, slug, MP.MODE_FILE))]
 
 
-def code_modes_note(slugs):
-    return ("code mode(s) %s are not put on the card: Write ships the pinned mode runtime with "
-            "the mode files, and a code mode runs only in Try it for now" % ", ".join(slugs))
+def code_modes_note(slugs, why=None):
+    """The change scan's one line for the code modes when THIS build leaves every mode out:
+    a code mode goes on the card with the modes, so it stays off with them. *why* is the
+    build's own reason when the caller has it (the gate's sentence, the Direct-SD refusal,
+    the host refusal); without it the line names the three ways a build leaves modes out,
+    because a project of code modes alone has no form-mode rows to point at."""
+    if not why:
+        why = ("the modes gate is off, a Direct-SD write cannot add files to the card, or "
+               "this computer cannot put a mode's files on a card")
+    return ("code mode(s) %s are not put on the card: this build leaves every mode out (%s), "
+            "and a code mode goes on the card with the modes" % (", ".join(slugs), why))
 
 
 def project_modes(project):
@@ -966,7 +978,7 @@ class TryItSet:
     stage_dir: str
     game_dir: str
     version: str
-    reused: bool = False                             # patched from the set already there
+    reused: bool = False                             # handed back unbuilt (the sidecar test)
     files: list = field(default_factory=list)       # games-partition paths in the set
     new_files: list = field(default_factory=list)   # of those, the ones a stock card lacks
     mode_files: list = field(default_factory=list)  # mode.cfg, mode1.cfg ... in slot order
@@ -995,14 +1007,191 @@ def _port_version(port_path):
     return ""
 
 
-def build_tryit_set(project, card, base, log=None, progress=None, cancel=None, label=None):
+#: Beside the set, never inside it (``run_game.sh`` binds every file in a set): what the
+#: last Try it was built from, so the next one can hand the set back unbuilt.
+TRYIT_SIDECAR = "set.tryit.json"
+TRYIT_SIDECAR_VERSION = 1
+#: The log's one line for a set handed back as it is.
+TRYIT_REUSED = ("nothing of the modes, the edits or the cards changed since the last Try it, "
+                "so the set is used as it is")
+
+
+def _card_identity(path):
+    """``{path, size, mtime}`` for a card image (the identity the engine's manifest and the
+    rig's own card cache key on), or None when it cannot be read."""
+    try:
+        st = os.stat(path)
+    except (OSError, TypeError):
+        return None
+    return {"path": os.path.abspath(str(path)), "size": st.st_size, "mtime": int(st.st_mtime)}
+
+
+def modes_fingerprint(project):
+    """Every file under ``<project>/modes`` as ``[relpath, mtime_ns, size]``, sorted: what a
+    mode edit, a new WAV beside one or a deleted mode changes. A walk of a few small files,
+    no hashing. Pure, and the same idea as the Write tab's own modes fingerprint
+    (``main_window._modes_write_fingerprint``), reimplemented here so no plugin imports the
+    window; posix relpaths, so a sidecar written on Windows still reads on Linux."""
+    out = []
+    root = MP.modes_dir(project) if project else ""
+    if not root or not os.path.isdir(root):
+        return out
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for name in sorted(filenames):
+            p = os.path.join(dirpath, name)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            out.append([os.path.relpath(p, root).replace("\\", "/"), st.st_mtime_ns, st.st_size])
+    return sorted(out)
+
+
+def assets_fingerprint(assets_dir):
+    """``"<files> <newest-mtime>"`` for everything under *assets_dir*: the Emulate tab's own
+    "have the edits moved?" question (``emulate_tab.assets_fingerprint``), reimplemented
+    here because that one lives in a Tk module. A stat walk, no hashing, because a project
+    is a whole extract; compared for EQUALITY, because a build writes its hash cache back
+    into the folder, so the value kept is the one taken AFTER the build, and a file put
+    back from an older copy moves it too."""
+    newest, count = 0, 0
+    for root, _dirs, files in os.walk(assets_dir):
+        for name in files:
+            count += 1
+            try:
+                m = os.stat(os.path.join(root, name)).st_mtime
+            except OSError:
+                continue
+            if m > newest:
+                newest = m
+    return "%d %.6f" % (count, newest)
+
+
+def tryit_sidecar(base):
+    return os.path.join(base, TRYIT_SIDECAR)
+
+
+def _build_env():
+    """Every ``PAD_STERN_*`` variable of the build's environment, sorted: the app mirrors its
+    build options into them (the text grow, the blip-free callouts, the audio grow ...), and
+    a set built under another option is not the set this build would make. The engine's own
+    caches key on the same variables (``_audio_cache_base_key``)."""
+    return sorted([k, v] for k, v in os.environ.items() if k.startswith("PAD_STERN_"))
+
+
+def _tryit_record(base_card, card, project, sound_ok):
+    """What the reuse test compares: the two cards' identities, the project, the gates, the
+    build's options and the app's version, and the two fingerprints. Everything in it is
+    JSON, so a read-back compares equal."""
+    from ... import __version__
+    return {
+        "version": TRYIT_SIDECAR_VERSION,
+        "base_card": _card_identity(base_card),
+        "run_card": _card_identity(card),
+        "assets": os.path.normcase(os.path.abspath(project)),
+        "sound_ok": sound_ok,
+        "preview": bool(preview_on()),
+        "gates": [bool(enabled()), bool(sound_enabled())],
+        "env": _build_env(),
+        "app": __version__,
+        "modes": modes_fingerprint(project),
+        "assets_fingerprint": assets_fingerprint(project),
+    }
+
+
+def read_tryit_sidecar(base):
+    try:
+        with open(tryit_sidecar(base), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_tryit_sidecar(base, record):
+    with open(tryit_sidecar(base), "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2)
+
+
+def tryit_reuse_reason(base, set_dir, base_card, card, project, sound_ok, engine=None):
+    """Why the set in *set_dir* cannot be handed back as it is, or ``""`` when it can: the
+    sidecar beside it names the same base card, run card, project, gates and fingerprints
+    as now, and the set's manifest is a finished one whose files are still exactly as the
+    build left them (the engine's own all-or-nothing test). A sentence, as the Emulate
+    tab's reuse test gives one, because "rebuilding" with no reason is what a four-minute
+    wait looks like when nothing changed."""
+    E = engine
+    if E is None:
+        from . import engine as E
+    kept = read_tryit_sidecar(base)
+    if not kept:
+        return "there is no record of the last Try it"
+    now = _tryit_record(base_card, card, project, sound_ok)
+    if not now["base_card"] or not now["run_card"]:
+        return "a card image could not be read"
+    if kept.get("version") != now["version"]:
+        return "the last Try it was recorded by another version of the app"
+    for key, words in (("base_card", "it was prepared from a different card image"),
+                       ("run_card", "it was prepared to run on a different card"),
+                       ("assets", "it was built from a different project"),
+                       ("sound_ok", "the own-sound choice changed"),
+                       ("preview", "a preview feature was switched since it was built"),
+                       ("gates", "a build gate changed since it was built"),
+                       ("env", "a build option changed since it was built"),
+                       ("app", "the app was updated since it was built"),
+                       ("modes", "the modes changed since it was built"),
+                       ("assets_fingerprint", "the project's edits changed since it was built")):
+        if kept.get(key) != now[key]:
+            return words
+    manifest = E.read_override_manifest(set_dir) or {}
+    if not manifest or manifest.get("building") or not manifest.get("generation"):
+        return "the set was never finished"
+    carried = manifest.get("modes")
+    if not carried:
+        return "the set carries no modes"
+    # The stage the install reads (the object, the port, the mode files) sits BESIDE the
+    # set and is not in its manifest's file list: a temp clean that took it leaves a set
+    # the install would refuse ("no stage folder") with nothing to make it build again.
+    stage = carried.get("dir") or (set_dir.rstrip("\\/") + E.OVERRIDE_MODES_SUFFIX)
+    for name in (E.OVERRIDE_MODES_OBJECT, "game.port"):
+        if not os.path.isfile(os.path.join(stage, name)):
+            return "the modes' runtime folder is gone"
+    check = getattr(E, "_override_reuse", None)
+    if check is not None and check(set_dir, manifest, base_card) is None:
+        return "the set's files are not as the build left them"
+    return ""
+
+
+def build_tryit_set(project, card, base, log=None, progress=None, cancel=None, label=None,
+                    sound_ok=None):
     """Build Try it's set for *project* against the card image *card* in ``<base>/set``, with
     the object, the port and the mode files in ``<base>/set-modes``, through
     ``engine.write_overrides`` - Write's own code. Returns a :class:`TryItSet`, or ``None``
     when *cancel* stopped it. Raises :class:`ModeWriteError` with a sentence for the person.
 
-    *log* may take ``(message)`` or ``(message, level)``. The set carries every edit of the
-    project, as Write would: a card with the modes and without the rest does not exist."""
+    *card* is the image the run BOOTS. The set is PREPARED FROM the card the project was
+    extracted from when that is another copy of the same build (:func:`.cards.override_base_card`,
+    PAD-161: every offset in the project was measured on that card), and *card* goes along
+    as ``run_card`` so the set's game program keeps what that card's own build changed in it
+    (PAD-172) - exactly as the Emulate tab's own "apply my edits" path prepares its set.
+
+    A SET THAT IS STILL CURRENT IS HANDED BACK UNBUILT. The sidecar :data:`TRYIT_SIDECAR`
+    beside the set records what the last build was made from (both cards, the project, the
+    gates, the build options and the app's version, a fingerprint of the modes and one of
+    the project's edits); when all of it is as it was, the set's manifest is a finished one
+    and the stage the install reads is still there, the :class:`TryItSet` is read back from
+    that manifest with ``reused=True`` and one log line, and the engine is never called. A
+    second press with nothing changed used to cost the whole build again (four minutes with
+    one own sound), because ``write_overrides``' own patch-in-place path still stages and
+    re-encodes the sound bank.
+
+    *progress* ``(done, total, text)`` and *cancel* reach the engine's checkpoints. *sound_ok*
+    is the own-sound gate for this build (None = the environment gate, as a Write reads it;
+    False = a mode's own sounds left out), handed to the engine as it is. *log* may take
+    ``(message)`` or ``(message, level)``. The set carries every edit of the project, as
+    Write would: a card with the modes and without the rest does not exist."""
+    from . import cards
     from . import engine as E
     say = log or (lambda *a, **k: None)
 
@@ -1016,7 +1205,7 @@ def build_tryit_set(project, card, base, log=None, progress=None, cancel=None, l
         raise ModeWriteError("Try it needs the mode maker, a preview feature that is not "
                              "switched on in this copy of the app (Settings > Preview features).")
     if not project or not os.path.isdir(project):
-        raise ModeWriteError("Open or extract a card project first: modes live in it.")
+        raise ModeWriteError(MP.NO_PROJECT_HELP)
     modes = card_modes(project, project_modes(project))
     code = code_mode_list(project)          # code modes with their own assets go through Write too
     if not modes and not code:
@@ -1025,15 +1214,53 @@ def build_tryit_set(project, card, base, log=None, progress=None, cancel=None, l
         raise ModeWriteError("Pick the card image to try the modes on first.")
     set_dir = os.path.join(base, TRYIT_SET)
     os.makedirs(base, exist_ok=True)
+
+    # PAD-161: prepared from the card the extract measured, run over the one picked.
+    base_card, note = cards.override_base_card(card, project, E.card_title_index)
+    if note:
+        elog(note, "info")
+
+    # The reuse test, before any build: the same cards, the same project, the same gates
+    # and nothing of the modes or the edits moved means the set already there is the one
+    # this build would make.
+    why = tryit_reuse_reason(base, set_dir, base_card, card, project, sound_ok, engine=E)
+    if not why:
+        listed = E.read_override_manifest(set_dir) or {}
+        kept = listed.get("counts") or {}
+        counts = tuple(kept.get(k, 0) for k in ("audio", "video", "image", "text"))
+        elog(TRYIT_REUSED, "info")
+        return _tryit_set_from_manifest(project, modes, code, set_dir, listed, counts, E,
+                                        reused=True)
+    elog("preparing the modes (%s)" % why, "info")
+
     try:
-        got = E.write_overrides(card, project, set_dir, log=elog, progress=progress,
-                                cancel=cancel, label=label)
+        got = E.write_overrides(base_card, project, set_dir, log=elog, progress=progress,
+                                cancel=cancel, label=label, run_card=card,
+                                sound_ok=sound_ok)
     except (RuntimeError, OSError, ValueError) as e:
         raise ModeWriteError(str(e)) from None
     counts = got[0]
     if counts is None:
         return None
     listed = E.read_override_manifest(set_dir) or {}
+    # reused=False: the engine ran, so the set is THIS build's (patched in place or made
+    # from scratch - the manifest's ``parent`` tells those apart, and neither is a set
+    # handed back as it was, which is what the tab says of reused=True).
+    result = _tryit_set_from_manifest(project, modes, code, set_dir, listed, tuple(counts), E,
+                                      reused=False)
+    # Taken AFTER the build: the engine writes its hash cache back into the project, and the
+    # fingerprint kept has to be the one the next press will measure.
+    try:
+        write_tryit_sidecar(base, _tryit_record(base_card, card, project, sound_ok))
+    except OSError as e:
+        elog("the record of this Try it could not be kept (%s); the next one builds again"
+             % e, "warning")
+    return result
+
+
+def _tryit_set_from_manifest(project, modes, code, set_dir, listed, counts, E, reused=False):
+    """The :class:`TryItSet` a set's manifest describes - read the same way after a build and
+    for a set handed back unbuilt, so the tab sees one shape either way."""
     carried = listed.get("modes") or {}
     if not carried:
         raise ModeWriteError("the set was built without the project's modes (the log says "
@@ -1048,7 +1275,7 @@ def build_tryit_set(project, card, base, log=None, progress=None, cancel=None, l
     from .mode_assets import mode_file_name
     result = TryItSet(
         set_dir=set_dir, stage_dir=stage, game_dir=prof.game_dir, version=_port_version(port),
-        reused=bool(listed.get("parent")),
+        reused=reused,
         files=[r.get("path", "").lstrip("/") for r in listed.get("files") or ()],
         new_files=[str(r).strip("/") for r in carried.get("added") or ()],
         mode_files=[n for n in carried.get("files") or () if n.endswith(".cfg")],

@@ -1,0 +1,158 @@
+/* Multi-boot tab.  Tokens and components come from app.css; this only lays
+   the tab out (the design's two columns) and draws what is its own: the
+   preview screen, the menu sketch, the size bar and the dialogs' boxes. */
+
+.mb-page { gap: 12px; }
+.mb-checks { justify-content: flex-end; }
+.mb-checks .phase { cursor: help; }
+.phase.mb-bad { color: var(--err); border-color: var(--err); background: var(--err-soft); }
+
+.mb-alarm { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 8px;
+  background: var(--err); color: #fff; font-family: var(--cond); font-weight: 600; font-size: 14px; }
+.mb-alarm .body-text { flex: 1 1 auto; min-width: 0; }
+
+/* the two columns: the boot menu, and the images over the card */
+.mb-cols { display: grid; grid-template-columns: minmax(300px, 4fr) minmax(0, 5fr); gap: 16px;
+  align-items: stretch; flex: 1 0 auto; }
+.mb-right { gap: 16px; min-width: 0; }
+.mb-right > .card { flex-shrink: 0; }
+.mb-images { flex: 1 0 auto; }
+.mb-menu { flex-shrink: 0; }
+.mb-images-bd { flex: 1 1 auto; }
+.mb-images > .hd { flex-wrap: nowrap; }
+.mb-images > .hd .h2 { white-space: nowrap; }
+.mb-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.mb-images > .hd .btn { flex: 0 0 auto; }
+
+/* ---- the preview ---- */
+.mb-screen { position: relative; width: 100%; background: #0b0e13; padding: 0; align-items: stretch;
+  justify-content: stretch; cursor: default; }
+.mb-screen:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mb-frame { position: relative; width: 100%; height: 100%; }
+.mb-frame > img { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; display: block; }
+.mb-clip { position: absolute; display: block; max-width: none !important; max-height: none !important;
+  object-fit: fill !important; pointer-events: none; }
+.mb-black { position: absolute; inset: 0; background: #000; display: flex; }
+.mb-black img { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; }
+.mb-placeholder { margin: auto; padding: 16px 24px; color: #6d7480; text-align: center; white-space: pre-line;
+  font-size: 13px; line-height: 1.6; }
+
+.mb-sketch { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; justify-content: space-between;
+  gap: 10px; padding: 5.5% 4.5% 4%; font-family: var(--cond); overflow: hidden; container-type: inline-size; }
+.mb-sk-head { text-align: center; letter-spacing: .18em; font-size: clamp(11px, 3cqi, 16px); font-weight: 600;
+  min-height: 1.2em; }
+.mb-sk-cards { display: grid; gap: clamp(4px, 1.6cqi, 10px); justify-content: center; }
+.mb-sk-card { border: 2px solid; border-radius: 6px; padding: 6% 5%; display: flex; flex-direction: column;
+  gap: 3px; align-items: center; justify-content: center; text-align: center; aspect-ratio: 1.15; min-width: 0; }
+.mb-sk-card .t { font-weight: 600; font-size: clamp(9px, 2.6cqi, 14px); line-height: 1.15; overflow-wrap: anywhere; }
+.mb-sk-card .s { font-size: clamp(8px, 2cqi, 11px); line-height: 1.15; overflow-wrap: anywhere; }
+.mb-sk-foot { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: clamp(8px, 2.1cqi, 11px);
+  letter-spacing: .08em; text-align: center; white-space: pre; }
+.mb-sk-tag { position: absolute; right: 6px; top: 5px; font-family: var(--sans); font-size: 10.5px; letter-spacing: 0;
+  color: #9aa3ad; background: rgba(0, 0, 0, .45); border-radius: 4px; padding: 0 6px; }
+
+.mb-strip { gap: 8px 10px; }
+.mb-flips { gap: 6px; }
+.mb-vol { gap: 8px; }
+.mb-vol input[type=range] { width: 96px; }
+.mb-readout { gap: 12px; min-height: 18px; }
+.mb-kv { grid-template-columns: 96px minmax(0, 1fr); font-size: 13px; gap: 4px 12px; align-items: start; }
+.mb-foot-hint { min-width: 180px; }
+
+/* ---- images table ---- */
+.mb-tablebox { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.mb-table { flex: 1 1 auto; }
+.mb-table .tr { gap: 8px; padding: 0 10px; }
+/* the header cells clip like the cells under them (Tk's fixed columns never
+   overlap); core's header cells stay visible for column grips this table
+   does not have */
+.mb-table .th > .c { overflow: hidden !important; text-overflow: ellipsis; white-space: nowrap; }
+.mb-table .tr.sel { background: transparent; box-shadow: inset 2px 0 0 var(--accent); }
+.mb-table .tr.sel:hover { background: var(--panel-2); }
+.mb-mv, .mb-acts { display: inline-flex; gap: 0; align-items: center; }
+.mb-acts { justify-content: flex-end; width: 100%; }
+.mb-ic.btn { min-height: 26px; padding: 0 3px; }
+.mb-ic.btn .i { width: 15px; height: 15px; }
+.mb-go.btn:not(:disabled) { color: var(--ok); }
+.mb-del.btn:not(:disabled) { color: var(--err); }
+.mb-addrow { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 14px; color: var(--ink-3); cursor: pointer; font-size: 13.5px; }
+.mb-addrow:hover { color: var(--ink); background: var(--panel-2); }
+.mb-addrow:disabled { opacity: .5; cursor: default; }
+.mb-addrow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mb-rowline { padding: 7px 14px 9px; border-top: 1px solid var(--line); }
+
+/* ---- the card: path, size strip ---- */
+.mb-pathbox { gap: 4px; }
+.mb-pathrow { gap: 8px; align-items: center; }
+.mb-path { flex: 1 1 260px; min-width: 200px; }
+.mb-pathbtns { gap: 8px; flex: 0 0 auto; }
+.mb-size { gap: 8px 12px; align-items: center; }
+.mb-size-head { gap: 10px; cursor: pointer; flex: 0 0 auto; }
+.mb-bar { position: relative; flex: 1 1 120px; min-width: 100px; height: 14px; border-radius: 4px; overflow: hidden;
+  background: var(--panel-2); border: 1px solid var(--line-2); display: flex; cursor: pointer; }
+.mb-bar > i { display: block; height: 100%; flex: 0 0 auto; position: relative; }
+.mb-bar > i + i { box-shadow: inset 1px 0 0 var(--panel-2); }
+.mb-bar .b-image { background: var(--accent); }
+.mb-bar .b-overhead { background: var(--ink-3); }
+.mb-bar .b-free { outline: 1px dashed var(--ink-3); outline-offset: -2px; background: transparent; }
+.mb-bar .b-free em { position: absolute; left: 0; top: 0; bottom: 0;
+  background: repeating-linear-gradient(135deg, var(--accent) 0 2px, transparent 2px 6px); }
+.mb-bar .b-over { position: absolute; top: 0; bottom: 0; right: 0; background: var(--err); border-left: 1px solid var(--ink); }
+.mb-bar .b-prog { position: absolute; left: 0; top: 0; bottom: 0;
+  background: repeating-linear-gradient(135deg, var(--accent) 0 2px, transparent 2px 6px); }
+.mb-bar.thinking::after { content: ""; position: absolute; top: 0; bottom: 0; width: 22%;
+  background: repeating-linear-gradient(135deg, var(--accent) 0 2px, transparent 2px 6px);
+  animation: mb-sweep 1.4s linear infinite; }
+@keyframes mb-sweep { 0% { left: -22%; } 100% { left: 100%; } }
+.mb-size-detail { flex: 1 1 220px; min-width: 0; }
+.mb-size .chk { flex: 0 0 auto; }
+
+/* ---- dialogs ---- */
+.modal.mb-dlg.xwide { width: min(980px, 100%); }
+.mb-box { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px 12px; margin: 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 8px; }
+.mb-md { gap: 12px; }
+.mb-box > legend { font-family: var(--cond); font-weight: 600; font-size: 13px; color: var(--ink-2); padding: 0 6px; }
+.mb-kv2 { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 12px; align-items: center; }
+.mb-kv2 > .k { font-family: var(--cond); color: var(--ink-3); font-size: 13px; }
+.mb-sound { gap: 6px; }
+.mb-drop { border: 0; background: transparent; color: var(--ink-3); cursor: pointer; padding: 0 2px; font: inherit; }
+.mb-drop:hover { color: var(--ink); }
+.mb-indent { margin-left: 24px; }
+.mb-p { margin: 0; }
+.mb-rolls { gap: 2px; }
+.mb-src { overflow-wrap: anywhere; }
+.mb-ed { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
+.mb-ed-main { gap: 12px; }
+.mb-ed-pv { align-items: stretch; }
+.mb-cardpv { border-radius: 6px; padding: 10px; display: flex; justify-content: center; }
+.mb-cardpv-card { width: 100%; border: 2px solid; border-radius: 6px; padding: 8px; display: flex; flex-direction: column;
+  align-items: center; gap: 3px; }
+.mb-cardpv-art { width: 100%; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; border-radius: 2px; }
+.mb-cardpv-art img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.mb-cardpv-card .t { font-weight: 600; font-size: 13px; text-align: center; margin-top: 6px; overflow-wrap: anywhere; }
+.mb-cardpv-card .s { font-size: 11.5px; text-align: center; min-height: 1em; overflow-wrap: anywhere; }
+.mb-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 4px 16px; }
+.mb-color { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mb-color-lbl { flex: 1 1 auto; min-width: 0; color: var(--ink-2); }
+.mb-swatch { position: relative; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 5px; border: 1px solid var(--line-2);
+  cursor: pointer; overflow: hidden; }
+.mb-swatch.ro { cursor: default; }
+.mb-swatch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: inherit; border: 0; padding: 0; }
+
+/* ---- narrow windows ---- */
+/* was @media (max-width: 900px) */
+html.bp-900 .mb-cols { grid-template-columns: minmax(0, 1fr); }
+html.bp-900 .mb-menu .mb-screen { max-width: 640px; align-self: center; }
+/* was @media (max-width: 760px) */
+html.bp-760 .mb-ed { grid-template-columns: minmax(0, 1fr); }
+html.bp-760 .mb-kv2 { grid-template-columns: minmax(0, 1fr); }
+html.bp-760 .mb-hint { display: none; }
+
+/* the picture, full size (the preview's right-click / double-click) */
+.modal.mb-fullview { width: min(1420px, 96vw); }
+.mb-fullview .bd { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.mb-fullbox { width: 100%; display: flex; justify-content: center; }
+.mb-screen.mb-full { cursor: default; }

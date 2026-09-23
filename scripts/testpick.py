@@ -32,39 +32,52 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ---------------------------------------------------------------------------
 # The zone table.  ORDER MATTERS: the first zone whose source prefix matches
-# a changed file claims it, so specific rows (a single gui file, a plugin
-# subdir) sit above general ones (the whole gui/ or plugins/stern/ tree).
+# a changed file claims it, so specific rows (a single tab file, a plugin
+# subdir) sit above general ones (the whole webui/ or plugins/stern/ tree).
 #
 # tests are glob patterns under tests/.  A source that maps to NO zone
 # promotes the whole run to FULL - that is the safety net, not an error.
 # ---------------------------------------------------------------------------
 
 ZONES = [
-    # -- Spike 2 rig: the emulator, its tab, its playfield tooling ---------
+    # -- Spike 2 rig: the emulator, its tab, the Multi-boot tab ------------
     ("spike2", ["tools/spike2_emu/",
                 "pinball_decryptor/plugins/stern/spike2/",
-                "pinball_decryptor/gui/emulate_tab.py",
-                "pinball_decryptor/gui/multiboot_tab.py"],
-     ["test_spike2_*.py", "test_emulate_tab.py", "test_emulate_poll_storm.py",
-      "test_emulate_setup_check.py",
+                "pinball_decryptor/webui/emulate_core.py",
+                "pinball_decryptor/webui/emulate_rig.py",
+                "pinball_decryptor/webui/tabs/emulate.py",
+                "pinball_decryptor/webui/emu_cache.py",
+                "pinball_decryptor/webui/runtime_prompt.py",
+                "pinball_decryptor/webui/rig.py",
+                "pinball_decryptor/webui/multiboot",      # multiboot_*.py
+                "pinball_decryptor/webui/tabs/multiboot.py",
+                "pinball_decryptor/webui/preview_audio.py"],
+     ["test_spike2_*.py", "test_emulate_*.py", "test_webui_emulate.py",
       # item 90: the Multi-boot tab and the two rig tools it drives
-      "test_multiboot_tab.py", "test_mkmulticard.py", "test_selectmedia.py"]),
+      "test_multiboot_*.py", "test_webui_multiboot.py", "test_preview_audio.py",
+      "test_mkmulticard.py", "test_selectmedia.py"]),
     # -- Spike 1 rig -------------------------------------------------------
     ("spike1", ["tools/spike1_emu/",
                 "pinball_decryptor/plugins/stern/spike1",   # spike1*.py
-                "pinball_decryptor/gui/spike1_emulate_tab.py",
-                "pinball_decryptor/gui/spike1_windows.py"],
-     ["test_spike1_*.py", "test_rig_leaf_imports.py"]),
+                "pinball_decryptor/webui/emulate_spike1_core.py",
+                "pinball_decryptor/webui/emulate_jjp_spike1view.py",
+                "pinball_decryptor/webui/tabs/emulate_spike1.py"],
+     ["test_spike1_*.py", "test_webui_emulate_spike1.py",
+      "test_rig_leaf_imports.py"]),
     # -- Stern plugin core: formats, engine, radium, sidx, compare... ------
     # Both rigs sit on it, so its zone pulls their tests in too.
     ("stern", ["pinball_decryptor/plugins/stern/"],
      ["test_stern_*.py", "test_spike1_*.py", "test_spike2_*.py",
       "test_emulate_*.py", "test_scene_*.py", "test_plugins.py", "test_rig_leaf_imports.py",
-      "test_multiboot_tab.py", "test_mkmulticard.py", "test_selectmedia.py"]),
+      "test_multiboot_*.py", "test_mkmulticard.py", "test_selectmedia.py",
+      "test_app_run_logic_modes.py", "test_webui_modes.py"]),
     # -- JJP: plugin, rig, tab --------------------------------------------
     ("jjp", ["pinball_decryptor/plugins/jjp/", "tools/jjp_emu/",
-             "pinball_decryptor/gui/jjp_emulate_tab.py"],
-     ["test_jjp_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
+             "pinball_decryptor/webui/emulate_jjp_core.py",
+             "pinball_decryptor/webui/emulate_jjp_common.py",
+             "pinball_decryptor/webui/tabs/emulate_jjp.py"],
+     ["test_jjp_*.py", "test_webui_emulate_jjp.py", "test_plugins.py",
+      "test_rig_leaf_imports.py"]),
     # -- The small plugins -------------------------------------------------
     ("bof",     ["pinball_decryptor/plugins/bof/"],
      ["test_bof_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
@@ -82,16 +95,14 @@ ZONES = [
      ["test_pb_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("pinmame", ["pinball_decryptor/plugins/pinmame_classic/"],
      ["test_pinmame_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
-    # -- Shared GUI: widgets, theme, picker, dialogs... --------------------
-    # Every tab imports these, so the zone is honestly wide: the whole Tk
-    # lane.  Still far short of FULL (no plugin/pipeline/core tests).
-    ("gui", ["pinball_decryptor/gui/", "pinball_decryptor/worktree_picker.py"],
-     ["test_gui_*.py", "test_emulate_*.py", "test_multiboot_tab.py",
-      "test_jjp_emulate_tab.py",
-      "test_jjp_matrix_ui.py", "test_spike1_emulate_tab.py",
-      "test_spike1_windows.py", "test_log_pane_freeze.py",
-      "test_worktree_*.py", "test_desktop_*.py", "test_placement*.py",
-      "test_installer.py"]),
+    # -- The web UI: the shell, every tab, the page ------------------------
+    # The rows above claim their own tabs first; this is everything else
+    # under webui/ (the shell, compat, the host, the other tabs, the page's
+    # static files) plus the dev launcher.  All in-process: about a minute.
+    ("webui", ["pinball_decryptor/webui/", "pinball_decryptor/worktree_picker.py"],
+     ["test_webui_*.py", "test_app_run_logic*.py", "test_gui_*.py",
+      "test_log_pane_freeze.py", "test_worktree_*.py", "test_desktop_*.py",
+      "test_installer.py", "test_preview_switch.py"]),
 ]
 # (No `updater` zone: pinball_decryptor/core/ is a FULL trigger and the
 # updater lives inside it - core changes run everything, on purpose.)
@@ -103,7 +114,6 @@ FULL_TRIGGERS = [
     "pinball_decryptor/__init__.py",
     "pinball_decryptor/__main__.py",
     "tests/conftest.py",
-    "tests/test_gui_smoke.py",       # the shared `app` fixture lives here
     "pytest.ini",
     "requirements",
     ".github/",
@@ -132,9 +142,8 @@ def changed_files(since):
 
 def classify(path):
     """-> ('zone', name) | ('full', why) | ('none', None) | ('self', path)"""
-    # FULL triggers come FIRST: tests/test_gui_smoke.py is a test file, but
-    # it is also the shared `app` fixture - editing it must run everything,
-    # not "itself" (which the suite ignores by name anyway).
+    # FULL triggers come FIRST: tests/conftest.py is a test file, but it is
+    # also every test's fixtures - editing it must run everything.
     for trig in FULL_TRIGGERS:
         if path.startswith(trig):
             return ("full", trig)
@@ -204,12 +213,9 @@ def main(argv):
 
     if full_why:
         print("FULL suite: %s" % full_why)
-        cmd = [sys.executable, "-m", "pytest", "tests/",
-               "--ignore=tests/test_gui_smoke.py"] + extra
+        cmd = [sys.executable, "-m", "pytest", "tests/"] + extra
     else:
         files = zone_tests(picked) + sorted(set(self_tests))
-        files = [f for f in files
-                 if os.path.basename(f) != "test_gui_smoke.py"]
         if not files:
             print("zones: %s -> no tests to run." % (sorted(picked) or "none"))
             return 0

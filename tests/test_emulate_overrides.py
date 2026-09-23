@@ -11,7 +11,8 @@ Three layers, and each is tested where it can be tested honestly:
   * the Emulate tab's policy — where a set is kept and when the staged one may
     be reused.  Pure functions, no Tk.
   * the tab itself — that ticking the box puts ``PAD_OVERRIDE_DIR`` in front of
-    ``watch.sh`` and that a refusal never launches anything.
+    ``watch.sh`` and that a refusal never launches anything — is driven in
+    tests/test_webui_emulate.py.
 
 The rig's own half (``overrides.sh`` staging, ``run_game.sh``'s bind loop) is
 Linux and is checked here only as script TEXT — the behaviour was exercised in
@@ -28,7 +29,7 @@ import pytest
 
 from tests._ext4_fake import FakeExt4Reader, materialize_files
 
-from pinball_decryptor.gui import emulate_tab
+from pinball_decryptor.webui import emulate_core
 from pinball_decryptor.plugins.stern import engine
 
 RIG = pathlib.Path(__file__).resolve().parents[1] / "tools" / "spike2_emu"
@@ -420,7 +421,7 @@ def test_a_folder_a_killed_build_left_is_still_ours(card, tmp_path):
     (out / "turtles_pro" / "image.bin").write_bytes(b"half")
 
     # It names no card, so the reuse test sends the tab back to building one.
-    assert emulate_tab.overrides_reason(
+    assert emulate_core.overrides_reason(
         engine.read_override_manifest(str(out)), str(card.img),
         str(tmp_path / "a"), "1 2.0")
 
@@ -655,7 +656,7 @@ def test_a_current_set_is_reused(tmp_path):
     img.write_bytes(b"x" * 32)
     assets = tmp_path / "gz"
     assets.mkdir()
-    assert emulate_tab.overrides_reason(
+    assert emulate_core.overrides_reason(
         _manifest(img, assets), str(img), str(assets), "1 2.0") == ""
 
 
@@ -678,7 +679,7 @@ def test_a_stale_set_says_why(tmp_path, what):
     else:
         man = {}
         expect = "no set staged"
-    why = emulate_tab.overrides_reason(man, str(img), str(assets), "1 2.0")
+    why = emulate_core.overrides_reason(man, str(img), str(assets), "1 2.0")
     assert expect in why
 
 
@@ -695,14 +696,14 @@ def test_a_set_prepared_for_another_card_to_run_on_is_rebuilt(tmp_path):
     assets.mkdir()
     man = _manifest(img, assets)
     # a set from before PAD-172 recorded no run card: it ran on its own card
-    assert emulate_tab.overrides_reason(
+    assert emulate_core.overrides_reason(
         man, str(img), str(assets), "1 2.0", run_card=str(img)) == ""
-    assert "run on a different card" in emulate_tab.overrides_reason(
+    assert "run on a different card" in emulate_core.overrides_reason(
         man, str(img), str(assets), "1 2.0", run_card=str(built))
     man["run_card"] = _manifest(built, assets)["card"]
-    assert emulate_tab.overrides_reason(
+    assert emulate_core.overrides_reason(
         man, str(img), str(assets), "1 2.0", run_card=str(built)) == ""
-    assert "run on a different card" in emulate_tab.overrides_reason(
+    assert "run on a different card" in emulate_core.overrides_reason(
         man, str(img), str(assets), "1 2.0", run_card=str(other))
 
 
@@ -712,18 +713,18 @@ def test_the_fingerprint_moves_for_any_edit(tmp_path):
     (assets / "audio").mkdir(parents=True)
     wav = assets / "audio" / "idx0001.wav"
     wav.write_bytes(b"RIFF")
-    first = emulate_tab.assets_fingerprint(str(assets))
-    assert emulate_tab.assets_fingerprint(str(assets)) == first   # stable
+    first = emulate_core.assets_fingerprint(str(assets))
+    assert emulate_core.assets_fingerprint(str(assets)) == first   # stable
     os.utime(wav, (1_000_000, 1_000_000))                         # backdated
-    assert emulate_tab.assets_fingerprint(str(assets)) != first
+    assert emulate_core.assets_fingerprint(str(assets)) != first
     (assets / "audio" / "idx0002.wav").write_bytes(b"RIFF")
-    assert emulate_tab.assets_fingerprint(str(assets)) != first
+    assert emulate_core.assets_fingerprint(str(assets)) != first
 
 
 def test_the_set_is_staged_where_the_app_already_cleans_up():
     """core.host_temp knows the spike2_ prefix, so the set is listed there."""
     from pinball_decryptor.core import host_temp
-    d = emulate_tab.overrides_dir()
+    d = emulate_core.overrides_dir()
     assert os.path.dirname(d) == host_temp.temp_dir()
     assert os.path.basename(d).startswith("spike2_")
 
@@ -776,7 +777,7 @@ def test_a_built_card_runs_edits_prepared_from_the_card_they_came_from(
     one had a scene that grew, so the set has to be prepared from the stock
     card - and the log has to say which card that was."""
     stock, built, assets = _cards(tmp_path)
-    base, note = emulate_tab.override_base_card(
+    base, note = emulate_core.override_base_card(
         built, assets, _index(godzilla_le_1_16_0=LE,
                               godzilla_le_1_16_0_modified=LE))
     assert base == stock
@@ -789,14 +790,14 @@ def test_the_card_the_extract_came_from_is_taken_as_it_is(tmp_path):
     def never(path):
         raise AssertionError("no card needs opening for this")
 
-    assert emulate_tab.override_base_card(stock, assets, never) == (stock, "")
+    assert emulate_core.override_base_card(stock, assets, never) == (stock, "")
 
 
 def test_another_version_is_prepared_from_the_card_picked(tmp_path):
     """Bytes from one version bound over another are a broken title of their
     own, so the old behaviour stands - and the user is told."""
     stock, built, assets = _cards(tmp_path)
-    base, note = emulate_tab.override_base_card(
+    base, note = emulate_core.override_base_card(
         built, assets, _index(
             godzilla_le_1_16_0=LE,
             godzilla_le_1_16_0_modified=("godzilla_pro-1_16_0.sidx",
@@ -807,11 +808,11 @@ def test_another_version_is_prepared_from_the_card_picked(tmp_path):
 
 def test_nothing_known_about_either_card_changes_nothing(tmp_path):
     stock, built, assets = _cards(tmp_path)
-    assert emulate_tab.override_base_card(
+    assert emulate_core.override_base_card(
         built, assets, lambda p: ()) == (built, "")
     # ...and neither does an extract with no record of its source.
     os.remove(os.path.join(assets, ".extract_source.json"))
-    assert emulate_tab.override_base_card(
+    assert emulate_core.override_base_card(
         built, assets, lambda p: LE) == (built, "")
 
 
@@ -820,320 +821,25 @@ def test_a_missing_original_is_said_out_loud_unless_it_just_moved(tmp_path):
     (tmp_path / "moved").mkdir()
     moved = tmp_path / "moved" / os.path.basename(stock)
     os.replace(stock, moved)
-    base, note = emulate_tab.override_base_card(built, assets, lambda p: LE)
+    base, note = emulate_core.override_base_card(built, assets, lambda p: LE)
     assert base == built and "not there any more" in note
     # Same name, same size: the original, somewhere else.
-    assert emulate_tab.override_base_card(
+    assert emulate_core.override_base_card(
         str(moved), assets, lambda p: LE) == (str(moved), "")
 
 
-# --------------------------------------------------------------------------
-# The tab
-# --------------------------------------------------------------------------
-
 @pytest.fixture(autouse=True)
 def _no_real_setup_probe(monkeypatch):
-    """Building a panel must not shell out to WSL to probe this machine."""
-    monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
-
-
-def _panel(**kw):
-    tk = pytest.importorskip("tkinter")
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip("Tk unavailable: %s" % exc)
-    root.attributes("-alpha", 0)
-    root.geometry("+10000+10000")
-    frame = tk.Frame(root)
-    frame.pack()
-    panel = emulate_tab.EmulatePanel(
-        frame, assets_var=tk.StringVar(value=kw.get("assets", "")),
-        overrides_var=tk.BooleanVar(value=kw.get("on", False)),
-        log=kw.get("log"), stage_fn=kw.get("stage"))
-    panel.build(frame)
-    root.update()
-    return root, panel
-
-
-def test_the_box_is_off_and_says_nothing_is_changed(tmp_path):
-    root, panel = _panel(assets=str(tmp_path))
-    try:
-        assert panel._overrides_wanted() is None
-        assert "runs exactly as it is" in panel._ovr_hint.cget("text")
-    finally:
-        root.destroy()
-
-
-def test_ticked_with_no_assets_folder_says_so():
-    root, panel = _panel(on=True, assets="")
-    try:
-        assert panel._overrides_wanted() is None
-        assert "no assets folder" in panel._ovr_hint.cget("text")
-    finally:
-        root.destroy()
-
-
-def test_ticked_with_a_folder_explains_the_wait(tmp_path):
-    root, panel = _panel(on=True, assets=str(tmp_path))
-    try:
-        panel._src_path.set("D:/cards/turtles.raw")
-        assert panel._overrides_wanted() == ("D:/cards/turtles.raw",
-                                             str(tmp_path))
-        assert "Start prepares them first" in panel._ovr_hint.cget("text")
-    finally:
-        root.destroy()
-
-
-def test_an_extract_with_no_baseline_is_refused(tmp_path, monkeypatch):
-    """Without .checksums.md5 every sound reads as edited — hours of encode."""
-    assets = tmp_path / "gz"
-    assets.mkdir()
-    img = tmp_path / "card.raw"
-    img.write_bytes(bytes(16))
-    root, panel = _panel(on=True, assets=str(assets))
-    try:
-        panel._src_path.set(str(img))
-        assert panel._prepare_overrides(str(img), str(assets)) is None
-        # The refusal is handed to the main loop (the caller is the start
-        # worker and Tk is not thread safe), so the reason only reaches the
-        # label once the loop has run - and it goes in the OPT-IN's label,
-        # which the 2 s status poll does not blank.
-        root.update()
-        assert "baseline" in panel._ovr_hint.cget("text")
-        assert panel._ovr_hint.cget("foreground") != "#888"
-    finally:
-        root.destroy()
-
-
-def test_a_prepared_set_reaches_watch_sh(tmp_path, monkeypatch):
-    """The whole point: PAD_OVERRIDE_DIR in front of watch.sh."""
-    out = tmp_path / "ovr"
-    out.mkdir()
-    monkeypatch.setattr(emulate_tab, "overrides_dir", lambda: str(out))
-    monkeypatch.setattr(engine, "read_override_manifest",
-                        lambda d: {"reuse": True})
-    monkeypatch.setattr(emulate_tab, "overrides_reason",
-                        lambda *a, **k: "")          # already current
-    assets = tmp_path / "gz"
-    assets.mkdir()
-    # Stern's baseline flavour is "<rel>\t<md5>" (core.checksums.read_checksums).
-    (assets / ".checksums.md5").write_text(
-        "audio/idx0001.wav\td41d8cd98f00b204e9800998ecf8427e\n")
-    img = tmp_path / "card.raw"
-    img.write_bytes(bytes(16))
-    root, panel = _panel(on=True, assets=str(assets))
-    try:
-        panel._src_path.set(str(img))
-        extra = panel._prepare_overrides(str(img), str(assets))
-        assert extra and extra[0].startswith("PAD_OVERRIDE_DIR=")
-        assert "\\" not in extra[0]          # a Windows path would not mount
-        cmd = emulate_tab.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"] + extra,
-                                    savestates=False)
-        assert any(a.startswith("PAD_OVERRIDE_DIR=") for a in cmd)
-        assert cmd.index(extra[0]) < cmd.index("120")
-    finally:
-        root.destroy()
+    """Nothing here may shell out to WSL to probe this machine (the setup
+    probe, or ``wsl_home()``, whose answer on a developer's PC is the
+    opposite of a rig-less runner's)."""
+    monkeypatch.setattr(emulate_core, "setup_state", lambda: None)
+    monkeypatch.setattr(emulate_core, "wsl_home", lambda: None)
 
 
 # --------------------------------------------------------------------------
 # PAD-121: a replacement you picked is an edit, without a build first
 # --------------------------------------------------------------------------
-
-def _ready_panel(tmp_path, monkeypatch, stage=None, log=None):
-    """A panel whose folder and card are ready for ``_prepare_overrides``.
-
-    The set is pinned CURRENT (``overrides_reason`` -> ""), so the only thing
-    left for a test to watch is what happens before that decision — which is
-    where the Replace tabs' assignments now land.
-    """
-    out = tmp_path / "ovr"
-    out.mkdir()
-    monkeypatch.setattr(emulate_tab, "overrides_dir", lambda: str(out))
-    monkeypatch.setattr(engine, "read_override_manifest",
-                        lambda d: {"reuse": True})
-    monkeypatch.setattr(emulate_tab, "overrides_reason", lambda *a, **k: "")
-    assets = tmp_path / "gz"
-    assets.mkdir()
-    (assets / ".checksums.md5").write_text(
-        "images/1.png\td41d8cd98f00b204e9800998ecf8427e\n")
-    img = tmp_path / "card.raw"
-    img.write_bytes(bytes(16))
-    root, panel = _panel(on=True, assets=str(assets), stage=stage, log=log)
-    # Picking a card normally kicks the rig's background pre-copy off the
-    # entry's write-trace (item 74).  Nothing here is testing that, and on a
-    # machine that HAS the rig it would start a wsl.exe per test.
-    panel._precache_kick = lambda *a, **kw: None
-    # Same for item 90's boot-menu probe, which asks the CARD (through WSL) on
-    # every card change and lands its answer through ``after`` — a thread that
-    # outlives the test's root and reports into whichever interpreter is
-    # running the event loop by then.
-    panel._select_probe_kick = lambda *a, **kw: None
-    panel._src_path.set(str(img))
-    return root, panel, str(img), str(assets)
-
-
-def test_an_assigned_replacement_is_applied_before_the_set_is_built(
-        tmp_path, monkeypatch):
-    """The ticket: a picked image did nothing until a card had been built.
-
-    The assignment lives in the Replace tab (and the folder's sidecar) until
-    something writes it over the folder's own file, and the set is computed
-    from that folder — so Start has to do it, exactly as a build does.
-    """
-    calls = []
-
-    def stage(assets_dir, cancel_cb=None):
-        calls.append((assets_dir, cancel_cb is not None))
-        return (1, 1, [])
-
-    lines = []
-    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch,
-                                            stage=stage, log=lines.append)
-    try:
-        extra = panel._prepare_overrides(img, assets)
-        assert extra and extra[0].startswith("PAD_OVERRIDE_DIR=")
-        # Applied, to THIS folder, and cancellable (a replaced video is a
-        # re-encode, and Stop has to reach it).
-        assert calls == [(assets, True)]
-        root.update()                       # _log goes through after(0, ...)
-        assert any("applied 1 replacement" in ln for ln in lines)
-    finally:
-        root.destroy()
-
-
-def test_an_ordinary_start_runs_the_sets_modes_as_a_card_does(tmp_path, monkeypatch):
-    """Item 149: the set carries the project's modes (write_overrides), whose screens are
-    authored VISIBLE for the runtime to hide - run 9's clean boot of a Written card showed every
-    panel over the HUD all game without it. So when the set names its modes payload, the
-    ordinary Start puts it in the rig (modes/tryit.sh install, as the card's game_monitor does
-    on a machine) and preloads it; a set without modes starts as it always did; a payload that
-    will not go in refuses the run with the reason."""
-    import subprocess as sp
-    stage = tmp_path / "ovr-modes"
-    stage.mkdir()
-    ran, lines = [], []
-    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch,
-                                            stage=lambda a, cancel_cb=None: (0, 0, []),
-                                            log=lines.append)
-    monkeypatch.setattr(emulate_tab, "rig_cmd", lambda script, *a, **k: ["RIG", script] + list(a))
-    result = {"rc": 0}
-
-    def run(cmd, **kw):
-        ran.append(cmd)
-        return sp.CompletedProcess(cmd, result["rc"], b"", b"boom" if result["rc"] else b"")
-    monkeypatch.setattr(emulate_tab.subprocess, "run", run)
-    try:
-        # no modes in the set: the env it always was, and no rig command
-        extra = panel._prepare_overrides(img, assets)
-        assert extra == ["PAD_OVERRIDE_DIR=%s" % emulate_tab._wsl_path(str(tmp_path / "ovr"))]
-        assert ran == []
-        # the set's record names its modes: installed, then preloaded
-        monkeypatch.setattr(engine, "read_override_manifest", lambda d: {
-            "reuse": True, "modes": {"dir": str(stage), "names": ["ATOMIC BREATH", "KAIJU RUSH"]}})
-        extra = panel._prepare_overrides(img, assets)
-        assert extra[0].startswith("PAD_OVERRIDE_DIR=") and extra[1] == "PAD_MODE_SO=/lib/pad_mode.so"
-        want = emulate_tab._wsl_path(str(stage)) if sys.platform == "win32" else str(stage)
-        assert ran == [["RIG", "modes/tryit.sh", "install", want]]
-        root.update()
-        assert any("carry modes (ATOMIC BREATH, KAIJU RUSH)" in ln for ln in lines), lines
-        # the install fails: no run, and the hint says why
-        result["rc"] = 1
-        assert panel._prepare_overrides(img, assets) is None
-        root.update()
-        assert "could not be put in the emulator" in panel._ovr_hint.cget("text")
-        assert "boom" in panel._ovr_hint.cget("text")
-        # the payload folder is gone: refused, never a run with the panels on the glass
-        result["rc"] = 0
-        monkeypatch.setattr(engine, "read_override_manifest", lambda d: {
-            "reuse": True, "modes": {"dir": str(tmp_path / "gone"), "names": ["KAIJU RUSH"]}})
-        assert panel._prepare_overrides(img, assets) is None
-    finally:
-        root.destroy()
-
-
-def test_a_folder_with_nothing_assigned_is_taken_as_it_stands(tmp_path,
-                                                              monkeypatch):
-    """The ordinary run: staging finds nothing, and says nothing about it."""
-    lines = []
-    root, panel, img, assets = _ready_panel(
-        tmp_path, monkeypatch, stage=lambda a, cancel_cb=None: (0, 0, []),
-        log=lines.append)
-    try:
-        assert panel._prepare_overrides(img, assets)
-        root.update()
-        assert not any("applied" in ln for ln in lines)
-    finally:
-        root.destroy()
-
-
-def test_assignments_that_could_not_be_applied_refuse_the_run(tmp_path,
-                                                              monkeypatch):
-    """A run that plays the stock card while the tab says it is testing the
-    user's edits is the failure this whole path exists to avoid — and one
-    where every replacement failed to convert is exactly that."""
-    root, panel, img, assets = _ready_panel(
-        tmp_path, monkeypatch,
-        stage=lambda a, cancel_cb=None: (2, 0, [("image: 1.png", "no ffmpeg")]))
-    try:
-        assert panel._prepare_overrides(img, assets) is None
-        root.update()
-        text = panel._ovr_hint.cget("text")
-        assert "stock card" in text and "no ffmpeg" in text
-        assert panel._ovr_hint.cget("foreground") != "#888"
-    finally:
-        root.destroy()
-
-
-def test_staging_that_raises_never_starts_a_run(tmp_path, monkeypatch):
-    def boom(assets_dir, cancel_cb=None):
-        raise OSError("the NAS went away")
-
-    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch, stage=boom)
-    try:
-        assert panel._prepare_overrides(img, assets) is None
-        root.update()
-        assert "NAS went away" in panel._ovr_hint.cget("text")
-    finally:
-        root.destroy()
-
-
-def test_start_prepares_the_set_from_the_card_the_extract_came_from(
-        tmp_path, monkeypatch):
-    """PAD-161 end to end on the tab: the reuse test and the build are both
-    asked about the extract's card, never the built one picked to run."""
-    from pinball_decryptor.core.extract_source import write_extract_source
-    lines = []
-    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch,
-                                            log=lines.append)
-    stock = tmp_path / "stock.raw"
-    stock.write_bytes(bytes(64))
-    write_extract_source(assets, str(stock))
-    monkeypatch.setattr(engine, "card_title_index",
-                        lambda p: ("godzilla_le-1_16_0.sidx",))
-    asked, built = [], []
-
-    def reason(manifest, card, assets_dir, fp, run_card=None):
-        asked.append((card, run_card))
-        return "there is no set staged yet"
-
-    def write_overrides(card, assets_dir, out, log=None, cancel=None,
-                        run_card=None):
-        built.append((card, run_card))
-        return (0, 0, 1, 0), None, None, [("/gz/scene.radium", 9)]
-
-    monkeypatch.setattr(emulate_tab, "overrides_reason", reason)
-    monkeypatch.setattr(engine, "write_overrides", write_overrides)
-    try:
-        extra = panel._prepare_overrides(img, assets)
-        assert extra and extra[0].startswith("PAD_OVERRIDE_DIR=")
-        # ...and both are told which card the set RUNS on (PAD-172): its
-        # game program is that card's, with the edits on top.
-        assert asked == [(str(stock), img)] and built == [(str(stock), img)]
-        root.update()
-        assert any("prepared from %s" % stock in ln for ln in lines)
-    finally:
-        root.destroy()
 
 
 def test_the_app_stages_all_three_kinds_the_way_a_build_does():
@@ -1168,29 +874,6 @@ def test_the_app_stages_all_three_kinds_the_way_a_build_does():
     assert seen[1][2] is stop
     assert got == (4, 2, [("video: b.mp4", "too long"),
                           ("image: c.png", "not a PNG")])
-
-
-def test_a_multi_image_card_says_which_image_the_edits_went_to(tmp_path,
-                                                               monkeypatch):
-    """DragonRR's second question, answered on the run it is about."""
-    lines = []
-    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch,
-                                            log=lines.append)
-    try:
-        assert panel._prepare_overrides(img, assets, selector=True)
-        root.update()
-        note = [ln for ln in lines if "boot menu" in ln]
-        # PAD-122 re-worded it: "the largest game partition" described the
-        # scan, not the answer — an extra image's partition can be the bigger
-        # one and still never be read, because it is a LOGICAL partition.
-        assert note and "the first game image on the card" in note[0]
-        # ...and not on an ordinary single-image run.
-        lines.clear()
-        assert panel._prepare_overrides(img, assets)
-        root.update()
-        assert not any("boot menu" in ln for ln in lines)
-    finally:
-        root.destroy()
 
 
 # --------------------------------------------------------------------------
@@ -1577,3 +1260,5 @@ def test_run_game_clears_and_publishes_the_video_host_flag_once():
     body = (RIG / "run_game.sh").read_text(encoding="utf-8", errors="replace")
     assert body.count('rm -f "$R/dump/vidoverride"') == 1
     assert body.count('> "$R/dump/vidoverride"') == 1
+
+

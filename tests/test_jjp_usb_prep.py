@@ -300,7 +300,7 @@ def test_jjp_manufacturer_wires_the_stick_pipeline():
 
 def test_flash_words_jjp_vs_default():
     """JJP relabels the shared flash surface; Stern/CGC keep the dd text."""
-    from pinball_decryptor.gui.flash_dialog import _flash_words
+    from pinball_decryptor.webui.write_dialogs import flash_words as _flash_words
 
     jjp = _flash_words(JJPManufacturer())
     assert jjp["noun"] == "USB stick"

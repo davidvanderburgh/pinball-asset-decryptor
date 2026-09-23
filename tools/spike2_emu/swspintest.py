@@ -6,9 +6,13 @@ Run on WINDOWS, with NO emulator up:
     py tools\\spike2_emu\\swspintest.py [switch_id] [hold_ms] [game]
 
 swholdtest.py's trick, unchanged: a fake padsw block in WSL via PAD_SW_FILE,
-the REAL Field window, synthesised <ButtonPress-3>/<ButtonRelease-3> at the
-marker's own coordinates - so the hit test, the `ripping` bookkeeping,
-SwitchDriver's queue and swspin.py are all the shipping code.
+the REAL playfield controller built headless, the SHIPPED page's hit test
+(pf.js `pfHit`, run under Node) asked which marker a right-press at the ring
+reaches, and then exactly the api calls the page's right pointerdown /
+pointerup make (`rip` on, `rip` off) - so the hit test, the `ripping`
+bookkeeping, SwitchDriver's queue and swspin.py are all the shipping code.
+The window is a web page now (2026-09-23); to SEE it, run
+`python playfield.py <game>` beside a run.
 
 WHAT IT CANNOT SEE, stated so nobody reads more into a pass than is there: the
 RIPPING ITSELF. The alternating level is the guest shim's write into the 0x11
@@ -36,6 +40,11 @@ import padpath
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+
+# The page's side - its hit test, its scale, its press - has ONE copy, in
+# swholdtest.py (import-safe: its main() only runs as a script).
+from swholdtest import (LeftPress, close, describe_hit, marker,  # noqa: E402
+                        page_hit, page_scale)
 
 #: The fake block. /var/tmp and not /tmp: /tmp is a tmpfs here and is wiped on
 #: a WSL restart, which has bitten this rig before.
@@ -80,22 +89,20 @@ def spin_gen(d):
     return struct.unpack_from("<I", d, padsw.OFF_SPIN_GEN)[0] if d else None
 
 
-def wait_for(root, fn, sw, want, limit_s=15.0):
-    """Pump Tk until `fn` of the block reads `want`. Elapsed ms, or None."""
+def wait_for(fn, sw, want, limit_s=15.0):
+    """Wait until `fn` of the block reads `want`. Elapsed ms, or None."""
     t0 = time.monotonic()
     while time.monotonic() - t0 < limit_s:
-        root.update()
         if fn(read_block(), sw) == want:
             return (time.monotonic() - t0) * 1000.0
         time.sleep(POLL_S)
     return None
 
 
-def pump(root, fn, sw, secs):
-    """Keep Tk alive for `secs`, sampling one array. Returns the values seen."""
+def pump(fn, sw, secs):
+    """Sample one array for `secs`. Returns the values seen."""
     seen, t0 = [], time.monotonic()
     while time.monotonic() - t0 < secs:
-        root.update()
         v = fn(read_block(), sw)
         if v is not None:
             seen.append(v)
@@ -103,7 +110,23 @@ def pump(root, fn, sw, secs):
     return seen
 
 
-ARGV = [a for a in sys.argv[1:] if not a.startswith("--")]
+class RightPress:
+    """A right press and release on a SWITCH marker, as the page makes them
+    (pf.js fieldView: button 2 on a switch rips it; on anything else a right
+    press does nothing)."""
+
+    def __init__(self, ctl, sw_id):
+        self.ctl, self.sw_id = ctl, sw_id
+
+    def down(self):
+        self.ctl.api("rip", [self.sw_id, True])
+
+    def up(self):
+        self.ctl.api("rip", [self.sw_id, False])
+
+
+ARGV = ([a for a in sys.argv[1:] if not a.startswith("--")]
+        if __name__ == "__main__" else [])
 SW = int(ARGV[0]) if ARGV else 47                       # LEFT SPINNER
 HOLD_MS = int(ARGV[1]) if len(ARGV) > 1 else 2000
 GAME = ARGV[2] if len(ARGV) > 2 else None
@@ -119,61 +142,62 @@ def main():
     # Arguments off the command line before playfield is imported - it reads
     # argv[1] as the GAME. Same trap swholdtest.py documents.
     sys.argv = [sys.argv[0]] + ([GAME] if GAME else [])
-    import tkinter as tk
     import playfield
 
-    root = tk.Tk()
-    root.title("swspintest")
-    view = playfield.Field(root)
-    root.update()
-
-    target = None
-    for i, e in view.info.items():
-        if e["kind"] == "switch" and e["d"]["id"] == SW:
-            target = (i, e["d"]["name"])
-            break
-    if target is None:
-        print("switch %d is not on this playfield" % SW)
+    ctl = playfield.Playfield()
+    if ctl.kind != "field":
+        print("%s has no artwork view here (the window would be the %s page),"
+              " so there is no marker to press" % (playfield.GAME, ctl.kind))
+        close(ctl)
         return 1
-    item, name = target
-    x0, y0, x1, y1 = view.cv.coords(item)
-    # ON THE RING'S STROKE, not its centre. The ring is an UNFILLED oval and
-    # Tk's find_overlapping treats a hollow oval as its outline band only, so
-    # the exact centre of a bare switch ring hit-tests to NOTHING - measured
-    # here, ring 47's own centre returned no marker at all. A mouse never
-    # notices because a hand aims at the drawn circle; a synthesised event has
-    # to aim there too. (swholdtest.py never hit this: its default target sits
-    # under a FILLED coil marker, which is hittable everywhere.)
-    x, y = int((x0 + x1) / 2), int(y0) + 1
-    print("switch %d  %s  at canvas (%d,%d) on the ring" % (SW, name, x, y))
 
-    # A RIGHT-click must land on the SWITCH to rip: on_rip only rips switch
+    found = marker(ctl, SW)
+    if found is None:
+        print("switch %d is not on this playfield" % SW)
+        close(ctl)
+        return 1
+    k, S = found
+    name = S["name"]
+    scale = page_scale(ctl)
+    # ON THE RING'S STROKE, not its centre. The ring is an UNFILLED circle and
+    # the hit test (Tk's semantics, kept by pf.js pfHit) treats a hollow ring
+    # as its outline band only, so the exact centre of a bare switch ring
+    # hit-tests to NOTHING - measured under Tk, ring 47's own centre returned
+    # no marker at all. A mouse never notices because a hand aims at the drawn
+    # circle; a synthesised press has to aim there too.
+    x, y = S["x"] * scale, S["y"] * scale - 5
+    print("switch %d  %s  at screen (%.0f,%.0f) on the ring, artwork scale "
+          "%.2f" % (SW, name, x, y, scale))
+
+    # A RIGHT-click must land on the SWITCH to rip: the page only rips switch
     # markers, so if the coil marker wins the hit test here the right gesture
     # is a no-op by design and the test says so up front.
-    class _Ev:
-        pass
-    probe = _Ev()
-    probe.x, probe.y = x, y
-    got = view._hit(probe)
-    e = view.info[got]
-    print("a press here lands on the %s marker: %s\n"
-          % (e["kind"].upper(), e["d"].get("name")))
-    if e["kind"] != "switch":
+    try:
+        hit = page_hit(ctl.view, x, y, scale)
+        print("a press here lands on the %s\n" % describe_hit(ctl, hit))
+    except LookupError as exc:
+        hit = ["switch", k]
+        print("%s - the page's hit test cannot be asked, so the SWITCH marker"
+              " is pressed directly\n" % exc)
+    if hit is None or hit[0] != "switch":
         print("pick a switch id whose marker wins its own hit test")
+        close(ctl)
         return 1
+    right = RightPress(ctl, ctl.view.sw_rows[hit[1]]["id"])
+    left = LeftPress(ctl, hit)
 
     fail = []
 
     # ---- 1. RIP ------------------------------------------------------------
     g0 = spin_gen(read_block())
-    view.cv.event_generate("<ButtonPress-3>", x=x, y=y)
-    t_on = wait_for(root, spin, SW, 1)
+    right.down()
+    t_on = wait_for(spin, SW, 1)
     if t_on is None:
         print("RIP    FAIL: right-press never set the spin flag")
         fail.append("rip-start")
     else:
         print("RIP    right-press -> spin[%d]=1 in %6.1f ms" % (SW, t_on))
-        seen = pump(root, spin, SW, HOLD_MS / 1000.0)
+        seen = pump(spin, SW, HOLD_MS / 1000.0)
         held = all(v == 1 for v in seen)
         print("       ripped for %d ms: %d samples, %s"
               % (HOLD_MS, len(seen),
@@ -181,8 +205,8 @@ def main():
                  % seen.count(0)))
         if not held:
             fail.append("rip-drop")
-        view.cv.event_generate("<ButtonRelease-3>", x=x, y=y)
-        t_off = wait_for(root, spin, SW, 0)
+        right.up()
+        t_off = wait_for(spin, SW, 0)
         if t_off is None:
             print("       FAIL: release never cleared the flag - a rip that "
                   "never ends")
@@ -204,10 +228,10 @@ def main():
         fail.append("lanes-scr")
     else:
         print("LANES  scr_held[%d] untouched by the whole rip" % SW)
-    view.cv.event_generate("<ButtonPress-1>", x=x, y=y)
-    wait_for(root, scr, SW, 1)
-    view.cv.event_generate("<ButtonRelease-1>", x=x, y=y)
-    wait_for(root, scr, SW, 0)
+    left.down()
+    wait_for(scr, SW, 1)
+    left.up()
+    wait_for(scr, SW, 0)
     if spin(read_block(), SW):
         print("       FAIL: a left-hold set the spin flag")
         fail.append("lanes-spin")
@@ -219,14 +243,12 @@ def main():
     # swholdtest's ORDER: on one queue, stop-before-start cannot happen.
     print("")
     for _ in range(10):
-        view.cv.event_generate("<ButtonPress-3>", x=x, y=y)
-        view.cv.event_generate("<ButtonRelease-3>", x=x, y=y)
-        root.update()
+        right.down()
+        right.up()
     t0 = time.monotonic()
-    while not view.drv.q.empty() and time.monotonic() - t0 < 60.0:
-        root.update()
+    while not ctl.drv.q.empty() and time.monotonic() - t0 < 60.0:
         time.sleep(POLL_S)
-    view.drv.q.join()
+    ctl.drv.q.join()
     drained = (time.monotonic() - t0) * 1000.0
     end = spin(read_block(), SW)
     if end == 0:
@@ -237,13 +259,17 @@ def main():
               "(spin=%s)" % end)
         fail.append("order-stuck")
     print("       driver still spinning: %s (want an empty set)"
-          % view.drv.spinning)
-    if view.drv.spinning:
+          % ctl.drv.spinning)
+    if ctl.drv.spinning:
         fail.append("order-spinning")
+    print("       controller still ripping: %s (want None)" % ctl.ripping)
+    if ctl.ripping is not None:
+        fail.append("order-ripping")
 
-    root.destroy()
+    close(ctl)
     print("\n%s" % ("FAILED: " + ", ".join(fail) if fail else "ALL PASS"))
     return 1 if fail else 0
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

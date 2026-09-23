@@ -370,35 +370,19 @@ def test_the_first_sight_of_a_counter_seeds_it_and_feeds_nothing(monkeypatch,
 
 
 # --- the clickable trough dots --------------------------------------------
+#
+# THE WINDOW IS A WEB PAGE NOW (2026-09-23). The dots are a model
+# (`playfield.TroughDots`) that the page (pfpage/pf.js `troughStrip`) draws,
+# and a click comes back as the controller's `api_trough(i)`. The Tk tests
+# here asked a real canvas about bindings; what is left to ask is the model's
+# decision, the controller's refusal, and where the page puts the listener.
 
-def _panel(on_ball):
-    """A real TroughPanel on an invisible Tk root, or a skip.
 
-    REAL Tk, not a stub, because what is under test is a BINDING: `tag_bind`
-    on a canvas item with a "break" return. A fake canvas would happily record
-    a bind that Tk itself would never deliver, which is the one thing this
-    needs to know.
-    """
-    tk = pytest.importorskip("tkinter")
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:                          # no display / no Tcl
-        pytest.skip("Tk unavailable: %s" % exc)
-    root.attributes("-alpha", 0)
-    # Off-screen too, not just transparent: a transparent window is still
-    # MAPPED - it takes the foreground and gets a taskbar button, which is
-    # what drags a fullscreen game around on the developer's own machine.
-    # Parking it is the half that actually works.
-    root.geometry("+10000+10000")
+def _dots(clickable=True):
     import playfield
-    cv = tk.Canvas(root, width=300, height=60)
-    cv.pack()
     positions = [dict(pos=i + 1, id=71 - i, name="Trough %d" % (i + 1))
                  for i in range(6)]
-    panel = playfield.TroughPanel(cv, positions, "named", 4, 4, anchor="nw",
-                                  on_ball=on_ball)
-    root.update()
-    return root, panel
+    return playfield.TroughDots(positions, "named", clickable=clickable)
 
 
 def test_clicking_a_ball_takes_one_out_and_an_empty_slot_brings_one_home():
@@ -407,84 +391,57 @@ def test_clicking_a_ball_takes_one_out_and_an_empty_slot_brings_one_home():
     Pressing the trough SWITCH cannot do it - item 24's hold is momentary and
     a ball is a latched closure - so the six dots are the control.
     """
-    said = []
-    root, panel = _panel(said.append)
-    try:
-        panel.update([True, True, True, False, False, False], "x")
-        panel._click(0)                       # a ball -> one fewer
-        panel._click(2)                       # a deeper ball -> still one fewer
-        panel._click(4)                       # an empty slot -> one more
-        assert said == ["take", "take", "drain"]
-    finally:
-        root.destroy()
+    dots = _dots()
+    dots.update([True, True, True, False, False, False], "x")
+    assert dots.click(0) == "take"            # a ball -> one fewer
+    assert dots.click(2) == "take"            # a deeper ball -> still one fewer
+    assert dots.click(4) == "drain"           # an empty slot -> one more
+    assert dots.click(99) == "drain"          # off the end: never a crash
 
 
-def test_the_click_is_bound_to_the_dot_and_stops_there():
-    """It must not reach the window's hit test - see TroughPanel's docstring.
+def test_the_click_reaches_the_plunge_helper_only_when_clickable():
+    """The controller's side: a clickable strip runs plunge.py with the
+    model's decision; a read-only one (the key panel's dots) or no strip at
+    all is a refusal, so a stale page cannot press through it."""
+    import playfield
+    ctl = playfield.Playfield.__new__(playfield.Playfield)
+    ran = []
+    ctl.run_plunge = ran.append
 
-    Two separate promises: the binding exists ON the item (so the panel does
-    not need to be in `info`, which item 24 measured matters), and the handler
-    returns "break" (so the canvas-level press handler never runs).
-    """
-    said = []
-    root, panel = _panel(said.append)
-    try:
-        assert panel.cv.tag_bind(panel.balls[0], "<Button-1>")
-        panel.update([True] * 6, "x")
-        assert panel._click(0) == "break"
-    finally:
-        root.destroy()
+    class V:
+        trough = _dots()
+    ctl.view = V
+    V.trough.update([True] * 6, "x")
+    assert ctl.api_trough(0) == "take" and ran == ["take"]
+    V.trough = _dots(clickable=False)
+    assert ctl.api_trough(0) is None and ran == ["take"]
+    V.trough = None
+    assert ctl.api_trough(0) is None and ran == ["take"]
 
 
 def test_an_EMPTY_dot_is_clickable_across_its_whole_cell_not_just_its_ring():
     """David, 2026-08-11: "when hovering over the circles, it's not always
     indicating that i can click on it."
 
-    The cause is a Tk rule, not a mis-binding: an item drawn with `fill=""` is
-    hittable ONLY ON ITS OUTLINE, and an empty trough position is drawn
-    hollow - so an occupied dot was a 14 px disc and an empty one a 1 px ring.
-
-    THIS GENERATES A REAL POINTER EVENT rather than calling `_click`, because
-    that Tk rule is the thing under test and a direct call cannot see it:
-    `event_generate` with coordinates goes through the canvas's own hit
-    testing, exactly as a mouse does. Before the per-cell hit pad, a click at
-    the centre of an EMPTY dot reached nothing at all.
-    """
-    said = []
-    root, panel = _panel(said.append)
-    try:
-        panel.update([False] * 6, "x")           # every position hollow
-        root.update()
-        x0, y0, x1, y1 = panel.cv.coords(panel.balls[2])
-        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2    # dead centre of the ring
-        panel.cv.event_generate("<Button-1>", x=int(cx), y=int(cy))
-        root.update()
-        assert said == ["drain"], "a click in the middle of a hollow dot"
-        # And the corner of the cell, which is not on the circle at all.
-        panel.cv.event_generate("<Button-1>", x=int(cx + 8), y=int(cy + 9))
-        root.update()
-        assert said == ["drain", "drain"], "a click on the cell, off the dot"
-    finally:
-        root.destroy()
+    In Tk the cause was the `fill=""` rule (a hollow item is hittable only on
+    its outline). On the page the listener is on the CELL - the dot and its
+    number - so an empty position is as big a target as a full one, and the
+    pointer cursor is the cell's too."""
+    js = open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf8").read()
+    assert 'c.addEventListener("click", () => api("trough", i))' in js
+    css = open(os.path.join(RIG, "pfpage", "pf.css"), encoding="utf8").read()
+    assert ".pf-trough.click .cell { cursor: pointer; }" in css
 
 
-def test_the_hit_pad_is_invisible_against_the_panel():
-    """It is a filled rectangle over a dark panel; the two colours are one
-    constant precisely so a hit target cannot become a visible grey square."""
-    import playfield
-    src = open(os.path.join(RIG, "playfield.py"), encoding="utf8").read()
-    assert 'fill=self.BG, outline=""' in src
-    assert playfield.TroughPanel.BG == "#101010"
-
-
-def test_a_panel_with_no_callback_is_not_clickable_at_all():
-    """The schematic view builds one before its driver exists in some paths;
-    a panel with nothing to call must simply not bind."""
-    root, panel = _panel(None)
-    try:
-        assert not panel.cv.tag_bind(panel.balls[0], "<Button-1>")
-    finally:
-        root.destroy()
+def test_a_strip_with_no_control_is_not_clickable_at_all():
+    """The key panel's dots are read-only (PAD-134): the spec says so, and
+    the page binds nothing for a spec that says so."""
+    dots = _dots(clickable=False)
+    assert dots.spec()["clickable"] is False
+    assert dots.spec()["pos"] == [1, 2, 3, 4, 5, 6]
+    dots.update([True, False, True, False, False, False], "t")
+    assert dots.dyn() == {"flags": [True, False, True, False, False, False],
+                          "text": "t"}
 
 
 def test_the_caption_says_the_dots_are_clickable():

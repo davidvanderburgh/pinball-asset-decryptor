@@ -1,25 +1,32 @@
-"""The Start / Plunge / Reset balls row exists in BOTH playfield views.
+"""The Insert coin / Start / Plunge / Reset balls / Clear switch alerts row
+exists in BOTH playfield views.
 
 Queue item 60. The fault this guards against is not "the button looks wrong",
-it is "the window has no way to reach plunge.py at all". `Field` built the row
-in `_place_actions()` as canvas widgets beside the plunger (item 25); the
-`Schematic` view - the one that runs on every title shipping no device table -
-had `run_plunge()` and nothing calling it but the trough dots, which only ever
-pass "take" and "drain". So on those titles David asked the obvious question:
-"where is my 'plunge' button now when there's no playfield image?"
+it is "the window has no way to reach plunge.py at all". The artwork view
+built the row beside the plunger (item 25); the schematic view - the one that
+runs on every title shipping no device table - had `run_plunge()` and nothing
+calling it but the trough dots, which only ever pass "take" and "drain". So on
+those titles David asked the obvious question: "where is my 'plunge' button
+now when there's no playfield image?"
+
+THE WINDOW IS A WEB PAGE NOW (2026-09-23). The row is drawn by pf.js from the
+`acts` list the controller's `state()` hands it, and a press comes back as
+`api_action(i)`. So the row is decided in ONE place for both views by
+construction, and what is under test is that decision and the call path the
+page uses - not widget construction, which no longer exists in Python.
 
 INVOKED, NOT LOOKED AT. A button that is drawn, labelled and wired to nothing
 is exactly what a screenshot cannot see, so every assertion here goes through
-`invoke()` and lands on a fake driver: the script NAME and the verb are what
-the guest actually receives. Real Tk, like the late-tables tests, because the
-thing under test is widget construction and a command binding - a stub Tk would
-happily record a command that Tk itself never fires.
+the controller's own entry point (`api_action`, `api_trough`, `run_plunge`)
+and lands on a fake driver: the script NAME and the verb are what the guest
+actually receives.
 
 The live half of item 60's acceptance is a run: a plunge on a schematic-view
 title has to put a ball into play. This is the half that answers in a second.
 """
 import os
 import sys
+import time
 
 import pytest
 
@@ -32,35 +39,6 @@ if RIG not in sys.path:
     sys.path.insert(0, RIG)
 
 
-@pytest.fixture(autouse=True)
-def _no_key_panel(monkeypatch, tmp_path):
-    """Every test here is about the bottom ACTION ROW, which PAD-134 hides
-    whenever a key panel attaches - and a panel attaches whenever dump/padbinds
-    exists. On a developer box that file is whatever the last emulator run
-    left (this one had today's), so the row vanished under
-    test_schematic_keeps_the_state_cluster_away_from_the_actions while CI,
-    which has no rig, stayed green. Pinned to a file that does not exist, so
-    the answer does not depend on the desk; the panel side has its own tests
-    in test_spike2_playfield_panel_controls.py."""
-    import playfield
-    monkeypatch.setattr(playfield, "BINDS_PATH", str(tmp_path / "no-padbinds"))
-
-
-def _root():
-    tk = pytest.importorskip("tkinter")
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:                          # no display / no Tcl
-        pytest.skip("Tk unavailable: %s" % exc)
-    root.attributes("-alpha", 0)
-    # Off-screen too, not just transparent: a transparent window is still
-    # MAPPED - it takes the foreground and gets a taskbar button, which is
-    # what drags a fullscreen game around on the developer's own machine.
-    # Parking it is the half that actually works.
-    root.geometry("+10000+10000")
-    return root
-
-
 class FakeReply:
     """A CompletedProcess as far as `helper_message()` cares."""
 
@@ -71,15 +49,32 @@ class FakeReply:
 class FakeDrv:
     """Records what would have been spawned, and spawns nothing.
 
+    Installed as `playfield.SwitchDriver`, so the controller, its key panel
+    and its keyboard fallback all hold THIS object - the same sharing the real
+    window has.
+
     `done` is the PAD-128 result callback, and it is ANSWERED rather than
     swallowed: the window's fix is that the helper's own reply reaches the
-    status bar, so a fake that dropped the callback would let that break with
+    status line, so a fake that dropped the callback would let that break with
     nothing noticing.  `reply` is what the pretend helper printed.
     """
 
     def __init__(self, reply=None):
         self.ran = []
+        self.pressed, self.released = [], []
         self.reply = reply
+
+    def press(self, sw):
+        self.pressed.append(sw)
+
+    def release(self, sw):
+        self.released.append(sw)
+
+    def spin(self, sw, on):
+        pass
+
+    def release_all(self):
+        pass
 
     def run_script(self, script, *args, done=None):
         self.ran.append((script, args))
@@ -96,71 +91,131 @@ def _switch_rows():
     return rows
 
 
-def test_schematic_offers_the_action_row_and_it_drives_plunge():
-    """The whole of item 60: no artwork, and the three actions are still there.
+#: Every wsl_run a test let through. The fixture fails the test on any.
+_WSL = []
 
-    Through the driver, so a row that was renamed or wired to the wrong script
-    fails here rather than on the glass.
+#: The module's own objects, taken by the fixture BEFORE it patches them
+#: (monkeypatch undoes every patch after each test, so these are the real
+#: ones), for the tests that need the real thing back.
+_REAL = {}
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch, tmp_path):
+    """No rig, no WSL, no desk: every file the window reads is pinned to a
+    path that does not exist, and every way out to WSL is stubbed BEFORE a
+    Playfield (and so a SwitchDriver) is built.
+
+    THE KEY PANEL IS PINNED ABSENT TOO. Every test here is about the bottom
+    ACTION ROW, which PAD-134 hides whenever a key panel attaches - and a
+    panel attaches whenever dump/padbinds exists. On a developer box that
+    file is whatever the last emulator run left, so the row vanished under a
+    test while CI, which has no rig, stayed green. Pinned to a file that does
+    not exist, so the answer does not depend on the desk; the panel side has
+    its own tests in test_spike2_playfield_panel_controls.py."""
+    import playfield
+    del _WSL[:]
+    for name in ("SwitchDriver", "load_switch_list", "load_coils"):
+        _REAL[name] = getattr(playfield, name)
+    monkeypatch.setattr(playfield, "wsl_run",
+                        lambda *a: _WSL.append(a))
+    monkeypatch.setattr(playfield, "state_run", lambda *a, **k: None)
+    monkeypatch.setattr(playfield, "state_slots", lambda: {})
+    monkeypatch.setattr(playfield.SwitchPipe, "_ensure", lambda self: False)
+    monkeypatch.setattr(playfield, "SwitchDriver", FakeDrv)
+    monkeypatch.setattr(playfield, "BINDS_PATH", str(tmp_path / "no-padbinds"))
+    for name in ("LED_PATH", "SW_PATH", "BALL_PATH", "LCD_PATH"):
+        monkeypatch.setattr(playfield, name, str(tmp_path / name.lower()))
+    monkeypatch.setattr(playfield, "STATE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(playfield, "SAVESTATES", False)
+    monkeypatch.setattr(playfield, "load_switch_list", _switch_rows)
+    monkeypatch.setattr(playfield, "load_switches", lambda: [])
+    monkeypatch.setattr(playfield, "load_leds", lambda: [])
+    monkeypatch.setattr(playfield, "load_coils", lambda: [])
+    monkeypatch.setattr(playfield, "load_led_names", lambda: {})
+    monkeypatch.setattr(playfield, "layout_art", lambda: None)
+    monkeypatch.setattr(playfield, "layout_extent", lambda pad=0: None)
+    monkeypatch.setattr(playfield, "layout_is_usable", lambda: False)
+    yield playfield
+    assert _WSL == [], "a test reached wsl_run: %r" % (_WSL,)
+
+
+def _window(playfield, monkeypatch, field=False):
+    """The controller the page talks to, on the schematic (default) or the
+    artwork view. Building a real Field with no tables gives a blank field,
+    which is all these need: the row is not the view's business."""
+    monkeypatch.setattr(playfield, "layout_is_usable", lambda: field)
+    pf = playfield.Playfield()
+    assert pf.kind == ("field" if field else "schematic")
+    return pf
+
+
+def _acts(pf):
+    return pf.state("main")["acts"]
+
+
+def _expected_acts(playfield):
+    return [[i, lbl] for i, (lbl, _s, _a) in enumerate(playfield.WINDOW_ACTIONS)]
+
+
+def _expected_runs(playfield):
+    return [(script, () if arg is None else (arg,))
+            for _, script, arg in playfield.WINDOW_ACTIONS]
+
+
+def test_schematic_offers_the_action_row_and_it_drives_plunge(offline,
+                                                             monkeypatch):
+    """The whole of item 60: no artwork, and the actions are still there.
+
+    Through the controller's api_action - the call the page's buttons make -
+    so a row that was renamed or wired to the wrong script fails here rather
+    than on the glass.
     """
-    root = _root()
-    import playfield
-    try:
-        view = playfield.Schematic(root, _switch_rows())
-        assert [b.cget("text") for b in view._acts] == \
-            [lbl for lbl, _, _ in playfield.WINDOW_ACTIONS]
-        view.drv = FakeDrv()
-        for b in view._acts:
-            b.invoke()
-        assert view.drv.ran == [(script, () if arg is None else (arg,))
-                                for _, script, arg in playfield.WINDOW_ACTIONS]
-    finally:
-        root.destroy()
+    playfield = offline
+    pf = _window(playfield, monkeypatch)
+    assert pf.key_panel is None and pf.acts_shown
+    assert _acts(pf) == _expected_acts(playfield)
+    for i, label in _acts(pf):
+        assert pf.api_action(i) == label
+    assert pf.drv.ran == _expected_runs(playfield)
 
 
-def test_schematic_keeps_the_state_cluster_away_from_the_actions():
+def test_schematic_keeps_the_state_cluster_away_from_the_actions(offline,
+                                                                 monkeypatch):
     """Item 25's separation, carried over: a misclicked "Load state" yanks the
-    game back to the save, so it is not a neighbour "Plunge" wants."""
-    root = _root()
-    import playfield
-    saved = playfield.SAVESTATES
-    playfield.SAVESTATES = True
-    try:
-        view = playfield.Schematic(root, _switch_rows())
-        sides = {b.pack_info()["side"] for b in view._acts}
-        assert sides == {"left"}
-        assert view._state_btns, "no state cluster to be apart from"
-        assert {w.pack_info()["side"] for w in view._state_btns} == {"right"}
-    finally:
-        playfield.SAVESTATES = saved
-        root.destroy()
+    game back to the save, so it is not a neighbour "Plunge" wants.
+
+    Which SIDE each cluster sits on is the page's CSS now (the actions are
+    their own flex row, pushed right; the save-state controls are a separate
+    element). What Python still decides is that they ARE separate: the state
+    cluster travels as `savestates` / `slots`, never as an entry in `acts`,
+    so the page cannot draw a state control inside the action row."""
+    playfield = offline
+    monkeypatch.setattr(playfield, "SAVESTATES", True)
+    pf = _window(playfield, monkeypatch)
+    st = pf.state("main")
+    assert st["savestates"] is True, "no state cluster to be apart from"
+    assert len(st["slots"]) == len(playfield.SLOT_IDS)
+    labels = [lbl for _i, lbl in st["acts"]]
+    assert labels == [lbl for lbl, _s, _a in playfield.WINDOW_ACTIONS]
+    assert not any(w in lbl.lower() for lbl in labels
+                   for w in ("save", "load", "slot")), labels
 
 
-def test_field_builds_the_same_row_from_the_same_list():
-    """The two views must not drift. `_place_actions` on a bare instance -
-    building a real Field wants the title's tables and its artwork, and none
-    of that is what this asserts."""
-    root = _root()
-    import playfield
-    import tkinter as tk
-    saved = playfield.SAVESTATES
-    playfield.SAVESTATES = False        # the state cluster is not under test
-    try:
-        f = playfield.Field.__new__(playfield.Field)
-        f.cv = tk.Canvas(root, width=400, height=300)
-        f.trough_panel = None
-        f.sw = type("SW", (), {"positions": []})()
-        f.drv = FakeDrv()
-        f._place_actions(400, 300)
-        assert [b.cget("text") for b in f._acts] == \
-            [lbl for lbl, _, _ in playfield.WINDOW_ACTIONS]
-        for b in f._acts:
-            b.invoke()
-        assert f.drv.ran == [(script, () if arg is None else (arg,))
-                             for _, script, arg in playfield.WINDOW_ACTIONS]
-    finally:
-        playfield.SAVESTATES = saved
-        root.destroy()
-def test_clear_alerts_runs_the_exerciser_with_no_argument():
+def test_field_builds_the_same_row_from_the_same_list(offline, monkeypatch):
+    """The two views must not drift. They cannot any more: the row is the
+    controller's, built from WINDOW_ACTIONS whatever the view - and this pins
+    that the artwork view gets it, and that it drives the same helpers."""
+    playfield = offline
+    pf = _window(playfield, monkeypatch, field=True)
+    assert _acts(pf) == _expected_acts(playfield)
+    for i, _label in _acts(pf):
+        pf.api_action(i)
+    assert pf.drv.ran == _expected_runs(playfield)
+
+
+def test_clear_alerts_runs_the_exerciser_with_no_argument(offline,
+                                                          monkeypatch):
     """Item 59, David's ask: an opt-in button that clears the CHECK SWITCH
     tech alerts.
 
@@ -174,20 +229,18 @@ def test_clear_alerts_runs_the_exerciser_with_no_argument():
     It must reach swexercise.py with NO argument: that script takes none, and
     passing a verb would make it a plunge.py-shaped call, which is exactly the
     special case WINDOW_ACTIONS carrying the script name exists to avoid.
+    Both ways in are checked: the row's button and the key panel's
+    (api_clear_alerts), which must land on the same call.
     """
-    root = _root()
-    import playfield
-    try:
-        view = playfield.Schematic(root, _switch_rows())
-        view.drv = FakeDrv()
-        clear = [b for b in view._acts
-                 if b.cget("text") == "Clear switch alerts"]
-        assert len(clear) == 1, \
-            "the row should offer exactly one Clear switch alerts"
-        clear[0].invoke()
-        assert view.drv.ran == [("swexercise.py", ())]
-    finally:
-        root.destroy()
+    playfield = offline
+    pf = _window(playfield, monkeypatch)
+    clear = [i for i, lbl in _acts(pf) if lbl == "Clear switch alerts"]
+    assert len(clear) == 1, \
+        "the row should offer exactly one Clear switch alerts"
+    pf.api_action(clear[0])
+    assert pf.drv.ran == [("swexercise.py", ())]
+    pf.api_clear_alerts()
+    assert pf.drv.ran == [("swexercise.py", ())] * 2
 
 
 def test_the_action_row_stays_one_fact_as_it_grows():
@@ -215,213 +268,66 @@ def test_a_machine_with_no_tables_still_opens_the_window():
     saved = playfield.TDIR
     playfield.TDIR = None
     try:
-        assert playfield.load_switch_list() == []
-        assert playfield.load_coils() == []
+        # The module's own readers, not the fixture's stand-ins.
+        assert _REAL["load_switch_list"]() == []
+        assert _REAL["load_coils"]() == []
     finally:
         playfield.TDIR = saved
 
 
 # --------------------------------------------------------------------------
 # ...and they have to fit next to the state controls (PAD-119)
-# --------------------------------------------------------------------------
-
-def _bare_field(root, w, h):
-    """A Field with just enough of one to lay its bottom row out.
-
-    Building a real one wants the title's tables and its artwork, and none of
-    that is what these assert - the same shortcut, and the same reason, as
-    test_field_builds_the_same_row_from_the_same_list above.
-    """
-    import playfield
-    import tkinter as tk
-    f = playfield.Field.__new__(playfield.Field)
-    f.cv = tk.Canvas(root, width=w, height=h)
-    f.trough_panel = None
-    f.key_panel = None
-    f.sw = type("SW", (), {"positions": []})()
-    f.drv = FakeDrv()
-    f._place_actions(w, h)
-    return f
-
-
-def _placed(f):
-    """[(label, x0, y0, x1, y1)] for every widget on the canvas."""
-    out = []
-    for item in f.cv.find_all():
-        if f.cv.type(item) != "window":
-            continue
-        wdg = f.cv.nametowidget(f.cv.itemcget(item, "window"))
-        try:
-            label = wdg.cget("text")
-        except Exception:                                   # noqa: BLE001
-            label = "<picker>"                              # the slot combobox
-        out.append((label,) + tuple(f.cv.bbox(item)))
-    return out
-
-
-def _overlaps(placed):
-    return [(a[0], b[0]) for i, a in enumerate(placed) for b in placed[i + 1:]
-            if a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4]]
-
-
-# --------------------------------------------------------------------------
-# HOW MANY ROWS THE WRAP COMES TO IS A FONT MEASUREMENT, NOT A RULE.
 #
-# v0.207.0 was tagged, published and yanked the same hour because the two
-# tests below asserted a row COUNT at a hardcoded canvas width.  Each action
-# button measures about 129 px on the Linux runner and about 135 px on macOS
-# against the narrower labels this developer box renders, so the bottom-row-up
-# wrap legitimately trips one button earlier there: a 900 px canvas that holds
-# one row here takes two on both of those runners, and the 420 px canvas that
-# takes two here takes three.  Every one of those layouts is correct.
+# THE LAYOUT IS THE PAGE'S NOW. PAD-119 (C FB 2026-09-08, beatles on a 1080p
+# screen) was the Tk canvas placing the state controls from the left edge and
+# the actions from the right with nothing stopping them meeting: the slot
+# picker was drawn over "Start" and "Load" over "Plunge", both there, neither
+# pressable. Its follow-up was a fifth action placed at a NEGATIVE x - clipped
+# off the canvas, a control simply missing. And v0.207.0 was yanked because a
+# test asserted a row COUNT that is really a font measurement.
 #
-# So the helpers below let the tests assert the RULES that were actually
-# implemented - a canvas with the room uses one row, a canvas without it wraps,
-# and only the BOTTOM row pays for the state cluster - with the widths measured
-# from the widgets instead of baked in.
+# pf.css makes the action row a flex-wrap row (.pf-acts, wrap-reverse so the
+# overflow climbs upward the way the Tk wrap did) beside a separate state
+# cluster. A flex container lays every child out in flow: two buttons cannot
+# overlap and none can land off the left edge, BY CONSTRUCTION, at any window
+# width and in any font, so there is no geometry left in Python to measure.
+# What stays checkable here is the half Python still owns - that the page is
+# handed every action, once, in order, beside (never inside) the state
+# cluster, whatever else is on the window.
 # --------------------------------------------------------------------------
 
-def _span(widgets, gap):
-    """What one cluster asks for, its own gaps included - `_place_actions`'
-    own `span()`, so the arithmetic here cannot drift from the arithmetic
-    under test."""
-    if not widgets:
-        return 0
-    return (sum(wdg.winfo_reqwidth() for wdg in widgets)
-            + gap * (len(widgets) - 1))
+def test_the_bottom_row_offers_every_action_once_beside_the_state_cluster(
+        offline, monkeypatch):
+    """PAD-119's window, as far as Python can see it: with the state cluster
+    up, the page is still handed all five actions - none dropped to make
+    room, none duplicated - and every index it can send back reaches its own
+    helper. A missing control used to be a clipped widget; now it could only
+    be a missing entry, and that is what this catches."""
+    playfield = offline
+    monkeypatch.setattr(playfield, "SAVESTATES", True)
+    pf = _window(playfield, monkeypatch, field=True)
+    acts = _acts(pf)
+    labels = [lbl for _i, lbl in acts]
+    assert len(labels) == len(set(labels)) == len(playfield.WINDOW_ACTIONS)
+    for label, _s, _a in playfield.WINDOW_ACTIONS:
+        assert label in labels, "%s is not offered at all" % label
+    for i, label in acts:
+        assert playfield.WINDOW_ACTIONS[i][0] == label
+        assert pf.api_action(i) == label
+    assert pf.drv.ran == _expected_runs(playfield)
 
 
-def _state_widgets(f):
-    """The state cluster as `_place_actions` built it, or [] with no flag."""
-    if not getattr(f, "_state_btns", None):
-        return []
-    return [f._slot_box] + f._state_btns
-
-
-def _one_row_width(f):
-    """The narrowest canvas on which both clusters share the bottom edge.
-
-    Measured, because "a canvas with the room" is a question about the font in
-    use and not about a number someone typed.
-    """
-    gap, pad = f.ACT_GAP, f.ACT_PAD
-    state = _state_widgets(f)
-    return (2 * pad + _span(f._acts, gap)
-            + (gap + _span(state, gap) if state else 0))
-
-
-def _act_rows(f, placed):
-    """The ACTION rows only, bottom row first, each left to right.
-
-    Keyed on the bottom edge, which is what one row means here.  The state
-    cluster is dropped: it is a cluster of its own and shares the bottom
-    action row's edge only when it fits beside it.
-    """
-    labels = [b.cget("text") for b in f._acts]
-    rows = {}
-    for p in placed:
-        if p[0] in labels:
-            rows.setdefault(p[4], []).append(p)
-    return [sorted(rows[edge], key=lambda p: p[1])
-            for edge in sorted(rows, reverse=True)]
-
-
-def _assert_the_wrap_is_tight(f, placed, w):
-    """Every action row is FULL: the button that went to the row ABOVE it did
-    not fit, measured against that row's own budget.
-
-    That budget is the whole canvas width less the padding, and less the state
-    cluster on the BOTTOM row ONLY - which is the rule the row count used to
-    stand in for ("two rows, not three: the rows above the bottom keep the
-    whole canvas width").  Charging every row for the state cluster, or
-    reserving nothing for it on the bottom row, both fail here, on any font.
-    """
-    rows = _act_rows(f, placed)
-    assert rows, placed
-    width = {b.cget("text"): b.winfo_reqwidth() for b in f._acts}
-    gap, pad = f.ACT_GAP, f.ACT_PAD
-    avail = max(1, w - 2 * pad)
-    state = _state_widgets(f)
-    state_cost = (_span(state, gap) + gap) if state else 0
-    for depth, row in enumerate(rows[:-1]):
-        budget = avail - (state_cost if depth == 0 else 0)
-        asked = sum(width[p[0]] for p in row) + gap * (len(row) - 1)
-        # Filled right to left from the bottom up, so the button that would
-        # not fit this row is the RIGHTMOST one on the row above it.
-        nxt = width[rows[depth + 1][-1][0]]
-        assert asked + gap + nxt > budget, (
-            "row %d still had room for %r: %d + %d of %d - %r"
-            % (depth, rows[depth + 1][-1][0], asked, nxt, budget, placed))
-
-
-def test_the_bottom_row_never_draws_a_button_on_a_button():
-    """PAD-119, C FB 2026-09-08: beatles on a 1080p screen.
-
-    The state controls grow rightwards from the canvas's left edge and the
-    actions leftwards from its right, and nothing stopped them meeting. On his
-    window the slot picker was drawn over "Start" and "Load" over "Plunge":
-    both buttons were there, neither could be pressed, and the log said
-    nothing because nothing was wrong with the run.
-
-    420x887 IS HIS WINDOW, not a contrived one. The canvas is the artwork
-    (336x710 for beatles) times pick_scale(), which is the screen height over
-    the artwork height - so this is exactly what a 1080p desk gets, and why a
-    taller developer monitor never saw it.
-    """
-    root = _root()
-    import playfield
-    saved, refresh = playfield.SAVESTATES, playfield.StateOps._slots_refresh
-    playfield.SAVESTATES = True
-    # No worker thread: the slot names come off the rig through wsl.exe, and
-    # what is under test is where the widgets land, not what is in them.
-    playfield.StateOps._slots_refresh = lambda self, **kw: None
-    try:
-        f = _bare_field(root, 420, 887)
-        placed = _placed(f)
-        assert _overlaps(placed) == [], \
-            "widgets drawn on top of each other: %r" % (placed,)
-        for label, _s, _a in playfield.WINDOW_ACTIONS:
-            assert any(p[0] == label for p in placed), \
-                "%s is not on the canvas at all" % label
-    finally:
-        playfield.StateOps._slots_refresh = refresh
-        playfield.SAVESTATES = saved
-        root.destroy()
-
-
-def test_a_canvas_with_the_room_keeps_them_on_one_row():
-    """The extra row is the narrow window's answer and must not become every
-    window's: on a canvas with the room the two clusters share the bottom edge
-    exactly as they always did, which is also what keeps the trough panel where
-    it is.
-
-    THE WIDE CANVAS IS MEASURED, NOT 900 PX - see the note above the helpers.
-    Whether a width has "the room" depends on the font, and 900 px has it here
-    and does not on either Unix runner.
-    """
-    root = _root()
-    import playfield
-    saved, refresh = playfield.SAVESTATES, playfield.StateOps._slots_refresh
-    playfield.SAVESTATES = True
-    playfield.StateOps._slots_refresh = lambda self, **kw: None
-    try:
-        narrow = _bare_field(root, 420, 887)
-        assert len({p[4] for p in _placed(narrow)}) > 1, \
-            "the narrow window should have taken another row"
-        _assert_the_wrap_is_tight(narrow, _placed(narrow), 420)
-
-        room = max(900, _one_row_width(narrow))
-        wide = _bare_field(root, room, 887)
-        assert _overlaps(_placed(wide)) == []
-        assert len({p[4] for p in _placed(wide)}) == 1, \
-            "one row means one bottom edge: %r" % (_placed(wide),)
-        # The trough panel sits above whatever the row count came to, or it
-        # lands on the state controls on exactly the windows that needed more.
-        assert narrow._panel_at[1] < wide._panel_at[1]
-    finally:
-        playfield.StateOps._slots_refresh = refresh
-        playfield.SAVESTATES = saved
-        root.destroy()
+def test_the_row_is_the_same_with_or_without_the_state_cluster(offline,
+                                                               monkeypatch):
+    """The extra row was the narrow window's answer and must not become a
+    change in WHAT is offered: the wrap is layout (the page's flex-wrap), so
+    the row's content cannot depend on whether the state cluster shares its
+    edge."""
+    playfield = offline
+    without = _acts(_window(playfield, monkeypatch, field=True))
+    monkeypatch.setattr(playfield, "SAVESTATES", True)
+    with_state = _acts(_window(playfield, monkeypatch, field=True))
+    assert without == with_state == _expected_acts(playfield)
 
 
 # --------------------------------------------------------------------------
@@ -447,19 +353,15 @@ def test_the_row_can_actually_start_a_game():
     assert ("Insert coin", "plunge.py", "coin") in playfield.WINDOW_ACTIONS
 
 
-def test_the_coin_button_reaches_plunge_coin():
-    """Through the driver, so a button wired to the wrong verb fails here."""
-    root = _root()
-    import playfield
-    try:
-        view = playfield.Schematic(root, _switch_rows())
-        view.drv = FakeDrv()
-        coin = [b for b in view._acts if b.cget("text") == "Insert coin"]
-        assert len(coin) == 1
-        coin[0].invoke()
-        assert view.drv.ran == [("plunge.py", ("coin",))]
-    finally:
-        root.destroy()
+def test_the_coin_button_reaches_plunge_coin(offline, monkeypatch):
+    """Through the controller, so a button wired to the wrong verb fails
+    here."""
+    playfield = offline
+    pf = _window(playfield, monkeypatch)
+    coin = [i for i, lbl in _acts(pf) if lbl == "Insert coin"]
+    assert len(coin) == 1
+    pf.api_action(coin[0])
+    assert pf.drv.ran == [("plunge.py", ("coin",))]
 
 
 def test_a_helper_message_carries_every_line_it_printed():
@@ -487,76 +389,55 @@ def test_a_helper_message_carries_every_line_it_printed():
     assert len(long) == playfield.HELPER_MSG_CAP and long.endswith("…")
 
 
-def test_the_helpers_answer_lands_in_the_status_bar():
+def test_the_helpers_answer_lands_in_the_status_bar(offline, monkeypatch):
     """The whole of "the game acts like nothing has happened" from this side:
     the window ran the helper and threw its reply away.
 
-    Real Tk, and the reply is delivered the way the driver delivers it, so
-    this covers the after(0) hop as well as the text.
-    """
-    root = _root()
-    import playfield
-    try:
-        view = playfield.Schematic(root, _switch_rows())
-        view.drv = FakeDrv(reply=FakeReply(
-            b"the trough is empty - nothing to eject\n"))
-        assert view._state_status() is None, "nothing pressed yet"
-        [b for b in view._acts if b.cget("text") == "Plunge"][0].invoke()
-        root.update()                       # run the queued after(0)
-        assert view._state_status() == "the trough is empty - nothing to eject"
-    finally:
-        root.destroy()
+    The REAL SwitchDriver this time, with only wsl_run faked, so the reply is
+    delivered the way the driver delivers it - on the driver's own thread,
+    into the controller's flash slot under its lock - and then read back the
+    way the page reads it: the view's tick puts it on the status line, and
+    `state()` carries that line to the page."""
+    playfield = offline
+    got = []
+
+    def fake_wsl(script, *args):
+        got.append((script, args))
+        return FakeReply(b"the trough is empty - nothing to eject\n")
+
+    monkeypatch.setattr(playfield, "SwitchDriver", _REAL["SwitchDriver"])
+    monkeypatch.setattr(playfield, "wsl_run", fake_wsl)
+    pf = _window(playfield, monkeypatch)
+    assert isinstance(pf.drv, _REAL["SwitchDriver"])
+    assert pf.state_status() is None, "nothing pressed yet"
+    plunge = [i for i, lbl in _acts(pf) if lbl == "Plunge"][0]
+    pf.api_action(plunge)
+    deadline = time.monotonic() + 10
+    while pf.state_status() is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert got == [("plunge.py", ("plunge",))]
+    assert pf.state_status() == "the trough is empty - nothing to eject"
+    frame = pf.view.tick(time.monotonic())
+    assert frame.get("status") == "the trough is empty - nothing to eject"
+    assert pf.state("main")["status"] == \
+        "the trough is empty - nothing to eject"
 
 
-def test_a_trough_dot_click_also_says_what_it_did():
+def test_a_trough_dot_click_also_says_what_it_did(offline, monkeypatch):
     """The dots are the other caller (`run_plunge`), and they are the ones he
     was clicking: "I can force it in using the black and white icons but the
-    game acts like nothing has happened"."""
-    root = _root()
-    import playfield
-    try:
-        view = playfield.Schematic(root, _switch_rows())
-        view.drv = FakeDrv(reply=FakeReply(
-            b"trough switch 66 closed (ball drained home)\n"))
-        view.run_plunge("drain")
-        root.update()
-        assert view.drv.ran == [("plunge.py", ("drain",))]
-        assert view._state_status() == \
-            "trough switch 66 closed (ball drained home)"
-    finally:
-        root.destroy()
+    game acts like nothing has happened".
 
-
-def test_five_actions_still_fit_the_1080p_canvas():
-    """PAD-119's window, one button later.  Four actions asked for 372 px of
-    its 408 and five ask for ~470, and nothing stopped `create_window` putting
-    the overflow at a NEGATIVE x - clipped off the canvas, no overlap for that
-    test to catch, and a control simply missing.
-    """
-    root = _root()
-    import playfield
-    saved, refresh = playfield.SAVESTATES, playfield.StateOps._slots_refresh
-    playfield.SAVESTATES = True
-    playfield.StateOps._slots_refresh = lambda self, **kw: None
-    try:
-        f = _bare_field(root, 420, 887)
-        placed = _placed(f)
-        assert _overlaps(placed) == [], placed
-        for label, _s, _a in playfield.WINDOW_ACTIONS:
-            hit = [p for p in placed if p[0] == label]
-            assert hit, "%s is not on the canvas at all" % label
-            x0, _y0, x1, _y1 = hit[0][1:]
-            assert x0 >= 0 and x1 <= 420, \
-                "%s is off the canvas at x %d..%d" % (label, x0, x1)
-        # It wrapped, and only the BOTTOM action row paid for the state
-        # cluster - the rows above it keep the whole canvas width.  Asserted as
-        # that rule rather than as "two rows, not three", because five buttons
-        # ask about 470 px of this canvas's 408 in the font here and about 650
-        # px in the wider ones the Unix runners measure, so two rows and three
-        # rows are both the right answer.  See the note above the helpers.
-        assert len({p[4] for p in placed}) > 1, placed
-        _assert_the_wrap_is_tight(f, placed, 420)
-    finally:
-        playfield.StateOps._slots_refresh = refresh
-        playfield.SAVESTATES = saved
-        root.destroy()
+    Without a key panel the schematic's trough strip is the clickable
+    fallback, and the page's click on a dot arrives as api_trough: an empty
+    dot drains a ball in, and the helper's answer reaches the status line."""
+    playfield = offline
+    pf = _window(playfield, monkeypatch)
+    pf.drv.reply = FakeReply(b"trough switch 66 closed (ball drained home)\n")
+    assert pf.view.trough is not None and pf.view.trough.clickable
+    assert pf.api_trough(0) == "drain"
+    assert pf.drv.ran == [("plunge.py", ("drain",))]
+    assert pf.state_status() == "trough switch 66 closed (ball drained home)"
+    # ...and run_plunge itself, the one both callers share.
+    pf.run_plunge("drain")
+    assert pf.drv.ran == [("plunge.py", ("drain",))] * 2

@@ -67,6 +67,7 @@ REQ_FILES = {
     "requirements.txt": "the app's own runtime dependencies",
     "requirements-build.txt": "what the frozen Mac/Linux builds add",
     "requirements-windows.txt": "what the Windows bundled Python adds",
+    "requirements-ui.txt": "the app window: pywebview and its web view backends",
 }
 _REQ_NAME_RE = re.compile(r"requirements(?:-[a-z]+)?\.txt")
 
@@ -454,32 +455,35 @@ def test_pyinstaller_bundles_ffmpeg(script):
 
 @pytest.mark.parametrize("script", PYINSTALLER_BUILD_SCRIPTS, ids=lambda p: p.name)
 def test_pyinstaller_collects_all_of_pillow(script):
-    """Every preview canvas needs PIL.ImageTk, which needs more of Pillow
-    than static analysis finds.
-
-    Naming ``PIL`` + ``PIL.Image`` bundles enough to open an image and not
-    enough to draw one: ImageTk's Tk glue reaches PIL._tkinter_finder and
-    the _imagingtk extension by paths PyInstaller's tracer never walks.
-    The v0.86-v0.88 AppImages shipped exactly that way and every video
-    frame preview came up "No module named 'PIL._tkinter_finder'" (a tester) --
-    a frozen bundle the user cannot pip-fix.  --collect-all takes the
-    submodules, the data and the native libraries together.
+    """Pillow is --collect-all: its plugins load by name and its native
+    libraries are not reachable by static analysis (the v0.86-v0.88
+    AppImages shipped half a Pillow and every picture failed to open, "No
+    module named ..." in a frozen bundle the user cannot pip-fix).
+    --collect-all takes the submodules, the data and the native libraries
+    together.
     """
     if not script.exists():
         pytest.skip(f"{script.name} not present in this checkout")
     src = script.read_text(encoding="utf-8", errors="replace")
     assert ('--collect-all "PIL"' in src or "--collect-all 'PIL'" in src
             or "--collect-all PIL" in src), (
-        f"{script.name} must --collect-all PIL — hidden-importing PIL/PIL.Image "
-        f"alone drops PIL._tkinter_finder and _imagingtk, which kills every "
-        f"image and video preview in the frozen app.")
+        f"{script.name} must --collect-all PIL.")
+
+
+@pytest.mark.parametrize("script", PYINSTALLER_BUILD_SCRIPTS, ids=lambda p: p.name)
+def test_pyinstaller_leaves_tkinter_out(script):
+    """The app is a web page in a native window since the web UI cut-over:
+    nothing imports tkinter, and PIL.ImageTk (inside --collect-all PIL) would
+    otherwise drag Tcl/Tk into the bundle for nothing."""
+    if not script.exists():
+        pytest.skip(f"{script.name} not present in this checkout")
+    src = script.read_text(encoding="utf-8", errors="replace")
+    for mod in ("tkinter", "_tkinter"):
+        assert f'--exclude-module "{mod}"' in src, (
+            f"{script.name} must --exclude-module {mod}")
     for mod in ("PIL.ImageTk", "PIL._tkinter_finder"):
-        assert (f'--hidden-import "{mod}"' in src
-                or f"--hidden-import '{mod}'" in src
-                or f"--hidden-import {mod}" in src), (
-            f"{script.name} must --hidden-import {mod} — belt-and-braces "
-            f"alongside --collect-all PIL, because these two are the exact "
-            f"modules whose absence broke previews in the AppImage.")
+        assert f'--hidden-import "{mod}"' not in src, (
+            f"{script.name} still asks for {mod}")
 
 
 def test_windows_build_installs_runtime_deps():
@@ -751,7 +755,8 @@ all_pip_packages=()
 # The Debian spellings that have a different Arch name.  One of these reaching
 # pacman is "target not found", which fails the whole batch.
 _APT_ONLY_SPELLINGS = ("python3-zstandard", "xvfb", "webp", "xorriso",
-                       "libc6-dev", "xxd", "python3-tk", "busybox-static",
+                       "libc6-dev", "xxd", "python3-tk", "python3-gi",
+                       "gir1.2-webkit2-4.1", "busybox-static",
                        "gcc-arm-linux-gnueabihf")
 
 
@@ -799,7 +804,8 @@ def test_linux_installer_speaks_pacman_for_every_manufacturer_it_lists():
     stern = _run_linux_picker("6", pm="pacman")
     stern_pkgs = stern.split("packages:")[1].split("\n")[0].split()
     for p in ("qemu-user-static", "qemu-user-static-binfmt", "gcc",
-              "e2fsprogs", "fuse3", "tk", "ffmpeg", "busybox"):
+              "e2fsprogs", "fuse3", "python-gobject", "webkit2gtk-4.1",
+              "ffmpeg", "busybox"):
         assert p in stern_pkgs, f"Stern's pacman list lacks {p}:\n{stern}"
 
     # ...and the apt path is untouched by the second manifest: PM unset is
@@ -807,7 +813,8 @@ def test_linux_installer_speaks_pacman_for_every_manufacturer_it_lists():
     apt = _run_linux_picker("a")
     apt_pkgs = set(apt.split("packages:")[1].split("\n")[0].split())
     arch_only = {"qemu-user-static-binfmt", "tinyxxd", "python-zstandard",
-                 "busybox", "tk", "libisoburn", "libwebp", "xorg-server-xvfb"}
+                 "busybox", "tk", "python-gobject", "webkit2gtk-4.1",
+                 "libisoburn", "libwebp", "xorg-server-xvfb"}
     assert not (apt_pkgs & arch_only), (
         f"Arch names reached the apt list: {apt_pkgs & arch_only}\n{apt}")
 
@@ -967,7 +974,8 @@ def test_linux_installer_without_apt_or_pacman_prints_both_spellings():
         capture_output=True, timeout=60)
     out = r.stdout.decode("utf-8", "replace")
     assert r.returncode == 1, (r.returncode, out, r.stderr)
-    for apt_name, arch_name in (("python3-tk", "tk"),
+    for apt_name, arch_name in (("python3-gi", "python-gobject"),
+                                ("gir1.2-webkit2-4.1", "webkit2gtk-4.1"),
                                 ("gcc-arm-linux-gnueabihf",
                                  "arm-linux-gnueabihf-gcc"),
                                 ("xxd", "tinyxxd"),
@@ -1385,7 +1393,7 @@ rm -rf "$tmp"
 def test_both_installers_offer_every_emulator_package_the_tab_names():
     """Regression guard — the native compiler was on nobody's list.
 
-    The Emulate tab probes what a run needs (emulate_tab._SETUP_TOOLS); the two
+    The Emulate tab probes what a run needs (emulate_core._SETUP_TOOLS); the two
     installers are where a user who never opens that tab gets the same things.
     Those were three separate lists and they came apart: the rig compiles the
     ARM shim AND a native renderer, only the cross compiler was ever named, and
@@ -1395,8 +1403,8 @@ def test_both_installers_offer_every_emulator_package_the_tab_names():
     Derived from the tab, so a sixth prerequisite cannot go stale here the way
     the fifth did.  libc6-dev is part of it for the reason the JJP entry
     already records: gcc only *recommends* the headers."""
-    from pinball_decryptor.gui.emulate_tab import (_SETUP_OPTIONAL,
-                                                   _SETUP_TOOLS)
+    from pinball_decryptor.webui.emulate_core import (_SETUP_OPTIONAL,
+                                                      _SETUP_TOOLS)
     ps1 = PS1.read_text(encoding="utf-8", errors="replace")
     linux = (INSTALLER / "install_prerequisites_linux.sh").read_text(
         encoding="utf-8", errors="replace")

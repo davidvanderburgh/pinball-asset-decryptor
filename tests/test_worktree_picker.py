@@ -369,6 +369,9 @@ def test_chooser_html_lists_the_rows_in_order_escaped():
     assert "<slots>" not in page
     assert page.count('class="row"') == 2
     assert wp._CHOOSER_QUESTION in page
+    # ten rows show before the list scrolls, and the window fits its page
+    assert "max-height: %dpx" % (wp._CHOOSER_ROW_PX * 10 + 2) in page
+    assert 'addEventListener("pywebviewready", fit)' in page
 
 
 def test_choose_main_answers_on_stdout(monkeypatch, capsys):

@@ -256,6 +256,11 @@ def checkout_badge(root=None):
     return branch
 
 
+#: Rows the chooser shows before its list scrolls, and one row's height.
+_CHOOSER_VISIBLE_ROWS = 10
+_CHOOSER_ROW_PX = 28
+
+
 def _launch(path):
     """Start the chosen checkout's app with this same interpreter."""
     env = dict(os.environ)
@@ -332,7 +337,8 @@ def _ask(root, others):
 def chooser_html(labels):
     """The chooser page: the rows, most recently touched first, the top one
     selected so Enter launches it; arrows move, a double click launches,
-    Esc cancels."""
+    Esc cancels.  Up to ``_CHOOSER_VISIBLE_ROWS`` rows show without a
+    scrollbar; once loaded the page asks the window to fit its content."""
     items = "\n".join(
         '<div class="row" tabindex="-1">%s</div>' % html.escape(text)
         for text in labels)
@@ -348,8 +354,9 @@ body { margin: 0; padding: 12px; background: var(--bg); color: var(--fg);
        font: 13px "Segoe UI", system-ui, sans-serif; user-select: none; }
 p { margin: 0 0 8px; }
 #rows { border: 1px solid var(--line); background: var(--self);
-        max-height: calc(100vh - 100px); overflow-y: auto; }
-.row { padding: 5px 8px; white-space: nowrap; cursor: default;
+        max-height: %(rows_px)dpx; overflow-y: auto; }
+.row { height: %(row_px)dpx; line-height: %(row_px)dpx; padding: 0 8px;
+       box-sizing: border-box; white-space: nowrap; cursor: default;
        overflow: hidden; text-overflow: ellipsis; outline: none; }
 .row.sel { background: var(--sel); color: #fff; }
 .buttons { display: flex; justify-content: flex-end; gap: 8px;
@@ -375,6 +382,11 @@ function show() {
 function api() { return window.pywebview && window.pywebview.api; }
 function go() { if (api()) { api().pick(sel); } }
 function cancel() { if (api()) { api().cancel(); } }
+function fit() {
+  var need = document.documentElement.scrollHeight - window.innerHeight;
+  if (api() && need !== 0) { api().fit(need); }
+}
+window.addEventListener("pywebviewready", fit);
 rows.forEach(function (r, i) {
   r.addEventListener("click", function () { sel = i; show(); });
   r.addEventListener("dblclick", function () { sel = i; show(); go(); });
@@ -396,7 +408,9 @@ show();
 </script>
 </body></html>
 """ % {"title": html.escape(_CHOOSER_TITLE),
-       "question": html.escape(_CHOOSER_QUESTION), "items": items}
+       "question": html.escape(_CHOOSER_QUESTION), "items": items,
+       "row_px": _CHOOSER_ROW_PX,
+       "rows_px": _CHOOSER_ROW_PX * _CHOOSER_VISIBLE_ROWS + 2}
 
 
 def _choose_main():
@@ -417,9 +431,16 @@ def _choose_main():
         def cancel(self):
             holder[0].destroy()
 
+        def fit(self, delta):
+            # the page measured what its content needs; the title bar and
+            # borders make any up-front estimate miss
+            win = holder[0]
+            win.resize(win.width, max(160, win.height + int(delta)))
+
     longest = max([len(text) for text in labels] + [len(_CHOOSER_QUESTION)])
     width = max(440, min(1100, 7 * longest + 60))
-    height = max(200, min(720, 118 + 27 * len(labels)))
+    shown = min(len(labels), _CHOOSER_VISIBLE_ROWS)
+    height = 140 + _CHOOSER_ROW_PX * shown
     holder.append(webview.create_window(
         _CHOOSER_TITLE, html=chooser_html(labels), js_api=_Api(),
         width=width, height=height, resizable=False, on_top=True))

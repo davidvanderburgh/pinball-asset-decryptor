@@ -33,6 +33,7 @@ import logging
 import threading
 from urllib.parse import quote, urlsplit
 
+from . import winbrand
 from .emulate_spike1_core import DEFAULT_NODES, SWITCH_COLS
 from ..plugins.stern.spike1_emulate import (MAX_INDEX, MAX_NODES,
                                             HardwareState, addr)
@@ -592,6 +593,12 @@ class ViewWindows:
             return
         if win is None:
             return
+        # a taskbar button and icon of its own, not a second PAD one: the
+        # DMD backbox for the display, the playfield for the switch panel
+        if kind == "display":
+            winbrand.brand(win, "dmdwin", winbrand.GAME_SCREEN)
+        else:
+            winbrand.brand(win, "playfield", winbrand.PLAYFIELD)
         win.events.closed += functools.partial(self._closed, kind, win)
         with self._lock:
             self._wins[kind] = win

@@ -1,28 +1,38 @@
-"""Regenerate the Spike 2 rig's window icons.
+"""Regenerate the emulator windows' icons.
 
-Two windows the emulator opens beside the app used to borrow an icon: the
+The windows the emulators open beside the app used to borrow an icon: the
 virtual playfield took the app's own (so the taskbar showed two PAD buttons
-nobody could tell apart), and the game's screen - an X window from
-padglhost, shown on the Windows desktop by WSLg - set none, so WSLg drew its
-Linux penguin. Each gets its own picture now, in the app icon's family (the
-same rounded dark tile) but with a different subject and colour, so the three
-buttons read apart at taskbar size:
+nobody could tell apart), and the game screens - X windows shown on the
+Windows desktop by WSLg - set none, so WSLg drew its Linux penguin. Each gets
+its own picture now, in the app icon's family (the same rounded dark tile)
+but with a different subject and colour, so the buttons read apart at
+taskbar size:
 
   * playfield - a top-down playfield: green board, three pop bumpers, yellow
-    flippers, a silver ball.
-  * gamewin   - the backbox: a lit screen over two speakers.
+    flippers, a silver ball. Every playfield / switch panel: Spike 2's
+    virtual playfield, Spike 1's switch / LED window, JJP's switch matrix.
+  * gamewin   - the backbox: a lit LCD over two speakers. The LCD titles'
+    game screens: Spike 2 (padglhost) and JJP (Xephyr).
+  * dmdwin    - the backbox with an amber dot-matrix display. Spike 1's
+    display window (DMD, or the home models' segment displays).
 
-Writes, all derived from the drawing code below:
+ONE FOLDER, THE SPIKE 2 RIG'S (tools/spike2_emu/icons), because it is the one
+every packaging carries - the macOS container mounts only that rig - and the
+other rigs and the app read them from there. Writes, all derived from the
+drawing code below:
 
-  tools/spike2_emu/icons/playfield.ico   the pywebview window (Windows)
-  tools/spike2_emu/icons/playfield.png   GTK window + app-mode favicon
-  tools/spike2_emu/icons/gamewin.png     the game window's picture, for reference
-  tools/spike2_emu/padicon.h             the game window's _NET_WM_ICON, as C
+  icons/playfield.ico  .png   windows' .ico (Windows), Tk / GTK / favicon .png
+  icons/dmdwin.ico     .png   the same pair for Spike 1's display
+  icons/gamewin.png           the LCD picture, for reference
+  icons/gamewin.argb          its _NET_WM_ICON, little-endian 32-bit words,
+                              for a window some other program made (Xephyr)
+  padicon.h                   the same words as C, compiled into padglhost
 
 Run after changing a drawing:  python installer/make_rig_icons.py
 Needs Pillow.
 """
 import os
+import struct
 
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -203,11 +213,76 @@ def draw_gamewin():
     return im
 
 
+#: 5x7 dot glyphs for the DMD's wordmark
+_GLYPHS = {
+    "P": ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
+    "A": ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
+    "D": ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
+}
+
+
+def draw_dmdwin():
+    """The backbox again, but its display is a 128x32-style dot matrix in
+    Spike 1 amber - wide and glowing, which is what reads at 24 px."""
+    im = Image.new("RGBA", (M, M), (0, 0, 0, 0))
+    _tile(im)
+    head = _mask()
+    ImageDraw.Draw(head).rounded_rectangle(_box(0.06, 0.09, 0.94, 0.91),
+                                           radius=_px(0.08), fill=255)
+    _fill(im, head, (92, 100, 132), (44, 48, 66))
+    inner = _mask()
+    ImageDraw.Draw(inner).rounded_rectangle(_box(0.09, 0.12, 0.91, 0.88),
+                                            radius=_px(0.06), fill=255)
+    _fill(im, inner, (22, 24, 36), (12, 13, 20))
+    # the display: black glass, a 32x9 dot grid, "PAD" lit in amber
+    x0, y0, x1, y1 = 0.11, 0.18, 0.89, 0.58
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle(_box(x0, y0, x1, y1), radius=_px(0.02),
+                        fill=(6, 4, 2, 255))
+    cols, rows = 32, 9
+    lit = set()
+    word = "PAD"
+    c0 = (cols - (len(word) * 5 + (len(word) - 1) * 2)) // 2
+    for k, ch in enumerate(word):
+        for r, line in enumerate(_GLYPHS[ch]):
+            for c, bit in enumerate(line):
+                if bit == "1":
+                    lit.add((c0 + k * 7 + c, 1 + r))
+    px = (x1 - x0 - 0.02) / cols
+    py = (y1 - y0 - 0.02) / rows
+    rad = min(px, py) * 0.46
+    glow = _mask()
+    gd = ImageDraw.Draw(glow)
+    for r in range(rows):
+        for c in range(cols):
+            cx = x0 + 0.01 + (c + 0.5) * px
+            cy = y0 + 0.01 + (r + 0.5) * py
+            on = (c, r) in lit
+            d.ellipse(_box(cx - rad, cy - rad, cx + rad, cy + rad),
+                      fill=(255, 184, 56, 255) if on else (44, 22, 8, 255))
+            if on:
+                gr = rad * 2.2
+                gd.ellipse(_box(cx - gr, cy - gr, cx + gr, cy + gr), fill=210)
+    glow = glow.filter(ImageFilter.GaussianBlur(_px(0.016)))
+    amber = Image.new("RGBA", (M, M), (255, 150, 40, 255))
+    im.alpha_composite(Image.composite(amber, Image.new("RGBA", (M, M)), glow))
+    # two speakers under it, as on the LCD backbox
+    for cx in (0.27, 0.73):
+        cy, r = 0.74, 0.09
+        d.ellipse(_box(cx - r, cy - r, cx + r, cy + r), fill=(120, 128, 156))
+        r2 = 0.070
+        d.ellipse(_box(cx - r2, cy - r2, cx + r2, cy + r2), fill=(28, 30, 44))
+        r3 = 0.026
+        d.ellipse(_box(cx - r3, cy - r3, cx + r3, cy + r3),
+                  fill=(84, 90, 116))
+    return im
+
+
 def _sized(master, n):
     return master.resize((n, n), Image.LANCZOS)
 
 
-def _c_array(name, img_sizes, master):
+def _netwm_words(img_sizes, master):
     """_NET_WM_ICON data: for each size, width, height, then ARGB rows."""
     words = []
     for n in img_sizes:
@@ -217,6 +292,10 @@ def _c_array(name, img_sizes, master):
         for i in range(0, len(raw), 4):
             r, g, b, a = raw[i:i + 4]
             words.append((a << 24) | (r << 16) | (g << 8) | b)
+    return words
+
+
+def _c_array(name, words):
     lines = []
     for i in range(0, len(words), 8):
         lines.append("    " + " ".join("0x%08xu," % w for w in words[i:i + 8]))
@@ -228,12 +307,17 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     pf = draw_playfield()
     gw = draw_gamewin()
+    dm = draw_dmdwin()
 
-    _sized(pf, 256).save(os.path.join(OUT, "playfield.png"))
-    _sized(pf, 256).save(os.path.join(OUT, "playfield.ico"),
-                         sizes=[(n, n) for n in ICO_SIZES])
+    for name, im in (("playfield", pf), ("dmdwin", dm)):
+        _sized(im, 256).save(os.path.join(OUT, name + ".png"))
+        _sized(im, 256).save(os.path.join(OUT, name + ".ico"),
+                             sizes=[(n, n) for n in ICO_SIZES])
     _sized(gw, 256).save(os.path.join(OUT, "gamewin.png"))
 
+    words = _netwm_words(X_SIZES, gw)
+    with open(os.path.join(OUT, "gamewin.argb"), "wb") as f:
+        f.write(struct.pack("<%dI" % len(words), *words))
     h = os.path.join(RIG, "padicon.h")
     with open(h, "w", newline="\n") as f:
         f.write("/* GENERATED by installer/make_rig_icons.py - do not edit.\n"
@@ -241,13 +325,12 @@ def main():
                 " * The game window's own icon, as _NET_WM_ICON wants it: for\n"
                 " * each size (largest first) width, height, then width*height\n"
                 " * ARGB pixels, row by row. icons/gamewin.png is the same\n"
-                " * picture. padglhost.c's win_set_icon() sets it. */\n"
+                " * picture. padglhost.c's win_brand() sets it. */\n"
                 "#ifndef PADICON_H\n#define PADICON_H\n\n")
-        f.write(_c_array("padicon_game", X_SIZES, gw))
+        f.write(_c_array("padicon_game", words))
         f.write("\n#endif\n")
-    print("wrote %s, %s and %s" % (os.path.join(OUT, "playfield.ico"),
-                                   os.path.join(OUT, "gamewin.png"), h))
-    return pf, gw
+    print("wrote %s and %s" % (OUT, h))
+    return pf, gw, dm
 
 
 if __name__ == "__main__":

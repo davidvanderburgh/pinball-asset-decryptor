@@ -126,6 +126,15 @@ class DmdView:
         self.delay = max(1, int(1000 / hz))
         self.root = tk.Tk()
         self.root.title("Spike 1 DMD")
+        # the DMD backbox icon (make_rig_icons.py, carried by the Spike 2
+        # rig): without one WSLg shows the penguin
+        try:
+            self._icon = tk.PhotoImage(file=os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "spike2_emu",
+                "icons", "dmdwin.png"))
+            self.root.iconphoto(True, self._icon)
+        except tk.TclError:
+            pass
         # Force an on-screen position: under WSLg/Weston a window with no
         # explicit geometry lands off-screen (observed at x~4985), so it opens
         # but is never visible.

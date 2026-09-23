@@ -618,6 +618,16 @@ class MatrixUI:
         self.coils = drawable_coils(devices.get('coils'))
 
         root.title('JJP switch matrix')
+        # Its own taskbar icon, the playfield one every rig's switch panel
+        # wears (installer/make_rig_icons.py; the Spike 2 rig carries them).
+        # Tk's class already gives the window a taskbar group of its own
+        # under WSLg, and an iconless group is the Linux penguin.
+        try:
+            self._icon = tk.PhotoImage(file=os.path.join(
+                HERE, '..', 'spike2_emu', 'icons', 'playfield.png'))
+            root.iconphoto(True, self._icon)
+        except tk.TclError:
+            pass
         root.configure(bg=BG)
         self._restore_geometry()
 

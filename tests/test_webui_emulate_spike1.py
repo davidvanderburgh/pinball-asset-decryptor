@@ -799,6 +799,37 @@ def test_view_windows_open_reopen_replace_place_and_close(fake_webview):
     assert len(fake_webview) == 4 and not vw.available()
 
 
+def test_each_view_window_gets_its_own_icon_and_taskbar_button(
+        fake_webview, monkeypatch):
+    """They are windows of the app's own process, so without this they sat
+    under the PAD taskbar button wearing the PAD icon."""
+    import types
+    from pinball_decryptor.webui import winbrand
+    from pinball_decryptor.webui.emulate_jjp_spike1view import ViewWindows
+    branded = []
+    monkeypatch.setattr(winbrand, "brand",
+                        lambda win, icon, group: branded.append(
+                            (win.title, icon, group)))
+    ctx = types.SimpleNamespace(host=_native_host("tok"), token="tok",
+                                store=_Store())
+    vw = ViewWindows(ctx)
+    vw.show("dmd")
+    assert _wait(lambda: len(branded) == 2)
+    assert sorted(branded) == [
+        ("Spike 1 — DMD", "dmdwin", winbrand.GAME_SCREEN),
+        ("Spike 1 — switches / LEDs", "playfield", winbrand.PLAYFIELD)]
+    assert winbrand.icon_path("dmdwin") and winbrand.icon_path("playfield")
+    vw.shutdown()
+
+
+def test_brand_leaves_a_window_with_no_native_form_alone():
+    import types
+    from pinball_decryptor.webui import winbrand
+    assert winbrand.brand(types.SimpleNamespace(), "playfield",
+                          winbrand.PLAYFIELD) is False
+    assert winbrand.set_app_id(0, winbrand.PLAYFIELD) is False
+
+
 def test_a_run_opens_the_two_windows_in_the_native_app(rig, tmp_path,
                                                        no_procs, monkeypatch,
                                                        fake_webview):

@@ -3,7 +3,7 @@
  * The game window's own icon, as _NET_WM_ICON wants it: for
  * each size (largest first) width, height, then width*height
  * ARGB pixels, row by row. icons/gamewin.png is the same
- * picture. padglhost.c's win_set_icon() sets it. */
+ * picture. padglhost.c's win_brand() sets it. */
 #ifndef PADICON_H
 #define PADICON_H
 

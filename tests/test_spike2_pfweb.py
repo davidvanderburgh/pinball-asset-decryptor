@@ -139,6 +139,31 @@ def test_the_playfield_wears_its_own_icon_not_the_apps():
                                      else "playfield.png")
 
 
+def test_every_icon_the_rigs_ship_is_whole():
+    """The first playfield.ico was committed under the rig folder's `* text`
+    rule, which took the CR out of its ten CR LF pairs: 10 bytes short, and a
+    file pywebview could not load.  Parsed here, no Pillow needed: every .ico
+    image must lie inside the file, every .png must end in its IEND chunk."""
+    import struct
+    d = os.path.join(RIG, "icons")
+    names = sorted(os.listdir(d))
+    assert {"playfield.ico", "playfield.png", "dmdwin.ico", "dmdwin.png",
+            "gamewin.png", "gamewin.argb"} <= set(names)
+    for name in names:
+        with open(os.path.join(d, name), "rb") as fh:
+            data = fh.read()
+        if name.endswith(".ico"):
+            reserved, kind, count = struct.unpack_from("<HHH", data, 0)
+            assert (reserved, kind) == (0, 1) and count, name
+            for i in range(count):
+                size, offset = struct.unpack_from("<II", data, 6 + 16 * i + 8)
+                assert offset + size <= len(data), (name, i)
+            assert offset + size == len(data), name     # the last one ends it
+        elif name.endswith(".png"):
+            assert data[:8] == b"\x89PNG\r\n\x1a\n", name
+            assert data[-12:] == b"\x00\x00\x00\x00IEND\xaeB`\x82", name
+
+
 def test_the_fonts_are_the_apps_own(host):
     if not host.fonts_dir:
         pytest.skip("no app fonts beside this rig")

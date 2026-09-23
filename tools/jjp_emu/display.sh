@@ -80,6 +80,13 @@ for i in $(seq 1 15); do
         # compositor chooses - on a multi-monitor desktop, usually the wrong
         # screen.  Best-effort and never fatal.
         bash "$HERE/winpos.sh" restore || true
+        # ITS OWN TASKBAR ICON.  Xephyr sets a class but no icon, so WSLg
+        # gives the game the Linux penguin; any X client may set
+        # _NET_WM_ICON on it, and WSLg follows the change.  The picture is
+        # the LCD backbox the Spike 2 game window wears (its rig carries
+        # the icons - installer/make_rig_icons.py).  Never fatal.
+        DISPLAY=${JJP_UI_DISPLAY:-:0} python3 "$HERE/wmicon.py" "$TITLE" \
+            "$HERE/../spike2_emu/icons/gamewin.argb" || true
         echo
         echo "Now launch the game against it:"
         echo "  JJP_DISPLAY=$JJP_NESTED bash $HERE/run_game.sh --detach"

@@ -182,6 +182,14 @@ class Viewer:
 
         self.root = tk.Tk()
         self.root.title("Spike 1 — switches / LEDs" + (" (demo)" if demo else ""))
+        # the playfield icon every rig's switch panel wears (make_rig_icons.py,
+        # carried by the Spike 2 rig): without one WSLg shows the penguin
+        try:
+            self._icon = tk.PhotoImage(file=os.path.join(
+                _REPO, "tools", "spike2_emu", "icons", "playfield.png"))
+            self.root.iconphoto(True, self._icon)
+        except tk.TclError:
+            pass
         # On-screen position (WSLg/Weston places a geometry-less window
         # off-screen); below the DMD window (which opens at +60+60).
         self.root.geometry("+60+320")

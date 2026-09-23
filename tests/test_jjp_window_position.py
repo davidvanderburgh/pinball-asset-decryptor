@@ -228,3 +228,47 @@ def test_the_matrix_persists_its_size_but_not_its_position():
     # The saved string is trimmed to WxH before it is written.
     assert r"(\d+x\d+)" in body
     assert "-32768" in src, "the reason must be recorded where it bit"
+
+
+def _wmicon():
+    import importlib.util
+    path = os.path.join(RIG, "wmicon.py")
+    if not os.path.exists(path):
+        pytest.skip("wmicon.py not present")
+    spec = importlib.util.spec_from_file_location("jjp_wmicon", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_game_window_gets_its_own_icon_and_it_is_never_fatal():
+    """Xephyr sets a class and no icon, so WSLg gave the game the Linux
+    penguin.  display.sh sets _NET_WM_ICON on Xephyr's window once it is up
+    (measured: WSLg swaps the penguin for the icon on a window already on
+    screen), from the Spike 2 rig's icons - and a failure is a missing icon,
+    never a failed launch."""
+    src = code("display.sh")
+    m = re.search(r'python3 "\$HERE/wmicon\.py" "\$TITLE" \\\s*'
+                  r'"\$HERE/\.\./spike2_emu/icons/gamewin\.argb" \|\| true', src)
+    assert m, "display.sh must hand wmicon.py the game title and the icon"
+    icon = os.path.join(RIG, "..", "spike2_emu", "icons", "gamewin.argb")
+    assert os.path.isfile(icon)
+
+
+def test_the_icon_file_is_whole_and_a_cut_one_is_refused(tmp_path):
+    """wmicon.py checks every size's pixels are all there before it hands the
+    words to X - a truncated icon is refused, not drawn as garbage."""
+    wm = _wmicon()
+    icon = os.path.join(RIG, "..", "spike2_emu", "icons", "gamewin.argb")
+    words = wm.load(icon)
+    sizes, i = [], 0
+    while i < len(words):
+        sizes.append((words[i], words[i + 1]))
+        i += 2 + words[i] * words[i + 1]
+    assert sizes[0] == max(sizes) and (64, 64) in sizes
+    with open(icon, "rb") as fh:
+        raw = fh.read()
+    cut = tmp_path / "cut.argb"
+    cut.write_bytes(raw[:-40])
+    with pytest.raises(ValueError):
+        wm.load(str(cut))

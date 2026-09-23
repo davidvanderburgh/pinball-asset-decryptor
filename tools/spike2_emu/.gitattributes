@@ -9,6 +9,10 @@
 # Never touch the run artefacts, on the off-chance one is ever force-added.
 *.png binary
 *.raw binary
+# The playfield's window icon (icons/playfield.ico, installer/make_rig_icons.py)
+# is committed and shipped: under `* text` a regeneration holding a CR LF pair
+# would be committed with the CR taken out.
+*.ico binary
 
 # The Mode SDK's PINNED runtime object (item 127, modes/sdk/prebuilt/mode.so) is
 # committed and shipped. Its rule MUST be here: a deeper .gitattributes wins, so the

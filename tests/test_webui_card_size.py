@@ -1067,8 +1067,8 @@ def test_a_build_that_wont_fit_is_one_clean_dialog(tmp_path, monkeypatch):
         assert [m["title"] for m in msgs] == ["Write Failed"]
         text = msgs[0]["message"]
         assert text == str(refusal)
-        assert text.startswith("This build needs 1.99 GB more on the card's "
-                               "games partition and it has 352 MB free")
+        assert text.startswith("This build needs 1.99 GB on the card's "
+                               "games partition, which has 352 MB free")
         assert "Build it for a 16 GB SD card" in text
         assert "16G" not in text and "Unexpected error" not in text
         lines = [e["text"] for e in w.window._log.get("stern", [])]

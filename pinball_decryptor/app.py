@@ -3600,7 +3600,12 @@ class App:
         # port builds are other games' cards, and the port's confirmation
         # never mentions a size, so each one builds at its own original's
         # size; the Write tab's choice is back in force when the chain ends.
+        # PAD_STERN_CARD_SIZE_FIXED tells a ported card that runs out of room
+        # to build that card on its own for a bigger size, never to set a
+        # size this chain ignores.
+        fixed_env = "PAD_STERN_CARD_SIZE_FIXED"     # card_size.FIXED_ENV
         asked = os.environ.pop(self._CARD_SIZE_ENV, None)
+        os.environ[fixed_env] = "1"
         if asked:
             log_cb("Each ported card is built at its own original's size: "
                    "the SD card size on the Write tab (%s) is for this "
@@ -3610,6 +3615,7 @@ class App:
                 jobs, extract, transfer, stage, write, log_cb,
                 lambda: self._cancel_requested)
         finally:
+            os.environ.pop(fixed_env, None)
             self._apply_card_size_env(self._card_size_setting())
         ok = bool(results) and all(s == "ok" for _j, s, _d in results)
         self.msg_queue.put(DoneMsg(ok, mod_port.summarize(results)))
@@ -3633,11 +3639,29 @@ class App:
         off the UI loop as soon as a bigger size is chosen, and the Build /
         flash dialog refuses on that answer before its Erase confirmation
         (WriteTab.card_size_problem); this catches a build started before the
-        answer was in."""
+        answer was in.  It also gets the project folder, the build's output
+        and the prerequisite strip's finished answers (Stern: assigned videos
+        that can't fit the card even before they are converted are refused
+        here, not after an hour of converting them)."""
         if original:
             why = None
             try:
-                why = self._current_mfr.write_preflight(original)
+                mfr = self._current_mfr
+                from .core.registry import Manufacturer
+                if isinstance(mfr, Manufacturer):
+                    try:
+                        rows = self.ctx.store.get("shell", "prereqs") or []
+                    except Exception:                   # noqa: BLE001
+                        rows = []
+                    why = mfr.write_preflight(
+                        original, assets_dir=assets_dir,
+                        output_path=getattr(self.pipeline, "output_path",
+                                            None),
+                        update=getattr(self.pipeline, "update", None),
+                        prereqs={r["name"]: r["state"] == "ok" for r in rows
+                                 if r.get("state") in ("ok", "missing")})
+                else:
+                    why = mfr.write_preflight(original)
             except Exception:                           # noqa: BLE001
                 why = None      # the pipeline's own checks still run
             if why:

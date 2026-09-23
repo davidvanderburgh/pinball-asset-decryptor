@@ -402,7 +402,7 @@ class SternWritePipeline(BasePipeline):
             had_modes = (before.get("modes") or {}).get("names") or []
         except Exception:
             had_modes = []
-        from .card_size import CardSizeError
+        from .card_size import Cancelled, CardSizeError
         try:
             counts, audio_mode, valpatch_mode = engine.write_image(
                 self.original_path, self.assets_dir, self.output_path,
@@ -412,8 +412,15 @@ class SternWritePipeline(BasePipeline):
                 update=self.update)
         except CardSizeError as e:
             # the SD card size option's refusal is an answer, not a crash:
-            # its sentence, without the traceback an unexpected error gets
-            raise PipelineError("Re-encode", card_class_words(str(e))) from e
+            # its sentence, without the traceback an unexpected error gets.
+            # Logged here as well, once: BasePipeline.run hands a
+            # PipelineError to the Write Failed dialog alone, and a refusal's
+            # numbers (the room, the size that fits, the biggest files,
+            # PAD-176) belong in the log a user keeps and pastes.
+            msg = card_class_words(str(e))
+            if not (isinstance(e, Cancelled) or self._cancelled):
+                self._log(msg, "error")
+            raise PipelineError("Re-encode", msg) from e
         self._set_phase(3)  # Patch image
         # Item 149: the modes this build put on the card, from its record.
         try:

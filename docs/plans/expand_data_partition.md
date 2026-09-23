@@ -76,6 +76,21 @@ with nothing relocated.
    multi-boot card, for a 32 GB original or on a direct SD write).
 7. A no-space failure says to build for a bigger card when the Write tab
    would offer one for this original.
+8. **Room is checked before the encode** (PAD-176's other half, `engine._SpaceCheck`,
+   design in `docs/architecture/stern.md` "Room on the games partition"). The
+   build adds up what it copies whole against the games partition's usable
+   room at its SD card size, before anything is encoded or written. That
+   covers each assigned clip (settled to the file that will really go on),
+   the grown sound bank at its exact length, and upper bounds for mode files.
+   Longer sounds are trimmed to fit. A build whose videos don't fit is refused
+   with the numbers and the smallest SD card size that fits. The file at the
+   output is left untouched, because the copy over it starts only once the
+   check passes. An update that fits only as a whole build becomes one.
+   `write_preflight` refuses even earlier, before the app converts any clip,
+   when a floor of the need can't fit. The Write tab's note gives the real
+   free room at each size. The texts about longer sounds and full-size
+   videos name both limits: the game's 2 GB bank, and the partition's room,
+   which only a bigger card raises.
 
 **Never `resize2fs IMG?offset=N`.** Handed a regular file, resize2fs 1.47.0
 finishes by truncating it to the filesystem's length, offset or not
@@ -129,13 +144,32 @@ card of that class).
   update installs onto /games, and a power cycle's boot fsck is clean. The rig
   never runs the card's kernel 3.14 or its init, so the emulator cannot prove
   those.
+- **2026-09-23, second pass: the room check before the encode.**
+  - Checkpoint commit `753673a3`, then the review fixes. Three reviewers found
+    12 confirmed defects in the first cut, then 10 more in the fixes, and
+    each was put to a skeptic. All 22 are fixed with tests.
+  - The worst one: a refused whole build waited out the 7.8 GB copy and then
+    deleted the build already at the output.
+  - Proven on the real card (scratchpad `e2e_stageD_build.py`, project
+    `C:\tmp\expand_e2e\gzproj2`, Godzilla Pro 1.16 audio + video, four songs
+    lengthened to 10 min):
+    - At 8G the bank budget trimmed one song, named 16 GB, and built.
+      The partition used exactly the predicted 77,522 blocks plus 1 block of
+      slack. The bank on the card is exactly the predicted 1,967,189,954 bytes.
+      e2fsck is clean.
+    - With 20 clips (+1.61 GB) at 8G, a whole build over an existing build is
+      refused in 3.9 s (it was 49 s) and leaves that build byte-identical. An
+      update onto it is refused in 0.8 s with the whole build's numbers
+      (352 MB here, 7.87 GB at 16 GB).
+  - **Still owed, blocked by a wedged WSL on the dev PC:** the Stage D 16G build
+    (four songs + 20 clips) with prediction vs actual, and its update in place.
 - Follow-up (not this branch): a grown build used as a multi-boot primary
   (mkmulticard's store sizing and the Multi-boot tab's size strip), filed as
   a separate task.
 
 ## How to test it
 
-- Targeted: `python -m pytest -q -p no:cacheprovider tests/test_stern_card_size.py tests/test_webui_card_size.py tests/test_pad176_no_space_report.py`
+- Targeted: `python -m pytest -q -p no:cacheprovider tests/test_stern_card_size.py tests/test_webui_card_size.py tests/test_pad176_no_space_report.py tests/test_stern_space_preflight.py tests/test_stern_space_hook_preflight.py tests/test_stern_space_port.py tests/test_stern_space_text_notes.py`
   (also run them under WSL: new test modules have failed on CI at first contact).
 - Real input: the scratchpad stage scripts above. Each copies 8-30 GB to
   C:\tmp\expand_e2e, and they never write under D:\Pinball\images.

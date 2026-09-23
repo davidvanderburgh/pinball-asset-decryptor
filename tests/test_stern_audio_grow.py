@@ -139,10 +139,11 @@ def test_longer_sound_texts_name_both_limits():
             assert "Godzilla 1.16" in text, text
     # and the SD card size tip says what a bigger card does NOT lift, so
     # 32 GB never reads as "unlimited songs", and that a build too big for
-    # the games partition is refused before its encode
+    # the games partition is refused before the card image is written
     tip = dict(HELP_CONTENT["Write"])["SD card size (Stern Spike 2)"]
     assert "sound bank over about 2 GB" in tip
-    assert "Before anything is encoded" in tip and "refused" in tip
+    assert "Before anything is written to the card image" in tip
+    assert "refused" in tip
 
 
 def test_the_trim_notice_names_every_clip_biggest_cut_first():

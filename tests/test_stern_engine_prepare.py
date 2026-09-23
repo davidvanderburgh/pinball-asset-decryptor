@@ -210,7 +210,7 @@ def test_a_cancel_during_the_grow_stage_returns_the_cancelled_shape(monkeypatch,
     monkeypatch.setattr(engine, "_derive_grown", derive_then_cancel)
     _msgs, log = _capture()
     got = _compute(project, log, cancel=lambda: state["cancelled"])
-    assert got == (None, None, None, None)
+    assert got == (None, None, None, None, None)     # the five write_image unpacks
     assert staged["path"], "the bank was staged before the Cancel"
     assert "path" not in staged["repointed"], "the re-point was not started after it"
 
@@ -229,4 +229,4 @@ def test_a_cancel_before_the_restore_returns_the_cancelled_shape(monkeypatch, tm
         raise AssertionError("the restore ran after a Cancel")
     monkeypatch.setattr(engine, "_restore_masterdir_consumed", not_here)
     _msgs, log = _capture()
-    assert _compute(project, log, cancel=lambda: state["cancelled"]) == (None, None, None, None)
+    assert _compute(project, log, cancel=lambda: state["cancelled"]) == (None,) * 5

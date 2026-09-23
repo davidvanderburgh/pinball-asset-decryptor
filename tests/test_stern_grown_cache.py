@@ -20,7 +20,7 @@ from pinball_decryptor.plugins.stern import engine                           # n
 from tests.test_stern_audio_grow import _capture, _said, _wav                # noqa: E402
 from tests.test_stern_mode_write_engine import _mode_card                    # noqa: E402
 
-CANCELLED = (None, None, None, None)
+CANCELLED = (None, None, None, None, None)     # the five write_image unpacks
 
 
 def _compute(project, log, cancel=lambda: False, **kw):

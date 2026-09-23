@@ -77,6 +77,11 @@ CARD_SIZES = collections.OrderedDict([
 #: Stern build options: unset means "the original's size", which is what every
 #: headless caller has always built.
 ENV = "PAD_STERN_CARD_SIZE"
+#: Set ("1") while the app's Port + build runs.  A port builds every card at
+#: its own original's size, whatever the Write tab says (app.py pops ENV for
+#: the whole chain), so a ported card that runs out of room is never told to
+#: set SD card size on the Write tab: that is for building the card on its own.
+FIXED_ENV = "PAD_STERN_CARD_SIZE_FIXED"
 
 P1 = (0x0C, 8192, 16384)
 P2 = (0x83, 24576, 688128)
@@ -141,6 +146,28 @@ def requested():
     ``None`` for the original's own size."""
     v = (os.environ.get(ENV) or "").strip().upper()
     return v if v in CARD_SIZES and v != "8G" else None
+
+
+def size_fixed():
+    """Whether this build can't take an SD card size at all: Port + build
+    (:data:`FIXED_ENV`) makes every card at its own original's size."""
+    return os.environ.get(FIXED_ENV) == "1"
+
+
+def bigger_card(cls, free=None, fixed=False):
+    """The words that send a user to a build for the *cls* SD card, with the
+    room its games partition then has (*free* bytes) when known, to follow
+    "if the SD card in the machine is 16 GB or bigger, ...": "build it for a
+    16 GB SD card (SD card size on the Write tab: 7.87 GB free there)".
+    With *fixed* (:func:`size_fixed`) the build is a port's, which can't
+    take a size, so they say to build the card on its own instead."""
+    room = size_words(free) + " free there" if free is not None else ""
+    if fixed:
+        return ("build this card on its own from the Write tab for a %s SD "
+                "card (%sa port builds every card at its original's size)"
+                % (words(cls), room + "; " if room else ""))
+    return ("build it for a %s SD card (SD card size on the Write tab%s)"
+            % (words(cls), ": " + room if room else ""))
 
 
 def class_of(nbytes):
@@ -557,19 +584,31 @@ def size_words(n):
 
 class WontFit(CardSizeError):
     """What a build copies on whole doesn't fit the games partition, found
-    before anything was encoded or written.  ``str()`` is the refusal a user
-    reads.
+    before the build wrote a byte to its output (a build already there is
+    left as it was).  ``str()`` is the refusal a user reads.
 
     *need* and *avail* are bytes: what the build adds to the partition and
-    what the partition has for it.  *items* are ``(bytes, card_path)`` for
-    the files that grow the most.  *fits* is the smallest SD card size the
-    build does fit at (with *fits_room*, its usable bytes there), or
-    ``None``; *largest* / *largest_room* the biggest size that was
-    considered, said when even that is too small.  *at* is the size this
-    build is for, when it grows the card."""
+    what the partition has for it, both measured on the ORIGINAL grown to
+    the size this build is for (*at*, when it grows the card): the figures
+    the Write tab's SD card size note gives.  *items* are ``(bytes, name)``
+    for the files that grow the most, named the way the user knows them.
+    *fits* is the smallest SD card size the build does fit at (with
+    *fits_room*, its usable bytes there), or ``None``; *largest* /
+    *largest_room* the biggest size that was considered, said when even that
+    is too small.  All of them come from the one *need*.  *fixed*: the build
+    can't take a size (a port's, see :func:`bigger_card`).
+
+    *early*: found by the Build's first step (Stern write_preflight), before
+    any replacement was converted, which counts only what is sure, so *need*
+    is a floor.  Without it the refusal comes from the engine's pre-flight,
+    after the Build converted the replacements it had to (they stay in the
+    project), and before the card image was written.  *uncounted* clips of
+    an early refusal couldn't be sized before they are converted: *fits* is
+    then only the smallest size that could hold the build, and said so."""
 
     def __init__(self, need, avail, items=(), fits=None, fits_room=None,
-                 largest=None, largest_room=None, at=None):
+                 largest=None, largest_room=None, at=None, fixed=False,
+                 early=False, uncounted=0):
         self.need = int(need)
         self.avail = int(avail)
         self.items = sorted(items, reverse=True)
@@ -578,19 +617,51 @@ class WontFit(CardSizeError):
         self.largest = largest
         self.largest_room = largest_room
         self.at = at
+        self.fixed = bool(fixed)
+        self.early = bool(early)
+        self.uncounted = int(uncounted or 0)
         super().__init__(self._sentence())
 
     def _sentence(self):
-        msg = ("This build needs %s more on the card's games partition and it "
-               "has %s free%s, so the build was stopped before anything was "
-               "encoded or written."
-               % (size_words(self.need), size_words(self.avail),
-                  " on a %s SD card" % words(self.at) if self.at else ""))
-        out = ("fewer or smaller replacements, or fewer longer sounds")
-        if self.fits:
-            msg += (" Build it for a %s SD card (SD card size on the Write "
-                    "tab: %s free there), or take something out (%s)."
-                    % (words(self.fits), size_words(self.fits_room), out))
+        need, avail = size_words(self.need), size_words(self.avail)
+        msg = ("This build needs %s%s on the card's games partition, which "
+               "has %s free%s%s, so the build was stopped before "
+               % ("at least " if self.early else "", need, avail,
+                  " on a %s SD card" % words(self.at) if self.at else "",
+                  # the same figure twice reads as fitting: say the gap
+                  " (%s short)" % size_words(self.need - self.avail)
+                  if need == avail else ""))
+        if self.early:
+            msg += "anything was converted or written."
+        else:
+            msg += ("anything was written to the card image. Any replacements "
+                    "it converted first are kept in the project.")
+        out = "fewer or smaller replacements"
+        if self.uncounted:
+            msg += (" It may need more: %d replaced video(s) can't be sized "
+                    "until the build converts them." % self.uncounted)
+        if self.fits and self.uncounted:
+            # a floor: the size that fits it may still be too small
+            where = ("build this card on its own from the Write tab for that "
+                     "size (a port builds every card at its original's size)"
+                     if self.fixed else
+                     "pick it under SD card size on the Write tab")
+            msg += (" Only a %s SD card or bigger could hold it: if the SD "
+                    "card in the machine is that big, %s. Otherwise take "
+                    "something out (%s)." % (words(self.fits), where, out))
+        elif self.fits and self.fixed:
+            msg += (" If the SD card in that machine is %s or bigger, %s. "
+                    "Otherwise take something out (%s)."
+                    % (words(self.fits),
+                       bigger_card(self.fits, self.fits_room, fixed=True), out))
+        elif self.fits:
+            # only a machine whose SD card is that big can take the image
+            msg += (" Build it for a %s SD card if the SD card in the machine "
+                    "is %s or bigger (SD card size on the Write tab%s). "
+                    "Otherwise take something out (%s)."
+                    % (words(self.fits), words(self.fits),
+                       ": %s free there" % size_words(self.fits_room)
+                       if self.fits_room is not None else "", out))
         elif self.largest and self.largest_room is not None:
             msg += (" Even a %s SD card has only %s free there, so something "
                     "has to come out (%s)."
@@ -599,7 +670,7 @@ class WontFit(CardSizeError):
             msg += " Something has to come out (%s)." % out
         big = [(n, rel) for n, rel in self.items if n > 0][:5]
         if big:
-            msg += "  Biggest: %s." % ", ".join(
+            msg += " Biggest: %s." % ", ".join(
                 "%s (+%s)" % (rel, size_words(n)) for n, rel in big)
         return msg
 

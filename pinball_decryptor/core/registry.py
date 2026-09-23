@@ -523,8 +523,13 @@ class Manufacturer(ABC):
     # assignments are staged (re-encoding every assigned video can take an
     # hour): ``None``, or the sentence that refuses the build because it
     # could never finish (Stern Spike 2: an SD card size the original or this
-    # computer can't build).  Every other plugin has nothing to check.
-    def write_preflight(self, original_path):
+    # computer can't build, or assigned videos that can't fit the card even
+    # before they are converted).  The Build hands it the project folder, the
+    # output, its ``update=`` answer and ``prereqs`` (``{name: ok}`` for the
+    # prerequisite checks that have finished), so nothing has to be asked
+    # again.  Every other plugin has nothing to check.
+    def write_preflight(self, original_path, assets_dir=None,
+                        output_path=None, update=None, prereqs=None):
         return None
 
     def force_write_ext(self, name):

@@ -195,6 +195,16 @@ def run_native(ctx, server, host):
             pass
 
     def _on_loaded():
+        # SHOW IT, whatever the process was started with.  Windows applies a
+        # program's start state to the first window it shows, so a launcher
+        # that starts it hidden (the installer's launcher.vbs did, for
+        # v1.0.0 / v1.0.1) leaves this window created and never visible;
+        # a second show is honoured.  Harmless when it is already showing.
+        if sys.platform == "win32":
+            try:
+                win.show()
+            except Exception:                           # noqa: BLE001
+                log.warning("could not show the window", exc_info=True)
         # A Python-side drop handler makes pywebview give every dropped File
         # a pywebviewFullPath, which the page's drop zones read (a browser
         # never exposes a dropped file's path).  preventDefault stops the

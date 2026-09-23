@@ -2479,3 +2479,29 @@ def test_the_uninstaller_does_not_call_the_runtime_not_your_data():
     j = body.index("Also delete the emulator")
     disk = body[j:j + 700]
     assert "YOUR work" in disk and "cannot be undone" in disk, disk[:400]
+
+
+@pytest.mark.parametrize("vbs", [INSTALLER / "launcher.vbs", REPO / "launch.vbs"],
+                         ids=lambda p: p.name)
+def test_the_launchers_start_the_app_shown(vbs):
+    """v1.0.0 / v1.0.1 were yanked for this: Windows applies a program's
+    start state to the FIRST window it shows, the web app's first window is
+    its main window, and a launcher passing 0 (hidden) left it created and
+    never visible.  The show argument must be 1."""
+    src = vbs.read_text(encoding="utf-8", errors="replace")
+    code = [ln for ln in src.splitlines() if not ln.lstrip().startswith("'")]
+    runs = [ln for ln in code if ".Run " in ln or '"runas"' in ln]
+    assert runs, "no launch line found in %s" % vbs.name
+    for ln in runs:
+        assert not re.search(r",\s*0\s*(,|$)", ln.strip()), ln
+        assert re.search(r",\s*1\s*(,|$)", ln.strip()), ln
+
+
+def test_the_window_shows_itself_whatever_it_was_started_with():
+    """...and the app does not rely on the launcher: once the page loads on
+    Windows it shows its window, which a hidden start cannot swallow twice."""
+    src = (REPO / "pinball_decryptor" / "webui" / "host.py").read_text(
+        encoding="utf-8")
+    loaded = src[src.index("def _on_loaded():"):]
+    loaded = loaded[:loaded.index("win.events.loaded")]
+    assert 'sys.platform == "win32"' in loaded and "win.show()" in loaded

@@ -7196,6 +7196,11 @@ class MultibootPanel:
         #: A restored card path that has not been read yet - :meth:`on_shown`
         #: reads it the first time the tab is opened.
         self._pending_read = False
+        #: The RESTORED form, handed to that read so it can be put back on
+        #: top of the card it loads (:meth:`_carry_restored_edits`).  None
+        #: for every other read: only the restore's own read is one nobody
+        #: asked for, and only it can arrive with work already on the tab.
+        self._carry_edits = None
         #: ``(path, why)`` for a card at the output path that would not be
         #: read - what keeps the row's sentence from going on offering a
         #: load the tool has already refused.  Dropped the moment the box
@@ -10315,7 +10320,17 @@ class MultibootPanel:
         path = self._out_var.get().strip().strip('"')
         if not path or not os.path.isfile(path):
             return False
-        return bool(self._load_or_reload(confirm=False, asked=False))
+        # ...AND THE FORM GOES WITH IT.  "No unsaved edits" above is true of
+        # the SAVE (nothing has been typed since the app opened) and not of
+        # what was saved: a form left mid-edit on a card that was never
+        # rebuilt is exactly what this read would replace.  It is handed
+        # over rather than compared here, because what the card holds is not
+        # known until it has been read - see :meth:`_carry_restored_edits`.
+        self._carry_edits = self.state() if self._rows else None
+        started = bool(self._load_or_reload(confirm=False, asked=False))
+        if not started:
+            self._carry_edits = None
+        return started
 
     def _path_committed(self, _event=None):
         """<Return> in the path box: read the card it names.
@@ -11473,6 +11488,9 @@ class MultibootPanel:
 
         def done(rc, failed, texts):
             if rc != 0:
+                # Nothing was read, so there is no baseline to put a
+                # restored form back on top of (PAD-188).
+                self._carry_edits = None
                 if self.run_cancelled():
                     # A load only READS the card, so there is nothing to
                     # warn about and nothing to clean up but the empty dir
@@ -11500,6 +11518,7 @@ class MultibootPanel:
                 return
             info = seen.get("info")
             if not isinstance(info, dict):
+                self._carry_edits = None
                 self._error("Cannot read %s: the inspect printed no JSON "
                             "report - see the tool output." % path)
                 return
@@ -11518,6 +11537,10 @@ class MultibootPanel:
         form, warnings = form_from_inspect(
             info, card, media_dir, self._selector_var.get().strip(), **self._pk())
         self._rows = list(form.images)
+        # What the CARD holds, kept before anything can be put back on top of
+        # it (_carry_restored_edits): the headline is about the card that was
+        # read, not about what is on the tab when the sentence is written.
+        card_images = len(form.images)
         # Before the fields are written: Default's trace moves Highlight only
         # while it has not been typed, and this card's default is the one to
         # follow whatever was typed for the last one.
@@ -11567,6 +11590,9 @@ class MultibootPanel:
         # The baseline is read back through form(), not the form built above:
         # what every diff compares is what the widgets now hold.
         self._loaded_form = self.form()
+        # ...and it is the baseline whether or not the person's own form goes
+        # back on top of it, which is why this comes straight after (PAD-188).
+        carried = self._carry_restored_edits()
         # The preview's frames were drawn for the form that was there before;
         # the media dir has changed under them, so none of them is this card.
         self._pv_cache.clear()
@@ -11595,8 +11621,12 @@ class MultibootPanel:
         # just loaded is a different answer to the one it may already hold.
         self._schedule_probe(refresh=True)
         head = "Loaded %s: %d image%s." % (
-            os.path.basename(card), len(self._rows),
-            "" if len(self._rows) == 1 else "s")
+            os.path.basename(card), card_images,
+            "" if card_images == 1 else "s")
+        if carried:
+            head += (" Your %d unsaved change%s from last time %s still here."
+                     % (carried, "" if carried == 1 else "s",
+                        "is" if carried == 1 else "are"))
         # Notes, not failures: a card that loads with things worth saying
         # (an image whose .raw is elsewhere, a sound with no provenance) has
         # still loaded, so the line stays the ordinary colour and says them.
@@ -11606,6 +11636,96 @@ class MultibootPanel:
         for line in warnings:
             self._write("[load] " + line)
         return warnings
+
+    def _carry_restored_edits(self):
+        """Put the form a RESTORE brought back on top of the card that
+        restore's own read has just loaded.  The number of changes carried,
+        0 for none.
+
+        :meth:`on_shown` reads the restored path so the tab is really as it
+        was left - in editing mode, with Apply live instead of a green Build
+        aimed at the very card being edited.  It read it with
+        ``confirm=False`` on the grounds that "the form came off disk a
+        moment ago, so there is nothing to discard", and that is only true
+        when the saved form IS what the card holds.  It is not when somebody
+        edited a loaded card and quit without rebuilding it: the read then
+        replaced their work with the card's own image list, silently, on
+        every launch, and the only trace was a sentence saying the card had
+        loaded.  A RANDOM CARD added over a built card's games is exactly
+        that edit, which is what was reported (BEN, Discord @ben01434,
+        PAD-188: "I updated and went to the multiboot screen. The random
+        group I had is gone." - his shots are this tab mid-load, with the
+        card's six singles back and the random card missing).
+
+        So the read still happens, because it is what earns the baseline and
+        editing mode - and then the person's form goes back on top of it as
+        the unsaved changes it always was.  That is a state this tab already
+        knows how to be in and to describe: it is where anyone editing a
+        loaded card sits.
+
+        A SAVED FORM THAT MATCHES THE CARD IS LEFT ALONE.  The card's rows
+        carry facts a saved one cannot have (the code version read off each
+        image, which media is the card's own), and re-applying an identical
+        form would throw those away to change nothing.
+        """
+        doc = self._carry_edits
+        self._carry_edits = None
+        if not isinstance(doc, dict) or not self._loaded_card:
+            return 0
+        # The box may have been retyped while the read was on the worker; a
+        # form saved against another card is not an edit of this one.
+        if _norm(str(doc.get("card") or "")) != _norm(self._loaded_card):
+            return 0
+        # Identical is the common case (nothing was touched last session),
+        # and the state document is what both sides are written as, so it is
+        # what they are compared as.
+        here = self.state()
+        if (doc.get("images") == here.get("images")
+                and doc.get("menu") == here.get("menu")):
+            return 0
+        try:
+            from ..core.admin import resolve_mapped_drive as _rmd
+        except ImportError:                             # pragma: no cover
+            def _rmd(p):
+                return p
+        rows = rows_from_state(doc.get("images"), resolve=_rmd)
+        if not rows:
+            # An empty image list is not an edit worth keeping over a card
+            # that has just been read: it is what a half-written state file
+            # looks like.
+            return 0
+        menu = menu_from_state(doc.get("menu"))
+        self._rows = rows
+        self._loading = True
+        try:
+            self._move_var.set(menu["move"])
+            self._confirm_var.set(menu["confirm"])
+            self._volume_var.set(str(min(int(menu["volume"]),
+                                         self._backend.volume_max)))
+            self._machine_vol_var.set(bool(menu.get("machine_volume", True)))
+            self._compact_var.set(bool(menu.get("compact", False)))
+            self._timeout_var.set(str(menu["timeout"]))
+            self._heading_var.set(menu["heading"])
+            self._same_text_var.set(bool(menu.get("same_text_size", True)))
+            self._counter_var.set(bool(menu.get("show_counter", True)))
+            self._countdown_word_var.set(menu["countdown_word"])
+            self._default_var.set(str(menu["default"]))
+            self._theme_var.set(menu["theme"])
+            self._seed_colors(theme_colors(menu["theme"]) or dict(
+                theme_colors(DEFAULT_THEME) or {}, **menu["colors"]))
+        finally:
+            self._loading = False
+        self._sync_theme_states()
+        self._set_var(self._hl_var, menu["default"])
+        # The frames on the canvas were drawn for the card's own menu, which
+        # is not the menu now in the form.
+        self._pv_cache.clear()
+        self._pv_totals.clear()
+        self._pv_shown = None
+        self._pv_src = None
+        self._pv_ready = None
+        menu_diff, rebuild = diff_forms(self._loaded_form, self.form())
+        return len(menu_diff) + len(rebuild)
 
     def _apply_blockers(self, form, prepare):
         """Why the loaded card cannot be injected with this form.  Not

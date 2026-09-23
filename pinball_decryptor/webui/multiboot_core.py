@@ -3140,6 +3140,44 @@ def media_fingerprint(form):
     return hashlib.sha1(json.dumps(data).encode("utf-8")).hexdigest()[:12]
 
 
+def media_source_paths(form):
+    """Every FILE the form's media fields name, as typed: pictures, clips,
+    music beds and sounds - the words (auto, none, synth, auto@N...) are not
+    files and are left out.
+
+    For the Mac container's bind mounts (PAD-196).  The ISOs and the output
+    were mounted and these were not, so a picture on the Desktop was "not a
+    file" to the prepare inside the container, no media.json was written, and
+    the build went on to make a text-only menu for somebody who had picked a
+    picture and a song for each image."""
+    vals = []
+    for r in form.images:
+        vals += [r.art, r.art_video, r.anim, r.music, r.confirm]
+    vals += [form.sound_move, form.sound_confirm]
+    out = []
+    for v in vals:
+        v = (v or "").strip().strip('"')
+        if not v or v.lower() in _WORDS or _AUTO_IDX_RE.match(v):
+            continue
+        out.append(v)
+    return out
+
+
+def form_wants_media(form):
+    """Whether the menu this form describes has anything but text in it: a
+    picture, a clip, a music bed or a sound on any image.  A form that asks
+    for none of them builds a text-only menu on purpose; any other form
+    that reaches a build with no prepared media has lost something."""
+    for r in form.images:
+        art = group_art_spec(r) if is_group(r) else (r.art or "").strip()
+        anim = group_anim_spec(r) if is_group(r) else (r.anim or "").strip()
+        for v in (art, anim, r.music):
+            if (v or "").strip().strip('"').lower() not in ("", "none"):
+                return True
+    return any((v or "").strip().strip('"').lower() not in ("", "none")
+               for v in (form.sound_move, form.sound_confirm))
+
+
 def scaled_size(w, h, box_w, box_h):
     """``(w, h)`` - *w* x *h* scaled to fit the box with its aspect ratio
     kept, up or down.  The smooth path (Pillow); at least 1x1."""
@@ -9096,6 +9134,13 @@ class MultibootPanel:
             form.force = True
         self._plan_info = None
         self._update_edit_status()
+        # NO PREPARED SET, BUT THE FORM ASKS FOR MEDIA: the preview never got
+        # a media.json written (on a Mac its prepare ran in a container that
+        # could not see the pictures), and building without one made a
+        # text-only menu nobody asked for (PAD-196).  The build prepares it
+        # itself, into the dir the preview would have used.
+        if not form.media_dir and form_wants_media(form):
+            form.media_dir = self.media_dir()
         # A media set exists: prepare it in full, with THIS form's specs.
         # The preview leaves a sound-less media.json in the same dir, and
         # art changed since the last Prepare would otherwise not be on the
@@ -12091,8 +12136,9 @@ class MultibootPanel:
         except Exception:                               # noqa: BLE001
             return paths
         for row in (form.images or []):
-            if row.path:
-                paths.append(row.path.strip().strip('"'))
+            paths += [p for p in row_paths(row) if p]
+        # ...and the pictures, clips and sounds the prepare reads (PAD-196)
+        paths += media_source_paths(form)
         for p in (form.out, form.selector_dir):
             if p:
                 paths.append(p.strip().strip('"'))

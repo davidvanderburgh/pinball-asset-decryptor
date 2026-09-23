@@ -15,6 +15,7 @@ program's compile) are called out in multiboot_docker's own docstring.
 import hashlib
 import os
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -137,6 +138,111 @@ def test_the_panel_offers_every_path_a_run_touches(mac):
     for want in (ISO0, ISO1, "/Volumes/Out/multi.iso", "/Volumes/Sel",
                  "/Volumes/Media"):
         assert want in paths, want
+
+
+def test_the_menus_pictures_and_music_are_mounted_too(mac):
+    """PAD-196, cooltoy's Sonic: a picture and a song per image, both on his
+    Desktop.  Only the ISOs' folders were mounted, so the prepare inside the
+    container said "art 0: /host/Users/.../x.jpg is not a file", no
+    media.json was written and the build made a text-only menu."""
+    panel = mt.MultibootPanel.__new__(mt.MultibootPanel)
+    desk = "/Users/cooltoy/Desktop"
+    form = MultibootForm(
+        images=[ImageRow(path=ISO0, art=desk + "/logo.jpg",
+                         music=desk + "/Fanfare.wav",
+                         confirm=desk + "/go.wav"),
+                ImageRow(path=ISO1, art="video frame",
+                         art_video="/Volumes/Clips/intro.mov",
+                         anim=desk + "/loop.gif", music="none")],
+        out="/Volumes/Out/multi.iso", platform="jjp",
+        sound_move="/Users/cooltoy/Music/move.wav", sound_confirm="synth",
+        selector_dir="/Volumes/Sel")
+    panel.form = lambda: form
+    panel.media_dir = lambda: "/Volumes/Media"
+    paths = panel._run_paths()
+    for want in (desk + "/logo.jpg", desk + "/Fanfare.wav", desk + "/go.wav",
+                 "/Volumes/Clips/intro.mov", desk + "/loop.gif",
+                 "/Users/cooltoy/Music/move.wav"):
+        assert want in paths, want
+    # the words are not files, and must not become mounts
+    for word in ("none", "synth", "video frame", "auto"):
+        assert word not in paths, word
+    mounts = D.mount_points(paths)
+    for d in (desk, "/Users/cooltoy/Music", "/Volumes/Clips"):
+        assert any(d == m or d.startswith(m + "/") for m in mounts), d
+
+
+def test_a_form_with_any_picture_or_sound_wants_media():
+    """What decides whether a build with no media.json prepares one itself
+    (PAD-196) instead of quietly building a text-only menu."""
+    none = MultibootForm(images=[ImageRow(path=ISO0, art="none"),
+                                 ImageRow(path=ISO1, art="none")],
+                         sound_move="none", sound_confirm="none")
+    assert not mt.form_wants_media(none)
+    art = replace(none, images=[ImageRow(path=ISO0, art="auto"),
+                                ImageRow(path=ISO1, art="none")])
+    assert mt.form_wants_media(art)
+    music = replace(none, images=[ImageRow(path=ISO0, art="none",
+                                           music="/x/song.wav"),
+                                  ImageRow(path=ISO1, art="none")])
+    assert mt.form_wants_media(music)
+    assert mt.form_wants_media(replace(none, sound_move="synth"))
+
+
+def _build_panel(monkeypatch, tmp_path, form):
+    """A panel whose Build & verify only records the steps it would run."""
+    monkeypatch.setattr(mt, "validate_form", lambda f, **k: [])
+    monkeypatch.setattr(mt, "rebuild_blockers", lambda f: [])
+    panel = mt.MultibootPanel.__new__(mt.MultibootPanel)
+    panel._loaded_card = None
+    panel.form = lambda: form
+    panel.media_dir = lambda: str(tmp_path / "media")
+    panel._update_edit_status = lambda: None
+    panel._plan_step = None
+    said = []
+    panel._ok = said.append
+    panel._error = said.append
+    ran = {}
+
+    def run(cmds, on_step=None, on_done=None):
+        ran["labels"] = [label for label, _ in cmds]
+        ran["done"] = on_done
+        return True
+    panel._run_commands = run
+    return panel, ran, said
+
+
+def test_a_build_with_no_prepared_media_prepares_it(monkeypatch, tmp_path):
+    """PAD-196: the preview's prepare had failed, so there was no media.json
+    and the build made a text-only menu - "Card built and verified ... (no
+    prepared media - text-only menu)" - for a form that named a picture and
+    a song for every image.  The build prepares the media itself now."""
+    form = MultibootForm(
+        images=[ImageRow(path=ISO0, art="/x/logo.jpg", music="/x/a.wav"),
+                ImageRow(path=ISO1, art="auto")],
+        out=str(tmp_path / "multi.iso"), platform="jjp")
+    assert form.media_dir == ""       # what form() says with no media.json
+    panel, ran, said = _build_panel(monkeypatch, tmp_path, form)
+    panel._build_card()
+    assert "prepare" in ran["labels"]
+    assert ran["labels"].index("prepare") < ran["labels"].index("build")
+    assert form.media_dir == str(tmp_path / "media")
+    ran["done"](0, None, {})
+    assert not any("text-only" in s for s in said), said
+
+
+def test_a_text_only_form_still_builds_text_only(monkeypatch, tmp_path):
+    """...and one that asked for nothing to look at or hear is not handed a
+    prepare it has no use for."""
+    form = MultibootForm(
+        images=[ImageRow(path=ISO0, art="none"),
+                ImageRow(path=ISO1, art="none")],
+        sound_move="none", sound_confirm="none",
+        out=str(tmp_path / "multi.iso"), platform="jjp")
+    panel, ran, said = _build_panel(monkeypatch, tmp_path, form)
+    panel._build_card()
+    assert "prepare" not in ran["labels"]
+    assert form.media_dir == ""
 
 
 # --------------------------------------------------------------------- image

@@ -86,7 +86,6 @@ EXT_TYPES = (0x05, 0x0F)
 TAIL = 2                    # every stock image ends 2 sectors after p4
 LOGICALS = 2                # p5 (/data) and p6 (/dump)
 CHUNK = 8 << 20
-BLOCK = 4096                # the games partition's ext4 block size (checked)
 
 
 class CardSizeError(Exception):
@@ -345,10 +344,11 @@ class _E2fs:
             raise CardSizeError("the Linux this app uses can't attach the "
                                 "card image as a disk (no loop devices)")
 
-    def grow(self, image_path, offset, size, blocks, epoch=None,
-             timeout=5400):
-        """Check, grow to *blocks* and re-check the ext4 at *offset* (the
-        partition being *size* bytes).  Returns ``{step: (rc, output)}`` for
+    def grow(self, image_path, offset, size, epoch=None, timeout=5400):
+        """Check, grow to fill and re-check the ext4 at *offset*, the
+        partition being *size* bytes.  The size goes to resize2fs in 512-byte
+        SECTORS: a bare number is counted in the filesystem's own block size,
+        which Stern's cards set to 4 KiB but nothing here may assume.  Returns ``{step: (rc, output)}`` for
         the steps that ran: ``loop``, ``fsck`` (-fp), ``resize``, ``check``
         (-fn).  A step runs only when the one before it succeeded.
 
@@ -381,7 +381,8 @@ class _E2fs:
             'e2fsck -fp "$L" > /tmp/pad_e2.$$ 2>&1; r=$?',
             'sed "s/^/PAD_OUT fsck /" /tmp/pad_e2.$$; echo "PAD_E2 fsck $r"',
             '[ $r -le 1 ] || exit 0',
-            'resize2fs "$L" %d > /tmp/pad_e2.$$ 2>&1; r=$?' % int(blocks),
+            'resize2fs "$L" %ds > /tmp/pad_e2.$$ 2>&1; r=$?'
+            % (int(size) // SECTOR),
             'sed "s/^/PAD_OUT resize /" /tmp/pad_e2.$$; echo "PAD_E2 resize $r"',
             '[ $r -eq 0 ] || exit 0',
             'e2fsck -fn "$L" > /tmp/pad_e2.$$ 2>&1; r=$?',
@@ -471,8 +472,18 @@ def _copy_range(f, src, dst, n, cancel):
         if len(buf) != step:
             raise CardSizeError("the card image ended early while moving its "
                                 "settings and log partitions")
-        f.seek(dst + pos)
-        f.write(buf)
+        if not buf.count(0) == step or not _is_zero(f, dst + pos, step):
+            f.seek(dst + pos)
+            f.write(buf)
+
+
+def _is_zero(f, off, n):
+    """Whether [off, off+n) of *f* already reads as zeros.  Writing zeros
+    over zeros would allocate a sparse file's holes for nothing: most of
+    /data and /dump is empty, and the new place is a fresh hole."""
+    f.seek(off)
+    got = f.read(n)
+    return len(got) == n and got.count(0) == n
 
 
 def _same_range(f, a, b, n):
@@ -497,20 +508,42 @@ def _set_mbr(f, p3_count, p4_start):
     f.write(bytes(mbr))
 
 
-def preflight(original_path, target):
+def check_tools(target):
+    """Raise :class:`CardSizeError` unless this computer can grow a card to
+    *target* (the loop device, e2fsprogs, not macOS)."""
+    try:
+        _E2fs()
+    except CardSizeError as e:
+        raise CardSizeError(
+            "This card can't be built for a %s SD card on this computer: "
+            "%s." % (words(target), e))
+
+
+def preflight(original_path, target, tools=True):
     """Everything :func:`expand_image` needs, checked before the build
     spends any time: the original is a Stern-shaped card that can grow to
-    *target*, and this machine can run resize2fs.  Returns the class the
-    build will come out at (``None``: the original is that big already)."""
+    *target*, and (with *tools*) this computer can grow one.  Returns the
+    class the build will come out at (``None``: the original is that big
+    already)."""
     t = target_for(original_path, target)
-    if t:
-        try:
-            _E2fs()
-        except CardSizeError as e:
-            raise CardSizeError(
-                "This card can't be built for a %s SD card on this computer: "
-                "%s." % (words(t), e))
+    if t and tools:
+        check_tools(t)
     return t
+
+
+def offered(original_path):
+    """The bigger classes *original_path* can be built for on this computer:
+    what the Write tab offers, and what a no-space failure may suggest."""
+    if not supported():
+        return []
+    out = []
+    for c in CARD_SIZES:
+        try:
+            if target_for(original_path, c):
+                out.append(c)
+        except (CardSizeError, OSError):
+            continue
+    return out
 
 
 def _zero_range(f, off, n):
@@ -531,8 +564,9 @@ def _zero_range(f, off, n):
     pos = 0
     while pos < n:
         step = min(CHUNK, n - pos)
-        f.seek(off + pos)
-        f.write(zeros[:step])
+        if not _is_zero(f, off + pos, step):
+            f.seek(off + pos)
+            f.write(zeros[:step])
         pos += step
 
 
@@ -592,8 +626,7 @@ def expand_image(path, target, log=None, cancel=None, epoch=None):
         os.fsync(f.fileno())
     if cancel():
         raise Cancelled("cancelled")
-    blocks = new.p3_count * SECTOR // BLOCK
-    res = e2.grow(path, P3_START * SECTOR, new.p3_count * SECTOR, blocks,
+    res = e2.grow(path, P3_START * SECTOR, new.p3_count * SECTOR,
                   epoch=epoch)
     for step, what, ok in (
             ("loop", "the card image could not be attached as a disk",

@@ -171,8 +171,8 @@ class _FakeE2fs:
     def __init__(self):
         pass
 
-    def grow(self, image_path, offset, size, blocks, epoch=None, timeout=0):
-        _FakeE2fs.calls.append((image_path, offset, size, blocks))
+    def grow(self, image_path, offset, size, epoch=None, timeout=0):
+        _FakeE2fs.calls.append((image_path, offset, size))
         res = {}
         for step in ("loop", "fsck", "resize", "check"):
             rc = self.rcs.get(step, 0)
@@ -221,9 +221,8 @@ def test_expand_moves_the_data_partitions_and_rewrites_two_fields(
     assert _read(path, new.p4_start * 512, len(region_head)) == region_head
     assert _read(path, new.logicals[1][1] * 512, 512) == p6_head
     assert _read(path, new.laid_out - 1024, 1024) == tail
-    # one grow of p3, bounded to the new partition, to the class's blocks
-    assert _FakeE2fs.calls == [(str(path), 712704 * 512, 28311550 * 512,
-                                28311550 * 512 // 4096)]
+    # one grow of p3, bounded to the new partition
+    assert _FakeE2fs.calls == [(str(path), 712704 * 512, 28311550 * 512)]
 
 
 def test_expand_is_a_no_op_at_the_same_size(tmp_path, monkeypatch):
@@ -259,11 +258,10 @@ def test_a_truncating_resize_is_caught(tmp_path, monkeypatch):
     truncating it to the filesystem's length, offset or not.  The runner never
     hands it a file, and if the image changes size anyway the grow fails."""
     class Truncating(_FakeE2fs):
-        def grow(self, image_path, offset, size, blocks, epoch=None,
-                 timeout=0):
+        def grow(self, image_path, offset, size, epoch=None, timeout=0):
             with open(image_path, "r+b") as f:
-                f.truncate(blocks * 4096)
-            return super().grow(image_path, offset, size, blocks)
+                f.truncate(size // 4096 * 4096)
+            return super().grow(image_path, offset, size)
     monkeypatch.setattr(cs, "_E2fs", Truncating)
     path = make_card(tmp_path / "c.raw", marks=False)
     with pytest.raises(cs.CardSizeError, match="changed size"):
@@ -289,13 +287,15 @@ def test_the_runner_script_uses_a_bounded_loop_device():
                     "PAD_E2 check 0\n")
     e2 = cs._E2fs.__new__(cs._E2fs)
     e2.ex = Ex()
-    res = e2.grow("C:/x/card.raw", 364904448, 14495514624, 3538943)
+    res = e2.grow("C:/x/card.raw", 364904448, 14495513600)
     assert res == {"loop": (0, ""), "fsck": (0, ""), "resize": (0, ""),
                    "check": (0, "")}
     script = shipped[0]
-    assert ("losetup -f --show -o 364904448 --sizelimit 14495514624"
+    assert ("losetup -f --show -o 364904448 --sizelimit 14495513600"
             in script)
-    assert 'resize2fs "$L" 3538943' in script
+    # in 512-byte SECTORS: a bare number would be read in the filesystem's
+    # own block size, which nothing here may assume
+    assert 'resize2fs "$L" 28311550s' in script
     assert 'e2fsck -fp "$L"' in script and 'e2fsck -fn "$L"' in script
     assert "?offset" not in script
     assert 'losetup -d "$L"' in script
@@ -353,10 +353,9 @@ def test_the_vacated_range_is_zeroed_and_the_clock_passed_on(tmp_path,
     seen = {}
 
     class Rec(_FakeE2fs):
-        def grow(self, image_path, offset, size, blocks, epoch=None,
-                 timeout=0):
+        def grow(self, image_path, offset, size, epoch=None, timeout=0):
             seen["epoch"] = epoch
-            return super().grow(image_path, offset, size, blocks)
+            return super().grow(image_path, offset, size)
     monkeypatch.setattr(cs, "_E2fs", Rec)
     path = make_card(tmp_path / "c.raw")
     with open(path, "rb") as f:
@@ -395,8 +394,8 @@ def test_the_runner_pins_the_clock_zeroes_tables_and_clears_stale_loops():
             return "PAD_E2 loop 0\n"
     e2 = cs._E2fs.__new__(cs._E2fs)
     e2.ex = Ex()
-    e2.grow("C:/x/card.raw", 364904448, 14495514624, 3538943, epoch=1662343979)
-    e2.grow("C:/x/card.raw", 364904448, 14495514624, 3538943)
+    e2.grow("C:/x/card.raw", 364904448, 14495513600, epoch=1662343979)
+    e2.grow("C:/x/card.raw", 364904448, 14495513600)
     pinned, free = shipped
     assert "export RESIZE2FS_FORCE_ITABLE_INIT=1" in pinned
     assert "E2FSCK_TIME=1662343979 E2FSPROGS_FAKE_TIME=1662343979" in pinned
@@ -424,3 +423,40 @@ def test_the_bigger_card_hint_only_where_it_helps(tmp_path):
     assert engine._bigger_card_hint(nospace, str(c8), 24576 * 512) == ""
     assert engine._bigger_card_hint(ext4_grow.Ext4GrowError("x"),
                                     str(c8), p3) == ""
+
+
+def test_a_grown_partition_that_does_not_check_clean_is_refused(tmp_path,
+                                                               monkeypatch):
+    class Unclean(_FakeE2fs):
+        rcs = {"check": 4}
+    monkeypatch.setattr(cs, "_E2fs", Unclean)
+    path = make_card(tmp_path / "c.raw", marks=False)
+    with pytest.raises(cs.CardSizeError, match="did not check clean"):
+        cs.expand_image(str(path), "16G")
+
+
+def test_offered_is_what_the_original_can_be_built_for(tmp_path, monkeypatch):
+    monkeypatch.setattr(cs, "supported", lambda: True)
+    c8 = make_card(tmp_path / "8.raw", "8G", marks=False)
+    c16 = make_card(tmp_path / "16.raw", "16G", marks=False)
+    c32 = make_card(tmp_path / "32.raw", "32G", marks=False)
+    assert cs.offered(str(c8)) == ["16G", "32G"]
+    assert cs.offered(str(c16)) == ["32G"]
+    assert cs.offered(str(c32)) == []
+    _set_p3_superblock(c8, 0x0246)                  # a pending journal
+    assert cs.offered(str(c8)) == []
+    monkeypatch.setattr(cs, "supported", lambda: False)
+    assert cs.offered(str(c16)) == []
+
+
+def test_the_hint_names_only_sizes_the_original_can_take(tmp_path):
+    from pinball_decryptor.core import ext4_grow
+    from pinball_decryptor.plugins.stern import engine
+    nospace = ext4_grow.Ext4GrowNoSpace("full")
+    c8 = make_card(tmp_path / "8.raw", "8G", marks=False)
+    p3 = 712704 * 512
+    # an original the Write tab offers nothing for gets no pointer at it
+    assert engine._bigger_card_hint(nospace, str(c8), p3, []) == ""
+    if cs.supported():
+        h = engine._bigger_card_hint(nospace, str(c8), p3, ["32G"])
+        assert "(32 GB)" in h and "16 GB" not in h

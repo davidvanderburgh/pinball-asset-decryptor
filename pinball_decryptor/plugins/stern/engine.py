@@ -6794,7 +6794,8 @@ def _apply_update(disk_f, index, output_path, plan, writes, log, label=None):
             jobs = groups[off]
             t0 = time.monotonic()
             n_ok = _grow_whole(output_path, off,
-                               [(rel, src) for _k, rel, src, *_ in jobs], log)
+                               [(rel, src) for _k, rel, src, *_ in jobs], log,
+                               hint_sizes=plan.get("hint_sizes"))
             _stage_done(log, "copying %d file(s) whole onto the card"
                         % len(jobs), t0)
             for i, (key, rel, src, kind, digest, size) in enumerate(jobs):
@@ -7020,7 +7021,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     # grow, or a computer without resize2fs, is refused in seconds rather
     # than after the encode.
     from . import card_size as _cs
-    grow_to = _cs.preflight(original_path, _cs.requested())
+    grow_to = _cs.preflight(original_path, _cs.requested(), tools=False)
     if grow_to:
         log("This build is for a %s SD card: the games partition is grown to "
             "fill it, so it needs an SD card of at least %s."
@@ -7044,6 +7045,17 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             log("Building from the original rather than updating the build "
                 "already at %s: %s." % (output_path, why),
                 "warning" if update else "info")
+    # Growing takes the Linux side's loop devices and e2fsprogs; an update of
+    # a build that is already that size grows nothing, so only a whole build
+    # asks (still before any copy or encode).
+    if grow_to and not updating:
+        _cs.check_tools(grow_to)
+    # What a no-space failure may suggest: the sizes the Write tab would offer
+    # for this original, not whatever is bigger than the output.
+    try:
+        hint_sizes = _cs.offered(original_path)
+    except Exception:  # noqa: BLE001 - a hint is never worth failing a build
+        hint_sizes = []
     # Item 149: did the build already at the output carry modes?  Read before
     # the copy lays its stub record over it.
     prev_modes = (prev or read_build_manifest(output_path)).get("modes")
@@ -7165,6 +7177,8 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         whole = _whole_jobs(grow_plan)
         digests = _whole_digests(whole, assets_dir,
                                  (grow_plan or {}).get("cleanup"))
+        if grow_plan is not None:
+            grow_plan["hint_sizes"] = hint_sizes
         _save_hashcache(assets_dir)
 
         plan = None
@@ -7177,10 +7191,13 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 if not _mark_building(output_path):
                     raise _CannotUpdate("the build record beside the output "
                                         "can't be written")
+                plan["hint_sizes"] = hint_sizes
             except _CannotUpdate as e:
                 log("This build can't update the last one in place (%s); "
                     "building from the original instead." % e, "warning")
                 updating = False
+                if grow_to:
+                    _cs.check_tools(grow_to)    # a whole build grows it now
                 t0 = time.monotonic()
                 log("Copying card image to output...", "info")
                 copier = _start_copy()
@@ -8352,10 +8369,12 @@ def _grow_video_slots(image_or_device, grow_plan, log):
     if not grow_plan or not grow_plan.get("jobs"):
         return 0
     return _grow_whole(image_or_device, grow_plan["offset"],
-                       grow_plan["jobs"], log, epoch=grow_plan.get("epoch"))
+                       grow_plan["jobs"], log, epoch=grow_plan.get("epoch"),
+                       hint_sizes=grow_plan.get("hint_sizes"))
 
 
-def _grow_whole(image_or_device, part_offset, jobs, log, epoch=None):
+def _grow_whole(image_or_device, part_offset, jobs, log, epoch=None,
+                hint_sizes=None):
     """Copy ``[(card_rel, source), ...]`` whole onto the partition at
     *part_offset* through the ext4 driver and return how many landed (they
     land in order, so it is the first N).  Failures are logged, never
@@ -8387,18 +8406,21 @@ def _grow_whole(image_or_device, part_offset, jobs, log, epoch=None):
         return 0
     except ext4_grow.Ext4GrowError as e:
         log("Writing the full-size file(s) failed: %s%s"
-            % (e, _bigger_card_hint(e, image_or_device, part_offset)),
+            % (e, _bigger_card_hint(e, image_or_device, part_offset,
+                                    hint_sizes)),
             "error")
         return getattr(e, "grown", 0)
 
 
-def _bigger_card_hint(err, image, part_offset):
+def _bigger_card_hint(err, image, part_offset, sizes=None):
     """The other way out of a full games partition (card_size.py): when the
     SD card in the machine is bigger than the image, build for it.  Said only
     when that could help: the failure was for space, on the games partition
     (the system partition never grows), of an image file laid out like
     Stern's that is smaller than the biggest class, on a computer that can
-    grow one."""
+    grow one.  *sizes*, when the build knows them, are the classes the Write
+    tab offers for its ORIGINAL (card_size.offered): an original it refuses
+    (a pending journal, a multi-boot card) is never pointed at the option."""
     from ...core import ext4_grow
     from . import card_size as _cs
     if not isinstance(err, ext4_grow.Ext4GrowNoSpace) or not _cs.supported():
@@ -8410,7 +8432,7 @@ def _bigger_card_hint(err, image, part_offset):
             cls = _cs.class_of(_cs.read_layout(f).laid_out)
     except Exception:  # noqa: BLE001 - a device, a multi-boot card, unreadable
         return ""
-    bigger = [c for c in _cs.CARD_SIZES
+    bigger = [c for c in (_cs.CARD_SIZES if sizes is None else sizes)
               if _cs.CARD_SIZES[c] > _cs.CARD_SIZES.get(cls, 1 << 62)]
     if not bigger:
         return ""

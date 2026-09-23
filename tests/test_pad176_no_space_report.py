@@ -40,7 +40,7 @@ def test_without_numbers_it_says_what_it_always_said():
     """A failure before the accounting ran, or an older script: no invented
     figures, just the plain sentence."""
     msg = ext4_grow.no_space_message()
-    assert msg.startswith("Not enough free space on the card's data partition")
+    assert msg.startswith("Not enough free space on the card's games partition")
     assert "over" not in msg
 
 

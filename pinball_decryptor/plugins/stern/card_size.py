@@ -21,7 +21,9 @@ the stock images (godzilla_pro 8G, jaws_le 16G, metallica 32G):
 and every partition entry past p2 carries the capped CHS bytes (03 e0 ff), so
 the only bytes of the partition tables that differ between an 8G and a 16G
 card are MBR entry 3's sector count and entry 4's start LBA.  The EBRs hold
-RELATIVE addresses and do not change at all.
+RELATIVE addresses and do not change at all.  (The MBR's disk id differs by
+class too, and Stern's own 8G cards ship with two different ones; nothing on
+the machine reads it, so a grown card keeps its original's.)
 
 WHAT THIS MODULE DOES.  :func:`expand_image` takes a build's output (a copy of
 the original with the build's in-place patches already in it) and turns it into
@@ -90,6 +92,39 @@ BLOCK = 4096                # the games partition's ext4 block size (checked)
 class CardSizeError(Exception):
     """The card can't be built at the size asked for (a user-facing
     sentence)."""
+
+
+class Cancelled(CardSizeError):
+    """The user cancelled while the card was being grown.  The build's
+    caller treats it like any other cancel, not as a failure."""
+
+
+def words(cls):
+    """``"16 GB"`` for ``"16G"``: the words the Write tab and the packaging
+    use, for every sentence a user reads."""
+    return str(cls or "").replace("G", " GB") if cls else ""
+
+
+def supported():
+    """Whether this computer can grow a card at all.  macOS has no loop
+    devices, which is the only safe way to hand resize2fs the partition (see
+    :class:`_E2fs`), so the option is not offered there yet."""
+    return sys.platform != "darwin"
+
+
+#: ext4's incompat "needs_recovery" bit: the journal holds changes that were
+#: never written home, because the filesystem was not cleanly unmounted.
+_NEEDS_RECOVERY = 0x4
+
+
+def journal_pending(f):
+    """True when the games partition of the card open as *f* was not cleanly
+    unmounted and its journal still has to be replayed."""
+    f.seek(P3_START * SECTOR + 1024)
+    sb = f.read(1024)
+    if len(sb) < 1024 or sb[0x38:0x3A] != b"\x53\xef":
+        return False
+    return bool(struct.unpack_from("<I", sb, 0x60)[0] & _NEEDS_RECOVERY)
 
 
 Layout = collections.namedtuple(
@@ -222,10 +257,23 @@ def target_for(original_path, target=None):
             layout = read_layout(f)
         except CardSizeError as e:
             raise CardSizeError(
-                "This card can't be built for a %s SD card: %s." % (target, e))
-    delta, _new = plan(layout, target)
-    if delta <= 0:
-        return None
+                "This card can't be built for a %s SD card: %s."
+                % (words(target), e))
+        delta, _new = plan(layout, target)
+        if delta <= 0:
+            return None
+        # The check that runs before the games partition grows replays an
+        # unfinished journal, and the replay rewrites files the build has
+        # already patched by where they sat on the original (a real library
+        # image, turtles_le 1.58.1 "1987", has one pending).  Refuse up front
+        # instead of discarding the build after the whole encode.
+        if journal_pending(f):
+            raise CardSizeError(
+                "This card can't be built for a %s SD card: its games "
+                "partition was not cleanly unmounted, so it still has changes "
+                "waiting to be written, and growing it would move files the "
+                "build has already placed. Build it at its own size, or "
+                "start from a clean copy of the card." % words(target))
     # A multi-boot STORE card is laid out exactly like a stock one (its extras
     # live inside a grown p3), so the table alone can't tell: ask the reader
     # that knows.  The Multi-boot tab sizes those cards itself.
@@ -237,7 +285,8 @@ def target_for(original_path, target=None):
     if multi:
         raise CardSizeError(
             "This card can't be built for a %s SD card: it is a multi-boot "
-            "card, and the Multi-boot tab sets the size of those." % target)
+            "card, and the Multi-boot tab sets the size of those."
+            % words(target))
     return target
 
 
@@ -273,7 +322,7 @@ class _E2fs:
     macOS has no loop devices, so the option is not offered there yet."""
 
     def __init__(self):
-        if sys.platform == "darwin":
+        if not supported():
             raise CardSizeError("growing the games partition isn't "
                                 "available on macOS yet")
         from ...core.executor import create_executor
@@ -290,20 +339,38 @@ class _E2fs:
         except Exception as e:  # noqa: BLE001 - CommandError / timeout
             out = str(e)
         if "tools" not in out:
-            raise CardSizeError("resize2fs isn't installed in the Linux this "
-                                "app uses")
+            raise CardSizeError("the Linux this app uses has no tool to grow "
+                                "a filesystem (e2fsprogs' resize2fs)")
         if not out.rstrip().endswith("ok"):
             raise CardSizeError("the Linux this app uses can't attach the "
                                 "card image as a disk (no loop devices)")
 
-    def grow(self, image_path, offset, size, blocks, timeout=5400):
+    def grow(self, image_path, offset, size, blocks, epoch=None,
+             timeout=5400):
         """Check, grow to *blocks* and re-check the ext4 at *offset* (the
         partition being *size* bytes).  Returns ``{step: (rc, output)}`` for
         the steps that ran: ``loop``, ``fsck`` (-fp), ``resize``, ``check``
-        (-fn).  A step runs only when the one before it succeeded."""
+        (-fn).  A step runs only when the one before it succeeded.
+
+        *epoch* pins the clock every tool stamps into the filesystem (the
+        superblock and its backups, the resize inode): the same original then
+        grows to the same bytes on every build, which item 149's
+        byte-identical mode rebuilds rely on.  The new groups' inode tables
+        are always ZEROED (RESIZE2FS_FORCE_ITABLE_INIT), as on Stern's own
+        16G/32G cards: left lazy, the kernel zeroes them at a pace that
+        depends on how long each later mount lasts, so no two builds agree,
+        and the machine finishes the job on its first read-write mount."""
         img = self.ex.to_exec_path(image_path)
-        script = "\n".join([
+        env = ["export RESIZE2FS_FORCE_ITABLE_INIT=1"]
+        if epoch:
+            env.append("export E2FSCK_TIME=%d E2FSPROGS_FAKE_TIME=%d"
+                       % (int(epoch), int(epoch)))
+        script = "\n".join(env + [
             "IMG=%s" % shlex.quote(img),
+            # a loop left attached to this image by a killed earlier run would
+            # keep the file open (and busy) through the whole build
+            'losetup -j "$IMG" 2>/dev/null | cut -d: -f1 | '
+            'xargs -r -n1 losetup -d 2>/dev/null',
             'L=$(losetup -f --show -o %d --sizelimit %d "$IMG" 2>&1) || '
             '{ echo "PAD_E2 loop 1 $L"; exit 0; }' % (int(offset), int(size)),
             'trap \'losetup -d "$L" 2>/dev/null\' EXIT',
@@ -396,14 +463,14 @@ def _copy_range(f, src, dst, n, cancel):
     pos = n
     while pos > 0:
         if cancel():
-            raise CardSizeError("cancelled")
+            raise Cancelled("cancelled")
         step = min(CHUNK, pos)
         pos -= step
         f.seek(src + pos)
         buf = f.read(step)
         if len(buf) != step:
             raise CardSizeError("the card image ended early while moving its "
-                                "data partition")
+                                "settings and log partitions")
         f.seek(dst + pos)
         f.write(buf)
 
@@ -442,15 +509,40 @@ def preflight(original_path, target):
         except CardSizeError as e:
             raise CardSizeError(
                 "This card can't be built for a %s SD card on this computer: "
-                "%s." % (t, e))
+                "%s." % (words(t), e))
     return t
 
 
-def expand_image(path, target, log=None, cancel=None):
+def _zero_range(f, off, n):
+    """Make [off, off+n) of *f* read as zeros: a hole on NTFS (instant, and
+    the space comes back), written zeros elsewhere."""
+    if n <= 0:
+        return
+    if sys.platform == "win32":
+        try:
+            from ...core import rawdevice as rd
+            f.flush()
+            if rd._win_fsctl(f, rd._FSCTL_SET_ZERO_DATA,
+                             rd._ZeroDataInformation(off, off + n)):
+                return
+        except (ImportError, AttributeError):
+            pass
+    zeros = bytes(CHUNK)
+    pos = 0
+    while pos < n:
+        step = min(CHUNK, n - pos)
+        f.seek(off + pos)
+        f.write(zeros[:step])
+        pos += step
+
+
+def expand_image(path, target, log=None, cancel=None, epoch=None):
     """Grow the card image at *path* IN PLACE to Stern's *target* class
     (``"16G"`` / ``"32G"``).  Returns True when it grew, False when it was
-    that size or bigger already.  Raises :class:`CardSizeError`; a failure
-    before the partition table is rewritten leaves the card as it was."""
+    that size or bigger already.  Raises :class:`CardSizeError` (and
+    :class:`Cancelled` when *cancel* says so); a failure before the partition
+    table is rewritten leaves the card as it was.  *epoch*: see
+    :meth:`_E2fs.grow`."""
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     t0 = time.monotonic()
@@ -461,8 +553,9 @@ def expand_image(path, target, log=None, cancel=None):
         if delta <= 0:
             return False
         log("Making the card a %s card: the games partition grows from "
-            "%.2f GB to %.2f GB, and the data partitions move to the end."
-            % (target, old.p3_count * SECTOR / 1e9,
+            "%.2f GB to %.2f GB, and the two small partitions that hold the "
+            "machine's settings and logs move to the end of the card."
+            % (words(target), old.p3_count * SECTOR / 1e9,
                new.p3_count * SECTOR / 1e9), "info")
         src = old.p4_start * SECTOR
         dst = new.p4_start * SECTOR
@@ -473,8 +566,8 @@ def expand_image(path, target, log=None, cancel=None):
             f.flush()
             os.fsync(f.fileno())
             if not _same_range(f, src, dst, n):
-                raise CardSizeError("the moved data partitions did not read "
-                                    "back the same")
+                raise CardSizeError("the moved settings and log partitions "
+                                    "did not read back the same")
         except BaseException:
             # nothing points at the new place yet: give the file its size back
             try:
@@ -490,14 +583,24 @@ def expand_image(path, target, log=None, cancel=None):
         if check != new:
             raise CardSizeError("the rewritten partition table does not read "
                                 "back as planned")
+        # The old copy of the moved partitions now lies inside the grown games
+        # partition, past its filesystem's end until the resize: nothing
+        # points at it, so it goes, rather than leave a stale partition table
+        # and an old /data filesystem in the games partition's free space.
+        _zero_range(f, src, min(n, dst - src))
+        f.flush()
+        os.fsync(f.fileno())
+    if cancel():
+        raise Cancelled("cancelled")
     blocks = new.p3_count * SECTOR // BLOCK
-    res = e2.grow(path, P3_START * SECTOR, new.p3_count * SECTOR, blocks)
+    res = e2.grow(path, P3_START * SECTOR, new.p3_count * SECTOR, blocks,
+                  epoch=epoch)
     for step, what, ok in (
             ("loop", "the card image could not be attached as a disk",
              lambda rc: rc == 0),
             ("fsck", "the games partition failed its check before growing",
              lambda rc: rc in (0, 1)),
-            ("resize", "resize2fs could not grow the games partition",
+            ("resize", "the games partition could not be grown",
              lambda rc: rc == 0),
             ("check", "the grown games partition did not check clean",
              lambda rc: rc == 0)):
@@ -515,8 +618,8 @@ def expand_image(path, target, log=None, cancel=None):
         if read_layout(f) != new:
             raise CardSizeError("the partition table does not read back as "
                                 "planned after the games partition grew")
-    log("The card is a %s card now (%s)." % (target, _fmt(time.monotonic() - t0)),
-        "success")
+    log("The card is a %s card now (%s)."
+        % (words(target), _fmt(time.monotonic() - t0)), "success")
     return True
 
 

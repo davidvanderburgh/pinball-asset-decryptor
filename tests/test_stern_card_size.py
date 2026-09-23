@@ -171,7 +171,7 @@ class _FakeE2fs:
     def __init__(self):
         pass
 
-    def grow(self, image_path, offset, size, blocks, timeout=0):
+    def grow(self, image_path, offset, size, blocks, epoch=None, timeout=0):
         _FakeE2fs.calls.append((image_path, offset, size, blocks))
         res = {}
         for step in ("loop", "fsck", "resize", "check"):
@@ -240,7 +240,7 @@ def test_a_failed_resize_is_reported_not_swallowed(tmp_path, monkeypatch):
         rcs = {"resize": 1}
     monkeypatch.setattr(cs, "_E2fs", Failing)
     path = make_card(tmp_path / "c.raw", marks=False)
-    with pytest.raises(cs.CardSizeError, match="resize2fs could not grow"):
+    with pytest.raises(cs.CardSizeError, match="could not be grown"):
         cs.expand_image(str(path), "16G")
 
 
@@ -259,10 +259,11 @@ def test_a_truncating_resize_is_caught(tmp_path, monkeypatch):
     truncating it to the filesystem's length, offset or not.  The runner never
     hands it a file, and if the image changes size anyway the grow fails."""
     class Truncating(_FakeE2fs):
-        def grow(self, image_path, offset, size, blocks, timeout=0):
+        def grow(self, image_path, offset, size, blocks, epoch=None,
+                 timeout=0):
             with open(image_path, "r+b") as f:
                 f.truncate(blocks * 4096)
-            return super().grow(image_path, offset, size, blocks, timeout)
+            return super().grow(image_path, offset, size, blocks)
     monkeypatch.setattr(cs, "_E2fs", Truncating)
     path = make_card(tmp_path / "c.raw", marks=False)
     with pytest.raises(cs.CardSizeError, match="changed size"):
@@ -319,5 +320,107 @@ def test_target_for_and_output_parts(tmp_path, monkeypatch):
 def test_target_for_refuses_a_card_it_cannot_read(tmp_path):
     bad = tmp_path / "x.raw"
     bad.write_bytes(b"\0" * 4096)
-    with pytest.raises(cs.CardSizeError, match="can't be built for a 16G"):
+    with pytest.raises(cs.CardSizeError, match="can't be built for a 16 GB SD card"):
         cs.target_for(str(bad), "16G")
+
+
+def _set_p3_superblock(path, incompat):
+    """Give the synthetic card's games partition an ext4 superblock magic
+    and *incompat* word (all the journal check reads)."""
+    with open(path, "r+b") as f:
+        f.seek(712704 * 512 + 1024 + 0x38)
+        f.write(b"\x53\xef")
+        f.seek(712704 * 512 + 1024 + 0x60)
+        f.write(struct.pack("<I", incompat))
+
+
+def test_an_unreplayed_journal_is_refused_before_the_build(tmp_path):
+    """The check before the resize replays a pending journal, and the replay
+    moves files the build already patched (a real library image has one):
+    refused up front, in words, instead of discarded after the encode."""
+    path = make_card(tmp_path / "c.raw", marks=False)
+    _set_p3_superblock(path, 0x0242)                # stock: no recovery
+    assert cs.target_for(str(path), "16G") == "16G"
+    _set_p3_superblock(path, 0x0246)                # needs_recovery
+    with pytest.raises(cs.CardSizeError, match="not cleanly unmounted"):
+        cs.target_for(str(path), "16G")
+    with pytest.raises(cs.CardSizeError, match="16 GB SD card"):
+        cs.target_for(str(path), "16G")
+
+
+def test_the_vacated_range_is_zeroed_and_the_clock_passed_on(tmp_path,
+                                                            monkeypatch):
+    seen = {}
+
+    class Rec(_FakeE2fs):
+        def grow(self, image_path, offset, size, blocks, epoch=None,
+                 timeout=0):
+            seen["epoch"] = epoch
+            return super().grow(image_path, offset, size, blocks)
+    monkeypatch.setattr(cs, "_E2fs", Rec)
+    path = make_card(tmp_path / "c.raw")
+    with open(path, "rb") as f:
+        old = cs.read_layout(f)
+    cs.expand_image(str(path), "16G", epoch=1662343979)
+    assert seen["epoch"] == 1662343979
+    # the old EBR1 and the old /data start read as zeros now
+    assert _read(path, old.p4_start * 512, 512) == bytes(512)
+    assert _read(path, (old.p4_start + 2048) * 512, 512) == bytes(512)
+
+
+def test_a_cancel_is_a_cancel(tmp_path, monkeypatch):
+    monkeypatch.setattr(cs, "_E2fs", _FakeE2fs)
+    path = make_card(tmp_path / "c.raw", marks=False)
+    with pytest.raises(cs.Cancelled):
+        cs.expand_image(str(path), "16G", cancel=lambda: True)
+    # nothing points at a moved copy: the card is its old size and layout
+    assert os.path.getsize(path) == cs.CARD_SIZES["8G"]
+    with open(path, "rb") as f:
+        assert cs.read_layout(f).p3_count == TABLES["8G"][0]
+
+
+def test_the_runner_pins_the_clock_zeroes_tables_and_clears_stale_loops():
+    shipped = []
+
+    class Ex:
+        def to_exec_path(self, p):
+            return p
+
+        def run(self, cmd, timeout=0):
+            import base64
+            import shlex
+            tmp = shlex.split(cmd.split("<", 1)[1].split("|", 1)[0])[0]
+            with open(tmp, "rb") as fh:
+                shipped.append(base64.b64decode(fh.read()).decode())
+            return "PAD_E2 loop 0\n"
+    e2 = cs._E2fs.__new__(cs._E2fs)
+    e2.ex = Ex()
+    e2.grow("C:/x/card.raw", 364904448, 14495514624, 3538943, epoch=1662343979)
+    e2.grow("C:/x/card.raw", 364904448, 14495514624, 3538943)
+    pinned, free = shipped
+    assert "export RESIZE2FS_FORCE_ITABLE_INIT=1" in pinned
+    assert "E2FSCK_TIME=1662343979 E2FSPROGS_FAKE_TIME=1662343979" in pinned
+    assert "E2FSCK_TIME" not in free and "RESIZE2FS_FORCE_ITABLE_INIT" in free
+    assert 'losetup -j "$IMG"' in pinned
+    assert pinned.index("losetup -j") < pinned.index("losetup -f")
+
+
+def test_the_bigger_card_hint_only_where_it_helps(tmp_path):
+    from pinball_decryptor.core import ext4_grow
+    from pinball_decryptor.plugins.stern import engine
+    nospace = ext4_grow.Ext4GrowNoSpace("full")
+    p3 = 712704 * 512
+    c8 = make_card(tmp_path / "8.raw", "8G", marks=False)
+    c16 = make_card(tmp_path / "16.raw", "16G", marks=False)
+    c32 = make_card(tmp_path / "32.raw", "32G", marks=False)
+    h8 = engine._bigger_card_hint(nospace, str(c8), p3)
+    assert "16 GB or 32 GB" in h8 or not cs.supported()
+    assert "32 GB" in engine._bigger_card_hint(nospace, str(c16), p3) \
+        or not cs.supported()
+    assert "16 GB" not in engine._bigger_card_hint(nospace, str(c16), p3)
+    assert engine._bigger_card_hint(nospace, str(c32), p3) == ""
+    # the system partition never grows; a failure that isn't for space is
+    # not answered with a size
+    assert engine._bigger_card_hint(nospace, str(c8), 24576 * 512) == ""
+    assert engine._bigger_card_hint(ext4_grow.Ext4GrowError("x"),
+                                    str(c8), p3) == ""

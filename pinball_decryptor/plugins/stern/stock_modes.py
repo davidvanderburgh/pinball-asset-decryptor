@@ -73,7 +73,9 @@ WORD_KINDS = ("imm", "movw", "movwt", "lit", "data", "path", "qword", "insn")
 INSN_KINDS = ("imm", "movw", "movwt", "insn")
 #: kinds whose one VA starts a run of several words (else: one word per VA)
 WORD_COUNT = {"path": 4, "qword": 2}
-CLASSES = ("word", "adjustment", "code", "scene")
+#: ``uncertain``: one word the app could write, but what the game does with it isn't certain
+#: (a value set on one path only, an undecoded field of the award record): read-only
+CLASSES = ("word", "adjustment", "code", "scene", "uncertain")
 
 #: why an ``inert`` initial_mask row does nothing in play (item 158 / 159, by its key)
 INERT_REASONS = {
@@ -123,10 +125,15 @@ class Mode:
     vtable: int = 0
     title_msg: object = None           # msg id or None
     starts: list = field(default_factory=list)
+    label: str = ""                    # the table's own name for the mode (``name Drive_My_Car``)
 
     @property
     def name(self):
-        """``cmode_battle_vs_ebirah`` -> ``Battle vs Ebirah``."""
+        """``cmode_battle_vs_ebirah`` -> ``Battle vs Ebirah``; a table's own name when it
+        gives one, its contractions spelled with their apostrophe (``It Wont Be Long`` ->
+        ``It Won't Be Long``: a name read from an audit's constant has lost it)."""
+        if self.label:
+            return _apostrophes(self.label.replace("_", " "))
         words = self.cls[6:] if self.cls.startswith("cmode_") else self.cls
         out = []
         for w in words.split("_"):
@@ -134,6 +141,31 @@ class Mode:
                 continue
             out.append(w if w in ("vs", "and", "of", "the", "mb") and out else w.capitalize())
         return " ".join(out).replace(" mb", " Multiball")
+
+
+#: contractions a name read from a constant (``AUD_IT_WONT_BE_LONG_STARTED``) has lost the
+#: apostrophe of; only words that are never anything else
+_CONTRACTIONS = {w.replace("'", ""): w for w in (
+    "won't", "don't", "can't", "isn't", "aren't", "ain't", "doesn't", "didn't", "wasn't",
+    "weren't", "couldn't", "shouldn't", "wouldn't", "haven't", "hasn't", "you're", "they're",
+    "we're", "i'm", "you've", "i've", "we've", "they've", "you'll", "we'll", "they'll",
+    "let's", "that's", "what's", "there's", "rock'n'roll")}
+
+
+def _apostrophes(name):
+    """``It Wont Be Long`` -> ``It Won't Be Long``, keeping each word's capitals."""
+    def fix(m):
+        w = m.group(0)
+        right = _CONTRACTIONS.get(w.lower())
+        if right is None:
+            return w
+        out = right
+        if w[:1].isupper():
+            out = out[:1].upper() + out[1:]
+        if w.isupper() and len(w) > 1:
+            out = out.upper()
+        return out
+    return re.sub(r"[A-Za-z]+", fix, name)
 
 
 @dataclass
@@ -238,6 +270,10 @@ class Number:
         if self.is_adjustment and self.range_inverted:
             return ("the game's own range for this setting is %d to %d (the minimum is above the "
                     "maximum), so no default can be written for it" % self.adj_range)
+        if self.klass == "uncertain":
+            why = (self.comment or "").split(";")[0].strip()
+            return ("it is one word in the game program, but the app can't be sure what the "
+                    "game does with it%s" % (" (%s)" % why if why else ""))
         if self.klass == "code" or self.kind == "code":
             return ("the game computes it in code (not one word), so it can only change "
                     "with a hook or a code cave")
@@ -278,6 +314,8 @@ class Number:
                      "timer": "Timer", "reset": "Reset", "ball_end": "Ball end",
                      "start_display": "Start display", "total_display": "Total display"}.get(
             role, role.replace("_", " ").capitalize())
+        if re.fullmatch(r"v\d+", role):
+            role_word = "Other"                 # a slot whose role the reader didn't name
         if call == "award_value":
             what = "award value"
         elif call.startswith("caward_add_scaled"):
@@ -355,12 +393,14 @@ class Build:
 
     def row_label(self, number):
         """The number's label without its mode's name in front (the tab shows the mode in
-        its own column): ``Battle Vs Ebirah Timer`` under Battle vs Ebirah -> ``Timer``."""
+        its own column): ``Battle Vs Ebirah Timer`` under Battle vs Ebirah -> ``Timer``, and
+        ``Mode Drive My Car Timer`` under Drive My Car -> ``Timer``."""
         label = number.label
         mode = self.mode_name(number.mode_id)
-        if label.lower().startswith(mode.lower() + " "):
-            rest = label[len(mode) + 1:]
-            return rest[:1].upper() + rest[1:]
+        for head in (mode, "mode " + mode):
+            if label.lower().startswith(head.lower() + " "):
+                rest = label[len(head) + 1:]
+                return rest[:1].upper() + rest[1:]
         return label
 
     def adjustment_numbers(self):
@@ -419,6 +459,8 @@ def parse(text):
                 mode.vtable = _int(kv["vtable"]) if kv.get("vtable", "?") != "?" else 0
                 tm = kv.get("title_msg", "?")
                 mode.title_msg = None if tm == "?" else int(tm)
+                if kv.get("name", "?") != "?":
+                    mode.label = kv["name"]
                 cur.modes[mid] = mode
             elif what == "start":
                 mid = int(tok[1])
@@ -445,6 +487,12 @@ def _parse_number(tok, comment):
         args, rest = rest[:n], rest[n:]
         if len(args) < n:
             raise StockModeError("kind %s takes %d token(s)" % (kind, n))
+        # one number the game keeps at several sites: more VAs of the same kind follow
+        while kind in WORD_KINDS and len(rest) > 2 and rest[0].lower().startswith("0x"):
+            more, rest = rest[:n], rest[n:]
+            if len(more) < n or not all(t.lower().startswith("0x") for t in more):
+                raise StockModeError("kind %s takes its VAs %d at a time" % (kind, n))
+            args = args + more
         if kind == "adj":
             args = (args[0], int(args[1], 0))
         else:
@@ -516,8 +564,22 @@ def _with_imm16(w, v):
     return (w & 0xFFF0F000) | ((v >> 12) & 0xF) << 16 | (v & 0xFFF)
 
 
+def _arity(kind):
+    """Words per site: a multi-word kind (a path entry, a qword) keeps all of its words at ONE VA."""
+    return WORD_COUNT.get(kind, 2 if kind == "movwt" else 1)
+
+
 def decode(kind, words):
-    """The value the word(s) of *kind* hold, or None when they aren't that kind's shape."""
+    """The value the word(s) of *kind* hold, or None when they aren't that kind's shape. A
+    number kept at several sites decodes when every site holds the same value."""
+    n = _arity(kind)
+    if kind in WORD_KINDS and len(words) > n and len(words) % n == 0:
+        vals = {_decode_one(kind, tuple(words[i:i + n])) for i in range(0, len(words), n)}
+        return vals.pop() if len(vals) == 1 and None not in vals else None
+    return _decode_one(kind, words)
+
+
+def _decode_one(kind, words):
     if kind == "imm" and len(words) == 1:
         w = words[0]
         if _is_mov(w):
@@ -567,8 +629,18 @@ def skeleton(kind, words):
 
 
 def encode(kind, stock_words, value):
-    """The word(s) holding *value* in the shape of *stock_words*. Raises StockModeError with
-    the reason when the value doesn't fit."""
+    """The word(s) holding *value* in the shape of *stock_words* (every site of a number kept
+    at several). Raises StockModeError with the reason when the value doesn't fit."""
+    n = _arity(kind)
+    if kind in WORD_KINDS and len(stock_words) > n and len(stock_words) % n == 0:
+        out = ()
+        for i in range(0, len(stock_words), n):
+            out += _encode_one(kind, tuple(stock_words[i:i + n]), value)
+        return out
+    return _encode_one(kind, stock_words, value)
+
+
+def _encode_one(kind, stock_words, value):
     value = int(value)
     if value < 0:
         raise StockModeError("a negative number can't be written here")
@@ -946,6 +1018,10 @@ def identify(img, builds, game=None, version=None):
         insn = [n for n in b.numbers if n.is_word and n.kind in INSN_KINDS]
         whole = [n for n in b.numbers if n.is_word and n.kind not in INSN_KINDS]
         if not insn and not whole:
+            # a table of operator settings alone (a plain-C title): the program is that build
+            # when it has every one of the table's settings at the table's id
+            if game is not None and _settings_agree(img, b):
+                return b, "settings", ""
             continue
         bad = None
         for n in insn:
@@ -968,17 +1044,46 @@ def identify(img, builds, game=None, version=None):
     return None, None, why
 
 
+def _settings_agree(img, build):
+    """Every operator setting *build*'s rows name is in the program at the row's id."""
+    rows = [n for n in build.numbers if n.kind == "adj"]
+    if not rows:
+        return False
+    from .adjustments import AdjustmentTable
+    try:
+        table = AdjustmentTable(bytes(img.data))
+    except ValueError:
+        return False
+    return all(table.by_name.get(n.args[0]) == n.args[1] for n in rows)
+
+
 # ---- the tables the app knows --------------------------------------------------------------
 _TABLES = None
 
 
-def tables():
+def hand_tables():
     """Every :class:`Build` in :mod:`.stock_mode_tables` (parsed once)."""
     global _TABLES
     if _TABLES is None:
         from . import stock_mode_tables
         _TABLES = parse(stock_mode_tables.TABLE)
     return _TABLES
+
+
+def tables():
+    """Every :class:`Build` the app knows: the hand tables, then the tables generated on this
+    machine from a card's own game program (:mod:`.stock_reader`), a hand table winning for
+    its program."""
+    hand = hand_tables()
+    try:
+        from .stock_reader import cached_builds
+        gen = cached_builds()
+    except Exception:
+        gen = []
+    if not gen:
+        return hand
+    shas = {b.sha1 for b in hand}
+    return list(hand) + [b for b in gen if b.sha1 not in shas]
 
 
 def table_for(game, version, builds=None):
@@ -1030,15 +1135,79 @@ def staged(assets_dir):
     return {"build": rec.get("build"), "values": vals, "touched": touched}
 
 
+# ---- a staged row key across table readers ----------------------------------------------------
+def _older_numbers(build):
+    """``{row key: Number}`` of the tables older readers kept for *build*'s program
+    (:func:`.stock_reader.older_tables`), newest reader first. ``{}`` for a hand table."""
+    try:
+        from .stock_reader import older_tables
+        olds = older_tables(build.sha1)
+    except Exception:
+        return {}
+    out = {}
+    for b in olds:
+        for n in b.numbers:
+            out.setdefault(n.row_key, n)
+    return out
+
+
+def _same_row(build, old):
+    """The row of *build* that is *old* (a Number of an older reader's table): the same
+    operator setting, or a word row at the same addresses. None when there is none."""
+    for n in build.numbers:
+        if old.kind == "adj" and n.kind == "adj" and n.adj_name == old.adj_name:
+            return n
+        if old.kind in WORD_KINDS and n.kind in WORD_KINDS and old.args and \
+                tuple(n.args) == tuple(old.args):
+            return n
+    return None
+
+
+def resolve_keys(values, build):
+    """*values* ``{row key: value}`` staged by the project, with every key this table does
+    not have mapped to the row it names, through the table an OLDER READER kept for the same
+    program (an app update that raises :data:`.stock_reader.READER_REV` may give rows new
+    keys): the same operator setting, or the same instruction addresses. A key this table has
+    wins over a mapped one; a key nothing maps is kept as it is (reported, never written)."""
+    values = dict(values or {})
+    if build is None or not values:
+        return values
+    have = {n.row_key for n in build.numbers}
+    missing = [k for k in values if k not in have]
+    if not missing:
+        return values
+    old = _older_numbers(build)
+    out = {k: v for k, v in values.items() if k in have}
+    for k in missing:
+        n = old.get(k)
+        new = _same_row(build, n) if n is not None else None
+        if new is None:
+            out.setdefault(k, values[k])
+        elif new.row_key not in out:
+            out[new.row_key] = values[k]
+    return out
+
+
+def staged_for(assets_dir, build):
+    """:func:`staged` with its row keys read against *build* (:func:`resolve_keys`)."""
+    rec = staged(assets_dir)
+    if build is not None and rec["build"] == build.id:
+        rec["values"] = resolve_keys(rec["values"], build)
+        rec["touched"] = sorted(resolve_keys(dict.fromkeys(rec["touched"]), build))
+    return rec
+
+
 def _record(data, build):
-    """The project's ``stock_modes`` record for *build* as ``(values, touched)`` copies; a
-    record staged for another build starts again empty."""
+    """The project's ``stock_modes`` record for *build* as ``(values, touched)`` copies, their
+    keys read against *build* (:func:`resolve_keys`); a record staged for another build starts
+    again empty."""
     rec = data.get(STAGE_KEY) if isinstance(data.get(STAGE_KEY), dict) else {}
     if rec.get("build") != build.id:
         return {}, set()
     touched = rec.get("touched")
-    return (dict(rec.get("values") or {}),
-            {str(k) for k in touched} if isinstance(touched, list) else set())
+    touched = {str(k) for k in touched} if isinstance(touched, list) else set()
+    return (resolve_keys(dict(rec.get("values") or {}), build),
+            set(resolve_keys(dict.fromkeys(touched), build)))
 
 
 def _put_record(data, build, values, touched):
@@ -1153,7 +1322,8 @@ def staged_edits(assets_dir, build=None):
     from ...core import staged_changes
     data = staged_changes.load(assets_dir)
     out = []
-    for key, v in sorted(rec["values"].items()):
+    values = resolve_keys(rec["values"], build) if rec["build"] == build.id else rec["values"]
+    for key, v in sorted(values.items()):
         n = build.number(key)
         if n is None or not n.is_word or n.inert or n.follows:
             continue                # a stale value for an inert row is never a pending change
@@ -1172,6 +1342,29 @@ def staged_edits(assets_dir, build=None):
     return out
 
 
+def unread_staged(assets_dir):
+    """How many changes the project staged for the game's own modes while no table of its
+    build is on this computer (the kept table was lost, an app update raised the reader's
+    revision, or the project came from another PC): its word values and staged settings.
+    They are not dropped: a Write reads the table again from the card's own game program
+    (:func:`plan_overlay`), and the Write list shows them as not read yet. 0 when the table
+    is here, the project manages none, or on any trouble."""
+    try:
+        if not assets_dir or not manages(assets_dir):
+            return 0
+        rec = staged(assets_dir)
+        if table_for_project(assets_dir) is not None:
+            return 0
+        if rec["build"]:
+            game, _sp, version = rec["build"].partition(" ")
+            if table_for(game, version) is not None:
+                return 0
+        from ...core import staged_changes
+        return len(rec["values"]) + len(_staged_settings(staged_changes.load(assets_dir)))
+    except Exception:
+        return 0
+
+
 def pending_count(assets_dir):
     """How many of the project's stock-mode rows are staged (0 on any trouble). The Write's
     'Nothing to write' guard counts these. A project with NOTHING staged any more is not
@@ -1179,7 +1372,7 @@ def pending_count(assets_dir):
     :func:`restore_count`, and a build of this project already at the output is put back to
     the original by the Write (``engine._stock_mode_restore_ok``)."""
     try:
-        return len(staged_edits(assets_dir))
+        return len(staged_edits(assets_dir)) + unread_staged(assets_dir)
     except Exception:
         return 0
 
@@ -1245,6 +1438,7 @@ def plan_overlay(elf_bytes, assets_dir, log, builds=None, stats=None):
     rec = staged(assets_dir)
     if rec["build"] is None:
         return {}, 0, None
+    read_here = builds is None
     builds = tables() if builds is None else builds
     try:
         img = ElfImage(elf_bytes)
@@ -1252,6 +1446,12 @@ def plan_overlay(elf_bytes, assets_dir, log, builds=None, stats=None):
         say("The game's own modes: %s; nothing changed." % e, "warning")
         return {}, 0, None
     game, _sp, version = (rec["build"] or "").partition(" ")
+    if read_here and table_for(game, version, builds) is None:
+        # no table of this build on this computer (a lost cache, a raised reader revision, a
+        # project from another PC): read it now from the card's own game program
+        got = _read_table_now(elf_bytes, game, version, say)
+        if got is not None:
+            builds = list(builds) + [got]
     build, how, why = identify(img, builds, game, version)
     if build is None:
         n_staged = len(rec["values"]) + len(_staged_setting_values(assets_dir, None, game,
@@ -1266,6 +1466,8 @@ def plan_overlay(elf_bytes, assets_dir, log, builds=None, stats=None):
             say("The game's own modes: %d change(s) were staged for %s, but this card is %s; "
                 "none were written." % (n_staged, rec["build"], build.id), "warning")
         return {}, 0, build
+    rec = dict(rec, values=resolve_keys(rec["values"], build),
+               touched=sorted(resolve_keys(dict.fromkeys(rec["touched"]), build)))
     overlay, n = {}, 0
     sites = {}                  # VA -> (row key, the word this Write leaves there)
     # A word two rows share (``shared N``) is settled by a STAGED row first, whatever the
@@ -1345,6 +1547,25 @@ def plan_overlay(elf_bytes, assets_dir, log, builds=None, stats=None):
                                             overlay, stats)
     overlay.update(s_overlay)
     return overlay, n + s_n, build
+
+
+def _read_table_now(elf_bytes, game, version, say):
+    """The table of the game's own modes read from *elf_bytes* now (:func:`.stock_reader.
+    ensure_table`: a second or two, kept for next time), or None with the reason logged."""
+    try:
+        from .stock_reader import ensure_table
+        got = ensure_table(bytes(elf_bytes), game, version)
+    except Exception as e:                      # noqa: BLE001 - said, never raised
+        say("The game's own modes: their table could not be read from this card's game "
+            "program (%s)." % e, "warning")
+        return None
+    if got.build is None:
+        say("The game's own modes: their table could not be read from this card's game "
+            "program. %s" % " ".join(got.notes or ()), "warning")
+        return None
+    say("The game's own modes: read their table from this card's game program (%s)."
+        % got.build.id, "info")
+    return got.build
 
 
 def _plan_path_family(img, build, mode_id, rec, say, sites, stats):

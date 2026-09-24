@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 """stock_modes.py - what a Spike 2 game's OWN modes are made of, read from its game ELF (item 144).
 
-    stock_modes.py <game ELF> [--ref <Godzilla Pro 1.15 game ELF>] [--json OUT] [--table]
+    stock_modes.py <game ELF> [--game G --version V] [--json OUT]
+    stock_modes.py <game ELF> --ref <Godzilla Pro 1.15 game ELF> [--json OUT]
+
+WITHOUT --ref (any Spike 2 build): the app's own reader
+(pinball_decryptor/plugins/stern/stock_scan*.py) prints the build's table: every mode found
+structurally on the build itself (C++ rule titles: the classes deriving from cmode; plain-C
+titles: the modes the audits name), with the numbers the app can change. It is the table the
+app generates and caches when it reads a card; the grammar is MODE_SDK.md's. The game and
+version are taken from --game/--version, else from the program's SHA-1 when the app knows
+the build, else from a file name like <game>-<version>.elf.
+
+WITH --ref, or on Godzilla Pro 1.15 itself: the item-144 report below, which also lists the
+facts the editor doesn't use (callouts, scenes, clips, shows, events, selector tables).
 
 A stock mode is compiled C++: one `cmode_*` class per mode, a static object per mode that
 `cmode_manager`'s constructor builds, and virtual functions that call the engine (awards,
@@ -491,6 +503,8 @@ def plausible_function(img, fn):
     if d[0] == "pushlr":
         return True
     pw = img.word(fn - 4)
+    if pw is None:
+        return True                  # the first word of the file-backed code: a function start
     p = decode(pw, fn - 4)
     flowing = p[0] in ("movw", "movt", "mov", "mvn", "addi", "subi", "andsi", "ldri", "strsp", "movr", "ldrlit") or (
         p[0] == "other" and (pw >> 26) & 3 in (0, 1) and (pw & 0x0FFFFFF0) != 0x012FFF10)
@@ -875,9 +889,10 @@ def timer_lines(img, model, engine, m, slots, p, entry, held, mode_classes):
     """cmode_timed's start hands the timer v[56]() (the duration, timer v[16] and v[12]) and
     v[57]() (timer v[18]); when a slot is the base's, the game inlines the base's 30 with a
     conditional mov in cmode_timed's reset and start - so the default is THREE words."""
-    if not derives(model, m["class"], "cmode_timed") or len(slots) <= S(57):
-        return
     base = vslots(img, model, "cmode_timed")
+    if not derives(model, m["class"], "cmode_timed") or len(slots) <= S(57) \
+            or len(base) <= max(S(57), S(3), S(8)):
+        return                       # a build whose cmode_timed is shorter than Pro 1.15's
     users = lambda fn: len(held.get(fn, set()) & mode_classes)  # noqa: E731
     for pk in (56, 57):
         k = S(pk)
@@ -1257,16 +1272,74 @@ def report(img, model, engine, game, version, out=sys.stdout, reader_notes=True)
     return data
 
 
+def _app_package():
+    root = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+
+def build_label(path, sha1, game=None, version=None):
+    """``(game, version)`` for the table's build line: the arguments, else the build the
+    app knows by this SHA-1, else a file name like ``<game>-<version>.elf``, else
+    ``("unknown", "0")`` (never another title's name)."""
+    if game and version:
+        return game, version
+    known = ""
+    try:
+        _app_package()
+        from pinball_decryptor.plugins.stern.stock_reader import KNOWN_STOCK
+        known = KNOWN_STOCK.get(sha1, "")
+    except ImportError:
+        pass
+    if sha1 == PRO115_SHA1:
+        known = "godzilla_pro 1.15.0"
+    if known:
+        g, _sp, v = known.partition(" ")
+    else:
+        stem = os.path.basename(path)
+        stem = stem[:-4] if stem.lower().endswith(".elf") else stem
+        m = re.match(r"^([a-z0-9_]+)-(\d+(?:[._]\d+)+)", stem)
+        g, v = (m.group(1), m.group(2).replace("_", ".")) if m else ("unknown", "0")
+    return game or g, version or v
+
+
+def generic(data, game, version, json_path=None, out=sys.stdout):
+    """The app's own reader on any build: print its table (and write a JSON summary)."""
+    _app_package()
+    from pinball_decryptor.plugins.stern import stock_reader
+    text, info = stock_reader.generate(data, game, version)
+    out.write(text)
+    if json_path:
+        from pinball_decryptor.plugins.stern import stock_modes as SM
+        b = SM.parse(text)[0]
+        summary = dict(info, game=game, version=version, sha1=b.sha1, modes=[
+            {"id": m.id, "class": m.cls, "name": m.name,
+             "numbers": [{"key": n.key, "value": n.value, "kind": n.kind, "args": list(n.args),
+                          "words": ["%08x" % w for w in n.words], "class": n.klass,
+                          "editable": n.editable, "why_read_only": n.why_read_only()}
+                         for n in b.numbers if n.mode_id == m.id]}
+            for m in b.modes.values()])
+        with open(json_path, "w") as f:
+            json.dump(summary, f, indent=1)
+    return info
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("elf")
-    ap.add_argument("--ref", help="Godzilla Pro 1.15's game ELF, to locate the engine calls on another build")
-    ap.add_argument("--game", default="godzilla_pro")
-    ap.add_argument("--version", default="1.15")
+    ap.add_argument("--ref", help="Godzilla Pro 1.15's game ELF: the item-144 report on another build")
+    ap.add_argument("--game", default=None, help="the build line's game (default: from the build)")
+    ap.add_argument("--version", default=None, help="the build line's version (default: from the build)")
     ap.add_argument("--json", help="also write the facts as JSON to this path (an OUTPUT; it is overwritten)")
     args = ap.parse_args(argv)
+    if args.json and os.path.abspath(args.json) == os.path.abspath(args.elf):
+        sys.exit("--json would overwrite the ELF")
     data = open(args.elf, "rb").read()
     img = Image(data)
+    args.game, args.version = build_label(args.elf, img.sha1, args.game, args.version)
+    if img.sha1 != PRO115_SHA1 and not args.ref:
+        generic(data, args.game, args.version, args.json)
+        return 0
     model = rt.build_model(data)
     if img.sha1 == PRO115_SHA1:
         engine = ENGINE_PRO115
@@ -1276,12 +1349,8 @@ def main(argv=None):
             print("# engine %s not located: %s" % (k, why))
         SLOT.update(slot_map(args.ref, args.elf))
         print("# slots mapped from Pro 1.15: %s" % " ".join("%d->%d" % kv for kv in sorted(SLOT.items()) if kv[0] != kv[1]))
-    else:
-        sys.exit("not Godzilla Pro 1.15 (sha1 %s): pass --ref <Pro 1.15 game ELF> to locate the engine calls" % img.sha1)
     out = report(img, model, engine, args.game, args.version)
     if args.json:
-        if os.path.abspath(args.json) == os.path.abspath(args.elf):
-            sys.exit("--json would overwrite the ELF")
         with open(args.json, "w") as f:
             json.dump(out, f, indent=1)
     return 0

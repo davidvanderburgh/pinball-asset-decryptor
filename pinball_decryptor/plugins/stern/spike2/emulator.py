@@ -18,10 +18,14 @@ only firmware-version coupling is the set of hardcoded addresses below (stable
 across games on the same Spike 2 build).
 """
 
+import copy
 import mmap
+import os
 import struct
+import threading
 
-from unicorn import (UC_ARCH_ARM, UC_HOOK_CODE, UC_HOOK_MEM_FETCH_UNMAPPED,
+from unicorn import (UC_ARCH_ARM, UC_HOOK_BLOCK, UC_HOOK_CODE,
+                     UC_HOOK_MEM_FETCH_UNMAPPED, UC_HOOK_MEM_READ,
                      UC_HOOK_MEM_READ_UNMAPPED, UC_HOOK_MEM_WRITE_UNMAPPED,
                      UC_MODE_ARM, UC_PROT_ALL, Uc, UcError)
 from unicorn.arm_const import (UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC,
@@ -373,6 +377,143 @@ def audio_decode_supported(game_real_path):
     return locate.locate_all(raw=raw) is not None
 
 
+class _Static:
+    """What :class:`Spike2Emu` reads off a game program before it boots it."""
+    __slots__ = ("generic", "addrs", "audio_supported", "atomic_pcs", "plt_entry")
+
+    def __init__(self, generic, addrs, audio_supported, atomic_pcs, plt_entry):
+        self.generic = generic
+        self.addrs = addrs
+        self.audio_supported = audio_supported
+        self.atomic_pcs = atomic_pcs
+        self.plt_entry = plt_entry
+
+
+#: game program digest -> :class:`_Static`, newest last (see _static_analysis)
+_STATIC = {}
+_STATIC_KEEP = 4
+#: guards _STATIC: an Extract and a build in the same app process can each
+#: make an emulator at the same moment
+_STATIC_LOCK = threading.Lock()
+
+
+def _static_analysis(raw, segs):
+    """The firmware's addresses (:func:`.locate.locate_all` on a generic build),
+    every LDREX/STREX and every PLT thunk entry of *raw*, worked out once per
+    game program in this process.
+
+    A build makes five or more emulators of the same program (the grown derive,
+    the chain encode's two, the integrity check, the final decode), and each
+    spent about 0.65 s of its 1.1 s setup scanning the program word by word.
+    The answer depends on the program's bytes alone, so it is kept by their
+    digest; each emulator gets its own copies of the tables."""
+    import hashlib
+    key = hashlib.sha1(raw).digest()
+    with _STATIC_LOCK:
+        got = _STATIC.pop(key, None)
+    if got is None:
+        # worked out outside the lock: two threads on the same new program
+        # both do the work once and keep the same answer
+        generic = not _build_supported_raw(raw)
+        if generic:
+            from . import locate
+            addrs = locate.locate_all(raw=raw)
+            supported = addrs is not None
+        else:
+            addrs, supported = None, True
+        atomic, plt = set(), {}
+        # ELF PLT thunk entries (`add ip, pc, #.. ; [add ip, ip, #..] ; ldr
+        # pc, [ip, #..]!`) -> the absolute GOT slot the thunk loads PC from.
+        # unicorn mistranslates the `ldr pc` terminator on some builds (it
+        # returns to the caller AND clobbers r0 instead of loading the GOT),
+        # silently no-op'ing every call through that thunk (e.g. Led Zeppelin
+        # LE 1.22.0's boot-time memcpy that fills the sound catalog).  We
+        # intercept at the *entry* and branch through the precomputed GOT
+        # ourselves, so the bad instruction never runs -- see _plt_branch.
+        for vaddr, off, filesz, _memsz in segs:
+            # index every LDREX/STREX so the global hook can emulate them
+            # inline (the firmware's C++ runtime uses atomics heavily; the boot
+            # runs under the global hook, which steps past each one itself).
+            for i in range(0, filesz & ~3, 4):
+                w = _u32(raw, off + i)
+                if _atomic_kind(w):
+                    atomic.add(vaddr + i)
+                    continue
+                # `ldr pc, [ip, #imm]!` terminating a thunk: walk the preceding
+                # `add ip, ip` chain back to the `add ip, pc` entry and fold the
+                # (constant) immediates into the absolute GOT address.
+                if (w & 0xFFFFF000) != 0xE5BCF000:
+                    continue
+                j = i - 4
+                while j >= 0 and (_u32(raw, off + j) & 0xFFFFF000) == 0xE28CC000:
+                    j -= 4
+                if j < 0 or (_u32(raw, off + j) & 0xFFFFF000) != 0xE28FC000:
+                    continue
+                got_va = (vaddr + j + 8) & 0xFFFFFFFF
+                for k in range(j, i, 4):
+                    got_va = (got_va + _rotimm(_u32(raw, off + k))) & 0xFFFFFFFF
+                plt[vaddr + j] = (got_va + (w & 0xFFF)) & 0xFFFFFFFF
+        got = _Static(generic, dict(addrs) if addrs is not None else None, supported,
+                      frozenset(atomic), plt)
+    with _STATIC_LOCK:
+        _STATIC.pop(key, None)
+        _STATIC[key] = got
+        while len(_STATIC) > _STATIC_KEEP:
+            _STATIC.pop(next(iter(_STATIC)), None)
+    return got
+
+
+def _raw_read_hook(mu, fn, begin, end):
+    """Register *fn* as a ``UC_HOOK_MEM_READ`` over ``[begin, end]`` straight
+    through unicorn's C API (see :meth:`Spike2Emu.add_read_hook`); raises when
+    the binding's private attributes are not where this expects them, before
+    anything is registered."""
+    import ctypes
+
+    from unicorn.unicorn_py3 import unicorn as _U
+    callbacks = mu._callbacks                 # where hook_del looks; checked first
+    fptr = _U.HOOK_MEM_ACCESS_CFUNC(fn)
+    hh = _U.uc_hook_h()
+    status = _U.uclib.uc_hook_add(
+        mu._uch, ctypes.byref(hh), UC_HOOK_MEM_READ, fptr,
+        ctypes.c_void_p(0), ctypes.c_uint64(begin), ctypes.c_uint64(end))
+    if status != 0:
+        raise UcError(status)
+    callbacks[hh.value] = fptr                # kept alive; hook_del drops it
+    return hh.value
+
+
+#: ``PAD_DERIVE_HOOKS=global`` runs a generic build's params derive under the
+#: per-instruction code hook it used before the narrow derive (a comparison
+#: switch: both give the same rows, the narrow one 2-17x sooner).
+DERIVE_HOOKS_ENV = "PAD_DERIVE_HOOKS"
+#: appended to a narrow derive's failure (see :meth:`Spike2Emu.derive_params`)
+NARROW_DERIVE_HINT = ("(Sound derive ran under narrow hooks; %s=global runs "
+                      "the older, slower derive.)" % DERIVE_HOOKS_ENV)
+
+
+class _ExtraHooks(dict):
+    """:attr:`Spike2Emu.extra`, ``{address: handler}``.
+
+    Under the global code hook every address is looked up here on every
+    instruction, so a plain ``extra[addr] = fn`` is enough to be called there.
+    Under narrow (address-filtered) hooks an address fires only when it has a
+    hook of its own; while :attr:`watch` is set (a narrow derive) assigning a
+    handler registers that hook too, so the derive's own ``extra[...] = ...``
+    and a caller's handler set before the derive both keep working."""
+
+    __slots__ = ("watch",)
+
+    def __init__(self):
+        super().__init__()
+        self.watch = None
+
+    def __setitem__(self, addr, fn):
+        super().__setitem__(addr, fn)
+        if self.watch is not None:
+            self.watch(addr)
+
+
 class Spike2Emu:
     # memory layout (no region overlaps; see module docstring)
     STK = 0x20000000; STKSZ = 0x00400000
@@ -392,54 +533,21 @@ class Spike2Emu:
         # module constants; any other build's codec lives elsewhere, so locate
         # every address generically (see :mod:`.locate`).  ``audio_supported``
         # is False for dual-path / unlocatable builds (engine skips audio).
-        self._generic = not _build_supported_raw(raw)
-        if self._generic:
-            from . import locate
-            addrs = locate.locate_all(raw=raw)
-            self.audio_supported = addrs is not None
-        else:
-            addrs = None
-            self.audio_supported = True
-        self._set_addrs(addrs)
+        st = _static_analysis(raw, segs)
+        self._generic = st.generic
+        self.audio_supported = st.audio_supported
+        self._set_addrs(copy.deepcopy(st.addrs) if st.addrs is not None else None)
         mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
         self.mu = mu
-        self._atomic_pcs = set()
-        # ELF PLT thunk entries (`add ip, pc, #.. ; [add ip, ip, #..] ; ldr pc,
-        # [ip, #..]!`) -> the absolute GOT slot the thunk loads PC from.  unicorn
-        # mistranslates the `ldr pc` terminator on some builds (it returns to the
-        # caller AND clobbers r0 instead of loading the GOT), silently no-op'ing
-        # every call through that thunk (e.g. Led Zeppelin LE 1.22.0's boot-time
-        # memcpy that fills the sound catalog).  We intercept at the *entry* and
-        # branch through the precomputed GOT ourselves, so the bad instruction
-        # never runs -- see _plt_branch + _hooks.
-        self._plt_entry = {}
+        # every LDREX/STREX, so the global hook can emulate them inline, and
+        # the ELF PLT thunk entries -> their GOT slots (see _static_analysis)
+        self._atomic_pcs = set(st.atomic_pcs)
+        self._plt_entry = dict(st.plt_entry)
         for vaddr, off, filesz, memsz in segs:
             b = vaddr & ~0xfff
             e = _algn(vaddr + memsz)
             mu.mem_map(b, e - b)
             mu.mem_write(vaddr, raw[off:off + filesz])
-            # index every LDREX/STREX so the global hook can emulate them inline
-            # (the firmware's C++ runtime uses atomics heavily; unicorn has no
-            # exclusive monitor, so without this they raise and abort the boot).
-            for i in range(0, filesz & ~3, 4):
-                w = _u32(raw, off + i)
-                if _atomic_kind(w):
-                    self._atomic_pcs.add(vaddr + i)
-                    continue
-                # `ldr pc, [ip, #imm]!` terminating a thunk: walk the preceding
-                # `add ip, ip` chain back to the `add ip, pc` entry and fold the
-                # (constant) immediates into the absolute GOT address.
-                if (w & 0xFFFFF000) != 0xE5BCF000:
-                    continue
-                j = i - 4
-                while j >= 0 and (_u32(raw, off + j) & 0xFFFFF000) == 0xE28CC000:
-                    j -= 4
-                if j < 0 or (_u32(raw, off + j) & 0xFFFFF000) != 0xE28FC000:
-                    continue
-                got = (vaddr + j + 8) & 0xFFFFFFFF
-                for k in range(j, i, 4):
-                    got = (got + _rotimm(_u32(raw, off + k))) & 0xFFFFFFFF
-                self._plt_entry[vaddr + j] = (got + (w & 0xFFF)) & 0xFFFFFFFF
         mu.mem_map(self.STK, self.STKSZ)
         mu.mem_map(self.HEAP, self.HEAPSZ)
         mu.mem_map(self.IMPORT & ~0xfff, 0x4000)
@@ -472,7 +580,7 @@ class Spike2Emu:
 
         self.fds = {}; self.nextfd = 10
         self.faults = []; self.ondemand = 0
-        self.extra = {}; self.log = []
+        self.extra = _ExtraHooks(); self.log = []
         # Before _hooks(): its unmapped-memory handler calls _ensure_page, which
         # must already know the card window is backed in one piece.
         self._map_card_window()
@@ -619,25 +727,9 @@ class Spike2Emu:
         # derivation runs once.  Decode/encode then switch to narrow,
         # address-filtered hooks (see _switch_to_narrow_hooks) so the codec body
         # runs at full JIT speed instead of paying a Python callback on every
-        # one of its ~13k instructions per block (~100x faster decode).
-        def code(mu, addr, size, ud):
-            w = self._watchdog
-            if w is not None:
-                w()
-            if addr in self._atomic_pcs:
-                self._emu_atomic(addr)
-                return
-            if addr in self.imports:
-                self._imp(addr)
-                return
-            h = self.PLT.get(addr)
-            if h:
-                h(self)
-                return
-            fn = self.extra.get(addr)
-            if fn:
-                fn(self)
-        self._global_hook = mu.hook_add(UC_HOOK_CODE, code)
+        # one of its ~13k instructions per block (~100x faster decode).  A
+        # generic build's params derive runs narrow too (_narrow_derive_begin).
+        self._global_hook = mu.hook_add(UC_HOOK_CODE, self._global_code)
         self._narrow = False
         self._extra_handles = {}
 
@@ -660,6 +752,25 @@ class Spike2Emu:
                 return False
         mu.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED
                     | UC_HOOK_MEM_FETCH_UNMAPPED, inv)
+
+    def _global_code(self, mu, addr, size, ud):
+        """The global code hook: every instruction, dispatched by address."""
+        w = self._watchdog
+        if w is not None:
+            w()
+        if addr in self._atomic_pcs:
+            self._emu_atomic(addr)
+            return
+        if addr in self.imports:
+            self._imp(addr)
+            return
+        h = self.PLT.get(addr)
+        if h:
+            h(self)
+            return
+        fn = self.extra.get(addr)
+        if fn:
+            fn(self)
 
     # ---- narrow (address-filtered) hooks for the hot decode/encode path -----
     def _on_import(self, mu, addr, size, ud):
@@ -716,6 +827,97 @@ class Spike2Emu:
             if a not in self._extra_handles:
                 self._extra_handles[a] = mu.hook_add(
                     UC_HOOK_CODE, self._on_extra, begin=a, end=a)
+
+    # ---- narrow hooks for the params derive (generic builds) ----------------
+    def narrow_derive(self):
+        """Whether :meth:`derive_params` runs under narrow hooks: on every
+        generic build unless :data:`DERIVE_HOOKS_ENV` says ``global``.  The
+        validated TMNT 1.58 path keeps the global hook it was validated with."""
+        return bool(self._generic) and os.environ.get(DERIVE_HOOKS_ENV, "") != "global"
+
+    def _narrow_derive_begin(self, addrs):
+        """Run the derive under address-filtered hooks instead of the global
+        per-instruction one.
+
+        The global hook is a Python call on EVERY guest instruction (about 101
+        million per Godzilla derive, 119 of its 155 s under a profiler); the
+        derive only ever acts at the import sentinels, the PLT table and the
+        handful of addresses in :attr:`extra`, so hooks on just those give the
+        same run with the rest of the code at JIT speed: Godzilla LE 1.16 74 s
+        to 4.2 s, Deadpool Pro 1.16 204 s to 27 s, Beatles 1.29 31 s to 13 s,
+        every row the same.  LDREX/STREX run natively (unicorn 2 keeps the
+        exclusive monitor), as they already do in the narrow decode.
+
+        *addrs* are the derive's own handler addresses, hooked up front; any
+        handler assigned while this lasts is hooked when it is set
+        (:class:`_ExtraHooks`).  Returns the state :meth:`_narrow_derive_end`
+        takes to put the hooks back exactly as they were, so a caller that goes
+        on to set ``extra[...]`` directly under the global hook is unaffected."""
+        mu = self.mu
+        was_narrow = self._narrow
+        base = []
+        if not was_narrow:
+            mu.hook_del(self._global_hook)
+            self._global_hook = None
+            lo = self.IMPORT
+            hi = self.IMPORT + 4 * max(1, len(self.imports)) + 4
+            base.append(mu.hook_add(UC_HOOK_CODE, self._on_import, begin=lo, end=hi))
+            for a in self.PLT:
+                base.append(mu.hook_add(UC_HOOK_CODE, self._on_plt, begin=a, end=a))
+            self._narrow = True
+        own = {}
+
+        def watch(addr):
+            if addr is None or addr in own or addr in self._extra_handles:
+                return
+            own[addr] = mu.hook_add(UC_HOOK_CODE, self._on_extra, begin=addr, end=addr)
+        for a in list(self.extra) + [a for a in addrs if a is not None]:
+            watch(a)
+        self.extra.watch = watch
+        return was_narrow, base, own
+
+    def _narrow_derive_end(self, state):
+        """Undo :meth:`_narrow_derive_begin`: drop the hooks it added and, when
+        the emulator was on the global hook before, put that hook back."""
+        was_narrow, base, own = state
+        mu = self.mu
+        self.extra.watch = None
+        for hh in list(own.values()) + base:
+            try:
+                mu.hook_del(hh)
+            except UcError:
+                pass
+        if not was_narrow:
+            self._narrow = False
+            self._global_hook = mu.hook_add(UC_HOOK_CODE, self._global_code)
+        else:
+            # already narrow before the derive (a decode was set up first): the
+            # handlers still in ``extra`` keep hooks, as add_hook gives them
+            for a in list(self.extra):
+                if a not in self._extra_handles:
+                    self._extra_handles[a] = mu.hook_add(
+                        UC_HOOK_CODE, self._on_extra, begin=a, end=a)
+
+    def _watchdog_block_hook(self):
+        """Under narrow hooks the derive's fail-fast watchdog cannot count
+        instructions one by one; a basic-block hook counts them a block at a
+        time (``size // 4``, ARM words) instead, and takes itself out as soon
+        as the watchdog is cleared, so a good build pays for it only until the
+        record-array malloc is caught.  Returns ``{"hh": handle}`` (emptied
+        once the hook has taken itself out) for the caller's cleanup."""
+        mu = self.mu
+        box = {}
+
+        def on_block(mu_, addr, size, ud):
+            w = self._watchdog
+            if w is None:
+                hh = box.pop("hh", None)
+                if hh is not None:
+                    mu_.hook_del(hh)
+                return
+            w(max(1, size >> 2))
+        box["hh"] = mu.hook_add(UC_HOOK_BLOCK, on_block)
+        return box
 
     # ---- import stubs -------------------------------------------------------
     def _emu_atomic(self, addr):
@@ -922,6 +1124,44 @@ class Spike2Emu:
         if hh is not None:
             self.mu.hook_del(hh)
 
+    def patch_card(self, off, data):
+        """Lay *data* over the card at image offset *off* in THIS emulator's
+        view only: the window is a private copy-on-write map (or pages copied
+        in), so the file on disk never changes.  The same bytes a copy of
+        ``image.bin`` patched on disk would show the firmware, without the
+        copy (1.65 GB on Godzilla).  Call before :meth:`boot` to have the whole
+        run see them, as a patched file would.  Raises ``ValueError`` for a
+        range past the end of the image: a patched copy would have grown, and
+        the size the firmware is told (fstat) would not match."""
+        n = len(data)
+        if off < 0 or off + n > self.imgsize:
+            raise ValueError("patch 0x%x+%d is outside the %d-byte image"
+                             % (off, n, self.imgsize))
+        if not n:
+            return
+        self._ensure_range(DESC_BASE + off, n)
+        self.mu.mem_write(DESC_BASE + off, bytes(data))
+
+    def add_read_hook(self, fn, begin, end):
+        """A ``UC_HOOK_MEM_READ`` hook over ``[begin, end]`` calling
+        ``fn(uc_or_handle, access, address, size, value, user_data)``; returns
+        a handle ``self.mu.hook_del`` takes.
+
+        A hook that fires millions of times (the consumed-read map sees every
+        guest read of the card) spends most of its time in the binding's own
+        layers: its exception guard and the closure that re-orders the
+        arguments are two Python frames per read.  Registering *fn* straight
+        through unicorn's C API as a ctypes callback leaves one.  *fn* gets the
+        raw engine handle, not the ``Uc``, as its first argument, and must not
+        raise (ctypes reports and ignores an exception, where the binding stops
+        the emulation).  If the private attributes this reaches for ever move,
+        it falls back to the ordinary ``hook_add``, which calls *fn* the same
+        way with the ``Uc`` first."""
+        try:
+            return _raw_read_hook(self.mu, fn, begin, end)
+        except Exception:
+            return self.mu.hook_add(UC_HOOK_MEM_READ, fn, begin=begin, end=end)
+
     @property
     def fast_reg_read(self):
         """``(uc_reg_read C function, uc handle)`` for reading a register
@@ -1038,7 +1278,38 @@ class Spike2Emu:
         state the previous record left, so record N is not reachable without
         having run 0..N-1 (replaying a late record from the initial state
         produces no object at all).
+
+        A generic build runs it under narrow hooks (:meth:`narrow_derive`), the
+        same rows many times sooner; the hooks are as they were afterwards.
+        A failure there names :data:`DERIVE_HOOKS_ENV`, the way back to the
+        global hook.  It is not retried in place: the failed run has already
+        moved this emulator's heap and the firmware's own state, so a second
+        run on it would not be the same derive.
         """
+        if not self.narrow_derive():
+            return self._derive_params(progress, after_step)
+        want = [self.MASTERDIR_MALLOC, self.BANDLOOP, self.BANDOBJ, self.FIND_BL]
+        if self.COUNTREG is not None:
+            want.append(self.MASTERDIR_COUNT)
+        want.extend(self.CHAIN_STUBS or ())
+        state = self._narrow_derive_begin(want)
+        try:
+            return self._derive_params(progress, after_step)
+        except RuntimeError as e:
+            if type(e) is not RuntimeError or self.imgsize > MAX_IMAGE_BYTES:
+                # a caller's own error from after_step/progress, or a bank too
+                # big for the game to open, which no hook choice changes
+                raise
+            raise RuntimeError("%s %s" % (e, NARROW_DERIVE_HINT)) from e
+        except UcError as e:
+            if hasattr(e, "add_note"):
+                e.add_note(NARROW_DERIVE_HINT)
+            raise
+        finally:
+            self._narrow_derive_end(state)
+
+    def _derive_params(self, progress, after_step):
+        """:meth:`derive_params` itself, under whichever hooks are in place."""
         mu = self.mu
         cap = {"mddst": None, "nrec": None, "state": None, "badrec": None,
                "count_at_src": None}
@@ -1098,15 +1369,27 @@ class Spike2Emu:
         # with the error below.
         wd = {"n": 0}
 
-        def _wd():
-            wd["n"] += 1
+        def _wd(n=1):
+            wd["n"] += n
             if wd["n"] >= 40_000_000 and cap["mddst"] is None:
                 mu.emu_stop()
         self._watchdog = _wd
+        # Under narrow hooks nothing calls the watchdog per instruction; a
+        # block hook counts for it until at_md clears it.
+        blocks = self._watchdog_block_hook() if self._narrow else None
+        if progress is not None:
+            # The record count is not known until the decode has run a while,
+            # so this stretch reports its name without a fraction.
+            progress(0, 0, "Reading the game's sound directory...")
         try:
             self.call(self.MASTERDIR_DECODE, (0,), limit=600_000_000)
         finally:
             self._watchdog = None
+            if blocks and blocks.get("hh") is not None:
+                try:
+                    mu.hook_del(blocks.pop("hh"))
+                except UcError:
+                    pass
             if self.MASTERDIR_COUNT is not None:
                 self.extra.pop(self.MASTERDIR_COUNT, None)
             self.extra.pop(self.MASTERDIR_MALLOC, None)

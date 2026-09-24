@@ -263,7 +263,7 @@ _MODES_EXPLAIN = (
     "Your modes are built exactly as Write would put them on a card, then the "
     "card starts with them. A mode's own sound is the slow part: the sound "
     "bank is staged and checked again the first time a sound changes, about "
-    "three minutes on Godzilla, and reused after that.")
+    "a minute on Godzilla, and reused after that.")
 
 #: PAD-121: what a multi-image card is told when it runs with the edits on
 #: top.  DragonRR asked it exactly: "In a multiboot image - which image does

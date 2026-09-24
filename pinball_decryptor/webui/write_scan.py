@@ -276,9 +276,17 @@ def stock_mode_rows(mfr, assets_path):
         from ..plugins.stern import stock_modes
         build = stock_modes.table_for_project(assets_path)
         edits = stock_modes.staged_edits(assets_path, build)
+        unread = stock_modes.unread_staged(assets_path)
     except Exception:                                   # noqa: BLE001
         return []
     out = []
+    if unread:
+        # staged while their table was here; it is not on this computer now, and the Write
+        # reads it again from the card's own game program
+        out.append((
+            "The game's own modes: %d staged change(s), not read yet (the Write reads their "
+            "table from the card's game program)" % unread,
+            "program", PENDING_STOCK_MODES, "pending"))
     for e in edits:
         num = e["number"]
         label = (build.row_label(num) if build is not None else num.label)

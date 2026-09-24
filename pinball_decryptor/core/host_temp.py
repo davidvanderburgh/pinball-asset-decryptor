@@ -70,6 +70,13 @@ def usage():
 
 
 _HEX8 = re.compile(r"^[0-9a-f]{8}$")
+#: Stern folders kept on purpose between builds (safe to clean: a build makes
+#: them again), named so the Clean temp view says what they are.
+_SPIKE2_KEPT = {
+    "spike2_card_cache": "card copies kept for faster rebuilds",
+    "spike2_clip_cache": "video clips kept for faster rebuilds",
+    "spike2_code_cache": "compiled objects kept for faster rebuilds",
+}
 
 
 def _spike2_detail(name):
@@ -78,6 +85,8 @@ def _spike2_detail(name):
     attributable; older ones were a bare random ``spike2_<suffix>`` with no
     title.  Return the game title (suffixed " (revert)" for reverts) when
     present, else the generic role."""
+    if name in _SPIKE2_KEPT:
+        return _SPIKE2_KEPT[name]
     rest = name[len("spike2_"):]
     head, _, tail = rest.rpartition("_")
     if not (head and _HEX8.match(tail)):

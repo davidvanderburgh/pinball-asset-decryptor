@@ -41,11 +41,22 @@ def _wait(w, cond, timeout=5.0):
     return cond()
 
 
-def _project(w, path):
+#: The card a scratch project names when a test gives none: there is no default game any
+#: more (a project that names no card greys the Modes form), so these Godzilla tests say
+#: which card their project is for. The image is not there, so nothing is read from it.
+GODZILLA_CARD = "godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw"
+
+
+def _project(w, path, card=GODZILLA_CARD):
     """Point the project folder (Write's assets folder) at *path* ("" for none), as the
-    window's traces did, and let the Modes tab read it."""
+    window's traces did, and let the Modes tab read it. A folder that names no card yet is
+    made a *card* project first (``card=None``: a bare folder)."""
     if path:
         os.makedirs(str(path), exist_ok=True)
+        rec = os.path.join(str(path), ".extract_source.json")
+        if card and not os.path.isfile(rec):
+            with open(rec, "w", encoding="utf-8") as f:
+                json.dump({"input_path": os.path.join(str(path), card), "input_name": card}, f)
     svc = _svc(w)
 
     def go():
@@ -995,8 +1006,8 @@ def test_modes_tab_try_it_runs_a_project_of_code_modes_only(tmp_path, monkeypatc
         assert w.run(svc.on_try) is True and not ran
         assert handed[0](str(card)) is None
         w.drain()
-        assert [c[2] for c in ran] == ["check"]              # the rig was asked, nothing built
-        assert "no port for nosuch_pro 9.9.0" in _line(w)
+        assert ran == []                    # the port is checked first: the rig is not asked
+        assert "Modes of your own can't be made for Nosuch Pro 9.9 yet" in _line(w)
         del ran[:]
 
         monkeypatch.setattr(MT, "card_title", lambda c: ("godzilla_pro", "1.15.0", 0))
@@ -1378,7 +1389,8 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         assert len(names) == 17
         assert st["profile"]["shots"] == names
         title = st["title_text"]
-        assert "TMNT Pro 1.59" in title and "turtles_pro-1.59.port" in title and "17 shots" in title
+        assert "TMNT Pro 1.59" in title and "17 shots" in title and "port" not in title
+        assert st["title_port"] == "turtles_pro-1.59.port"          # the head's tooltip has it
         assert [e["name"] for e in st["examples"]] == ["TARGET RUSH"]
         assert st["new_ok"] is True
 
@@ -1390,8 +1402,12 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
             reason = st["reasons"][part]
             assert "Not on this game" in reason and tmnt.why_not(part) in reason
         assert st["dis"]["countdown"] and st["dis"]["own_sound"]
-        assert "countdown" in st["reasons"]["sound"]
+        assert "count down" in st["reasons"]["sound"]
         assert st["editor_on"] is True                          # the shots stay live
+        # no named inserts and no measured carriers on TMNT: both greyed, with the reason
+        assert st["dis"]["lit_shots"] and "TMNT Pro 1.59" in st["reasons"]["lit_shots"]
+        assert st["dis"]["own_extra"] and "spare sounds" in st["reasons"]["own_extra"]
+        assert st["own_extra_ok"] is False
 
         spec = MP.load(str(project / "modes" / slug / "mode.json"))
         assert spec.title == "turtles_pro_1_59" and spec.start_shot == "Center loop"
@@ -1436,8 +1452,10 @@ def test_modes_tab_card_with_no_port_points_at_making_a_port(tmp_path):
         _project(w, project)
         st = _st(w)
         note = st["title_note"]
-        assert "MODE_SDK.md" in note and "Making a port for another game or version" in note
-        assert "Godzilla Pro 1.16.0" in note
+        # what to do is in words; the SDK pointer for someone who writes C is a tooltip
+        details = st["no_port_details"]
+        assert "MODE_SDK.md" in details and "Making a port for another game or version" in details
+        assert "Godzilla Pro 1.16" in note and "MODE_SDK" not in note
         assert st["new_ok"] is False
         assert st["ex_ok"] is False
 
@@ -1488,16 +1506,17 @@ def test_modes_tab_jaws_greys_lights_and_screen_and_a_godzilla_mode_is_retargete
 
 
 @pytest.mark.usefixtures("preview_modes_on")
-def test_modes_tab_bare_project_keeps_godzilla_pro_1_15(tmp_path):
+def test_modes_tab_bare_project_knows_no_game(tmp_path):
+    """A project that names no card has no game: there is no default title any more (it
+    used to be Godzilla Pro 1.15), so nothing can be made until a card says which game."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
     with web_app(tmp_path, mfr="stern") as w:
-        _project(w, tmp_path / "bare")
+        _project(w, tmp_path / "bare", card=None)
         st = _st(w)
-        assert st["profile"]["shots"] == [n for n, _m in MP.GODZILLA_PRO_1_15.shots]
-        assert "names no card" in st["title_text"]
-        assert st["title_note"] == ""
-        assert st["new_ok"] is True
+        assert st["profile"]["shots"] == []
+        assert st["title_text"] == "" and MP.NO_CARD_HELP == st["title_note"]
+        assert st["new_ok"] is False and st["examples"] == []
 
 
 @pytest.mark.usefixtures("preview_modes_on")
@@ -1597,7 +1616,8 @@ def test_modes_tab_no_port_card_after_another_title_never_rewrites_a_modes_shots
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_bare_project_keeps_a_modes_own_title(tmp_path):
     """Item 148: a project that names no card retargets nothing. A TMNT mode in it is shown
-    with TMNT's shots and saved back as TMNT, while New still makes Godzilla Pro 1.15."""
+    with TMNT's shots, read-only (the project names no game to build it for), and its file
+    is left as it was; New makes nothing (there is no default game)."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
     tmnt = MP.profile("turtles_pro_1_59")
@@ -1606,18 +1626,17 @@ def test_modes_tab_bare_project_keeps_a_modes_own_title(tmp_path):
     spec = MP.blank_spec(tmnt, "TURTLE RUSH")
     spec.scoring_shots = ["Left orbit", "Left ramp", "Right top lane"]
     slug, _s = MP.new_mode(str(project), spec=spec)
+    before = (project / "modes" / slug / "mode.json").read_bytes()
     with web_app(tmp_path, mfr="stern") as w:
-        _project(w, project)
+        _project(w, project, card=None)
         assert _st(w)["profile"]["shots"] == [n for n, _m in tmnt.shots]
+        assert _st(w)["editor_on"] is False
         _f(w, "award", "123456")
         _save(w)
-        saved = MP.load(str(project / "modes" / slug / "mode.json"))
-        assert saved.title == tmnt.key and saved.scoring_shots == spec.scoring_shots
-        assert saved.award == 123456
-        assert _st(w)["examples"][0]["name"] == "KAIJU RUSH"
-        new = w.call("modes.new")
-        assert MP.load(str(project / "modes" / new / "mode.json")).title == MP.GODZILLA_PRO_1_15.key
-        assert _st(w)["profile"]["shots"] == [n for n, _m in MP.GODZILLA_PRO_1_15.shots]
+        assert (project / "modes" / slug / "mode.json").read_bytes() == before
+        assert _st(w)["examples"] == []
+        assert w.call("modes.new") is None
+        assert sorted(os.listdir(project / "modes")) == [slug]
 
 
 @pytest.mark.usefixtures("preview_modes_on")
@@ -2276,10 +2295,13 @@ def test_modes_tab_advanced_section_writes_every_parameter(tmp_path):
 
 
 @pytest.mark.usefixtures("preview_modes_on")
-def test_modes_tab_advanced_section_names_bad_values_and_keeps_what_it_cannot_show(tmp_path):
-    """A bad value in the Advanced section is named in the status, not dropped; rows the form
-    has no place for (callouts past its four rows, a shot this title does not name) are
-    written back as they were; and with no mode open every Advanced field is greyed."""
+def test_modes_tab_advanced_section_names_bad_values_and_matches_awards_to_the_card(tmp_path):
+    """A bad value in the Advanced section is named in the status, not dropped; callouts past
+    the form's four rows are written back as they were; an award for a shot the project's
+    card does not have is named in the status and left out when the mode is saved (the mode
+    is matched to the card, item 148; values the form cannot show on a shot the card DOES
+    have are kept, test_modes_tab_advanced_section_keeps_hand_edited_values_until_changed);
+    and with no mode open every Advanced field is greyed."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
     project = tmp_path / "proj"
@@ -2310,11 +2332,15 @@ def test_modes_tab_advanced_section_names_bad_values_and_keeps_what_it_cannot_sh
                     shot_award=[["Spinner", 7]], restore_after=6, clip_both={})
         path.write_text(json.dumps(data), encoding="utf-8")
         w.run(svc._open, slug, MP.load(str(path)))
+        # the project's card is Godzilla Pro 1.15, which has no Spinner: the mode is
+        # matched to the card (item 148) and the status says that shot's points go
+        assert "Spinner is not on Godzilla Pro 1.15, so its own points are left out" \
+            in _status(w)
         _set(w, "award:Building", "")
         _save(w)
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data["callout_at"] == [[25, 1], [24, 2], [23, 3], [22, 4], [21, 5]]
-        assert data["shot_award"] == [["Spinner", 7]]
+        assert data["shot_award"] == []
 
 
 @pytest.mark.usefixtures("preview_modes_on")
@@ -2396,7 +2422,7 @@ def test_modes_tab_lists_the_games_own_modes_and_stages_like_defaults(tmp_path):
         svc = _svc(w)
         _project(w, project)
         stock = _st(w)["stock"]
-        assert "godzilla_pro 1.15" in stock["msg"]
+        assert "Godzilla Pro 1.15" in stock["msg"]
         rows = {r["key"]: r for r in stock["rows"]}
         assert "12.start.caward_add" in rows and "12.timer.seconds" in rows
         assert "12.timer.v57" not in rows                      # one row per operator setting
@@ -2447,7 +2473,7 @@ def test_modes_tab_says_when_the_build_has_no_table(tmp_path):
         _project(w, project)
         stock = _st(w)["stock"]
         assert "doesn't know" in stock["msg"]
-        assert "turtles_pro 1.59.0" in stock["msg"]
+        assert "TMNT Pro 1.59" in stock["msg"]
         assert stock["rows"] == []
         assert stock["on"] is False and stock["row_on"] is False
 
@@ -2466,7 +2492,7 @@ def test_modes_tab_picks_a_tank_position_by_shot_and_sets_a_spin_count(tmp_path,
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, project)
         stock = _st(w)["stock"]
-        assert "godzilla_le 1.16" in stock["msg"]
+        assert stock["msg"].startswith("Godzilla Premium/LE 1.16:")
         rows = {r["key"]: r for r in stock["rows"]}
         # the positions: 2 and 4 pickable, the seeds and the goal read-only with the reason
         assert rows["4.path.3"]["number"] == "Position 4" and rows["4.path.3"]["stock"] == "Top spinner, first bit"
@@ -2912,7 +2938,7 @@ def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)
         _project(w, project)
-        assert _st(w)["cap_text"] == "0 of 8 modes"
+        assert _st(w)["cap_text"] == "" and _st(w)["n_form"] == 0
         slugs = [MP.new_mode(str(project), "MODE %d" % i,
                              MP.ModeSpec(name="MODE %d" % i, screen=False, clip="none"))[0]
                  for i in range(MP.MAX_MODES)]
@@ -2928,7 +2954,7 @@ def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(
         assert len(code) == 5 and set(code.values()) == {False}
         w.run(svc.delete_mode, slugs[0])
         st = _st(w)
-        assert st["cap_text"] == "7 of 8 modes"
+        assert st["cap_text"] == "" and st["n_form"] == 7
         assert st["new_ok"] is True
         assert not any(e["disabled"] for e in st["examples"])
         _project(w, "")
@@ -3017,7 +3043,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert ("drafted and never run" in which) == bool(drafted)
     assert "for now" not in which and "Making a port for another game or version" in which
     assert callable(dict(HD.PREVIEW_HELP["modes"]["Modes"])["Which games"])   # read at render
-    assert "three minutes" in bodies["Try it"] and "Cancel" in bodies["Try it"]
+    assert "about a minute" in bodies["Try it"] and "Cancel" in bodies["Try it"]
     assert "used as it is" in bodies["Try it"] and "Start mode now" in bodies["Try it"]
     code = bodies["Modes written in C"]
     assert "New code mode" in code and "assets.json" in code and "MODE_SDK.md" in code

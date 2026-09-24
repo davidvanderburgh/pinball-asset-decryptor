@@ -1,13 +1,15 @@
 // Modes: make a game mode of your own, saved in the card project and put on the card by
 // Write (item 127). The web port of the Tk ModesPanel in the audit's re-hang design:
-// one list of both kinds, a five-page editor, a code mode's Code/Assets panes, the game's
-// own modes in a dialog, the film cutter, and a pinned Try it footer.
+// one list of both kinds (with the game's own modes as a group above them, each with a
+// page of its numbers), a five-page editor, a code mode's Code/Assets panes, the game's
+// own modes in a dialog too, the film cutter, a pinned Try it footer, and the progress
+// of reading a card's game build the first time the tab sees it.
 //
 // Python (tabs/modes.py) owns every decision; this page renders modes.* and edits the
 // form through ui.set("modes", "f:<key>" | "shot:<name>" | "award:<name>", value).
 
 import { html, useEffect, useRef, useState, Button, Field, Select, Check, Radio, Chip, Note, Empty,
-         InfoBadge, Icon, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
+         InfoBadge, Icon, Progress, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
 import { CountsAsDialog } from "./modes_counts_as.js";   // item 160
@@ -31,8 +33,8 @@ const T = {
   cooldown: "0 = no wait. The wait runs from the moment the mode ends, and carries on through the end of a ball.",
   starts: "Counted for each player. Once a ball starts again on the player's next ball; once a game, and up to N times, start again in the next game.",
   stack: "On: the mode starts whenever its shot is made, even during one of the game's own battles or multiballs. Off: it waits until the game's own battle or multiball ends, and the next start shot after that starts it.",
-  lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time. Godzilla's ports name the inserts; on a title whose port does not, nothing is lit.",
-  priority: "How the mode's screen and clip sit among the game's own displays while it runs, on the game's own scale (1-255). At 180 the game's full-screen shot awards (LOOPS) and BATTLE IS LIT wait until the mode ends; its jackpots, multiball and battle starts and the tilt warning still come through, and the mode's screen is back when they end. Higher holds more back (190: starts and jackpots wait too). 0 leaves the game's display order as it is.",
+  lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
+  priority: "How the mode's screen and clip sit among the game's own displays while it runs, on the game's own scale (1-255). At 180 the game's full-screen shot awards wait until the mode ends (on Godzilla: LOOPS and BATTLE IS LIT); its jackpots, multiball and battle starts and the tilt warning still come through, and the mode's screen is back when they end. Higher holds more back (190: starts and jackpots wait too). 0 leaves the game's display order as it is.",
   film: "Cut this mode's clip, its sound or its screen's picture from a film: pick the film, a start time and a length (up to 30 seconds), and whether to keep the film's letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the film.",
   rising: "The Nth scoring shot pays N times its points: 1x, 2x, 3x...",
   fixed: "Every scoring shot pays its points once.",
@@ -41,7 +43,8 @@ const T = {
   clip2Title: "The second title card's words. Empty uses the mode's name.",
   callouts: "One of the game's own callouts, by number, when that many seconds are left. Pick names the ones measured to play on this game; the countdown under Sound adds its own.",
   restore: "How long the mode's own screen (Screen, above) shows its total after the mode ends. With no screen of its own this does nothing.",
-  tryit: "Try it builds this project's modes as Write puts them on a card (their screens, clips and own sounds, from the card itself) and starts the card in the Emulate tab with them. Then start a game: a mode starts on its shots, or at once with Start mode now. Edits you make while the game runs reach it within a second. A mode's own sound costs about three minutes the first time it changes and is reused after that.",
+  tryit: "Try it builds this project's modes as Write puts them on a card (their screens, clips and own sounds, from the card itself) and starts the card in the Emulate tab with them. Then start a game: a mode starts on its shots, or at once with Start mode now. Edits you make while the game runs reach it within a second.",
+  ownSoundCost: " A mode's own sound costs about a minute the first time it changes and is reused after that.",
   startNow: "Start the mode open on the left in the running game, without its starting shots. A game must be in play.",
   endNow: "End whichever of this project's modes is running.",
   codeMode: "A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others.",
@@ -104,7 +107,11 @@ function Head({ s, openStock, openCountsAs, openRewrite }) {
   const proj = s.project || "";
   const counts = `${s.n_form || 0} of 8 modes${s.n_code ? ` + ${s.n_code} in C` : ""}`;
   const modesDir = proj ? proj.replace(/[\\/]+$/, "").split(/[\\/]/).pop() + (proj.includes("\\") ? "\\" : "/") + "modes" : "";
-  const compact = proj && s.title_label && (s.title_text || "").startsWith("Card:") && !s.no_port;
+  // one line: the card's game and version (its full words in the tooltip), the counts, the folder
+  const compact = proj && (s.title_label || s.card_label) && (s.title_text || "").startsWith("Card:");
+  const r = s.reading || {};
+  const readLine = r.state === "done" && r.seconds >= 0 ? `Read ${r.label} in ${(r.seconds || 0).toFixed(1)} s.` : "";
+  const headTip = [s.title_text, s.title_port ? "Its port: " + s.title_port : "", readLine, s.project_label].filter(Boolean).join("\n");
   const examples = (e) => {
     const items = [];
     const form = (s.examples || []).filter((x) => !x.code);
@@ -121,16 +128,52 @@ function Head({ s, openStock, openCountsAs, openRewrite }) {
     <div class="grow">
       <div class="row" style="gap:8px"><h1 class="h1">Modes</h1><${InfoBadge} text=${s.about} /></div>
       <p class="modes-sub">${!proj ? html`<span>${s.project_label}</span>`
-        : compact ? html`<span ...${tip(s.title_text + "\n" + s.project_label)}><b>${s.title_label}</b> · port <span class="mono">${s.title_port}</span>, ${s.title_shots} shots</span> · ${counts} · <span class="mono" ...${tip(s.project_label)}>${modesDir}</span>`
-        : html`<span>${s.title_text}</span>${s.title_text ? " · " : ""}${counts} · <span class="mono" ...${tip(s.project_label)}>${modesDir}</span>`}</p>
+        : compact ? html`<span ...${tip(headTip)}><b>${s.title_label || s.card_label}</b>${s.title_label ? ` · ${s.title_shots} shots` : ""}</span> · ${counts} · <span class="mono" ...${tip(s.project_label)}>${modesDir}</span>`
+        : html`<span ...${tip(headTip)}>${s.title_text}</span>${s.title_text ? " · " : ""}${counts} · <span class="mono" ...${tip(s.project_label)}>${modesDir}</span>`}</p>
     </div>
     <div class="actions">
       <${Button} icon="list" disabled=${!proj} onClick=${openStock}>The game's own timers and awards…<//>
       <${Button} icon="list" disabled=${!proj} onClick=${openCountsAs} title="A shot that counts as one of a rule's own.">Counts as…<//>
       <${Button} icon="edit" disabled=${!proj} onClick=${openRewrite} title="A rule's shot logic rewritten in C, as a code mode of this project.">Rewrite in C…<//>
-      <${Button} iconRight="down" disabled=${!s.ex_ok} onClick=${examples}>Examples…<//>
+      <${Button} iconRight="down" disabled=${!s.ex_ok} title=${s.ex_ok ? "" : s.ex_tip} onClick=${examples}>Examples…<//>
     </div>
   </div>`;
+}
+
+// ------------------------------------------------------------------ reading the card
+// The first look at a card's game build reads it on a worker (tabs/modes.py through
+// modes_reading.py): a bar for the whole read, the steps as a checklist, and Cancel. A
+// read that failed or was stopped says so, with Read again. A finished read shows one
+// quiet line (how long it took, and anything the reader wants said).
+const READ_STATE = { reading: "Reading", failed: "Could not read", cancelled: "Stopped" };
+
+function ReadingPanel({ r }) {
+  if (!r || !r.state) return null;
+  if (r.state === "done") return null;          // the head's tooltip says how long; the log has the rest
+  const working = r.state === "reading";
+  const kind = r.state === "failed" ? "err" : working ? "acc" : "warn";
+  return html`<section class="card modes-read" role="status" aria-live="polite">
+    <div class="bd modes-read-bd">
+      <div class="row modes-read-top">
+        <${Chip} kind=${kind} dot>${READ_STATE[r.state] || r.state}<//>
+        <span class="modes-read-what"><b>${r.label}</b> <span class="mono small muted">${r.card}</span></span>
+        <span class="grow"></span>
+        ${working ? html`<span class="mono small muted">${r.pct || 0}%</span><${Elapsed} started=${r.started} />` : null}
+        ${working ? html`<${Button} size="sm" kind="danger" icon="x" onClick=${() => call("modes.read_cancel")}
+            title="Stop reading. Nothing is kept of a read that was stopped; Read again starts it over.">Cancel<//>`
+          : html`<${Button} size="sm" icon="refresh" onClick=${() => call("modes.read_again")}>Read again<//>`}
+      </div>
+      ${working ? html`<${Progress} pct=${r.pct || 0} />` : null}
+      <div class="phases modes-read-steps">
+        ${(r.steps || []).map((x) => html`<span key=${x.key} class=${cx("phase", x.state === "done" && "done", x.state === "doing" && "now", x.state === "failed" && "fail")}
+            title=${x.state === "done" ? "Done" : x.state === "doing" ? "Now" : x.state === "failed" ? "This step failed" : "Not yet"}>
+          ${x.state === "done" ? "✓ " : ""}${x.words}</span>`)}
+      </div>
+      ${working && r.text ? html`<div class="small dim modes-read-text">${r.text}</div>` : null}
+      ${r.state === "failed" && r.error ? html`<div class="small err-ink modes-read-text">${r.error}</div>` : null}
+      ${r.state === "cancelled" ? html`<div class="small dim modes-read-text">Stopped before it was done, so this card's game build is not known yet.</div>` : null}
+    </div>
+  </section>`;
 }
 
 // ------------------------------------------------------------------ the list
@@ -141,18 +184,52 @@ function newMenuItems(s, onNewCode) {
   return [
     { label: "New mode", icon: "plus", disabled: !s.new_ok, onClick: () => call("modes.new"),
       title: s.new_ok ? "A blank mode, NEW MODE, made for this card's game." : (s.cap_text || s.project_label) },
-    { label: "New code mode…", icon: "edit", title: T.codeMode,
+    { label: "New code mode…", icon: "edit", title: s.project && s.no_port ? s.no_port : T.codeMode,
+      disabled: !!(s.project && s.no_port),
       onClick: () => (s.project ? onNewCode() : call("modes.new_code_mode", "")) },
     { sep: true },
     { label: "Open MODE_SDK.md", icon: "file", title: s.sdk_doc, onClick: () => call("modes.open_sdk_doc") },
   ];
 }
 
+// One row of the list: the person's modes (form, and code with a C pill) and the game's own
+// modes (kind "game", with a count of staged changes).
+function ListRow({ r, i, selIdx, isSel }) {
+  const where = r.kind === "code" ? "modes/" + r.slug + "/" + r.slug + ".c"
+    : r.kind === "game" ? "One of the game's own modes: its timers and awards" : "modes/" + r.slug;
+  return html`<button type="button" role="option" key=${r.kind + r.slug}
+      aria-selected=${isSel(r)} tabindex=${i === Math.max(0, selIdx) ? 0 : -1}
+      class=${cx("li", isSel(r) && "sel", r.kind === "game" && "game")}
+      onClick=${() => call("modes.select", r.slug, r.kind)}
+      ...${tip(where + (r.chip_tip ? "\n" + r.chip_tip : ""))}>
+      <span class="ellip">${r.name}</span>
+      ${r.kind === "code" ? html`<span class="r pill" title="Written in C">C</span>`
+        : r.kind === "game" ? (r.chip ? html`<span class="r chip acc sm">${r.chip}</span>` : null)
+        : r.chip === "ready" ? html`<span class="r chip ok sm">ready</span>`
+        : r.chip ? html`<span class="r chip warn sm">${r.chip}</span>` : null}
+    </button>`;
+}
+
+// The game's own modes sit BELOW the person's, folded by default when there are more than
+// GAME_FOLD_AT of them (a person's choice to open or fold them is kept in this browser).
+const GAME_FOLD_AT = 6;
+
 function ModeList({ s, onNewCode }) {
-  const rows = s.rows || [];
+  const [fold, setFold] = useStored("pad.modes.game_fold2", "auto");
   const sel = s.sel || {};
+  const allGame = s.game_rows || [];
+  const closed = fold === "closed" || (fold === "auto" && allGame.length > GAME_FOLD_AT);
+  const folded = closed && sel.kind !== "game";
+  const game = folded ? [] : allGame;
+  const own = s.rows || [];
+  const rows = [...own, ...game];
   const isSel = (r) => sel.slug === r.slug && sel.kind === r.kind;
   const selIdx = rows.findIndex(isSel);
+  const listRef = useRef(null);
+  useEffect(() => {
+    const el = listRef.current && listRef.current.querySelector('[aria-selected="true"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  }, [sel.slug, sel.kind, rows.length]);
   // the Tk Listbox: Up/Down (and Home/End) move the selection, and the mode opens
   const onKey = (e) => {
     if (!rows.length || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
@@ -168,17 +245,16 @@ function ModeList({ s, onNewCode }) {
     <div class="hd"><span class="h2">Modes</span><span class="sp"></span>
       <${Button} kind="primary" size="sm" iconRight="down" onClick=${(e) => openMenu(e.currentTarget, newMenuItems(s, onNewCode))}>New<//></div>
     <div class="bd modes-list-bd">
-      ${rows.length ? html`<div class="list" role="listbox" aria-label="Modes in this project" onKeyDown=${onKey}>
-        ${rows.map((r, i) => html`<button type="button" role="option" key=${r.kind + r.slug}
-            aria-selected=${isSel(r)} tabindex=${i === Math.max(0, selIdx) ? 0 : -1}
-            class=${cx("li", isSel(r) && "sel")}
-            onClick=${() => call("modes.select", r.slug, r.kind)}
-            ...${tip((r.kind === "code" ? "modes/" + r.slug + "/" + r.slug + ".c" : "modes/" + r.slug) + (r.chip_tip ? "\n" + r.chip_tip : ""))}>
-            <span class="ellip">${r.name}</span>
-            ${r.kind === "code" ? html`<span class="r pill" title="Written in C">C</span>`
-              : r.chip === "ready" ? html`<span class="r chip ok sm">ready</span>`
-              : r.chip ? html`<span class="r chip warn sm">${r.chip}</span>` : null}
-          </button>`)}
+      ${rows.length || allGame.length ? html`<div class="list" role="listbox" aria-label="Modes in this project" onKeyDown=${onKey} ref=${listRef}>
+        ${allGame.length ? html`<div class="modes-list-grp" role="presentation">Yours</div>` : null}
+        ${own.map((r, i) => html`<${ListRow} key=${r.kind + r.slug} r=${r} i=${i} selIdx=${selIdx} isSel=${isSel} />`)}
+        ${allGame.length && !own.length && s.project ? html`<div class="small muted modes-list-empty">No modes of your own yet.</div>` : null}
+        ${allGame.length ? html`<button type="button" class="modes-list-grp" aria-expanded=${!folded}
+            title=${(folded ? "Show the game's own modes: their timers and awards" : "Fold the game's own modes away")
+              + (s.game_hidden ? `\n${s.game_hidden} more have nothing to change here (the game's own timers and awards dialog lists every number).` : "")}
+            onClick=${() => setFold(folded ? "open" : "closed")}>
+            <${Icon} name=${folded ? "right" : "down"} /> The game's own (${allGame.length})</button>` : null}
+        ${game.map((r, i) => html`<${ListRow} key=${"g" + r.slug} r=${r} i=${i + own.length} selIdx=${selIdx} isSel=${isSel} />`)}
       </div>` : s.project ? html`<div class="small muted modes-list-empty">No modes yet.</div>` : null}
     </div>
     <div class="ft modes-list-ft">
@@ -265,6 +341,9 @@ function ModePage({ s, f, off, dis, rs }) {
 }
 
 function ShowPage({ s, f, off, dis, rs, labels, files, showClip }) {
+  if (dis.show_order) {
+    return html`<div class="modes-show-off"><${Reason} text=${rs.show_all} /></div>`;
+  }
   const pv = s.preview;
   const scrOff = off || dis.screen;
   const clipOff = off || dis.clip;
@@ -332,12 +411,12 @@ function ShowPage({ s, f, off, dis, rs, labels, files, showClip }) {
       <${Sec} title="On the screen">
         <div class="row wrap">
           <span class="lbl nw" ...${tip(T.restore)}>Screen stays up</span>
-          <${Num} k="restore_after" value=${f.restore_after} disabled=${off} width=${64} title=${T.restore} />
+          <${Num} k="restore_after" value=${f.restore_after} disabled=${off || dis.show_order} width=${64} title=${T.restore} />
           <span class="dim">seconds after it ends</span>
         </div>
         <div class="row wrap">
           <span class="lbl nw">Display priority</span>
-          <${Num} k="priority" value=${f.priority} disabled=${off} width=${72} title=${T.priority} />
+          <${Num} k="priority" value=${f.priority} disabled=${off || dis.show_order} width=${72} title=${T.priority} />
           <span class="small muted">0 = none, 180 = over the game's shot awards</span>
         </div>
       <//>
@@ -373,14 +452,14 @@ function LightsPage({ s, f, off, dis, rs }) {
         <span class="lbl">Off command</span><${Field} ns="modes" k="f:light_off_raw" value=${f.light_off_raw} disabled=${lOff} mono />
       </div>` : null}
     <//>
-    <${Sec} title="The shots that score">
+    <${Sec} title="The shots that score" reason=${rs.lit_shots}>
       <div class="row wrap">
-        <${Check} label="Light the shots that score" checked=${f.light_shots_on} disabled=${off} title=${T.lit} ns="modes" k="f:light_shots_on" />
-        <${Swatch} k="light_shots_color" value=${f.light_shots_color} disabled=${off} title="Colour of the lit shots" />
+        <${Check} label="Light the shots that score" checked=${f.light_shots_on} disabled=${off || dis.lit_shots} title=${T.lit} ns="modes" k="f:light_shots_on" />
+        <${Swatch} k="light_shots_color" value=${f.light_shots_color} disabled=${off || dis.lit_shots} title="Colour of the lit shots" />
         <${Select} value=${f.light_shots_pattern} options=${PATTERNS.includes(f.light_shots_pattern) ? PATTERNS : [f.light_shots_pattern, ...PATTERNS]}
-          ns="modes" k="f:light_shots_pattern" disabled=${off} width=${110} sm />
+          ns="modes" k="f:light_shots_pattern" disabled=${off || dis.lit_shots} width=${110} sm />
       </div>
-      <div class="small muted wrap">${T.lit}</div>
+      ${dis.lit_shots ? null : html`<div class="small muted wrap">${T.lit}</div>`}
     <//>
   </div>`;
 }
@@ -406,21 +485,21 @@ function SoundsPage({ s, f, off, dis, rs, labels, files }) {
           ${f.end_mode === "file" && !(off || dis.own_sound) ? html`<${Button} size="xs" kind="ghost" onClick=${() => call("modes.choose", "end")}>Change…<//>` : null}</div>` : null}
         ${rs.sound_unheard ? html`<div class="modes-reason small">${rs.sound_unheard}</div>` : null}
       <//>
-      <${Sec} title="Sounds of its own">
+      <${Sec} title="Sounds of its own" reason=${rs.own_extra}>
         <div class="modes-kv top">
           ${own.map(([attr, mv, words]) => html`
             <span class="lbl">${words}</span>
             <div class="stack" style="gap:2px">
               <div class="row wrap">
-                <${Radio} name=${"m-" + attr} value="none" label="Nothing" checked=${f[mv] !== "file"} disabled=${off} onChange=${(v) => setF(mv, v, true)} />
-                <${Radio} name=${"m-" + attr} value="file" label="My sound…" checked=${f[mv] === "file"} disabled=${off} onChange=${() => call("modes.choose", attr)} />
+                <${Radio} name=${"m-" + attr} value="none" label="Nothing" checked=${f[mv] !== "file"} disabled=${off || dis.own_extra} onChange=${(v) => setF(mv, v, true)} />
+                <${Radio} name=${"m-" + attr} value="file" label="My sound…" checked=${f[mv] === "file"} disabled=${off || dis.own_extra} onChange=${() => call("modes.choose", attr)} />
               </div>
-              ${attr === "sound_shot" ? html`<div class="row"><span class="dim nw">on every</span><${Num} k="sound_shot_every" value=${f.sound_shot_every} disabled=${off} width=${64} /><span class="dim nw">scoring shot(s)</span></div>` : null}
+              ${attr === "sound_shot" ? html`<div class="row"><span class="dim nw">on every</span><${Num} k="sound_shot_every" value=${f.sound_shot_every} disabled=${off || dis.own_extra} width=${64} /><span class="dim nw">scoring shot(s)</span></div>` : null}
               ${labels[attr] ? html`<div class="row small"><span class="dim">${labels[attr]}</span><${PlayButton} path=${files[attr]} />
-                ${!off ? html`<${Button} size="xs" kind="ghost" onClick=${() => call("modes.choose", attr)}>Change…<//>` : null}</div>` : null}
+                ${!(off || dis.own_extra) ? html`<${Button} size="xs" kind="ghost" onClick=${() => call("modes.choose", attr)}>Change…<//>` : null}</div>` : null}
             </div>`)}
         </div>
-        <div class="small muted wrap">Each plays in place of a stock call the game never makes. Write puts them on the card, and names any it cannot carry.</div>
+        ${dis.own_extra ? null : html`<div class="small muted wrap">Each plays in place of a stock call the game never makes. Write puts them on the card, and names any it cannot carry.</div>`}
       <//>
     </div>
     <div class="stack" style="gap:14px">
@@ -480,7 +559,9 @@ function Editor({ s, showClip }) {
   const files = s.files || {};
   const ready = !!s.ready;
   const fixPages = new Set(s.fix_pages || []);
-  const saveWords = s.no_port ? "" : s.save_state === "editing" ? "Saving…" : s.save_state === "saved" ? "Saved · put on the card by Write" : "";
+  const saveWords = s.no_port ? "" : s.save_state === "editing" ? "Saving…"
+    : s.save_state === "saved" ? (s.write_waits ? "Saved · Write carries it after a Try it" : "Saved · put on the card by Write") : "";
+  const offPages = new Set(dis.show_order ? ["show"] : []);
   const props = { s, f, off, dis, rs, labels, files, showClip };
   const P = { mode: ModePage, show: ShowPage, lights: LightsPage, sounds: SoundsPage, scoring: ScoringPage }[page] || ModePage;
   return html`<section class="card modes-editor">
@@ -492,8 +573,8 @@ function Editor({ s, showClip }) {
     </div>
     ${s.status && s.status !== "Ready to build." ? html`<div class=${cx("modes-status", s.no_port || ready ? "info" : "warn")} role="status">${s.status}</div>` : null}
     <div class="pages" role="tablist">
-      ${PAGES.map(([k, l]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${page === k ? "on" : ""} onClick=${() => setPage(k)}
-        ...${tip(fixPages.has(k) ? "What the line above says to fix is on this page." : "")}>${l}${fixPages.has(k) ? html`<span class="m" aria-label="to fix">•</span>` : null}</button>`)}
+      ${PAGES.map(([k, l]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${cx(page === k && "on", offPages.has(k) && "off")} onClick=${() => setPage(k)}
+        ...${tip(fixPages.has(k) ? "What the line above says to fix is on this page." : offPages.has(k) ? "Nothing on this page works on this game yet: the page says why." : "")}>${l}${fixPages.has(k) ? html`<span class="m" aria-label="to fix">•</span>` : null}</button>`)}
     </div>
     <div class="bd modes-editor-bd"><${P} ...${props} /></div>
   </section>`;
@@ -545,6 +626,52 @@ function CodePane({ s }) {
   </section>`;
 }
 
+// ------------------------------------------------------------------ one of the game's own modes
+// Its numbers (timer, shot counts, awards), each with the game's own value, a new value,
+// Set and Stock. A number the app cannot change is greyed with the reason. The same
+// backend as "The game's own timers and awards" (stock_modes stage / unstage; an operator
+// setting is staged for the Defaults tab too).
+function GameRow({ r }) {
+  const [val, setVal] = useState(r.current || "");
+  useEffect(() => { setVal(r.current || ""); }, [r.current, r.key]);
+  const same = String(val).replace(/[,\s]/g, "") === String(r.current || "").replace(/[,\s]/g, "");
+  const set = () => { if (String(val).trim() && !same) call("modes.game_set", r.key, val); };
+  return html`<div class=${cx("modes-gm-row", r.readonly && "readonly", r.changed && "changed")}>
+    <div class="modes-gm-what">
+      <span class="lbl">${r.number}</span>
+      <span class="small muted" ...${tip(r.hint || r.where)}>${r.where}</span>
+    </div>
+    <div class="modes-gm-stock small"><span class="dim">Stock</span> <span class="mono">${r.stock}</span></div>
+    ${r.readonly ? html`<div class="modes-gm-why small" ...${tip(r.hint)}>${r.why}</div>`
+      : html`<div class="row modes-gm-edit" onKeyDown=${(e) => { if (e.key === "Enter") set(); }}>
+          <${Field} value=${val} onChange=${setVal} mono sm width=${120} title=${r.hint} />
+          <${Button} size="sm" kind="primary" disabled=${!String(val).trim() || same} onClick=${set}>Set<//>
+          <${Button} size="sm" disabled=${!r.changed} title="Put this number back to the game's own value."
+            onClick=${() => call("modes.game_stock", r.key)}>Stock<//>
+          ${r.changed ? html`<${Chip} kind="acc" sm>changed<//>` : null}
+        </div>`}
+  </div>`;
+}
+
+function GameModePage({ g }) {
+  const rows = g.rows || [];
+  return html`<section class="card modes-editor">
+    <div class="hd">
+      <span class="h2 ellip">${g.name}</span>
+      <span class="chip info"><span class="dot"></span>The game's own</span>
+      <span class="sp"></span>
+      <span class="small muted">${g.n_changed ? `${g.n_changed} change(s) for the next Write` : g.build}</span>
+    </div>
+    <div class="modes-status info" role="status">${g.about}</div>
+    <div class="bd modes-editor-bd">
+      ${rows.length ? html`<div class="modes-gm">${rows.map((r) => html`<${GameRow} key=${r.key} r=${r} />`)}</div>`
+        : html`<div class="small muted">No numbers to show.</div>`}
+      ${g.note ? html`<${Note} kind=${g.note.startsWith("Read-only") ? "" : "info"}>${g.note}<//>` : null}
+      <div class="small muted wrap">To rename it, edit its title on the Text tab.</div>
+    </div>
+  </section>`;
+}
+
 // ------------------------------------------------------------------ Try it
 function Elapsed({ started }) {
   const [, tick] = useState(0);
@@ -559,8 +686,10 @@ function Elapsed({ started }) {
 function idleWords(s) {
   const n = s.n_form || 0, c = s.n_code || 0;
   const what = `${n} mode${n === 1 ? "" : "s"}${c ? ` and ${c} in C` : ""}`;
-  return `${what}, built as Write puts them on a card. A mode's own sound costs about three minutes the first time it changes and is reused after that.`;
+  return `${what}, built as Write puts them on a card.${s.own_extra_ok === false ? "" : T.ownSoundCost}`;
 }
+
+const tryTip = (s) => T.tryit + (s.own_extra_ok === false ? "" : T.ownSoundCost);
 
 // A long card path shows its END (the image's file name, which says which card) unless it is
 // being edited: the Emulate tab's own card box does the same.
@@ -601,16 +730,20 @@ function TryFooter({ s }) {
         ${emu.verdict ? html`<${Chip} kind=${emu.verdict_kind} dot title=${emu.verdict_tip}>${emu.verdict}<//>` : null}
       </div>
       <div class="row modes-tryrow">
-        <${Button} kind=${working ? "danger" : "primary"} size="big" icon=${working ? "x" : "play"} title=${T.tryit}
-          disabled=${!s.project} onClick=${() => call("modes.tryit")}>${working ? "Cancel" : "Try it"}<//>
-        <${Check} label="leave out own sounds (the game's calls play; skips the sound bank)" title=${T.leaveOut}
+        <${Button} kind=${working ? "danger" : "primary"} size="big" icon=${working ? "x" : "play"}
+          title=${!working && s.no_port ? s.no_port : tryTip(s)}
+          disabled=${!s.project || (!working && !!s.no_port)} onClick=${() => call("modes.tryit")}>${working ? "Cancel" : "Try it"}<//>
+        <${Check} label=${html`leave out own sounds<span class="modes-long"> (the game's calls play; skips the sound bank)</span>`} title=${T.leaveOut}
           checked=${s.leave_out} disabled=${working} ns="modes" k="leave_out" />
+        <button type="button" class="chip modes-tryon-chip" disabled=${!emu.box || working} onClick=${() => call("modes.browse_card")}
+          ...${tip((emu.card ? emu.card + "\n" : "") + TRY_ON_TIP + " Click to pick another.")}>
+          <${Icon} name="file" /><span class="ellip">${emu.card ? emu.card.split(/[\\/]/).pop() : "Pick a card…"}</span></button>
         <span class="vsep"></span>
         <${Button} disabled=${!emu.up} title=${emu.up ? T.startNow : "The emulator is not running: press Try it first."} onClick=${() => call("modes.start_now")}>Start mode now<//>
         <${Button} disabled=${!emu.up} title=${emu.up ? T.endNow : "The emulator is not running."} onClick=${() => call("modes.end_now")}>End mode<//>
         <span class="grow"></span>
         ${working || live ? html`<${Button} kind="ghost" size="sm" icon="emulate" onClick=${() => call("modes.goto_emulate")}>Emulate tab<//>`
-          : s.project && !s.tryit_line ? html`<span class="small dim modes-tryhint" ...${tip(T.tryit)}>${idleWords(s)}</span>` : null}
+          : s.project && !s.tryit_line ? html`<span class="small dim modes-tryhint" ...${tip(tryTip(s))}>${idleWords(s)}</span>` : null}
       </div>
       ${(t.state && t.state !== "idle") || s.tryit_line ? html`<div class="row modes-tryline" role="status">
         ${t.state && t.state !== "idle" ? html`<${Chip} kind=${stateKind} dot>${STATE_WORDS[t.state] || t.state}<//>` : null}
@@ -620,6 +753,16 @@ function TryFooter({ s }) {
       </div>` : null}
     </div>
   </section>`;
+}
+
+// ------------------------------------------------------------------ the title's note
+// What the card's build cannot do yet, or what a person should do first. On a short window
+// it is one line with "more"; the details for someone who writes C are in a tooltip.
+function TitleNote({ s }) {
+  const [more, setMore] = useState(false);
+  const details = s.no_port_details ? html`<${InfoBadge} text=${s.no_port_details} />` : null;
+  return html`<div class=${cx("modes-note", more && "open")}><${Note} kind="warn" action=${html`<span class="row nw modes-note-act">${details}
+      <button type="button" class="linkish small modes-note-more" onClick=${() => setMore(!more)}>${more ? "less" : "more"}</button></span>`}>${s.title_note}<//></div>`;
 }
 
 // ------------------------------------------------------------------ the tab
@@ -636,11 +779,12 @@ export default function ModesTab() {
   const hasProject = !!s.project;
   return html`<div class="page modes-page">
     <${Head} s=${s} openStock=${() => setStock(true)} openCountsAs=${() => setCountsAs(true)} openRewrite=${() => setRewrite(true)} />
-    ${s.title_note ? html`<${Note} kind="warn" action=${s.no_port && s.no_port === s.title_note
-      ? html`<${Button} size="sm" icon="file" title=${s.sdk_doc} onClick=${() => call("modes.open_sdk_doc")}>Open MODE_SDK.md<//>` : null}>${s.title_note}<//>` : null}
+    <${ReadingPanel} r=${s.reading} />
+    ${s.title_note ? html`<${TitleNote} s=${s} />` : null}
     <div class="modes-body">
       <${ModeList} s=${s} onNewCode=${() => setNewCode(true)} />
-      ${s.code ? html`<${CodePane} s=${withClip} />`
+      ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} />`
+        : s.code ? html`<${CodePane} s=${withClip} />`
         : s.open ? html`<${Editor} s=${s} showClip=${showClip} />`
         : html`<section class="card modes-editor modes-empty">
             <${Empty} icon="modes" title=${hasProject ? "No mode open" : "No project"}>
@@ -648,7 +792,7 @@ export default function ModesTab() {
             <//>
             ${hasProject ? html`<div class="row" style="justify-content:center">
               <${Button} kind="primary" icon="plus" disabled=${!s.new_ok} onClick=${() => call("modes.new")}>New mode<//>
-              <${Button} icon="edit" onClick=${() => setNewCode(true)}>New code mode…<//>
+              <${Button} icon="edit" disabled=${!!s.no_port} title=${s.no_port || T.codeMode} onClick=${() => setNewCode(true)}>New code mode…<//>
             </div>` : null}
           </section>`}
     </div>

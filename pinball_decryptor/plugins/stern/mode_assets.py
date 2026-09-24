@@ -18,9 +18,14 @@ stock Godzilla clips are - H.264 Constrained Baseline 3.0, 8-bit 4:2:0, 30 fps, 
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -155,6 +160,215 @@ def convert_clip(src, out, w, h, ffmpeg, max_seconds=30):
                              % (os.path.basename(src), (r.stderr or "").strip()[-300:]))
 
 
+# ---- clips made once, side by side, and kept -------------------------------------------------
+# A build used to encode its clips one after another, inside the loop that adds each to the video
+# bank (6 ffmpeg runs, 4.4 s of a Godzilla Try it, every time). The bank only needs each clip's
+# size, so the clips are made first, up to CLIP_WORKERS at once, and each is kept under a digest of
+# everything that goes into it (the source video's bytes or the title card's words, colours, length
+# and font, the bank's frame size, the encoder and its arguments): a clip made before is copied, not
+# encoded again. The bytes are the ones the loop made: the same encoder on the same input.
+#: ``PAD_CLIP_CACHE=0``: no clip is kept between builds (they are still made side by side).
+CLIP_CACHE_ENV = "PAD_CLIP_CACHE"
+CLIP_WORKERS = 4
+#: Clips kept at most; the least recently used go first.
+CLIP_CACHE_KEEP = 40
+#: Bump when a clip's encode changes in a way its key does not show.
+_CLIP_REV = 1
+
+
+@dataclass(frozen=True)
+class ClipJob:
+    """One clip a build puts in the bank: a title card or a person's own video, at the bank's size."""
+    kind: str                    # "title" | "file"
+    w: int
+    h: int
+    title: str = ""
+    seconds: float = 0.0
+    panel_color: str = ""
+    title_color: str = ""
+    src: str = ""
+
+
+def clip_cache_dir():
+    """Where made clips are kept: the temp dir, under a ``spike2_`` name like the other build
+    scratch, so the app's clean-up knows it."""
+    return os.path.join(tempfile.gettempdir(), "spike2_clip_cache")
+
+
+_DIGESTS = {}
+_DIGESTS_LOCK = threading.Lock()
+
+
+def _file_digest(path):
+    """sha256 of a file's bytes, worked out once per (path, size, mtime) in this process."""
+    st = os.stat(path)
+    key = (os.path.normcase(os.path.abspath(path)), st.st_size, st.st_mtime_ns)
+    with _DIGESTS_LOCK:
+        got = _DIGESTS.get(key)
+    if got is None:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 22), b""):
+                h.update(chunk)
+        got = h.hexdigest()
+        with _DIGESTS_LOCK:
+            _DIGESTS[key] = got
+    return got
+
+
+def _tool_identity(path):
+    try:
+        st = os.stat(path)
+        return (os.path.normcase(os.path.abspath(path)), st.st_size, st.st_mtime_ns)
+    except (OSError, TypeError, ValueError):
+        return (str(path),)
+
+
+def clip_key(job, ffmpeg):
+    """The digest a made clip is kept under: everything the encode reads."""
+    parts = [_CLIP_REV, job.kind, job.w, job.h, FPS, _encode_args("ffmpeg", "OUT"),
+             _tool_identity(ffmpeg)]
+    if job.kind == "title":
+        font = next((p for p in FONTS if os.path.exists(p)), "")
+        parts += [job.title, float(job.seconds), job.panel_color, job.title_color,
+                  _tool_identity(font) if font else "default font"]
+    else:
+        try:
+            parts += [_file_digest(job.src), 30]
+        except OSError:
+            parts += ["missing", job.src]     # the encode says what is wrong with it
+    return hashlib.sha256(repr(parts).encode("utf-8")).hexdigest()
+
+
+def _encode_clip(job, out, ffmpeg):
+    if job.kind == "title":
+        render_title_clip(out, job.title, job.w, job.h, job.seconds, job.panel_color,
+                          job.title_color, ffmpeg)
+    else:
+        convert_clip(job.src, out, job.w, job.h, ffmpeg)
+
+
+def _prune_clip_cache(folder, keep=CLIP_CACHE_KEEP):
+    try:
+        names = [n for n in os.listdir(folder) if n.endswith(".mp4") and ".tmp" not in n]
+        names.sort(key=lambda n: os.path.getmtime(os.path.join(folder, n)))
+        for n in (names[:-keep] if len(names) > keep else ()):
+            os.remove(os.path.join(folder, n))
+    except OSError:
+        pass
+
+
+def make_clips(jobs, ffmpeg, workers=CLIP_WORKERS, progress=None):
+    """Make every clip of ``jobs`` (:class:`ClipJob`), those not kept from an earlier build up to
+    ``workers`` at a time. Returns ``(made, scratch)``: ``{job: path of its clip}`` and a folder
+    the caller removes when done (``None`` when the clips are in the cache). ``progress(done,
+    total, words)`` after each clip. Raises the first job's :class:`ModeAssetError`, in job order."""
+    jobs = list(dict.fromkeys(jobs))
+    if not jobs:
+        return {}, None
+    keep = os.environ.get(CLIP_CACHE_ENV, "1") != "0"
+    folder = scratch = None
+    if keep:
+        folder = clip_cache_dir()
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError:
+            keep = False
+    if not keep:
+        folder = scratch = tempfile.mkdtemp(prefix="spike2_clips_")
+    made, todo = {}, []
+    for job in jobs:
+        path = os.path.join(folder, clip_key(job, ffmpeg) + ".mp4")
+        if keep and os.path.isfile(path) and os.path.getsize(path) > 0:
+            try:
+                os.utime(path, None)          # recently used: kept longest
+            except OSError:
+                pass
+            made[job] = path
+        else:
+            todo.append((job, path))
+    done = [len(made)]
+    lock = threading.Lock()
+
+    def one(item):
+        job, path = item
+        tmp = "%s.%d.%d.tmp.mp4" % (path[:-4], os.getpid(), threading.get_ident())
+        try:
+            _encode_clip(job, tmp, ffmpeg)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+        with lock:
+            done[0] += 1
+            if progress is not None:
+                progress(done[0], len(jobs), "Making the modes' clips (%d of %d)..."
+                         % (done[0], len(jobs)))
+        return path
+
+    if todo:
+        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo)))) as pool:
+            futures = [(job, pool.submit(one, (job, path))) for job, path in todo]
+            first_error = None
+            for job, fut in futures:
+                try:
+                    made[job] = fut.result()
+                except Exception as e:                      # noqa: BLE001
+                    if first_error is None:
+                        first_error = e
+        if first_error is not None:
+            if scratch:
+                shutil.rmtree(scratch, ignore_errors=True)
+            raise first_error
+    if keep:
+        _prune_clip_cache(folder)
+    return made, scratch
+
+
+def _place_clip(job, local, made, ffmpeg):
+    """Put ``job``'s clip at ``local``: a copy of the one :func:`make_clips` made, or (a job it
+    did not make) encoded here."""
+    src = made.get(job) if made else None
+    if src and os.path.isfile(src):
+        shutil.copyfile(src, local)
+    else:
+        _encode_clip(job, local, ffmpeg)
+
+
+def _title_job(title, parsed, seconds, panel_color, title_color):
+    return ClipJob("title", parsed.width, parsed.height, title=title, seconds=float(seconds),
+                   panel_color=panel_color, title_color=title_color)
+
+
+def _file_job(path, parsed):
+    return ClipJob("file", parsed.width, parsed.height, src=path)
+
+
+def _first_clip_job(project, slug, spec, parsed):
+    if spec.clip == "title":
+        return _title_job(spec.clip_title or spec.name, parsed, spec.clip_seconds,
+                          spec.panel_color, spec.title_color)
+    return _file_job(os.path.join(MP.mode_folder(project, slug), spec.clip_file), parsed)
+
+
+def _second_clip_job(project, slug, spec, parsed):
+    """Item 141's second clip as a job, or ``None`` when the mode adds none."""
+    kind = (spec.clip_both or {}).get("clip") if isinstance(spec.clip_both, dict) else None
+    if spec.clip == "none" or kind not in ("title", "file"):
+        return None
+    if kind == "title":
+        return _title_job(spec.clip_both.get("title") or spec.name, parsed,
+                          spec.clip_both.get("seconds", 4.0), spec.panel_color, spec.title_color)
+    return _file_job(os.path.join(MP.mode_folder(project, slug), spec.clip_both["file"]), parsed)
+
+
+def _code_clip_job(project, slug, spec, parsed):
+    return _file_job(os.path.join(MP.mode_folder(project, slug), spec.clip), parsed)
+
+
 # ---- the whole build -----------------------------------------------------------------------
 LCD = "assets/lcd/auto_loaded"
 
@@ -174,7 +388,8 @@ def mode_file_name(slot):
     return "mode.cfg" if slot == 0 else "mode%d.cfg" % slot
 
 
-def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=None, prof=None):
+def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=None, prof=None,
+          progress=None):
     """Build every mode in ``project`` (or the slugs in ``only``) from the stock scenes.
 
     ``stock_hud`` / ``stock_bank`` are the stock bytes of the title's HUD scene and video
@@ -184,7 +399,10 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     ``code`` is the project's CODE modes with their own assets (``[(slug, CodeAssets)]``,
     :mod:`.code_modes`): their screens and clips go into the same HUD scene and bank, in the same
     pass, after the form modes'. A project of code modes only builds for ``prof`` (its card's
-    title, :func:`.code_modes.profile_for`)."""
+    title, :func:`.code_modes.profile_for`).
+
+    The clips are made before the bank is built, side by side and kept between builds
+    (:func:`make_clips`); ``progress(done, total, words)`` follows them."""
     found, broken = MP.list_modes(project)
     if broken:
         raise ModeAssetError("these modes could not be read: %s"
@@ -215,6 +433,8 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     elif prof is None:
         from . import code_modes as CM
         prof = CM.profile_for(project, code)
+        if prof is None:
+            raise ModeAssetError(CM.NO_TITLE)
     result = ModeBuild(out_dir=out_dir)
 
     def write(rel, data):
@@ -242,41 +462,50 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
         hud, _infos = SW.add_screens(stock_hud, screens)
         write("%s/%s/scene.radium" % (LCD, prof.hud_scene), hud)
 
-    # the clips, one after another into the stock bank
+    # the clips: made first (side by side, kept between builds), then one after another into
+    # the stock bank
     clips = [(slug, spec) for slug, spec in found if spec.clip != "none" and prof.can("clip")]
     code_clips = [(slug, c) for slug, c in code if c.clip and prof.can("clip")]
-    if code_clips and not clips:
+    made, scratch = {}, None
+    if clips or code_clips:
         if not ffmpeg:
             raise ModeAssetError("building a clip needs ffmpeg, and none was found")
-        bank, _parsed = _add_code_clips(project, code_clips, stock_bank, VB.parse(stock_bank), prof,
-                                        out_dir, ffmpeg, result)
-        write("%s/%s/scene.radium" % (LCD, prof.bank_scene), bank)
-        code_clips = []
-    if clips:
-        if not ffmpeg:
-            raise ModeAssetError("building a clip needs ffmpeg, and none was found")
-        bank = stock_bank
-        parsed = VB.parse(bank)
+        size = VB.parse(stock_bank)
+        jobs = []
         for slug, spec in clips:
-            names = MP.asset_names(slug)
-            path = VB.next_path(parsed)
-            rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
-            local = os.path.join(out_dir, *rel.split("/"))
-            os.makedirs(os.path.dirname(local), exist_ok=True)
-            if spec.clip == "title":
-                render_title_clip(local, spec.clip_title or spec.name, parsed.width, parsed.height,
-                                  float(spec.clip_seconds), spec.panel_color, spec.title_color, ffmpeg)
-            else:
-                convert_clip(os.path.join(MP.mode_folder(project, slug), spec.clip_file), local,
-                             parsed.width, parsed.height, ffmpeg)
-            result.files.append(rel)
-            result.new_files.append(rel)
-            bank, _info = VB.add_clip(bank, names["clip"], os.path.getsize(local), path)
+            jobs.append(_first_clip_job(project, slug, spec, size))
+            jobs.append(_second_clip_job(project, slug, spec, size))
+        jobs += [_code_clip_job(project, slug, c, size) for slug, c in code_clips]
+        made, scratch = make_clips([j for j in jobs if j is not None], ffmpeg, progress=progress)
+    try:
+        if code_clips and not clips:
+            bank, _parsed = _add_code_clips(project, code_clips, stock_bank, VB.parse(stock_bank),
+                                            prof, out_dir, ffmpeg, result, made)
+            write("%s/%s/scene.radium" % (LCD, prof.bank_scene), bank)
+            code_clips = []
+        if clips:
+            bank = stock_bank
             parsed = VB.parse(bank)
-            bank, parsed = _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, result)
-        if code_clips:
-            bank, parsed = _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result)
-        write("%s/%s/scene.radium" % (LCD, prof.bank_scene), bank)
+            for slug, spec in clips:
+                names = MP.asset_names(slug)
+                path = VB.next_path(parsed)
+                rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
+                local = os.path.join(out_dir, *rel.split("/"))
+                os.makedirs(os.path.dirname(local), exist_ok=True)
+                _place_clip(_first_clip_job(project, slug, spec, parsed), local, made, ffmpeg)
+                result.files.append(rel)
+                result.new_files.append(rel)
+                bank, _info = VB.add_clip(bank, names["clip"], os.path.getsize(local), path)
+                parsed = VB.parse(bank)
+                bank, parsed = _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir,
+                                                ffmpeg, result, made)
+            if code_clips:
+                bank, parsed = _add_code_clips(project, code_clips, bank, parsed, prof, out_dir,
+                                               ffmpeg, result, made)
+            write("%s/%s/scene.radium" % (LCD, prof.bank_scene), bank)
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
 
     # the runtime mode files, in slot order, beside the tree rather than in it: on a card
     # they go to p2 (/usr/local/padmode), in the rig to /dump
@@ -331,24 +560,18 @@ def _modes_for_the_card(project, found):
     return out
 
 
-def _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, result):
+def _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, result, made=None):
     """Item 141: a mode's SECOND clip (``clip_both`` a title card or a video file), added to
     the bank as :func:`MP.second_clip_name`. "same" plays the first clip again and adds
-    nothing. Returns the bank and its parse."""
-    kind = (spec.clip_both or {}).get("clip") if isinstance(spec.clip_both, dict) else None
-    if spec.clip == "none" or kind not in ("title", "file"):
+    nothing. Returns the bank and its parse. ``made``: the clips :func:`make_clips` made."""
+    job = _second_clip_job(project, slug, spec, parsed)
+    if job is None:
         return bank, parsed
     path = VB.next_path(parsed)
     rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
     local = os.path.join(out_dir, *rel.split("/"))
     os.makedirs(os.path.dirname(local), exist_ok=True)
-    if kind == "title":
-        render_title_clip(local, spec.clip_both.get("title") or spec.name, parsed.width, parsed.height,
-                          float(spec.clip_both.get("seconds", 4.0)), spec.panel_color, spec.title_color,
-                          ffmpeg)
-    else:
-        convert_clip(os.path.join(MP.mode_folder(project, slug), spec.clip_both["file"]), local,
-                     parsed.width, parsed.height, ffmpeg)
+    _place_clip(job, local, made, ffmpeg)
     result.files.append(rel)
     result.new_files.append(rel)
     bank, _info = VB.add_clip(bank, MP.second_clip_name(slug), os.path.getsize(local), path)
@@ -383,17 +606,17 @@ def _code_screens(project, code, prof):
     return out
 
 
-def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result):
+def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None):
     """The code modes' start clips into the bank, after the form modes' (``PadMode_<slug>_Clip``),
-    each made into the bank's format like a form mode's own video. Returns the bank and its parse."""
+    each made into the bank's format like a form mode's own video. Returns the bank and its parse.
+    ``made``: the clips :func:`make_clips` made."""
     for slug, spec in code_clips:
         names = MP.asset_names(slug)
         path = VB.next_path(parsed)
         rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
         local = os.path.join(out_dir, *rel.split("/"))
         os.makedirs(os.path.dirname(local), exist_ok=True)
-        convert_clip(os.path.join(MP.mode_folder(project, slug), spec.clip), local, parsed.width, parsed.height,
-                     ffmpeg)
+        _place_clip(_code_clip_job(project, slug, spec, parsed), local, made, ffmpeg)
         result.files.append(rel)
         result.new_files.append(rel)
         bank, _info = VB.add_clip(bank, names["clip"], os.path.getsize(local), path)

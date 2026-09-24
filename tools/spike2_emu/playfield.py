@@ -1165,7 +1165,7 @@ class SwitchWatch:
         for source in (rows or [], load_switch_list()):
             hit = next((r for r in source
                         if (r.get("name") or "").upper().strip()
-                        == "SHOOTER LANE"), None)
+                        in ("SHOOTER LANE", "SHOOTER LANE OPTO")), None)
             if hit is not None:
                 self.lane_id = hit["id"]
                 break

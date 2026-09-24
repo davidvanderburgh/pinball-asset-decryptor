@@ -1,0 +1,572 @@
+# john_wick_le 1.01 - worked out by the app from the ports of The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, TMNT Pro 1.59.
+# Emulator-proven 2026-09-24 by a full build check (modes/gamecheck.sh play full, item 162): the
+# runtime hooked the game, 38 of its 43 shots came from their switches, a drain ended each ball, and
+# the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
+# Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane, Lock 1, Lock 2, Lock 3.
+# program sha1 c5f0dbdf995adfdb9c783b604fd1a8eec6fcc300, portgen revision 3, 7 reference port(s) of framework generation B.
+
+game           john_wick_le
+version        1.01
+
+# ---- functions: site <name> <address> <first two instruction words> ----
+#   tick: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site tick             0x002bd140 0xe92d4038 0xe3a00037
+# site shot_dispatch          NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+#   ball_end: the handler of event 0x34 (the end of ball) that is the reference's 0x3c2024 (located, strict) - drain a ball to prove it [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site ball_end         0x00189940 0xe92d4070 0xe1a06000
+#   sound_lookup: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site sound_lookup     0x00409040 0xe92d4038 0xe1a05000
+#   score_add: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site score_add        0x002ff44c 0xe30e127a 0xe340106a
+#   callout: through the handler of hook 0xa6, as in the reference [The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site callout          0x0036fbf8 0xe92d4010 0xe301ee88
+#   callout_nth: located (loose) [The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site callout_nth      0x0036fdac 0xe92d4010 0xe301ee88
+# site light_run              NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   lamp_group: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site lamp_group       0x002f9070 0xe92d4038 0xe1a04000
+#   show_priority: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site show_priority    0x00328f70 0xe30533dc 0xe340306b
+#   award_screen: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site award_screen     0x001438a4 0xe92d4070 0xe24dd008
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site string_new       0x00016774 0xe28fc605 0xe28ccaf8
+#   dynamic_cast: PLT stub for __dynamic_cast [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site dynamic_cast     0x00016180 0xe28fc605 0xe28ccaf8
+#   resource_get: placed through 3 callers, e.g. the bl at 0x406098 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site resource_get     0x00250f70 0xe92d43f0 0xe1a04000
+#   find_node: placed through 3 callers, e.g. the bl at 0x196378 [The Beatles 1.29]
+site find_node        0x004cbc74 0xe92d4070 0xe24dd008
+# site find_text              NOT PLACED: not unique in the reference; only 1 caller lined up
+#   set_text: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site set_text         0x004af4b4 0xe92d47f0 0xe1a06000
+#   clip_play: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site clip_play        0x0004cb7c 0xe92d43f0 0xe24dd014
+# site clip_stop              NOT PLACED: absent in the target (the function changed); only 1 caller lined up
+#   candidate: the reference clip_stop calls 0x52808, which is 0x4c990 in the target - prove what it does before using it
+#   candidate: the reference clip_stop calls 0x379f0c, which is 0x2220cc in the target - prove what it does before using it
+#   candidate: the reference clip_stop calls 0x405acc, which is 0x143a68 in the target - prove what it does before using it
+#   video_player: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site video_player     0x0004c96c 0xe92d4010 0xe3014e84
+#   video_surface: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site video_surface    0x0004c990 0xe92d4070 0xe3015e84
+#   surface_state: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site surface_state    0x004be9a0 0xe5900550 0xe2800008
+#   player_advance: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site player_advance   0x00143c9c 0xe2501000 0x012fff1e
+#   display_draw: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site display_draw     0x001748b8 0xe3520001 0x812fff1e
+#   sound_play: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_play       0x0036fbf8 0xe92d4010 0xe301ee88
+#   sound_nth: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_nth        0x0036fdac 0xe92d4010 0xe301ee88
+#   sound_active: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_active     0x0037036c 0xe59f3034 0xe2831e62
+#   sound_stop: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_stop       0x003704c4 0xe92d40f8 0xe1a06000
+#   sound_worker: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_worker     0x0036f1e4 0xe92d4ff0 0xe2507000
+# site stock_any_running      NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+# site stock_battle_running   NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+# site stock_multiball_running NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+#   hook_dispatch: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14]
+site hook_dispatch    0x00409688 0xe35000cf 0xe92d4038
+# site skill_shot_award       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference skill_shot_award calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+#   candidate: the reference skill_shot_award calls 0x2fc1c, which is 0x33a48 in the target - prove what it does before using it
+#   candidate: the reference skill_shot_award calls 0x2b3614, which is 0x1dbdc0 in the target - prove what it does before using it
+#   mball_start: located (loose) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site mball_start      0x000b5954 0xe92d40f8 0xe1a04000
+# site mball_stop             NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference mball_stop calls 0x3f3350, which is 0x254e48 in the target - prove what it does before using it
+# site roster_start           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site roster_done            NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference roster_done calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+# site roster_city_done       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference roster_city_done calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+#   display_effect_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_effect_start 0x0019eed0 0xe92d47f0 0xe2516000
+#   display_effect_next: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_effect_next 0x0019f2b4 0xe30d32ec 0xe340306a
+#   display_priority_now: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_priority_now 0x0019f748 0xe5d0000e 0xe12fff1e
+#   layered_priority: located (loose) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site layered_priority 0x00035880 0xe92d4008 0xe59030c0
+# site layered_waiter         NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference layered_waiter calls 0x379f0c, which is 0x2220cc in the target - prove what it does before using it
+#   candidate: the reference layered_waiter calls 0x3d10c, which is 0x35a44 in the target - prove what it does before using it
+#   candidate: the reference layered_waiter calls 0x3cfcc, which is 0x35880 in the target - prove what it does before using it
+# site stock_rule_get         NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+#   caward_add: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site caward_add       0x00033a48 0xe92d41f0 0xe1a04000
+# site caward_build           NOT PLACED: absent in the target (the function changed); only 1 caller lined up
+#   candidate: the reference caward_build calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+#   caward_add_scaled: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site caward_add_scaled 0x00033b08 0xe92d4ff8 0xe1a09002
+#   show_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site show_start       0x00328d10 0xe92d47f0 0xe2508000
+#   game_event: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site game_event       0x0040f2a8 0xe92d47f0 0xe1a09000
+#   event_post_replacing: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site event_post_replacing 0x00254ed8 0xe92d4070 0xe1a05001
+#   event_cancel: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site event_cancel     0x00254e48 0xe92d40f8 0xe30563d8
+# site ebirah_refill_counts   NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_refill_counts calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+# site ebirah_stage_done      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_stage_done calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+#   candidate: the reference ebirah_stage_done calls 0x3f33e0, which is 0x254ed8 in the target - prove what it does before using it
+# site ebirah_award_screen    NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_award_screen calls 0x405908, which is 0x1438a4 in the target - prove what it does before using it
+#   candidate: the reference ebirah_award_screen calls 0x1f34d4, which is 0x328d10 in the target - prove what it does before using it
+#   candidate: the reference ebirah_award_screen calls 0x43d2ac, which is 0x36fbf8 in the target - prove what it does before using it
+# site ebirah_final_mask      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_final_mask calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+# site tank_maser_phase       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_maser_phase calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+# site tank_positions_or      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_pick_record       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_path_index        NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_seed_wave         NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_seed_wave calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+#   candidate: the reference tank_seed_wave calls 0x2f790, which is 0x335f8 in the target - prove what it does before using it
+# site tank_destroy           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_destroy calls 0x3387f0, which is 0x430eb4 in the target - prove what it does before using it
+# site tank_advance           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_advance calls 0x5cf000, which is 0x5120e8 in the target - prove what it does before using it
+# site tank_award_screen_kill NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_award_screen_kill calls 0x405908, which is 0x1438a4 in the target - prove what it does before using it
+#   candidate: the reference tank_award_screen_kill calls 0x43d2ac, which is 0x36fbf8 in the target - prove what it does before using it
+#   candidate: the reference tank_award_screen_kill calls 0x1f34d4, which is 0x328d10 in the target - prove what it does before using it
+#   switch_hit: located (strict) [The Beatles 1.29]
+site switch_hit       0x0025645c 0xe2503000 0x012fff1e
+#   switch_hit2: located (strict) [The Beatles 1.29]
+site switch_hit2      0x002564fc 0xe92d4010 0xe2504000
+#   switch_edge: the framework's per-switch call in its switch drain (generation B: r0 = the switch id, called for every edge after the new level is stored) - press the switches to prove it
+site switch_edge      0x00281810 0xe30437ec 0xe340306b
+#   switch_drain: the drain itself, never hooked: an edge counts only when switch_edge is called from it
+site switch_drain     0x002824e8 0xe92d4ff0 0xe30998e4
+
+# ---- globals: data <name> <address> ----
+#   cur_player: derived from 2 places, e.g. 0x338790+0x60 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool Pro 1.16, TMNT Pro 1.59]
+data cur_player             0x0061d200
+#   scores: derived from 2 places, e.g. 0x2b2524+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data scores                 0x006bfcb8
+#   mode_mask: derived from 2 places, e.g. 0x1c420+0xf8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data mode_mask              0x006ae27a
+#   event_head: derived from 2 places, e.g. 0x53068+0x6c [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data event_head             0x006b53d8
+#   event_current: derived from 2 places, e.g. 0x76e94+0x4 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data event_current          0x006b53dc
+#   resource_manager: a base 0x7f51d0 + field 0x80; the base derived from 2 places, e.g. 0x406020+0x54 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data resource_manager       0x006aaba0
+#   typeinfo_resource: derived from 2 places, e.g. 0x526d4+0x34 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data typeinfo_resource      0x00562018
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x526d4+0x38 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data typeinfo_scene_player  0x00581adc
+#   display_holder: derived from 2 places, e.g. 0x404620+0x28 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data display_holder         0x006aab20
+# data message_count          NOT PLACED: left off - another title's layout
+# data message_remap          NOT PLACED: left off - another title's layout
+# data message_table          NOT PLACED: left off - another title's layout
+#   award_screen_arg: derived from 2 places, e.g. 0x3d564+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data award_screen_arg       0x00610b98
+#   sound_channels: derived from 2 places, e.g. 0x43c3fc+0x50 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_channels         0x00701f94
+#   sound_queue: derived from 2 places, e.g. 0x43d304+0xc [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_queue            0x00702808
+# data city_variants          NOT PLACED: no code that loads it could be lined up
+#   sound_requests: derived from 2 places, e.g. 0x43c898+0x34 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_requests         0x0066986c
+#   sound_request_count: derived from 2 places, e.g. 0x43c898+0x14 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_request_count    0x0055b2f4
+# data stock_mode_manager     NOT PLACED: no code that loads it could be lined up
+# data rule_battle            NOT PLACED: no code that loads it could be lined up
+# data roster_screen_table    NOT PLACED: no code that loads it could be lined up
+# data rule_cities            NOT PLACED: no code that loads it could be lined up
+#   display_effects: derived from 1 places, e.g. 0x4394d4+0xa4; ONE place is enough here: the runtime uses it only when the manager it points at holds award_screen_arg's table (disp_manager), so a wrong one holds nothing [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data display_effects        0x006ad2ec
+#   layered_displays: derived from 1 places, e.g. 0x3cdb0+0x8; ONE place is enough here: the program loads it in ONE place only (its getter), so two can never agree [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data layered_displays       0x00610548
+#   lamp_layers: derived from 2 places, e.g. 0x3a6010+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data lamp_layers            0x006b1fb8
+#   light_count: derived from 2 places, e.g. 0x1e1974+0x18 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data light_count            0x006b9a84
+# data ebirah_stage_awards    NOT PLACED: no code that loads it could be lined up
+# data ebirah_lamp_table      NOT PLACED: no code that loads it could be lined up
+# data tank_path              NOT PLACED: no code that loads it could be lined up
+# data tank_spot_list         NOT PLACED: no code that loads it could be lined up
+#   score_mult: derived from 2 places, e.g. 0x15efa4+0xc [The Beatles 1.29]
+data score_mult             0x006175cc
+data switch_records         0x006b78ec
+data switch_count           0x006b47ec
+
+# ---- scenes ----
+#   scene hud: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Jaws LE 1.02]
+scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
+#   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x526d4+0x4) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+# scene attract                NOT PLACED: the target program never names 394c4a03 (derived an address, but it holds no 40-hex id)
+
+# ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
+value mode_mask_busy        0x210
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value stock_slot_shot   42
+value stock_slot_active 14
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      8
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value ebirah_rule           12
+value ebirah_spin_left_at   0x8c      # + 4 * player, spins left on the Left spinner (15 at a refill)
+value ebirah_spin_top_at    0x9c      # Top spinner (40)
+value ebirah_spin_shield_at 0xac      # Shield ramp spinner (15)
+value ebirah_stage_count_at 0xbc      # + 4 * player: stages done (the 2-stage RuleCities/RuleAllies mark reads it)
+value ebirah_stage_index_at 0xd0      # which of 5M / 10M / 15M is next (START resets it)
+value ebirah_kotm_at        0xd4      # byte: King of the Monsters runs (awards go to rule 20)
+value ebirah_spin_left_bit  0x200     # the raw shot bits the handler tests (each spinner's middle bit)
+value ebirah_spin_top_bit   0x2000
+value ebirah_final_shot     0x40      # the Pop bumper: the final blow (or bit 42, unnamed)
+value ebirah_final_mask_lo  0x40      # the field once every counter is 0 (0x814cc writes 0x400_00000040)
+value ebirah_final_mask_hi  0x400
+value ebirah_reminder_event 0x14e
+value ebirah_stage_award_count 3
+value ebirah_stage_msg      0xce3     # award screen messages 0xce3 / 0xce4 / 0xce5 (left / top / shield), 0xce6 the final blow
+value ebirah_stage_lamp_left  0x71    # 113 LEFT SPINNER, the lamp the stage screen names
+value ebirah_stage_lamp_top   0x96    # 150 TOP SPINNER
+value ebirah_stage_lamp_shield 0x7a   # 122 ATTACK MECHA (the shield ramp spinner's insert)
+value ebirah_lamp_entries   6
+value tank_rule             4
+value tank_records_at       0x68      # a std::vector (begin, end) of tank records
+value tank_record_size      40
+value tank_record_active_at 0
+value tank_record_pos_at    8         # u64: the tank's position (a path mask)
+value tank_record_prev_at   0x10      # u64: where it was before the last step (a grace window for the handler)
+value tank_record_dest_at   0x18      # u64: its destination (the Godzilla target 0x80000)
+value tank_record_value_at  0x20      # u64: what destroying it pays (2,500,000 - 500,000 a step, floor 1,500,000)
+value tank_level_at         0x70      # + 4 * player
+value tank_value_at         0x80      # + 8 * player, u64: this player's tank value (+150,000 a kill)
+value tank_destroyed_at     0xa8      # u32: tanks destroyed this wave (4/5/6/7/8 by level light the Maser)
+value tank_multiplier_at    0xac      # the Maser multiplier (3 a wave, -1 per tank that reaches the target)
+value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
+value tank_path_entries     6
+value tank_path_entry_size  16
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_desc_via       0x8
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+
+# ---- shots: none from the rules: the switch drain's `switch` lines below are the shots ----
+
+# ---- the build's own shot bits, which no dispatch hands a mode here ----
+# shot 0x1             Left 2 bank tgt bot
+# shot 0x2             Left 2 bank tgt top
+# shot 0x4             Shot 0x4
+# shot 0x8             Left eject
+# shot 0x10            Left orbit
+# shot 0x20            Left ramp
+# shot 0x40            Drop target (0x40)
+# shot 0x80            Shot 0x80
+# shot 0x100           Center ramp
+# shot 0x200           Shot 0x200
+# shot 0x400           Shot 0x400
+# shot 0x800           Shot 0x800
+# shot 0x1000          Right orbit
+# shot 0x2000          Right ramp
+# shot 0x4000          Shot 0x4000
+# shot 0x8000          Shot 0x8000
+# shot 0x10000         Coins flash (0x10000)
+# shot 0x20000         Coins flash (0x20000)
+# shot 0x40000         Shot 0x40000
+# shot 0x80000         Left ramp left tgt
+# shot 0x100000        Left ramp right tgt
+# shot 0x200000        Right ramp left tgt
+# shot 0x400000        Shot 0x400000
+# shot 0x800000        Shot 0x800000
+# shot 0x1000000       Shot 0x1000000
+# shot 0x2000000       Shot 0x2000000
+# shot 0x4000000       Shot 0x4000000
+# shot 0x8000000       Shot 0x8000000
+# shot 0x10000000      Shot 0x10000000
+# shot 0x20000000      Shot 0x20000000
+# shot 0x40000000      Shot 0x40000000
+# shot 0x80000000      Shot 0x80000000
+# shot 0x100000000     Shot 0x100000000
+# shot 0x200000000     Drop target (0x200000000)
+# ---- shots from the switch drain: switch <id> <shot mask> <name> (the game's own switch names; not the trough, shooter lane, flippers or cabinet) - prove them with a census ----
+switch 46   0x1                Left eject
+switch 47   0x2                Left ramp left tgt
+switch 48   0x4                Left ramp right tgt
+switch 49   0x8                Left ramp exit opto
+switch 50   0x10               Left 2 bank tgt top
+switch 51   0x20               Left 2 bank tgt bot
+switch 52   0x40               Left spinner opto
+switch 53   0x80               Skill shot 1
+switch 54   0x100              Skill shot 2
+switch 55   0x200              Right ramp tgt
+switch 56   0x400              Mid right tgt top
+switch 57   0x800              Mid right tgt bot
+switch 59   0x1000             Left outlane
+switch 60   0x2000             Left return lane
+switch 61   0x4000             Right return lane
+switch 62   0x8000             Right outlane
+switch 63   0x10000            Crate
+switch 67   0x20000            Right slingshot
+switch 68   0x40000            Left slingshot
+switch 77   0x80000            Car front opto
+switch 78   0x100000           Car hold opto
+switch 79   0x200000           Car back opto
+switch 80   0x400000           Left orbit
+switch 81   0x800000           Drop target opto
+switch 82   0x1000000          Captive ball tgt
+switch 85   0x2000000          Center ramp exit opto
+switch 86   0x4000000          Right orbit
+switch 87   0x8000000          Right ramp exit opto
+switch 88   0x10000000         Right vuk opto
+switch 89   0x20000000         Pop target 1
+switch 90   0x40000000         Pop target 2
+switch 91   0x80000000         Pop target 3
+switch 92   0x100000000        Pop target 4
+switch 93   0x200000000        Pop target 5
+switch 94   0x400000000        Pop target 6
+switch 95   0x800000000        Pop target 7
+switch 96   0x1000000000       Pop enter
+switch 97   0x2000000000       Pop exit opto
+switch 98   0x4000000000       Pop bumper
+switch 99   0x8000000000       Top sling
+switch 100  0x10000000000      Lock 1
+switch 101  0x20000000000      Lock 2
+switch 102  0x40000000000      Lock 3
+
+# ---- callouts and text: a start shot for a template mode ----
+text example_start_shot     Left ramp left tgt
+
+# ---- events: COPIED, unverified - prove them with event_probe.c (MODE_SDK.md, Events) ----
+
+# ---- lamps: the build's own inserts (lamp_map.py), shot ties from its cshot objects ----
+#   the runtime keeps 192 lamp lines (N_LAMPS): the last 10 of this build's 202 inserts are left out
+lamp 94,95,96     0         RIGHT RAMP  # lamp 7, I/O group 7 index 48, at 218,340
+lamp 35,36,37     0            LEFT EJECT  # lamp 8, I/O group 7 index 64, at 58,368
+lamp 86,87,88     0         RIGHT ORBIT  # lamp 10, I/O group 8 index 29, at 220,168
+lamp 107,108,109  0              POP BUMPER  # lamp 11, I/O group 8 index 32, at 113,136
+lamp 69,70,71     0          CENTER RAMP  # lamp 12, I/O group 8 index 54, at 155,301
+lamp 62,63,64     0    DROP TARGET  # lamp 13, I/O group 8 index 60, at 125,270
+lamp 46,47,48     0           LEFT ORBIT  # lamp 14, I/O group 8 index 68, at 71,326
+lamp 55,56,57     0           LEFT RAMP  # lamp 15, I/O group 8 index 74, at 105,340
+lamp 114          0              BOTTOM GI (X16)  # lamp 16, I/O group 7 index 0, at 0,0
+lamp 115          0              TOP LEFT GI (X14)  # lamp 17, I/O group 7 index 1, at 0,0
+lamp 116          0              TOP RIGHT GI (X9)  # lamp 18, I/O group 7 index 2, at 0,0
+lamp 137          0              CONTINENTAL FLASH RED  # lamp 19, I/O group 8 index 39, at 206,125
+lamp 25           0              FACTION 1  # lamp 20, I/O group 7 index 14, at 104,477
+lamp 26           0              FACTION 2  # lamp 21, I/O group 7 index 13, at 113,494
+lamp 27           0              FACTION 3  # lamp 22, I/O group 7 index 12, at 128,506
+lamp 28           0              FACTION 4  # lamp 23, I/O group 7 index 11, at 147,510
+lamp 29           0              FACTION 5  # lamp 24, I/O group 7 index 10, at 166,506
+lamp 30           0              FACTION 6  # lamp 25, I/O group 7 index 9, at 180,494
+lamp 31           0              FACTION 7  # lamp 26, I/O group 7 index 8, at 189,477
+lamp 15           0              RIGHT RETURN LANE-TOP  # lamp 27, I/O group 7 index 15, at 237,454
+lamp 16           0              RIGHT RETURN LANE-BOT  # lamp 28, I/O group 7 index 16, at 237,471
+lamp 17           0              RIGHT OUTLANE-TOP  # lamp 29, I/O group 7 index 17, at 258,467
+lamp 18           0              RIGHT OUTLANE-BOT  # lamp 30, I/O group 7 index 18, at 258,486
+lamp 19           0              RIGHT BALL SAVE  # lamp 31, I/O group 7 index 19, at 258,550
+lamp 122          0              RIGHT SLING FLASH  # lamp 32, I/O group 7 index 20, at 212,506
+lamp 20           0              CENTER ARROW 1  # lamp 33, I/O group 7 index 24, at 100,450
+lamp 21           0              CENTER ARROW 2  # lamp 34, I/O group 7 index 25, at 119,426
+lamp 22           0              CENTER ARROW 3  # lamp 35, I/O group 7 index 26, at 147,417
+lamp 23           0              CENTER ARROW 4  # lamp 36, I/O group 7 index 27, at 175,426
+lamp 24           0              CENTER ARROW 5  # lamp 37, I/O group 7 index 28, at 193,450
+lamp 125          0              CENTER CIRCLE 1 FLASH  # lamp 38, I/O group 7 index 29, at 123,394
+lamp 126          0              CENTER CIRCLE 2 FLASH  # lamp 39, I/O group 7 index 30, at 146,390
+lamp 127          0              CENTER CIRCLE 3 FLASH  # lamp 40, I/O group 7 index 31, at 170,394
+lamp 9            0              LEFT OUTLANE-TOP  # lamp 41, I/O group 7 index 32, at 36,467
+lamp 10           0              LEFT OUTLANE-BOT  # lamp 42, I/O group 7 index 33, at 36,486
+lamp 11           0              LEFT RETURN LANE-TOP  # lamp 43, I/O group 7 index 34, at 57,455
+lamp 12           0              LEFT RETURN LANE-BOT  # lamp 44, I/O group 7 index 35, at 57,471
+lamp 13           0              LEFT BALL SAVE  # lamp 45, I/O group 7 index 36, at 36,550
+lamp 14           0              SHOOT AGAIN  # lamp 46, I/O group 7 index 37, at 147,605
+lamp 120          0              LOWER LEFT SPOTLIGHT  # lamp 47, I/O group 7 index 38, at 29,552
+lamp 121          0              LEFT SLING FLASH  # lamp 48, I/O group 7 index 39, at 82,506
+lamp 44           0              CRATE BOT  # lamp 49, I/O group 7 index 40, at 207,425
+lamp 43           0              CRATE MID  # lamp 50, I/O group 7 index 41, at 206,406
+lamp 42           0              CRATE TOP  # lamp 51, I/O group 7 index 42, at 204,387
+lamp 99           0              RIGHT RAMP 3  # lamp 52, I/O group 7 index 43, at 208,368
+lamp 98           0              RIGHT RAMP 2  # lamp 53, I/O group 7 index 44, at 218,359
+lamp 97           0              RIGHT RAMP 1  # lamp 54, I/O group 7 index 45, at 206,355
+lamp 92           0       RIGHT RAMP LEFT TGT  # lamp 55, I/O group 7 index 46, at 219,293
+lamp 93           0              RIGHT RAMP DIAMOND  # lamp 56, I/O group 7 index 47, at 229,307
+lamp 130          0              JOB START FLASH  # lamp 57, I/O group 7 index 51, at 259,349
+lamp 138          0        COINS FLASH  # lamp 58, I/O group 7 index 52, at 235,365
+lamp 129          0              RIGHT VUK FLASH  # lamp 59, I/O group 7 index 54, at 278,350
+lamp 128          0              CRATE FLASH (2X)  # lamp 60, I/O group 7 index 55, at 0,0
+lamp 39           0              LEFT EJECT 2  # lamp 61, I/O group 7 index 56, at 70,380
+lamp 40           0              LEFT EJECT 3  # lamp 62, I/O group 7 index 57, at 78,393
+lamp 41           0              EXTRA BALL  # lamp 63, I/O group 7 index 58, at 87,406
+lamp 33           0            LEFT 2 BANK TGT BOT  # lamp 64, I/O group 7 index 59, at 62,422
+lamp 32           0            LEFT 2 BANK TGT TOP  # lamp 65, I/O group 7 index 60, at 67,406
+lamp 38           0              LEFT EJECT 1  # lamp 66, I/O group 7 index 61, at 66,388
+lamp 100          0              MARKER LEFT  # lamp 67, I/O group 7 index 62, at 37,415
+lamp 101          0              MARKER RIGHT  # lamp 68, I/O group 7 index 63, at 51,408
+lamp 124          0              SPINNER FLASH  # lamp 69, I/O group 7 index 67, at 55,265
+lamp 123          0              LEFT EJECT FLASH  # lamp 70, I/O group 7 index 68, at 38,300
+lamp 34           0              ADMINISTRATOR  # lamp 71, I/O group 7 index 71, at 41,344
+lamp 85           0              WINSTO(N)  # lamp 72, I/O group 8 index 8, at 203,254
+lamp 84           0              WINST(O)N  # lamp 73, I/O group 8 index 9, at 194,245
+lamp 83           0              WINS(T)ON  # lamp 74, I/O group 8 index 10, at 203,236
+lamp 102          0              DANCE FLOOR 1  # lamp 75, I/O group 8 index 11, at 107,180
+lamp 103          0              DANCE FLOOR 2  # lamp 76, I/O group 8 index 12, at 98,172
+lamp 104          0              DANCE FLOOR 3  # lamp 77, I/O group 8 index 13, at 95,160
+lamp 105          0              DANCE FLOOR 4  # lamp 78, I/O group 8 index 14, at 83,147
+lamp 106          0              DANCE FLOOR LARGE  # lamp 79, I/O group 8 index 15, at 87,132
+lamp 82           0              WIN(S)TON  # lamp 80, I/O group 8 index 16, at 194,227
+lamp 81           0              WI(N)STON  # lamp 81, I/O group 8 index 17, at 204,218
+lamp 75           0              CAR 1  # lamp 82, I/O group 8 index 18, at 167,242
+lamp 76           0              CAR 2  # lamp 83, I/O group 8 index 19, at 179,258
+lamp 77           0              CAR 3  # lamp 84, I/O group 8 index 20, at 192,267
+lamp 78           0              CAR 4  # lamp 85, I/O group 8 index 21, at 208,273
+lamp 135          0              CAR SPOTLIGHT  # lamp 86, I/O group 8 index 22, at 240,338
+lamp 80           0              W(I)NSTON  # lamp 87, I/O group 8 index 24, at 195,209
+lamp 79           0              (W)INSTON  # lamp 88, I/O group 8 index 25, at 204,200
+lamp 91           0              RIGHT ORBIT 3  # lamp 89, I/O group 8 index 26, at 216,196
+lamp 89           0              RIGHT ORBIT 1  # lamp 90, I/O group 8 index 27, at 211,184
+lamp 90           0              RIGHT ORBIT 2  # lamp 91, I/O group 8 index 28, at 224,186
+lamp 136          0              CONTINENTAL FLASH WHT  # lamp 95, I/O group 8 index 38, at 206,130
+lamp 134          0              BUILDING SPOTLIGHT  # lamp 96, I/O group 8 index 40, at 259,301
+lamp 61           0              DROP TGT ENTRANCE  # lamp 97, I/O group 8 index 41, at 116,239
+lamp 131          0              DANCEFLOOR FLASH LEFT  # lamp 99, I/O group 8 index 43, at 63,157
+lamp 132          0              DANCEFLOOR FLASH RIGHT  # lamp 100, I/O group 8 index 44, at 84,171
+lamp 74           0              CENTER RAMP 3  # lamp 101, I/O group 8 index 51, at 160,329
+lamp 73           0              CENTER RAMP 2  # lamp 102, I/O group 8 index 52, at 164,317
+lamp 72           0              CENTER RAMP 1  # lamp 103, I/O group 8 index 53, at 151,320
+lamp 67           0              DROP TARGET 3  # lamp 104, I/O group 8 index 57, at 132,296
+lamp 66           0              DROP TARGET 2  # lamp 105, I/O group 8 index 58, at 135,284
+lamp 68           0              CENTER RAMP DIAMOND  # lamp 106, I/O group 8 index 59, at 149,266
+lamp 65           0              DROP TARGET 1  # lamp 107, I/O group 8 index 63, at 123,287
+lamp 54           0       LEFT RAMP RIGHT TGT  # lamp 108, I/O group 8 index 64, at 112,298
+lamp 53           0              LEFT RAMP DIAMOND  # lamp 109, I/O group 8 index 65, at 97,305
+lamp 52           0        LEFT RAMP LEFT TGT  # lamp 110, I/O group 8 index 66, at 80,305
+lamp 45           0              LEFT ORBIT TOP ARROW  # lamp 111, I/O group 8 index 67, at 62,295
+lamp 49           0              LEFT ORBIT 1  # lamp 112, I/O group 8 index 71, at 70,344
+lamp 50           0              LEFT ORBIT 2  # lamp 113, I/O group 8 index 72, at 82,340
+lamp 51           0              LEFT ORBIT 3  # lamp 114, I/O group 8 index 73, at 79,353
+lamp 58           0              LEFT RAMP 1  # lamp 115, I/O group 8 index 77, at 102,359
+lamp 59           0              LEFT RAMP 2  # lamp 116, I/O group 8 index 78, at 115,356
+lamp 60           0              LEFT RAMP 3  # lamp 117, I/O group 8 index 79, at 111,368
+lamp 208,209,210  0              EXPRESSIVE LIGHTING L 1  # lamp 141, I/O group 1 index 1, at 14,546
+lamp 211,212,213  0              EXPRESSIVE LIGHTING L 2  # lamp 142, I/O group 1 index 4, at 14,527
+lamp 214,215,216  0              EXPRESSIVE LIGHTING L 3  # lamp 143, I/O group 1 index 7, at 14,508
+lamp 217,218,219  0              EXPRESSIVE LIGHTING L 4  # lamp 144, I/O group 1 index 10, at 14,489
+lamp 220,221,222  0              EXPRESSIVE LIGHTING L 5  # lamp 145, I/O group 1 index 13, at 14,471
+lamp 223,224,225  0              EXPRESSIVE LIGHTING L 6  # lamp 146, I/O group 1 index 16, at 14,452
+lamp 226,227,228  0              EXPRESSIVE LIGHTING L 7  # lamp 147, I/O group 1 index 19, at 14,433
+lamp 229,230,231  0              EXPRESSIVE LIGHTING L 8  # lamp 148, I/O group 1 index 22, at 14,414
+lamp 232,233,234  0              EXPRESSIVE LIGHTING L 9  # lamp 149, I/O group 1 index 25, at 14,395
+lamp 235,236,237  0              EXPRESSIVE LIGHTING L 10  # lamp 150, I/O group 1 index 28, at 14,376
+lamp 238,239,240  0              EXPRESSIVE LIGHTING L 11  # lamp 151, I/O group 1 index 31, at 14,357
+lamp 241,242,243  0              EXPRESSIVE LIGHTING L 12  # lamp 152, I/O group 1 index 34, at 14,338
+lamp 244,245,246  0              EXPRESSIVE LIGHTING L 13  # lamp 153, I/O group 1 index 37, at 14,320
+lamp 247,248,249  0              EXPRESSIVE LIGHTING L 14  # lamp 154, I/O group 1 index 40, at 14,301
+lamp 250,251,252  0              EXPRESSIVE LIGHTING L 15  # lamp 155, I/O group 1 index 43, at 14,282
+lamp 253,254,255  0              EXPRESSIVE LIGHTING L 16  # lamp 156, I/O group 1 index 46, at 14,263
+lamp 256,257,258  0              EXPRESSIVE LIGHTING L 17  # lamp 157, I/O group 1 index 49, at 14,244
+lamp 259,260,261  0              EXPRESSIVE LIGHTING L 18  # lamp 158, I/O group 1 index 52, at 14,225
+lamp 262,263,264  0              EXPRESSIVE LIGHTING L 19  # lamp 159, I/O group 1 index 55, at 14,206
+lamp 265,266,267  0              EXPRESSIVE LIGHTING L 20  # lamp 160, I/O group 1 index 58, at 14,187
+lamp 268,269,270  0              EXPRESSIVE LIGHTING L 21  # lamp 161, I/O group 1 index 61, at 14,169
+lamp 271,272,273  0              EXPRESSIVE LIGHTING L 22  # lamp 162, I/O group 1 index 64, at 14,150
+lamp 274,275,276  0              EXPRESSIVE LIGHTING L 23  # lamp 163, I/O group 1 index 67, at 14,131
+lamp 277,278,279  0              EXPRESSIVE LIGHTING L 24  # lamp 164, I/O group 1 index 70, at 14,112
+lamp 280,281,282  0              EXPRESSIVE LIGHTING L 25  # lamp 165, I/O group 1 index 73, at 14,546
+lamp 283,284,285  0              EXPRESSIVE LIGHTING L 26  # lamp 166, I/O group 1 index 76, at 14,527
+lamp 286,287,288  0              EXPRESSIVE LIGHTING L 27  # lamp 167, I/O group 1 index 79, at 14,508
+lamp 289,290,291  0              EXPRESSIVE LIGHTING L 28  # lamp 168, I/O group 1 index 82, at 14,489
+lamp 292,293,294  0              EXPRESSIVE LIGHTING L 29  # lamp 169, I/O group 1 index 85, at 14,471
+lamp 295,296,297  0              EXPRESSIVE LIGHTING L 30  # lamp 170, I/O group 1 index 88, at 14,452
+lamp 298,299,300  0              EXPRESSIVE LIGHTING L 31  # lamp 171, I/O group 1 index 91, at 14,433
+lamp 301,302,303  0              EXPRESSIVE LIGHTING L 32  # lamp 172, I/O group 1 index 94, at 14,414
+lamp 304,305,306  0              EXPRESSIVE LIGHTING L 33  # lamp 173, I/O group 1 index 97, at 14,395
+lamp 307,308,309  0              EXPRESSIVE LIGHTING L 34  # lamp 174, I/O group 1 index 100, at 14,376
+lamp 310,311,312  0              EXPRESSIVE LIGHTING L 35  # lamp 175, I/O group 1 index 103, at 14,357
+lamp 313,314,315  0              EXPRESSIVE LIGHTING L 36  # lamp 176, I/O group 1 index 106, at 14,338
+lamp 316,317,318  0              EXPRESSIVE LIGHTING L 37  # lamp 177, I/O group 1 index 109, at 14,320
+lamp 319,320,321  0              EXPRESSIVE LIGHTING L 38  # lamp 178, I/O group 1 index 112, at 14,301
+lamp 322,323,324  0              EXPRESSIVE LIGHTING L 39  # lamp 179, I/O group 1 index 115, at 14,282
+lamp 325,326,327  0              EXPRESSIVE LIGHTING L 40  # lamp 180, I/O group 1 index 118, at 14,263
+lamp 328,329,330  0              EXPRESSIVE LIGHTING L 41  # lamp 181, I/O group 1 index 121, at 14,244
+lamp 331,332,333  0              EXPRESSIVE LIGHTING L 42  # lamp 182, I/O group 1 index 124, at 14,225
+lamp 334,335,336  0              EXPRESSIVE LIGHTING L 43  # lamp 183, I/O group 1 index 127, at 14,206
+lamp 337,338,339  0              EXPRESSIVE LIGHTING L 44  # lamp 184, I/O group 1 index 130, at 14,187
+lamp 340,341,342  0              EXPRESSIVE LIGHTING L 45  # lamp 185, I/O group 1 index 133, at 14,169
+lamp 343,344,345  0              EXPRESSIVE LIGHTING L 46  # lamp 186, I/O group 1 index 136, at 14,150
+lamp 346,347,348  0              EXPRESSIVE LIGHTING L 47  # lamp 187, I/O group 1 index 139, at 14,131
+lamp 349,350,351  0              EXPRESSIVE LIGHTING L 48  # lamp 188, I/O group 1 index 142, at 14,112
+lamp 352,353,354  0              EXPRESSIVE LIGHTING R 49  # lamp 189, I/O group 1 index 145, at 305,546
+lamp 355,356,357  0              EXPRESSIVE LIGHTING R 50  # lamp 190, I/O group 1 index 148, at 305,527
+lamp 358,359,360  0              EXPRESSIVE LIGHTING R 51  # lamp 191, I/O group 1 index 151, at 305,508
+lamp 361,362,363  0              EXPRESSIVE LIGHTING R 52  # lamp 192, I/O group 1 index 154, at 305,489
+lamp 364,365,366  0              EXPRESSIVE LIGHTING R 53  # lamp 193, I/O group 1 index 157, at 305,471
+lamp 367,368,369  0              EXPRESSIVE LIGHTING R 54  # lamp 194, I/O group 1 index 160, at 305,452
+lamp 370,371,372  0              EXPRESSIVE LIGHTING R 55  # lamp 195, I/O group 1 index 163, at 305,433
+lamp 373,374,375  0              EXPRESSIVE LIGHTING R 56  # lamp 196, I/O group 1 index 166, at 305,414
+lamp 376,377,378  0              EXPRESSIVE LIGHTING R 57  # lamp 197, I/O group 1 index 169, at 305,395
+lamp 379,380,381  0              EXPRESSIVE LIGHTING R 58  # lamp 198, I/O group 1 index 172, at 305,376
+lamp 382,383,384  0              EXPRESSIVE LIGHTING R 59  # lamp 199, I/O group 1 index 175, at 305,357
+lamp 385,386,387  0              EXPRESSIVE LIGHTING R 60  # lamp 200, I/O group 1 index 178, at 305,338
+lamp 388,389,390  0              EXPRESSIVE LIGHTING R 61  # lamp 201, I/O group 1 index 181, at 305,320
+lamp 391,392,393  0              EXPRESSIVE LIGHTING R 62  # lamp 202, I/O group 1 index 184, at 305,301
+lamp 394,395,396  0              EXPRESSIVE LIGHTING R 63  # lamp 203, I/O group 1 index 187, at 305,282
+lamp 397,398,399  0              EXPRESSIVE LIGHTING R 64  # lamp 204, I/O group 1 index 190, at 305,263
+lamp 400,401,402  0              EXPRESSIVE LIGHTING R 65  # lamp 205, I/O group 1 index 193, at 305,244
+lamp 403,404,405  0              EXPRESSIVE LIGHTING R 66  # lamp 206, I/O group 1 index 196, at 305,225
+lamp 406,407,408  0              EXPRESSIVE LIGHTING R 67  # lamp 207, I/O group 1 index 199, at 305,206
+lamp 409,410,411  0              EXPRESSIVE LIGHTING R 68  # lamp 208, I/O group 1 index 202, at 305,187
+lamp 412,413,414  0              EXPRESSIVE LIGHTING R 69  # lamp 209, I/O group 1 index 205, at 305,169
+lamp 415,416,417  0              EXPRESSIVE LIGHTING R 70  # lamp 210, I/O group 1 index 208, at 305,150
+lamp 418,419,420  0              EXPRESSIVE LIGHTING R 71  # lamp 211, I/O group 1 index 211, at 305,131
+lamp 421,422,423  0              EXPRESSIVE LIGHTING R 72  # lamp 212, I/O group 1 index 214, at 305,112
+lamp 424,425,426  0              EXPRESSIVE LIGHTING R 73  # lamp 213, I/O group 1 index 217, at 305,546
+lamp 427,428,429  0              EXPRESSIVE LIGHTING R 74  # lamp 214, I/O group 1 index 220, at 305,527
+lamp 430,431,432  0              EXPRESSIVE LIGHTING R 75  # lamp 215, I/O group 1 index 223, at 305,508
+lamp 433,434,435  0              EXPRESSIVE LIGHTING R 76  # lamp 216, I/O group 1 index 226, at 305,489
+lamp 436,437,438  0              EXPRESSIVE LIGHTING R 77  # lamp 217, I/O group 1 index 229, at 305,471
+lamp 439,440,441  0              EXPRESSIVE LIGHTING R 78  # lamp 218, I/O group 1 index 232, at 305,452
+lamp 442,443,444  0              EXPRESSIVE LIGHTING R 79  # lamp 219, I/O group 1 index 235, at 305,433
+lamp 445,446,447  0              EXPRESSIVE LIGHTING R 80  # lamp 220, I/O group 1 index 238, at 305,414
+lamp 448,449,450  0              EXPRESSIVE LIGHTING R 81  # lamp 221, I/O group 1 index 241, at 305,395
+lamp 451,452,453  0              EXPRESSIVE LIGHTING R 82  # lamp 222, I/O group 1 index 244, at 305,376
+lamp 454,455,456  0              EXPRESSIVE LIGHTING R 83  # lamp 223, I/O group 1 index 247, at 305,357
+lamp 457,458,459  0              EXPRESSIVE LIGHTING R 84  # lamp 224, I/O group 1 index 250, at 305,338
+lamp 460,461,462  0              EXPRESSIVE LIGHTING R 85  # lamp 225, I/O group 1 index 253, at 305,320
+lamp 463,464,465  0              EXPRESSIVE LIGHTING R 86  # lamp 226, I/O group 1 index 256, at 305,301
+
+# ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47

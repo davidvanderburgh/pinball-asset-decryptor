@@ -260,7 +260,8 @@ class Feeder:
         positions, how = trough.find(rows)
         self.trough = ballmodel.Trough(positions)
         self.how = how
-        self.lane = self._switch(rows, ballmodel.LANE_NAME)
+        self.lane = next((i for i in (self._switch(rows, n) for n in ballmodel.LANE_NAMES)
+                          if i is not None), None)
         coils = coilmap.load(gameinfo.table("device_xy.txt", self.game) or "")
         self.eject_coil = coilmap.address(coils, coilmap.TROUGH)
         self.plunge_coil = coilmap.address(coils, coilmap.AUTO_PLUNGER)

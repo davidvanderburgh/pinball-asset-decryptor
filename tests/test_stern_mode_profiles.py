@@ -61,6 +61,9 @@ PORTS = {
     "sword_of_rage_le-1.18": (35, 64, True, ALL - {"events"}, CALLOUT_SOUND),
     "mando_le-1.44": (40, 64, True, ALL - {"events"}, CALLOUT_SOUND),
     "turtles_le-1.59": (17, 32, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
+    "dungeons_and_dragons_le-1.00": (33, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "john_wick_le-1.01": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "venom_le-1.07": (40, 64, True, ALL - {"events"}, CALLOUT_SOUND),
 }
 
 #: the lines a part of a mode puts in the runtime file

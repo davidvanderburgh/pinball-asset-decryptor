@@ -66,6 +66,8 @@ ROLL_GAP_S = float(os.environ.get("PAD_BALL_ROLL_GAP_MS") or 30) / 1000.0
 #: this disk. Held here rather than in the feeder so plunge.py and the feeder
 #: cannot disagree about which switch a ball arrives on.
 LANE_NAME = "SHOOTER LANE"
+#: ...or, on a lane read by an opto, these (Jurassic Park Pin: SHOOTER LANE OPTO)
+LANE_NAMES = (LANE_NAME, "SHOOTER LANE OPTO")
 
 
 class Plan:

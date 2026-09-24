@@ -28,6 +28,7 @@ PORTS = [
     ("beatles", "1.29"),
     ("deadpool_le", "1.14"),
     ("deadpool_pro", "1.16"),
+    ("dungeons_and_dragons_le", "1.00"),
     ("elvira3", "1.13"),
     ("foo_fighters_le", "1.04"),
     ("godzilla_le", "1.16"),
@@ -38,6 +39,7 @@ PORTS = [
     ("james_bond_60th_le", "1.11"),
     ("james_bond_le", "1.06"),
     ("jaws_le", "1.02"),
+    ("john_wick_le", "1.01"),
     ("jurassic_park_le", "1.16"),
     ("king_kong_le", "0.97"),
     ("led_zeppelin_le", "1.22"),
@@ -54,6 +56,7 @@ PORTS = [
     ("turtles_pro", "1.58"),
     ("turtles_pro", "1.59"),
     ("uncanny_xmen_le", "0.98"),
+    ("venom_le", "1.07"),
 ]
 
 

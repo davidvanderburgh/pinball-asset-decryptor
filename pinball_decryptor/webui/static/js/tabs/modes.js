@@ -10,6 +10,8 @@ import { html, useEffect, useRef, useState, Button, Field, Select, Check, Radio,
          InfoBadge, Icon, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
+import { CountsAsDialog } from "./modes_counts_as.js";   // item 160
+import { RewriteDialog } from "./modes_rewrite.js";     // item 161
 
 export const css = true;
 
@@ -98,7 +100,7 @@ function Num({ k, value, disabled, width = 64, title }) {
 }
 
 // ------------------------------------------------------------------ the head
-function Head({ s, openStock }) {
+function Head({ s, openStock, openCountsAs, openRewrite }) {
   const proj = s.project || "";
   const counts = `${s.n_form || 0} of 8 modes${s.n_code ? ` + ${s.n_code} in C` : ""}`;
   const modesDir = proj ? proj.replace(/[\\/]+$/, "").split(/[\\/]/).pop() + (proj.includes("\\") ? "\\" : "/") + "modes" : "";
@@ -124,6 +126,8 @@ function Head({ s, openStock }) {
     </div>
     <div class="actions">
       <${Button} icon="list" disabled=${!proj} onClick=${openStock}>The game's own timers and awards…<//>
+      <${Button} icon="list" disabled=${!proj} onClick=${openCountsAs} title="A shot that counts as one of a rule's own.">Counts as…<//>
+      <${Button} icon="edit" disabled=${!proj} onClick=${openRewrite} title="A rule's shot logic rewritten in C, as a code mode of this project.">Rewrite in C…<//>
       <${Button} iconRight="down" disabled=${!s.ex_ok} onClick=${examples}>Examples…<//>
     </div>
   </div>`;
@@ -623,13 +627,15 @@ export default function ModesTab() {
   const s = useNs("modes");
   if (s.spin) SPIN = s.spin;
   const [stock, setStock] = useState(false);
+  const [countsAs, setCountsAs] = useState(false);   // item 160
+  const [rewrite, setRewrite] = useState(false);     // item 161
   const [newCode, setNewCode] = useState(false);
   const [clip, setClip] = useState(null);
   const showClip = (path, title) => setClip({ path, title });
   const withClip = Object.assign({}, s, { _showClip: showClip });
   const hasProject = !!s.project;
   return html`<div class="page modes-page">
-    <${Head} s=${s} openStock=${() => setStock(true)} />
+    <${Head} s=${s} openStock=${() => setStock(true)} openCountsAs=${() => setCountsAs(true)} openRewrite=${() => setRewrite(true)} />
     ${s.title_note ? html`<${Note} kind="warn" action=${s.no_port && s.no_port === s.title_note
       ? html`<${Button} size="sm" icon="file" title=${s.sdk_doc} onClick=${() => call("modes.open_sdk_doc")}>Open MODE_SDK.md<//>` : null}>${s.title_note}<//>` : null}
     <div class="modes-body">
@@ -648,6 +654,8 @@ export default function ModesTab() {
     </div>
     <${TryFooter} s=${s} />
     ${stock ? html`<${StockDialog} s=${s} onClose=${() => setStock(false)} />` : null}
+    ${countsAs ? html`<${CountsAsDialog} s=${s} onClose=${() => setCountsAs(false)} />` : null}
+    ${rewrite ? html`<${RewriteDialog} s=${s} onClose=${() => setRewrite(false)} />` : null}
     ${s.film ? html`<${FilmDialog} film=${s.film} key=${s.film.seq} />` : null}
     ${newCode ? html`<${NewCodeDialog} onClose=${() => setNewCode(false)} />` : null}
     ${clip ? html`<${ClipDialog} path=${clip.path} title=${clip.title} onClose=${() => setClip(null)} />` : null}

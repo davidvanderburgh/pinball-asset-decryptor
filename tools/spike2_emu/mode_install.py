@@ -74,9 +74,13 @@ PORT_FILE = ("game.port", 0o100644)
 #: item 149: a card holds up to eight modes, the slots mode.so reads (item 133) -
 #: mode.cfg, then mode1.cfg .. mode7.cfg. These are the seven after the first.
 EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 8))
+#: item 160: the "counts as" table of the game's own rules (sdk/MODE_SDK.md "Counts as"), the
+#: only other data file the runtime reads beside its mode files; placed when the install is
+#: given one (--file), taken off when it is not
+EXTRA_FILES = (("stock.cfg", 0o100644),)
 #: everything an install can leave behind, for remove() and inspect(). Every slot is
 #: listed, so a removal takes a leftover mode1.cfg too and the rmdir cannot fail on it.
-ALL_FILES = CARD_FILES + (PORT_FILE,) + EXTRA_CFGS
+ALL_FILES = CARD_FILES + (PORT_FILE,) + EXTRA_CFGS + EXTRA_FILES
 #: a code mode's own assets file: <slug>.assets, the slug a card project folder name
 ASSET_SUFFIX = ".assets"
 ASSET_MODE = 0o100644
@@ -151,7 +155,8 @@ def inspect(card):
     return out
 
 
-def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=(), assets=()):
+def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=(), assets=(),
+            extras=()):
     """Put mode.so + mode.cfg (+ game.port) on p2 and hook game_monitor. Idempotent.
     A port left on p2 by an earlier install is removed when this one brings none.
 
@@ -161,10 +166,19 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
 
     ``assets``: the code modes' ``<slug>.assets`` files, placed under their own names; a card
     of code modes only has no ``cfg_path`` (None). An .assets file an earlier install left and
-    this one does not bring is removed too."""
+    this one does not bring is removed too.
+
+    ``extras`` (item 160): the runtime's other data files by their own names, today only
+    ``stock.cfg`` (:data:`EXTRA_FILES`); one an earlier install left and this one does not
+    bring is removed too."""
     mk.need_tools("debugfs", "e2fsck")
     extra_cfgs = list(extra_cfgs or ())
     assets = list(assets or ())
+    extras = list(extras or ())
+    for x in extras:
+        if os.path.basename(x) not in dict(EXTRA_FILES):
+            raise mk.Refused("%s is not a file the mode runtime reads (%s) - nothing has been written"
+                             % (os.path.basename(x), ", ".join(n for n, _m in EXTRA_FILES)))
     if len(extra_cfgs) > len(EXTRA_CFGS):
         raise mk.Refused("a card holds at most %d mode files - nothing has been written"
                          % (1 + len(EXTRA_CFGS)))
@@ -177,11 +191,12 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
             raise mk.Refused("%s is not a code mode's <slug>.assets - nothing has been written"
                              % os.path.basename(a))
     given = [so_path] + ([cfg_path] if cfg_path else []) + ([port_path] if port_path else [])
-    for p in given + extra_cfgs + assets:
+    for p in given + extra_cfgs + assets + extras:
         if not os.path.isfile(p):
             raise mk.Refused("%s is not a file - nothing has been written" % p)
     files = ((CARD_FILES if cfg_path else CARD_FILES[:1]) + ((PORT_FILE,) if port_path else ())
-             + EXTRA_CFGS[:len(extra_cfgs)] + tuple((os.path.basename(a), ASSET_MODE) for a in assets))
+             + EXTRA_CFGS[:len(extra_cfgs)] + tuple((os.path.basename(a), ASSET_MODE) for a in assets)
+             + tuple((os.path.basename(x), dict(EXTRA_FILES)[os.path.basename(x)]) for x in extras))
     ref, off = _ref(card)
 
     # The script we are about to edit, and the hook, BEFORE anything is written:
@@ -195,7 +210,7 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
     payload = {"mode.so": open(so_path, "rb").read()}
     if cfg_path:
         payload["mode.cfg"] = open(cfg_path, "rb").read()
-    for a in assets:
+    for a in assets + extras:
         with open(a, "rb") as f:
             payload[os.path.basename(a)] = f.read()
     if port_path:
@@ -316,6 +331,9 @@ def main(argv=None):
     p.add_argument("--asset", action="append", default=[],
                    help="a code mode's <slug>.assets (sdk/pad_mode_assets.h); repeat it for "
                         "several code modes. A card of code modes only needs no --cfg")
+    p.add_argument("--file", action="append", default=[],
+                   help="another data file the runtime reads beside its mode files, by its own "
+                        "name: stock.cfg, the counts-as table of the game's own rules (item 160)")
     p.add_argument("--port", help="the SDK runtime's port file for this game (item 134)")
     p.add_argument("--workdir")
     p = sub.add_parser("remove")
@@ -327,7 +345,7 @@ def main(argv=None):
     try:
         if a.cmd == "install":
             names = install(a.card, a.so, a.cfg[0] if a.cfg else None, a.port, a.workdir,
-                            extra_cfgs=a.cfg[1:], assets=a.asset)
+                            extra_cfgs=a.cfg[1:], assets=a.asset, extras=a.file)
             print("[mode] installed %s into %s and hooked %s"
                   % (", ".join(names), MODE_DIR, GAME_MONITOR))
         elif a.cmd == "remove":

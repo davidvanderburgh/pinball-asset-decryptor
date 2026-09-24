@@ -67,7 +67,7 @@ forget() {
     [ -f "$MARK" ] || return 0
     rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP/game.port" \
           "$DUMP"/mode.start "$DUMP"/mode[1-7].start "$DUMP/mode.stop" "$DUMP/mode.clip" \
-          "$DUMP/mode.log" "$DUMP"/*.assets "$MARK" 2>/dev/null
+          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$MARK" 2>/dev/null
     return 0
 }
 
@@ -150,7 +150,7 @@ fi
 if [ "$(id -u)" = 0 ]; then
     _o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
     [ -n "$_o" ] && [ "$_o" != root ] && chown "$_o" "$ROOT$OBJECT" "$DUMP/game.port" \
-        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$MARK" 2>/dev/null
+        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$MARK" 2>/dev/null
 fi
 say "this card carries $WHAT: their runtime runs in this game, as on the machine"
 echo "$OBJECT"

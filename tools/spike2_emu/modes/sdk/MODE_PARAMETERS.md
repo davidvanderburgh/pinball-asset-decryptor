@@ -202,14 +202,14 @@ Capability flags, for `pm_can()`: `PM_CAN_CALLOUT`, `PM_CAN_LIGHTS`, `PM_CAN_SCR
 `PM_CAN_CLIPS`, `PM_CAN_OWN_SOUND`, `PM_CAN_MESSAGES`, `PM_CAN_AWARD_SCREEN`, and
 `PM_CAN_EVENTS` (item 147: set when at least one named event is armed), `PM_CAN_ROSTER`
 (item 146: the port names the battle roster and its start is hooked), `PM_CAN_LAMPS` (item mode-leds:
-the port has `lamp` lines and the game's lamp layer, and their light ids fit the game's), `PM_CAN_DISPLAY_PRIORITY` (item 154 display: the port names the display arbitration and it is hooked). A port that
+the port has `lamp` lines and the game's lamp layer, and their light ids fit the game's), `PM_CAN_DISPLAY_PRIORITY` (item 154 display: the port names the display arbitration and it is hooked), `PM_CAN_STOCK_RULES` (item 160: the port names the game's own rules, the manager's get and the shot slot, so a rule's shot handler can be wrapped). A port that
 lacks a function switches off only its own flag (the boot log's `armed: ... can ...` line).
 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 68 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
-F = `mode_file.c`.
+The 76 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
 |---|---|---|---|
@@ -281,6 +281,14 @@ F = `mode_file.c`.
 | `pm_lamp_layers(prio, max)` | the game's lamp layers now, bottom to top, 0x100 added for ours; -1 without the port's layer list | `lamp_probe.c` | item mode-leds RUN 5 (the layer lists in MODE_SDK.md) |
 | `pm_display_priority(priority)` | the running mode becomes, to the game's display arbitration, a display of `priority` (1-255); 0 gives it up. 1 = held; 0 without the port's display lines or when the caller is not the running mode | F | item 154 display: Premium 1.16 r2-r6, Pro 1.15 r5 (MODE_SDK.md "Display priority") |
 | `pm_display_covered()` | 1 while a display of the game's that beat the held priority has the screen | none (`display_test_mode.c`) | item 154 display r4: 1 when the tilt warning (241) beat 230 (`covered by a game display that beat the priority`) |
+| `pm_stock_rule_count()` | how many of the game's own rules the port names (`rule` lines); 0 without `PM_CAN_STOCK_RULES` | none | item 160: desk (the port readers in `tests/test_spike2_stock_remap.py`); 2 on both Godzilla ports |
+| `pm_stock_rule_at(i, &id, &label)` | the i-th rule's id and label | none | item 160: desk |
+| `pm_stock_rule_object(rule)` | the rule's object through the manager's get, checked against the port's vtable word; 0 until the manager is built | R | item 160: Premium 1.16 (the wrap line `rule 12 Battle vs Ebirah obj 0x7b53f0 vtable 0x636d78: shot v[42] 0x816e8 wrapped`); see MODE_SDK.md "Counts as" for the run |
+| `pm_stock_rule_active(rule)` | the rule's own active query for the player up: 1 / 0, -1 unknown | R | item 160: Premium 1.16 (the stand-in insert follows it: held while the battle runs, handed back at its stop) |
+| `pm_stock_rule_field(rule)` | the rule's per-player lit mask (the u64 at obj + `stock_field` + 8 x player) | R | item 160: Premium 1.16 (the field in every `counts as` / `passed through` line matches the probe's) |
+| `pm_stock_rule_hook(rule, fn)` | wraps the rule's shot handler for the caller: `fn(rule, &shot, obj)` sees every shot first, may change it, returns 1 to run the game's handler with it or 0 to keep it from running (item 161's route) | none | item 160: desk only (the wrap itself is the counts-as wrap, proven in the run; a C hook has not run) |
+| `pm_stock_rule_unhook(rule)` | the hook is gone; the wrap stays and passes through | none | item 160: desk only |
+| `pm_stock_counts_as(rule, from, to)` | a counts-as row from C, kept across `stock.cfg` reloads; `to` = 0 removes; `to` must be ONE bit outside `from` | none | item 160: desk only (the file's rows go through the same table and decision, proven in the run) |
 
 ## 4. Item 141's proof
 
@@ -393,6 +401,33 @@ plays from the tick; any other start or end plays at once, and a start clip stil
 when the mode ends never plays (desk). Run 1's scoring, callouts, end shot and screen timing
 matched run 2's line for line.
 
+## 4b. `stock.cfg`: the game's own rules take another shot (item 160)
+
+Not a mode file: one file beside them (`/usr/local/padmode/stock.cfg` on a card, `/dump/stock.cfg` in
+the rig), read by the runtime itself twice a second and re-parsed when its bytes change, so an
+edit lands in a running game. The Modes tab's "Counts as…" table writes it (the rows live in the
+project as `modes/stock.json`; Write and Try it carry the rendered file with the modes). A `#` at the
+start of a line, or after a blank on a row, begins a comment (the runtime strips it before reading
+the row). MODE_SDK.md "Counts as" says how it works and what was measured.
+
+| Key | Value | Absent | What it does | Tab | Measured |
+|---|---|---|---|---|---|
+| `counts_as` | `<rule id> <shot> -> <shot>` (shots: the port's names, any case, or `0x` masks), up to 16 rows | none: every rule stock | while the rule runs and the target bit is lit in its own mask, a dispatch whose bits are all inside the first shot is REPLACED by the target bit (one bit; never ORed in); once the rule clears the bit the shot passes through untouched. A rule the port does not name, a shot it does not name, a target of more than one bit or one inside the first shot is logged and ignored | Counts as… > Add | item 160 on Premium 1.16 (MODE_SDK.md "Counts as": the Left ramp entering Ebirah's handler as 0x200, the count falling, the file removed and put back mid-battle) |
+| `light` | `<rule id> <colour> [solid\|blink\|pulse] [ms] [on ms]` | yellow blink 500 ms, 300 on | the stand-in's inserts (the first shot's, from the port's `lamp` lines) while the target bit is lit, on the runtime's own lamp layer at priority 255; handed back when the bit clears or the rule stops | no | item 160: the default (LEFT RAMP yellow while 0x200 is lit; off once the count is 0) in the run; a `light` line: desk only |
+
+## 4c. `pad_stock.h`: a rule's shot logic rewritten in C (item 161)
+
+Beside the counts-as table, a CODE MODE of the project may replace one rule's shot handler outright:
+`PM_STOCK_HANDLER(<rule id>, fn)` (or a `struct pm_stock_handler` record with `started` / `stopped`
+callbacks) in `modes/<folder>/<folder>.c`, against `pad_stock.h`. The handler returns `PM_STOCK_DONE`
+(the game's handler is not run for that shot) or `PM_STOCK_PASS`; `pm_stock_call_original` replays the
+game's own handler with a shot of the C code's choosing. Every accessor (the rule's lit mask, its own
+counters, an award as the handler pays one, a show, a game event, STOP; Ebirah's stage award and final
+blow; tank's records) reads its slot, offset or address from the port's `stock_*`, `ebirah_*` and `tank_*`
+lines. The Modes tab's "Rewrite in C..." dialog makes such a folder from the SDK's example for the rule
+(`examples/ebirah_rewrite.c`); Write carries it as every code mode. MODE_SDK.md, "Rewriting a stock rule's
+shot logic", has the calls and what is emulator-proven.
+
 ## 5. Keys other items reserve (not in this runtime yet)
 
 Each lands as its own rows in sections 1 and 2 when its item merges (item 139's `starts`
@@ -402,3 +437,21 @@ and `cooldown`, item 140's `stack`, item 142's film fields, item 147's `starts_o
 | Key / field | Item | What it is for |
 |---|---|---|
 | (none left) | | |
+
+
+## 6. The game's own modes: their shots as data (item 159)
+
+The Modes tab's "The game's own modes" dialog edits numbers of the modes the game shipped with
+(item 145: awards, timers). Item 158 measured that the lit mask it could also stage does nothing for
+tank attack multiball (its shots are a path table the tanks walk) and battle vs Ebirah (its start
+rebuilds the mask from spin counts). Item 159 replaces that with what the two rules really play,
+on Godzilla Premium/LE 1.16 and Pro 1.15; see MODE_SDK.md, "Stock mode shots as data (item 159)".
+
+| Row (Modes tab) | Value | Stock | What it does | Measured |
+|---|---|---|---|---|
+| Tank Attack Multiball, Position 1..6 | a shot picked by name, or none (positions 2 and 4 only; 1, 5, 6 are where tanks appear and 3 is where they head: read-only, the row says why) | bit 35, Left ramp, Godzilla target, Top spinner, Right ramp, bit 37 | the six-entry path the tanks walk toward position 3; a hit on the entry a tank stands on destroys it. None = the entry copies its neighbour away from the goal, so the walk skips it. The counted-shots words and the spot list follow | position 4 = none: emulator-proven on Premium/LE 1.16 (item 158 live-3, item 159 edited1); another shot: desk only |
+| Battle vs Ebirah, Left / Top / Shield ramp spinner spins | 1 to 255 | 15 / 40 / 15 | how many spins of that spinner the battle needs before its stage award (5M / 10M / 15M by completion order) | left = 5: emulator-proven on Premium/LE 1.16 (item 159 edited1); top and shield: the same one-word edit, desk |
+
+The rows go through the one patch set every Write path shares (the image Write, Direct SD, the
+emulator's override set), behind the preview switch; back to stock writes the stock words byte for
+byte, the family's included.

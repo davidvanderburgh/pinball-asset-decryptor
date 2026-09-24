@@ -1413,7 +1413,8 @@ def test_modes_tab_premium_1_16_project_offers_godzillas_names(tmp_path):
         _project(w, project)
         st = _st(w)
         names = st["profile"]["shots"]
-        assert len(names) == 18 and "Shield target center" in names and "Maser target" in names
+        assert len(names) == 21 and "Shield target center" in names and "Maser target" in names
+        assert "Left spinner" in names and "Top spinner" in names and "Shield ramp spinner" in names
         assert "Godzilla Premium/LE 1.16" in st["title_text"]
         assert st["examples"][0]["name"] == "KAIJU RUSH"
         w.call("modes.example", "KAIJU RUSH")
@@ -1638,7 +1639,7 @@ def test_modes_tab_renamed_card_is_read_only_until_its_game_is_read(tmp_path, mo
             assert (proj / "modes" / "kaiju_rush" / "mode.json").read_bytes() == saved
             go.set()
             assert _wait(w, lambda: "Premium/LE 1.16" in _st(w)["title_text"], 8)
-            assert len(_st(w)["profile"]["shots"]) == 18 and svc._spec.title == "godzilla_le_1_16"
+            assert len(_st(w)["profile"]["shots"]) == 21 and svc._spec.title == "godzilla_le_1_16"
             assert _st(w)["dup_ok"] is True
             assert "read-only" not in _status(w)
         finally:
@@ -2513,6 +2514,67 @@ def test_modes_tab_says_when_the_build_has_no_table(tmp_path):
         assert "turtles_pro 1.59.0" in stock["msg"]
         assert stock["rows"] == []
         assert stock["on"] is False and stock["row_on"] is False
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_picks_a_tank_position_by_shot_and_sets_a_spin_count(tmp_path, manufacturers_by_key):
+    """Item 159: a stock mode's SHOTS as data. Tank attack's positions are picked by shot name
+    (a select of the shots the switches send alone, and none), ebirah's spins per spinner are
+    typed, the rows item 158 proved inert (the lit-mask getter words) are read-only with the
+    reason, and the Write list names the shots, not raw words."""
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.webui import write_scan as WS
+
+    stern = manufacturers_by_key["stern"]
+    project = _stock_modes_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, project)
+        stock = _st(w)["stock"]
+        assert "godzilla_le 1.16" in stock["msg"]
+        rows = {r["key"]: r for r in stock["rows"]}
+        # the positions: 2 and 4 pickable, the seeds and the goal read-only with the reason
+        assert rows["4.path.3"]["number"] == "Position 4" and rows["4.path.3"]["stock"] == "Top spinner, first bit"
+        assert not rows["4.path.3"]["readonly"] and rows["4.path.3"]["raw"] == "2048"
+        labels = {c["value"]: c["label"] for c in rows["4.path.3"]["choices"]}
+        assert labels["0"].startswith("none") and labels["2048"] == "Top spinner, first bit"
+        assert labels[str(0x400000)] == "Building" and str(1 << 36) not in labels
+        assert str(0x200000) not in labels                       # Right ramp is position 5
+        assert rows["4.path.0"]["readonly"] and "choices" not in rows["4.path.0"]
+        assert "4.path.counted.lo" not in rows and "4.path.spot.2" not in rows
+        # the lit-mask getter rows were never listed here (not awards or timers); the model
+        # keeps the ones item 158 measured inert read-only (tests/test_stern_stock_modes.py)
+        assert "4.initial_mask.lo" not in rows and "12.initial_mask.lo" not in rows
+        # pick none for position 4
+        w.call("modes.stock_select", "4.path.3")
+        st = _st(w)["stock"]
+        assert st["row_on"] and st["value"] == "2048" and st["choices"] == rows["4.path.3"]["choices"]
+        assert "tanks then skip this position" in st["note"]
+        note = w.call("modes.stock_set", "0")
+        assert "position 4: Top spinner, first bit -> none staged" in note
+        assert staged_changes.load(str(project))["stock_modes"]["values"] == {"4.path.3": 0}
+        rows = {r["key"]: r for r in _st(w)["stock"]["rows"]}
+        assert rows["4.path.3"]["value"].startswith("none") and rows["4.path.3"]["changed"]
+        assert "1 change(s) staged" in _st(w)["stock"]["msg"]
+        # a duplicate is refused with the reason
+        assert "already position" in w.call("modes.stock_set", str(0x200000))
+        # a spin count is typed
+        w.call("modes.stock_select", "12.spins.left")
+        st = _st(w)["stock"]
+        assert st["row_on"] and st["choices"] is None and st["value"] == "15"
+        assert "How many spins" in st["note"]
+        assert "left spinner spins: 15 -> 5 staged" in w.call("modes.stock_set", "5")
+        assert "at least 1" in w.call("modes.stock_set", "0")
+        assert staged_changes.load(str(project))["stock_modes"]["values"] == {
+            "4.path.3": 0, "12.spins.left": 5}
+        # the Write list names the shot
+        got = [r[0] for r in WS.stock_mode_rows(stern, str(project))]
+        assert "Tank Attack Multiball position 4: Top spinner, first bit -> none" in got
+        assert "Battle vs Ebirah left spinner spins: 15 -> 5" in got
+        # Stock puts the position back; All to stock clears the rest
+        w.call("modes.stock_select", "4.path.3")
+        assert "back to the game's own Top spinner" in w.call("modes.stock_reset")
+        assert w.call("modes.stock_all") == 1
+        assert staged_changes.load(str(project))["stock_modes"]["values"] == {}
 
 
 @pytest.mark.usefixtures("preview_modes_on")

@@ -2,10 +2,10 @@
 // film cutter ("Cut from a film"), New code mode's name, and a clip's preview.
 // Python owns the state (modes.stock, modes.film); these only render it and call back.
 
-import { html, useEffect, useRef, useState, Modal, Button, Field, Check, Radio, Table, Note,
+import { html, useEffect, useRef, useState, Modal, Button, Field, Check, Radio, Select, Table, Note,
          tip, cx, call, mediaUrl } from "../core/ui.js";
 
-const STOCK_TIP = "The timers and awards of the modes the game shipped with. Pick a row, type a new value and press Set. Changes are saved with this project and put on the card by Write, like the Defaults tab. A timer that is an operator setting is the same number the Defaults tab shows (a machine still on the game's default takes the new one when it boots). A number the game works out in code can't be changed here; the row says why. To rename a mode, edit its title on the Text tab.";
+const STOCK_TIP = "The timers, awards and shots of the modes the game shipped with. Pick a row, type a new value (or pick a shot) and press Set. Changes are saved with this project and put on the card by Write, like the Defaults tab. A timer that is an operator setting is the same number the Defaults tab shows (a machine still on the game's default takes the new one when it boots). A number the game works out in code, or one the game never uses in play, can't be changed here; the row says why. To rename a mode, edit its title on the Text tab.";
 
 // ------------------------------------------------------------ the game's own modes
 // The Tk Treeview's headings could be dragged to widen a column: the widths a person drags
@@ -34,10 +34,14 @@ export function StockDialog({ s, onClose }) {
   ];
   const can = st.on && st.row_on;
   const set = () => { if (can) call("modes.stock_set", val); };
+  // item 159: a tank position is picked by shot name (Python lists the shots the switches
+  // send alone, and none); every other number is typed
+  const choices = st.choices || null;
   return html`<${Modal} title="The game's own modes" icon="list" xwide onClose=${onClose}
     footer=${html`<span class="lbl">New value</span>
-      <div style="width:150px" onKeyDown=${(e) => { if (e.key === "Enter") set(); }}>
-        <${Field} value=${val} onChange=${setVal} mono sm disabled=${!can} /></div>
+      ${choices ? html`<${Select} value=${val} options=${choices} onChange=${setVal} sm width=${240} disabled=${!can} />`
+                : html`<div style="width:150px" onKeyDown=${(e) => { if (e.key === "Enter") set(); }}>
+        <${Field} value=${val} onChange=${setVal} mono sm disabled=${!can} /></div>`}
       <${Button} size="sm" kind="primary" disabled=${!can} onClick=${set}>Set<//>
       <${Button} size="sm" disabled=${!can} onClick=${() => call("modes.stock_reset")}
         title="Put the selected number back to the game's own value.">Stock<//>

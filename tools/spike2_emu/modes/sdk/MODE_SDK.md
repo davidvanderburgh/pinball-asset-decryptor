@@ -1906,3 +1906,347 @@ did not end the ball in 25 s); the kit's own tilt path (in the emulator the tilt
 modes first and ended them); the game's battle ending by itself with ANGUIRUS in it (the battle's timer
 did not run out in the run's window; the stop trigger ended it, so the total's wait for the battle's
 own total is desk-proven only); Pro 1.15.
+
+## Watching the game's own rules play (item 158)
+
+To see what one of the game's OWN compiled rules does with each shot (a battle's spinner counts, a
+multiball's moving targets), `stock_probe.c` is an instrument, never a card's mode: it reads a config
+(`stock_probe.godzilla_le-1.16.cfg` for Godzilla Premium/LE 1.16), finds each watched rule through the
+game's manager and wraps three of its vtable slots (start, stop, shot handler). Every call still goes
+to the game's function; around it the probe logs the incoming shot, the rule's shot mask and lit shots
+before and after, the rule's own counters, its start and stop with the caller, and the award calls.
+`/dump/stockprobe.start "<id>"` starts a rule for the player up, from the tick. Build it with
+`build_mode.sh -o stockprobe.so stock_probe.c`; read its log with `stock_probe_read.py`. The file
+headers say everything; the addresses in the config are desk-read and checked at run time.
+
+`lamp_watch.py` is the matching insert log: the shim's decoded LED block (`dump/padled`) sampled every
+100 ms, by the insert names of the port's `lamp` lines. In a game every insert animates, so a rule's
+lights read as a change against a window before it (`lamp_watch.py report`).
+
+Emulator-proven on Premium/LE 1.16 (muted): rules 12 (battle vs Ebirah) and 4 (tank attack multiball)
+started on demand with a ball in play and played their own start screens; the Ebirah spinners' counts
+fell by one on each spinner's middle bit (0x200, 0x2000, 0x20000) while the Left ramp changed nothing;
+a tank on the Right ramp was destroyed by it. Every switch dispatches `0x1` too, and a spinner closure
+dispatches its three bits separately.
+
+
+## Stock mode shots as data (item 159)
+
+Item 158 measured that a stock mode's LIT MASK (the `initial_mask` rows of "The game's own modes",
+the getter cmode's START stores) is not what two of Godzilla's rules play. Tank attack multiball (4)
+never reads it: its shots are a six-entry PATH the tanks walk, and a hit on the entry a tank stands
+on destroys it. Battle vs Ebirah (12) rebuilds it from three per-player SPIN COUNTS at every start.
+Item 159 puts what those rules really play into the table, so the Modes tab edits it as data, and
+marks the rows that do nothing. The audit of all 26 modes (the item's scratch folder,
+`START_AUDIT.md`, desk-proven on both builds) found six more whose own start stores the mask again.
+
+### Three more kinds, three marks
+
+The grammar of "The table format (format 1)" grows, read by `pinball_decryptor/plugins/stern/
+stock_modes.py` (an older reader skips a kind it does not know and keeps the row read-only):
+
+| kind | tokens | the word(s) | a new value must |
+|---|---|---|---|
+| `path <va>` | 1 | a 16-byte tank path entry `{u64 position, u16 lamp, u16 id, u32 0}`: four words; the value is the position mask, the lamp and id are kept | be ONE bit the switches send alone, held by no other position; or 0 = NONE (below) |
+| `qword <va>` | 1 | a u64 data pair (a spot list entry): two words | fit 64 bits |
+| `insn <va>` | 1 | an instruction that LOADS the number from elsewhere (`ldr rd,[rn,#off]`); the table's value is what it loads, measured | be an 8-bit value rotated (1..255 in practice): the load becomes `mov rd,#N` on the same register; back to stock is the load word again |
+
+- **`inert <why>`** after the class: the row is read-only and the tab says why. `inline_copy`: the
+  mode's getter slot is cmode's own, and cmode's START uses an inlined copy of the base getter
+  (tank attack; emulator-proven, item 158 edited-1). `start_rewrites`: the mode's own start stores
+  the field again (Ebirah, emulator-proven; godzilla multiball, planet X multiball, titanosaurus,
+  megalon, king of the monsters, planet X hurry-up: desk). A stale staged value for such a row is
+  never written; a card that holds an older app's edit of it still goes back to stock.
+- **`fixed <why>`** on a `path` row: `seed` (tanks appear there: the position is a word in the
+  game's code too, `0x109cbc/0x10a660`, `0x109cd8`, `0x109cd0/0x10a5fc` on Premium/LE 1.16) or
+  `goal` (every tank heads there, `0x109c78/0x10a5ec/0x10a654`). Read-only, with the reason; so
+  only positions 2 (Left ramp) and 4 (Top spinner) can change.
+- **`follows path`** on a row the Write keeps IN STEP with the mode's positions: the counted-shots
+  words (v[47], `0x108d84..0x108d8c`: the OR of the six positions, `moveq`/`movteq`) and the spot
+  list (v[48], `0x640930`, six u64: a replaced position's entry follows it; a NONE position's entry
+  stays, since it is then neither lit nor counted and the game never spots it). Never staged by
+  themselves; planned with the family (`stock_modes.family_words`), and back to stock with it.
+
+**NONE** (a `path` row staged at 0): the entry becomes a whole copy of its neighbour AWAY from the
+goal (lamp and id included), so the walk skips it: position 4 := position 5 is what item 158's
+live-3 proved (no tank ever stood on the Top spinner, TANK 4 stayed dark, the rule ran and ended as
+stock). The tab's picker offers none, then every single-bit shot of the port that no other position
+holds; Big loop is never offered (the census saw it dispatched with `0x1` in one mask, and the tank
+handler needs an exact 64-bit match). A choice whose OR with the other positions does not encode in
+the counted-shots `moveq` is refused with the reason.
+
+The rows (both builds; Pro 1.15's addresses desk-read on its ELF, `desk\words159.txt`):
+
+```
+number 4 path.0 0x800000000 path 0x640960 00000000,00000008,0b7f0072,00000000 word fixed seed
+number 4 path.1 0x100000 path 0x640970 00100000,00000000,0b6d0090,00000000 word
+number 4 path.2 0x80000 path 0x640980 00080000,00000000,0b6c0093,00000000 word fixed goal
+number 4 path.3 0x800 path 0x640990 00000800,00000000,0b64009a,00000000 word
+number 4 path.4 0x200000 path 0x6409a0 00200000,00000000,0b6e00ad,00000000 word fixed seed
+number 4 path.5 0x2000000000 path 0x6409b0 00000000,00000020,0b80007b,00000000 word fixed seed
+number 4 path.counted.lo 0x380800 movwt 0x108d84 0x108d8c 03a00b02,03400038 word follows path
+number 4 path.counted.hi 0x28 imm 0x108d88 03a01028 word follows path
+number 4 path.spot.0 0x80000 qword 0x640930 00080000,00000000 word follows path   (.. spot.5)
+number 12 spins.left 15 insn 0x81020 e5905078 word
+number 12 spins.top 40 insn 0x81028 e594607c word
+number 12 spins.shield 15 insn 0x81038 e5945080 word
+```
+(Pro 1.15: path `0x630240`, spot list `0x630210`, counted `0x10654c 0x106554` / `0x106550`, refill
+loads `0x7f850 0x7f858 0x7f868`.) Ebirah's three loads are in the refill `0x81018`, which both refill
+paths run (v[5] and king of the monsters' start): the constructor's words `0x80fdc`/`0x80fec` stay,
+one of them shared by two spinners, which is why the loads are the rows.
+
+### Measured (item 159, 2026-09-23, emulator-proven on Premium/LE 1.16, muted, the app's rig)
+
+The set built THROUGH the app (`engine.write_overrides` from a project that staged position 4 = none
+and left spinner spins = 5) differs from stock at six words: the entry `0x638990/0x638998` (path[3] :=
+path[4], lamp 173), `0x100d84` (counted lo `moveq r0,#0`), `0x079020` (`mov r5,#5`) and the two bypass
+words. Against a stock control run with the same presses (the item's scratch runs):
+
+- Ebirah started `pw+0x8c 5` (control 15); five single closures of the Left spinner took it 5 -> 0,
+  the fifth cleared the bit (field `0x22200 -> 0x22000`) and paid the 5,000,000 stage award (`lr
+  0x81858`) at once (control: 15 -> 10, no award); the top and shield spinners, the 10M and 15M
+  awards and the 25M final blow (`STOP 12 reason 1 lr 0x81f2c`) followed as stock.
+- Tank attack ran 132 s with 54 active states and NO record ever on 0x800 (control: 3 of 47); the
+  right-side walk went bit 37 -> Right ramp -> Godzilla target; all four Top spinner presses into the
+  handler changed nothing (control: one killed a tank, `w+0xa8 0->1`); the TANK 4 insert lit 5% of
+  the samples (the light-show background; control 13%); the rule ended through the tilt / end-of-ball
+  path (`lr 0xd6190`) as the control.
+- Health both runs: segv 0 (gzwatch.log and game.out), fatal 0, [validation] 0, no GAME VALIDATION
+  ERROR; the rig at 0 processes after, the app's own stage untouched.
+- Revert (desk): the rows back to Stock write back exactly the four stock words over the edited ELF
+  (equal to stock but for the bypass), and the Emulate tab's call says "Nothing to write".
+
+### Not in this item
+
+Ebirah's FINAL shot (Pop bumper or bit 42: `0x81514/0x81518`, the handler's tests `0x8175c/0x81760`,
+v[38] `0x80144/0x80164` and the lamp entries) stays code; adding a shot to Ebirah (item 160's remap);
+moving a seed or the goal position (the code words above would have to follow); the other 24 modes'
+own shot data (each needs an item 158-style reading first). What the live initial_mask rows do in
+play (modes 2, 5, 6, 9, 10, 11, 18, 21, 23, 24, 26: their getter IS called) is measured only for
+tesla strike (item 144: its lights come from its own `start.lit_mask` field).
+
+## Counts as: a stock rule takes another shot for one of its own (item 160)
+
+Item 158 showed that a rule the game shipped with cannot be given a new shot by data alone: the
+battle vs Ebirah's shot handler (Premium 1.16 `v[42]` at `0x816e8`) tests the RAW shot mask for
+`0x200`, `0x2000` and `0x20000` (its spinners' middle bits) and `0x40` / bit 42 (the final blow),
+and a lit, lamped Left ramp still scored nothing. So a shot the rule does not know has to ARRIVE
+as the bit it tests, and that is what the runtime's stock-rules section does, from a table:
+
+```
+# stock.cfg, beside the mode files (a card: /usr/local/padmode; the rig: /dump); read twice a second
+counts_as 12 Left ramp -> Left spinner
+```
+
+**What the runtime does.** The port names each rule (`rule 12 0x00636d78 Battle vs Ebirah`), the
+manager's get function (`site stock_rule_get`, checked like every site), the manager (`data
+stock_mode_manager`) and this build's slots (`value stock_slot_shot 42`, `stock_slot_active 14`,
+`stock_field 0x18`). A rule a row names gets its shot slot WRAPPED, once, the way `stock_probe.c`
+wraps it (the vtable word replaced by our function, which calls the original with r0-r3 and four
+stack words passed through), and only when the object the manager returns carries the port's
+vtable pointer, so a port for another build wraps nothing. In the wrap, a dispatch whose bits are
+all inside a row's first shot is REPLACED by the row's second shot, one bit, while that bit is lit
+in the rule's own per-player mask (the u64 at obj + 0x18 + 8 x player). It is never ORed in, and
+once the rule clears the bit (Ebirah at a spinner's last spin) the shot passes through untouched:
+a finished target never receives its bit again (item 158's check: a second decrement past 0 leaves
+the battle unwinnable), and the `0x1` "a switch was hit" dispatch and any multi-bit mask are never
+touched. An empty table, or a file that is gone, passes every shot through. While the target bit is
+lit the first shot's inserts are held on the runtime's own lamp layer (priority 255) in the row's
+colour and blink (Ebirah's yellow, 300 ms on / 200 ms off unless a `light <rule> <colour>
+[pattern] [ms] [on ms]` line says otherwise), and handed back when the bit clears or the rule
+stops; the rule's own lamp table (full, 6 entries on Ebirah) is not touched. The table is a
+pointer swapped on the tick after a full rebuild, so the wrap on the game's thread never sees a
+half-written row. Every decision is a `[pad] stock:` line in `mode.log`.
+
+**The spin-count trap.** One ramp = one spin. A ramp standing in for Ebirah's left spinner needs
+the spinner's 15 hits (200,000 each), unless the count word is lowered (item 159's rows). The
+spinners' middle bits are `shot` lines of both Godzilla ports now (`Left spinner`, `Top spinner`,
+`Shield ramp spinner` on Premium; `Right spinner` on Pro), so the table names them as it names any
+shot; a mode may score on them too.
+
+**In the app.** Modes tab, "Counts as…": a table of rows {rule, shot, counts as} for the project's
+card (the rules and shots its port names; a card without a port, or a port without `rule` lines,
+says so and takes no row). The rows are the project's `modes/stock.json`; Write renders
+`stock.cfg` into the modes' system-partition payload (`mode_install.py --file`), Try it drops the
+same file in `/dump`, and a card's own `stock.cfg` rides with its modes into the emulator
+(`cardmodes.sh`). The file goes with the project's modes: a card needs the runtime, which Write
+installs with at least one mode. A project of rows alone writes no table: the Write list and the
+Write log say so ("NOT written ... at least one mode"), and with a mode the table's own line names
+the rows ("the game's own rules take another shot (stock.cfg): ...").
+
+**From C** (`pad_mode.h`): `pm_stock_rule_count / _at / _object / _active / _field`,
+`pm_stock_counts_as(rule, from, to)` for a row of a mode's own, and for item 161
+`pm_stock_rule_hook(rule, fn)`: `fn(rule, &shot, obj)` sees every shot before the game's handler,
+may change it, and returns 1 to run the game's handler with it or 0 to keep it from running at
+all; `pm_stock_rule_unhook` leaves the wrap passing through. A probe that wraps the same slot from
+its tick (`stock_probe.c`) wraps FIRST, because the runtime's wraps go in after the modes' ticks:
+the probe then logs what the game's handler receives.
+
+**What is measured** (emulator-proven on Premium/LE 1.16, 2026-09-23, muted, the app's rig, a stock
+card copy, two runs back to back with the same presses; the run object = this runtime +
+`stock_probe.c` + `mode_file.c`, the probe wrapping Ebirah's `v[42]` first so its `SP SHOT` lines
+say what the handler received; the pinned `prebuilt/mode.so` is built from the same runtime
+source). The battle (rule 12) started by the probe's trigger with a ball in play:
+
+- REMAP (`counts_as 12 Left ramp -> Left spinner`): the runtime wrapped the slot (`rule 12 Battle
+  vs Ebirah obj 0x7b53f0 vtable 0x636d78: shot v[42] ... wrapped`). Every Left ramp closure entered
+  the handler as `0x200` (`SP SHOT 12 ... shot 0x200 ... pw+0x8c 15->14`, then 14->13 ... 1->0), each
+  paying 200,000 at the spinner's own site (`caward_add val 200000 lr 0x81da8`, 15 of them, all from
+  ramp hits); the 15th cleared the bit (field `0x22200 -> 0x22000`) and paid the stage award
+  (`val 5000000 lr 0x81858`; the glass read EBIRAH LEFT SPINNER AWARD 5,000,000). With the file
+  REMOVED mid-battle (`stock.cfg gone - ... a wrapped rule with no row passes every shot through`)
+  the next ramp entered as `0x100000` and changed nothing; put back (`1 counts_as row(s) live`) the
+  next one counted (10->9). In the final phase (field `0x40000000040`) a ramp `passed through -
+  0x200 is not lit`. The top and shield spinners ripped to 0 (10,000,000 and 15,000,000), the Pop
+  bumper paid 25,000,000 and stopped the battle as won (`SP STOP 12 ... reason 1 lr 0x81f2c`; the
+  glass: EBIRAH FINAL BLOW 25,000,000, FINISHING BONUS 11,000,000). LEFT RAMP (the insert oracle,
+  100 ms samples): yellow 255,255,0 in 62% of the settled window (a 300 on / 200 off blink on the
+  runtime's layer at 255; the control: white 100%, the base game's own light), handed back the
+  moment the count hit 0 (`1 insert(s) of 0x100000 handed back`; off 100% after). Health: segv 0,
+  fatal 0, `[validation]` 0, throw 6 (the boot baseline).
+- CONTROL (`stock.cfg` with comments only): `0 counts_as row(s) live`, nothing wrapped; the same
+  sixteen ramp closures entered as `0x100000` with `pw+0x8c 15` unchanged and no award; the left
+  spinner's rip took 15->0 (its 15 x 200,000 at the same `lr 0x81da8`), the same stage awards, final
+  blow and stop. LEFT RAMP white, never yellow.
+
+Not measured: the tank (rule 4: a row is desk-checked only; a tank hit needs the exact position
+bit), `light` lines, a C hook (`pm_stock_rule_hook`), a row from C, Pro 1.15 (its port lines are
+desk-read from item 158's address pass), a card built by Write with `stock.cfg` on it (the file
+goes through the same `mode_install.py` path as the mode files; not booted), the Modes tab's
+dialog on the glass (its service is tested in-process).
+
+## Rewriting a stock rule's shot logic (item 161)
+
+Designed at the desk on 2026-09-23 from item 158's reading of the game's own rules (above), built on
+item 160's per-rule wrap of the shot-handler vtable slot (the section above). The pieces in the repo:
+`pad_stock.h` (the header an author's C sees), its implementation in `pad_mode_runtime.c` ("STOCK
+RULES IN C"), `examples/ebirah_rewrite.c` (a worked example: battle vs Ebirah with three different
+shots in order, then the Building), and the port lines the accessors read in both Godzilla ports. The
+readable pseudo-C of Ebirah's and tank attack's own code is reference material (Stern's logic) and is
+NOT in the repo. What is emulator-proven is at the end of this section.
+
+**What it is.** A stock rule (a battle, a multiball) is a compiled C++ object; its SHOT HANDLER is one
+vtable slot (v[42] on Premium 1.16, v[41] on Pro 1.15) that the game calls with every dispatched shot
+while the rule is active: `(this, _, shot lo, shot hi, [sp] factor)`. Item 160's wrapper takes that
+slot. Item 161 lets a C file REPLACE what the slot does:
+
+```c
+#include "pad_stock.h"
+static int on_shot(struct pm_stock_rule *r, uint64_t shot, unsigned factor) { ...; return PM_STOCK_DONE; }
+PM_STOCK_HANDLER(12, on_shot);          /* rule 12 = battle vs Ebirah on Godzilla */
+```
+
+The handler returns `PM_STOCK_DONE` (the game's handler is not run for this shot) or `PM_STOCK_PASS`
+(it runs, after item 160's remap table when the card has one). `pm_stock_call_original(r, shot, factor)`
+runs the game's handler on purpose from inside yours. A full record (`PM_STOCK_RULE`) adds `started`
+(after the rule's own START ran) and `stopped` (before its STOP) callbacks. Everything else about the
+rule stays the game's: its start from the select screen, its timer, its screens, its lamps, its ending.
+
+**The stock pieces an author reaches, all through the port** (no address in C):
+
+| Piece | Call | Port lines |
+|---|---|---|
+| the rule object, the player | `pm_stock_rule(id)`, `pm_stock_player()` | `site stock_get`, `data stock_mode_manager` |
+| its per-player lit mask | `pm_stock_field` / `_set` | `value stock_field_at` (+8 x player) |
+| lit shots, active, running | `pm_stock_lit`, `pm_stock_active`, `pm_stock_running` | `value stock_slot_lit/active`, `stock_running_at` |
+| any word of the rule's own | `pm_stock_pw_get/set` (per player), `pm_stock_w_get/set` | `value <rule>_<what>_at` |
+| an award, as the handler pays one | `pm_stock_award(r, value)` = caward_add(rule's award, 0, value, 0) | `site caward_add`, `value stock_award_at` |
+| a show, a game event | `pm_stock_show(id)`, `pm_stock_event(id, value)` | `site show_start`, `site game_event` |
+| STOP as won / not | `pm_stock_stop(r, won)` = v[11](won ? 1 : 0) | `value stock_slot_stop` |
+| Ebirah's spin counters, bits, stage awards | `pm_ebirah_spins`, `pm_ebirah_spin_bit`, `pm_ebirah_stage_award` | `value ebirah_*` |
+| Ebirah's FINAL BLOW | `pm_stock_final_blow(r)` | `value ebirah_final_*` |
+| tank's records, counters, pieces | `pm_tank_records`, `pm_tank_destroy`, `pm_tank_seed_wave`, ... | `value tank_*`, `site tank_*`, `data tank_path` |
+
+Two of these are worth knowing about: `pm_ebirah_stage_award(r, which)` sets that spinner's counter to
+1, lights its bit and runs the GAME'S handler with the spinner's own bit, so the game pays the last spin,
+gives its 5M / 10M / 15M award in completion order, shows its stage screen, posts its reminder and,
+after the third, writes its final mask itself; `pm_stock_final_blow(r)` sets the field to the final
+mask and runs the game's handler with the final shot (the Pop bumper's bit), so the game pays
+25,000,000 and the finishing bonus, shows EBIRAH FINAL BLOW, posts its events and STOPS the battle as
+WON, i.e. the battle's own ending plays. Replaying the game's handler with a chosen shot is how a
+rewrite keeps the game's ending without re-implementing it; item 158 proved (emulator) that those two
+paths do exactly this when the real switches drive them.
+
+**What the example does** (`examples/ebirah_rewrite.c`): after the battle's own START it puts the Left
+ramp in the field and holds its insert (yellow blink, `pm_lamp_shot`); a Left ramp hit pays what a spin
+pays (200,000 x factor, `pm_stock_award`), takes the game's first stage award, and lights the Right ramp;
+then the Big loop; then the Building, whose hit is the game's final blow. Any other shot does nothing,
+as an unlit shot does in stock. With the file left out of the build the battle is the game's own.
+
+**Port lines and the runtime's tables.** The accessors read about 20 `site` and 47 `value` lines per
+build (the engine calls the handlers make, the slot numbers, the cmode fields, and Ebirah's and tank's
+own words and pieces), in each Godzilla port right after item 160's `rule` lines. They took the
+runtime's tables past their old caps (48 sites, 64 values: Premium's port now has 64 and 105), so
+`N_SITES` is 80 and `N_VALUES` 128; `tests/test_stern_mode_runtime.py` reads the caps from the source
+and still fails a port that outgrows one. Every `site` word pair was read from the ELF by
+`port_words.py`; the Pro 1.15 twins were checked against a decompile of both builds (every function's
+shape the same), and nothing on Pro has run.
+
+**How it reaches a card (the app).** A stock-rule rewrite is a CODE MODE of the project
+(`modes/<folder>/<folder>.c`, the item 149 path): Write compiles the project's code modes with
+`mode_file.c` into the card's `mode.so` in the app's Linux, so nothing new is needed to carry it; it
+needs no `assets.json` beyond a name, no screen, no clip (the game's own play). The wrapper installs
+only for rule ids a handler registers, so a card without such a file runs stock. What the Modes tab
+shows for it, under the preview switch: in "The game's own modes" a CODE row per stock rule beside the
+number rows ("Shot logic: the game's own" / "rewritten by <folder>"), a "Rewrite in C..." action on a
+rule that copies a per-rule template (the example, for Ebirah) into `modes/<folder>/`, and the code
+mode's usual row in the modes list with "replaces the shots of battle vs Ebirah" as its kind. Try it
+carries it like any code mode.
+
+**Open at the desk, settled by the implementation:** a handler sees the shot BEFORE the remap table (a
+PASS'd shot then goes through it); a rule started by King of the Monsters pays through KOTM's award
+in stock, the example pays through Ebirah's own and says so; the game's START rebuilds the mask and
+resets the stage index on a second START, and the example's `started` runs after it, so the field is
+the example's again.
+
+**What is measured** (emulator-proven on Godzilla Premium/LE 1.16, 2026-09-23, the app's rig muted,
+a COPY of the stock LE 1.16 card, nothing flashed): the runtime, the SDK's stock probe (six battles
+watched), `mode_file.c` and the example, compiled into ONE `mode.so` the code-mode way
+(`modes/ebirah_rewrite/ebirah_rewrite.c`; the app's own compile command built the same source to the
+same shape). The run: a boot of 57 s; a game; the battle select opened on GIGAN and the game's own
+START of rule 14 ran (`lr 0x1249d4`), so the harness STOPPED it (reason 0) and started Ebirah BY THE
+TRIGGER (`SP START 12 ... lr 0x408445e8 field 0x0 -> 0x22200`, the game's own 250,000 start award
+paid by its START, `lr 0x8548c`); the natural start of Ebirah with the rewrite present is therefore
+NOT measured (the select screen's opening cursor differs between boots and the harness presses no
+flipper; the control run whose select opened on Ebirah started it the game's own way). After the
+start show: `SP STATE 12 ... field 0x100000` (the example's `started` put the Left ramp in the field;
+the glass showed GODZILLA VS EBIRAH, YOUR SCORE 250,000, 15 / 40 / 15 SPINS LEFT). Then, one press
+each, 10 s apart: Right ramp and Building OUT OF ORDER: 0 handler entries, 0 awards; Left ramp (stage
+1): one entry of the C handler, 200,000 `lr 0x40847a20` (`pm_stock_award`), then the replay of the
+game's handler with the left spinner's bit, 200,000 `lr 0x81da8` + 5,000,000 `lr 0x81858` + its
+award screen (`caward_build 250,000 lr 0x818ac`), field -> 0x200000 (the Right ramp); Left ramp again
+and Big loop OUT OF ORDER: 0 entries; Right ramp (stage 2): 200,000 ours + 200,000 `lr 0x81dc4` +
+10,000,000 `lr 0x81f60`, field -> 0x1000000000 (the Big loop); Big loop (84 then 74, stage 3): 200,000
+ours + 200,000 `lr 0x81c7c` + 15,000,000 `lr 0x821bc`, field -> `0x40000400040` (the game's own final
+mask, written by its third stage, plus the Building); the glass: 00 / 00 / 00 SPINS LEFT, the mode's
+score 31,450,000 (= 250,000 + 3 x 400,000 + 5M + 10M + 15M), and the game's OWN words "SHOOT POP BUMPER
+FOR FINAL BLOW!" (the BG layer is the game's; see below); Pop bumper (the game's final shot): 0 entries
+of rule 12, refused; Building: 25,000,000 `lr 0x81ebc` + 17,000,000 `lr 0x82080` (the finishing bonus)
++ `caward_build 2,100,000 lr 0x820bc`, then `SP STOP 12 battle_ebirah p1 reason 1 lr 0x81f2c` (the
+game's handler stopped the battle as WON; the example's `stopped` ran before it), the glass GODZILLA VS
+EBIRAH TOTAL 73,450,000. No `SP SHOT` line of the probe for any ramp, loop or Building press: the
+game's handler never saw them; its only entries are the three replays (`lr 0x4084b608`, shot 0x200 /
+0x2000 / 0x20000) and their `pw+0x8c 1->0` counters. Inserts (`lamp_watch.py`, 100 ms samples): in
+each window ONE insert blinks yellow, the shot that is next, the rest held by the game: settled LEFT
+RAMP yellow 40% (the others the start show's red / yellow 48 / 48), after stage 1 RIGHT RAMP yellow 39%
+(the others orange 100%), after stage 2 BIG LOOP yellow 60%, after stage 3 BUILDING yellow 39%; in the
+control none blinks alone (all eight 48 / 48, then all orange). Health: the game's own 6 throws, segv 0
+in `game.out` AND `gzwatch.log`, fatal 0, GAME VALIDATION ERROR 0, no rig process left. CONTROL (the
+same object built WITHOUT the rewrite, two runs): the ordered ramp / loop / Building presses reached
+the game's handler (an `SP SHOT` line each) and changed nothing, the spinners and the Pop bumper won
+the battle (`reason 1 lr 0x81f2c` after the Pop bumper, EBIRAH RIGHT SPINNER AWARD 15,000,000 on the
+glass); one of them started Ebirah the game's own way (`lr 0x1249d4`, its select opened on Ebirah).
+Two rewrite boots before the clean one CRASHED at boot / game start (`libpthread+0x8858`, r0 0x18: the
+game's own null-singleton lock, seen by item 158's CONTROL run too) when the boot was slow under other
+work on the PC (the probe ready at 127 s / 134 s instead of 57 s); the harness reboots when the probe
+is not ready within 110 s. The order in the wrap: the C handler runs FIRST; a PASS'd shot then goes
+through item 160's counts-as row (or a mode's `pm_stock_rule_hook`), then the game's handler.
+
+**Not measured:** Ebirah started the game's own way WITH the rewrite (above); Pro 1.15 (its port lines
+are desk-only, the twins checked by decompile); the tank accessors (`pm_tank_*`, desk-only: no tank
+rewrite ran); a battle started by King of the Monsters; a second START while the battle runs; the
+battle's on-screen words (the BG layer's text follows the SPINNER bits, so a rewrite's shots show the
+game's default line, "SHOOT POP BUMPER FOR FINAL BLOW!" after the third stage); whether the stage
+screens, which name the spinner completed, read well over a ramp. A rewrite's own words would need
+the rule's display layer, which this item does not touch.

@@ -28,8 +28,8 @@ NO_FRAMEWORK_DISPLAY = ("callout", "own-sound", "messages")
 
 #: port -> (shots, shot_mask_bits, proven, parts it cannot do, what the runtime arms with)
 PORTS = {
-    "godzilla_pro-1.15": (12, 64, True, set(), EVERY_CAPABILITY),
-    "godzilla_le-1.16": (18, 64, True, set(), EVERY_CAPABILITY),
+    "godzilla_pro-1.15": (15, 64, True, set(), EVERY_CAPABILITY),   # item 160: + the three spinners
+    "godzilla_le-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
     "jaws_le-1.02": (27, 64, True, {"lights", "screen", "stack", "events"},
                      ("callout", "screens", "clips", "own-sound", "messages")),
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),

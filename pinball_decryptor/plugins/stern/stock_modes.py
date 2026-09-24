@@ -28,6 +28,30 @@ at its VA(s) are the table's stock words, or the same instruction with another v
 card this module wrote before). Anything else - a different build, a patched instruction, a
 number the code computes (``code``), a scene - is refused and says why. A row put back to
 stock writes the stock words back, byte for byte.
+
+SHOTS AS DATA (item 159). Item 158 measured that a stock mode's LIT MASK (the ``initial_mask``
+rows, the getter cmode's START stores) is not what two of Godzilla's modes play: tank attack
+never reads it (its shots are a six-entry PATH table the tanks walk) and battle vs Ebirah
+rebuilds it from its spin counts at every start. Item 159's desk audit found the same for six
+more modes (their own start stores the field again). So:
+
+* an ``initial_mask`` row carrying ``inert <why>`` is read-only, with the reason (``inline_copy``:
+  cmode's START uses an inlined copy of the base getter; ``start_rewrites``: the mode's own start
+  stores the field again). A stale staged value for such a row is never written; a card that
+  holds an older app's edit of it still goes back to stock;
+* three more kinds: ``path <va>`` (a 16-byte tank path entry ``{u64 position, u16 lamp, u16 id,
+  u32 0}``, four words; the value is the position mask, the lamp and id are kept), ``qword
+  <va>`` (a u64 data word pair) and ``insn <va>`` (an instruction that LOADS the number from
+  elsewhere, ``ldr rd,[rn,#off]``; the table's value is what it loads, measured; a value of the
+  app's own replaces the load with ``mov rd,#N`` on the same register, back to stock is the
+  load word again);
+* ``fixed <why>`` marks a path position that code also names (``seed``: tanks appear there,
+  ``goal``: tanks head there): read-only, with the reason;
+* ``follows path`` marks a row the Write keeps IN STEP with a mode's path rows (the counted-shots
+  words, the spot list): never staged by itself, planned with the family (:func:`family_words`).
+  A ``path`` row staged at 0 means NONE: the entry becomes a copy of its neighbour away from the
+  goal, so the tanks' walk skips it (item 158 live-3, emulator-proven for position 4 of tank
+  attack on Premium/LE 1.16).
 """
 
 import hashlib
@@ -41,12 +65,44 @@ from dataclasses import dataclass, field
 FORMAT = 1
 
 #: kind -> how many tokens follow it
-KIND_ARITY = {"imm": 1, "movw": 1, "movwt": 2, "lit": 1, "data": 1, "adj": 2, "code": 1}
-#: kinds whose number is one or two words at VAs this module can rewrite
-WORD_KINDS = ("imm", "movw", "movwt", "lit", "data")
+KIND_ARITY = {"imm": 1, "movw": 1, "movwt": 2, "lit": 1, "data": 1, "adj": 2, "code": 1,
+              "path": 1, "qword": 1, "insn": 1}
+#: kinds whose number is one or more words at VAs this module can rewrite
+WORD_KINDS = ("imm", "movw", "movwt", "lit", "data", "path", "qword", "insn")
 #: kinds whose words are INSTRUCTIONS (a skeleton + a value)
-INSN_KINDS = ("imm", "movw", "movwt")
+INSN_KINDS = ("imm", "movw", "movwt", "insn")
+#: kinds whose one VA starts a run of several words (else: one word per VA)
+WORD_COUNT = {"path": 4, "qword": 2}
 CLASSES = ("word", "adjustment", "code", "scene")
+
+#: why an ``inert`` initial_mask row does nothing in play (item 158 / 159, by its key)
+INERT_REASONS = {
+    "inline_copy": "the mode never reads its lit shots (its start keeps an inlined copy of the "
+                   "game's default); what it plays are the tank positions below",
+    "start_rewrites": "the mode rebuilds its lit shots when it starts, so this number never "
+                      "reaches play",
+}
+#: why a ``fixed`` path position stays as it is
+FIXED_REASONS = {
+    "seed": "tanks appear at this position (its shot is a word in the game's code too), so it "
+            "stays where it is",
+    "goal": "every tank heads for this position (its shot is a word in the game's code too), so "
+            "it stays where it is",
+}
+#: spinner bits the ports name only in a comment, by title (a spinner sends three bits a spin: the
+#: game's own rules test the MIDDLE one, which the ports name as the shot; the tank path holds the
+#: top spinner's FIRST bit 0x800, which no port names). A port name that collides with one of
+#: these for another bit is told apart by :func:`shot_names`.
+SPINNER_BITS = {"godzilla": {0x200: "Left spinner", 0x800: "Top spinner, first bit",
+                             0x20000: "Shield ramp spinner"}}
+#: shots the switches never send ALONE (item 158's census saw them with 0x1 in one mask): a
+#: tank position must be a single bit the router dispatches by itself, so never these
+NOT_ALONE = {"godzilla": {0x1000000000}}          # Big loop arrives as 0x1000000001
+
+
+def word_count(kind, args):
+    """How many words a row of *kind* with these VA args carries."""
+    return WORD_COUNT.get(kind, len(args))
 
 #: .staged_changes.json key for the staged word values
 STAGE_KEY = "stock_modes"
@@ -92,10 +148,32 @@ class Number:
     shared: int = 0
     seen: str = ""
     comment: str = ""
+    extra: dict = field(default_factory=dict)     # the other trailing tokens (inert, fixed, follows)
 
     @property
     def row_key(self):
         return "%d.%s" % (self.mode_id, self.key)
+
+    @property
+    def inert(self):
+        """The reason key when the row does nothing in play (an ``inert`` token), else ''."""
+        return str(self.extra.get("inert") or "")
+
+    @property
+    def fixed(self):
+        """The reason key when a path position stays as it is (a ``fixed`` token), else ''."""
+        return str(self.extra.get("fixed") or "")
+
+    @property
+    def follows(self):
+        """The family this row is kept in step with (a ``follows`` token), else ''."""
+        return str(self.extra.get("follows") or "")
+
+    @property
+    def path_index(self):
+        """``path.3`` -> 3; None for any other key."""
+        m = re.match(r"^path\.(\d+)$", self.key)
+        return int(m.group(1)) if m else None
 
     @property
     def vas(self):
@@ -130,17 +208,30 @@ class Number:
     @property
     def words_agree(self):
         """The row's stock words hold its value the way its kind says (a row that doesn't is
-        never written: the app would be guessing at the instruction)."""
+        never written: the app would be guessing at the instruction). An ``insn`` row's stock
+        word LOADS its value from elsewhere (the value is measured, not in the word): it agrees
+        when the word is that load."""
+        if self.kind == "insn":
+            return len(self.words) == 1 and _is_ldr_imm(self.words[0])
         return self.kind not in WORD_KINDS or decode(self.kind, self.words) == self.value
 
     @property
     def editable(self):
+        if self.inert or self.fixed or self.follows:
+            return False
         return (self.is_word and self.words_agree) or (self.is_adjustment and not self.range_inverted)
 
     def why_read_only(self):
         """Why a person can't change this number here ('' when they can)."""
         if self.editable:
             return ""
+        if self.inert:
+            return INERT_REASONS.get(self.inert, "the game never uses this number in play")
+        if self.fixed:
+            return FIXED_REASONS.get(self.fixed, "it stays as it is")
+        if self.follows:
+            return ("the Write keeps it in step with the %s rows, so it isn't set by itself"
+                    % self.follows)
         if self.is_word and not self.words_agree:
             return ("the table's words for it (%s) don't hold %s the way a '%s' number does" % (
                 ",".join("%08x" % w for w in self.words), format(self.value, ","), self.kind))
@@ -173,6 +264,16 @@ class Number:
             if shown.endswith(".ctor"):         # 144: the constant the mode's constructor stores
                 shown = "start value"           # fits the tab's Number column
             return "Timer (%s)%s" % (shown, (" (%s)" % rep) if rep else "")
+        if role == "path":                      # item 159: a tank position, or what follows it
+            if call.isdigit():
+                return "Position %d" % (int(call) + 1)
+            if call.startswith("counted"):
+                return "Counted shots (%s)" % (call.partition(".")[2] or "?")
+            if call.startswith("spot."):
+                return "Spot list entry %s" % call.partition(".")[2]
+        if role == "spins":
+            return "%s spinner spins" % {"left": "Left", "top": "Top",
+                                         "shield": "Shield ramp"}.get(call, call.capitalize())
         role_word = {"start": "Start", "shot": "Shot", "end": "End", "stop": "Stop",
                      "timer": "Timer", "reset": "Reset", "ball_end": "Ball end",
                      "start_display": "Start display", "total_display": "Total display"}.get(
@@ -199,6 +300,8 @@ class Number:
             return True
         call = self.key.partition("#")[0].partition(".")[2]
         role = self.key.partition(".")[0]
+        if role in ("path", "spins"):           # item 159: what a mode really plays
+            return not self.follows
         return (call.startswith(("caward_add", "score_add", "award_value", "ctimer"))
                 or role == "timer")
 
@@ -210,7 +313,8 @@ class Number:
             n = len(self.args)
             what = {"imm": "an instruction", "movw": "an instruction",
                     "movwt": "two instructions", "lit": "a literal word",
-                    "data": "a data word"}[self.kind]
+                    "data": "a data word", "path": "a 16-byte path entry",
+                    "qword": "a data word pair", "insn": "an instruction"}[self.kind]
             return "game program, %s at 0x%x%s" % (
                 what if n == 1 or self.kind == "movwt" else "%d words" % n, self.args[0],
                 ", shared by %d" % self.shared if self.shared else "")
@@ -355,15 +459,16 @@ def _parse_number(tok, comment):
         raise StockModeError("a number line ends '<words> <class>'")
     words_tok, klass, extra = rest[0], rest[1], rest[2:]
     words = () if words_tok == "-" else tuple(int(w, 16) for w in words_tok.split(","))
-    if kind in WORD_KINDS and kind in KIND_ARITY and len(words) != len(args):
-        raise StockModeError("%s needs %d word(s), the line has %d" % (kind, len(args), len(words)))
+    if kind in WORD_KINDS and kind in KIND_ARITY and len(words) != word_count(kind, args):
+        raise StockModeError("%s needs %d word(s), the line has %d"
+                             % (kind, word_count(kind, args), len(words)))
     shared, seen = 0, ""
     kv = dict(zip(extra[0::2], extra[1::2]))
     if "shared" in kv:
-        shared = int(kv["shared"])
+        shared = int(kv.pop("shared"))
     if "seen" in kv:
-        seen = kv["seen"]
-    return Number(mid, key, value, kind, args, words, klass, shared, seen, comment)
+        seen = kv.pop("seen")
+    return Number(mid, key, value, kind, args, words, klass, shared, seen, comment, kv)
 
 
 # ---- instruction words -------------------------------------------------------------------
@@ -398,6 +503,11 @@ def _is_movt(w):
     return (w & 0x0FF00000) == 0x03400000
 
 
+def _is_ldr_imm(w):
+    """``ldr rt, [rn, #+-imm]`` (a word load with an immediate offset, no writeback)."""
+    return (w & 0x0E500000) == 0x04100000 and (w & 0x00200000) == 0
+
+
 def _imm16(w):
     return ((w >> 16) & 0xF) << 12 | (w & 0xFFF)
 
@@ -430,6 +540,14 @@ def decode(kind, words):
         return None
     if kind in ("lit", "data") and len(words) == 1:
         return words[0]
+    if kind == "path" and len(words) == 4:
+        return words[1] << 32 | words[0]
+    if kind == "qword" and len(words) == 2:
+        return words[1] << 32 | words[0]
+    if kind == "insn" and len(words) == 1:
+        # the stock word is a load (the value is measured, not in it); a card this module
+        # wrote holds `mov rd, #N` in its place
+        return _rot_imm(words[0]) if _is_mov(words[0]) else None
     return None
 
 
@@ -442,6 +560,9 @@ def skeleton(kind, words):
         # a movwt pair's low word may be a plain mov (its value is the low 12 bits)
         return tuple(w & 0xFFFFF000 if (_is_mov(w) or _is_mvn(w)) else w & 0xFFF0F000
                      for w in words)
+    if kind == "insn":
+        # the load and the mov that replaces it share the condition and the register
+        return tuple(w & 0xF000F000 for w in words)
     return None
 
 
@@ -489,6 +610,25 @@ def encode(kind, stock_words, value):
         if value > 0xFFFFFFFF:
             raise StockModeError("%s is too big (at most 4,294,967,295)" % format(value, ","))
         return (value,)
+    if kind in ("path", "qword"):
+        if value > 0xFFFFFFFFFFFFFFFF:
+            raise StockModeError("0x%x is too big for a 64-bit shot mask" % value)
+        lo, hi = value & 0xFFFFFFFF, value >> 32
+        # a path entry keeps its lamp and id words: only the position changes
+        return (lo, hi, stock_words[2], stock_words[3]) if kind == "path" else (lo, hi)
+    if kind == "insn":
+        w = stock_words[0]
+        if value == 0:
+            raise StockModeError("0 can't be written here (the count has to be at least 1)")
+        enc = _imm8_encoding(value)
+        if enc is None or value > 0xFFFFFFFF:
+            near = _nearest_imm8(value)
+            raise StockModeError(
+                "%s doesn't fit this instruction (an 8-bit value shifted by an even number of "
+                "bits%s)" % (format(value, ","), "; the nearest that fits is " + ", ".join(
+                    format(n, ",") for n in near if n) if near else ""))
+        # mov rd, #value: the load's condition and destination register, the value in place
+        return ((w & 0xF0000000) | 0x03A00000 | (w & 0x0000F000) | enc[0] << 8 | enc[1],)
     raise StockModeError("a '%s' number can't be written in place" % kind)
 
 
@@ -504,13 +644,20 @@ def _nearest_imm8(value):
 
 
 def check_value(number, value):
-    """Raise StockModeError when *value* can't be staged for *number*; else return it (int)."""
+    """Raise StockModeError when *value* can't be staged for *number*; else return it (int).
+    A ``path`` row takes a shot mask (decimal or ``0x`` hex) or ``none`` (0)."""
     if not number.editable:
         raise StockModeError("%s can't be changed here: %s" % (number.label, number.why_read_only()))
+    text = str(value).replace(",", "").strip()
+    if number.kind == "path" and text.lower() in ("none", "no", "skip", "-"):
+        text = "0"
     try:
-        value = int(str(value).replace(",", "").strip())
+        value = int(text, 0) if number.kind in ("path", "qword") else int(text)
     except ValueError:
         raise StockModeError("%r isn't a whole number" % (value,)) from None
+    if number.kind == "path" and value:
+        if value & (value - 1):
+            raise StockModeError("a tank position is ONE shot (one bit), not 0x%x" % value)
     if number.is_adjustment:
         rng = number.adj_range
         if rng and not rng[0] <= value <= rng[1]:
@@ -519,6 +666,195 @@ def check_value(number, value):
         return value
     encode(number.kind, number.words, value)
     return value
+
+
+# ---- shots as data: the tank path family and the shot names (item 159) -----------------------
+def _title(build):
+    """``godzilla_le`` -> ``godzilla``: the title the per-title facts are keyed by."""
+    return (build.game or "").split("_")[0]
+
+
+def shot_names(build):
+    """``{mask: name}`` for the build's title: the SDK port's shot lines (what the Modes tab
+    calls the shots) plus the spinner bits the port names only in a comment."""
+    names = {}
+    try:
+        from . import mode_project as MP
+        p = MP.profiles().get("%s_%s" % (build.game, str(build.version).replace(".", "_")))
+    except Exception:                               # noqa: BLE001 - no ports: bits by number
+        p = None
+    if p is not None:
+        for name, mask in p.shots:
+            names.setdefault(int(mask), name)
+    for mask, name in SPINNER_BITS.get(_title(build), {}).items():
+        names.setdefault(mask, name)
+    # one label, one bit: a port name reused for another mask gets its bit spelled out
+    seen = {}
+    for mask in sorted(names):
+        label = names[mask]
+        if label in seen:
+            names[mask] = "%s (bit %d)" % (label, mask.bit_length() - 1)
+        seen.setdefault(label, mask)
+    return names
+
+
+def shot_name(build, mask):
+    """A shot in words: its port name, ``none`` for 0, else ``bit N``."""
+    if not mask:
+        return "none"
+    name = shot_names(build).get(mask)
+    if name:
+        return name
+    bits = [b for b in range(64) if mask >> b & 1]
+    return "bit %d" % bits[0] if len(bits) == 1 else "bits " + ", ".join(str(b) for b in bits)
+
+
+def display(build, number, value):
+    """*value* of *number* in words: a shot name for a ``path`` row, hex for a ``qword``,
+    the number otherwise (the Modes tab's Value and Stock columns, the Write list)."""
+    if value is None:
+        return "?"
+    if number.kind == "path":
+        return shot_name(build, int(value))
+    if number.kind == "qword":
+        return "0x%x" % int(value)
+    return format(int(value), ",")
+
+
+def path_rows(build, mode_id):
+    """The mode's ``path`` rows in position order."""
+    return sorted((n for n in build.numbers if n.mode_id == mode_id and n.kind == "path"),
+                  key=lambda n: n.path_index if n.path_index is not None else 99)
+
+
+def path_goal(rows):
+    """The index of the position every tank heads for (the ``fixed goal`` row), or None."""
+    return next((n.path_index for n in rows if n.fixed == "goal"), None)
+
+
+def path_none_neighbour(rows, index):
+    """The entry a position set to NONE copies: its neighbour AWAY from the goal (the proven
+    way: position 4 := position 5 on Godzilla, item 158). None when there is no such entry."""
+    goal = path_goal(rows)
+    if goal is None:
+        return None
+    j = index - 1 if index < goal else index + 1
+    return next((n for n in rows if n.path_index == j), None)
+
+
+def path_choices(build, number, values=None):
+    """``[(mask, label)]`` a position picker offers for *number* (a ``path`` row): NONE when the
+    position may be skipped, then every single-bit shot the switches send alone that no other
+    position of the mode holds (*values* = the staged ``{row key: int}``, to count a staged
+    neighbour). ``[]`` for a row that isn't an editable position."""
+    if number.kind != "path" or not number.editable:
+        return []
+    values = values or {}
+    rows = path_rows(build, number.mode_id)
+    taken = set()
+    for n in rows:
+        if n.row_key != number.row_key:
+            v = values.get(n.row_key, n.value)
+            if not v:                               # a NONE neighbour holds its neighbour's shot
+                nb = path_none_neighbour(rows, n.path_index)
+                v = values.get(nb.row_key, nb.value) if nb else 0
+            if v:
+                taken.add(v)
+    out = []
+    if path_none_neighbour(rows, number.path_index) is not None:
+        out.append((0, "none (the tanks skip this position)"))
+    names = shot_names(build)
+    bad = NOT_ALONE.get(_title(build), set())
+    cands = set(names) | {n.value for n in rows if n.value}
+    for mask in sorted(cands, key=lambda m: (m.bit_length(), m)):
+        if mask & (mask - 1) or mask in bad or mask in taken:
+            continue
+        out.append((mask, names.get(mask) or shot_name(build, mask)))
+    return out
+
+
+def check_path(build, number, value, values=None):
+    """Raise StockModeError when *value* (an int from :func:`check_value`) can't be a tank
+    position for *number* beside the other positions (*values* = the staged ones): it must be
+    a shot the switches send alone, held by no other position, and the family's counted-shots
+    words must still encode. NONE (0) needs a neighbour to copy."""
+    values = dict(values or {})
+    rows = path_rows(build, number.mode_id)
+    if value == 0:
+        if path_none_neighbour(rows, number.path_index) is None:
+            raise StockModeError("%s can't be none: there is no neighbouring position for the "
+                                 "tanks to take instead" % number.label)
+    else:
+        if value in NOT_ALONE.get(_title(build), set()):
+            raise StockModeError("the switches never send %s alone (it arrives with another "
+                                 "bit), so a tank can't stand on it" % shot_name(build, value))
+        for n in rows:
+            if n.row_key == number.row_key:
+                continue
+            v = values.get(n.row_key, n.value)
+            if not v:
+                nb = path_none_neighbour(rows, n.path_index)
+                v = values.get(nb.row_key, nb.value) if nb else 0
+            if v == value:
+                raise StockModeError("%s is already position %d" % (shot_name(build, value),
+                                                                   n.path_index + 1))
+    values[number.row_key] = value
+    try:
+        family_words(build, number.mode_id, values)
+    except StockModeError as e:
+        raise StockModeError("with the other positions, %s doesn't fit the mode's counted-shots "
+                             "instruction: %s" % (shot_name(build, value), e)) from None
+    return value
+
+
+def resolve_path(build, mode_id, values):
+    """``({index: (mask, words)}, counted)`` for the mode's positions with the staged
+    *values* applied: a NONE (0) position is a whole copy of its neighbour away from the goal
+    (lamp and id included, the proven way), and *counted* is the OR of the positions."""
+    rows = path_rows(build, mode_id)
+    out = {}
+    for n in rows:
+        v = values.get(n.row_key, n.value)
+        if v == 0:
+            nb = path_none_neighbour(rows, n.path_index)
+            if nb is None:
+                raise StockModeError("position %d can't be none: no neighbouring position"
+                                     % (n.path_index + 1))
+            nv = values.get(nb.row_key, nb.value)
+            words = encode("path", nb.words, nv) if nv else tuple(nb.words)
+        else:
+            words = encode("path", n.words, v)
+        out[n.path_index] = (decode("path", words), words)
+    counted = 0
+    for mask, _w in out.values():
+        counted |= mask
+    return out, counted
+
+
+def family_words(build, mode_id, values):
+    """``{row key: words}`` for every row of the mode's PATH FAMILY (the positions and the
+    rows that ``follow path``: the counted-shots words = the OR of the positions, and each
+    spot list entry = the position whose stock shot it holds) with the staged *values*
+    applied. Raises StockModeError when a word can't be encoded."""
+    rows = path_rows(build, mode_id)
+    resolved, counted = resolve_path(build, mode_id, values)
+    out = {n.row_key: resolved[n.path_index][1] for n in rows}
+    for n in build.numbers:
+        if n.mode_id != mode_id or n.follows != "path":
+            continue
+        if n.key == "path.counted.lo":
+            out[n.row_key] = encode(n.kind, n.words, counted & 0xFFFFFFFF)
+        elif n.key == "path.counted.hi":
+            out[n.row_key] = encode(n.kind, n.words, counted >> 32)
+        elif n.key.startswith("path.spot."):
+            # a replaced position's spot entry follows it; a NONE position's entry stays (the
+            # entry is then neither lit nor counted, so the game never spots it)
+            pos = next((p for p in rows if p.value == n.value), None)
+            v = values.get(pos.row_key, pos.value) if pos is not None else n.value
+            out[n.row_key] = encode(n.kind, n.words, v if v else n.value)
+        else:
+            out[n.row_key] = tuple(n.words)
+    return out
 
 
 # ---- the ELF -------------------------------------------------------------------------------
@@ -554,9 +890,27 @@ class ElfImage:
             out.append(struct.unpack_from("<I", self.data, o)[0])
         return tuple(out)
 
+    def row_words(self, number):
+        """The words a row describes: one per VA, or a run of :func:`word_count` words from
+        its one VA (a ``path`` entry, a ``qword``). None when a word isn't in the file."""
+        n = word_count(number.kind, number.vas)
+        if number.kind in WORD_COUNT:
+            return self.words(tuple(number.vas[0] + 4 * k for k in range(n))) if number.vas else None
+        return self.words(number.vas)
+
     @property
     def sha1(self):
         return hashlib.sha1(bytes(self.data)).hexdigest()
+
+
+def row_offsets(img, number):
+    """The file offsets of a row's words, in word order (None when any is missing)."""
+    if number.kind in WORD_COUNT:
+        vas = tuple(number.vas[0] + 4 * k for k in range(word_count(number.kind, number.vas)))
+    else:
+        vas = number.vas
+    offs = tuple(img.va_to_off(va) for va in vas)
+    return None if any(o is None for o in offs) else offs
 
 
 def site_state(img, number):
@@ -564,7 +918,7 @@ def site_state(img, number):
     instruction with another value - a card this module wrote), ``value`` (a whole-word kind
     holding another value), ``differs`` (not what the table describes) or ``missing`` (the
     VA isn't in the file)."""
-    cur = img.words(number.vas)
+    cur = img.row_words(number)
     if cur is None:
         return "missing", None
     if cur == tuple(number.words):
@@ -710,6 +1064,9 @@ def stage(assets_dir, build, number, value):
     data = staged_changes.load(assets_dir)
     back_to_stock = value == number.value
     vals, touched = _record(data, build)
+    if number.kind == "path" and not back_to_stock:
+        # a tank position is checked beside the mode's other positions (item 159)
+        check_path(build, number, value, vals)
     if number.is_adjustment:
         settings = dict(_staged_settings(data))
         if back_to_stock:
@@ -798,10 +1155,11 @@ def staged_edits(assets_dir, build=None):
     out = []
     for key, v in sorted(rec["values"].items()):
         n = build.number(key)
-        if n is None or not n.is_word:
-            continue
+        if n is None or not n.is_word or n.inert or n.follows:
+            continue                # a stale value for an inert row is never a pending change
         out.append({"number": n, "mode": build.mode_name(n.mode_id), "stock": n.value, "new": v,
-                    "staged_for": rec["build"]})
+                    "staged_for": rec["build"], "stock_text": display(build, n, n.value),
+                    "new_text": display(build, n, v)})
     settings = _staged_settings(data) if isinstance(data.get(STAGE_KEY), dict) else {}
     for name, n in build.adjustment_numbers().items():
         if name in settings:
@@ -918,7 +1276,16 @@ def plan_overlay(elf_bytes, assets_dir, log, builds=None, stats=None):
                + [num for num in build.numbers
                   if num.is_word and num.row_key not in rec["values"]])
     for num in ordered:
+        if num.kind == "path" or num.follows:
+            continue                # planned together, as one family (item 159), below
         want = rec["values"].get(num.row_key, num.value)
+        if num.inert and want != num.value:
+            # an older project's value for a row item 158 proved inert: never written, but
+            # a card holding it (an older app's Write) still goes back to stock below
+            say("The game's own modes: %s %s not written - %s." % (
+                build.mode_name(num.mode_id), build.row_label(num).lower(),
+                num.why_read_only()), "warning")
+            want = num.value
         st, cur = site_state(img, num)
         if not num.words_agree:
             if num.row_key in rec["values"]:
@@ -964,15 +1331,76 @@ def plan_overlay(elf_bytes, assets_dir, log, builds=None, stats=None):
         for va, w in zip(num.vas, new):
             overlay[img.va_to_off(va)] = struct.pack("<I", w)
         n += 1
-        old_v = decode(num.kind, cur)
+        # a stock insn row's word LOADS its value: the table's measured value is what it held
+        old_v = num.value if st == "stock" else decode(num.kind, cur)
         say("The game's own modes: %s %s %s -> %s (game program, %s)%s." % (
             build.mode_name(num.mode_id), build.row_label(num).lower(),
             format(old_v, ",") if old_v is not None else "?", format(want, ","), num.where(),
             " - back to stock" if want == num.value else ""), "info")
+    for mid in sorted({num.mode_id for num in build.numbers if num.kind == "path"}):
+        f_overlay, f_n = _plan_path_family(img, build, mid, rec, say, sites, stats)
+        overlay.update(f_overlay)
+        n += f_n
     s_overlay, s_n = _plan_setting_defaults(elf_bytes, build, assets_dir, rec["touched"], say,
                                             overlay, stats)
     overlay.update(s_overlay)
     return overlay, n + s_n, build
+
+
+def _plan_path_family(img, build, mode_id, rec, say, sites, stats):
+    """``({file_offset: bytes}, n_changed)`` for one mode's PATH FAMILY (item 159): its
+    ``path`` rows and the rows that ``follow path``, planned together from the staged
+    positions (:func:`family_words`). Nothing is touched unless the project staged a position
+    or once did (``touched``); then every family word the card holds differently from what
+    the positions say is written - which is also how a family goes back to stock, byte for
+    byte. Refusals are logged, never raised."""
+    rows = path_rows(build, mode_id)
+    if not rows:
+        return {}, 0
+    fam = rows + [n for n in build.numbers if n.mode_id == mode_id and n.follows == "path"]
+    keys = {n.row_key for n in rows}
+    staged = {k: v for k, v in rec["values"].items() if k in keys}
+    if not staged and not (keys & set(rec["touched"])):
+        return {}, 0
+    name = build.mode_name(mode_id)
+    cur = {}
+    for n in fam:
+        st, w = site_state(img, n)
+        if st == "missing":
+            say("The game's own modes: %s positions not written - the address of %s isn't in "
+                "this game program." % (name, build.row_label(n).lower()), "warning")
+            return {}, 0
+        cur[n.row_key] = w
+    try:
+        want = family_words(build, mode_id, staged)
+    except StockModeError as e:
+        say("The game's own modes: %s positions not written - %s." % (name, e), "warning")
+        return {}, 0
+    overlay, n_changed, held = {}, 0, 0
+    for n in fam:
+        new = want[n.row_key]
+        offs = row_offsets(img, n)
+        for k, w in enumerate(new):
+            sites[n.vas[0] + 4 * k] = (n.row_key, w)
+        if new == cur[n.row_key]:
+            if n.row_key in staged:
+                held += 1
+            continue
+        for off, w in zip(offs, new):
+            overlay[off] = struct.pack("<I", w)
+        n_changed += 1
+        if n.kind == "path":
+            old = decode("path", cur[n.row_key])
+            new_v = staged.get(n.row_key, n.value)
+            say("The game's own modes: %s position %d: %s -> %s (game program, %s)%s." % (
+                name, n.path_index + 1, shot_name(build, old), shot_name(build, new_v),
+                n.where(), " - back to stock" if n.row_key not in staged else ""), "info")
+        else:
+            say("The game's own modes: %s %s kept in step with the positions (game program, "
+                "%s)." % (name, build.row_label(n).lower(), n.where()), "info")
+    if stats is not None:
+        stats["held"] = stats.get("held", 0) + held
+    return overlay, n_changed
 
 
 def _staged_setting_values(assets_dir, build, game=None, version=None):

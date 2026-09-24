@@ -10,6 +10,7 @@
  * when the object loads. There is no allocator, so everything is static.
  */
 #include "pad_mode.h"
+#include "pad_stock.h"          /* item 161: the game's own rules in C */
 
 extern int   open(const char *, int, ...);
 extern long  read(int, void *, __SIZE_TYPE__);
@@ -154,9 +155,9 @@ static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump
  * line a full table cannot take, is said in the boot log, never dropped silently. */
 #define PORT_MAX   131072
 #define PORT_CHUNK 4096
-#define N_SITES    48
+#define N_SITES    80
 #define N_DATA     48
-#define N_VALUES   64
+#define N_VALUES   128
 #define N_SHOTS    64
 #define N_ROLES    32
 #define N_TEXTS    32
@@ -203,6 +204,7 @@ static void rest(const char *s, char *out, unsigned cap)
 
 static void event_line(const char *s);        /* `event <name> <id>`: the events section below */
 static void lamp_line(const char *s);         /* `lamp <lights> <shots> <name>`: the lights section */
+static void rule_line(const char *s);         /* `rule <id> <vtable> <label>`: the stock rules section (item 160) */
 
 static void port_line(const char *s)
 {
@@ -254,6 +256,7 @@ static void port_line(const char *s)
     }
     if (str_eq(key, "event")) { event_line(s); return; }
     if (str_eq(key, "lamp")) { lamp_line(s); return; }
+    if (str_eq(key, "rule")) { rule_line(s); return; }
     /* an unknown key is skipped: a newer port must not break an older runtime */
 }
 
@@ -826,8 +829,10 @@ struct lamp_held {
     unsigned chase_i, chase_n;
     unsigned long t0;
     int last[3];                    /* the level last written to each light, -1 = rewrite */
+    unsigned on_ms;                 /* a blink's ON time; 0 = half the period (item 160: a rule's 300/200 blink) */
 };
 static struct lamp_held lamp_held[N_LAMPS];
+static unsigned lamp_hold_on_ms;    /* the on time the next hold takes (set around a call, runtime-internal) */
 static struct { unsigned prio; unsigned char *group; unsigned misses; } lamp_layer[LAMP_LAYERS];
 static int n_lamp_layers;
 static struct { const struct pm_mode *mode; unsigned prio; } lamp_mode_prio[LAMP_MODES];
@@ -1069,6 +1074,7 @@ static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned
         h->chase_n = (unsigned)n;
         h->layer = layer;
         h->last[0] = h->last[1] = h->last[2] = -1;
+        h->on_ms = lamp_hold_on_ms < period_ms ? lamp_hold_on_ms : 0;
     }
     lamp_say("lamps: %d insert(s) held (%s): %06x %s, %u ms, layer %u", n, what, rgb & 0xffffffu,
              lamp_pattern_name[pattern], period_ms, prio);
@@ -1198,7 +1204,7 @@ static int lamp_level(const struct lamp_held *h, unsigned long now)
     unsigned long el = now - h->t0, p = h->period ? h->period : 1, ph = el % p;
     unsigned tri;
     switch (h->pattern) {
-    case PM_LAMP_BLINK: return ph < p / 2 ? 255 : 0;
+    case PM_LAMP_BLINK: return ph < (h->on_ms ? h->on_ms : p / 2) ? 255 : 0;
     case PM_LAMP_PULSE:
         tri = (unsigned)(ph < p / 2 ? ph * 510 / p : (p - ph) * 510 / p);    /* 0..255..0 */
         if (tri > 255) tri = 255;
@@ -1939,6 +1945,1118 @@ const char *pm_stock_mode_what(unsigned kind)
     return kind ? "a stock mode" : "nothing";
 }
 
+/* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
+ * A rule the game shipped with (a battle, a multiball) is a compiled object with a vtable, and
+ * its SHOT HANDLER (one vtable slot) tests the RAW shot mask against fixed bits: Godzilla's
+ * battle vs Ebirah counts a spin only when the dispatch carries 0x200 (its left spinner's
+ * middle bit), and does nothing with any other bit, lit or not (item 158, emulator-proven).
+ * So a shot the rule does not know can never count for it by data alone: it has to ARRIVE
+ * as the bit the rule tests. This section does that, and nothing more:
+ *
+ *   - The PORT names each rule (`rule <id> <vtable> <label>`), the manager's get function
+ *     (`site stock_rule_get`, its first two words checked like every site), the manager
+ *     (`data stock_mode_manager`) and the slot numbers of this build (`value stock_slot_shot`,
+ *     the handler; `stock_slot_active`; `stock_field`, the per-player lit mask's offset).
+ *   - A TABLE of rows {rule, from shot, to shot} comes from stock.cfg beside the mode files
+ *     (/usr/local/padmode/stock.cfg on a card, /dump/stock.cfg in the rig), re-read twice a
+ *     second and re-parsed when its bytes change, so an edit lands in a running game; or from
+ *     C through pm_stock_counts_as() (item 161 builds on the same wrap).
+ *   - A rule a row names gets its shot slot WRAPPED, once, the way stock_probe.c wraps it:
+ *     the vtable word is replaced by our function, which calls the original with r0..r3 and
+ *     four stack words passed through. It is wrapped only when the object's vtable pointer is
+ *     the port's word for that rule, so a port for another build wraps nothing.
+ *   - In the wrap: a dispatch whose bits are all inside a row's `from` is REPLACED by the row's
+ *     `to` bit - never ORed in - and only while that bit is lit in the rule's per-player mask.
+ *     Once the rule clears it (Ebirah at a spinner's last spin), the shot passes through
+ *     unchanged, so a finished target never receives its bit again (a second decrement past 0
+ *     would leave the battle unwinnable: item 158's check). `to` must be ONE bit (Ebirah tests
+ *     0x200 exactly; the tank matches a position by 64-bit equality). An empty table, or a file
+ *     that is gone, passes every shot through: the rule plays stock.
+ *   - While the target bit is lit, the `from` shot's inserts are HELD with the lamp layer of
+ *     this section's own (pm_lamp_*, priority 255) in the row's colour and blink (Ebirah's
+ *     yellow, 300 ms on / 200 ms off by default), and handed back when the bit clears or the
+ *     rule stops. The rule's own lamp table (full, 6 entries on Ebirah) is not touched.
+ *
+ * Threads: the wrap runs on the game's thread that dispatches shots; the table is a pointer
+ * swapped on the tick after a full rebuild (two buffers), so the wrap never sees a half-written
+ * row. The lit check reads the u64 field the rule itself writes.
+ * One ramp = one spin: a ramp standing in for a spinner needs the spinner's count of hits
+ * (Ebirah: 15 on the left spinner) unless the count word is lowered (item 159). */
+#define N_STOCK_RULES   8
+#define STOCK_ROWS      16
+#define STOCK_C_ROWS    8
+#define STOCK_FILE_MAX  4096
+#define STOCK_SAY_MAX   600
+#define STOCK_LINE_MAX  160
+
+typedef uint64_t (*stock_vfn8)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
+typedef uint64_t (*stock_vfn1)(unsigned);
+static const char *const STOCK_FILES[] = { "/usr/local/padmode/stock.cfg", "/dump/stock.cfg" };
+
+struct stock_rule {
+    unsigned id, vt, obj;
+    char label[40];
+    int wrapped, refused;
+    stock_vfn8 orig;                /* the slot's function before our wrap (a probe's wrap, maybe) */
+    pm_stock_shot_fn fn;            /* item 161: a C hook that sees every shot first, or 0 */
+    const struct pm_mode *fn_by;
+    int lit;                        /* the from-shot's inserts are held now */
+    uint64_t lit_from;
+    unsigned remaps, passes;        /* counted, for the log */
+    const struct pm_stock_handler *h161;   /* item 161: the record from the pm_stock section, or 0 */
+    stock_vfn8 orig_start, orig_stop;      /* item 161: the START / STOP slots before our wraps */
+    int wrapped_start, wrapped_stop, in_original;   /* in_original: a replay of the game's handler is running */
+};
+
+struct stock_row { unsigned rule; uint64_t from, to; unsigned rgb, ms, on_ms; int pattern; int from_c; };
+struct stock_table { unsigned n; struct stock_row row[STOCK_ROWS]; };
+
+static struct stock_rule stock_rules[N_STOCK_RULES];
+static int n_stock_rules;
+static struct stock_table stock_tab[2];
+static struct stock_table *volatile stock_live = &stock_tab[0];
+static int stock_tab_i;
+static struct stock_row stock_file_rows[STOCK_ROWS], stock_c_rows[STOCK_C_ROWS];
+static unsigned n_stock_file_rows, n_stock_c_rows;
+static struct { unsigned rule, rgb, ms, on_ms; int pattern, set; } stock_lights[N_STOCK_RULES];
+static char stock_raw[STOCK_FILE_MAX];
+static long stock_raw_len = -1;
+static int stock_file_which = -1, stock_says, stock_armed;
+static const struct pm_mode stock_mode = { .name = "stock" };   /* the holder of this section's inserts */
+static int stock161_first(struct stock_rule *x, uint64_t *shot, unsigned s0);   /* item 161, below */
+static void stock161_attach(void);
+
+static void stock_say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void stock_say(const char *fmt, ...)
+{
+    va_list ap;
+    if (stock_says >= STOCK_SAY_MAX) return;
+    if (++stock_says == STOCK_SAY_MAX) { say("stock: that is %d lines; no more stock lines this boot", STOCK_SAY_MAX); return; }
+    va_start(ap, fmt);
+    log_raw("pad", fmt, ap);
+    va_end(ap);
+}
+
+/* `rule <id> <vtable> <label to the end of the line>` */
+static void rule_line(const char *s)
+{
+    struct stock_rule *x;
+    int ok = 0;
+    unsigned id, vt;
+    if (n_stock_rules >= N_STOCK_RULES) { port.dropped++; return; }
+    id = (unsigned)number(&s, &ok);
+    if (!ok) return;
+    vt = (unsigned)number(&s, &ok);
+    if (!ok || !vt) return;
+    x = &stock_rules[n_stock_rules];
+    x->id = id;
+    x->vt = vt;
+    rest(s, x->label, sizeof x->label);
+    {
+        unsigned i;
+        for (i = 0; x->label[i]; i++)                          /* a trailing comment is not the label */
+            if (x->label[i] == '#' && i && (x->label[i - 1] == ' ' || x->label[i - 1] == '\t')) {
+                while (i && (x->label[i - 1] == ' ' || x->label[i - 1] == '\t')) i--;
+                x->label[i] = 0;
+                break;
+            }
+    }
+    if (!x->label[0]) pm_snprintf(x->label, sizeof x->label, "rule %u", id);
+    n_stock_rules++;
+}
+
+static struct stock_rule *stock_rule(unsigned id)
+{
+    int i;
+    for (i = 0; i < n_stock_rules; i++)
+        if (stock_rules[i].id == id) return &stock_rules[i];
+    return 0;
+}
+
+static struct stock_rule *stock_find(unsigned self)
+{
+    int i;
+    for (i = 0; i < n_stock_rules; i++) if (stock_rules[i].wrapped && stock_rules[i].obj == self) return &stock_rules[i];
+    for (i = 0; i < n_stock_rules; i++) if (stock_rules[i].wrapped && stock_rules[i].vt == *(const unsigned *)(unsigned long)self) return &stock_rules[i];
+    return 0;
+}
+
+static unsigned *stock_vtab(const struct stock_rule *x) { return (unsigned *)(unsigned long)x->vt; }
+static int stock_slot(const char *name, long fallback) { return (int)pm_port_value(name, fallback); }
+
+/* the rule's per-player lit mask: u64 at obj + stock_field + 8 * player */
+static uint64_t stock_field(const struct stock_rule *x, unsigned p)
+{
+    unsigned a;
+    if (!x->obj || p < 1 || p > 4) return 0;
+    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + 8u * p;
+    return (uint64_t)*(volatile const unsigned *)(unsigned long)a | (uint64_t)*(volatile const unsigned *)(unsigned long)(a + 4) << 32;
+}
+
+static int stock_active(const struct stock_rule *x)
+{
+    int slot = stock_slot("stock_slot_active", -1);
+    if (!x->obj || slot < 0 || !pm_player()) return -1;
+    return (int)(((stock_vfn1)(unsigned long)stock_vtab(x)[slot])(x->obj) & 0xffu);
+}
+
+/* the rule's object through the manager's get, checked: 0 until the manager is built, or when the
+ * object's vtable is not the port's word for it */
+static unsigned stock_object(struct stock_rule *x, int say_why)
+{
+    unsigned get = fn("stock_rule_get"), mgr = data("stock_mode_manager"), obj;
+    if (x->obj) return x->obj;
+    if (!get || !mgr || !*(const unsigned *)(unsigned long)mgr) return 0;       /* not built yet */
+    obj = (unsigned)(unsigned long)((void *(*)(void *, unsigned))(unsigned long)get)((void *)(unsigned long)mgr, x->id);
+    if (!obj) return 0;
+    if (*(const unsigned *)(unsigned long)obj != x->vt) {
+        if (say_why && !x->refused)
+            stock_say("stock: rule %u %s NOT wrapped - its object 0x%x has vtable 0x%x, the port says 0x%x (another build?)",
+                      x->id, x->label, obj, *(const unsigned *)(unsigned long)obj, x->vt);
+        x->refused = 1;
+        return 0;
+    }
+    x->obj = obj;
+    return obj;
+}
+
+/* ---- the wrap: what the game's handler receives ------------------------------------------------- */
+/* The decision, and only that (tests lift it verbatim): the first row of `rule` whose `from`
+ * holds every bit of `shot` decides. Its `to` bit lit in `field` = the shot becomes that one bit
+ * (*hit = the row, 1 returned); not lit = the shot is left as it is (*hit = the row, 0 returned:
+ * the rule has finished with that bit, or never lit it). No row = untouched, *hit = 0. A dispatch
+ * carrying a bit outside `from` (the 0x1 "a switch was hit" dispatch, a mask of two shots) is never
+ * remapped, so nothing is ever ORed into a shot and a multi-bit mask never reaches the handler as
+ * the target. */
+static int stock_decide(const struct stock_table *t, unsigned rule, uint64_t *shot, uint64_t field,
+                        const struct stock_row **hit)
+{
+    unsigned i;
+    *hit = 0;
+    for (i = 0; i < t->n; i++) {
+        const struct stock_row *r = &t->row[i];
+        if (r->rule != rule || !*shot || (*shot & ~r->from)) continue;
+        *hit = r;
+        if (!(field & r->to)) return 0;
+        *shot = r->to;
+        return 1;
+    }
+    return 0;
+}
+
+static void stock_remap_shot(struct stock_rule *x, uint64_t *shot)
+{
+    const struct stock_row *r;
+    unsigned p = pm_player();
+    uint64_t was = *shot, field = stock_field(x, p);
+    if (stock_decide(stock_live, x->id, shot, field, &r)) {
+        x->remaps++;
+        if (x->remaps <= 200 || x->remaps % 100 == 0)
+            stock_say("stock: rule %u shot 0x%llx counts as 0x%llx (p%u, field 0x%llx, #%u)", x->id,
+                      (unsigned long long)was, (unsigned long long)*shot, p, (unsigned long long)field, x->remaps);
+    } else if (r) {
+        x->passes++;
+        if (x->passes <= 50 || x->passes % 100 == 0)
+            stock_say("stock: rule %u shot 0x%llx passed through - 0x%llx is not lit (p%u, field 0x%llx)", x->id,
+                      (unsigned long long)was, (unsigned long long)r->to, p, (unsigned long long)field);
+    }
+}
+
+static uint64_t stock_w_shot(unsigned r0, unsigned r1, unsigned r2, unsigned r3,
+                             unsigned s0, unsigned s1, unsigned s2, unsigned s3)
+{
+    struct stock_rule *x = stock_find(r0);
+    uint64_t shot = (uint64_t)r2 | (uint64_t)r3 << 32;
+    if (!x) return 0;                            /* cannot happen: only wrapped rules' vtables point here */
+    if (x->obj != r0) return x->orig(r0, r1, r2, r3, s0, s1, s2, s3);   /* another object of the class: not ours, untouched */
+    if (x->in_original) return x->orig(r0, r1, r2, r3, s0, s1, s2, s3);   /* item 161: a replay of the game's handler passes straight through */
+    if (x->h161 && stock161_first(x, &shot, s0)) return 0;                  /* item 161: the C handler took the shot */
+    if (x->fn) {
+        const struct pm_mode *was = current;
+        int keep;
+        current = x->fn_by;
+        keep = x->fn(x->id, &shot, (void *)(unsigned long)r0);
+        current = was;
+        if (!keep) return 0;                     /* item 161: the hook handled it; the game's handler does not run */
+    } else {
+        stock_remap_shot(x, &shot);
+    }
+    return x->orig(r0, r1, (unsigned)shot, (unsigned)(shot >> 32), s0, s1, s2, s3);
+}
+
+static int stock_wrap(struct stock_rule *x)
+{
+    int slot = stock_slot("stock_slot_shot", -1);
+    unsigned *vt;
+    if (x->wrapped) return 1;
+    if (slot < 0 || slot > 96 || !stock_object(x, 1)) return 0;
+    vt = stock_vtab(x);
+    x->orig = (stock_vfn8)(unsigned long)vt[slot];
+    mprotect((void *)(unsigned long)(x->vt & ~0xfffu), ((x->vt & 0xfffu) + 4u * (unsigned)slot + 4u + 0xfffu) & ~0xfffu, 7);
+    x->wrapped = 1;
+    vt[slot] = (unsigned)(unsigned long)stock_w_shot;
+    stock_say("stock: rule %u %s obj 0x%x vtable 0x%x: shot v[%d] 0x%x wrapped (active v[%d], field +0x%lx)", x->id, x->label,
+              x->obj, x->vt, slot, (unsigned)(unsigned long)x->orig, stock_slot("stock_slot_active", -1),
+              pm_port_value("stock_field", 0x18));
+    return 1;
+}
+
+/* ---- the table --------------------------------------------------------------------------------- */
+static int stock_one_bit(uint64_t v) { return v && !(v & (v - 1)); }
+
+/* rebuild the shadow table from the file's rows and the C rows, then publish it */
+static void stock_publish(void)
+{
+    struct stock_table *t = &stock_tab[stock_tab_i ^ 1];
+    unsigned i;
+    t->n = 0;
+    for (i = 0; i < n_stock_c_rows && t->n < STOCK_ROWS; i++) t->row[t->n++] = stock_c_rows[i];
+    for (i = 0; i < n_stock_file_rows && t->n < STOCK_ROWS; i++) t->row[t->n++] = stock_file_rows[i];
+    for (i = 0; i < t->n; i++) {                 /* a `light` line for the rule sets the row's colour */
+        int k;
+        for (k = 0; k < N_STOCK_RULES; k++)
+            if (stock_lights[k].set && stock_lights[k].rule == t->row[i].rule) {
+                t->row[i].rgb = stock_lights[k].rgb;
+                t->row[i].ms = stock_lights[k].ms;
+                t->row[i].on_ms = stock_lights[k].on_ms;
+                t->row[i].pattern = stock_lights[k].pattern;
+            }
+    }
+    __sync_synchronize();
+    stock_live = t;
+    stock_tab_i ^= 1;
+    for (i = 0; i < t->n; i++) {
+        struct stock_rule *x = stock_rule(t->row[i].rule);
+        if (x) stock_wrap(x);                    /* now, or on a later tick once the manager is built */
+    }
+}
+
+static int stock_word_is(const char *s, const char *w, unsigned n)
+{
+    unsigned i;
+    for (i = 0; i < n; i++) if (lamp_upper(s[i]) != lamp_upper(w[i])) return 0;
+    return w[n] == 0;
+}
+
+/* a shot at *p: `0x..` or a number, else the port's shot NAME up to `stop` (case does not matter) */
+static uint64_t stock_shot(const char *s, unsigned len)
+{
+    int i, ok = 0;
+    uint64_t v;
+    while (len && (*s == ' ' || *s == '\t')) { s++; len--; }
+    while (len && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r')) len--;
+    if (!len) return 0;
+    if (s[0] >= '0' && s[0] <= '9') {
+        const char *q = s;
+        v = number(&q, &ok);
+        return ok && (unsigned)(q - s) <= len ? v : 0;
+    }
+    for (i = 0; i < port.n_shot; i++)
+        if (stock_word_is(s, port.shot[i].name, len)) return port.shot[i].mask;
+    return 0;
+}
+
+static int stock_colour(const char **p, unsigned *rgb)
+{
+    static const struct { const char *name; unsigned rgb; } names[] = {
+        { "red", 0xff0000 }, { "green", 0x00ff00 }, { "blue", 0x0000ff }, { "yellow", 0xffff00 },
+        { "orange", 0xff6000 }, { "purple", 0xa000ff }, { "cyan", 0x00ffff }, { "white", 0xffffff },
+        { "pink", 0xff40a0 },
+    };
+    const char *s = *p;
+    unsigned n = 0, i, v = 0;
+    while (*s == ' ' || *s == '\t') s++;
+    if (*s == '#') s++;
+    while (s[n] && s[n] != ' ' && s[n] != '\t' && s[n] != '\r') n++;
+    for (i = 0; i < sizeof names / sizeof names[0]; i++)
+        if (stock_word_is(s, names[i].name, n)) { *rgb = names[i].rgb; *p = s + n; return 1; }
+    if (n != 6) return 0;
+    for (i = 0; i < 6; i++) {
+        int d = hexval(s[i]);
+        if (d < 0) return 0;
+        v = v * 16 + (unsigned)d;
+    }
+    *rgb = v;
+    *p = s + n;
+    return 1;
+}
+
+/* one line of stock.cfg:
+ *   counts_as <rule id> <shot> -> <shot>            shots: the port's names, or 0x masks
+ *   light <rule id> <colour> [pattern] [ms] [on ms]  the stand-in's inserts (yellow blink 500 300 when absent) */
+static void stock_line(const char *s)
+{
+    char key[16];
+    int ok = 0;
+    unsigned id;
+    const char *a, *arrow;
+    s = word(s, key, sizeof key);
+    if (str_eq(key, "counts_as")) {
+        struct stock_row r;
+        uint64_t from, to;
+        unsigned i;
+        id = (unsigned)number(&s, &ok);
+        if (!ok) { stock_say("stock: counts_as needs a rule id - ignored"); return; }
+        for (arrow = s; *arrow && !(arrow[0] == '-' && arrow[1] == '>'); arrow++) ;
+        if (!*arrow) { stock_say("stock: counts_as %u needs `<shot> -> <shot>` - ignored", id); return; }
+        from = stock_shot(s, (unsigned)(arrow - s));
+        a = arrow + 2;
+        while (*a == ' ' || *a == '\t') a++;
+        for (i = 0; a[i] && a[i] != '\n' && a[i] != '\r'; i++) ;
+        to = stock_shot(a, i);
+        if (!stock_rule(id)) { stock_say("stock: counts_as %u: this port names no rule %u - ignored", id, id); return; }
+        if (!from) { stock_say("stock: counts_as %u: the shot before -> is not a shot this port names - ignored", id); return; }
+        if (!to) { stock_say("stock: counts_as %u: the shot after -> is not a shot this port names - ignored", id); return; }
+        if (!stock_one_bit(to)) { stock_say("stock: counts_as %u: the target 0x%llx must be ONE bit (a rule tests one bit) - ignored", id, (unsigned long long)to); return; }
+        if (from & to) { stock_say("stock: counts_as %u: 0x%llx already carries 0x%llx - ignored", id, (unsigned long long)from, (unsigned long long)to); return; }
+        if (n_stock_file_rows >= STOCK_ROWS) { stock_say("stock: more than %d counts_as rows - ignored", STOCK_ROWS); return; }
+        r.rule = id; r.from = from; r.to = to; r.from_c = 0;
+        r.rgb = 0xffff00; r.ms = 500; r.on_ms = 300; r.pattern = PM_LAMP_BLINK;
+        stock_file_rows[n_stock_file_rows++] = r;
+        stock_say("stock: counts_as %u %s: 0x%llx (%s) -> 0x%llx (%s)", id, stock_rule(id)->label, (unsigned long long)from,
+                  pm_shot_name(from) ? pm_shot_name(from) : "?", (unsigned long long)to, pm_shot_name(to) ? pm_shot_name(to) : "?");
+        return;
+    }
+    if (str_eq(key, "light")) {
+        unsigned rgb = 0, k, ms, on;
+        int pat = PM_LAMP_BLINK;
+        char pw[12];
+        id = (unsigned)number(&s, &ok);
+        if (!ok || !stock_rule(id)) { stock_say("stock: light needs a rule id this port names - ignored"); return; }
+        if (!stock_colour(&s, &rgb)) { stock_say("stock: light %u: no colour (rrggbb or a colour's name) - ignored", id); return; }
+        a = word(s, pw, sizeof pw);
+        if (pw[0] && !(pw[0] >= '0' && pw[0] <= '9')) {
+            if (str_eq(pw, "solid")) pat = PM_LAMP_SOLID;
+            else if (str_eq(pw, "blink")) pat = PM_LAMP_BLINK;
+            else if (str_eq(pw, "pulse")) pat = PM_LAMP_PULSE;
+            else { stock_say("stock: light %u: pattern is solid, blink or pulse - ignored", id); return; }
+            s = a;
+        }
+        ms = (unsigned)number(&s, &ok);
+        on = ok ? (unsigned)number(&s, 0) : 0;
+        for (k = 0; k < N_STOCK_RULES && stock_lights[k].set && stock_lights[k].rule != id; k++) ;
+        if (k == N_STOCK_RULES) return;
+        stock_lights[k].set = 1;
+        stock_lights[k].rule = id;
+        stock_lights[k].rgb = rgb;
+        stock_lights[k].pattern = pat;
+        stock_lights[k].ms = ms ? ms : 500;
+        stock_lights[k].on_ms = on;
+        stock_say("stock: light %u: %06x %s, %u ms%s", id, rgb, pat == PM_LAMP_SOLID ? "solid" : pat == PM_LAMP_PULSE ? "pulse" : "blink",
+                  stock_lights[k].ms, on ? " (on part given)" : "");
+        return;
+    }
+    stock_say("stock: unknown key, skipped: %.60s", key);
+}
+
+static void stock_parse(const char *buf, long len)
+{
+    char line[STOCK_LINE_MAX];
+    long i = 0;
+    int k;
+    n_stock_file_rows = 0;
+    for (k = 0; k < N_STOCK_RULES; k++) stock_lights[k].set = 0;
+    while (i < len) {
+        long j = 0;
+        while (i < len && buf[i] != '\n') {
+            if (j + 1 < (long)sizeof line) line[j++] = buf[i];
+            i++;
+        }
+        i++;
+        line[j] = 0;
+        {
+            const char *s = line;
+            long c;
+            /* a `#` at the start, or after a blank, ends the line: a comment line, or a trailing comment
+             * on a row (the app's Write writes one per row; 2026-09-23 a card's rows were refused as
+             * "not a shot this port names" because the comment rode into the shot after `->`) */
+            for (c = 0; line[c]; c++)
+                if (line[c] == '#' && (c == 0 || line[c - 1] == ' ' || line[c - 1] == '\t')) { line[c] = 0; break; }
+            while (*s == ' ' || *s == '\t') s++;
+            if (*s) stock_line(s);
+        }
+    }
+}
+
+/* twice a second: the file, byte-compared; a change is parsed and published */
+static void stock_file_poll(void)
+{
+    static char buf[STOCK_FILE_MAX];
+    long n = -1, i;
+    int k;
+    for (k = 0; k < (int)(sizeof STOCK_FILES / sizeof STOCK_FILES[0]); k++) {
+        n = pm_read_file(STOCK_FILES[k], buf, sizeof buf);
+        if (n >= 0) break;
+    }
+    if (n < 0) {
+        if (stock_raw_len < 0) return;
+        stock_raw_len = -1;
+        stock_file_which = -1;
+        n_stock_file_rows = 0;
+        stock_publish();
+        stock_say("stock: stock.cfg gone - %u C row(s) left; a wrapped rule with no row passes every shot through", n_stock_c_rows);
+        return;
+    }
+    if (stock_file_which != k) {
+        stock_file_which = k;
+        stock_say("stock: file %s", STOCK_FILES[k]);
+    }
+    if (n == stock_raw_len) {
+        for (i = 0; i < n && buf[i] == stock_raw[i]; i++) ;
+        if (i == n) return;
+    }
+    for (i = 0; i < n; i++) stock_raw[i] = buf[i];
+    stock_raw_len = n;
+    stock_parse(stock_raw, n);
+    stock_publish();
+    stock_say("stock: %u counts_as row(s) live (%u from C); an empty table plays every rule stock", stock_live->n, n_stock_c_rows);
+}
+
+/* every 100 ms: the stand-in's inserts follow the target bit, while the rule is active */
+static void stock_lamps_poll(void)
+{
+    struct stock_table *t = stock_live;
+    const struct pm_mode *was = current;
+    int i;
+    unsigned k;
+    for (i = 0; i < n_stock_rules; i++) {
+        struct stock_rule *x = &stock_rules[i];
+        const struct stock_row *want = 0;
+        int act;
+        if (!x->wrapped || !x->obj) continue;
+        act = pm_in_game() ? stock_active(x) : 0;
+        if (act > 0) {
+            uint64_t field = stock_field(x, pm_player());
+            for (k = 0; k < t->n && !want; k++)
+                if (t->row[k].rule == x->id && (field & t->row[k].to)) want = &t->row[k];
+        }
+        if (want && (!x->lit || x->lit_from != want->from)) {
+            int n;
+            current = &stock_mode;
+            if (x->lit) pm_lamp_release_shot(x->lit_from);
+            lamp_hold_on_ms = want->on_ms;
+            n = pm_lamp_shot(want->from, want->rgb, want->pattern, want->ms);
+            lamp_hold_on_ms = 0;
+            current = was;
+            x->lit = 1;
+            x->lit_from = want->from;
+            stock_say("stock: rule %u %s: %d insert(s) of 0x%llx lit %06x while 0x%llx is lit (%s)", x->id, x->label, n,
+                      (unsigned long long)want->from, want->rgb, (unsigned long long)want->to,
+                      pm_can(PM_CAN_LAMPS) ? "our lamp layer" : "no lamp layer on this port: nothing lit");
+        } else if (!want && x->lit) {
+            int n, rows = 0;
+            for (k = 0; k < t->n; k++) rows += t->row[k].rule == x->id;
+            current = &stock_mode;
+            n = pm_lamp_release_shot(x->lit_from);
+            current = was;
+            x->lit = 0;
+            stock_say("stock: rule %u %s: %d insert(s) of 0x%llx handed back (%s)", x->id, x->label, n,
+                      (unsigned long long)x->lit_from,
+                      act <= 0 ? "the rule is not active" : rows ? "the target bit cleared" : "no row names the rule now");
+        }
+    }
+}
+
+/* from on_tick, AFTER the modes' ticks: a probe that wraps the same slot from its tick (stock_probe.c)
+ * wraps first, so it logs what the game's handler receives */
+static void stock_tick(void)
+{
+    static unsigned ticks;
+    int i;
+    if (!stock_armed) return;
+    ticks++;
+    if (ticks % 30 == 0) {
+        stock_file_poll();
+        stock161_attach();                        /* item 161: records from the pm_stock section */
+        for (i = 0; i < n_stock_rules; i++) {    /* a rule named before the manager was built */
+            unsigned k;
+            struct stock_table *t = stock_live;
+            if (stock_rules[i].wrapped) continue;
+            for (k = 0; k < t->n; k++)
+                if (t->row[k].rule == stock_rules[i].id) { stock_wrap(&stock_rules[i]); break; }
+        }
+    }
+    if (ticks % 6 == 0) stock_lamps_poll();
+}
+
+static void stock_arm(void)
+{
+    struct site *g = site("stock_rule_get");
+    if (!n_stock_rules) return;
+    if (!g || !g->ok || !data("stock_mode_manager") || stock_slot("stock_slot_shot", -1) < 0
+        || stock_slot("stock_slot_active", -1) < 0 || pm_port_value("stock_field", -1) < 0) {
+        say("stock rules: %d named, but the port lacks stock_rule_get (matching), stock_mode_manager, stock_slot_shot, stock_slot_active or stock_field - no counts-as",
+            n_stock_rules);
+        return;
+    }
+    stock_armed = 1;
+    can |= PM_CAN_STOCK_RULES;
+    say("stock rules: %d named (%s%s); counts_as rows are read from stock.cfg twice a second, shot slot v[%d]",
+        n_stock_rules, stock_rules[0].label, n_stock_rules > 1 ? ", ..." : "", stock_slot("stock_slot_shot", -1));
+}
+
+/* ---- the calls (pad_mode.h) ---- */
+int pm_stock_rule_count(void) { return (can & PM_CAN_STOCK_RULES) ? n_stock_rules : 0; }
+
+int pm_stock_rule_at(int i, unsigned *id, const char **label)
+{
+    if (!(can & PM_CAN_STOCK_RULES) || i < 0 || i >= n_stock_rules) return 0;
+    if (id) *id = stock_rules[i].id;
+    if (label) *label = stock_rules[i].label;
+    return 1;
+}
+
+void *pm_stock_rule_object(unsigned id)
+{
+    struct stock_rule *x = stock_rule(id);
+    if (!(can & PM_CAN_STOCK_RULES) || !x) return 0;
+    return (void *)(unsigned long)stock_object(x, 0);
+}
+
+int pm_stock_rule_active(unsigned id)
+{
+    struct stock_rule *x = stock_rule(id);
+    if (!(can & PM_CAN_STOCK_RULES) || !x || !stock_object(x, 0)) return -1;
+    return stock_active(x);
+}
+
+uint64_t pm_stock_rule_field(unsigned id)
+{
+    struct stock_rule *x = stock_rule(id);
+    if (!(can & PM_CAN_STOCK_RULES) || !x || !stock_object(x, 0)) return 0;
+    return stock_field(x, pm_player());
+}
+
+int pm_stock_rule_hook(unsigned id, pm_stock_shot_fn fn)
+{
+    struct stock_rule *x = stock_rule(id);
+    if (!(can & PM_CAN_STOCK_RULES) || !x || !fn) return 0;
+    if (x->fn && x->fn_by != current) return 0;
+    if (!stock_wrap(x)) return 0;
+    x->fn = fn;
+    x->fn_by = current;
+    stock_say("stock: rule %u %s: %s hooks its shot handler", id, x->label, current && current->name ? current->name : "a mode");
+    return 1;
+}
+
+void pm_stock_rule_unhook(unsigned id)
+{
+    struct stock_rule *x = stock_rule(id);
+    if (!x || !x->fn || x->fn_by != current) return;
+    x->fn = 0;
+    x->fn_by = 0;
+    stock_say("stock: rule %u %s: its shot handler is the game's again (the wrap passes through)", id, x->label);
+}
+
+int pm_stock_counts_as(unsigned id, uint64_t from, uint64_t to)
+{
+    unsigned i;
+    if (!(can & PM_CAN_STOCK_RULES) || !stock_rule(id) || !from) return 0;
+    for (i = 0; i < n_stock_c_rows; i++)
+        if (stock_c_rows[i].rule == id && stock_c_rows[i].from == from) break;
+    if (!to) {
+        if (i == n_stock_c_rows) return 0;
+        for (; i + 1 < n_stock_c_rows; i++) stock_c_rows[i] = stock_c_rows[i + 1];
+        n_stock_c_rows--;
+        stock_publish();
+        return 1;
+    }
+    if (!stock_one_bit(to) || (from & to)) return 0;
+    if (i == n_stock_c_rows) {
+        if (n_stock_c_rows >= STOCK_C_ROWS) return 0;
+        n_stock_c_rows++;
+    }
+    stock_c_rows[i].rule = id; stock_c_rows[i].from = from; stock_c_rows[i].to = to; stock_c_rows[i].from_c = 1;
+    stock_c_rows[i].rgb = 0xffff00; stock_c_rows[i].ms = 500; stock_c_rows[i].on_ms = 300; stock_c_rows[i].pattern = PM_LAMP_BLINK;
+    stock_publish();
+    return 1;
+}
+/* ---- STOCK RULES IN C (item 161): a C handler that runs INSTEAD of a rule's shot handler --------------
+ * pad_stock.h, on item 160's wrap above. A record in the `pm_stock` section (PM_STOCK_HANDLER /
+ * PM_STOCK_RULE) names a rule id and a C function. From the tick, once the manager has built the rule,
+ * its shot slot is wrapped (stock_wrap: a probe that wrapped first from its own tick stays inside, so
+ * its log shows what the game's handler gets) and, when the record has the callbacks, its START and
+ * STOP slots too (`value stock_slot_start` / `stock_slot_stop`). In the wrap the C handler runs first,
+ * with the shot as dispatched and the dispatch's stack word (the factor): PM_STOCK_DONE = the game's
+ * handler is not run for this shot; PM_STOCK_PASS = item 160's rows and the game's handler run as if
+ * the record were not there. pm_stock_call_original runs the slot's function as it was before the wrap
+ * (a probe's, or the game's) with the rule marked "in the original", so a handler that replays the
+ * game's own code (pm_ebirah_stage_award, pm_stock_final_blow) is never re-entered and no row is
+ * applied to the replay. Every accessor reads its slot, offset or address from the port (MODE_SDK.md,
+ * "Rewriting a stock rule's shot logic"); a missing line answers 0 / -1 and is said once. */
+extern const struct pm_stock_handler *const __start_pm_stock[] __attribute__((weak, visibility("hidden")));
+extern const struct pm_stock_handler *const __stop_pm_stock[] __attribute__((weak, visibility("hidden")));
+#define EACH_STOCK_HANDLER(h) \
+    for (const struct pm_stock_handler *const *ph_ = __start_pm_stock; ph_ && ph_ < __stop_pm_stock && ((h) = *ph_, 1); ph_++)
+
+static struct stock_rule *stock161_of(struct pm_stock_rule *r) { return (struct stock_rule *)(void *)r; }
+static struct pm_stock_rule *stock161_handle(struct stock_rule *x) { return (struct pm_stock_rule *)(void *)x; }
+static uint64_t stock161_u64(unsigned a)
+{
+    return (uint64_t)*(volatile const unsigned *)(unsigned long)a | (uint64_t)*(volatile const unsigned *)(unsigned long)(a + 4) << 32;
+}
+
+/* a port line an accessor needs is missing: said once per name, the call answers "nothing" */
+static int stock161_missing(const char *name)
+{
+    static const char *said[24];
+    static int n;
+    int i;
+    for (i = 0; i < n; i++) if (said[i] == name) return 0;
+    if (n < 24) said[n++] = name;
+    stock_say("stock: the port has no `%s` line - that call does nothing", name);
+    return 0;
+}
+static long stock161_value(const char *name)
+{
+    long v = pm_port_value(name, -1);
+    if (v < 0) stock161_missing(name);
+    return v;
+}
+static unsigned stock161_site(const char *name)
+{
+    unsigned f = fn(name);
+    if (!f) stock161_missing(name);
+    return f;
+}
+static unsigned stock161_data(const char *name)
+{
+    unsigned d = data(name);
+    if (!d) stock161_missing(name);
+    return d;
+}
+static const struct pm_mode *stock161_mode(const struct stock_rule *x)
+{
+    return x->h161 && x->h161->mode ? x->h161->mode : &stock_mode;
+}
+
+/* the C handler, first in the wrap: 1 = it took the shot, the game's handler does not run */
+static int stock161_first(struct stock_rule *x, uint64_t *shot, unsigned s0)
+{
+    const struct pm_mode *was = current;
+    int done;
+    if (!x->h161->shot) return 0;
+    current = stock161_mode(x);
+    done = x->h161->shot(stock161_handle(x), *shot, s0);
+    current = was;
+    return done != 0;
+}
+
+static struct stock_rule *stock161_find(unsigned self)
+{
+    int i;
+    for (i = 0; i < n_stock_rules; i++) if (stock_rules[i].obj && stock_rules[i].obj == self) return &stock_rules[i];
+    /* the wrap sits in the CLASS's vtable: another object of it reaches here too, and gets the game's slot untouched */
+    for (i = 0; i < n_stock_rules; i++) if (stock_rules[i].obj && stock_rules[i].vt == *(const unsigned *)(unsigned long)self) return &stock_rules[i];
+    return 0;
+}
+
+/* the START wrap: the game's START first, then the record's started() */
+static uint64_t stock_w_start(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, unsigned s1, unsigned s2, unsigned s3)
+{
+    struct stock_rule *x = stock161_find(r0);
+    uint64_t ret;
+    if (!x || !x->orig_start) return 0;
+    ret = x->orig_start(r0, r1, r2, r3, s0, s1, s2, s3);
+    if (x->obj == r0 && x->h161 && x->h161->started) {
+        const struct pm_mode *was = current;
+        current = stock161_mode(x);
+        x->h161->started(stock161_handle(x));
+        current = was;
+    }
+    return ret;
+}
+
+/* the STOP wrap: the record's stopped(reason) first, then the game's STOP */
+static uint64_t stock_w_stop(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, unsigned s1, unsigned s2, unsigned s3)
+{
+    struct stock_rule *x = stock161_find(r0);
+    if (!x || !x->orig_stop) return 0;
+    if (x->obj == r0 && x->h161 && x->h161->stopped) {
+        const struct pm_mode *was = current;
+        current = stock161_mode(x);
+        x->h161->stopped(stock161_handle(x), r1);
+        current = was;
+    }
+    return x->orig_stop(r0, r1, r2, r3, s0, s1, s2, s3);
+}
+
+/* one more slot of a rule whose object is known and checked (the shot wrap holds it already) */
+static int stock161_wrap_slot(struct stock_rule *x, const char *slot_name, stock_vfn8 *orig, int *flag, stock_vfn8 wrapper)
+{
+    int slot = stock_slot(slot_name, -1);
+    unsigned *vt;
+    if (*flag) return 1;
+    if (slot < 0) return stock161_missing(slot_name);
+    if (slot > 96 || !x->obj) return 0;
+    vt = stock_vtab(x);
+    *orig = (stock_vfn8)(unsigned long)vt[slot];
+    mprotect((void *)(unsigned long)(x->vt & ~0xfffu), ((x->vt & 0xfffu) + 4u * (unsigned)slot + 4u + 0xfffu) & ~0xfffu, 7);
+    *flag = 1;
+    vt[slot] = (unsigned)(unsigned long)wrapper;
+    stock_say("stock: rule %u %s: %s v[%d] 0x%x wrapped", x->id, x->label, slot_name, slot, (unsigned)(unsigned long)*orig);
+    return 1;
+}
+
+/* from stock_tick, twice a second: every record attached to its rule once the manager has built it */
+static void stock161_attach(void)
+{
+    const struct pm_stock_handler *h;
+    static int said_no_rule, said_taken;
+    EACH_STOCK_HANDLER(h) {
+        struct stock_rule *x;
+        if (!h) continue;
+        x = stock_rule(h->rule_id);
+        if (!x) {
+            if (!said_no_rule) {
+                said_no_rule = 1;
+                stock_say("stock: %s names rule %u, which this port does not name - not installed",
+                          h->name ? h->name : "a C handler", h->rule_id);
+            }
+            continue;
+        }
+        if (x->h161 == h) continue;
+        if (x->h161) {
+            if (!said_taken) {
+                said_taken = 1;
+                stock_say("stock: rule %u %s already has %s; %s is not installed", x->id, x->label,
+                          x->h161->name ? x->h161->name : "a C handler", h->name ? h->name : "another");
+            }
+            continue;
+        }
+        if (!stock_wrap(x)) continue;                          /* the manager is not built yet: next time */
+        if (h->started) stock161_wrap_slot(x, "stock_slot_start", &x->orig_start, &x->wrapped_start, stock_w_start);
+        if (h->stopped) stock161_wrap_slot(x, "stock_slot_stop", &x->orig_stop, &x->wrapped_stop, stock_w_stop);
+        x->h161 = h;
+        stock_say("stock: rule %u %s: its shots go to %s first (PM_STOCK_DONE keeps the game's handler from running)",
+                  x->id, x->label, h->name ? h->name : "a C handler");
+    }
+}
+
+/* ---- the calls (pad_stock.h) ---- */
+struct pm_stock_rule *pm_stock_rule(unsigned id)
+{
+    struct stock_rule *x = stock_rule(id);
+    if (!(can & PM_CAN_STOCK_RULES) || !x || !stock_object(x, 0)) return 0;
+    return stock161_handle(x);
+}
+
+unsigned pm_stock_rule_id(const struct pm_stock_rule *r) { return r ? ((const struct stock_rule *)(const void *)r)->id : 0; }
+unsigned pm_stock_player(void) { return pm_player(); }
+
+uint64_t pm_stock_call_original(struct pm_stock_rule *r, uint64_t shot, unsigned factor)
+{
+    struct stock_rule *x = stock161_of(r);
+    uint64_t ret;
+    if (!x || !x->wrapped || !x->orig || !x->obj) return 0;
+    x->in_original++;
+    ret = x->orig(x->obj, 0, (unsigned)shot, (unsigned)(shot >> 32), factor, 0, 0, 0);
+    x->in_original--;
+    return ret;
+}
+
+uint64_t pm_stock_field(struct pm_stock_rule *r, unsigned player)
+{
+    struct stock_rule *x = stock161_of(r);
+    return x ? stock_field(x, player) : 0;
+}
+
+int pm_stock_field_set(struct pm_stock_rule *r, unsigned player, uint64_t mask)
+{
+    struct stock_rule *x = stock161_of(r);
+    unsigned a;
+    if (!x || !x->obj || player < 1 || player > 4) return 0;
+    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + 8u * player;
+    *(volatile unsigned *)(unsigned long)a = (unsigned)mask;
+    *(volatile unsigned *)(unsigned long)(a + 4) = (unsigned)(mask >> 32);
+    return 1;
+}
+
+uint64_t pm_stock_lit(struct pm_stock_rule *r)
+{
+    struct stock_rule *x = stock161_of(r);
+    long slot = x ? stock161_value("stock_slot_lit") : -1;
+    if (!x || !x->obj || slot < 0 || slot > 96) return 0;
+    return ((stock_vfn1)(unsigned long)stock_vtab(x)[slot])(x->obj);
+}
+
+int pm_stock_active(struct pm_stock_rule *r)
+{
+    struct stock_rule *x = stock161_of(r);
+    return x ? stock_active(x) : -1;
+}
+
+int pm_stock_running(struct pm_stock_rule *r, unsigned player)
+{
+    struct stock_rule *x = stock161_of(r);
+    long at = x ? stock161_value("stock_running_at") : -1;
+    if (!x || !x->obj || at < 0 || player < 1 || player > 4) return -1;
+    return *(volatile const unsigned char *)(unsigned long)(x->obj + (unsigned)at + player);
+}
+
+long pm_stock_at(const char *value_name) { return stock161_value(value_name); }
+
+static volatile unsigned *stock161_word(struct pm_stock_rule *r, long at, unsigned player, int per_player)
+{
+    struct stock_rule *x = stock161_of(r);
+    if (!x || !x->obj || at < 0 || at > 0x10000) return 0;
+    if (per_player && (player < 1 || player > 4)) return 0;
+    return (volatile unsigned *)(unsigned long)(x->obj + (unsigned)at + (per_player ? 4u * player : 0u));
+}
+
+int pm_stock_pw_get(struct pm_stock_rule *r, long at, unsigned player, int *out)
+{
+    volatile unsigned *w = stock161_word(r, at, player, 1);
+    if (!w) return 0;
+    *out = (int)*w;
+    return 1;
+}
+int pm_stock_pw_set(struct pm_stock_rule *r, long at, unsigned player, int value)
+{
+    volatile unsigned *w = stock161_word(r, at, player, 1);
+    if (!w) return 0;
+    *w = (unsigned)value;
+    return 1;
+}
+int pm_stock_w_get(struct pm_stock_rule *r, long at, int *out)
+{
+    volatile unsigned *w = stock161_word(r, at, 0, 0);
+    if (!w) return 0;
+    *out = (int)*w;
+    return 1;
+}
+int pm_stock_w_set(struct pm_stock_rule *r, long at, int value)
+{
+    volatile unsigned *w = stock161_word(r, at, 0, 0);
+    if (!w) return 0;
+    *w = (unsigned)value;
+    return 1;
+}
+int pm_stock_b_get(struct pm_stock_rule *r, long at, int *out)
+{
+    volatile unsigned *w = stock161_word(r, at, 0, 0);
+    if (!w) return 0;
+    *out = *(volatile const unsigned char *)w;
+    return 1;
+}
+
+/* an award the way the handlers pay one: caward_add / caward_build(the rule's award, 0, value, [sp] 0) */
+typedef uint64_t (*stock161_award_fn)(unsigned, unsigned, unsigned, unsigned, unsigned);
+static uint64_t stock161_pay(const char *site_name, unsigned obj, uint64_t value)
+{
+    unsigned f = stock161_site(site_name), award;
+    long at = stock161_value("stock_award_at");
+    if (!f || at < 0 || !obj) return 0;
+    award = *(volatile const unsigned *)(unsigned long)(obj + (unsigned)at);
+    if (!award) return 0;
+    return ((stock161_award_fn)(unsigned long)f)(award, 0, (unsigned)value, (unsigned)(value >> 32), 0);
+}
+uint64_t pm_stock_award(struct pm_stock_rule *r, uint64_t value)
+{
+    struct stock_rule *x = stock161_of(r);
+    return x && x->obj ? stock161_pay("caward_add", x->obj, value) : 0;
+}
+uint64_t pm_stock_award_to(unsigned rule_id, uint64_t value)
+{
+    struct stock_rule *x = stock_rule(rule_id);
+    return x && stock_object(x, 0) ? stock161_pay("caward_add", x->obj, value) : 0;
+}
+uint64_t pm_stock_build(struct pm_stock_rule *r, uint64_t value)
+{
+    struct stock_rule *x = stock161_of(r);
+    return x && x->obj ? stock161_pay("caward_build", x->obj, value) : 0;
+}
+
+void *pm_stock_show(unsigned id)
+{
+    unsigned f = stock161_site("show_start");
+    return f ? ((void *(*)(unsigned))(unsigned long)f)(id) : 0;
+}
+
+int pm_stock_event(unsigned id, uint64_t value)
+{
+    unsigned f = stock161_site("game_event");
+    if (!f) return 0;
+    /* (id, _, value lo, hi, [sp] a, pad, [sp+8] b lo, hi): b is a u64, so the eighth word is its high half */
+    ((void (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)f)(
+        id, 0, (unsigned)value, (unsigned)(value >> 32), 0, 0, 0, 0);
+    return 1;
+}
+
+void *pm_stock_display_event(unsigned id, unsigned handler, unsigned flags)
+{
+    unsigned f = stock161_site("event_post_replacing");
+    return f ? ((void *(*)(unsigned, unsigned, unsigned))(unsigned long)f)(id, handler, flags) : 0;
+}
+
+int pm_stock_event_cancel(unsigned id)
+{
+    unsigned f = stock161_site("event_cancel");
+    if (!f) return 0;
+    ((void (*)(unsigned, unsigned))(unsigned long)f)(id, 0xffffu);
+    return 1;
+}
+
+static int stock161_call_slot(struct pm_stock_rule *r, const char *slot_name, unsigned r1)
+{
+    struct stock_rule *x = stock161_of(r);
+    long slot = x ? stock161_value(slot_name) : -1;
+    if (!x || !x->obj || slot < 0 || slot > 96) return 0;
+    ((stock_vfn8)(unsigned long)stock_vtab(x)[slot])(x->obj, r1, 0, 0, 0, 0, 0, 0);
+    return 1;
+}
+int pm_stock_stop(struct pm_stock_rule *r, int won) { return stock161_call_slot(r, "stock_slot_stop", won ? 1u : 0u); }
+int pm_stock_start(struct pm_stock_rule *r) { return stock161_call_slot(r, "stock_slot_start", 0); }
+
+/* ---- Godzilla: battle vs Ebirah ---- */
+static const char *const EB_SPIN_AT[3] = { "ebirah_spin_left_at", "ebirah_spin_top_at", "ebirah_spin_shield_at" };
+static const char *const EB_SPIN_BIT[3] = { "ebirah_spin_left_bit", "ebirah_spin_top_bit", "ebirah_spin_shield_bit" };
+
+int pm_ebirah_spins(struct pm_stock_rule *r, int which, unsigned player)
+{
+    int v;
+    if (which < 0 || which > 2) return -1;
+    return pm_stock_pw_get(r, stock161_value(EB_SPIN_AT[which]), player, &v) ? v : -1;
+}
+int pm_ebirah_spins_set(struct pm_stock_rule *r, int which, unsigned player, int n)
+{
+    if (which < 0 || which > 2) return 0;
+    return pm_stock_pw_set(r, stock161_value(EB_SPIN_AT[which]), player, n);
+}
+uint64_t pm_ebirah_spin_bit(int which)
+{
+    long v;
+    if (which < 0 || which > 2) return 0;
+    v = stock161_value(EB_SPIN_BIT[which]);
+    return v < 0 ? 0 : (uint64_t)v;
+}
+
+int pm_ebirah_stage_award(struct pm_stock_rule *r, int which)
+{
+    struct stock_rule *x = stock161_of(r);
+    unsigned p = pm_player();
+    uint64_t bit = pm_ebirah_spin_bit(which);
+    if (!x || !p || !bit) return 0;
+    if (!pm_ebirah_spins_set(r, which, p, 1)) return 0;
+    pm_stock_field_set(r, p, pm_stock_field(r, p) | bit);
+    stock_say("stock: rule %u %s: the game's own stage award, replayed as 0x%llx (that spinner's count := 1, its bit lit)",
+              x->id, x->label, (unsigned long long)bit);
+    pm_stock_call_original(r, bit, 1);
+    return 1;
+}
+
+int pm_stock_final_blow(struct pm_stock_rule *r)
+{
+    struct stock_rule *x = stock161_of(r);
+    unsigned p = pm_player();
+    long lo = stock161_value("ebirah_final_mask_lo"), hi = pm_port_value("ebirah_final_mask_hi", 0);
+    long shot = stock161_value("ebirah_final_shot");
+    if (!x || !p || lo < 0 || shot < 0) return 0;
+    pm_stock_field_set(r, p, (uint64_t)(unsigned long)hi << 32 | (uint64_t)(unsigned long)lo);
+    stock_say("stock: rule %u %s: the game's own final blow, replayed as 0x%lx with the field 0x%lx_%08lx",
+              x->id, x->label, shot, hi, lo);
+    pm_stock_call_original(r, (uint64_t)(unsigned long)shot, 1);
+    return 1;
+}
+
+uint64_t pm_ebirah_stage_value(unsigned index)
+{
+    unsigned base = stock161_data("ebirah_stage_awards");
+    long n = pm_port_value("ebirah_stage_award_count", 0);
+    if (!base || (long)index >= n) return 0;
+    return stock161_u64(base + 8u * index);
+}
+
+/* ---- Godzilla: tank attack multiball ---- */
+static int stock161_tank_vec(struct stock_rule *x, unsigned *begin, unsigned *n, unsigned *size)
+{
+    long at = stock161_value("tank_records_at"), sz = pm_port_value("tank_record_size", 40);
+    unsigned end;
+    if (!x || !x->obj || at < 0 || sz < 8) return 0;
+    *size = (unsigned)sz;
+    *begin = *(volatile const unsigned *)(unsigned long)(x->obj + (unsigned)at);
+    end = *(volatile const unsigned *)(unsigned long)(x->obj + (unsigned)at + 4);
+    if (!*begin || end < *begin) return 0;
+    *n = (end - *begin) / *size;
+    if (*n > 64) *n = 64;
+    return 1;
+}
+
+int pm_tank_records(struct pm_stock_rule *r, struct pm_tank_record *out, int max)
+{
+    unsigned begin, n, size, i;
+    long a_act = pm_port_value("tank_record_active_at", 0), a_pos = pm_port_value("tank_record_pos_at", 8);
+    long a_prev = pm_port_value("tank_record_prev_at", 0x10), a_dest = pm_port_value("tank_record_dest_at", 0x18);
+    long a_val = pm_port_value("tank_record_value_at", 0x20);
+    if (!stock161_tank_vec(stock161_of(r), &begin, &n, &size)) return 0;
+    for (i = 0; i < n && (int)i < max; i++) {
+        unsigned rec = begin + i * size;
+        out[i].active = *(volatile const unsigned char *)(unsigned long)(rec + (unsigned)a_act);
+        out[i].pos = stock161_u64(rec + (unsigned)a_pos);
+        out[i].prev = stock161_u64(rec + (unsigned)a_prev);
+        out[i].dest = stock161_u64(rec + (unsigned)a_dest);
+        out[i].value = stock161_u64(rec + (unsigned)a_val);
+    }
+    return (int)i;                               /* how many were filled: at most max */
+}
+
+int pm_tank_destroyed(struct pm_stock_rule *r)
+{
+    int v;
+    return pm_stock_w_get(r, stock161_value("tank_destroyed_at"), &v) ? v : -1;
+}
+int pm_tank_level(struct pm_stock_rule *r, unsigned player)
+{
+    int v;
+    return pm_stock_pw_get(r, stock161_value("tank_level_at"), player, &v) ? v : -1;
+}
+int pm_tank_maser_phase(struct pm_stock_rule *r)
+{
+    struct stock_rule *x = stock161_of(r);
+    unsigned f = stock161_site("tank_maser_phase");
+    if (!x || !x->obj || !f) return 0;
+    return (int)(((stock_vfn1)(unsigned long)f)(x->obj) & 0xffu);
+}
+int pm_tank_destroy(struct pm_stock_rule *r, int index, int credit)
+{
+    struct stock_rule *x = stock161_of(r);
+    unsigned f = stock161_site("tank_destroy"), begin, n, size;
+    if (!f || !stock161_tank_vec(x, &begin, &n, &size) || index < 0 || (unsigned)index >= n) return 0;
+    ((void (*)(unsigned, unsigned, unsigned))(unsigned long)f)(x->obj, begin + (unsigned)index * size, credit ? 1u : 0u);
+    return 1;
+}
+static int stock161_tank_call(struct pm_stock_rule *r, const char *site_name)
+{
+    struct stock_rule *x = stock161_of(r);
+    unsigned f = stock161_site(site_name);
+    if (!x || !x->obj || !f) return 0;
+    ((void (*)(unsigned))(unsigned long)f)(x->obj);
+    return 1;
+}
+int pm_tank_seed_wave(struct pm_stock_rule *r) { return stock161_tank_call(r, "tank_seed_wave"); }
+int pm_tank_advance(struct pm_stock_rule *r) { return stock161_tank_call(r, "tank_advance"); }
+
+int pm_tank_path_entry(unsigned index, uint64_t *mask, unsigned *lamp)
+{
+    unsigned base = stock161_data("tank_path"), a;
+    long n = pm_port_value("tank_path_entries", 0), sz = pm_port_value("tank_path_entry_size", 16);
+    if (!base || sz < 10 || (long)index >= n) return 0;
+    a = base + index * (unsigned)sz;
+    *mask = stock161_u64(a);
+    *lamp = *(volatile const unsigned short *)(unsigned long)(a + 8);
+    return 1;
+}
+int pm_tank_path_index(struct pm_stock_rule *r, uint64_t shot)
+{
+    unsigned i, lamp;
+    uint64_t mask;
+    (void)r;
+    for (i = 0; pm_tank_path_entry(i, &mask, &lamp); i++)
+        if (mask & shot) return (int)i;
+    return -1;
+}
+/* ---- STOCK END */
+
 /* ---- the modes, and the hooks that call them -------------------------------------------------- */
 /* Hidden, like everything in the object (build_mode.sh: -fvisibility=hidden): two mode
  * objects preloaded together must never bind to each other's modes or calls. */
@@ -1962,6 +3080,7 @@ static void note_thread(const char *what, int *said)
 
 static void events_deliver(void);             /* the events section below */
 static void roster_deferred_tick(void);   /* item 146 */
+static void stock_tick(void);             /* item 160 */
 
 static void on_tick(unsigned *r)
 {
@@ -1983,6 +3102,7 @@ static void on_tick(unsigned *r)
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     roster_deferred_tick();
+    stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
     lamps_tick();                             /* named inserts: their patterns (lights section) */
 }
 
@@ -2498,6 +3618,7 @@ static void pad_mode_start(void)
         }
     }
     lamps_arm();                                    /* the port's named inserts (lights section) */
+    stock_arm();                                    /* item 160: the port's `rule` lines (stock rules section) */
     EACH_MODE(m) modes += m != 0;
     say("armed: %d mode(s); can%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",

@@ -110,7 +110,7 @@ case "$cmd" in
         # have a later stock run take THOSE out.
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
-              "$DUMP"/*.assets
+              "$DUMP"/*.assets "$DUMP"/stock.cfg
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
         n=0
@@ -119,6 +119,10 @@ case "$cmd" in
             put "$f" "$DUMP/$(basename "$f")" || die "could not copy $(basename "$f")"
             n=$((n + 1))
         done
+        # item 160: the counts-as table of the game's own rules, read beside the mode files
+        if [ -f "$S/stock.cfg" ]; then
+            put "$S/stock.cfg" "$DUMP/stock.cfg" || die "could not copy stock.cfg"
+        fi
         a=0
         for f in "$S"/*.assets; do       # a code mode's own assets (the build's carriers)
             [ -f "$f" ] || continue
@@ -134,7 +138,7 @@ case "$cmd" in
         # game reads them as root), so it is said, not fatal.
         if [ "$(id -u)" = 0 ]; then
             given=("$LIB/pad_mode.so" "$DUMP/game.port")
-            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets; do
+            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg; do
                 [ -f "$f" ] && given+=("$f")
             done
             pad_give_back "${given[@]}"

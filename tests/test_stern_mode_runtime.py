@@ -22,14 +22,29 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SDK = os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk")
 
 PORTS = [
+    ("aerosmith_le", "1.15"),
+    ("avengers_infinity_le", "1.09"),
+    ("batman", "1.13"),
     ("beatles", "1.29"),
     ("deadpool_le", "1.14"),
     ("deadpool_pro", "1.16"),
+    ("elvira3", "1.13"),
+    ("foo_fighters_le", "1.04"),
     ("godzilla_le", "1.16"),
     ("godzilla_pro", "1.15"),
+    ("godzilla_pro", "1.16"),
+    ("james_bond_60th_le", "1.11"),
     ("jaws_le", "1.02"),
+    ("led_zeppelin_le", "1.22"),
+    ("led_zeppelin_pro", "1.22"),
+    ("metallica_spike", "1.03"),
+    ("munsters_le", "1.28"),
+    ("rush_le", "1.18"),
+    ("star_wars_elg", "1.10"),
+    ("star_wars_le", "1.30"),
     ("turtles_pro", "1.58"),
     ("turtles_pro", "1.59"),
+    ("uncanny_xmen_le", "0.98"),
 ]
 
 

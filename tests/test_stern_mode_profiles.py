@@ -25,6 +25,7 @@ SDK = REPO / "tools" / "spike2_emu" / "modes" / "sdk"
 ALL = set(MP.PARTS)
 EVERY_CAPABILITY = ("callout", "lights", "screens", "clips", "own-sound", "messages", "award-screen")
 NO_FRAMEWORK_DISPLAY = ("callout", "own-sound", "messages")
+CALLOUT_SOUND = ("callout", "own-sound")
 
 #: port -> (shots, shot_mask_bits, proven, parts it cannot do, what the runtime arms with)
 PORTS = {
@@ -33,9 +34,25 @@ PORTS = {
     "jaws_le-1.02": (27, 64, True, {"lights", "screen", "stack", "events"},
                      ("callout", "screens", "clips", "own-sound", "messages")),
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
-    "turtles_pro-1.59": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
-    "deadpool_pro-1.16": (25, 64, True, ALL, NO_FRAMEWORK_DISPLAY),
+    "turtles_pro-1.59": (17, 32, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
+    "deadpool_pro-1.16": (25, 64, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
     "deadpool_le-1.14": (28, 64, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
+    # item 162 (2026-09-24): every latest build, proven by a full build check in the emulator
+    "godzilla_pro-1.16": (21, 64, True, {"screen", "clip"}, EVERY_CAPABILITY),
+    "aerosmith_le-1.15": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "avengers_infinity_le-1.09": (36, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "batman-1.13": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "elvira3-1.13": (45, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "foo_fighters_le-1.04": (41, 64, True, ALL - {"events"}, ("own-sound",)),
+    "james_bond_60th_le-1.11": (37, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "led_zeppelin_le-1.22": (31, 32, True, ALL - {"events"}, ("screens", "own-sound")),
+    "led_zeppelin_pro-1.22": (30, 32, True, ALL - {"events"}, ("screens", "own-sound")),
+    "metallica_spike-1.03": (40, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
+    "munsters_le-1.28": (27, 32, True, ALL - {"events"}, CALLOUT_SOUND),
+    "rush_le-1.18": (38, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "star_wars_elg-1.10": (30, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "star_wars_le-1.30": (42, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "uncanny_xmen_le-0.98": (33, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
 }
 
 #: the lines a part of a mode puts in the runtime file
@@ -207,7 +224,7 @@ def test_premium_1_16_offers_godzillas_names_with_three_shield_targets():
 
 
 def test_a_card_with_no_port_gets_none_and_the_help_names_making_a_port():
-    assert MP.profile_for_card("godzilla_pro", "1.16.0") is None
+    assert MP.profile_for_card("godzilla_pro", "1.14.0") is None
     assert MP.profile_for_card("turtles_pro", "1.58.1") is None      # a patch level is another build
     assert MP.profile_for_card("", "1.15") is None
     # the words say what is missing; the SDK pointer is the details a tooltip shows
@@ -257,7 +274,7 @@ def _extract_record(project, name, card_version=None):
     ("godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0", "godzilla_le", "godzilla_le_1_16"),
     ("turtles_pro-1_59_0.Release.8G.sdcard.raw", None, "turtles_pro", "turtles_pro_1_59"),
     ("jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0", "jaws_le", "jaws_le_1_02"),
-    ("godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0", "godzilla_pro", None),
+    ("godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw", "1.14.0", "godzilla_pro", None),
 ])
 def test_project_card_from_the_extract_record(tmp_path, name, card_version, game, key):
     _extract_record(tmp_path, name, card_version)
@@ -366,7 +383,7 @@ def test_project_profile_for_each_kind_of_project(tmp_path):
     assert card.game_dir == "godzilla_le" and p.key == "godzilla_le_1_16"
     nop = tmp_path / "nop"
     nop.mkdir()
-    _extract_record(nop, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    _extract_record(nop, "godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw", "1.14.0")
     card, p = MP.project_profile(str(nop))
     assert card.game_dir == "godzilla_pro" and p is None
 
@@ -410,9 +427,9 @@ def test_a_build_refuses_a_mode_naming_shots_the_cards_game_lacks(tmp_path):
 
 
 def test_a_build_refuses_a_card_with_no_port(tmp_path):
-    project = _card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    project = _card_project(tmp_path, "godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw", "1.14.0")
     MP.new_mode(str(project), spec=MP.ModeSpec(name="OLD MODE", screen=False))
-    with pytest.raises(MA.ModeAssetError, match="can't be made for Godzilla Pro 1.16 yet"):
+    with pytest.raises(MA.ModeAssetError, match="can't be made for Godzilla Pro 1.14 yet"):
         MA.build(str(project), None, None, str(tmp_path / "out"))
 
 
@@ -444,13 +461,14 @@ def test_a_build_probes_a_renamed_card_and_uses_its_port(tmp_path, monkeypatch):
 def test_events_come_from_the_port_as_the_runtime_arms_them(tmp_path):
     """A profile's events are the port's ``event`` lines that pad_mode_runtime.c's events_arm
     would arm: a bus event needs ``site hook_dispatch``, a site event its own site. Only the
-    two Godzilla ports carry events today; every other title greys them, with the reason."""
+    ports proven by item 162's build check carry the events that fired; a port without them greys
+    them, with the reason."""
     le = MP.profile("godzilla_le_1_16")
     text = open(_port("godzilla_le-1.16"), encoding="utf-8").read()
     assert list(le.events) == [line.split()[1] for line in text.splitlines() if line.startswith("event ")]
     assert le.can("events") and MP.GODZILLA_PRO_1_15.can("events")
     assert set(MP.profile_from_port(_port("godzilla_pro-1.15")).events) == set(MP.GODZILLA_PRO_1_15.events)
-    for key in ("turtles_pro_1_59", "jaws_le_1_02", "deadpool_pro_1_16"):
+    for key in ("turtles_pro_1_58", "jaws_le_1_02"):
         p = MP.profile(key)
         assert p.events == () and "events yet" in p.why_not("events")
     no_bus = "\n".join(line for line in text.splitlines() if not line.startswith("site hook_dispatch"))

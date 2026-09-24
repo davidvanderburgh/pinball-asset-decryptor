@@ -1,0 +1,445 @@
+# godzilla_pro 1.16 - worked out by the app from the ports of The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, TMNT Pro 1.59.
+# Emulator-proven 2026-09-24 by a full build check (modes/gamecheck.sh play full, item 162): the
+# runtime hooked the game, 21 of its 21 shots came from their switches, a drain ended each ball, and
+# the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
+# program sha1 c9fbe1ba3a4f83a93259402fa2abee8f2bdafdb7, portgen revision 3, 7 reference port(s) of framework generation B.
+
+game           godzilla_pro
+version        1.16
+
+# ---- functions: site <name> <address> <first two instruction words> ----
+#   tick: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site tick             0x003e97f8 0xe92d4038 0xe3a00037
+#   shot_dispatch: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site shot_dispatch    0x000d1a9c 0xe92d41f0 0xe24dd008
+#   ball_end: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16]
+site ball_end         0x000d3dcc 0xe92d40f8 0xe3016c10
+#   sound_lookup: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site sound_lookup     0x00345ab0 0xe92d4038 0xe1a05000
+#   score_add: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site score_add        0x00257458 0xe30518ea 0xe340107e
+#   callout: placed through 3 callers, e.g. the bl at 0x433b8; other titles' ports place 0x2ac950 (The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site callout          0x00187f44 0xe3043928 0xe340307a
+#   callout_nth: located (strict); other titles' ports place 0x2acb04 (The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site callout_nth      0x0018800c 0xe3043928 0xe340307a
+#   light_run: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site light_run        0x001c3454 0xeafffdc4 0xe92d40f0
+#   lamp_group: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site lamp_group       0x00285314 0xe92d4038 0xe1a04000
+#   show_priority: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site show_priority    0x003e9c3c 0xe30d315c 0xe340307d
+#   award_screen: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site award_screen     0x0035ddc8 0xe92d4070 0xe24dd008
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site string_new       0x00016920 0xe28fc606 0xe28ccae8
+#   dynamic_cast: PLT stub for __dynamic_cast [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site dynamic_cast     0x00016314 0xe28fc606 0xe28ccae8
+#   resource_get: placed through 3 callers, e.g. the bl at 0x406098 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site resource_get     0x003eef00 0xe92d43f0 0xe1a04000
+#   find_node: placed through 3 callers, e.g. the bl at 0x20940 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02]
+site find_node        0x0057ec4c 0xe92d4070 0xe24dd008
+#   find_text: placed through 3 callers, e.g. the bl at 0x20b8c [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site find_text        0x0057e6e8 0xe92d4070 0xe24dd008
+#   set_text: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site set_text         0x00562414 0xe92d47f0 0xe1a06000
+#   clip_play: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site clip_play        0x000528a4 0xe92d43f0 0xe24dd014
+#   clip_stop: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site clip_stop        0x00052b04 0xe92d4008 0xebfffeea
+#   video_player: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site video_player     0x00052694 0xe92d4010 0xe305475c
+#   video_surface: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+site video_surface    0x000526b8 0xe92d4070 0xe305575c
+#   surface_state: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site surface_state    0x00571978 0xe5900550 0xe2800008
+#   player_advance: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site player_advance   0x0035e1c0 0xe2501000 0x012fff1e
+#   display_draw: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+site display_draw     0x004d63d8 0xe3520001 0x812fff1e
+#   sound_play: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_play       0x002ac950 0xe92d4010 0xe305e2e8
+#   sound_nth: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_nth        0x002acb04 0xe92d4010 0xe305e2e8
+#   sound_active: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_active     0x002ad0c4 0xe59f3034 0xe2831e62
+#   sound_stop: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_stop       0x002ad21c 0xe92d40f8 0xe1a06000
+#   sound_worker: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_worker     0x002abf3c 0xe92d4ff0 0xe2507000
+#   stock_any_running: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site stock_any_running 0x000d1e20 0xe92d4070 0xe30d6ed8
+#   stock_battle_running: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site stock_battle_running 0x000d2040 0xe92d4070 0xe30d6ed8
+#   stock_multiball_running: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site stock_multiball_running 0x000d2218 0xe92d40f8 0xe30d6ed8
+#   hook_dispatch: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14]
+site hook_dispatch    0x003a6398 0xe35000cf 0xe92d4038
+#   skill_shot_award: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site skill_shot_award 0x0016df38 0xe92d4ff0 0xe24dd03c
+#   mball_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site mball_start      0x000d521c 0xe92d40f8 0xe1a04000
+#   mball_stop: located (loose) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site mball_stop       0x000d52f8 0xe92d4010 0xe1a04000
+#   roster_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site roster_start     0x001220b8 0xe5903000 0xe5933020
+#   roster_done: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site roster_done      0x00122014 0xe92d4010 0xe1a04000
+#   roster_city_done: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site roster_city_done 0x00135394 0xe92d4070 0xe24dd010
+#   display_effect_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_effect_start 0x00437e1c 0xe92d47f0 0xe2516000
+#   display_effect_next: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_effect_next 0x00438200 0xe3023a64 0xe340307e
+#   display_priority_now: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_priority_now 0x00438694 0xe5d0000e 0xe12fff1e
+#   layered_priority: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site layered_priority 0x0003ce7c 0xe92d4008 0xe5903058
+#   layered_waiter: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site layered_waiter   0x00052d54 0xe92d4ff0 0xe30ec904
+#   stock_rule_get: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site stock_rule_get   0x000d1c10 0xe351001a 0xe92d4008
+#   caward_add: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site caward_add       0x0002facc 0xe92d41f0 0xe1a04000
+#   caward_build: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site caward_build     0x0002f784 0xe92d4ff8 0xe1a0b000
+#   caward_add_scaled: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site caward_add_scaled 0x0002fb8c 0xe92d4ff8 0xe1a09002
+#   show_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site show_start       0x003e99dc 0xe92d47f0 0xe2508000
+#   game_event: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site game_event       0x003a5f6c 0xe92d47f0 0xe1a09000
+#   event_post_replacing: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site event_post_replacing 0x003ab40c 0xe92d4070 0xe1a05001
+#   event_cancel: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site event_cancel     0x003ab37c 0xe92d40f8 0xe30d6158
+#   ebirah_refill_counts: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site ebirah_refill_counts 0x0007f848 0xe92d4070 0xe1a04000
+#   ebirah_stage_done: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site ebirah_stage_done 0x0007fd58 0xe92d4038 0xe1a04000
+#   ebirah_award_screen: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site ebirah_award_screen 0x0007f898 0xe92d4ff0 0xe24dd024
+#   ebirah_final_mask: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site ebirah_final_mask 0x0007fcfc 0xe92d4010 0xe1a04000
+#   tank_maser_phase: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site tank_maser_phase 0x001064e8 0xe92d4038 0xe1a04000
+#   tank_positions_or: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site tank_positions_or 0x00106c68 0xe5903068 0xe590c06c
+#   tank_pick_record: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site tank_pick_record 0x00106b8c 0xe92d41f0 0xe1a07003
+#   tank_path_index: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site tank_path_index  0x00106b1c 0xe92d00f0 0xe1a07003
+#   tank_seed_wave: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site tank_seed_wave   0x0010742c 0xe92d47f0 0xe24dd008
+#   tank_destroy: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site tank_destroy     0x00107754 0xe3520000 0xe3a03000
+#   tank_advance: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site tank_advance     0x00107be8 0xe5903000 0xe92d4ff0
+#   tank_award_screen_kill: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site tank_award_screen_kill 0x00106970 0xe92d43f0 0xe24dd01c
+#   switch_hit: located (strict) [The Beatles 1.29]
+site switch_hit       0x001e1508 0xe2503000 0x012fff1e
+#   switch_hit2: located (strict) [The Beatles 1.29]
+site switch_hit2      0x001e15a8 0xe92d4010 0xe2504000
+
+# ---- globals: data <name> <address> ----
+#   cur_player: derived from 2 places, e.g. 0x338790+0x60 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool Pro 1.16, TMNT Pro 1.59]
+data cur_player             0x0070e848
+#   scores: derived from 2 places, e.g. 0x2b2524+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data scores                 0x007b1500
+#   mode_mask: derived from 2 places, e.g. 0x1c420+0xf8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data mode_mask              0x007e58ea
+#   event_head: derived from 2 places, e.g. 0x52d08+0x30 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data event_head             0x007dd158
+#   event_current: derived from 2 places, e.g. 0x1d440+0xe8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data event_current          0x007dd15c
+#   resource_manager: a base 0x7f51d0 + field 0x80; the base derived from 2 places, e.g. 0x406020+0x54 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data resource_manager       0x007d44a8
+#   typeinfo_resource: derived from 2 places, e.g. 0x2075c+0x54 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data typeinfo_resource      0x00626be4
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x2075c+0x58 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data typeinfo_scene_player  0x0064a5a4
+#   display_holder: derived from 2 places, e.g. 0x404620+0x28 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data display_holder         0x007d4428
+#   message_count: derived from 2 places, e.g. 0x394d6c+0xd4 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data message_count          0x005f22e8
+#   message_remap: derived from 2 places, e.g. 0x394e48+0x10 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data message_remap          0x007d57cc
+#   message_table: derived from 2 places, e.g. 0x394eac+0x24 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data message_table          0x0074b9b8
+#   award_screen_arg: derived from 2 places, e.g. 0x32e48+0xb4 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+data award_screen_arg       0x00701368
+#   sound_channels: derived from 2 places, e.g. 0x43c3fc+0x50 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_channels         0x007b53f4
+#   sound_queue: derived from 2 places, e.g. 0x43d304+0xc [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_queue            0x007b5c68
+#   city_variants: derived from 2 places, e.g. 0x18bbd0+0x98 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data city_variants          0x007adfc0
+#   sound_requests: derived from 2 places, e.g. 0x43c898+0x34 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_requests         0x00778288
+#   sound_request_count: derived from 2 places, e.g. 0x53604+0x30 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_request_count    0x00611f54
+#   stock_mode_manager: derived from 2 places, e.g. 0x47220+0x2c [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data stock_mode_manager     0x007a46ac
+#   rule_battle: derived from 2 places, e.g. 0x7f998+0x64 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data rule_battle            0x007a4638
+#   roster_screen_table: derived from 2 places, e.g. 0x190acc+0x5c [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data roster_screen_table    0x007035f4
+#   rule_cities: derived from 2 places, e.g. 0x31e64+0x20 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data rule_cities            0x007a4840
+#   display_effects: derived from 1 places, e.g. 0x4394d4+0xa4; ONE place is enough here: the runtime uses it only when the manager it points at holds award_screen_arg's table (disp_manager), so a wrong one holds nothing [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data display_effects        0x007e2a64
+#   layered_displays: derived from 1 places, e.g. 0x3cdb0+0x8; ONE place is enough here: the program loads it in ONE place only (its getter), so two can never agree [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data layered_displays       0x00700c2c
+#   lamp_layers: derived from 2 places, e.g. 0x3a6010+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data lamp_layers            0x007e2f2c
+#   light_count: derived from 2 places, e.g. 0x1f7e8+0x54 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data light_count            0x007e16e8
+#   ebirah_stage_awards: derived from 1 places, e.g. 0x816e8+0x22c; ONE place is enough here: the rule's constructor copies the rodata table in ONE place; the runtime reads it only through a rule whose vtable words matched [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data ebirah_stage_awards    0x0062ca28
+#   ebirah_lamp_table: derived from 1 places, e.g. 0x8465c+0x54; ONE place is enough here: the rule's lamp fiber loads the rodata table from ONE literal; the runtime reads it only through a rule whose vtable words matched [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data ebirah_lamp_table      0x0062cae0
+#   tank_path: derived from 1 places, e.g. 0x109964+0x48; ONE place is enough here: the tank rule's constructor loads the rodata path from ONE literal; the runtime reads it only through a rule whose vtable words matched [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data tank_path              0x00636460
+#   tank_spot_list: derived from 1 places, e.g. 0x108ea0+0x194; ONE place is enough here: the tank rule's spot getter loads the rodata list from ONE literal; the runtime reads it only through a rule whose vtable words matched [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data tank_spot_list         0x00636430
+#   score_mult: derived from 2 places, e.g. 0x15efa4+0xc [The Beatles 1.29]
+data score_mult             0x0070780c
+
+# ---- scenes ----
+#   scene hud: COPIED, unverified (no code that loads it could be lined up; the target program names the same id); other titles' ports place 9d57875196c613785a1eee010c55223a0f1aa821 (Jaws LE 1.02) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+scene hud                  32e6ae280ddaec08e203a02289bb39a04968e7b0
+#   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x526d4+0x4) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+#   scene attract: derived: the target code loads it (derived from 1 places, e.g. 0x2075c+0x28) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
+scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
+
+# ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
+value mode_mask_busy        0x210
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value light_owner           538
+value light_lts             224
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value display_at            0x7c
+value award_message_at      0xa0
+value award_value_at        0xa8
+value award_count_at        0xb0
+value award_screen_type     122
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value roster_slots          7
+value roster_vec_at         8
+value roster_record_size    12
+value roster_id_at          4
+value roster_qualified_at   83
+value roster_start_after_ms 3000
+value roster_screen_record_size 32
+value roster_callout_at      28
+value roster_city_bit        1
+value roster_city_index_at   20
+value roster_city_vec_at     44
+value roster_city_record_size 16
+value display_host           29
+value display_mode_level     184
+value display_now_at         0xc
+value display_priority_at    0xe
+value layered_record_size    16
+value layered_priority_at    12
+value layered_wait_for_at    0xa0
+value layered_fg_at          0x58
+value layered_fg_flags_at    0x60
+value lamp_slot_size        40
+value lamp_slot_level       2
+value lamp_slot_alpha       3
+value lamp_slot_fade        8
+value lamp_slot_used        36
+value lamp_group_prio       4
+value lamp_group_next       20
+value lamp_fade             3
+value stock_slot_shot   42
+value stock_slot_active 14
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      8
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value ebirah_rule           12
+value ebirah_spin_left_at   0x8c      # + 4 * player, spins left on the Left spinner (15 at a refill)
+value ebirah_spin_top_at    0x9c      # Top spinner (40)
+value ebirah_spin_shield_at 0xac      # Shield ramp spinner (15)
+value ebirah_stage_count_at 0xbc      # + 4 * player: stages done (the 2-stage RuleCities/RuleAllies mark reads it)
+value ebirah_stage_index_at 0xd0      # which of 5M / 10M / 15M is next (START resets it)
+value ebirah_kotm_at        0xd4      # byte: King of the Monsters runs (awards go to rule 20)
+value ebirah_spin_left_bit  0x200     # the raw shot bits the handler tests (each spinner's middle bit)
+value ebirah_spin_top_bit   0x2000
+value ebirah_final_shot     0x40      # the Pop bumper: the final blow (or bit 42, unnamed)
+value ebirah_final_mask_lo  0x40      # the field once every counter is 0 (0x814cc writes 0x400_00000040)
+value ebirah_final_mask_hi  0x400
+value ebirah_reminder_event 0x14e
+value ebirah_stage_award_count 3
+value ebirah_stage_msg      0xce3     # award screen messages 0xce3 / 0xce4 / 0xce5 (left / top / shield), 0xce6 the final blow
+value ebirah_stage_lamp_left  0x71    # 113 LEFT SPINNER, the lamp the stage screen names
+value ebirah_stage_lamp_top   0x96    # 150 TOP SPINNER
+value ebirah_stage_lamp_shield 0x7a   # 122 ATTACK MECHA (the shield ramp spinner's insert)
+value ebirah_lamp_entries   6
+value tank_rule             4
+value tank_records_at       0x68      # a std::vector (begin, end) of tank records
+value tank_record_size      40
+value tank_record_active_at 0
+value tank_record_pos_at    8         # u64: the tank's position (a path mask)
+value tank_record_prev_at   0x10      # u64: where it was before the last step (a grace window for the handler)
+value tank_record_dest_at   0x18      # u64: its destination (the Godzilla target 0x80000)
+value tank_record_value_at  0x20      # u64: what destroying it pays (2,500,000 - 500,000 a step, floor 1,500,000)
+value tank_level_at         0x70      # + 4 * player
+value tank_value_at         0x80      # + 8 * player, u64: this player's tank value (+150,000 a kill)
+value tank_destroyed_at     0xa8      # u32: tanks destroyed this wave (4/5/6/7/8 by level light the Maser)
+value tank_multiplier_at    0xac      # the Maser multiplier (3 a wave, -1 per tank that reaches the target)
+value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
+value tank_path_entries     6
+value tank_path_entry_size  16
+
+# ---- shots: COPIED from Godzilla Premium/LE 1.16, the same title; unverified ----
+shot 0x00100000    Left ramp
+shot 0x00200000    Right ramp
+shot 0x00400000    Building
+shot 0x00080000    Godzilla target
+shot 0x08000000    Maser target
+shot 0x10000000    Powerline left
+shot 0x20000000    Powerline center
+shot 0x40000000    Powerline right
+shot 0x80000000    Shield target left
+shot 0x100000000   Shield target center
+shot 0x200000000   Shield target right
+shot 0x400000000   Skill shot
+shot 0x1000000000  Big loop
+shot 0x2           Slingshot
+shot 0x4           Left return lane
+shot 0x10          Right return lane
+shot 0x40          Pop bumper
+shot 0x10000000000 Mecha exit bottom
+shot 0x200         Left spinner
+shot 0x2000        Top spinner
+shot 0x20000       Shield ramp spinner
+
+# ---- callouts and text: COPIED from Godzilla Premium/LE 1.16, the same title; unverified ----
+callout countdown           1287
+callout ten_seconds         1291
+callout time_up             1295
+text example_start_shot     Maser target
+text example_clip           Mothra_godzilla_attack20
+text example_lights_on      blele --sweep 0 --lts 224 --red 0 --green 255 --blue 0 --freq 10 --use_alpha 1 --alpha 255
+text example_lights_off     blele --sweep 1 --lts 224 --fade 20 --rgb 0 --freq 10 --delay_start 15 --end 1
+
+# ---- events: COPIED, unverified - prove them with event_probe.c (MODE_SDK.md, Events) ----
+
+lamp 285          0x8            LEFT OUTLANE  # lamp 98, I/O group 6 index 7, at 29,498
+lamp 286          0x4            LEFT RETURN LANE  # lamp 99, I/O group 6 index 6, at 53,472
+lamp 287          0x20           RIGHT OUTLANE  # lamp 100, I/O group 6 index 5, at 264,498
+lamp 288          0x10           RIGHT RETURN LANE  # lamp 101, I/O group 6 index 4, at 242,472
+lamp 289          0              SHOOT AGAIN (X2)  # lamp 102, I/O group 6 index 53, at 0,0
+lamp 290          0              ADV FIGHTER LEFT  # lamp 103, I/O group 6 index 52, at 69,537
+lamp 291          0              FIGHTER LEFT 1  # lamp 104, I/O group 6 index 49, at 57,549
+lamp 292          0              FIGHTER LEFT 2  # lamp 105, I/O group 6 index 50, at 69,558
+lamp 293          0              FIGHTER LEFT 3  # lamp 106, I/O group 6 index 51, at 80,566
+lamp 294          0              ADV FIGHTER RIGHT  # lamp 107, I/O group 6 index 12, at 225,537
+lamp 295          0              FIGHTER RIGHT 1  # lamp 108, I/O group 6 index 9, at 239,549
+lamp 296          0              FIGHTER RIGHT 2  # lamp 109, I/O group 6 index 10, at 227,558
+lamp 297          0              FIGHTER RIGHT 3  # lamp 110, I/O group 6 index 11, at 215,566
+lamp 298          0x8000000      MASER  # lamp 111, I/O group 6 index 62, at 51,417
+lamp 299          0              MASER READY  # lamp 112, I/O group 6 index 63, at 67,425
+lamp 300,301,302  0x800000000    LEFT SPINNER  # lamp 113, I/O group 6 index 56, at 55,373
+lamp 303          0              TANK 1  # lamp 114, I/O group 6 index 55, at 69,391
+lamp 304          0              ADV RAMPAGE  # lamp 115, I/O group 6 index 54, at 77,405
+lamp 305          0              RODAN  # lamp 116, I/O group 6 index 41, at 178,421
+lamp 306          0              MOTHRA  # lamp 117, I/O group 6 index 27, at 199,424
+lamp 307          0              ANGUIRUS  # lamp 118, I/O group 6 index 47, at 186,439
+lamp 308,309,310  0              TOP SAUCER  # lamp 119, I/O group 6 index 28, at 209,410
+lamp 311,312,313  0              BOTTOM SAUCER  # lamp 120, I/O group 6 index 17, at 215,436
+lamp 314          0              SAUCER  # lamp 121, I/O group 6 index 8, at 225,450
+lamp 315          0              ATTACK MECHA  # lamp 122, I/O group 6 index 23, at 200,381
+lamp 316          0              TANK 6  # lamp 123, I/O group 6 index 22, at 227,394
+lamp 317          0x2000000000   SELECT CITY  # lamp 124, I/O group 6 index 21, at 236,380
+lamp 318,319,320  0x4000000000   MECHA LANE  # lamp 125, I/O group 6 index 24, at 282,393
+lamp 321,322,323  0x40           POP BUMPER  # lamp 126, I/O group 6 index 42, at 251,413
+lamp 324,325,326  0x80000000     SHIELD LEFT  # lamp 127, I/O group 6 index 31, at 188,308
+lamp 330,331,332  0x100000000    SHIELD CENTER  # lamp 129, I/O group 6 index 37, at 195,332
+lamp 327,328,329  0x200000000    SHIELD RIGHT  # lamp 128, I/O group 6 index 34, at 223,335
+lamp 333          0              TANKS  # lamp 130, I/O group 7 index 39, at 107,386
+lamp 334          0              KAIJU  # lamp 131, I/O group 7 index 8, at 127,392
+lamp 335          0              BRIDGE  # lamp 132, I/O group 7 index 9, at 146,392
+lamp 336          0              POWER  # lamp 133, I/O group 7 index 10, at 166,386
+lamp 337          0              NY  # lamp 134, I/O group 7 index 30, at 118,360
+lamp 338          0              LONDON  # lamp 135, I/O group 7 index 38, at 128,374
+lamp 339          0              PARIS  # lamp 136, I/O group 7 index 15, at 145,374
+lamp 340          0              TOKYO  # lamp 137, I/O group 7 index 16, at 155,360
+lamp 341          0              PLANET X  # lamp 138, I/O group 7 index 26, at 137,353
+lamp 342          0              MONSTER ZERO WIZ  # lamp 139, I/O group 7 index 29, at 114,328
+lamp 343          0              KING OF THE MONSTERS WIZ  # lamp 140, I/O group 7 index 28, at 137,331
+lamp 344          0              MECHA WIZ  # lamp 141, I/O group 7 index 27, at 160,328
+lamp 345          0x400000000    SKILL SHOT  # lamp 142, I/O group 7 index 47, at 49,284
+lamp 346,347,348  0x100000       LEFT RAMP  # lamp 143, I/O group 7 index 48, at 69,272
+lamp 349          0              TANK 2  # lamp 144, I/O group 7 index 40, at 76,287
+lamp 350          0              ADV TRAIN  # lamp 145, I/O group 7 index 41, at 83,304
+lamp 351          0x80000        MAGNA GRAB  # lamp 146, I/O group 7 index 44, at 89,260
+lamp 352          0              TANK 3  # lamp 147, I/O group 7 index 43, at 95,276
+lamp 353          0              ATTACK BRIDGE  # lamp 148, I/O group 7 index 42, at 102,292
+lamp 354,355,356  0xc00000       BUILDING  # lamp 149, I/O group 7 index 76, at 123,202
+lamp 357,358,359  0x1800         TOP SPINNER  # lamp 150, I/O group 7 index 67, at 165,207
+lamp 360          0x10000000     POWERLINE LEFT  # lamp 151, I/O group 7 index 79, at 104,219
+lamp 361          0              LITE DESTRUCTION JACKPOT  # lamp 152, I/O group 7 index 71, at 124,220
+lamp 362          0x20000000     POWERLINE CENTER  # lamp 153, I/O group 7 index 70, at 144,216
+lamp 363          0              TANK 4  # lamp 154, I/O group 7 index 66, at 162,223
+lamp 364          0              TESLA STRIKE  # lamp 155, I/O group 7 index 62, at 159,242
+lamp 365,366,0    0              BUILDING FIRE LEFT 1  # lamp 156+157, I/O group 7 index 86, at 118,267
+lamp 367,368,0    0              BUILDING FIRE LEFT 2  # lamp 158+159, I/O group 7 index 72, at 117,254
+lamp 369,370,0    0              BUILDING FIRE LEFT 3  # lamp 160+161, I/O group 7 index 74, at 116,239
+lamp 371,372,0    0              BUILDING FIRE RIGHT 1  # lamp 162+163, I/O group 7 index 84, at 137,265
+lamp 373,374,0    0              BUILDING FIRE RIGHT 2  # lamp 164+165, I/O group 7 index 82, at 136,254
+lamp 375,376,0    0              BUILDING FIRE RIGHT 3  # lamp 166+167, I/O group 7 index 80, at 135,238
+lamp 377          0              HEAT RAY L1  # lamp 168, I/O group 7 index 22, at 169,184
+lamp 378          0              HEAT RAY L2  # lamp 169, I/O group 7 index 23, at 172,172
+lamp 379          0              HEAT RAY L3  # lamp 170, I/O group 7 index 24, at 176,159
+lamp 380          0              HEAT RAY  # lamp 171, I/O group 7 index 25, at 180,144
+lamp 381,382,383  0x200000       RIGHT RAMP  # lamp 172, I/O group 7 index 17, at 199,189
+lamp 384          0              TANK 5  # lamp 173, I/O group 7 index 20, at 192,205
+lamp 385          0x40000000     POWERLINE RIGHT  # lamp 174, I/O group 7 index 21, at 212,204
+lamp 386,387,388  0x1000000000   BIG LOOP  # lamp 175, I/O group 7 index 31, at 195,251
+lamp 389          0              DESTRUCTION JACKPOT  # lamp 176, I/O group 7 index 34, at 170,273
+lamp 390          0              TAIL WHIP  # lamp 177, I/O group 7 index 35, at 176,297
+lamp 397          0              SCOOP BB-BATTLE  # lamp 184, I/O group 6 index 14, at 254,346
+lamp 398          0              SCOOP BB-GODZILLA PWR UP  # lamp 185, I/O group 6 index 15, at 254,346
+lamp 399          0              SCOOP BB-SUMMON ALLY  # lamp 186, I/O group 6 index 16, at 254,346
+lamp 401          0              LOWER PLAYFIELD GI-RED(X4)  # lamp 188, I/O group 6 index 0, at 0,0
+lamp 403          0              UPPER PLAYFIELD GI-RED(X9)  # lamp 190, I/O group 7 index 0, at 0,0
+lamp 404          0              UPPER PLAYFIELD GI-WHT(X12)  # lamp 191, I/O group 7 index 1, at 0,0
+lamp 405          0              MASER FIRE FLASH  # lamp 192, I/O group 6 index 48, at 91,438
+lamp 406          0x200          MASER FLASH  # lamp 193, I/O group 6 index 59, at 30,388
+lamp 407          0              BUILDING SPOT  # lamp 194, I/O group 6 index 60, at 57,382
+lamp 408          0              GLOBE FLASH  # lamp 195, I/O group 7 index 36, at 287,206
+lamp 409          0x2000         TOP SPINNER FLASH  # lamp 196, I/O group 7 index 60, at 172,100
+
+# ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47

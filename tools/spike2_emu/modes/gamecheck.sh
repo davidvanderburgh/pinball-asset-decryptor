@@ -63,6 +63,52 @@ launch_ball() {
         python3 "$RIG/plunge.py" plunge > /dev/null 2>&1
     fi
 }
+#: coins, Start, and the ball served by hand on a title with no feeder. A card not on free play
+#: wants credits: a dollar a game is four coins (Batman 66), so eight go in (spares do no harm)
+start_game() {
+    python3 "$RIG/plunge.py" coin 8 > /dev/null 2>&1 || say "plunge.py coin said no"
+    python3 "$RIG/plunge.py" game > /dev/null 2>&1
+    nofeed && { say "no ball feeder on this title: serving the ball by hand"; sleep 2; launch_ball; }
+}
+#: Guided Setup (a first boot's menu): walk its red row down with SERVICE PLUS until the last row,
+#: Save & Exit, is the red one (menurow.py reads a glshot.sh frame), then SERVICE SELECT. Measured
+#: on Avengers LE 1.09, 2026-09-24. 1 when the screen is not that menu.
+#: guided_setup <backs>: a row's EDITOR (Start or Select opened it: the language list, its title
+#: previewing each language as PLUS walks it) is not the menu; up to <backs> SERVICE BACKs close it,
+#: leaving the setting as it was, and the walk goes on from the menu
+guided_setup() {
+    local plus sel back k state shot backs=${1:-0}
+    plus=$(awk '!/^#/ && toupper($0) ~ /SERVICE PLUS/ {print $1; exit}' "$LIST")
+    sel=$(awk '!/^#/ && toupper($0) ~ /SERVICE SELECT/ {print $1; exit}' "$LIST")
+    back=$(awk '!/^#/ && toupper($0) ~ /SERVICE BACK/ {print $1; exit}' "$LIST")
+    [ -n "$plus" ] && [ -n "$sel" ] || return 1
+    shot=$(mktemp "${TMPDIR:-/tmp}/gamecheck.XXXXXX.png")
+    for k in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+        (cd "$RIG" && bash glshot.sh "$shot" > /dev/null 2>&1) || break
+        state=$(python3 "$RIG/menurow.py" "$shot" 2>/dev/null)
+        case "$state" in
+            "menu last=yes")
+                python3 "$RIG/swpoke.py" "$sel" 300 > /dev/null 2>&1
+                sleep 4
+                rm -f "$shot"
+                return 0 ;;
+            "menu last=no")
+                python3 "$RIG/swpoke.py" "$plus" 300 > /dev/null 2>&1
+                sleep 1.2 ;;
+            *)
+                if [ "$backs" -gt 0 ] && [ -n "$back" ]; then
+                    backs=$((backs - 1))
+                    python3 "$RIG/swpoke.py" "$back" 300 > /dev/null 2>&1
+                    sleep 1.5
+                    continue
+                fi
+                cp "$shot" "$DUMP/gamecheck.png" 2>/dev/null   # the frame it judged, for a person
+                break ;;
+        esac
+    done
+    rm -f "$shot"
+    return 1
+}
 #: drain until the object logs one more end of ball (up to four drains): 0 when one did
 drain_until_end() {
     local before n end
@@ -115,15 +161,29 @@ case "$cmd" in
         wait_for 90 "past Tech Alerts|standing down|did not clear|gave up|already past" "$AUTO" \
             || say "(the rig never said the Tech Alerts were cleared; starting anyway)"
         game_up || die "the game stopped before a game could start"
+        # a title's FIRST boot on this rig: mktables writes its switch list a minute or so in
+        # (from the shim's dump, or read out of the program by swelf.py)
+        wait_for 150 "" "$LIST" || [ -f "$LIST" ] || die "the rig has no switch list for $GAME ($LIST)"
         sleep 3
-        [ -f "$LIST" ] || die "the rig has no switch list for $GAME ($LIST)"
-        say "starting a game"
-        # a card not on free play wants credits: a dollar a game is four coins (Batman 66), so
-        # eight go in before Start (the spare credits do no harm)
-        python3 "$RIG/plunge.py" coin 8 > /dev/null 2>&1 || say "plunge.py coin said no"
-        python3 "$RIG/plunge.py" game > /dev/null 2>&1
-        nofeed && { say "no ball feeder on this title: serving the ball by hand"; sleep 2; launch_ball; }
-        sleep 3
+        # a first boot opens Guided Setup: leave it BEFORE Start, which there opens a row's editor
+        guided_setup 0 && { say "first boot: left Guided Setup by Save & Exit"; sleep 3; }
+        # a Start the game ignores (a service screen the rig's autoattract opened for a moment, a
+        # menu a first boot left up) is tried again, up to three times, leaving any menu first
+        started=""
+        for attempt in 1 2 3; do
+            say "starting a game"
+            start_game
+            wait_for 12 "in_game 0 -> 1" "$LOG" && { started=1; break; }
+            if guided_setup 2; then
+                say "left Guided Setup by Save & Exit"
+                sleep 3
+            else
+                say "no game yet (try $attempt)"
+                sleep 8
+            fi
+        done
+        [ -n "$started" ] || die "no game started after three tries, and the screen is not a menu the check can leave"
+        sleep 2
         ids=()
         while read -r id _num _node _bit name; do
             case "$id" in ""|\#*|*[!0-9]*) continue ;; esac

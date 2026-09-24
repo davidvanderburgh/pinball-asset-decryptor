@@ -1,5 +1,9 @@
 # deadpool_pro 1.16 - drafted by port_tool.py from jaws_le-1.02.port, finished with call_probe.c and the
 # end-of-ball hook (item 138). Lights, screens and clips are off: their functions were not found.
+# Emulator-proven 2026-09-24 by a full build check (modes/gamecheck.sh play full, item 162): the
+# runtime hooked the game, 25 of its 25 shots came from their switches, a drain ended each ball, and
+# the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
+
 game           deadpool_pro
 version        1.16
 
@@ -86,3 +90,14 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Lil Deadpool target
+
+# ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
+site hook_dispatch    0x002ef67c 0xe35000cf 0xe92d4038
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47

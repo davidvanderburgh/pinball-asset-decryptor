@@ -1445,9 +1445,9 @@ def test_modes_tab_premium_1_16_project_offers_godzillas_names(tmp_path):
 
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_card_with_no_port_points_at_making_a_port(tmp_path):
-    """Godzilla Pro 1.16 has no port: the tab says so, names MODE_SDK.md's "Making a
+    """Godzilla Pro 1.14 has no port: the tab says so, names MODE_SDK.md's "Making a
     port", and New and Examples are off."""
-    project = _modes_card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    project = _modes_card_project(tmp_path, "godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw", "1.14.0")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, project)
         st = _st(w)
@@ -1455,7 +1455,7 @@ def test_modes_tab_card_with_no_port_points_at_making_a_port(tmp_path):
         # what to do is in words; the SDK pointer for someone who writes C is a tooltip
         details = st["no_port_details"]
         assert "MODE_SDK.md" in details and "Making a port for another game or version" in details
-        assert "Godzilla Pro 1.16" in note and "MODE_SDK" not in note
+        assert "Godzilla Pro 1.14" in note and "MODE_SDK" not in note
         assert st["new_ok"] is False
         assert st["ex_ok"] is False
 
@@ -1539,8 +1539,8 @@ def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
         assert all(st["dis"]["film_" + t] for t in ("clip", "still", "sound"))
         film = st["reasons"]["film"]
         assert "a clip, a picture for the screen or a sound" in film and "TMNT Pro 1.59" in film
-        # item 147's events: TMNT's port names none, so "An event" is greyed with the reason
-        assert st["dis"]["events"] and tmnt.why_not("events") in st["reasons"]["events"]
+        # item 147's events: TMNT 1.59's port carries the ones item 162's build check saw fire
+        assert not st["dis"]["events"] and tmnt.can("events")
 
         jaws = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0",
                                    folder="jaws")
@@ -1564,14 +1564,14 @@ def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
 
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_no_port_card_after_another_title_never_rewrites_a_modes_shots(tmp_path):
-    """Item 148: after a TMNT project, a project on a card with no port (Godzilla Pro 1.16)
+    """Item 148: after a TMNT project, a project on a card with no port (Godzilla Pro 1.14)
     that already holds Godzilla modes shows each mode with the shots of the title it was
     made for - never TMNT's - read-only, and nothing it does rewrites mode.json. A no-port
     project with no modes shows no shot names at all."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
     tmnt = _modes_card_project(tmp_path, "turtles_pro-1_59_0.Release.8G.sdcard.raw", "1.59.0")
-    gz116 = _modes_card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0",
+    gz116 = _modes_card_project(tmp_path, "godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw", "1.14.0",
                                 folder="gz116")
     for name, spec in MP.example_specs()[:2]:
         MP.new_mode(str(gz116), name, spec)
@@ -1604,8 +1604,8 @@ def test_modes_tab_no_port_card_after_another_title_never_rewrites_a_modes_shots
                                    folder="jaws")
         _project(w, jaws)
         assert len(_st(w)["profile"]["shots"]) == 27
-        empty = _modes_card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw",
-                                    "1.16.0", folder="empty")
+        empty = _modes_card_project(tmp_path, "godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw",
+                                    "1.14.0", folder="empty")
         _project(w, empty)
         st = _st(w)
         assert st["profile"]["shots"] == [] and st["shots_on"] == []
@@ -1743,8 +1743,8 @@ def test_modes_tab_advanced_and_the_games_call_follow_the_title(tmp_path):
         st = _st(w)
         assert st["awards"]["Left orbit"] == "750000"        # shown, not kept aside
         assert st["form"]["end_shot"] == "Center loop"
-        no_port = _modes_card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw",
-                                      "1.16.0", folder="noport")
+        no_port = _modes_card_project(tmp_path, "godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw",
+                                      "1.14.0", folder="noport")
         _project(w, no_port)                                 # no port, no modes: no shot names anywhere
         st = _st(w)
         assert st["awards"] == {} and st["profile"]["end_shots"] == [svc.PARAM_NEVER]

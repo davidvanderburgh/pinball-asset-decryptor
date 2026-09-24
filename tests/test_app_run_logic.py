@@ -1055,8 +1055,16 @@ def _images_open(w, assets):
             pass
     w.run(_set)
     w.call("images.scan")
+    # The populate clears "scanning" as it STARTS and loads this folder's
+    # sidecar (group names reseeded and saved) further on, publishing "dir"
+    # near its end: wait for THIS folder, then let the loop finish that
+    # populate.  Waiting on "scanning" alone read the half-populated state
+    # (and the last folder's "total") on a slow macOS runner.
     assert _wait(w, lambda: not w.state("images").get("scanning")
-                 and w.state("images").get("total")), w.state("images")
+                 and w.state("images").get("total")
+                 and w.state("images").get("dir") == str(assets)), \
+        w.state("images")
+    w.drain()
 
 
 def _group_heads(w):

@@ -228,6 +228,41 @@ def test_the_page_says_when_the_card_is_not_the_projects(tmp_path):
         w.run(w.window.emulate_card_var.set, "")
         _wait(w, lambda: w.state(NS).get("which") is None)
 
+
+def test_a_browsed_foreign_card_runs_as_it_is(tmp_path, monkeypatch):
+    # PAD-205: a card picked with Browse that is not the project's ran with
+    # the project's edits laid over it, so it looked like the project's card.
+    # Picking it unticks the Apply box; the project's own card leaves it be.
+    from pinball_decryptor.core.extract_source import write_extract_source
+    src = tmp_path / "godzilla_le-1_16_0.Release.16G.sdcard.raw"
+    src.write_bytes(bytes(64))
+    other = tmp_path / "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
+    other.write_bytes(bytes(64))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    write_extract_source(str(proj), str(src))
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.window.write_assets_var.set, str(proj))
+        w.run(w.window.emulate_overrides_var.set, True)
+        picked = []
+        monkeypatch.setattr(w.window, "ask_open",
+                            lambda *a, **k: picked.pop(0))
+        picked.append(str(src))
+        w.call("emulate.browse")
+        _wait(w, lambda: (w.state(NS).get("which") or {}).get("kind")
+              == "source")
+        assert w.window.emulate_overrides_var.get() is True
+        picked.append(str(other))
+        w.call("emulate.browse")
+        _wait(w, lambda: (w.state(NS).get("which") or {}).get("kind")
+              == "other")
+        _wait(w, lambda: w.window.emulate_overrides_var.get() is False)
+        # ticked again by hand, it stays ticked for that card
+        w.run(w.window.emulate_overrides_var.set, True)
+        w.run(w.window.write_assets_var.set, str(proj))
+        time.sleep(0.3)
+        assert w.window.emulate_overrides_var.get() is True
+
 def test_machine_settings_restore_globally(tmp_path):
     settings = {"emulate_country": "Denmark",
                 "emulate_power": "not a real choice"}

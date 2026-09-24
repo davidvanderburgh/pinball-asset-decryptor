@@ -8317,10 +8317,22 @@ def resolve_image_args(args):
             # is where the flag sat, which is why this is an ordered action at all.
             spec, _sep, rest = value.partition("|")
             title, _sep, subtitle = rest.partition("|")
+            # '@P' after the range names the place outright.  The flag's own place
+            # cannot say "before image 0": the primary is not an ordered flag, so the
+            # first place a flag can sit is after it - and a random card at the TOP of
+            # the menu came out second (PAD-202).
+            spec, at, where = spec.partition("@")
+            if at:
+                try:
+                    pos = int(where)
+                except ValueError:
+                    raise Refused("--group-over %r: '@%s' is not an image index" % (value, where))
+            else:
+                pos = len(extras) + 1
             open_group = None
             groups.append({"title": title.strip(), "subtitle": subtitle.strip(),
                            "members": parse_member_spec(spec), "keep": True,
-                           "pos": len(extras) + 1})
+                           "pos": pos})
         elif kind in ("member", "members-list"):
             if open_group is None:
                 raise Refused("--%s must follow a --group" % kind)
@@ -8379,7 +8391,8 @@ def _add_group_flags(s):
                    help="a random card over images ALREADY on the card (0-based, e.g. '1-2|RANDOM|pick "
                         "one or let it roll'): it adds no games and those images KEEP their own cards, "
                         "so the menu offers the builds and a 'surprise me' beside them. Its place in "
-                        "the menu is where this flag sits among the --extra ones")
+                        "the menu is where this flag sits among the --extra ones, or '@P' after the "
+                        "range ('0-5@0|...') to sit before image P - '@0' is the top of the menu")
     s.add_argument("--group-roll", action="append", default=[], metavar="G=MODE",
                    help="how random card G picks: not-last (never the one it booted last - "
                         "the default), any (the dice, repeats and all), or shuffle (every "

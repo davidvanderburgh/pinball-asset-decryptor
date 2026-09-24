@@ -2076,15 +2076,23 @@ def _image_args(form):
     member's image index is where its flag sat (item 106)."""
     trees = form_trees(form)
     primary = next((t[1] for t in trees), "")
+    # THE PRIMARY'S ROW, which is not always row 0: a random card over games
+    # already on the card adds none, so with one at the top the primary is
+    # the row under it.  Skipping row 0 sent that game twice (--primary AND
+    # --extra), and the card grew a seventh image of six (PAD-202).
+    primary_row = next((t[2] for t in trees), 0)
     args = ["--primary", wsl(primary)]
     for ri, row in enumerate(form.images):
         if is_group(row) and row.keep:
             # IT ADDS NO GAMES: it names images other rows already put there,
-            # and its place among these flags is where its card sits.
+            # and its place among these flags is where its card sits - except
+            # above every game, which no flag's place can say (the primary is
+            # not one of them), so there it names its place: '@0'.
             imgs = [i for i in group_member_images(form, row) if i >= 0]
             if len(imgs) >= 2:
-                args += ["--group-over", "%d-%d|%s|%s"
-                         % (min(imgs), max(imgs), (row.title or "").strip(),
+                at = "@0" if ri < primary_row else ""
+                args += ["--group-over", "%d-%d%s|%s|%s"
+                         % (min(imgs), max(imgs), at, (row.title or "").strip(),
                             (row.subtitle or "").strip())]
             continue
         if is_group(row):
@@ -2093,7 +2101,7 @@ def _image_args(form):
             for path in row_paths(row):
                 args += ["--member", wsl(path)]
             continue
-        if ri == 0:
+        if ri == primary_row:
             continue                      # already given as --primary
         args += ["--extra", wsl(row_paths(row)[0])]
     return args

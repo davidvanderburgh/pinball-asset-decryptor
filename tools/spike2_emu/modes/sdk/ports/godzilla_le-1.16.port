@@ -229,102 +229,6 @@ value roster_city_index_at   20
 value roster_city_vec_at     44
 value roster_city_record_size 16
 
-# ---- item 160: the game's own rules, a shot that COUNTS AS one of theirs (MODE_SDK.md "Counts as") ------
-# cmode_manager_get(manager, id) -> the rule's object (cmp r1,#26; push {r3,lr}: 27 rules, ids 0..26); the
-# manager is `data stock_mode_manager` above. Read off this build's ELF (ea8c6d36) and emulator-proven by
-# item 158's probe, which wraps the same slots: START v[8], the shot handler v[42] (this build added a slot
-# at 41: Pro 1.15's is v[41]), the active query v[14], the lit-shot query v[25]; the per-player lit mask is
-# the u64 at obj + 0x18 + 8 * player. Each `rule` names a rule the runtime may wrap: its id, its vtable
-# pointer (checked against the object the manager returns before anything is written) and a label.
-site stock_rule_get   0x000d3fa0 0xe351001a 0xe92d4008
-value stock_slot_shot   42
-value stock_slot_active 14
-value stock_slot_lit    25
-value stock_field       0x18
-# 12 cmode_battle_vs_ebirah (obj 0x7b53f0, handler 0x816e8): counts 0x200 / 0x2000 / 0x20000 (the spinners'
-# middle bits, 15 / 40 / 15 spins), then 0x40 (Pop bumper) or bit 42 for the final blow
-rule 12 0x00636d78 Battle vs Ebirah
-# 4 cmode_tank_attack_multiball (obj 0x7b4f30, handler 0x10a040): a hit on a tank's exact position bit
-rule 4  0x00640820 Tank attack multiball
-# ---- item 161: the game's own rules REWRITTEN in C (pad_stock.h; MODE_SDK.md "Rewriting a stock rule's shot logic") ----
-# Every site word pair below was read from the ELF by port_words.py; every offset and id by item 158
-# (desk-proven, the marked ones emulator-proven) and checked against this item's decompile.
-# the rule manager and the engine calls the shot handlers make (called, never hooked)
-site caward_add       0x0002fc1c 0xe92d41f0 0xe1a04000  # (award, 0, value lo, value hi, [sp] index) (emulator-proven: every award of both rules)
-site caward_build     0x0002f8d4 0xe92d4ff8 0xe1a0b000  # (award, 0, value lo, hi, [sp] 0): tank pays half a kill into it
-site caward_add_scaled 0x0002fcdc 0xe92d4ff8 0xe1a09002  # (award, notify, index, multiplier): the Maser hit
-site show_start       0x001f34d4 0xe92d47f0 0xe2508000  # (id) -> the show's record, or 0
-site game_event       0x001def88 0xe92d47f0 0xe1a09000  # (id, _, value lo, hi, [sp] a, [sp+8] b lo, hi)
-site event_post_replacing 0x003f33e0 0xe92d4070 0xe1a05001  # (id, handler, flags) -> the event record or 0
-site event_cancel     0x003f3350 0xe92d40f8 0xe3066278  # (id, 0xffff): removes the id from the event list (the final blow cancels 0x14e)
-# the slots on THIS build (Premium 1.16 has one slot more than Pro 1.15 from 41 on)
-value stock_slot_start      8
-value stock_slot_end        10
-value stock_slot_stop       11
-value stock_slot_running    12
-value stock_slot_shot_entry 15
-value stock_slot_mask       45
-# the cmode fields every rule has (MODE_API.md; the field and running byte emulator-proven by the probe)
-value stock_running_at      0x1b      # + player: running byte
-value stock_level_at        0x3c      # + 4 * player: starts this game
-value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
-# ---- battle vs Ebirah, rule 12 (object 0x7b53f0, vtable 0x636d78) ----
-value ebirah_rule           12
-value ebirah_spin_left_at   0x8c      # + 4 * player, spins left on the Left spinner (15 at a refill)
-value ebirah_spin_top_at    0x9c      # Top spinner (40)
-value ebirah_spin_shield_at 0xac      # Shield ramp spinner (15)
-value ebirah_stage_count_at 0xbc      # + 4 * player: stages done (the 2-stage RuleCities/RuleAllies mark reads it)
-value ebirah_stage_index_at 0xd0      # which of 5M / 10M / 15M is next (START resets it)
-value ebirah_kotm_at        0xd4      # byte: King of the Monsters runs (awards go to rule 20)
-value ebirah_spin_left_bit  0x200     # the raw shot bits the handler tests (each spinner's middle bit)
-value ebirah_spin_top_bit   0x2000
-value ebirah_spin_shield_bit 0x20000
-value ebirah_final_shot     0x40      # the Pop bumper: the final blow (or bit 42, unnamed)
-value ebirah_final_mask_lo  0x40      # the field once every counter is 0 (0x814cc writes 0x400_00000040)
-value ebirah_final_mask_hi  0x400
-value ebirah_reminder_event 0x14e
-value ebirah_spin_award     200000    # what a spin pays (movwt 0x81d90/0x81d98 and the other five sites)
-value ebirah_final_award    25000000  # movwt 0x81ea4/0x81eac (KOTM: 0x819a4/0x819b0)
-data  ebirah_stage_awards   0x00636eb0  # rodata: u64 x 3 = 5,000,000 / 10,000,000 / 15,000,000 (copied into a static vector at first use)
-value ebirah_stage_award_count 3
-value ebirah_stage_msg      0xce3     # award screen messages 0xce3 / 0xce4 / 0xce5 (left / top / shield), 0xce6 the final blow
-value ebirah_stage_lamp_left  0x71    # 113 LEFT SPINNER, the lamp the stage screen names
-value ebirah_stage_lamp_top   0x96    # 150 TOP SPINNER
-value ebirah_stage_lamp_shield 0x7a   # 122 ATTACK MECHA (the shield ramp spinner's insert)
-site ebirah_refill_counts 0x00081018 0xe92d4070 0xe1a04000  # (obj): copies the ctor defaults to the player (v[5] and KOTM's start call it)
-site ebirah_stage_done 0x00081528 0xe92d4038 0xe1a04000  # (obj): stage count + 1; all done: the reminder event; 2 stages: RuleCities + RuleAllies
-site ebirah_award_screen 0x00081068 0xe92d4ff0 0xe24dd024  # (obj, msg, lamp, [sp] value lo, hi, [sp+8] timer, [sp+0x10] factor lo, hi, [sp+0x18] stage index)
-site ebirah_final_mask 0x000814cc 0xe92d4010 0xe1a04000  # (obj): when every counter is 0, field = 0x400_00000040
-data  ebirah_lamp_table     0x00636f68  # rodata: 6 x {u64 mask, u16 lamp, u8 off-phase brightness}, read by the lamp fiber 0x8465c (emulator-proven, item 158 fix-lamp-1)
-value ebirah_lamp_entries   6
-# ---- tank attack multiball, rule 4 (object 0x7b4f30, vtable 0x640820) ----
-value tank_rule             4
-value tank_records_at       0x68      # a std::vector (begin, end) of tank records
-value tank_record_size      40
-value tank_record_active_at 0
-value tank_record_pos_at    8         # u64: the tank's position (a path mask)
-value tank_record_prev_at   0x10      # u64: where it was before the last step (a grace window for the handler)
-value tank_record_dest_at   0x18      # u64: its destination (the Godzilla target 0x80000)
-value tank_record_value_at  0x20      # u64: what destroying it pays (2,500,000 - 500,000 a step, floor 1,500,000)
-value tank_level_at         0x70      # + 4 * player
-value tank_value_at         0x80      # + 8 * player, u64: this player's tank value (+150,000 a kill)
-value tank_destroyed_at     0xa8      # u32: tanks destroyed this wave (4/5/6/7/8 by level light the Maser)
-value tank_multiplier_at    0xac      # the Maser multiplier (3 a wave, -1 per tank that reaches the target)
-value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
-value tank_maser_bit        0x8000000
-data  tank_path             0x00640960  # rodata: 6 x 16 bytes {u64 mask, u16 lamp, u16 id, u32 0}: bit 35, Left ramp, Godzilla target, 0x800, Right ramp, bit 37 (emulator-proven, item 158 live-3)
-value tank_path_entries     6
-value tank_path_entry_size  16
-data  tank_spot_list        0x00640930  # rodata: 6 x u64, v[48]'s spot list
-site tank_maser_phase 0x00108d20 0xe92d4038 0xe1a04000  # (obj) -> 1 in the Maser phase
-site tank_positions_or 0x001094a0 0xe5903068 0xe590c06c  # (obj, include previous) -> the active records' positions ORed
-site tank_pick_record 0x001093c4 0xe92d41f0 0xe1a07003  # (obj, shot lo, hi) -> the record whose position equals the shot (then previous), else 0
-site tank_path_index  0x00109354 0xe92d00f0 0xe1a07003  # (obj, shot lo, hi) -> the first path entry that ANDs the shot
-site tank_seed_wave   0x00109c64 0xe92d47f0 0xe24dd008  # (obj): level + 1, destroyed = 0, three tanks, the timer, multiplier 3
-site tank_destroy     0x00109f8c 0xe3520000 0xe3a03000  # (obj, record, credit): zero it; credit: destroyed + 1, value + 150,000; no tanks left: advance + spawn
-site tank_advance     0x0010a420 0xe5903000 0xe92d4ff0  # (obj): if active, step every tank (retire at the target), then spawn one
-site tank_award_screen_kill 0x001091a8 0xe92d43f0 0xe24dd01c  # (obj, 0xc94, value lo, hi, [sp] random): the kill's award screen and countdown sound
-
 # ---- display priority (item 154 display; MODE_SDK.md "Display priority") --------------------------------------
 # Placed by signature from Pro 1.15 (strict); the effect and layered tables match Pro's record for record. Run here
 # with display_probe.c (r1): the layered display is effect 29 (priority 1); shot awards are layered displays 37-48,
@@ -462,3 +366,102 @@ lamp 411          0              SCOOP BB MECHA SPOT  # lamp 198, I/O group 6 in
 lamp 412          0              GODZILLA SPOT  # lamp 199, I/O group 7 index 55, at 33,205
 lamp 413          0              GLOBE FLASH  # lamp 200, I/O group 7 index 36, at 287,206
 lamp 414          0x2000         TOP SPINNER FLASH  # lamp 201, I/O group 7 index 60, at 172,100
+
+# The item 160 and 161 lines sit AFTER the lamps on purpose: a runtime older than item mode-leds
+# reads only the first 16 KB of a port, and everything it understands must stay inside that.
+# ---- item 160: the game's own rules, a shot that COUNTS AS one of theirs (MODE_SDK.md "Counts as") ------
+# cmode_manager_get(manager, id) -> the rule's object (cmp r1,#26; push {r3,lr}: 27 rules, ids 0..26); the
+# manager is `data stock_mode_manager` above. Read off this build's ELF (ea8c6d36) and emulator-proven by
+# item 158's probe, which wraps the same slots: START v[8], the shot handler v[42] (this build added a slot
+# at 41: Pro 1.15's is v[41]), the active query v[14], the lit-shot query v[25]; the per-player lit mask is
+# the u64 at obj + 0x18 + 8 * player. Each `rule` names a rule the runtime may wrap: its id, its vtable
+# pointer (checked against the object the manager returns before anything is written) and a label.
+site stock_rule_get   0x000d3fa0 0xe351001a 0xe92d4008
+value stock_slot_shot   42
+value stock_slot_active 14
+value stock_slot_lit    25
+value stock_field       0x18
+# 12 cmode_battle_vs_ebirah (obj 0x7b53f0, handler 0x816e8): counts 0x200 / 0x2000 / 0x20000 (the spinners'
+# middle bits, 15 / 40 / 15 spins), then 0x40 (Pop bumper) or bit 42 for the final blow
+rule 12 0x00636d78 Battle vs Ebirah
+# 4 cmode_tank_attack_multiball (obj 0x7b4f30, handler 0x10a040): a hit on a tank's exact position bit
+rule 4  0x00640820 Tank attack multiball
+# ---- item 161: the game's own rules REWRITTEN in C (pad_stock.h; MODE_SDK.md "Rewriting a stock rule's shot logic") ----
+# Every site word pair below was read from the ELF by port_words.py; every offset and id by item 158
+# (desk-proven, the marked ones emulator-proven) and checked against this item's decompile.
+# the rule manager and the engine calls the shot handlers make (called, never hooked)
+site caward_add       0x0002fc1c 0xe92d41f0 0xe1a04000  # (award, 0, value lo, value hi, [sp] index) (emulator-proven: every award of both rules)
+site caward_build     0x0002f8d4 0xe92d4ff8 0xe1a0b000  # (award, 0, value lo, hi, [sp] 0): tank pays half a kill into it
+site caward_add_scaled 0x0002fcdc 0xe92d4ff8 0xe1a09002  # (award, notify, index, multiplier): the Maser hit
+site show_start       0x001f34d4 0xe92d47f0 0xe2508000  # (id) -> the show's record, or 0
+site game_event       0x001def88 0xe92d47f0 0xe1a09000  # (id, _, value lo, hi, [sp] a, [sp+8] b lo, hi)
+site event_post_replacing 0x003f33e0 0xe92d4070 0xe1a05001  # (id, handler, flags) -> the event record or 0
+site event_cancel     0x003f3350 0xe92d40f8 0xe3066278  # (id, 0xffff): removes the id from the event list (the final blow cancels 0x14e)
+# the slots on THIS build (Premium 1.16 has one slot more than Pro 1.15 from 41 on)
+value stock_slot_start      8
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+# the cmode fields every rule has (MODE_API.md; the field and running byte emulator-proven by the probe)
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+# ---- battle vs Ebirah, rule 12 (object 0x7b53f0, vtable 0x636d78) ----
+value ebirah_rule           12
+value ebirah_spin_left_at   0x8c      # + 4 * player, spins left on the Left spinner (15 at a refill)
+value ebirah_spin_top_at    0x9c      # Top spinner (40)
+value ebirah_spin_shield_at 0xac      # Shield ramp spinner (15)
+value ebirah_stage_count_at 0xbc      # + 4 * player: stages done (the 2-stage RuleCities/RuleAllies mark reads it)
+value ebirah_stage_index_at 0xd0      # which of 5M / 10M / 15M is next (START resets it)
+value ebirah_kotm_at        0xd4      # byte: King of the Monsters runs (awards go to rule 20)
+value ebirah_spin_left_bit  0x200     # the raw shot bits the handler tests (each spinner's middle bit)
+value ebirah_spin_top_bit   0x2000
+value ebirah_spin_shield_bit 0x20000
+value ebirah_final_shot     0x40      # the Pop bumper: the final blow (or bit 42, unnamed)
+value ebirah_final_mask_lo  0x40      # the field once every counter is 0 (0x814cc writes 0x400_00000040)
+value ebirah_final_mask_hi  0x400
+value ebirah_reminder_event 0x14e
+value ebirah_spin_award     200000    # what a spin pays (movwt 0x81d90/0x81d98 and the other five sites)
+value ebirah_final_award    25000000  # movwt 0x81ea4/0x81eac (KOTM: 0x819a4/0x819b0)
+data  ebirah_stage_awards   0x00636eb0  # rodata: u64 x 3 = 5,000,000 / 10,000,000 / 15,000,000 (copied into a static vector at first use)
+value ebirah_stage_award_count 3
+value ebirah_stage_msg      0xce3     # award screen messages 0xce3 / 0xce4 / 0xce5 (left / top / shield), 0xce6 the final blow
+value ebirah_stage_lamp_left  0x71    # 113 LEFT SPINNER, the lamp the stage screen names
+value ebirah_stage_lamp_top   0x96    # 150 TOP SPINNER
+value ebirah_stage_lamp_shield 0x7a   # 122 ATTACK MECHA (the shield ramp spinner's insert)
+site ebirah_refill_counts 0x00081018 0xe92d4070 0xe1a04000  # (obj): copies the ctor defaults to the player (v[5] and KOTM's start call it)
+site ebirah_stage_done 0x00081528 0xe92d4038 0xe1a04000  # (obj): stage count + 1; all done: the reminder event; 2 stages: RuleCities + RuleAllies
+site ebirah_award_screen 0x00081068 0xe92d4ff0 0xe24dd024  # (obj, msg, lamp, [sp] value lo, hi, [sp+8] timer, [sp+0x10] factor lo, hi, [sp+0x18] stage index)
+site ebirah_final_mask 0x000814cc 0xe92d4010 0xe1a04000  # (obj): when every counter is 0, field = 0x400_00000040
+data  ebirah_lamp_table     0x00636f68  # rodata: 6 x {u64 mask, u16 lamp, u8 off-phase brightness}, read by the lamp fiber 0x8465c (emulator-proven, item 158 fix-lamp-1)
+value ebirah_lamp_entries   6
+# ---- tank attack multiball, rule 4 (object 0x7b4f30, vtable 0x640820) ----
+value tank_rule             4
+value tank_records_at       0x68      # a std::vector (begin, end) of tank records
+value tank_record_size      40
+value tank_record_active_at 0
+value tank_record_pos_at    8         # u64: the tank's position (a path mask)
+value tank_record_prev_at   0x10      # u64: where it was before the last step (a grace window for the handler)
+value tank_record_dest_at   0x18      # u64: its destination (the Godzilla target 0x80000)
+value tank_record_value_at  0x20      # u64: what destroying it pays (2,500,000 - 500,000 a step, floor 1,500,000)
+value tank_level_at         0x70      # + 4 * player
+value tank_value_at         0x80      # + 8 * player, u64: this player's tank value (+150,000 a kill)
+value tank_destroyed_at     0xa8      # u32: tanks destroyed this wave (4/5/6/7/8 by level light the Maser)
+value tank_multiplier_at    0xac      # the Maser multiplier (3 a wave, -1 per tank that reaches the target)
+value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
+value tank_maser_bit        0x8000000
+data  tank_path             0x00640960  # rodata: 6 x 16 bytes {u64 mask, u16 lamp, u16 id, u32 0}: bit 35, Left ramp, Godzilla target, 0x800, Right ramp, bit 37 (emulator-proven, item 158 live-3)
+value tank_path_entries     6
+value tank_path_entry_size  16
+data  tank_spot_list        0x00640930  # rodata: 6 x u64, v[48]'s spot list
+site tank_maser_phase 0x00108d20 0xe92d4038 0xe1a04000  # (obj) -> 1 in the Maser phase
+site tank_positions_or 0x001094a0 0xe5903068 0xe590c06c  # (obj, include previous) -> the active records' positions ORed
+site tank_pick_record 0x001093c4 0xe92d41f0 0xe1a07003  # (obj, shot lo, hi) -> the record whose position equals the shot (then previous), else 0
+site tank_path_index  0x00109354 0xe92d00f0 0xe1a07003  # (obj, shot lo, hi) -> the first path entry that ANDs the shot
+site tank_seed_wave   0x00109c64 0xe92d47f0 0xe24dd008  # (obj): level + 1, destroyed = 0, three tanks, the timer, multiplier 3
+site tank_destroy     0x00109f8c 0xe3520000 0xe3a03000  # (obj, record, credit): zero it; credit: destroyed + 1, value + 150,000; no tanks left: advance + spawn
+site tank_advance     0x0010a420 0xe5903000 0xe92d4ff0  # (obj): if active, step every tank (retire at the target), then spawn one
+site tank_award_screen_kill 0x001091a8 0xe92d43f0 0xe24dd01c  # (obj, 0xc94, value lo, hi, [sp] random): the kill's award screen and countdown sound
+

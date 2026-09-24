@@ -59,6 +59,14 @@ ONE_PLACE_DATA = {
     "layered_displays": "the program loads it in ONE place only (its getter), so two can never agree",
     "display_effects": "the runtime uses it only when the manager it points at holds award_screen_arg's "
                        "table (disp_manager), so a wrong one holds nothing",
+    "ebirah_stage_awards": "the rule's constructor copies the rodata table in ONE place; the runtime "
+                           "reads it only through a rule whose vtable words matched",
+    "ebirah_lamp_table": "the rule's lamp fiber loads the rodata table from ONE literal; the runtime "
+                         "reads it only through a rule whose vtable words matched",
+    "tank_path": "the tank rule's constructor loads the rodata path from ONE literal; the runtime reads it "
+                 "only through a rule whose vtable words matched",
+    "tank_spot_list": "the tank rule's spot getter loads the rodata list from ONE literal; the runtime "
+                      "reads it only through a rule whose vtable words matched",
 }
 
 

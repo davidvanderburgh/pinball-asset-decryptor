@@ -390,22 +390,52 @@ def test_tail_only_long_edit_relocates_the_host(reloc_elf):
     assert (sorted(writes2), blob2) == (sorted(writes), blob) and n2 == 2
 
 
-def test_interior_reference_without_a_tail_mapping_keeps_the_old_rule(reloc_elf):
+def test_unedited_tail_follows_a_line_that_keeps_its_prefix(reloc_elf):
+    # PAD-198: a Transfer Mods pass carried "GODZILLA VS TITANOSAURUS" ->
+    # "GODZILLA VS DESTROYAH" without the standalone "TITANOSAURUS" row, and
+    # the Write refused the line, so BOTH stayed stock on the card.  With
+    # everything in front of the name unchanged, the name follows the line.
     raw, offs = reloc_elf
     msgs, log = _logs()
-    # the new title no longer ENDS with MEGALON, which the +12 group shows
     writes, n, blob = progtext.plan_writes(
         raw, {MEGA: "GODZILLA VS SPACEGODZILLA"}, log, RELOC)
+    assert n == 1 and blob == b"GODZILLA VS SPACEGODZILLA\x00"
+    # the identical plan to renaming both rows by hand
+    writes2, _n2, blob2 = progtext.plan_writes(
+        raw, {MEGA: "GODZILLA VS SPACEGODZILLA", "MEGALON": "SPACEGODZILLA"},
+        None, RELOC)
+    assert (sorted(writes), blob) == (sorted(writes2), blob2)
+    assert not _warnings(msgs)
+    assert any('"MEGALON"' in m and '"SPACEGODZILLA", following its line' in m
+               for _l, m in msgs)
+    # same for the caption's interior LONE word ("EBIRAH TIMER" at +10)
+    msgs, log = _logs()
+    new = "BATTLE VS BIOLLANTE TIMER"
+    writes, n, blob = progtext.plan_writes(raw, {CAP: new}, log, RELOC)
+    assert n == 1 and blob == new.encode() + b"\x00"
+    copy_va = RELOC["base_va"] + RELOC["used"]
+    buf = _apply(raw, writes)
+    assert _ref_value(buf, "lone", [offs["cap_in10"]]) == copy_va + 10
+    assert not _warnings(msgs)
+
+
+def test_tail_does_not_follow_a_line_whose_prefix_changed(reloc_elf):
+    raw, offs = reloc_elf
+    msgs, log = _logs()
+    # "GODZILLA VS " became "GZ VS ", so which part is the name is a guess:
+    # the old rule stands
+    writes, n, blob = progtext.plan_writes(
+        raw, {MEGA: "GZ VS SPACEGODZILLA"}, log, RELOC)
     assert writes == [] and n == 0 and blob == b""
     assert any("shown on its own" in m and "must END with" in m
                for m in _warnings(msgs))
-    # same for the caption's interior LONE word ("EBIRAH TIMER" at +10)
+    # and a tail the user DID edit is never overridden by the line
     msgs, log = _logs()
     writes, n, blob = progtext.plan_writes(
-        raw, {CAP: "BATTLE VS BIOLLANTE TIMER"}, log, RELOC)
-    assert writes == [] and n == 0 and blob == b""
-    assert any("EBIRAH TIMER" in m and "must END with" in m
-               for m in _warnings(msgs))
+        raw, {MEGA: "GODZILLA VS SPACEGODZILLA", "MEGALON": "ORGA"},
+        log, RELOC)
+    assert writes == [] and n == 0
+    assert any("must END with" in m for m in _warnings(msgs))
 
 
 def test_interior_lone_reference_is_retargeted_to_the_new_tail(reloc_elf):

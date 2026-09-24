@@ -30,7 +30,7 @@ export function StockDialog({ s, onClose }) {
     { key: "number", label: "Number", width: "minmax(120px, 1fr)", titleOf: (r) => r.number },
     { key: "value", label: "Value", width: "110px", num: true },
     { key: "stock", label: "Stock", width: "110px", num: true },
-    { key: "where", label: "Where it lives", width: "minmax(180px, 1.6fr)", titleOf: (r) => r.where },
+    { key: "where", label: "Where it lives", width: "minmax(180px, 1.6fr)", titleOf: (r) => r.hint || r.where },
   ];
   const can = st.on && st.row_on;
   const set = () => { if (can) call("modes.stock_set", val); };

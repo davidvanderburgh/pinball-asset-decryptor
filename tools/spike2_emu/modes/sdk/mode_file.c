@@ -1188,8 +1188,8 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     }
     cfg.valid = cfg.seconds && cfg.trigger_count;
     trigger_on_validate(M);
-    pm_log("loaded \"%s\": trigger %08x x%u, %u s, shots %08x_%08x, award %llu%s",
-           cfg.name, (unsigned)cfg.trigger_bits, cfg.trigger_count, cfg.seconds,
+    pm_log("loaded \"%s\": trigger %08x_%08x x%u, %u s, shots %08x_%08x, award %llu%s",
+           cfg.name, (unsigned)(cfg.trigger_bits >> 32), (unsigned)cfg.trigger_bits, cfg.trigger_count, cfg.seconds,
            (unsigned)(cfg.shot_bits >> 32), (unsigned)cfg.shot_bits, (unsigned long long)cfg.award,
            cfg.valid ? "" : "  - NOT VALID, it needs seconds and a trigger count");
     if (cfg.stack_no) pm_log("\"%s\": stack no - waits while the game's own battle or multiball runs", cfg.name);
@@ -1448,8 +1448,8 @@ static void roster_sync(struct slot *M)
     unsigned want, k;
     if (M->raw_len >= 0 && cfg.roster_slot_1 && cfg.seconds && !cfg.valid && cfg.trigger_bits && !cfg.trigger_count) {
         /* `trigger <shots> 0` never starts a mode (without roster_slot the file is NOT VALID): keep that meaning */
-        pm_log("%s: trigger %08x with a count of 0 starts nothing - only a pick of roster slot %u starts it", cfg.name,
-               (unsigned)cfg.trigger_bits, cfg.roster_slot_1 - 1);
+        pm_log("%s: trigger %08x_%08x with a count of 0 starts nothing - only a pick of roster slot %u starts it", cfg.name,
+               (unsigned)(cfg.trigger_bits >> 32), (unsigned)cfg.trigger_bits, cfg.roster_slot_1 - 1);
         cfg.trigger_bits = 0;
     }
     if (M->raw_len >= 0 && cfg.roster_slot_1 && cfg.seconds && !cfg.valid) {

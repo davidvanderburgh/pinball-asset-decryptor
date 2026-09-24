@@ -22,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SDK = os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk")
 
 PORTS = [
+    ("beatles", "1.29"),
     ("deadpool_le", "1.14"),
     ("deadpool_pro", "1.16"),
     ("godzilla_le", "1.16"),
@@ -141,7 +142,7 @@ def test_ports_lists_what_the_sdk_carries():
 # key -> the runtime's #define that sizes its table (pad_mode_runtime.c)
 _PORT_TABLES = {"site": "N_SITES", "data": "N_DATA", "value": "N_VALUES", "shot": "N_SHOTS",
                 "callout": "N_ROLES", "scene": "N_ROLES", "text": "N_TEXTS", "event": "N_EVENTS",
-                "lamp": "N_LAMPS"}
+                "lamp": "N_LAMPS", "switch": "N_SWITCHES"}
 
 
 @pytest.mark.parametrize("game_dir,version", PORTS)
@@ -236,8 +237,8 @@ def port_reader(tmp_path_factory):
 
 @pytest.mark.parametrize("game_dir,version", [("godzilla_le", "1.16"), ("godzilla_pro", "1.15")])
 def test_the_reader_takes_every_line_of_a_merged_port(port_reader, game_dir, version):
-    """Both Godzilla ports carry the display lines and 86-88 lamp lines at the end (past 16 KB, in
-    six 4 KB chunks): the reader takes every line, whatever chunk boundary it straddles."""
+    """Both Godzilla ports carry the display lines, 86-88 lamp lines and then the stock-rule lines past
+    16 KB, in 4 KB chunks: the reader takes every line, whatever chunk boundary it straddles."""
     path = MR.port_file(game_dir, version)
     with open(path, encoding="utf-8") as f:
         lines = [l.split("#", 1)[0].split() for l in f]
@@ -247,7 +248,8 @@ def test_the_reader_takes_every_line_of_a_merged_port(port_reader, game_dir, ver
     for k, n in want.items():
         assert int(got[k]) == n, (k, got[k], n)
     assert got["dropped"] == "0" and got["too_long"] == "0"
-    assert got["last_site"] == "layered_waiter"            # the display lines' last site, before the lamps (item 157)
+    last = [w[1] for w in lines if w and w[0] == "site"][-1]
+    assert got["last_site"] == last                        # the file's own last site line, whatever comes after the lamps
 
 
 def test_the_reader_says_what_it_could_not_take(port_reader, tmp_path):

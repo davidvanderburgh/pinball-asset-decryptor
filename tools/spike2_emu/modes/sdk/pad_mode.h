@@ -18,7 +18,8 @@
  * THE SAFETY GATE. Before hooking anything the runtime checks, for every function the
  * port names, the first two machine instructions against what the port says they
  * should be. If the core ones do not match - a port for another game or version - it
- * hooks NOTHING, calls none of your code, logs why, and the game runs stock.
+ * hooks NOTHING, calls none of your code, logs why, and the game runs stock. An address
+ * outside the game's own code is never read, and the core is checked before the rest.
  *
  * THE RULES THAT KEEP A GAME RUNNING (MODE_SDK.md explains each):
  *   1. Never block. Every callback runs on a game thread; return quickly.
@@ -73,6 +74,7 @@ struct pm_mode {
 #define PM_CAN_MESSAGES     0x0020u   /* pm_message_set / pm_message_restore */
 #define PM_CAN_AWARD_SCREEN 0x0040u   /* pm_award_screen */
 #define PM_CAN_EVENTS       0x0080u   /* .event callbacks, pm_event */
+#define PM_CAN_SWITCH_SHOTS 0x0200u   /* shots from switches: the port's `switch` lines (see shots) */
 
 int pm_can(unsigned what);            /* 1 if EVERY bit in `what` is available */
 const char *pm_game(void);            /* the port's game, e.g. "godzilla_pro" */
@@ -87,7 +89,10 @@ uint64_t pm_score(unsigned player);   /* that player's score */
  * A SHOT is a 64-bit mask the game hands every mode when a playfield switch means
  * something: one bit per shot (a ramp, a target...). A single switch can dispatch twice -
  * first 0x1 ("a playfield switch was hit"), then its own shot bit - so test bits, never
- * compare the whole mask. The port names this game's shots: */
+ * compare the whole mask. On a title whose rules send no shot for some switches (The
+ * Beatles' standups and lanes), the port can map those switches to shot bits of their own
+ * (`switch` lines, PM_CAN_SWITCH_SHOTS): each hit comes to .shot like any other shot,
+ * from the tick. The port names this game's shots, switch ones included: */
 uint64_t pm_shot(const char *name);   /* the named shot's mask, or 0 if this game has none */
 const char *pm_shot_name(uint64_t shot);          /* the first named shot in `shot`, or 0 */
 int pm_shot_count(void);                          /* how many named shots the port has */
@@ -100,7 +105,11 @@ int pm_running(void);      /* your mode is the one running */
 
 /* ---- scoring ------------------------------------------------------------------------
  * Through the game's own scoring, so its playfield multiplier and its rules about when a
- * score may be added apply. Returns what was actually added (can be 0). */
+ * score may be added apply. Returns what was actually added (can be 0). A title whose
+ * scores are 32-bit (The Beatles: the port's score_add32) multiplies the points and adds
+ * them with no carry check, so the points are cut to the room left below 4,294,967,295
+ * divided by the multiplier (the port's data score_mult): the score stops at the top
+ * instead of wrapping, and at the top an award adds 0. */
 uint64_t pm_score_add(unsigned player, uint64_t points);
 
 /* ---- sound --------------------------------------------------------------------------

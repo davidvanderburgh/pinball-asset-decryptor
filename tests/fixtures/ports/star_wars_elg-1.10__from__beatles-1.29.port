@@ -1,0 +1,298 @@
+# DRAFTED by port_tool.py from beatles-1.29.port
+# target ELF: star_wars_elg-1.10.0.elf
+# Every entry says how it was placed. COPIED entries are unverified: prove them in the
+# emulator (MODE_SDK.md). Re-run port_words.py on the result before shipping it.
+game           star_wars_elg
+version        1.10
+
+# ---- functions: site <name> <address> <first two instruction words> --------------------
+#   tick: located (strict)
+site tick             0x001e23ec 0xe92d4038 0xe3a00037
+# site shot_dispatch    NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   ball_end: the handler of event 0x34 (the end of ball) that is the reference's 0x336d80 (located, strict) - drain a ball to prove it
+site ball_end         0x00136a54 0xe92d4070 0xe1a06000
+value ball_end_event       0x34
+#   sound_lookup: located (strict)
+site sound_lookup     0x002867c0 0xe92d4038 0xe1a05000
+#   score_add32: located (strict)
+site score_add32      0x00287078 0xe30b376a 0xe3a02000
+#   callout: located (strict)
+site callout          0x001ed86c 0xe92d4010 0xe301e8b8
+#   callout_nth: located (strict)
+site callout_nth      0x001eda20 0xe92d4010 0xe301e8b8
+#   lamp_group: located (strict)
+site lamp_group       0x0017fcf8 0xe92d4038 0xe1a04000
+#   show_priority: located (strict)
+site show_priority    0x0013557c 0xe30d34dc 0xe3403058
+#   award_screen: located (strict)
+site award_screen     0x002e3ee0 0xe92d4070 0xe24dd008
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE
+site string_new       0x00016810 0xe28fc605 0xe28cca2b
+#   dynamic_cast: PLT stub for __dynamic_cast
+site dynamic_cast     0x0001621c 0xe28fc605 0xe28cca2b
+#   resource_get: placed through 3 callers, e.g. the bl at 0x1360f4
+site resource_get     0x001dc0cc 0xe92d43f0 0xe1a04000
+#   find_node: placed through 3 callers, e.g. the bl at 0x196378
+site find_node        0x0043bafc 0xe92d4070 0xe24dd008
+# site find_text        NOT PLACED: not unique in the reference; no caller could be lined up
+#   set_text: located (strict)
+site set_text         0x0041f2c4 0xe92d47f0 0xe1a06000
+#   surface_state: located (strict)
+site surface_state    0x0042e828 0xe5900550 0xe2800008
+#   player_advance: located (strict)
+site player_advance   0x002e42d8 0xe2501000 0x012fff1e
+#   display_draw: located (strict)
+site display_draw     0x001b0a30 0xe3520001 0x812fff1e
+
+# ---- globals: data <name> <address> ---------------------------------------------------------
+#   cur_player: derived from 2 places, e.g. 0x159b30+0x60
+data cur_player             0x0054d670
+#   scores32: derived from 2 places, e.g. 0x15edb8+0x8
+data scores32               0x00592410
+#   score_mult: derived from 2 places, e.g. 0x15ee4c+0x30
+data score_mult             0x0054c348
+# data mode_mask              NOT PLACED: disagreement: 0x58b76a x113, 0x585378 x1
+#   event_head: derived from 2 places, e.g. 0x11e688+0x20
+data event_head             0x0058d4d8
+#   event_current: derived from 2 places, e.g. 0x27524+0x3c
+data event_current          0x0058d4dc
+#   resource_manager: a base 0x5b1830 + field 0x80; the base derived from 2 places, e.g. 0x13607c+0x54
+data resource_manager       0x005f8680
+#   display_holder: derived from 2 places, e.g. 0x134690+0x28
+data display_holder         0x005f8600
+#   typeinfo_resource: derived from 2 places, e.g. 0x3313c+0x58
+data typeinfo_resource      0x004c03b4
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x3313c+0x5c
+data typeinfo_scene_player  0x004d69b4
+#   message_count: derived from 2 places, e.g. 0x1f1dbc+0xd4
+data message_count          0x004a8a30
+#   message_remap: derived from 2 places, e.g. 0x1f1e98+0x10
+data message_remap          0x00587f24
+#   message_table: derived from 2 places, e.g. 0x1f1efc+0x24
+data message_table          0x0055c698
+#   award_screen_arg: derived from 2 places, e.g. 0x26ce0+0x64
+data award_screen_arg       0x00543270
+
+# ---- offsets, flags and ids: value <name> <number> -----------------------------------------
+value shot_mask_at          0
+value shot_mask_bits        32
+value mode_mask_busy        0x210
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value display_at            0x7c
+value surface_playing       2
+value clip_layer            0
+value award_message_at      0xa0
+value award_value_at        0xa8
+value award_count_at        0xb0
+
+# ---- shots: shot <mask> <name> -------------------------------------------------------------------
+# shot 0x2           FAB drop F   <- beatles's, not this title's
+# shot 0x4           FAB drop A   <- beatles's, not this title's
+# shot 0x8           FAB drop B   <- beatles's, not this title's
+# shot 0x10          FAB bank completed   <- beatles's, not this title's
+# shot 0x20          FOUR drop F   <- beatles's, not this title's
+# shot 0x40          FOUR drop O   <- beatles's, not this title's
+# shot 0x80          FOUR drop U   <- beatles's, not this title's
+# shot 0x100         FOUR drop R   <- beatles's, not this title's
+# shot 0x200         FOUR bank completed   <- beatles's, not this title's
+# shot 0x400         1964 drop 1   <- beatles's, not this title's
+# shot 0x800         1964 drop 9   <- beatles's, not this title's
+# shot 0x1000        1964 drop 6   <- beatles's, not this title's
+# shot 0x2000        1964 drop 4   <- beatles's, not this title's
+# shot 0x4000        1964 bank completed   <- beatles's, not this title's
+# shot 0x8000        Left pop bumper   <- beatles's, not this title's
+# shot 0x10000       Top pop bumper   <- beatles's, not this title's
+# shot 0x20000       Right pop bumper   <- beatles's, not this title's
+# shot 0x400000      Left orbit target   <- beatles's, not this title's
+# shot 0x800000      Right orbit target   <- beatles's, not this title's
+# shot 0x1000000     Lower left target   <- beatles's, not this title's
+# shot 0x2000000     Super jackpot target   <- beatles's, not this title's
+# shot 0x4000000     Left orbit   <- beatles's, not this title's
+# shot 0x8000000     Right orbit   <- beatles's, not this title's
+# shot 0x10000000    Left spinner   <- beatles's, not this title's
+# shot 0x20000000    Right spinner   <- beatles's, not this title's
+# shot 0x40000000    Skill shot rollover   <- beatles's, not this title's
+# shot 0x80000000    Top orbit   <- beatles's, not this title's
+
+# ---- shots from switches: switch <id> <shot mask> <name> (MODE_SDK.md, "Shots from switches") -----------
+#   switch_hit: located (strict)
+site switch_hit       0x002c8f3c 0xe2503000 0x012fff1e
+#   switch_hit2: located (strict)
+site switch_hit2      0x002c8fdc 0xe92d4010 0xe2504000
+# switch 73          0x100000000     Target 1   <- beatles's, not this title's
+# switch 74          0x200000000     Target 2   <- beatles's, not this title's
+# switch 75          0x400000000     Target 3   <- beatles's, not this title's
+# switch 76          0x800000000     Target 4   <- beatles's, not this title's
+# switch 48          0x1000000000    Left outlane   <- beatles's, not this title's
+# switch 49          0x2000000000    Left return lane   <- beatles's, not this title's
+# switch 50          0x4000000000    Right return lane   <- beatles's, not this title's
+# switch 51          0x8000000000    Right outlane   <- beatles's, not this title's
+
+# ---- callouts by role, scenes by role -------------------------------------------------------------
+# callout countdown           385   <- beatles's, not this title's
+#   scene video_bank: COPIED, unverified (derived an address, but it holds no 40-hex id; the target program names the same id)
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- examples a template mode can use on this game ------------------------------------------------
+# text example_start_shot     Left orbit target   <- beatles's, not this title's
+
+# ---- sound requests (item 150): framework play chain, placed by port_tool (strict or through hooks)
+#   sound_play: located (strict)
+site sound_play       0x001ed86c 0xe92d4010 0xe301e8b8
+#   sound_nth: located (strict)
+site sound_nth        0x001eda20 0xe92d4010 0xe301e8b8
+#   sound_active: located (strict)
+site sound_active     0x001edfe0 0xe59f3034 0xe2831e62
+#   sound_stop: located (strict)
+site sound_stop       0x001ee138 0xe92d40f8 0xe1a06000
+#   sound_worker: located (strict)
+site sound_worker     0x001ece3c 0xe92d4ff0 0xe2507000
+#   sound_channels: derived from 2 places, e.g. 0x23e9b0+0x50
+data sound_channels         0x005919c4
+#   sound_queue: derived from 2 places, e.g. 0x23f8d4+0xc
+data sound_queue            0x00592260
+#   sound_requests: derived from 2 places, e.g. 0x23ee4c+0x34
+data sound_requests         0x0057744c
+#   sound_request_count: derived from 2 places, e.g. 0x23ee4c+0x14
+data sound_request_count    0x004bdf0c
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+
+# ---- the game's own modes: NO cmode_manager, so no stock_* sites (pm_stock_mode_running -> -1).
+
+# ---- events: the same framework bus as Godzilla (subscribe 0x2e149c, dispatch 0x2e1548, table
+#   hook_dispatch: located (strict)
+site hook_dispatch    0x000ccc2c 0xe35000cf 0xe92d4038
+#   event game_start: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)
+event game_start      0x4d
+#   event ball_start: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)
+event ball_start      0x25
+#   event ball_end: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)
+event ball_end        0x34
+#   event bonus_start: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)
+event bonus_start     0x27
+#   event bonus_end: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)
+event bonus_end       0x28
+#   event tilt_warning: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)
+event tilt_warning    0xc8
+#   event tilt: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)
+event tilt            0xc6
+#   event game_over: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)
+event game_over       0x47
+# site mball_start      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference mball_start calls 0x2f406c, which is 0x1e22d0 in the target - prove what it does before using it
+#   candidate: the reference mball_start calls 0x11e688, which is 0x13531c in the target - prove what it does before using it
+#   candidate: the reference mball_start calls 0x135978, which is 0x2e3ee0 in the target - prove what it does before using it
+# event multiball_start site mball_start   <- left out: its site mball_start was not placed
+
+# ---- display priority: display_effect_start 0x2e0420, display_effect_next 0x2e0804,
+
+# ---- named inserts: framework lamp layers (the allocator 0x2e10c8 is Godzilla's 0x3c14d4 word for word)
+#   lamp_layers: derived from 2 places, e.g. 0x2e10c8+0x8
+data lamp_layers            0x00590140
+#   light_count: derived from 2 places, e.g. 0xa0af8+0x24
+data light_count            0x00603d18
+value lamp_slot_size        40
+value lamp_slot_level       2
+value lamp_slot_alpha       3
+value lamp_slot_fade        8
+value lamp_slot_used        36
+value lamp_group_prio       4
+value lamp_group_next       20
+value lamp_fade             3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py --image Test/beatles_playfield
+# lamp 19,20,21          0              TICKET TO RIDE  # lamp 3, I/O group 6 index 9, at 177,546   <- another title's insert
+# lamp 22,23,24          0              IT WON'T BE LONG  # lamp 4, I/O group 6 index 12, at 197,535   <- another title's insert
+# lamp 16,17,18          0              I SHOULD'VE KNOWN BETTER  # lamp 5, I/O group 6 index 15, at 155,550   <- another title's insert
+# lamp 13,14,15          0              DRIVE MY CAR  # lamp 6, I/O group 6 index 21, at 133,546   <- another title's insert
+# lamp 10,11,12          0              ALL MY LOVING  # lamp 7, I/O group 6 index 18, at 114,535   <- another title's insert
+# lamp 95                0              LOWER PLAYFIELD GI 1  # lamp 8, I/O group 6 index 0, at 0,0   <- another title's insert
+# lamp 96                0              LOWER PLAYFIELD GI 2  # lamp 9, I/O group 6 index 1, at 0,0   <- another title's insert
+# lamp 41                0              4X BONUS  # lamp 11, I/O group 6 index 8, at 202,505   <- another title's insert
+# lamp 40                0              2X BONUS  # lamp 12, I/O group 6 index 24, at 188,505   <- another title's insert
+# lamp 39                0              1X BONUS  # lamp 13, I/O group 6 index 25, at 195,492   <- another title's insert
+# lamp 101               0              RIGHT SLING FLASH  # lamp 14, I/O group 6 index 26, at 230,492   <- another title's insert
+# lamp 102               0              DRUM FLASH (X3)  # lamp 15, I/O group 6 index 27, at 155,501   <- another title's insert
+# lamp 100               0              LEFT SLING FLASH  # lamp 16, I/O group 6 index 28, at 81,492   <- another title's insert
+# lamp 25                0              1  # lamp 17, I/O group 6 index 29, at 115,492   <- another title's insert
+# lamp 26                0              2  # lamp 18, I/O group 6 index 30, at 108,505   <- another title's insert
+# lamp 27                0              3  # lamp 19, I/O group 6 index 31, at 123,505   <- another title's insert
+# lamp 103               0              RECORD FLASH (X2)  # lamp 20, I/O group 6 index 32, at 0,0   <- another title's insert
+# lamp 65                0x100          FOU(R)  # lamp 21, I/O group 6 index 33, at 168,303; tie: by name/position   <- another title's insert
+# lamp 64                0x80           FO(U)R  # lamp 22, I/O group 6 index 34, at 154,292; tie: by name/position   <- another title's insert
+# lamp 63                0x40           F(O)UR  # lamp 23, I/O group 6 index 35, at 139,280; tie: by name/position   <- another title's insert
+# lamp 62                0x20           (F)OUR  # lamp 24, I/O group 6 index 36, at 125,269; tie: by name/position   <- another title's insert
+# lamp 66                0              ADVANCE LOOPS 2 CNTR 4BANK  # lamp 25, I/O group 6 index 37, at 109,281   <- another title's insert
+# lamp 67                0              ADVANCE MULTIPLIERS X CNTR 4BANK  # lamp 26, I/O group 6 index 38, at 120,290   <- another title's insert
+# lamp 68                0              SCORE BONUS CNTR 4BANK  # lamp 27, I/O group 6 index 39, at 131,299   <- another title's insert
+# lamp 109               0x80000000     TOP MAGNET FLASH  # lamp 28, I/O group 6 index 40, at 184,95; tie: the top orbit opto's flasher (5 px)   <- another title's insert
+# lamp 93                0x2000         196(4)  # lamp 29, I/O group 6 index 41, at 252,202; tie: by name/position   <- another title's insert
+# lamp 92                0x1000         19(6)4  # lamp 30, I/O group 6 index 42, at 242,187; tie: by name/position   <- another title's insert
+# lamp 91                0x800          1(9)64  # lamp 31, I/O group 6 index 43, at 233,171; tie: by name/position   <- another title's insert
+# lamp 90                0x400          (1)964  # lamp 32, I/O group 6 index 44, at 223,156; tie: by name/position   <- another title's insert
+# lamp 73                0              ADVANCE LOOPS 3 RT 4BANK  # lamp 33, I/O group 6 index 45, at 213,178   <- another title's insert
+# lamp 74                0              ADV MULTIPLIERS X RT 4BANK  # lamp 34, I/O group 6 index 46, at 221,190   <- another title's insert
+# lamp 75                0              SCORE BONUS RT 4BANK  # lamp 35, I/O group 6 index 47, at 229,202   <- another title's insert
+# lamp 97                0              PLAYFIELD UPPER GI LEFT  # lamp 36, I/O group 7 index 0, at 0,0   <- another title's insert
+# lamp 98                0              PLAYFIELD UPPER GI RIGHT  # lamp 37, I/O group 7 index 1, at 0,0   <- another title's insert
+# lamp 110               0x10000000     LEFT SPINNER FLASH  # lamp 39, I/O group 7 index 3, at 90,195; tie: the spinner's flasher (2 px)   <- another title's insert
+# lamp 111               0x20000000     RIGHT SPINNER FLASH  # lamp 40, I/O group 7 index 4, at 270,296; tie: the spinner's flasher (2 px)   <- another title's insert
+# lamp 55,56,57          0x40000000     SKILL SHOT ROLLOVER  # lamp 41, I/O group 7 index 7, at 257,399; tie: by name/position   <- another title's insert
+# lamp 104               0              UP RIGHT FLIPPER FLASH  # lamp 42, I/O group 7 index 8, at 277,422   <- another title's insert
+# lamp 61                0              RINGO SPINNER  # lamp 43, I/O group 7 index 9, at 229,370   <- another title's insert
+# lamp 60                0              GEORGE SPINNER  # lamp 44, I/O group 7 index 10, at 236,357   <- another title's insert
+# lamp 59                0              PAUL SPINNER  # lamp 45, I/O group 7 index 11, at 242,345   <- another title's insert
+# lamp 58                0              JOHN SPINNER  # lamp 46, I/O group 7 index 12, at 249,332   <- another title's insert
+# lamp 83                0x800000       RIGHT ORBIT TARGET  # lamp 47, I/O group 7 index 13, at 248,287; tie: by name/position   <- another title's insert
+# lamp 84                0              RIGHT ORBIT 2X  # lamp 48, I/O group 7 index 14, at 275,264   <- another title's insert
+# lamp 85                0              RIGHT ORBIT 1  # lamp 49, I/O group 7 index 15, at 290,223   <- another title's insert
+# lamp 86                0              RIGHT ORBIT 2  # lamp 50, I/O group 7 index 16, at 291,181   <- another title's insert
+# lamp 87                0              RIGHT ORBIT 3  # lamp 51, I/O group 7 index 17, at 277,141   <- another title's insert
+# lamp 88                0              RIGHT ORBIT 4  # lamp 52, I/O group 7 index 18, at 250,108   <- another title's insert
+# lamp 89                0              RIGHT ORBIT 5  # lamp 53, I/O group 7 index 19, at 215,85   <- another title's insert
+# lamp 36                0              9K BONUS  # lamp 54, I/O group 7 index 20, at 223,444   <- another title's insert
+# lamp 35                0              8K BONUS  # lamp 55, I/O group 7 index 21, at 215,422   <- another title's insert
+# lamp 34                0              7K BONUS  # lamp 56, I/O group 7 index 22, at 199,403   <- another title's insert
+# lamp 52,53,54          0              JACKPOT  # lamp 57, I/O group 7 index 23, at 205,374   <- another title's insert
+# lamp 33                0              6K BONUS  # lamp 58, I/O group 7 index 26, at 179,391   <- another title's insert
+# lamp 38                0              20K BONUS  # lamp 59, I/O group 7 index 27, at 171,375   <- another title's insert
+# lamp 32                0              5K BONUS  # lamp 60, I/O group 7 index 28, at 155,387   <- another title's insert
+# lamp 37                0              10K BONUS  # lamp 61, I/O group 7 index 29, at 140,375   <- another title's insert
+# lamp 31                0              4K BONUS  # lamp 62, I/O group 7 index 30, at 132,391   <- another title's insert
+# lamp 48                0              SCORE BONUS LT 3BANK  # lamp 63, I/O group 7 index 31, at 107,368   <- another title's insert
+# lamp 69                0              JOHN POP TARGET  # lamp 64, I/O group 7 index 32, at 93,184   <- another title's insert
+# lamp 70                0              PAUL POP TARGET  # lamp 65, I/O group 7 index 33, at 102,161   <- another title's insert
+# lamp 71                0              GEORGE POP TARGET  # lamp 66, I/O group 7 index 34, at 115,147   <- another title's insert
+# lamp 72                0              RINGO POP TARGET  # lamp 67, I/O group 7 index 35, at 204,140   <- another title's insert
+# lamp 105               0x8000         LEFT POP FLASH  # lamp 68, I/O group 7 index 36, at 123,207; tie: the pop's own flasher (0 px)   <- another title's insert
+# lamp 106               0x20000        RIGHT POP FLASH  # lamp 69, I/O group 7 index 37, at 196,229; tie: the pop's own flasher (0 px)   <- another title's insert
+# lamp 107               0x10000        TOP POP FLASH  # lamp 70, I/O group 7 index 38, at 171,171; tie: the pop's own flasher (0 px)   <- another title's insert
+# lamp 108               0              POP FLASH  # lamp 71, I/O group 7 index 39, at 162,211   <- another title's insert
+# lamp 76                0x400000       LEFT ORBIT TARGET  # lamp 72, I/O group 7 index 40, at 74,221; tie: by name/position   <- another title's insert
+# lamp 77                0              LEFT ORBIT 2X  # lamp 73, I/O group 7 index 41, at 60,264   <- another title's insert
+# lamp 78                0              LEFT ORBIT 1  # lamp 74, I/O group 7 index 42, at 45,223   <- another title's insert
+# lamp 79                0              LEFT ORBIT 2  # lamp 75, I/O group 7 index 43, at 45,181   <- another title's insert
+# lamp 80                0              LEFT ORBIT 3  # lamp 76, I/O group 7 index 44, at 59,141   <- another title's insert
+# lamp 81                0              LEFT ORBIT 4  # lamp 77, I/O group 7 index 45, at 85,108   <- another title's insert
+# lamp 82                0              LEFT ORBIT 5  # lamp 78, I/O group 7 index 46, at 121,86   <- another title's insert
+# lamp 45                0x8            FA(B)  # lamp 79, I/O group 7 index 47, at 89,355; tie: by name/position   <- another title's insert
+# lamp 47                0              ADVANCE MULTIPLIERS X LT 3BANK  # lamp 80, I/O group 7 index 48, at 100,381   <- another title's insert
+# lamp 46                0              ADVANCE LOOPS 1 LT 3BANK  # lamp 81, I/O group 7 index 49, at 94,394   <- another title's insert
+# lamp 30                0              3K BONUS  # lamp 82, I/O group 7 index 50, at 111,403   <- another title's insert
+# lamp 44                0x4            F(A)B  # lamp 83, I/O group 7 index 51, at 81,372; tie: by name/position   <- another title's insert
+# lamp 43                0x2            (F)AB  # lamp 84, I/O group 7 index 52, at 73,388; tie: by name/position   <- another title's insert
+# lamp 42                0x1000000      MYSTERY  # lamp 85, I/O group 7 index 53, at 71,412; tie: by position only (14 px from the lower left target)   <- another title's insert
+# lamp 29                0              2K BONUS  # lamp 86, I/O group 7 index 54, at 96,422   <- another title's insert
+# lamp 28                0              1K BONUS  # lamp 87, I/O group 7 index 55, at 88,444   <- another title's insert
+# lamp 49,50,51          0x2000000      SUPER JACKPOT  # lamp 88, I/O group 7 index 56, at 53,341; tie: by name/position   <- another title's insert
+# lamp 5                 0              LEFT OUTLANE  # lamp 89, I/O group 7 index 59, at 41,531   <- another title's insert
+# lamp 6                 0              LEFT INLANE  # lamp 90, I/O group 7 index 60, at 60,464   <- another title's insert
+# lamp 7                 0              SHOOT AGAIN  # lamp 91, I/O group 7 index 61, at 155,584   <- another title's insert
+# lamp 8                 0              RIGHT INLANE  # lamp 92, I/O group 7 index 62, at 250,464   <- another title's insert
+# lamp 9                 0              RIGHT OUTLANE  # lamp 93, I/O group 7 index 63, at 269,531   <- another title's insert

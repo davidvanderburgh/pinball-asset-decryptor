@@ -8,8 +8,9 @@ by ``tools/spike2_emu/modes/sdk/build_prebuilt.sh`` and committed as
 from. Try it (the emulator) and Write (a card) both copy it from here.
 
 A PORT tells the runtime where one game build's functions are
-(``sdk/ports/<game_dir>-<version>.port``); the runtime refuses to hook a game whose code
-does not match its port, so handing it the wrong one leaves the game stock, never broken.
+(``sdk/ports/<game_dir>-<version>.port``, or one derived on this machine for a card's build:
+:func:`port_dirs`); the runtime refuses to hook a game whose code does not match its port, so
+handing it the wrong one leaves the game stock, never broken.
 """
 from __future__ import annotations
 
@@ -53,9 +54,47 @@ def sources_file():
     return os.path.join(sdk_dir(), "prebuilt", "SOURCES.sha256")
 
 
+def port_dirs():
+    """The folders ports are read from, in the order a lookup tries them: the SDK's shipped
+    ``ports`` folder, then this machine's derived ports (:func:`.port_derive.user_ports_dir`,
+    where a card's build gets a port when none is shipped for it)."""
+    dirs = [os.path.join(sdk_dir(), "ports")]
+    try:
+        from .port_derive import user_ports_dir
+        dirs.append(user_ports_dir())
+    except OSError:                       # the cache folder cannot be made: shipped ports only
+        pass
+    return dirs
+
+
+def port_paths():
+    """Every port as ``(game_dir, version, path)``, shipped ones first, each folder sorted. A
+    derived port that is no longer current (:func:`.port_derive.derived_current`: another
+    drafting revision, or its reference ports changed) is left out until the card is read
+    again."""
+    out = []
+    for n, d in enumerate(port_dirs()):
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for name in names:
+            m = re.match(r"^(.+)-(\d+\.\d+(?:\.\d+)?)\.port$", name)
+            path = os.path.join(d, name)
+            if not m or not os.path.isfile(path):
+                continue
+            if n > 0:
+                from .port_derive import derived_current
+                if not derived_current(path):
+                    continue
+            out.append((m.group(1), m.group(2), path))
+    return out
+
+
 def port_file(game_dir, version):
-    """The port for one game build, ``sdk/ports/<game_dir>-<version>.port``, or None when
-    the SDK has no port for it (then no mode can run on that build).
+    """The port for one game build, ``<game_dir>-<version>.port``, or None when there is none
+    (then no mode can run on that build). The SDK's shipped ports win; a port derived on this
+    machine (:func:`port_dirs`) is found after them.
 
     ``1.15``, ``1_15``, ``1.15.0`` and ``1_15_0`` are all the port version ``1.15``, and a
     nonzero third part is kept, so ``1.15.1`` never silently takes ``1.15``'s port. The
@@ -68,25 +107,15 @@ def port_file(game_dir, version):
     want = version_key(version)
     if not want:
         return None
-    for game, named in ports():
+    for game, named, path in port_paths():
         if game == game_dir and version_key(named) == want:
-            path = os.path.join(sdk_dir(), "ports", "%s-%s.port" % (game, named))
-            return path if os.path.isfile(path) else None
+            return path
     return None
 
 
 def ports():
-    """Every ``(game_dir, version)`` the SDK has a port for, sorted."""
-    out = []
-    try:
-        names = os.listdir(os.path.join(sdk_dir(), "ports"))
-    except OSError:
-        return out
-    for name in names:
-        m = re.match(r"^(.+)-(\d+\.\d+(?:\.\d+)?)\.port$", name)
-        if m:
-            out.append((m.group(1), m.group(2)))
-    return sorted(out)
+    """Every ``(game_dir, version)`` there is a port for (shipped or derived here), sorted."""
+    return sorted({(g, v) for g, v, _p in port_paths()})
 
 
 def _sha256_lf(path):

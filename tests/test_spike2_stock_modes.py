@@ -209,3 +209,38 @@ def test_the_pro_115_report_matches_what_the_emulator_proved():
                 assert ["%08x" % img.word(k[1]), "%08x" % img.word(k[2])] == n["words"]
             elif k[0] == "lit":
                 assert "%08x" % img.word(k[1]) == n["words"][0]
+
+
+# ---- any build: the app's own reader behind the same command ----------------------------------------
+#: folders of <game>-<version>.elf game programs, from PAD_GAME_ELFS (several joined with
+#: os.pathsep); the tests that need them skip without
+GAME_ELFS = [d for d in (os.environ.get("PAD_GAME_ELFS") or "").split(os.pathsep) if d]
+
+
+def test_the_build_line_never_names_another_title():
+    t = _tool()
+    assert t.build_label("x.elf", t.PRO115_SHA1) == ("godzilla_pro", "1.15.0")
+    assert t.build_label("/a/beatles-1.29.0.elf", "0" * 40) == ("beatles", "1.29.0")
+    assert t.build_label("/a/rush_le-1_18_0.elf", "0" * 40) == ("rush_le", "1.18.0")
+    assert t.build_label("/a/game", "0" * 40) == ("unknown", "0")
+    assert t.build_label("/a/game", "0" * 40, "mine", "2.0") == ("mine", "2.0")
+
+
+def test_without_ref_it_prints_the_apps_table_for_any_build(tmp_path):
+    pytest.importorskip("numpy")
+    path = next((os.path.join(d, "beatles-1.29.0.elf") for d in GAME_ELFS
+                 if os.path.isfile(os.path.join(d, "beatles-1.29.0.elf"))), None)
+    if path is None:
+        pytest.skip("no Beatles 1.29 game program on this machine")
+    t = _tool()
+    out = io.StringIO()
+    js = tmp_path / "facts.json"
+    data = open(path, "rb").read()
+    info = t.generic(data, "beatles", "1.29.0", str(js), out=out)
+    text = out.getvalue()
+    assert text.startswith("build beatles 1.29.0 sha1 89bdc7b3f2ed1eaf6b8b6213ab1b199fbb56b91d")
+    assert "number 2 timer.adjustment 30 adj AD_MODE_DRIVE_MY_CAR_TIMER 171" in text
+    assert info["modes"] == 6
+    import json
+    facts = json.loads(js.read_text())
+    assert [m["name"] for m in facts["modes"]][:2] == ["All My Loving", "Drive My Car"]

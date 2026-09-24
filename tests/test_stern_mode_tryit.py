@@ -243,8 +243,22 @@ def test_slots_code_modes_and_what_waits_for_the_next_try(tmp_path):
     assert MT.code_mode_sources(project) == [("blitz", code)]
     spec = MP.ModeSpec(name="X")
     before = MT.asset_signature(spec)
-    spec.award, spec.seconds, spec.name = 5, 9, "Y"
+    spec.award, spec.seconds = 5, 9
     assert MT.asset_signature(spec) == before           # these reload live
+    # the name is drawn on a generated panel (no title or picture of its own) and on a title
+    # clip with no title: there it waits for the next Try it, elsewhere it reloads live
+    spec.name = "Y"
+    assert MT.asset_signature(spec) != before
+    spec.screen_title = "OWN TITLE"
+    before = MT.asset_signature(spec)
+    spec.name = "Z"
+    assert MT.asset_signature(spec) == before
+    spec.clip, spec.clip_title = "title", ""
+    before = MT.asset_signature(spec)
+    spec.name = "W"
+    assert MT.asset_signature(spec) != before
+    spec.clip, spec.name = "none", "Y"
+    before = MT.asset_signature(spec)
     spec.panel_color = "#000000"
     assert MT.asset_signature(spec) != before           # this waits for the next Try it
     # the family's built assets wait too: a second clip (141), a new span of a film (142)
@@ -645,7 +659,7 @@ def test_a_mode_naming_a_shot_the_projects_card_lacks_is_refused(tmp_path):
 def test_project_title_names_the_card_to_pick(tmp_path):
     project = str(tmp_path / "proj")
     os.makedirs(project)
-    assert MT.project_title(project).key == GZ.key          # no card, no modes
+    assert MT.project_title(project) is None                 # no card, no modes: no game
     MP.new_mode(project, "Alpha", MP.ModeSpec(name="Alpha", title=_le().key, screen=False,
                                               clip="none"))
     assert MT.project_title(project).key == _le().key       # no card: the modes' own title

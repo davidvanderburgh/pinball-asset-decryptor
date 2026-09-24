@@ -21,3 +21,7 @@
 # root file's `binary` line lost to `* text eol=lf` above, and a rebuild whose bytes
 # held a CR LF pair would have been committed with the CR taken out.
 *.so binary
+
+# The port recipes (modes/sdk/ports/recipes/*.recipe.gz) are gzip files the app reads byte for
+# byte; `* text eol=lf` above would take a CR out of one.
+*.gz binary

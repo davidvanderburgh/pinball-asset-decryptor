@@ -24,7 +24,7 @@ manifest composed with the modes in it, a mode's own sounds in a grown ``image.b
 the count patch and the validator bypass in the game program, and the modes matched to the
 project's card (item 148). The set carries the project's other edits too, as the card
 would. A set already there is patched, not rebuilt (``write_overrides``' own update path);
-a set with a sound of a mode's own takes about three minutes, most of it the sound bank.
+a set with a sound of a mode's own takes about a minute, most of it the sound bank.
 """
 from __future__ import annotations
 
@@ -244,6 +244,8 @@ def build_set(project, card, base=None, ffmpeg=None, log=None, progress=None, ca
         else:
             from . import code_modes as CM
             prof = CM.profile_for(project, code)
+            if prof is None:
+                raise TryItError(CM.NO_TITLE)
     except MP.ModeProjectError as e:
         raise TryItError(str(e)) from None
     if not card or not os.path.isfile(card):
@@ -499,13 +501,23 @@ def asset_signature(spec):
     """The fields of a mode that change its BUILT assets (the screen and the clip). An
     edit to one of these applies at the next Try it; everything else reloads live.
     Item 141's second clip and item 142's film cuts (a new span is a new clip or picture)
-    are built assets too."""
-    return json.dumps({k: getattr(spec, k, None) for k in (
+    are built assets too, and so is the NAME wherever a build draws it: on the generated
+    panel of a screen with no title or picture of its own, and on a title-card clip with no
+    title of its own (:mod:`.mode_assets`). The award is not: the runtime writes the
+    screen's words ("1,000,000 A SHOT") from the mode file each time the mode starts."""
+    got = {k: getattr(spec, k, None) for k in (
         "screen", "screen_title", "screen_art", "panel_color", "title_color",
         "clip", "clip_title", "clip_file", "clip_seconds", "clip_when", "title",
         "clip_both", "clip_source", "clip_from", "clip_length", "clip_crop",
-        "art_source", "art_from", "art_crop")},
-        sort_keys=True)
+        "art_source", "art_from", "art_crop")}
+    both = getattr(spec, "clip_both", None)
+    drawn = ((getattr(spec, "screen", False) and not getattr(spec, "screen_art", "")
+              and not getattr(spec, "screen_title", ""))
+             or (getattr(spec, "clip", "") == "title" and not getattr(spec, "clip_title", ""))
+             or (getattr(spec, "clip", "none") != "none" and isinstance(both, dict)
+                 and both.get("clip") == "title" and not both.get("title")))
+    got["name_drawn"] = getattr(spec, "name", None) if drawn else None
+    return json.dumps(got, sort_keys=True)
 
 
 # ---- the project's card decides the title (item 148) --------------------------------
@@ -526,7 +538,7 @@ def modes_for_the_card(project, found):
 def project_title(project):
     """The profile ``project``'s modes run on, without opening any image: its card's port
     when it names a card that has one (item 148), else the title its first mode was made
-    for, else Godzilla Pro 1.15. For words only (which card to pick)."""
+    for, else None (there is no default game). For words only (which card to pick)."""
     try:
         card, prof = MP.project_profile(project)
     except (OSError, ValueError):
@@ -539,7 +551,7 @@ def project_title(project):
             return MP.profile(spec.title)
         except MP.ModeProjectError:
             break
-    return MP.GODZILLA_PRO_1_15
+    return None
 
 
 #: A mode's OWN sounds (items 131 and 150): WAVs a Write puts in the card's sound bank.

@@ -70,6 +70,36 @@
 .modes-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .2s ease; }
 .modes-bar.busy i { width: 30% !important; position: absolute; animation: slide 1.1s ease-in-out infinite; }
 
+/* reading a card's game build: a bar, the steps as a checklist, Cancel */
+.modes-read { flex: 0 0 auto; }
+.modes-read-bd { padding: 10px 16px !important; gap: 8px !important; }
+.modes-read-top { gap: 10px; flex-wrap: wrap; }
+.modes-read-what { min-width: 0; overflow-wrap: anywhere; }
+.modes-read-steps .phase.fail { color: var(--err); border-color: var(--err); background: var(--err-soft); }
+.modes-read-text { overflow-wrap: anywhere; line-height: 1.4; }
+.modes-read-done { margin-top: -6px; }
+
+/* the list's two groups: the game's own modes above the person's */
+.modes-list-grp { display: flex; align-items: center; gap: 4px; width: 100%; font: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); padding: 8px 10px 4px; border: 0; background: transparent; text-align: left; }
+button.modes-list-grp { cursor: pointer; border-radius: 6px; }
+button.modes-list-grp:hover { color: var(--ink-2); background: var(--panel-2); }
+.modes-list-grp:first-child { padding-top: 2px; }
+.modes-list .li.game .ellip { color: var(--ink-2); }
+
+/* one of the game's own modes: a row per number */
+.modes-gm { display: flex; flex-direction: column; gap: 0; }
+.modes-gm-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) max-content minmax(260px, 1.4fr); gap: 6px 18px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.modes-gm-row:last-child { border-bottom: 0; }
+.modes-gm-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.modes-gm-what .small { overflow-wrap: anywhere; }
+.modes-gm-stock .mono { font-variant-numeric: tabular-nums; }
+.modes-gm-edit { gap: 6px; flex-wrap: wrap; }
+.modes-gm-why { color: var(--ink-3); overflow-wrap: anywhere; }
+.modes-gm-row.readonly .lbl, .modes-gm-row.readonly .modes-gm-stock { color: var(--ink-3); }
+.modes-gm-row.changed .lbl { color: var(--accent); }
+html.bp-1280 .modes-gm-row { grid-template-columns: minmax(0, 1fr) max-content; }
+html.bp-1280 .modes-gm-edit, html.bp-1280 .modes-gm-why { grid-column: 1 / -1; }
+
 /* dialogs */
 .modes-film { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; align-items: center; }
 .modes-film-frame { width: 320px; height: 180px; max-width: 100%; }
@@ -90,3 +120,30 @@ html.bph-760 /* short windows: the page scrolls and the Try it footer stays pinn
   .modes-page { overflow: auto; padding-bottom: 0; }
 html.bph-760 .modes-body { flex: 1 0 400px; }
 html.bph-760 .modes-foot { margin-bottom: 10px; }
+
+/* the title's note: its "more" and the details badge; on a short window it is one line */
+.modes-note .note { align-items: flex-start; }
+.modes-note-act { gap: 6px; align-self: center; }
+.modes-note-more { display: none; border: 0; background: none; padding: 0 2px; color: var(--accent); cursor: pointer; font: inherit; }
+.modes-note-more:hover { text-decoration: underline; }
+html.bph-760 .modes-note-more { display: inline; }
+html.bph-760 .modes-note:not(.open) .body-text { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* a page with nothing that works on this game: its tab is dimmed, the page is one sentence */
+.modes-editor .pages button.off { color: var(--ink-3); }
+.modes-show-off { padding: 4px 0; max-width: 640px; }
+
+/* the Try it footer on a short window: one compact row (the card is a chip, no idle hint) */
+.modes-tryon-chip { display: none; max-width: 240px; min-width: 0; gap: 6px; align-items: center; cursor: pointer; background: none; font: inherit; }
+.modes-tryon-chip .ellip { min-width: 0; }
+.modes-tryon-chip:disabled { cursor: default; opacity: .6; }
+html.bph-760 .modes-tryon { display: none; }
+html.bph-760 .modes-tryon-chip { display: inline-flex; }
+html.bph-760 .modes-tryhint, html.bph-760 .modes-long { display: none; }
+html.bph-760 .modes-foot-bd { padding: 8px 14px !important; gap: 6px !important; }
+html.bph-760 .modes-tryrow { flex-wrap: nowrap; }
+html.bph-760 .modes-tryrow .btn.big { padding-top: 6px; padding-bottom: 6px; }
+/* ... and one scroll: the page scrolls, the editor and the list grow to their content */
+html.bph-760 .modes-body { flex: 0 0 auto; }
+html.bph-760 .modes-editor-bd { overflow: visible; }
+html.bph-760 .modes-list-bd { max-height: 300px; }

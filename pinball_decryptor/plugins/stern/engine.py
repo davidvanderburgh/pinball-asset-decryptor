@@ -100,6 +100,7 @@ _CACHE_KINDS = (
     (_REV_TAG + ".pkl",             re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.pkl$")),
     (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
     (_REV_TAG + ".sfxnames4.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
+    (_REV_TAG + ".sites1.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
 )
 
 
@@ -207,22 +208,30 @@ def _install_consumed_hook(emu):
     master-directory-consumed body offset during a ``derive_params`` pass.
     Returns ``(reads_set, hook_handle)``; the caller must ``mu.hook_del`` the
     handle after the derive so it doesn't slow a later decode.  Read hooks don't
-    change emulation and profiling showed ~0 added derive time.  Records each
-    byte of a multi-byte read (matching :func:`_restore_masterdir_consumed`)."""
-    from unicorn import UC_HOOK_MEM_READ
+    change emulation.  Records each byte of a multi-byte read (matching
+    :func:`_restore_masterdir_consumed`).
 
+    It fires once per guest read (2.7 million on a Godzilla derive, nearly all
+    one byte wide), so it goes in through :meth:`~.spike2.emulator.Spike2Emu.
+    add_read_hook`, which skips the binding's wrapper layers: 2.2 s of hook on
+    a 3.7 s derive where the ordinary ``hook_add`` cost 4.0 s."""
     from .spike2 import emulator as EM
     base = EM.DESC_BASE
     size = emu.imgsize
     reads = set()
+    add = reads.add
 
-    def on_read(mu, access, addr, sz, value, ud):
+    def on_read(_uc, access, addr, sz, value, ud):
         o = addr - base
+        if sz == 1:
+            if 0 <= o < size:
+                add(o)
+            return
         for k in range(sz):
             oo = o + k
             if 0 <= oo < size:
-                reads.add(oo)
-    hh = emu.mu.hook_add(UC_HOOK_MEM_READ, on_read, begin=base, end=base + size)
+                add(oo)
+    hh = emu.add_read_hook(on_read, base, base + size)
     return reads, hh
 
 
@@ -409,6 +418,140 @@ def _extract_inputs(disk_f, partitions, work_dir, log, read_progress=None):
     log("Extracting image.bin (%.0f MB)..." % (img_node["size"] / 1e6), "info")
     reader.extract_file(img_node, img_path, progress=read_progress)
     return gr_path, img_path, reader, fw_node, img_node
+
+
+_EXTRACT_INPUTS = _extract_inputs
+
+# --------------------------------------------------------------------------
+# A card's firmware + image.bin, kept for the next override set
+# --------------------------------------------------------------------------
+# An override set (the Emulate tab's "apply my edits", a Try it) is built again
+# and again from ONE card, and each build read image.bin out of it afresh: 1 s
+# when the OS still had the card's pages, 10-20 s when it did not (the card
+# library is on a hard disk here: 1650 MB of Godzilla at ~100 MB/s).  The pair
+# is kept in the temp dir, keyed by the card file's identity (the same path +
+# size + mtime the rig's own card cache keys on), and a later build copies it
+# (an SSD-to-SSD copy).  Only an override set whose caller asks for it keeps
+# one (keep_card_extracts: the preview-set builder, which is pressed again and
+# again; a Write to a card is a one-off, and neither its user nor the Emulate
+# tab's ever asked for 1.6 GB of temp); at most CARD_CACHE_KEEP cards are kept,
+# the log says when one is, and PAD_CARD_CACHE=0 reads the card every time.
+CARD_CACHE_ENV = "PAD_CARD_CACHE"
+CARD_CACHE_KEEP = 2
+#: per thread: ``wanted`` is set by keep_card_extracts around a write_overrides
+#: call, ``on`` by write_overrides while it computes that set (a Write may run
+#: beside a preview build in the same process)
+_KEEP_EXTRACTS = threading.local()
+
+
+class keep_card_extracts:
+    """``with keep_card_extracts(): write_overrides(...)``: an override set built
+    on this thread inside the block keeps its card's firmware and image.bin for
+    the next build from the same card (:func:`_extract_inputs_kept`)."""
+
+    def __enter__(self):
+        self._was = getattr(_KEEP_EXTRACTS, "wanted", False)
+        _KEEP_EXTRACTS.wanted = True
+        return self
+
+    def __exit__(self, *exc):
+        _KEEP_EXTRACTS.wanted = self._was
+        return False
+
+
+def card_cache_dir():
+    return os.path.join(tempfile.gettempdir(), "spike2_card_cache")
+
+
+def _card_extract_key(disk_f, fw_node, img_node):
+    name = getattr(disk_f, "name", None)
+    if not isinstance(name, str) or not os.path.isfile(name):
+        return None
+    st = os.stat(name)
+    ident = (os.path.normcase(os.path.abspath(name)), st.st_size, st.st_mtime_ns,
+             fw_node["size"], bytes(fw_node["i_block"]).hex(),
+             img_node["size"], bytes(img_node["i_block"]).hex())
+    return hashlib.sha256(repr(ident).encode()).hexdigest()[:32]
+
+
+def _copy_with_progress(src, dst, progress=None, chunk=1 << 24):
+    total = os.path.getsize(src)
+    done = 0
+    with open(src, "rb") as a, open(dst, "wb") as b:
+        while True:
+            buf = a.read(chunk)
+            if not buf:
+                break
+            b.write(buf)
+            done += len(buf)
+            if progress:
+                progress(done, total)
+
+
+def _extract_inputs_kept(disk_f, partitions, work_dir, log, read_progress=None):
+    """:func:`_extract_inputs`, taking the pair from this card's kept copy when an
+    override set is being built (see :data:`CARD_CACHE_ENV`) and keeping it
+    after a fresh read.  The files handed back are the build's own copies, so
+    what the build does to them (a grown bank is staged over its image.bin)
+    never reaches the kept pair.  A stand-in extractor (a test's) is always
+    called as it is."""
+    if (not getattr(_KEEP_EXTRACTS, "on", False)
+            or _extract_inputs is not _EXTRACT_INPUTS
+            or os.environ.get(CARD_CACHE_ENV) == "0"):
+        return _extract_inputs(disk_f, partitions, work_dir, log, read_progress)
+    reader, fw_node, img_node = _locate(disk_f, partitions)
+    key = _card_extract_key(disk_f, fw_node, img_node)
+    if key is None:
+        return _extract_inputs(disk_f, partitions, work_dir, log, read_progress)
+    kept = os.path.join(card_cache_dir(), key)
+    k_gr, k_img = os.path.join(kept, "game_real"), os.path.join(kept, "image.bin")
+    gr_path = os.path.join(work_dir, "game_real")
+    img_path = os.path.join(work_dir, "image.bin")
+    try:
+        hit = (os.path.getsize(k_gr) == fw_node["size"]
+               and os.path.getsize(k_img) == img_node["size"])
+    except OSError:
+        hit = False
+    if hit:
+        try:
+            log("Extracting firmware (%.1f MB, this card's kept copy)..."
+                % (fw_node["size"] / 1e6), "info")
+            _copy_with_progress(k_gr, gr_path)
+            log("Extracting image.bin (%.0f MB, this card's kept copy)..."
+                % (img_node["size"] / 1e6), "info")
+            _copy_with_progress(k_img, img_path, read_progress)
+            try:
+                os.utime(kept, None)
+            except OSError:
+                pass
+            return gr_path, img_path, reader, fw_node, img_node
+        except OSError as e:
+            log("This card's kept copy could not be read (%s); reading the card."
+                % e, "info")
+    out = _extract_inputs(disk_f, partitions, work_dir, log, read_progress)
+    try:
+        import shutil
+        free = shutil.disk_usage(tempfile.gettempdir()).free
+        if free > 3 * (img_node["size"] + fw_node["size"]):
+            tmp = kept + ".tmp%d" % os.getpid()
+            shutil.rmtree(tmp, ignore_errors=True)
+            os.makedirs(tmp)
+            shutil.copyfile(gr_path, os.path.join(tmp, "game_real"))
+            shutil.copyfile(img_path, os.path.join(tmp, "image.bin"))
+            shutil.rmtree(kept, ignore_errors=True)
+            os.replace(tmp, kept)
+            log("Kept a copy of this card's firmware and sound bank (%.0f MB) in %s "
+                "for faster rebuilds (at most %d cards; %s=0 turns this off)."
+                % ((img_node["size"] + fw_node["size"]) / 1e6, card_cache_dir(),
+                   CARD_CACHE_KEEP, CARD_CACHE_ENV), "info")
+            root = card_cache_dir()
+            old = sorted((d for d in os.listdir(root) if ".tmp" not in d),
+                         key=lambda d: os.path.getmtime(os.path.join(root, d)))
+            for d in old[:-CARD_CACHE_KEEP] if len(old) > CARD_CACHE_KEEP else ():
+                shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+    except OSError:
+        pass
+    return out
 
 
 _ASSET_REF = re.compile(rb"\d+\.asset/\d+\.asset")
@@ -4865,6 +5008,75 @@ def _stage_done(log, name, t0):
         log("Write timing: %s took %s." % (name, _fmt_dur(dt)), "info")
 
 
+# --------------------------------------------------------------------------
+# ONE progress bar for a whole build
+# --------------------------------------------------------------------------
+# A build reports ``progress(done, 100, words)`` from start to end, and each
+# stage owns a stretch of that 0..100, placed by what the stages cost on an
+# own-sound Try it on Godzilla LE 1.16 (the heaviest ordinary build) once the
+# derive ran under narrow hooks: reading image.bin 0-10, the play tables 10-12,
+# deriving the grown bank 12-30, re-encoding replaced stock sounds 31-45 (10-75
+# when nothing grows: that is then the whole audio stage), the chain encode
+# 45-75, the master-directory restore 74-76, the integrity check 76-84, music
+# banks 85-90, display text and radium images 90-91, the modes 91-94, video,
+# images and textures 94-96, the manifest and the bypass 96-97, writing the
+# files out 97-100.  A stage with a counter of its own (a derive's "sound i of
+# n") reports through :func:`_span`, so its counter moves the one bar through
+# the stage's stretch instead of restarting it at 0, and :func:`_forward_only`
+# keeps the bar from ever moving back when a stage is skipped or cut short.
+
+def _span(progress, lo, hi, label=None):
+    """*progress* for one stage of a build: the stage's own ``(done, total,
+    words)`` reported as ``lo..hi`` of the build's 0..100.  ``(0, 0, words)``
+    (a stretch with no count yet) reports ``lo``.  With *label* the words say
+    which stage it is ("<label>: sound i of n"); the stage's own words are used
+    when it gives no count and there is no label.  ``None`` in, ``None`` out."""
+    if progress is None:
+        return None
+
+    def cb(done, total, words=""):
+        f = min(max(float(done) / total, 0.0), 1.0) if total else 0.0
+        if label:
+            words = ("%s: sound %d of %d..." % (label, done, total) if total
+                     else "%s..." % label)
+        progress(int(lo + (hi - lo) * f), 100, words)
+    return cb
+
+
+def _rescale(progress, src_lo, src_hi, lo, hi):
+    """*progress* for a stage that already reports on the build's 0..100 scale
+    but in the stretch ``src_lo..src_hi`` (the stock-sound encode says 10..75):
+    its figures moved into ``lo..hi``, its words kept."""
+    if progress is None:
+        return None
+
+    def cb(done, total, words=""):
+        pct = float(done) * 100.0 / total if total else float(src_lo)
+        f = min(max((pct - src_lo) / float(src_hi - src_lo), 0.0), 1.0)
+        progress(int(lo + (hi - lo) * f), 100, words)
+    return cb
+
+
+def _forward_only(progress):
+    """*progress* that never moves the bar back: a figure below the furthest
+    one reported keeps the bar where it is and still shows the new words.
+    ``(done, 0, words)`` (no figure) passes through as it is."""
+    if progress is None or getattr(progress, "_forward_only", False):
+        return progress
+    top = {"pct": -1.0}
+
+    def cb(done, total, words=""):
+        if not total:
+            return progress(done, total, words)
+        pct = float(done) * 100.0 / total
+        if pct < top["pct"]:
+            return progress(int(top["pct"]), 100, words)
+        top["pct"] = pct
+        return progress(done, total, words)
+    cb._forward_only = True
+    return cb
+
+
 def _grow_stage_name(grow_plan):
     """The timing line's name for the ext4 copy stage, by what it copies (item 149): a
     build that carries modes copies their files, not just grown videos; one without names
@@ -5636,6 +5848,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     ``FileNotFoundError`` when there's nothing to write and ``RuntimeError``
     when nothing could be re-encoded / fit."""
     phase = phase or (lambda i: None)
+    # ONE bar for the whole build: each stage reports in its own stretch of
+    # 0..100 (see _span), and nothing a skipped stage says moves it back.
+    progress = _forward_only(progress)
 
     import numpy as np
 
@@ -5649,6 +5864,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # The leading index survives a rename ("idx0651 - text.wav"); the walk is
     # recursive so Write works from the extract root or its audio/ subdir.
     t_scan = time.monotonic()
+    if progress:
+        progress(0, 100, "Checking the project for changes...")
     baseline = read_checksums(assets_dir)
     audio_edits = _select_changed_idx_wavs(assets_dir, baseline)
 
@@ -5737,6 +5954,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             log("Found %d mode(s) to write: %s."
                 % (len(mode_list), ", ".join(s.name for _g, s in mode_list)),
                 "info")
+            # A card whose game build has no port cannot run any mode: the
+            # modes are left out with the reason and the rest is written (a
+            # project's other edits are never held back by its modes).
+            # boot_screen=False is Try it's set for the emulator; every other
+            # build goes on a real card or image (a derived port must have run)
+            _card_why = _MW.card_refusal(assets_dir, real_card=boot_screen)
+            if _card_why:
+                log("Modes: the project's %d mode(s) are left out of this build: %s"
+                    % (len(mode_list), _card_why), "warning")
+                _modes_left_out = ([s.name for _g, s in mode_list], _card_why)
+                mode_list = []
+        if mode_list:
             # item 148: the modes as the project's CARD runs them (its port,
             # masks and scenes), exactly as mode_assets.build makes them
             try:
@@ -5769,8 +5998,27 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             log("Found %d code mode(s) to write: %s."
                 % (len(code_list), ", ".join(c.name for _g, c in code_list)), "info")
             from . import code_modes as _CM
-            _cprof = (_MW.MP.profile(mode_list[0][1].title) if mode_list
-                      else _CM.profile_for(assets_dir, code_list))
+            _cwhy = _MW.card_refusal(assets_dir, real_card=boot_screen)
+            _cprof = None
+            if not _cwhy:
+                _cprof = (_MW.MP.profile(mode_list[0][1].title) if mode_list
+                          else _CM.profile_for(assets_dir, code_list))
+                if _cprof is None:
+                    _cwhy = _CM.NO_TITLE
+            if _cwhy:
+                log("Modes: the project's %d code mode(s) are left out of this build: %s"
+                    % (len(code_list), _cwhy), "warning")
+                _modes_left_out = ((_modes_left_out or ([], _cwhy))[0]
+                                   + [c.name for _g, c in code_list], _cwhy)
+                code_list = []
+        if code_list:
+            # their object compiles beside the rest of the build, not at its end
+            # (the modes stage waits for it, or takes the one kept from before)
+            try:
+                _MW.prefetch_code_object(
+                    [_CM.source_path(assets_dir, s) for s, _c in code_list])
+            except Exception:                           # noqa: BLE001
+                pass
             _req, _beds = _MW.own_sounds_taken(mode_own)
             if mode_sound and mode_sound.get("request"):
                 _req.append(int(mode_sound["request"]))
@@ -5994,7 +6242,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if audio_edits or music_edits or mode_sound or mode_own:
             phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
             t0 = time.monotonic()
-            gr_path, img_path, reader, fw_node, img_node = _extract_inputs(
+            gr_path, img_path, reader, fw_node, img_node = _extract_inputs_kept(
                 disk_f, parts, work, log, _read_prog)
             _stage_done(log, "reading the firmware and audio image out of "
                         "the card", t0)
@@ -6032,7 +6280,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     # across worker processes (each boots its own emulator), with
                     # a single-process fallback.  Params come from the
                     # Extract-time cache; only a cold cache boots an emulator here.
-                    params = _params_for(gr_path, img_path, log, progress)
+                    # the card's play tables, kept per card (read at most
+                    # once per card image, before any stage moves the bank)
+                    _sites_key = _card_sites_key(disk_f, gr_path, img_path)
+                    params = _params_for(
+                        gr_path, img_path, log,
+                        _span(progress, 10, 12,
+                              "Deriving the card's sound parameters"))
                     # The encode cache is keyed on the STOCK bank even when this
                     # build grows it, so one longer callout doesn't re-encode
                     # every other sound in the mod.  Captured before the grow
@@ -6065,7 +6319,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         t0 = time.monotonic()
                         if progress:
                             progress(10, 100, "Reading the game's play tables...")
-                        desc_sites = _descriptor_sites(gr_path, img_path, log)
+                        desc_sites = _card_descriptor_sites(
+                            gr_path, img_path, log, card_key=_sites_key)
                         grows = _grows_named_by_a_descriptor(
                             grows, {p["idx"]: p for p in params}, desc_sites,
                             log)
@@ -6083,8 +6338,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             if progress:
                                 progress(10, 100,
                                          "Reading the game's play tables...")
-                            desc_sites = _descriptor_sites(gr_path, img_path,
-                                                           log)
+                            desc_sites = _card_descriptor_sites(
+                                gr_path, img_path, log, card_key=_sites_key)
                             _stage_done(log, "reading the game's play tables",
                                         t0)
                         audio_edits, grows, mode_sound_used = _mode_sound_grow(
@@ -6099,8 +6354,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             if progress:
                                 progress(10, 100,
                                          "Reading the game's play tables...")
-                            desc_sites = _descriptor_sites(gr_path, img_path,
-                                                           log)
+                            desc_sites = _card_descriptor_sites(
+                                gr_path, img_path, log, card_key=_sites_key)
                             _stage_done(log, "reading the game's play tables",
                                         t0)
                         grow_work = grow_work or _work_dir(
@@ -6229,7 +6484,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             params = grown_hit["params"]
                             _greads = grown_hit["reads"]
                             if progress:
-                                progress(12, 100, "Reusing the last grown "
+                                progress(30, 100, "Reusing the last grown "
                                          "sound bank...")
                             log("Grown bank: these %d longer sound(s) are "
                                 "exactly the set the last build derived, "
@@ -6242,7 +6497,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 "(PAD_STERN_AUDIO_CACHE=0 runs everything "
                                 "again)." % len(grows), "info")
                             if progress:
-                                progress(14, 100, "Re-pointing the game's "
+                                progress(30, 100, "Re-pointing the game's "
                                          "play tables at the longer sounds...")
                             _repoint_descriptors(
                                 gr_path, img_path, params, desc_sites, log,
@@ -6260,11 +6515,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 progress(12, 100,
                                          "Deriving the grown sound bank...")
                             params, _greads = _derive_grown(
-                                gr_path, img_path, params, log, progress)
+                                gr_path, img_path, params, log,
+                                _span(progress, 12, 30,
+                                      "Deriving the grown sound bank"))
                             if cancel():
                                 return None, None, None, None, None
                             if progress:
-                                progress(14, 100, "Re-pointing the game's "
+                                progress(30, 100, "Re-pointing the game's "
                                          "play tables at the longer sounds...")
                             _repoint_descriptors(gr_path, img_path, params,
                                                  desc_sites, log)
@@ -6310,7 +6567,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params,
                             {i: w for i, w in audio_edits.items()
                              if i not in _chain_edits}, np, log,
-                            progress, cancel, assets_dir=assets_dir,
+                            (_rescale(progress, 10, 75, 31, 45) if grows
+                             else progress),
+                            cancel, assets_dir=assets_dir,
                             gains=slot_gains, cache_img_ident=stock_ident)
                     if audio_patches is None:
                         return None, None, None, None, None
@@ -6321,7 +6580,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             level_refs=_mode_music_level_refs(
                                 gr_path, img_path, params, desc_sites,
                                 _loop_idx, log),
-                            progress=progress, cancel=cancel)
+                            progress=_span(progress, 45, 75),
+                            cancel=cancel)
                         audio_patches.update(_cp)
                         # an appended record's container key comes out of the chain,
                         # so the play tables are re-pointed again at the keys the
@@ -6506,6 +6766,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         if (replayed is None and os.environ.get(
                                 "PAD_STERN_SKIP_FINAL_VERIFY") != "1"):
                             t0 = time.monotonic()
+                            if progress:
+                                progress(84, 100, "Decoding the replaced sounds "
+                                         "from the finished bank...")
                             try:
                                 _verify_final_patches(
                                     gr_path, img_path, audio_patches, params,
@@ -6529,11 +6792,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     if space_chk is not None:
                         space_chk.check()
                     if progress:
-                        progress(80, 100, "Re-encoding music bank(s)...")
+                        progress(85, 100, "Re-encoding music bank(s)...")
                     t0 = time.monotonic()
                     music_patches = _compute_music_patches(
                         reader, gr_path, img_path, music_edits, work, log,
-                        progress, cancel, np, gains=music_gains)
+                        _rescale(progress, 80, 95, 85, 90), cancel, np,
+                        gains=music_gains)
                     if cancel():
                         return None, None, None, None, None
                     _stage_done(log, "re-encoding %d music-bank song(s)"
@@ -6570,7 +6834,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         grown_text = None
         if text_edits:
             if progress:
-                progress(95, 100, "Preparing display text...")
+                progress(90, 100, "Preparing display text...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             (text_writes, n_text, _t_ov, fw_text_overlay,
              grown_text) = _radium_text_writes(
@@ -6632,7 +6896,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         n_color = 0
         if color_edits:
             if progress:
-                progress(95, 100, "Preparing text colours...")
+                progress(90, 100, "Preparing text colours...")
             color_writes, n_color, _c_ov = _radium_color_writes(
                 reader, assets_dir, log, cancel)
             _merge_radium_overlays(radium_overlays, _c_ov)
@@ -6647,7 +6911,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         n_layout = 0
         if layout_edits:
             if progress:
-                progress(95, 100, "Preparing text layout...")
+                progress(90, 100, "Preparing text layout...")
             layout_writes, n_layout, _l_ov = _radium_layout_writes(
                 reader, assets_dir, log, cancel)
             _merge_radium_overlays(radium_overlays, _l_ov)
@@ -6664,7 +6928,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         grown_images = {}
         if radimg_edits:
             if progress:
-                progress(96, 100, "Preparing radium images...")
+                progress(91, 100, "Preparing radium images...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             radimg_writes, n_radimg, _i_ov = _radium_image_writes(
                 reader, assets_dir, baseline, log, cancel,
@@ -6718,7 +6982,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if mode_list or code_list:
             t0 = time.monotonic()
             if progress:
-                progress(95, 100, "Building the project's modes...")
+                progress(91, 100, "Building the project's modes...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -6726,6 +6990,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 else:
                     from . import code_modes as _CM
                     _mprof = _CM.profile_for(assets_dir, code_list)
+                    if _mprof is None:
+                        raise _MW.ModeWriteError(_CM.NO_TITLE)
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel:
@@ -6745,7 +7011,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     reader.read_file_bytes(_mnodes[_bank_rel]) if _bank_rel else b"",
                     bytes(reader.read_file_bytes(fw_node)),
                     os.path.join(grow_work, "modes"), log=log,
-                    end_sound=mode_sound_used, own_sounds=mode_own_used)
+                    end_sound=mode_sound_used, own_sounds=mode_own_used,
+                    progress=_span(progress, 91, 94))
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
                           for p, _i, n in reader.iter_regular_files(
                               min_size=1, max_depth=20)}
@@ -6772,7 +7039,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         video_grow_jobs = []   # (card_rel, source_file) — grown via ext4 driver
         if video_edits:
             if progress:
-                progress(86, 100, "Preparing video...")
+                progress(94, 100, "Preparing video...")
             # The user's assigned replacements (extract rel -> source file);
             # oversized ones grow their slot instead of being crushed to fit.
             from ...core import staged_changes as _sc
@@ -6794,7 +7061,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         image_patches = []     # (inode, payload bytes == inode size)
         if image_edits:
             if progress:
-                progress(92, 100, "Preparing images...")
+                progress(95, 100, "Preparing images...")
             t0 = time.monotonic()
             image_patches, _iskip = _prepare_image_patches(
                 reader, image_edits, work, log, cancel)
@@ -6806,7 +7073,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         boot_writes, boot_grow, n_boot = [], None, 0
         if boot_edits:
             if progress:
-                progress(93, 100, "Preparing the boot screen...")
+                progress(95, 100, "Preparing the boot screen...")
             boot_writes, boot_grow, n_boot = _prepare_boot_screen_patches(
                 disk_f, parts, reader.base, boot_edits, work, log, cancel,
                 dest_is_device=dest_is_device)
@@ -6816,7 +7083,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         texture_patches = []   # (inode, payload bytes == inode size)
         if texture_edits:
             if progress:
-                progress(94, 100, "Preparing scene textures...")
+                progress(96, 100, "Preparing scene textures...")
             texture_patches, _tskip = _prepare_texture_patches(
                 reader, texture_edits, log, cancel)
             if cancel():
@@ -6853,6 +7120,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # then copies over it.
         audio_inplace = audio_patches
         if grow_places is not None:
+            if progress:
+                progress(96, 100, "Composing the grown sound bank...")
             with open(_lp(img_path), "r+b") as f:
                 for body_off, body in audio_patches.items():
                     f.seek(body_off)
@@ -6886,6 +7155,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # needing re-validation, exactly as before this step existed.
         full_repl = list(video_patches) + list(image_patches) + list(texture_patches)
         t0 = time.monotonic()
+        if progress:
+            progress(96, 100, "Refreshing the SD-validation manifest...")
         try:
             writes += _compute_sidx_writes(
                 reader, disk_f, img_node, audio_inplace, music_patches,
@@ -7218,7 +7489,10 @@ def build_update_reason(prev, original_path, output_path, assets_dir):
     try:
         from . import mode_write as _MW
         if _mode_family_on() and _MW.enabled() and (
-                _MW.project_modes(assets_dir) or _MW.code_mode_list(assets_dir)):
+                _MW.project_modes(assets_dir) or _MW.code_mode_list(assets_dir)) and (
+                not _MW.card_refusal(assets_dir, probe=False)):
+            # (a card with no port for its build carries none of them: the Write leaves
+            # them out, so the update in place still applies)
             return "a build that carries modes is built whole"
     except Exception:
         return "the project's modes could not be read"
@@ -8420,13 +8694,20 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     parts = _linux_partitions(original_path)
     disk_f = open(_lp(original_path), "rb")
     try:
-        writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
-            disk_f, parts, assets_dir, log, progress, cancel, label=label,
-            boot_screen=False,
-            # Only when the caller decided the gate: the default call stays
-            # exactly the call it was (the tests' stand-ins for
-            # _compute_patches pin its signature).
-            **({} if sound_ok is None else {"sound_ok": sound_ok}))
+        # a preview set is built again and again from this card: when its
+        # caller asks (keep_card_extracts), keep the card's firmware + image.bin
+        # for the next one (_extract_inputs_kept)
+        _KEEP_EXTRACTS.on = bool(getattr(_KEEP_EXTRACTS, "wanted", False))
+        try:
+            writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
+                disk_f, parts, assets_dir, log, progress, cancel, label=label,
+                boot_screen=False,
+                # Only when the caller decided the gate: the default call stays
+                # exactly the call it was (the tests' stand-ins for
+                # _compute_patches pin its signature).
+                **({} if sound_ok is None else {"sound_ok": sound_ok}))
+        finally:
+            _KEEP_EXTRACTS.on = False
         if writes is None:                  # cancelled mid-compute
             _rmtree_grow_plan(grow_plan)
             return None, None, None, None
@@ -8486,6 +8767,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             written, records, delta = [], [], []
             t0 = time.monotonic()
             total = len(by_file) + len((grow_plan or {}).get("jobs", ()))
+            # the last stretch of the build's one bar (see _span)
+            wprog = _span(progress, 97, 100)
             try:
                 for i, (card_path, (node, file_writes)) in enumerate(
                         sorted(by_file.items())):
@@ -8493,9 +8776,9 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                         if fresh:
                             _rmtree(out_dir)   # the plan is cleaned by finally
                         return None, None, None, None
-                    if progress:
-                        progress(i, max(total, 1),
-                                 "Writing %s" % os.path.basename(card_path))
+                    if wprog:
+                        wprog(i, max(total, 1),
+                              "Writing %s" % os.path.basename(card_path))
                     dest = _override_path(out_dir, card_path)
                     ranges = _merge_ranges(
                         [(off, len(buf)) for off, buf in file_writes])
@@ -8561,9 +8844,9 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                             % (card_path, size / 1e6), "info")
                         written.append((card_path, size))
                         records.append(_override_record(dest, card_path, []))
-                        if progress:
-                            progress(len(by_file) + j, max(total, 1),
-                                     "Keeping %s" % os.path.basename(card_path))
+                        if wprog:
+                            wprog(len(by_file) + j, max(total, 1),
+                                  "Keeping %s" % os.path.basename(card_path))
                         continue
                     os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
                     shutil.copyfile(_lp(source), _lp(dest))
@@ -8580,9 +8863,9 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                     written.append((card_path, size))
                     records.append(_override_record(dest, card_path, []))
                     delta.append((card_path, None))
-                    if progress:
-                        progress(len(by_file) + j, max(total, 1),
-                                 "Writing %s" % os.path.basename(card_path))
+                    if wprog:
+                        wprog(len(by_file) + j, max(total, 1),
+                              "Writing %s" % os.path.basename(card_path))
 
                 # Item 149: the modes' system-partition files (the pinned
                 # runtime, the mode files, the port) are not games-partition
@@ -12916,7 +13199,9 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
                             end=((EM.DESC_BASE + end) + 0xfff) & ~0xfff)
         # Progress, because this is the multi-minute stretch a cold cache adds
         # to a Write and a stationary bar here is what reads as a hang.
-        emu.derive_params(progress=progress)    # the real MASTERDIR_DECODE pass
+        # the real MASTERDIR_DECODE pass
+        emu.derive_params(progress=_span(
+            progress, 74, 76, "Reading which card bytes the sound directory uses"))
         for off, body in patches.items():
             if off in skip_offsets:
                 continue
@@ -13477,6 +13762,12 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
     if not want:
         return {}, params
     stock_rows = [p for p in params if not p.get("grown")]
+    # *progress* is this stage's own 0..100 (the build maps it, see _span):
+    # the chain walk to the appended records is nearly all of it, the encode
+    # of each one the last few percent.
+    if progress:
+        progress(0, 100, "Encoding the new sounds along the firmware's chain: "
+                 "starting the firmware...")
     emu_e = Spike2Emu(gr_path, staged)
     emu_d = Spike2Emu(gr_path, staged)
     patches, done, state = {}, [], {"gr": None, "sr": None}
@@ -13527,7 +13818,7 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
             patches[off] = bytes(body)
             done.append(idx)
             if progress:
-                progress(40 + int(len(done) * 35 / max(len(want), 1)), 100,
+                progress(95 + int(len(done) * 5 / max(len(want), 1)), 100,
                          "Encoding the new sounds along the firmware's chain "
                          "(%d of %d)..." % (len(done), len(want)))
             log("idx %d (record %d): encoded on the chain's parameters (scale "
@@ -13537,7 +13828,10 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
                        (p["length"] - EM.BLOCK) / 44100.0)), "info")
             return redo()
 
-        rows = emu_d.derive_params(after_step=after)
+        rows = emu_d.derive_params(
+            after_step=after,
+            progress=_span(progress, 2, 95,
+                           "Encoding the new sounds along the firmware's chain"))
     finally:
         emu_e.close()
         emu_d.close()
@@ -13688,6 +13982,62 @@ def _op11_payloads(desc):
         p += 4
 
 
+def _card_sites_key(disk_f, gr_path, img_path):
+    """The key :func:`_descriptor_sites` keeps a card's play tables under: the
+    card image file's identity (path, size, mtime, as the Emulate tab's and the
+    rig's own card caches key a card) and the extracted pair's fingerprint.
+    ``None`` for a card that is not a plain file (a physical SD card), whose
+    tables are read every time."""
+    name = getattr(disk_f, "name", None)
+    if not isinstance(name, str):
+        return None
+    try:
+        st = os.stat(name)
+        if not os.path.isfile(name):
+            return None
+        h = hashlib.sha256()
+        h.update(repr((os.path.normcase(os.path.abspath(name)), st.st_size,
+                       st.st_mtime_ns)).encode())
+        h.update(_fingerprint(gr_path, img_path).encode())
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def _sites_cache_path(key):
+    return os.path.join(_params_cache_dir(), key[:32] + _REV_TAG + ".sites1.pkl")
+
+
+def _card_descriptor_sites(gr_path, img_path, log=None, card_key=None):
+    """:func:`_descriptor_sites` for a build, kept per card.
+
+    With *card_key* (:func:`_card_sites_key`: the card image the pair was
+    extracted from) the tables are kept in the params cache and read back on
+    the next build of the same card: resolving every sound id through the
+    firmware's own resolver is 2-5 s of every build that grows the bank, and
+    the answer is the card's alone.  A stand-in reader (a test's) is always
+    asked, and its answer never kept."""
+    genuine = _descriptor_sites is _DESCRIPTOR_SITES
+    if card_key and genuine:
+        try:
+            with open(_sites_cache_path(card_key), "rb") as f:
+                kept = pickle.load(f)
+            if isinstance(kept, list) and kept:
+                return [_DescSite(*s) for s in kept]
+        except Exception:                               # noqa: BLE001
+            pass
+    out = _descriptor_sites(gr_path, img_path, log)
+    if card_key and genuine and out:
+        try:
+            tmp = _sites_cache_path(card_key) + ".tmp"
+            with open(tmp, "wb") as f:
+                pickle.dump([tuple(s) for s in out], f, 4)
+            os.replace(tmp, _sites_cache_path(card_key))
+        except OSError:
+            pass
+    return out
+
+
 def _descriptor_sites(gr_path, img_path, log=None):
     """Every op11 payload the card's play tables carry, as a list of
     :class:`_DescSite`.  Empty when the resolver can't be located, which a
@@ -13717,6 +14067,9 @@ def _descriptor_sites(gr_path, img_path, log=None):
     finally:
         emu.close()
     return out
+
+
+_DESCRIPTOR_SITES = _descriptor_sites
 
 
 def _grows_named_by_a_descriptor(grows, byidx, sites, log):
@@ -14172,6 +14525,56 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None):
     return writes
 
 
+#: ``PAD_STERN_VERIFY_COPY=1``: the integrity check patches a copy of
+#: ``image.bin`` on disk, as it did before it patched the emulator's own view.
+VERIFY_COPY_ENV = "PAD_STERN_VERIFY_COPY"
+
+
+def _integrity_rows(gr_path, img_path, patches, work_dir, progress=None):
+    """The rows the firmware derives from ``image.bin`` with *patches* laid
+    over it, for :func:`_assert_param_integrity`.
+
+    The patches go into the emulator's private copy-on-write view of the card
+    (:meth:`~.spike2.emulator.Spike2Emu.patch_card`) before it boots, which is
+    what the firmware would read from a patched copy of the file; the copy it
+    replaces was 1.65 GB on Godzilla and most of the check's time once the
+    derive got fast.  A patch past the end of the file (a file a copy would
+    have grown), or :data:`VERIFY_COPY_ENV`, takes the copy as before."""
+    from .spike2.emulator import Spike2Emu
+    size = os.path.getsize(img_path)
+    in_view = (os.environ.get(VERIFY_COPY_ENV) != "1"
+               and all(0 <= off and off + len(body) <= size
+                       for off, body in patches.items()))
+    if in_view:
+        emu = Spike2Emu(gr_path, img_path)
+        try:
+            for off in sorted(patches):
+                emu.patch_card(off, patches[off])
+            emu.boot()
+            return emu.derive_params(progress=progress)
+        finally:
+            emu.close()
+    import shutil
+    tmp = os.path.join(work_dir, "image_verify.bin")
+    shutil.copyfile(img_path, tmp)
+    try:
+        with open(tmp, "r+b") as f:
+            for off, body in patches.items():
+                f.seek(off)
+                f.write(body)
+        emu = Spike2Emu(gr_path, tmp)
+        try:
+            emu.boot()
+            return emu.derive_params(progress=progress)
+        finally:
+            emu.close()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
                             work_dir, progress=None):
     """Write-time safety net: apply *patches* to a temp ``image.bin`` and confirm
@@ -14185,27 +14588,10 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
     written and used to be the one with nothing on screen at all."""
     if not patches or os.environ.get("PAD_STERN_SKIP_MASTERDIR_VERIFY") == "1":
         return
-    import shutil
-
-    from .spike2.emulator import Spike2Emu, collapse_shadowed
-    tmp = os.path.join(work_dir, "image_verify.bin")
-    shutil.copyfile(img_path, tmp)
-    try:
-        with open(tmp, "r+b") as f:
-            for off, body in patches.items():
-                f.seek(off)
-                f.write(body)
-        emu = Spike2Emu(gr_path, tmp)
-        try:
-            emu.boot()
-            rows = emu.derive_params(progress=progress)
-        finally:
-            emu.close()
-    finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+    from .spike2.emulator import collapse_shadowed
+    rows = _integrity_rows(gr_path, img_path, patches, work_dir,
+                           _span(progress, 76, 84,
+                                 "Checking the finished sound bank"))
     # On a grown bank the array holds two records per grown sound; the collapse
     # keeps the one the game will actually play, under the index the rest of
     # the write knows it by (:func:`~.spike2.emulator.collapse_shadowed`).  On

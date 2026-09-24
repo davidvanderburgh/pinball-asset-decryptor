@@ -2396,7 +2396,7 @@ PREVIEW_HELP = {
              "card, then starts the card in the Emulate tab with them; the run is "
              "that tab's, and its Stop stops it. The button reads Cancel while it "
              "works, and the line under it says what is happening. A mode's own "
-             "sound is the slow part: about three minutes the first time it "
+             "sound is the slow part: about a minute the first time it "
              "changes, and reused after that. A set nothing changed since the last "
              "Try it is used as it is. A refusal is shown beside the Try it button "
              "and on the Emulate tab, with the reason. Cancel, here or on the "

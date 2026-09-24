@@ -153,6 +153,18 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.video_bank" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_mode_tables" \
+    --hidden-import "pinball_decryptor.plugins.stern.lampmap" \
+    --hidden-import "pinball_decryptor.plugins.stern.port_derive" \
+    --hidden-import "pinball_decryptor.plugins.stern.portgen" \
+    --hidden-import "pinball_decryptor.plugins.stern.portshots" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_reader" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_scan" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_scan_c" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_scan_cpp" \
+    --hidden-import "pinball_decryptor.plugins.stern.portswitch" \
+    --hidden-import "pinball_decryptor.plugins.stern.title_reader" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_remap" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_rewrite" \
     --hidden-import "pinball_decryptor.plugins.stern.text_colors" \
     --hidden-import "pinball_decryptor.plugins.stern.text_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.dds" \

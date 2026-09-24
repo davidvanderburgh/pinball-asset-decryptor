@@ -6,6 +6,7 @@ command that installs it, and what the log and change scan say. The asset build 
 mode_assets' (tested there); here it is stubbed so the mapping of its outputs to card paths
 is what is tested.
 """
+import itertools
 import os
 import struct
 
@@ -123,8 +124,8 @@ def test_a_port_matches_only_the_program_it_was_measured_on(tmp_path, monkeypatc
     elf = _elf({0x10100: (0xe92d4038, 0xe3a00037), 0x10200: (1, 2)})
     assert MW.site_mismatches(str(good), elf) == []
     assert MW.site_mismatches(str(good), _elf({0x10100: (0xe92d4038, 0xe3a00037)})) == ["callout"]
-    monkeypatch.setattr(MR, "ports", lambda: [("godzilla_pro", "1.15"), ("turtles_pro", "1.58")])
-    monkeypatch.setattr(MR, "port_file", lambda g, v: str(good) if g == "godzilla_pro" else None)
+    monkeypatch.setattr(MR, "port_paths", lambda: [("godzilla_pro", "1.15", str(good)),
+                                                   ("turtles_pro", "1.58", str(tmp_path / "none.port"))])
     assert MW.find_port(GZ, elf) == str(good)
     with pytest.raises(MW.ModeWriteError, match="1 of 2 functions differ"):
         MW.find_port(GZ, _elf({0x10100: (0xe92d4038, 0xe3a00037)}))
@@ -540,10 +541,10 @@ def test_the_log_and_the_scan_never_promise_a_screen_or_a_clip_the_title_cannot_
 
 
 # ---- Try it's builder: the two card roles and the reuse sidecar (feature/emulate-prepare) ----
-def _engine_stub(monkeypatch, handed, files=()):
+def _engine_stub(monkeypatch, handed, files=(), own=()):
     """A stand-in engine.write_overrides that lays down a finished manifest with the modes
     in it (and the files it names, as the engine's own all-or-nothing reuse test reads
-    them), recording what it was handed."""
+    them), recording what it was handed. *own*: the carried own sounds it records."""
     import json
     from pinball_decryptor.plugins.stern import engine as E
 
@@ -577,7 +578,8 @@ def _engine_stub(monkeypatch, handed, files=()):
                        "counts": {"audio": 1, "video": 0, "image": 0, "text": 2},
                        "files": records,
                        "modes": {"dir": stage, "files": ["mode.cfg", "mode1.cfg"],
-                                 "end_sound": {"name": "KAIJU RUSH", "request": 1295, "idx": 7}}},
+                                 "end_sound": {"name": "KAIJU RUSH", "request": 1295, "idx": 7},
+                                 "own_sounds": list(own)}},
                       f)
         return (1, 0, 0, 2), ("", ""), ("", ""), []
     monkeypatch.setattr(E, "write_overrides", write_overrides)
@@ -631,10 +633,11 @@ def test_a_second_try_it_with_nothing_changed_hands_the_set_back_unbuilt(tmp_pat
     MW.build_tryit_set(project, picked, base, log=log, sound_ok=False)
     assert len(handed) == 2
 
-    # an edit to a mode
+    # an edit to a mode (one the built set shows: the screen's colour; a settings-only edit
+    # keeps the set, see test_a_settings_only_edit_keeps_the_set_and_rewrites_the_mode_files)
     slug = MW.project_modes(project)[0][0]
     spec = MP.load(os.path.join(MP.mode_folder(project, slug), MP.MODE_FILE))
-    spec.seconds = spec.seconds + 5
+    spec.panel_color = "#000001"
     MP.save(project, slug, spec)
     # the fingerprint is a stat walk (time and size): an edit that keeps the size and
     # lands in the same coarse kernel clock tick as the last build (this test runs its
@@ -725,3 +728,141 @@ def test_the_reuse_test_reads_the_edits_after_the_build_and_never_hashes(tmp_pat
     with open(os.path.join(project, "note.txt"), "w") as f:
         f.write("x")
     assert MW.assets_fingerprint(project).split()[0] == str(int(count) + 1)
+
+
+_DATED = itertools.count(1)
+
+
+def _dated_save(project, slug, spec):
+    """Save *spec* and date the file past the last build's fingerprint (see the note in
+    test_a_second_try_it_with_nothing_changed_hands_the_set_back_unbuilt). Each call dates
+    one second further on: Linux stamps files from a coarse clock (a few ms a tick), so two
+    saves a stub build apart can read the same time, and a same-size edit then looked like
+    no edit at all."""
+    MP.save(project, slug, spec)
+    edited = os.path.join(MP.mode_folder(project, slug), MP.MODE_FILE)
+    later = os.stat(edited).st_mtime + 2 + next(_DATED)
+    os.utime(edited, (later, later))
+
+
+def test_a_settings_only_edit_keeps_the_set_and_rewrites_the_mode_files(tmp_path, monkeypatch):
+    """An edit to nothing but a mode's settings (the timer, the shots ...: SETTINGS_ONLY_FIELDS)
+    changes no byte of the set, only the mode files in its stage: those are written again, as
+    the build writes them (with the carriers of the own sounds the set carries), without the
+    engine. Anything else - a field the set shows, a mode's own file, a mode added, the
+    project's other edits, a timer of a mode with music - builds the set again."""
+    from pinball_decryptor.plugins.stern import cards
+    from pinball_decryptor.plugins.stern.mode_assets import mode_file_name
+    project = _project(tmp_path, sound_for=("KAIJU RUSH",))
+    picked, stock = _two_cards(tmp_path)
+    monkeypatch.setattr(cards, "override_base_card", lambda c, a, t: (stock, ""))
+    modes = MW.project_modes(project)
+    slug0, slug1 = modes[0][0], modes[1][0]
+    with open(os.path.join(MP.mode_folder(project, slug1), "start.wav"), "wb") as f:
+        f.write(b"RIFF")
+    spec1 = modes[1][1]
+    spec1.sound_start = "start.wav"
+    MP.save(project, slug1, spec1)
+    modes = MW.project_modes(project)
+    own = [{"slug": slug1, "name": modes[1][1].name, "key": "sound_start", "request": 777,
+            "idx": 9, "ms": 1500}]
+    handed = []
+    _engine_stub(monkeypatch, handed, own=own)
+    base = str(tmp_path / "tryit")
+    said = []
+    log = lambda m, lvl="info": said.append(m)                  # noqa: E731
+    first = MW.build_tryit_set(project, picked, base, log=log)
+    assert len(handed) == 1
+
+    spec = MP.load(os.path.join(MP.mode_folder(project, slug0), MP.MODE_FILE))
+    spec.seconds += 5
+    spec.scoring_shots = list(spec.scoring_shots[:1])
+    _dated_save(project, slug0, spec)
+    said.clear()
+    got = MW.build_tryit_set(project, picked, base, log=log)
+    assert len(handed) == 1, "a settings-only edit called the engine"
+    assert got.reused is False and got.set_dir == first.set_dir
+    assert any("only the modes' settings changed" in m for m in said)
+    # each mode file is the one the build writes: the carried sound named for its mode
+    for slot, (slug, spec_now) in enumerate(MW.card_modes(project, MW.project_modes(project))):
+        with open(os.path.join(first.stage_dir, mode_file_name(slot)), encoding="utf-8") as f:
+            assert f.read() == MW.mode_file_text(project, slug, spec_now, own)
+    assert "777" in MW.mode_file_text(project, slug1, MW.project_modes(project)[1][1], own)
+    # and the next press with nothing changed hands the set back as it is
+    said.clear()
+    again = MW.build_tryit_set(project, picked, base, log=log)
+    assert len(handed) == 1 and again.reused is True and said == [MW.TRYIT_REUSED]
+
+    def builds(change):
+        before = len(handed)
+        change()
+        MW.build_tryit_set(project, picked, base, log=log)
+        return len(handed) == before + 1
+
+    def colour():
+        s = MP.load(os.path.join(MP.mode_folder(project, slug0), MP.MODE_FILE))
+        s.panel_color = "#010203"
+        _dated_save(project, slug0, s)
+    assert builds(colour), "a field the set shows must build again"
+
+    def own_file():
+        with open(os.path.join(MP.mode_folder(project, slug0), "art.png"), "wb") as f:
+            f.write(b"png")
+    assert builds(own_file), "a mode's own file must build again"
+
+    def other_edit():
+        with open(os.path.join(project, "note.txt"), "w") as f:
+            f.write("x")
+    assert builds(other_edit), "the project's other edits must build again"
+
+    def music():
+        s = MP.load(os.path.join(MP.mode_folder(project, slug0), MP.MODE_FILE))
+        s.music = "theme.wav"
+        with open(os.path.join(MP.mode_folder(project, slug0), "theme.wav"), "wb") as f:
+            f.write(b"RIFF")
+        _dated_save(project, slug0, s)
+    assert builds(music), "a sound of a mode's own must build again"
+
+    def music_timer():
+        s = MP.load(os.path.join(MP.mode_folder(project, slug0), MP.MODE_FILE))
+        s.seconds += 3
+        _dated_save(project, slug0, s)
+    assert builds(music_timer), "a mode with music follows its timer with its bed"
+
+
+def test_the_settings_only_fields_reach_only_the_mode_file():
+    """Every SETTINGS_ONLY_FIELDS field is a real ModeSpec field, and neither the asset
+    signature nor the own-sound signature counts one of them (the builders' own reads are
+    pinned by test_no_set_builder_reads_a_settings_only_field)."""
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    names = set(MP.ModeSpec().__dict__)
+    assert MW.SETTINGS_ONLY_FIELDS <= names
+    import json
+    spec = MP.ModeSpec(name="X")
+    a, s = json.loads(MT.asset_signature(spec)), json.loads(MT.sound_signature(spec))
+    for key in MW.SETTINGS_ONLY_FIELDS:
+        assert key not in a and key not in s, key
+    assert not {"award", "name", "title", "clip", "screen", "music", "end_sound"} & \
+        MW.SETTINGS_ONLY_FIELDS
+
+
+def test_no_set_builder_reads_a_settings_only_field():
+    """What builds the set's files from a mode's fields (the scenes and clips, the sound bank,
+    the choice of carriers) reads no SETTINGS_ONLY_FIELDS field, so a settings-only edit
+    cannot change a byte of the set. The one exception is a music bed's length, cut to the
+    mode's ``seconds``, which the settings-only check already sends to a full build
+    (_SETTINGS_ONLY_UNLESS_MUSIC)."""
+    import inspect
+    import re
+    from pinball_decryptor.plugins.stern import mode_assets, mode_sounds
+    reads = re.compile(r"\b(?:c?spec)\.([a-z_]+)|getattr\(\s*c?spec\s*,\s*[\"']([a-z_]+)[\"']")
+
+    def fields(src):
+        return {a or b for a, b in reads.findall(src)}
+    for mod in (mode_assets, mode_sounds):
+        assert not fields(inspect.getsource(mod)) & MW.SETTINGS_ONLY_FIELDS, mod.__name__
+    assert not fields(inspect.getsource(MW.choose_end_sound)) & MW.SETTINGS_ONLY_FIELDS
+    own = fields(inspect.getsource(MW.choose_own_sounds)) & MW.SETTINGS_ONLY_FIELDS
+    assert own <= MW._SETTINGS_ONLY_UNLESS_MUSIC == {"seconds"}
+    # the scan sees the builders' reads at all
+    assert {"name", "clip", "screen_art"} <= fields(inspect.getsource(mode_assets))

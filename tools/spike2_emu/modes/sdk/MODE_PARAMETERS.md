@@ -194,7 +194,7 @@ A mode is a `struct pm_mode` registered with `PM_REGISTER`:
 | `name` | log prefix `[name]` | item 134 |
 | `init` | once, on the game's first tick (never from a constructor: that crashed the game at boot) | item 134 |
 | `tick` | 60 times a second, on the game's scheduler thread | items 125, 134; thread logged every boot |
-| `shot` | every shot dispatch, with the 64-bit mask | items 125, 134-138 (Godzilla: `0x1`, then the bit) |
+| `shot` | every shot dispatch, with the 64-bit mask; and, from the tick, each hit of a switch the port's `switch` lines map (MODE_SDK.md "Shots from switches", not run yet) | items 125, 134-138 (Godzilla: `0x1`, then the bit) |
 | `ball_end` | the end-of-ball broadcast (event hook 0x34) | items 125, 138 (a drain on Deadpool Pro); a multiball drain or ball save is not measured |
 | `event` | from the tick, within a tick of the game's own broadcast, once per firing of an event the port names, with its id (item 147) | item 147 on Godzilla Pro 1.15 and Premium 1.16 (`[pad] events: 11 of 11 named events armed, dispatch hooked`; `census_mode.c` and `mode_file.c` got game_start, ball_start, skill_shot, multiball_start and end, tilt_warning, tilt on both; on Pro also ball_end, bonus_start/end, game_over). MODE_SDK.md "Events" |
 
@@ -202,7 +202,7 @@ Capability flags, for `pm_can()`: `PM_CAN_CALLOUT`, `PM_CAN_LIGHTS`, `PM_CAN_SCR
 `PM_CAN_CLIPS`, `PM_CAN_OWN_SOUND`, `PM_CAN_MESSAGES`, `PM_CAN_AWARD_SCREEN`, and
 `PM_CAN_EVENTS` (item 147: set when at least one named event is armed), `PM_CAN_ROSTER`
 (item 146: the port names the battle roster and its start is hooked), `PM_CAN_LAMPS` (item mode-leds:
-the port has `lamp` lines and the game's lamp layer, and their light ids fit the game's), `PM_CAN_DISPLAY_PRIORITY` (item 154 display: the port names the display arbitration and it is hooked), `PM_CAN_STOCK_RULES` (item 160: the port names the game's own rules, the manager's get and the shot slot, so a rule's shot handler can be wrapped). A port that
+the port has `lamp` lines and the game's lamp layer, and their light ids fit the game's), `PM_CAN_DISPLAY_PRIORITY` (item 154 display: the port names the display arbitration and it is hooked), `PM_CAN_SWITCH_SHOTS` (the port's `switch` lines and a `switch_hit` or `switch_edge` site that matched and is hooked: a switch's hit comes to `shot` from the tick; emulator-proven on The Beatles 1.29), `PM_CAN_STOCK_RULES` (item 160: the port names the game's own rules, the manager's get and the shot slot, so a rule's shot handler can be wrapped). A port that
 lacks a function switches off only its own flag (the boot log's `armed: ... can ...` line).
 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,

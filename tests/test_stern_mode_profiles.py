@@ -150,7 +150,7 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     bare = "\n".join(line for line in text.splitlines() if "stock_" not in line)
     (tmp_path / "godzilla_le-1.16.port").write_text(bare, encoding="utf-8")
     p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
-    assert not p.can("stack") and "own mode queries" in p.why_not("stack")
+    assert not p.can("stack") and "tells that one of its own modes is running" in p.why_not("stack")
     assert [part for part in MP.PARTS if not p.can(part)] == ["stack"]
     # a stack no mode still makes a file every title's runtime reads (one that cannot tell
     # logs so and starts it anyway), and so do the other items' keys
@@ -204,8 +204,10 @@ def test_a_card_with_no_port_gets_none_and_the_help_names_making_a_port():
     assert MP.profile_for_card("godzilla_pro", "1.16.0") is None
     assert MP.profile_for_card("turtles_pro", "1.58.1") is None      # a patch level is another build
     assert MP.profile_for_card("", "1.15") is None
-    assert "Making a port for another game or version" in MP.NO_PORT_HELP
-    assert "MODE_SDK.md" in MP.NO_PORT_HELP
+    # the words say what is missing; the SDK pointer is the details a tooltip shows
+    assert "port" not in MP.NO_PORT_HELP
+    assert "Making a port for another game or version" in MP.NO_PORT_DETAILS
+    assert "MODE_SDK.md" in MP.NO_PORT_DETAILS
     heading = "### Making a port for another game or version"
     assert heading in (SDK / "MODE_SDK.md").read_text(encoding="utf-8")
 
@@ -404,7 +406,7 @@ def test_a_build_refuses_a_mode_naming_shots_the_cards_game_lacks(tmp_path):
 def test_a_build_refuses_a_card_with_no_port(tmp_path):
     project = _card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
     MP.new_mode(str(project), spec=MP.ModeSpec(name="OLD MODE", screen=False))
-    with pytest.raises(MA.ModeAssetError, match="Making a port for another game or version"):
+    with pytest.raises(MA.ModeAssetError, match="can't be made for Godzilla Pro 1.16 yet"):
         MA.build(str(project), None, None, str(tmp_path / "out"))
 
 
@@ -444,7 +446,7 @@ def test_events_come_from_the_port_as_the_runtime_arms_them(tmp_path):
     assert set(MP.profile_from_port(_port("godzilla_pro-1.15")).events) == set(MP.GODZILLA_PRO_1_15.events)
     for key in ("turtles_pro_1_59", "jaws_le_1_02", "deadpool_pro_1_16"):
         p = MP.profile(key)
-        assert p.events == () and '"Events"' in p.why_not("events")
+        assert p.events == () and "events yet" in p.why_not("events")
     no_bus = "\n".join(line for line in text.splitlines() if not line.startswith("site hook_dispatch"))
     (tmp_path / "godzilla_le-1.16.port").write_text(no_bus, encoding="utf-8")
     assert MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port")).events == (

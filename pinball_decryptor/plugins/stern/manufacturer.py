@@ -133,13 +133,32 @@ _WHITESTAR_PREREQS = (
 )
 
 _EXT4_GROW_REASON = (
-    "Full-size video replacement, the opt-in blip-free callouts, and "
-    "different-size file swaps in the Partition Explorer: resizes files "
-    "inside the card's ext4 partition through the platform's Linux "
-    "filesystem path. Without it an oversized replacement clip is crushed "
-    "into its stock byte slot instead of going on at full quality, and a "
-    "Partition Explorer replacement has to match the original's size "
+    "Full-size video replacement, longer sounds, the opt-in blip-free "
+    "callouts, and different-size file swaps in the Partition Explorer: "
+    "resizes files inside the card's ext4 partition through the platform's "
+    "Linux filesystem path. Without it an oversized replacement clip is "
+    "crushed into its stock byte slot instead of going on at full quality, "
+    "and a Partition Explorer replacement has to match the original's size "
     "exactly.")
+#: Windows only: SD card size (card_size.py) grows the games partition through
+#: the same WSL2 loop device (card_size.check_tools), and it is not offered on
+#: macOS at all, so only the WSL2 row says so.
+_EXT4_GROW_REASON_WIN = _EXT4_GROW_REASON + (
+    " SD card size on the Write tab needs it too: without it a build can't "
+    "be made for a bigger SD card.")
+
+
+def _bigger_card_words(platform=None, capital=False):
+    """What adds room on the games partition, as the subject of a Spike 2
+    note's sentence: the Write tab's SD card size control, or on macOS, which
+    doesn't show that control (card_size.supported), the build it makes and
+    where this app can make one."""
+    if (platform or sys.platform) == "darwin":
+        text = ("a build for a bigger SD card, which this app can make on "
+                "Windows and Linux,")
+    else:
+        text = "SD card size on the Write tab"
+    return text[0].upper() + text[1:] if capital else text
 
 
 def _ext4_grow_prereqs(platform):
@@ -169,7 +188,7 @@ def _ext4_grow_prereqs(platform):
     if platform == "win32":
         return (
             Prerequisite(name="WSL2", where="wsl", probe=LOOP_PROBE,
-                         reason=_EXT4_GROW_REASON,
+                         reason=_EXT4_GROW_REASON_WIN,
                          install_hint=(
                              "wsl --install -d Ubuntu  "
                              "(admin PowerShell, then reboot)\n"
@@ -511,6 +530,10 @@ class SternManufacturer(Manufacturer):
         return True
 
     def audio_length_note(self):
+        # The Audio tab shows this only in the Trim / pad checkbox's tooltip,
+        # and hides that checkbox wherever audio_forces_length_match() is
+        # True, which it always is here.  Kept correct anyway: it is the
+        # plugin's own summary of the rule (docs/architecture/stern.md).
         if self._era == "spike1":
             return ("Replacements are patched in place as raw PCM: each "
                     "sound is fit to its original slot length (longer is "
@@ -520,16 +543,32 @@ class SternManufacturer(Manufacturer):
                 "its original slot length (longer is trimmed, shorter padded "
                 "with silence) and amplitude-limited into the codec's range. "
                 "Advanced audio options can let a longer replacement grow the "
-                "sound bank instead of being trimmed — image builds only, up "
-                "to about 45 minutes of lengthened stereo sound per build.")
+                "sound bank instead of being trimmed, on image builds only. "
+                "The game can't open a sound bank bigger than about 2 GB, and "
+                "each lengthened sound also needs room for its whole length "
+                "on the card's games partition, shared with full-size "
+                "videos; a sound past either limit is trimmed. %s adds that "
+                "room but does not raise the 2 GB limit."
+                % _bigger_card_words(capital=True))
 
     def video_length_note(self):
-        return ("Video is patched into the SD-card image in place, so each "
-                "replacement is fit to its original clip's byte size: a small "
-                "enough clip drops straight in, a larger one is automatically "
-                "re-encoded down to fit, and one that still won't fit is "
-                "skipped (left unchanged) — use a shorter / lower-resolution "
-                "clip. Tick “Trim / pad” to also match the original length.")
+        # Spike 2 only (the Replace Video tab is hidden for Spike 1 and
+        # Whitestar).  engine._prepare_video_patches: a clip with a live
+        # assignment goes on whole through the ext4 driver; only a direct-SD
+        # write, a computer that can't grow a file, an assignment whose file
+        # has gone from disk, or an in-folder edit with no assignment is
+        # fitted to its slot.
+        return ("An image build puts each clip assigned here on the card at "
+                "full size. The limit is the free room on the card's games "
+                "partition, which every full-size clip and lengthened sound "
+                "share (a stock 8 GB card can have only a few hundred MB "
+                "free), and %s adds room. A clip is squeezed to fit its "
+                "original's byte size only on a direct SD write, when this "
+                "computer can't write whole files to the card (on Windows "
+                "that needs WSL2), or when the file picked for it has since "
+                "been moved or deleted; one that still won't fit is skipped. "
+                "Tick “Trim / pad” to also match the original length."
+                % _bigger_card_words())
 
     def image_note(self):
         # No inline note — the auto-fit / per-store fitting rules live in the
@@ -748,9 +787,203 @@ class SternManufacturer(Manufacturer):
         from . import pipeline as _pipeline
         if _pipeline.engine is None:
             return "the Spike 2 engine is unavailable"
-        return _pipeline.engine.build_update_reason(
+        why = _pipeline.engine.build_update_reason(
             _pipeline.engine.read_build_manifest(output_path),
             original_path, output_path, assets_dir)
+        # the SD card size reasons, in the words the Write tab's control uses
+        return (_pipeline.card_class_words(why)
+                if why and "SD card" in why else why)
+
+    def write_preflight(self, original_path, assets_dir=None,
+                        output_path=None, update=None, prereqs=None):
+        """The SD card size the build is asked for (card_size.py,
+        PAD_STERN_CARD_SIZE): an original that can't grow to it (a multi-boot
+        or hand-edited card), or a computer that can't grow one (no resize2fs
+        or loop devices in its Linux, macOS), refuses the build here, before
+        a replacement is staged.  engine.write_image checks it again; this is
+        the check made in time.  The original's own size checks nothing.
+
+        Then PAD-176's room on the games partition, given *assets_dir*: a
+        build whose assigned videos can't fit even at the fewest bytes each
+        can take on the card (:meth:`_video_floor`) is refused now, in the
+        pre-flight's own words, rather than after the hour the staging's
+        re-encodes can take.  Only when this computer is known to copy whole
+        files (:meth:`_copies_whole_known`), and never on a port
+        (card_size.size_fixed), which builds each card at its own size."""
+        if self._era != "spike2":
+            return None
+        from . import card_size as _cs
+        from .pipeline import card_class_words
+        want = _cs.requested()
+        grow_to = None
+        if want:
+            try:
+                grow_to = _cs.preflight(original_path, want)
+            except _cs.CardSizeError as e:
+                return card_class_words(str(e))
+            except OSError:
+                return None  # an unreadable original: the build says so itself
+        if not assets_dir or _cs.size_fixed():
+            return None
+        # a grow's tools check has just proved the loop devices a copy needs
+        if not (grow_to or self._copies_whole_known(prereqs)):
+            return None
+        try:
+            from .pipeline import engine
+            clips, maybe, uncounted = self._video_floor(assets_dir, engine)
+            if not clips and not maybe:
+                return None
+            # a build that may update the one at the output is measured there
+            # first, as write_image measures it (_SpaceBudget.updating)
+            refuse = engine.space_floor(
+                original_path, grow_to, output_path,
+                updating=bool(output_path and update is not False
+                              and engine.read_build_manifest(output_path)))
+            # with every unsettled clip at its full size it fits: no probe
+            try:
+                refuse(clips + [(f, rel, src_n)
+                                for f, rel, _s, _y, src_n in maybe])
+                return None
+            except _cs.WontFit:
+                pass
+            settled = self._settle_floor(maybe)
+            # a clip counted short of the file that goes on makes the need
+            # a floor: the refusal says so, and names no size as enough
+            refuse(clips + settled,
+                   uncounted=uncounted + len(maybe) - len(settled))
+        except _cs.WontFit as e:
+            # the sentence, carrying the refusal: the app offers the SD card
+            # size that fits (card_size.bigger_card_offer)
+            return _cs.RefusalText(card_class_words(str(e)), e)
+        except Exception:  # noqa: BLE001 - the build's own pre-flight decides
+            return None
+        return None
+
+    @staticmethod
+    def _copies_whole_known(prereqs):
+        """Whether this computer copies files onto the card whole, from what
+        is known without starting WSL: the prerequisite strip's answers
+        (*prereqs*, ``{name: ok}`` for the checks that have finished) for
+        the ext4 driver's own rows, as engine._SpaceCheck._copies_whole would
+        ask them; macOS asks its e2fsprogs, a lookup on disk.  ``None`` when
+        it isn't known (a check still running, native Linux, which declares
+        no row)."""
+        if sys.platform == "darwin":
+            from ...core import ext4_grow
+            try:
+                return bool(ext4_grow.available()[0])
+            except Exception:  # noqa: BLE001 - unknown
+                return None
+        names = [p.name for p in _EXT4_GROW_PREREQS]
+        got = [(prereqs or {}).get(n) for n in names]
+        if not names or any(g is None for g in got):
+            return None
+        return all(got)
+
+    @staticmethod
+    def _video_floor(assets_dir, engine):
+        """The assigned videos (the project's .staged_changes.json "video"
+        map, as engine._SpaceCheck.add_videos reads it) before they are
+        staged: ``(clips, maybe, uncounted)``.  *clips* are ``(fname,
+        card_rel, bytes)`` for the ones whose size on the card is already
+        known: "use my files as-is" copies the file through, so it goes on
+        at its own size, and one the Video tab has converted since it was
+        last assigned (newer than the file and the assignment, over a slot
+        already staged) goes on as that copy or as the user's file, so it
+        counts the smaller.  *maybe* are ``(fname, card_rel, file, slot's
+        own clip, bytes)`` for an MP4/QuickTime file with nothing converted
+        yet: it counts at its own size only once :meth:`_settle_floor` has
+        found it goes on as it is.  A file of any other kind is always
+        converted, to a size nobody knows yet, and counts nothing; so does a
+        file "as-is" can't copy (another container), which the staging
+        refuses.  *uncounted* is how many clips count short of the file
+        that may go on: the ones counted at nothing that the build converts,
+        and the converted ones whose two sizes differ."""
+        from ...core import staged_changes as _sc
+        from ...core import staged_originals as _so
+        from ...core import video as _video
+        saved = _sc.load(assets_dir)
+        assigned = saved.get("video") or {}
+        vid = os.path.join(assets_dir, "video")
+        cards = {}
+        try:
+            with open(os.path.join(vid, engine._VIDEO_MANIFEST), "r",
+                      encoding="utf-8") as f:
+                for line in f:
+                    cols = line.rstrip("\r\n").split("\t")
+                    if len(cols) >= 2 and not cols[0].startswith("#"):
+                        cards[cols[0]] = cols[1].lstrip("/")
+        except OSError:
+            return [], [], 0
+        try:
+            said = os.path.getmtime(os.path.join(assets_dir, _sc.SIDE_CAR))
+        except OSError:
+            said = None
+        asis = saved.get("video_asis_slots") or {}
+        clips, maybe, uncounted = [], [], 0
+        for rel, src in assigned.items():
+            fname = rel[len("video/"):] if rel.startswith("video/") else None
+            staged = os.path.join(vid, fname or "")
+            if (not fname or fname not in cards or not isinstance(src, str)
+                    or not os.path.isfile(src) or not os.path.isfile(staged)):
+                continue
+            n = os.path.getsize(src)
+            same_ext = (os.path.splitext(src)[1].lower()
+                        == os.path.splitext(fname)[1].lower()
+                        and _video.backend_for(staged) is None)
+            # "use my files as-is", this clip's or the tab's; unknown = either
+            noconv = asis.get(rel, saved.get("video_no_conversion"))
+            if noconv:
+                if same_ext:
+                    clips.append((fname, cards[fname], n))
+                continue
+            if _video.isobmff_brand(src) is None:
+                uncounted += 1
+                continue                # always converted: size unknown
+            pristine = _so.snapshot_path(assets_dir, rel)
+            conv = None
+            if pristine and said is not None:
+                t = os.path.getmtime(staged)
+                if t >= os.path.getmtime(src) and t >= said:
+                    conv = os.path.getsize(staged)
+            if noconv is None and not same_ext:
+                uncounted += 1          # "as-is" would refuse it, else converted
+                continue
+            if conv is not None:
+                clips.append((fname, cards[fname], min(n, conv)))
+                uncounted += n != conv
+            else:
+                maybe.append((fname, cards[fname], src, pristine or staged, n))
+        return clips, maybe, uncounted
+
+    @staticmethod
+    def _settle_floor(maybe):
+        """The *maybe* clips of :meth:`_video_floor` that go on the card as
+        the user's own file (engine._intact_verdict against the slot's own
+        clip, a few probes each, side by side), at that file's size.  One
+        that doesn't, or can't be told, counts nothing: its converted copy
+        isn't made yet."""
+        from concurrent.futures import ThreadPoolExecutor
+        from ...core.audio import find_ffmpeg
+        from .pipeline import engine
+        out = []
+        if not maybe:
+            return out
+        ffmpeg = find_ffmpeg()
+        with ThreadPoolExecutor(max_workers=min(8, len(maybe))) as pool:
+            probes = [(m, pool.submit(engine._intact_verdict, m[2], m[3]))
+                      for m in maybe]
+            for (fname, rel, src, _slot, n), fut in probes:
+                try:
+                    ok = fut.result()[0]
+                except Exception:  # noqa: BLE001 - not settled: nothing
+                    continue
+                # without ffmpeg only a file of the slot's own container is
+                # staged at all (it is copied), so another can't go on
+                if ok and (ffmpeg or os.path.splitext(src)[1].lower()
+                           == os.path.splitext(fname)[1].lower()):
+                    out.append((fname, rel, n))
+        return out
 
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,

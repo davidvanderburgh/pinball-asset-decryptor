@@ -40,6 +40,7 @@ anything else comes back with :attr:`ClipQuality.error` set and is reported as
 
 import os
 import struct
+import sys
 from dataclasses import dataclass
 
 # H.264 looks poor below ~0.03 bits per pixel per second regardless of the
@@ -386,7 +387,26 @@ def summarize(clips):
             len([c for c in clips if c.error]))
 
 
-def summary_lines(clips):
+#: Said after both pieces of rebuild advice below.  Every clip a rebuild puts
+#: on whole (or converts at the stock clip's bitrate) takes room on the card's
+#: games partition, and on an 8 GB card that room is a few hundred MB:
+#: following the advice for hundreds of clips at once is what ran PAD-176's
+#: build out of space.  SD card size (plugins/stern/card_size.py) gives the
+#: room; macOS doesn't show that control (card_size.supported), so there the
+#: sentence says where a bigger card's build can be made instead.
+_ROOM = ("Clips at full size need room on the card's games partition, and a "
+         "stock 8 GB card can have only a few hundred MB free, so for many "
+         "clips build for a bigger SD card (%s).")
+_ROOM_WHERE = "SD card size on the Write tab"
+_ROOM_WHERE_MAC = "this app can make one on Windows and Linux"
+
+
+def _room(platform=None):
+    return _ROOM % (_ROOM_WHERE_MAC if (platform or sys.platform) == "darwin"
+                    else _ROOM_WHERE)
+
+
+def summary_lines(clips, platform=None):
     """The two or three sentences that go above the list.
 
     The split between "below the bar" and "squeezed into its slot" is the
@@ -394,8 +414,11 @@ def summary_lines(clips):
     fix.  A clip that is simply small is EITHER the user's own file, which a
     rebuild will not change, or PAD's format-matched conversion, which it will
     -- and the card cannot say which (Stern's own clips carry the same x264
-    signature PAD's conversions do), so the line names both.
+    signature PAD's conversions do), so the line names both.  *platform* (a
+    ``sys.platform`` value, this computer's by default) decides how the
+    rebuild advice names the way to a bigger SD card.
     """
+    room = _room(platform)
     total, blocky, squeezed, both, bad = summarize(clips)
     if not total:
         return ["No video clips found on this card."]
@@ -411,7 +434,7 @@ def summary_lines(clips):
         out.append("%d clip(s) were squeezed into the slot they replaced by a "
                    "Write; %d of those are below the bar. Building an image "
                    "file (not a direct-SD write) with WSL working puts them on "
-                   "at full quality instead." % (squeezed, both))
+                   "at full quality instead. %s" % (squeezed, both, room))
     elif blocky:
         # This used to say they were the user's own files at their own size
         # and to re-export them.  On the card that reported it (PAD-171) all
@@ -425,8 +448,8 @@ def summary_lines(clips):
                    "on as a converted copy, and older versions converted at "
                    "far below Stern's bitrate; build again from your original "
                    "replacement files to convert them at the bitrate of the "
-                   "clip they replace. A clip that went on as your own file "
-                   "keeps the bitrate you exported it at.")
+                   "clip they replace. %s A clip that went on as your own "
+                   "file keeps the bitrate you exported it at." % room)
     if bad:
         out.append("%d clip(s) could not be read." % bad)
     return out

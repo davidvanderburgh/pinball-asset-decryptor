@@ -265,6 +265,10 @@ class App:
         # text (default on).  Mirrored to PAD_STERN_TEXT_GROW before any
         # Write / Build / emulator-override run can read it.
         self._apply_text_grow_env(self._text_grow_setting())
+        # Write tab: the SD card size a Stern Spike 2 build is for
+        # (plugins/stern/card_size.py).  Mirrored to PAD_STERN_CARD_SIZE the
+        # same way; the original's own size leaves the var unset.
+        self._apply_card_size_env(self._card_size_setting())
         # PREVIEW FEATURES (the mode maker ships dark): the codes in settings.json
         # are checked ONCE, here, and the answer is cached for the whole run
         # (core/preview.py).  Before the window, whose Modes tab asks it.
@@ -399,6 +403,8 @@ class App:
             on_audio_advanced_change=self._on_audio_advanced_change,
             initial_text_grow=self._text_grow_setting(),
             on_text_grow_change=self._on_text_grow_change,
+            initial_card_size=self._card_size_setting(),
+            on_card_size_change=self._on_card_size_change,
             on_detected_game_change=self._on_detected_game_change,
             on_audio_profile=self._on_audio_profile_request,
             on_partition_image_opened=self._on_partition_image_opened,
@@ -1858,12 +1864,19 @@ class App:
     # Write
     # ------------------------------------------------------------------
 
-    def _start_write(self, chain_flash_device=None):
+    def _start_write(self, chain_flash_device=None, again=False):
         """Dispatch a Build.  ``chain_flash_device`` (the Build / flash
         dialog with both sections ticked) makes a successful build chain
         straight into flashing its output onto that device — armed only at
         dispatch, after every validation prompt, so an aborted build never
-        leaves a flash queued."""
+        leaves a flash queued.
+
+        *again*: the same build, started over at the bigger SD card size the
+        user just said Yes to (:meth:`_offer_bigger_card`).  The questions
+        they answered for it a moment ago (what the original is, the project
+        folder, replacing the file at the output) are not asked twice; a
+        different file at the output, from the new size's default name, still
+        is."""
         if not self._current_mfr.capabilities.write:
             return
 
@@ -1951,6 +1964,21 @@ class App:
                 "folder so it doesn't overwrite the original.")
             return
 
+        # The Write tab's SD card size (Stern Spike 2, card_size.py): a size
+        # this original can't be built at (a multi-boot or hand-edited card),
+        # or this computer can't grow a card to, is refused NOW, in the words
+        # the tab shows under the control - not by the overwrite prompt below
+        # as its "can't be updated" reason, and not by the engine after every
+        # replacement has been staged.  The Build / flash dialog asks the
+        # same before its own questions (WriteTab._build_refusal); this is
+        # the check for every other way a build starts.
+        problem = self.window.card_size_problem()
+        if problem:
+            from .webui.tabs.write import CARD_SIZE_WAY_BACK
+            messagebox.showerror("SD card size",
+                                 f"{problem}\n\n{CARD_SIZE_WAY_BACK}")
+            return
+
         # Make the destination folder NOW, before any of the work.  A Build
         # Location that isn't on disk yet used to fail deep inside the write
         # with "[Errno 2] No such file or directory: <the build file>", a
@@ -1964,7 +1992,7 @@ class App:
         # What the original really is (PAD-122): a multi-boot card builds as a
         # multi-boot card with its FIRST image changed, and the user has to
         # know that before the edits go in, not after.
-        if not self._source_note_accepted(original):
+        if not again and not self._source_note_accepted(original):
             return
 
         # Collision check: warn before clobbering an existing build with the
@@ -1980,17 +2008,23 @@ class App:
         # the same question a second time.
         update = None
         if os.path.exists(output_path):
-            update = self._confirm_build_over(original, assets_dir,
-                                              output_path)
-            if update is None:
-                return
+            if again and os.path.abspath(output_path) == os.path.abspath(
+                    getattr(self, "_last_build_output", None) or ""):
+                # the file the user already agreed to replace, left as it
+                # was by the refusal; a new SD card size is a whole build
+                update = False
+            else:
+                update = self._confirm_build_over(original, assets_dir,
+                                                  output_path)
+                if update is None:
+                    return
 
         # Catch the silent "assigned replacements for one folder, then pointed
         # Build at another" trap: the Write flow's folder-match guard would
         # drop those assignments and quietly build an unmodified image.  Warn
         # before we do all the work.
         mismatches = self.window.replacement_folder_mismatches(assets_dir)
-        if mismatches:
+        if mismatches and not again:
             recorded = recorded_replacement_counts(
                 assets_dir, [kind for kind, _n, _f in mismatches])
             if not messagebox.askyesno(
@@ -2004,7 +2038,7 @@ class App:
         # card silently drops every mod that was baked into the first one.
         from .core.extract_source import other_card_recorded
         other = other_card_recorded(assets_dir, original)
-        if other and not messagebox.askyesno(
+        if other and not again and not messagebox.askyesno(
                 OTHER_CARD_TITLE,
                 other_card_message(assets_dir, other, original)):
             return
@@ -2063,10 +2097,15 @@ class App:
         # before the pipeline reads it (belt and braces: it is also set at
         # startup and on every toggle).
         self._apply_text_grow_env(self.window.text_grow_enabled())
+        # The Write tab's SD card size, the same way.
+        self._apply_card_size_env(self.window.card_size_choice())
         if self._current_mfr.supports_build_update():
             write_kwargs["update"] = update
         self._chain_flash_after_build = (
             (chain_flash_device, output_path) if chain_flash_device else None)
+        # what _offer_bigger_card needs if this build is refused for room
+        self._last_build_output = output_path
+        self._space_refusal = None
         self.pipeline = self._current_mfr.make_write_pipeline(
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
@@ -2074,7 +2113,7 @@ class App:
         )
         threading.Thread(
             target=self._run_pipeline_with_audio, args=(assets_dir,),
-            daemon=True).start()
+            kwargs={"original": original}, daemon=True).start()
 
     def _confirm_build_over(self, original, assets_dir, output_path):
         """The prompt for a Build whose output file already exists.
@@ -3572,13 +3611,32 @@ class App:
             run_sub(self._current_mfr.make_write_pipeline(
                 raw, ws, out, log_cb, phase_cb, progress_cb, step_done))
 
-        results = mod_port.run_ports(
-            jobs, extract, transfer, stage, write, log_cb,
-            lambda: self._cancel_requested)
+        # The SD card size on the Write tab (PAD_STERN_CARD_SIZE, process-wide)
+        # is the size of the SD card in THIS project's machine.  The cards a
+        # port builds are other games' cards, and the port's confirmation
+        # never mentions a size, so each one builds at its own original's
+        # size; the Write tab's choice is back in force when the chain ends.
+        # PAD_STERN_CARD_SIZE_FIXED tells a ported card that runs out of room
+        # to build that card on its own for a bigger size, never to set a
+        # size this chain ignores.
+        fixed_env = "PAD_STERN_CARD_SIZE_FIXED"     # card_size.FIXED_ENV
+        asked = os.environ.pop(self._CARD_SIZE_ENV, None)
+        os.environ[fixed_env] = "1"
+        if asked:
+            log_cb("Each ported card is built at its own original's size: "
+                   "the SD card size on the Write tab (%s) is for this "
+                   "project's own card." % asked.replace("G", " GB"), "info")
+        try:
+            results = mod_port.run_ports(
+                jobs, extract, transfer, stage, write, log_cb,
+                lambda: self._cancel_requested)
+        finally:
+            os.environ.pop(fixed_env, None)
+            self._apply_card_size_env(self._card_size_setting())
         ok = bool(results) and all(s == "ok" for _j, s, _d in results)
         self.msg_queue.put(DoneMsg(ok, mod_port.summarize(results)))
 
-    def _run_pipeline_with_audio(self, assets_dir):
+    def _run_pipeline_with_audio(self, assets_dir, original=None):
         """Worker-thread entry for a Write run: apply any Replace-Audio,
         Replace-Video and Replace-Image assignments into the assets folder
         first, then run the pipeline (which repacks the now-changed files).
@@ -3588,7 +3646,49 @@ class App:
         convert failed), building would copy the original image unchanged and
         report success — the user flashes it and sees none of their edits.
         We stop loudly instead.  Partial failures are remembered so the
-        success dialog can flag which replacements were skipped."""
+        success dialog can flag which replacements were skipped.
+
+        With *original*, the plugin's ``write_preflight`` runs first: a build
+        that could never finish (Stern: an SD card size this original or this
+        computer can't build) is refused before anything is staged.  For the
+        SD card size that is the backstop: the Write tab asks the computer
+        off the UI loop as soon as a bigger size is chosen, and the Build /
+        flash dialog refuses on that answer before its Erase confirmation
+        (WriteTab.card_size_problem); this catches a build started before the
+        answer was in.  It also gets the project folder, the build's output
+        and the prerequisite strip's finished answers (Stern: assigned videos
+        that can't fit the card even before they are converted are refused
+        here, not after an hour of converting them)."""
+        if original:
+            why = None
+            try:
+                mfr = self._current_mfr
+                from .core.registry import Manufacturer
+                if isinstance(mfr, Manufacturer):
+                    try:
+                        rows = self.ctx.store.get("shell", "prereqs") or []
+                    except Exception:                   # noqa: BLE001
+                        rows = []
+                    why = mfr.write_preflight(
+                        original, assets_dir=assets_dir,
+                        output_path=getattr(self.pipeline, "output_path",
+                                            None),
+                        update=getattr(self.pipeline, "update", None),
+                        prereqs={r["name"]: r["state"] == "ok" for r in rows
+                                 if r.get("state") in ("ok", "missing")})
+                else:
+                    why = mfr.write_preflight(original)
+            except Exception:                           # noqa: BLE001
+                why = None      # the pipeline's own checks still run
+            if why:
+                self._staging_failures = []
+                # a room refusal carries its WontFit: _on_done offers the SD
+                # card size that fits (_offer_bigger_card)
+                self._space_refusal = getattr(why, "refusal", None)
+                self.msg_queue.put(LogMsg(
+                    "Not building: %s" % why, "error"))
+                self.msg_queue.put(DoneMsg(False, why))
+                return
         pend_a = self._stage_pending_audio(assets_dir)
         pend_v = self._stage_pending_video(
             assets_dir, cancel_cb=lambda: self._cancel_requested)
@@ -4323,9 +4423,45 @@ class App:
         else:
             self.window.set_status("Failed")
             title = "Extract Failed" if is_extract else "Write Failed"
-            messagebox.showerror(title, summary)
+            if is_extract or not self._offer_bigger_card(chain_flash):
+                messagebox.showerror(title, summary)
         # Clear staging-failure state so it never leaks into a later run.
         self._staging_failures = []
+
+    def _offer_bigger_card(self, chain_flash=None):
+        """A build refused because it doesn't fit the card's games partition
+        (Stern Spike 2, PAD-176) where a bigger SD card size would fit it:
+        ask once, in place of the Write Failed dialog, whether to build for
+        that size.  Yes sets the Write tab's SD card size (saved, like the
+        user choosing it) and starts the same build again, with the flash it
+        was chained to, if any (the flash refuses a card too small for the
+        image before writing anything).  No keeps the size, and the refusal
+        above in the log says what else would fit.  True when asked."""
+        refusal = (getattr(self, "_space_refusal", None)
+                   or getattr(getattr(self, "pipeline", None),
+                              "card_size_refusal", None))
+        self._space_refusal = None
+        if refusal is None:
+            return False
+        from .plugins.stern import card_size as cs
+        offer = cs.bigger_card_offer(refusal)
+        if offer is None:
+            return False
+        current, fits = offer
+        if not messagebox.askyesno("SD card size",
+                                   cs.offer_question(current, fits)):
+            self.window.append_log(
+                "Not built: the SD card size stays %s. To fit it, use fewer "
+                "or smaller replacements." % cs.words(current), "info")
+            return True
+        self.window.write_card_size_var.set(fits)       # saved and applied
+        self.window.append_log(
+            "SD card size is now %s; building again." % cs.words(fits),
+            "info")
+        device = chain_flash[0] if chain_flash else None
+        self.root.after(0, lambda: self._start_write(
+            chain_flash_device=device, again=True))
+        return True
 
     # ------------------------------------------------------------------
     # Update check
@@ -5764,6 +5900,49 @@ class App:
         """Persist + apply the Write tab's grow option."""
         self._settings[self._TEXT_GROW_KEY] = bool(on)
         self._apply_text_grow_env(bool(on))
+        self._save_settings()
+
+    #: Settings key for the Write tab's "SD card size" (Stern Spike 2,
+    #: plugins/stern/card_size.py): "" builds at the original's size, "16G" /
+    #: "32G" grows the card's games partition to that class.
+    _CARD_SIZE_KEY = "card_size"
+    #: card_size.ENV, spelled out so the setting is applied before (and
+    #: without) the Stern plugin being imported.
+    _CARD_SIZE_ENV = "PAD_STERN_CARD_SIZE"
+    _CARD_SIZES = ("16G", "32G")
+
+    @classmethod
+    def _norm_card_size(cls, val):
+        """A saved or chosen card size: "16G" / "32G", anything else "".
+        Always "" where a card can't be grown (macOS: no loop devices, and
+        the Write tab doesn't offer the option there)."""
+        from .webui.tabs.write import card_size_supported
+        val = val.strip().upper() if isinstance(val, str) else ""
+        if not card_size_supported():
+            return ""
+        return val if val in cls._CARD_SIZES else ""
+
+    def _card_size_setting(self):
+        """The persisted SD card size ("" when never set)."""
+        return self._norm_card_size(self._settings.get(self._CARD_SIZE_KEY))
+
+    @classmethod
+    def _apply_card_size_env(cls, choice):
+        """Mirror the SD card size into ``PAD_STERN_CARD_SIZE``.  Same
+        polarity rule as the audio options: the original's own size leaves
+        the var UNSET, so spawned workers and headless callers, which never
+        see the Write tab, build what they always built."""
+        choice = cls._norm_card_size(choice)
+        if choice:
+            os.environ[cls._CARD_SIZE_ENV] = choice
+        else:
+            os.environ.pop(cls._CARD_SIZE_ENV, None)
+
+    def _on_card_size_change(self, choice):
+        """Persist + apply the Write tab's SD card size."""
+        choice = self._norm_card_size(choice)
+        self._settings[self._CARD_SIZE_KEY] = choice
+        self._apply_card_size_env(choice)
         self._save_settings()
 
     def _apply_audio_preview_env(self, output_path):

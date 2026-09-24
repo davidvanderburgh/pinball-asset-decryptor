@@ -1553,3 +1553,14 @@ def test_the_mixer_uses_the_control_names_the_card_defines():
     # 'Line Out Mute' switch beside it); the volume element is still "PCM"
     assert 'mixer_find(ctl, "PCM"' in src
     assert 'snd_mixer_selem_id_set_name(id, name)' in src
+
+
+def test_cardmount_cache_budgets_what_a_sparse_card_really_takes():
+    """A card built for a 32 GB SD card is 30.4 GB apparent and about 8.5 GB
+    allocated (card_size.py grows it sparse). Budgeting the apparent size
+    asked for more than the whole work disk and evicted every cached card."""
+    code = _code(_read("cardmount.sh"))
+    room = code[code.index("cache_make_room() {"):code.index("cache_wait() {")]
+    assert "stat -c '%b * %B'" in room
+    assert 'need=$(( alloc / 1024 ))' in room
+    assert 'need=$(( size / 1024 ))' in room      # no allocation reported

@@ -16,6 +16,7 @@ docs/plans/web_ui_tabs/write.md.
 import csv
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -53,6 +54,29 @@ TEXT_GROW_TIP = (
     "over-long edits are skipped with a named reason in the build "
     "log. Proven in the PC emulator only; keep the stock card to "
     "hand. Mirrored to PAD_STERN_TEXT_GROW for the build.")
+#: Stern Spike 2: the SD card class a build is for (plugins/stern/card_size.py;
+#: the engine's no-space failure points at this control by its label).
+CARD_SIZE_LABEL = "SD card size"
+CARD_SIZE_TIP = (
+    "Every replaced video and longer sound goes onto the card's games "
+    "partition, which is only as big as Stern made it for the original's "
+    "card size; the note under this control says how much of it is free at "
+    "each size. If the SD card in your machine is bigger, build for it: the "
+    "games partition grows to fill that card size and everything else on the "
+    "card stays exactly as it was. The built image is that size, so it only "
+    "fits an SD card at least that big. A bigger card adds room and nothing "
+    "else: the game's own limit of about 2 GB on its sound bank stays the "
+    "same, and a replacement that has to fit its original's space (a sound "
+    "that isn't made longer, a video written straight to the card) still "
+    "has to.")
+CARD_SIZE_SAME = "Same as the original"
+#: the way back, said under every refusal of an SD card size (the Build /
+#: flash dialog's and app._start_write's)
+CARD_SIZE_WAY_BACK = ("To build it at its own size, choose \"Same as the "
+                      "original\" under SD card size on the Write tab.")
+#: the classes a build can be grown to, smallest first (card_size.CARD_SIZES
+#: holds the 8 GB class too, which no card grows to)
+CARD_SIZE_CHOICES = ("16G", "32G")
 EDITABLE_HINT = (
     "Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
     "files in pck/_EDITABLE ASSETS/ inside your Modified Assets "
@@ -124,6 +148,201 @@ def _is_admin():
         return False
 
 
+def card_size_supported(platform=None):
+    """Whether this computer (or *platform*, a ``sys.platform`` value) can
+    build a Spike 2 card for a bigger SD card.  card_size.py grows the games
+    partition through a loop device, and macOS has none (card_size._E2fs
+    refuses there), so the option is not offered on macOS and a saved choice
+    reads as the original's size.  app.App's _norm_card_size asks this."""
+    return (platform or sys.platform) != "darwin"
+
+
+def _norm_card_size(val):
+    """A card size as the setting holds it: "16G" / "32G", anything else ""
+    (the original's own size); always "" where the option isn't offered.
+    app.App._norm_card_size's rule."""
+    val = val.strip().upper() if isinstance(val, str) else ""
+    if not card_size_supported():
+        return ""
+    return val if val in CARD_SIZE_CHOICES else ""
+
+
+def _class_words(name):
+    """"16G" -> "16 GB" (the card packaging's words)."""
+    return name[:-1] + " GB" if name and name.endswith("G") else name
+
+
+#: the card class in a build's default file name (Stern names its images
+#: "...Release.8G.sdcard.raw")
+_NAME_CLASS = re.compile(r"(?<![0-9A-Za-z])(8|16|32)G(?![0-9A-Za-z])")
+
+
+def _name_for_class(name, cls):
+    """*name* with its card class token (the last "8G" / "16G" / "32G"
+    standing on its own in the stem) swapped for *cls*; unchanged when it
+    has none.  A build for a bigger card must not be named for the
+    original's card size, and an 8 GB and a 16 GB build of one project then
+    stop overwriting each other."""
+    stem, ext = os.path.splitext(name)
+    hits = list(_NAME_CLASS.finditer(stem))
+    if not hits:
+        return name
+    m = hits[-1]
+    return stem[:m.start()] + cls + stem[m.end():] + ext
+
+
+def _probe_card_size(path):
+    """What the SD card size control needs to know about the original at
+    *path* (reads its partition tables, and for a card that can grow, asks
+    the multi-boot reader; OFF the UI loop).  ``None`` when it is not a file
+    this app can read; else ``{"own": "8G" | None, "size": the file's size,
+    "why": {choice: (class it builds at or None, error sentence, the built
+    image's size or None)}, "room": {class: usable bytes}}`` with ``own``
+    None when the tables are not laid out the way Stern lays a Spike 2 card
+    out.  The built size is card_size.plan's: the class size, or the original
+    FILE's size when that is longer (a dump of a whole bigger SD card keeps
+    its length).  ``room`` is :func:`_probe_room`'s."""
+    from ...core.longpath import ext as _lp
+    from ...plugins.stern import card_size as cs
+    try:
+        if not os.path.isfile(path):
+            return None
+        own = layout = None
+        with open(_lp(path), "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            try:
+                layout = cs.read_layout(f, size)
+                own = cs.class_of(layout.laid_out)
+            except cs.CardSizeError:
+                own = layout = None
+        why = {}
+        for choice in CARD_SIZE_CHOICES:
+            try:
+                builds_at = cs.target_for(path, choice)
+            except cs.CardSizeError as e:
+                why[choice] = (None, str(e), None)
+                continue
+            out = None
+            if builds_at and layout is not None:
+                out = cs.plan(layout, builds_at)[1].size
+            why[choice] = (builds_at, "", out)
+    except OSError:
+        return None
+    room = _probe_room(path, layout, own, why)
+    return {"own": own, "size": size, "why": why, "room": room}
+
+
+def _probe_room(path, layout, own, why):
+    """``{class: bytes}``: the room the files a build puts on whole
+    (replaced videos, a grown sound bank) have on the games partition of the
+    original at *path*, at its own size and at each bigger size it can be
+    built for (card_size.room_by_class, the figures the engine's pre-flight
+    measures a build against).  Read from the partition's superblock and
+    group descriptors, a few KB, OFF the UI loop.  Counted as the kernel's
+    driver copies (card_size.ROUTE_MOUNT), which keeps a small reserve back:
+    never more room than every route has.  A size whose room can't be worked
+    out is left out; ``{}`` when the partition can't be read."""
+    if layout is None or not own:
+        return {}
+    from ...plugins.stern import card_size as cs
+    try:
+        space = cs.read_space(path)
+    except Exception:  # noqa: BLE001 - not a filesystem this reads: no figure
+        log.debug("card size probe: games partition not read", exc_info=True)
+        return {}
+    classes = [own] + [c for c in CARD_SIZE_CHOICES
+                       if (why.get(c) or (None, "", None))[0]
+                       and not why[c][1]]
+    room = {}
+    for c in classes:
+        try:
+            room.update(cs.room_by_class(layout, space, [c], cs.ROUTE_MOUNT))
+        except Exception:  # noqa: BLE001 - a layout the estimate can't grow
+            log.debug("card size probe: no room figure at %s", c,
+                      exc_info=True)
+    return room
+
+
+def _room_words(room, own, offered):
+    """The SD card size note's sentence on the room a build has for the files
+    it puts on whole, from the probe's *room* (:func:`_probe_room`): at the
+    original's own size *own*, then at each of the *offered* bigger sizes, or
+    "" when the original's own figure isn't known.  Starts with a space, to
+    follow the note's first sentence."""
+    from ...plugins.stern.card_size import size_words
+    if own not in room:
+        return ""
+    text = (" Its games partition, where replaced videos and longer sounds "
+            "go, has %s free" % size_words(room[own]))
+    bigger = [c for c in offered if c in room]
+    for i, c in enumerate(bigger):
+        text += ("; built for a %s card it has %s" if not i
+                 else ", for a %s card %s") % (_class_words(c),
+                                               size_words(room[c]))
+    return text + "."
+
+
+# Whether THIS computer can grow a card: card_size._E2fs asks the Linux this
+# app uses (WSL on Windows) for e2fsprogs and a loop device, the machine half
+# of card_size.preflight.  Asking starts that Linux, so it is never asked on
+# the UI loop: a worker asks once a bigger size is chosen, well before the
+# Build / flash dialog's Start, and the answer is kept.  A yes holds for the
+# session; a no (or no answer) is asked again after a minute, because the
+# prerequisites strip can mend it, and holds until the new answer is in.
+_GROW_HERE = {"why": None, "at": None, "busy": False}
+_GROW_HERE_LOCK = threading.Lock()
+_GROW_HERE_RECHECK = 60.0
+
+
+def _grow_here():
+    """"" when this computer can grow a card, the reason it can't, or None
+    when that isn't known yet."""
+    with _GROW_HERE_LOCK:
+        return _GROW_HERE["why"]
+
+
+def _ask_grow_here(then=None):
+    """Ask whether this computer can grow a card, on a worker thread, unless
+    it can, is being asked, or was asked less than a minute ago.  *then()*
+    runs on that thread once the answer is in.  True when it asks."""
+    with _GROW_HERE_LOCK:
+        st = _GROW_HERE
+        if st["busy"] or st["why"] == "" or (
+                st["at"] is not None
+                and time.monotonic() - st["at"] < _GROW_HERE_RECHECK):
+            return False
+        st["busy"] = True
+
+    def _worker():
+        from ...plugins.stern import card_size as cs
+        why = None
+        try:
+            cs._E2fs()
+            why = ""
+        except cs.CardSizeError as e:
+            why = (str(e).strip()
+                   or "the games partition can't be grown here")
+        except Exception:                               # noqa: BLE001
+            # no answer: the build's own check says, and this asks again
+            # in a minute rather than straight away
+            log.exception("can this computer grow a card")
+        with _GROW_HERE_LOCK:
+            if why is not None:
+                _GROW_HERE["why"] = why
+            _GROW_HERE["at"] = time.monotonic()
+            _GROW_HERE["busy"] = False
+        if then is not None:
+            try:
+                then()
+            except Exception:                           # noqa: BLE001
+                log.exception("card size: after asking this computer")
+
+    threading.Thread(target=_worker, daemon=True,
+                     name="card-size-here").start()
+    return True
+
+
 class WriteTab(TabService):
     ns = "write"
     key = "Write"
@@ -135,9 +354,10 @@ class WriteTab(TabService):
         "write_filename_var", "write_input_source_var", "write_drive_var",
         "write_drive_display_var", "write_partition_override_var",
         "write_text_grow_var", "write_version_auto_var",
-        "write_version_date_var",
+        "write_version_date_var", "write_card_size_var",
         "write_version_override", "write_version_validation_error",
-        "_target_write_path", "text_grow_enabled", "set_flash_running",
+        "_target_write_path", "text_grow_enabled", "card_size_choice",
+        "card_size_problem", "set_flash_running",
         "begin_revert_view", "_remember_flashed_image", "_image_was_flashed",
         "_open_flash_dialog", "_has_pending_write_changes",
         "_scan_write_preview", "_maybe_rescan_write_preview",
@@ -158,6 +378,8 @@ class WriteTab(TabService):
         tg = cb.get("initial_text_grow")
         self.write_text_grow_var = self.var(
             "text_grow", "bool", True if tg is None else bool(tg))
+        self.write_card_size_var = self.var(
+            "card_size", "str", _norm_card_size(cb.get("initial_card_size")))
         self.write_version_auto_var = self.var("version_auto", "bool", True)
         self.write_version_date_var = self.var("version_date")
 
@@ -167,6 +389,12 @@ class WriteTab(TabService):
         self._drives_cache = []
         self._drive_enum_id = 0
         self._badge_seq = 0
+        # the SD card size control: what the original is, read off the loop
+        # (None = nothing to show), and the probe that answers for the
+        # current original
+        self._card_probe = None
+        self._card_probe_path = ""
+        self._card_seq = 0
         self._suggested_mfr = None
         self._rows = []                  # [(file, type, status, tag)]
         self._sort = (None, False)
@@ -209,6 +437,8 @@ class WriteTab(TabService):
             "write", lambda *_a: self._on_drive_selected())
         self.write_text_grow_var.trace_add(
             "write", lambda *_a: self._on_text_grow_toggle())
+        self.write_card_size_var.trace_add(
+            "write", lambda *_a: self._on_card_size_change())
         self.write_version_auto_var.trace_add(
             "write", lambda *_a: self._on_version_auto_toggle())
         self.write_version_date_var.trace_add(
@@ -223,7 +453,11 @@ class WriteTab(TabService):
                  refresh_disabled=False, fda_ack=self._fda_ack,
                  admin_collapsed=self._admin_collapsed,
                  project=NO_PROJECT, project_set=False, prebuild=[],
-                 widths=self._saved_widths(), flash_hosted=False)
+                 widths=self._saved_widths(), flash_hosted=False,
+                 card_size_cap=False, card_size_options=[],
+                 card_size_shown="", card_size_note="",
+                 card_size_note_kind="", card_size_label=CARD_SIZE_LABEL,
+                 card_size_tip=CARD_SIZE_TIP)
         self._hook_mirrors()
 
     # ------------------------------------------------------------------
@@ -361,6 +595,7 @@ class WriteTab(TabService):
         self._update_write_badge()
         self._update_write_filename()
         self._refresh_prebuild_notes()
+        self._refresh_card_size()
         self._sync_buttons()
 
     @staticmethod
@@ -499,6 +734,7 @@ class WriteTab(TabService):
         self._update_write_badge()
         self._maybe_default_write_output()
         self._update_write_filename()
+        self._refresh_card_size()
 
     def _update_write_badge(self):
         """main_window._set_badge(mode="write"), with the detection (it reads
@@ -712,6 +948,11 @@ class WriteTab(TabService):
             name = f"{stem}{suffix}{ext}"
         if mfr is not None:
             name = mfr.force_write_ext(name)
+        # a Stern Spike 2 build for a bigger SD card is named for that card
+        # ("...Release.16G.sdcard-modified.raw"), not the original's
+        grown = self._card_build()[0]
+        if grown:
+            name = _name_for_class(name, grown)
         return name
 
     def _target_write_path(self):
@@ -927,6 +1168,243 @@ class WriteTab(TabService):
                                              self.text_grow_enabled()))
         self._rows = keep
         self._publish_rows()
+
+    # ------------------------------------------------------------------
+    # SD card size (Stern Spike 2, plugins/stern/card_size.py)
+    # ------------------------------------------------------------------
+    def card_size_choice(self):
+        """The SD card size the next build is asked for: "16G" / "32G", or
+        "" for the original's own size (what PAD_STERN_CARD_SIZE mirrors)."""
+        try:
+            return _norm_card_size(self.write_card_size_var.get())
+        except Exception:                               # noqa: BLE001
+            return ""
+
+    def _on_card_size_change(self):
+        choice = self.card_size_choice()
+        if self.write_card_size_var.get() != choice:
+            self.write_card_size_var.set(choice)        # traces back here
+            return
+        fn = self.window.cb.get("on_card_size_change")
+        if fn is not None:
+            try:
+                fn(choice)
+            except Exception:                           # noqa: BLE001
+                log.exception("card size change")
+        self._publish_card_size()
+
+    def _card_size_applies(self):
+        """A Stern Spike 2 build on a computer that can grow one: the only
+        build card_size.py grows (not on macOS: see card_size_supported)."""
+        mfr = self.mfr
+        return bool(mfr is not None and mfr.key == "stern"
+                    and getattr(mfr, "current_era", "spike2") == "spike2"
+                    and self.cap("write") and card_size_supported())
+
+    def card_size_problem(self):
+        """Why the next image build can't be made at the SD card size asked
+        for: the sentence the control shows in red, or "" (it can, or the
+        original's own size is asked for).  The Build / flash dialog asks
+        this first when its Start builds (``_build_refusal``), and
+        app._start_write before its prompts, so a size the original can't
+        take is refused in a second, before any other question, rather than
+        after every assigned video has been re-encoded.  It reads the
+        original's tables itself (a few sectors; the multi-boot answer is
+        cached by the probe) rather than trust a probe that may still be
+        running.  Whether this computer can grow a card is the answer a
+        worker already has (``_grow_here_problem``); while there is none, the
+        build's own check (Manufacturer.write_preflight) still refuses."""
+        choice = self.card_size_choice()
+        if (not choice or not self._card_size_applies()
+                or self._is_direct()):
+            return ""
+        path = (self.write_upd_var.get() or "").strip()
+        if not path:
+            return ""
+        from ...plugins.stern import card_size as cs
+        from ...plugins.stern.pipeline import card_class_words
+        try:
+            grows_to = cs.target_for(path, choice)
+        except cs.CardSizeError as e:
+            return card_class_words(str(e))
+        except OSError:
+            return ""                   # the build's own checks say why
+        return self._grow_here_problem(grows_to) if grows_to else ""
+
+    def _grow_here_problem(self, cls):
+        """The sentence refusing a build grown to *cls* on this computer
+        (card_size.preflight's own words), or "" when it can grow one or
+        that isn't known yet.  An answer that is missing, or a no a minute
+        old, is asked for again here, off the UI loop, and the control is
+        re-published when it comes in."""
+        self._ask_grow_here()
+        why = _grow_here()
+        if not why:
+            return ""
+        from ...plugins.stern import card_size as cs
+        from ...plugins.stern.pipeline import card_class_words
+        return card_class_words(
+            "This card can't be built for a %s SD card on this computer: "
+            "%s." % (cs.words(cls), why.rstrip(".")))
+
+    def _ask_grow_here(self):
+        loop = self.ctx.loop
+
+        def _then():
+            try:
+                loop.post(self._publish_card_size)
+            except Exception:                           # noqa: BLE001
+                pass                    # the window has gone
+        return _ask_grow_here(_then)
+
+    def _build_refusal(self):
+        """The Build / flash dialog's first check when its Start builds:
+        ``(title, message)`` when the SD card size asked for can't be built
+        from this original or on this computer, else None.  Asked before the
+        dialog's own questions, so a build that is going to be refused never
+        follows an "Erase the SD card" confirmation, and the dialog stays
+        open (Flash on its own still works)."""
+        problem = self.card_size_problem()
+        if not problem:
+            return None
+        return CARD_SIZE_LABEL, "%s\n\n%s" % (problem, CARD_SIZE_WAY_BACK)
+
+    def _refresh_card_size(self):
+        """Re-read what the original is (its partition tables, off the
+        loop) and re-publish the control."""
+        self._card_seq += 1
+        seq = self._card_seq
+        path = (self.write_upd_var.get() or "").strip()
+        if not path or not self._card_size_applies():
+            self._card_probe, self._card_probe_path = None, ""
+            self._publish_card_size()
+            return
+
+        def _worker():
+            try:
+                probe = _probe_card_size(path)
+            except Exception:                           # noqa: BLE001
+                log.exception("card size probe")
+                probe = None
+            self.ctx.loop.post(self._apply_card_probe, seq, path, probe)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_card_probe(self, seq, path, probe):
+        if (seq != self._card_seq
+                or (self.write_upd_var.get() or "").strip() != path):
+            return
+        self._card_probe, self._card_probe_path = probe, path
+        self._publish_card_size()
+
+    def _current_card_probe(self):
+        """The probe of the original picked NOW, or None (another
+        manufacturer or era, macOS, or a probe of a file no longer picked
+        whose successor is still being read)."""
+        if not self._card_size_applies():
+            return None
+        path = (self.write_upd_var.get() or "").strip()
+        if not path or path != self._card_probe_path:
+            return None
+        return self._card_probe
+
+    def _card_build(self):
+        """``(class, size, error)`` of the next image build as the SD card
+        size control knows it: the class it grows to (None: it keeps the
+        original's), the size of the file it makes (None: unknown - not a
+        Stern Spike 2 original this tab has read), and the sentence refusing
+        the size asked for ("" when it can be built)."""
+        probe = self._current_card_probe()
+        if probe is None:
+            return None, None, ""
+        choice = self.card_size_choice()
+        builds_at, err, out = ((probe.get("why") or {}).get(
+            choice, (None, "", None)) if choice else (None, "", None))
+        if err:
+            return None, None, err
+        if builds_at and out:
+            return builds_at, out, ""
+        if not probe.get("own"):
+            # not laid out the way the control reads: no build of it was
+            # ever grown, so the file at the build path still tells
+            return None, None, ""
+        # the original's own size: a Spike 2 build is a copy of the original
+        # patched in place, to the byte its length
+        return None, probe.get("size"), ""
+
+    def _publish_card_size(self):
+        """The control's state: shown (``card_size_cap``) when the original
+        is a Spike 2 card laid out the way Stern lays one out and a bigger
+        card class it can be built at exists for it, or when the size asked
+        for can't be built from this original (so the reason, and the way
+        back to the original's size, are on screen before a build is
+        refused).  The note says what the original is, how much room its
+        games partition has at each size (the probe read it off the loop:
+        :func:`_probe_room`), and what the size asked for costs.  The Build
+        Image line's default name follows the class."""
+        from ...plugins.stern.card_size import CARD_SIZES
+        from ...plugins.stern.pipeline import card_class_words
+        from ..write_dialogs import _fmt_size
+        probe = self._current_card_probe()
+        choice = self.card_size_choice()
+        own = probe.get("own") if probe else None
+        why = (probe.get("why") or {}) if probe else {}
+        none = (None, "", None)
+        # only the sizes this original CAN be built at: a multi-boot store
+        # card is laid out like a stock one, and target_for refuses it
+        offered = [c for c in CARD_SIZE_CHOICES
+                   if own and CARD_SIZES[c] > CARD_SIZES[own]
+                   and not why.get(c, none)[1]]
+        builds_at, err, out = why.get(choice, none) if choice else none
+        if probe is not None and builds_at and not err:
+            # the original can grow to it: can THIS computer grow a card?
+            # (asked off the loop; this runs again when the answer is in)
+            err = self._grow_here_problem(builds_at)
+        if probe is None or (not offered and not err):
+            # not a Stern-shaped card, one of the biggest class already, or
+            # one that can't grow at all: nothing to choose
+            self.set(card_size_cap=False, card_size_options=[],
+                     card_size_shown="", card_size_note="",
+                     card_size_note_kind="")
+            self._update_write_filename()
+            return
+        options = [{"value": "", "label": CARD_SIZE_SAME}]
+        options += [{"value": c, "label": "%s card" % _class_words(c)}
+                    for c in offered]
+        shown = choice if choice in offered else ""
+        if err:
+            # the size asked for, which this original (or this computer)
+            # can't build: kept in the list so the control shows what a build
+            # would be refused
+            if choice not in offered:
+                options.append({"value": choice,
+                                "label": "%s card" % _class_words(choice)})
+            shown = choice
+            note, kind = card_class_words(err), "err"
+        else:
+            size = int(probe.get("size") or 0)
+            note = ("The original is %s %s card"
+                    % ("an" if own == "8G" else "a", _class_words(own)))
+            if size > CARD_SIZES[own]:
+                note += " in a %s file" % _fmt_size(size)
+            note += "." + _room_words(probe.get("room") or {}, own, offered)
+            if builds_at:
+                out = out or CARD_SIZES[builds_at]
+                if out > CARD_SIZES[builds_at]:
+                    # card_size.plan keeps a longer original's length
+                    note += (" The built image is %s, as long as the original "
+                             "file, so it needs an SD card that holds at "
+                             "least %s; flashing it takes longer."
+                             % (_fmt_size(out), _fmt_size(out)))
+                else:
+                    note += (" The built image is %s and needs an SD card of "
+                             "at least %s; flashing it takes longer."
+                             % (_fmt_size(out), _class_words(builds_at)))
+            kind = ""
+        self.set(card_size_cap=True,
+                 card_size_options=options, card_size_shown=shown,
+                 card_size_note=note, card_size_note_kind=kind)
+        self._update_write_filename()
 
     # ------------------------------------------------------------------
     # Modified Files: the scan
@@ -1347,12 +1825,31 @@ class WriteTab(TabService):
                 self.window.select_tab(self.ns)
             except Exception:                           # noqa: BLE001
                 self._return_tab = None
+        # the size of the image a build makes, when this tab knows it: the
+        # SD card size chosen here changes it, so the file a LAST build left
+        # at the build path says nothing about the next one
+        grown, build_size, _err = self._card_build()
+        # "pick a smaller size" only when one builds a smaller image: an
+        # original FILE longer than its card class (a dump of a whole bigger
+        # SD card) builds at the file's length whatever size is picked
+        probe = self._current_card_probe() or {}
+        smaller = bool(grown and build_size
+                       and build_size > int(probe.get("size") or 0))
+        if grown:
+            # a stale answer to "can this computer grow a card?" is renewed
+            # while the SD card is being picked, before the dialog's Start
+            self._ask_grow_here()
         self._flash = FlashDialog(
             self.ctx.loop, mfr, on_flash,
             initial_image=initial,
             on_build_flash=self.window.cb.get("on_build_flash"),
             build_target=target, can_build=can_build,
             cannot_build_reason=reason,
+            build_size=build_size,
+            build_size_hint=(
+                "or pick a smaller SD card size on the Write tab" if smaller
+                else ""),
+            build_refusal=self._build_refusal,
             has_pending_changes=self._has_pending_write_changes(),
             initial_choices=choices,
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(
@@ -1742,12 +2239,15 @@ class WriteTab(TabService):
         self._refresh_write_assets_warning()
         self._update_write_filename_hint()
         self._refresh_prebuild_notes()
+        # the original may have been replaced on disk since it was read
+        self._refresh_card_size()
         self.set_admin_warning_collapsed(self._shared_admin_collapsed())
 
     def on_close(self):
         self._scan_id += 1
         self._drive_enum_id += 1
         self._badge_seq += 1
+        self._card_seq += 1
         self._return_tab = None
         for dlg in (self._flash, self._diag):
             if dlg is not None:

@@ -1502,6 +1502,9 @@ def test_stern_declares_ext4_grow_prereq_per_platform():
     # opt-in), but blip-free must stay named: a build that opts back in still
     # falls back to the scrap-remains card without this, silently.
     assert "video" in win.reason and "blip-free" in win.reason.lower()
+    # SD card size grows the games partition through the same loop device
+    # (card_size.check_tools), so the WSL2 row names it too.
+    assert "SD card size" in win.reason
     assert "wsl --install" in win.install_hint
     # And the hint must carry the WSL 1 -> 2 conversion, the actual fix on
     # the machines this probe newly catches.
@@ -1509,6 +1512,9 @@ def test_stern_declares_ext4_grow_prereq_per_platform():
 
     (mac,) = _ext4_grow_prereqs("darwin")
     assert mac.name == "e2fsprogs" and mac.where == "host"
+    # ... but not the macOS row: SD card size isn't offered there at all
+    # (card_size.supported), so e2fsprogs can't be what it waits on.
+    assert "SD card size" not in mac.reason
     # The probe must search every keg-only location _find_e2fsprogs does --
     # e2fsprogs is keg-only in Homebrew, so a bare PATH check reports it
     # missing on a machine where ext4_grow works fine.

@@ -44,13 +44,15 @@ def no_space_message(need=None, avail=None, items=(), what="file(s)"):
     a modder whose 542 replaced videos and grown sound bank overran the card
     was told only that there was "not enough free space" — after twenty-odd
     minutes of encoding, with nothing to say how far over he was or what was
-    taking the room (PAD-176).  The card's data partition is a fixed size, so
-    the answer is always "take something out"; the only question is what.
+    taking the room (PAD-176).  The card's games partition is the size Stern
+    made it for the original's card, so the answer is "take something out" -
+    or build for a bigger SD card, which the Stern engine says after this
+    sentence when it could help (engine._bigger_card_hint, card_size.py).
 
     *items* are ``(growth_in_bytes, card_path)`` pairs.  The biggest few are
     named because a mod's space is rarely spread evenly across its files.
     """
-    msg = ("Not enough free space on the card's data partition to write the "
+    msg = ("Not enough free space on the card's games partition to write the "
            "larger %s. They keep their stock content on the card." % what)
     if need is None or avail is None:
         return msg
@@ -100,7 +102,26 @@ class Ext4GrowNoSpace(Ext4GrowError):
     generic error so a caller can word it for what IT was growing — the base
     message says "file(s)" because the same path now carries videos, a
     re-serialised scene, a rebuilt game program and a grown sound bank, and it
-    is wrong for e.g. a Partition Explorer swap on the OS partition."""
+    is wrong for e.g. a Partition Explorer swap on the OS partition.
+
+    ``need`` and ``avail`` are the growth and the free space in bytes, and
+    ``items`` the ``(growth, card_path)`` pairs, as the check measured them
+    (``None`` / empty when it didn't get that far), so a caller can work out
+    what would fit - the Stern engine names the one SD card size that does
+    (engine._bigger_card_hint)."""
+
+    def __init__(self, message, grown=0, need=None, avail=None, items=()):
+        super().__init__(message, grown=grown)
+        self.need = need
+        self.avail = avail
+        self.items = list(items or ())
+
+
+def _no_space(text, grown=0):
+    """The :class:`Ext4GrowNoSpace` for a script's failure output *text*."""
+    need, avail, items = parse_space_report(text)
+    return Ext4GrowNoSpace(no_space_message(need, avail, items), grown=grown,
+                           need=need, avail=avail, items=items)
 
 
 # Can the executor's Linux hand out a loop device?  ``losetup -f`` only ASKS
@@ -344,9 +365,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
         # PAD_GROW_OK marker first) — surface that count to the caller.
         n_ok = text.count("PAD_GROW_OK ")
         if "PAD_GROW_ENOSPC" in text:
-            raise Ext4GrowNoSpace(
-                no_space_message(*parse_space_report(text)),
-                grown=n_ok) from e
+            raise _no_space(text, grown=n_ok) from e
         raise Ext4GrowError(
             "Couldn't grow files:\n%s" % text, grown=n_ok) from e
     finally:
@@ -451,7 +470,7 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
     mb = re.search(r"^Block size:\s*(\d+)", head, re.M)
     if rc != 0 or not (mf and mb):
         raise Ext4GrowError(
-            "Couldn't read the card's data partition (the card image was not "
+            "Couldn't read the card's games partition (the card image was not "
             "modified by this step):\n%s" % head.strip())
     avail = int(mf.group(1)) * int(mb.group(1))
     need = 0
@@ -463,7 +482,8 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
         if d:
             items.append((d, card_rel))
     if need > avail:
-        raise Ext4GrowNoSpace(no_space_message(need, avail, items))
+        raise Ext4GrowNoSpace(no_space_message(need, avail, items),
+                              need=need, avail=avail, items=items)
 
     grown, touched = 0, False
     try:
@@ -529,7 +549,7 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
                                 "e2fsck")
             if rc not in (0, 1, 2):
                 raise Ext4GrowError(
-                    "e2fsck could not repair the card's data partition after "
+                    "e2fsck could not repair the card's games partition after "
                     "growth (exit %d):\n%s" % (rc, out.strip()[-2000:]))
     log("Grew %d file(s) to full size (filesystem left valid)." % grown,
         "success")
@@ -706,9 +726,7 @@ def grow_files_pinned(image_path, part_offset, jobs, epoch, log=None,
         text = str(e)
         n_ok = text.count("PAD_GROW_OK ")
         if "PAD_GROW_ENOSPC" in text:
-            raise Ext4GrowNoSpace(
-                no_space_message(*parse_space_report(text)),
-                grown=n_ok) from e
+            raise _no_space(text, grown=n_ok) from e
         raise Ext4GrowError("Couldn't write files:\n%s" % text,
                             grown=n_ok) from e
     finally:

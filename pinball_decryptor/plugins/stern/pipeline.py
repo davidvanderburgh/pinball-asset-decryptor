@@ -12,6 +12,7 @@ derive every sound's keystream, then decode/re-encode.
 """
 
 import os
+import re
 
 from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
@@ -33,6 +34,26 @@ def _require_engine():
             "Engine",
             "Spike 2 audio engine unavailable. Install its prerequisites "
             "(pip install unicorn capstone numpy) and try again.")
+
+
+#: a card class code standing as a word of a sentence: never one inside a
+#: file name or path ("...Release.16G.sdcard-modified.raw", ".../16G/...",
+#: "gz 16G-modified.raw"), which must stay the name of a file that exists.
+#: A sentence's own full stop after it ("for 16G.") still ends a word.
+_CARD_CLASS = re.compile(r"(?<![\w.\\/-])(8|16|32)G(?![\w\\/-]|\.\w)")
+
+
+def card_class_words(text):
+    """*text*, a card_size.py or engine sentence about the SD card size a
+    build is for, with each card class code ("16G") in the words the Write
+    tab's SD card size control and the card packaging use ("16 GB").  Applied
+    where those sentences reach the user (the control's note, the Build
+    refusal, the overwrite prompt, a failed build), so a control reading
+    "16 GB card" never sits over a "16G SD card".  A code inside a file name
+    or path quoted in the sentence is left as it is: a grown build's default
+    name carries its class (".16G.sdcard"), and a failure naming that file
+    must name the file that is there."""
+    return _CARD_CLASS.sub(r"\1 GB", text or "")
 
 
 def _log_multi_image(path, log):
@@ -361,6 +382,9 @@ class SternWritePipeline(BasePipeline):
         # let the engine decide from the record beside the file
         # (engine.write_image).
         self.update = update
+        # The card_size refusal that stopped this build, if one did: the app
+        # offers the SD card size that fits (card_size.bigger_card_offer).
+        self.card_size_refusal = None
 
     def _run(self):
         self._set_phase(0)  # Detect
@@ -381,11 +405,26 @@ class SternWritePipeline(BasePipeline):
             had_modes = (before.get("modes") or {}).get("names") or []
         except Exception:
             had_modes = []
-        counts, audio_mode, valpatch_mode = engine.write_image(
-            self.original_path, self.assets_dir, self.output_path,
-            log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
-            label=display_for_key(key, self.original_path),
-            update=self.update)
+        from .card_size import Cancelled, CardSizeError
+        try:
+            counts, audio_mode, valpatch_mode = engine.write_image(
+                self.original_path, self.assets_dir, self.output_path,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled,
+                label=display_for_key(key, self.original_path),
+                update=self.update)
+        except CardSizeError as e:
+            # the SD card size option's refusal is an answer, not a crash:
+            # its sentence, without the traceback an unexpected error gets.
+            # Logged here as well, once: BasePipeline.run hands a
+            # PipelineError to the Write Failed dialog alone, and a refusal's
+            # numbers (the room, the size that fits, the biggest files,
+            # PAD-176) belong in the log a user keeps and pastes.
+            msg = card_class_words(str(e))
+            if not (isinstance(e, Cancelled) or self._cancelled):
+                self._log(msg, "error")
+                self.card_size_refusal = e
+            raise PipelineError("Re-encode", msg) from e
         self._set_phase(3)  # Patch image
         # Item 149: the modes this build put on the card, from its record.
         try:

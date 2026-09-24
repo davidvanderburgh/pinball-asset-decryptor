@@ -216,7 +216,22 @@ function Destination({ s }) {
     </div>` : null}
     ${s.text_grow_cap ? html`<${Check} ns="write" k="text_grow" checked=${s.text_grow} wrap
         label=${s.text_grow_label} title=${s.text_grow_tip} disabled=${s.running} />` : null}
+    ${s.card_size_cap && !direct ? html`<${CardSize} s=${s} />` : null}
   <//>`;
+}
+
+// Stern Spike 2: the SD card class the build is for (the games partition
+// grows to fill it).  An image build only: a direct write keeps the card's
+// own partitions.  The note says what the original is, the room its games
+// partition has at each size, and what the choice costs, or, in red, why
+// this original can't be built at that size.
+function CardSize({ s }) {
+  return html`<div class="stack wr-build">
+    <label class="lbl" for="wr-cardsize" ...${tip(s.card_size_tip)}>${s.card_size_label}</label>
+    <${Select} id="wr-cardsize" ns="write" k="card_size" value=${s.card_size_shown}
+      options=${s.card_size_options || []} width=${240} title=${s.card_size_tip} disabled=${s.running} />
+    ${s.card_size_note ? html`<span class=${cx("small", s.card_size_note_kind === "err" ? "err-ink" : "muted")}>${s.card_size_note}</span>` : null}
+  </div>`;
 }
 
 // The design's "Before you build": what the run logic and the Replace tabs

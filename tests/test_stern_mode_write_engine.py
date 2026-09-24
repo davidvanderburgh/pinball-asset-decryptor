@@ -566,13 +566,18 @@ def test_a_missing_file_after_a_mode_build_is_an_error_not_the_original(card, tm
                                                                        monkeypatch, why):
     """Only NothingToWrite means "every mode taken out": any other missing file (the pinned
     runtime gone, a replacement sound deleted) fails the Write - it never writes the
-    original card and calls that a success."""
+    original card and calls that a success.  It fails before the build copied anything over
+    the output (PAD-176: the copy starts once the build is measured), so the last build
+    there and its record are left exactly as they were."""
     monkeypatch.setattr(ext4_grow, "grow_files_pinned",
                         lambda img, off, jobs, epoch, log=None, timeout=0: len(jobs))
     monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None: None)
     card.state["grow"] = _mode_grow(card, tmp_path)
     _build(card, update=False)
     assert _record(card).get("modes")
+
+    before = (os.stat(str(card.out)).st_mtime_ns, os.path.getsize(str(card.out)),
+              _record(card))
 
     def other_failure(*a, **k):
         raise FileNotFoundError(why)
@@ -583,7 +588,8 @@ def test_a_missing_file_after_a_mode_build_is_an_error_not_the_original(card, tm
                            log=lambda m, l="info", *a, **k: lines.append((m, l)))
     assert not isinstance(got.value, engine.NothingToWrite)
     assert not any("written as the original card" in m for m, _l in lines)
-    assert not os.path.exists(str(card.out)), "a failed build must not leave a card behind"
+    assert (os.stat(str(card.out)).st_mtime_ns, os.path.getsize(str(card.out)),
+            _record(card)) == before, "a failed build leaves the last build as it was"
 
 
 def test_a_closed_gate_after_a_mode_build_says_the_modes_were_left_out(card, tmp_path, monkeypatch):
@@ -638,8 +644,16 @@ def test_the_copy_stage_timing_line_names_what_a_mode_build_copies():
     """The ext4 copy stage's timing line says it copies the modes' files (and the grown sound
     bank) when the build carries modes, not "the full-size (grown) videos"."""
     name = engine._grow_stage_name
-    assert name(None) == "copying the full-size (grown) videos into the card"
+    assert name(None) == "copying the files that outgrew their slots into the card"
     assert name({"jobs": [], "modes": None}) == name(None)
+    # PAD-176: without modes it names what it copies, not "videos" for a grown bank alone
+    two = [("a", "x"), ("b", "y")]
+    assert (name({"jobs": two[:1], "n_video": 0, "audio_job": 0})
+            == "copying the grown sound bank into the card")
+    assert (name({"jobs": two, "n_video": 1, "audio_job": None})
+            == "copying the full-size videos and the rebuilt game files into the card")
+    assert (name({"jobs": two, "n_video": 1, "audio_job": 1})
+            == "copying the full-size videos and the grown sound bank into the card")
     modes = {"added": ["a", "b"], "rewritten": ["c", "d", "e"], "end_sound": {"name": "KAIJU RUSH"}}
     got = name({"jobs": [], "modes": modes})
     assert "videos" not in got

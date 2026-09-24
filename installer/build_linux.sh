@@ -121,6 +121,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.info" \
     --hidden-import "pinball_decryptor.plugins.stern.compare" \
     --hidden-import "pinball_decryptor.plugins.stern.multiimage" \
+    --hidden-import "pinball_decryptor.plugins.stern.card_size" \
     --hidden-import "pinball_decryptor.core.image_info" \
     --hidden-import "pinball_decryptor.core.hashcache" \
     --hidden-import "pinball_decryptor.core.rawdevice" \

@@ -153,13 +153,25 @@ label_mounted() {   # <label>
 # sidecar; a missing one falls back to the copy's own mtime, which makes
 # never-booted strays and pre-item-77 entries the first to go). Never evicts
 # the label being copied, a mounted label, or one whose copier is live.
-# `need` uses the image's APPARENT size - conservative, since sparse lands
-# smaller. Returns 1 when even eviction cannot make room; the boot then runs
-# off the original and nothing half-lands. PAD_CACHE_KEEP_FREE_GB (default 8)
-# is the floor the rest of the WSL disk keeps.
+# `need` is what the copy can really take: the image's ALLOCATED bytes when
+# its filesystem reports them (drvfs does, for NTFS), else its apparent size.
+# The copy is `dd conv=sparse`, so it never lands bigger than what the
+# original allocates. Apparent size alone was wrong by 22 GB for a card built
+# for a 32 GB SD card (card_size.py: 30.4 GB apparent, 8.5 GB allocated) -
+# more than the whole work disk, so merely PICKING it evicted every other
+# cached card and then ran off the original anyway. Returns 1 when even
+# eviction cannot make room; the boot then runs off the original and nothing
+# half-lands. PAD_CACHE_KEEP_FREE_GB (default 8) is the floor the rest of the
+# WSL disk keeps.
 cache_make_room() {   # <img> <own-copy-path>
-    local need keep free f vlabel vboot victim oldest
-    need=$(( $(stat -c %s "$1" 2>/dev/null || echo 0) / 1024 ))
+    local need keep free f vlabel vboot victim oldest size alloc
+    size=$(stat -c %s "$1" 2>/dev/null || echo 0)
+    alloc=$(( $(stat -c '%b * %B' "$1" 2>/dev/null || echo 0) ))
+    if [ "$alloc" -gt 0 ] && [ "$alloc" -lt "$size" ]; then
+        need=$(( alloc / 1024 ))
+    else
+        need=$(( size / 1024 ))
+    fi
     keep=$(( ${PAD_CACHE_KEEP_FREE_GB:-8} * 1048576 ))
     while :; do
         free=$(df -k --output=avail "$CACHE" 2>/dev/null | tail -1 | tr -d " ")

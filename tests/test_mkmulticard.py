@@ -2780,6 +2780,25 @@ def test_group_over_names_images_already_on_the_card(mk, tmp_path):
     assert groups[0]["pos"] == 1
 
 
+def test_group_over_at_names_its_place_before_the_primary(mk, tmp_path):
+    """PAD-202: the primary is not an ordered flag, so no flag's place is
+    "before image 0" - a random card at the top of the menu came out second.
+    '@P' after the range names the place outright."""
+    extras, groups = _resolved(mk, [
+        "build", "--primary", "P", "--out", "O",
+        "--group-over", "0-2@0|RANDOM|", "--extra", "A", "--extra", "B"])
+    assert extras == ["A", "B"]
+    assert groups[0]["members"] == [0, 1, 2] and groups[0]["pos"] == 0
+    conf = mk.render_images_conf(["/dev/mmcblk0p3", "/dev/mmcblk0p3:img1", "/dev/mmcblk0p3:img2"],
+                                 groups=groups)
+    lines = [ln for ln in conf.splitlines() if ln.startswith(("group=", "image="))]
+    assert lines[0].startswith("group=+0-2|RANDOM"), lines
+    assert mk.parse_images_conf(conf)["groups"][0]["pos"] == 0
+    with pytest.raises(mk.Refused):
+        _resolved(mk, ["build", "--primary", "P", "--out", "O",
+                       "--group-over", "0-1@x|R|", "--extra", "A"])
+
+
 # ---- item 106: a random card's picture is its own, not its first member's ---
 def _group_media_dir(mk, d, n_images=3):
     """synth_media_dir plus one group's own picture, and the manifest row that

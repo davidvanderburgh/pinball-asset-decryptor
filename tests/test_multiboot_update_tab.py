@@ -222,3 +222,30 @@ def test_update_and_inject_titles_are_one_per_game_not_per_row(monkeypatch, tmp_
     for argv in (update_args(form, card), inject_args(form, card), build_args(form)):
         words = _tool_words(root_command(argv, cwd="/mnt/c/repo"))
         assert flag(words, "--default-card") == "0", words[1]
+
+
+def test_a_random_card_on_top_sends_each_game_once_and_sits_first(monkeypatch, tmp_path):
+    """PAD-202 round 3: Ben moved his random card (over the six games, which
+    keep their own cards) to the top.  The primary is then row 1, but the
+    image flags skipped row 0 - so the first game went as --primary AND as
+    --extra, the tool counted 7 images for 6 and the update refused
+    ("media.json lists 6 images; the card holds 7").  And the card's own
+    place has to be said ('@0'): no flag's position is before the primary."""
+    from pinball_decryptor.webui.multiboot_core import ImageRow, MemberRow, build_args
+    _win(monkeypatch)
+    form = _form(tmp_path, 4)
+    paths = [r.path for r in form.images]
+    form.images.insert(0, ImageRow(path="", title="RANDOM", keep=True,
+                                   members=[MemberRow(path=p) for p in paths]))
+    card = str(tmp_path / "card.raw")
+    for argv in (update_args(form, card), build_args(form)):
+        words = _tool_words(root_command(argv, cwd="/mnt/c/repo"))
+        games = [words[i + 1] for i, w in enumerate(words) if w in ("--primary", "--extra")]
+        assert games == [multiboot_core.wsl(p) for p in paths], words[1]
+        assert words[words.index("--group-over") + 1] == "0-3@0|RANDOM|", words[1]
+    # lower down, the flag's own place still says it, as it always did
+    form.images.append(form.images.pop(0))
+    words = _tool_words(root_command(update_args(form, card), cwd="/mnt/c/repo"))
+    games = [words[i + 1] for i, w in enumerate(words) if w in ("--primary", "--extra")]
+    assert games == [multiboot_core.wsl(p) for p in paths]
+    assert words[words.index("--group-over") + 1] == "0-3|RANDOM|"

@@ -25,6 +25,7 @@ comes back through the UI loop and a bump counter drops stale answers.
 """
 
 import inspect
+import json
 import logging
 import os
 import sys
@@ -48,7 +49,7 @@ _EXPORTS = (
     "get_extract_options", "set_extract_options",
     "_refresh_extract_phases", "acknowledge_macos_fda",
     "reset_dmd_preview", "on_dmd_frame", "on_capture_ready",
-    "_on_input_source_change",
+    "_on_input_source_change", "note_extract_done",
     # shared with the Write tab's copies of the card-mode panels
     "_fda_acknowledged", "_dismiss_macos_fda_banner", "_admin_body_text",
     "_admin_warning_collapsed", "_toggle_admin_warning",
@@ -129,6 +130,9 @@ class ExtractTab(TabService):
         self._rc = None
         self._rc_seq = 0
         self._rc_thread = None
+        # what the last successful extract ran (PAD-206): the button greys
+        # out while the same card, folder and options would only redo it
+        self._done_key = None
 
         cb = window.cb
         self._fda_ack = bool(cb.get("initial_fda_acknowledged"))
@@ -149,6 +153,11 @@ class ExtractTab(TabService):
             "write", lambda *_a: self._refresh_extract_phases())
         self._rc_image_var.trace_add(
             "write", lambda *_a: self._rc_update_readout())
+        for var in (self.extract_dongle_var, self.extract_graphics_var,
+                    self.extract_sounds_var, self.extract_filesystem_var,
+                    self.decode_dmd_var, self.transcribe_var,
+                    self.music_id_var, self.duration_names_var):
+            var.trace_add("write", lambda *_a: self._refresh_gate())
 
         self.set(categories=[], mfr_key="", input_label="Input",
                  direct=False, ssd=False, iso_label="From ISO",
@@ -242,6 +251,7 @@ class ExtractTab(TabService):
             var = self.var("cat_" + key, "bool", True)
             var.trace_add("write",
                           lambda *_a: self._update_autoname_state())
+            var.trace_add("write", lambda *_a: self._refresh_gate())
             self._extract_category_vars[key] = var
             rows.append({"key": key, "label": label,
                          "tip": H.EXTRACT_CATEGORY_TIPS.get(
@@ -761,7 +771,51 @@ class ExtractTab(TabService):
             return f"Pick {thing} to extract first."
         if not self.extract_output_var.get().strip():
             return "Choose an output folder first."
+        if (not ssd_mode and self._done_key is not None
+                and self._run_key() == self._done_key):
+            return ("Already extracted into this project folder. Pick the "
+                    "card again (or change an option) to extract again.")
         return ""
+
+    def _run_key(self, in_path=None, out_path=None):
+        """What an Extract of the file row would run: the card (path, size,
+        modified time), the project folder and every option.  None when
+        there is no such file or folder (nothing to compare)."""
+        in_path = (self.extract_input_var.get() if in_path is None
+                   else in_path).strip()
+        out_path = (self.extract_output_var.get() if out_path is None
+                    else out_path).strip()
+        if not in_path or not out_path:
+            return None
+        try:
+            st = os.stat(in_path)
+        except OSError:
+            return None
+        if not os.path.isdir(out_path):
+            return None
+        opts = self.get_extract_options()
+        opts.update(static=bool(self.static_extract_var.get()),
+                    capture=bool(self.capture_mode_var.get()),
+                    dongle=bool(self.extract_dongle_var.get()),
+                    decode_dmd=bool(self.decode_dmd_var.get()),
+                    deltas=list(self.extract_delta_paths))
+        norm = lambda p: os.path.normcase(os.path.abspath(p))  # noqa: E731
+        return (norm(in_path), norm(out_path), st.st_size, st.st_mtime_ns,
+                json.dumps(opts, sort_keys=True))
+
+    def note_extract_done(self, in_path, out_path):
+        """From the run logic after a successful file extract: grey the
+        button out until something would make a new run differ."""
+        self._done_key = None if self._ssd_mode() else self._run_key(
+            in_path, out_path)
+        self._refresh_gate()
+
+    def _forget_done(self):
+        """The user picked a card or folder again, even the same one: that
+        is the way to ask for a fresh extract."""
+        if self._done_key is not None:
+            self._done_key = None
+            self._refresh_gate()
 
     def _refresh_gate(self):
         if self.mfr is None:
@@ -779,6 +833,8 @@ class ExtractTab(TabService):
 
     def on_show(self):
         self._refresh_recents()
+        # the card may have been replaced on disk while away
+        self._refresh_gate()
 
     # ------------------------------------------------------------------
     # the page's calls: paths
@@ -791,6 +847,7 @@ class ExtractTab(TabService):
             initialdir=self.window._initialdir_for(
                 self.extract_input_var.get()))
         if path:
+            self._forget_done()
             self.extract_input_var.set(os.path.normpath(path))
         return bool(path)
 
@@ -818,6 +875,7 @@ class ExtractTab(TabService):
                     "produced.\n\nUse the parent folder instead?"):
                 path = parent
         path = os.path.normpath(path)
+        self._forget_done()
         self.extract_output_var.set(path)
         cb = self.window.cb.get("on_project_folder_picked")
         if cb is not None:
@@ -846,6 +904,7 @@ class ExtractTab(TabService):
         if var is None or not path:
             return False
         from ...core.admin import resolve_mapped_drive
+        self._forget_done()
         var.set(resolve_mapped_drive(path))
         return True
 
@@ -865,6 +924,7 @@ class ExtractTab(TabService):
             if os.path.isfile(p):
                 if self._ssd_mode():
                     self.extract_input_source_var.set("iso")
+                self._forget_done()
                 self.extract_input_var.set(p)
                 return True
         return False
@@ -897,6 +957,7 @@ class ExtractTab(TabService):
             H.deltas_summary(self.extract_delta_paths))
         self.set(deltas=[os.path.basename(p)
                          for p in self.extract_delta_paths])
+        self._refresh_gate()
 
     # ------------------------------------------------------------------
     # run

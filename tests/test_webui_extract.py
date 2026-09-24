@@ -168,6 +168,65 @@ def test_block_reason_order(tmp_path):
         _settle(w)
 
 
+def test_a_finished_extract_greys_the_button_until_something_changes(
+        tmp_path):
+    """PAD-206: after a successful extract the same card, folder and options
+    would only redo it.  Picking the card (or folder) again, changing an
+    option or replacing the card on disk brings the button back."""
+    card = tmp_path / "game.raw"
+    card.write_bytes(b"x")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "extract", "input", str(card))
+        w.call("ui.set", "extract", "output", str(proj))
+        _settle(w)
+        assert w.state("extract")["block_reason"] == ""
+
+        def done():
+            w.run(w.window.note_extract_done, str(card), str(proj))
+            return w.state("extract")["block_reason"]
+
+        assert done().startswith("Already extracted into this project")
+        # an option change: the new run would differ
+        w.call("ui.set", "extract", "cat_audio", False)
+        assert w.state("extract")["block_reason"] == ""
+        w.call("ui.set", "extract", "cat_audio", True)
+        assert w.state("extract")["block_reason"].startswith("Already")
+
+        # picking the SAME card again is the way to ask for a fresh run
+        w.answers.append(str(card))
+        assert w.call("extract.browse_input") is True
+        assert w.state("extract")["block_reason"] == ""
+        assert done().startswith("Already")
+        assert w.call("extract.use_recent", "output", str(proj)) is True
+        assert w.state("extract")["block_reason"] == ""
+        assert done().startswith("Already")
+        assert w.call("extract.drop_paths", [str(card)]) is True
+        assert w.state("extract")["block_reason"] == ""
+
+        # the card replaced on disk: seen when the tab is shown again
+        assert done().startswith("Already")
+        card.write_bytes(b"xy")
+        w.run(_svc(w).on_show)
+        assert w.state("extract")["block_reason"] == ""
+
+        # another folder: not the same run
+        assert done().startswith("Already")
+        other = tmp_path / "other"
+        other.mkdir()
+        w.call("ui.set", "extract", "output", str(other))
+        assert w.state("extract")["block_reason"] == ""
+        _settle(w)
+
+
+def test_the_run_logic_reports_a_finished_extract():
+    src = APP_PY.read_text(encoding="utf-8")
+    i = src.index("if is_extract and success and self._last_extract_io:")
+    assert "note_extract_done" in src[i:src.index(
+        "self._last_extract_io = None", i)]
+
+
 # -------------------------------------------------------- options + phases
 def test_options_round_trip_and_autoname_greys(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:

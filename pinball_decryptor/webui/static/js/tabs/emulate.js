@@ -87,8 +87,9 @@ function Which({ s }) {
   else if (w.kind === "other_build") text = html`Not your project's card: PAD built this one from another project, <b>${w.other}</b>.`;
   else text = html`Not your project's card: ${proj} was extracted from ${w.source_name
     ? html`<span class="mono">${w.source_name}</span>` : "a different card"}.`;
-  const also = !ours && s.overrides
-    ? " With the box below ticked, your project's edits run on top of it." : null;
+  const also = ours ? null : s.overrides
+    ? " With the box below ticked, your project's edits run on top of it."
+    : " It runs exactly as it is; tick the box below to run your project's edits on top of it.";
   const btns = [];
   if (w.source) btns.push(html`<${Button} size="sm" kind=${ours ? "ghost" : ""} title=${w.source}
     onClick=${() => call("emulate.use_card", "source")}>Use the extracted card<//>`);

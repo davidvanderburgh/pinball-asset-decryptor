@@ -199,6 +199,7 @@ class EmulateTab(TabService):
         self._select_touched = False
         self._which_token = 0
         self._which = None
+        self._browsed = None
         self._slots_rows = None
         self._slots_total = None
         self._slots_free = None
@@ -444,6 +445,20 @@ class EmulateTab(TabService):
         if token != self._which_token:
             return
         self._which = rel
+        card = self._card()
+        if (rel is not None and card and card == self._browsed
+                and rel.get("kind") in ("other", "other_build")
+                and self.emulate_overrides_var.get()):
+            # A card picked with Browse that is not the project's runs as
+            # it is: left ticked, the box laid the project's edits over it
+            # and the run looked like the project's card, not the one
+            # picked (PAD-205).  Ticking it again is one click.
+            self.emulate_overrides_var.set(False)
+            self._log("[emulate] %s is not your project's card, so it runs "
+                      "as it is: \"Apply my replaced assets on top\" was "
+                      "unticked. Tick it to run your edits on top of it."
+                      % os.path.basename(card))
+        self._browsed = None
         if rel is not None:
             same = os.path.normcase(os.path.abspath(self._card()))
             for key in ("source", "build"):
@@ -482,7 +497,10 @@ class EmulateTab(TabService):
             [("Card images", "*.raw *.img"), ("All files", "*.*")],
             initialdir=os.path.dirname(card) if card else None)
         if path:
-            self.emulate_card_var.set(os.path.normpath(path))
+            path = os.path.normpath(path)
+            if path != card:
+                self._browsed = path
+            self.emulate_card_var.set(path)
         return path or ""
 
     def _precache_kick(self):

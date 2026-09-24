@@ -9108,6 +9108,28 @@ def _minus_ranges(runs, cover):
     return out
 
 
+def _bypass_only(writes, stock, picked):
+    """True when *writes* (file offset, bytes) to the program *stock* change
+    nothing but the validation bypass, and *picked* already carries all of it.
+
+    A write that leaves *stock*'s bytes as they are (the extract card was
+    itself a PAD build, so its program is bypassed already) changes nothing.
+    """
+    from . import valpatch
+    ov, status = valpatch.bypass_overlay(stock)
+    if status[0] != "bypassed":
+        return False
+    for off, buf in writes:
+        if stock[off:off + len(buf)] == buf:
+            continue
+        if not any(o <= off and off + len(buf) <= o + len(b)
+                   for o, b in ov.items()):
+            return False
+    pov, pstatus = valpatch.bypass_overlay(picked)
+    return pstatus[0] == "bypassed" and all(
+        picked[o:o + len(b)] == b for o, b in pov.items())
+
+
 def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
                             original_path, run_card, log):
     """Keep the game-program bytes the card the set RUNS ON was built with.
@@ -9147,7 +9169,10 @@ def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
 
     A program rebuilt whole - by that card's build (blip-free sounds, longer
     program text) or by these edits - has no offsets the other side shares,
-    so nothing is carried and the log says what that can cost.  The set's
+    so nothing is carried and the log says what that can cost - unless the
+    edits bring the program nothing but the bypass and that card's program
+    already has it, when the program leaves the set and the card's own runs
+    (PAD-200, :func:`_bypass_only`).  The set's
     ``.sidx`` record for the program is left as prepared: a card run never
     binds the ``.sidx`` (it sits beside the title), and only the bypassed
     validator ever reads it.
@@ -9179,6 +9204,20 @@ def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
         return 0
     stock = bytes(reader.read_file_bytes(fw_node))
     if picked == stock:
+        return 0
+    if not rebuilt and len(picked) != len(stock) and _bypass_only(
+            by_file[key][1], stock, picked):
+        # PAD-200: the picked card's own build rebuilt its program (the
+        # blip-free cave is written for THAT card's sound bank) and these
+        # edits bring nothing to the program but the bypass, which the
+        # picked program already carries.  Binding the extract card's
+        # program over it ran one card's sound code on another card's bank:
+        # the game froze at Ball 1 music and its own 10 s watchdog ended it.
+        del by_file[key]
+        log("%s carries a game program its own build changed, and your "
+            "edits change nothing in the program but the validation bypass, "
+            "which that card's program already has, so this run uses that "
+            "card's own program." % name, "info")
         return 0
     if rebuilt or len(picked) != len(stock):
         log("%s carries a game program its own build changed, and %s, so "

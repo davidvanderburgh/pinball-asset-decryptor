@@ -612,6 +612,74 @@ def test_a_program_of_another_size_is_not_mixed_in(card, built, tmp_path):
         and "build the card image" in warn[0]
 
 
+# PAD-200: the Godzilla run above's other half.  A card whose build rebuilt its
+# program (the blip-free cave serves that card's own sound bank) ran with the
+# extract card's program bound over it, which brought nothing but the bypass:
+# the game froze at Ball 1 and its 10 s dispatch watchdog exited 5.
+
+@pytest.fixture()
+def validator_at_bypass(monkeypatch):
+    """valpatch sees a validator at BYPASS_AT in every program (the fakes
+    have none of their own)."""
+    from pinball_decryptor.plugins.stern import valpatch
+    monkeypatch.setattr(valpatch, "bypass_overlay",
+                        lambda elf: ({BYPASS_AT: BYPASS}, ("bypassed", "")))
+
+
+def test_a_rebuilt_program_that_is_bypassed_runs_as_it_is(
+        card, built, tmp_path, validator_at_bypass):
+    built.program = _program(count_nop=True, bypass=True) + b"CAVE" * 8
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert not (out / "turtles_pro" / "game").exists()
+    assert "/turtles_pro/game" not in {
+        f["path"] for f in engine.read_override_manifest(str(out))["files"]}
+    assert not [m for lvl, m in lines if lvl == "warning"]
+    assert any("own program" in m for _l, m in lines)
+
+
+def test_a_program_a_previous_set_carried_leaves_it(
+        card, built, tmp_path, validator_at_bypass):
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           run_card=str(card.img))
+    assert (out / "turtles_pro" / "game").exists()
+    built.program = _program(bypass=True) + b"CAVE" * 8
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           run_card=str(built.img))
+    assert not (out / "turtles_pro" / "game").exists()
+
+
+def test_a_rebuilt_program_without_the_bypass_keeps_the_warning(
+        card, built, tmp_path, validator_at_bypass):
+    built.program = _program(count_nop=True) + b"CAVE" * 8
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(bypass=True)
+    assert any(lvl == "warning" and "different sizes" in m
+               for lvl, m in lines)
+
+
+def test_edits_that_change_the_program_keep_their_program(
+        card, built, tmp_path, validator_at_bypass):
+    built.program = _program(bypass=True) + b"CAVE" * 8
+    card.state["writes"].append(
+        (_disk(built.stock, "/turtles_pro/game", COUNT_AT), NOP))
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(count_nop=True, bypass=True)
+    assert any(lvl == "warning" and "different sizes" in m
+               for lvl, m in lines)
+
+
 def test_a_card_that_cannot_be_read_costs_a_warning_not_the_run(
         card, built, tmp_path, monkeypatch):
     real = engine._locate

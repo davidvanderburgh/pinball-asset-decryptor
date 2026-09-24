@@ -936,6 +936,21 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    or a converted copy an older version made far below Stern's bitrate
    — and building again from your original replacement files fixes
    those. Nothing is written — the card is opened read-only.
+   **Best quality (Stern Spike 2).** Tick *Best quality* and every
+   `Re-encode` is made at full quality instead of the bitrate of the
+   clip it replaces: each clip gets the bits its picture needs, more
+   than the stock clip for a detailed one, fewer for a simple one.
+   Build for a 16 GB or 32 GB SD card on the Write tab when they don't
+   fit. Converted clips are kept in the project, so the next build only
+   converts what changed. **Best quality…** on the toolbar also finds
+   your files when the project doesn't know them (a card built on
+   another PC, clips picked from files named nothing like the slots):
+   pick a card built with your videos, the stock card and the folder
+   your videos are in, and every clip that card replaced is matched to
+   a file in the folder by what it looks like — names and file types
+   don't matter, a colour clip is told from its black-and-white twin,
+   and where the folder holds the same video more than once the best
+   copy wins. Tick what you want and *Use these files at best quality*.
 7. **Write tab** — the original image and project folder carry over
    from the Extract tab (shown read-only), and a single **Build
    Image** line shows the exact file the build will produce; click

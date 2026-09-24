@@ -209,7 +209,11 @@ def test_no_control_for_other_eras_and_manufacturers(tmp_path):
         w.call("ui.set_era", "spike1")
         point_at(w, card)
         assert w.window.write_upd_var.get() == str(card)
-        assert w.state("write")["card_size_cap"] is False
+        # the era switch re-publishes the tab; a slow runner reads the
+        # Spike 2 state first (the macOS CI leg did, once)
+        assert wait_for(
+            w, lambda: w.state("write")["card_size_cap"] is False), \
+            w.state("write")["card_size_cap"]
     with web_app(tmp_path / "jjp", mfr="jjp") as w:
         point_at(w, card)
         assert w.window.write_upd_var.get() == str(card)

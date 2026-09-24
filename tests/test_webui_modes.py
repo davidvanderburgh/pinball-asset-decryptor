@@ -150,7 +150,10 @@ def test_new_mode_edit_autosave_and_validation(tmp_path, preview_on):
         assert _wait(w, lambda: w.state("modes")["status"].startswith("To fix"))
         assert "Pick at least one shot that scores while it runs." in w.state("modes")["status"]
         # the list names the editor page that holds it (the design's "Show •"), and that
-        # page's tab carries a dot
+        # page's tab carries a dot; the list catches up on the loop after the status (the
+        # macOS CI leg read the row between the two)
+        assert _wait(w, lambda: w.state("modes")["rows"][0]["chip"] == "Mode •"), \
+            w.state("modes")["rows"][0]["chip"]
         st = w.state("modes")
         assert st["rows"][0]["chip"] == "Mode •"
         assert st["rows"][0]["chip_tip"] == st["status"]

@@ -2120,6 +2120,41 @@ def group_media_args(form):
     return args
 
 
+def game_titles(form, platform="stern"):
+    """``(titles, subtitles)``, ONE PER GAME, because images.conf's image=
+    lines are.  A group card's own title and subtitle do not go here: they
+    ride on its --group / --group-over flag, and its members keep their own
+    names so the LOADING frame can say which song set the roll landed on.
+
+    Build, update and inject all send these.  Update and inject used to send
+    one per table ROW, so a card with a random card over games already on it
+    (a row that adds no game) sent one title too many and the tool refused:
+    "images.conf: 7 titles / 7 subtitles / 6 media rows for 6 images", which
+    left 'Build a fresh card' as the only way to change anything (PAD-202)."""
+    titles, subtitles = [], []
+    for _i, path, ri, mi in form_trees(form):
+        row = form.images[ri]
+        if mi is None:
+            titles.append((row.title or "").strip() or suggest_title(path, platform)[0])
+            subtitles.append((row.subtitle or "").strip())
+        else:
+            m = row.members[mi]
+            titles.append((m.title or "").strip() or suggest_title(path, platform)[0])
+            subtitles.append("")
+    return titles, subtitles
+
+
+def default_card_args(form):
+    """``--default-card N`` when the highlighted row is a KEEPING group.  Its
+    games all keep cards of their own, so no image index resolves to it, and
+    a random card the countdown cannot land on is useless for an unattended
+    power-up, which is the whole point - so the card index goes too."""
+    d = int(form.default)
+    if 0 <= d < len(form.images) and is_group(form.images[d]) and form.images[d].keep:
+        return ["--default-card", str(row_card_index(form, d))]
+    return []
+
+
 def jjp_selector_dir(selector_dir):
     """The JJP menu program's directory: what the form names, unless that is
     empty or the STERN default the form is born with (a form that never
@@ -2283,20 +2318,7 @@ def build_args(form):
     to :func:`_jjp_build_args`."""
     if backend_for(form).key == "jjp":
         return _jjp_build_args(form)
-    # --titles and --subtitles are ONE PER GAME, because images.conf's image=
-    # lines are.  A group card's own title and subtitle do not go here: they
-    # ride on its --group flag, and its members keep their own names so the
-    # LOADING frame can say which song set the roll landed on.
-    titles, subtitles = [], []
-    for _i, path, ri, mi in form_trees(form):
-        row = form.images[ri]
-        if mi is None:
-            titles.append((row.title or "").strip() or suggest_title(path)[0])
-            subtitles.append((row.subtitle or "").strip())
-        else:
-            m = row.members[mi]
-            titles.append((m.title or "").strip() or suggest_title(path)[0])
-            subtitles.append("")
+    titles, subtitles = game_titles(form)
     args = [MKMULTICARD, "build"] + _image_args(form) + group_roll_args(form) + [
         "--out", wsl(form.out.strip().strip('"')),
         "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
@@ -2314,13 +2336,7 @@ def build_args(form):
         "--volume", str(int(form.volume)),
     ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
         + theme_args(form)
-    # A KEEPING GROUP'S CARD CANNOT BE NAMED BY AN IMAGE: its games all keep
-    # cards of their own, so no image index resolves to it.  A random card the
-    # countdown cannot land on is useless for an unattended power-up, which is
-    # the whole point - so the card index goes too.
-    d = int(form.default)
-    if 0 <= d < len(form.images) and is_group(form.images[d]) and form.images[d].keep:
-        args += ["--default-card", str(row_card_index(form, d))]
+    args += default_card_args(form)
     if form.machine_volume:
         # ...and on the machine the menu plays at ITS setting, not that number
         args.append("--machine-volume")
@@ -2371,9 +2387,7 @@ def inject_args(form, card):
     keeps the card's own value for a flag left off, and here the form is the
     record) - subtitles included, so clearing them clears them."""
     be = backend_for(form)
-    titles = [(r.title or "").strip() or suggest_title(r.path, be.key)[0]
-              for r in form.images]
-    subtitles = [(r.subtitle or "").strip() for r in form.images]
+    titles, subtitles = game_titles(form, be.key)
     if be.key == "jjp":
         # mkjjpmulti.py inject --iso: root A restored, re-staged, re-imaged
         # and spliced back into the ISO in place (item 116)
@@ -2397,8 +2411,9 @@ def inject_args(form, card):
             "--titles", ";".join(titles),
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
-            "--default", str(int(form.default)),
+            "--default", str(row_first_image(form, int(form.default))),
             "--volume", str(int(form.volume))]
+    args += default_card_args(form)
     args += (heading_args(form) + text_size_args(form)
              + menu_text_args(form) + theme_args(form))
     if form.machine_volume:
@@ -2414,9 +2429,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
     inject's (every field spelled out); ``--dry-run`` says what it would
     write and writes nothing; ``--expect-bytes`` is the number the dialog
     showed, and the tool refuses when a source moved under it."""
-    titles = [(r.title or "").strip() or suggest_title(r.path)[0]
-              for r in form.images]
-    subtitles = [(r.subtitle or "").strip() for r in form.images]
+    titles, subtitles = game_titles(form)
     args = [MKMULTICARD, "update",
             "--card", wsl(card.strip().strip('"'))] + _image_args(form)
     args += group_roll_args(form) + [
@@ -2424,8 +2437,10 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
             "--titles", ";".join(titles),
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
-            "--default", str(int(form.default)),
+            # an IMAGE, as build's is (the tab's number is the ROW)
+            "--default", str(row_first_image(form, int(form.default))),
             "--volume", str(int(form.volume))]
+    args += default_card_args(form)
     args += (heading_args(form) + text_size_args(form)
              + menu_text_args(form) + theme_args(form))
     if form.machine_volume:

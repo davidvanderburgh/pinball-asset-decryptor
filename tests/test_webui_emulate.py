@@ -199,6 +199,35 @@ def test_exports_are_the_run_logic_variables(tmp_path):
         assert svc.machine_choices("other") == []
 
 
+def test_the_page_says_when_the_card_is_not_the_projects(tmp_path):
+    # PAD-199: the header names the project, the field runs any card.  The
+    # page says which the card is and switches back to the project's own.
+    from pinball_decryptor.core.extract_source import write_extract_source
+    src = tmp_path / "godzilla_le-1_16_0.Release.16G.sdcard.raw"
+    src.write_bytes(bytes(64))
+    other = tmp_path / "Heisei Custom.raw"
+    other.write_bytes(bytes(64))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    write_extract_source(str(proj), str(src))
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.window.write_assets_var.set, str(proj))
+        w.run(w.window.emulate_card_var.set, str(other))
+        _wait(w, lambda: (w.state(NS).get("which") or {}).get("kind")
+              == "other")
+        which = w.state(NS)["which"]
+        assert which["project"] == "proj"
+        assert which["source"] == str(src)
+        assert w.call("emulate.use_card", "source") is True
+        assert w.window.emulate_card_var.get() == str(src)
+        _wait(w, lambda: (w.state(NS).get("which") or {}).get("kind")
+              == "source")
+        # the card already picked is not offered again
+        assert w.state(NS)["which"]["source"] == ""
+        assert w.call("emulate.use_card", "build") is False
+        w.run(w.window.emulate_card_var.set, "")
+        _wait(w, lambda: w.state(NS).get("which") is None)
+
 def test_machine_settings_restore_globally(tmp_path):
     settings = {"emulate_country": "Denmark",
                 "emulate_power": "not a real choice"}

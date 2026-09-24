@@ -197,6 +197,8 @@ class EmulateTab(TabService):
         self._select_probed = ""
         self._select_stamp = None
         self._select_touched = False
+        self._which_token = 0
+        self._which = None
         self._slots_rows = None
         self._slots_total = None
         self._slots_free = None
@@ -232,7 +234,8 @@ class EmulateTab(TabService):
             slots_sum=("The slots appear with the next status poll."
                        if sys.platform == "win32" else
                        "Slot management is available on Windows (WSL)."),
-            game=None, assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
+            game=None, which=None,
+            assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
             cache=None, rename=None)
         self._run_label(False, False)
         # The panel wrote the control file at build so it exists before a
@@ -363,10 +366,12 @@ class EmulateTab(TabService):
         self._assets_var = var
         self._assets_bound = True
         try:
-            var.trace_add("write", lambda *_a: self._overrides_paint())
+            var.trace_add("write", lambda *_a: (self._overrides_paint(),
+                                                self._which_kick()))
         except Exception:                                # noqa: BLE001
             pass
         self._overrides_paint()
+        self._which_kick()
 
     def on_manufacturer(self, mfr):
         self._bind_assets()
@@ -409,6 +414,53 @@ class EmulateTab(TabService):
         self._slots_paint()
         self._precache_kick()
         self._select_probe_kick()
+        self._which_kick()
+
+    # -- which card this is, next to the project (PAD-199) ----------------
+    def _which_kick(self):
+        """Work out, off the loop, whether the card picked to run is the
+        project's own (the one it was extracted from, or one PAD built from
+        it).  The header and the Apply box follow the project, the run
+        follows this field, and the page never said when those differ."""
+        self._which_token += 1
+        token = self._which_token
+        card, assets = self._card(), self._assets()
+        if not card or not assets:
+            self._which = None
+            self.set(which=None)
+            return
+
+        def run():
+            from ...core.extract_source import card_relation
+            try:
+                rel = card_relation(card, assets)
+            except Exception:                            # noqa: BLE001
+                rel = None
+            self._post(self._which_apply, token, rel)
+
+        self._thread(run)
+
+    def _which_apply(self, token, rel):
+        if token != self._which_token:
+            return
+        self._which = rel
+        if rel is not None:
+            same = os.path.normcase(os.path.abspath(self._card()))
+            for key in ("source", "build"):
+                if rel.get(key) and os.path.normcase(
+                        os.path.abspath(rel[key])) == same:
+                    rel = dict(rel, **{key: ""})
+        self.set(which=rel)
+
+    @rpc
+    def use_card(self, key):
+        """Switch the card to run to the project's extracted card
+        (``"source"``) or its newest build (``"build"``)."""
+        path = (self._which or {}).get(key) or ""
+        if key not in ("source", "build") or not path:
+            return False
+        self.emulate_card_var.set(os.path.normpath(path))
+        return True
 
     def _card_game(self):
         path = self._card()

@@ -222,6 +222,99 @@ def built_card_source(assets_dir: str) -> Optional[str]:
     return rec.get("input_name") or os.path.basename(path)
 
 
+def _build_project(card_path: str) -> Optional[str]:
+    """The project folder the build record beside *card_path* names, or
+    ``None`` when PAD did not build that card (or the build never
+    finished)."""
+    try:
+        with open(card_path + BUILD_RECORD_SUFFIX, encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rec, dict) or rec.get("building"):
+        return None
+    return str(rec.get("assets") or "") or None
+
+
+def _same_dir(a: str, b: str) -> bool:
+    return bool(a and b) and (os.path.normcase(os.path.abspath(a))
+                              == os.path.normcase(os.path.abspath(b)))
+
+
+def latest_build(assets_dir: str) -> Optional[str]:
+    """The newest card PAD built from *assets_dir* into the project's build
+    folder, or ``None``.  Only the build folder's own files are looked at,
+    and only the ones whose build record names this project."""
+    from .project_file import project_build_dir
+    try:
+        folder = project_build_dir(assets_dir)
+        names = os.listdir(folder)
+    except (OSError, ValueError):
+        return None
+    best, best_t = None, None
+    for name in names:
+        if not name.endswith(BUILD_RECORD_SUFFIX):
+            continue
+        card = os.path.join(folder, name[:-len(BUILD_RECORD_SUFFIX)])
+        if not _same_dir(_build_project(card) or "", assets_dir):
+            continue
+        try:
+            t = os.path.getmtime(card)
+        except OSError:
+            continue
+        if best_t is None or t > best_t:
+            best, best_t = card, t
+    return best
+
+
+def card_relation(card_path: str, assets_dir: str) -> Optional[dict]:
+    """How the card picked to run relates to the project folder (PAD-199).
+
+    The Emulate tab runs whatever card is picked, while the header and the
+    "Apply my replaced assets" box both follow the project; nothing on the
+    page said whether those were the same game.  ``None`` when either is
+    unset; otherwise a dict:
+
+    - ``kind``: ``"source"`` (the card the project was extracted from),
+      ``"build"`` (a card PAD built from this project), ``"other_build"``
+      (a card PAD built from ANOTHER project, named in ``other``) or
+      ``"other"`` (anything else).
+    - ``source`` / ``build``: the project's extracted card and its newest
+      build, when they are on disk (``""`` when not), so the page can offer
+      to switch to them.
+    - ``source_name``: the recorded source card's file name, even when the
+      file is gone.
+
+    File reads only (a sidecar, a build record, one folder listing); the
+    card itself is never opened, but the caller still keeps it off the UI
+    loop because a card on a sleeping share can stall a ``stat``.
+    """
+    if not card_path or not assets_dir:
+        return None
+    rec = read_extract_source(assets_dir) or {}
+    src = str(rec.get("input_path") or "")
+    built_from = _build_project(card_path)
+    if rec and _names_this_image(rec, card_path):
+        kind = "source"
+    elif built_from and _same_dir(built_from, assets_dir):
+        kind = "build"
+    elif built_from:
+        kind = "other_build"
+    else:
+        kind = "other"
+    build = latest_build(assets_dir) or ""
+    return {
+        "kind": kind,
+        "project": os.path.basename(os.path.normpath(assets_dir)),
+        "other": (os.path.basename(os.path.normpath(built_from))
+                  if kind == "other_build" else ""),
+        "source": src if src and os.path.isfile(src) else "",
+        "source_name": (rec.get("input_name") or os.path.basename(src)
+                        if rec else ""),
+        "build": build,
+    }
+
+
 def version_hint_from_name(name: Optional[str]) -> Optional[str]:
     """A human version label parsed from a card-image filename, or ``None``.
 

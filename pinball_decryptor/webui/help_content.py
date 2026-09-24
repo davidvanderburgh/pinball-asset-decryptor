@@ -1472,6 +1472,16 @@ HELP_CONTENT = {
          "then verifies nothing survived — and if leftovers are stuck where "
          "nothing inside WSL can clear them, Stop says so and offers the "
          "WSL restart that does."),
+        ("Which card",
+         "The line under the card says how that card relates to the project. "
+         "Green means it is the card the project was extracted from, or a "
+         "card PAD built from it. Amber means it is a build of another "
+         "project or an unrelated card: the line names the project's own card, "
+         "and with Apply ticked the project's edits still run on top of "
+         "whichever card is picked. Use the extracted card and Use the last "
+         "build switch the field to the project's own cards; the last build "
+         "is the newest card in the project's build folder that PAD built "
+         "from this project."),
         ("Topper",
          "Some machines have a second screen above the backbox — a "
          "Mandalorian's hologram, a Venom's, a Stranger Things projector — and "

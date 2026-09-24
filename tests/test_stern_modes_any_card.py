@@ -17,7 +17,7 @@ from pinball_decryptor.plugins.stern import mode_tryit as MT
 from pinball_decryptor.plugins.stern import mode_write as MW
 
 #: a Spike 2 build no port exists for (none shipped, and the title cache is emptied below)
-NO_PORT_CARD = "mando_le-1_44_0.Release.8G.sdcard.raw"
+NO_PORT_CARD = "mando_le-1_40_0.Release.8G.sdcard.raw"
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +78,7 @@ def test_card_refusal_names_the_build(tmp_path):
     proj = tmp_path / "mando"
     _name_card(proj, NO_PORT_CARD)
     why = MW.card_refusal(str(proj))
-    assert why == MP.no_port_words("The Mandalorian LE 1.44")
+    assert why == MP.no_port_words("The Mandalorian LE 1.40")
     gz = tmp_path / "gz"
     _name_card(gz, "godzilla_pro-1_15_0.raw")
     assert MW.card_refusal(str(gz)) == ""
@@ -178,7 +178,7 @@ def test_a_write_leaves_the_modes_out_and_writes_the_rest(monkeypatch, tmp_path)
     writes, counts, msgs = _engine_run(monkeypatch, tmp_path, with_modes=True)
     assert writes is not None and counts[0] == 1          # the sound edit is written
     said = [m for _l, m in msgs if "left out of this build" in m]
-    assert said and "The Mandalorian LE 1.44" in said[0]
+    assert said and "The Mandalorian LE 1.40" in said[0]
     assert [lvl for lvl, m in msgs if m == said[0]] == ["warning"]
 
 
@@ -210,7 +210,7 @@ def test_a_write_asks_whether_a_port_that_never_ran_may_go_on_a_real_card(monkey
 
     def refusal(project, probe=True, real_card=False):
         asked.append(real_card)
-        return MW.try_it_first_words("The Mandalorian LE 1.44")
+        return MW.try_it_first_words("The Mandalorian LE 1.40")
     monkeypatch.setattr(MW, "card_refusal", refusal)
     writes, counts, msgs = _engine_run(monkeypatch, tmp_path, with_modes=True)
     assert asked and set(asked) == {True}

@@ -3,6 +3,11 @@
 # emulator proved, and what is still copied is written beside each entry.
 # Proven in the emulator (PAD_CARD jaws_le-1_02_0, muted): all 24 functions match; the
 # shot dispatch, tick and ball end hooks fire (one thread); template_mode.c runs unchanged.
+# Emulator-proven 2026-09-24 by a full build check (modes/gamecheck.sh play full, item 162): the
+# runtime hooked the game, 26 of its 27 shots came from their switches, a drain ended each ball, and
+# the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
+# Shots no press made (their switch is left out of the check, or needs two): Mid flipper lane.
+
 game           jaws_le
 version        1.02
 
@@ -157,3 +162,13 @@ scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Chum bucket target
 text example_clip           Beach_panic_intro
+
+# ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
+site hook_dispatch    0x0032772c 0xe35000cf 0xe92d4038
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47

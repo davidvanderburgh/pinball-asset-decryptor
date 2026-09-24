@@ -1,0 +1,175 @@
+# iron_maiden_le 1.16 - worked out by the app from the ports of TMNT Pro 1.58.
+# Emulator-proven 2026-09-24 by a full build check (modes/gamecheck.sh play full, item 162): the
+# runtime hooked the game, 30 of its 32 shots came from their switches, a drain ended each ball, and
+# the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
+# Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane.
+# program sha1 53a80db3967517380866945587eeda0b33519124, portgen revision 3, 1 reference port(s) of framework generation A.
+
+game           iron_maiden_le
+version        1.16
+
+# ---- functions: site <name> <address> <first two instruction words> ----
+#   tick: located (strict) [TMNT Pro 1.58]
+site tick             0x002a6f28 0xe92d4038 0xe3a00033
+# site shot_dispatch          NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no crule_manager
+# site ball_end               NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no crule_manager
+#   sound_lookup: located (strict) [TMNT Pro 1.58]
+site sound_lookup     0x00370d08 0xe92d4038 0xe1a05000
+#   score_add: located (strict) [TMNT Pro 1.58]
+site score_add        0x002d3318 0xe3011992 0xe3401058
+#   callout: located (strict) [TMNT Pro 1.58]
+site callout          0x002d7e38 0xe92d4010 0xe305eee0
+#   callout_nth: located (strict) [TMNT Pro 1.58]
+site callout_nth      0x002d7fec 0xe92d4010 0xe305eee0
+#   lamp_group: located (strict) [TMNT Pro 1.58]
+site lamp_group       0x00289c5c 0xe92d4038 0xe1a04000
+#   show_priority: located (strict) [TMNT Pro 1.58]
+site show_priority    0x0023d48c 0xe30a39f4 0xe340305c
+#   award_screen: located (strict) [TMNT Pro 1.58]
+site award_screen     0x00376600 0xe92d4070 0xe24dd008
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [TMNT Pro 1.58]
+site string_new       0x00016650 0xe28fc605 0xe28cca18
+#   dynamic_cast: PLT stub for __dynamic_cast [TMNT Pro 1.58]
+site dynamic_cast     0x00016068 0xe28fc605 0xe28cca18
+#   resource_get: placed through 3 callers, e.g. the bl at 0x1def20 [TMNT Pro 1.58]
+site resource_get     0x002682e4 0xe92d43f0 0xe1a04000
+#   set_text: located (strict) [TMNT Pro 1.58]
+site set_text         0x00403d9c 0xe92d47f0 0xe1a06000
+#   surface_state: located (strict) [TMNT Pro 1.58]
+site surface_state    0x004132b8 0xe5900230 0xea004903
+#   player_advance: located (strict) [TMNT Pro 1.58]
+site player_advance   0x003769dc 0xe2501000 0x012fff1e
+#   display_draw: located (strict) [TMNT Pro 1.58]
+site display_draw     0x0026cd3c 0xe3520001 0x812fff1e
+#   hook_dispatch: the event bus's dispatch (cmp r0, #191; push): the one function of that shape
+site hook_dispatch    0x001cac54 0xe35000bf 0xe92d4038
+#   the end of ball: no ball_end site - the framework's end of ball at 0x112b54 dispatches bus 0x30 (its sequence 0x31, 0x32, 0x30, then the bonus 0x23, 0x24) - drain a ball to prove it (value ball_end_event below)
+#   switch_edge: the framework's per-switch call in its switch drain (generation A: r0 = the switch id, called for every edge the game acts on, before the level is stored) - press the switches to prove it
+site switch_edge      0x0028f604 0xe92d4010 0xe1a04000
+#   switch_drain: the drain itself, never hooked: an edge counts only when switch_edge is called from it
+site switch_drain     0x0028fd5c 0xe92d4ff0 0xe30c9df0
+
+# ---- globals: data <name> <address> ----
+#   cur_player: derived from 2 places, e.g. 0xc78c8+0x4 [TMNT Pro 1.58]
+data cur_player             0x00537278
+#   scores: derived from 2 places, e.g. 0x353484+0x8 [TMNT Pro 1.58]
+data scores                 0x00615de8
+#   mode_mask: derived from 2 places, e.g. 0x1b44c+0xf4 [TMNT Pro 1.58]
+data mode_mask              0x00581992
+#   event_head: derived from 2 places, e.g. 0x5fab8+0x6c [TMNT Pro 1.58]
+data event_head             0x005ca9f0
+#   event_current: derived from 2 places, e.g. 0xf2ff4+0x4 [TMNT Pro 1.58]
+data event_current          0x005ca9f4
+#   resource_manager: a base 0x634940 + field 0x80; the base derived from 2 places, e.g. 0x1deea8+0x54 [TMNT Pro 1.58]
+data resource_manager       0x00634a18
+#   typeinfo_resource: derived from 2 places, e.g. 0x609d0+0x30 [TMNT Pro 1.58]
+data typeinfo_resource      0x004a2048
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x609d0+0x34 [TMNT Pro 1.58]
+data typeinfo_scene_player  0x004b9804
+#   display_holder: derived from 2 places, e.g. 0x1dd678+0x28 [TMNT Pro 1.58]
+data display_holder         0x00634998
+# data message_count          NOT PLACED: left off - another title's layout
+# data message_remap          NOT PLACED: left off - another title's layout
+# data message_table          NOT PLACED: left off - another title's layout
+#   award_screen_arg: derived from 2 places, e.g. 0x5fab8+0x10 [TMNT Pro 1.58]
+data award_screen_arg       0x005309fc
+data switch_records         0x0053727c
+data switch_count           0x00589820
+
+# ---- scenes ----
+#   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x609d0+0x4) [TMNT Pro 1.58]
+scene video_bank           45a4e8c6251510e3f7b11f8b21f227e1fa49f331
+
+# ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value ball_end_event        0x30
+value switch_drain_size     0x1c8
+value switch_record_size    0x2c
+value switch_level_at       0x1
+value switch_level_via      0x0
+value switch_level_before   0x1
+value switch_flags_at       0x1e
+value switch_polarity_at    0x20
+
+# ---- shots: none from the rules: the switch drain's `switch` lines below are the shots ----
+
+# ---- the build's own shot bits, which no dispatch hands a mode here ----
+# shot 0x1             Shot 0x1
+# shot 0x2             Shot 0x2
+# shot 0x4             Shot 0x4
+# shot 0x8             Shot 0x8
+# shot 0x10            Shot 0x10
+# shot 0x20            Shot 0x20
+# shot 0x40            Shot 0x40
+# shot 0x80            Shot 0x80
+# shot 0x100           Shot 0x100
+# shot 0x200           Shot 0x200
+# shot 0x400           Shot 0x400
+# shot 0x800           Shot 0x800
+# shot 0x1000          Shot 0x1000
+# shot 0x2000          Shot 0x2000
+# shot 0x4000          Shot 0x4000
+# shot 0x8000          Shot 0x8000
+# shot 0x10000         Shot 0x10000
+# shot 0x20000         Shot 0x20000
+# shot 0x40000         Shot 0x40000
+# shot 0x80000         Shot 0x80000
+# shot 0x100000        Shot 0x100000
+# shot 0x200000        Shot 0x200000
+# shot 0x400000        Shot 0x400000
+# shot 0x800000        Shot 0x800000
+# shot 0x1000000       Shot 0x1000000
+# shot 0x2000000       Shot 0x2000000
+# shot 0x4000000       Shot 0x4000000
+# shot 0x8000000       Shot 0x8000000
+# shot 0x10000000      Shot 0x10000000
+# shot 0x20000000      Shot 0x20000000
+# ---- shots from the switch drain: switch <id> <shot mask> <name> (the game's own switch names; not the trough, shooter lane, flippers or cabinet) - prove them with a census ----
+switch 46   0x1                Mini loop rollunder
+switch 47   0x2                Right orbit enter
+switch 48   0x4                Super jackpot target
+switch 49   0x8                Mini loop target
+switch 50   0x10               Right ramp opto
+switch 54   0x20               Left outlane
+switch 55   0x40               Left return lane
+switch 56   0x80               Right return lane
+switch 57   0x100              Right outlane
+switch 58   0x200              3 Bank drop top
+switch 59   0x400              3 Bank drop mid
+switch 60   0x800              3 Bank drop bot
+switch 66   0x1000             Right slingshot
+switch 67   0x2000             Left slingshot
+switch 78   0x4000             Top eject
+switch 80   0x8000             Ball lock
+switch 81   0x10000            Load ramp
+switch 82   0x20000            Captive ball hit
+switch 83   0x40000            Bulls eye
+switch 84   0x80000            Inner ring
+switch 85   0x100000           Outer ring
+switch 87   0x200000           Pop target
+switch 88   0x400000           Clairvoyant ball
+switch 89   0x800000           Mystery target
+switch 90   0x1000000          Left spinner
+switch 91   0x2000000          Left ramp opto
+switch 92   0x4000000          Left orbit opto
+switch 93   0x8000000          Right spinner
+switch 98   0x10000000         Left pop bumper
+switch 99   0x20000000         Right pop bumper
+switch 100  0x40000000         Bottom pop bumper
+switch 101  0x80000000         Skillshot target
+
+# ---- callouts and text: a start shot for a template mode ----
+text example_start_shot     Super jackpot target
+
+# ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
+event game_start     0x49
+event ball_start     0x21
+event ball_end       0x30
+event bonus_start    0x23
+event bonus_end      0x24
+event tilt_warning   0xb9
+event tilt           0xb7

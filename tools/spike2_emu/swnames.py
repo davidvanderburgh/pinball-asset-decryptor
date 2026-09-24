@@ -107,6 +107,13 @@ PLATFORM = {
     (4, 15): "QR Scanner Status No Reader",
 }
 
+#: Names MEASURED IN THE EMULATOR for switches a title's own tables leave unnamed, keyed by its game
+#: directory: used last, only for a row still `?`. Jurassic Park Pin (the home model, 2026-09-24) has
+#: no cabinet node, so Start is not (1, 11): a press of (8, 39) started a game, and nothing else did.
+TITLE_MEASURED = {
+    "jurassic_park_the_pin": {(8, 39): "START BUTTON"},
+}
+
 
 def _fit(recs, bits_by_node, names):
     """The one (node, shift) a group's device indices ALL land on, or None.
@@ -397,6 +404,9 @@ def fill(rows, game=None, elf_path=None, use_static=True):
                 from_static += 1
             elif (node, bit) in PLATFORM:
                 name = PLATFORM[(node, bit)]
+                from_plat += 1
+            elif (node, bit) in TITLE_MEASURED.get(game or "", {}):
+                name = TITLE_MEASURED[game][(node, bit)]
                 from_plat += 1
         out.append((sid, num, node, bit, name))
 

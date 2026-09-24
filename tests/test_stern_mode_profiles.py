@@ -31,8 +31,6 @@ CALLOUT_SOUND = ("callout", "own-sound")
 PORTS = {
     "godzilla_pro-1.15": (15, 64, True, set(), EVERY_CAPABILITY),   # item 160: + the three spinners
     "godzilla_le-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
-    "jaws_le-1.02": (27, 64, True, {"lights", "screen", "stack", "events"},
-                     ("callout", "screens", "clips", "own-sound", "messages")),
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
     "turtles_pro-1.59": (17, 32, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
     "deadpool_pro-1.16": (25, 64, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
@@ -53,6 +51,16 @@ PORTS = {
     "star_wars_elg-1.10": (30, 64, True, ALL - {"events"}, CALLOUT_SOUND),
     "star_wars_le-1.30": (42, 64, True, ALL - {"events"}, CALLOUT_SOUND),
     "uncanny_xmen_le-0.98": (33, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
+    "jaws_le-1.02": (27, 64, True, ALL - {"clip", "countdown", "events", "own_sound"}, ("callout", "screens", "clips", "own-sound", "messages")),
+    "stranger_things_le-1.12": (39, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "king_kong_le-0.97": (55, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
+    "james_bond_le-1.06": (44, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "jurassic_park_le-1.16": (38, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
+    "guardians_le-1.14": (34, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "iron_maiden_le-1.16": (32, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "sword_of_rage_le-1.18": (35, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "mando_le-1.44": (40, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "turtles_le-1.59": (17, 32, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
 }
 
 #: the lines a part of a mode puts in the runtime file
@@ -468,7 +476,7 @@ def test_events_come_from_the_port_as_the_runtime_arms_them(tmp_path):
     assert list(le.events) == [line.split()[1] for line in text.splitlines() if line.startswith("event ")]
     assert le.can("events") and MP.GODZILLA_PRO_1_15.can("events")
     assert set(MP.profile_from_port(_port("godzilla_pro-1.15")).events) == set(MP.GODZILLA_PRO_1_15.events)
-    for key in ("turtles_pro_1_58", "jaws_le_1_02"):
+    for key in ("turtles_pro_1_58",):
         p = MP.profile(key)
         assert p.events == () and "events yet" in p.why_not("events")
     no_bus = "\n".join(line for line in text.splitlines() if not line.startswith("site hook_dispatch"))
@@ -480,7 +488,8 @@ def test_events_come_from_the_port_as_the_runtime_arms_them(tmp_path):
 def test_a_premium_build_of_a_pro_titled_mode_that_starts_on_an_event(tmp_path):
     """Item 147 + fix-1: a mode saved as Godzilla Pro 1.15 that starts on a ball start and ends
     on a multiball, built for a Premium 1.16 card, keeps both events (Premium's port carries
-    them) and ships Premium's port; on a Jaws card, which has no events, the build refuses."""
+    them) and ships Premium's port; on a Jaws card, whose port has the bus events but no
+    multiball start (a site event only the Godzilla ports place), the build refuses."""
     le = MP.profile("godzilla_le_1_16")
     project = _card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
     spec = MP.ModeSpec(name="EVENTFUL", screen=False, starts_on="event ball_start",
@@ -498,9 +507,9 @@ def test_a_premium_build_of_a_pro_titled_mode_that_starts_on_an_event(tmp_path):
     _extract_record(jaws, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0")
     j = MP.profile("jaws_le_1_02")
     spec = MP.blank_spec(j, "EVENTFUL")
-    spec.starts_on = "event ball_start"
+    spec.starts_on = "event multiball_start"
     MP.new_mode(str(jaws), spec=spec)
-    with pytest.raises(MA.ModeAssetError, match="no event 'ball_start'"):
+    with pytest.raises(MA.ModeAssetError, match="no event 'multiball_start'"):
         MA.build(str(jaws), None, None, str(tmp_path / "out2"))
 
 

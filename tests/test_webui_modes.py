@@ -206,7 +206,7 @@ def test_code_modes_are_in_the_list(tmp_path, preview_on):
 def test_stock_table_needs_a_known_build(tmp_path, preview_on):
     proj = tmp_path / "proj"
     with web_app(tmp_path, mfr="stern") as w:
-        _project(w, proj, card="mando_le-1_44_0.raw")
+        _project(w, proj, card="mando_le-1_40_0.raw")
         st = w.state("modes")["stock"]
         assert st["on"] is False
         assert st["msg"].startswith("The app doesn't know the timers and awards of")
@@ -428,9 +428,10 @@ def test_jaws_greys_what_its_port_cannot_do(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert st["status"] == "Ready to build."
-        for part in ("screen", "lights", "stack", "events"):
+        for part in ("screen", "lights", "stack"):
             assert st["dis"][part], part
             assert st["reasons"][part].startswith("Not on this game: "), part
+        assert not st["dis"]["events"]              # item 162: Jaws's events were seen firing
         assert st["reasons"]["sound_unheard"].startswith("Not heard yet: ")
         assert not st["dis"]["clip"]
 
@@ -1165,9 +1166,9 @@ def test_tryit_checks_the_port_before_the_rig(tmp_path, preview_on):
     """The Emulate tab's worker: a project whose card has no port is refused before the rig
     check runs (it used to spend up to two minutes on the rig first)."""
     from pinball_decryptor.plugins.stern import mode_project as MP
-    proj = _card_project(tmp_path / "mando", "mando_le-1_44_0.raw")
+    proj = _card_project(tmp_path / "mando", "mando_le-1_40_0.raw")
     MP.new_mode(str(proj), "OLD", MP.blank_spec(MP.GODZILLA_PRO_1_15))
-    card = tmp_path / "mando_le-1_44_0.raw"
+    card = tmp_path / "mando_le-1_40_0.raw"
     card.write_bytes(b"\0" * 64)
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)

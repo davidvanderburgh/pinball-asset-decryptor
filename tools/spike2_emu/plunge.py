@@ -125,6 +125,9 @@ def _resolve():
     for key, name in _WANT.items():
         if name in by_name:
             ids[key] = by_name[name]
+    # a shooter lane read by an opto says so (Jurassic Park Pin: SHOOTER LANE OPTO)
+    if "SHOOTER LANE" not in by_name and "SHOOTER LANE OPTO" in by_name:
+        ids["shooter"] = by_name["SHOOTER LANE OPTO"]
     # The door resolves by WIRE (item 73): (0,23) is universal, the NAME is
     # not - this family says COIN DOOR INTERLOCK where godzilla says COIN
     # DOOR POWER INTERLOCK, so the _WANT row above misses exactly on the

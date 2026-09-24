@@ -1,0 +1,305 @@
+# turtles_le 1.59 - worked out by the app from the ports of The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, TMNT Pro 1.59.
+# Emulator-proven 2026-09-24 by a full build check (modes/gamecheck.sh play full, item 162): the
+# runtime hooked the game, 17 of its 17 shots came from their switches, a drain ended each ball, and
+# the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
+# program sha1 89c916f82269e8a9d8d060ba2708cdec1cef02e5, portgen revision 3, 7 reference port(s) of framework generation B.
+
+game           turtles_le
+version        1.59
+
+# ---- functions: site <name> <address> <first two instruction words> ----
+#   tick: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site tick             0x001cd1c8 0xe92d4038 0xe3a00037
+#   shot_dispatch: located (strict) [TMNT Pro 1.59]
+site shot_dispatch    0x0012b1f8 0xe92d43f8 0xe1a09001
+#   ball_end: located (strict) [TMNT Pro 1.59]
+site ball_end         0x0012afdc 0xe92d4038 0xe59f401c
+#   sound_lookup: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site sound_lookup     0x0027e5b0 0xe92d4038 0xe1a05000
+#   score_add: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site score_add        0x0034a0a8 0xe3051d46 0xe340106a
+#   callout: located (strict) [TMNT Pro 1.59, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site callout          0x001e54e0 0xe92d4010 0xe30ae1f8
+#   callout_nth: located (strict) [TMNT Pro 1.59, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site callout_nth      0x001e5694 0xe92d4010 0xe30ae1f8
+#   lamp_group: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site lamp_group       0x001dff78 0xe92d4038 0xe1a04000
+#   show_priority: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site show_priority    0x00333798 0xe30b3afc 0xe3403069
+#   award_screen: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site award_screen     0x003c4a88 0xe92d4070 0xe24dd008
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site string_new       0x000167f4 0xe28fc605 0xe28ccad7
+#   dynamic_cast: PLT stub for __dynamic_cast [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site dynamic_cast     0x00016200 0xe28fc605 0xe28ccad7
+#   resource_get: placed through 3 callers, e.g. the bl at 0x2012f0 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site resource_get     0x0040cc90 0xe92d43f0 0xe1a04000
+#   set_text: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site set_text         0x0048a09c 0xe92d47f0 0xe1a06000
+#   surface_state: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site surface_state    0x00499600 0xe5900550 0xe2800008
+#   player_advance: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site player_advance   0x003c4e80 0xe2501000 0x012fff1e
+#   display_draw: located (strict) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+site display_draw     0x003ad82c 0xe3520001 0x812fff1e
+# site light_run              NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   find_node: placed through 3 callers, e.g. the bl at 0x196378 [The Beatles 1.29]
+site find_node        0x004a68d4 0xe92d4070 0xe24dd008
+# site find_text              NOT PLACED: not unique in the reference; no caller could be lined up
+# site clip_play              NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference clip_play calls 0x580564, which is 0x49e2ac in the target - prove what it does before using it
+# site clip_stop              NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference clip_stop calls 0x379f0c, which is 0x1c9c70 in the target - prove what it does before using it
+#   candidate: the reference clip_stop calls 0x405acc, which is 0x3c4c4c in the target - prove what it does before using it
+#   candidate: the reference clip_stop calls 0x3d10c, which is 0x3535c in the target - prove what it does before using it
+# site video_player           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site video_surface          NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   sound_play: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_play       0x001e54e0 0xe92d4010 0xe30ae1f8
+#   sound_nth: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_nth        0x001e5694 0xe92d4010 0xe30ae1f8
+#   sound_active: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_active     0x001e5c54 0xe59f3034 0xe2831e62
+#   sound_stop: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_stop       0x001e5dac 0xe92d40f8 0xe1a06000
+#   sound_worker: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+site sound_worker     0x001e4acc 0xe92d4ff0 0xe2507000
+# site stock_any_running      NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+# site stock_battle_running   NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+# site stock_multiball_running NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+#   hook_dispatch: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14]
+site hook_dispatch    0x00164420 0xe35000cf 0xe92d4038
+# site skill_shot_award       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference skill_shot_award calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+#   candidate: the reference skill_shot_award calls 0x173448, which is 0x85650 in the target - prove what it does before using it
+#   candidate: the reference skill_shot_award calls 0x2b3614, which is 0x1e2cc0 in the target - prove what it does before using it
+# site mball_start            NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference mball_start calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+#   candidate: the reference mball_start calls 0x3f33e0, which is 0x2d3b98 in the target - prove what it does before using it
+# site mball_stop             NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference mball_stop calls 0x3f3350, which is 0x2d3b08 in the target - prove what it does before using it
+# site roster_start           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site roster_done            NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference roster_done calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+# site roster_city_done       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference roster_city_done calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+#   display_effect_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_effect_start 0x004508f0 0xe92d47f0 0xe2516000
+#   display_effect_next: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_effect_next 0x00450cf8 0xe3023068 0xe340306d
+#   display_priority_now: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site display_priority_now 0x00451180 0xe5d0000e 0xe12fff1e
+# site layered_priority       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site layered_waiter         NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference layered_waiter calls 0x379f0c, which is 0x1c9c70 in the target - prove what it does before using it
+#   candidate: the reference layered_waiter calls 0x3d10c, which is 0x3535c in the target - prove what it does before using it
+#   candidate: the reference layered_waiter calls 0x405aac, which is 0x3c4c2c in the target - prove what it does before using it
+# site stock_rule_get         NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+# site caward_add             NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference caward_add calls 0x2b2720, which is 0x34a210 in the target - prove what it does before using it
+#   candidate: the reference caward_add calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+# site caward_build           NOT PLACED: absent in the target (the function changed); only 1 caller lined up
+#   candidate: the reference caward_build calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+# site caward_add_scaled      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference caward_add_scaled calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+#   candidate: the reference caward_add_scaled calls 0x2b2720, which is 0x34a210 in the target - prove what it does before using it
+#   candidate: the reference caward_add_scaled calls 0x2fa54, which is 0x3348c in the target - prove what it does before using it
+#   show_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site show_start       0x00333538 0xe92d47f0 0xe2508000
+#   game_event: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site game_event       0x001bac8c 0xe92d47f0 0xe1a09000
+#   event_post_replacing: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site event_post_replacing 0x002d3b98 0xe92d4070 0xe1a05001
+#   event_cancel: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site event_cancel     0x002d3b08 0xe92d40f8 0xe30b6af8
+# site ebirah_refill_counts   NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_refill_counts calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+# site ebirah_stage_done      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_stage_done calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+#   candidate: the reference ebirah_stage_done calls 0x3f33e0, which is 0x2d3b98 in the target - prove what it does before using it
+# site ebirah_award_screen    NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_award_screen calls 0x405908, which is 0x3c4a88 in the target - prove what it does before using it
+#   candidate: the reference ebirah_award_screen calls 0x1f34d4, which is 0x333538 in the target - prove what it does before using it
+#   candidate: the reference ebirah_award_screen calls 0x43d2ac, which is 0x1e54e0 in the target - prove what it does before using it
+# site ebirah_final_mask      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_final_mask calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+# site tank_maser_phase       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_maser_phase calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+# site tank_positions_or      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_pick_record       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_path_index        NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_seed_wave         NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_seed_wave calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+# site tank_destroy           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_destroy calls 0x3387f0, which is 0x31dcdc in the target - prove what it does before using it
+# site tank_advance           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_advance calls 0x5cf000, which is 0x4ecd48 in the target - prove what it does before using it
+# site tank_award_screen_kill NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_award_screen_kill calls 0x405908, which is 0x3c4a88 in the target - prove what it does before using it
+#   candidate: the reference tank_award_screen_kill calls 0x43d2ac, which is 0x1e54e0 in the target - prove what it does before using it
+#   candidate: the reference tank_award_screen_kill calls 0x1f34d4, which is 0x333538 in the target - prove what it does before using it
+#   switch_hit: located (strict) [The Beatles 1.29]
+site switch_hit       0x003cc220 0xe2503000 0x012fff1e
+#   switch_hit2: located (strict) [The Beatles 1.29]
+site switch_hit2      0x003cc2c0 0xe92d4010 0xe2504000
+
+# ---- globals: data <name> <address> ----
+#   cur_player: derived from 2 places, e.g. 0x286c90+0x60 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool Pro 1.16, Jaws LE 1.02]
+data cur_player             0x005fb0e8
+#   scores: derived from 2 places, e.g. 0x1e03e8+0x8 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data scores                 0x006a3040
+#   mode_mask: derived from 2 places, e.g. 0x1b550+0xf8 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data mode_mask              0x006a5d46
+#   event_head: derived from 2 places, e.g. 0x5fbec+0x6c [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data event_head             0x0069baf8
+#   event_current: derived from 2 places, e.g. 0x1c9c0+0x6c [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data event_current          0x0069bafc
+#   resource_manager: a base 0x671b48 + field 0x80; the base derived from 2 places, e.g. 0x201278+0x54 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data resource_manager       0x006c41f0
+#   typeinfo_resource: derived from 2 places, e.g. 0x1d660+0x60 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data typeinfo_resource      0x0052c99c
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x1d660+0x64 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data typeinfo_scene_player  0x00570534
+#   display_holder: derived from 2 places, e.g. 0x1ff88c+0x28 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data display_holder         0x006c4170
+#   message_count: derived from 2 places, e.g. 0x26c080+0xd4 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data message_count          0x00513318
+#   message_remap: derived from 2 places, e.g. 0x26c15c+0x10 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data message_remap          0x00655de4
+#   message_table: derived from 2 places, e.g. 0x26c1c0+0x24 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data message_table          0x0060dcc0
+#   award_screen_arg: derived from 2 places, e.g. 0x1d660+0x4c0 [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+data award_screen_arg       0x005f05f0
+#   sound_channels: derived from 2 places, e.g. 0x43c3fc+0x50 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_channels         0x0065a304
+#   sound_queue: derived from 2 places, e.g. 0x43d304+0xc [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_queue            0x0065ab78
+# data city_variants          NOT PLACED: no code that loads it could be lined up
+#   sound_requests: derived from 2 places, e.g. 0x43c898+0x34 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_requests         0x0062f474
+#   sound_request_count: derived from 2 places, e.g. 0x43c898+0x14 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data sound_request_count    0x0052b150
+# data stock_mode_manager     NOT PLACED: no code that loads it could be lined up
+# data rule_battle            NOT PLACED: no code that loads it could be lined up
+# data roster_screen_table    NOT PLACED: no code that loads it could be lined up
+# data rule_cities            NOT PLACED: no code that loads it could be lined up
+# data display_effects        NOT PLACED: no code that loads it could be lined up
+# data layered_displays       NOT PLACED: no code that loads it could be lined up
+#   lamp_layers: derived from 2 places, e.g. 0x3a6010+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data lamp_layers            0x006a55d4
+#   light_count: derived from 2 places, e.g. 0x1e1974+0x18 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
+data light_count            0x006cc84c
+# data ebirah_stage_awards    NOT PLACED: no code that loads it could be lined up
+# data ebirah_lamp_table      NOT PLACED: no code that loads it could be lined up
+# data tank_path              NOT PLACED: no code that loads it could be lined up
+# data tank_spot_list         NOT PLACED: no code that loads it could be lined up
+#   score_mult: derived from 2 places, e.g. 0x15efa4+0xc [The Beatles 1.29]
+data score_mult             0x005fb1d0
+
+# ---- scenes ----
+#   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x60b04+0x4) [TMNT Pro 1.59, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02]
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+# scene hud                    NOT PLACED: the target program never names 32e6ae28 (no code that loads it could be lined up)
+#   candidate: 3ac42508ad93cd123c6bba3ade2f152fa5ea5f35, the first id after "NetScoreFrameOverlay" in the target, as in the reference - prove it holds this role
+# scene attract                NOT PLACED: the target program never names 394c4a03 (derived an address, but it holds no 40-hex id)
+
+# ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value surface_playing       2
+value clip_layer            0
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value stock_slot_shot   42
+value stock_slot_active 14
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      8
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value ebirah_rule           12
+value ebirah_spin_left_at   0x8c      # + 4 * player, spins left on the Left spinner (15 at a refill)
+value ebirah_spin_top_at    0x9c      # Top spinner (40)
+value ebirah_spin_shield_at 0xac      # Shield ramp spinner (15)
+value ebirah_stage_count_at 0xbc      # + 4 * player: stages done (the 2-stage RuleCities/RuleAllies mark reads it)
+value ebirah_stage_index_at 0xd0      # which of 5M / 10M / 15M is next (START resets it)
+value ebirah_kotm_at        0xd4      # byte: King of the Monsters runs (awards go to rule 20)
+value ebirah_spin_left_bit  0x200     # the raw shot bits the handler tests (each spinner's middle bit)
+value ebirah_spin_top_bit   0x2000
+value ebirah_final_shot     0x40      # the Pop bumper: the final blow (or bit 42, unnamed)
+value ebirah_final_mask_lo  0x40      # the field once every counter is 0 (0x814cc writes 0x400_00000040)
+value ebirah_final_mask_hi  0x400
+value ebirah_reminder_event 0x14e
+value ebirah_stage_award_count 3
+value ebirah_stage_msg      0xce3     # award screen messages 0xce3 / 0xce4 / 0xce5 (left / top / shield), 0xce6 the final blow
+value ebirah_stage_lamp_left  0x71    # 113 LEFT SPINNER, the lamp the stage screen names
+value ebirah_stage_lamp_top   0x96    # 150 TOP SPINNER
+value ebirah_stage_lamp_shield 0x7a   # 122 ATTACK MECHA (the shield ramp spinner's insert)
+value ebirah_lamp_entries   6
+value tank_rule             4
+value tank_records_at       0x68      # a std::vector (begin, end) of tank records
+value tank_record_size      40
+value tank_record_active_at 0
+value tank_record_pos_at    8         # u64: the tank's position (a path mask)
+value tank_record_prev_at   0x10      # u64: where it was before the last step (a grace window for the handler)
+value tank_record_dest_at   0x18      # u64: its destination (the Godzilla target 0x80000)
+value tank_record_value_at  0x20      # u64: what destroying it pays (2,500,000 - 500,000 a step, floor 1,500,000)
+value tank_level_at         0x70      # + 4 * player
+value tank_value_at         0x80      # + 8 * player, u64: this player's tank value (+150,000 a kill)
+value tank_destroyed_at     0xa8      # u32: tanks destroyed this wave (4/5/6/7/8 by level light the Maser)
+value tank_multiplier_at    0xac      # the Maser multiplier (3 a wave, -1 per tank that reaches the target)
+value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
+value tank_path_entries     6
+value tank_path_entry_size  16
+value shot_mask_at          1
+value shot_mask_bits        32
+
+# ---- shots: COPIED from TMNT Pro 1.59, the same title; unverified ----
+shot 0x1         Left bank target
+shot 0x8         Left orbit
+shot 0x10        Left ramp
+shot 0x80        Center loop
+shot 0x100       Center ramp
+shot 0x200       Right ramp
+shot 0x800       Right bank target
+shot 0x1000      Left return lane right
+shot 0x2000      Center ramp target
+shot 0x4000      Upper pop target
+shot 0x8000      Left ramp left target
+shot 0x10000     Left ramp right target
+shot 0x20000     Lower pop target
+shot 0x40000     Left return lane left
+shot 0x80000     Right return lane
+shot 0x100000    Left top lane
+shot 0x200000    Right top lane
+
+# ---- callouts and text: COPIED from TMNT Pro 1.59, the same title; unverified ----
+text example_start_shot     Center loop
+
+# ---- events: COPIED, unverified - prove them with event_probe.c (MODE_SDK.md, Events) ----
+
+# ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47

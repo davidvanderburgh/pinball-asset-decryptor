@@ -109,13 +109,16 @@ guided_setup() {
     rm -f "$shot"
     return 1
 }
-#: drain until the object logs one more end of ball (up to four drains): 0 when one did
+#: drain until the object logs one more end of ball: 0 when one did. A drain inside the ball saver
+#: comes back as a new ball, and a ball drained before any playfield switch since its launch is given
+#: back every time (John Wick, Venom), so after a saved drain three switches are hit and the saver
+#: is waited out before the next one
 drain_until_end() {
-    local before n end
+    local before n end id
     echo drain > "$DUMP/census.mark"
     sleep 0.6
     before=$(count "check ball end")
-    for n in 1 2 3 4; do
+    for n in 1 2 3 4 5; do
         game_up || return 1
         say "drain $n"
         python3 "$RIG/plunge.py" drain > /dev/null 2>&1
@@ -124,6 +127,11 @@ drain_until_end() {
             [ "$(count "check ball end")" -gt "$before" ] && return 0
             sleep 0.5
         done
+        [ "$n" -ge 2 ] || continue
+        say "the ball saver gave it back: playing past it"
+        for id in "${ids[@]:0:3}"; do press "$id"; done
+        sleep 15
+        echo drain > "$DUMP/census.mark"
     done
     return 1
 }

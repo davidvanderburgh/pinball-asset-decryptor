@@ -1741,6 +1741,11 @@ class EmulateTab(TabService):
             self._log("[emulate] applied %d replacement(s) you assigned on "
                       "the Replace tabs to %s (the same thing a build does "
                       "before it repacks)" % (staged, assets))
+            # the Replace tabs' previews still name the files just written
+            # over; they now hold the picks, not the originals (PAD-209)
+            notify = getattr(self.window, "folder_staged", None)
+            if callable(notify):
+                self._post(notify, assets)
         return True
 
     def _overrides_refuse(self, message, say=True):

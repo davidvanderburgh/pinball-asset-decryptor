@@ -644,6 +644,24 @@ class WebWindow:
             except Exception:                        # noqa: BLE001
                 log.exception("on_running %s", svc.ns)
 
+    def folder_staged(self, folder):
+        """Tell the Replace tabs that their picks were just written over
+        the files in *folder* by something that is not a build (Emulate's
+        Start): a preview drawn before still names the slot's own file, which
+        now holds the replacement, under "Original" (PAD-209).  The Replace
+        tabs' re-diff after a revert is the same job: it re-reads which slots
+        have an ``.orig`` snapshot and redraws the open preview from it.
+        Not the Write tab: its own refresh logs itself as "after Revert all
+        changes".  Call on the loop thread."""
+        for ns in ("images", "video", "audio"):
+            svc = self._by_ns.get(ns)
+            if svc is None or not hasattr(svc, "refresh_after_revert"):
+                continue
+            try:
+                svc.refresh_after_revert()
+            except Exception:                        # noqa: BLE001
+                log.exception("%s.refresh_after_revert", ns)
+
     def _is_running(self):
         return self._running
 

@@ -641,6 +641,62 @@ def test_changed_on_disk_and_revert_fanouts(scanned):
         ("image", 1, assets)]
 
 
+def test_emulate_staging_redraws_the_original_from_the_snapshot(scanned):
+    """PAD-209: the preview was drawn while the slot's own file was still
+    the card's picture; Emulate's Start then wrote the pick over it, and the
+    Original pane went on naming that file, so it showed the pick."""
+    w, assets, reps, _st = scanned
+    from pinball_decryptor.core import staged_originals
+    rep = os.path.join(reps, "SpaceGodzilla.png")
+    w.answers = [rep]
+    w.call("images.choose", BANNER)
+    w.call("images.set_keep", BANNER, True)
+    w.call("images.select", BANNER)
+    p = w.state("images")["preview"]
+    assert p["orig"] == os.path.join(assets, *BANNER.split("/"))
+    ver = p["ver"]
+    # what Emulate's Start does (App.stage_pending_replacements)
+    slots, assigns, keep = w.window.pending_image_assignments(assets)
+    from pinball_decryptor.core.image_slots import stage_replacements
+    staged, failures = stage_replacements(slots, assigns, assets_dir=assets,
+                                          keep_size=keep)
+    assert (staged, failures) == (1, [])
+    snap = staged_originals.snapshot_path(assets, BANNER)
+    assert snap
+    w.run(lambda: w.window.folder_staged(assets))
+    st = _wait(w, lambda s: s["preview"].get("orig") == snap and _settled(s))
+    p = st["preview"]
+    assert p["hdr_main"] == "Original" and p["ver"] > ver
+    assert p["rep"] == os.path.normpath(rep)
+    # the Resolution column is probed again off the file now on disk
+    row = _by_rel(st)[BANNER]
+    assert row["s"] == "90×22" and row["t"] == "changed"
+
+
+def test_emulate_start_tells_the_replace_tabs(tmp_path, monkeypatch):
+    from pinball_decryptor.webui.tabs.emulate import EmulateTab
+    told, posted = [], []
+
+    class _Win:
+        cb = {"on_stage_pending": lambda a, cancel_cb=None: (1, 1, [])}
+
+        def folder_staged(self, folder):
+            told.append(folder)
+
+    tab = EmulateTab.__new__(EmulateTab)
+    tab.window = _Win()
+    tab._stopping = tab._stopped = tab._cancel_prepare = False
+    tab._preparing = None
+    monkeypatch.setattr(tab, "_post", lambda fn, *a: posted.append((fn, a)),
+                        raising=False)
+    monkeypatch.setattr(tab, "_log", lambda *a, **k: None, raising=False)
+    assert tab._stage_pending("C:/proj") is True
+    for fn, a in posted:
+        if fn == tab.window.folder_staged:
+            fn(*a)
+    assert told == ["C:/proj"]
+
+
 def test_reveal_image_slot_clears_hiding_filters(scanned):
     w, _assets, _reps, _st = scanned
     w.call("ui.set", "images", "search", "backglass")

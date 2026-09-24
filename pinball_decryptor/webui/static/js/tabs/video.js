@@ -565,6 +565,8 @@ export default function VideoTab() {
       ] },
       { sep: true },
       { label: "What this slot needs…", onClick: async () => { const d = await call("video.target_spec", rel); if (d) setSpec(d); } },
+      { label: "Open in default app", onClick: () => call("video.open_default", rel, "orig") },
+      info.open_rep && { label: "Open replacement in default app", onClick: () => call("video.open_default", rel, "rep") },
       { label: info.reveal, onClick: () => call("video.reveal", rel) },
       info.partition && { label: "Find in Partition Explorer", onClick: () => call("video.find_in_partition", rel) },
     ]);

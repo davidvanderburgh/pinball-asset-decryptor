@@ -1727,6 +1727,10 @@ class ImagesTab(TabService):
                               "act": "fonts"})
             items.append({"label": "Show scene contents…", "act": "scenes"})
         items.append({"sep": True})
+        items.append({"label": "Open in default app", "act": "open_orig"})
+        if self._open_target(iid, "rep"):
+            items.append({"label": "Open replacement in default app",
+                          "act": "open_rep"})
         items.append({"label": reveal_menu_label(), "act": "reveal"})
         if self._pex_available():
             items.append({"label": "Find in Partition Explorer",
@@ -1747,6 +1751,12 @@ class ImagesTab(TabService):
             if slot is not None:
                 self._reveal_in_file_manager(slot.abs_path)
             return True
+        if action in ("open_orig", "open_rep"):
+            path = self._open_target(iid, action[5:])
+            if path is None:
+                return False
+            from ..shellx_common import open_in_default_app_or_warn
+            return open_in_default_app_or_warn(path)
         if action == "pex":
             fn = self._pex_jump()
             if fn is not None:
@@ -1902,6 +1912,17 @@ class ImagesTab(TabService):
             return False
         return bool(self.window.open_scene_browser(assets,
                                                    preselect_rel=rel))
+
+    def _open_target(self, rel, which):
+        """The file "Open in default app" hands the OS (PAD-208): the
+        slot's own file, or its assigned replacement when that is a file."""
+        slot = self._by_rel.get(rel)
+        if slot is None:
+            return None
+        if which == "orig":
+            return slot.abs_path
+        rep = self._assignments.get(rel)
+        return rep if isinstance(rep, str) and os.path.isfile(rep) else None
 
     def _reveal_in_file_manager(self, path):
         if not path:

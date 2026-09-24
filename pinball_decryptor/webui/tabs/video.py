@@ -1541,6 +1541,7 @@ class VideoTab(BestQualityMixin, TabService):
         return {
             "multi": False, "rel": rel,
             "has_pick": bool(self._assign.get(rel)),
+            "open_rep": bool(self._open_target(rel, "rep")),
             "can_clear": bool(self._targets([rel])),
             "stern": self._mfr_key() == "stern",
             "scenes": self._scene_browser() is not None,
@@ -1571,6 +1572,26 @@ class VideoTab(BestQualityMixin, TabService):
             return False
         fn(preselect_video=rel)
         return True
+
+    def _open_target(self, rel, which):
+        """The file "Open in default app" hands the OS (PAD-208): the
+        slot's own clip, or its assigned replacement when that is a file."""
+        slot = self._by_rel.get(rel)
+        if slot is None:
+            return None
+        if which == "orig":
+            return slot.abs_path
+        rep = self._assign.get(rel)
+        return rep if isinstance(rep, str) and os.path.isfile(rep) else None
+
+    @rpc
+    def open_default(self, rel, which="orig"):
+        """"Open in default app": the clip in the OS's own player."""
+        path = self._open_target(rel, which)
+        if path is None:
+            return False
+        from ..shellx_common import open_in_default_app_or_warn
+        return open_in_default_app_or_warn(path)
 
     @rpc
     def reveal(self, rel):

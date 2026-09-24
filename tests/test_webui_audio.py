@@ -789,3 +789,28 @@ def test_row_controls_never_fire_the_row_double_click():
            "if (e.detail > 1) return; fn(e); };" in src
     assert "resizable widths=${tblWidths} onResize=${onResize}" in src
     assert "aud-grip" not in src and "audio_web" not in src
+
+
+def test_open_in_default_app(tmp_path, monkeypatch):
+    """PAD-208: the row menu hands the sound (and its pick) to the OS."""
+    from pinball_decryptor.webui import shellx_common
+    opened = []
+    monkeypatch.setattr(shellx_common, "open_in_default_app",
+                        lambda p: opened.append(p))
+    folder = _project(tmp_path)
+    rep = str(tmp_path / "mine" / "new_jackpot.wav")
+    _wav(rep, seconds=1.0)
+    rel = "audio/idx0001 - Jackpot.wav"
+    with web_app(tmp_path, mfr="ap") as w:
+        _open(w, folder)
+        acts = [it.get("action") for it in w.call("audio.menu", rel, [rel])]
+        assert "open_orig" in acts and "open_rep" not in acts
+        assert w.call("audio.menu_action", "open_orig", rel, [rel]) is True
+        assert os.path.normcase(opened[-1]) == os.path.normcase(
+            os.path.join(folder, rel))
+        w.answers.append(rep)
+        w.call("audio.choose", rel)
+        acts = [it.get("action") for it in w.call("audio.menu", rel, [rel])]
+        assert "open_rep" in acts
+        assert w.call("audio.menu_action", "open_rep", rel, [rel]) is True
+        assert opened[-1] == rep

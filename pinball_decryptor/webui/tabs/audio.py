@@ -2257,8 +2257,13 @@ class AudioTab(TabService):
                        "action": "keep_whole",
                        "checked": rel in self._keep_whole}]
         items += [{"sep": True},
-                  {"label": self._reveal_label(), "action": "reveal",
-                   "icon": "folder"}]
+                  {"label": "Open in default app", "action": "open_orig",
+                   "icon": "file"}]
+        if self._open_target(rel, "rep"):
+            items.append({"label": "Open replacement in default app",
+                          "action": "open_rep", "icon": "file"})
+        items.append({"label": self._reveal_label(), "action": "reveal",
+                      "icon": "folder"})
         if self.window.tab_visible("Partition Explorer"):
             items.append({"label": "Find in Partition Explorer",
                           "action": "find_pex", "icon": "search"})
@@ -2295,11 +2300,28 @@ class AudioTab(TabService):
             slot = self._by_rel.get(rel)
             if slot is not None:
                 self._reveal(slot.abs_path)
+        elif action in ("open_orig", "open_rep"):
+            path = self._open_target(rel, action[5:])
+            if path is None:
+                return False
+            from ..shellx_common import open_in_default_app_or_warn
+            return open_in_default_app_or_warn(path)
         elif action == "find_pex":
             self._find_in_partition(rel)
         else:
             return False
         return True
+
+    def _open_target(self, rel, which):
+        """The file "Open in default app" hands the OS (PAD-208): the
+        slot's own file, or its assigned replacement when that is a file."""
+        slot = self._by_rel.get(rel)
+        if slot is None:
+            return None
+        if which == "orig":
+            return slot.abs_path
+        rep = self._assign.get(rel)
+        return rep if isinstance(rep, str) and os.path.isfile(rep) else None
 
     def _reveal(self, path):
         import subprocess

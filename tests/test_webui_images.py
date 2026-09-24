@@ -661,3 +661,31 @@ def test_manufacturer_switch_is_a_clean_slate(scanned):
     assert st["total"] == 0 and st["view"] == []
     assert w.window.pending_image_assignments(assets) is None
     assert st["preview"]["orig"] == ""
+
+
+def test_open_in_default_app(scanned, monkeypatch):
+    """PAD-208: the row menu hands the picture (and its pick) to the OS."""
+    from pinball_decryptor.webui import shellx_common
+    opened = []
+    monkeypatch.setattr(shellx_common, "open_in_default_app",
+                        lambda p: opened.append(p))
+    w, assets, reps, _st = scanned
+    labels = [it.get("label") for it in w.call("images.menu", PLAIN, [PLAIN])]
+    assert "Open in default app" in labels
+    assert "Open replacement in default app" not in labels
+    assert w.call("images.act", "open_orig", PLAIN, [PLAIN]) is True
+    assert os.path.normcase(opened[-1]) == os.path.normcase(
+        os.path.join(assets, PLAIN))
+    rep = os.path.join(reps, "SpaceGodzilla.png")
+    w.answers = [rep]
+    w.call("images.choose", PLAIN)
+    labels = [it.get("label") for it in w.call("images.menu", PLAIN, [PLAIN])]
+    assert "Open replacement in default app" in labels
+    assert w.call("images.act", "open_rep", PLAIN, [PLAIN]) is True
+    assert opened[-1] == rep
+    # an opener that fails says so instead of doing nothing
+    monkeypatch.setattr(shellx_common, "open_in_default_app",
+                        lambda p: "no app for .png")
+    assert w.call("images.act", "open_orig", PLAIN, [PLAIN]) is False
+    assert w.asked[-1]["title"] == "Couldn't open file"
+    assert "no app for .png" in w.asked[-1]["message"]

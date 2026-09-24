@@ -764,3 +764,27 @@ def test_a_card_copy_does_not_replace_a_pick_the_project_has(tmp_path,
         row = st["best"]["rows"][0]
         assert row["use"] is False
         assert "already on the card untouched" in row["note"]
+
+
+def test_open_in_default_app(tmp_path, monkeypatch):
+    """PAD-208: the row menu hands the clip (and its pick) to the OS."""
+    from pinball_decryptor.webui import shellx_common
+    opened = []
+    monkeypatch.setattr(shellx_common, "open_in_default_app",
+                        lambda p: opened.append(p))
+    proj = _project(tmp_path)
+    mine = _mine(tmp_path)
+    with web_app(tmp_path, mfr="spooky") as w:
+        _scan(w, proj)
+        assert w.call("video.row_menu",
+                      ["video/intro.mp4"])["open_rep"] is False
+        assert w.call("video.open_default", "video/intro.mp4") is True
+        assert os.path.normcase(opened[-1]) == os.path.normcase(
+            str(proj / "video" / "intro.mp4"))
+        w.answers.append(str(mine))
+        w.call("video.choose", "video/intro.mp4")
+        assert w.call("video.row_menu",
+                      ["video/intro.mp4"])["open_rep"] is True
+        assert w.call("video.open_default", "video/intro.mp4", "rep") is True
+        assert opened[-1] == str(mine)
+        assert w.call("video.open_default", "video/nope.mp4") is False

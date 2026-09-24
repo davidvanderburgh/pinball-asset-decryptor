@@ -95,6 +95,42 @@ def open_in_text_viewer(path):
         reveal_in_file_manager(path)
 
 
+def open_in_default_app(path):
+    """Hand *path* to the OS's default app for its type (Photos, the video
+    player, the music player: PAD-208).  Returns None, or the error text
+    to show; unlike :func:`open_in_text_viewer` it never falls back to the
+    file manager, so the caller can say why nothing opened."""
+    if not path or not os.path.isfile(path):
+        return "The file isn't there:\n%s" % (path or "(no file)")
+    path = os.path.abspath(path)
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)                        # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            from ..core import desktop
+            ok, err = desktop.open_path(path)
+            if not ok:
+                return err or "no desktop opener found"
+    except Exception as e:                            # noqa: BLE001
+        log.exception("open %s", path)
+        return "%s\n\n%s" % (path, e)
+    return None
+
+
+def open_in_default_app_or_warn(path):
+    """:func:`open_in_default_app`, with a warning box when it fails."""
+    err = open_in_default_app(path)
+    if err:
+        from . import compat
+        compat.messagebox.showwarning("Couldn't open file",
+                                      "Couldn't open this file in its "
+                                      "default app:\n%s" % err)
+        return False
+    return True
+
+
 def off_loop(ctx, fn, *args, timeout=None):
     """Run ``fn(*args)`` on a worker thread and wait for it WITHOUT stalling
     the UI loop (log lines, progress and other calls keep flowing, as they

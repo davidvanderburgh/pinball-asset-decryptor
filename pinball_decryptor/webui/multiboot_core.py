@@ -3307,13 +3307,22 @@ def build_commands(form, cwd=None, prepare=False):
 DRY_RUN = "dry-run"
 
 
-def measure_commands(form, card=None, cwd=None):
+def measure_commands(form, card=None, cwd=None, media_stale=False):
     """The automatic size check: the plan, and - when a card that can be
     updated in place is loaded - what an update of it would write.  Both
-    run as the user and write nothing."""
+    run as the user and write nothing.
+
+    ``media_stale``: the update itself renders the media again first
+    (:func:`media_specs_changed`), so the media set in ``form.media_dir`` is
+    the OLD one and the dry-run must not be handed it.  It was: a game added
+    to a loaded card measured the new 7-game list against the 6-image
+    media.json and refused ("media.json lists 6 images; the card holds 7"),
+    which greyed out the in-place update the real run would have done
+    (PAD-202, round 2)."""
     cmds = plan_commands(form, cwd)
     if card:
-        cmds.append((DRY_RUN, wsl_command(update_args(form, card, dry_run=True), cwd)))
+        dry = replace(form, media_dir="") if media_stale else form
+        cmds.append((DRY_RUN, wsl_command(update_args(dry, card, dry_run=True), cwd)))
     return cmds
 
 
@@ -9188,7 +9197,10 @@ class MultibootPanel:
         # an in-place update exists on the Stern card only (item 118)
         if not self._backend.update:
             card = None
-        if not self._run_commands(measure_commands(form, card), on_step=step,
+        stale = bool(card and self._loaded_form is not None
+                     and media_specs_changed(self._loaded_form, form))
+        if not self._run_commands(measure_commands(form, card, media_stale=stale),
+                                  on_step=step,
                                   on_done=done, preview=True, on_tick=tick):
             # The worker is busy.  Ask again in a moment rather than queue.
             try:

@@ -680,6 +680,26 @@ def test_edits_that_change_the_program_keep_their_program(
                for lvl, m in lines)
 
 
+def test_a_rebuilt_program_whose_validator_moved_runs_as_it_is(
+        card, built, tmp_path, monkeypatch):
+    """PAD-201: a rebuild moves code, so the picked program's bypass sits at
+    another offset than stock's.  The bypass is checked where each program
+    has its own validator, not at the stock offset."""
+    from pinball_decryptor.plugins.stern import valpatch
+    size = len(_program())
+    monkeypatch.setattr(valpatch, "bypass_overlay", lambda elf: (
+        {BYPASS_AT + (16 if len(elf) != size else 0): BYPASS},
+        ("bypassed", "")))
+    elf = bytearray(_program(count_nop=True))
+    elf[BYPASS_AT:BYPASS_AT] = b"CAVE" * 4          # the cave shifts the code
+    elf[BYPASS_AT + 16:BYPASS_AT + 20] = BYPASS
+    built.program = bytes(elf) + b"CAVE" * 4
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           run_card=str(built.img))
+    assert not (out / "turtles_pro" / "game").exists()
+
+
 def test_a_card_that_cannot_be_read_costs_a_warning_not_the_run(
         card, built, tmp_path, monkeypatch):
     real = engine._locate

@@ -162,3 +162,43 @@ def test_the_footer_walks_copy_for_an_update():
     assert multiboot_core.MultibootPanel.PHASE_OF[DRY_RUN] == 0
     assert "changed" in multiboot_core.MultibootPanel.PHASE_STATUS["update"]
 
+
+
+def test_update_and_inject_titles_are_one_per_game_not_per_row(monkeypatch, tmp_path):
+    """PAD-202: a random card over games already on the card is a ROW that
+    adds no GAME.  Update and inject sent one title per row, so six games and
+    one such card said 7 titles for 6 images and the tool refused the update
+    ("images.conf: 7 titles / 7 subtitles / 6 media rows for 6 images") -
+    'Build a fresh card' was then the only way to change anything."""
+    from pinball_decryptor.webui.multiboot_core import (
+        MemberRow, build_args, inject_args)
+    from pinball_decryptor.webui.multiboot_core import ImageRow
+    _win(monkeypatch)
+    form = _form(tmp_path, 4)              # four games, five rows
+    paths = [r.path for r in form.images]
+    # the random card sits FIRST, so a per-row --default would name the
+    # wrong image too
+    form.images.insert(0, ImageRow(path="", title="RANDOM", subtitle="surprise me", keep=True,
+                                   members=[MemberRow(path=p) for p in paths[1:4]]))
+    card = str(tmp_path / "card.raw")
+
+    def flag(words, name):
+        return words[words.index(name) + 1]
+
+    want = ";".join("IMG %d" % i for i in range(4))
+    for argv in (update_args(form, card), inject_args(form, card), build_args(form)):
+        words = _tool_words(root_command(argv, cwd="/mnt/c/repo"))
+        assert flag(words, "--titles") == want, words[1]
+        if "--subtitles" in words:
+            assert flag(words, "--subtitles").split(";") == [""] * 4, words[1]
+    # row 1 (IMG 0) highlighted: that is IMAGE 0, not 1
+    form.default = 1
+    for argv in (update_args(form, card), inject_args(form, card), build_args(form)):
+        words = _tool_words(root_command(argv, cwd="/mnt/c/repo"))
+        assert flag(words, "--default") == "0", words[1]
+        assert "--default-card" not in words, words[1]
+    # the random card highlighted: its CARD index goes, as build's always did
+    form.default = 0
+    for argv in (update_args(form, card), inject_args(form, card), build_args(form)):
+        words = _tool_words(root_command(argv, cwd="/mnt/c/repo"))
+        assert flag(words, "--default-card") == "0", words[1]

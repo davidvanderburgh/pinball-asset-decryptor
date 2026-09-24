@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from .audio_slots import replace_with_retry
-from .checksums import NON_ASSET_DIRS
+from .checksums import NON_ASSET_DIRS, is_other_extract
 from .image import (IMAGE_EXTS, ImageInfo, detect_image_info, pil_available,
                     transcode_image_to)
 
@@ -80,6 +80,7 @@ def scan_image_slots(assets_dir: str, roots=None, exts=None,
             # generated / staged folders (checksums.NON_ASSET_DIRS).
             dirs[:] = [d for d in dirs
                        if not d.startswith(".")
+                       and not is_other_extract(os.path.join(root, d))
                        and not (d in NON_ASSET_DIRS
                                 and os.path.normcase(os.path.normpath(root))
                                 == os.path.normcase(

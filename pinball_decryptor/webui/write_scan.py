@@ -15,7 +15,8 @@ the widget plumbing is gone.
 import os
 import re
 
-from ..core.checksums import NON_ASSET_DIRS, TRACKING_SIDECARS
+from ..core.checksums import (NON_ASSET_DIRS, TRACKING_SIDECARS,
+                              is_other_extract)
 from ..core.staged_originals import ORIG_DIR
 
 #: Write-tab status strings for pending on-screen-text edits (main_window.py).
@@ -149,6 +150,7 @@ def walk_changes(assets_path, saved, *, hide_imported_cache, current,
     for root_dir, dirs, files in os.walk(assets_path):
         dirs[:] = [d for d in dirs
                    if d != ORIG_DIR
+                   and not is_other_extract(os.path.join(root_dir, d))
                    and not (root_dir == assets_path
                             and d in NON_ASSET_DIRS)]
         for name in files:

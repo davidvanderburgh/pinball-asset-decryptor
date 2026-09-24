@@ -37,6 +37,7 @@ from collections import namedtuple
 # 260-character limit — with an error that reads as "file not found" (a tester's
 # build failed until he shortened the path).  _lp() opts each call out of it.
 from ...core.longpath import ext as _lp
+from ...core.checksums import is_other_extract
 
 # The engine is wired; a missing unicorn/numpy is surfaced via the plugin's
 # prerequisite probe + a lazy import error, not by hiding the tabs.
@@ -3106,6 +3107,8 @@ def _changed_music_banks(assets_dir, baseline):
         return []
     changed = []
     for root, _dirs, files in os.walk(assets_dir):
+        _dirs[:] = [d for d in _dirs
+                    if not is_other_extract(os.path.join(root, d))]
         for fn in files:
             if not fn.lower().endswith(".wav"):
                 continue
@@ -3135,8 +3138,12 @@ def _select_changed_idx_wavs(assets_dir, baseline):
     for root, _dirs, files in os.walk(assets_dir):
         # Never walk the .orig snapshot mirror — it holds pristine copies of
         # edited sounds (== baseline), which would otherwise register as extra
-        # twins for their idx (harmless, but wasteful to hash).
-        _dirs[:] = [d for d in _dirs if not d.startswith(".")]
+        # twins for their idx (harmless, but wasteful to hash).  Nor another
+        # card's extract nested in this project (Extract Both into it,
+        # PAD-211): its idx0000.wav is THAT card's sound 0, and taking it as
+        # an edit here re-encoded every sound on the card from the wrong one.
+        _dirs[:] = [d for d in _dirs if not d.startswith(".")
+                    and not is_other_extract(os.path.join(root, d))]
         for fn in files:
             if not fn.lower().endswith(".wav"):
                 continue
@@ -10652,7 +10659,8 @@ def audio_profile_report(assets_dir, log, progress=None):
 
     files = []
     for root, _dirs, fns in os.walk(assets_dir):
-        _dirs[:] = [d for d in _dirs if not d.startswith(".")]
+        _dirs[:] = [d for d in _dirs if not d.startswith(".")
+                    and not is_other_extract(os.path.join(root, d))]
         for fn in fns:
             if fn.lower().endswith(".wav"):
                 idx = _wav_idx(os.path.splitext(fn)[0])

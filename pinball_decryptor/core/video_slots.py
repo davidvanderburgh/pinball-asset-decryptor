@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from .audio_slots import replace_with_retry
-from .checksums import NON_ASSET_DIRS
+from .checksums import NON_ASSET_DIRS, is_other_extract
 from .video import (VIDEO_EXTS, VideoInfo, backend_for, detect_video_info,
                     encode_replacement, find_ffmpeg, isobmff_brand,
                     profile_rank, remux_video_to, same_pix_fmt,
@@ -134,6 +134,7 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None,
             # generated / staged folders (checksums.NON_ASSET_DIRS).
             dirs[:] = [d for d in dirs
                        if not d.startswith(".")
+                       and not is_other_extract(os.path.join(root, d))
                        and not (d in NON_ASSET_DIRS
                                 and os.path.normcase(os.path.normpath(root))
                                 == os.path.normcase(

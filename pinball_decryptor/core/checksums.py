@@ -36,6 +36,17 @@ NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
                             ".write_cache"})
 
 
+def is_other_extract(path):
+    """Is the folder *path* an extract of its own (it holds a baseline)?
+
+    Extract Both, pointed at an existing project, drops two whole extracts
+    INSIDE it (PAD-211: the 1.27 stock and modded cards under the 1.31
+    project).  Their files are another card's: every walk of the outer project
+    prunes them, or the Replace tabs list thousands of strays and the Write
+    takes each ``idxNNNN.wav`` in there as an edit of the same idx here."""
+    return os.path.isfile(os.path.join(path, CHECKSUMS_FILE))
+
+
 def md5_file(path):
     h = hashlib.md5()
     with open(path, "rb") as f:
@@ -85,6 +96,7 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
         dirnames[:] = [
             d for d in dirnames
             if (f"{rel_dir}/{d}" if rel_dir else d) not in excluded
+            and not is_other_extract(os.path.join(dirpath, d))
         ]
         for fn in filenames:
             if fn.startswith("."):

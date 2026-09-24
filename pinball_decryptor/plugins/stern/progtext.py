@@ -551,7 +551,13 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
         followed = []
         if full_new is not None:
             for k, (d, tt, p, tn) in enumerate(tail_edits):
-                if (tn is None and len(full_new) > d
+                # A name edit copied from a scene row carries that row's
+                # space padding ("DESTROYAH   "); it still means the name the
+                # line now ends with, not a different one (PAD-198 round 2).
+                if (tn is not None and tn != tn.rstrip(" ")
+                        and full_new.endswith(tn.rstrip(" "))):
+                    tail_edits[k] = (d, tt, p, tn.rstrip(" "))
+                elif (tn is None and len(full_new) > d
                         and full_new[:d] == text[:d] and full_new[d:] != tt
                         and _fmt_tokens(full_new[d:]) == _fmt_tokens(tt)):
                     tail_edits[k] = (d, tt, p, full_new[d:])
@@ -627,11 +633,15 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
             continue
         if not _fmt_ok(text, new_full, "full line"):
             continue
-        relocate = len(new_full) > budget
-
         # Every reference INTO the string must land on a suffix of the new
-        # text; collect (ref, new_delta) for the ones that have to move.
-        tail_moves = []
+        # text.  One that can't (the name no longer ends the line) is split
+        # off when the line can move: the new line goes to new space, an
+        # unedited name keeps reading the original bytes (which stay put),
+        # and an edited one gets a copy of its own.  Without new space the
+        # old rule stands and the span is skipped.
+        suffix_tails = []      # (refs, new_delta, old_delta)
+        kept = []              # unedited names left on the original bytes
+        own_copies = []        # (refs, name, old name): edited, placed alone
         ok = True
         for d, tt, trefs, tn in tail_edits:
             want = tn if tn is not None else tt
@@ -639,26 +649,40 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
                 ok = False
                 break
             if not new_full.endswith(want):
+                if growable:
+                    if tn is None:
+                        kept.append(tt)
+                    else:
+                        own_copies.append((trefs, tn, tt))
+                    continue
+                why = (" This write can't place text in new space%s, which "
+                       "would let the two differ." % why_write
+                       if write_blocked else "")
                 log('Program text: "%s" is also shown on its own (the machine '
                     'points %d bytes into the line). The new line "%s" must '
                     'END with the new name "%s" — edit one of the two so it '
-                    "does; skipped."
-                    % (enc(text), d, enc(new_full), enc(want)), "warning")
+                    "does; skipped.%s"
+                    % (enc(text), d, enc(new_full), enc(want), why), "warning")
                 ok = False
                 break
-            new_delta = len(new_full) - len(want)
-            if relocate or new_delta != d:
-                tail_moves.extend((r, new_delta) for r in trefs)
+            suffix_tails.append((trefs, len(new_full) - len(want), d))
         if not ok:
             continue
+        relocate = len(new_full) > budget or bool(kept or own_copies)
+        tail_moves = [(r, nd) for trefs, nd, d in suffix_tails
+                      if relocate or nd != d for r in trefs]
 
         moved = 0
         if relocate:
+            mark = (len(blob.data), dict(blob._where))
             copy_va = blob.place(new_full)
-            if copy_va is None:
-                log('Program text: "%s" -> "%s" is longer than the original '
-                    "and the free space for longer text (%d KB) is used up; "
-                    "skipped. Shorten it, or fewer long edits."
+            name_vas = [blob.place(tn) for _trefs, tn, _tt in own_copies]
+            if copy_va is None or None in name_vas:
+                blob.data[mark[0]:] = b""        # nothing half-placed
+                blob._where = mark[1]
+                log('Program text: "%s" -> "%s" needs new space and the free '
+                    "space for longer text (%d KB) is used up; skipped. "
+                    "Shorten it, or fewer long edits."
                     % (enc(text), enc(new_full),
                        (blob.capacity + 1023) // 1024), "warning")
                 continue
@@ -668,6 +692,9 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
                     span_writes.extend(_retarget(r, copy_va))
             for r, nd in tail_moves:
                 span_writes.extend(_retarget(r, copy_va + nd))
+            for (trefs, _tn, _tt), va in zip(own_copies, name_vas):
+                for r in trefs:
+                    span_writes.extend(_retarget(r, va))
             moved = len(span_writes)
         else:
             va = off2va(off)
@@ -689,8 +716,12 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
                 applied.add(tt)
         if new_full != text:
             if relocate:
-                how = (" (longer than the original: placed in new space, "
-                       "%d reference word(s) repointed)" % moved)
+                how = (" (%s: placed in new space, %d reference word(s) "
+                       "repointed)"
+                       % ("longer than the original"
+                          if len(new_full) > budget
+                          else "so the name it used to end with can differ",
+                          moved))
             else:
                 how = " (standalone-name pointer moved)" if moved else ""
             log('Program text: "%s" -> "%s"%s.' % (enc(text), enc(new_full), how),
@@ -698,6 +729,13 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
         for tt, tn in followed:
             log('Program text: "%s" (the game also shows it on its own) -> '
                 '"%s", following its line.' % (enc(tt), enc(tn)), "info")
+        for tt in kept:
+            log('Program text: "%s" (the game also shows it on its own) stays '
+                '"%s"; only the full line changed.' % (enc(tt), enc(tt)),
+                "info")
+        for _trefs, tn, tt in own_copies:
+            log('Program text: "%s" (the game also shows it on its own) -> '
+                '"%s", placed on its own.' % (enc(tt), enc(tn)), "info")
 
     applied.discard(None)
     # "wasn't found" means exactly that.  A string the loop DID find and then

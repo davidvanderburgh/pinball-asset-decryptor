@@ -906,7 +906,8 @@ class VideoTab(BestQualityMixin, TabService):
             if col == "len":
                 return (s.duration,)
             if col == "res":
-                return ((s.info.width * s.info.height) if s.info else -1,)
+                # width first, then height: every 1920-wide row together (PAD-207)
+                return ((s.info.width, s.info.height) if s.info else (-1, -1),)
             if col == "fmt":
                 return (s.format_summary().lower(), s.rel_path.lower())
             if col == "aud":

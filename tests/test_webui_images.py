@@ -228,6 +228,33 @@ def test_on_show_rescans_when_the_folder_changed(tmp_path):
 
 
 # ------------------------------------------------------------ filters
+def test_resolution_sorts_by_width_then_height(tmp_path):
+    """PAD-207: every 1920-wide picture sorts together, tallest first, ahead
+    of a narrower one with more pixels (892x760 > 1920x316 by area)."""
+    assets = tmp_path / "gz"
+    (assets / "images").mkdir(parents=True)
+    sizes = [(892, 760), (1920, 316), (1920, 1080), (720, 1200),
+             (1920, 100), (1360, 1000)]
+    for w_, h in sizes:
+        Image.new("RGB", (w_, h)).save(assets / "images" / ("p%dx%d.png"
+                                                            % (w_, h)))
+    from pinball_decryptor.core import checksums
+    checksums.generate_checksums(str(assets))
+    with web_app(tmp_path, mfr="stern") as w:
+        _set_folder(w, str(assets))
+        w.call("images.scan")
+        _wait(w, _settled)
+        w.call("images.sort", "res")
+        st = w.state("images")
+        want = ["1920×1080", "1920×316", "1920×100", "1360×1000",
+                "892×760", "720×1200"]
+        rows = _rows(st)
+        assert [rows[e]["s"] for e in st["view"]] == want
+        w.call("images.sort", "res")
+        st = w.state("images")
+        assert [rows[e]["s"] for e in st["view"]] == want[::-1]
+
+
 def test_search_source_show_and_sort(scanned):
     w, _assets, reps, _st = scanned
     # the search matches a container's name too: both pictures of the

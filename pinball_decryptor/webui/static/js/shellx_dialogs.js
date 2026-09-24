@@ -405,7 +405,7 @@ function NewProjectDialog({ close }) {
         <${Button} onClick=${async () => { const p = await call("shellx.browse_location", parent); if (p) setParent(p); }}>Browse...<//></div><//>
       <${Row} label="Folder name:"><${Field} value=${name} onChange=${(v) => { setName(v); setErr(""); }} autoFocus
         bad=${!!name && BAD_NAME.test(name)} placeholder="TMNT 1.59 upscale" /><//>
-      <${Row} label="Game:"><${Select} value=${mfr} onChange=${setMfr}
+      <${Row} label="Manufacturer:"><${Select} value=${mfr} onChange=${setMfr}
         options=${form.mfrs.map((m) => ({ value: m.key, label: m.display }))} /><//>
       <${Row} label="Stock image:"><div class="row">
         <${Field} value=${stock} onChange=${(v) => { setStock(v); setErr(""); }} mono cls="grow" placeholder="Optional: the card image the project starts from" />
@@ -495,7 +495,7 @@ function PropertiesDialog({ close, folder }) {
       <${Button} kind="primary" onClick=${saveAndClose}>Close<//>`}>
     <div class="sx-form kvs">
       <${Row} label="Location:"><${PathLink} path=${p.folder} /><//>
-      <${Row} label="Game:">${p.game}<//>
+      <${Row} label="Manufacturer:">${p.game}<//>
       <${Row} label="Stock image:"><span class="mono small sx-wrap">${p.stock}</span><//>
       <${Row} label="Build location:"><${PathLink} path=${p.build_dir} /><//>
       <${Row} label="Saved with:">${p.saved_with}<//>

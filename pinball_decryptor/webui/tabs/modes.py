@@ -145,7 +145,7 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         "Make a game mode of your own: what starts it, how long it runs, which shots "
         "score, and what the display, lights and speakers do while it runs. Modes are "
         "saved in this project and put on the card by Write, like the other tabs' "
-        "changes. A card holds up to %d modes; one runs at a time." % MP.MAX_MODES)
+        "changes. One runs at a time.")
 
     NAME_TIP = ("What the mode is called. It is the title on its screen and clip unless you "
                 "give those their own.")
@@ -539,7 +539,7 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
             text = ("%d of %d modes: delete one to add another. Modes written in C are "
                     "not counted." % (n, MP.MAX_MODES))
         else:
-            text = ""                       # the head says "N of 8 modes"
+            text = ""                       # the head says "N modes"
         self.set(cap_text=text, n_form=n, n_code=len(self._code_list))
         self._publish_examples()
 

@@ -5,7 +5,7 @@ read off the code, with what has been MEASURED about each one. A mode has three 
 
 1. **`mode.json`**, what the Modes tab saves in the card project (`ModeSpec` in
    `pinball_decryptor/plugins/stern/mode_project.py`). A person picks shots by name.
-2. **The runtime mode file** (`mode.cfg`, `mode1.cfg` .. `mode7.cfg`), which the build
+2. **The runtime mode file** (`mode.cfg`, `mode1.cfg`, `mode2.cfg` ...), which the build
    generates from `mode.json` and `mode_file.c` reads inside the game. Shots are masks here.
 3. **The SDK calls** in `pad_mode.h`, which `mode_file.c` and any mode written in C use.
 
@@ -33,7 +33,7 @@ count (`loaded ... - NOT VALID, it needs seconds and a trigger count` otherwise)
 | `STR_MAX` | 224 (223 characters) | `title_words`, `total_words`, `light_on`, `light_off` are cut |
 | `CALLOUT_AT_MAX` | 8 `callout_at` lines | later ones are ignored, silently |
 | `SHOT_AWARD_MAX` | 16 `shot_award` lines | later ones are ignored, with a log line |
-| `MODES_MAX` | 8 slots | `mode.cfg`, `mode1.cfg` .. `mode7.cfg` |
+| `MODES_MAX` | 64 slots | `mode.cfg`, `mode1.cfg` .. `mode63.cfg`; after the first sweep only the slots up to one past the last file are re-read |
 | `TICKS_PER_S` | 60 | the clock every time value runs on |
 | `POLL_TICKS` | 30 | files and trigger files are checked twice a second |
 | `CLIP_AFTER_SHOT_TICKS` | 30 | a clip a shot starts (trigger shot, end shot) waits this long, then plays from the tick (item 141) |

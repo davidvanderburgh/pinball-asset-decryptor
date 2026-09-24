@@ -913,7 +913,7 @@ int pm_lights_as(unsigned owner, const char *command)
  * and releasing it is clearing +3. Nothing of the game's is hooked or rewritten for this. */
 #define N_LAMPS      192
 #define LAMP_LAYERS  4
-#define LAMP_MODES   8
+#define LAMP_MODES   64
 #define LAMP_SAY_MAX 400
 
 struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; };

@@ -2432,8 +2432,8 @@ PREVIEW_HELP = {
              "half a second after you stop typing, and the line at the bottom of "
              "the form says whether the mode can be built."),
             ("Several modes",
-             "A card holds up to 8 modes made in the form; the count is under New, "
-             "and modes written in C are not counted. Each starts from its own "
+             "A card holds as many modes as you make; the count is under New, "
+             "with modes written in C counted apart. Each starts from its own "
              "shot, and one runs at a time: a mode whose shots come up while "
              "another is running does not start then, but its next starting shot "
              "after that one ends starts it. A card carries one end sound of a "

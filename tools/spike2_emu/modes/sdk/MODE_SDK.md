@@ -156,7 +156,7 @@ calls (see "A code mode's own clip, screen, music and calls").
 
 On a machine, a card that carries modes loads them itself: the hook in its
 `/etc/init.d/game_monitor` preloads `/usr/local/padmode/mode.so`, and the object reads
-`game.port` and `mode.cfg`, `mode1.cfg` .. `mode7.cfg` beside it (`../../mode_install.py` lays
+`game.port` and `mode.cfg`, `mode1.cfg`, `mode2.cfg` ... beside it (`../../mode_install.py` lays
 them out on the card's rootfs partition). The emulator never runs a card's boot chain, it
 starts `./game` directly. So `run_game.sh` asks the card before every boot (`../cardmodes.sh`):
 it pulls `/usr/local/padmode` out of the card's rootfs with `parts.py --rootfs-dir` (debugfs,

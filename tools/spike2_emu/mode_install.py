@@ -7,7 +7,7 @@ off again leaving the card stock.
     mode_install.py remove  <card.raw>
     mode_install.py inspect <card.raw>
 
-Several --cfg (item 149): the first is mode.cfg, the rest mode1.cfg .. mode7.cfg.
+Several --cfg (item 149): the first is mode.cfg, the rest mode1.cfg, mode2.cfg ...
 --asset (a CODE mode's own assets, sdk/pad_mode_assets.h): <slug>.assets beside mode.so, one per
 code mode, naming the carriers the build gave its music and calls. A card of code modes only needs no
 --cfg: the object carries the modes and each .assets file names one.
@@ -71,9 +71,10 @@ GAME_MONITOR = "/etc/init.d/game_monitor"
 CARD_FILES = (("mode.so", 0o100755), ("mode.cfg", 0o100644))
 #: the SDK runtime's port, placed when the install is given one
 PORT_FILE = ("game.port", 0o100644)
-#: item 149: a card holds up to eight modes, the slots mode.so reads (item 133) -
-#: mode.cfg, then mode1.cfg .. mode7.cfg. These are the seven after the first.
-EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 8))
+#: item 149: a card holds up to 64 modes, the slots mode.so reads (sdk/mode_file.c
+#: MODES_MAX, mode_project.MAX_MODES) - mode.cfg, then mode1.cfg .. mode63.cfg. These are
+#: the ones after the first.
+EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 64))
 #: item 160: the "counts as" table of the game's own rules (sdk/MODE_SDK.md "Counts as"), the
 #: only other data file the runtime reads beside its mode files; placed when the install is
 #: given one (--file), taken off when it is not

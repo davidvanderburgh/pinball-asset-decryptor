@@ -2928,12 +2928,13 @@ def test_try_it_carries_code_modes_with_assets_through_writes_set(tmp_path, monk
 
 # ---------------------------------------------------------------------- words, small truths, the help
 @pytest.mark.usefixtures("preview_modes_on")
-def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(tmp_path):
+def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(tmp_path, monkeypatch):
     """The line under New says how many of the card's modes the project has. At the cap New
     is off and the line says what to do; Examples stays live with only its FORM entries
     greyed, since a mode written in C takes none of the card's slots."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
+    monkeypatch.setattr(MP, "MAX_MODES", 3)       # the real cap is 64; test the guard small
     project = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)
@@ -2945,7 +2946,7 @@ def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(
         w.run(svc.refresh)
         st = _st(w)
         assert st["cap_text"] == (
-            "8 of 8 modes: delete one to add another. Modes written in C are not counted.")
+            "3 of 3 modes: delete one to add another. Modes written in C are not counted.")
         assert st["new_ok"] is False
         assert st["ex_ok"] is True
         states = {e.get("label") or e["name"]: e["disabled"] for e in st["examples"]}
@@ -2954,7 +2955,7 @@ def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(
         assert len(code) == 5 and set(code.values()) == {False}
         w.run(svc.delete_mode, slugs[0])
         st = _st(w)
-        assert st["cap_text"] == "" and st["n_form"] == 7
+        assert st["cap_text"] == "" and st["n_form"] == 2
         assert st["new_ok"] is True
         assert not any(e["disabled"] for e in st["examples"])
         _project(w, "")
@@ -3050,7 +3051,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     stock = bodies["The game's own modes"]
     assert "All to stock" in stock and "Defaults tab" in stock and "Text tab" in stock
     assert "never the film" in bodies["From a film"]
-    assert "8 modes" in bodies["Several modes"] and "not counted" in bodies["Several modes"]
+    assert "as many modes as you make" in bodies["Several modes"] and "counted apart" in bodies["Several modes"]
     for title, body in sections:
         assert "\u2014" not in body, title
     # and it is what the window shows

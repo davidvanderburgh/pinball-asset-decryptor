@@ -153,7 +153,8 @@ def test_project_round_trip_keeps_unknown_keys(tmp_path):
     assert json.load(open(path, encoding="utf-8"))["future_key"] == {"from": "a newer editor"}
 
 
-def test_new_duplicate_delete_and_the_limit(tmp_path):
+def test_new_duplicate_delete_and_the_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(MP, "MAX_MODES", 5)       # the real cap is 64; test the guard small
     project = str(tmp_path)
     a, _ = MP.new_mode(project, "Rush")
     b, _ = MP.new_mode(project, "Rush")

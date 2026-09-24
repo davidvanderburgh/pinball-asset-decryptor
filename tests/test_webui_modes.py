@@ -117,7 +117,7 @@ def test_hidden_on_other_stern_eras(tmp_path, preview_on, era):
 
 
 # ---------------------------------------------------------- the list, the form
-def test_examples_duplicate_delete_and_the_cap(tmp_path, preview_on):
+def test_examples_duplicate_delete_and_the_cap(tmp_path, preview_on, monkeypatch):
     proj = tmp_path / "proj"
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
@@ -138,12 +138,14 @@ def test_examples_duplicate_delete_and_the_cap(tmp_path, preview_on):
         assert w.call("modes.delete") is True
         assert len(_modes_on_disk(proj)) == 1
         # fill to the cap: New and the form examples grey, the line says what to do
-        for _i in range(7):
+        from pinball_decryptor.plugins.stern import mode_project as MP
+        monkeypatch.setattr(MP, "MAX_MODES", 3)   # the real cap is 64; test the guard small
+        for _i in range(2):
             w.call("modes.new")
         st = w.state("modes")
-        assert len(_modes_on_disk(proj)) == 8
+        assert len(_modes_on_disk(proj)) == 3
         assert st["new_ok"] is False
-        assert st["cap_text"].startswith("8 of 8 modes: delete one to add another.")
+        assert st["cap_text"].startswith("3 of 3 modes: delete one to add another.")
         assert all(e["disabled"] for e in st["examples"] if not e["code"])
         assert not any(e["disabled"] for e in st["examples"] if e["code"])
         # the plugin's refusal is a message box titled as the Tk one

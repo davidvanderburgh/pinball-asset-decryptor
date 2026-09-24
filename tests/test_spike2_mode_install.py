@@ -280,7 +280,7 @@ def test_cli_refusal_exits_2(tmp_path):
     assert rc == 2
 
 
-# ---- item 149: several modes on one card (mode.cfg, mode1.cfg .. mode7.cfg) -----------
+# ---- item 149: several modes on one card (mode.cfg, mode1.cfg, mode2.cfg ...) ---------
 def _p2_image(card):
     """p2's bytes, for a byte-for-byte comparison of the whole partition."""
     import mkmulticard as mk
@@ -363,7 +363,7 @@ def test_more_mode_files_than_slots_is_refused_before_writing(tmp_path):
     so, cfg = _payload(tmp_path)
     before = _p2_image(card)
     with pytest.raises(mk.Refused):
-        mi.install(card, so, cfg, extra_cfgs=[cfg] * 8)
+        mi.install(card, so, cfg, extra_cfgs=[cfg] * (len(mi.EXTRA_CFGS) + 1))
     assert _p2_image(card) == before
 
 

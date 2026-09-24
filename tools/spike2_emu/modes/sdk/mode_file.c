@@ -1,14 +1,16 @@
 /* mode_file.c - modes written as FILES, run by a mode written in C (items 126, 133, 134).
  *
  * The Modes tab does not write C: it writes key-per-line mode files (mode.cfg,
- * mode1.cfg .. mode7.cfg), and this mode interprets them. It is an ordinary mode on
+ * mode1.cfg, mode2.cfg ...), and this mode interprets them. It is an ordinary mode on
  * pad_mode.h - no address in it - so it runs on any game with a port, beside any modes
  * written in C, and pm_begin() keeps all of them to one at a time.
  *
  * It is items 126-133's mode.c, moved onto the SDK with its behaviour kept:
- *   - slot 0 is mode.cfg, slots 1-7 mode1.cfg .. mode7.cfg, each looked for in
- *     /usr/local/padmode/ (a card) then /dump/ (the rig), each re-read twice a second
- *     and re-parsed when its bytes change, a vanished file disarming its slot;
+ *   - slot 0 is mode.cfg, slot K modeK.cfg, each looked for in /usr/local/padmode/
+ *     (a card) then /dump/ (the rig), each re-read twice a second and re-parsed when its
+ *     bytes change, a vanished file disarming its slot. The app numbers the files with no
+ *     gaps, so after the first sweep only the slots up to one past the last file are
+ *     re-read (poll_n): 64 slots cost what the files there are, not 64 x 2 open()s;
  *   - every slot keeps its own trigger counts and its own screen, and every screen is
  *     found and hidden;
  *   - /dump/mode.start starts slot 0, /dump/modeK.start slot K, /dump/mode.stop ends
@@ -24,7 +26,7 @@
 
 static const char *const MODE_DIRS[] = { "/usr/local/padmode/", "/dump/" };
 #define MODE_DIRS_N     2
-#define MODES_MAX       8
+#define MODES_MAX       64          /* high enough never to be the limit a person meets */
 #define TICKS_PER_S     60
 #define CFG_MAX         4096
 #define STR_MAX         224
@@ -78,6 +80,7 @@ struct slot {
     unsigned ev_trig[5], ev_pending;      /* item 147: event start counts; a start waiting for pm_in_game */
 };
 static struct slot slots[MODES_MAX];
+static unsigned poll_n = 1;         /* slots re-read each poll: up to one past the last file */
 #define cfg (M->c)
 
 static struct {
@@ -1597,6 +1600,17 @@ static void on_ball_end(void)
     roster_ball_end();                       /* item 146: a pick not started yet is given back */
 }
 
+/* The files are numbered with no gaps (the app writes slot order), so a new one appears at
+ * the slot after the last: re-read every slot up to that one. The first sweep (on_init)
+ * reads them all, so a file past a gap that was there at boot is still found. */
+static void poll_bound(void)
+{
+    unsigned k, n = 0;
+    for (k = 0; k < MODES_MAX; k++)
+        if (slots[k].raw_len >= 0) n = k + 1;
+    poll_n = n < MODES_MAX ? n + 1 : MODES_MAX;
+}
+
 static void on_tick(void)
 {
     static unsigned ticks;
@@ -1610,7 +1624,7 @@ static void on_tick(void)
     roster_tick();                           /* item 146: a taken roster pick starts when it may */
     for (k = 0; k < MODES_MAX; k++) {
         M = &slots[k];
-        if (ticks % POLL_TICKS == 0) {
+        if (ticks % POLL_TICKS == 0 && k < poll_n) {
             if (cfg_reload(M) && running(M)) pm_log("reloaded while running - the new file is live");
             screen_resolve(M);
             if (k == 0) pm_snprintf(name, sizeof name, "mode.start");
@@ -1623,6 +1637,7 @@ static void on_tick(void)
         }
     }
     if (ticks % POLL_TICKS == 0) {
+        poll_bound();
         if (pm_trigger("mode.stop")) mode_end("trigger file");
         if (pm_trigger_text("mode.clip", clip, sizeof clip) && clip[0]) {
             for (i = 0; clip[i] && clip[i] != ' '; i++) ;
@@ -1685,8 +1700,9 @@ static void on_init(void)
         }
         found += cfg_reload(M);
     }
-    pm_log("armed, %d mode file(s) now, reading %d slot(s) x %d path(s) twice a second",
-           found, MODES_MAX, MODE_DIRS_N);
+    poll_bound();
+    pm_log("armed, %d mode file(s) now, reading %u slot(s) x %d path(s) twice a second",
+           found, poll_n, MODE_DIRS_N);
 }
 
 static const struct pm_mode mode_files = {

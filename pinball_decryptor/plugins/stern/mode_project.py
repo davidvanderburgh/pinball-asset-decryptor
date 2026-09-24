@@ -28,7 +28,9 @@ from dataclasses import dataclass, field, fields, replace
 FORMAT = 1
 MODES_DIRNAME = "modes"
 MODE_FILE = "mode.json"
-MAX_MODES = 8
+#: The slots mode.so reads (sdk/mode_file.c MODES_MAX); high enough never to be the limit a
+#: person meets, so the tab shows no cap.
+MAX_MODES = 64
 
 
 class ModeProjectError(ValueError):

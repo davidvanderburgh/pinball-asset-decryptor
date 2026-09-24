@@ -105,7 +105,8 @@ function Num({ k, value, disabled, width = 64, title }) {
 // ------------------------------------------------------------------ the head
 function Head({ s, openStock, openCountsAs, openRewrite }) {
   const proj = s.project || "";
-  const counts = `${s.n_form || 0} of 8 modes${s.n_code ? ` + ${s.n_code} in C` : ""}`;
+  const nForm = s.n_form || 0;
+  const counts = `${nForm} mode${nForm === 1 ? "" : "s"}${s.n_code ? ` + ${s.n_code} in C` : ""}`;
   const modesDir = proj ? proj.replace(/[\\/]+$/, "").split(/[\\/]/).pop() + (proj.includes("\\") ? "\\" : "/") + "modes" : "";
   // one line: the card's game and version (its full words in the tooltip), the counts, the folder
   const compact = proj && (s.title_label || s.card_label) && (s.title_text || "").startsWith("Card:");

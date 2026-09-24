@@ -806,6 +806,9 @@ class TryItMixin:
         if not self._on_loop():
             self.ctx.loop.post(self.run_ended, serial)
             return
+        check = getattr(self, "_check_run_ended", None)
+        if callable(check):
+            check(serial)
         st = self._tryit["state"]
         run = self._tryit["run"]
         live = self._tryit_live

@@ -1485,10 +1485,19 @@ static void roster_sync(struct slot *M)
     }
 }
 
+/* ---- the game check (the Modes tab's Check this game) -------------------------------------
+ * With /dump/gamecheck.on there at the first tick (tryit.sh install puts it there), every shot,
+ * event and end of ball is logged as a `check` line, and so is each switch mark gamecheck.sh
+ * writes to /dump/census.mark before it presses a switch: the app reads which of the port's
+ * shots, events and end of ball this game really sends. Off, nothing here runs. */
+static int check_on;
+
 static void on_shot(uint64_t mask)
 {
     unsigned p = pm_player(), k;
     struct slot *M;
+    if (check_on)
+        pm_log("check shot 0x%llx in_game %d", (unsigned long long)mask, pm_in_game());
     if (!pm_in_game()) return;
     if (run.active && (M = run.slot) != 0 && p == run.player && (mask & scoring_bits(M))
         && end_pending != M) {                   /* item 141: nothing pays once its end shot was hit */
@@ -1533,6 +1542,10 @@ static void on_event(unsigned id)
 {
     unsigned k, p = pm_player();
     struct slot *M;
+    if (check_on) {
+        const char *name = pm_event_name(id);
+        pm_log("check event %s (0x%02x) in_game %d", name ? name : "?", id, pm_in_game());
+    }
     if (run.active && (M = run.slot) != 0 && cfg.end_on == END_EVENT && (int)id == cfg.end_event) {
         char why[64];
         pm_snprintf(why, sizeof why, "event %s", cfg.end_event_name);
@@ -1593,6 +1606,7 @@ static int keeps_through_ball_end(void)
 static void on_ball_end(void)
 {
     unsigned k, p;
+    if (check_on) pm_log("check ball end");
     if (!keeps_through_ball_end()) mode_end("ball ended");
     for (k = 0; k < MODES_MAX; k++)
         for (p = 0; p < 5; p++) slots[k].trig[p] = 0;
@@ -1617,6 +1631,8 @@ static void on_tick(void)
     unsigned secs, i, k;
     char name[24], clip[100];
     struct slot *M;
+    if (check_on && pm_trigger_text("census.mark", name, sizeof name))
+        pm_log("check mark %s", name);
     starts_watch_game();                     /* item 139: what marks a new game */
     clip_later_tick();                       /* item 141: a clip a shot started */
     ++ticks;
@@ -1703,6 +1719,8 @@ static void on_init(void)
     poll_bound();
     pm_log("armed, %d mode file(s) now, reading %u slot(s) x %d path(s) twice a second",
            found, poll_n, MODE_DIRS_N);
+    check_on = pm_trigger("gamecheck.on");
+    if (check_on) pm_log("check ready on %s %s", pm_game(), pm_version());
 }
 
 static const struct pm_mode mode_files = {

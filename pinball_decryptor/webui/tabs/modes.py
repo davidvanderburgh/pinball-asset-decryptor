@@ -37,6 +37,7 @@ from .. import modes_filmcut as FCD
 from ..modes_reading import TitleReadMixin
 from ..modes_stock_remap import StockRemapMixin
 from ..modes_stock_rewrite import StockRewriteMixin   # item 161
+from ..modes_check import GameCheckMixin
 from ..modes_tryit import TryItMixin
 from .base import TabService, rpc
 
@@ -129,7 +130,7 @@ def fix_chip(problems):
     return dict(PAGES)[pages[0]] + (" •" if len(pages) == 1 else " +%d •" % (len(pages) - 1))
 
 
-class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
+class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin, TabService):
     ns = "modes"
     key = "Modes"
     label = "Modes"
@@ -281,6 +282,7 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         self._game_mode = None         # the game's own mode shown instead (its id), or None
         self._title_read = None        # the finished read of the shown card, or None
         self._init_tryit()
+        self._init_check()
         self._init_reading()
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
@@ -295,7 +297,8 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
                  film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, ready=False,
                  fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
                  no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
-                 game_hidden=0)
+                 game_hidden=0, check_offer=False, check_wanted=False, check_done=None,
+                 check_tip=self.CHECK_TIP)
         self._show_starts_words()
 
     # ------------------------------------------------------------------
@@ -443,13 +446,14 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
     def _tick(self):
         self._ticker_job = None
         shown = self.window.ctx.store.get("shell", "tab") == self.ns
-        working = self._tryit["state"] in self.TRYIT_WORKING
+        working = self._tryit["state"] in self.TRYIT_WORKING or self._check_working()
         live = self._tryit["state"] == "live"
         if not (shown or working or live):
             self._ticker_on = False
             return
         try:
             self._tryit_tick()
+            self._check_tick()
             self._show_emu(quiet=True)
         except Exception:                                   # noqa: BLE001
             pass
@@ -1154,13 +1158,13 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
 
     #: the note on a port the app worked out itself and no Try it has run yet: Write leaves
     #: the modes off a card until one has (mode_write.card_refusal)
-    DERIVED_UNPROVEN = ("Press Try it once first: the app worked out by itself how to run modes "
-                        "on %s, and until a Try it has run the game with them on this PC, Write "
-                        "leaves them off the card.")
+    DERIVED_UNPROVEN = ("Check this game (or press Try it) once first: the app worked out by "
+                        "itself how to run modes on %s, and until the game has run with them on "
+                        "this PC, Write leaves them off the card.")
     #: ... and once a Try it ran the game with it live
-    DERIVED_RAN = ("The app worked out by itself how to run modes on %s, and a Try it has run "
-                   "the game with them on this PC, so Write puts them on the card. Try each mode "
-                   "before you trust it on a machine.")
+    DERIVED_RAN = ("The app worked out by itself how to run modes on %s, and the game has run "
+                   "with them on this PC (Check this game or Try it), so Write puts them on the "
+                   "card. Try each mode before you trust it on a machine.")
     #: the status and the grey form's words while the card is being read
     READING_WORDS = "Reading which game build the card is, and what it offers (see above)."
 
@@ -1212,7 +1216,9 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         if os.path.isabs(profile.port or ""):
             note = self._derived_words(profile)
         else:
-            note = "" if profile.proven else "Unproven: " + profile.proven_note
+            checked = self._check_record(profile)
+            note = ("" if profile.proven or (checked is not None and checked.ok)
+                    else "Unproven: " + profile.proven_note)
         return self._with_switch_note(note, profile)
 
     @staticmethod
@@ -1294,6 +1300,14 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
                 note = "%s %s" % (note, MP.NO_PORT_STILL)
         self._title_note = note
         from ...plugins.stern import mode_write as MW
+        checked = self._check_record(profile)
+        self.set(check_offer=bool(profile is not None and not no_port),
+                 check_wanted=bool(profile is not None and not no_port and (
+                     MW.derived_not_run(profile) or not (profile.proven or (
+                         checked is not None and checked.ok)))),
+                 check_done=(None if checked is None else {
+                     "ok": checked.ok, "when": checked.when,
+                     "text": checked.summary(profile.label)}))
         self.set(title_text=text, title_note=note, no_port=no_port, title_origin=origin,
                  no_port_details=details,
                  own_extra_ok=bool(profile is not None and not self._own_extra_why(profile)),
@@ -2089,6 +2103,10 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
     @rpc
     def tryit(self):
         return bool(self.on_try())
+
+    @rpc
+    def check_game(self):
+        return bool(self.on_check())
 
     @rpc
     def start_now(self):

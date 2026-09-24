@@ -137,7 +137,7 @@ html.bph-760 .modes-foot { margin-bottom: 10px; }
 
 /* the title's note: its "more" and the details badge; on a short window it is one line */
 .modes-note .note { align-items: flex-start; }
-.modes-note-act { gap: 6px; align-self: center; }
+.modes-note-act { gap: 6px; align-self: center; flex: none; }
 .modes-note-more { display: none; border: 0; background: none; padding: 0 2px; color: var(--accent); cursor: pointer; font: inherit; }
 .modes-note-more:hover { text-decoration: underline; }
 html.bph-760 .modes-note-more { display: inline; }

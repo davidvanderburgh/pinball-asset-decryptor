@@ -450,6 +450,31 @@ def test_an_unproven_port_says_so(tmp_path, preview_on, monkeypatch):
         st = w.state("modes")
         assert st["title_note"].startswith("Unproven: ")
         assert st["new_ok"] and st["ex_ok"]
+        assert st["check_offer"] and st["check_wanted"] and st["check_done"] is None
+
+
+def test_a_passing_check_proves_a_drafted_port(tmp_path, preview_on, monkeypatch):
+    import dataclasses
+    from pinball_decryptor.plugins.stern import game_check as GC
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    monkeypatch.setenv("PAD_TITLE_CACHE", str(tmp_path / "cache"))
+    real = MP._folder_profiles
+
+    def folder_profiles(d):
+        return {k: dataclasses.replace(p, proven=False, proven_note="it was drafted and has never run.")
+                if p.game_dir == "deadpool_le" else p for k, p in real(d).items()}
+    monkeypatch.setattr(MP, "_folder_profiles", folder_profiles)
+    res = GC.CheckResult(armed="armed: 1 mode(s)", started=True, pressed=3, ball_end=True,
+                         shots_seen={"Left orbit": "LEFT ORBIT"}, shots_unseen=["Inner loop"],
+                         when="2026-09-24 12:00")
+    assert GC.record(os.path.join(MP.PORTS_DIR, "deadpool_le-1.14.port"), res)
+    proj = _card_project(tmp_path / "dp", "deadpool_le-1_14_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        st = w.state("modes")
+        assert st["title_note"] == "" and not st["check_wanted"] and st["check_offer"]
+        assert st["check_done"]["ok"] and st["check_done"]["when"] == "2026-09-24 12:00"
+        assert st["check_done"]["text"].startswith("Checked in the emulator: modes run on Deadpool LE")
 
 
 def test_beatles_switch_shots_are_proven_and_its_countdown_unheard(tmp_path, preview_on):
@@ -1084,7 +1109,7 @@ def test_a_new_card_is_read_with_progress_then_made_for(tmp_path, preview_on, be
         assert st["profile"]["label"] == "The Beatles 1.29"
         assert st["profile"]["shots"][:2] == ["Left orbit", "Right orbit"]
         assert st["title_origin"] == "derived"
-        assert st["title_note"].startswith("Press Try it once first: the app worked out by "
+        assert st["title_note"].startswith("Check this game (or press Try it) once first: the app worked out by "
                                            "itself how to run modes on The Beatles 1.29")
         assert "port" not in st["title_note"]
         assert st["new_ok"] and st["ex_ok"]
@@ -1369,7 +1394,7 @@ def test_a_port_worked_out_earlier_shows_unproven_before_the_read(tmp_path, prev
         st = w.state("modes")
         assert st["profile"]["label"] == "The Beatles 1.29" and st["new_ok"]
         assert st["title_origin"] == "derived"
-        assert st["title_note"].startswith("Press Try it once first: the app worked out by "
+        assert st["title_note"].startswith("Check this game (or press Try it) once first: the app worked out by "
                                            "itself how to run modes on The Beatles 1.29")
         assert st["write_waits"] is True
         fake.gate.set()

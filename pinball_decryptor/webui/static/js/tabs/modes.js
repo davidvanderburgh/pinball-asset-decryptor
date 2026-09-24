@@ -811,6 +811,9 @@ function TryFooter({ s }) {
         <span class="vsep"></span>
         <${Button} disabled=${!emu.up} title=${emu.up ? T.startNow : "The emulator is not running: press Try it first."} onClick=${() => call("modes.start_now")}>Start mode now<//>
         <${Button} disabled=${!emu.up} title=${emu.up ? T.endNow : "The emulator is not running."} onClick=${() => call("modes.end_now")}>End mode<//>
+        <span class="vsep"></span>
+        <${Button} disabled=${!s.check_offer || working || live || !!(s.check || {}).working} title=${s.check_tip}
+          onClick=${() => call("modes.check_game")}>Check this game<//>
         <span class="grow"></span>
         ${working || live ? html`<${Button} kind="ghost" size="sm" icon="emulate" onClick=${() => call("modes.goto_emulate")}>Emulate tab<//>`
           : s.project && !s.tryit_line ? html`<span class="small dim modes-tryhint" ...${tip(tryTip(s))}>${idleWords(s)}</span>` : null}
@@ -832,7 +835,35 @@ function TitleNote({ s }) {
   const [more, setMore] = useState(false);
   const details = s.no_port_details ? html`<${InfoBadge} text=${s.no_port_details} />` : null;
   return html`<div class=${cx("modes-note", more && "open")}><${Note} kind="warn" action=${html`<span class="row nw modes-note-act">${details}
+      ${s.check_wanted && !(s.check || {}).working ? html`<${CheckButton} s=${s} />` : null}
       <button type="button" class="linkish small modes-note-more" onClick=${() => setMore(!more)}>${more ? "less" : "more"}</button></span>`}>${s.title_note}<//></div>`;
+}
+
+// ------------------------------------------------------------------ check this game
+// One scripted game in the emulator proves (or not) what the app knows of the card's build.
+function CheckButton({ s, again }) {
+  return html`<${Button} size="sm" kind=${again ? "ghost" : "primary"} icon="play" title=${s.check_tip}
+    onClick=${() => call("modes.check_game")}>${again ? "Check again" : "Check this game"}<//>`;
+}
+
+function CheckNote({ s }) {
+  const c = s.check || {};
+  const done = s.check_done;
+  if (c.working) {
+    return html`<div class="modes-note"><${Note} kind="info" icon="emulate" action=${html`<span class="row nw modes-note-act">
+        <${Elapsed} started=${c.started} />
+        ${c.state === "preparing" ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("modes.check_game")}>Cancel<//>` : null}</span>`}>
+      <b>Checking this game</b> (about two minutes). ${c.line}<//></div>`;
+  }
+  const again = s.check_offer ? html`<span class="row nw modes-note-act"><${CheckButton} s=${s} again /></span>` : null;
+  if (c.state === "passed" || c.state === "failed") {
+    return html`<div class="modes-note"><${Note} kind=${c.state === "passed" ? "ok" : "err"} action=${again}>${c.line}<//></div>`;
+  }
+  if (c.line) return html`<div class="modes-note"><${Note} kind="info">${c.line}<//></div>`;
+  if (done) {
+    return html`<div class="modes-note"><${Note} kind=${done.ok ? "ok" : "warn"} action=${again}>${done.text} <span class="small dim">(${done.when})</span><//></div>`;
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------ the first mode
@@ -847,6 +878,8 @@ function FirstMode({ s, onNewCode }) {
         <div class="small muted wrap">A mode is something new for the game to do: what starts it, how long it runs, which shots score, and what the display, lights and speakers do meanwhile.</div>
         ${s.no_port ? html`<div class="small warn-ink wrap">${s.no_port}</div>` : null}
       </div>
+      ${s.check_wanted && !(s.check || {}).working ? html`<${Note} kind="warn" action=${html`<span class="row nw modes-note-act"><${CheckButton} s=${s} /></span>`}>
+        <b>Check this game first.</b> What the app knows of ${s.title_label || "this game"} has never run in the emulator. The check plays one game by itself (about two minutes) and says which shots and events work, before you make a mode.<//>` : null}
       <div class="modes-first-grid">
         <div class="modes-first-opt rec">
           <div class="row wrap"><${Icon} name="list" /><b>From an example</b><${Chip} kind="ok" sm>recommended<//></div>
@@ -888,6 +921,7 @@ export default function ModesTab() {
     <${Head} s=${s} />
     <${ReadingPanel} r=${s.reading} />
     ${s.title_note ? html`<${TitleNote} s=${s} />` : null}
+    <${CheckNote} s=${s} />
     <div class="modes-body">
       <${ModeList} s=${s} onNewCode=${() => setNewCode(true)} onAllNumbers=${() => setStock(true)} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`

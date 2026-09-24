@@ -7,7 +7,8 @@
 #                                  A build is minutes; this is a second, so it goes first
 #   tryit.sh install <stage dir>   before the run: <stage>/pad_mode.so -> $ROOT/lib/pad_mode.so
 #                                  (PAD_MODE_SO=/lib/pad_mode.so), <stage>/game.port ->
-#                                  $ROOT/dump/game.port, <stage>/mode*.cfg and each code mode's
+#                                  $ROOT/dump/game.port, <stage>/gamecheck.on (Check this game,
+#                                  gamecheck.sh) -> $ROOT/dump, <stage>/mode*.cfg and each code mode's
 #                                  <stage>/<slug>.assets (sdk/pad_mode_assets.h) -> $ROOT/dump,
 #                                  after clearing the mode files, triggers and mode.log a
 #                                  previous run left there. cardmodes.sh calls this too, for
@@ -114,9 +115,13 @@ case "$cmd" in
         # have a later stock run take THOSE out.
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
-              "$DUMP"/*.assets "$DUMP"/stock.cfg
+              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/gamecheck.on "$DUMP"/census.mark
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
+        # the Modes tab's Check this game: the object logs what the game sends (mode_file.c)
+        if [ -f "$S/gamecheck.on" ]; then
+            put "$S/gamecheck.on" "$DUMP/gamecheck.on" || die "could not copy gamecheck.on"
+        fi
         n=0
         for f in "$S"/mode.cfg "$S"/mode[1-7].cfg; do
             [ -f "$f" ] || continue
@@ -142,7 +147,7 @@ case "$cmd" in
         # game reads them as root), so it is said, not fatal.
         if [ "$(id -u)" = 0 ]; then
             given=("$LIB/pad_mode.so" "$DUMP/game.port")
-            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg; do
+            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/gamecheck.on; do
                 [ -f "$f" ] && given+=("$f")
             done
             pad_give_back "${given[@]}"

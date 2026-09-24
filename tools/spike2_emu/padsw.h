@@ -197,6 +197,22 @@ struct padsw_shm {
      * reader ORs them. */
     unsigned char cab[PADSW_CAB_N];      /* KEYBOARD's; written only by padglhost */
     unsigned char scr_cab[PADSW_CAB_N];  /* SCRIPTS' (the playfield's keyboard)   */
+    /* ---- PAUSE (PAD-204): the Pause key freezes the whole game. -----------
+     *
+     * padglhost SIGSTOPs the guest and SIGCONTs it on the next press, so every
+     * thread, the video pull and the audio feed stop together. The catch is
+     * the game's own watchdog: its dispatch loop waits on a condvar with a
+     * 10 s pthread_cond_timedwait and calls exit(5) on ETIMEDOUT (PAD-200).
+     * The deadline is absolute, so a pause longer than 10 s would expire it
+     * and the game would end itself the moment it was resumed.
+     *
+     * So padglhost counts how long the game has been frozen, and hwshim's
+     * cond_timedwait interposer pushes a deadline that expired across a pause
+     * out by exactly that much - for the game, the frozen time never passed.
+     * padglhost is the only writer, and it adds to paused_ms BEFORE the
+     * SIGCONT, so the guest can never see a resumed run with a stale count. */
+    unsigned paused;                     /* 1 while frozen; padglhost only      */
+    unsigned paused_ms;                  /* total ms frozen; padglhost only     */
 };
 
 #endif

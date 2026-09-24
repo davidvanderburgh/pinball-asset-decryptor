@@ -66,7 +66,8 @@ def test_the_python_offsets_follow_the_end_of_the_block(padsw):
     assert padsw.CAB_N == 8
     assert padsw.OFF_CAB == padsw.OFF_SPIN + padsw.MAX_ID
     assert padsw.OFF_SCR_CAB == padsw.OFF_CAB + padsw.CAB_N
-    assert padsw.SIZE == padsw.OFF_SCR_CAB + padsw.CAB_N
+    assert padsw.OFF_PAUSED == padsw.OFF_SCR_CAB + padsw.CAB_N    # PAD-204
+    assert padsw.SIZE == padsw.OFF_PAUSED_MS + 4
     assert padsw.SIZE <= 4096
 
 
@@ -102,8 +103,9 @@ def test_the_shim_mirror_carries_the_fields(padsw):
     """hwshim.c is built -nostdlib with its own hand-kept copy of the struct."""
     c = _text("hwshim.c")
     body = re.search(r"struct padsw_shm \{(.*?)\n\};", c, re.S).group(1)
-    tail = body.rstrip().splitlines()[-1]
-    assert "cab[8]" in tail and "scr_cab[8]" in tail
+    assert "unsigned char cab[8]; unsigned char scr_cab[8];" in body
+    tail = body.rstrip().splitlines()[-1]           # PAD-204's pause is last now
+    assert "unsigned paused; unsigned paused_ms;" in tail
     assert "spin[256]" in body                      # ...and after the last old field
     assert body.index("spin[256]") < body.index("cab[8]")
 

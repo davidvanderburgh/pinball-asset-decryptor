@@ -413,14 +413,38 @@ int shim_cond_wait(void *c, void *m)
     return real(c, m);
 }
 
+/* PAD-204: THE PAUSE KEY MUST NOT TRIP THE GAME'S WATCHDOG. padglhost freezes
+ * the game with SIGSTOP, and the game's dispatch loop waits here with a 10 s
+ * ABSOLUTE deadline and exits 5 on ETIMEDOUT (PAD-200). A pause longer than
+ * that expires the deadline while nothing runs, so the resumed game would end
+ * itself at once. A timeout that spans a pause is therefore not a timeout:
+ * the deadline moves out by the time spent frozen and the wait goes on, as if
+ * the frozen seconds never passed. A deadline with no pause in it expires
+ * exactly as before. */
+static unsigned pause_total_ms(void);
+
 int shim_cond_timedwait(void *c, void *m, void *t) __asm__("pthread_cond_timedwait");
 int shim_cond_timedwait(void *c, void *m, void *t)
 {
     static int (*real)(void *, void *, void *);
     unsigned long ra = (unsigned long)__builtin_return_address(0);
+    unsigned p0 = pause_total_ms(), p1;
+    struct { long s, ns; } dl;
+    int r;
     if (!real) real = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
     if (ra > 0x16a00 && ra < 0x5d3168) synclog("pthread_cond_timedwait", c, ra);
-    return real(c, m, t);
+    r = real(c, m, t);
+    if (r != 110 /* ETIMEDOUT */ || !t) return r;
+    dl = *(const __typeof__(dl) *)t;
+    while (r == 110 && (p1 = pause_total_ms()) != p0) {
+        unsigned add = p1 - p0;
+        p0 = p1;
+        dl.s += add / 1000;
+        dl.ns += (long)(add % 1000) * 1000000L;
+        if (dl.ns >= 1000000000L) { dl.s++; dl.ns -= 1000000000L; }
+        r = real(c, m, &dl);
+    }
+    return r;
 }
 
 /* ---- libstdc++ read path ---------------------------------------------- *
@@ -4014,6 +4038,8 @@ struct padsw_shm {
     /* the boot menu's buttons by name (padsw.h): nothing here reads them, they
      * are kept so the struct stays padsw.h's field for field */
     unsigned char cab[8]; unsigned char scr_cab[8];
+    /* PAD-204: padglhost's pause - see shim_cond_timedwait */
+    unsigned paused; unsigned paused_ms;
 };
 #define PADSW_MAGIC 0x53444150u
 
@@ -4021,6 +4047,13 @@ struct padsw_shm {
  * is read-only to the guest, and stays that way - see padsw.h for which of the
  * three regions each writer owns. */
 static volatile struct padsw_shm *sw_shm;
+
+/* PAD-204: total ms padglhost has held the game frozen, 0 before the block is
+ * mapped. Read by shim_cond_timedwait, which sits far above this struct. */
+static unsigned pause_total_ms(void)
+{
+    return sw_shm ? sw_shm->paused_ms : 0;
+}
 
 /* A tap in flight. `pad_tap_id` is consulted by sw_scan_bytes() exactly as if
  * the switch were held; `tap_left` counts down the transfers it still has to

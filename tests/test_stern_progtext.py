@@ -419,23 +419,61 @@ def test_unedited_tail_follows_a_line_that_keeps_its_prefix(reloc_elf):
     assert not _warnings(msgs)
 
 
-def test_tail_does_not_follow_a_line_whose_prefix_changed(reloc_elf):
+def test_mismatched_tail_is_split_off_when_the_line_can_move(reloc_elf):
+    # PAD-198 round 2: "GODZILLA + ANGUIRUS VS. KING GHIDORAH + GIGAN" ->
+    # "GODZILLA VS. BATTRA" with the standalone "GIGAN" left alone.  The new
+    # line goes to new space and the name keeps reading the original bytes.
     raw, offs = reloc_elf
     msgs, log = _logs()
-    # "GODZILLA VS " became "GZ VS ", so which part is the name is a guess:
-    # the old rule stands
     writes, n, blob = progtext.plan_writes(
         raw, {MEGA: "GZ VS SPACEGODZILLA"}, log, RELOC)
-    assert writes == [] and n == 0 and blob == b""
-    assert any("shown on its own" in m and "must END with" in m
-               for m in _warnings(msgs))
-    # and a tail the user DID edit is never overridden by the line
+    assert n == 1 and blob == b"GZ VS SPACEGODZILLA" + bytes(1)
+    copy_va = RELOC["base_va"] + RELOC["used"]
+    buf = _apply(raw, writes)
+    g0 = [offs["mega_g0"] + 4 * i for i in range(5)]
+    g12 = [offs["mega_g12"] + 4 * i for i in range(5)]
+    assert _ref_value(buf, "group", g0) == copy_va
+    assert _ref_value(buf, "group", g12) == _ref_value(raw, "group", g12)
+    assert buf[offs["mega"]:offs["mega"] + len(MEGA)] == MEGA.encode()
+    assert not _warnings(msgs)
+    assert any('stays "MEGALON"' in m for _l, m in msgs)
+    # a name edited to something the line doesn't end with gets its own copy
     msgs, log = _logs()
     writes, n, blob = progtext.plan_writes(
         raw, {MEGA: "GODZILLA VS SPACEGODZILLA", "MEGALON": "ORGA"},
         log, RELOC)
+    assert n == 2 and not _warnings(msgs)
+    buf = _apply(raw, writes)
+    name_va = _ref_value(buf, "group", g12)
+    at = name_va - RELOC["base_va"] - RELOC["used"]
+    assert blob[at:at + 5] == b"ORGA" + bytes(1)
+    assert _ref_value(buf, "group", g0) == copy_va
+
+
+def test_mismatched_tail_still_skips_without_new_space(reloc_elf):
+    raw, offs = reloc_elf
+    msgs, log = _logs()
+    writes, n, blob = progtext.plan_writes(
+        raw, {MEGA: "GZ VS SPACEGODZILLA"}, log, None,
+        no_grow_why="a direct-SD write can't grow the game program")
     assert writes == [] and n == 0
-    assert any("must END with" in m for m in _warnings(msgs))
+    assert any("must END with" in m and "direct-SD" in m
+               for m in _warnings(msgs))
+
+
+def test_padded_name_edit_matches_its_line(reloc_elf):
+    # PAD-198 round 2: the name row's edit came over from a scene row as
+    # "DESTROYAH   " (space padded), so it never matched "... DESTROYAH".
+    raw, offs = reloc_elf
+    msgs, log = _logs()
+    writes, n, blob = progtext.plan_writes(
+        raw, {MEGA: "GODZILLA VS SPACEGODZILLA", "MEGALON": "SPACEGODZILLA   "},
+        log, RELOC)
+    writes2, _n2, blob2 = progtext.plan_writes(
+        raw, {MEGA: "GODZILLA VS SPACEGODZILLA", "MEGALON": "SPACEGODZILLA"},
+        None, RELOC)
+    assert n == 2 and not _warnings(msgs)
+    assert (sorted(writes), blob) == (sorted(writes2), blob2)
 
 
 def test_interior_lone_reference_is_retargeted_to_the_new_tail(reloc_elf):

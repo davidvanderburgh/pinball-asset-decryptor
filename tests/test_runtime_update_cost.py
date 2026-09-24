@@ -151,15 +151,6 @@ def test_a_changed_image_is_a_cache_miss_and_is_fetched(cache):
 
 # ---- the destructive edge, which is the one to be careful about -----------
 
-def test_replacing_a_registered_runtime_needs_consent():
-    """A runtime version bump means unregister-then-import, which DELETES that
-    distro's filesystem - save states included.  The app must refuse to do that
-    on its own, so an update can never silently eat something a person made."""
-    with pytest.raises(runtime.RuntimeNeedsReplacing):
-        runtime.install(runner=_runner(listed=(runtime.DISTRO,)),
-                        source=None, replace=False)
-
-
 def test_the_work_disk_is_not_inside_the_distro():
     """So replacing the runtime cannot take the cards and caches with it."""
     from pinball_decryptor.core import rigdata

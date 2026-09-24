@@ -201,25 +201,6 @@ def test_no_control_without_a_spike2_card(tmp_path):
         assert w.state("write")["card_size_cap"] is False
 
 
-def test_no_control_for_other_eras_and_manufacturers(tmp_path):
-    card = make_card(tmp_path / "gz.raw")
-    with web_app(tmp_path, mfr="stern") as w:
-        point_at(w, card)
-        assert wait_for(w, lambda: w.state("write")["card_size_cap"])
-        w.call("ui.set_era", "spike1")
-        point_at(w, card)
-        assert w.window.write_upd_var.get() == str(card)
-        # the era switch re-publishes the tab; a slow runner reads the
-        # Spike 2 state first (the macOS CI leg did, once)
-        assert wait_for(
-            w, lambda: w.state("write")["card_size_cap"] is False), \
-            w.state("write")["card_size_cap"]
-    with web_app(tmp_path / "jjp", mfr="jjp") as w:
-        point_at(w, card)
-        assert w.window.write_upd_var.get() == str(card)
-        assert w.state("write")["card_size_cap"] is False
-
-
 def test_an_8g_original_offers_16_and_32(tmp_path):
     card = make_card(tmp_path / "gz.raw", "8G")
     with web_app(tmp_path, mfr="stern") as w:

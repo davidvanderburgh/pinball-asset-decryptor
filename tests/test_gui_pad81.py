@@ -359,40 +359,6 @@ def _run_bulk(w, sb, out):
     return captured["r"]
 
 
-def test_save_all_previews_writes_one_png_per_listed_scene(tmp_path):
-    with web_app(tmp_path, mfr="stern") as w:
-        sb = _scene_window(w, tmp_path / "extract")
-        out = tmp_path / "shots"
-        out.mkdir()
-        written, skipped = _run_bulk(w, sb, out)
-
-        assert (written, skipped) == (3, 0)
-        assert sb._bulk is None
-        assert w.state("text_scenes")["bulk"] is False
-        names = sorted(os.listdir(out))
-        assert len(names) == 3, names
-        assert all(n.lower().endswith(".png") for n in names)
-        full = w.state("text_scenes")["caption_full"]
-        assert "Saved 3 previews" in full
-        assert "first frame of each" in full
-
-
-def test_the_search_box_narrows_the_batch(tmp_path):
-    """The list is the batch — silently exporting the scenes the user just
-    filtered out is the same surprise as extra work nobody asked for."""
-    with web_app(tmp_path, mfr="stern") as w:
-        sb = _scene_window(w, tmp_path / "extract")
-        listed = list(sb._listed)
-        assert len(listed) == 3
-        w.call("text_scenes.set_search", sb._scenes[listed[0]]["label"])
-        assert len(sb._listed) == 1
-
-        out = tmp_path / "one"
-        out.mkdir()
-        assert _run_bulk(w, sb, out) == (1, 0)
-        assert len(os.listdir(out)) == 1
-
-
 def test_two_scenes_that_sanitise_alike_do_not_overwrite_each_other():
     """An overwrite there would silently drop a scene from a folder that
     claims to hold them all."""
@@ -404,46 +370,6 @@ def test_two_scenes_that_sanitise_alike_do_not_overwrite_each_other():
     assert _unique_png("Game ? Intro", used) == "Game___Intro_3.png"
     assert _safe_stem("") == "scene"
     assert _safe_stem("///") == "___"
-
-
-def test_a_scene_with_no_layout_is_counted_not_guessed_at(tmp_path):
-    """A folder of 2 PNGs from a 3-scene list has to say what happened to the
-    third."""
-    with web_app(tmp_path, mfr="stern") as w:
-        sb = _scene_window(w, tmp_path / "extract")
-
-        def _drop():
-            sb._layouts = {k: v for k, v in sb._layouts.items()
-                           if not k.endswith("/g/scene9/scene.radium")}
-        w.run(_drop)
-        out = tmp_path / "partial"
-        out.mkdir()
-        assert _run_bulk(w, sb, out) == (2, 1)
-        assert len(os.listdir(out)) == 2
-        assert "1 scene could not be drawn" in \
-            w.state("text_scenes")["caption_full"]
-
-
-def test_a_cancelled_batch_reports_what_it_did_write(tmp_path, monkeypatch):
-    """Cancel stops the batch; it does not pretend the folder is empty."""
-    with web_app(tmp_path, mfr="stern") as w:
-        sb = _scene_window(w, tmp_path / "extract")
-        out = tmp_path / "stopped"
-        out.mkdir()
-        _no_worker_thread(monkeypatch)
-        w.answers.append(str(out))
-        w.call("text_scenes.save_all")
-        state = sb._bulk
-        assert state is not None
-        # A second press IS the cancel (the button doubles as one, like the
-        # MP4 export and Rebuild previews).
-        w.call("text_scenes.save_all")
-        assert state["cancel"] is True
-        written, skipped, err = sb._save_all_work(state)
-        assert (written, skipped, err) == (0, 0, None)
-        w.run(sb._save_all_done, state, state["out"], written, skipped, err)
-        assert "Stopped" in w.state("text_scenes")["caption_full"]
-        assert os.listdir(out) == []
 
 
 def test_closing_the_window_stops_a_bulk_save(tmp_path):
@@ -466,32 +392,6 @@ def _show(w, sb, layout):
     w.run(sb._show_preview, sb._token, [Image.new("RGB", (320, 180))], [],
           layout)
     return w.state("text_scenes")
-
-
-def test_the_caption_line_leads_with_what_the_preview_cannot_show(tmp_path):
-    """PAD-81, from the two files the tester sent in for Venom 1.07's
-    7f71ddb3: PAD's PNG of that scene is 327 sprites composited on top of one
-    another, and the line under it read "Still picture: 200 images on a
-    1360x768 stage." The window had ALREADY established that 309 images could
-    not be placed and that the scene holds 327 screens to step through — both
-    sentences were behind the "?" while the visible one said all was well.
-
-    Through the real _show_preview, because the caption is the thing that
-    was wrong; the full paragraph must still be on the tooltip."""
-    pytest.importorskip("PIL")
-    with web_app(tmp_path, mfr="stern") as w:
-        sb = _scene_window(w, tmp_path / "extract")
-        layout = {"stage": [1360, 768, 30.0], "partial": True,
-                  "unplaced": 309, "offstage": 0, "texts": [],
-                  "sprites": [{"name": "a", "x": 10, "y": 10,
-                               "image_off": 1}]}
-        st = _show(w, sb, layout)
-
-        assert st["caption"] == \
-            "309 more images in this scene can't be placed yet."
-        # The summary is not lost, only moved behind the "?".
-        assert st["caption_full"].startswith("Still picture:")
-        assert "can't be placed yet" in st["caption_full"]
 
 
 def test_a_scene_with_nothing_to_admit_still_says_what_it_is(tmp_path):

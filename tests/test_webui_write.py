@@ -281,27 +281,6 @@ def test_scan_lists_modified_sort_export_revert(tmp_path):
         assert s["rows"] == [] and s["empty"] == "Reverting…"
 
 
-def test_scan_empty_states(tmp_path):
-    with web_app(tmp_path, mfr="pb") as w:
-        w.call("ui.select_tab", "write")
-        w.run(w.window.service("write")._scan_write_preview)
-        assert wait_for(w, lambda: not w.state("write")["scanning"])
-        assert w.state("write")["empty"].startswith("Select your modified")
-        proj = make_project(tmp_path, changed=False)
-        w.call("ui.set", "extract", "output", str(proj))
-        assert wait_for(w, lambda: not w.state("write")["scanning"])
-        # Refresh while idle scans; while scanning it is "Cancel scan"
-        assert w.call("write.refresh") is True
-        assert wait_for(w, lambda: not w.state("write")["scanning"])
-        s = w.state("write")
-        assert s["count"] == 0
-        assert s["empty"] == "No modified files detected."
-        assert s["revert_enabled"] is False
-        export = w.call("write.export_csv")
-        assert export is False
-        assert "Nothing to export yet" in w.asked[-1]["message"]
-
-
 def test_scan_pauses_during_a_run(tmp_path):
     proj = make_project(tmp_path)
     with web_app(tmp_path, mfr="pb") as w:

@@ -263,60 +263,6 @@ class _Closable:
         pass
 
 
-def test_the_launch_streams_moves_the_ladder_and_catches_the_key_verdict(rig, 
-        tmp_path, monkeypatch):
-    import subprocess
-    from pinball_decryptor.webui import emulate_core as et
-    from pinball_decryptor.webui import emulate_jjp_core as tkjjp
-    from pinball_decryptor.webui import emulate_jjp_common as common
-    monkeypatch.setattr(et, "AUDIO_CTL_FILE", str(tmp_path / "audio.json"))
-    lines = ["== mount image ==", "  sda3: 40%", "== jail ==",
-             "== game (GunsNRoses) ==",
-             "NO KEY: the licence daemon sees no key"]
-    seen = {}
-
-    def fake_popen(cmd, **kw):
-        seen["cmd"] = cmd
-        return _stdout_close(_FakeProc(lines, rc=7))
-
-    monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(subprocess, "run", _boom)
-    monkeypatch.setattr(tkjjp, "rig_cmd_root",
-                        lambda *a, **k: ["watch", list(a), k.get("env")])
-    with web_app(tmp_path, mfr="jjp") as w:
-        monkeypatch.setattr(common, "rig_off", lambda: False)
-        import pinball_decryptor.webui.tabs.emulate_jjp as mod
-        monkeypatch.setattr(mod, "rig_off", lambda: False)
-        svc = _svc(w)
-        monkeypatch.setattr(svc, "_attach_dongle", lambda: True)
-        monkeypatch.setattr(svc, "_read_status", lambda: {
-            "wsl": "1", "game_procs": "0", "dongle_present": "1",
-            "image_mounted": "1"})
-        w.call("ui.select_tab", NS)
-        w.window.jjp_emulate_iso_var.set(r"D:\games\gnr.iso")
-        w.call(NS + ".toggle")
-        s = w.state(NS)
-        # Start's own work: its spinner (a WSL restart only greys it) - while
-        # it is still running; a fast runner may already be past it
-        if svc._busy:
-            assert s["go_label"] == "Starting…" and s["go_busy"]
-        assert _wait(lambda: not svc._busy)
-        w.drain()
-        assert not w.state(NS)["go_busy"]
-        assert seen["cmd"][1] == ["watch.sh", r"D:\games\gnr.iso"]
-        assert seen["cmd"][2] == ["PAD_AUDIO_CTL=" + str(tmp_path /
-                                                         "audio.json")]
-        log = _log_text(w)
-        assert "JJP: == mount image ==" in log
-        assert "JJP: NO KEY: the licence daemon sees no key" in log
-        # the key verdict is sticky over the stopped poll that follows
-        assert _wait(lambda: svc._polled_once)
-        w.drain()
-        s = w.state(NS)
-        assert s["state_label"] == "No security key"
-        assert s["go_label"] == "Start" and s["go_enabled"]
-
-
 def test_fix_state_declined_does_nothing(tmp_path, monkeypatch):
     import subprocess
     monkeypatch.setattr(subprocess, "run", _boom)

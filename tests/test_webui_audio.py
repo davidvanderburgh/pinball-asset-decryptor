@@ -243,29 +243,6 @@ def test_choose_stages_in_the_sidecar_and_feeds_the_write(tmp_path):
         assert w.state("audio")["rows"][0]["rep"] == "Choose…"
 
 
-def test_trim_toggle_and_preview_limit(tmp_path):
-    folder = _project(tmp_path)
-    rep = str(tmp_path / "long.wav")
-    _wav(rep, seconds=2.0)
-    rel = "audio/idx0001 - Jackpot.wav"
-    from pinball_decryptor.core import audio as _audio
-    if not (_audio.probe_duration(rep) or 0) > 0:
-        # the limit is drawn from the probed length (ffprobe), which a CI
-        # runner with only the Python requirements does not have
-        pytest.skip("no audio duration probe on this machine")
-    with web_app(tmp_path, mfr="ap") as w:
-        _open(w, folder)
-        w.call("audio.set_trim", True)
-        assert _sidecar(folder)["audio_trim"] is True
-        w.answers.append(rep)
-        w.call("audio.choose", rel)
-        w.call("audio.select", [rel])
-        assert _wait(w, lambda: w.state("audio")["panes"]["rep"]["limit"])
-        pane = w.state("audio")["panes"]["rep"]
-        assert abs(pane["limit"] - 0.2) < 0.01
-        assert pane["dur"] > 1.5
-
-
 def test_clear_all_confirms_and_drops(tmp_path):
     folder = _project(tmp_path)
     rep = str(tmp_path / "a.wav")

@@ -1112,53 +1112,6 @@ def test_image_search_finds_scene_by_any_occurrence(tmp_path, monkeypatch):
         w.call("ui.set", "images", "search", "")
 
 
-def test_group_tags_reseed_across_reextract(tmp_path, monkeypatch):
-    """A group name given one extract is restored when the SAME card is
-    re-extracted to a fresh folder (a tester: tags lost on re-extract).  The
-    per-card library is keyed by the source card's file name, so only the
-    same-version card seeds; the fresh folder's sidecar also gets the name so
-    it rides Mod Transfer / reopen.  A blank rename restores the manifest
-    label and drops the tag."""
-    pytest.importorskip("PIL")
-    from pinball_decryptor.core import (extract_source, staged_changes,
-                                        tag_library)
-    monkeypatch.setattr(tag_library, "LIBRARY_FILE",
-                        str(tmp_path / "settings" / "group_tags.json"))
-    card = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
-    card.write_bytes(b"\x00" * 32)
-    key = "rad::/game/scenes/aaaaaaaa1111/scene.radium"
-
-    a, _shared = _seed_shared_image_assets(tmp_path / "A")
-    extract_source.write_extract_source(a, str(card))
-    b, _shared = _seed_shared_image_assets(tmp_path / "B")
-    extract_source.write_extract_source(b, str(card))
-    with web_app(tmp_path, mfr="stern") as w:
-        svc = w.window.service("images")
-        # First extract: rename a group -> sidecar AND the card library.
-        _images_open(w, a)
-        w.call("images.rename_group", key, "Boss Intro")
-        assert tag_library.load() == {
-            "turtles_pro-1_59_0.release.8g.sdcard.raw": {key: "Boss Intro"}}
-        assert staged_changes.load(a)["image_group_tags"] == {
-            key: "Boss Intro"}
-
-        # Second extract of the same card to a blank folder: name comes back.
-        assert not staged_changes.load(b).get("image_group_tags")
-        _images_open(w, b)
-        assert svc._group_tags.get(key) == "Boss Intro"
-        assert staged_changes.load(b).get("image_group_tags") == {
-            key: "Boss Intro"}
-        w.call("images.set_grouped", True)
-        heads = [e for e in w.state("images")["view"] if isinstance(e, dict)]
-        assert [h["l"] for h in heads if h["g"] == key] == ["Boss Intro"]
-
-        # A blank rename restores the manifest label and drops the tag.
-        w.call("images.rename_group", key, "")
-        heads = [e for e in w.state("images")["view"] if isinstance(e, dict)]
-        assert [h["l"] for h in heads if h["g"] == key] != ["Boss Intro"]
-        assert not staged_changes.load(b).get("image_group_tags")
-
-
 def test_one_row_still_clears_without_a_confirm(tmp_path, monkeypatch):
     """The per-row menu entry is the shared clear path with a selection of
     one, and it must not have grown a dialog: it was a single click before

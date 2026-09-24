@@ -5423,7 +5423,7 @@ class _SpaceCheck:
             largest_room=card.room.get(largest) if largest else None,
             at=card.at, fixed=self.budget.fixed,
             early=getattr(self.budget, "early", False),
-            uncounted=self.uncounted)
+            uncounted=self.uncounted, current=card.current)
 
     def _bank_room(self, card):
         node = card.files.get(self.img_rel) if self.img_rel else None

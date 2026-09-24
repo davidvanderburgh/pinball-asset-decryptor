@@ -852,7 +852,9 @@ class SternManufacturer(Manufacturer):
             refuse(clips + settled,
                    uncounted=uncounted + len(maybe) - len(settled))
         except _cs.WontFit as e:
-            return card_class_words(str(e))
+            # the sentence, carrying the refusal: the app offers the SD card
+            # size that fits (card_size.bigger_card_offer)
+            return _cs.RefusalText(card_class_words(str(e)), e)
         except Exception:  # noqa: BLE001 - the build's own pre-flight decides
             return None
         return None

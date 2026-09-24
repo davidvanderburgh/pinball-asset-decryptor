@@ -1078,6 +1078,205 @@ def test_a_build_that_wont_fit_is_one_clean_dialog(tmp_path, monkeypatch):
         assert w.state("shell").get("running") is False
 
 
+# ------------------------------------------- one click to a bigger card
+QUESTION_8_TO_16 = (
+    "Your assets no longer fit on an 8 GB SD card. Would you like to change "
+    "the size requirement to 16 GB so that you don't have to compress any "
+    "assets?\n\nThe SD card in the machine has to be 16 GB or bigger.")
+
+
+def _refused_run(w, tmp_path, monkeypatch, refusal, answer):
+    """A Stern build whose engine pre-flight raises *refusal*, run the way the
+    build's worker runs it, with a flash chained after it; the modal
+    question answered *answer*.  Returns (messages asked, the builds started
+    again)."""
+    from pinball_decryptor.plugins.stern import pipeline as sp
+
+    def _write_image(*a, **k):
+        raise refusal
+    monkeypatch.setattr(sp, "detect_game", lambda p: "godzilla_pro")
+    monkeypatch.setattr(sp, "display_for_key", lambda *a, **k: "Godzilla")
+    monkeypatch.setattr(sp, "engine", SimpleNamespace(
+        AVAILABLE=True, write_image=_write_image,
+        read_build_manifest=lambda p: {}))
+    app = w.app
+    again = []
+    monkeypatch.setattr(app, "_start_write", lambda **k: again.append(k))
+    log_cb, phase_cb, progress_cb, done_cb = app._make_callbacks()
+    pipe = sp.SternWritePipeline(
+        str(tmp_path / "orig.raw"), str(tmp_path), str(tmp_path / "o.raw"),
+        log_cb, phase_cb, progress_cb, done_cb)
+
+    def _building():
+        app._active_mode = "write"
+        app._cancel_requested = False
+        app._space_refusal = None
+        app.pipeline = pipe
+        app._chain_flash_after_build = (r"\\.\PhysicalDrive9",
+                                        str(tmp_path / "o.raw"))
+        w.window.set_running(True, mode="write")
+    w.run(_building)
+    w.asked.clear()
+    w.answers[:] = [answer]
+    pipe.run()
+
+    def _msgs():
+        return [a for a in w.asked if a.get("kind") == "message"]
+    assert wait_for(w, _msgs)
+    w.drain()
+    return _msgs(), again
+
+
+def _refusal(**k):
+    base = dict(fits="16G", fits_room=7_867_650_048, current="8G")
+    base.update(k)
+    return cs.WontFit(1_990_000_000, 351_760_384,
+                      [(81_000_000, "big_loop2.mp4")], **base)
+
+
+def test_a_refused_build_asks_to_build_for_the_size_that_fits(tmp_path,
+                                                              monkeypatch):
+    """PAD-176 in one click: a build the games partition can't hold, where a
+    bigger SD card size would, asks that question instead of the Write
+    Failed dialog.  Yes sets SD card size (saved and applied, as if the user
+    chose it) and starts the same build again, chained to the same flash."""
+    monkeypatch.setenv(ENV, "")
+    monkeypatch.delenv(ENV)             # restored to unset afterwards
+    with web_app(tmp_path, mfr="stern") as w:
+        msgs, again = _refused_run(w, tmp_path, monkeypatch, _refusal(),
+                                   "yes")
+        assert [m["title"] for m in msgs] == ["SD card size"]
+        assert msgs[0]["message"] == QUESTION_8_TO_16
+        assert wait_for(w, lambda: again)
+        assert again == [{"chain_flash_device": r"\\.\PhysicalDrive9",
+                          "again": True}]
+        assert w.run(w.window.card_size_choice) == "16G"
+        assert w.app._settings["card_size"] == "16G"
+        assert os.environ.get(ENV) == "16G"
+        lines = [e["text"] for e in w.window._log.get("stern", [])]
+        assert "SD card size is now 16 GB; building again." in lines
+
+
+def test_no_keeps_the_size_and_builds_nothing(tmp_path, monkeypatch):
+    with web_app(tmp_path, mfr="stern") as w:
+        msgs, again = _refused_run(w, tmp_path, monkeypatch, _refusal(),
+                                   "no")
+        assert [m["title"] for m in msgs] == ["SD card size"]
+        w.drain()
+        assert not again
+        assert w.run(w.window.card_size_choice) == ""
+        assert not w.app._settings.get("card_size")
+        lines = [e["text"] for e in w.window._log.get("stern", [])]
+        assert ("Not built: the SD card size stays 8 GB. To fit it, use "
+                "fewer or smaller replacements.") in lines
+        # the refusal itself, with its numbers, is in the log above it
+        assert any(t.startswith("This build needs 1.99 GB") for t in lines)
+
+
+@pytest.mark.parametrize("kw", [
+    {"fits": None, "largest": "32G", "largest_room": 22_500_000_000},
+    {"fixed": True},                   # a port: it can't take a size
+    {"current": None},                 # not measured at a Stern size
+    {"current": "16G", "fits": "16G"},  # nothing bigger to offer
+], ids=["nothing-fits", "port", "no-size", "not-bigger"])
+def test_no_question_when_a_bigger_card_isnt_the_answer(tmp_path,
+                                                        monkeypatch, kw):
+    with web_app(tmp_path, mfr="stern") as w:
+        refusal = _refusal(**kw)
+        msgs, again = _refused_run(w, tmp_path, monkeypatch, refusal, "yes")
+        assert [m["title"] for m in msgs] == ["Write Failed"]
+        assert msgs[0]["message"] == str(refusal)
+        assert not again
+
+
+def test_not_offered_where_a_card_cant_be_grown(monkeypatch):
+    """macOS has no loop devices: no size to change to there."""
+    monkeypatch.setattr(cs, "supported", lambda: False)
+    assert cs.bigger_card_offer(_refusal()) is None
+    monkeypatch.setattr(cs, "supported", lambda: True)
+    assert cs.bigger_card_offer(_refusal()) == ("8G", "16G")
+    assert cs.bigger_card_offer(ValueError("no")) is None
+
+
+def test_the_question_names_both_sizes():
+    assert cs.offer_question("8G", "16G") == QUESTION_8_TO_16
+    assert cs.offer_question("16G", "32G").startswith(
+        "Your assets no longer fit on a 16 GB SD card. Would you like to "
+        "change the size requirement to 32 GB")
+
+
+def test_the_early_refusal_asks_the_same(tmp_path, monkeypatch):
+    """The Build's first step (write_preflight, before any clip is
+    converted) refuses with the same WontFit: the same question."""
+    with web_app(tmp_path, mfr="stern") as w:
+        app = w.app
+        refusal = _refusal(early=True)
+        monkeypatch.setattr(app._current_mfr, "write_preflight",
+                            lambda *a, **k: cs.RefusalText(
+                                "Not enough room.", refusal))
+        again = []
+        monkeypatch.setattr(app, "_start_write", lambda **k: again.append(k))
+
+        def _building():
+            app._active_mode = "write"
+            app._cancel_requested = False
+            app._chain_flash_after_build = None
+            app.pipeline = SimpleNamespace(output_path=None, update=None)
+            w.window.set_running(True, mode="write")
+        w.run(_building)
+        w.asked.clear()
+        w.answers[:] = ["yes"]
+        app._run_pipeline_with_audio(str(tmp_path),
+                                     original=str(tmp_path / "orig.raw"))
+
+        def _msgs():
+            return [a for a in w.asked if a.get("kind") == "message"]
+        assert wait_for(w, _msgs)
+        w.drain()
+        assert [m["message"] for m in _msgs()] == [QUESTION_8_TO_16]
+        assert wait_for(w, lambda: again)
+        assert again == [{"chain_flash_device": None, "again": True}]
+        monkeypatch.delenv(ENV, raising=False)
+
+
+def test_building_again_asks_nothing_already_answered(tmp_path, monkeypatch):
+    """The build started again after Yes replaces the file the user already
+    agreed to replace without asking again, and builds it whole; a
+    different file at the output (the new size's default name) is still
+    asked about."""
+    card = make_card(tmp_path / "orig.raw")
+    with web_app(tmp_path, mfr="stern", settings={"card_size": "16G"}) as w:
+        point_at(w, card)
+        started = _to_the_build_button(w, tmp_path, monkeypatch)
+        out = os.path.join(w.window.write_output_var.get(),
+                           w.window.write_filename_var.get())
+        with open(out, "wb") as f:
+            f.write(b"the build the user already agreed to replace")
+        w.app._last_build_output = out
+        w.asked.clear()
+        w.run(lambda: w.app._start_write(again=True))
+        w.drain()
+        assert not [a for a in w.asked if a.get("kind") == "message"]
+        assert len(started) == 1
+        assert w.app.pipeline.update is False
+        # the same Build started fresh (not again) asks about that file
+        w.asked.clear()
+        w.answers[:] = ["cancel"]
+        w.run(lambda: w.app._start_write())
+        w.drain()
+        assert [a for a in w.asked if a.get("kind") == "message"]
+        assert len(started) == 1
+        # and so does again, for a file it wasn't told about
+        w.app._last_build_output = os.path.join(str(tmp_path), "other.raw")
+        w.asked.clear()
+        w.answers[:] = ["cancel"]
+        w.run(lambda: w.app._start_write(again=True))
+        w.drain()
+        assert [a for a in w.asked if a.get("kind") == "message"]
+        assert len(started) == 1
+        monkeypatch.delenv(ENV, raising=False)
+
+
 # ------------------------------------------------------- Port + build
 @pytest.mark.parametrize("saved", ["16G", ""])
 def test_port_builds_are_made_at_each_cards_own_size(monkeypatch, saved):

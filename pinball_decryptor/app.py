@@ -1864,12 +1864,19 @@ class App:
     # Write
     # ------------------------------------------------------------------
 
-    def _start_write(self, chain_flash_device=None):
+    def _start_write(self, chain_flash_device=None, again=False):
         """Dispatch a Build.  ``chain_flash_device`` (the Build / flash
         dialog with both sections ticked) makes a successful build chain
         straight into flashing its output onto that device — armed only at
         dispatch, after every validation prompt, so an aborted build never
-        leaves a flash queued."""
+        leaves a flash queued.
+
+        *again*: the same build, started over at the bigger SD card size the
+        user just said Yes to (:meth:`_offer_bigger_card`).  The questions
+        they answered for it a moment ago (what the original is, the project
+        folder, replacing the file at the output) are not asked twice; a
+        different file at the output, from the new size's default name, still
+        is."""
         if not self._current_mfr.capabilities.write:
             return
 
@@ -1985,7 +1992,7 @@ class App:
         # What the original really is (PAD-122): a multi-boot card builds as a
         # multi-boot card with its FIRST image changed, and the user has to
         # know that before the edits go in, not after.
-        if not self._source_note_accepted(original):
+        if not again and not self._source_note_accepted(original):
             return
 
         # Collision check: warn before clobbering an existing build with the
@@ -2001,17 +2008,23 @@ class App:
         # the same question a second time.
         update = None
         if os.path.exists(output_path):
-            update = self._confirm_build_over(original, assets_dir,
-                                              output_path)
-            if update is None:
-                return
+            if again and os.path.abspath(output_path) == os.path.abspath(
+                    getattr(self, "_last_build_output", None) or ""):
+                # the file the user already agreed to replace, left as it
+                # was by the refusal; a new SD card size is a whole build
+                update = False
+            else:
+                update = self._confirm_build_over(original, assets_dir,
+                                                  output_path)
+                if update is None:
+                    return
 
         # Catch the silent "assigned replacements for one folder, then pointed
         # Build at another" trap: the Write flow's folder-match guard would
         # drop those assignments and quietly build an unmodified image.  Warn
         # before we do all the work.
         mismatches = self.window.replacement_folder_mismatches(assets_dir)
-        if mismatches:
+        if mismatches and not again:
             recorded = recorded_replacement_counts(
                 assets_dir, [kind for kind, _n, _f in mismatches])
             if not messagebox.askyesno(
@@ -2025,7 +2038,7 @@ class App:
         # card silently drops every mod that was baked into the first one.
         from .core.extract_source import other_card_recorded
         other = other_card_recorded(assets_dir, original)
-        if other and not messagebox.askyesno(
+        if other and not again and not messagebox.askyesno(
                 OTHER_CARD_TITLE,
                 other_card_message(assets_dir, other, original)):
             return
@@ -2090,6 +2103,9 @@ class App:
             write_kwargs["update"] = update
         self._chain_flash_after_build = (
             (chain_flash_device, output_path) if chain_flash_device else None)
+        # what _offer_bigger_card needs if this build is refused for room
+        self._last_build_output = output_path
+        self._space_refusal = None
         self.pipeline = self._current_mfr.make_write_pipeline(
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
@@ -3666,6 +3682,9 @@ class App:
                 why = None      # the pipeline's own checks still run
             if why:
                 self._staging_failures = []
+                # a room refusal carries its WontFit: _on_done offers the SD
+                # card size that fits (_offer_bigger_card)
+                self._space_refusal = getattr(why, "refusal", None)
                 self.msg_queue.put(LogMsg(
                     "Not building: %s" % why, "error"))
                 self.msg_queue.put(DoneMsg(False, why))
@@ -4404,9 +4423,45 @@ class App:
         else:
             self.window.set_status("Failed")
             title = "Extract Failed" if is_extract else "Write Failed"
-            messagebox.showerror(title, summary)
+            if is_extract or not self._offer_bigger_card(chain_flash):
+                messagebox.showerror(title, summary)
         # Clear staging-failure state so it never leaks into a later run.
         self._staging_failures = []
+
+    def _offer_bigger_card(self, chain_flash=None):
+        """A build refused because it doesn't fit the card's games partition
+        (Stern Spike 2, PAD-176) where a bigger SD card size would fit it:
+        ask once, in place of the Write Failed dialog, whether to build for
+        that size.  Yes sets the Write tab's SD card size (saved, like the
+        user choosing it) and starts the same build again, with the flash it
+        was chained to, if any (the flash refuses a card too small for the
+        image before writing anything).  No keeps the size, and the refusal
+        above in the log says what else would fit.  True when asked."""
+        refusal = (getattr(self, "_space_refusal", None)
+                   or getattr(getattr(self, "pipeline", None),
+                              "card_size_refusal", None))
+        self._space_refusal = None
+        if refusal is None:
+            return False
+        from .plugins.stern import card_size as cs
+        offer = cs.bigger_card_offer(refusal)
+        if offer is None:
+            return False
+        current, fits = offer
+        if not messagebox.askyesno("SD card size",
+                                   cs.offer_question(current, fits)):
+            self.window.append_log(
+                "Not built: the SD card size stays %s. To fit it, use fewer "
+                "or smaller replacements." % cs.words(current), "info")
+            return True
+        self.window.write_card_size_var.set(fits)       # saved and applied
+        self.window.append_log(
+            "SD card size is now %s; building again." % cs.words(fits),
+            "info")
+        device = chain_flash[0] if chain_flash else None
+        self.root.after(0, lambda: self._start_write(
+            chain_flash_device=device, again=True))
+        return True
 
     # ------------------------------------------------------------------
     # Update check

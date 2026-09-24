@@ -382,6 +382,9 @@ class SternWritePipeline(BasePipeline):
         # let the engine decide from the record beside the file
         # (engine.write_image).
         self.update = update
+        # The card_size refusal that stopped this build, if one did: the app
+        # offers the SD card size that fits (card_size.bigger_card_offer).
+        self.card_size_refusal = None
 
     def _run(self):
         self._set_phase(0)  # Detect
@@ -420,6 +423,7 @@ class SternWritePipeline(BasePipeline):
             msg = card_class_words(str(e))
             if not (isinstance(e, Cancelled) or self._cancelled):
                 self._log(msg, "error")
+                self.card_size_refusal = e
             raise PipelineError("Re-encode", msg) from e
         self._set_phase(3)  # Patch image
         # Item 149: the modes this build put on the card, from its record.

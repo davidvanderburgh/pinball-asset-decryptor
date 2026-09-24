@@ -181,6 +181,20 @@ card of that class).
       (output discarded, reason given). A rerun with nothing else in WSL and a
       10-second heartbeat, grow and copies included, never hung. So the grow
       step alone does not reproduce it, and the cause is still unknown.
+- **2026-09-23, third pass: one click to the size that fits** (David's ask,
+  worded as he gave it).
+  - A build refused for room, where a bigger SD card size would fit, asks
+    "Your assets no longer fit on an 8 GB SD card. Would you like to change
+    the size requirement to 16 GB so that you don't have to compress any
+    assets?" It adds that the machine's card has to be that big, and it
+    replaces the Write Failed dialog.
+  - Yes sets SD card size and builds again, without asking again what was
+    already answered. No keeps the size.
+  - Not asked for a port, on macOS, or when no bigger size fits.
+  - Proven in the real app (scratchpad `oneclick_real.py`) on the real card
+    with gzproj2: Build at 8 GB, the question 5 s later, Yes, and the 16 GB
+    build finished in 5 min 43 s. The only other dialog was Write Complete.
+    The image is 15,494,807,552 bytes and was renamed with the 16G token.
 - Follow-up (not this branch): a grown build used as a multi-boot primary
   (mkmulticard's store sizing and the Multi-boot tab's size strip), filed as
   a separate task.

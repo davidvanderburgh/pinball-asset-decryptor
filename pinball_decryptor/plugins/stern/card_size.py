@@ -596,7 +596,10 @@ class WontFit(CardSizeError):
     *fits_room*, its usable bytes there), or ``None``; *largest* /
     *largest_room* the biggest size that was considered, said when even that
     is too small.  All of them come from the one *need*.  *fixed*: the build
-    can't take a size (a port's, see :func:`bigger_card`).
+    can't take a size (a port's, see :func:`bigger_card`).  *current* is the
+    SD card size the build was measured at (the original's own, or the one
+    it was asked to grow to), which :func:`bigger_card_offer` offers to
+    change.
 
     *early*: found by the Build's first step (Stern write_preflight), before
     any replacement was converted, which counts only what is sure, so *need*
@@ -608,7 +611,8 @@ class WontFit(CardSizeError):
 
     def __init__(self, need, avail, items=(), fits=None, fits_room=None,
                  largest=None, largest_room=None, at=None, fixed=False,
-                 early=False, uncounted=0):
+                 early=False, uncounted=0, current=None):
+        self.current = current
         self.need = int(need)
         self.avail = int(avail)
         self.items = sorted(items, reverse=True)
@@ -673,6 +677,44 @@ class WontFit(CardSizeError):
             msg += " Biggest: %s." % ", ".join(
                 "%s (+%s)" % (rel, size_words(n)) for n, rel in big)
         return msg
+
+
+class RefusalText(str):
+    """A refusal's sentence, as Stern's ``write_preflight`` returns it, that
+    still carries the :class:`WontFit` it came from (*refusal*), so the app
+    can offer the SD card size that fits instead of only showing it."""
+
+    def __new__(cls, text, refusal=None):
+        s = super().__new__(cls, text)
+        s.refusal = refusal
+        return s
+
+
+def bigger_card_offer(refusal):
+    """``(current, fits)`` when *refusal* can be answered in one click by
+    building for a bigger SD card from the Write tab: it is a
+    :class:`WontFit` measured at a known size, a bigger size fits it, the
+    build can take a size (not a port's) and this computer can grow a card.
+    ``None`` otherwise."""
+    if not isinstance(refusal, WontFit) or refusal.fixed or not supported():
+        return None
+    cur, fits = refusal.current, refusal.fits
+    if cur not in CARD_SIZES or fits not in CARD_SIZES:
+        return None
+    if CARD_SIZES[fits] <= CARD_SIZES[cur]:
+        return None
+    return cur, fits
+
+
+def offer_question(current, fits):
+    """The one-click question for :func:`bigger_card_offer`'s answer."""
+    now = words(current)
+    return ("Your assets no longer fit on %s %s SD card. Would you like to "
+            "change the size requirement to %s so that you don't have to "
+            "compress any assets?\n\nThe SD card in the machine has to be %s "
+            "or bigger."
+            % ("an" if now.startswith("8") else "a", now, words(fits),
+               words(fits)))
 
 
 # ---------------------------------------------------------------------------

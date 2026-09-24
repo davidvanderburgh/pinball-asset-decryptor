@@ -769,7 +769,9 @@ def test_every_word_row_matches_the_real_game_program(build_id):
     assert rows
     for n in rows:
         assert S.site_state(img, n)[0] == "stock", n.row_key
-        assert S.decode(n.kind, n.words) == n.value, n.row_key
+        assert n.words_agree, n.row_key
+        if n.kind != "insn":            # an insn row's stock word LOADS its (measured) value
+            assert S.decode(n.kind, n.words) == n.value, n.row_key
 
 
 def test_the_shipped_tables_parse_and_every_row_is_well_formed():
@@ -779,7 +781,11 @@ def test_the_shipped_tables_parse_and_every_row_is_well_formed():
             assert n.mode_id in b.modes, n.row_key
             if n.is_word:
                 S.encode(n.kind, n.words, n.value)
-                assert S.decode(n.kind, n.words) == n.value, n.row_key
+                assert n.words_agree, n.row_key
+                if n.kind != "insn":
+                    assert S.decode(n.kind, n.words) == n.value, n.row_key
+                if n.inert:                  # item 159: read-only, and says why
+                    assert not n.editable and n.why_read_only()
             if n.is_adjustment:
                 assert n.adj_range, n.row_key
                 if n.range_inverted:            # Stern ships a few (90..60): read-only, said why
@@ -1134,3 +1140,325 @@ def test_a_mod_pack_for_another_build_never_mixes_row_keys(tmp_path):
     # and a project that never managed its modes exports nothing for them
     assert "stock_modes" not in modpack.project_extras(
         _pack_folder(tmp_path / "plain", {"settings": {"AD_FREE_PLAY": 1}}))
+
+
+# ---- item 159: a stock mode's SHOTS as data (the tank path family, the spin counts) --------
+# Item 158 measured that tank attack never reads its lit mask (its shots are a six-entry path
+# the tanks walk) and that battle vs Ebirah rebuilds its mask from spin counts at every start.
+# These tests pin the app's side on a synthetic ELF: the new kinds (path, qword, insn), the
+# inert / fixed / follows marks, a position set to NONE (a copy of its neighbour away from the
+# goal, the proven way) or to another shot with the counted-shots words and the spot list kept
+# in step, the refusals (a duplicate, a multi-bit, a shot the switches never send alone, a
+# fixed position, a family whose counted words can't encode), the revert byte for byte, a spin
+# count as a mov over the load, and an inert row's stale value never written.
+FAMILY_VA = TEXT_VADDR + 0x400
+PATH_VA = FAMILY_VA                          # 6 x 16-byte entries
+SPOT_VA = FAMILY_VA + 0x60                   # 6 x u64
+CNT_LO_VA, CNT_HI_VA, CNT_LO2_VA = FAMILY_VA + 0x90, FAMILY_VA + 0x94, FAMILY_VA + 0x98
+SPIN_VA = (FAMILY_VA + 0xA0, FAMILY_VA + 0xA4, FAMILY_VA + 0xA8)
+PATH_STOCK = [(1 << 35, 0x0B7F0072), (0x100000, 0x0B6D0090), (0x80000, 0x0B6C0093),
+              (0x800, 0x0B64009A), (0x200000, 0x0B6E00AD), (1 << 37, 0x0B80007B)]
+SPOT_STOCK = [0x80000, 0x100000, 0x800, 0x200000, 1 << 35, 1 << 37]
+MOVEQ_R0_800, MOVEQ_R1_28, MOVTEQ_R0_38 = 0x03A00B02, 0x03A01028, 0x03400038
+LDR_LEFT, LDR_TOP, LDR_SHIELD = 0xE5905078, 0xE594607C, 0xE5945080
+
+
+def _with_big_phdr(elf, text_len=0x600):
+    """``_with_phdr`` with a PT_LOAD long enough to hold a data region after the code."""
+    b = bytearray(elf)
+    b += b"\0" * max(0, TEXT_OFF + text_len - len(b))
+    ph_off = len(b)
+    b += struct.pack("<8I", 1, TEXT_OFF, TEXT_VADDR, TEXT_VADDR, text_len, text_len, 5, 0x1000)
+    struct.pack_into("<I", b, 0x1C, ph_off)
+    struct.pack_into("<HH", b, 0x2A, 32, 1)
+    return b
+
+
+def family_elf():
+    b = _with_big_phdr(_build_elf(inline_crc_loops=5, trailer=VALIDATOR_STRINGS))
+    for va, w in ((AWARD_VA, MOVW_R2_D090), (AWARD_VA2, MOVT_R2_3), (TIMER_VA, MOV_R1_30),
+                  (LIT_VA, 5000), (MASK_VA, MOV_R0_800), (MASK_VA2, MOVT_R0_70)):
+        _put(b, va, w)
+    for i, (mask, lamp) in enumerate(PATH_STOCK):
+        _put(b, PATH_VA + 16 * i, mask & 0xFFFFFFFF)
+        _put(b, PATH_VA + 16 * i + 4, mask >> 32)
+        _put(b, PATH_VA + 16 * i + 8, lamp)
+        _put(b, PATH_VA + 16 * i + 12, 0)
+    for i, mask in enumerate(SPOT_STOCK):
+        _put(b, SPOT_VA + 8 * i, mask & 0xFFFFFFFF)
+        _put(b, SPOT_VA + 8 * i + 4, mask >> 32)
+    _put(b, CNT_LO_VA, MOVEQ_R0_800)
+    _put(b, CNT_HI_VA, MOVEQ_R1_28)
+    _put(b, CNT_LO2_VA, MOVTEQ_R0_38)
+    for va, w in zip(SPIN_VA, (LDR_LEFT, LDR_TOP, LDR_SHIELD)):
+        _put(b, va, w)
+    return bytes(b)
+
+
+def family_table(elf):
+    fixed = {0: " fixed seed", 2: " fixed goal", 4: " fixed seed", 5: " fixed seed"}
+    lines = [table_text(elf, game="godzilla_pro", version="1.15")]
+    lines.append("mode 4 cmode_tank_attack_multiball obj 0x7a1b20 vtable 0x6300f8 title_msg 3240")
+    lines.append("number 4 initial_mask.lo 7342080 movwt 0x%x 0x%x e3a00b02,e3400070 word inert inline_copy"
+                 % (MASK_VA, MASK_VA2))
+    for i, (mask, lamp) in enumerate(PATH_STOCK):
+        lines.append("number 4 path.%d 0x%x path 0x%x %08x,%08x,%08x,00000000 word%s  # TANK %d" % (
+            i, mask, PATH_VA + 16 * i, mask & 0xFFFFFFFF, mask >> 32, lamp, fixed.get(i, ""), i + 1))
+    lines.append("number 4 path.counted.lo 0x380800 movwt 0x%x 0x%x 03a00b02,03400038 word follows path"
+                 % (CNT_LO_VA, CNT_LO2_VA))
+    lines.append("number 4 path.counted.hi 0x28 imm 0x%x 03a01028 word follows path" % CNT_HI_VA)
+    for i, mask in enumerate(SPOT_STOCK):
+        lines.append("number 4 path.spot.%d 0x%x qword 0x%x %08x,%08x word follows path" % (
+            i, mask, SPOT_VA + 8 * i, mask & 0xFFFFFFFF, mask >> 32))
+    lines.append("number 12 spins.left 15 insn 0x%x e5905078 word" % SPIN_VA[0])
+    lines.append("number 12 spins.top 40 insn 0x%x e594607c word" % SPIN_VA[1])
+    lines.append("number 12 spins.shield 15 insn 0x%x e5945080 word" % SPIN_VA[2])
+    return "\n".join(lines) + "\n"
+
+
+@pytest.fixture
+def felf():
+    return family_elf()
+
+
+@pytest.fixture
+def fbuild(felf):
+    return S.parse(family_table(felf))[0]
+
+
+def _plan(project, build, elf):
+    rdr, _ = _stub(elf)
+    msgs = []
+    _w, overlay, n = S.compute_writes(rdr, rdr.fw_node, project,
+                                      lambda m, lvl="info": msgs.append((m, lvl)), builds=[build])
+    return overlay, n, msgs
+
+
+def _word(overlay, va):
+    return struct.unpack("<I", overlay[TEXT_OFF + (va - TEXT_VADDR)])[0]
+
+
+def test_the_shots_as_data_kinds_read_encode_and_say_what_is_read_only(fbuild):
+    b = fbuild
+    p3, p0, p2 = b.number("4.path.3"), b.number("4.path.0"), b.number("4.path.2")
+    assert p3.kind == "path" and p3.value == 0x800 and p3.path_index == 3 and p3.editable
+    assert b.row_label(p3) == "Position 4" and p3.is_player_facing
+    assert "16-byte path entry" in p3.where_text()
+    assert not p0.editable and "tanks appear" in p0.why_read_only()
+    assert not p2.editable and "heads for" in p2.why_read_only()
+    assert [n.path_index for n in S.path_rows(b, 4)] == [0, 1, 2, 3, 4, 5]
+    assert S.path_none_neighbour(S.path_rows(b, 4), 3).path_index == 4     # away from the goal
+    assert S.path_none_neighbour(S.path_rows(b, 4), 1).path_index == 0
+    cnt = b.number("4.path.counted.lo")
+    assert cnt.follows == "path" and not cnt.editable and "in step" in cnt.why_read_only()
+    assert not cnt.is_player_facing and not b.number("4.path.spot.2").is_player_facing
+    mask = b.number("4.initial_mask.lo")
+    assert mask.inert == "inline_copy" and not mask.editable
+    assert "never reads its lit shots" in mask.why_read_only() and mask.words_agree
+    spins = b.number("12.spins.left")
+    assert spins.kind == "insn" and spins.value == 15 and spins.editable and spins.words_agree
+    assert b.row_label(spins) == "Left spinner spins" and spins.is_player_facing
+    # the words
+    assert S.decode("path", (0x800, 0, 0x0B64009A, 0)) == 0x800
+    assert S.encode("path", (0x800, 0, 0x0B64009A, 0), 1 << 37) == (0, 0x20, 0x0B64009A, 0)
+    assert S.decode("qword", (0, 8)) == 1 << 35 and S.encode("qword", (0, 8), 0x800) == (0x800, 0)
+    assert S.decode("insn", (LDR_LEFT,)) is None                       # the load: measured, not held
+    assert S.encode("insn", (LDR_LEFT,), 5) == (0xE3A05005,)          # mov r5, #5
+    assert S.encode("insn", (LDR_TOP,), 40) == (0xE3A06028,)          # mov r6, #40: the load's register
+    assert S.decode("insn", (0xE3A05005,)) == 5
+    assert S.skeleton("insn", (LDR_LEFT,)) == S.skeleton("insn", (0xE3A05005,))
+    with pytest.raises(S.StockModeError, match="at least 1"):
+        S.encode("insn", (LDR_LEFT,), 0)
+    with pytest.raises(S.StockModeError, match="nearest that fits"):
+        S.encode("insn", (LDR_LEFT,), 257)
+    # names: the port's shot lines, the spinner bits, else the bit number
+    assert S.shot_name(b, 0x100000) == "Left ramp" and S.shot_name(b, 0x800) == "Top spinner, first bit"
+    assert S.shot_name(b, 0) == "none" and S.shot_name(b, 1 << 35) == "bit 35"
+    assert S.display(b, p3, 0x800) == "Top spinner, first bit" and S.display(b, spins, 15) == "15"
+    choices = dict(S.path_choices(b, p3))
+    assert choices[0].startswith("none") and choices[0x400000] == "Building"
+    assert 0x1000000000 not in choices                                 # Big loop: never alone
+    assert 0x200000 not in choices and 0x100000 not in choices         # other positions
+    assert S.path_choices(b, p0) == []
+
+
+def test_a_position_set_to_none_copies_its_neighbour_and_the_family_follows(project, fbuild, felf):
+    from pinball_decryptor.core import staged_changes
+    assert S.stage(project, fbuild, fbuild.number("4.path.3"), "none") == 0
+    assert staged_changes.load(project)["stock_modes"]["values"] == {"4.path.3": 0}
+    assert S.pending_count(project) == 1
+    edits = S.staged_edits(project, fbuild)
+    assert (edits[0]["stock_text"], edits[0]["new_text"]) == ("Top spinner, first bit", "none")
+    overlay, n, msgs = _plan(project, fbuild, felf)
+    assert n == 2                                            # the entry + the counted low half
+    # the whole entry is position 5's (lamp and id too): the walk skips it, the proven way
+    assert [_word(overlay, PATH_VA + 0x30 + 4 * k) for k in range(4)] == \
+        [0x200000, 0, 0x0B6E00AD, 0]
+    assert _word(overlay, CNT_LO_VA) == 0x03A00000 and _word(overlay, CNT_LO2_VA) == MOVTEQ_R0_38
+    assert TEXT_OFF + (CNT_HI_VA - TEXT_VADDR) not in overlay            # bits 37, 35: unchanged
+    assert not any(TEXT_OFF + (SPOT_VA + 8 * i - TEXT_VADDR) in overlay for i in range(6))
+    text = " ".join(m for m, _l in msgs)
+    assert "position 4: Top spinner, first bit -> none" in text and "counted shots (lo) kept in step" in text
+
+
+def test_a_position_replaced_by_a_shot_moves_its_spot_entry_and_the_counted_words(project, fbuild, felf):
+    assert S.stage(project, fbuild, fbuild.number("4.path.3"), "0x400000") == 0x400000
+    overlay, n, _m = _plan(project, fbuild, felf)
+    assert n == 3                                            # entry, counted low half, spot entry
+    assert [_word(overlay, PATH_VA + 0x30 + 4 * k) for k in range(4)] == [0x400000, 0, 0x0B64009A, 0]
+    assert _word(overlay, CNT_LO_VA) == 0x03A00000 and _word(overlay, CNT_LO2_VA) == 0x03400078
+    assert (_word(overlay, SPOT_VA + 16), _word(overlay, SPOT_VA + 20)) == (0x400000, 0)
+    # a shot above bit 31 lands in the high half of the counted words (a moveq: bits 35, 37
+    # and 42 together would need an odd rotation, so that one is refused with the reason)
+    with pytest.raises(S.StockModeError, match="counted-shots instruction"):
+        S.stage(project, fbuild, fbuild.number("4.path.3"), str(1 << 42))
+    S.stage(project, fbuild, fbuild.number("4.path.3"), str(1 << 39))
+    overlay, n, _m = _plan(project, fbuild, felf)
+    assert n == 4 and _word(overlay, CNT_HI_VA) == 0x03A010A8    # moveq r1, #0xa8 (bits 35, 37, 39)
+    assert _word(overlay, PATH_VA + 0x34) == 0x80
+
+
+def test_a_position_refuses_what_the_tanks_cannot_stand_on(project, fbuild):
+    p3, p1 = fbuild.number("4.path.3"), fbuild.number("4.path.1")
+    with pytest.raises(S.StockModeError, match="already position 5"):
+        S.stage(project, fbuild, p3, "0x200000")
+    with pytest.raises(S.StockModeError, match="ONE shot"):
+        S.stage(project, fbuild, p3, "0x3")
+    with pytest.raises(S.StockModeError, match="never send Big loop alone"):
+        S.stage(project, fbuild, p3, str(1 << 36))
+    with pytest.raises(S.StockModeError, match="tanks appear"):
+        S.stage(project, fbuild, fbuild.number("4.path.0"), "none")
+    with pytest.raises(S.StockModeError, match="in step"):
+        S.stage(project, fbuild, fbuild.number("4.path.counted.lo"), 5)
+    # two low bits far apart (the Slingshot's bit 1 beside the Top spinner's bit 11) do not
+    # fit the counted-shots mov: refused with the reason; once the Top spinner is gone they do
+    with pytest.raises(S.StockModeError, match="counted-shots instruction"):
+        S.stage(project, fbuild, p1, "0x2")
+    assert S.stage(project, fbuild, p3, "0x40") == 0x40
+    assert S.stage(project, fbuild, p1, "0x2") == 0x2
+    assert S.staged(project)["values"] == {"4.path.1": 2, "4.path.3": 0x40}
+    assert S.stage(project, fbuild, p3, "0x800") is None
+    # a NONE neighbour counts as the shot it copies (bit 35 is position 1's, and now 2's too)
+    S.stage(project, fbuild, p1, "none")
+    with pytest.raises(S.StockModeError, match="bit 35 is already position"):
+        S.stage(project, fbuild, p3, str(1 << 35))
+
+
+def test_the_family_goes_back_to_stock_byte_for_byte(project, fbuild, felf):
+    S.stage(project, fbuild, fbuild.number("4.path.3"), "none")
+    overlay, _n, _m = _plan(project, fbuild, felf)
+    written = bytearray(felf)
+    for off, b in overlay.items():
+        written[off:off + 4] = b
+    written = bytes(written)
+    assert S.identify(S.ElfImage(written), [fbuild])[0] is fbuild        # still this build, by words
+    # a second Write of the same edit: nothing to do
+    overlay2, n2, _m = _plan(project, fbuild, written)
+    assert (overlay2, n2) == ({}, 0)
+    # back to Top spinner: the stock words, every one of them
+    assert S.stage(project, fbuild, fbuild.number("4.path.3"), "0x800") is None
+    assert S.pending_count(project) == 0 and S.manages(project)
+    overlay3, n3, msgs = _plan(project, fbuild, written)
+    assert n3 == 2 and "back to stock" in " ".join(m for m, _l in msgs)
+    restored = bytearray(written)
+    for off, b in overlay3.items():
+        restored[off:off + 4] = b
+    assert bytes(restored) == felf
+    # and on a stock card with nothing staged, nothing is written at all
+    assert _plan(project, fbuild, felf)[:2] == ({}, 0)
+    # revert all keeps the family managed: the card that holds our words still goes back
+    S.stage(project, fbuild, fbuild.number("4.path.3"), "none")
+    S.unstage_all(project, fbuild)
+    overlay4, n4, _m = _plan(project, fbuild, written)
+    assert n4 == 2 and overlay4 == overlay3
+
+
+def test_a_spin_count_is_a_mov_over_the_load_and_the_load_comes_back(project, fbuild, felf):
+    left = fbuild.number("12.spins.left")
+    assert S.stage(project, fbuild, left, "5") == 5
+    with pytest.raises(S.StockModeError, match="at least 1"):
+        S.stage(project, fbuild, left, "0")
+    overlay, n, msgs = _plan(project, fbuild, felf)
+    assert n == 1 and _word(overlay, SPIN_VA[0]) == 0xE3A05005
+    assert "spins 15 -> 5" in " ".join(m for m, _l in msgs)
+    written = bytearray(felf)
+    _put(written, SPIN_VA[0], 0xE3A05005)
+    written = bytes(written)
+    img = S.ElfImage(written)
+    assert S.site_state(img, left) == ("ours", (0xE3A05005,))
+    assert S.identify(img, [fbuild])[1] == "words"
+    assert S.stage(project, fbuild, left, "15") is None                # back to the load
+    overlay, n, _m = _plan(project, fbuild, written)
+    assert n == 1 and _word(overlay, SPIN_VA[0]) == LDR_LEFT
+    # a card with a different load there is not this build's row: refused, not guessed
+    other = bytearray(felf)
+    _put(other, SPIN_VA[0], 0xE5905074)
+    assert S.site_state(S.ElfImage(bytes(other)), left)[0] == "differs"
+
+
+def test_an_inert_rows_stale_value_is_never_written_but_the_card_still_goes_back(project, fbuild, felf):
+    from pinball_decryptor.core import staged_changes
+    mask = fbuild.number("4.initial_mask.lo")
+    with pytest.raises(S.StockModeError, match="never reads its lit shots"):
+        S.stage(project, fbuild, mask, 0x700000)
+    # an older project staged it before item 158 measured it
+    staged_changes.save(project, {"stock_modes": {"build": fbuild.id,
+                                                  "values": {"4.initial_mask.lo": 0x700000},
+                                                  "touched": ["4.initial_mask.lo"]}})
+    assert S.pending_count(project) == 0 and S.staged_edits(project, fbuild) == []
+    overlay, n, msgs = _plan(project, fbuild, felf)
+    assert (overlay, n) == ({}, 0)
+    assert any("not written" in m and "never reads" in m and lvl == "warning" for m, lvl in msgs)
+    # a card an older app wrote that edit onto: the stock instruction goes back
+    old = bytearray(felf)
+    _put(old, MASK_VA, 0xE3A00000)                                       # mov r0, #0
+    overlay, n, _m = _plan(project, fbuild, bytes(old))
+    assert n == 1 and _word(overlay, MASK_VA) == MOV_R0_800
+
+
+@pytest.mark.parametrize("build_id", ["godzilla_pro 1.15", "godzilla_le 1.16"])
+def test_the_shipped_tables_carry_the_tank_path_and_the_spin_counts(build_id):
+    b = next(x for x in S.tables() if x.id == build_id)
+    rows = S.path_rows(b, 4)
+    assert [n.path_index for n in rows] == [0, 1, 2, 3, 4, 5]
+    assert [n.value for n in rows] == [1 << 35, 0x100000, 0x80000, 0x800, 0x200000, 1 << 37]
+    assert [n.path_index for n in rows if n.editable] == [1, 3]
+    assert S.path_goal(rows) == 2
+    follows = [n for n in b.numbers if n.mode_id == 4 and n.follows == "path"]
+    assert sorted(n.key for n in follows) == sorted(
+        ["path.counted.lo", "path.counted.hi"] + ["path.spot.%d" % i for i in range(6)])
+    assert S.family_words(b, 4, {}) == {n.row_key: tuple(n.words) for n in rows + follows}
+    words = S.family_words(b, 4, {"4.path.3": 0})
+    assert words["4.path.3"] == tuple(rows[4].words)
+    assert S.decode("movwt", words["4.path.counted.lo"]) == 0x380000
+    choices = dict(S.path_choices(b, rows[3]))
+    assert choices[0x800] == "Top spinner, first bit" and choices[0x400000] == "Building" and 0 in choices
+    assert 1 << 36 not in choices and 0x100000 not in choices
+    spins = {n.key: n for n in b.numbers if n.mode_id == 12 and n.kind == "insn"}
+    assert sorted(spins) == ["spins.left", "spins.shield", "spins.top"]
+    assert [spins[k].value for k in ("spins.left", "spins.top", "spins.shield")] == [15, 40, 15]
+    assert all(n.editable and n.words_agree for n in spins.values())
+    # the getter rows item 158 / 159 found inert, on both builds
+    inert = sorted({n.mode_id for n in b.numbers if n.inert})
+    assert inert == [1, 4, 7, 12, 13, 15, 20, 22]
+    assert all(not n.editable and n.why_read_only() for n in b.numbers if n.inert)
+    live = sorted({n.mode_id for n in b.numbers if n.key.startswith("initial_mask.")
+                   and n.is_word and n.editable})
+    assert live == [2, 5, 6, 9, 10, 11, 18, 21, 23, 24, 26]
+
+
+def test_shot_labels_are_unique_on_both_builds():
+    """One label, one bit: the port names the top spinner's middle bit 0x2000 "Top spinner" and the
+    tank path holds its first bit 0x800, so the two must read differently in the picker, the Value
+    and Stock columns and the Write log (the merge of the port's spinner shots and the path family
+    once listed "Top spinner" twice)."""
+    for build_id in ("godzilla_le 1.16", "godzilla_pro 1.15"):
+        b = next(x for x in S.tables() if x.id == build_id)
+        names = S.shot_names(b)
+        labels = list(names.values())
+        assert len(labels) == len(set(labels)), sorted(l for l in labels if labels.count(l) > 1)
+        assert names[0x800] == "Top spinner, first bit" and names[0x2000] == "Top spinner"
+        rows = S.path_rows(b, 4)
+        for n in rows:
+            picks = [label for _m, label in S.path_choices(b, n)]
+            assert len(picks) == len(set(picks)), picks

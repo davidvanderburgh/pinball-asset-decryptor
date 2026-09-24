@@ -34,6 +34,8 @@ from ...plugins.stern import mode_project as MP
 from ...plugins.stern import mode_tryit as MT
 from .. import compat
 from .. import modes_filmcut as FCD
+from ..modes_stock_remap import StockRemapMixin
+from ..modes_stock_rewrite import StockRewriteMixin   # item 161
 from ..modes_tryit import TryItMixin
 from .base import TabService, rpc
 
@@ -126,7 +128,7 @@ def fix_chip(problems):
     return dict(PAGES)[pages[0]] + (" •" if len(pages) == 1 else " +%d •" % (len(pages) - 1))
 
 
-class ModesTab(TryItMixin, TabService):
+class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
     ns = "modes"
     key = "Modes"
     label = "Modes"
@@ -345,6 +347,8 @@ class ModesTab(TryItMixin, TabService):
     def _refresh_all(self):
         self.refresh()
         self.refresh_stock_modes()
+        self.refresh_stock_remap()             # item 160: the counts-as table
+        self.refresh_stock_rewrite()           # item 161: the rewrite rows
 
     # -- hooks ------------------------------------------------------------
     def on_manufacturer(self, mfr):
@@ -558,8 +562,16 @@ class ModesTab(TryItMixin, TabService):
             rows.append({"slug": slug, "kind": "form", "name": name, "chip": chip,
                          "chip_tip": tip})
         for slug, name in self._code_list:
-            rows.append({"slug": slug, "kind": "code", "name": name, "chip": "",
-                         "chip_tip": ""})
+            chip, tip = "", ""
+            try:                                   # item 161: a code mode that rewrites one of the game's rules
+                from ...plugins.stern import stock_rewrite as SW
+                port = self._remap_port()[0] if self.project() else ""
+                tip = SW.describe_suffix(self.project(), slug, port or None).strip(" -")
+                chip = "rewrite" if tip else ""
+            except Exception:                      # noqa: BLE001 - the list must never fail on a chip
+                chip, tip = "", ""
+            rows.append({"slug": slug, "kind": "code", "name": name, "chip": chip,
+                         "chip_tip": tip})
         sel = ({"slug": self._code_slug, "kind": "code"} if self._code_slug else
                {"slug": self._slug, "kind": "form"} if self._slug else None)
         self.set(rows=rows, sel=sel)
@@ -2163,7 +2175,8 @@ class ModesTab(TryItMixin, TabService):
         if not project:
             self._stock_set(msg="Open or extract a card project first (Extract tab) - changes "
                                 "to the game's own modes are saved in it.",
-                            rows=[], on=False, sel=None, note="", value="", row_on=False)
+                            rows=[], on=False, sel=None, note="", value="", row_on=False,
+                            choices=None)
             return
         if build is None:
             pb = SM.project_build(project)
@@ -2192,19 +2205,25 @@ class ModesTab(TryItMixin, TabService):
                 staged = settings[num.adj_name]
             elif num.is_word and not other_build and num.row_key in rec["values"]:
                 staged = rec["values"][num.row_key]
-            stock = "?" if num.value is None else format(num.value, ",")
+            stock = SM.display(build, num, num.value)
             if not num.editable:
                 value = stock
                 where = "%s (read-only)" % num.where_text()
             else:
-                value = format(int(staged), ",") + "  ●" if staged is not None else stock
+                value = SM.display(build, num, int(staged)) + "  ●" if staged is not None else stock
                 where = num.where_text()
             if staged is not None:
                 n_changed += 1
-            rows.append({"key": num.row_key, "mode": build.mode_name(num.mode_id),
-                         "number": build.row_label(num), "value": value, "stock": stock,
-                         "where": where, "changed": staged is not None,
-                         "readonly": not num.editable})
+            row = {"key": num.row_key, "mode": build.mode_name(num.mode_id),
+                   "number": build.row_label(num), "value": value, "stock": stock,
+                   "where": where, "changed": staged is not None,
+                   "readonly": not num.editable}
+            if num.kind == "path" and num.editable:
+                # item 159: a tank position is picked by shot name, not typed as a number
+                row["choices"] = [{"value": str(v), "label": label}
+                                  for v, label in SM.path_choices(build, num, rec["values"])]
+                row["raw"] = str(int(staged) if staged is not None else num.value)
+            rows.append(row)
             self._stock_rows[num.row_key] = num
             self._stock_order.append(num.row_key)
         msg = ("%s: %d number(s) of the game's own modes. %s" % (
@@ -2226,20 +2245,33 @@ class ModesTab(TryItMixin, TabService):
             return
         why = num.why_read_only()
         if why:
-            self._stock_set(sel=key, value="", note="Read-only: %s." % why, row_on=False)
+            self._stock_set(sel=key, value="", note="Read-only: %s." % why, row_on=False,
+                            choices=None)
             return
         row = next((r for r in (self.get("stock") or {}).get("rows", []) if r["key"] == key), None)
         cur = (row["value"] if row else "").replace("●", "").strip()
+        choices = None
         if num.is_adjustment:
             rng = num.adj_range
             note = ("An operator setting (%s)%s: the same number as on the Defaults tab. A "
                     "machine still on the game's default takes the new one when it boots."
                     % (num.adj_name, ", %d to %d" % rng if rng else ""))
+        elif num.kind == "path":
+            # item 159: which shot this tank position is; the picker lists the shots the
+            # switches send alone, and none (the tanks then skip the position)
+            choices = (row or {}).get("choices") or []
+            cur = (row or {}).get("raw", "")
+            note = ("Which shot this tank position is (game program, %s). Pick another shot "
+                    "the switches send alone, or none: the tanks then skip this position. "
+                    "The counted shots and the spot list follow it." % num.where())
+        elif num.kind == "insn":
+            note = ("How many spins this spinner needs (game program, %s): the load of the "
+                    "game's own count becomes this number, 1 to 255." % num.where())
         else:
             note = "One word in the game program (%s)%s." % (
                 num.where(), "; it is shared by %d modes, so changing it changes all of them"
                 % num.shared if num.shared else "")
-        self._stock_set(sel=key, value=cur, note=note, row_on=True)
+        self._stock_set(sel=key, value=cur, note=note, row_on=True, choices=choices)
 
     @rpc
     def stock_refresh(self):
@@ -2276,10 +2308,10 @@ class ModesTab(TryItMixin, TabService):
             return str(e)
         label = "%s %s" % (build.mode_name(num.mode_id), build.row_label(num).lower())
         if got is None:
-            text = "%s is back to the game's own %s." % (label, format(num.value, ","))
+            text = "%s is back to the game's own %s." % (label, SM.display(build, num, num.value))
         else:
             text = "%s: %s -> %s staged for the next Write." % (
-                label, format(num.value, ","), format(got, ","))
+                label, SM.display(build, num, num.value), SM.display(build, num, got))
         self._say(text)
         if num.is_adjustment:
             try:

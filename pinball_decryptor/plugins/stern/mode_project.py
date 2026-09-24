@@ -98,6 +98,10 @@ GODZILLA_PRO_1_15 = TitleProfile(
         ("Shield target right", 0x100000000),
         ("Skill shot", 0x400000000),
         ("Big loop", 0x1000000000),
+        # item 160: the spinners' middle bits, the bits the game's own rules count (Ebirah's spins)
+        ("Left spinner", 0x200),
+        ("Top spinner", 0x2000),
+        ("Right spinner", 0x20000),
     ),
     callout_countdown=1287,
     callout_ten_seconds=1291,

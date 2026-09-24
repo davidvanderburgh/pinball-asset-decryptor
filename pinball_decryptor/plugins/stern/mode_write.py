@@ -448,6 +448,9 @@ class ModePlan:
     code: list = field(default_factory=list)
     object: str = ""
     asset_files: list = field(default_factory=list)
+    #: item 160: the "counts as" table for the game's own rules (``stock.cfg`` beside the mode
+    #: files), or "" when the project has no rows
+    stock_file: str = ""
 
     @property
     def jobs(self):
@@ -622,7 +625,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     result.lines = describe(modes, result, prof=prof)
     if code:
         code_plan(project, result, code, tree, prof, log=log)
-        result.lines += describe_code(code, result, prof=prof)
+        result.lines += describe_code(code, result, prof=prof, project=project)
+    stock_plan(project, result, tree)
     return result
 
 
@@ -721,11 +725,16 @@ def _has_code_modes(project):
     return bool(CM.code_slugs(project))
 
 
-def describe_code(code, result=None, prof=None):
-    """The log's and change scan's line for each CODE mode (:func:`.code_modes.describe`)."""
+def describe_code(code, result=None, prof=None, project=None):
+    """The log's and change scan's line for each CODE mode (:func:`.code_modes.describe`); with
+    *project*, a code mode that rewrites one of the game's own rules (item 161,
+    :mod:`.stock_rewrite`) says which."""
     from . import code_modes as CM
+    from . import stock_rewrite as SW
     carried = None if result is None else list(getattr(result, "own_sounds", None) or ())
-    return [CM.describe(slug, spec, carried, prof) for slug, spec in code or ()]
+    port = MP.port_path(prof) if project and prof is not None and getattr(prof, "port", None) else None
+    return [CM.describe(slug, spec, carried, prof) + (SW.describe_suffix(project, slug, port) if project else "")
+            for slug, spec in code or ()]
 
 
 def pending_lines(project, modes=None):
@@ -740,7 +749,7 @@ def pending_lines(project, modes=None):
     if modes is None:
         modes = project_modes(project)
     if not modes and not _has_code_modes(project):
-        return []
+        return stock_lines(project, carried=False)
     try:
         _card, prof = MP.project_profile(project)          # probe=False: no image is opened
     except Exception:
@@ -760,8 +769,44 @@ def pending_lines(project, modes=None):
         if chosen and chosen.get("request"):
             req.append(int(chosen["request"]))
         carried = choose_code_sounds(project, code, sound_gate(), cprof, taken=req, taken_beds=beds)
-        lines += describe_code(code, _EndSoundOnly(chosen, list(own) + carried), prof=cprof)
+        lines += describe_code(code, _EndSoundOnly(chosen, list(own) + carried), prof=cprof, project=project)
+    lines += stock_lines(project, carried=True, prof=prof)
     return lines
+
+
+#: The change scan's and the Write log's words for a counts-as table with no mode to ride with.
+COUNTS_AS_NEEDS_A_MODE = ("Counts as: the %d row(s) in modes/stock.json are NOT written: the table rides "
+                          "with the modes' runtime, which a build puts on the card only with at least one "
+                          "mode (add a mode, or a rewrite in C, and Write again)")
+
+
+def stock_lines(project, carried, prof=None):
+    """Item 160: the change scan's line for the project's counts-as rows (``modes/stock.json``):
+    what the table adds when a mode carries it (:func:`.stock_remap.describe`), or that it is NOT
+    written when nothing carries it (``carried=False``: the project has no mode and no code mode,
+    so no runtime goes on the card and :func:`stock_plan` is never reached). Nothing is opened but
+    the project's files and the port; never raises."""
+    try:
+        from . import stock_remap as SR
+        rows = SR.load(project)
+    except Exception:                                    # noqa: BLE001
+        rows = []
+    if not rows:
+        return []
+    if not carried:
+        return [COUNTS_AS_NEEDS_A_MODE % len(rows)]
+    if prof is None:
+        try:
+            _card, prof = MP.project_profile(project)    # probe=False: no image is opened
+        except Exception:                                # noqa: BLE001
+            prof = None
+    port = MP.port_path(prof) if prof is not None and getattr(prof, "port", "") else ""
+    if not port or not os.path.isfile(port):
+        return ["Counts as: %d row(s) (stock.cfg) for the card's port" % len(rows)]
+    try:
+        return [SR.describe(rows, SR.port_rules(port), SR.port_shots(port))]
+    except Exception:                                    # noqa: BLE001
+        return ["Counts as: %d row(s) (stock.cfg) for the card's port" % len(rows)]
 
 
 def conflicts(result, touched_rels=(), audio_idx=(), sound_idx=None):
@@ -909,10 +954,37 @@ def p2_payload(result, out_dir):
             dst = os.path.join(out_dir, name)
             shutil.copyfile(src, dst)
             assets.append(dst)
+        extras = []                                  # item 160: stock.cfg, the counts-as table
+        if getattr(result, "stock_file", ""):
+            from . import stock_remap as SR
+            dst = os.path.join(out_dir, SR.FILE_NAME)
+            shutil.copyfile(result.stock_file, dst)
+            extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"
                              % e) from None
-    return {"so": so, "cfgs": cfgs, "port": port, "assets": assets}
+    return {"so": so, "cfgs": cfgs, "port": port, "assets": assets, "extras": extras}
+
+
+def stock_plan(project, result, tree):
+    """Item 160: render the project's counts-as rows (``modes/stock.json``) for the card's port
+    into ``<tree>/padmode/stock.cfg`` and name it in *result*; nothing when there are none.
+    A row the port cannot take stops the build with the reason."""
+    from . import stock_remap as SR
+    rows = SR.load(project)
+    if not rows:
+        return result
+    padmode = os.path.join(tree, "padmode")
+    os.makedirs(padmode, exist_ok=True)
+    path = os.path.join(padmode, SR.FILE_NAME)
+    try:
+        n = SR.write_file(project, result.port, path)
+    except SR.StockRemapError as e:
+        raise ModeWriteError("the game's own rules' counts-as table: %s" % e) from None
+    if n:
+        result.stock_file = path
+        result.lines.append(SR.describe(rows, SR.port_rules(result.port), SR.port_shots(result.port)))
+    return result
 
 
 def tools_dir():
@@ -932,6 +1004,8 @@ def install_command(ex, image_path, payload, epoch):
         args += ["--cfg", ex.to_exec_path(ab(c))]
     for a in payload.get("assets") or ():
         args += ["--asset", ex.to_exec_path(ab(a))]      # a code mode's <slug>.assets
+    for a in payload.get("extras") or ():
+        args += ["--file", ex.to_exec_path(ab(a))]       # item 160: stock.cfg
     args += ["--port", ex.to_exec_path(ab(payload["port"]))]
     return ("cd %s && E2FSPROGS_FAKE_TIME=%d python3 mode_install.py %s"
             % (q(ex.to_exec_path(tools_dir())), int(epoch), " ".join(q(a) for a in args)))

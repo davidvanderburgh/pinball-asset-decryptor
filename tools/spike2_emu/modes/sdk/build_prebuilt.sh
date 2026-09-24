@@ -7,7 +7,7 @@
 # The Modes tab plays and writes a mode FILE with no compiler anywhere: the object that
 # reads mode files (the runtime + mode_file.c) is built once, here, and committed. No user
 # ever builds it (the app's pinned-payloads rule). Run this after ANY change to
-# pad_mode.h, pad_mode_runtime.c, mode_file.c or build_mode.sh, and commit both outputs;
+# pad_mode.h, pad_stock.h, pad_mode_runtime.c, mode_file.c or build_mode.sh, and commit both outputs;
 # tests/test_stern_mode_runtime.py fails, naming this script, while the object is stale.
 #
 # Needs arm-linux-gnueabihf-gcc (the app's PAD-Runtime WSL distro has it):
@@ -29,7 +29,7 @@ done
 CC=${CC:-arm-linux-gnueabihf-gcc}
 command -v "$CC" >/dev/null || { echo "build_prebuilt.sh: $CC not found (run it in the PAD-Runtime distro)" >&2; exit 1; }
 # the files the object is made from, in the order SOURCES.sha256 lists them
-SOURCES="pad_mode.h pad_mode_runtime.c mode_file.c build_mode.sh"
+SOURCES="pad_mode.h pad_stock.h pad_mode_runtime.c mode_file.c build_mode.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 for f in $SOURCES; do

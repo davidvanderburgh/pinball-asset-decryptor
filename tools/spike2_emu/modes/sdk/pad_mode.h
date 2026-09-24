@@ -312,4 +312,32 @@ int pm_display_priority(unsigned priority);
  * under it); 0 otherwise, and with no priority held. */
 int pm_display_covered(void);
 
+/* ---- the game's own rules: their shot handlers (item 160; MODE_SDK.md "Counts as") ----------
+ * A rule the game shipped with (Godzilla's battle vs Ebirah, its tank attack multiball) is a
+ * compiled object; the port names it (`rule <id> <vtable> <label>`) with the manager's get and
+ * the slot numbers of its build. Its SHOT HANDLER tests the raw shot mask for fixed bits, so a
+ * shot it does not know can only count for it by ARRIVING as the bit it tests. The runtime
+ * wraps that vtable slot (the object's vtable is checked against the port first) and, from
+ * stock.cfg beside the mode files (`counts_as <rule> <shot> -> <shot>`, re-read twice a
+ * second), REPLACES a mapped dispatch with the target bit while that bit is lit in the rule's
+ * own per-player mask - never ORed in, never once the rule has cleared it. The stand-in's
+ * inserts are held (pm_lamp_*) while the target is lit. An empty table plays every rule stock.
+ *
+ * From C a mode may add rows, or take a rule's handler over entirely (item 161): a hook sees
+ * every shot before the game's handler, may change *shot, and returns 1 to let the game's
+ * handler run with it or 0 to keep it from running at all. Every call answers 0 (or -1) on a
+ * port without `rule` lines (pm_can(PM_CAN_STOCK_RULES)). */
+#define PM_CAN_STOCK_RULES  0x8000u   /* the port names rules, the manager's get and the shot slot */
+typedef int (*pm_stock_shot_fn)(unsigned rule, uint64_t *shot, void *object);
+int pm_stock_rule_count(void);                                  /* rules the port names */
+int pm_stock_rule_at(int i, unsigned *id, const char **label);  /* the i-th; 1 = filled */
+void *pm_stock_rule_object(unsigned rule);          /* the rule's object; 0 until the manager is built */
+int pm_stock_rule_active(unsigned rule);            /* 1 / 0 for the player up; -1 unknown */
+uint64_t pm_stock_rule_field(unsigned rule);        /* the rule's lit mask for the player up */
+int pm_stock_rule_hook(unsigned rule, pm_stock_shot_fn fn);     /* 1 = the handler is wrapped and yours */
+void pm_stock_rule_unhook(unsigned rule);           /* the wrap stays; it passes through again */
+/* a counts-as row from C (kept across stock.cfg reloads); to = 0 removes the row for `from`.
+ * `to` must be ONE bit outside `from`. 1 = the table now holds it. */
+int pm_stock_counts_as(unsigned rule, uint64_t from, uint64_t to);
+
 #endif

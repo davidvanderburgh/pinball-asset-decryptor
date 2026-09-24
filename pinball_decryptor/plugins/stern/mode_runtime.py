@@ -20,7 +20,7 @@ import re
 import sys
 
 #: The files the pinned object is made from, in SOURCES.sha256's order.
-SOURCES = ("pad_mode.h", "pad_mode_runtime.c", "mode_file.c", "build_mode.sh")
+SOURCES = ("pad_mode.h", "pad_stock.h", "pad_mode_runtime.c", "mode_file.c", "build_mode.sh")
 BUILDER = "tools/spike2_emu/modes/sdk/build_prebuilt.sh"
 
 

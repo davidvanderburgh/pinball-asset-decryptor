@@ -10,6 +10,7 @@ Modes written in C against `pad_mode.h` (read `../MODE_SDK.md` first). Each file
 | `maser_barrage.c` | MASER BARRAGE | a combo chain with a timer between shots and a growing multiplier; started by the game's skill shot EVENT |
 | `final_wars.c` | FINAL WARS | a multi-phase wizard mode, lit by playing the other modes, with add-time shots |
 | `anguirus_assist.c` | ANGUIRUS | a mode that stacks with the game's own battle on purpose: it starts and ends with it |
+| `ebirah_rewrite.c` | EBIRAH, three shots then the Building | the game's OWN Ebirah battle with its shot logic replaced in C (item 161, against `../pad_stock.h`; emulator-proven on Premium 1.16, MODE_SDK.md says what was measured) |
 
 The last five (item 152) were written for Godzilla Premium 1.16 (`godzilla_le-1.16.port`) and use
 only shot names, events and callout roles that port has. They also build and run on Pro 1.15's port,

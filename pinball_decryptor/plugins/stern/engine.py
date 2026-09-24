@@ -5777,6 +5777,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             mode_own = list(mode_own) + _MW.choose_code_sounds(
                 assets_dir, code_list, _sound_gate, _cprof, taken=_req,
                 taken_beds=_beds, log=log)
+    # Item 160: the counts-as table (modes/stock.json -> stock.cfg) rides with the modes'
+    # runtime, which goes on the card only with a mode; with none, say so rather than
+    # dropping the rows without a word.
+    if _family and not mode_list and not code_list:
+        for _line in _MW.stock_lines(assets_dir, carried=False):
+            log("Modes: %s." % _line, "warning")
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -6966,6 +6972,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 "p2": ([os.path.basename(mode_payload["so"])]
                        + [os.path.basename(c) for c in mode_payload["cfgs"]]
                        + [os.path.basename(a) for a in mode_payload.get("assets") or ()]
+                       + [os.path.basename(e) for e in mode_payload.get("extras") or ()]
                        + [os.path.basename(mode_payload["port"])]),
                 "code_object": bool(getattr(mode_plan, "object", "")),
                 "payload": mode_payload,
@@ -8701,6 +8708,7 @@ def _write_override_modes(out_dir, modes, log):
     for src, name in ([(pay["so"], OVERRIDE_MODES_OBJECT)]
                       + [(c, os.path.basename(c)) for c in pay["cfgs"]]
                       + [(a, os.path.basename(a)) for a in pay.get("assets") or ()]
+                      + [(a, os.path.basename(a)) for a in pay.get("extras") or ()]   # item 160: stock.cfg
                       + [(pay["port"], os.path.basename(pay["port"]))]):
         shutil.copyfile(_lp(src), _lp(os.path.join(dest, name)))
         files.append(name)

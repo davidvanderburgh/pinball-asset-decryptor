@@ -285,8 +285,8 @@ def stock_mode_rows(mfr, assets_path):
         other = e["staged_for"] not in (None, build.id if build else None)
         out.append((
             "%s %s: %s -> %s%s" % (
-                e["mode"], label.lower(), format(e["stock"], ","),
-                format(e["new"], ","),
+                e["mode"], label.lower(), e.get("stock_text") or format(e["stock"], ","),
+                e.get("new_text") or format(e["new"], ","),
                 "  (staged for %s, not written)" % e["staged_for"]
                 if other else ""),
             "setting" if num.is_adjustment else "program",

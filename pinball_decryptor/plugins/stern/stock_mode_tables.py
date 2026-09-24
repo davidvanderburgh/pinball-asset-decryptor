@@ -11,6 +11,12 @@ Run A: ``seen runA`` = the same value at the same call site in that run's ``padm
 Regenerate this file from a newer table rather than editing rows by hand; the real-ELF test in
 ``tests/test_stern_stock_modes.py`` checks every word row against the game programs.
 
+ITEM 159 (2026-09-23) ADDS, by hand at the end of each block: the tank path family (``path``,
+``qword`` and the ``follows path`` rows) and ebirah's per-spinner spin counts (``insn``), and marks
+the ``initial_mask`` rows of eight modes ``inert`` (item 158 measured two, the desk audit of
+item 159 read the rest: their own start stores the lit mask again). See MODE_SDK.md, "Stock mode
+shots as data (item 159)".
+
 A number can only be changed in place when it is ONE word the code loads (class ``word``) or an
 operator adjustment; ``code`` rows are listed so the Modes tab can say why they stay read-only.
 Source sha1 of the blocks: 9dcdfa8b1189a258af77b024df12c4dde5c08cf4
@@ -23,8 +29,8 @@ build godzilla_pro 1.15 sha1 08d502998706d327bfbb6ea5f92ac0cee76be63b
 mode 1 cmode_godzilla_multiball obj 0x7a18a8 vtable 0x629b98 title_msg 3235
 ctor 1 a 1 award 10 b 2 timer -   # cmode_mball, ctor 0xafde0 called at 0xd325c; compared against cmode_mball_null, 63 virtuals
 shots 1 0x0 v[44] 0xaecb0, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: none
-number 1 initial_mask.lo 0 imm 0xaecb0 e3a00000 word  # v[44] returns it (0x0)
-number 1 initial_mask.hi 0 imm 0xaecb4 e3a01000 word  # v[44] returns it (0x0)
+number 1 initial_mask.lo 0 imm 0xaecb0 e3a00000 word inert start_rewrites  # v[44] returns it (0x0)
+number 1 initial_mask.hi 0 imm 0xaecb4 e3a01000 word inert start_rewrites  # v[44] returns it (0x0)
 number 1 title_msg 3235 movw 0x475f4 e3000ca3 word
 number 1 audit_started 211 imm 0xb3d34 e3a000d3 word
 number 1 audit_completed 212 imm 0xb3d3c e3a000d4 word
@@ -75,8 +81,8 @@ clip 3 BridgeDestructionProgress_3 movwt 0xa90dc 0xa90e4 e3043da8,e3403062  # v[
 mode 4 cmode_tank_attack_multiball obj 0x7a1b20 vtable 0x6300f8 title_msg 3240
 ctor 4 a 1 award 13 b 5 timer -   # cmode_mball, ctor 0x10712c called at 0xd316c; compared against cmode_mball_null, 64 virtuals
 shots 4 0x5800700800 v[44] 0x7d1e0, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: top spinner, left ramp, right ramp, building, bit 35, big loop, bit 38
-number 4 initial_mask.lo 7342080 movwt 0x7d1e0 0x7d1e8 e3a00b02,e3400070 word  # v[44] returns it (0x700800) (the low word is a mov)
-number 4 initial_mask.hi 88 imm 0x7d1e4 e3a01058 word  # v[44] returns it (0x58)
+number 4 initial_mask.lo 7342080 movwt 0x7d1e0 0x7d1e8 e3a00b02,e3400070 word inert inline_copy  # v[44] returns it (0x700800) (the low word is a mov)
+number 4 initial_mask.hi 88 imm 0x7d1e4 e3a01058 word inert inline_copy  # v[44] returns it (0x58)
 number 4 title_msg 3240 movw 0x10b40c e3000ca8 word
 number 4 audit_started 217 imm 0x10b414 e3a000d9 word
 number 4 audit_completed 218 imm 0x10b41c e3a000da word
@@ -135,8 +141,8 @@ clip 6 Megalon_gigan_jetjag_godzilla4 movwt 0xa14d0 0xa14d4 e3080be8,e3400062  #
 mode 7 cmode_planet_x_multiball obj 0x7a1d98 vtable 0x62ebb0 title_msg 3267
 ctor 7 a 17 award 16 b 13 timer -   # cmode_mball, ctor 0xf3fb0 called at 0xd307c; compared against cmode_mball_null, 64 virtuals
 shots 7 0x0 v[44] 0xf253c, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: none
-number 7 initial_mask.lo 0 imm 0xf253c e3a00000 word  # v[44] returns it (0x0)
-number 7 initial_mask.hi 0 imm 0xf2540 e3a01000 word  # v[44] returns it (0x0)
+number 7 initial_mask.lo 0 imm 0xf253c e3a00000 word inert start_rewrites  # v[44] returns it (0x0)
+number 7 initial_mask.hi 0 imm 0xf2540 e3a01000 word inert start_rewrites  # v[44] returns it (0x0)
 number 7 title_msg 3267 movw 0xf9f58 e3000cc3 word
 number 7 audit_started 221 imm 0xf9f60 e3a000dd word
 number 7 audit_completed 222 imm 0xf9f68 e3a000de word
@@ -244,8 +250,8 @@ mode 12 cmode_battle_vs_ebirah obj 0x7a1fe0 vtable 0x6266c8 title_msg 3257
 # seen runA: started at 439508 ms, stopped 83001 ms later, reason 0, by lr 0x7e1fc
 ctor 12 a 10 award 19 b 7 timer 0   # cmode_battle, ctor 0x7f7e8 called at 0xd2ef0; compared against cmode_battle, 63 virtuals
 shots 12 0x22200 v[44] 0x7e6e8, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: left spinner, top spinner, right spinner
-number 12 initial_mask.lo 139776 movwt 0x7e6e8 0x7e6f0 e3a00c22,e3400002 word  # v[44] returns it (0x22200) (the low word is a mov)
-number 12 initial_mask.hi 0 imm 0x7e6ec e3a01000 word  # v[44] returns it (0x0)
+number 12 initial_mask.lo 139776 movwt 0x7e6e8 0x7e6f0 e3a00c22,e3400002 word inert start_rewrites  # v[44] returns it (0x22200) (the low word is a mov)
+number 12 initial_mask.hi 0 imm 0x7e6ec e3a01000 word inert start_rewrites  # v[44] returns it (0x0)
 start 12 select: slot 0 of the 7-entry selector table 0x631f44 {slot, mode id, 0} (12 13 14 15 16 6 17); the screen that reads it is not traced by the tool
 number 12 select.slot0.mode_id 12 data 0x631f48 0000000c word  # which mode the selector's slot 0 starts
 number 12 title_msg 3257 movw 0x8408c e3000cb9 word seen runA
@@ -290,8 +296,8 @@ clip 12 ebirah_attack1 movwt 0x840d4 0x840d8 e3060998,e3400062  # BDLBattleVSEbi
 mode 13 cmode_battle_vs_titanosaurus obj 0x7a20c0 vtable 0x628f58 title_msg 3258
 ctor 13 a 10 award 20 b 7 timer 1   # cmode_battle, ctor 0xa35e0 called at 0xd2e9c; compared against cmode_battle, 63 virtuals
 shots 13 0x0 v[44] 0xa25a8, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: none
-number 13 initial_mask.lo 0 imm 0xa25a8 e3a00000 word  # v[44] returns it (0x0)
-number 13 initial_mask.hi 0 imm 0xa25ac e3a01000 word  # v[44] returns it (0x0)
+number 13 initial_mask.lo 0 imm 0xa25a8 e3a00000 word inert start_rewrites  # v[44] returns it (0x0)
+number 13 initial_mask.hi 0 imm 0xa25ac e3a01000 word inert start_rewrites  # v[44] returns it (0x0)
 start 13 select: slot 1 of the 7-entry selector table 0x631f44 {slot, mode id, 0} (12 13 14 15 16 6 17); the screen that reads it is not traced by the tool
 number 13 select.slot1.mode_id 13 data 0x631f54 0000000d word  # which mode the selector's slot 1 starts
 number 13 title_msg 3258 movw 0xa76f8 e3000cba word
@@ -344,8 +350,8 @@ clip 14 gigan_good_intro movwt 0x8fa6c 0x8fa70 e3070688,e3400062  # BDLBattleVSG
 mode 15 cmode_battle_vs_megalon obj 0x7a22a8 vtable 0x627fb8 title_msg 3260
 ctor 15 a 10 award 22 b 7 timer 3   # cmode_battle, ctor 0x98070 called at 0xd2dec; compared against cmode_battle, 63 virtuals
 shots 15 0x5800700800 v[44] 0x96eac, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: top spinner, left ramp, right ramp, building, bit 35, big loop, bit 38
-number 15 initial_mask.lo 7342080 movwt 0x96eac 0x96eb4 e3a00b02,e3400070 word  # v[44] returns it (0x700800) (the low word is a mov)
-number 15 initial_mask.hi 88 imm 0x96eb0 e3a01058 word  # v[44] returns it (0x58)
+number 15 initial_mask.lo 7342080 movwt 0x96eac 0x96eb4 e3a00b02,e3400070 word inert start_rewrites  # v[44] returns it (0x700800) (the low word is a mov)
+number 15 initial_mask.hi 88 imm 0x96eb0 e3a01058 word inert start_rewrites  # v[44] returns it (0x58)
 start 15 select: slot 3 of the 7-entry selector table 0x631f44 {slot, mode id, 0} (12 13 14 15 16 6 17); the screen that reads it is not traced by the tool
 number 15 select.slot3.mode_id 15 data 0x631f6c 0000000f word  # which mode the selector's slot 3 starts
 number 15 title_msg 3260 movw 0x9c194 e3000cbc word
@@ -482,8 +488,8 @@ ctor 20 a 18 award 27 b 16 timer 25   # cmode_timed, ctor 0xbf8a8 called at 0xd2
 number 20 timer.seconds ? code 0xbc8d8 - code  # v[56] computes it; not measured
 number 20 timer.v57 84 imm 0xbc2b4 e3a00054 word  # v[57] returns it
 shots 20 0x0 v[44] 0xd04d0, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: none
-number 20 initial_mask.lo 0 imm 0xd04d0 e3a00000 word  # v[44] returns it (0x0)
-number 20 initial_mask.hi 0 imm 0xd04d4 e3a01000 word  # v[44] returns it (0x0)
+number 20 initial_mask.lo 0 imm 0xd04d0 e3a00000 word inert start_rewrites  # v[44] returns it (0x0)
+number 20 initial_mask.hi 0 imm 0xd04d4 e3a01000 word inert start_rewrites  # v[44] returns it (0x0)
 start 20 start: cmode_manager_get(20) at 0x56460 then v[8], in fn 0x5640c
 start 20 stop: cmode_manager_get(20) at 0xbd540 then v[11], in cmode_king_of_the_monsters_multiball::v[11]
 start 20 start: cmode_manager_get(20) at 0x156fc8 then v[8], in RuleKingOfTheMonsters::v[25]
@@ -536,8 +542,8 @@ ctor 22 a 20 award 16 b 13 timer 21   # cmode_hurry_up, ctor 0xf9a7c called at 0
 number 22 timer.seconds ? code 0xf2590 - code  # v[56] reads the object's field +0x70; set elsewhere, not measured
 number 22 timer.v57 30 code 0x7e5f8 - code shared 5  # the base default: mov #30 at 0x7e5f8, 0x11b398 - all of them, or a hook
 shots 22 0x2000000000 v[44] 0xf9f80, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: bit 37
-number 22 initial_mask.lo 0 imm 0xf9f80 e3a00000 word  # v[44] returns it (0x0)
-number 22 initial_mask.hi 32 imm 0xf9f84 e3a01020 word  # v[44] returns it (0x20)
+number 22 initial_mask.lo 0 imm 0xf9f80 e3a00000 word inert start_rewrites  # v[44] returns it (0x0)
+number 22 initial_mask.hi 32 imm 0xf9f84 e3a01020 word inert start_rewrites  # v[44] returns it (0x20)
 number 22 title_msg 3268 movw 0xf9f70 e3000cc4 word
 number 22 audit_started 0 imm 0x7dee8 e3a00000 word
 number 22 audit_completed 0 imm 0x7def0 e3a00000 word shared 4
@@ -733,14 +739,42 @@ callout 26 870 live.request@6 movw 0xea71c e3000366  # seen runA +9702 ms after 
 callout 26 1036 live.callout@3 movw 0xea724 e300040c  # seen runA +9703 ms after the start, call 0xea728 in fn 0xea600
 # engine callout_play not located: not unique in the reference
 # slots mapped from Pro 1.15: 41->42 42->43 43->44 44->45 45->46 46->47 47->48 48->49 49->50 50->51 51->52 52->53 53->54 54->55 55->56 56->57 57->58 58->59 59->60 60->61 61->62
+# --- hand read (item 159, desk; the path edit emulator-proven by item 158 on Premium/LE 1.16): tank attack's shots
+# are a six-entry PATH, not the lit mask. Each entry is 16 bytes {u64 position, u16 TANK lamp, u16 id, u32 0};
+# tanks walk toward entry 2 (the Godzilla target) and die on the entry they stand on. Positions 0, 4 and 5 are
+# also where tanks appear (seed words in code: 0x107484/0x108428, 0x1074a0, 0x107498/0x1083c4) and 2 is where they head
+# (0x107440/0x1083b4/0x10841c), so those four stay as they are; 1 and 3 can be another shot the switches send alone,
+# or none (= a copy of the neighbouring entry away from the target: the walk skips it, proven). The counted-shots
+# words (v[46]) and the spot list (v[47]) follow the path. ---
+number 4 path.0 0x800000000 path 0x630240 00000000,00000008,0b7f0072,00000000 word fixed seed  # TANK 1 (lamp 114): bit 35, where a tank appears
+number 4 path.1 0x100000 path 0x630250 00100000,00000000,0b6d0090,00000000 word  # TANK 2 (lamp 144): Left ramp
+number 4 path.2 0x80000 path 0x630260 00080000,00000000,0b6c0093,00000000 word fixed goal  # TANK 3 (lamp 147): Godzilla target, where every tank heads
+number 4 path.3 0x800 path 0x630270 00000800,00000000,0b64009a,00000000 word  # TANK 4 (lamp 154): Top spinner (bit 11); path[3] := path[4] proven on Premium/LE 1.16 (item 158 live-3); this build's table is the same bytes (desk)
+number 4 path.4 0x200000 path 0x630280 00200000,00000000,0b6e00ad,00000000 word fixed seed  # TANK 5 (lamp 173): Right ramp, where a tank appears
+number 4 path.5 0x2000000000 path 0x630290 00000000,00000020,0b80007b,00000000 word fixed seed  # TANK 6 (lamp 123): bit 37, where a tank appears
+number 4 path.counted.lo 0x380800 movwt 0x10654c 0x106554 03a00b02,03400038 word follows path  # v[46] counted shots (moveq/movteq), low half = the OR of the path
+number 4 path.counted.hi 0x28 imm 0x106550 03a01028 word follows path  # v[46] counted shots, high half
+number 4 path.spot.0 0x80000 qword 0x630210 00080000,00000000 word follows path  # v[47] spot list entry for path.2
+number 4 path.spot.1 0x100000 qword 0x630218 00100000,00000000 word follows path  # v[47] spot list entry for path.1
+number 4 path.spot.2 0x800 qword 0x630220 00000800,00000000 word follows path  # v[47] spot list entry for path.3
+number 4 path.spot.3 0x200000 qword 0x630228 00200000,00000000 word follows path  # v[47] spot list entry for path.4
+number 4 path.spot.4 0x800000000 qword 0x630230 00000000,00000008 word follows path  # v[47] spot list entry for path.0
+number 4 path.spot.5 0x2000000000 qword 0x630238 00000000,00000020 word follows path  # v[47] spot list entry for path.5
+# --- hand read (item 159, desk): battle vs ebirah needs N spins of each spinner; the counts are loaded per spinner
+# by the refill 0x7f848 (ldr from the constructor's words 0x7f80c/0x7f81c, one of them shared by two spinners). Each load
+# becomes `mov rd,#N` for a count of the app's own. Seen 15/40/15 at every START (item 158, Premium/LE 1.16). ---
+number 12 spins.left 15 insn 0x7f850 e5905078 word  # ldr r5,[r0,#0x78] -> mov r5,#N: spins of the Left spinner (bit 0x200)
+number 12 spins.top 40 insn 0x7f858 e594607c word  # ldr r6,[r4,#0x7c] -> mov r6,#N: spins of the Top spinner (bit 0x2000)
+number 12 spins.shield 15 insn 0x7f868 e5945080 word  # ldr r5,[r4,#0x80] -> mov r5,#N: spins of the Shield ramp spinner (bit 0x20000)
+
 build godzilla_le 1.16 sha1 ea8c6d36f130bfe1421b36c0a071bc66c9be4e99
 # read by stock_modes.py: cmode_manager constructor 0xd4b64, 26 mode objects
 
 mode 1 cmode_godzilla_multiball obj 0x7b4cb8 vtable 0x63a248 title_msg 3235
 ctor 1 a 1 award 10 b 2 timer -   # cmode_mball, ctor 0xb173c called at 0xd55ec; compared against cmode_mball_null, 64 virtuals
 shots 1 0x0 v[45] 0xb054c, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: none
-number 1 initial_mask.lo 0 imm 0xb054c e3a00000 word  # v[45] returns it (0x0)
-number 1 initial_mask.hi 0 imm 0xb0550 e3a01000 word  # v[45] returns it (0x0)
+number 1 initial_mask.lo 0 imm 0xb054c e3a00000 word inert start_rewrites  # v[45] returns it (0x0)
+number 1 initial_mask.hi 0 imm 0xb0550 e3a01000 word inert start_rewrites  # v[45] returns it (0x0)
 number 1 title_msg 3235 movw 0x47744 e3000ca3 word
 number 1 audit_started 211 imm 0xb5730 e3a000d3 word
 number 1 audit_completed 212 imm 0xb5738 e3a000d4 word
@@ -791,8 +825,8 @@ clip 3 BridgeDestructionProgress_3 movwt 0xaa944 0xaa94c e30533e0,e3403063  # v[
 mode 4 cmode_tank_attack_multiball obj 0x7b4f30 vtable 0x640818 title_msg 3240
 ctor 4 a 1 award 13 b 5 timer -   # cmode_mball, ctor 0x109964 called at 0xd54fc; compared against cmode_mball_null, 65 virtuals
 shots 4 0x5800700800 v[45] 0x7e9a8, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: top spinner, left ramp, right ramp, building, bit 35, big loop, bit 38
-number 4 initial_mask.lo 7342080 movwt 0x7e9a8 0x7e9b0 e3a00b02,e3400070 word  # v[45] returns it (0x700800) (the low word is a mov)
-number 4 initial_mask.hi 88 imm 0x7e9ac e3a01058 word  # v[45] returns it (0x58)
+number 4 initial_mask.lo 7342080 movwt 0x7e9a8 0x7e9b0 e3a00b02,e3400070 word inert inline_copy  # v[45] returns it (0x700800) (the low word is a mov)
+number 4 initial_mask.hi 88 imm 0x7e9ac e3a01058 word inert inline_copy  # v[45] returns it (0x58)
 number 4 title_msg 3240 movw 0x10dc44 e3000ca8 word
 number 4 audit_started 217 imm 0x10dc4c e3a000d9 word
 number 4 audit_completed 218 imm 0x10dc54 e3a000da word
@@ -851,8 +885,8 @@ clip 6 Megalon_gigan_jetjag_godzilla4 movwt 0xa2cd4 0xa2cd8 e3090298,e3400063  #
 mode 7 cmode_planet_x_multiball obj 0x7b51a8 vtable 0x63f2c0 title_msg 3267
 ctor 7 a 17 award 16 b 13 timer -   # cmode_mball, ctor 0xf6718 called at 0xd540c; compared against cmode_mball_null, 65 virtuals
 shots 7 0x0 v[45] 0xf4ca4, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: none
-number 7 initial_mask.lo 0 imm 0xf4ca4 e3a00000 word  # v[45] returns it (0x0)
-number 7 initial_mask.hi 0 imm 0xf4ca8 e3a01000 word  # v[45] returns it (0x0)
+number 7 initial_mask.lo 0 imm 0xf4ca4 e3a00000 word inert start_rewrites  # v[45] returns it (0x0)
+number 7 initial_mask.hi 0 imm 0xf4ca8 e3a01000 word inert start_rewrites  # v[45] returns it (0x0)
 number 7 title_msg 3267 movw 0xfc6c0 e3000cc3 word
 number 7 audit_started 221 imm 0xfc6c8 e3a000dd word
 number 7 audit_completed 222 imm 0xfc6d0 e3a000de word
@@ -949,8 +983,8 @@ clip 11 kotm_game_over movwt 0xdf500 0xdf508 e30d1b6c,e3401063  # BDLMonsterIsla
 mode 12 cmode_battle_vs_ebirah obj 0x7b53f0 vtable 0x636d70 title_msg 3257
 ctor 12 a 10 award 19 b 7 timer 0   # cmode_battle, ctor 0x80fb8 called at 0xd5280; compared against cmode_battle, 64 virtuals
 shots 12 0x22200 v[45] 0x7feb8, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: left spinner, top spinner, right spinner
-number 12 initial_mask.lo 139776 movwt 0x7feb8 0x7fec0 e3a00c22,e3400002 word  # v[45] returns it (0x22200) (the low word is a mov)
-number 12 initial_mask.hi 0 imm 0x7febc e3a01000 word  # v[45] returns it (0x0)
+number 12 initial_mask.lo 139776 movwt 0x7feb8 0x7fec0 e3a00c22,e3400002 word inert start_rewrites  # v[45] returns it (0x22200) (the low word is a mov)
+number 12 initial_mask.hi 0 imm 0x7febc e3a01000 word inert start_rewrites  # v[45] returns it (0x0)
 start 12 select: slot 0 of the 7-entry selector table 0x64272c {slot, mode id, 0} (12 13 14 15 16 6 17); the screen that reads it is not traced by the tool
 number 12 select.slot0.mode_id 12 data 0x642730 0000000c word  # which mode the selector's slot 0 starts
 number 12 title_msg 3257 movw 0x8585c e3000cb9 word
@@ -995,8 +1029,8 @@ clip 12 ebirah_attack1 movwt 0x858a4 0x858a8 e3070040,e3400063  # BDLBattleVSEbi
 mode 13 cmode_battle_vs_titanosaurus obj 0x7b54d0 vtable 0x639608 title_msg 3258
 ctor 13 a 10 award 20 b 7 timer 1   # cmode_battle, ctor 0xa4de4 called at 0xd522c; compared against cmode_battle, 65 virtuals
 shots 13 0x0 v[45] 0xa3dac, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: none
-number 13 initial_mask.lo 0 imm 0xa3dac e3a00000 word  # v[45] returns it (0x0)
-number 13 initial_mask.hi 0 imm 0xa3db0 e3a01000 word  # v[45] returns it (0x0)
+number 13 initial_mask.lo 0 imm 0xa3dac e3a00000 word inert start_rewrites  # v[45] returns it (0x0)
+number 13 initial_mask.hi 0 imm 0xa3db0 e3a01000 word inert start_rewrites  # v[45] returns it (0x0)
 start 13 select: slot 1 of the 7-entry selector table 0x64272c {slot, mode id, 0} (12 13 14 15 16 6 17); the screen that reads it is not traced by the tool
 number 13 select.slot1.mode_id 13 data 0x64273c 0000000d word  # which mode the selector's slot 1 starts
 number 13 title_msg 3258 movw 0xa8efc e3000cba word
@@ -1050,8 +1084,8 @@ clip 14 gigan_good_intro movwt 0x9123c 0x91240 e3070d38,e3400063  # BDLBattleVSG
 mode 15 cmode_battle_vs_megalon obj 0x7b56b8 vtable 0x638668 title_msg 3260
 ctor 15 a 10 award 22 b 7 timer 3   # cmode_battle, ctor 0x99840 called at 0xd517c; compared against cmode_battle, 64 virtuals
 shots 15 0x5800700800 v[45] 0x9867c, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: top spinner, left ramp, right ramp, building, bit 35, big loop, bit 38
-number 15 initial_mask.lo 7342080 movwt 0x9867c 0x98684 e3a00b02,e3400070 word  # v[45] returns it (0x700800) (the low word is a mov)
-number 15 initial_mask.hi 88 imm 0x98680 e3a01058 word  # v[45] returns it (0x58)
+number 15 initial_mask.lo 7342080 movwt 0x9867c 0x98684 e3a00b02,e3400070 word inert start_rewrites  # v[45] returns it (0x700800) (the low word is a mov)
+number 15 initial_mask.hi 88 imm 0x98680 e3a01058 word inert start_rewrites  # v[45] returns it (0x58)
 start 15 select: slot 3 of the 7-entry selector table 0x64272c {slot, mode id, 0} (12 13 14 15 16 6 17); the screen that reads it is not traced by the tool
 number 15 select.slot3.mode_id 15 data 0x642754 0000000f word  # which mode the selector's slot 3 starts
 number 15 title_msg 3260 movw 0x9d964 e3000cbc word
@@ -1185,8 +1219,8 @@ ctor 20 a 18 award 27 b 16 timer 25   # cmode_timed, ctor 0xc12a4 called at 0xd4
 number 20 timer.seconds ? code 0xbe2d4 - code  # v[57] computes it; not measured
 number 20 timer.v57 84 imm 0xbdcb0 e3a00054 word  # v[58] returns it
 shots 20 0x0 v[45] 0xd28a8, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: none
-number 20 initial_mask.lo 0 imm 0xd28a8 e3a00000 word  # v[45] returns it (0x0)
-number 20 initial_mask.hi 0 imm 0xd28ac e3a01000 word  # v[45] returns it (0x0)
+number 20 initial_mask.lo 0 imm 0xd28a8 e3a00000 word inert start_rewrites  # v[45] returns it (0x0)
+number 20 initial_mask.hi 0 imm 0xd28ac e3a01000 word inert start_rewrites  # v[45] returns it (0x0)
 start 20 start: cmode_manager_get(20) at 0x56730 then v[8], in fn 0x566dc
 start 20 stop: cmode_manager_get(20) at 0xbef3c then v[11], in cmode_king_of_the_monsters_multiball::v[11]
 start 20 start: cmode_manager_get(20) at 0x15a620 then v[8], in RuleKingOfTheMonsters::v[25]
@@ -1236,8 +1270,8 @@ ctor 22 a 20 award 16 b 13 timer 21   # cmode_hurry_up, ctor 0xfc1e4 called at 0
 number 22 timer.seconds ? code 0xf4cf8 - code  # v[57] reads the object's field +0x70; set elsewhere, not measured
 number 22 timer.v57 30 code 0x7fdc8 - code shared 5  # the base default: mov #30 at 0x7fdc8, 0x11dca8 - all of them, or a hook
 shots 22 0x2000000000 v[45] 0xfc6e8, the lit mask cmode's START takes (returned as a constant); this mode has its own start, which can write another mask: bit 37
-number 22 initial_mask.lo 0 imm 0xfc6e8 e3a00000 word  # v[45] returns it (0x0)
-number 22 initial_mask.hi 32 imm 0xfc6ec e3a01020 word  # v[45] returns it (0x20)
+number 22 initial_mask.lo 0 imm 0xfc6e8 e3a00000 word inert start_rewrites  # v[45] returns it (0x0)
+number 22 initial_mask.hi 32 imm 0xfc6ec e3a01020 word inert start_rewrites  # v[45] returns it (0x20)
 number 22 title_msg 3268 movw 0xfc6d8 e3000cc4 word
 number 22 audit_started 0 imm 0x7f6b0 e3a00000 word
 number 22 audit_completed 0 imm 0x7f6b8 e3a00000 word shared 4
@@ -1396,4 +1430,31 @@ scene 24 7949bb14a9a21abf5e2885a01eb5ed4f9c3a8eca movwt 0xe3c78 0xe3c80 e30419d8
 scene 26 4e0bf26631e0d64055ae92806c1a413634f6d72f movwt 0xe8c68 0xe8c6c e30e1b0c,e3401063  # BDLMonsterZeroStart::v[13] loads it; holds: Xilien console pop-up (Planet X voice lines)
 # scene 4fb4bb55 for 1: not located on this build (0xb1ad4 not located: not unique in the reference)
 # scene a24cebb4 for 2: not located on this build (0xd8420 not located: not unique in the reference)
+# --- hand read (item 159, desk; the path edit emulator-proven by item 158 on Premium/LE 1.16): tank attack's shots
+# are a six-entry PATH, not the lit mask. Each entry is 16 bytes {u64 position, u16 TANK lamp, u16 id, u32 0};
+# tanks walk toward entry 2 (the Godzilla target) and die on the entry they stand on. Positions 0, 4 and 5 are
+# also where tanks appear (seed words in code: 0x109cbc/0x10a660, 0x109cd8, 0x109cd0/0x10a5fc) and 2 is where they head
+# (0x109c78/0x10a5ec/0x10a654), so those four stay as they are; 1 and 3 can be another shot the switches send alone,
+# or none (= a copy of the neighbouring entry away from the target: the walk skips it, proven). The counted-shots
+# words (v[47]) and the spot list (v[48]) follow the path. ---
+number 4 path.0 0x800000000 path 0x640960 00000000,00000008,0b7f0072,00000000 word fixed seed  # TANK 1 (lamp 114): bit 35, where a tank appears
+number 4 path.1 0x100000 path 0x640970 00100000,00000000,0b6d0090,00000000 word  # TANK 2 (lamp 144): Left ramp
+number 4 path.2 0x80000 path 0x640980 00080000,00000000,0b6c0093,00000000 word fixed goal  # TANK 3 (lamp 147): Godzilla target, where every tank heads
+number 4 path.3 0x800 path 0x640990 00000800,00000000,0b64009a,00000000 word  # TANK 4 (lamp 154): Top spinner (bit 11); path[3] := path[4] proven (item 158 live-3, this build)
+number 4 path.4 0x200000 path 0x6409a0 00200000,00000000,0b6e00ad,00000000 word fixed seed  # TANK 5 (lamp 173): Right ramp, where a tank appears
+number 4 path.5 0x2000000000 path 0x6409b0 00000000,00000020,0b80007b,00000000 word fixed seed  # TANK 6 (lamp 123): bit 37, where a tank appears
+number 4 path.counted.lo 0x380800 movwt 0x108d84 0x108d8c 03a00b02,03400038 word follows path  # v[47] counted shots (moveq/movteq), low half = the OR of the path
+number 4 path.counted.hi 0x28 imm 0x108d88 03a01028 word follows path  # v[47] counted shots, high half
+number 4 path.spot.0 0x80000 qword 0x640930 00080000,00000000 word follows path  # v[48] spot list entry for path.2
+number 4 path.spot.1 0x100000 qword 0x640938 00100000,00000000 word follows path  # v[48] spot list entry for path.1
+number 4 path.spot.2 0x800 qword 0x640940 00000800,00000000 word follows path  # v[48] spot list entry for path.3
+number 4 path.spot.3 0x200000 qword 0x640948 00200000,00000000 word follows path  # v[48] spot list entry for path.4
+number 4 path.spot.4 0x800000000 qword 0x640950 00000000,00000008 word follows path  # v[48] spot list entry for path.0
+number 4 path.spot.5 0x2000000000 qword 0x640958 00000000,00000020 word follows path  # v[48] spot list entry for path.5
+# --- hand read (item 159, desk): battle vs ebirah needs N spins of each spinner; the counts are loaded per spinner
+# by the refill 0x81018 (ldr from the constructor's words 0x80fdc/0x80fec, one of them shared by two spinners). Each load
+# becomes `mov rd,#N` for a count of the app's own. Seen 15/40/15 at every START (item 158, Premium/LE 1.16). ---
+number 12 spins.left 15 insn 0x81020 e5905078 word  # ldr r5,[r0,#0x78] -> mov r5,#N: spins of the Left spinner (bit 0x200)
+number 12 spins.top 40 insn 0x81028 e594607c word  # ldr r6,[r4,#0x7c] -> mov r6,#N: spins of the Top spinner (bit 0x2000)
+number 12 spins.shield 15 insn 0x81038 e5945080 word  # ldr r5,[r4,#0x80] -> mov r5,#N: spins of the Shield ramp spinner (bit 0x20000)
 """

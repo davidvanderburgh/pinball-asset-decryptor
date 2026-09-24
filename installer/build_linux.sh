@@ -165,6 +165,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.title_reader" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_remap" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_rewrite" \
+    --hidden-import "pinball_decryptor.plugins.stern.source_find" \
     --hidden-import "pinball_decryptor.plugins.stern.text_colors" \
     --hidden-import "pinball_decryptor.plugins.stern.text_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.dds" \

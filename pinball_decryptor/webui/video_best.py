@@ -111,7 +111,7 @@ class BestQualityMixin:
     def _best_defaults(self):
         """Built card = the last Write's output, stock = the Write tab's
         original image (or the project's recorded one)."""
-        from ...core import project_file
+        from ..core import project_file
         w = self.window
         card = ""
         try:
@@ -127,7 +127,10 @@ class BestQualityMixin:
         except Exception:                                   # noqa: BLE001
             stock = ""
         if not os.path.isfile(stock):
-            anchor = project_file.load_anchor(self._assets_path()) or {}
+            try:
+                anchor = project_file.load_anchor(self._assets_path()) or {}
+            except (OSError, ValueError):       # a folder with no anchor
+                anchor = {}
             stock = str(anchor.get("stock_image") or "")
             if not os.path.isfile(stock):
                 stock = ""
@@ -277,7 +280,7 @@ class BestQualityMixin:
                     log=on_log, progress=on_progress,
                     cancel=lambda: self._b_cancel)
             except Exception as e:                          # noqa: BLE001
-                from ...core.source_match import Cancelled
+                from ..core.source_match import Cancelled
                 err = ("Stopped." if isinstance(e, Cancelled)
                        else (str(e) or e.__class__.__name__))
             post(self._best_done, run, res, err)

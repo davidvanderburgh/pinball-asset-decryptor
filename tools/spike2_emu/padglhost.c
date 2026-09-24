@@ -27,6 +27,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <signal.h>
+#include <dirent.h>
 
 #include "padgl.h"
 #include "padvid.h"
@@ -1825,6 +1826,102 @@ static void cab_publish(void)
     memcpy((void *)swshm->cab, h, sizeof h);
 }
 
+/* ---- PAD-204: THE PAUSE KEY FREEZES THE WHOLE GAME ----------------------
+ *
+ * "Hit Pause to freeze the game state, e.g. to look at an animation." Pause
+ * (or F9, for keyboards without one) toggles. The freeze is SIGSTOP on the
+ * guest - every `game` process, the name every rig tool finds it by - so all
+ * of it stops at once: the game's threads, the video it pulls from padvidhost
+ * (demand-driven, so the clips stop too) and the audio it feeds. A pause
+ * inside the game's own logic would have to be taught per title; a stopped
+ * process is the same freeze on all of them.
+ *
+ * THE WATCHDOG. The game ends itself (exit 5) if its dispatch wait runs past
+ * a 10 s absolute deadline, and a pause longer than that expires it. So the
+ * frozen time is added to swshm->paused_ms BEFORE the SIGCONT, and hwshim's
+ * cond_timedwait moves a deadline that expired across a pause out by it
+ * (padsw.h says more). Without the switch block there is nothing to tell the
+ * shim, so there is no pause either.
+ *
+ * This process never leaves the game stopped behind it: pause_release() runs
+ * on every clean stop, and a window close is one. */
+static char win_title[160];
+static int game_paused;
+static double pause_t0;
+
+/* SIGSTOP or SIGCONT every process named `game`; how many were signalled. */
+static int pause_signal(int sig)
+{
+    DIR *d = opendir("/proc");
+    struct dirent *e;
+    int n = 0;
+    if (!d) return 0;
+    while ((e = readdir(d))) {
+        char path[64], comm[32];
+        FILE *f;
+        int pid = atoi(e->d_name);
+        if (pid <= 0 || pid == getpid()) continue;
+        snprintf(path, sizeof path, "/proc/%d/comm", pid);
+        if (!(f = fopen(path, "r"))) continue;
+        if (fgets(comm, sizeof comm, f)) {
+            comm[strcspn(comm, "\n")] = 0;
+            if (!strcmp(comm, "game") && kill(pid, sig) == 0) n++;
+        }
+        fclose(f);
+    }
+    closedir(d);
+    return n;
+}
+
+static void pause_title(void)
+{
+    char t[200];
+    if (!xdpy || !xwin || !win_title[0]) return;
+    if (game_paused) {
+        snprintf(t, sizeof t, "PAUSED (press Pause to resume) - %s", win_title);
+        XStoreName(xdpy, xwin, t);
+    } else {
+        XStoreName(xdpy, xwin, win_title);
+    }
+}
+
+static void pause_release(void)
+{
+    double held;
+    if (!game_paused) return;
+    held = now_s() - pause_t0;
+    if (swshm) {
+        /* the count first: the shim must see it the moment the game runs */
+        swshm->paused_ms += (unsigned)(held * 1000.0 + 0.5);
+        __sync_synchronize();
+        swshm->paused = 0;
+    }
+    pause_signal(SIGCONT);
+    game_paused = 0;
+    fprintf(stderr, "[pause] resumed after %.1f s\n", held);
+    pause_title();
+}
+
+static void pause_toggle(void)
+{
+    if (game_paused) { pause_release(); return; }
+    if (!swshm) {
+        fprintf(stderr, "[pause] no switch block, so the game cannot be paused safely\n");
+        return;
+    }
+    swshm->paused = 1;
+    __sync_synchronize();
+    pause_t0 = now_s();
+    if (!pause_signal(SIGSTOP)) {
+        swshm->paused = 0;
+        fprintf(stderr, "[pause] no running game to pause\n");
+        return;
+    }
+    game_paused = 1;
+    fprintf(stderr, "[pause] game frozen; press Pause again to resume\n");
+    pause_title();
+}
+
 /* One key edge. Called for EVERY key event, before the binds[] lookup. */
 static void cab_key(unsigned long sym, int press)
 {
@@ -2151,11 +2248,10 @@ static int win_open(void)
      * game you are debugging. PAD_GAME is the rig's name for the directory
      * under games/; watch.sh always sets it. */
     {
-        static char title[160];
         const char *g = getenv("PAD_GAME");
-        snprintf(title, sizeof title, "%s - Stern Spike 2 emulator",
+        snprintf(win_title, sizeof win_title, "%s - Stern Spike 2 emulator",
                  (g && *g) ? g : "Spike 2");
-        XStoreName(xdpy, xwin, title);
+        XStoreName(xdpy, xwin, win_title);
     }
     win_brand(xwin);
     /* StructureNotifyMask (1<<17) gives ConfigureNotify for resizes;
@@ -2601,6 +2697,11 @@ static void win_pump(void)
             }
             {
                 unsigned long sym = XLookupKeysym(&ev, 0);
+                /* PAD-204: Pause / F9 freeze and resume; they press nothing */
+                if (sym == 0xff13 || sym == 0xffc6) {
+                    if (press) pause_toggle();
+                    break;
+                }
                 /* the boot menu's buttons first: they do not depend on the
                  * title's table, and a key with no binds[] row must still
                  * reach them (the `break` below) */
@@ -5680,6 +5781,7 @@ int main(int argc, char **argv)
         }
         free(payload);
     }
+    pause_release();                    /* PAD-204: never leave it frozen */
     fprintf(stderr, "[padglhost] stopped after %ld frames in %.1f s (%.1f fps avg)\n",
             frames_done, now_s() - t0, frames_done / (now_s() - t0));
     /* Always, not only under PADGL_DEBUG: this is the run's answer to "were

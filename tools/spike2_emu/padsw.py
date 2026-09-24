@@ -79,7 +79,9 @@ CAB_NAMES = ("left", "right", "start", "action", "select", "plus", "minus", "bac
 CAB_N = len(CAB_NAMES)
 OFF_CAB = OFF_SPIN + MAX_ID          # 1068 keyboard's cab[]   (padglhost writes)
 OFF_SCR_CAB = OFF_CAB + CAB_N        # 1076 scripts' scr_cab[] (WE write)
-SIZE = OFF_SCR_CAB + CAB_N           # 1084, in a 4096-byte block
+OFF_PAUSED = OFF_SCR_CAB + CAB_N     # 1084 1 while frozen     (padglhost writes)
+OFF_PAUSED_MS = OFF_PAUSED + 4       # 1088 total ms frozen    (padglhost writes)
+SIZE = OFF_PAUSED_MS + 4             # 1092, in a 4096-byte block
 
 
 def open_block(path=PATH):

@@ -612,6 +612,87 @@ def test_a_program_of_another_size_is_not_mixed_in(card, built, tmp_path):
         and "build the card image" in warn[0]
 
 
+def _fake_bypass(monkeypatch, at_end=0):
+    """valpatch's locator taught this module's fake programs: the validator
+    entry is BYPASS_AT, *at_end* bytes further on in a program longer than
+    stock (a rebuilt program moves its code)."""
+    from pinball_decryptor.plugins.stern import valpatch
+    size = len(_program())
+
+    def overlay(elf):
+        off = BYPASS_AT + (at_end if len(elf) != size else 0)
+        return {off: BYPASS}, ("bypassed", "")
+
+    monkeypatch.setattr(valpatch, "bypass_overlay", overlay)
+
+
+def _rebuilt(bypass=True):
+    """A built card's program its build rebuilt: 32 bytes longer, the
+    validator entry moved 16 bytes on."""
+    elf = bytearray(_program(count_nop=True))
+    elf[BYPASS_AT:BYPASS_AT] = b"CAVE" * 4
+    elf += b"CAVE" * 4
+    if bypass:
+        elf[BYPASS_AT + 16:BYPASS_AT + 20] = BYPASS
+    return bytes(elf)
+
+
+def test_a_rebuilt_program_that_is_bypassed_runs_as_it_is(
+        card, built, tmp_path, monkeypatch):
+    """PAD-201: pictures-only edits over a card whose own build rebuilt its
+    program.  The set's program was the extract card's and the game ran it
+    against that card's sound bank (no start sound, then a crash).  The set
+    only brings the bypass, which that program already has, so it carries no
+    program at all and the card's own one runs."""
+    _fake_bypass(monkeypatch, at_end=16)
+    built.program = _rebuilt()
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert not (out / "turtles_pro" / "game").exists()
+    files = [f["path"] for f in engine.read_override_manifest(str(out))["files"]]
+    assert "/turtles_pro/game" not in files
+    said = [m for lvl, m in lines if "own program" in m]
+    assert said and "its sounds" in said[0]
+    assert not [m for lvl, m in lines if lvl == "warning"]
+
+
+def test_a_rebuilt_program_without_the_bypass_keeps_the_sets(
+        card, built, tmp_path, monkeypatch):
+    """Dropping the set's program would run a validator nothing switched
+    off: the set keeps its own, and says what that costs, as before."""
+    _fake_bypass(monkeypatch, at_end=16)
+    built.program = _rebuilt(bypass=False)
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(bypass=True)
+    assert any(lvl == "warning" and "different sizes" in m
+               for lvl, m in lines)
+
+
+def test_edits_that_change_the_program_keep_the_sets_on_a_rebuilt_card(
+        card, built, tmp_path, monkeypatch):
+    """A set whose program carries more than the bypass (program text, the
+    sound count) needs that program: it is kept, with the warning."""
+    _fake_bypass(monkeypatch, at_end=16)
+    built.program = _rebuilt()
+    stock = built.stock
+    card.state["writes"] = card.state["writes"] + [
+        (_disk(stock, "/turtles_pro/game", COUNT_AT), NOP)]
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(count_nop=True, bypass=True)
+    assert any(lvl == "warning" and "different sizes" in m
+               for lvl, m in lines)
+
+
 def test_a_card_that_cannot_be_read_costs_a_warning_not_the_run(
         card, built, tmp_path, monkeypatch):
     real = engine._locate

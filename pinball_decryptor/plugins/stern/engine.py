@@ -9108,6 +9108,27 @@ def _minus_ranges(runs, cover):
     return out
 
 
+def _set_program_is_the_bypass(stock, writes):
+    """True when every byte *writes* lays on the program *stock* is part of
+    the validator bypass - the one program edit every set makes whatever the
+    user changed."""
+    from . import valpatch
+    overlay, _status = valpatch.bypass_overlay(stock)
+    if not overlay or not writes:
+        return False
+    return all(any(o <= off and off + len(b) <= o + len(ob)
+                   for o, ob in overlay.items())
+               for off, b in writes)
+
+
+def _already_bypassed(program):
+    """True when *program*'s validator is found and already neutered."""
+    from . import valpatch
+    overlay, (kind, _why) = valpatch.bypass_overlay(program)
+    return kind == "bypassed" and all(
+        program[o:o + len(b)] == b for o, b in overlay.items())
+
+
 def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
                             original_path, run_card, log):
     """Keep the game-program bytes the card the set RUNS ON was built with.
@@ -9147,7 +9168,10 @@ def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
 
     A program rebuilt whole - by that card's build (blip-free sounds, longer
     program text) or by these edits - has no offsets the other side shares,
-    so nothing is carried and the log says what that can cost.  The set's
+    so nothing is carried and the log says what that can cost.  Unless the
+    set's program is only there for the bypass and that card's program is
+    already bypassed (PAD-201): then the set drops its program and the card's
+    own runs, with the sound bank its build made for it.  The set's
     ``.sidx`` record for the program is left as prepared: a card run never
     binds the ``.sidx`` (it sits beside the title), and only the bypassed
     validator ever reads it.
@@ -9179,6 +9203,22 @@ def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
         return 0
     stock = bytes(reader.read_file_bytes(fw_node))
     if picked == stock:
+        return 0
+    if not rebuilt and len(picked) != len(stock) \
+            and _set_program_is_the_bypass(stock, by_file[key][1]) \
+            and _already_bypassed(picked):
+        # PAD-201 (DragonRR, v1.3.3): edits of pictures only, run on a card
+        # whose program its own build rebuilt.  The set's copy of the program
+        # was the extract card's, so the game ran that program against the
+        # picked card's sound bank: no start sound, the sound stopping in
+        # play, then a crash.  All the set's copy adds is the validator bypass,
+        # and the picked card's program has one of its own, so the card's
+        # program runs and the set carries none.
+        del by_file[key]
+        log("%s was built with its own game program, and your edits change "
+            "nothing in it but the validator bypass that program already "
+            "has, so this run uses that card's own program: its sounds were "
+            "built to play with it." % name, "info")
         return 0
     if rebuilt or len(picked) != len(stock):
         log("%s carries a game program its own build changed, and %s, so "

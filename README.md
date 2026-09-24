@@ -1440,6 +1440,13 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    rather than aiming further away on each of six tries. The button
    still exists for everything those leave alone, and works on every
    platform, running or not.
+   **Pause** — the Pause key or F9, in the game window or the virtual
+   playfield window, or the Pause button on the playfield's status bar,
+   freezes the whole game on the current frame, video and sound
+   included, for as long as you like, and the next press carries on
+   from exactly that frame: the game's own clock stands still while it
+   is frozen, so nothing jumps ahead on resume. The same status bar
+   carries the tab's volume slider and Mute.
    **Save states**, on by default — every Start boots the guest in the
    one shape that can be checkpointed, so there is nothing to tick, and
    the ⓘ beside the section title spells out what a save costs. The

@@ -1641,6 +1641,13 @@ HELP_CONTENT = {
          "the one part that needs the game to be up: it publishes its "
          "switch list a minute or so into a run, and they appear on the "
          "playfield as soon as it does, without restarting anything."),
+        ("Pause",
+         "Press Pause (or F9) in the game window or the playfield window, "
+         "or click Pause on the playfield's bottom bar, and the whole game "
+         "freezes on the current frame, video and sound included, for as "
+         "long as you like. Press it again (the button reads Resume) and "
+         "it carries on from exactly that frame. The same bar has a volume "
+         "slider and Mute, the same ones as on this tab."),
         ("Save states",
          "The playfield window carries a slot picker with Save state and "
          "Load state buttons (Windows); the ⓘ beside the section title on "

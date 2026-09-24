@@ -435,7 +435,15 @@ def test_jaws_greys_what_its_port_cannot_do(tmp_path, preview_on):
         assert not st["dis"]["clip"]
 
 
-def test_an_unproven_port_says_so(tmp_path, preview_on):
+def test_an_unproven_port_says_so(tmp_path, preview_on, monkeypatch):
+    import dataclasses
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    real = MP._folder_profiles
+
+    def folder_profiles(d):      # every shipped port is proven now: make Deadpool LE's a draft
+        return {k: dataclasses.replace(p, proven=False, proven_note="it was drafted and has never run.")
+                if p.game_dir == "deadpool_le" else p for k, p in real(d).items()}
+    monkeypatch.setattr(MP, "_folder_profiles", folder_profiles)
     proj = _card_project(tmp_path / "dp", "deadpool_le-1_14_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)

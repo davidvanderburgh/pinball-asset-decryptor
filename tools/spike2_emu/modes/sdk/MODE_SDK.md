@@ -885,7 +885,7 @@ which is why the `lamp` lines go last.
 | `turtles_pro-1.59.port` | An older framework (see below). 17 functions: the shot dispatch and end of ball were found with `call_probe.c`; lights, screens and clips are off (their functions were not found). 13 globals, 17 shots (32-bit mask in r1), no callout ids. |
 | `turtles_pro-1.58.port` | Drafted by `port_tool.py` from 1.59: everything placed. |
 | `deadpool_pro-1.16.port` | `cmode_manager` again (35 virtuals); the shot dispatch (virtual 11, mask in r2:r3) found with `call_probe.c`, the end of ball through its event hook. Lights, screens and clips off. 25 shots. |
-| `deadpool_le-1.14.port` | Drafted from Deadpool Pro, every entry strict. **Not run:** Deadpool LE refuses to start a game in the emulator. |
+| `deadpool_le-1.14.port` | Drafted from Deadpool Pro, every entry strict. Proven with a census and the template: its 25 shots, a start and an end on the clock and on a drain, and 8 bus events (its bus is two ids smaller than Godzilla's, so its tilt ids are too). Plus the two spinners and the top target. |
 | `beatles-1.29.port` | The first title whose rules are plain C (no `cmode_manager`, no `crule_manager`) on Godzilla's framework. 32-bit scores (`score_add32` / `scores32`); 27 shots from its one shot function (one bit in r0, `shot_mask_at 0`, `shot_mask_bits 32`), plus 8 from switches (standups and lanes; emulator-proven with a census and a mode file). Every core entry, the 27-bit shot map and the 8 bus events were proven with a census and a scoring template (the file says which run proved what). No lights (no `light_run`), no clips (no `clip_play`), no HUD scene, no game mode queries. |
 
 A mode that uses port roles (`pm_shot_at`, `pm_callout_id`, `pm_port_text`) instead of one
@@ -1046,10 +1046,10 @@ ten-seconds call 1291 becomes Jaws's 1387); any other id is dropped, since the s
 plays some other sound on another game, and the build refuses the mode until it is edited. Today: Godzilla Pro 1.15 and Premium/LE 1.16 have every section; Jaws LE
 1.02 has no lights (no light owner) and no screen (its score panel is not measured), and
 has clips (a title card added to its bank played on the glass in the emulator); TMNT Pro and
-Deadpool have shots and scoring only. The Beatles 1.29 has shots (its own and from
+Deadpool Pro have shots and scoring only, Deadpool LE 1.14 events too. The Beatles 1.29 has shots (its own and from
 switches), 32-bit scoring, the countdown and events; lights, screen, clip, a sound of the
 mode's own and `stack` are greyed. Only the two Godzilla ports name the game's own mode
-queries, so `stack` is greyed on every other title, and only they and The Beatles carry
+queries, so `stack` is greyed on every other title, and only they, The Beatles and Deadpool LE carry
 events, so "An event" is greyed on every other title.
 
 ### Making a port for another game or version

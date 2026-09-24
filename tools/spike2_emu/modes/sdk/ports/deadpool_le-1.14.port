@@ -1,7 +1,10 @@
 # deadpool_le 1.14 - drafted by port_tool.py from deadpool_pro-1.16.port (item 138): all 17 functions
 # and 13 globals placed by strict signature; its end of ball is also the function its hook 0x34 handler
-# calls. NOT RUN: Deadpool LE refuses to start a game in the emulator (Start reaches the game; the
-# refusal is not understood yet). Shots are copied from Pro: check them with a census once it starts.
+# calls. Emulator-proven 2026-09-24 (three runs of census_mode.c + template_mode.c on a copy of the
+# 1.14.0 card): the runtime armed, every one of the 25 shots below came from the switch its name says,
+# TARGET RUSH started on the third Lil Deadpool target and ended on its clock and on a drain
+# (END (ball ended)), and every event below fired when it should. Its event bus is two ids smaller than
+# Godzilla's (cmp r0, #205), and so are its tilt ids: 0xc6 is the warning here, 0xc4 the tilt.
 game           deadpool_le
 version        1.14
 
@@ -81,7 +84,7 @@ value display_at            0x7c
 value surface_playing       2
 value clip_layer            0
 
-# ---- shots: from the item 138 probe, one switch at a time (census_mode.c confirms) ----------
+# ---- shots: from the item 138 probe, confirmed switch by switch by census_mode.c (2026-09-24) --
 shot 0x2               Left orbit
 shot 0x20              Inner loop
 shot 0x40              Colossal jackpot target
@@ -107,6 +110,22 @@ shot 0x10000000000     BOOM target B
 shot 0x20000000000     BOOM target M
 shot 0x40000000000     BOOM target O
 shot 0x80000000000     BOOM target second O
+#   the two spinners send two bits per spin (0x4 + 0x800000000000, 0x8 + 0x1000000000000): one listed
+shot 0x4               Dazzler spinner
+shot 0x8               Wolverine spinner
+shot 0x400000000000    Top target
+
+# ---- events (item 147): the framework's event bus, each seen in the emulator 2026-09-24 ---------
+#   hook_dispatch: the event bus's dispatch (cmp r0, #205; push): the one function of that shape
+site hook_dispatch    0x0037f7ec 0xe35000cd 0xe92d4038
+event game_start      0x4d     # the Start that began a game
+event ball_start      0x25     # game start, and after each ball's bonus (at once after a tilted ball)
+event ball_end        0x34     # each drain that ended a ball, and a tilted ball's
+event bonus_start     0x27     # just after a drain's end of ball; not after a tilt
+event bonus_end       0x28     # a few seconds later, before the next ball starts
+event tilt_warning    0xc6     # each of the first two tilt pendulum hits (Godzilla's 0xc8)
+event tilt            0xc4     # the third hit (Godzilla's 0xc6)
+event game_over       0x47     # the last ball's drain, after its bonus
 
 # ---- callouts by role, scenes by role -------------------------------------------------------------
 #   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x144904+0x4)

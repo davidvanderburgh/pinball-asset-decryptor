@@ -35,7 +35,7 @@ PORTS = {
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
     "turtles_pro-1.59": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
     "deadpool_pro-1.16": (25, 64, True, ALL, NO_FRAMEWORK_DISPLAY),
-    "deadpool_le-1.14": (25, 64, False, ALL, NO_FRAMEWORK_DISPLAY),
+    "deadpool_le-1.14": (28, 64, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
 }
 
 #: the lines a part of a mode puts in the runtime file
@@ -163,10 +163,16 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
         assert cfg["stack"] == ["no"] and not q.can("stack")
 
 
-def test_deadpool_le_is_marked_unproven_and_says_why():
-    p = MP.profile("deadpool_le_1_14")
+def test_every_shipped_port_is_proven():
+    assert all(MP.profile(k).proven for k in MP.profiles())
+
+
+def test_a_port_marked_not_run_is_unproven_and_says_why(tmp_path):
+    src = (SDK / "ports" / "deadpool_le-1.14.port").read_text(encoding="utf-8")
+    port = tmp_path / "deadpool_le-1.14.port"
+    port.write_text("# drafted. NOT RUN: never run in the emulator.\n" + src, encoding="utf-8")
+    p = MP.profile_from_port(str(port))
     assert p.proven is False and "never run" in p.proven_note
-    assert all(MP.profile(k).proven for k in MP.profiles() if k != "deadpool_le_1_14")
 
 
 def test_godzilla_pro_1_15_is_unchanged_and_is_what_its_port_says():

@@ -2768,6 +2768,14 @@ while :; do
             grep -a 'FATAL' "$ROOT/dump/debug_log.txt" | tail -2 | cut -c1-200
         fi
         grep -a '^\[exit\] status' "$LOG" 2>/dev/null | grep -av 'child process' | tail -1
+        # EXIT 5 IS THE GAME'S OWN WATCHDOG (PAD-200): main() waits on its
+        # dispatch loop with a 10 s timeout and, when nothing arrives, writes
+        # "GAME EXIT DISPATCH TIMEOUT" to the debug log and exits 5 - a
+        # machine reboots there. The pane showed ExchangeData noise and the
+        # bare status, which read as a crash with no reason.
+        if tail -3 "$ROOT/dump/debug_log.txt" 2>/dev/null | grep -aq 'GAME EXIT DISPATCH TIMEOUT'; then
+            echo "[watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here."
+        fi
         break
     fi
     if [ "$END" != 0 ] && [ "$(date +%s)" -ge "$END" ]; then

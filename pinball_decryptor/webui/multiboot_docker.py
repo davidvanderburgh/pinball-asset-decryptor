@@ -63,7 +63,7 @@ import sys
 #: image inspect`` succeeds on a stale image built from an older Dockerfile,
 #: so a new package list that kept the old tag would never reach anybody who
 #: had already built one.
-IMAGE = "pad-multiboot:2"
+IMAGE = "pad-multiboot:3"
 CONTAINER = "pad-multiboot-worker"
 
 #: The architecture the image and the container are built and run for - see
@@ -94,11 +94,18 @@ ARCH = "amd64"
 #: without this package a Mac gets no menu picture either.  --no-install-
 #: recommends is what keeps fontconfig and the rest of a desktop out; this
 #: is the ~1.5 MB of .ttf on its own.
+#:
+#: ``ffmpeg`` IS THE MENU'S MEDIA STEP (PAD-203).  ``mkjjpmulti.py media``
+#: hands the picked art, music and animations to selectmedia.py, which
+#: scales a still with ffmpeg or PIL and needs ffmpeg outright for any music
+#: that is not already 44.1 kHz 16-bit, a frame of a video and every GIF.
+#: With neither, the first picture refused ("neither ffmpeg nor PIL is
+#: available to scale ...") and a Mac could not build a menu with art on it.
 DOCKERFILE = """\
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \\
         partclone e2fsprogs xorriso pigz gzip coreutils util-linux \\
-        python3 bash make gcc libc6-dev fonts-dejavu-core \\
+        python3 bash make gcc libc6-dev fonts-dejavu-core ffmpeg \\
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp
 CMD ["bash"]
@@ -311,14 +318,20 @@ def _running_state():
     running the wrong-architecture image the tag used to point at.
     """
     r = _docker(["inspect", "-f",
-                 "{{.Image}}{{range .Mounts}}\n{{.Source}}{{end}}",
+                 "{{.State.Running}}\n{{.Image}}"
+                 "{{range .Mounts}}\n{{.Source}}{{end}}",
                  CONTAINER], timeout=20)
     if r.returncode != 0:
         return None
     lines = (r.stdout or "").split("\n")
-    if not lines or not lines[0].strip():
+    # A STOPPED container is no container (PAD-203).  Quitting Docker
+    # Desktop or restarting the Mac stops it and leaves it there, still
+    # named right, mounted right and on the right image, so the checks
+    # below called it "already right" and every step after that died on
+    # "Error response from daemon: container ... is not running".
+    if len(lines) < 2 or lines[0].strip() != "true" or not lines[1].strip():
         return None
-    return lines[0].strip(), set(x for x in lines[1:] if x.strip())
+    return lines[1].strip(), set(x for x in lines[2:] if x.strip())
 
 
 def ensure_container(paths, repo_src, log=None):

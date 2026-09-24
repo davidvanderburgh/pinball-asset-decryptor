@@ -283,14 +283,22 @@ def test_the_image_carries_a_font_because_a_slim_debian_has_none():
     assert "--no-install-recommends" in D.DOCKERFILE
 
 
+def test_the_image_carries_ffmpeg_for_the_menu_media():
+    """PAD-203.  The media step scales the picked art with ffmpeg or PIL
+    and needs ffmpeg for music, video frames and GIFs; the image had
+    neither, so a Mac's build refused at "neither ffmpeg nor PIL is
+    available to scale .../Sonic_Pinball_Feature-800x445.jpg"."""
+    assert "ffmpeg" in D.DOCKERFILE
+
+
 #: (tag, sha256 of DOCKERFILE) as they were last agreed.  A machine that has
 #: already built an image is offered the tag, not the file: ``ensure_image``
 #: asks ``docker image inspect`` about IMAGE and returns happily, so a changed
 #: package list under an unchanged tag reaches nobody who needs it - which is
 #: the mistake PAD-194's fix would have made.  Change one, change both.
 _IMAGE_AS_AGREED = (
-    "pad-multiboot:2",
-    "09b3382bc7d740a33fee602230cdde859825b824afa1a60e33058a471f1bac3f",
+    "pad-multiboot:3",
+    "590084b88f65c964ac6b492799ba89983b9500bae71bdbfa38b1a6e6f10f380a",
 )
 
 
@@ -319,6 +327,7 @@ class _Fake:
         self.arch = arch                # "" = no image on this machine
         self.image_id = image_id
         self.container = container      # (image id, {mounts}) or None
+        self.running = "true"           # .State.Running of that container
         self.calls = []
 
     def __call__(self, args, timeout=30):
@@ -336,7 +345,8 @@ class _Fake:
             if self.container is None:
                 rc = 1
             else:
-                out = "\n".join([self.container[0]] + sorted(self.container[1]))
+                out = "\n".join([self.running, self.container[0]]
+                                + sorted(self.container[1]))
         elif args[0] == "build":
             self.arch = D.ARCH
 
@@ -412,6 +422,32 @@ def test_a_container_on_the_old_image_is_replaced(mac, monkeypatch):
     monkeypatch.setattr(D, "_docker", good)
     D.ensure_container([ISO0], "/repo")
     assert not any(c[0] == "run" for c in good.calls)
+
+
+def test_a_stopped_container_is_started_again(mac, monkeypatch):
+    """PAD-203.  Quitting Docker Desktop (or restarting the Mac) STOPS the
+    container and leaves it there, same name, same mounts, same image, so
+    it passed for "already right" and every step died on "Error response
+    from daemon: container ... is not running"."""
+    mounts = {D.cache_root(), "/Volumes/Mac SSD/Sonichedge"}
+    stopped = _Fake(arch=D.ARCH, image_id="sha256:new",
+                    container=("sha256:new", mounts))
+    stopped.running = "false"
+    monkeypatch.setattr(D, "_docker", stopped)
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    monkeypatch.setattr(D, "stage_rig", lambda src: D.staged_repo())
+    D.ensure_container([ISO0], "/repo")
+    calls = [c[0] for c in stopped.calls]
+    assert "run" in calls, "the stopped container was kept"
+    assert calls.index("rm") < calls.index("run"), \
+        "the stopped one still holds the name"
+
+
+def test_a_stopped_container_gets_the_same_sentence(mac):
+    """What the reporter's preview and size check printed, a dozen times."""
+    raw = ("Error response from daemon: container 888b1f58e3f1 is not "
+           "running")
+    assert "not up yet" in mt.container_note(raw)
 
 
 def test_a_step_before_the_container_is_up_gets_a_sentence(mac):

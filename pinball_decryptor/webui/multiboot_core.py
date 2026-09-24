@@ -2638,8 +2638,9 @@ def sudo_password_note(text):
             "terminal where `sudo -v` has already been run.")
 
 
-#: What Docker prints when a step is run and no container of ours is up.
-_NO_CONTAINER = "No such container"
+#: What Docker prints when a step is run and no container of ours is up:
+#: none at all, or one Docker Desktop stopped when it quit (PAD-203).
+_NO_CONTAINER = ("No such container", "is not running")
 
 
 def container_note(text):
@@ -2654,7 +2655,8 @@ def container_note(text):
     step waiting for one - :meth:`MultibootPanel._run_commands` always meant
     it to "say so, once", and this is what it says.
     """
-    if not _mac.enabled() or _NO_CONTAINER not in (text or ""):
+    if not _mac.enabled() or not any(m in (text or "")
+                                     for m in _NO_CONTAINER):
         return ""
     return ("The Linux container this Mac runs the tools in is not up yet. "
             "Build / flash card... starts it (and builds its image the "

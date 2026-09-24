@@ -107,7 +107,9 @@ HELP_CONTENT = {
          "each project is one folder, one game version. (Extracting into an "
          "ARCHIVED project is different: that's the hydrate — your edited "
          "files are set aside first and restored over the fresh extraction "
-         "automatically.)"),
+         "automatically.) After a finished extract the Extract button greys "
+         "out until you pick the card or folder again, change an option, or "
+         "the card file changes, so a second click can't redo it by accident."),
     ],
     "Replace Audio": [
         ("Scan and assign",

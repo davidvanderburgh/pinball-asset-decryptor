@@ -81,7 +81,8 @@ OFF_CAB = OFF_SPIN + MAX_ID          # 1068 keyboard's cab[]   (padglhost writes
 OFF_SCR_CAB = OFF_CAB + CAB_N        # 1076 scripts' scr_cab[] (WE write)
 OFF_PAUSED = OFF_SCR_CAB + CAB_N     # 1084 1 while frozen     (padglhost writes)
 OFF_PAUSED_MS = OFF_PAUSED + 4       # 1088 total ms frozen    (padglhost writes)
-SIZE = OFF_PAUSED_MS + 4             # 1092, in a 4096-byte block
+OFF_PAUSE_REQ = OFF_PAUSED_MS + 4    # 1092 pause presses      (WE write)
+SIZE = OFF_PAUSE_REQ + 4             # 1096, in a 4096-byte block
 
 
 def open_block(path=PATH):
@@ -273,6 +274,15 @@ def set_cab(m, name, val):
     merges it, so there is no edge to lose and no stuck level to inherit
     except our own, which the callers release on EOF."""
     m[OFF_SCR_CAB + CAB_NAMES.index(name)] = 1 if val else 0
+    m.flush()
+
+
+def request_pause(m):
+    """Pause or resume the game, as the game window's Pause key does (PAD-204).
+    One press = one step of the counter padglhost polls; it toggles once per
+    step it has not seen. Nothing to release: a press is not a hold."""
+    struct.pack_into("<I", m, OFF_PAUSE_REQ,
+                     (struct.unpack_from("<I", m, OFF_PAUSE_REQ)[0] + 1) & 0xFFFFFFFF)
     m.flush()
 
 

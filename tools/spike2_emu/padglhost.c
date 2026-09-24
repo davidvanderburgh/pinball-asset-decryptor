@@ -1836,18 +1836,23 @@ static void cab_publish(void)
  * inside the game's own logic would have to be taught per title; a stopped
  * process is the same freeze on all of them.
  *
- * THE WATCHDOG. The game ends itself (exit 5) if its dispatch wait runs past
- * a 10 s absolute deadline, and a pause longer than that expires it. So the
- * frozen time is added to swshm->paused_ms BEFORE the SIGCONT, and hwshim's
- * cond_timedwait moves a deadline that expired across a pause out by it
- * (padsw.h says more). Without the switch block there is nothing to tell the
- * shim, so there is no pause either.
+ * THE CLOCK. A stopped process's clocks keep running, so on its own the
+ * freeze held the picture and then the game leapt ahead to where it would
+ * have been (and past a 10 s absolute deadline its dispatch watchdog exits 5,
+ * PAD-200). So the frozen time is added to swshm->paused_ms BEFORE the
+ * SIGCONT, and hwshim subtracts it from every clock the game reads and adds
+ * it to every deadline the game hands the kernel: the game's time stood still
+ * with it (padsw.h says more). Without the switch block there is nothing to
+ * tell the shim, so there is no pause either.
  *
  * This process never leaves the game stopped behind it: pause_release() runs
  * on every clean stop, and a window close is one. */
 static char win_title[160];
 static int game_paused;
 static double pause_t0;
+/* swshm->pause_req as last acted on; set when the block is mapped, so presses
+ * a previous session left in the counter are never replayed (pause_poll) */
+static unsigned pause_req_seen;
 
 /* SIGSTOP or SIGCONT every process named `game`; how many were signalled. */
 static int pause_signal(int sig)
@@ -1891,8 +1896,14 @@ static void pause_release(void)
     if (!game_paused) return;
     held = now_s() - pause_t0;
     if (swshm) {
-        /* the count first: the shim must see it the moment the game runs */
-        swshm->paused_ms += (unsigned)(held * 1000.0 + 0.5);
+        /* The count first: the shim must see it the moment the game runs.
+         * It is ALSO the game's clock now - hwshim subtracts it from every
+         * clock the guest reads - so it errs SHORT: whole ms, less one. A
+         * credit longer than the real gap would step the game's monotonic
+         * clock BACKWARDS at resume; one this short steps it forward by
+         * under 2 ms, which nothing can tell from a slow frame. */
+        unsigned ms = (unsigned)(held * 1000.0);
+        swshm->paused_ms += ms ? ms - 1 : 0;
         __sync_synchronize();
         swshm->paused = 0;
     }
@@ -1911,15 +1922,34 @@ static void pause_toggle(void)
     }
     swshm->paused = 1;
     __sync_synchronize();
-    pause_t0 = now_s();
     if (!pause_signal(SIGSTOP)) {
         swshm->paused = 0;
         fprintf(stderr, "[pause] no running game to pause\n");
         return;
     }
+    /* AFTER the stop, not before: the frozen time starts when the game's last
+     * clock read can have happened, which is what keeps the credit short */
+    pause_t0 = now_s();
     game_paused = 1;
     fprintf(stderr, "[pause] game frozen; press Pause again to resume\n");
     pause_title();
+}
+
+/* The playfield window's Pause / F9 (swkeys.py bumps pause_req). Toggles once
+ * per step not yet seen - an odd number of steps is one toggle, an even number
+ * none. Runs from win_pump, which the idle poll keeps calling while the game
+ * is frozen, so the resume press is seen too. */
+static void pause_poll(void)
+{
+    unsigned req;
+    if (!swshm) return;
+    req = swshm->pause_req;
+    if (req == pause_req_seen) return;
+    if ((req - pause_req_seen) & 1u) {
+        fprintf(stderr, "[pause] asked for from the playfield window\n");
+        pause_toggle();
+    }
+    pause_req_seen = req;
 }
 
 /* One key edge. Called for EVERY key event, before the binds[] lookup. */
@@ -2010,6 +2040,7 @@ static void sw_shm_open(void)
         swshm->tap_gen = swshm->tap_id = swshm->tap_reads = 0;
     }
     swshm->magic = PADSW_MAGIC;
+    pause_req_seen = swshm->pause_req;  /* PAD-204: old presses are not ours */
     __sync_synchronize();
     swshm->gen = 1;
     fprintf(stderr, "[padglhost] keyboard -> switches via %s\n", path);
@@ -2433,6 +2464,7 @@ static void win_pump(void)
     union { long l[32]; unsigned long ul[32]; int i[64]; } ev;
     if (!win_on) return;
     sw_keysim();            /* diagnostic, off unless PAD_SW_KEYSIM is set */
+    pause_poll();           /* PAD-204: Pause / F9 from the playfield window */
 
     /* ★ ITEM 49: WATCH FOR THE SWITCH LIST ARRIVING MID-RUN. On a title's
      * first run mktables derives it from this run's own [sw] dump about a

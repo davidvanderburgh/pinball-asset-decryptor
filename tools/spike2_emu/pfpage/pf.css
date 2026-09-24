@@ -49,6 +49,13 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .pf-status .txt { flex: 1 1 auto; min-width: 0; font: 12px var(--mono); color: var(--ink-2); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .pf-status .txt.flash { color: var(--accent); }
 .pf-states { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.pf-run { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.pf-run .btn { min-width: 64px; }
+.pf-run .lab { font: 600 11px var(--cond); letter-spacing: .08em; color: var(--ink-3); margin-left: 6px; }
+.pf-run .vol { width: 96px; accent-color: var(--accent); }
+.pf-run .pct { width: 34px; font-size: 11px; color: var(--ink-2); text-align: right; }
+.pf-run .mute { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+.pf-run .mute input { accent-color: var(--accent); margin: 0; }
 
 /* ---------------------------------------------------------------- artwork */
 .pf-stagewrap { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 8px; }

@@ -413,15 +413,102 @@ int shim_cond_wait(void *c, void *m)
     return real(c, m);
 }
 
-/* PAD-204: THE PAUSE KEY MUST NOT TRIP THE GAME'S WATCHDOG. padglhost freezes
- * the game with SIGSTOP, and the game's dispatch loop waits here with a 10 s
- * ABSOLUTE deadline and exits 5 on ETIMEDOUT (PAD-200). A pause longer than
- * that expires the deadline while nothing runs, so the resumed game would end
- * itself at once. A timeout that spans a pause is therefore not a timeout:
- * the deadline moves out by the time spent frozen and the wait goes on, as if
- * the frozen seconds never passed. A deadline with no pause in it expires
- * exactly as before. */
+/* ---- PAD-204: A TRUE PAUSE - THE GAME'S CLOCK STANDS STILL WHILE FROZEN ----
+ *
+ * padglhost freezes the game with SIGSTOP (Pause / F9). The first release
+ * stopped at that, and it froze the PICTURE but not TIME: every clock the game
+ * reads had moved on by the frozen seconds when it woke, so the clip's frame
+ * schedule (gstvid.c, paced off CLOCK_MONOTONIC) caught up in one burst and the
+ * game's own timers jumped with it. The frame held, then the show leapt to
+ * where it would have been - "not resuming from there" (tester, v1.6.0).
+ *
+ * So the guest reads a clock that did not run while it was frozen: every wall
+ * and monotonic clock, minus the total time padglhost has held it (padsw's
+ * paused_ms, which padglhost adds to BEFORE the SIGCONT and keeps a hair
+ * SHORT of the real gap, so these clocks can never step backwards). The game
+ * then cannot tell a pause happened, and nothing in it has to be taught one.
+ *
+ * WHAT READS TIME, measured off godzilla_pro's imports: clock_gettime,
+ * gettimeofday and time (game, libstdc++, boost, dbus), all through the PLT,
+ * so all land here. The game's `syscall` is gettid (224) only and
+ * libstdc++'s is futex (240) with a relative timeout computed off
+ * gettimeofday; neither reads a clock behind our back. gstvid.c and
+ * alsastub.c live in this .so and call these same symbols, so the video
+ * schedule and the audio bucket follow the paused clock too - which is the
+ * point. pad_ms() does NOT: it binds the real clock through RTLD_NEXT, because
+ * host tools line the `[sw]` stamps up against their own CLOCK_MONOTONIC.
+ *
+ * THE OTHER HALF IS EVERY ABSOLUTE DEADLINE. A deadline the game computes off
+ * its paused clock is behind the kernel's clock by paused_ms, so it is handed
+ * on moved out by exactly that - pthread_cond_timedwait is the only absolute
+ * wait any of these ELFs import. Its 10 s dispatch watchdog (exit 5, PAD-200)
+ * is the one that proved it matters. */
 static unsigned pause_total_ms(void);
+
+struct shim_ts { long s, ns; };
+
+static void ts_add_ms(struct shim_ts *t, unsigned ms)
+{
+    t->s += ms / 1000;
+    t->ns += (long)(ms % 1000) * 1000000L;
+    if (t->ns >= 1000000000L) { t->s++; t->ns -= 1000000000L; }
+}
+
+static void ts_sub_ms(struct shim_ts *t, unsigned ms)
+{
+    t->s -= ms / 1000;
+    t->ns -= (long)(ms % 1000) * 1000000L;
+    if (t->ns < 0) { t->s--; t->ns += 1000000000L; }
+}
+
+/* The clocks a pause stops: REALTIME, MONOTONIC, MONOTONIC_RAW, the two
+ * COARSE ones, BOOTTIME, the two ALARM ones and TAI. Not the CPU-time clocks
+ * (2, 3, and the negative per-thread ids): a stopped process burns no CPU,
+ * so they already agree. */
+static int pause_clock(int clk)
+{
+    return clk == 0 || clk == 1 || (clk >= 4 && clk <= 9) || clk == 11;
+}
+
+int shim_clock_gettime(int clk, struct shim_ts *t) __asm__("clock_gettime");
+int shim_clock_gettime(int clk, struct shim_ts *t)
+{
+    static int (*real)(int, struct shim_ts *);
+    unsigned p;
+    int r;
+    if (!real) real = dlsym(RTLD_NEXT, "clock_gettime");
+    r = real(clk, t);
+    if (r == 0 && t && pause_clock(clk) && (p = pause_total_ms()) != 0)
+        ts_sub_ms(t, p);
+    return r;
+}
+
+struct shim_tv { long s, us; };
+
+int shim_gettimeofday(struct shim_tv *tv, void *tz) __asm__("gettimeofday");
+int shim_gettimeofday(struct shim_tv *tv, void *tz)
+{
+    static int (*real)(struct shim_tv *, void *);
+    unsigned p;
+    int r;
+    if (!real) real = dlsym(RTLD_NEXT, "gettimeofday");
+    r = real(tv, tz);
+    if (r == 0 && tv && (p = pause_total_ms()) != 0) {
+        tv->s -= p / 1000;
+        tv->us -= (long)(p % 1000) * 1000L;
+        if (tv->us < 0) { tv->s--; tv->us += 1000000L; }
+    }
+    return r;
+}
+
+long shim_time(long *out) __asm__("time");
+long shim_time(long *out)
+{
+    struct shim_tv tv = { 0, 0 };
+    shim_gettimeofday(&tv, 0);
+    if (out) *out = tv.s;
+    return tv.s;
+}
 
 int shim_cond_timedwait(void *c, void *m, void *t) __asm__("pthread_cond_timedwait");
 int shim_cond_timedwait(void *c, void *m, void *t)
@@ -429,19 +516,19 @@ int shim_cond_timedwait(void *c, void *m, void *t)
     static int (*real)(void *, void *, void *);
     unsigned long ra = (unsigned long)__builtin_return_address(0);
     unsigned p0 = pause_total_ms(), p1;
-    struct { long s, ns; } dl;
+    struct shim_ts dl;
     int r;
     if (!real) real = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
     if (ra > 0x16a00 && ra < 0x5d3168) synclog("pthread_cond_timedwait", c, ra);
-    r = real(c, m, t);
-    if (r != 110 /* ETIMEDOUT */ || !t) return r;
-    dl = *(const __typeof__(dl) *)t;
-    while (r == 110 && (p1 = pause_total_ms()) != p0) {
-        unsigned add = p1 - p0;
+    if (!t) return real(c, m, t);
+    /* the game's (paused) clock -> the kernel's */
+    dl = *(const struct shim_ts *)t;
+    ts_add_ms(&dl, p0);
+    r = real(c, m, &dl);
+    /* a pause that began DURING the wait moves the deadline out again */
+    while (r == 110 /* ETIMEDOUT */ && (p1 = pause_total_ms()) != p0) {
+        ts_add_ms(&dl, p1 - p0);
         p0 = p1;
-        dl.s += add / 1000;
-        dl.ns += (long)(add % 1000) * 1000000L;
-        if (dl.ns >= 1000000000L) { dl.s++; dl.ns -= 1000000000L; }
         r = real(c, m, &dl);
     }
     return r;
@@ -4039,7 +4126,7 @@ struct padsw_shm {
      * are kept so the struct stays padsw.h's field for field */
     unsigned char cab[8]; unsigned char scr_cab[8];
     /* PAD-204: padglhost's pause - see shim_cond_timedwait */
-    unsigned paused; unsigned paused_ms;
+    unsigned paused; unsigned paused_ms; unsigned pause_req;
 };
 #define PADSW_MAGIC 0x53444150u
 
@@ -4049,7 +4136,8 @@ struct padsw_shm {
 static volatile struct padsw_shm *sw_shm;
 
 /* PAD-204: total ms padglhost has held the game frozen, 0 before the block is
- * mapped. Read by shim_cond_timedwait, which sits far above this struct. */
+ * mapped. Read by the clock interposers and shim_cond_timedwait, which sit far
+ * above this struct. */
 static unsigned pause_total_ms(void)
 {
     return sw_shm ? sw_shm->paused_ms : 0;

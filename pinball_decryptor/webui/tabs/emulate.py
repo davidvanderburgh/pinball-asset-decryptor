@@ -673,11 +673,32 @@ class EmulateTab(TabService):
     # volume (item 56): LIVE, never greyed
     # ------------------------------------------------------------------
     def _on_volume_change(self, *_a):
+        if getattr(self, "_following_audio", False):
+            return
         try:
             gain = max(0.0, min(1.0, float(self._volume_var.get()) / 100.0))
         except (TypeError, ValueError):
             gain = 1.0
         write_audio_ctl(gain, bool(self._mute_var.get()))
+
+    def _follow_audio_ctl(self):
+        """PAD-204: the virtual playfield window writes the same file from its
+        status bar, so the slider follows it on the status poll. It never
+        writes the file back: setting the two vars one at a time would
+        otherwise save the new volume beside the OLD mute in between."""
+        gain, muted = load_audio_ctl()
+        vol = round(gain * 100)
+        self._following_audio = True
+        try:
+            try:
+                if round(float(self._volume_var.get())) != vol:
+                    self._volume_var.set(vol)
+            except (TypeError, ValueError):
+                pass
+            if bool(self._mute_var.get()) != muted:
+                self._mute_var.set(muted)
+        finally:
+            self._following_audio = False
 
     # ------------------------------------------------------------------
     # Docker (macOS)
@@ -2121,6 +2142,8 @@ class EmulateTab(TabService):
         for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES")):
             if fields.get(key):
                 env[name] = fields[key]
+        # PAD-204: the window's status bar moves this tab's volume / Mute
+        env["PAD_AUDIO_CTL"] = audio_ctl_file()
         try:
             self._pf_proc = self._popen(cmd, env=env)
             self._log("[emulate] opened the virtual playfield window here — "
@@ -2412,6 +2435,7 @@ class EmulateTab(TabService):
                 self._polled_once = True
                 self._runtime_apply(rt)
                 self._apply(info)
+                self._follow_audio_ctl()
             self._post(apply_and_release)
 
         self._thread(run)

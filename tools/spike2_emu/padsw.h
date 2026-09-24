@@ -206,13 +206,25 @@ struct padsw_shm {
      * The deadline is absolute, so a pause longer than 10 s would expire it
      * and the game would end itself the moment it was resumed.
      *
-     * So padglhost counts how long the game has been frozen, and hwshim's
-     * cond_timedwait interposer pushes a deadline that expired across a pause
-     * out by exactly that much - for the game, the frozen time never passed.
-     * padglhost is the only writer, and it adds to paused_ms BEFORE the
-     * SIGCONT, so the guest can never see a resumed run with a stale count. */
+     * So padglhost counts how long the game has been frozen, and hwshim
+     * subtracts that from every clock the game reads and adds it to every
+     * absolute deadline the game hands the kernel - for the game, the frozen
+     * time never passed. That is also what makes it a TRUE pause: with only
+     * the deadline fixed (v1.6.0), the video schedule and the game's timers
+     * caught up at resume and the show jumped ahead. padglhost is the only
+     * writer; it adds to paused_ms BEFORE the SIGCONT, so the guest can never
+     * see a resumed run with a stale count, and it credits a hair less than
+     * the real gap, so the game's clock never steps backwards. */
     unsigned paused;                     /* 1 while frozen; padglhost only      */
     unsigned paused_ms;                  /* total ms frozen; padglhost only     */
+    /* A pause asked for from ANOTHER window. The key only reached padglhost
+     * with the game window focused, and the playfield window is where hands
+     * usually are - there Pause and F9 did nothing at all. swkeys.py bumps
+     * this counter per press; padglhost toggles once per step it has not
+     * seen yet, from the idle poll that keeps running while the game is
+     * frozen. A COUNTER, not a flag, so two presses between polls are two
+     * toggles and nothing ever has to be cleared by the other side. */
+    unsigned pause_req;                  /* presses so far; the scripts only    */
 };
 
 #endif

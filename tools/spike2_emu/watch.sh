@@ -2191,6 +2191,12 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_UNIT_MS"
         [ -n "${PAD_PF_FADE_MS:-}" ] && \
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_MS"
+        # PAD-204: the Emulate tab's volume / Mute file, so the window's status
+        # bar moves the same knob. The app hands it over as a WINDOWS path
+        # already, so no /p - the same crossing playaudio.sh makes for the
+        # audio player.
+        [ -n "${PAD_AUDIO_CTL:-}" ] && \
+            export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_CTL"
         if [ -n "$PF_PY" ] && command -v "$PF_PY" >/dev/null 2>&1; then
             if [ "$PF_BEST" = 0 ]; then
                 echo "[watch] no Windows Python on this PC has pywebview and"

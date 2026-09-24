@@ -163,6 +163,7 @@ function startMain() {
   on("layout", () => load());
   on("frame", (f) => view && view.frame(f));
   on("slots", (s) => { if (S) { S.slots = s.values; S.state_busy = s.busy; } if (view) view.slots(s); });
+  on("run", (r) => { if (S) S.run = r; if (view) view.run(r); });
 
   function render() {
     app.textContent = "";
@@ -173,6 +174,8 @@ function startMain() {
     const status = el("div", "pf-status");
     const stxt = el("div", "txt", S.status || "");
     status.append(stxt);
+    const run = runCluster(S.run);
+    status.append(run.el);
     const states = S.savestates ? stateCluster() : null;
     if (states) status.append(states.el);
     let v;
@@ -189,7 +192,57 @@ function startMain() {
         if (panel && f.panel) panel.update(f.panel);
       },
       slots(s) { if (states) states.update(s); },
+      run(r) { run.update(r); },
     };
+  }
+
+  // ---- the run's own controls (PAD-204): Pause, and the PC-side volume -------
+  // Pause freezes the whole game exactly as Pause / F9 does. The volume and
+  // Mute are the Emulate tab's own (one control file, polled by the audio
+  // player), shown only when the run was handed that file. Every control here
+  // lets go of the keyboard the moment it is used: a focused slider would eat
+  // the arrow keys and a focused box the space bar, which are the flippers
+  // and the Action button.
+  function runCluster(R) {
+    const box = el("div", "pf-run");
+    const pause = btn("Pause", () => { pause.blur(); api("pause"); }, "sm");
+    pause.title = "Freeze the game where it is, and carry on from there (Pause or F9)";
+    box.append(pause);
+    let vol = null, pct = null, mute = null, sliding = false, sent = 0, timer = null;
+    if (R && R.audio) {
+      const lab = el("span", "lab", "VOL");
+      vol = el("input", "vol");
+      vol.type = "range"; vol.min = "0"; vol.max = "100"; vol.step = "1";
+      pct = el("span", "pct mono", "");
+      const send = () => { timer = null; sent = Date.now(); api("volume", Number(vol.value)); };
+      vol.addEventListener("pointerdown", () => { sliding = true; });
+      vol.addEventListener("input", () => {
+        pct.textContent = vol.value + "%";
+        if (!timer) timer = setTimeout(send, Math.max(0, 80 - (Date.now() - sent)));
+      });
+      vol.addEventListener("change", () => { sliding = false; vol.blur(); });
+      const mbox = el("label", "mute");
+      mute = el("input");
+      mute.type = "checkbox";
+      mute.addEventListener("change", () => { api("mute", mute.checked); mute.blur(); });
+      mbox.append(mute, el("span", null, "Mute"));
+      box.append(lab, vol, pct, mbox);
+    }
+    const update = (r) => {
+      if (!r) return;
+      pause.textContent = r.paused ? "Resume" : "Pause";
+      pause.classList.toggle("primary", !!r.paused);
+      box.classList.toggle("paused", !!r.paused);
+      if (vol && r.audio) {
+        if (!sliding) {
+          vol.value = String(Math.round(r.audio.gain * 100));
+          pct.textContent = vol.value + "%";
+        }
+        mute.checked = !!r.audio.muted;
+      }
+    };
+    update(R || {});
+    return { el: box, update };
   }
 
   // ---- the save-state cluster (item 13) --------------------------------------
@@ -542,6 +595,7 @@ function startMain() {
       return { row, d, x };
     });
     kb.append(el("div", "kp-hint", "green dot = switch made"));
+    kb.append(el("div", "kp-hint", "Pause or F9 = freeze / resume the game"));
     if (spec.rows.some((r) => r.click != null)) kb.append(el("div", "kp-hint", "click Start Button or Left Coin to press it"));
     root.append(kb);
 
@@ -653,7 +707,8 @@ function startMain() {
 
   // ---- the keyboard, with THIS window focused (item 39) -----------------------
   const typing = (e) => { const t = e.target; return t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA"); };
-  const PLAY_CODES = /^(Key[A-Z]|Digit\d|Space|Enter|NumpadEnter|Backspace|Escape|Equal|Minus|Arrow(Left|Right|Up|Down))$/;
+  // Pause and F9 freeze and resume the game (PAD-204), as in the game window
+  const PLAY_CODES = /^(Key[A-Z]|Digit\d|Space|Enter|NumpadEnter|Backspace|Escape|Equal|Minus|Arrow(Left|Right|Up|Down)|Pause|F9)$/;
   addEventListener("keydown", (e) => {
     if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
     if (!PLAY_CODES.test(e.code)) return;

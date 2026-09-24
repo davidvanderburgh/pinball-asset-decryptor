@@ -135,6 +135,10 @@ def _controller(playfield, monkeypatch, host):
     ctl.host = host
     ctl.pos = {}
     ctl.lcd = None
+    # the status bar's Pause / volume poll rides every tick (PAD-204); no
+    # control file, and a block path that can never be a live rig's
+    monkeypatch.setattr(playfield, "SW_PATH", os.devnull)
+    ctl.run = playfield.RunCtl(None)
     return ctl
 
 

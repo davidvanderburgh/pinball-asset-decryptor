@@ -1403,6 +1403,12 @@ class SwitchPipe:
         press the pipe could not carry than drop it."""
         return self._send(b"cab %s %d\n" % (name.encode("ascii"), val))
 
+    def pause(self):
+        """Freeze or resume the game, as Pause in the game window does
+        (PAD-204; swkeys.py's `pause` line). No spawn fallback, as for
+        set_cab."""
+        return self._send(b"pause\n")
+
     def _send(self, line):
         if not self._ensure():
             return False
@@ -2101,7 +2107,12 @@ CODE_KEYSYM = {"Enter": "Return", "NumpadEnter": "KP_Enter",
                "Backspace": "BackSpace", "Escape": "Escape",
                "Space": "space", "Equal": "equal", "Minus": "minus",
                "ArrowLeft": "Left", "ArrowRight": "Right",
-               "ArrowUp": "Up", "ArrowDown": "Down"}
+               "ArrowUp": "Up", "ArrowDown": "Down",
+               "Pause": "Pause", "F9": "F9"}
+
+#: PAD-204: these freeze and resume the game instead of pressing anything, the
+#: same two padglhost takes in the game window (XK_Pause, XK_F9).
+PAUSE_KEYSYMS = ("Pause", "F9")
 
 
 def code_to_keysym(code, key=""):
@@ -2157,6 +2168,13 @@ class KeyInput:
         self.pipe._ensure()
 
     def key(self, sym, down):
+        if sym in PAUSE_KEYSYMS:
+            # PAD-204: a user pressed Pause with THIS window focused and
+            # nothing happened - only the game window knew the key. Acted on
+            # at the press; the page has already dropped auto-repeat.
+            if down:
+                self.pipe.pause()
+            return True
         r = self.map.get(sym)
         if r is None:
             return False
@@ -3465,6 +3483,105 @@ TABLES_TIMEOUT_S = 900
 TABLES_EVERY_S = 2.0
 
 
+#: The Emulate tab's volume / Mute control file (item 56), handed to the run as
+#: PAD_AUDIO_CTL: {"gain": 0.0-1.0, "muted": bool}. The audio player polls it,
+#: so writing it here moves the sound live, and the tab's own slider follows.
+AUDIO_CTL = os.environ.get("PAD_AUDIO_CTL") or None
+RUN_POLL_S = 0.3
+
+
+def read_paused():
+    """padsw's `paused` - 1 while padglhost holds the game frozen - or None
+    with no live block."""
+    try:
+        with open(SW_PATH, "rb") as f:
+            d = f.read(padsw.SIZE)
+    except OSError:
+        return None
+    if len(d) < padsw.SIZE or struct.unpack_from("<I", d, 0)[0] != PADSW_MAGIC:
+        return None
+    return struct.unpack_from("<I", d, padsw.OFF_PAUSED)[0]
+
+
+def load_audio_ctl(path):
+    """(gain, muted) as the Emulate tab reads them: unity and unmuted for a
+    file that is missing or unreadable."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        gain = float(data.get("gain", 1.0))
+        muted = bool(data.get("muted", False))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 1.0, False
+    return max(0.0, min(1.0, gain)), muted
+
+
+def write_audio_ctl(path, gain, muted):
+    """Atomic, like the tab's write: the player's poll never sees half a file."""
+    try:
+        tmp = path + ".pf.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"gain": gain, "muted": muted}, f)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+class RunCtl:
+    """The status bar's Pause button and volume (PAD-204): what the page shows
+    for them, polled every RUN_POLL_S. The pause flag is padglhost's, read off
+    the switch block, so the button says Resume however the game was frozen -
+    this button, Pause or F9 in either window. The volume is the tab's file."""
+
+    def __init__(self, ctl_path=None):
+        self.ctl_path = ctl_path
+        self.paused = False
+        self.audio = load_audio_ctl(ctl_path) if ctl_path else None
+        self._mtime = self._stat()
+        self._next = 0.0
+
+    def _stat(self):
+        try:
+            return os.stat(self.ctl_path).st_mtime if self.ctl_path else None
+        except OSError:
+            return None
+
+    def poll(self, now):
+        """True when what the page shows has changed."""
+        if now < self._next:
+            return False
+        self._next = now + RUN_POLL_S
+        changed = False
+        paused = bool(read_paused())
+        if paused != self.paused:
+            self.paused, changed = paused, True
+        if self.ctl_path:
+            mt = self._stat()
+            if mt != self._mtime:
+                self._mtime = mt
+                audio = load_audio_ctl(self.ctl_path)
+                if audio != self.audio:
+                    self.audio, changed = audio, True
+        return changed
+
+    def set_audio(self, gain=None, muted=None):
+        if not self.ctl_path:
+            return False
+        g0, m0 = load_audio_ctl(self.ctl_path)
+        g = g0 if gain is None else max(0.0, min(1.0, float(gain)))
+        m = m0 if muted is None else bool(muted)
+        if not write_audio_ctl(self.ctl_path, g, m):
+            return False
+        self.audio, self._mtime = (g, m), self._stat()
+        return True
+
+    def dyn(self):
+        return {"paused": self.paused,
+                "audio": ({"gain": self.audio[0], "muted": self.audio[1]}
+                          if self.audio is not None else None)}
+
+
 class Playfield:
     """The window's one controller: which view, the loop, and the page's
     actions. ONE SwitchDriver for the life of the window (every view, the key
@@ -3501,6 +3618,7 @@ class Playfield:
         self.pos = {}
         self.lcd = LcdPanel(GAME, on_build=self._open_lcd)
         self.lcd.drv = self.drv
+        self.run = RunCtl(AUDIO_CTL)
         self._wait_deadline = time.time() + TABLES_TIMEOUT_S
         self._wait_next = time.monotonic() + TABLES_EVERY_S
         self._build_view()
@@ -3757,6 +3875,8 @@ class Playfield:
         if self.lcd.dirty:
             self.lcd.dirty = False
             self.publish("lcd", self.lcd.dyn())
+        if self.run.poll(now):
+            self.publish("run", self.run.dyn())
 
     # ---- windows ---------------------------------------------------------------
     def window_spec(self):
@@ -3869,7 +3989,8 @@ class Playfield:
             st = {"title": WINDOW_TITLE, "game": GAME, "kind": self.kind,
                   "savestates": SAVESTATES, "slots": self.slot_values(),
                   "state_busy": self._state_busy,
-                  "acts": ([[i, a[0]] for i, a in enumerate(WINDOW_ACTIONS)]
+                  "run": self.run.dyn(),
+                  "acts":([[i, a[0]] for i, a in enumerate(WINDOW_ACTIONS)]
                            if self.acts_shown and self.view is not None
                            else []),
                   "panel": ({"spec": self.key_panel.spec(),
@@ -3990,6 +4111,24 @@ class Playfield:
         else:
             self.key_panel.row_release()
         return True
+
+    def api_pause(self):
+        """The status bar's Pause / Resume - the same toggle as Pause or F9."""
+        if self.keys is None:
+            return False
+        return self.keys.pipe.pause()
+
+    def api_volume(self, pct):
+        ok = self.run.set_audio(gain=float(pct) / 100.0)
+        if ok:
+            self.publish("run", self.run.dyn())
+        return ok
+
+    def api_mute(self, on):
+        ok = self.run.set_audio(muted=bool(on))
+        if ok:
+            self.publish("run", self.run.dyn())
+        return ok
 
     def api_door(self):
         if self.key_panel is not None:

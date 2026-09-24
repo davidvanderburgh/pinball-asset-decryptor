@@ -645,6 +645,36 @@ def test_volume_and_mute_write_the_live_control_file(tmp_path):
         assert data == {"gain": 0.35, "muted": True}
 
 
+def test_the_slider_follows_the_playfield_window(tmp_path):
+    """PAD-204: the virtual playfield's status bar writes the same control
+    file; the status poll brings the slider and Mute along, and never writes
+    the file back while it does."""
+    with web_app(tmp_path, mfr="stern") as w:
+        from pinball_decryptor.webui.tabs import emulate as emod
+        svc = _svc(w)
+        path = emod.audio_ctl_file()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"gain": 0.6, "muted": True}, f)
+        before = os.stat(path).st_mtime_ns
+        w.run(svc._follow_audio_ctl)
+        st = w.state(NS)
+        assert round(st["volume"]) == 60 and st["mute"] is True
+        assert os.stat(path).st_mtime_ns == before
+        # and the tab's own slider still writes it afterwards
+        w.call("ui.set", NS, "volume", 20)
+        assert json.load(open(path, encoding="utf-8")) == {"gain": 0.2, "muted": True}
+
+
+def test_the_playfield_window_is_handed_the_control_file():
+    """The app opens the window itself when WSL cannot; it must get the file
+    too, or its volume row never appears (watch.sh forwards it otherwise)."""
+    import inspect
+    from pinball_decryptor.webui.tabs import emulate as emod
+    src = inspect.getsource(emod.EmulateTab._open_playfield)
+    assert 'env["PAD_AUDIO_CTL"] = audio_ctl_file()' in src
+
+
 # ---------------------------------------------------------- card, select
 def test_browse_sets_the_card(tmp_path):
     card = tmp_path / "star_wars_le-1_30_0.raw"

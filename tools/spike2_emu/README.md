@@ -1012,14 +1012,33 @@ writes the full output to `$TMPDIR/pad-<script>.log`, which it names in the log.
 Both builders pass `-Werror=implicit-function-declaration` so GCC 13 gives
 GCC 14's answer here rather than on a user's newer distro.
 
-**Pause (or F9) in the game window freezes the whole game** (PAD-204):
+**Pause (or F9) in the game window or the playfield window, or the playfield's
+Pause button, is a TRUE pause of the whole game** (PAD-204):
 `padglhost` SIGSTOPs every `game` process, the title bar says PAUSED, and the
-next press resumes it. Video and sound stop with it, because the guest pulls
-both. A pause of any length is safe: the game's dispatch watchdog exits 5 after
-10 s without progress (PAD-200), so `padglhost` adds the frozen time to
-`padsw`'s `paused_ms` before the SIGCONT, and `hwshim`'s
-`pthread_cond_timedwait` moves a deadline that ran out during a pause out by
-that much. A bare `kill -STOP` of 15 s ends the game on resume; do not use one.
+next press resumes it from the frame it froze on. The playfield window cannot
+signal the game itself, so its key and its button go down swkeys.py's pipe as
+a `pause` line, which steps `padsw`'s `pause_req` counter; `padglhost` polls
+that from its idle loop (which keeps running while the game is frozen) and
+toggles once per step it has not seen. The button reads Resume off `padsw`'s
+`paused` flag, however the pause began.
+
+**The game's clock stands still with it.** A stopped process's clocks keep
+running, so a bare freeze held the picture and then leapt ahead: the clip's
+frame schedule (`gstvid.c`) caught up the frozen seconds in one burst
+(measured: 220 frames in 2 s after an 8 s pause) and the game's timers jumped
+with it, and past 10 s its dispatch watchdog exits 5 (PAD-200). So
+`padglhost` adds the frozen time to `padsw`'s `paused_ms` before the SIGCONT
+(a hair short, so no clock steps backwards), and `hwshim` subtracts it from
+every clock the guest reads (`clock_gettime`, `gettimeofday`, `time`) and adds
+it to the one absolute deadline the guest hands the kernel
+(`pthread_cond_timedwait`). With it, the delivery across a 16 s pause reads a
+plain 61 frames in 2033 ms and the first frame after Resume matches the frozen
+one. `pad_ms()` stays on the real clock: host tools line the `[sw]` stamps up
+against their own. A bare `kill -STOP` is not a pause; do not use one.
+
+The playfield's status bar also carries the Emulate tab's **volume and Mute**
+(`PAD_AUDIO_CTL`, which watch.sh forwards to the window): both write the one
+control file the audio player polls, and the tab's slider follows it.
 
 `buildgl.sh` and `buildbridge.sh` **both write `libGLESv2.so.2`**, so whichever
 ran last decides which backend is live. Re-run the one you want before measuring.

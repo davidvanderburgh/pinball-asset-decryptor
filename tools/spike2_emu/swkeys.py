@@ -19,6 +19,10 @@ buttons BY NAME (padsw.h's cab[], written to the scripts' half). A title's
 first run has no switch list yet, so the ids above do not exist for the menu's
 flippers or Action; the name always does. Same release-on-EOF discipline.
 
+A THIRD, "pause", is the Pause / F9 key (PAD-204): one press of it, a step
+of padsw's pause_req, which padglhost polls and toggles the freeze on. There
+is nothing to hold, so nothing to release.
+
 EOF RELEASES EVERYTHING STILL HELD. The stuck-switch failure is the same one
 item 24 guards against: if the playfield dies mid-flipper, its exit closes
 this stdin, and the finally below opens whatever was left closed - the game
@@ -32,10 +36,13 @@ padsw.set_source('p')   # the playfield's keyboard; PAD_SW_SRC overrides
 
 
 def parse(line):
-    """One stdin line as ('sw', id, level) or ('cab', name, level); None for
-    anything that is not a well-formed edge (a helper must never die of a
-    malformed line: the playfield keeps writing after it)."""
+    """One stdin line as ('sw', id, level), ('cab', name, level) or
+    ('pause', None, None); None for anything that is not a well-formed edge (a
+    helper must never die of a malformed line: the playfield keeps writing
+    after it)."""
     p = line.split()
+    if p == ["pause"]:
+        return ("pause", None, None)
     try:
         if len(p) == 3 and p[0] == "cab":
             if p[1] not in padsw.CAB_NAMES:
@@ -67,7 +74,9 @@ def main():
             if edge is None:
                 continue
             kind, what, val = edge
-            if kind == "cab":
+            if kind == "pause":
+                padsw.request_pause(m)
+            elif kind == "cab":
                 padsw.set_cab(m, what, val)
                 cab_held[what] = val
             else:

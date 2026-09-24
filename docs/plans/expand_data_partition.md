@@ -164,12 +164,22 @@ card of that class).
       16 GB). The refusal is logged, and it names the clips by their project
       file names.
     - At 16G with four songs and 20 clips, the pre-flight kept all four songs
-      whole (bank 2,073 MB of the game's 2,147 MB) and measured 2.03 GB needed
-      of 7.87 GB. The build encoded everything, then the grow step failed
-      because WSL on the dev PC wedged (19:42, the second time that evening).
-      The build discarded the output and said why.
-  - **Still owed:** that 16G build run to the end (prediction vs actual use),
-    and its update in place (`e2e_stageD_build.py d16 dupd`), once WSL is back.
+      whole (bank 2,073 MB of the game's 2,147 MB) and predicted 495,449
+      blocks of growth against 1,920,813 usable. The build used 495,451 (the
+      2 over are within the 21 blocks of per-copy slack it counts). The bank
+      on the card is exactly the predicted 2,073,034,882 bytes. All 21 files
+      copied whole match the build record on the card, and the 20 clips are
+      byte-identical to their source. The table is Stern's own 16G table, and
+      e2fsck is clean on p3, p5 and p6.
+    - Lengthening one song again (10 to 12 min) and building onto that updated
+      it in place. Measured against the build already there, it predicted
+      5,167 blocks and used 5,168. The bank is exactly the predicted
+      2,094,202,882 bytes and e2fsck is clean.
+    - WSL on the dev PC wedged twice that evening (18:07 and 19:42), the second
+      time during this 16G build's grow step, which then failed cleanly
+      (output discarded, reason given). A rerun with nothing else in WSL and a
+      10-second heartbeat, grow and copies included, never hung. So the grow
+      step alone does not reproduce it, and the cause is still unknown.
 - Follow-up (not this branch): a grown build used as a multi-boot primary
   (mkmulticard's store sizing and the Multi-boot tab's size strip), filed as
   a separate task.

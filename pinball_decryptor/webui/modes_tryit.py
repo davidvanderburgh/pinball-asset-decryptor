@@ -79,7 +79,7 @@ class TryItMixin:
         "clips and own sounds, from the card itself) and starts the card in the Emulate tab "
         "with them. Then start a game: a "
         "mode starts on its shots, or at once with Start mode now. Edits you make while the "
-        "game runs reach it within a second. A mode's own sound costs about three minutes "
+        "game runs reach it within a second. A mode's own sound costs about a minute "
         "the first time it changes and is reused after that.")
 
     #: The states of one Try it, in order (the Tk tab's). ``idle`` before the first press;
@@ -408,6 +408,10 @@ class TryItMixin:
             self._tryit_set("live")
             self._tryit["run"] = self._run_id_fn()
             self._down_ticks = 0
+            self._armed_tries = 0
+        elif st == "live" and up:
+            self._down_ticks = 0
+            self._tryit_check_armed()
         elif st == "live" and not up:
             self._down_ticks += 1
             if self._down_ticks >= 3:
@@ -415,6 +419,70 @@ class TryItMixin:
                 self.run_ended(self._tryit.get("run"))
         else:
             self._down_ticks = 0
+
+    # ---- a derived port's first live run (Write waits for it) --------------------------
+    #: how many times, a tick apart, a live run is asked whether the runtime hooked the game
+    ARMED_TRIES = 45
+    _armed_tries = 0
+    _armed_busy = False
+
+    @staticmethod
+    def _port_to_record(game_dir, version, installed):
+        """The port DERIVED on this machine that this Try it installed and no Try it has run
+        yet, or "": its first live run is recorded (port_derive.record_live_run), and until
+        then a Write leaves the modes out (mode_write.card_refusal). Only when the installed
+        copy is that port's exact text."""
+        from ..plugins.stern import port_derive as PD
+        try:
+            src = MR.port_file(game_dir, version)
+            if not src or not PD.is_derived(src) or PD.ran_live(src):
+                return ""
+            with open(src, "rb") as a, open(installed, "rb") as b:
+                return src if a.read() == b.read() else ""
+        except (OSError, TypeError, ValueError):
+            return ""
+
+    def armed_cmd(self):
+        return self._rig_cmd("modes/tryit.sh", "armed")
+
+    def _tryit_check_armed(self):
+        """While live: ask the rig (once a tick, one at a time) whether the mode runtime hooked
+        the running game with the port this Try it installed; the first "armed" records a
+        derived port's live run, so a Write can carry the modes from then on."""
+        live = self._tryit_live
+        path = (live or {}).get("record_port")
+        if not path or self._armed_busy or self._armed_tries >= self.ARMED_TRIES:
+            return None
+        self._armed_busy = True
+        self._armed_tries += 1
+
+        def done(ok, out):
+            self._armed_busy = False
+            said = self._rig_sentence(out)
+            if ok and "armed:" in said:
+                from ..plugins.stern import port_derive as PD
+                if (self._tryit_live or {}).get("record_port") == path and PD.record_live_run(path, said):
+                    self._tryit_live["record_port"] = ""
+                    self._say("Try it: the game ran with the modes hooked in (%s); a Write can "
+                              "now put them on a card." % said)
+                    self._post(self._after_live_record)
+            elif "NOT THIS GAME" in said:
+                if self._tryit_live is not None:
+                    self._tryit_live["record_port"] = ""
+                self._tryit_note("the game did not take the modes: what the app worked out for "
+                                 "this build does not match its program, so the game runs as it "
+                                 "shipped and a Write will not put the modes on a card.")
+                self._say("Try it: " + said)
+        return self._in_background(self.armed_cmd(), done)
+
+    def _after_live_record(self):
+        """A derived port just ran live: the tab's note and Write's words move on."""
+        fn = getattr(self, "refresh", None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:                               # noqa: BLE001
+                pass
 
     # ---- Try it -----------------------------------------------------------------------
     @staticmethod
@@ -448,6 +516,14 @@ class TryItMixin:
             return False
         if not MP.list_modes(project)[0] and not MT.code_mode_sources(project):
             self._tryit_note("there are no modes in this project yet.")
+            return False
+        refusal = getattr(self, "_refusal", None)
+        why = refusal() if callable(refusal) else ""
+        if why:
+            # the card cannot run a mode (no card, no port, still being read): said at once,
+            # before the Emulate tab or the rig is asked anything
+            self._tryit_set("failed", why)
+            self._tryit_note(why)
             return False
         state = self._emulate_state()
         if state:
@@ -536,12 +612,42 @@ class TryItMixin:
         except Exception:                                   # noqa: BLE001
             return None
 
+    def _tryit_port_refusal(self, project, card, code_only):
+        """Why no mode can run on this Try it, from the PORT, before the rig is asked: the
+        project's card has a game with no port, or (code modes only) the booted card's
+        build has none. "" when a port is there. It may open a card image (a worker only)."""
+        from ..plugins.stern import mode_write as MW
+        why = MW.card_refusal(project)
+        if why:
+            return why
+        if code_only:
+            try:
+                game_dir, version, _part = MT.card_title(card)
+            except MT.TryItError as e:
+                return str(e)
+            if not MR.port_file(game_dir, version):
+                return MP.no_port_words(MP.title_label(game_dir or "this card", version))
+        return ""
+
     def _tryit_prepare(self, card):
         project = self._tryit_project or self.project()
         ffmpeg = self._ffmpeg_path()
         if not card or not os.path.isfile(card):
-            return self._tryit_refuse("pick a card image in the Emulate tab first (a %s card)."
-                                      % MT.project_title(project).label)
+            prof = MT.project_title(project)
+            return self._tryit_refuse(
+                "pick a card image in the Emulate tab first (%s)."
+                % ("a %s card" % prof.label if prof is not None
+                   else "the card this project was made from"))
+        found_modes, broken = MP.list_modes(project) if project else ([], [])
+        try:
+            with_assets = MT.code_modes_with_assets(project) if project else []
+        except MT.TryItError as e:
+            return self._tryit_refuse(str(e))
+        code_only = bool(not found_modes and not broken and MT.code_mode_sources(project)
+                         and not with_assets)
+        why = self._tryit_port_refusal(project, card, code_only)
+        if why:
+            return self._tryit_refuse(why)
         as_root = self._as_root()
         ok, out = self._run(self.check_cmd(as_root=as_root), timeout=120,
                             cancel=self._tryit_cancelled)
@@ -550,12 +656,7 @@ class TryItMixin:
                 return self._tryit_cancelled_refuse()
             return self._tryit_refuse(self._rig_sentence(out)
                                       or "the emulator's rig did not answer the modes' check.")
-        found_modes, broken = MP.list_modes(project) if project else ([], [])
-        try:
-            with_assets = MT.code_modes_with_assets(project) if project else []
-        except MT.TryItError as e:
-            return self._tryit_refuse(str(e))
-        if not found_modes and not broken and MT.code_mode_sources(project) and not with_assets:
+        if code_only:
             return self._tryit_prepare_code_only(project, card, as_root)
         self._tryit_set("building")
         # the design's "leave out own sounds": build_set's own sound_ok=False (None = the
@@ -604,6 +705,7 @@ class TryItMixin:
             "codes": self._tryit_code_triggers(codes),
             "codes_unreached": self._tryit_code_unreached(codes),
             "own": dict(getattr(ts, "own_sounds", None) or {}),
+            "record_port": self._port_to_record(ts.game_dir, ts.version, ts.port),
         }
         if ts.slots:
             ready = ("%d mode(s) ready (%s). Start a game, then play the starting shots or press "
@@ -647,8 +749,8 @@ class TryItMixin:
             return self._tryit_refuse(str(e))
         port = MR.port_file(game_dir, version)
         if not port:
-            return self._tryit_refuse("The Mode SDK has no port for %s %s, so no mode can run "
-                                      "on it." % (game_dir or "this card", version))
+            return self._tryit_refuse(MP.no_port_words(MP.title_label(game_dir or "this card",
+                                                                      version)))
         self._tryit_set("building")
         stage = MT.stage_dir(self._tryit_base)
         try:
@@ -676,7 +778,9 @@ class TryItMixin:
         self._tryit_live = {"project": project, "slots": {}, "signatures": {},
                             "stage": stage, "run": self._run_id_fn(),
                             "codes": self._tryit_code_triggers(codes),
-                            "codes_unreached": self._tryit_code_unreached(codes)}
+                            "codes_unreached": self._tryit_code_unreached(codes),
+                            "record_port": self._port_to_record(
+                                game_dir, version, os.path.join(stage, MT.PORT_NAME))}
         self._tryit_note("no modes made in the form, so no screens or clips to build. Start "
                          "a game on %s %s." % (game_dir, version)
                          + self._tryit_code_note(codes))
@@ -846,10 +950,31 @@ class TryItMixin:
     def make_code_mode(self, name):
         """Copy the SDK's template into ``modes/<slug>/<slug>.c``. Returns the path."""
         slug, path = MT.new_code_mode(self.project(), name)
+        prof = getattr(self, "_profile", None)
+        self.stamp_code_title(self.project(), slug, prof.key if prof is not None else "")
         self._tryit_note("made modes/%s/%s.c from the Mode SDK's template. Edit it, then "
                          "Try it builds it in; its test trigger is /dump/%s.start."
                          % (slug, slug, slug))
         return slug, path
+
+    @staticmethod
+    def stamp_code_title(project, slug, key):
+        """Record the game the tab made a code mode for (``title`` in its assets.json), so a
+        project that names no card of its own (its game came from the "Try it on" card)
+        still builds it for that game in Try it and Write (code_modes.profile_for). A mode
+        that already names a title keeps it."""
+        from ..plugins.stern import code_modes as CM
+        if not key or not project:
+            return False
+        try:
+            spec = CM.load(project, slug)
+        except (OSError, ValueError):
+            return False
+        if (spec.extra or {}).get("title"):
+            return False
+        spec.extra = dict(spec.extra or {}, title=key)
+        CM.save(project, slug, spec)
+        return True
 
     def sdk_doc(self):
         return os.path.join(MR.sdk_dir(), "MODE_SDK.md")

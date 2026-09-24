@@ -207,9 +207,16 @@ def validate(spec, folder=None):
     return out
 
 
+#: Why a code-mode-only project has no game to build for (:func:`profile_for` gave None).
+NO_TITLE = ("This project names no card and no code mode names its game, so the app does not "
+            "know which game the code modes are for. Extract the card into the project "
+            "(Extract tab) first.")
+
+
 def profile_for(project, code=()):
     """The title a code-mode-only project builds for: its card's port (item 148), else the title
-    its first code mode names (``extra["title"]``), else Godzilla Pro 1.15."""
+    its first code mode names (``extra["title"]``), else None (:data:`NO_TITLE`): there is no
+    default game."""
     try:
         _card, prof = MP.project_profile(project, probe=True)
     except (OSError, ValueError):
@@ -223,7 +230,7 @@ def profile_for(project, code=()):
                 return MP.profile(key)
             except MP.ModeProjectError:
                 break
-    return MP.GODZILLA_PRO_1_15
+    return None
 
 
 # ---- the sounds, as Write carries them -----------------------------------------------------------

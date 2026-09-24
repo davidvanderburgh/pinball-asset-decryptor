@@ -841,14 +841,32 @@ text example_clip     Mothra_godzilla_attack20
 function against the port. If the core functions (tick, shot dispatch, ball end, score)
 do not match, the port is for another game or version: the runtime hooks nothing, calls
 none of your code, and logs `NOT THIS GAME'S PORT`. Every other function that fails the
-check switches off only its own capability (lights, screens, clips...). The words are
+check switches off only its own capability (lights, screens, clips...). The gate reads the
+process's mappings (`/proc/self/maps`) once and never reads an address outside the game's
+own code: such a site is logged `site X 0x...: not in the game's code - not read` and
+counts as not matching. The core sites are checked first, and when one of them fails no
+other site is read at all. (Before this, `godzilla_le-1.16.port` on The Beatles 1.29 killed
+the game at boot: its `resource_get` 0x538484 lies in Beatles' unmapped hole between its code
+and its data, and the gate read it.)
+
+**The core, and its alternatives.** A port names one of each; the runtime (`core_of_port`) and
+the app (`mode_project.core_missing`) pick the same:
+
+| Core part | The reference way | Or |
+|---|---|---|
+| the tick | `site tick` | |
+| a shot source | `site shot_dispatch` | `site switch_hit` with `switch` lines (see "Shots from switches") |
+| the end of a ball | `site ball_end` | `value ball_end_event <bus id>` with `site hook_dispatch`: the runtime hands the ball end to the modes from the bus dispatch, as the game's own handler of that id would run |
+| the score | `site score_add` + `data scores`: 64-bit points in r2:r3, u64 scores | `site score_add32` + `data scores32`: 32-bit points in r1, u32 scores (The Beatles). The game multiplies the points by its playfield multiplier and adds them with no carry check, so `pm_score_add` cuts an award to the room left below 4,294,967,295, divided by the multiplier byte the optional `data score_mult` names (taken as 1 without it): a score stops at the top instead of wrapping. The boot log says `scores: 32-bit (score_add32 0x..., scores32 0x..., multiplier byte 0x...)`. The Modes tab also refuses an award above 16,843,009 (4,294,967,295 / 255) on such a title. The names carry the calling convention, so a runtime from before the 32-bit form finds no core `score_add` in such a port and hooks nothing |
+| the player up | `data cur_player` | | The words are
 never typed by hand: `port_words.py <game ELF> <port> --write` reads them from the game.
 Two entries are weak checks: `string_new` and `dynamic_cast` are PLT stubs, and every PLT
 stub starts with the same two instructions.
 
 **How much a port holds.** The runtime reads a port a line at a time, in 4 KB pieces, up to
 128 KB (`PORT_MAX`), and keeps each kind of line in a table of its own: 48 `site`, 48 `data`,
-64 `value`, 64 `shot`, 32 `callout`, 32 `scene`, 32 `text`, 48 `event` and 192 `lamp` lines. A
+64 `value`, 64 `shot`, 32 `callout`, 32 `scene`, 32 `text`, 48 `event`, 192 `lamp` and 32
+`switch` lines (each `switch` line's name also takes a `shot` place). A
 line past a full table or past 128 KB is not read, and the boot log says so (`port: 2 line(s)
 not read - a table is full (sites 48 of 48, ...)`); `tests/test_stern_mode_runtime.py` fails
 for a committed port that outgrows a table. Godzilla Premium 1.16's port, with its display
@@ -868,11 +886,14 @@ which is why the `lamp` lines go last.
 | `turtles_pro-1.58.port` | Drafted by `port_tool.py` from 1.59: everything placed. |
 | `deadpool_pro-1.16.port` | `cmode_manager` again (35 virtuals); the shot dispatch (virtual 11, mask in r2:r3) found with `call_probe.c`, the end of ball through its event hook. Lights, screens and clips off. 25 shots. |
 | `deadpool_le-1.14.port` | Drafted from Deadpool Pro, every entry strict. **Not run:** Deadpool LE refuses to start a game in the emulator. |
+| `beatles-1.29.port` | The first title whose rules are plain C (no `cmode_manager`, no `crule_manager`) on Godzilla's framework. 32-bit scores (`score_add32` / `scores32`); 27 shots from its one shot function (one bit in r0, `shot_mask_at 0`, `shot_mask_bits 32`), plus 8 from switches (standups and lanes; emulator-proven with a census and a mode file). Every core entry, the 27-bit shot map and the 8 bus events were proven with a census and a scoring template (the file says which run proved what). No lights (no `light_run`), no clips (no `clip_play`), no HUD scene, no game mode queries. |
 
 A mode that uses port roles (`pm_shot_at`, `pm_callout_id`, `pm_port_text`) instead of one
 game's shot names runs on each unchanged. **The port format is settled** after these five
 titles: the only additions they needed were `shot_mask_at` and `shot_mask_bits`, and both
-default to the reference layout, so no existing port changes.
+default to the reference layout, so no existing port changes. The Beatles added three
+alternatives to the core (the 32-bit scoring pair, `ball_end_event`, `switch_hit` with
+`switch` lines), each optional: a port without them reads as before.
 
 **What changes from one title to another** (learned on Jaws LE):
 
@@ -909,6 +930,77 @@ default to the reference layout, so no existing port changes.
   table has several loops of the same shape calling different virtuals, and Jaws's first
   port had taken one that runs at game start.
 
+### Plain-C titles: The Beatles 1.29
+
+Twelve of the latest Spike 2 builds run their rules as plain C, with no rule classes at all
+(The Beatles, Aerosmith, Batman, Elvira 3, Guardians, both James Bonds, Jurassic Park The
+Pin, Metallica, Star Wars ELG, Stranger Things, Uncanny X-Men). The Beatles runs them on
+the same framework as Godzilla (its tick, event bus, switch drain, current player, lamp
+allocator and end-of-ball sequence match Godzilla Pro 1.15 instruction for instruction), so
+a port for it needs three things Godzilla's does not:
+
+- **32-bit scores.** Its `score_add` is `(u8 player r0, u32 points r1) -> u32` and its scores
+  are `u32[4]`: `site score_add32` and `data scores32` (see "The core, and its alternatives").
+- **One bit in r0.** Every shot reaches one function with the shot's single bit in r0:
+  `value shot_mask_at 0` and `value shot_mask_bits 32`. There is no `0x1` pre-dispatch.
+- **Shots from switches** for what its rules never send as a shot (below).
+
+What it does not have greys cleanly: no `light_run` (so no `pm_lights`; its named inserts
+work through the `lamp` lines), no `clip_play` (its game code plays clips inline), no layered
+display (display priority can arm on the display effects alone, see "Display priority", once
+a port names them), and no mode manager to ask (`pm_stock_mode_running` returns -1, and a
+`stack no` mode starts anyway). Its countdown callout 385 has no ten-seconds call beside it:
+the Modes tab offers the 5..1 count with only `callout countdown`.
+
+#### Shots from switches
+
+A plain-C title's shot function carries only what its rules score as a shot: The Beatles'
+four standups (switches 73-76) and its lanes (48-51) send no bit. The framework broadcasts
+every switch whose descriptor flags ask for it, once per hit, from its switch drain, through
+one small function per flag with r0 = the switch id (The Beatles: 0x96e68 for flag 0x2000,
+0x96f08 for flag 0x1000; Godzilla Pro 1.16's is 0x1e1508). A port names each as a site whose
+name starts `switch_hit`, and maps switch ids to shot bits of their own:
+
+```
+site switch_hit       0x00096e68 0xe2503000 0x012fff1e
+site switch_hit2      0x00096f08 0xe92d4010 0xe2504000
+switch 73          0x100000000     Target 1
+switch 48          0x1000000000    Left outlane
+```
+
+Here `switch_hit` is the flag-0x2000 broadcast (the lanes) and `switch_hit2` the flag-0x1000 one
+(the standups). A `switch` line is `switch <id> <shot mask> <name>`, and the name runs to the end
+of the line, so put a comment on a line of its own above it, never after the name.
+
+- Use bits the rules' dispatch never sends (above bit 31 on a 32-bit title). Each name is also
+  a named shot (`pm_shot("Target 1")`), unless the port has a shot of that name already; two
+  lines for one switch give both bits in one hit.
+- A hit is counted where it happens, lock-free, and handed to every mode's `.shot` from the
+  tick, like an event: within a tick of the hit, on the tick thread. `pm_can(PM_CAN_SWITCH_SHOTS)`
+  is 1 once a `switch_hit` site matched. `value switch_hit_at` names the register holding the
+  id when it is not r0.
+- Only a switch the game's flags broadcast can be mapped: The Beatles' slingshots (60, 61) have
+  no flag, so nothing broadcasts them. The drain skips a switch while the game's mode mask
+  shares no bit with its flags (attract, the bonus), so a switch shot comes only in play.
+- A port with `switch` lines and no `shot_dispatch` still has a shot source: `site switch_hit`
+  is then core.
+- The boot log says `switch shots: 8 switch line(s) hand their shots to the modes; 2 of 2
+  switch_hit site(s) hooked (the id in r0)`, and at the first hit `switch hits run on thread N`.
+- The Modes tab offers the switch shots beside the port's own, and says they are not proven
+  until `mode_project.SWITCH_SHOTS_PROVEN` names the port. Emulator-proven on The Beatles 1.29:
+  each of 73-76 and 48-51 gave exactly one shot in play and none in attract, and 60/61 gave none.
+
+#### A ball end from the bus
+
+Where no function runs only at the end of a ball, a port can name the bus id instead:
+`value ball_end_event 0x34` with `site hook_dispatch` and no `site ball_end`. The runtime hooks
+the dispatch (it does anyway for `event` lines) and calls every mode's `.ball_end` when that id
+is dispatched, from inside the dispatch, where the game's own handlers of the id run; the boot
+log says `ball end: the game's event 0x34, from its dispatch (the port has no ball_end site)`.
+A port with `site ball_end` keeps it, and the value is not used. On The Beatles the `ball_end`
+site is itself a handler of bus 0x34, called from inside that dispatch. Emulator-proven on The
+Beatles 1.29 with the site taken out of the port: one ball end per drain, a tilted ball's included.
+
 ### Ports in the Modes tab
 
 The app's Modes tab makes modes as files (`mode_file.c` runs them), and it reads these
@@ -920,9 +1012,9 @@ pointing here. What each part of the tab needs from the port:
 
 | Tab section | Needs in the port | Also needs |
 |---|---|---|
-| Starts on, Shots that score | `shot` lines (and `shot_mask_bits` when the game sends 32 bits) | |
+| Starts on, Shots that score | `shot` lines (and `shot_mask_bits` when the game sends 32 bits), and `switch` lines with a `switch_hit` site | a port not in `SWITCH_SHOTS_PROVEN` says its switch shots are not proven |
 | Examples | `text example_start_shot` | Godzilla's ready-made modes appear wherever every shot they name exists |
-| Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` + `ten_seconds` | |
+| Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` | `callout ten_seconds` adds the call at 10 s; without it the count is 5..1 only |
 | Sound: the game's own call | `callout time_up` | without it nothing plays when time is up |
 | Sound: my sound | the `sound_lookup` site and `callout time_up` (the call it replaces) | |
 | Lights | everything `pm_can(PM_CAN_LIGHTS)` needs, including `value light_owner`, and `value light_lts` | |
@@ -954,9 +1046,11 @@ ten-seconds call 1291 becomes Jaws's 1387); any other id is dropped, since the s
 plays some other sound on another game, and the build refuses the mode until it is edited. Today: Godzilla Pro 1.15 and Premium/LE 1.16 have every section; Jaws LE
 1.02 has no lights (no light owner) and no screen (its score panel is not measured), and
 has clips (a title card added to its bank played on the glass in the emulator); TMNT Pro and
-Deadpool have shots and scoring only. Only the two Godzilla ports name the game's own
-mode queries, so `stack` is greyed on every other title, and only they carry events, so
-"An event" is greyed on every other title too.
+Deadpool have shots and scoring only. The Beatles 1.29 has shots (its own and from
+switches), 32-bit scoring, the countdown and events; lights, screen, clip, a sound of the
+mode's own and `stack` are greyed. Only the two Godzilla ports name the game's own mode
+queries, so `stack` is greyed on every other title, and only they and The Beatles carry
+events, so "An event" is greyed on every other title.
 
 ### Making a port for another game or version
 
@@ -1160,8 +1254,12 @@ lines:
 |---|---|
 | `[pad] port /dump/game.port: godzilla_pro 1.15, 24 sites, 12 shots` | the port was found |
 | `[pad] site X 0x...: expected ... found ...` | that function differs in this build; its capability is off |
+| `[pad] site X 0x...: not in the game's code - not read` | the address is outside the game's code: a port for another build |
+| `[pad] core site X: not in the port` | the port lacks a core part and its alternative |
 | `[pad] NOT THIS GAME'S PORT ...` | wrong port: nothing hooked, the game runs stock |
 | `[pad] armed: 1 mode(s); can callout lights screens clips ...` | running; this is what this game can do |
+| `[pad] scores: 32-bit (...)` | the port's scoring pair is the 32-bit one |
+| `[pad] switch shots: ...` / `switch shots off: ...` | the port's `switch` lines, and whether a `switch_hit` site was hooked |
 | `[TARGET RUSH] ...` | your `pm_log` lines |
 | `[TARGET RUSH] not started: X is running` | `pm_begin()` refused; another mode is up |
 | `[mode] <name> not started (trigger shot): a battle is running` | a `stack no` mode file waited for the game's own battle (or multiball) |
@@ -1721,7 +1819,13 @@ value layered_fg_flags_at 0x60 / layered_waiter_call 0x00052efc / effect_waiter_
 ```
 
 A port without them has no `PM_CAN_DISPLAY_PRIORITY`: `pm_display_priority` returns 0 and a mode file
-logs `priority N not held`. The boot log says `[pad] display priority: on - ...`; a hold logs
+logs `priority N not held`. A title with no layered displays (The Beatles has the framework's effect
+start, next and priority-now, and nothing of Godzilla's layered-display library) can name the effect
+half alone: `display_effect_start` (and `display_effect_next`, `display_priority_now`), `data
+display_effects`, `award_screen_arg`, `event_current` and the four `display_*` values, and no
+`layered_priority`. The hold then rides on the display effects only, and the boot log says `display
+priority: on, display effects only`. No port names it that way yet: The Beatles' `display_host` is
+not measured. The boot log says `[pad] display priority: on - ...`; a hold logs
 `display: <mode> holds display priority N`, each display that waits for it once (`the game's layered
 display 40 (priority 113, flags 0x11) waits for the hold at 180`), `covered by ...` / `in view again`,
 and `priority N released`.

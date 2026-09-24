@@ -762,7 +762,7 @@ def test_every_word_row_matches_the_real_game_program(build_id):
     if data is None:
         pytest.skip("no %s game program on this machine (its stock card; "
                     "set PAD_STOCK_MODES_CARDS to a folder of cards)" % build_id)
-    table = next(b for b in S.tables() if b.id == build_id)
+    table = next(b for b in S.hand_tables() if b.id == build_id)
     img = S.ElfImage(data)
     assert S.identify(img, S.tables())[0] is table
     rows = [n for n in table.numbers if n.is_word]
@@ -775,7 +775,7 @@ def test_every_word_row_matches_the_real_game_program(build_id):
 
 
 def test_the_shipped_tables_parse_and_every_row_is_well_formed():
-    for b in S.tables():
+    for b in S.hand_tables():
         assert len(b.sha1) == 40 and b.modes
         for n in b.numbers:
             assert n.mode_id in b.modes, n.row_key

@@ -22,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SDK = os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk")
 
 PORTS = [
+    ("beatles", "1.29"),
     ("deadpool_le", "1.14"),
     ("deadpool_pro", "1.16"),
     ("godzilla_le", "1.16"),
@@ -141,7 +142,7 @@ def test_ports_lists_what_the_sdk_carries():
 # key -> the runtime's #define that sizes its table (pad_mode_runtime.c)
 _PORT_TABLES = {"site": "N_SITES", "data": "N_DATA", "value": "N_VALUES", "shot": "N_SHOTS",
                 "callout": "N_ROLES", "scene": "N_ROLES", "text": "N_TEXTS", "event": "N_EVENTS",
-                "lamp": "N_LAMPS"}
+                "lamp": "N_LAMPS", "switch": "N_SWITCHES"}
 
 
 @pytest.mark.parametrize("game_dir,version", PORTS)

@@ -39,9 +39,20 @@ def _wait(w, cond, timeout=5.0):
     return cond()
 
 
-def _project(w, path):
-    """Point the project folder (Write's assets folder, else the Extract output) at *path*."""
+#: The card a scratch project names when a test gives none: there is no default game any
+#: more (a project that names no card greys the form), so the Godzilla tests say which
+#: card their project is for. The image is not there, so the tab reads nothing and uses
+#: the shipped port.
+GODZILLA_CARD = "godzilla_pro-1_15_0.raw"
+
+
+def _project(w, path, card=GODZILLA_CARD):
+    """Point the project folder (Write's assets folder, else the Extract output) at *path*.
+    A folder that names no card yet is made a *card* project first (``card=None``: a bare
+    folder)."""
     os.makedirs(str(path), exist_ok=True)
+    if card and not os.path.isfile(os.path.join(str(path), ".extract_source.json")):
+        _card_project(path, card)
     svc = _svc(w)
 
     def go():
@@ -179,7 +190,7 @@ def test_code_modes_are_in_the_list(tmp_path, preview_on):
         assert st["code"]["source"].endswith("laser_show.c")
         assert st["code"]["trigger"] == "/dump/laser_show.start"
         assert st["tryit_line"].startswith("made modes/laser_show/laser_show.c from the Mode SDK")
-        assert st["cap_text"] == "0 of 8 modes"          # a code mode takes no slot
+        assert st["cap_text"] == "" and st["n_form"] == 0 and st["n_code"] == 1   # no slot
         assert st["code_words"].startswith("Code modes: ")
         assert st["dup_ok"] and st["del_ok"] and not st["editor_on"]
         # duplicate and delete a code mode
@@ -193,7 +204,7 @@ def test_code_modes_are_in_the_list(tmp_path, preview_on):
 def test_stock_table_needs_a_known_build(tmp_path, preview_on):
     proj = tmp_path / "proj"
     with web_app(tmp_path, mfr="stern") as w:
-        _project(w, proj)
+        _project(w, proj, card="mando_le-1_44_0.raw")
         st = w.state("modes")["stock"]
         assert st["on"] is False
         assert st["msg"].startswith("The app doesn't know the timers and awards of")
@@ -406,7 +417,8 @@ def test_jaws_greys_what_its_port_cannot_do(tmp_path, preview_on):
         _project(w, proj)
         st = w.state("modes")
         assert st["title_text"].startswith("Card: jaws_le-1_02_0.raw, Jaws LE 1.02 (from ")
-        assert "Modes run on its port, jaws_le-1.02.port, with its 27 shots." in st["title_text"]
+        assert "Modes of your own use its 27 shots." in st["title_text"]
+        assert "port" not in st["title_text"] and st["title_port"] == "jaws_le-1.02.port"
         assert st["profile"]["label"] == "Jaws LE 1.02"
         assert len(st["profile"]["shots"]) == 27 and st["profile"]["cols"] == 3
         names = [e["name"] for e in st["examples"]]
@@ -430,6 +442,19 @@ def test_an_unproven_port_says_so(tmp_path, preview_on):
         assert st["new_ok"] and st["ex_ok"]
 
 
+def test_beatles_switch_shots_are_proven_and_its_countdown_unheard(tmp_path, preview_on):
+    proj = _card_project(tmp_path / "beatles", "beatles-1_29_0.Release.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        st = w.state("modes")
+        assert st["profile"]["label"] == "The Beatles 1.29" and len(st["profile"]["shots"]) == 35
+        assert "shots from switches" not in st["title_note"]      # beatles-1.29 is in SWITCH_SHOTS_PROVEN
+        w.call("modes.new")
+        st = w.state("modes")
+        assert not st["dis"]["countdown"]
+        assert st["reasons"]["sound_unheard"].startswith("Not heard yet: The Beatles 1.29's countdown")
+
+
 def test_tmnt_shots_and_greying(tmp_path, preview_on):
     proj = _card_project(tmp_path / "tmnt", "turtles_pro-1_59_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
@@ -449,11 +474,13 @@ def test_a_card_with_no_port_is_read_only(tmp_path, preview_on):
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
         st = w.state("modes")
-        assert st["no_port"].startswith("There is no port for ")
-        assert st["title_note"] == st["no_port"]
+        assert st["no_port"].startswith("Modes of your own can't be made for ")
+        assert st["title_note"].startswith(st["no_port"])
+        assert "MODE_SDK.md" in st["no_port_details"] and "MODE_SDK" not in st["title_note"]
         assert st["new_ok"] is False and st["ex_ok"] is False
-        assert st["status"] == "Modes cannot be built for this card yet: it has no port (see above)."
-        assert st["shots_text"] == "(no shots: this card's game has no port)"
+        assert st["ex_tip"] == st["no_port"]              # the greyed Examples says why
+        assert st["status"] == "Modes of your own can't be built for this card yet (see above)."
+        assert st["shots_text"] == "(no shots: modes of your own can't be made for this card yet)"
         assert st["profile"]["shots"] == []
 
 
@@ -562,7 +589,7 @@ def test_stock_value_staged_for_the_next_write(tmp_path, preview_on):
         st = w.state("modes")["stock"]
         if not st["on"]:
             pytest.skip("no stock table for godzilla_le 1.16 in this tree")
-        assert st["msg"].startswith("godzilla_le 1.16: ")
+        assert st["msg"].startswith("Godzilla Premium/LE 1.16: ")
         assert "Nothing changed - every number is the game's own." in st["msg"]
         row = next(r for r in st["rows"] if not r["readonly"] and r["stock"] not in ("?", "0"))
         w.call("modes.stock_select", row["key"])
@@ -888,3 +915,566 @@ def test_tryit_through_the_real_emulate_service(tmp_path, preview_on, monkeypatc
             assert w.run(modes.on_start_now) is None
         finally:
             released.set()
+
+
+# ------------------------------------------------------------------ any Spike 2 card
+# The PORTS and STOCK helpers behind title_reader are built beside this tab, so these tests
+# stand in title_reader.read_card (the contract: progress(step, fraction, text), cancel(),
+# a TitleRead back) and give it a port file and a stock table of their own.
+BEATLES_CARD = "beatles-1_29_0.Release.8G.sdcard.raw"
+
+BEATLES_PORT = """# The Beatles 1.29: a stand-in port for the tab's tests (no program behind it)
+game           beatles
+version        1.29
+
+site tick             0x000c0210 0xe92d4038 0xe3a00037
+site shot_dispatch    0x0003e314 0xe92d4ff0 0xe3045b18
+site ball_end         0x0004b5e8 0xe92d40f8 0xe30e6c04
+site score_add        0x0015ee3c 0xe3041d0e 0xe3401087
+
+data cur_player             0x0054322c
+data scores                 0x005b3578
+
+shot 0x1               Left orbit
+shot 0x2               Right orbit
+shot 0x4               Penny Lane ramp
+shot 0x8               Abbey Road ramp
+shot 0x10              Center target
+"""
+
+BEATLES_TABLE = """
+build beatles 1.29 sha1 00000000000000000000000000000000000000aa
+mode 1 cmode_all_my_loving obj 0x0 vtable 0x0 title_msg ?
+mode 2 cmode_drive_my_car obj 0x0 vtable 0x0 title_msg ?
+number 2 timer.timer 30 adj AD_MODE_DRIVE_MY_CAR_TIMER 171 e3a000ab adjustment  # range 20..60, min..max default in ELF
+number 2 timer.shots 2 adj AD_MODE_DRIVE_MY_CAR_SHOTS 172 e3a000ac adjustment  # range 2..8, min..max default in ELF
+number 2 timer.bonus ? code 0x35354 - code  # worked out in code
+mode 6 cmode_main_multiball obj 0x0 vtable 0x0 title_msg ?
+number 6 timer.ball_save 30 adj AD_MAIN_MULTIBALL_BALL_SAVE_SECONDS 180 e3a000b4 adjustment  # range 0..60, min..max default in ELF
+"""
+
+
+def _derived_port(text, name="beatles-1.29"):
+    """A port derived on this machine as port_derive.ensure_port leaves it: in the title
+    cache's ports folder with a current sidecar, so every lookup lists it."""
+    import json
+    from pinball_decryptor.plugins.stern import port_derive as PD
+    from pinball_decryptor.plugins.stern import portgen as G
+    path = os.path.join(PD.user_ports_dir(), name + ".port")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    with open(path[:-len(".port")] + ".json", "w", encoding="utf-8") as f:
+        json.dump(dict(key=dict(elf_sha1="aa" * 20, revision=G.REVISION, refs={}), ok=True), f)
+    return path
+
+
+class _FakeReader:
+    """title_reader.read_card as the contract has it. ``gate`` holds the port step until
+    set (so a test can look at the tab mid-read); ``fail`` raises that error instead."""
+
+    def __init__(self, tmp_path, port=True, missing=(), fail=None, proven=False):
+        import threading
+        from pinball_decryptor.plugins.stern import stock_modes as SM
+        self.gate = threading.Event()
+        self.calls = []
+        self.fail = fail
+        self.missing = tuple(missing)
+        self.proven = proven
+        self.port = ""
+        self.want_port = bool(port)
+        self.build = SM.parse(BEATLES_TABLE)[0]
+
+    def __call__(self, card, progress=None, cancel=None):
+        from pinball_decryptor.plugins.stern import title_reader as TR
+        self.calls.append(card)
+        progress("program", 0.0, TR.STEP_WORDS["program"])
+        progress("program", 1.0, TR.STEP_WORDS["program"])
+        progress("port", 0.0, TR.STEP_WORDS["port"])
+        progress("port", 0.5, "Placing the ball end")
+        while not self.gate.wait(0.02):
+            if cancel is not None and cancel():
+                raise TR.Cancelled()
+        if self.fail:
+            raise TR.TitleReadError(self.fail)
+        if self.want_port and not self.port:
+            # where ensure_port puts a port it derives, with the sidecar that keeps it current
+            self.port = _derived_port(BEATLES_PORT)
+        progress("port", 1.0, "")
+        progress("stock", 0.0, TR.STEP_WORDS["stock"])
+        progress("stock", 1.0, "")
+        return TR.TitleRead(
+            game="beatles", version="1.29.0", elf_sha1="aa" * 20, family="c",
+            port_path=self.port, port_origin="derived" if self.port else "",
+            port_proven=self.proven, port_missing=() if self.port else self.missing,
+            stock_build=self.build, stock_origin="generated",
+            notes=("Read by the stand-in reader.",), seconds=1.5)
+
+
+@pytest.fixture
+def beatles(monkeypatch, tmp_path):
+    """A Beatles-like card project whose image is on disk (so the tab reads it), the stand-in
+    reader, and no SHIPPED port for Beatles (one may come later): only the port the read
+    finds, as every lookup (the tab, Write, Try it) resolves it."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import title_reader as TR
+    monkeypatch.setenv("PAD_TITLE_CACHE", str(tmp_path / "titles"))
+    real = MP._folder_profiles
+
+    def folder_profiles(d):
+        out = real(d)
+        if os.path.abspath(d) == os.path.abspath(MP.PORTS_DIR):
+            # the SHIPPED Beatles port is hidden; one derived on this machine stays
+            out = {k: p for k, p in out.items() if p.game_dir != "beatles"}
+        return out
+    monkeypatch.setattr(MP, "_folder_profiles", folder_profiles)
+    proj = tmp_path / "beatles"
+    _card_project(proj, BEATLES_CARD)
+    with open(os.path.join(str(proj), BEATLES_CARD), "wb") as f:
+        f.write(b"\0" * 4096)
+
+    def make(**kw):
+        fake = _FakeReader(tmp_path, **kw)
+        monkeypatch.setattr(TR, "read_card", fake)
+        return fake
+    return proj, make
+
+
+def _reading(w):
+    return w.state("modes")["reading"]
+
+
+def test_a_new_card_is_read_with_progress_then_made_for(tmp_path, preview_on, beatles):
+    proj, make = beatles
+    fake = make()
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj, card=None)
+        # mid-read: a determinate bar, the steps as a checklist, the form greyed
+        assert _wait(w, lambda: _reading(w).get("step") == "port"
+                     and _reading(w).get("pct", 0) > 0)
+        r = _reading(w)
+        assert r["state"] == "reading" and r["label"] == "The Beatles 1.29"
+        assert r["card"] == BEATLES_CARD
+        assert [(x["key"], x["state"]) for x in r["steps"]] == [
+            ("program", "done"), ("port", "doing"), ("stock", "todo")]
+        assert 0 < r["pct"] < 100 and r["started"]
+        st = w.state("modes")
+        assert st["no_port"] == _svc(w).READING_WORDS
+        assert st["title_note"] == ""                  # the panel says it, not a warning
+        assert st["new_ok"] is False and st["ex_ok"] is False
+        assert st["status"].startswith("Modes cannot be built for this card yet: reading ")
+        assert st["shots_text"] == "(no shots yet: reading which game the card is)"
+        # the server refuses a New pressed anyway: nothing is written
+        assert w.call("modes.new") is None
+        assert _modes_on_disk(proj) == []
+        # the read lands
+        fake.gate.set()
+        assert _wait(w, lambda: _reading(w)["state"] == "done")
+        st = w.state("modes")
+        assert _reading(w)["notes"] == ["Read by the stand-in reader."]
+        assert st["profile"]["label"] == "The Beatles 1.29"
+        assert st["profile"]["shots"][:2] == ["Left orbit", "Right orbit"]
+        assert st["title_origin"] == "derived"
+        assert st["title_note"].startswith("Press Try it once first: the app worked out by "
+                                           "itself how to run modes on The Beatles 1.29")
+        assert "port" not in st["title_note"]
+        assert st["new_ok"] and st["ex_ok"]
+        # a plain starter mode, never Godzilla's, and no code examples
+        assert [e["name"] for e in st["examples"]] == ["TARGET RUSH"]
+        # the game's own modes are a group of the list: the ones with a number to change
+        assert [r["name"] for r in st["game_rows"]] == ["Drive My Car", "Main Multiball"]
+        assert st["game_hidden"] == 1                     # All My Loving has none
+        assert st["stock"]["on"] and st["stock"]["msg"].startswith("The Beatles 1.29: ")
+        # a mode made here is for this card, with its shots, and says what it cannot do
+        slug = w.call("modes.new")
+        assert slug == "new_mode"
+        data = json.loads((proj / "modes" / slug / "mode.json").read_text("utf-8"))
+        assert data["title"] == "beatles_1_29"
+        assert data["start_shot"] in st["profile"]["shots"]
+        st = w.state("modes")
+        assert st["editor_on"] and st["status"] == "Ready to build."
+        for part in ("screen", "clip", "lights", "events", "stack"):
+            assert st["dis"][part], part
+            assert st["reasons"][part].startswith("Not on this game: "), part
+        assert st["profile"]["events"] == []
+        # Write and Try it find the same port the tab shows (they used to say "There is no
+        # port for The Beatles" about a mode the tab called ready)
+        from pinball_decryptor.plugins.stern import mode_project as MP
+        from pinball_decryptor.plugins.stern import mode_write as MW
+        assert MW.card_refusal(str(proj)) == ""
+        assert MP.project_profile(str(proj))[1].key == "beatles_1_29"
+        found, _broken = MP.list_modes(str(proj))
+        built = MW.card_modes(str(proj), found)
+        assert [spec.title for _s, spec in built] == ["beatles_1_29"]
+        assert _svc(w)._tryit_port_refusal(str(proj), "", False) == ""
+        # a Godzilla code example is refused on the server too, not only left off the menu
+        from pinball_decryptor.plugins.stern import code_modes as CM
+        name = CM.example_names()[0]
+        assert w.call("modes.code_example", name) is False
+        assert "an example for Godzilla" in w.state("modes")["tryit_line"]
+        assert not os.path.isdir(MP.mode_folder(str(proj), CM.example(name)["slug"]))
+        # a second look is instant: nothing is read again
+        _project(w, proj, card=None)
+        assert len(fake.calls) == 1
+        assert w.state("modes")["profile"]["label"] == "The Beatles 1.29"
+
+
+def test_reading_can_be_cancelled_and_read_again(tmp_path, preview_on, beatles):
+    proj, make = beatles
+    fake = make()
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj, card=None)
+        assert _wait(w, lambda: _reading(w).get("state") == "reading")
+        assert w.call("modes.read_cancel") is True
+        assert _reading(w)["text"] == "Stopping at the next step…"
+        assert _wait(w, lambda: _reading(w)["state"] == "cancelled")
+        st = w.state("modes")
+        assert "was stopped" in st["no_port"] and "Read again" in st["no_port"]
+        assert st["new_ok"] is False
+        # a refresh does not start it again by itself
+        w.run(_svc(w)._refresh_all)
+        w.drain()
+        assert len(fake.calls) == 1 and _reading(w)["state"] == "cancelled"
+        fake.gate.set()
+        assert w.call("modes.read_again") is True
+        assert _wait(w, lambda: _reading(w)["state"] == "done")
+        assert len(fake.calls) == 2
+        assert w.state("modes")["new_ok"] is True
+
+
+def test_a_card_that_cannot_be_read_says_why(tmp_path, preview_on, beatles):
+    proj, make = beatles
+    fake = make(fail="The game program could not be read from the card: bad superblock")
+    fake.gate.set()
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj, card=None)
+        assert _wait(w, lambda: _reading(w).get("state") == "failed")
+        r = _reading(w)
+        assert r["error"].endswith("bad superblock")
+        assert [x["state"] for x in r["steps"]] == ["done", "failed", "todo"]
+        st = w.state("modes")
+        assert st["no_port"].startswith("The card could not be read, so modes cannot be made "
+                                        "for it: ")
+        assert st["new_ok"] is False
+
+
+def test_no_port_says_why_and_the_server_refuses(tmp_path, preview_on, beatles):
+    """A build the app could not make a port for: the words say what is missing, and New,
+    an example, a code mode and Try it are refused on the server as well as greyed."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    proj, make = beatles
+    fake = make(port=False, missing=("shot_dispatch", "score_add"))
+    fake.gate.set()
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        svc._platform = "win32"
+        _project(w, proj, card=None)
+        assert _wait(w, lambda: _reading(w).get("state") == "done")
+        st = w.state("modes")
+        assert st["no_port"].startswith("Modes of your own can't be made for The Beatles 1.29 "
+                                        "yet: the app could not find where the game hands out "
+                                        "its shots and how the game adds points in its program")
+        # the banner says what still works, and the SDK pointer is a tooltip
+        assert st["title_note"] == st["no_port"] + " " + MP.NO_PORT_STILL
+        assert st["no_port_details"] == MP.NO_PORT_DETAILS
+        assert st["new_ok"] is False and st["ex_ok"] is False and st["examples"] == []
+        assert st["shots_text"] == "(no shots: modes of your own can't be made for this card yet)"
+        # the game's own modes do not need a port: they are listed and can be changed
+        assert [r["name"] for r in st["game_rows"]][:2] == ["Drive My Car", "Main Multiball"]
+        n = len(w.asked)
+        assert w.call("modes.new") is None
+        assert w.asked[n]["title"] == "New mode" and "hands out its shots" in w.asked[n]["message"]
+        assert w.call("modes.example", "TARGET RUSH") is None
+        assert w.call("modes.new_code_mode", "Laser") is None
+        assert w.state("modes")["tryit_line"].startswith("Modes of your own can't be made for "
+                                                         "The Beatles")
+        assert _modes_on_disk(proj) == [] and not os.path.isdir(proj / "modes" / "laser")
+        # a mode already in the folder: Try it says why at once, before the Emulate tab or
+        # the rig is asked anything
+        MP.new_mode(str(proj), "OLD", MP.blank_spec(MP.GODZILLA_PRO_1_15))
+        emu = _FakeEmulate()
+        _with_emu(w, emu)
+        assert w.call("modes.tryit") is False
+        assert emu.handed == []
+        st = w.state("modes")
+        assert st["tryit"]["state"] == "failed"
+        assert st["tryit_line"].startswith("Modes of your own can't be made for The Beatles "
+                                           "1.29 yet")
+
+
+def test_tryit_checks_the_port_before_the_rig(tmp_path, preview_on):
+    """The Emulate tab's worker: a project whose card has no port is refused before the rig
+    check runs (it used to spend up to two minutes on the rig first)."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    proj = _card_project(tmp_path / "mando", "mando_le-1_44_0.raw")
+    MP.new_mode(str(proj), "OLD", MP.blank_spec(MP.GODZILLA_PRO_1_15))
+    card = tmp_path / "mando_le-1_44_0.raw"
+    card.write_bytes(b"\0" * 64)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        _project(w, proj, card=None)
+        ran = []
+        svc._run_fn = lambda cmd, **k: ran.append(cmd)
+        _with_emu(w, _FakeEmulate())
+        svc._tryit_project = str(proj)
+        assert svc.tryit_prepare(str(card)) is None
+        assert ran == []
+        assert svc.tryit_prepare.last_reason.startswith("Modes of your own can't be made for "
+                                                        "The Mandalorian")
+
+
+def test_the_games_own_mode_has_a_page(tmp_path, preview_on, beatles):
+    from pinball_decryptor.core import staged_changes
+    proj, make = beatles
+    make().gate.set()
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj, card=None)
+        assert _wait(w, lambda: _reading(w).get("state") == "done")
+        assert w.call("modes.select", "2", "game") is True
+        st = w.state("modes")
+        assert st["sel"] == {"slug": "2", "kind": "game"}
+        g = st["game_mode"]
+        assert g["name"] == "Drive My Car" and g["build"] == "The Beatles 1.29"
+        assert not st["open"] and st["code"] is None
+        timer = next(r for r in g["rows"] if r["key"] == "2.timer.timer")
+        assert timer["stock"] == "30" and timer["current"] == "30" and not timer["readonly"]
+        assert timer["hint"].startswith("An operator setting (AD_MODE_DRIVE_MY_CAR_TIMER), "
+                                        "20 to 60")
+        # the visible line in plain words; the setting's name and the address in the tooltip
+        assert timer["where"] == "Operator setting, 20 to 60 (also on the Defaults tab)"
+        code = next(r for r in g["rows"] if r["key"] == "2.timer.bonus")
+        assert code["readonly"] and code["why"] == ("The game works this out as it plays, so it "
+                                                    "cannot be changed here.")
+        assert "0x35354" in code["hint"] and "0x" not in code["where"]
+        # Set: staged for the next Write, as the Defaults tab stages a setting
+        text = w.call("modes.game_set", "2.timer.timer", "45")
+        assert "30 -> 45 staged for the next Write" in text
+        assert staged_changes.load(str(proj))["settings"]["AD_MODE_DRIVE_MY_CAR_TIMER"] == 45
+        st = w.state("modes")
+        timer = next(r for r in st["game_mode"]["rows"] if r["key"] == "2.timer.timer")
+        assert timer["changed"] and timer["current"] == "45"
+        assert st["game_mode"]["note"] == text
+        assert next(r for r in st["game_rows"] if r["slug"] == "2")["chip"] == "1 changed"
+        # out of the game's range: refused with its words, nothing more staged
+        assert w.call("modes.game_set", "2.timer.timer", "600")
+        assert staged_changes.load(str(proj))["settings"]["AD_MODE_DRIVE_MY_CAR_TIMER"] == 45
+        # Stock: back to the game's own
+        assert "back to the game's own 30" in w.call("modes.game_stock", "2.timer.timer")
+        assert "AD_MODE_DRIVE_MY_CAR_TIMER" not in (
+            staged_changes.load(str(proj)).get("settings") or {})
+        # a read-only row cannot be set
+        assert w.call("modes.game_stock", "2.timer.bonus") == ""
+        # the dialog still lists every number
+        w.call("modes.stock_refresh")
+        assert len(w.state("modes")["stock"]["rows"]) == 4
+        # a mode of the person's own leaves the page
+        slug = w.call("modes.new")
+        st = w.state("modes")
+        assert st["game_mode"] is None and st["sel"] == {"slug": slug, "kind": "form"}
+        w.call("modes.select", "6", "game")
+        assert w.state("modes")["game_mode"]["name"] == "Main Multiball"
+        w.call("modes.select", slug, "form")
+        assert w.state("modes")["game_mode"] is None and w.state("modes")["open"]
+
+
+def test_godzilla_uses_its_shipped_port_while_the_card_is_read(tmp_path, preview_on,
+                                                               monkeypatch):
+    """The Godzilla path is unchanged: its port is shipped, so the form is live at once,
+    and the read that runs beside it only adds the game's own modes."""
+    import threading
+    from pinball_decryptor.plugins.stern import mode_runtime as MR
+    from pinball_decryptor.plugins.stern import title_reader as TR
+    gate = threading.Event()
+
+    def read_card(card, progress=None, cancel=None):
+        progress("program", 1.0, "")
+        gate.wait(120)          # held until the test has looked (a slow runner starts late)
+        return TR.TitleRead(game="godzilla_pro", version="1.15.0",
+                            port_path=MR.port_file("godzilla_pro", "1.15"),
+                            port_origin="shipped", port_proven=True)
+    monkeypatch.setattr(TR, "read_card", read_card)
+    proj = _card_project(tmp_path / "gz", "godzilla_pro-1_15_0.raw")
+    (proj / "godzilla_pro-1_15_0.raw").write_bytes(b"\0" * 64)
+    with web_app(tmp_path, mfr="stern") as w:
+      try:
+        _project(w, proj, card=None)
+        st = w.state("modes")
+        assert _reading(w)["state"] == "reading"
+        assert st["profile"]["key"] == "godzilla_pro_1_15" and st["new_ok"] and not st["no_port"]
+        names = [e["name"] for e in st["examples"] if not e["code"]]
+        assert names[:4] == ["KAIJU RUSH", "ATOMIC BREATH", "MOTHRA'S SONG", "MECHAGODZILLA"]
+        assert any(e["code"] for e in st["examples"])
+        assert w.call("modes.new") == "new_mode"
+        gate.set()
+        assert _wait(w, lambda: _reading(w)["state"] == "done")
+        st = w.state("modes")
+        assert st["profile"]["key"] == "godzilla_pro_1_15" and st["title_origin"] == "shipped"
+        assert st["title_note"] == "" and st["open"] and st["editor_on"]
+      finally:
+        gate.set()
+
+
+def test_a_project_with_no_card_knows_no_game(tmp_path, preview_on):
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    proj = tmp_path / "bare"
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj, card=None)
+        st = w.state("modes")
+        # said once, in the note: the head keeps only the counts
+        assert st["title_text"] == "" and st["title_note"] == MP.NO_CARD_HELP and st["no_card"]
+        assert st["new_ok"] is False and st["examples"] == [] and st["profile"]["shots"] == []
+        assert st["shots_text"] == "(no shots: this project names no card)"
+        assert w.call("modes.new") is None and _modes_on_disk(proj) == []
+        # the "Try it on" card names a game: the modes are for it
+        emu = w.window.service("emulate")
+        w.run(lambda: emu.emulate_card_var.set(str(tmp_path / "godzilla_le-1_16_0.raw")))
+        w.drain()                          # the card box's trace re-reads the title
+        st = w.state("modes")
+        assert st["profile"]["label"] == "Godzilla Premium/LE 1.16" and st["new_ok"]
+        assert st["title_via"] == "try_on"
+        assert "\"Try it on\" card" in st["title_text"]
+        # a code mode made here records that game, so Try it and Write build it for it
+        # (the project names no card for them to read it from)
+        from pinball_decryptor.plugins.stern import code_modes as CM
+        from pinball_decryptor.plugins.stern import mode_write as MW
+        svc = _svc(w)
+        svc._opener = lambda path: None
+        assert w.call("modes.new_code_mode", "Blitz")
+        code = CM.list_code(str(proj))
+        assert [(s, c.extra.get("title")) for s, c in code] == [("blitz", "godzilla_le_1_16")]
+        assert CM.profile_for(str(proj), code).key == "godzilla_le_1_16"
+        assert not any(CM.NO_TITLE in ln for ln in MW.pending_lines(str(proj)))
+
+
+def test_a_port_worked_out_earlier_shows_unproven_before_the_read(tmp_path, preview_on,
+                                                                   beatles):
+    """A port derived on this machine in an earlier session is used at once, while the card
+    is read again, and it says it is unproven whatever its header says."""
+    from pinball_decryptor.plugins.stern import port_derive
+    proj, make = beatles
+    fake = make()
+    _derived_port(BEATLES_PORT.replace("# The Beatles 1.29:", "# DRAFTED by port_tool.py:"))
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj, card=None)
+        assert _wait(w, lambda: _reading(w).get("state") == "reading")
+        st = w.state("modes")
+        assert st["profile"]["label"] == "The Beatles 1.29" and st["new_ok"]
+        assert st["title_origin"] == "derived"
+        assert st["title_note"].startswith("Press Try it once first: the app worked out by "
+                                           "itself how to run modes on The Beatles 1.29")
+        assert st["write_waits"] is True
+        fake.gate.set()
+        assert _wait(w, lambda: _reading(w)["state"] == "done")
+
+
+def test_the_title_note_carries_the_ports_switch_line_words():
+    from types import SimpleNamespace
+    from pinball_decryptor.webui.tabs.modes import ModesTab as ModesService
+    p = SimpleNamespace(switch_shots_note="Its shots from switches are desk-only.")
+    assert ModesService._with_switch_note("", p) == \
+        "Unproven: Its shots from switches are desk-only."
+    assert ModesService._with_switch_note("Unproven: x.", p) == \
+        "Unproven: x. Its shots from switches are desk-only."
+    assert ModesService._with_switch_note("n", SimpleNamespace()) == "n"
+
+
+# ---- review fixes: what a title cannot do is greyed with the reason, in plain words -----------
+def test_own_sounds_grey_where_no_carriers_were_measured(tmp_path, preview_on):
+    """Review M1: on a title with no measured carriers (Jaws) the start sound, shot sound and
+    music are greyed with a plain reason, refused on the server, and the Try it words drop the
+    "about a minute" sentence; on Godzilla Premium/LE 1.16 (measured) they stay live."""
+    proj = _card_project(tmp_path / "jaws", "jaws_le-1_02_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new")
+        st = w.state("modes")
+        assert st["dis"]["own_extra"] and st["own_extra_ok"] is False
+        why = st["reasons"]["own_extra"]
+        assert why.startswith("Not on this game yet: ") and "Jaws LE 1.02" in why
+        assert "port" not in why
+        asked = len(w.asked)
+        assert w.call("modes.choose", "sound_start") is None       # the server refuses too
+        assert len(w.asked) == asked                                # no file dialog was opened
+        # a title with no named inserts: "Light the shots that score" is greyed with it
+        assert st["dis"]["lit_shots"] and "Jaws LE 1.02" in st["reasons"]["lit_shots"]
+    gz = _card_project(tmp_path / "gz", "godzilla_le-1_16_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, gz)
+        w.call("modes.new")
+        st = w.state("modes")
+        assert not st["dis"]["own_extra"] and st["own_extra_ok"] is True
+        assert "own_extra" not in st["reasons"] and not st["dis"]["lit_shots"]
+        assert not st["dis"]["show_order"]
+
+
+def test_the_show_page_is_one_sentence_where_nothing_on_it_works(tmp_path, preview_on):
+    """Review: on a title that can show neither a screen nor a clip (TMNT Pro 1.59), the Show
+    page collapses to one sentence and "stays up" / "priority" grey with it."""
+    proj = _card_project(tmp_path / "tmnt", "turtles_pro-1_59_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new")
+        st = w.state("modes")
+        assert st["dis"]["screen"] and st["dis"]["clip"] and st["dis"]["show_order"]
+        assert st["reasons"]["show_all"].startswith("Not on this game yet: a mode cannot show a "
+                                                    "screen or a clip of its own on TMNT Pro 1.59")
+        assert "TMNT Pro 1.59 cannot show either" in st["reasons"]["show_order"]
+
+
+def test_a_live_try_it_records_a_derived_ports_first_run(tmp_path, preview_on):
+    """Review M6: once live, Try it asks the rig whether the runtime hooked the game (tryit.sh
+    armed); its "armed:" line records the derived port's live run, so Write carries the modes
+    from then on. "NOT THIS GAME'S PORT" records nothing and says so."""
+    import subprocess
+    from pinball_decryptor.plugins.stern import port_derive as PD
+    path = _derived_port(BEATLES_PORT)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        _with_emu(w, _FakeEmulate())
+        assert svc.armed_cmd()[-2:] == ["modes/tryit.sh", "armed"]
+        out = ["[tryit] NOT THIS GAME'S PORT - the core functions do not match (1 site(s) wrong)."]
+        svc._run_fn = lambda cmd, **k: subprocess.CompletedProcess(cmd, 3, out[0], "")
+        svc._tryit_live = {"record_port": path, "project": ""}
+        svc._armed_tries = 0
+        svc._tryit_check_armed().join(5)
+        w.drain()
+        assert not PD.ran_live(path) and svc._tryit_live["record_port"] == ""
+        assert "the game did not take the modes" in w.state("modes")["tryit_line"]
+        out[0] = "[tryit] 12 [mode] armed: 1 mode(s); can callout lights"
+        svc._run_fn = lambda cmd, **k: subprocess.CompletedProcess(cmd, 0, out[0], "")
+        svc._tryit_live = {"record_port": path, "project": ""}
+        svc._tryit_check_armed().join(5)
+        w.drain()
+        assert PD.ran_live(path) and svc._tryit_live["record_port"] == ""
+        assert svc._tryit_check_armed() is None                    # nothing left to ask
+    # the rig script has the verb, reading only this run's mode.log
+    rig = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "tools", "spike2_emu", "modes", "tryit.sh")
+    body = open(rig, encoding="utf-8").read()
+    assert "    armed)" in body and '"$DUMP/mode.log"' in body
+
+
+def test_the_game_mode_page_reads_like_the_defaults_tab(tmp_path, preview_on, beatles,
+                                                        monkeypatch):
+    """Review: a setting's label is its operator-menu caption (the Defaults tab's words, from
+    the read), the visible line says where it lives in plain words, and the list puts the
+    person's own modes first."""
+    proj, make = beatles
+    fake = make()
+    fake.gate.set()
+    from pinball_decryptor.plugins.stern import title_reader as TR
+    real_call = fake.__call__
+
+    def with_captions(card, progress=None, cancel=None):
+        tr = real_call(card, progress=progress, cancel=cancel)
+        tr.captions = {"AD_MODE_DRIVE_MY_CAR_TIMER": "DRIVE MY CAR TIME"}
+        return tr
+    monkeypatch.setattr(TR, "read_card", with_captions)
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj, card=None)
+        assert _wait(w, lambda: _reading(w).get("state") == "done")
+        w.call("modes.select", "2", "game")
+        g = w.state("modes")["game_mode"]
+        timer = next(r for r in g["rows"] if r["key"] == "2.timer.timer")
+        assert timer["number"] == "Time"                 # "Drive My Car Time" under Drive My Car
+        assert "DRIVE MY CAR TIME" in timer["hint"] and "AD_MODE_DRIVE_MY_CAR_TIMER" in timer["hint"]
+        assert g["build"] == "The Beatles 1.29"

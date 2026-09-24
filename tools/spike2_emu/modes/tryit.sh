@@ -21,6 +21,10 @@
 #                                  [a-z0-9_] only: a code mode reads only its own trigger)
 #   tryit.sh push <file> <K>       an edited mode file in as slot K while the game runs; the
 #                                  runtime re-reads its files twice a second (hot reload)
+#   tryit.sh armed                 did the runtime hook the running game? Reads nothing but
+#                                  $ROOT/dump/mode.log (install clears it, so it is this
+#                                  run's): its "armed:" line and exit 0, its "NOT THIS
+#                                  GAME'S PORT" line and exit 3, or nothing yet and exit 2
 #
 # WHERE THE GUEST'S / IS, ASKED OF padpath.sh, which knows whose rig this is (a root
 # launch's $HOME is /root, where no rig lives). Every copy lands under a temporary name
@@ -181,7 +185,22 @@ case "$cmd" in
         put "$f" "$DUMP/$name" || die "could not copy it in as $name"
         echo "[tryit] pushed $name"
         ;;
+    armed)
+        L="$DUMP/mode.log"
+        bad=$(grep -a "NOT THIS GAME'S PORT" "$L" 2>/dev/null | tail -n 1)
+        if [ -n "$bad" ]; then
+            echo "[tryit] $bad"
+            exit 3
+        fi
+        ok=$(grep -a "armed: " "$L" 2>/dev/null | tail -n 1)
+        if [ -n "$ok" ]; then
+            echo "[tryit] $ok"
+            exit 0
+        fi
+        echo "[tryit] the mode runtime has not said yet whether it hooked the game"
+        exit 2
+        ;;
     *)
-        die "usage: tryit.sh check | install <stage> | start [K] | start-code <name> | stop [NAME...] | push <file> <K>"
+        die "usage: tryit.sh check | install <stage> | start [K] | start-code <name> | stop [NAME...] | push <file> <K> | armed"
         ;;
 esac

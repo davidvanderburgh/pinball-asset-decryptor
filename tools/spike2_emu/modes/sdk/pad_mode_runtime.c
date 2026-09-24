@@ -144,6 +144,7 @@ void pm_commas(char *out, unsigned cap, uint64_t v)
  *   data <name> <addr>           a global's address
  *   value <name> <number>        a struct offset, a flag, an id
  *   shot <mask> <name ...>       a named shot
+ *   switch <id> <mask> <name ...> a switch whose hit is a shot: the switches section below
  *   callout <role> <id>          scene <role> <40-hex id>
  *   text <name> <rest of line>   anything else a mode may want
  * Looked for at /usr/local/padmode/game.port (a card) then /dump/game.port (the rig). */
@@ -161,6 +162,8 @@ static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump
 #define N_SHOTS    64
 #define N_ROLES    32
 #define N_TEXTS    32
+#define N_SWITCHES 64       /* a build's playfield switches as shots (the switch drain): up to 64, one bit each */
+#define N_SWITCH_IDS 256      /* switch ids a `switch` line may name, and a switch_hit site may pass */
 
 /* Limits a port must keep (port_words.py checks them): names up to 39 characters, a shot
  * name or a text value up to 159. */
@@ -168,6 +171,7 @@ struct site { char name[40]; unsigned addr, w0, w1; int ok; };
 struct named { char name[40]; long value; };
 struct shot { char name[160]; uint64_t mask; };
 struct text { char name[40]; char value[160]; };
+struct switch_shot { unsigned id; uint64_t mask; };
 
 static struct {
     char game[32], version[24], path[40];
@@ -175,6 +179,7 @@ static struct {
     struct named data[N_DATA]; int n_data;
     struct named value[N_VALUES]; int n_value;
     struct shot shot[N_SHOTS]; int n_shot;
+    struct switch_shot sw[N_SWITCHES]; int n_switch;
     struct named callout[N_ROLES]; int n_callout;
     struct text scene[N_ROLES]; int n_scene;
     struct text text[N_TEXTS]; int n_text;
@@ -241,6 +246,24 @@ static void port_line(const char *s)
         x->mask = number(&s, &ok);
         rest(s, x->name, sizeof x->name);
         if (ok && x->mask && x->name[0]) port.n_shot++;
+        return;
+    }
+    if (str_eq(key, "switch")) {         /* `switch <id> <mask> <name>`: the switch map, and a named shot */
+        struct shot sh;
+        unsigned id = (unsigned)number(&s, &ok);
+        int i, known = 0;
+        if (!ok) return;
+        sh.mask = number(&s, &ok);
+        rest(s, sh.name, sizeof sh.name);
+        if (!ok || !sh.mask || !sh.name[0] || id >= N_SWITCH_IDS) return;
+        if (port.n_switch >= N_SWITCHES) { port.dropped++; return; }
+        port.sw[port.n_switch].id = id;
+        port.sw[port.n_switch].mask = sh.mask;
+        port.n_switch++;
+        for (i = 0; i < port.n_shot; i++) known |= str_eq(port.shot[i].name, sh.name);
+        if (known) return;                                  /* a second switch for one named shot */
+        if (port.n_shot >= N_SHOTS) { port.dropped++; return; }
+        port.shot[port.n_shot++] = sh;
         return;
     }
     if ((str_eq(key, "scene") || str_eq(key, "text"))) {
@@ -354,40 +377,86 @@ int pm_can(unsigned what) { return (can & what) == what; }
 /* ---- rule 1: is this process the game? ----------------------------------------------
  * The machine's launcher and the emulator both pass the preload to every child the game
  * spawns (a shell, for instance), and those have nothing at the game's addresses.
- * Only a process with an executable mapping named ...game covering the tick is it. */
-static int is_game_process(unsigned addr)
+ * Only a process with an executable mapping named ...game covering the tick is it.
+ *
+ * The process's mappings are read from /proc/self/maps ONCE, at the gate, and every address
+ * the gate reads is checked against them first: a port for another game names addresses that
+ * may not be mapped in this one (godzilla_le-1.16.port's resource_get 0x538484 falls in The
+ * Beatles 1.29's hole between its code and its data), and reading one killed the game at boot. */
+#define N_MAPS   1024          /* mappings kept (the game has a few hundred; a trampoline's may be any of them) */
+#define MAP_R    1u
+#define MAP_X    2u
+#define MAP_GAME 4u              /* the line names ...game: the game's own program */
+static struct { unsigned long lo, hi; unsigned how; } maps[N_MAPS];
+static int n_maps;
+
+/* one line of /proc/self/maps: "lo-hi perms offset dev inode path" (tests lift it verbatim) */
+static void maps_line(const char *s, const char *e)
 {
-    static char buf[65536];
-    long n, tot = 0;
-    char *s = buf, *e;
+    unsigned long lo = 0, hi = 0;
+    const char *q = s, *p;
+    unsigned how = 0;
+    int d;
+    if (n_maps >= N_MAPS) return;
+    for (; q < e && (d = hexval(*q)) >= 0; q++) lo = lo * 16 + (unsigned)d;
+    if (q >= e || *q != '-') return;
+    for (q++; q < e && (d = hexval(*q)) >= 0; q++) hi = hi * 16 + (unsigned)d;
+    if (q + 4 > e || q[0] != ' ' || hi <= lo) return;
+    if (q[1] == 'r') how |= MAP_R;
+    if (q[3] == 'x') how |= MAP_X;
+    for (p = q; p + 4 <= e; p++)
+        if (p[0] == 'g' && p[1] == 'a' && p[2] == 'm' && p[3] == 'e') { how |= MAP_GAME; break; }
+    maps[n_maps].lo = lo;
+    maps[n_maps].hi = hi;
+    maps[n_maps].how = how;
+    n_maps++;
+}
+
+/* the whole file, a chunk at a time (a game with many libraries has a long one) */
+static void maps_read(void)
+{
+    static char buf[4096];
+    char line[512];
+    long n, i, j = 0;
     int fd = open("/proc/self/maps", O_RDONLY);
-    if (fd < 0) return 0;
-    while (tot < (long)sizeof buf - 1 && (n = read(fd, buf + tot, sizeof buf - 1 - (unsigned long)tot)) > 0)
-        tot += n;
-    close(fd);
-    buf[tot] = 0;
-    while (*s) {
-        unsigned long lo = 0, hi = 0;
-        char *q = s;
-        int d;
-        for (e = s; *e && *e != '\n'; e++) ;
-        for (; (d = hexval(*q)) >= 0 && d < 16; q++) lo = lo * 16 + (unsigned)d;
-        if (*q == '-') {
-            q++;
-            for (; (d = hexval(*q)) >= 0; q++) hi = hi * 16 + (unsigned)d;
-            if (lo <= addr && addr + 8 <= hi && q[0] == ' ' && q[1] == 'r' && q[3] == 'x') {
-                char *p;
-                for (p = q; p + 4 <= e; p++)
-                    if (p[0] == 'g' && p[1] == 'a' && p[2] == 'm' && p[3] == 'e') return 1;
-                return 0;
-            }
+    n_maps = 0;
+    if (fd < 0) return;
+    while ((n = read(fd, buf, sizeof buf)) > 0)
+        for (i = 0; i < n; i++) {
+            if (buf[i] == '\n') { maps_line(line, line + j); j = 0; }
+            else if (j < (long)sizeof line) line[j++] = buf[i];      /* a longer path is cut */
         }
-        s = *e ? e + 1 : e;
+    close(fd);
+    if (j) maps_line(line, line + j);
+}
+
+/* 1 when [addr, addr + len) lies inside mappings with every bit of `how`: one mapping, or a run of
+ * CONTIGUOUS ones (another preloaded object's mprotect of a page for its trampoline splits the game's
+ * code mapping in three, and a site's 8 bytes may cross the split), each with every bit (tests lift it
+ * verbatim) */
+static int maps_has(unsigned long addr, unsigned long len, unsigned how)
+{
+    unsigned long at = addr, end = addr + len;
+    int i, steps;
+    if (end < addr) return 0;
+    for (steps = 0; steps <= n_maps; steps++) {
+        for (i = 0; i < n_maps; i++)
+            if (maps[i].lo <= at && at < maps[i].hi) break;
+        if (i == n_maps || (maps[i].how & how) != how) return 0;
+        if (end <= maps[i].hi) return 1;
+        at = maps[i].hi;                         /* the rest must start where this mapping ends */
     }
     return 0;
 }
 
-/* ---- rule 2: the words, followed through another preloaded object's trampoline -------- */
+static int is_game_process(unsigned addr)
+{
+    return maps_has(addr, 8, MAP_R | MAP_X | MAP_GAME);
+}
+
+/* ---- rule 2: the words, followed through another preloaded object's trampoline --------
+ * Called only for a site inside the game's code (site_check); a hook jump's target is read only
+ * when it is mapped readable too. */
 static int words_match(struct site *x)
 {
     const unsigned *p = (const unsigned *)(unsigned long)x->addr;
@@ -395,6 +464,7 @@ static int words_match(struct site *x)
     for (depth = 0; depth < 4; depth++) {
         if (p[0] == x->w0 && p[1] == x->w1) return 1;
         if (p[0] != 0xe51ff004u) break;              /* not a hook jump */
+        if (!maps_has((unsigned long)p[1], 64, MAP_R)) break;   /* its target: a trampoline's 16 words */
         p = (const unsigned *)(unsigned long)p[1];
         if (p[0] != 0xe92d500fu) break;              /* not a trampoline of this shape */
         if (p[14] == x->w0 && p[15] == x->w1) return 1;   /* the words it moved, as they were */
@@ -466,16 +536,44 @@ int pm_in_game(void)
     return pm_player() != 0 && (mask & busy) == 0;
 }
 
+/* A title with 32-bit scores (The Beatles 1.29: score_add(u8 player, u32 points) -> u32, the scores
+ * u32[4]) names its entries `site score_add32` and `data scores32`. The names carry the calling
+ * convention, so a runtime without this code finds no `score_add` / `scores` - core entries - and
+ * refuses the port (NOT THIS GAME'S PORT) instead of passing 64-bit points into a 32-bit function. */
 uint64_t pm_score(unsigned player)
 {
-    if (player < 1 || player > 4 || !data("scores")) return 0;
-    return ((uint64_t *)(unsigned long)data("scores"))[player - 1];
+    unsigned s32 = data("scores32"), s64 = data("scores");
+    if (player < 1 || player > 4) return 0;
+    if (s32) return ((const unsigned *)(unsigned long)s32)[player - 1];
+    if (!s64) return 0;
+    return ((uint64_t *)(unsigned long)s64)[player - 1];
+}
+
+/* The 32-bit score_add multiplies the points by the playfield multiplier (a byte: the port's
+ * optional `data score_mult`) and adds them into the u32 score with no carry check, so an award
+ * past what is left below 4,294,967,295 would wrap the player's score to a small number. The
+ * points are cut to that room, divided by the multiplier (taken as 1 when the port names none).
+ * (tests lift it verbatim) */
+static unsigned score32_points(unsigned player, uint64_t points)
+{
+    unsigned s32 = data("scores32"), at = data("score_mult"), mult = 1;
+    uint64_t room;
+    if (!s32 || player < 1 || player > 4) return 0;
+    room = 0xffffffffull - ((const unsigned *)(unsigned long)s32)[player - 1];
+    if (at && maps_has(at, 1, MAP_R)) mult = *(const unsigned char *)(unsigned long)at;
+    if (mult > 1) room /= mult;
+    return (unsigned)(points < room ? points : room);
 }
 
 uint64_t pm_score_add(unsigned player, uint64_t points)
 {
-    unsigned f = fn("score_add");
-    if (!f || player < 1 || player > 4) return 0;
+    unsigned f32 = fn("score_add32"), f = fn("score_add"), n;
+    if (player < 1 || player > 4) return 0;
+    if (f32) {
+        n = score32_points(player, points);
+        return n ? ((unsigned (*)(unsigned, unsigned))(unsigned long)f32)(player, n) : 0;
+    }
+    if (!f) return 0;
     return ((uint64_t (*)(unsigned, uint64_t))(unsigned long)f)(player, points);
 }
 
@@ -1788,8 +1886,28 @@ static void display_arm(void)
     static const char *const v[] = { "display_host", "display_mode_level", "display_now_at", "display_priority_at",
                                      "layered_record_size", "layered_priority_at", "layered_wait_for_at",
                                      "layered_waiter_call", "layered_fg_at", "layered_fg_flags_at", 0 };
+    /* The effect half alone: a title whose game has no layered displays (The Beatles 1.29 has the
+     * framework's effect start, next and priority-now, and nothing of Godzilla's layered-display
+     * library). The hold then rides on the display effects only: an effect of the game's comes
+     * through when its priority beats the hold's. */
+    static const char *const es[] = { "display_effect_start", 0 };
+    static const char *const ed[] = { "display_effects", "award_screen_arg", "event_current", 0 };
+    static const char *const ev[] = { "display_host", "display_mode_level", "display_now_at", "display_priority_at", 0 };
     if (can & PM_CAN_CLIPS) hook(fn("clip_play"), on_clip_play);
     if (!site("display_effect_start") && !site("layered_priority")) return;      /* a port without them: silent */
+    if (!site("layered_priority")) {
+        if (!have_sites(es) || !have_data(ed) || !have_values(ev)) {
+            say("display priority: off - the port's display lines are incomplete or do not match this build");
+            return;
+        }
+        if (!hook(fn("display_effect_start"), on_display_effect_start)) return;
+        can |= PM_CAN_DISPLAY_PRIORITY;
+        if (fn("display_priority_now")) hook(fn("display_priority_now"), on_display_priority_now);
+        else say("display priority: the port has no display_priority_now - a waiter can slip through in the frame after an effect ends");
+        say("display priority: on, display effects only (the port has no layered display) - the effect start 0x%08x is hooked "
+            "(host effect %u)", fn("display_effect_start"), disp_host());
+        return;
+    }
     if (!have_sites(s) || !have_data(d) || !have_values(v)) {
         say("display priority: off - the port's display lines are incomplete or do not match this build");
         return;
@@ -3079,6 +3197,7 @@ static void note_thread(const char *what, int *said)
 }
 
 static void events_deliver(void);             /* the events section below */
+static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
 static void stock_tick(void);             /* item 160 */
 
@@ -3099,6 +3218,7 @@ static void on_tick(unsigned *r)
     clip_tick();
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
     events_deliver();
+    switches_deliver();
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     roster_deferred_tick();
@@ -3445,12 +3565,19 @@ const char *pm_event_name(unsigned id)
     return 0;
 }
 
+/* A port with no ball_end site ends a ball on a bus id instead (`value ball_end_event 0x34`; the
+ * core takes hook_dispatch then, core_of_port). It is handed to the modes from the dispatch itself,
+ * as the game's own handler of that id would run: on The Beatles 1.29 the ball_end site IS a bus
+ * 0x34 handler, called from inside this dispatch. -1: the ball_end site is the end of a ball. */
+static int ball_end_event = -1;
+
 static void on_event_dispatch(unsigned *r)
 {
     static volatile int said;
     if (r[0] < N_BUS_IDS) __sync_fetch_and_add(&event_fired[r[0]], 1u);
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
+    if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
 }
 
 /* one counter per site event: the trampoline hands a logger only the registers */
@@ -3485,17 +3612,19 @@ static void events_deliver(void)
 static void events_arm(void)
 {
     struct site *bus = site("hook_dispatch");
-    int i, bus_names = 0, armed = 0;
+    int i, bus_names = 0, armed = 0, bus_hooked = 0;
     unsigned id;
     if (!n_event_names && !bus) return;
     for (id = 0; id < N_EVENT_IDS; id++) event_delivered[id] = event_fired[id];
     for (i = 0; i < n_event_names; i++) bus_names += !event_names[i].site[0];
-    if (bus_names) {
+    if (bus_names || ball_end_event >= 0) {
         if (!bus || !bus->ok) say("bus events off: %s", !bus ? "the port has no hook_dispatch" : "hook_dispatch does not match this build");
-        else if (hook(bus->addr, on_event_dispatch)) {
+        else if ((bus_hooked = hook(bus->addr, on_event_dispatch)) != 0) {
             for (i = 0; i < n_event_names; i++)
                 if (!event_names[i].site[0]) { event_names[i].armed = 1; armed++; }
         }
+        if (ball_end_event >= 0 && !bus_hooked)
+            say("ball end: the dispatch could not be hooked - no mode sees a ball end");
     }
     for (i = 0; i < n_event_names; i++) {
         struct site *x;
@@ -3510,6 +3639,198 @@ static void events_arm(void)
     if (armed) can |= PM_CAN_EVENTS;
     say("events: %d of %d named events armed%s", armed, n_event_names,
         bus && bus->ok && bus_names ? ", dispatch hooked" : "");
+}
+
+/* ---- shots from switches (optional) ---------------------------------------------------------------
+ * A title whose rules are plain C sends a shot only for what its rules score as one: The Beatles
+ * 1.29's shot dispatch never carries its four standups (73-76) or its lanes (48-51). The framework
+ * itself broadcasts every switch whose descriptor flags ask for it, from its switch drain, through
+ * one small function per flag with r0 = the switch id (The Beatles: 0x96e68 for flag 0x2000, 0x96f08
+ * for flag 0x1000; Godzilla Pro 1.16's is 0x1e1508). The port names each as a site whose name starts
+ * `switch_hit` (switch_hit, switch_hit2 ...; the id's register in value switch_hit_at, r0 if absent)
+ * and maps switch ids to shot bits of its own, bits the rules' dispatch never sends:
+ *   switch <id> <mask> <name>      e.g. `switch 73 0x100000000 Target 1`
+ * The name is also a named shot (pm_shot), unless a shot of that name is in the port already. Like
+ * the events, a hit is only COUNTED where it happens, lock-free; the tick hands it to every mode's
+ * .shot, so a mode's callbacks keep to the tick thread. Only a switch the game's flags broadcast can
+ * be mapped (on The Beatles not the slingshots, whose descriptors ask for nothing). */
+static volatile unsigned switch_fired[N_SWITCH_IDS];
+static unsigned switch_delivered[N_SWITCH_IDS];
+static unsigned switch_at;                    /* the register holding the switch id */
+
+static void on_switch_hit(unsigned *r)
+{
+    static volatile int said;
+    unsigned id = r[switch_at];
+    if (id < N_SWITCH_IDS) __sync_fetch_and_add(&switch_fired[id], 1u);
+    if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
+        say("switch hits run on thread %ld (first seen: switch %u)", syscall(SYS_GETTID), id);
+}
+
+/* every tick: each switch hit since the last, as its shots (all the lines naming that switch) */
+static void switches_deliver(void)
+{
+    const struct pm_mode *m;
+    int i, j;
+    if (!(can & PM_CAN_SWITCH_SHOTS)) return;
+    for (i = 0; i < port.n_switch; i++) {
+        unsigned id = port.sw[i].id, now = switch_fired[id], n = now - switch_delivered[id];
+        uint64_t mask = 0;
+        if (!n) continue;
+        switch_delivered[id] = now;
+        for (j = i; j < port.n_switch; j++)
+            if (port.sw[j].id == id) mask |= port.sw[j].mask;
+        if (n > 8) n = 8;                            /* a flood is not N separate hits */
+        while (n--) EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
+        current = 0;
+    }
+}
+
+static int is_switch_hit(const char *name)
+{
+    static const char want[] = "switch_hit";
+    unsigned k;
+    for (k = 0; k + 1 < sizeof want; k++)
+        if (name[k] != want[k]) return 0;
+    return 1;
+}
+
+/* ---- shots from the switch drain (optional; any build) ----------------------------------------------
+ * Every Spike 2 build's framework runs one switch drain per tick, which hands the game each switch edge
+ * the node boards reported. For every edge it calls one small per-switch function with r0 = the switch
+ * id: the port's `site switch_edge`. Hooking it gives EVERY playfield switch, where switch_hit gives only
+ * the ones whose descriptors ask for a broadcast, and it is the same code in every build of a framework
+ * generation (portswitch.py finds it by one signature per generation). What the edge was is read from
+ * the game's own tables, through the port:
+ *   site  switch_drain <addr> <w0> <w1>   the drain itself, never hooked: an edge counts only when
+ *   value switch_drain_size <bytes>       switch_edge returns into it (the game also calls switch_edge
+ *                                         from its switch resets, which are not edges)
+ *   data  switch_records <addr>           the pointer to the per-switch records, indexed by switch id
+ *   data  switch_count <addr>             the number of switches (u32)
+ *   value switch_record_size <bytes>
+ *   value switch_level_at <offset>        the switch's level byte (0/1): in the record, or - with
+ *   value switch_level_via <offset>       - in the state the record points at from this offset
+ *   value switch_level_before 1           the byte still holds the level from BEFORE this edge (A)
+ *   value switch_desc_via <offset>        the record points at the switch's descriptor from here (B);
+ *                                         without it the record IS the descriptor (A)
+ *   value switch_flags_at <offset>        the descriptor's u16 edge flags: 0x400 = the game's handler runs
+ *                                         on the level-0 edge, 0x800 = on the level-1 edge
+ *   value switch_polarity_at <offset>     the descriptor's u16 whose bit 2 says the switch is active high
+ *   data  mode_mask <addr>                (optional) the u16 the drain tests before a switch's handler
+ * A HIT is the edge the game's own handler runs on; for a switch whose handler runs on both edges, or
+ * that has none (slingshots, pop bumpers), the edge to its active level (closed). With a mode_mask the
+ * drain's own test applies too: the mask is 0, or shares a bit with the switch's flags - so attract,
+ * the bonus count and a tilt give no hits. A hit is counted, lock-free, like a switch_hit, and the tick
+ * hands it to the modes through the port's `switch` lines. */
+static struct {
+    unsigned records, count, mode_mask, drain, drain_end;
+    long size, level_at, level_via, level_before, desc_via, flags_at, polarity_at;
+} edge;
+
+static int have_values(const char *const *names);   /* the gate section below */
+
+/* 1 when (id, the edge's level, the switch's descriptor fields, the mode mask) is a hit, the rule above
+ * (tests lift it verbatim) */
+static int edge_is_hit(unsigned level, unsigned flags, unsigned polarity, int have_mask, unsigned mask)
+{
+    unsigned closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
+    if ((level & 1u) != closed) return 0;
+    return !have_mask || !mask || (mask & flags) != 0;
+}
+
+static long edge_log_left;                   /* value switch_edge_log N: log the first N edges (proving a port) */
+
+static void on_switch_edge(unsigned *r)
+{
+    static volatile int said;
+    unsigned id = r[0], lr = r[5], base, rec, st, level, desc, flags, pol, mask;
+    int hit, playing;
+    if (lr <= edge.drain || lr > edge.drain_end) return;           /* not from the drain: not an edge */
+    if (!id || id >= N_SWITCH_IDS || (edge.count && id >= *(const unsigned *)(unsigned long)edge.count)) return;
+    base = *(const unsigned *)(unsigned long)edge.records;
+    if (!base) return;
+    rec = base + id * (unsigned)edge.size;
+    st = edge.level_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.level_via) : rec;
+    desc = edge.desc_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.desc_via) : rec;
+    if (!st || !desc) return;
+    level = *(const unsigned char *)(unsigned long)(st + (unsigned)edge.level_at);
+    if (edge.level_before) level ^= 1u;
+    flags = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.flags_at);
+    pol = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.polarity_at);
+    mask = edge.mode_mask ? *(const unsigned short *)(unsigned long)edge.mode_mask : 0u;
+    hit = edge_is_hit(level, flags, pol, edge.mode_mask != 0, mask);
+    playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
+    if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
+        say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level & 1u,
+            flags, pol, mask, playing, hit && playing ? " - a hit" : "");
+    if (!hit || !playing) return;
+    __sync_fetch_and_add(&switch_fired[id], 1u);
+    if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
+        say("switch edges run on thread %ld (first hit: switch %u)", syscall(SYS_GETTID), id);
+}
+
+/* The switch_edge site's tables, checked against the process's mappings (read at the gate: the game's
+ * own globals are mapped by then). 0 with *why when the port lacks one or one is not mapped. */
+static int edge_arm(const char **why)
+{
+    struct site *d = site("switch_drain");
+    static const char *const need[] = { "switch_drain_size", "switch_record_size", "switch_level_at",
+                                        "switch_flags_at", "switch_polarity_at", 0 };
+    edge.records = data("switch_records");
+    edge.count = data("switch_count");
+    edge.mode_mask = data("mode_mask");
+    if (!d || !d->ok) { *why = !d ? "the port has no switch_drain" : "switch_drain does not match this build"; return 0; }
+    if (!have_values(need)) { *why = "the port lacks a switch_* value"; return 0; }
+    if (!edge.records || !maps_has(edge.records, 4, MAP_R)) { *why = "switch_records is not mapped"; return 0; }
+    if (edge.count && !maps_has(edge.count, 4, MAP_R)) edge.count = 0;
+    if (edge.mode_mask && !maps_has(edge.mode_mask, 2, MAP_R)) edge.mode_mask = 0;
+    edge.drain = d->addr;
+    edge.drain_end = d->addr + (unsigned)pm_port_value("switch_drain_size", 0);
+    edge.size = pm_port_value("switch_record_size", 0);
+    edge.level_at = pm_port_value("switch_level_at", 0);
+    edge.level_via = pm_port_value("switch_level_via", -1);
+    edge.level_before = pm_port_value("switch_level_before", 0);
+    edge.desc_via = pm_port_value("switch_desc_via", -1);
+    edge.flags_at = pm_port_value("switch_flags_at", 0);
+    edge.polarity_at = pm_port_value("switch_polarity_at", 0);
+    edge_log_left = pm_port_value("switch_edge_log", 0);
+    if (edge.size <= 0 || edge.size > 4096 || edge.drain_end <= edge.drain) { *why = "a switch_* value is out of range"; return 0; }
+    return 1;
+}
+
+static void switches_arm(void)
+{
+    long at = pm_port_value("switch_hit_at", 0);
+    int i, sites = 0, hooked = 0;
+    unsigned id;
+    struct site *e = site("switch_edge");
+    const char *why = 0;
+    if (!port.n_switch) return;                  /* a switch_hit site with no switch lines: nothing to hand on */
+    switch_at = at >= 0 && at <= 3 ? (unsigned)at : 0;
+    for (id = 0; id < N_SWITCH_IDS; id++) switch_delivered[id] = switch_fired[id];
+    if (e) {                                     /* the drain's edges: every switch; the switch_hit sites stay unhooked */
+        if (e->ok && edge_arm(&why) && hook(e->addr, on_switch_edge)) {
+            can |= PM_CAN_SWITCH_SHOTS;
+            say("switch shots: %d switch line(s) hand their shots to the modes; the switch drain's edges (switch_edge "
+                "0x%08x, from the drain 0x%08x..0x%08x%s)", port.n_switch, e->addr, edge.drain, edge.drain_end,
+                edge.mode_mask ? ", the game's mode mask applied" : ", no mode mask");
+        } else {
+            say("switch shots off: %s", !e->ok ? "switch_edge does not match this build" : why ? why : "switch_edge could not be hooked");
+        }
+        return;
+    }
+    for (i = 0; i < port.n_site; i++) {
+        if (!is_switch_hit(port.site[i].name)) continue;
+        sites++;
+        if (port.site[i].ok && hook(port.site[i].addr, on_switch_hit)) hooked++;
+    }
+    if (hooked) {
+        can |= PM_CAN_SWITCH_SHOTS;
+        say("switch shots: %d switch line(s) hand their shots to the modes; %d of %d switch_hit site(s) hooked (the id in r%u)",
+            port.n_switch, hooked, sites, switch_at);
+    } else {
+        say("switch shots off: %s", sites ? "no switch_hit site matches this build" : "the port has no switch_hit site");
+    }
 }
 
 /* Which sites and data each capability needs; all must be present and verified. */
@@ -3540,40 +3861,105 @@ static int have_values(const char *const *names)
     return 1;
 }
 
-static const char *const CORE_SITES[] = { "tick", "shot_dispatch", "ball_end", "score_add", 0 };
-static const char *const CORE_DATA[] = { "cur_player", "scores", 0 };
+/* ---- the gate ------------------------------------------------------------------------------------
+ * The CORE is what every mode needs; without it nothing is hooked. A port names one of each:
+ *   the tick             site tick
+ *   a shot source        site shot_dispatch, or (a title whose rules send no shot for its switches)
+ *                        site switch_edge (the framework's switch drain: any build) or site switch_hit,
+ *                        with `switch` lines
+ *   the end of a ball    site ball_end, or value ball_end_event (a bus id) with site hook_dispatch
+ *   the score            site score_add + data scores (64-bit points in r2:r3, u64 scores), or
+ *                        site score_add32 + data scores32 (32-bit points in r1, u32 scores: The Beatles).
+ *                        The names carry the calling convention, so a runtime without the 32-bit
+ *                        form finds no core score_add in such a port and hooks nothing
+ *   the player up        data cur_player
+ * (tests lift it verbatim) Fills s[] and d[] with the core sites and data this port uses, 0-ended. */
+static void core_of_port(const char *s[8], const char *d[4])
+{
+    int n = 0, s32 = site("score_add32") != 0;
+    long ev = pm_port_value("ball_end_event", -1);
+    s[n++] = "tick";
+    s[n++] = !site("shot_dispatch") && site("switch_edge") && port.n_switch ? "switch_edge"
+           : !site("shot_dispatch") && site("switch_hit") && port.n_switch ? "switch_hit" : "shot_dispatch";
+    s[n++] = !site("ball_end") && ev >= 0 && ev < N_BUS_IDS ? "hook_dispatch" : "ball_end";
+    s[n++] = s32 ? "score_add32" : "score_add";
+    s[n] = 0;
+    d[0] = "cur_player";
+    d[1] = s32 ? "scores32" : "scores";
+    d[2] = 0;
+}
+
+/* One site against the running game: first that it lies inside the game's own code (nothing
+ * outside is ever read), then its words. (tests lift it verbatim) */
+static int site_check(struct site *x)
+{
+    if (!maps_has(x->addr, 8, MAP_R | MAP_X | MAP_GAME)) {
+        say("site %s 0x%08x: not in the game's code - not read", x->name, x->addr);
+        return x->ok = 0;
+    }
+    x->ok = words_match(x);
+    if (!x->ok)
+        say("site %s 0x%08x: expected %08x %08x, found %08x %08x",
+            x->name, x->addr, x->w0, x->w1,
+            ((const unsigned *)(unsigned long)x->addr)[0], ((const unsigned *)(unsigned long)x->addr)[1]);
+    return x->ok;
+}
+
+/* The core sites first: when one is missing, outside the game's code or not this build's, no other
+ * site is read and the port is refused. Then every other site, each switching off only its own
+ * capability. 1 = this game's port. (tests lift it verbatim) */
+static int port_gate(void)
+{
+    const char *cs[8], *cd[4];
+    int i, j, bad = 0, core = 1;
+    core_of_port(cs, cd);
+    for (i = 0; cs[i]; i++) {
+        struct site *x = site(cs[i]);
+        if (!x) {
+            say("core site %s: not in the port", cs[i]);
+            core = 0;
+        } else if (!site_check(x)) {
+            bad++;
+            core = 0;
+        }
+    }
+    for (i = 0; cd[i]; i++)
+        if (!data(cd[i])) {
+            say("core data %s: not in the port", cd[i]);
+            core = 0;
+        }
+    if (!core) {
+        say("NOT THIS GAME'S PORT - the core functions do not match (%d site(s) wrong). "
+            "Nothing is hooked; the game runs stock.", bad);
+        return 0;
+    }
+    for (i = 0; i < port.n_site; i++) {
+        for (j = 0; cs[j] && !str_eq(cs[j], port.site[i].name); j++) ;
+        if (!cs[j]) site_check(&port.site[i]);          /* a core site was checked above */
+    }
+    return 1;
+}
 
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
     const struct pm_mode *m;
     struct site *tick;
-    int i, bad = 0, modes = 0;
+    int modes = 0;
     if (!port_load()) return;                       /* no port: stay out of the way */
     tick = site("tick");
-    if (!tick || !is_game_process(tick->addr)) return;
+    if (!tick) return;
+    maps_read();                                    /* the process's mappings, read once */
+    if (!is_game_process(tick->addr)) return;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     log_fd = open("/dump/mode.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
     say("port %s: %s %s, %d sites, %d shots", port.path, port.game, port.version, port.n_site, port.n_shot);
     if (port.too_long) say("port: longer than %d bytes - the lines after that are not read", PORT_MAX);
     if (port.dropped)
-        say("port: %d line(s) not read - a table is full (sites %d of %d, data %d of %d, values %d of %d, shots %d of %d)",
-            port.dropped, port.n_site, N_SITES, port.n_data, N_DATA, port.n_value, N_VALUES, port.n_shot, N_SHOTS);
-    for (i = 0; i < port.n_site; i++) {
-        struct site *x = &port.site[i];
-        x->ok = words_match(x);
-        if (!x->ok) {
-            say("site %s 0x%08x: expected %08x %08x, found %08x %08x",
-                x->name, x->addr, x->w0, x->w1,
-                ((const unsigned *)(unsigned long)x->addr)[0], ((const unsigned *)(unsigned long)x->addr)[1]);
-            bad++;
-        }
-    }
-    if (!have_sites(CORE_SITES) || !have_data(CORE_DATA)) {
-        say("NOT THIS GAME'S PORT - the core functions do not match (%d site(s) wrong). "
-            "Nothing is hooked; the game runs stock.", bad);
-        return;
-    }
+        say("port: %d line(s) not read - a table is full (sites %d of %d, data %d of %d, values %d of %d, shots %d of %d, switches %d of %d)",
+            port.dropped, port.n_site, N_SITES, port.n_data, N_DATA, port.n_value, N_VALUES, port.n_shot, N_SHOTS,
+            port.n_switch, N_SWITCHES);
+    if (!port_gate()) return;
     {
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };
         static const char *const light_s[] = { "light_run", "lamp_group", "show_priority", 0 };
@@ -3603,11 +3989,18 @@ static void pad_mode_start(void)
         if (have_sites(award_s) && have_data(award_d) && have_values(award_v)) can |= PM_CAN_AWARD_SCREEN;
     }
     hook(fn("tick"), on_tick);
-    hook(fn("shot_dispatch"), on_shot);
-    hook(fn("ball_end"), on_ball_end);
+    if (fn("shot_dispatch")) hook(fn("shot_dispatch"), on_shot);
+    if (site("ball_end")) {
+        hook(fn("ball_end"), on_ball_end);
+    } else {                                  /* the core took the event's way (core_of_port) */
+        ball_end_event = (int)pm_port_value("ball_end_event", -1);
+        say("ball end: the game's event 0x%x, from its dispatch (the port has no ball_end site)",
+            (unsigned)ball_end_event);
+    }
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
     if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);
     events_arm();
+    switches_arm();                           /* shots from switches, when the port maps some */
     {   /* item 146: the battle roster, when the port has one */
         static const char *const roster_s[] = { "roster_start", "roster_done", 0 };   /* both: a pick taken must be given back */
         static const char *const roster_d[] = { "rule_battle", 0 };
@@ -3620,6 +4013,13 @@ static void pad_mode_start(void)
     lamps_arm();                                    /* the port's named inserts (lights section) */
     stock_arm();                                    /* item 160: the port's `rule` lines (stock rules section) */
     EACH_MODE(m) modes += m != 0;
+    if (fn("score_add32") && data("score_mult"))
+        say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
+            data("scores32"), data("score_mult"));
+    else if (fn("score_add32"))
+        say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
+            fn("score_add32"), data("scores32"));
+    if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
     say("armed: %d mode(s); can%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",

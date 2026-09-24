@@ -84,6 +84,17 @@ def _isolate_rig_dirs(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_title_cache(tmp_path_factory, monkeypatch):
+    """Every test gets its own empty per-build cache (title_reader.cache_dir: ports and
+    tables worked out on this machine), so no test reads or writes the developer's own,
+    and a port one test works out or reads off a card is not seen by the next."""
+    monkeypatch.setenv("PAD_TITLE_CACHE", str(tmp_path_factory.mktemp("titles")))
+    mp = sys.modules.get("pinball_decryptor.plugins.stern.mode_project")
+    if mp is not None and hasattr(mp, "_REMEMBERED"):
+        monkeypatch.setattr(mp, "_REMEMBERED", {})
+
+
+@pytest.fixture(autouse=True)
 def _preview_features_off(monkeypatch):
     """Every test starts with every PREVIEW FEATURE switched off (core/preview.py), as a
     copy of the app with no code does - whatever an earlier test in the same worker
@@ -155,6 +166,15 @@ def _isolate_audio_ctl(tmp_path_factory):
     from pinball_decryptor.webui import emulate_core
     emulate_core.AUDIO_CTL_FILE = str(
         tmp_path_factory.mktemp("audio_ctl") / "audio_ctl.json")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_title_cache_session(tmp_path_factory):
+    """Point the per-build caches (title_reader.cache_dir: ports derived on this machine,
+    generated tables) at a temp folder for the whole run, so a port the developer's app
+    derived is never read by a test (every port lookup reads that folder) and a test's
+    is never left in ``%LOCALAPPDATA%``. A test that wants its own sets the variable."""
+    os.environ["PAD_TITLE_CACHE"] = str(tmp_path_factory.mktemp("title_cache"))
 
 
 

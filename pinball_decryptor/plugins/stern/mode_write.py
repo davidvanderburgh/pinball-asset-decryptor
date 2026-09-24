@@ -33,12 +33,15 @@ second mode also has one, the mode ends with the game's own time-up call.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import struct
 import sys
+import tempfile
+import threading
 from dataclasses import dataclass, field
 
 from . import mode_project as MP
@@ -196,6 +199,47 @@ def card_modes(project, modes):
         raise ModeWriteError(str(e)) from None
 
 
+def card_refusal(project, probe=True, real_card=False):
+    """Why the PROJECT'S CARD cannot carry any mode, or ``""``: the project names a card
+    whose game build has no port (shipped, or derived on this machine), so neither a form
+    mode nor a code mode can run on it. A Write then leaves the modes out with this reason
+    and writes everything else, instead of refusing the whole build. ``probe=True`` may open
+    the card image (a renamed card's index): a build calls it that way, never the UI
+    thread.
+
+    ``real_card=True`` (a Write to a card or an image, not Try it's set for the emulator): a
+    port DERIVED on this machine that no Try it has run live yet (:func:`derived_not_run`)
+    refuses too. Its every entry was worked out from the program alone, so it goes on a real
+    card only after the emulator has run the game with it."""
+    if not project:
+        return ""
+    try:
+        card, prof = MP.project_profile(project, probe=probe)
+    except (OSError, ValueError):
+        return ""
+    if card is None or not card.game_dir:
+        return ""
+    if prof is None:
+        return MP.no_port_words(MP.title_label(card.game_dir, card.version))
+    if real_card and derived_not_run(prof):
+        return try_it_first_words(prof.label)
+    return ""
+
+
+def derived_not_run(prof):
+    """Is ``prof``'s port one derived on this machine that no Try it has run live yet?"""
+    from . import port_derive
+    path = MP.port_path(prof) if prof is not None else ""
+    return bool(path) and port_derive.is_derived(path) and not port_derive.ran_live(path)
+
+
+def try_it_first_words(label):
+    """The sentence for modes left out of a Write because :func:`derived_not_run`."""
+    return ("the app worked out how to run modes on %s by itself, and they have not run in the "
+            "emulator on this PC yet. Press Try it once first (Modes tab), then Write again: "
+            "until a Try it has run the game with them, a card gets no modes." % label)
+
+
 #: Why a Mac cannot carry modes yet (the pinned delivery runs Linux tools; see host_refusal).
 MAC_REFUSAL = ("a Mac cannot put a mode's files on the card yet (the tools that copy them "
                "onto the card run only on Windows and Linux); write the card on Windows or "
@@ -318,24 +362,60 @@ def site_mismatches(port_path, elf):
     return bad
 
 
+def port_unproven(port_path):
+    """True when a port's header says it has never run (:data:`.mode_project.UNPROVEN_MARK`:
+    drafted by hand, or derived on this machine)."""
+    try:
+        with open(port_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                if not s.startswith("#"):
+                    return False
+                if MP.UNPROVEN_MARK in s:
+                    return True
+    except OSError:
+        return True
+    return False
+
+
+def _same_file(a, b):
+    return bool(a and b) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
 def find_port(prof, elf):
-    """The SDK port for the card's game program: one for the title's game dir whose every
-    site matches the ELF. Raises :class:`ModeWriteError` saying what was tried."""
-    tried = []
-    for game_dir, version in MR.ports():
+    """The port for the card's game program: one for the title's game dir whose every site
+    matches the ELF, shipped ones first, then those derived on this machine
+    (:func:`.mode_runtime.port_dirs`). Raises :class:`ModeWriteError` saying what was tried.
+
+    A port that has never run (:func:`port_unproven`; every port derived on this machine is
+    one) is taken only when it IS the profile's own port: the person chose that build's title
+    and was told it is unproven. Modes made for another build are never quietly written with
+    one; they are refused, naming the build to make them for."""
+    tried, unproven = [], []
+    own = MP.port_path(prof)
+    for game_dir, version, path in MR.port_paths():
         if game_dir != prof.game_dir:
-            continue
-        path = MR.port_file(game_dir, version)
-        if not path:
             continue
         sites = port_sites(path)
         bad = site_mismatches(path, elf)
         if sites and not bad:
-            return path
+            if not port_unproven(path) or _same_file(path, own):
+                return path
+            unproven.append(version)
+            continue
         tried.append("%s %s (%d of %d functions differ)" % (game_dir, version, len(bad), len(sites)))
+    if unproven:
+        label = MP.title_label(prof.game_dir, unproven[0])
+        raise ModeWriteError(
+            "this card is %s, and what the app knows of how to run modes on it has never run in "
+            "the emulator, and these modes were made for %s; make them for %s to write them to "
+            "this card" % (label, prof.label, label))
     raise ModeWriteError(
-        "no mode port matches this card's game program%s, so a mode could never start on it"
-        % (": tried " + "; ".join(tried) if tried else " (the SDK has none for %s)" % prof.game_dir))
+        "what the app knows of how to run modes on %s does not match this card's game "
+        "program, so a mode could never start on it%s"
+        % (prof.label, " (tried: " + "; ".join(tried) + ")" if tried else ""))
 
 
 def request_sids(game_elf, image_head, request):
@@ -562,15 +642,29 @@ def own_cfg_args(project, slug, spec, own_sounds):
     return requests, ms or None
 
 
+def mode_file_text(project, slug, spec, own_sounds):
+    """The runtime mode file a build writes for the mode *slug*: :func:`.mode_project.runtime_cfg`
+    naming the carriers of its own sounds in *own_sounds* (the build's carried list), or as
+    :func:`.mode_assets.build` writes it for a mode that carries none. What :func:`plan` writes,
+    and what a settings-only Try it writes again (:func:`tryit_settings_only`)."""
+    requests, ms = own_cfg_args(project, slug, spec, own_sounds)
+    try:
+        if not requests:
+            return MP.runtime_cfg(spec, slug)
+        return MP.runtime_cfg(spec, slug, own_sounds=requests, own_sound_ms=ms)
+    except MP.ModeProjectError as e:
+        raise ModeWriteError("%s: %s" % (spec.name, e)) from None
+
+
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
-         log=None, end_sound="choose", own_sounds=None):
+         log=None, end_sound="choose", own_sounds=None, progress=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
     settles it before the sound bank is staged); ``"choose"`` asks
     :func:`choose_end_sound`. *own_sounds* is the engine's list of the start sounds, shot
     sounds and music that went into the bank (each with its carrier ``request``): their
-    modes' files name the carriers."""
+    modes' files name the carriers. *progress* ``(done, total, words)`` follows the clips."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project))
@@ -586,6 +680,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         else:
             from . import code_modes as CM
             prof = CM.profile_for(project, code)
+            if prof is None:
+                raise ModeWriteError(CM.NO_TITLE)
     except MP.ModeProjectError as e:
         raise ModeWriteError(str(e)) from None
     port = find_port(prof, game_elf)
@@ -595,6 +691,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     tree = os.path.join(scratch, "tree")
     try:
         kw = {"code": code, "prof": prof} if code else {}     # a form-mode build is called as before
+        if progress is not None:
+            kw["progress"] = progress
         build = mode_assets.build(project, stock_hud, stock_bank, tree, ffmpeg=ffmpeg, **kw)
     except (mode_assets.ModeAssetError, MP.ModeProjectError) as e:
         raise ModeWriteError(str(e)) from None
@@ -610,19 +708,28 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         # the modes whose own sounds went into the bank name their carriers (item 150's keys)
         from .mode_assets import mode_file_name
         for slot, (slug, spec) in enumerate(modes):
-            requests, ms = own_cfg_args(project, slug, spec, result.own_sounds)
-            if not requests:
+            if not own_cfg_args(project, slug, spec, result.own_sounds)[0]:
                 continue
             path = os.path.join(tree, "padmode", mode_file_name(slot))
-            try:
-                text = MP.runtime_cfg(spec, slug, own_sounds=requests, own_sound_ms=ms)
-            except MP.ModeProjectError as e:
-                raise ModeWriteError("%s: %s" % (spec.name, e)) from None
+            text = mode_file_text(project, slug, spec, result.own_sounds)
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
     result.end_sound = (choose_end_sound(project, modes, sound_ok, log)
                         if end_sound == "choose" else end_sound)
     result.lines = describe(modes, result, prof=prof)
+    if not getattr(prof, "proven", True):
+        # find_port takes a port that never ran only as the profile's own: say so in the log
+        from . import port_derive
+        try:
+            live = port_derive.ran_live(MP.port_path(prof))
+        except Exception:                           # noqa: BLE001 - the plainer sentence then
+            live = False
+        if live:
+            result.lines.append("what the app worked out of how to run modes on %s has run in the "
+                                "emulator on this PC (a Try it), not yet on a machine" % prof.label)
+        else:
+            result.lines.append("what the app knows of how to run modes on %s has never run in the "
+                                "emulator, so they may not start on this card" % prof.label)
     if code:
         code_plan(project, result, code, tree, prof, log=log)
         result.lines += describe_code(code, result, prof=prof, project=project)
@@ -754,6 +861,18 @@ def pending_lines(project, modes=None):
         _card, prof = MP.project_profile(project)          # probe=False: no image is opened
     except Exception:
         prof = None
+    refused = card_refusal(project, probe=False, real_card=True)
+    if refused:
+        # the project's card has no port (or one no Try it has run yet): a Write leaves every
+        # mode out and writes the rest (the engine's own decision), so the scan promises none
+        refused = refused[:1].upper() + refused[1:]
+        try:
+            code = code_mode_list(project)
+        except ModeWriteError:
+            code = []
+        return (["%s: not put on the card. %s" % (spec.name, refused) for _s, spec in modes]
+                + ["%s (code mode): not put on the card. %s" % (c.name, refused)
+                   for _s, c in code])
     chosen = choose_end_sound(project, modes, sound_gate())
     own = choose_own_sounds(project, modes, sound_gate(), end_sound=chosen)
     lines = describe(modes, _EndSoundOnly(chosen, own), prof=prof)
@@ -764,7 +883,11 @@ def pending_lines(project, modes=None):
     if code:
         # the code modes' own sounds as the build would carry them (no image opened: the title
         # is the project card's, else the one the code names)
-        cprof = prof or (_title_profile(modes[0][1]) if modes else None) or MP.GODZILLA_PRO_1_15
+        cprof = prof or (_title_profile(modes[0][1]) if modes else None) or _code_title(code)
+        if cprof is None:
+            from . import code_modes as CM
+            return lines + ["%s (code mode): not put on the card. %s" % (c.name, CM.NO_TITLE)
+                            for _s, c in code]
         req, beds = own_sounds_taken(own)
         if chosen and chosen.get("request"):
             req.append(int(chosen["request"]))
@@ -772,6 +895,19 @@ def pending_lines(project, modes=None):
         lines += describe_code(code, _EndSoundOnly(chosen, list(own) + carried), prof=cprof, project=project)
     lines += stock_lines(project, carried=True, prof=prof)
     return lines
+
+
+def _code_title(code):
+    """The title the first code mode names (its assets' ``title``), or None: what
+    :func:`.code_modes.profile_for` falls back to, without opening a card image."""
+    for _slug, spec in code or ():
+        key = (getattr(spec, "extra", None) or {}).get("title")
+        if key:
+            try:
+                return MP.profile(key)
+            except MP.ModeProjectError:
+                return None
+    return None
 
 
 #: The change scan's and the Write log's words for a counts-as table with no mode to ride with.
@@ -1129,17 +1265,32 @@ def assets_fingerprint(assets_dir):
     is a whole extract; compared for EQUALITY, because a build writes its hash cache back
     into the folder, so the value kept is the one taken AFTER the build, and a file put
     back from an older copy moves it too."""
+    return _assets_fingerprints(assets_dir)[0]
+
+
+def _assets_fingerprints(assets_dir, apart=None):
+    """``(whole, rest)``: :func:`assets_fingerprint` of *assets_dir*, and the same of it without
+    the folder *apart* (``None``: ``rest`` is ``None``), in one walk."""
+    apart = os.path.normcase(os.path.abspath(apart)) if apart else None
     newest, count = 0, 0
+    r_newest, r_count = 0, 0
     for root, _dirs, files in os.walk(assets_dir):
+        inside = apart is not None and (
+            os.path.normcase(os.path.abspath(root)) + os.sep).startswith(apart + os.sep)
         for name in files:
             count += 1
+            if not inside:
+                r_count += 1
             try:
                 m = os.stat(os.path.join(root, name)).st_mtime
             except OSError:
                 continue
             if m > newest:
                 newest = m
-    return "%d %.6f" % (count, newest)
+            if not inside and m > r_newest:
+                r_newest = m
+    return ("%d %.6f" % (count, newest),
+            "%d %.6f" % (r_count, r_newest) if apart is not None else None)
 
 
 def tryit_sidecar(base):
@@ -1159,6 +1310,8 @@ def _tryit_record(base_card, card, project, sound_ok):
     build's options and the app's version, and the two fingerprints. Everything in it is
     JSON, so a read-back compares equal."""
     from ... import __version__
+    modes = modes_fingerprint(project)
+    whole, rest = _assets_fingerprints(project, apart=MP.modes_dir(project))
     return {
         "version": TRYIT_SIDECAR_VERSION,
         "base_card": _card_identity(base_card),
@@ -1169,8 +1322,13 @@ def _tryit_record(base_card, card, project, sound_ok):
         "gates": [bool(enabled()), bool(sound_enabled())],
         "env": _build_env(),
         "app": __version__,
-        "modes": modes_fingerprint(project),
-        "assets_fingerprint": assets_fingerprint(project),
+        "modes": modes,
+        "assets_fingerprint": whole,
+        # for the settings-only test (tryit_settings_only): each mode file as it reads, the
+        # rest of the modes' folders, and the project without its modes
+        "mode_json": _mode_json_dicts(project),
+        "modes_other": [e for e in modes if e[0].rsplit("/", 1)[-1] != MP.MODE_FILE],
+        "assets_other": rest,
     }
 
 
@@ -1218,6 +1376,12 @@ def tryit_reuse_reason(base, set_dir, base_card, card, project, sound_ok, engine
                        ("assets_fingerprint", "the project's edits changed since it was built")):
         if kept.get(key) != now[key]:
             return words
+    return _set_intact_reason(set_dir, base_card, E)
+
+
+def _set_intact_reason(set_dir, base_card, E):
+    """Why the set in *set_dir* is not a finished set whose files and stage are as its build
+    left them, or ``""`` when it is (the engine's own all-or-nothing test)."""
     manifest = E.read_override_manifest(set_dir) or {}
     if not manifest or manifest.get("building") or not manifest.get("generation"):
         return "the set was never finished"
@@ -1235,6 +1399,121 @@ def tryit_reuse_reason(base, set_dir, base_card, card, project, sound_ok, engine
     if check is not None and check(set_dir, manifest, base_card) is None:
         return "the set's files are not as the build left them"
     return ""
+
+
+# ---- a settings-only edit: the set stays, the mode files are written again ---------------
+#: The ``mode.json`` fields that reach nothing but the mode's own runtime file
+#: (:func:`.mode_project.runtime_cfg`): no screen, clip, sound, scene or game-program byte
+#: of a build reads them. A Try it whose only change since the last one is to these keeps
+#: the set as it is and writes the mode files again (:func:`tryit_settings_only`), in
+#: milliseconds where the build took most of a minute. A field not named here (a new one
+#: included) always builds the set again.
+SETTINGS_ONLY_FIELDS = frozenset((
+    "start_shot", "start_count", "seconds", "scoring_shots", "countdown", "lights",
+    "light_color", "light_on_raw", "light_off_raw", "stack", "award_ladder", "shot_award",
+    "end_shot", "callout_at", "restore_after", "starts_on", "ends_on", "starts", "cooldown",
+    "priority", "light_shots", "light_shots_pattern"))
+#: ...except these, for a mode with music of its own: its bed is cut to the mode's length.
+_SETTINGS_ONLY_UNLESS_MUSIC = frozenset(("seconds",))
+
+
+def _mode_json_dicts(project):
+    """``{slug: the mode.json's fields}`` of every form mode, as read (``None`` for one that
+    does not read as JSON)."""
+    out = {}
+    root = MP.modes_dir(project) if project else ""
+    try:
+        names = sorted(os.listdir(root)) if root else []
+    except OSError:
+        return out
+    for slug in names:
+        path = os.path.join(root, slug, MP.MODE_FILE)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = None
+        out[slug] = data if isinstance(data, dict) else None
+    return out
+
+
+def _settings_only_reason(kept, now):
+    """Why the change from the record *kept* to *now* is not a settings-only one, or ``""``
+    when every difference is a :data:`SETTINGS_ONLY_FIELDS` field of a form mode."""
+    if not kept or kept.get("version") != now["version"]:
+        return "there is no record of the last Try it"
+    for key in ("base_card", "run_card", "assets", "sound_ok", "preview", "gates", "env", "app"):
+        if kept.get(key) != now[key]:
+            return "not only the modes changed"
+    if kept.get("assets_other") is None or kept.get("assets_other") != now["assets_other"]:
+        return "the project's other edits changed"
+    if kept.get("modes_other") != now["modes_other"]:
+        return "a mode's own files changed, or a mode was added or taken out"
+    old, new = kept.get("mode_json") or {}, now["mode_json"] or {}
+    if sorted(old) != sorted(new):
+        return "a mode was added or taken out"
+    changed = 0
+    for slug in new:
+        a, b = old.get(slug), new.get(slug)
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            return "a mode's file does not read"
+        diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+        if diff - SETTINGS_ONLY_FIELDS:
+            return "a mode's screen, clip, sound or name changed"
+        if diff & _SETTINGS_ONLY_UNLESS_MUSIC and (a.get("music") or b.get("music")):
+            return "a mode with music of its own changed its length"
+        changed += bool(diff)
+    if not changed:
+        return "nothing of the modes' settings changed"
+    return ""
+
+
+def tryit_settings_only(project, base, set_dir, base_card, card, sound_ok, engine=None,
+                        log=None):
+    """A Try it after an edit to the modes' SETTINGS only (:data:`SETTINGS_ONLY_FIELDS`: the
+    timer, the shots, the lights, the scoring ...): the set is the last build's, byte for
+    byte, and only the mode files in its stage change. Writes them again, exactly as the
+    build writes them (:func:`mode_file_text`, with the carried own sounds the set's
+    manifest names), records the press, and returns ``(listed manifest, [mode files
+    rewritten])``; ``(None, why)`` when this is not such a change, and nothing is touched."""
+    E = engine
+    if E is None:
+        from . import engine as E
+    from .mode_assets import mode_file_name
+    kept = read_tryit_sidecar(base)
+    now = _tryit_record(base_card, card, project, sound_ok)
+    if not now["base_card"] or not now["run_card"]:
+        return None, "a card image could not be read"
+    why = _settings_only_reason(kept, now) or _set_intact_reason(set_dir, base_card, E)
+    if why:
+        return None, why
+    listed = E.read_override_manifest(set_dir) or {}
+    carried = listed.get("modes") or {}
+    stage = carried.get("dir") or (set_dir.rstrip("\\/") + E.OVERRIDE_MODES_SUFFIX)
+    modes = card_modes(project, project_modes(project))
+    names = [mode_file_name(slot) for slot in range(len(modes))]
+    if names != [n for n in carried.get("files") or () if n.endswith(".cfg")]:
+        return None, "the set's mode files are not the project's modes"
+    rewritten = []
+    for slot, (slug, spec) in enumerate(modes):
+        text = mode_file_text(project, slug, spec, carried.get("own_sounds") or ())
+        path = os.path.join(stage, names[slot])
+        try:
+            with open(path, "r", encoding="utf-8", newline="") as f:
+                same = f.read() == text
+        except OSError:
+            same = False
+        if not same:
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+            rewritten.append(names[slot])
+    write_tryit_sidecar(base, now)
+    if log:
+        log("only the modes' settings changed since the last Try it, so its set is used as it "
+            "is and the mode files are written again (%s)" % ", ".join(rewritten or ["none"]))
+    return listed, rewritten
 
 
 def build_tryit_set(project, card, base, log=None, progress=None, cancel=None, label=None,
@@ -1305,12 +1584,24 @@ def build_tryit_set(project, card, base, log=None, progress=None, cancel=None, l
         elog(TRYIT_REUSED, "info")
         return _tryit_set_from_manifest(project, modes, code, set_dir, listed, counts, E,
                                         reused=True)
+    # Only the modes' settings moved (the timer, the shots, the lights ...): the set is the
+    # last build's byte for byte, so only the mode files beside it are written again.
+    listed, _rewritten = tryit_settings_only(project, base, set_dir, base_card, card,
+                                             sound_ok, engine=E,
+                                             log=lambda m: elog(m, "info"))
+    if listed is not None:
+        kept = listed.get("counts") or {}
+        counts = tuple(kept.get(k, 0) for k in ("audio", "video", "image", "text"))
+        return _tryit_set_from_manifest(project, modes, code, set_dir, listed, counts, E,
+                                        reused=False)
     elog("preparing the modes (%s)" % why, "info")
 
     try:
-        got = E.write_overrides(base_card, project, set_dir, log=elog, progress=progress,
-                                cancel=cancel, label=label, run_card=card,
-                                sound_ok=sound_ok)
+        # pressed again and again on one card: keep its firmware + sound bank between builds
+        with E.keep_card_extracts():
+            got = E.write_overrides(base_card, project, set_dir, log=elog, progress=progress,
+                                    cancel=cancel, label=label, run_card=card,
+                                    sound_ok=sound_ok)
     except (RuntimeError, OSError, ValueError) as e:
         raise ModeWriteError(str(e)) from None
     counts = got[0]
@@ -1346,6 +1637,8 @@ def _tryit_set_from_manifest(project, modes, code, set_dir, listed, counts, E, r
     else:
         from . import code_modes as CM
         prof = CM.profile_for(project, code)
+        if prof is None:
+            raise ModeWriteError(CM.NO_TITLE)
     from .mode_assets import mode_file_name
     result = TryItSet(
         set_dir=set_dir, stage_dir=stage, game_dir=prof.game_dir, version=_port_version(port),
@@ -1480,15 +1773,135 @@ def compile_command(ex, out, sources):
     return "bash " + " ".join(q(a) for a in args)
 
 
+#: ``PAD_CODE_CACHE=0``: the code modes are compiled on every build, never taken from an
+#: earlier build of the same sources.
+CODE_CACHE_ENV = "PAD_CODE_CACHE"
+#: Objects kept at most; the least recently used go first.
+CODE_CACHE_KEEP = 20
+_PENDING = {}                    # object key -> threading.Event of a compile started early
+_PENDING_LOCK = threading.Lock()
+_PREFETCHED = set()              # keys this process compiled early (for the log's words)
+
+
+def code_cache_dir():
+    """Where compiled objects are kept: the temp dir, under a ``spike2_`` name like the other
+    build scratch."""
+    return os.path.join(tempfile.gettempdir(), "spike2_code_cache")
+
+
+#: What sits beside a code mode's C that a compile never reads: its pictures, clips, sounds
+#: and assets.json. Leaving them out keeps the kept object across an asset edit.
+_NOT_COMPILED = frozenset((".wav", ".mp3", ".ogg", ".flac", ".mp4", ".mov", ".mkv", ".webm",
+                           ".avi", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".json"))
+#: Past this size a file beside a mode is keyed by its size and time, not its bytes.
+_KEY_BYTES_MAX = 4 << 20
+
+
+def _mode_folder_files(folder):
+    """Every file under *folder* (recursively, sorted) a compile could include: gcc finds a
+    quoted include beside the source or in any folder under it, whatever its extension."""
+    got = []
+    for root, dirs, names in os.walk(folder):
+        dirs.sort()
+        for n in sorted(names):
+            if os.path.splitext(n)[1].lower() not in _NOT_COMPILED:
+                got.append(os.path.join(root, n))
+    return got
+
+
+def code_object_key(sources):
+    """The digest an object is kept under: the bytes of every code mode's C file and of every
+    other file under its folder a compile could include (:func:`_mode_folder_files`), and of
+    everything of the SDK ``build_mode.sh`` compiles in (the runtime, the mode-file interpreter,
+    the headers, the script itself). The same key is the same object: gcc is pinned in the
+    app's Linux."""
+    sdk = MR.sdk_dir()
+    files = [(n, os.path.join(sdk, n)) for n in (BUILD_MODE, "pad_mode_runtime.c", "mode_file.c")]
+    files += sorted((n, os.path.join(sdk, n)) for n in os.listdir(sdk) if n.endswith(".h"))
+    for src in sources:
+        folder = os.path.dirname(os.path.abspath(src))
+        files.append((os.path.basename(src), src))
+        files += [(os.path.relpath(p, folder).replace(os.sep, "/"), p)
+                  for p in _mode_folder_files(folder)
+                  if os.path.normcase(os.path.abspath(p)) != os.path.normcase(os.path.abspath(src))]
+    h = hashlib.sha256(b"pad code object 2\0")
+    for name, p in files:
+        h.update(name.encode("utf-8") + b"\0")
+        st = os.stat(p)
+        if st.st_size > _KEY_BYTES_MAX:
+            h.update(b"big %d %d\0" % (st.st_size, st.st_mtime_ns))
+            continue
+        with open(p, "rb") as f:
+            data = f.read()
+        h.update(b"%d\0" % len(data))
+        h.update(data)
+    return h.hexdigest()
+
+
+def _cached_object(key, wait=600):
+    """The kept object for *key*, or ``None``; waits for a compile of the same key started early
+    (:func:`prefetch_code_object`)."""
+    with _PENDING_LOCK:
+        ev = _PENDING.get(key)
+    if ev is not None:
+        ev.wait(wait)
+    path = os.path.join(code_cache_dir(), key + ".so")
+    return path if os.path.isfile(path) and os.path.getsize(path) > 0 else None
+
+
+def _keep_object(key, built):
+    folder = code_cache_dir()
+    try:
+        os.makedirs(folder, exist_ok=True)
+        tmp = os.path.join(folder, "%s.%d.%d.tmp" % (key, os.getpid(), threading.get_ident()))
+        shutil.copyfile(built, tmp)
+        os.replace(tmp, os.path.join(folder, key + ".so"))
+        kept = sorted((n for n in os.listdir(folder) if n.endswith(".so")),
+                      key=lambda n: os.path.getmtime(os.path.join(folder, n)))
+        for n in kept[:-CODE_CACHE_KEEP] if len(kept) > CODE_CACHE_KEEP else ():
+            os.remove(os.path.join(folder, n))
+    except OSError:
+        pass
+
+
 def compile_code_object(sources, out, log=None, executor=None, timeout=600):
     """Build the object a card with code modes carries: the runtime, every code mode and the
     mode-file interpreter (so the project's form modes run beside them). Returns *out*. Raises
-    :class:`ModeWriteError` with the compiler's words when it fails."""
+    :class:`ModeWriteError` with the compiler's words when it fails.
+
+    With the app's own executor (*executor* None) the object is kept by
+    :func:`code_object_key`, and a build of the same sources takes the kept one instead of
+    compiling (1.5 s, and 10-15 s on a busy PC); a compile of them already started by
+    :func:`prefetch_code_object` is waited for. A caller's own executor always compiles."""
     say = log or (lambda *a, **k: None)
+    names = ", ".join(os.path.splitext(os.path.basename(s))[0] for s in sources)
+    key = None
+    if executor is None and os.environ.get(CODE_CACHE_ENV) != "0":
+        try:
+            key = code_object_key(sources)
+        except OSError:
+            key = None
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    if key:
+        kept = _cached_object(key, wait=timeout)
+        if kept:
+            shutil.copyfile(kept, out)
+            try:
+                os.utime(kept, None)
+            except OSError:
+                pass
+            if key in _PREFETCHED:
+                say("Modes: built the code mode(s) %s into the card's mode.so with the "
+                    "mode-file interpreter beside the rest of the build (%d bytes)."
+                    % (names, os.path.getsize(out)), "info")
+            else:
+                say("Modes: the code mode(s) %s are as they were for an earlier build, so its "
+                    "mode.so is used (%d bytes; PAD_CODE_CACHE=0 compiles every time)."
+                    % (names, os.path.getsize(out)), "info")
+            return out
     if executor is None:
         from ...core.executor import create_executor
         executor = create_executor()
-    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     try:
         said = executor.run(compile_command(executor, out, sources), timeout=timeout)
     except Exception as e:                   # the executor's CommandError, a missing WSL
@@ -1496,9 +1909,61 @@ def compile_code_object(sources, out, log=None, executor=None, timeout=600):
     if not os.path.isfile(out):
         raise ModeWriteError("the code modes did not build (no object was written): %s"
                              % (said or "").strip()[-400:])
+    if key:
+        _keep_object(key, out)
     say("Modes: built the code mode(s) %s into the card's mode.so with the mode-file interpreter (%d bytes)."
-        % (", ".join(os.path.splitext(os.path.basename(s))[0] for s in sources), os.path.getsize(out)), "info")
+        % (names, os.path.getsize(out)), "info")
     return out
+
+
+_compile_code_object = compile_code_object
+
+
+def prefetch_code_object(sources, timeout=600):
+    """Start compiling *sources* in the background now, into the kept objects, so the build's
+    own :func:`compile_code_object` of them later finds the object ready (or waits for the rest
+    of this compile) instead of compiling at the end of the build. Returns the started thread,
+    or ``None`` when there is nothing to start: an object already kept or already being made,
+    caching off, a source that cannot be read, or a stand-in compile (a test's), which is never
+    run early. A compile that fails here is simply not kept: the build's own compile then runs
+    and says why."""
+    if compile_code_object is not _compile_code_object or not sources:
+        return None
+    if os.environ.get(CODE_CACHE_ENV) == "0":
+        return None
+    try:
+        key = code_object_key(sources)
+    except OSError:
+        return None
+    with _PENDING_LOCK:
+        if key in _PENDING or os.path.isfile(os.path.join(code_cache_dir(), key + ".so")):
+            return None
+        ev = _PENDING[key] = threading.Event()
+
+    def run():
+        out = os.path.join(tempfile.gettempdir(), "spike2_code_prefetch_%s_%d.so"
+                           % (key[:16], threading.get_ident()))
+        try:
+            from ...core.executor import create_executor
+            ex = create_executor()
+            ex.run(compile_command(ex, out, sources), timeout=timeout)
+            if os.path.isfile(out):
+                _keep_object(key, out)
+                with _PENDING_LOCK:
+                    _PREFETCHED.add(key)
+        except Exception:                                   # noqa: BLE001
+            pass
+        finally:
+            try:
+                os.remove(out)
+            except OSError:
+                pass
+            with _PENDING_LOCK:
+                _PENDING.pop(key, None)
+            ev.set()
+    t = threading.Thread(target=run, name="pad-code-prefetch", daemon=True)
+    t.start()
+    return t
 
 
 def code_plan(project, result, code, tree, prof, log=None):

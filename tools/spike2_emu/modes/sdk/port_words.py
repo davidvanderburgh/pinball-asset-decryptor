@@ -9,42 +9,26 @@ the runtime compares before it touches that function - the safety gate that make
 port for the wrong game or version hook nothing. Those words must come from the ELF,
 never from a person, so this is how a port gets them.
 
-It also refuses a HOOKED site (tick, shot_dispatch, ball_end, sound_lookup) whose first
+It also refuses a HOOKED site (tick, shot_dispatch, ball_end, sound_lookup, switch_edge, every
+switch_hit*, the display and roster hooks: portgen.is_hooked_site) whose first
 two instructions depend on the program counter: those cannot be moved into a
 trampoline, and hooking one would crash the game. A literal load (`ldr rd, [pc, #n]`) is
 the exception: the runtime copies the literal and moves it (item 137).
 """
+import os
 import re
 import struct
 import sys
 
-HOOKED = {"tick", "shot_dispatch", "ball_end", "sound_lookup"}
-HOOKED |= {"hook_dispatch"}          # item 147: the event bus's dispatch, hooked when present
+# the package this file ships beside (a checkout or an install: four folders up)
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
+if os.path.isdir(os.path.join(_ROOT, "pinball_decryptor")) and _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+# the checks themselves are the package's (the app checks a port it derives with them too)
+from pinball_decryptor.plugins.stern.portgen import (  # noqa: E402,F401
+    HOOKED_SITES as HOOKED, event_problems, is_hooked_site, literal_load, movable, pc_dependent)
 
-
-def event_problems(n, parts, sites=()):
-    """item 147: `event <name> <id>` - a name the runtime keeps (39 characters) and a bus id
-    (0..207) - or `event <name> site <site name>`, a site the port names. Returns the problem
-    lines."""
-    out = []
-    if len(parts) < 3:
-        return ["line %d: an event needs a name and an id" % n]
-    name, rest = parts[1], parts[2].split()
-    if len(name) > 39:
-        out.append("line %d: the event name %r is over 39 characters" % (n, name))
-    if rest and rest[0] == "site":
-        if len(rest) < 2 or rest[1].startswith("#"):
-            return out + ["line %d: the event %r names no site" % (n, name)]
-        if rest[1] not in sites:
-            out.append("line %d: the event %r names site %r, which the port has no line for" % (n, name, rest[1]))
-        return out
-    try:
-        ident = int(rest[0], 0)
-    except (ValueError, IndexError):
-        return out + ["line %d: the event %r has no numeric id" % (n, name)]
-    if not 0 <= ident <= 207:
-        out.append("line %d: the event %r id %d is outside 0..207" % (n, name, ident))
-    return out
+__all__ = ["HOOKED", "is_hooked_site", "event_problems", "literal_load", "movable", "pc_dependent", "segments", "words_at", "main"]
 
 
 def segments(elf):
@@ -69,36 +53,7 @@ def words_at(elf, segs, va):
     raise ValueError("0x%x is not in the ELF" % va)
 
 
-def pc_dependent(w):
-    if (w & 0x0E000000) == 0x0A000000:                 # b / bl / blx imm
-        return True
-    if (w >> 26) & 3 == 1 and ((w >> 16) & 0xF) == 15:  # ldr/str based on pc
-        return True
-    if (w >> 26) & 3 == 0 and (((w >> 16) & 0xF) == 15 or ((w >> 12) & 0xF) == 15):
-        return (w & 0x0FB00000) != 0x03000000          # movw/movt carry imm4 there
-    if (w & 0x0E108000) == 0x08108000:                 # ldm ... pc
-        return True
-    return False
-
-
-def literal_load(w):
-    """`ldr rd, [pc, #+-n]` with rd not pc: pad_mode_runtime.c relocates it."""
-    return (w & 0xFF7F0000) == 0xE51F0000 and ((w >> 12) & 0xF) != 15
-
-
-def movable(w0, w1):
-    """Can the trampoline run these two words somewhere else? A return (bx lr) can, unless it
-    is the function's first and only instruction."""
-    if w0 == 0xE12FFF1E:
-        return False
-    return not any(pc_dependent(w) and not literal_load(w) and (w & 0x0FFFFFFF) != 0x012FFF1E
-                   for w in (w0, w1))
-
-
 SITE = re.compile(r"^(\s*site\s+)(\S+)(\s+)(0x[0-9a-fA-F]+|\d+)(.*)$")
-
-# item 146: the runtime hooks the battle roster's start too (pad_mode_runtime.c on_roster_start)
-HOOKED = HOOKED | {"roster_start"}
 
 
 def main(argv):
@@ -144,7 +99,7 @@ def main(argv):
             bad += 1
             out.append(line)
             continue
-        if (name in HOOKED or name in event_sites) and not movable(w0, w1):
+        if (is_hooked_site(name) or name in event_sites) and not movable(w0, w1):
             print("%-16s 0x%08x starts %08x %08x - cannot be hooked (pc-relative)" % (name, va, w0, w1))
             bad += 1
         old = m.group(5).split()

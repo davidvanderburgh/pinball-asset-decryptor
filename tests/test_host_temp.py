@@ -62,6 +62,10 @@ def test_cc_dcs_matched_before_generic_cc():
     # Legacy bare-random form (no title) -> generic role.
     ("spike2_q7x", "audio extract / build staging"),
     ("spike2_revert_q7x", "audio extract / build staging"),
+    # Folders kept on purpose between builds say so.
+    ("spike2_card_cache", "card copies kept for faster rebuilds"),
+    ("spike2_clip_cache", "video clips kept for faster rebuilds"),
+    ("spike2_code_cache", "compiled objects kept for faster rebuilds"),
 ])
 def test_spike2_title(name, detail):
     mfr, got = host_temp._classify(name)

@@ -61,6 +61,11 @@ class TitleProfile:
     runtime_can: tuple = ()      # what pad_mode_runtime.c would arm with, in its own words
     cannot: tuple = ()           # ((part, reason), ...) - PARTS this title cannot do, and why
     sound_note: str = ""         # what is not known yet about the title's callouts (never heard)
+    score_bits: int = 64         # 32 for a port with the 32-bit scoring pair (score_add32 + scores32)
+    switch_shots: tuple = ()     # names in ``shots`` that come from the port's `switch` lines
+    switch_shots_note: str = ""  # why those are not proven yet; "" when they are (or there are none)
+    lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
+    #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
 
     def can(self, part):
         """True unless this title cannot do ``part`` (one of :data:`PARTS`)."""
@@ -148,9 +153,70 @@ def profile(key):
         return PROFILES[key]
     except KeyError:
         found = profiles().get(key)          # item 148: every port in PORTS_DIR
+        if found is None:
+            found = _machine_profiles().get(key)   # derived on this machine, or read this session
         if found is not None:
             return found
         raise ModeProjectError("modes are not supported on %r yet" % key) from None
+
+
+#: Profiles of ports a card's read found this session (title_reader: a port worked out on
+#: this machine can live outside the folders :func:`profiles` scans), by key.
+_REMEMBERED = {}
+#: the port file's mtime when each remembered profile was read (a changed file is read again)
+_REMEMBERED_AT = {}
+
+
+def _listed_ports():
+    """The port files every lookup may use, as normalised paths: exactly
+    :func:`.mode_runtime.port_paths` (the shipped ports, then the ports derived on this machine
+    that are still current). THE ONE SOURCE LIST: :func:`profiles`, :func:`profile`,
+    :func:`profile_for_card`, ``mode_runtime.port_file`` and ``mode_write.find_port`` all
+    answer from it, so a derived port that went stale is gone from every one of them at once."""
+    from . import mode_runtime
+    return {_norm_path(p) for _g, _v, p in mode_runtime.port_paths()}
+
+
+def _norm_path(path):
+    return os.path.normcase(os.path.abspath(path)) if path else ""
+
+
+def _is_listed(p, listed):
+    """Is the port behind profile ``p`` one of :func:`_listed_ports`?"""
+    return _norm_path(port_path(p)) in listed
+
+
+def _machine_profiles():
+    """``{key: profile}`` a read found this session (:func:`remember_profile`) whose port is
+    still one every lookup uses (:func:`_listed_ports`). A remembered profile whose port file
+    is gone, went stale (another drafting revision, a changed reference) or changed since is
+    left out: the ports derived on this machine are read by :func:`profiles` itself, from the
+    same list, so a Write or a Try it in a later session finds them there."""
+    listed = _listed_ports()
+    out = {}
+    for key, p in _REMEMBERED.items():
+        if not _is_listed(p, listed):
+            continue
+        try:
+            same = os.path.getmtime(port_path(p)) == _REMEMBERED_AT.get(key)
+        except OSError:
+            continue
+        if same:
+            out[key] = p
+    return out
+
+
+def remember_profile(p):
+    """Make :func:`profile` answer ``p.key`` with ``p`` for the rest of this session: the
+    Modes tab calls it with the profile of the port it read off a card, so validating and
+    building a mode made for that card finds its title."""
+    if p is not None and p.key and p.key not in PROFILES:
+        _REMEMBERED[p.key] = p
+        try:
+            _REMEMBERED_AT[p.key] = os.path.getmtime(port_path(p))
+        except OSError:
+            _REMEMBERED_AT.pop(p.key, None)
+    return p
 
 
 # ---- every ported title: profiles from the SDK's port files (item 148) ---------------
@@ -184,8 +250,48 @@ RUNTIME_NEEDS = {
     "award-screen": (("award_screen",), ("award_screen_arg",),
                      ("award_message_at", "award_value_at", "award_count_at")),
 }
-#: without these the runtime logs NOT THIS GAME'S PORT and hooks nothing
+#: without these the runtime logs NOT THIS GAME'S PORT and hooks nothing: the reference title's
+#: core. A port may name an alternative for three of them (pad_mode_runtime.c core_of_port), which
+#: :func:`core_missing` applies: a switch_edge (the framework's switch drain) or switch_hit site
+#: with `switch` lines for shot_dispatch, value ball_end_event with site hook_dispatch for ball_end,
+#: and the 32-bit scoring pair.
 RUNTIME_CORE = (("tick", "shot_dispatch", "ball_end", "score_add"), ("cur_player", "scores"))
+#: the 32-bit scoring pair (The Beatles 1.29: score_add(u8 player r0, u32 points r1), u32 scores)
+RUNTIME_CORE_32 = ("score_add32", "scores32")
+#: ids below this are the game's event bus ids (pad_mode_runtime.c N_BUS_IDS)
+BUS_IDS = 208
+
+#: Ports whose shots from switches (`switch` lines through a switch_hit site) were seen reaching a
+#: mode in the emulator, as ``<game>-<version>``. Until a port is here the tab says they are not
+#: proven (:attr:`TitleProfile.switch_shots_note`).
+#: beatles-1.29: emulator-proven 2026-09-23, each of 73-76 and 48-51 gave exactly one shot in play, the
+#: slingshots none, and a mode file started on Target 1 and scored on Target 2-4 and the return lanes.
+SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29"})
+#: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
+#: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
+#: 1.29 and Star Wars ELG 1.10 of generation B, Batman 66 1.13 and Rush LE 1.18 of generation A).
+SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18"})
+
+
+def _core_names(port):
+    """The core sites and data one port uses, as pad_mode_runtime.c's core_of_port picks them."""
+    sites, values = port["site"], port["value"]
+    s32 = RUNTIME_CORE_32[0] in sites
+    shots = ("switch_edge" if "shot_dispatch" not in sites and "switch_edge" in sites and port.get("switch")
+             else "switch_hit" if "shot_dispatch" not in sites and "switch_hit" in sites and port.get("switch")
+             else "shot_dispatch")
+    event = values.get("ball_end_event", -1)
+    ball_end = "hook_dispatch" if "ball_end" not in sites and 0 <= event < BUS_IDS else "ball_end"
+    return (("tick", shots, ball_end, RUNTIME_CORE_32[0] if s32 else "score_add"),
+            ("cur_player", RUNTIME_CORE_32[1] if s32 else "scores"))
+
+
+def core_missing(port):
+    """What a port (:func:`read_port`'s dict) lacks of the runtime's core, as a list of entry
+    names; [] when the runtime would hook it. The runtime's rule, pad_mode_runtime.c
+    core_of_port."""
+    sites, data = _core_names(port)
+    return [n for n in sites if n not in port["site"]] + [n for n in data if not port["data"].get(n)]
 
 #: The stock scene files behind each port's ``scene hud`` / ``scene video_bank``, measured
 #: READ-ONLY off the card images (item 148, 2026-09-16): each file's md5, then
@@ -219,29 +325,101 @@ TITLE_SCENES = {
 #: muted), in words the Modes tab shows under Sound; the countdown and a sound of the
 #: mode's own stay live there. From the port's own comment on its callouts.
 TITLE_SOUND_UNHEARD = {
-    "jaws_le-1.02": "Jaws LE 1.02's countdown and time-up callouts (1386, 1387 and 1388) ran in "
-                    "the emulator without a fault, but muted, so which sounds they play (and so "
-                    "what a sound of the mode's own replaces) has not been heard yet.",
+    "jaws_le-1.02": "Jaws LE 1.02's countdown and time-up callouts have played in the emulator "
+                    "only with the sound off, so which sounds they are (and so what a sound of "
+                    "the mode's own replaces) has not been heard yet.",
+    "beatles-1.29": "The Beatles 1.29's countdown callout has played in the emulator only with "
+                    "the sound off, so which sound it is has not been heard yet.",
 }
 
-_TITLE_NAMES = {"godzilla": "Godzilla", "turtles": "TMNT", "jaws": "Jaws", "deadpool": "Deadpool"}
+#: The game's name for each Spike 2 game directory (the part before an edition word), as the
+#: backglass says it. Every latest Spike 2 build is here; a directory not listed is written
+#: out from its words (``_title_words``).
+_TITLE_NAMES = {
+    "aerosmith": "Aerosmith",
+    "avengers_infinity": "Avengers: Infinity Quest",
+    "batman": "Batman 66",
+    "beatles": "The Beatles",
+    "deadpool": "Deadpool",
+    "dungeons_and_dragons": "Dungeons & Dragons",
+    "elvira3": "Elvira",
+    "foo_fighters": "Foo Fighters",
+    "godzilla": "Godzilla",
+    "guardians": "Guardians of the Galaxy",
+    "iron_maiden": "Iron Maiden",
+    "james_bond": "James Bond 007",
+    "james_bond_60th": "James Bond 60th",
+    "jaws": "Jaws",
+    "john_wick": "John Wick",
+    "jurassic_park": "Jurassic Park",
+    "jurassic_park_the_pin": "Jurassic Park Pin",
+    "king_kong": "King Kong",
+    "led_zeppelin": "Led Zeppelin",
+    "mando": "The Mandalorian",
+    "metallica_spike": "Metallica Remastered",
+    "munsters": "The Munsters",
+    "rush": "Rush",
+    "star_wars": "Star Wars",
+    "star_wars_elg": "Star Wars ELG",
+    "stranger_things": "Stranger Things",
+    "sword_of_rage": "Sword of Rage",
+    "turtles": "TMNT",
+    "uncanny_xmen": "Uncanny X-Men",
+    "venom": "Venom",
+}
 _EDITION_NAMES = {"pro": "Pro", "le": "LE", "prem": "Premium", "premium": "Premium", "se": "SE"}
 #: one card image that serves two models
 _SHARED_EDITIONS = {"godzilla_le": "Premium/LE"}
+#: short words kept lower case inside a name written out from its directory
+_SMALL_WORDS = ("of", "the", "and", "a", "in", "on")
 #: a port whose opening comment says this was drafted and never run
 UNPROVEN_MARK = "NOT RUN"
 
 
+def _title_words(base):
+    """A game directory with no entry in :data:`_TITLE_NAMES`, written out: ``x_men`` ->
+    ``X Men``, ``house_of_horrors`` -> ``House of Horrors``; a word of up to three
+    consonants reads as letters (``elg`` -> ``ELG``)."""
+    out = []
+    for i, w in enumerate(w for w in base.split("_") if w):
+        if i and w in _SMALL_WORDS:
+            out.append(w)
+        elif len(w) <= 3 and not re.search(r"[aeiouy]", w):
+            out.append(w.upper())
+        elif re.match(r"^\d+(st|nd|rd|th)$", w):
+            out.append(w)
+        else:
+            out.append(w[:1].upper() + w[1:])
+    return " ".join(out)
+
+
 def title_label(game, version=""):
-    """``godzilla_pro``, ``1.15`` -> ``Godzilla Pro 1.15``."""
+    """``godzilla_pro``, ``1.15`` -> ``Godzilla Pro 1.15``; ``beatles`` -> ``The Beatles``.
+
+    ONE LABEL PER BUILD: the version is spelled as a port names it (``1.29.0``, ``1_29_0`` and
+    ``1.29`` all read ``1.29``; a nonzero third part is kept, ``1.15.1``), so the head, the
+    read panel, a game mode's page and every sentence name one card the same way."""
+    version = _label_version(version)
     words = (game or "").lower().split("_")
     edition = ""
     if len(words) > 1 and words[-1] in _EDITION_NAMES:
         edition = _SHARED_EDITIONS.get(game.lower(), _EDITION_NAMES[words[-1]])
         words = words[:-1]
     base = "_".join(words)
-    name = _TITLE_NAMES.get(base, base.replace("_", " ").title())
+    name = _TITLE_NAMES.get(base) or _title_words(base)
     return " ".join(x for x in (name, edition, version) if x)
+
+
+def _label_version(version):
+    """``1.29.0`` / ``1_29_0`` -> ``1.29``; ``1.15.1`` stays; text that is not a version is
+    kept as it is."""
+    text = str(version or "").strip()
+    if not re.match(r"^\d+([._]\d+)*$", text):
+        return text
+    parts = re.split(r"[._]", text)
+    while len(parts) > 2 and int(parts[-1]) == 0:
+        parts.pop()
+    return ".".join(parts)
 
 
 def _port_number(text):
@@ -257,6 +435,7 @@ def read_port(path):
     out = dict(game="", version="", site={}, data={}, value={}, callout={}, shot=[],
                scene={}, text={}, header=[], event=[])
     out["lamp"] = []                      # item mode-leds: [(name, (r, g, b) light ids, shot mask)]
+    out["switch"] = []                    # shots from switches: [(switch id, shot mask, name)]
     body = False
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         for raw in f:
@@ -297,6 +476,11 @@ def read_port(path):
                     lamp = _port_lamp(rest)
                     if lamp:
                         out["lamp"].append(lamp)
+                elif key == "switch":             # `switch <id> <shot mask> <name>`: a switch's hit is a shot
+                    sw, mask, name = rest.split(None, 2)
+                    sw, mask, name = _port_number(sw), _port_number(mask), name.strip()
+                    if mask and name and 0 <= sw < 256:
+                        out["switch"].append((sw, mask, name))
             except (IndexError, ValueError):
                 continue                  # the runtime skips a line it cannot read, too
     return out
@@ -339,12 +523,12 @@ def profile_from_port(path):
     if not game or not version:
         raise ModeProjectError("%s names no game and version" % base)
     sites, data, values = port["site"], port["data"], port["value"]
-    missing = ([n for n in RUNTIME_CORE[0] if n not in sites]
-               + [n for n in RUNTIME_CORE[1] if not data.get(n)])
+    missing = core_missing(port)
     if missing:
         raise ModeProjectError("%s lacks what every mode needs (%s): the runtime would hook "
                                "nothing" % (base, ", ".join(missing)))
-    if not port["shot"]:
+    shots, switch_shots = _shots_with_switches(port)
+    if not shots:
         raise ModeProjectError("%s names no shots" % base)
     runtime = tuple(cap for cap, (s, d, v) in RUNTIME_NEEDS.items()
                     if all(n in sites for n in s) and all(data.get(n) for n in d)
@@ -358,60 +542,70 @@ def profile_from_port(path):
         cannot.append((part, why % dict(label=label)))
 
     if "callout" not in runtime:
-        no("countdown", "%(label)s's port has no callout functions, so the game's own voice "
-                        "cannot count down.")
-    elif not (callouts.get("countdown") and callouts.get("ten_seconds")):
-        no("countdown", "%(label)s's port names no countdown callouts, so the game's own voice "
-                        "cannot count down.")
+        no("countdown", "The app has not found how %(label)s plays its callouts, so the game's "
+                        "own voice cannot count down.")
+    elif not callouts.get("countdown"):         # ten_seconds is optional: the count is 5..1 without it
+        no("countdown", "The app does not know which of %(label)s's callouts count down, so the "
+                        "game's own voice cannot count down.")
     if "lights" not in runtime:
         if all(n in sites for n in RUNTIME_NEEDS["lights"][0]):
-            no("lights", "%(label)s's port has no light owner yet (a rule id of the title's own), "
-                         "so its lights cannot be driven.")
+            no("lights", "The app has found %(label)s's light shows but not yet which of the "
+                         "game's own rules may run one, so its lights cannot be driven.")
         else:
-            no("lights", "%(label)s's port has no light functions: they were not found in its "
-                         "program.")
+            no("lights", "The app has not found how %(label)s runs its light shows, so a mode "
+                         "cannot sweep the playfield yet.")
     elif not values.get("light_lts"):
-        no("lights", "%(label)s's port names no light set for a colour sweep.")
+        no("lights", "The app does not know a light show of %(label)s's to sweep a colour "
+                     "with.")
     hud = scenes.get("hud", "")
     if "screens" not in runtime:
-        no("screen", "%(label)s's port has no screen functions: they were not found in its "
-                     "program.")
+        no("screen", "The app has not found how %(label)s draws its screens, so a mode cannot "
+                     "show one of its own yet.")
     elif not hud:
-        no("screen", "%(label)s's port names no HUD scene to add a screen to.")
+        no("screen", "The app does not know which of %(label)s's scenes a mode's screen goes "
+                     "in, so a mode cannot show one yet.")
     elif not measured.get("hud") or not _hud_is_profiled(measured["hud"]):
-        no("screen", "%%(label)s's HUD scene (%s) has not been measured, so a screen cannot be "
-                     "added to it yet." % hud[:8])
+        no("screen", "The scene a mode's screen goes in on %(label)s has not been measured yet, "
+                     "so a screen cannot be added to it.")
     bank = scenes.get("video_bank", "")
     if "clips" not in runtime:
-        no("clip", "%(label)s's port has no clip functions: they were not found in its program.")
+        no("clip", "The app has not found where %(label)s plays its clips, so a mode cannot "
+                   "add one yet.")
     elif not bank:
-        no("clip", "%(label)s's port names no video bank to add a clip to.")
+        no("clip", "The app does not know which of %(label)s's video banks a clip goes in, so "
+                   "a mode cannot add one yet.")
     elif not measured.get("bank"):
-        no("clip", "%(label)s's video bank has not been measured, so a clip cannot be added to "
-                   "it yet.")
+        no("clip", "%(label)s's video bank has not been measured yet, so a clip cannot be "
+                   "added to it.")
     elif not measured.get("clip_proven"):
         no("clip", "A clip added to %(label)s's video bank has not been seen on the screen in "
                    "the emulator yet.")
     if "own-sound" not in runtime:
-        no("own_sound", "%(label)s's port has no sound lookup, so a sound of the mode's own "
-                        "cannot play.")
+        no("own_sound", "The app has not found how %(label)s looks up its sounds, so a sound of "
+                        "the mode's own cannot play.")
     elif not callouts.get("time_up"):
-        no("own_sound", "%(label)s's port names no time-up callout for a sound of the mode's "
-                        "own to replace.")
+        no("own_sound", "The app does not know %(label)s's time-up callout, the one a sound of "
+                        "the mode's own plays in place of.")
     if not (all(n in sites for n in STACK_NEEDS[0]) and all(data.get(n) for n in STACK_NEEDS[1])):
-        no("stack", "%(label)s's port does not name the game's own mode queries, so a mode cannot "
-                    "tell when the game's own battle or multiball is on, and always runs beside "
+        no("stack", "The app has not found how %(label)s tells that one of its own modes is "
+                    "running, so a mode of yours cannot wait for them and always runs beside "
                     "them.")
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
-        no("events", "%(label)s's port names none of the game's events (MODE_SDK.md, \"Events\"), "
-                     "so a mode starts on its shot and ends on its clock or the drain.")
+        no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
+                     "multiball), so a mode starts on its shot and ends on its clock or the "
+                     "drain.")
     proven =not any(UNPROVEN_MARK in line for line in port["header"])
+    switch_note = ""
+    seen = SWITCH_EDGE_PROVEN if "switch_edge" in port["site"] else SWITCH_SHOTS_PROVEN
+    if switch_shots and "%s-%s" % (game, version) not in seen:
+        switch_note = ("%s's shots from switches (%s) have not been seen reaching a mode in the "
+                       "emulator yet." % (label, ", ".join(switch_shots)))
     return TitleProfile(
         key="%s_%s" % (game, version.replace(".", "_")),
         label=label,
         game_dir=game,
-        shots=tuple(port["shot"]),
+        shots=shots,
         callout_countdown=callouts.get("countdown", 0),
         callout_ten_seconds=callouts.get("ten_seconds", 0),
         callout_time_up=callouts.get("time_up", 0),
@@ -423,8 +617,8 @@ def profile_from_port(path):
         port=path if os.path.dirname(os.path.abspath(path)) != os.path.abspath(PORTS_DIR) else base,
         proven=proven,
         proven_note="" if proven else (
-            "The %s port was drafted and never run in the emulator (its file says %s), so a "
-            "mode made here may not work." % (label, UNPROVEN_MARK)),
+            "what the app knows of %s was drafted and has never run in the emulator, so a mode "
+            "made here may not work." % label),
         example_start_shot=port["text"].get("example_start_shot", ""),
         shot_mask_bits=values.get("shot_mask_bits", 64),
         runtime_can=runtime,
@@ -433,7 +627,43 @@ def profile_from_port(path):
         # needs hook_dispatch, a site event its site. What each run measured is in the port.
         events=events,
         sound_note=TITLE_SOUND_UNHEARD.get("%s-%s" % (game, version), ""),
+        score_bits=32 if RUNTIME_CORE_32[0] in sites else 64,
+        switch_shots=switch_shots,
+        switch_shots_note=switch_note,
+        lamps=_lit_inserts(port),
     )
+
+
+#: what pad_mode_runtime.c's lamps_arm needs besides the `lamp` lines before it lights an insert
+LAMP_NEEDS = (("lamp_group",), ("lamp_layers", "light_count"),
+              ("lamp_slot_size", "lamp_slot_level", "lamp_slot_alpha", "lamp_slot_fade",
+               "lamp_slot_used", "lamp_group_prio", "lamp_group_next"))
+
+
+def _lit_inserts(port):
+    """How many of the port's named inserts the runtime would light for a shot that scores:
+    `lamp` lines tied to a shot, when the port also has the lamp layer (LAMP_NEEDS); else 0."""
+    sites, data, values = LAMP_NEEDS
+    if not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+            and all(n in port["value"] for n in values)):
+        return 0
+    return sum(1 for _name, _ids, mask in port.get("lamp", ()) if mask)
+
+
+def _shots_with_switches(port):
+    """``(shots, switch_shot_names)``: the port's `shot` lines, then each `switch` line's name that
+    is not a shot already, as the runtime's port reader adds them. Switch lines count only when the
+    port names a switch_edge or switch_hit site (the runtime arms them only through one)."""
+    shots = list(port["shot"])
+    names = []
+    if "switch_edge" in port["site"] or any(s.startswith("switch_hit") for s in port["site"]):
+        known = {n for n, _m in shots}
+        for _sw, mask, name in port.get("switch", ()):
+            if name not in known:
+                known.add(name)
+                shots.append((name, mask))
+                names.append(name)
+    return tuple(shots), tuple(names)
 
 
 def port_path(p):
@@ -445,11 +675,31 @@ _PROFILES_CACHE = {}
 
 
 def profiles(ports_dir=None):
-    """Every usable port in ``ports_dir`` (default :data:`PORTS_DIR`) as ``{key: profile}``,
-    keyed ``<game>_<version>`` with the dots as underscores (``turtles_pro_1_59``). A file
-    that is not a usable port is left out. For the default folder the hand-written
-    :data:`PROFILES` win (``GODZILLA_PRO_1_15``). Re-read when a port file changes."""
-    d = ports_dir or PORTS_DIR
+    """Every usable port in ``ports_dir`` as ``{key: profile}``, keyed ``<game>_<version>`` with
+    the dots as underscores (``turtles_pro_1_59``). A file that is not a usable port is left
+    out. By default every folder ports are read from: :data:`PORTS_DIR` (the shipped ports),
+    then the ports derived on this machine (:func:`.mode_runtime.port_dirs`); a shipped port
+    wins over a derived one of the same build, and the hand-written :data:`PROFILES` win over
+    both (``GODZILLA_PRO_1_15``). Each folder is re-read when a port file in it changes.
+
+    Only a port in :func:`_listed_ports` (``mode_runtime.port_paths``, the one list every
+    lookup shares) is answered: a derived port no longer current (another drafting revision,
+    a changed reference) is left out here exactly as ``port_file`` and ``find_port`` leave it
+    out."""
+    if ports_dir is None:
+        out = {}
+        from . import mode_runtime
+        listed = _listed_ports()
+        for d in [x for x in mode_runtime.port_dirs()[1:] if os.path.abspath(x) != os.path.abspath(PORTS_DIR)]:
+            out.update({k: p for k, p in _folder_profiles(d).items() if _is_listed(p, listed)})
+        out.update({k: p for k, p in _folder_profiles(PORTS_DIR).items() if _is_listed(p, listed)})
+        out.update(PROFILES)
+        return out
+    return _folder_profiles(ports_dir)
+
+
+def _folder_profiles(d):
+    """{key: profile} of every usable port in one folder, cached until a file in it changes."""
     try:
         names = sorted(n for n in os.listdir(d) if n.endswith(".port"))
         stamp = tuple((n, os.path.getmtime(os.path.join(d, n))) for n in names)
@@ -465,8 +715,6 @@ def profiles(ports_dir=None):
         except ModeProjectError:
             continue
         out[p.key] = p
-    if ports_dir is None:
-        out.update(PROFILES)
     _PROFILES_CACHE[d] = (stamp, out)
     return dict(out)
 
@@ -497,20 +745,86 @@ def profile_for_card(game_dir, version, ports_dir=None):
     for p in profiles(ports_dir).values():
         if p.game_dir == game and _version_key(p.version) == want:
             return p
+    if ports_dir is None:
+        # a port derived on this machine or found by a card's read: the Modes tab, Write
+        # and Try it all resolve a card's port here, so they agree on it
+        for p in _machine_profiles().values():
+            if p.game_dir == game and _version_key(p.version) == want:
+                return p
     return None
 
 
 #: The tab's message for a card whose title and version have no port.
-NO_PORT_HELP = ("There is no port for %s, so modes cannot be made for this card yet. A port "
-                "records where one game build keeps the functions a mode calls. "
-                "tools/spike2_emu/modes/sdk/MODE_SDK.md, section \"Making a port for another "
-                "game or version\", says how to make one; a new port file shows up here by "
-                "itself.")
+NO_PORT_HELP = ("Modes of your own can't be made for %s yet: the app has not found in its "
+                "program how to run them.")
+#: The details behind a no-port sentence, for a tooltip (what a person who writes C can do).
+NO_PORT_DETAILS = ("A mode of your own needs to know where this game build keeps the functions "
+                   "it calls (a port). tools/spike2_emu/modes/sdk/MODE_SDK.md, section "
+                   "\"Making a port for another game or version\", says how to find them by "
+                   "hand; a new port file shows up here by itself.")
+#: What still works on a card with no port, when the game's own modes were read.
+NO_PORT_STILL = "You can still change the timers and awards of its own modes (in the list)."
 
 #: The family's one sentence for a call made with no project open: Try it, Write's set,
 #: a new code mode and an example all say this, so the person reads the same fix each time.
 NO_PROJECT_HELP = ("Open or extract a card project first (Extract tab). Modes are saved in "
                    "it.")
+
+#: What each runtime name a port could not place IS, in words (:func:`no_port_words`).
+_PORT_NEED_WORDS = {
+    "tick": "the game's tick",
+    "shot_dispatch": "where the game hands out its shots",
+    "shots": "the game's shots",
+    "ball_end": "the end of a ball",
+    "score_add": "how the game adds points",
+    "score_add32": "how the game adds points",
+    "cur_player": "which player is up",
+    "scores": "the players' scores",
+    "scores32": "the players' scores",
+    "hook_dispatch": "the game's event bus",
+    # the words port_derive's PortResult.missing already uses (its _WORDS)
+    "its tick": "the game's tick",
+    "its shot dispatch": "where the game hands out its shots",
+    "its end of ball": "the end of a ball",
+    "its score function": "how the game adds points",
+    "its current player": "which player is up",
+    "its scores": "the players' scores",
+    "its shots": "the game's shots",
+    "a port that could be derived": "what a mode needs",
+    "a port that passes its check": "what a mode needs",
+}
+
+#: The contract's placeholder for "nothing was tried yet" (port_derive's first version)
+_NO_PORT_PLACEHOLDER = "no port for this build"
+
+
+def no_port_words(label, missing=()):
+    """Why modes cannot be made for the build ``label``: what its port could not place
+    (``missing``, from :class:`.port_derive.PortResult`) in words, else
+    :data:`NO_PORT_HELP`."""
+    said = []
+    for m in missing or ():
+        m = str(m or "").strip()
+        if not m or m == _NO_PORT_PLACEHOLDER:
+            continue
+        w = _PORT_NEED_WORDS.get(m, m.replace("_", " ") if re.match(r"^[a-z0-9_]+$", m) else m)
+        if w.startswith("a reference port"):
+            return ("Modes of your own can't be made for %s yet: the app knows no game built the "
+                    "same way to work it out from." % label)
+        if w not in said:
+            said.append(w)
+    if not said:
+        return NO_PORT_HELP % label
+    what = said[0] if len(said) == 1 else ", ".join(said[:-1]) + " and " + said[-1]
+    return ("Modes of your own can't be made for %s yet: the app could not find %s in its "
+            "program." % (label, what))
+
+
+#: The tab's words for a project that names no card: which game a mode is for comes from
+#: the card, and there is no default game.
+NO_CARD_HELP = ("This project names no card, so the app does not know which game its modes "
+                "are for. Extract a card into it (Extract tab), or pick the card under "
+                "\"Try it on\" below.")
 
 _CARD_NAME = re.compile(r"^([A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)-(\d+)_(\d+)_(\d+)")
 
@@ -609,7 +923,8 @@ def _card_by_name_or_probe(image, exact="", source_from_record=False):
 
 def project_card(project):
     """Which card ``project`` was made from, or None when it names none (a bare folder:
-    the tab keeps Godzilla Pro 1.15). Reads what the project records, never the image.
+    the tab then knows no game, :data:`NO_CARD_HELP`). Reads what the project records,
+    never the image.
 
     THE EXTRACT'S RECORD WINS. ``.extract_source.json`` names the card every offset in the
     project was measured on (and the ``card_version`` read from that card's own index), so
@@ -688,6 +1003,9 @@ CLIP_WHEN = ("start", "end")
 class ModeSpec:
     """Everything a person decides about a mode. Field names are the JSON keys."""
     name: str = "NEW MODE"
+    # A mode.json with no "title" was saved before item 148, when Godzilla Pro 1.15 was the
+    # only title, so that is what a missing title means. Never a default for a NEW mode:
+    # the tab makes each one with its card's title (blank_spec / examples_for).
     title: str = GODZILLA_PRO_1_15.key
     start_shot: str = "Maser target"
     start_count: int = 3
@@ -1251,10 +1569,9 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
         if off:
             lines.append("light_off      %s" % off)
     if spec.countdown and p.can("countdown"):
-        lines += [
-            "callout_at     10 %d" % p.callout_ten_seconds,
-            "callout_count  %d" % p.callout_countdown,
-        ]
+        if p.callout_ten_seconds:             # a title may have the 5..1 count and no ten-seconds call
+            lines.append("callout_at     10 %d" % p.callout_ten_seconds)
+        lines.append("callout_count  %d" % p.callout_countdown)
     if spec.end_sound and sound_key and p.can("own_sound"):
         lines += ["sound_key      %s" % sound_key, "sound_callout  %d" % p.callout_time_up]
     elif p.callout_time_up:
@@ -1472,10 +1789,21 @@ def _int_or_none(v):
         return None
 
 
+#: The most one award may be on a title with 32-bit scores (TitleProfile.score_bits 32): the
+#: game multiplies it by a byte multiplier and adds it with no carry check, so this is what 255x
+#: still fits in 32 bits. pad_mode_runtime.c also cuts each award to the room left in the score.
+SCORE32_AWARD_MAX = 0xffffffff // 255
+
+
 def validate_parameters(spec, p, folder=None):
     """The Advanced section's reasons this mode cannot be built, as sentences."""
     out = []
     names = dict(p.shots)
+    if getattr(p, "score_bits", 64) == 32:
+        big = _int_or_none(spec.award)
+        if big is not None and big > SCORE32_AWARD_MAX:
+            out.append("%s keeps its scores in 32 bits, so a shot can pay at most %s points."
+                       % (p.label, format(SCORE32_AWARD_MAX, ",")))
     if spec.award_ladder not in AWARD_LADDERS:
         out.append("The award ladder is rising or fixed.")
     if not isinstance(spec.shot_award, list):
@@ -1500,6 +1828,9 @@ def validate_parameters(spec, p, folder=None):
             n = _int_or_none(points)
             if n is None or n < 1:
                 out.append("%s's own points must be a whole number above 0." % shot)
+            elif getattr(p, "score_bits", 64) == 32 and n > SCORE32_AWARD_MAX:
+                out.append("%s's own points can be at most %s: %s keeps its scores in 32 bits."
+                           % (shot, format(SCORE32_AWARD_MAX, ","), p.label))
     if spec.end_shot and (not isinstance(spec.end_shot, str) or spec.end_shot not in names):
         out.append("%s has no shot called %r to end the mode." % (p.label, spec.end_shot))
     both = spec.clip_both

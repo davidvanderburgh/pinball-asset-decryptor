@@ -1471,7 +1471,8 @@ def test_cold_consumed_cache_derive_reports_progress_and_says_why(monkeypatch):
         progress=lambda d, t, m: ticks.append((d, t, m)))
 
     assert _FakeEmu.last["progress"] is not None, "derive ran without progress"
-    assert any("Deriving codec parameters" in m for _d, _t, m in ticks)
+    # the derive's own count moves the build's one bar through the restore's stretch
+    assert any("sound 1 of 1" in m and t == 100 and 74 <= d <= 76 for d, t, m in ticks), ticks
     why = " ".join(m for _lvl, m in lines)
     assert "re-derived" in why and "different version" in why
 

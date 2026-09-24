@@ -34,6 +34,7 @@ from ...plugins.stern import mode_project as MP
 from ...plugins.stern import mode_tryit as MT
 from .. import compat
 from .. import modes_filmcut as FCD
+from ..modes_reading import TitleReadMixin
 from ..modes_stock_remap import StockRemapMixin
 from ..modes_stock_rewrite import StockRewriteMixin   # item 161
 from ..modes_tryit import TryItMixin
@@ -128,7 +129,7 @@ def fix_chip(problems):
     return dict(PAGES)[pages[0]] + (" •" if len(pages) == 1 else " +%d •" % (len(pages) - 1))
 
 
-class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
+class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
     ns = "modes"
     key = "Modes"
     label = "Modes"
@@ -173,14 +174,14 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                "shot with its own points) shows this colour and pattern, over the game's own "
                "light shows; every other insert keeps doing what the game wants. They go back "
                "to the game the moment the mode ends. Blink and Pulse repeat about twice a "
-               "second and every 1.6 s; Chase lights one of them at a time. Godzilla's ports "
-               "name the inserts; on a title whose port does not, nothing is lit.")
+               "second and every 1.6 s; Chase lights one of them at a time.")
     PRIORITY_TIP = ("How the mode's screen and clip sit among the game's own displays while it "
                     "runs, on the game's own scale (1-255). At 180 the game's full-screen shot "
-                    "awards (LOOPS) and BATTLE IS LIT wait until the mode ends; its jackpots, "
-                    "multiball and battle starts and the tilt warning still come through, and "
-                    "the mode's screen is back when they end. Higher holds more back (190: "
-                    "starts and jackpots wait too). 0 leaves the game's display order as it is.")
+                    "awards wait until the mode ends (on Godzilla: LOOPS and BATTLE IS LIT); its "
+                    "jackpots, multiball and battle starts and the tilt warning still come "
+                    "through, and the mode's screen is back when they end. Higher holds more "
+                    "back (190: starts and jackpots wait too). 0 leaves the game's display order "
+                    "as it is.")
     FILM_TIP = ("Cut this mode's clip, its sound or its screen's picture from a film: pick "
                 "the film, a start time and a length (up to 30 seconds), and whether to keep "
                 "the film's letterbox or fill the frame. The mode keeps only the cut "
@@ -233,7 +234,7 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
     def __init__(self, window):
         super().__init__(window)
         self.f = _blank_form()
-        self._shot_names = [n for n, _m in MP.GODZILLA_PRO_1_15.shots]
+        self._shot_names = []              # the shown title's shots; none until a card says
         self._shots_on = set()
         self._shot_awards = {n: "" for n in self._shot_names}
         self._slugs = []
@@ -254,9 +255,9 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self._retarget_saved = None
         self._retarget_refuses = True
         self._at_cap = False
-        # the title (item 148)
-        self._profile = MP.GODZILLA_PRO_1_15
-        self._applied_key = MP.GODZILLA_PRO_1_15.key
+        # the title (item 148): the CARD's, and none until a card says which game it is
+        self._profile = None
+        self._applied_key = None
         self._card_bound = False
         self._shown = None
         self._no_port = ""
@@ -276,9 +277,13 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self._stock_rows = {}
         self._stock_build = None
         self._stock_order = []
+        self._game_mode = None         # the game's own mode shown instead (its id), or None
+        self._title_read = None        # the finished read of the shown card, or None
         self._init_tryit()
+        self._init_reading()
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
-                 profile=self._profile_payload(MP.GODZILLA_PRO_1_15), rows=[], sel=None,
+                 profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
+                 game_mode=None, title_origin="",
                  cap_text="", new_ok=False, ex_ok=False, dup_ok=False, del_ok=False,
                  examples=[], open=False, editor_on=False, form=dict(self.f),
                  shots_on=[], awards=dict(self._shot_awards), shots_text="", status="",
@@ -287,7 +292,9 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                  stock={"msg": "", "rows": [], "on": False, "sel": None, "note": "",
                         "value": "", "row_on": False},
                  film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, ready=False,
-                 fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc())
+                 fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
+                 no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
+                 game_hidden=0)
         self._show_starts_words()
 
     # ------------------------------------------------------------------
@@ -331,7 +338,18 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         card = self._export("emulate_card_var")
         if card is not None and card is not self._card_hooked:
             self._card_hooked = card
-            card.trace_add("write", lambda *_a: self._post(self._show_emu))
+            card.trace_add("write", lambda *_a: self._post(self._on_try_on_changed))
+
+    def _on_try_on_changed(self):
+        """The Emulate tab's card changed: the footer's verdict, and, for a project that
+        names no card of its own, which game its modes are for (_title_card)."""
+        self._show_emu()
+        project = self.project()
+        if (project and getattr(self, "_visible", False) and self._preview_on()
+                and MP.project_card(project) is None):
+            self._save_if_edited()
+            self.refresh()
+            self.refresh_stock_modes()
 
     def _post(self, fn, *args):
         if self._on_loop():
@@ -439,12 +457,14 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
     # ------------------------------------------------------------------
     # the list
     # ------------------------------------------------------------------
-    def refresh(self, select=None, select_code=None):
+    def refresh(self, select=None, select_code=None, select_game=None):
         """Re-read the project's modes into the list, keeping (or choosing) a selection."""
         project = self.project()
         if self._slug is not None and project != self._open_project:
             self._save_if_edited()
             self._slug, self._spec = None, None
+        if project != (self.get("project") or ""):
+            self._game_mode = None
         self.set(project=project,
                  project_label=("Saved in %s" % os.path.join(project, MP.MODES_DIRNAME))
                  if project else
@@ -463,6 +483,15 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self._apply_project_title(project)
         self._show_cap(project, len(found))
         codes = [s for s, _n in self._code_list]
+        game = self._game_ids()
+        if select_game is not None and select_game in game:
+            self._show_game_mode(select_game)
+            return
+        if (select is None and select_code is None and self._game_mode is not None
+                and self._game_mode in game):
+            self._show_game_mode(self._game_mode)
+            return
+        self._game_mode = None
         if select_code in codes:
             self._show_code(select_code)
             return
@@ -481,14 +510,27 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
             self._slug, self._spec = None, None
             self._blank_form()
             self._set_editor_state(False)
-            self.set(status="" if not project else
-                     "No modes yet. Press New for a blank mode, or pick one under "
-                     "Examples - KAIJU RUSH is the one that has run on a machine.",
-                     save_state="", sel=None, code=None)
+            self.set(status="" if not project else self._no_modes_words(),
+                     save_state="", sel=None, code=None, game_mode=None)
             self._note_no_port_in_status()
             self._publish_rows()
             return
         self._open(want, self._found[want])
+
+    def _no_modes_words(self):
+        """The empty editor's sentence: what to press, for the shown title."""
+        p = self._profile
+        if p is None:
+            text = "No modes of your own yet."
+        elif any(n == "KAIJU RUSH" for n, _s in MP.examples_for(p)):
+            text = ("No modes yet. Press New for a blank mode, or pick one under Examples - "
+                    "KAIJU RUSH is the one that has run on a machine.")
+        else:
+            text = "No modes yet. Press New for a blank mode, or pick one under Examples."
+        if self._game_ids():
+            text += (" The game's own modes are listed under yours: pick one to see and change "
+                     "its timers and awards.")
+        return text
 
     def _show_cap(self, project, n):
         if not project:
@@ -497,25 +539,31 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
             text = ("%d of %d modes: delete one to add another. Modes written in C are "
                     "not counted." % (n, MP.MAX_MODES))
         else:
-            text = "%d of %d modes" % (n, MP.MAX_MODES)
+            text = ""                       # the head says "N of 8 modes"
         self.set(cap_text=text, n_form=n, n_code=len(self._code_list))
         self._publish_examples()
 
     def _publish_examples(self):
-        p = self._profile or MP.GODZILLA_PRO_1_15
-        shown = self._examples_profile or p
+        """The Examples menu for the CARD's title: Godzilla's four (and its code examples)
+        only on Godzilla, a plain starter mode on any other title, nothing with no title."""
+        p = self._profile
         items = [{"name": name, "code": False, "disabled": bool(self._at_cap)}
-                 for name, _s in MP.examples_for(shown)]
+                 for name, _s in (MP.examples_for(p) if p is not None else ())]
         from ...plugins.stern import code_modes as CM
-        prof = self._profile if self._profile is not None else None
-        if prof is None or str(getattr(prof, "game_dir", "")).startswith("godzilla"):
+        if self._code_examples_ok():
             for name in CM.example_names():
                 items.append({"name": name, "label": name + self.CODE_EXAMPLE_SUFFIX,
                               "code": True, "disabled": False})
-        self.set(examples=items, new_ok=bool(self._new_ok and not self._no_port),
-                 ex_ok=bool(self._ex_ok and not self._no_port))
+        ex_ok = bool(self._ex_ok and not self._no_port)
+        self.set(examples=items, new_ok=bool(self._new_ok and not self._no_port), ex_ok=ex_ok,
+                 ex_tip="" if ex_ok else (self._no_port or MP.NO_PROJECT_HELP))
 
-    _examples_profile = None
+    def _code_examples_ok(self):
+        """The code examples are Godzilla's (their shots, films and sounds): offered, and
+        accepted by the server, only when the card's title is Godzilla."""
+        p = self._profile
+        return p is not None and str(getattr(p, "game_dir", "")).startswith("godzilla")
+
     _new_ok = False
     _ex_ok = False
     _ready = False
@@ -572,25 +620,40 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                 chip, tip = "", ""
             rows.append({"slug": slug, "kind": "code", "name": name, "chip": chip,
                          "chip_tip": tip})
-        sel = ({"slug": self._code_slug, "kind": "code"} if self._code_slug else
+        sel = ({"slug": str(self._game_mode), "kind": "game"} if self._game_mode is not None else
+               {"slug": self._code_slug, "kind": "code"} if self._code_slug else
                {"slug": self._slug, "kind": "form"} if self._slug else None)
-        self.set(rows=rows, sel=sel)
+        self.set(rows=rows, sel=sel, game_rows=self._game_rows())
 
     @rpc
     def select(self, slug, kind="form"):
-        """A row of the list was picked."""
+        """A row of the list was picked: one of the person's modes (``form``), a code mode
+        (``code``) or one of the game's own modes (``game``, ``slug`` its id)."""
+        if kind == "game":
+            try:
+                mode_id = int(slug)
+            except (TypeError, ValueError):
+                return False
+            if mode_id not in self._game_ids():
+                return False
+            if self._game_mode == mode_id:
+                return True
+            self._save_if_edited()
+            self._show_game_mode(mode_id)
+            return True
         if kind == "code":
             if self._code_slug == slug:
                 return True
             self._save_if_edited()
             self._show_code(slug)
             return True
-        if slug == self._slug and self._code_slug is None:
+        if slug == self._slug and self._code_slug is None and self._game_mode is None:
             return True
         self._save_if_edited()
         found = dict(MP.list_modes(self.project())[0])
         if slug in found:
             self._code_slug = None
+            self._game_mode = None
             self._open(slug, found[slug])
         return True
 
@@ -611,6 +674,7 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         spec = self._retarget_for_title(spec)
         self._slug, self._spec = slug, spec
         self._code_slug = None
+        self._game_mode = None
         self._open_project = self.project()
         self._loading = True
         try:
@@ -645,7 +709,7 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self._publish_form()
         self._set_editor_state(True)
         self._dirty = False
-        self.set(save_state="saved", code=None)
+        self.set(save_state="saved", code=None, game_mode=None)
         self._after_change()
 
     def collect(self):
@@ -928,13 +992,11 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
 
     # item 147: what starts it and what ends it
     def _event_choices(self):
-        """(label, name) for the events the shown title's port carries (Godzilla Pro
-        1.15's until a title with events of its own is shown)."""
-        p = self._events_profile or MP.GODZILLA_PRO_1_15
-        events = p.events or MP.GODZILLA_PRO_1_15.events
-        return [(MP.EVENT_LABELS.get(n, n), n) for n in events]
-
-    _events_profile = None
+        """(label, name) for the events the shown title's port carries; none when no title
+        is shown or its port names none (another title's events are never offered)."""
+        p = self._shown or self._profile
+        events = p.events if p is not None else ()
+        return [(MP.EVENT_LABELS.get(n, n), n) for n in events or ()]
 
     def _open_trigger(self, spec):
         by_name = {n: label for label, n in self._event_choices()}
@@ -1060,7 +1122,11 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self._preview_path = ""
 
     def _blank_spec(self):
-        return MP.blank_spec(self._profile or MP.GODZILLA_PRO_1_15)
+        """A new mode for the CARD's title. There is no default game: with no title (no
+        card, or a card whose build has no port) the refusal says why."""
+        if self._profile is None or self._no_port:
+            raise MP.ModeProjectError(self._no_port or MP.NO_CARD_HELP)
+        return MP.blank_spec(self._profile)
 
     # ------------------------------------------------------------------
     # the title: which card, which port (item 148)
@@ -1069,12 +1135,15 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         """What the page needs of the shown title: its shots (and how many columns they
         take), the events the start and end lists offer, the measured callouts Pick
         offers, and the early-ending shot list (the Tk tab rebuilt each of these per
-        title in _apply_profile and _apply_profile_to_advanced)."""
+        title in _apply_profile and _apply_profile_to_advanced). ``p`` None: no title."""
+        if p is None:
+            return {"key": "", "label": "", "port": "", "shots": [], "cols": 2,
+                    "callouts": [], "callouts_none": "", "events": [],
+                    "end_shots": [self.PARAM_NEVER]}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
-        events = [MP.EVENT_LABELS.get(n, n) for n in (p.events or ())] or \
-            [label for label, _n in self._event_choices()]
+        events = [MP.EVENT_LABELS.get(n, n) for n in (p.events or ())]
         return {"key": p.key, "label": p.label, "port": p.port, "shots": names,
                 "cols": 2 if len(names) <= self._TWO_COLUMN_SHOTS else 3,
                 "callouts": choices,
@@ -1082,13 +1151,89 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                                   "(no callouts measured on %s: type an id)" % p.label),
                 "events": events, "end_shots": [self.PARAM_NEVER] + names}
 
-    def _apply_project_title(self, project):
+    #: the note on a port the app worked out itself and no Try it has run yet: Write leaves
+    #: the modes off a card until one has (mode_write.card_refusal)
+    DERIVED_UNPROVEN = ("Press Try it once first: the app worked out by itself how to run modes "
+                        "on %s, and until a Try it has run the game with them on this PC, Write "
+                        "leaves them off the card.")
+    #: ... and once a Try it ran the game with it live
+    DERIVED_RAN = ("The app worked out by itself how to run modes on %s, and a Try it has run "
+                   "the game with them on this PC, so Write puts them on the card. Try each mode "
+                   "before you trust it on a machine.")
+    #: the status and the grey form's words while the card is being read
+    READING_WORDS = "Reading which game build the card is, and what it offers (see above)."
+
+    def _title_card(self, project):
+        """``(card, via)``: the card whose game the modes are for. The project's own card
+        (mode_project.project_card); a project that names none takes the "Try it on" card
+        (the Emulate tab's), so a bare folder can still be pointed at a game. Never opens
+        an image."""
         card = MP.project_card(project) if project else None
-        profile, text, note, no_port = MP.GODZILLA_PRO_1_15, "", "", ""
+        if card is not None or not project:
+            return card, "project"
+        var = self._export("emulate_card_var")
+        path = ((var.get() if var is not None else "") or "").strip().strip('"')
+        if not path:
+            return None, ""
+        try:
+            _made, run = MP.project_cards(project, path)
+        except Exception:                                   # noqa: BLE001
+            run = None
+        if run is None or not run.game_dir:
+            return None, ""
+        return MP.ProjectCard(run.image, run.game_dir, run.version,
+                              "the \"Try it on\" card's %s" % (run.source or "file name")), "try_on"
+
+    def _profile_of_read(self, tr, label):
+        """``(profile, why, note)`` from a finished read: the profile of the port it found
+        (shipped or worked out on this machine), else None and why in words."""
+        if not tr.port_path:
+            return None, MP.no_port_words(label, tr.port_missing), ""
+        try:
+            prof = MP.remember_profile(MP.profile_from_port(tr.port_path))
+        except MP.ModeProjectError as e:
+            self._say("the app's port for %s cannot be used: %s" % (label, e))
+            return None, ("Modes of your own can't be made for %s yet: what the app worked out "
+                          "for it cannot be used (the log says why)." % label), ""
+        if tr.port_origin == "derived" and not tr.port_proven:
+            return prof, "", self._with_switch_note(self._derived_words(prof), prof)
+        return prof, "", self._port_note(prof)
+
+    def _derived_words(self, profile):
+        from ...plugins.stern import mode_write as MW
+        return (self.DERIVED_UNPROVEN if MW.derived_not_run(profile)
+                else self.DERIVED_RAN) % profile.label
+
+    def _port_note(self, profile):
+        """The unproven note for a port found before (or without) a read: a port outside the
+        shipped folder was worked out on this machine, and nothing has run it yet, whatever
+        its header says."""
+        if os.path.isabs(profile.port or ""):
+            note = self._derived_words(profile)
+        else:
+            note = "" if profile.proven else "Unproven: " + profile.proven_note
+        return self._with_switch_note(note, profile)
+
+    @staticmethod
+    def _with_switch_note(note, profile):
+        """*note* with the port's own word on its switch-line shots, when it has one."""
+        extra = str(getattr(profile, "switch_shots_note", "") or "").strip()
+        if not extra:
+            return note
+        return (note + " " + extra).strip() if note else "Unproven: " + extra
+
+    def _apply_project_title(self, project):
+        """Which game the modes are for, from the CARD, and what that build offers. There is
+        no default game: a project with no card, a card that cannot be read and a build with
+        no port all leave the form greyed with the reason in words."""
+        card, via = self._title_card(project)
+        profile, text, note, no_port = None, "", "", ""
+        self._title_read = None
+        origin = ""
         if card is None:
             if project:
-                text = ("This project names no card, so its modes are made for %s."
-                        % MP.GODZILLA_PRO_1_15.label)
+                no_port = note = MP.NO_CARD_HELP     # said once, in the note (the head: counts)
+            self._clear_reading()
         elif not card.game_dir:
             probed = MP.probed_card_title(card.image) if card.image else None
             if (probed is None and card.image and os.path.isfile(card.image)
@@ -1096,37 +1241,72 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                 self._probe_card(card.image)
                 text = "Card: %s. Reading which game it is from the card..." % MP.file_name(card.image)
                 no_port = "Reading which game the card is."
-                profile = None
             else:
-                text = ("Card: %s. Which game it is could not be read, so its modes are made for %s."
-                        % (MP.file_name(card.image), MP.GODZILLA_PRO_1_15.label))
+                text = ("Card: %s. Which game it is could not be read, so modes cannot be made "
+                        "for it." % MP.file_name(card.image))
+                no_port = note = text
         else:
-            found = MP.profile_for_card(card.game_dir, card.version)
             name = MP.file_name(card.image)
-            if found is None:
-                label = MP.title_label(card.game_dir, card.version)
-                text = "Card: %s, %s (from %s)." % (name, label, card.source)
-                no_port = MP.NO_PORT_HELP % label
-                note = no_port
-                profile = None
+            label = MP.title_label(card.game_dir, card.version)
+            kind, got = self.title_read(card)
+            why = ""
+            if kind == "done":
+                self._title_read = got
+                profile, why, note = self._profile_of_read(got, label)
+                origin = got.port_origin
             else:
-                profile = found
-                text = ("Card: %s, %s (from %s). Modes run on its port, %s, with its %d shots."
-                        % (name, found.label, card.source, found.port, len(found.shots)))
-                note = "" if found.proven else "Unproven: " + found.proven_note
-        self._title_note = note
+                # a port already on this machine (shipped, or worked out earlier) is used at
+                # once; a read that runs meanwhile only adds what it finds
+                profile = MP.profile_for_card(card.game_dir, card.version)
+                if profile is not None:
+                    note = self._port_note(profile)
+                    origin = "shipped" if not os.path.isabs(profile.port) else "derived"
+                elif kind == "reading":
+                    why = self.READING_WORDS
+                elif kind == "failed":
+                    why = "The card could not be read, so modes cannot be made for it: %s" % got
+                elif kind == "cancelled":
+                    why = ("Reading %s was stopped, so which build it is and what it offers is "
+                           "not known yet. Press Read again to finish it." % label)
+                else:
+                    why = MP.no_port_words(label)
+            if profile is None:
+                text = "Card: %s, %s (from %s)." % (name, label, card.source)
+                no_port = why
+                note = "" if kind in ("reading", "cancelled", "failed") else why
+            else:
+                text = ("Card: %s, %s (from %s). Modes of your own use its %d shots."
+                        % (name, profile.label, card.source, len(profile.shots)))
+            if kind == "none" or (self.get("reading") or {}).get("card") not in ("", None, name):
+                self._clear_reading()          # nothing read here, or another card's words
         self._no_port = no_port
         self._profile = profile
         self._card_bound = bool(card is not None and card.game_dir and profile is not None)
         self._shown = None
-        self.set(title_text=text, title_note=note, no_port=no_port,
+        self._stock_build = self._stock_build_for(project)
+        details = ""
+        if (no_port and no_port == note and card is not None and card.game_dir
+                and kind not in ("reading", "cancelled", "failed")):
+            # a card with no port: what still works, and the SDK pointer in a tooltip
+            details = MP.NO_PORT_DETAILS
+            if self._game_ids():
+                note = "%s %s" % (note, MP.NO_PORT_STILL)
+        self._title_note = note
+        from ...plugins.stern import mode_write as MW
+        self.set(title_text=text, title_note=note, no_port=no_port, title_origin=origin,
+                 no_port_details=details,
+                 own_extra_ok=bool(profile is not None and not self._own_extra_why(profile)),
+                 card_label=(MP.title_label(card.game_dir, card.version)
+                             if card is not None and card.game_dir else ""),
+                 write_waits=bool(profile is not None and MW.derived_not_run(profile)),
+                 title_via=via, no_card=no_port == MP.NO_CARD_HELP,
                  title_label=profile.label if profile is not None else "",
-                 title_port=profile.port if profile is not None else "",
+                 title_port=MP.file_name(profile.port) if profile is not None else "",
                  title_shots=len(profile.shots) if profile is not None else 0)
         if profile is not None and profile.key != self._applied_key:
             self._apply_profile(profile)
-        elif profile is None and not self._slugs and self._applied_key is not None:
-            self._clear_shots()
+        elif profile is None:
+            self._clear_shots()         # an open mode shows its own title again (_open)
         self._grey_what_the_title_cannot(self._spec is not None)
 
     def _probe_card(self, image):
@@ -1150,14 +1330,12 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self.refresh()
 
     def _apply_profile(self, p, said=None):
-        """Show title ``p``: its shots, and the ready-made modes of the project's title
-        (``p`` when the project has none) under Examples."""
+        """Show title ``p``: its shots, and the ready-made modes of the card's title under
+        Examples."""
         names = [n for n, _m in p.shots]
         self._shot_names = names
         self._shots_on = {n for n in self._shots_on if n in names}
         self._shot_awards = {n: self._shot_awards.get(n, "") for n in names}
-        self._examples_profile = self._profile or p
-        self._events_profile = p if p.events else self._events_profile
         self._applied_key = p.key
         self._say(said or "modes here are for %s: %d shots, from %s" % (p.label, len(names), p.port))
         self.set(profile=self._profile_payload(p), shots_text="")
@@ -1165,19 +1343,22 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self._publish_examples()
 
     def _clear_shots(self):
-        """No title to show (a card with no port and no mode open): no shot names at all."""
+        """No title to show (no card, a card being read, or a build with no port): no shot
+        names at all, no events, no callouts."""
         self._shot_names = []
         self._shots_on = set()
         self._shot_awards = {}
         self.f["start_shot"] = ""
         self._applied_key = None
-        reading = self._no_port != self._title_note
-        prof = dict(self.get("profile") or {})
-        prof.update(shots=[], end_shots=[self.PARAM_NEVER], key="")
-        self.set(profile=prof,
-                 shots_text="(no shots yet: reading which game the card is)" if reading
-                 else "(no shots: this card's game has no port)")
+        if self._no_port in (self.READING_WORDS, "Reading which game the card is."):
+            words = "(no shots yet: reading which game the card is)"
+        elif self._no_port == MP.NO_CARD_HELP:
+            words = "(no shots: this project names no card)"
+        else:
+            words = "(no shots: modes of your own can't be made for this card yet)"
+        self.set(profile=self._profile_payload(None), shots_text=words)
         self._publish_form()
+        self._publish_examples()
 
     def _set_editor_state(self, on):
         self._editor_open = bool(on)
@@ -1188,9 +1369,17 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
 
     def _grey_what_the_title_cannot(self, on=True):
         """Each part the title cannot do is greyed, with the reason in words; a card with no
-        port shows the open mode read-only (Delete stays)."""
-        p = self._shown or self._profile or MP.GODZILLA_PRO_1_15
+        port shows the open mode read-only (Delete stays). No title at all greys every part."""
+        p = self._shown or self._profile
         on = bool(on) and self._spec is not None
+        if p is None:
+            dis = {k: True for k in ("screen", "clip", "lights", "countdown", "own_sound",
+                                     "end_game", "clip_both", "stack", "events", "film_clip",
+                                     "film_still", "film_sound", "own_extra", "lit_shots",
+                                     "show_order")}
+            self.set(reasons={}, dis=dis, editor_on=False, dup_ok=False,
+                     del_ok=bool(on or self._code_slug))
+            return
         reasons, dis = {}, {}
         for part in self._PART_SECTIONS:
             why = p.why_not(part)
@@ -1204,17 +1393,34 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         dis["own_sound"] = bool(p.why_not("own_sound"))
         dis["end_game"] = not p.callout_time_up
         if not p.callout_time_up:
-            sound.append("%s's port names no time-up callout, so nothing plays when time is up "
-                         "and a sound of the mode's own has no call to replace." % p.label)
+            sound.append("The app does not know %s's time-up callout, so nothing plays when time "
+                         "is up and a sound of the mode's own has no call to replace." % p.label)
         elif p.why_not("own_sound"):
             sound.append(p.why_not("own_sound"))
         if sound:
             reasons["sound"] = "Not on this game: " + " ".join(sound)
+        why = self._own_extra_why(p)
+        dis["own_extra"] = bool(why)
+        if why:
+            reasons["own_extra"] = "Not on this game yet: " + why
+        dis["lit_shots"] = getattr(p, "lamps", -1) == 0
+        if dis["lit_shots"]:
+            reasons["lit_shots"] = ("Not on this game yet: the app does not know which light is in "
+                                    "front of each of %s's shots, so none can be lit." % p.label)
+        # a mode's screen and clip are what "stays up" and "priority" act on: with neither,
+        # the whole Show page is one sentence and those two grey with it
+        dis["show_order"] = bool(dis["screen"] and dis["clip"])
+        if dis["show_order"]:
+            reasons["show_all"] = (
+                "Not on this game yet: a mode cannot show a screen or a clip of its own on %s. "
+                "It still scores, counts down and ends as set on the other pages." % p.label)
+            reasons["show_order"] = ("Not on this game yet: these act on a mode's own screen and "
+                                     "clip, and %s cannot show either." % p.label)
         note = getattr(p, "sound_note", "")
         if note and (p.can("countdown") or p.can("own_sound")):
             reasons["sound_unheard"] = "Not heard yet: " + note
-        why = "" if p.can("clip") else ("a second clip, since %s cannot add a clip (Clip says "
-                                        "why)." % p.label)
+        why = "" if p.can("clip") else ("a second clip, since a mode cannot add a clip on %s "
+                                        "(Clip says why)." % p.label)
         dis["clip_both"] = bool(why)
         if why:
             reasons["clip_both"] = "Not on this game: " + why
@@ -1240,6 +1446,21 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self.set(reasons=reasons, dis=dis, editor_on=editor_on,
                  dup_ok=bool(editor_on or (self._code_slug and not self._no_port)),
                  del_ok=bool(on or self._code_slug))
+
+    @staticmethod
+    def _own_extra_why(p):
+        """Why the mode's start sound, shot sound and music cannot be carried on title ``p``
+        ("" when they can): each rides on a stock sound the game never plays (a carrier,
+        mode_sounds), and only titles whose carriers were measured have any. Without them a
+        Write and a Try it would drop the three with only a log line."""
+        from ...plugins.stern import mode_sounds as MS
+        if p is None:
+            return ""
+        game, version = MS.title_version(p.key)
+        if game and MS.carriers(game, version) is not None:
+            return ""
+        return ("the app has not found spare sounds on %s to carry a mode's own start sound, "
+                "shot sound and music, so they cannot be picked here." % p.label)
 
     def _retarget_for_title(self, spec):
         p = self._profile
@@ -1318,10 +1539,18 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self.set(status="%s %s%s. %s" % (text, note[0].upper(), note[1:], tail))
 
     def _show_on_its_own_title(self, spec):
+        """No card says which game: the mode is shown on the title its own file names. A
+        title this app has no port for leaves it read-only, with the reason."""
         try:
             own = MP.profile(spec.title)
         except MP.ModeProjectError:
-            own = MP.GODZILLA_PRO_1_15
+            own = None
+        if own is None:
+            self._shown = None
+            if not self._no_port:
+                self._no_port = ("%s was made for %s, a game the app can't run modes on here, so "
+                                 "it is shown read-only." % (spec.name, spec.title or "another game"))
+            return spec
         self._shown = own
         if own.key != self._applied_key:
             self._apply_profile(own, said="%s is shown with the shots of %s, the game it was made for"
@@ -1331,9 +1560,17 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
     def _note_no_port_in_status(self):
         no_port = self._no_port
         if no_port:
-            self.set(status="Modes cannot be built for this card yet: %s%s" % (
-                "it has no port (see above)." if no_port == self._title_note else no_port,
-                " The mode is shown as it was saved, read-only." if self._spec is not None else ""))
+            if no_port == MP.NO_CARD_HELP:
+                head = "Modes cannot be built yet: this project names no card (see above)."
+            elif no_port == self.READING_WORDS:
+                head = "Modes cannot be built for this card yet: " + no_port[:1].lower() + \
+                    no_port[1:]
+            elif self._title_note.startswith(no_port):
+                head = "Modes of your own can't be built for this card yet (see above)."
+            else:
+                head = "Modes cannot be built for this card yet: " + no_port
+            self.set(status=head + (" The mode is shown as it was saved, read-only."
+                                    if self._spec is not None else ""))
 
     # ------------------------------------------------------------------
     # files into the mode folder
@@ -1376,6 +1613,11 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                                 "end_mode", "game")
         for attr, mode_var, words, stem in self._OWN_SOUNDS:
             if what == attr:
+                why = self._own_extra_why(self._shown or self._profile)
+                if why:
+                    # the page greys these three; a call made anyway picks nothing
+                    self._say("%s: %s" % (words, why))
+                    return None
                 return self._choose("Choose the sound: %s" % words.lower(),
                                     [("WAV sounds", "*.wav")], stem, attr, mode_var, "none")
         if what == "clip2":
@@ -1401,10 +1643,23 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
     # ------------------------------------------------------------------
     # New / Examples / Duplicate / Delete
     # ------------------------------------------------------------------
+    def _refusal(self):
+        """Why no mode can be added here now ("" when one can): no title (no card, a card
+        being read, a build with no port). The page greys the buttons; this is the server's
+        own check, so a call made anyway writes nothing."""
+        if self._no_port:
+            return self._no_port
+        if self._profile is None:
+            return MP.NO_CARD_HELP
+        return ""
+
     def new_mode(self, name="NEW MODE", spec=None):
         project = self.project()
         if not project:
             return None
+        why = self._refusal()
+        if why:
+            raise MP.ModeProjectError(why)
         self._save_if_edited()
         slug, _spec = MP.new_mode(project, name, spec if spec is not None else self._blank_spec())
         self._say("%s (modes/%s)" % ("added the example" if spec else "made a new mode", slug))
@@ -1422,9 +1677,16 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
 
     @rpc
     def example(self, name):
-        """A form example from the Examples menu (the title's own list)."""
-        shown = self._examples_profile or self._profile or MP.GODZILLA_PRO_1_15
-        spec = dict(MP.examples_for(shown)).get(name)
+        """A form example from the Examples menu (the card's title's own list)."""
+        why = self._refusal()
+        if why:
+            compat.messagebox.showinfo("Example mode", why)
+            return None
+        spec = dict(MP.examples_for(self._profile)).get(name)
+        if spec is None:
+            compat.messagebox.showinfo("Example mode", "%s is not an example for %s."
+                                       % (name, self._profile.label))
+            return None
         try:
             return self.new_mode(name, spec)
         except MP.ModeProjectError as e:
@@ -1436,6 +1698,10 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         if self._code_slug:
             return self._duplicate_code(self._code_slug)
         if self._slug is None:
+            return None
+        why = self._refusal()
+        if why:
+            compat.messagebox.showinfo("Duplicate mode", why)
             return None
         self._save_if_edited()
         try:
@@ -1551,10 +1817,13 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                 music=spec.music, calls=calls, files=files, describe=words,
                 summary=self._code_words_one(spec),
                 recipe=str(film.get("recipe") or ""),
-                status=("Ready to build." if not problems
+                status=("Cannot be built for this card yet: " + self._refusal()
+                        if self._refusal() else
+                        "Ready to build." if not problems
                         else "To fix before it can be built: " + " ".join(problems)),
                 has_assets_file=os.path.isfile(os.path.join(folder, CM.ASSETS_FILE)))
-        self.set(code=data, status="", save_state="")
+        self._game_mode = None
+        self.set(code=data, status="", save_state="", game_mode=None)
         self._grey_what_the_title_cannot(False)
         self._publish_rows()
 
@@ -1565,6 +1834,10 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
             self._tryit_note(MP.NO_PROJECT_HELP)
             return None
         if not name or not str(name).strip():
+            return None
+        why = self._refusal()
+        if why:
+            self._tryit_note(why)
             return None
         self._save_if_edited()
         try:
@@ -1591,6 +1864,10 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         return True
 
     def _duplicate_code(self, slug):
+        why = self._refusal()
+        if why:
+            compat.messagebox.showinfo("Duplicate mode", why)
+            return None
         try:
             new_slug, _path = MT.duplicate_code_mode(self.project(), slug)
         except (MT.TryItError, OSError) as e:
@@ -1627,6 +1904,10 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         ex = CM.example(name)
         if ex is None:
             return None
+        if not self._code_examples_ok():
+            self._tryit_note("%s is an example for Godzilla; this card is not." % name)
+            return None
+        title = self._profile.key
         if os.path.exists(MP.mode_folder(project, ex["slug"])):
             self._tryit_note("%s is already in this project (modes/%s)." % (name, ex["slug"]))
             return None
@@ -1642,6 +1923,7 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                 self._tryit_note("%s could not be added: %s" % (name, e))
                 self._post_refresh_code()
                 return
+            self.stamp_code_title(project, slug, title)
             self._tryit_note(self._code_example_note(name, slug, missing, CM))
             self._post_refresh_code(slug)
 
@@ -1701,6 +1983,13 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
     def code_example(self, name):
         from ...plugins.stern import code_modes as CM
         project = self.project()
+        why = self._refusal() if project else ""
+        if not why and project and not self._code_examples_ok():
+            why = ("%s is an example for Godzilla; this card is %s."
+                   % (name, self._profile.label if self._profile is not None else "not Godzilla"))
+        if why:
+            self._tryit_note(why)
+            return False
         ex = CM.example(name)
         if not project or ex is None:
             return bool(self.add_code_example(name))
@@ -2164,34 +2453,123 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         st.update(kw)
         self.set(stock=st)
 
+    def _stock_build_for(self, project):
+        """The game's own modes of the shown card: what reading it found (a hand table, or
+        one worked out on this machine), else the table for the project's recorded build."""
+        tr = self._title_read
+        if tr is not None and getattr(tr, "stock_build", None) is not None:
+            return tr.stock_build
+        return self._SM().table_for_project(project) if project else None
+
+    def _known_builds_words(self):
+        labels = [MP.title_label(b.game, b.version) for b in self._SM().tables()]
+        if not labels:
+            return ""
+        return " (it knows %s)" % (labels[0] if len(labels) == 1
+                                   else ", ".join(labels[:-1]) + " and " + labels[-1])
+
+    def _caption(self, num):
+        """The operator menu's own words for a setting (the Defaults tab's), in title case, or
+        "" when the card's read did not give them."""
+        tr = self._title_read
+        cap = ((getattr(tr, "captions", None) or {}).get(num.adj_name, "")
+               if num.is_adjustment or num.kind == "adj" else "")
+        return _title_case(cap) if cap else ""
+
+    def _number_words(self, build, num):
+        """A number's label under its mode's name: an operator setting's menu caption, else
+        its words; one that starts with the mode's own name (``AD_MODE_DRIVE_MY_CAR_TIMER``
+        -> "Mode Drive My Car Timer"), which the list and the page already say, keeps only
+        "Timer"."""
+        label = self._caption(num) or build.row_label(num)
+        mode = build.mode_name(num.mode_id)
+
+        def flat(t):
+            return re.sub(r"[^a-z0-9 ]", "", t.lower())
+        for head in ("mode %s " % flat(mode), "%s " % flat(mode)):
+            if flat(label).startswith(head) and len(flat(label)) > len(head):
+                n = len(head.split())
+                rest = " ".join(label.split()[n:])
+                if rest:
+                    return rest[:1].upper() + rest[1:]
+        return label
+
+    def _stock_row(self, build, num, settings, rec, other_build):
+        SM = self._SM()
+        staged = None
+        if num.is_adjustment and num.adj_name in settings:
+            staged = settings[num.adj_name]
+        elif num.is_word and not other_build and num.row_key in rec["values"]:
+            staged = rec["values"][num.row_key]
+        stock = "?" if num.value is None else SM.display(build, num, num.value)
+        if not num.editable:
+            value = stock
+        else:
+            value = SM.display(build, num, int(staged)) + "  ●" if staged is not None else stock
+        row = {"key": num.row_key, "mode_id": num.mode_id, "mode": build.mode_name(num.mode_id),
+               "number": self._number_words(build, num), "value": value, "stock": stock,
+               "current": SM.display(build, num, int(staged)) if staged is not None else stock,
+               "where": _where_words(num), "changed": staged is not None,
+               "readonly": not num.editable, "why": _why_words(num),
+               "hint": self._stock_hint(num)}
+        if num.kind == "path" and num.editable:
+            # item 159: a tank position is picked by shot name, not typed as a number
+            row["choices"] = [{"value": str(v), "label": label}
+                              for v, label in SM.path_choices(build, num, rec["values"])]
+            row["raw"] = str(int(staged) if staged is not None else num.value)
+        return row
+
+    def _stock_hint(self, num):
+        """What a number is, in words, with where it lives for whoever wants it (the row's
+        tooltip and the dialog's note): the setting's name, the program address."""
+        if not num.editable:
+            return "%s. %s" % (num.where_text()[:1].upper() + num.where_text()[1:],
+                               num.why_read_only()[:1].upper() + num.why_read_only()[1:] + ".")
+        if num.is_adjustment:
+            rng = num.adj_range
+            cap = self._caption(num)
+            return ("An operator setting%s (%s)%s: the same number as on the Defaults tab. A "
+                    "machine still on the game's default takes the new one when it boots."
+                    % (" the menu calls %s" % cap.upper() if cap else "", num.adj_name,
+                       ", %d to %d" % rng if rng else ""))
+        return "One word in the game program (%s)%s." % (
+            num.where(), "; it is shared by %d modes, so changing it changes all of them"
+            % num.shared if num.shared else "")
+
     def refresh_stock_modes(self):
         SM = self._SM()
         keep = (self.get("stock") or {}).get("sel")
         self._stock_rows = {}
         self._stock_order = []
         project = self.project()
-        build = SM.table_for_project(project) if project else None
+        build = self._stock_build_for(project)
         self._stock_build = build
         if not project:
             self._stock_set(msg="Open or extract a card project first (Extract tab) - changes "
                                 "to the game's own modes are saved in it.",
                             rows=[], on=False, sel=None, note="", value="", row_on=False,
                             choices=None)
+            self._after_stock()
             return
         if build is None:
             pb = SM.project_build(project)
-            known = ", ".join(b.id for b in SM.tables())
-            self._stock_set(
-                msg="The app doesn't know the timers and awards of %s's own modes yet (it "
-                    "knows %s)." % ("%s %s" % pb if pb else "this project's game", known),
-                rows=[], on=False, sel=None, note="", value="", row_on=False)
+            what = (MP.title_label(pb[0], pb[1]) if pb else
+                    (self.get("title_label") or "this project's game"))
+            if self._no_port == self.READING_WORDS:
+                msg = ("Reading the game's own rules from the card (see above): its modes are "
+                       "listed here when that is done.")
+            else:
+                msg = ("The app doesn't know the timers and awards of %s's own modes yet%s."
+                       % (what, self._known_builds_words()))
+            self._stock_set(msg=msg, rows=[], on=False, sel=None, note="", value="",
+                            row_on=False)
+            self._after_stock()
             return
-        rec = SM.staged(project)
+        rec = SM.staged_for(project, build)
         from ...core import staged_changes
         settings = staged_changes.load(project).get(SM.SETTINGS_KEY) or {}
         other_build = rec["build"] not in (None, build.id)
         seen_adj = set()
-        n_changed = 0
         rows = []
         for num in build.numbers:
             if not num.is_player_facing:
@@ -2200,43 +2578,140 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
                 if num.adj_name in seen_adj:
                     continue
                 seen_adj.add(num.adj_name)
-            staged = None
-            if num.is_adjustment and num.adj_name in settings:
-                staged = settings[num.adj_name]
-            elif num.is_word and not other_build and num.row_key in rec["values"]:
-                staged = rec["values"][num.row_key]
-            stock = SM.display(build, num, num.value)
-            if not num.editable:
-                value = stock
-                where = "%s (read-only)" % num.where_text()
-            else:
-                value = SM.display(build, num, int(staged)) + "  ●" if staged is not None else stock
-                where = num.where_text()
-            if staged is not None:
-                n_changed += 1
-            row = {"key": num.row_key, "mode": build.mode_name(num.mode_id),
-                   "number": build.row_label(num), "value": value, "stock": stock,
-                   "where": where, "changed": staged is not None,
-                   "readonly": not num.editable}
-            if num.kind == "path" and num.editable:
-                # item 159: a tank position is picked by shot name, not typed as a number
-                row["choices"] = [{"value": str(v), "label": label}
-                                  for v, label in SM.path_choices(build, num, rec["values"])]
-                row["raw"] = str(int(staged) if staged is not None else num.value)
-            rows.append(row)
+            rows.append(self._stock_row(build, num, settings, rec, other_build))
             self._stock_rows[num.row_key] = num
             self._stock_order.append(num.row_key)
+        n_changed = sum(1 for r in rows if r["changed"])
         msg = ("%s: %d number(s) of the game's own modes. %s" % (
-            build.id, len(self._stock_rows),
+            MP.title_label(build.game, build.version), len(self._stock_rows),
             "%d change(s) staged for the next Write." % n_changed if n_changed else
             "Nothing changed - every number is the game's own."))
         if other_build and rec["values"]:
             msg += (" %d change(s) were staged for %s, not this card, and are not written."
                     % (len(rec["values"]), rec["build"]))
         sel = keep if keep in self._stock_rows else None
-        self._stock_set(msg=msg + " Rename a mode on the Text tab.", rows=rows, on=True,
-                        sel=sel, n_changed=n_changed)
+        caveat = self._stock_caveat()
+        self._stock_set(msg=msg + (" " + caveat if caveat else "") + " Rename a mode on the "
+                        "Text tab.", rows=rows, on=True, sel=sel, n_changed=n_changed)
         self._on_stock_select(sel)
+        self._after_stock()
+
+    def _stock_caveat(self):
+        """The table's own caveat on its numbers (a program the app has not seen from Stern,
+        or a card this app changed read through its original's table), or ""."""
+        tr = self._title_read
+        notes = [str(n) for n in (getattr(tr, "stock_notes", None) or ())]
+        keep = [n for n in notes if "seen from Stern" in n or "changed" in n]
+        return " ".join(keep)
+
+    # -- the game's own modes in the list, and a page for each ---------------------------
+    def _game_ids(self):
+        """The ids of the game's own modes the list shows, in the game's order: the ones with
+        a number the person can change (a mode with none, or only read-only ones, has nothing
+        to do here and is left out; the stock dialog still lists every row)."""
+        build = self._stock_build
+        if build is None:
+            return []
+        editable = {n.mode_id for n in build.numbers if n.is_player_facing and n.editable}
+        return sorted(m for m in build.modes if m in editable)
+
+    def _game_rows(self):
+        build = self._stock_build
+        if build is None:
+            return []
+        rows = {r["key"]: r for r in (self.get("stock") or {}).get("rows", [])}
+        out = []
+        self.set(game_hidden=max(0, len(build.modes) - len(self._game_ids())))
+        for mid in self._game_ids():
+            mine = [r for r in rows.values() if r.get("mode_id") == mid]
+            changed = sum(1 for r in mine if r["changed"])
+            n = len(mine)
+            out.append({"slug": str(mid), "kind": "game", "name": build.mode_name(mid),
+                        "chip": "%d changed" % changed if changed else "",
+                        "chip_tip": ("%d of its numbers are staged for the next Write"
+                                     % changed) if changed else "",
+                        "n": n})
+        return out
+
+    def _after_stock(self):
+        """The stock table changed: the list's group and the open game mode's page follow."""
+        if self._game_mode is not None and self._game_mode not in self._game_ids():
+            self._game_mode = None
+            self.set(game_mode=None)
+            self.refresh()
+            return
+        if self._game_mode is not None:
+            self._publish_game_mode()
+        self._publish_rows()
+
+    def _show_game_mode(self, mode_id):
+        """One of the game's own modes in the editor's place: its numbers, each with its
+        stock value, a new value, Set and Stock; read-only ones greyed with the reason."""
+        self._save_if_edited()
+        self._slug, self._spec = None, None
+        self._code_slug = None
+        self._game_mode = mode_id
+        self._set_editor_state(False)
+        self.set(code=None, status="", save_state="")
+        self._publish_game_mode()
+        self._publish_rows()
+
+    def _publish_game_mode(self, note=None):
+        build = self._stock_build
+        mid = self._game_mode
+        if build is None or mid is None:
+            self.set(game_mode=None)
+            return
+        rows = [r for r in (self.get("stock") or {}).get("rows", []) if r.get("mode_id") == mid]
+        cur = self.get("game_mode") or {}
+        keep_note = cur.get("note", "") if cur.get("id") == mid else ""
+        mode = build.modes.get(mid)
+        n_edit = sum(1 for r in rows if not r["readonly"])
+        if not rows:
+            about = ("The app found none of this mode's timers, shot counts or awards in the "
+                     "game program, so there is nothing of it to change here.")
+        elif not n_edit:
+            about = "Every number of this mode is read-only here; each row says why."
+        else:
+            about = ("Type a new value and press Set. Write puts it on the card; Stock puts the "
+                     "game's own value back.")
+        caveat = self._stock_caveat()
+        if caveat:
+            about += " " + caveat
+        self.set(game_mode={
+            "id": mid, "name": build.mode_name(mid), "rows": rows,
+            "build": MP.title_label(build.game, build.version),
+            "about": about, "starts": list(getattr(mode, "starts", []) or [])[:3],
+            "note": keep_note if note is None else note,
+            "n_changed": sum(1 for r in rows if r["changed"])})
+
+    @rpc
+    def game_set(self, key, value):
+        """New value + Set on a row of the game's mode page."""
+        if key not in self._stock_rows:
+            return ""
+        text = self.stage_stock_value(key, value)
+        self._publish_game_mode(note=text)
+        return text
+
+    @rpc
+    def game_stock(self, key):
+        """Stock on a row of the game's mode page: the game's own value again."""
+        num = self._stock_rows.get(key)
+        if num is None or not num.editable:
+            return ""
+        text = self.stage_stock_value(key, num.value)
+        self._publish_game_mode(note=text)
+        return text
+
+    # -- the card's read ------------------------------------------------------------------
+    @rpc
+    def read_cancel(self):
+        return self.reading_cancel()
+
+    @rpc
+    def read_again(self):
+        return self.reading_again()
 
     def _on_stock_select(self, key):
         num = self._stock_rows.get(key) if key else None
@@ -2251,12 +2726,8 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         row = next((r for r in (self.get("stock") or {}).get("rows", []) if r["key"] == key), None)
         cur = (row["value"] if row else "").replace("●", "").strip()
         choices = None
-        if num.is_adjustment:
-            rng = num.adj_range
-            note = ("An operator setting (%s)%s: the same number as on the Defaults tab. A "
-                    "machine still on the game's default takes the new one when it boots."
-                    % (num.adj_name, ", %d to %d" % rng if rng else ""))
-        elif num.kind == "path":
+        note = self._stock_hint(num)
+        if num.kind == "path":
             # item 159: which shot this tank position is; the picker lists the shots the
             # switches send alone, and none (the tanks then skip the position)
             choices = (row or {}).get("choices") or []
@@ -2267,10 +2738,6 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         elif num.kind == "insn":
             note = ("How many spins this spinner needs (game program, %s): the load of the "
                     "game's own count becomes this number, 1 to 255." % num.where())
-        else:
-            note = "One word in the game program (%s)%s." % (
-                num.where(), "; it is shared by %d modes, so changing it changes all of them"
-                % num.shared if num.shared else "")
         self._stock_set(sel=key, value=cur, note=note, row_on=True, choices=choices)
 
     @rpc
@@ -2306,8 +2773,10 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         except SM.StockModeError as e:
             self._stock_set(note=str(e))
             return str(e)
-        label = "%s %s" % (build.mode_name(num.mode_id), build.row_label(num).lower())
-        if got is None:
+        label = "%s %s" % (build.mode_name(num.mode_id), self._number_words(build, num).lower())
+        if got is None and num.value is None:
+            text = "%s is back to the game's own." % label
+        elif got is None:
             text = "%s is back to the game's own %s." % (label, SM.display(build, num, num.value))
         else:
             text = "%s: %s -> %s staged for the next Write." % (
@@ -2355,6 +2824,56 @@ class ModesTab(TryItMixin, StockRemapMixin, StockRewriteMixin, TabService):
         self._stock_set(note="Every number is back to the game's own (%d change(s) "
                              "undone)." % n)
         return n
+
+
+
+_SMALL = ("a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "vs")
+
+
+def _title_case(caption):
+    """An operator menu caption (``MULTIBALL BALL SAVE TIME``) in title case, as the tab
+    writes names: ``Multiball Ball Save Time``; a word with a digit keeps its capitals."""
+    out = []
+    for i, w in enumerate(str(caption).split()):
+        low = w.lower()
+        if any(c.isdigit() for c in w):
+            out.append(w)
+        elif i and low in _SMALL:
+            out.append(low)
+        else:
+            out.append(low[:1].upper() + low[1:])
+    return " ".join(out)
+
+
+def _where_words(num):
+    """Where a number lives, as a person reads it (the tooltip has the setting's name or the
+    address): an operator setting with its range, or built into the game."""
+    if num.kind == "adj" or num.is_adjustment:
+        rng = num.adj_range
+        return ("Operator setting, %d to %d (also on the Defaults tab)" % rng if rng
+                else "Operator setting (also on the Defaults tab)")
+    if num.shared and num.editable:
+        return "Built into the game, shared by %d modes" % num.shared
+    return "Built into the game"
+
+
+def _why_words(num):
+    """Why a number cannot be changed here, in plain words ("" when it can); the exact reason
+    is in the row's tooltip."""
+    if num.editable:
+        return ""
+    if num.klass == "code" or num.kind == "code":
+        return "The game works this out as it plays, so it cannot be changed here."
+    if num.is_adjustment and num.range_inverted:
+        return num.why_read_only()[:1].upper() + num.why_read_only()[1:] + "."
+    if num.klass == "uncertain":
+        return ("The app can't be sure what the game does with this number, so it is not "
+                "changed here.")
+    if num.klass == "scene":
+        return "It lives in a scene file, not in the game program."
+    if num.value is None:
+        return "Its value hasn't been read, so it is not changed here."
+    return "The app can't change this number in place safely, so it is not changed here."
 
 
 TAB = ModesTab

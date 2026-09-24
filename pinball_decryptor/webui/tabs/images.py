@@ -2010,11 +2010,24 @@ class ImagesTab(TabService):
             self._scan_image_slots_async()
 
     def refresh_after_revert(self):
+        # Also run after Emulate's Start wrote the picks over the folder's
+        # files (window.folder_staged, PAD-209).  Either way the files that
+        # were or now are changed hold different pictures than the Resolution
+        # column was probed from, so probe those again.
+        from ...core import staged_originals
+        moved = set(self._changed_on_disk) | staged_originals.snapshot_rels(
+            self._scan_dir or None)
         self._changed_on_disk = set()
         self._foreign_rels = set()
+        for rel in moved:
+            slot = self._by_rel.get(rel)
+            if slot is not None:
+                slot.info = None
+                slot.probed = False
         self._refresh_image_list()
         if self._slots:
             self._start_change_scan()
+            self._probe_image_metadata_async(self._scan_id)
         if self._current_rel is not None:
             self._render_preview(self._current_rel)
 

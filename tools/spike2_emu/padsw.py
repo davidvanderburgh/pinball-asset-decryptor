@@ -82,7 +82,11 @@ OFF_SCR_CAB = OFF_CAB + CAB_N        # 1076 scripts' scr_cab[] (WE write)
 OFF_PAUSED = OFF_SCR_CAB + CAB_N     # 1084 1 while frozen     (padglhost writes)
 OFF_PAUSED_MS = OFF_PAUSED + 4       # 1088 total ms frozen    (padglhost writes)
 OFF_PAUSE_REQ = OFF_PAUSED_MS + 4    # 1092 pause presses      (WE write)
-SIZE = OFF_PAUSE_REQ + 4             # 1096, in a 4096-byte block
+OFF_STOP_WANT = OFF_PAUSE_REQ + 4    # 1096 1 = freeze wanted  (padglhost writes)
+OFF_STOP_GEN = OFF_STOP_WANT + 4     # 1100 request counter    (padglhost writes)
+OFF_STOP_N = OFF_STOP_GEN + 4        # 1104 games signalled    (pausekeep.py writes)
+OFF_STOP_ACK = OFF_STOP_N + 4        # 1108 request served     (pausekeep.py writes)
+SIZE = OFF_STOP_ACK + 4              # 1112, in a 4096-byte block
 
 
 def open_block(path=PATH):

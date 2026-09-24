@@ -51,7 +51,9 @@ def test_the_pause_fields_close_the_block():
     assert padsw.OFF_PAUSED == 1084
     assert padsw.OFF_PAUSED_MS == 1088
     assert padsw.OFF_PAUSE_REQ == 1092
-    assert padsw.SIZE == 1096
+    assert (padsw.OFF_STOP_WANT, padsw.OFF_STOP_GEN,
+            padsw.OFF_STOP_N, padsw.OFF_STOP_ACK) == (1096, 1100, 1104, 1108)
+    assert padsw.SIZE == 1112
 
 
 @pytest.mark.skipif(not shutil.which("gcc"), reason="no C compiler")
@@ -171,7 +173,7 @@ def test_the_frozen_time_errs_short_so_the_clock_never_runs_back():
     before the timer starts, and the credit is whole ms less one."""
     c = _text("padglhost.c")
     tog = _func(c, "pause_toggle")
-    assert tog.index("pause_signal(SIGSTOP)") < tog.index("pause_t0 = now_s();")
+    assert tog.index("pause_stop(SIGSTOP)") < tog.index("pause_t0 = now_s();")
     rel = _func(c, "pause_release")
     assert "unsigned ms = (unsigned)(held * 1000.0);" in rel
     assert "swshm->paused_ms += ms ? ms - 1 : 0;" in rel
@@ -190,14 +192,14 @@ def test_the_pause_key_toggles_and_presses_nothing():
 
 def test_resume_counts_the_frozen_time_before_the_game_runs():
     body = _func(_text("padglhost.c"), "pause_release")
-    assert body.index("swshm->paused_ms +=") < body.index("pause_signal(SIGCONT)")
-    assert body.index("__sync_synchronize()") < body.index("pause_signal(SIGCONT)")
+    assert body.index("swshm->paused_ms +=") < body.index("pause_stop(SIGCONT)")
+    assert body.index("__sync_synchronize()") < body.index("pause_stop(SIGCONT)")
 
 
 def test_pause_needs_the_switch_block_and_a_game():
     body = _func(_text("padglhost.c"), "pause_toggle")
     # no block = nothing to tell the shim, so no freeze the watchdog would kill
-    assert body.index("if (!swshm)") < body.index("pause_signal(SIGSTOP)")
+    assert body.index("if (!swshm)") < body.index("pause_stop(SIGSTOP)")
     assert "no running game to pause" in body
 
 
@@ -408,3 +410,106 @@ def test_the_run_hands_the_window_the_control_file():
     assert 'export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_CTL"' in w
     i = w.index('export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_CTL"')
     assert i < w.index('setsid_as_user "$PF_PY" "$PF_WIN"')
+
+
+# --- the root hand: every run from the app (PAD-204, round 3) -----------------
+#
+# A tester, on v1.10.0 after restarting WSL: "this pause just does not do
+# anything at all". Their log: `wsl.exe -u root ... PAD_PIVOT=1 ... watch.sh`
+# and "[watch] running the guest as root, helpers as <user>". The renderer owns
+# the key and runs as the user; the guest runs as root; kill() is refused. On
+# the rig, the same launch (root watch.sh, the X socket the user's) reproduced
+# it exactly - the game kept running and padglhost logged "no running game to
+# pause" - and with pausekeep.py serving the stop as root, a 23.6 s pause froze
+# the root game (state T) and resumed the same process, no watchdog exit.
+
+def _block():
+    import padsw
+    return bytearray(4096), padsw
+
+
+def _set(b, off, v):
+    struct.pack_into("<I", b, off, v)
+
+
+def _get(b, off):
+    return struct.unpack_from("<I", b, off)[0]
+
+
+def test_the_keeper_serves_a_request_and_answers_count_then_generation(monkeypatch):
+    import pausekeep
+    b, padsw = _block()
+    sent = []
+    # stand-in numbers: Windows' signal module has no SIGSTOP at all
+    monkeypatch.setattr(pausekeep, "signal",
+                        types.SimpleNamespace(SIGSTOP=19, SIGCONT=18))
+    monkeypatch.setattr(pausekeep, "signal_games", lambda sig: sent.append(sig) or 2)
+    assert pausekeep.serve(b) is None                      # nothing asked yet
+    _set(b, padsw.OFF_STOP_WANT, 1)
+    _set(b, padsw.OFF_STOP_GEN, 7)
+    assert pausekeep.serve(b) == (1, 2)
+    assert sent == [19]
+    assert _get(b, padsw.OFF_STOP_N) == 2
+    assert _get(b, padsw.OFF_STOP_ACK) == 7
+    assert pausekeep.serve(b) is None                      # answered once only
+    _set(b, padsw.OFF_STOP_WANT, 0)
+    _set(b, padsw.OFF_STOP_GEN, 8)
+    assert pausekeep.serve(b) == (0, 2)
+    assert sent[-1] == 18
+
+
+def test_the_keeper_writes_the_count_before_the_ack():
+    src = _text("pausekeep.py")
+    body = src[src.index("def serve("):src.index("def main(")]
+    assert body.index("OFF_STOP_N, n)") < body.index("OFF_STOP_ACK, gen)")
+
+
+def test_the_keeper_ignores_a_request_left_by_an_earlier_session():
+    src = _text("pausekeep.py")
+    main = src[src.index("def main("):]
+    # the ack is caught up to the generation BEFORE the serving loop starts
+    assert main.index("OFF_STOP_ACK, u32(m, padsw.OFF_STOP_GEN))") < main.index("while True:")
+
+
+def test_the_keeper_never_leaves_the_game_frozen():
+    src = _text("pausekeep.py")
+    assert "signal.signal(signal.SIGTERM, resume_and_exit)" in src
+    assert "if not renderer_up():\n                resume_and_exit()" in src
+
+
+def test_padglhost_asks_the_keeper_when_the_run_has_one():
+    c = _text("padglhost.c")
+    body = _func(c, "pause_stop")
+    assert 'getenv("PAD_PAUSE_KEEPER")' in body
+    # what it wants BEFORE the new generation, then wait for that generation
+    assert body.index("swshm->stop_want =") < body.index("++swshm->stop_gen")
+    assert "swshm->stop_ack == gen" in body and "return (int)swshm->stop_n;" in body
+    # a keeper that never answers is no worse than before
+    assert body.rstrip().endswith("return pause_signal(sig);")
+    assert "pause_stop(SIGSTOP)" in _func(c, "pause_toggle")
+    assert "pause_stop(SIGCONT)" in _func(c, "pause_release")
+
+
+def test_a_refused_signal_is_named_in_the_log():
+    body = _func(_text("padglhost.c"), "pause_signal")
+    assert "not allowed to signal the game" in body
+
+
+def test_watch_starts_the_keeper_as_root_on_a_dropped_run():
+    w = _text("watch.sh")
+    assert 'PAUSE_KEEPER=0\n[ "$DROP" = 1 ] && PAUSE_KEEPER=1' in w
+    assert 'PAD_PAUSE_KEEPER="$PAUSE_KEEPER"' in w            # the renderer is told
+    start = 'setsid python3 "$S/pausekeep.py" "$SW_HOST" >> "$HOSTLOG" 2>&1 &'
+    assert start in w                                         # root: NOT as_user
+    assert w.index('PAD_PAUSE_KEEPER="$PAUSE_KEEPER"') < w.index(start)
+
+
+def test_the_keeper_is_torn_down_and_counted():
+    assert "pkill -9 -f 'pausekeep[.]py'" in _text("watch.sh")
+    assert "pkill -9 -f 'pausekeep[.]py'" in _text("killgame.sh")
+    assert "$(n -f 'pausekeep[.]py')" in _text("alive.sh")
+
+
+def test_pause_lines_reach_the_app_s_log():
+    assert r'/\[pause\]/              { print "[event] " $0; fflush(); next }' \
+        in _text("watch.sh")

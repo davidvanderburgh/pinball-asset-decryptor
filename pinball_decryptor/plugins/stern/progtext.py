@@ -543,6 +543,19 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
         if full_new is None and not any(tn is not None
                                         for (_d, _t, _p, tn) in tail_edits):
             continue
+        # A standalone name nobody edited follows a full-line edit that kept
+        # everything in front of it: "GODZILLA VS TITANOSAURUS" -> "GODZILLA
+        # VS DESTROYAH" renames the "TITANOSAURUS" the game shows on its own
+        # too.  Refusing the line instead left BOTH stock on the card, and a
+        # Transfer Mods pass carries the line but not its tail row (PAD-198).
+        followed = []
+        if full_new is not None:
+            for k, (d, tt, p, tn) in enumerate(tail_edits):
+                if (tn is None and len(full_new) > d
+                        and full_new[:d] == text[:d] and full_new[d:] != tt
+                        and _fmt_tokens(full_new[d:]) == _fmt_tokens(tt)):
+                    tail_edits[k] = (d, tt, p, full_new[d:])
+                    followed.append((tt, full_new[d:]))
         budget = len(text)
         refs = census.get(off, [])
         growable = blob is not None and bool(refs)
@@ -672,7 +685,7 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
         writes.extend(span_writes)
         applied.add(text if full_new is not None else None)
         for d, tt, _p, tn in tail_edits:
-            if tn is not None:
+            if tn is not None and tt in edits:
                 applied.add(tt)
         if new_full != text:
             if relocate:
@@ -682,6 +695,9 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
                 how = " (standalone-name pointer moved)" if moved else ""
             log('Program text: "%s" -> "%s"%s.' % (enc(text), enc(new_full), how),
                 "info")
+        for tt, tn in followed:
+            log('Program text: "%s" (the game also shows it on its own) -> '
+                '"%s", following its line.' % (enc(tt), enc(tn)), "info")
 
     applied.discard(None)
     # "wasn't found" means exactly that.  A string the loop DID find and then

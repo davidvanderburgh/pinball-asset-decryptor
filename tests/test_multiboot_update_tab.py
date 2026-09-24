@@ -103,6 +103,26 @@ def test_measure_commands_add_the_dry_run_only_for_a_loaded_card(monkeypatch, tm
     assert not callable(cmds[1][1]) and "--dry-run" in _tool_words(cmds[1][1])
 
 
+def test_dry_run_is_not_handed_a_media_set_the_update_renders_again(monkeypatch, tmp_path):
+    """PAD-202 round 2: a game added to a loaded card.  The real update
+    prepares the media again first, so the media set on disk is the old
+    6-image one; handing it to the dry-run made the tool refuse ("media.json
+    lists 6 images; the card holds 7") and the dialog greyed the update out."""
+    _win(monkeypatch)
+    form = _form(tmp_path, 2, media_dir=str(tmp_path / "media"))
+    card = str(tmp_path / "c.raw")
+    fresh = _tool_words(measure_commands(form, card, cwd="/mnt/c/repo")[1][1])
+    assert "--media-dir" in fresh                  # nothing to re-render: it is the card's
+    stale = _tool_words(measure_commands(form, card, cwd="/mnt/c/repo", media_stale=True)[1][1])
+    assert "--dry-run" in stale and "--media-dir" not in stale
+    # the plan step is untouched either way
+    assert measure_commands(form, card, cwd="/mnt/c/repo", media_stale=True)[0] ==         measure_commands(form, card, cwd="/mnt/c/repo")[0]
+    # ...and what decides it: an added game is a media change
+    bigger = _form(tmp_path, 3, media_dir=form.media_dir)
+    assert multiboot_core.media_specs_changed(form, bigger)
+    assert not multiboot_core.media_specs_changed(form, form)
+
+
 # ------------------------------------------------------------------ parsing
 PLAN_TEXT = (
     "image-size 0 /dev/mmcblk0p3 3490000000 turtles_pro-1_59_0.Release\n"

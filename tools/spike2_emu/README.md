@@ -1036,6 +1036,20 @@ plain 61 frames in 2033 ms and the first frame after Resume matches the frozen
 one. `pad_ms()` stays on the real clock: host tools line the `[sw]` stamps up
 against their own. A bare `kill -STOP` is not a pause; do not use one.
 
+**On a run from the app, a root helper does the stopping** (PAD-204, round 3).
+The app starts `watch.sh` as root with `PAD_PIVOT=1`, so the guest runs as root
+while the helpers, `padglhost` included, drop to the desktop user - and a user
+cannot SIGSTOP a root process. Until this, Pause did nothing on every real
+install; the proofs had run `watch.sh` as the user. Now, whenever the helpers
+drop (`DROP=1`), `watch.sh` also starts `pausekeep.py` as root and hands
+`padglhost` `PAD_PAUSE_KEEPER=1`. `padglhost` then writes `stop_want` and a
+new `stop_gen` into `padsw`, and the keeper signals the guest and answers with
+`stop_n` and then `stop_ack`. `padglhost` waits for that answer (2 s; it takes
+about 10 ms) before starting the frozen-time clock, and falls back to its own
+`kill()` if none comes. Every press now puts a `[pause]` line in the run log
+the app shows. To test this path, run `watch.sh` as root with an X socket that
+the user owns; running it as the user never reaches this code.
+
 The playfield's status bar also carries the Emulate tab's **volume and Mute**
 (`PAD_AUDIO_CTL`, which watch.sh forwards to the window): both write the one
 control file the audio player polls, and the tab's slider follows it.

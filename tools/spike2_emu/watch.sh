@@ -1128,7 +1128,13 @@ if [ "$DROP" = 1 ]; then
 fi
 
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""; TBLPG=""
-BALLPG=""
+BALLPG=""; KEEPPG=""
+# PAD-204: WHO STOPS THE GAME FOR THE PAUSE KEY. With DROP=1 the guest is root
+# and the renderer is not, so the renderer cannot SIGSTOP it - Pause did
+# nothing on every install. pausekeep.py stays root and does it on request
+# (padsw.h, stop_*); padglhost is told to ask it rather than kill() itself.
+PAUSE_KEEPER=0
+[ "$DROP" = 1 ] && PAUSE_KEEPER=1
 # PAD_PIVOT run only: the guest logs to $ROOT/dump/game.out (its stdout points
 # inside the container - see run_game.sh), so a tail folds that back into $LOG
 # and every existing reader (autoattract, the [sw]/[segv] greps, gamestate)
@@ -1178,6 +1184,10 @@ teardown() {
     pkill -9 -f 'autoattract.sh' 2>/dev/null
     [ -n "$BALLPG" ] && kill -9 -"$BALLPG" 2>/dev/null
     pkill -9 -f 'ballfeed[.]py' 2>/dev/null
+    # PAD-204's root pause keeper. The guest is already SIGKILLed above, and
+    # SIGKILL ends a stopped process too, so nothing is left frozen by this.
+    [ -n "$KEEPPG" ] && kill -9 -"$KEEPPG" 2>/dev/null
+    pkill -9 -f 'pausekeep[.]py' 2>/dev/null
     # longplay.sh is started BESIDE a run rather than by it, so it has no pgid
     # here - but a leaked one keeps poking ramp optos, and it would do that
     # into the NEXT run. It watches the guest and exits on its own; this is the
@@ -1676,7 +1686,7 @@ pad_gl_try() {
     # back exports that and nothing here overrides them.
     setsid_as_user env PAD_GL_WINDOW=1 PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
                PAD_SW_SHM="$SW_HOST" PAD_GL_LEGEND="${PAD_GL_LEGEND:-}" \
-               PAD_VID_SHM="${VID_FOR_GL:-}" \
+               PAD_VID_SHM="${VID_FOR_GL:-}" PAD_PAUSE_KEEPER="$PAUSE_KEEPER" \
                "$PAD_GLHOST_BIN" "$RING_HOST" > "$HOSTLOG" 2>&1 &
     # PADGL_DEBUG / PADGL_SEQ_* are NOT listed here on purpose: `env A=B cmd`
     # keeps the rest of the environment, so exporting them before watch.sh
@@ -1889,6 +1899,16 @@ case "$GLWIN" in
         echo "[watch] the renderer has not said whether its window opened;" \
              "see $HOSTLOG" >&2 ;;
 esac
+
+# PAD-204: the root half of the Pause key, on the runs that need one. NOT
+# setsid_as_user - being root is its whole job. It waits for the renderer to
+# map the switch block, exits when the renderer is gone, and resumes a game
+# it froze before it goes. Its lines land in the renderer's log, which the
+# event feed already follows. alive.sh and killgame.sh count it.
+if [ "$PAUSE_KEEPER" = 1 ]; then
+    setsid python3 "$S/pausekeep.py" "$SW_HOST" >> "$HOSTLOG" 2>&1 &
+    KEEPPG=$!
+fi
 
 echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 # PAD_PIVOT=1 boots a checkpointable guest (item 13). run_game.sh does the work;
@@ -2569,6 +2589,9 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
                 { print "[event] " $0; fflush() }
             next }
         /\[play\]/               { print "[event] " $0; fflush(); next }
+        # PAD-204: every Pause press says what happened to it - a pause that
+        # did nothing used to leave no trace in the log the user can send
+        /\[pause\]/              { print "[event] " $0; fflush(); next }
         # THE LINE THAT NAMES A BLACK WINDOW, and it is not ours: Mesa prints
         # it, into the renderer log, when the renderer is running as root and
         # cannot attach to the WSLg X server shared memory. The window opens,

@@ -225,6 +225,24 @@ struct padsw_shm {
      * frozen. A COUNTER, not a flag, so two presses between polls are two
      * toggles and nothing ever has to be cleared by the other side. */
     unsigned pause_req;                  /* presses so far; the scripts only    */
+    /* ---- THE ROOT HAND THAT STOPS THE GAME (PAD-204, round 3). A run from
+     * the app is a PAD_PIVOT run: the guest runs as ROOT and watch.sh drops
+     * the helpers - padglhost included - to the desktop user, and a user
+     * cannot SIGSTOP a root process. kill() said EPERM, padglhost logged "no
+     * running game to pause" to a file nobody reads, and Pause did nothing
+     * at all on every real install; the rig proofs ran watch.sh as the
+     * user, where the guest is the user's own.
+     *
+     * So on those runs padglhost does not signal the game itself. It says
+     * what it wants here - stop_want, then a new stop_gen - and pausekeep.py,
+     * which watch.sh leaves running as root, signals every `game` process and
+     * answers with the count and the generation it served. padglhost waits
+     * for that answer before it starts the frozen-time clock, so the credit
+     * still errs short. One writer per field, as everywhere in this block. */
+    unsigned stop_want;                  /* 1 = frozen, 0 = running; padglhost  */
+    unsigned stop_gen;                   /* bumped per request;       padglhost */
+    unsigned stop_n;                     /* games signalled;          keeper    */
+    unsigned stop_ack;                   /* stop_gen served (after n); keeper   */
 };
 
 #endif

@@ -1870,12 +1870,43 @@ static int pause_signal(int sig)
         if (!(f = fopen(path, "r"))) continue;
         if (fgets(comm, sizeof comm, f)) {
             comm[strcspn(comm, "\n")] = 0;
-            if (!strcmp(comm, "game") && kill(pid, sig) == 0) n++;
+            if (!strcmp(comm, "game")) {
+                if (kill(pid, sig) == 0) n++;
+                else fprintf(stderr, "[pause] not allowed to signal the game"
+                             " (pid %d runs as another user)\n", pid);
+            }
         }
         fclose(f);
     }
     closedir(d);
     return n;
+}
+
+/* PAD-204 round 3: WHO MAY STOP THE GAME. On a run from the app the guest is
+ * root and this process is the desktop user (watch.sh drops the helpers), so
+ * the kill() above is refused and Pause did nothing on every real install.
+ * watch.sh then leaves pausekeep.py running as root and says so with
+ * PAD_PAUSE_KEEPER=1; the request goes through the switch block instead
+ * (padsw.h, stop_*) and this waits for the keeper's answer - the number of
+ * games it signalled - so the frozen-time clock still starts after the stop.
+ * A keeper that never answers falls back to our own kill(), which is at least
+ * no worse than before and says why in the log. */
+static int pause_stop(int sig)
+{
+    const char *k = getenv("PAD_PAUSE_KEEPER");
+    unsigned gen;
+    int i;
+    if (!k || strcmp(k, "1") != 0 || !swshm) return pause_signal(sig);
+    swshm->stop_want = sig == SIGSTOP;
+    __sync_synchronize();
+    gen = ++swshm->stop_gen;
+    for (i = 0; i < 200; i++) {                 /* 2 s; it answers in ~10 ms */
+        __sync_synchronize();
+        if (swshm->stop_ack == gen) return (int)swshm->stop_n;
+        usleep(10000);
+    }
+    fprintf(stderr, "[pause] the root keeper did not answer; signalling the game directly\n");
+    return pause_signal(sig);
 }
 
 static void pause_title(void)
@@ -1907,7 +1938,7 @@ static void pause_release(void)
         __sync_synchronize();
         swshm->paused = 0;
     }
-    pause_signal(SIGCONT);
+    pause_stop(SIGCONT);
     game_paused = 0;
     fprintf(stderr, "[pause] resumed after %.1f s\n", held);
     pause_title();
@@ -1922,7 +1953,7 @@ static void pause_toggle(void)
     }
     swshm->paused = 1;
     __sync_synchronize();
-    if (!pause_signal(SIGSTOP)) {
+    if (!pause_stop(SIGSTOP)) {
         swshm->paused = 0;
         fprintf(stderr, "[pause] no running game to pause\n");
         return;
@@ -2041,6 +2072,7 @@ static void sw_shm_open(void)
     }
     swshm->magic = PADSW_MAGIC;
     pause_req_seen = swshm->pause_req;  /* PAD-204: old presses are not ours */
+    swshm->stop_want = 0;               /* ...and no stale freeze request      */
     __sync_synchronize();
     swshm->gen = 1;
     fprintf(stderr, "[padglhost] keyboard -> switches via %s\n", path);

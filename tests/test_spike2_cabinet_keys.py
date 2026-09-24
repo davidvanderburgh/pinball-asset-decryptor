@@ -68,7 +68,9 @@ def test_the_python_offsets_follow_the_end_of_the_block(padsw):
     assert padsw.OFF_SCR_CAB == padsw.OFF_CAB + padsw.CAB_N
     assert padsw.OFF_PAUSED == padsw.OFF_SCR_CAB + padsw.CAB_N    # PAD-204
     assert padsw.OFF_PAUSE_REQ == padsw.OFF_PAUSED_MS + 4
-    assert padsw.SIZE == padsw.OFF_PAUSE_REQ + 4
+    assert padsw.OFF_STOP_WANT == padsw.OFF_PAUSE_REQ + 4      # PAD-204 round 3
+    assert padsw.OFF_STOP_ACK == padsw.OFF_STOP_WANT + 12
+    assert padsw.SIZE == padsw.OFF_STOP_ACK + 4
     assert padsw.SIZE <= 4096
 
 

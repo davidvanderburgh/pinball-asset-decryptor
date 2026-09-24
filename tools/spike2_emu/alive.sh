@@ -172,10 +172,14 @@ VID=$(n -f 'padvidhost\.py')
 # switch ids, so a leaked one would be pressing switches into the NEXT run,
 # which is the leaked-ballfeed shape and just as hard to read from the game's
 # side. BOTH patterns, because the shell can be waiting with no python yet.
+# pausekeep.py (PAD-204) is the root half of the Pause key, counted from the day
+# it was written. It exits when the renderer goes; a leaked one would still
+# SIGSTOP whatever `game` the next run starts if a stale request reached it.
 HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F $PAD_HOME/padvid\.log") \
          + $(n -f '^tail -F .*dump/game\.out') + $(n -f 'ballfeed[.]py') \
          + $(n -f '^bash [^ ]*longplay\.sh') + $(n -f 'mktables[.]py') \
-         + $(n -f 'swexercise\.sh') + $(n -f 'swexercise[.]py') ))
+         + $(n -f 'swexercise\.sh') + $(n -f 'swexercise[.]py') \
+         + $(n -f 'pausekeep[.]py') ))
 
 # ★ WINDOWS-INTEROP STUBS - the class that leaked seven deep unseen.
 #

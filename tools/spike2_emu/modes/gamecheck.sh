@@ -9,6 +9,8 @@
 #                              drain until a ball ends. Prints "[check] ..." lines as it goes.
 #                              Exit 0 when a ball ended, 1 when it could not play, 2 when no
 #                              drain ended a ball, 3 when the runtime refused the port
+#   gamecheck.sh play <game> full   the same, then a tilted ball 2 and a ball 3 played to the
+#                              game's end (about three minutes more): for proving a port's events
 #   gamecheck.sh log           the lines of this run's $ROOT/dump/mode.log the app reads
 #
 # It only presses switches and reads the log: nothing is installed or removed here. What a
@@ -50,10 +52,41 @@ skipped() {
     echo "$1" | grep -qiE 'TROUGH|FLIPPER|SHOOTER|COIN|SERVICE|^DIP|START|TILT|DOOR|VOLUME|HEADPHONE|ENCODER|QR SCANNER|MOTOR|LOCKDOWN|LOCK [0-9]|TICKET|OUTLANE|OUT LANE|EOS|DETECT|BUTTON|POSITION|HOME|INTERLOCK|OPTO BOARD|JAM'
 }
 
+#: the rig's ball feeder answers the game's trough eject; on a title whose device table has no
+#: eject coil (Batman 66) nothing does, so the check serves each ball by hand (plunge.py serve:
+#: trough -> shooter lane -> launched). Never both: a served ball on a fed title is a second ball
+nofeed() { grep -aq "eject coil NOT IN THE DEVICE TABLE\|nothing to do on this title" "$PAD_HOME/padball.log" 2>/dev/null; }
+launch_ball() {
+    if nofeed; then
+        python3 "$RIG/plunge.py" serve > /dev/null 2>&1 || say "plunge.py serve said no"
+    else
+        python3 "$RIG/plunge.py" plunge > /dev/null 2>&1
+    fi
+}
+#: drain until the object logs one more end of ball (up to four drains): 0 when one did
+drain_until_end() {
+    local before n end
+    echo drain > "$DUMP/census.mark"
+    sleep 0.6
+    before=$(count "check ball end")
+    for n in 1 2 3 4; do
+        game_up || return 1
+        say "drain $n"
+        python3 "$RIG/plunge.py" drain > /dev/null 2>&1
+        end=$(( $(date +%s) + 7 ))
+        while [ "$(date +%s)" -lt "$end" ]; do
+            [ "$(count "check ball end")" -gt "$before" ] && return 0
+            sleep 0.5
+        done
+    done
+    return 1
+}
+
 cmd=${1:-}
 case "$cmd" in
     play)
         GAME=${2:-}
+        FULL=${3:-}
         case "$GAME" in ""|*[!abcdefghijklmnopqrstuvwxyz0123456789_]*) die "a game is [a-z0-9_] only, not '$GAME'" ;; esac
         LIST=$DUMP/tables/$GAME/switch_list.txt
         # the app calls this once the Emulate tab's run is up, which is before the rig has
@@ -85,7 +118,11 @@ case "$cmd" in
         sleep 3
         [ -f "$LIST" ] || die "the rig has no switch list for $GAME ($LIST)"
         say "starting a game"
-        python3 "$RIG/plunge.py" game > /dev/null 2>&1 || say "plunge.py game said no"
+        # a card not on free play wants credits: a dollar a game is four coins (Batman 66), so
+        # eight go in before Start (the spare credits do no harm)
+        python3 "$RIG/plunge.py" coin 8 > /dev/null 2>&1 || say "plunge.py coin said no"
+        python3 "$RIG/plunge.py" game > /dev/null 2>&1
+        nofeed && { say "no ball feeder on this title: serving the ball by hand"; sleep 2; launch_ball; }
         sleep 3
         ids=()
         while read -r id _num _node _bit name; do
@@ -106,34 +143,43 @@ case "$cmd" in
         done
         # the ball saver can give the first drain back (and then the rig counts two balls in
         # play), so drain until the object logs an end of ball
-        echo drain > "$DUMP/census.mark"
-        sleep 0.6
-        before=$(count "check ball end")
-        for n in 1 2 3 4; do
-            game_up || die "the game stopped before a ball could drain"
-            say "drain $n"
-            python3 "$RIG/plunge.py" drain > /dev/null 2>&1
-            end=$(( $(date +%s) + 7 ))
-            while [ "$(date +%s)" -lt "$end" ]; do
-                if [ "$(count "check ball end")" -gt "$before" ]; then
-                    say "a ball ended"
-                    # the bonus (its end is an event on most builds), and the next ball's start
-                    wait_for 20 "check event bonus_end" "$LOG" || true
-                    sleep 2
-                    say "done"
-                    exit 0
-                fi
-                sleep 0.5
-            done
-        done
-        say "no drain ended a ball"
-        exit 2
+        drain_until_end || { say "no drain ended a ball"; exit 2; }
+        say "a ball ended"
+        # the bonus (its end is an event on most builds), and the next ball's start
+        wait_for 20 "check event bonus_end" "$LOG" || true
+        sleep 2
+        if [ "$FULL" = full ]; then
+            # ball 2: a tilt (three pendulum hits, 4.5 s apart), then its drain; ball 3: played
+            # past the ball saver and drained, which ends the game
+            TILT=$(awk '!/^#/ && toupper($0) ~ /TILT/ && toupper($0) !~ /SLAM/ {print $1; exit}' "$LIST")
+            wait_for 25 "check event ball_start" "$LOG" || true
+            launch_ball
+            sleep 2
+            for id in "${ids[@]:0:10}"; do press "$id"; done
+            if [ -n "$TILT" ]; then
+                say "tilting ball 2 (switch $TILT)"
+                for k in 1 2 3; do echo "tilt$k" > "$DUMP/census.mark"; sleep 0.45
+                    python3 "$RIG/swpoke.py" "$TILT" 150 > /dev/null 2>&1; sleep 4; done
+                sleep 4
+            fi
+            drain_until_end || say "no drain ended ball 2"
+            say "ball 2 ended"
+            sleep 20
+            launch_ball
+            sleep 2
+            say "ball 3: playing past the ball saver"
+            for id in "${ids[@]}"; do game_up || break; press "$id"; done
+            drain_until_end || say "no drain ended ball 3"
+            wait_for 45 "check event game_over" "$LOG" && say "the game ended"                 || say "(no game_over event after ball 3)"
+        fi
+        say "done"
+        exit 0
         ;;
     log)
         [ -f "$LOG" ] || die "no mode.log yet"
         grep -a "check \|armed: \|NOT THIS GAME\|\[pad\] port \|\[pad\] events: " "$LOG"
         ;;
     *)
-        die "usage: gamecheck.sh play <game> | log"
+        die "usage: gamecheck.sh play <game> [full] | log"
         ;;
 esac

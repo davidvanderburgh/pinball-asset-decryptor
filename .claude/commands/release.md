@@ -22,7 +22,8 @@ its retries.  So:
   pytest as the ship gate; since 2026-09-17 that local gate is gone
   too, because its ~2 minutes were most of the budget.  The Tests CI
   run is the only gate, applied after the fact as a post-tag TRIPWIRE
-  (step 7b): red means a yank, not a shipped regression.  Test
+  (step 7b): red with the app wrong means a yank; a flake or a wrong
+  test never yanks.  Test
   discipline belongs to the work itself (/next, /finish, targeted runs
   while iterating), never to this command.
 - Push, tag, and draft release (steps 7-9) all happen in one attended
@@ -60,8 +61,9 @@ foreground-block on a CI run, and never poll in a sleep loop.
    also catches what a local run can't — CI runners have less installed
    than the dev env (Pillow lived in my dev env but not the CI
    pip-install step, which silently broke Williams plugin discovery for
-   the entire v0.4.0 release).  Red CI after the tag means an immediate
-   yank, not a shipped regression.
+   the entire v0.4.0 release).  A red run after the tag yanks only when
+   the APP is wrong (step 7b); CI retries a failed test twice, so a
+   flake never turns it red.
 
 4. **Decide the bump.**
    - Default to **patch** for bugfixes / small tweaks.
@@ -280,23 +282,48 @@ foreground-block on a CI run, and never poll in a sleep loop.
       and only then end the turn.  Do not pre-announce results the
       watches haven't produced.
 
-    When the tripwire watch completes (a later background turn — by
-    then the tag is out and the first assets may already be live):
+    **FLAKES NEVER YANK A RELEASE** (David, 2026-09-23, after flaky
+    macOS UI tests pulled v1.2.0 and turned v1.2.1's tripwire red three
+    times with nothing wrong in the app).  CI retries a failed test
+    twice (`pytest-rerunfailures`, `--reruns 2` in `test.yml`), so a
+    flake that passes on a retry never turns the run red; the run's
+    "Flaky tests" step lists every test that needed a retry, and those
+    get DELETED, not patched.  A red run yanks only when the APP is
+    wrong.
+
+    Read the verdict with `gh run view $RUN_ID --json conclusion`, never
+    through a pipe.  When the tripwire watch completes (a later
+    background turn; by then the tag is out and assets may be live):
     - **Green** → nothing to do; the final report notes "tests CI
-      green" in one line.
-    - **Red** → read `gh run view $RUN_ID --log-failed` FIRST (fast,
-      and it decides which of two very different responses is right):
-      - **Infrastructure failure** (runner died, pip network error,
-        GitHub 5xx — no test actually failed) → `gh run rerun
-        $RUN_ID --failed`, fresh background watch, release stays live.
-      - **A real test failure** → YANK the release, immediately and
-        without asking — an update banner pointing at a regression is
+      green" in one line.  If "Flaky tests" listed any (`gh run view
+      $RUN_ID --log | grep "Flaky test::"`), delete those tests in a
+      follow-up commit (no release) and say so in one line.
+    - **Red** → read `gh run view $RUN_ID --log-failed` FIRST.  A red run
+      means a test failed three times running, or the job died:
+      - **Infrastructure** (runner died, pip or network error, GitHub
+        5xx, an xdist "worker crashed", a test that needed the network)
+        → `gh run rerun $RUN_ID --failed`, fresh background watch,
+        release stays live.  Delete a test that needs the network.
+      - **The test is wrong, not the app**: the failure shows the app
+        doing what it is designed to do (a test that assumed
+        Windows/Linux on the macOS leg, a stale expectation, a race in
+        the test's own polling), or the failing test covers nothing
+        this release changed (`git diff $BASE..$REL_SHA` touches
+        neither the test file nor the code it tests) and it passed on
+        the previous release's run → **release stays live**; fix or
+        delete the test forward on main (no release) and rerun.
+      - **The app is wrong**: the failing test covers what this release
+        changed and the assertion shows a real defect → YANK, now and
+        without asking; an update banner pointing at a regression is
         worse than a missing release.  Follow "Yanking a release"
         below, report the yank LOUDLY, fix forward (commit + push),
-        and start the release over — the re-release derives a FRESH
+        and start the release over; the re-release derives a FRESH
         version number.  The yanked number is burned: re-tagging it
         with different content confuses release caches and any
         updater that already saw it.
+      When unsure between the last two, read the failing assertion
+      against the diff: a yank is for a regression a user would hit,
+      never for a test that is wrong.
     - **Transient GitHub 503s / watch died** → just start a fresh
       background watch on the same run id.
 

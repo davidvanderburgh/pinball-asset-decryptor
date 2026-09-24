@@ -73,7 +73,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # pytest-xdist: the suite runs one worker per core (-n auto).
-          pip install pytest pytest-xdist pycryptodome
+          # pytest-rerunfailures: a test that fails is run again (twice), so
+          # a flake that passes on a retry never turns the run red and
+          # never yanks a release (David, 2026-09-23).  The retried tests
+          # are listed by the "Flaky tests" step below: delete them.
+          pip install pytest pytest-xdist pytest-rerunfailures pycryptodome
           # Pillow is in requirements.txt — Williams' DMD render
           # path (dmd_render.py, capture_pipeline.py) imports it at
           # module load, so missing it causes the Williams plugin
@@ -94,7 +98,8 @@ jobs:
 
       - name: Run tests (Linux)
         if: runner.os == 'Linux'
-        run: python -m pytest tests -n auto --dist loadgroup -v
+        shell: bash
+        run: python -m pytest tests -n auto --dist loadgroup -v --reruns 2 --reruns-delay 1 -r fER | tee pytest.log
 
       # The multi-boot card builder's own end-to-end test (item 93): real ext4
       # through debugfs/mke2fs/e2fsck, and - as root, which the hosted runner
@@ -106,4 +111,24 @@ jobs:
 
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
-        run: python -m pytest tests -n auto --dist loadgroup -v
+        shell: bash
+        run: python -m pytest tests -n auto --dist loadgroup -v --reruns 2 --reruns-delay 1 -r fER | tee pytest.log
+
+      # Every test that failed and then passed on a retry is a FLAKE: it can
+      # pass or fail on the same code, so it finds no regressions and only
+      # costs releases.  Listed on the run (annotations + summary) so the next
+      # session deletes it (memory: feedback_delete_flaky_tests).
+      - name: Flaky tests
+        if: always()
+        shell: bash
+        run: |
+          [ -f pytest.log ] || exit 0
+          grep -oE 'RERUN +tests/[^ ]+|tests/[^ ]+ RERUN' pytest.log \
+            | grep -oE 'tests/[^ ]+' | sort -u > flaky.txt || true
+          if [ -s flaky.txt ]; then
+            echo "### Flaky tests on ${{ matrix.os }} (passed on a retry: delete them)" >> "$GITHUB_STEP_SUMMARY"
+            while read -r t; do
+              echo "- \`$t\`" >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning title=Flaky test::$t failed and then passed on a retry; delete it"
+            done < flaky.txt
+          fi

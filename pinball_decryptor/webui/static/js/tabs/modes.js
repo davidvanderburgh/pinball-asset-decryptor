@@ -850,7 +850,7 @@ function FirstMode({ s, onNewCode }) {
       <div class="modes-first-grid">
         <div class="modes-first-opt rec">
           <div class="row wrap"><${Icon} name="list" /><b>From an example</b><${Chip} kind="ok" sm>recommended<//></div>
-          <div class="small muted wrap">A finished mode to play and change. KAIJU RUSH is the one that has run on a real machine.</div>
+          <div class="small muted wrap">A finished mode to play and change.${ex.some((x) => x.label === "KAIJU RUSH") ? " KAIJU RUSH is the one that has run on a real machine." : ""}</div>
           <div class="row wrap">${ex.length ? ex.map((x) => html`<${Button} key=${x.label} size="sm" kind=${x.label === "KAIJU RUSH" ? "primary" : ""}
               disabled=${off || x.disabled} title=${x.title} onClick=${x.onClick}>${x.label}<//>`)
             : html`<span class="small dim">${s.ex_tip || "No example for this game yet."}</span>`}</div>

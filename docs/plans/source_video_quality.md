@@ -28,7 +28,11 @@ card size option gives the room.
 `.staged_changes.json`, set by a "Best quality" checkbox on the Video tab.
 `core.video.transcode_video_to(best_quality=True)` encodes H.264 at CRF 16
 with a peak of 0.64 bpp of the slot's pixel rate (20 Mbps at 1360x768/30,
-1.5x the highest-rate stock clip measured, 13.3 Mbps), Lanczos scaling. The
+1.5x the highest-rate stock clip measured, 13.3 Mbps), Lanczos scaling, and
+the replaced clip's bitrate as a FLOOR: a picture simple enough to come in
+under it is encoded again at that rate, so best quality is never fewer bits
+than a normal build (a first cut without the floor gave rich stock slots
+fewer bits at the same SSIM, which is not what "highest possible" means). The
 x264 preset, profile ceiling, level, pixel format and audio shape are what a
 conversion has always used, so the stream is shaped exactly like the ones the
 machine plays; only the bits differ. A pinned byte budget (JJP) still wins.
@@ -112,8 +116,34 @@ the middle of a long file (the TMNT upscale pipeline's problem, not this one).
 | Real plugin path (`SternManufacturer.find_video_sources`), TMNT LE project, folder = the project | 298/298 byte-identical to the recorded file (9 are the same bytes under another name); 297 certain; 34 s cold |
 | Tester's Heisei V1.93 card, 542 real card clips; folder = 542 1080p stand-in masters (random names, 77 of them 3 s longer) + 658 clips of an older Heisei build | 444 masters + 17 duplicate slots (two slots, one video); 81 flagged "same as the clip on the card" (older-build extracts); 0 wrong |
 
-Owed: a best-quality Write of a real card (size, bitrate, the clips in the
-emulator); David's check in the app from the tree selector.
+**Real Write, 2026-09-23 (scratchpad `e2e_best_build.py`; scratch project =
+a fresh video extract of Godzilla Pro 1.16; 40 full-screen slots; built for a
+16 GB card; every clip read back off the built image and SSIM'd against its
+source):**
+
+| Sources | Normal build | Best quality |
+|---|---|---|
+| 1080p Heisei stand-ins (soft: upscaled from 2 Mbps card clips), before the floor | 253 MB, median 7.7 Mbps, SSIM 0.9746 | 165 MB, median 4.2 Mbps, SSIM 0.9754; lean stock slots 2-3 Mbps -> 5-11 Mbps and SSIM 0.9555 -> 0.9675, 0.9677 -> 0.9817 |
+| TMNT CRF-8 upscale segments (1360x768, detailed), with the floor | 139 MB, median 7.7 Mbps, SSIM 0.9934 | 183 MB, median 8.2 Mbps, SSIM 0.9935 |
+
+Both builds: the card grown to 16 GB, all 40 clips copied whole ("Grew 40
+file(s)"), filesystem valid, the room check passed. The conversion cache:
+the second staging of all 40 took 0.0 s, and a best-quality build after a
+normal one took 23 s instead of 109 s. The web window, driven in the real
+app on a scratch copy of the TMNT LE project against the upscaled card and
+D:\TMNT1987_Upscale: 298/298 found (297 certain), applied, and the sidecar
+matched the real project's recorded files byte for byte for 296 (the other
+2 = the enhanced masters those were encoded from).
+
+**What it means for the tester's card:** a normal build from the original
+files already lifts most of those 2 Mbps clips to the stock rate (the card
+predates the stock-rate conversions); best quality adds bits where a stock
+slot is lean or a picture is detailed, and never takes any away.
+
+Owed: David's check in the app from the tree selector. A hardware run of a
+best-quality card (the emulator decodes in software, so it can't speak for
+the i.MX6 VPU at the 20 Mbps peak; the VPU is specified for 1080p30 H.264
+well above that and stock clips reach 13.3 Mbps).
 
 ## How to test
 

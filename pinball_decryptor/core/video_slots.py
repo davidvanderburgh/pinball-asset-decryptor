@@ -349,7 +349,8 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
     :func:`core.video.transcode_video_to`).  Copies and remuxes ignore it.
 
     *best_quality* makes a re-encode with no budget a constant-quality one
-    instead (the Video tab's "Best quality"); *match_bitrate* is then unused.
+    instead (the Video tab's "Best quality"), held up to *match_bitrate* when
+    the picture is simple enough to come in under it.
 
     Returns ``(ok, detail)`` — on success *detail* summarises the conversions
     applied (may be empty, or note a copy-through); on failure it's an error
@@ -420,7 +421,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                     replacement_path, tmp, slot.info,
                     match_length=trim_to_length, cancel_cb=cancel_cb,
                     max_bytes=byte_budget,
-                    match_bitrate=None if best_quality else match_bitrate,
+                    match_bitrate=match_bitrate,
                     best_quality=best_quality)
                 if not ok:
                     _remove(tmp)
@@ -455,6 +456,11 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
 #: Where :func:`stage_replacements` remembers what it last staged into each
 #: slot (see :class:`StagedCache`).
 STAGED_CACHE = os.path.join(".write_cache", "video_staged.json")
+
+#: Part of every staging recipe: bump it whenever what a conversion produces
+#: changes (encoder flags, rate control, scaling), so a project's cached
+#: conversions from an older version are made again rather than kept.
+CONVERSION_REV = 1
 
 
 class StagedCache:
@@ -515,8 +521,8 @@ class StagedCache:
             shape = [info.vcodec, info.width, info.height,
                      round(info.fps, 3), info.profile, info.level,
                      info.has_audio, info.has_alpha, info.pix_fmt]
-        blob = json.dumps([os.path.normcase(os.path.abspath(rep)), st.st_size,
-                           st.st_mtime_ns, slot.ext, shape,
+        blob = json.dumps([CONVERSION_REV, os.path.normcase(os.path.abspath(rep)),
+                           st.st_size, st.st_mtime_ns, slot.ext, shape,
                            sorted(options.items())], default=str)
         return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
@@ -602,9 +608,9 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     bytes.  The budget is a target, not a gate — a clip that misses it is
     still staged and the build's fit re-encodes it as before.
 
-    *best_quality* re-encodes at constant quality instead of the stock clip's
-    bitrate (see :func:`core.video.transcode_video_to`); a pinned budget
-    still wins where there is one.
+    *best_quality* re-encodes at constant quality, never below the stock
+    clip's bitrate (see :func:`core.video.transcode_video_to`); a pinned
+    budget still wins where there is one.
 
     With *assets_dir*, a slot whose file is still exactly what the same
     source and options produced last time is left as it is
@@ -660,7 +666,7 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         # without the length matched its bytes are no guide, and a clip the
         # build then has to fit would pay a second generation for it.
         rate = None
-        if not pin_byte_size and not best_quality:
+        if not pin_byte_size:
             rate = _clip_bitrate(orig or slot.abs_path)
         recipe = cache.recipe(slot, rep, orig, trim=bool(trim_to_length),
                               noconv=slot_noconv, budget=budget,

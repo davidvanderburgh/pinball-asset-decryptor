@@ -1327,7 +1327,8 @@ def test_a_real_conversion_lands_near_the_slots_bitrate(tmp_path):
 # --------------------------------------------------------------------------
 
 def _best_cmd(monkeypatch, tmp_path, *, max_bytes=None, codec="h264",
-              ext=".mp4", width=1360, height=768, fps=30.0):
+              ext=".mp4", width=1360, height=768, fps=30.0,
+              size=6_000_000):
     from pinball_decryptor.core import video as V
     from pinball_decryptor.core.video import VideoInfo
 
@@ -1336,7 +1337,7 @@ def _best_cmd(monkeypatch, tmp_path, *, max_bytes=None, codec="h264",
     def fake_run(cmd, limit, cancel_cb=None):
         seen.append(list(cmd))
         with open(cmd[-1], "wb") as fh:
-            fh.write(b"x" * 7500)
+            fh.write(b"x" * size)
         return 0, b"", None
 
     monkeypatch.setattr(V, "find_ffmpeg", lambda: "ffmpeg")
@@ -1355,14 +1356,27 @@ def test_best_quality_encodes_at_constant_quality_under_a_peak(monkeypatch,
                                                                tmp_path):
     from pinball_decryptor.core.video import BEST_CRF, BEST_MAX_BPS
 
-    ok, detail, cmds = _best_cmd(monkeypatch, tmp_path)
+    ok, detail, cmds = _best_cmd(monkeypatch, tmp_path)   # 9.6 Mbps out
+    assert len(cmds) == 1
     cmd = cmds[0]
     assert ok and cmd[cmd.index("-crf") + 1] == str(BEST_CRF)
     assert "-b:v" not in cmd                  # not held to the stock rate
     assert int(cmd[cmd.index("-maxrate") + 1]) == BEST_MAX_BPS
     assert cmd[cmd.index("-profile:v") + 1] == "main"    # ceiling kept
     assert "flags=lanczos" in cmd[cmd.index("-vf") + 1]
-    assert "best quality" in detail
+    assert detail.endswith("best quality, 9.6 Mbps")
+
+
+def test_best_quality_is_never_fewer_bits_than_a_normal_build(monkeypatch,
+                                                             tmp_path):
+    """A simple picture comes in under the replaced clip's 7.6 Mbps at
+    constant quality; it is encoded again at that rate, so best quality is
+    the normal rate or more, never less."""
+    ok, detail, cmds = _best_cmd(monkeypatch, tmp_path, size=1_000_000)
+    assert ok and len(cmds) == 2
+    assert "-crf" in cmds[0] and "-crf" not in cmds[1]
+    assert cmds[1][cmds[1].index("-b:v") + 1] == "7600000"
+    assert "held up to the clip it replaces" in detail
 
 
 def test_best_quality_peak_scales_with_a_small_slot(monkeypatch, tmp_path):
@@ -1380,7 +1394,7 @@ def test_a_pinned_budget_still_wins_over_best_quality(monkeypatch, tmp_path):
     assert cmd[cmd.index("-b:v") + 1] == str(int(1_000_000 * 8 * 0.92 / 5.0))
 
 
-def test_staging_hands_best_quality_down_and_skips_the_stock_rate(
+def test_staging_hands_best_quality_down_with_the_stock_rate_as_floor(
         monkeypatch, tmp_path):
     from pinball_decryptor.core import video_slots as VS
 
@@ -1401,7 +1415,8 @@ def test_staging_hands_best_quality_down_and_skips_the_stock_rate(
                                                      probe=False)}
     VS.stage_replacements(slots, {"clip.mp4": str(tmp_path / "rep.mp4")},
                           assets_dir=str(tmp_path), best_quality=True)
-    assert got == {"best": True, "rate": None} and measured == []
+    # the stock clip's rate still rides along: it is best quality's floor
+    assert got == {"best": True, "rate": 7_600_000} and len(measured) == 1
 
 
 # --------------------------------------------------------------------------

@@ -102,3 +102,24 @@ def test_a_row_for_ebirah_is_kept_in_the_project_and_written_for_write(tmp_path,
         assert w.state("modes")["remap"]["rows"] == [] and SR.load(str(proj)) == []
         assert not os.path.exists(SR.project_file(str(proj)))
         assert "No rows" in w.state("modes")["remap"]["msg"]
+
+
+def test_a_rule_is_a_game_mode_in_the_list_and_its_page_carries_its_shots_and_its_rewrite(tmp_path, preview_on):
+    """The counts-as rows and the rewrite live on the page of the game mode they change, not in
+    the page head: every rule the card's port names is in the list's game group, and its page
+    says it is a rule (the Shots and Advanced sections render from modes.remap / modes.rewrite)."""
+    proj = _card_project(tmp_path / "gz", "godzilla_le-1_16_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        st = w.state("modes")
+        ids = {int(r["slug"]) for r in st["game_rows"]}
+        assert {12, 4} <= ids
+        assert w.call("modes.select", "12", "game") is True
+        g = w.state("modes")["game_mode"]
+        assert g["id"] == 12 and g["rule"] is True
+        assert w.call("modes.remap_add", 12, "Left ramp", "Left spinner") == ""
+        st = w.state("modes")
+        assert [(r["rule"], r["from"], r["to"]) for r in st["remap"]["rows"]] == [(12, "Left ramp", "Left spinner")]
+        assert [r["id"] for r in st["rewrite"]["rows"]] == [12, 4]
+        assert w.call("modes.remap_delete", 0) is True
+        assert w.state("modes")["remap"]["rows"] == []

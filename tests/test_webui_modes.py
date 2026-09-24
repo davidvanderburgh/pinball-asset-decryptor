@@ -402,7 +402,7 @@ def test_film_dialog_opens_on_the_open_mode(tmp_path, preview_on):
         assert w.state("modes")["film"]["start"] == "1:23"
         w.call("modes.film_close")
         assert w.state("modes")["film"] is None
-        assert w.state("modes")["labels"]["film"] == "Nothing cut from a film yet."
+        assert w.state("modes")["labels"]["film"] == "Nothing cut from a video yet."
 
 
 # ------------------------------------------------------------------ per title (item 148)

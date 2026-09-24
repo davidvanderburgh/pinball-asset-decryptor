@@ -1,5 +1,5 @@
 // The Modes tab's dialogs: the game's own modes (the stock timers and awards table), the
-// film cutter ("Cut from a film"), New code mode's name, and a clip's preview.
+// video cutter ("Cut from a video"), a mode in C's name, and a clip's preview.
 // Python owns the state (modes.stock, modes.film); these only render it and call back.
 
 import { html, useEffect, useRef, useState, Modal, Button, Field, Check, Radio, Select, Table, Note,
@@ -59,7 +59,7 @@ export function StockDialog({ s, onClose }) {
 }
 
 // ------------------------------------------------------------------ the film cutter
-const FILM_TIP = "Cut this mode's clip, its sound or its screen's picture from a film: pick the film, a start time and a length (up to 30 seconds), and whether to keep the film's letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the film.";
+const FILM_TIP = "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.";
 const FILM_KEYS = ["film", "start", "length", "crop", "take_clip", "take_sound", "take_still",
                    "sound_same", "sound_start", "sound_length", "still_at"];
 const pick = (film) => { const o = {}; for (const k of FILM_KEYS) o[k] = film[k]; return o; };
@@ -73,14 +73,14 @@ export function FilmDialog({ film }) {
   const put = (k) => (x) => setV((o) => Object.assign({}, o, { [k]: x }));
   const busy = !!film.busy;
   const close = () => call("modes.film_close");
-  return html`<${Modal} title="Cut from a film" icon="film" wide onClose=${close}
+  return html`<${Modal} title="Cut from a video" icon="film" wide onClose=${close}
     footer=${html`<span class="grow"></span>
       <${Button} onClick=${close}>Cancel<//>
       <${Button} kind="primary" busy=${busy} disabled=${busy} onClick=${() => call("modes.film_cut", v)}>Cut<//>`}>
     <div class="modes-film">
-      <label class="lbl">Film</label>
+      <label class="lbl">Video</label>
       <div class="row">
-        <${Field} value=${v.film} onChange=${put("film")} mono cls="grow" placeholder="A film on this computer"
+        <${Field} value=${v.film} onChange=${put("film")} mono cls="grow" placeholder="A video file on this computer"
           onCommit=${(x) => call("modes.film_probe", Object.assign({}, v, { film: x }))} />
         <${Button} onClick=${() => call("modes.film_choose", v)}>Choose…<//>
       </div>

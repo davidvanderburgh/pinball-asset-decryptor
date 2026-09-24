@@ -260,7 +260,7 @@ def test_modes_tab_examples_add_kaiju_rush_and_an_empty_editor_keeps_its_labels(
 
     The first was every control under the editor being greyed with no mode open, labels
     included; the page now greys only what a person types in or clicks (``editor_on``). The
-    second is the Examples menu: KAIJU RUSH, as it ran on the machine, one click away.
+    second is an example: KAIJU RUSH, as it ran on the machine, one click away.
     """
     from pinball_decryptor.plugins.stern import mode_project as MP
 
@@ -268,7 +268,7 @@ def test_modes_tab_examples_add_kaiju_rush_and_an_empty_editor_keeps_its_labels(
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, project)
         st = _st(w)
-        assert "Examples" in st["status"]
+        assert "Start from an example" in st["status"] and "KAIJU RUSH" in st["status"]
         assert st["open"] is False and st["editor_on"] is False     # nothing to edit yet
         assert st["ex_ok"] is True
 
@@ -1979,7 +1979,7 @@ def test_modes_tab_from_a_film_makes_the_cut_the_modes_clip_sound_and_picture(tm
         _project(w, project)
         slug = w.run(svc.new_mode, "FILM RUSH")
         st = _st(w)
-        assert "Nothing cut from a film yet" in st["labels"]["film"]
+        assert "Nothing cut from a video yet" in st["labels"]["film"]
         assert not any(st["dis"]["film_" + t] for t in ("clip", "still", "sound"))
         folder = MP.mode_folder(str(project), slug)
 
@@ -2829,8 +2829,12 @@ def test_a_code_example_without_its_films_is_added_and_the_tab_says_which(tmp_pa
         assert sorted(os.listdir(folder)) == ["anguirus_assist.c", "assets.json", "intricate_kit.h"]
         status = _line(w)
         assert "added the example ANGUIRUS as modes/anguirus_assist with its code" in status
-        assert "Godzilla Raids Again (1955)" in status and "Cut film assets" in status
+        assert "Godzilla Raids Again (1955)" in status and "Choose your films folder" in status
         assert _wait(w, lambda: "ANGUIRUS (its film assets are not cut yet)" in _st(w)["code_words"])
+        # its own page says which films it needs, until they are cut
+        assert _wait(w, lambda: (_st(w).get("code") or {}).get("slug") == "anguirus_assist")
+        assert _st(w)["code"]["needs_films"] == "Godzilla Raids Again (1955)"
+        assert _st(w)["code"]["needs_files"].endswith(".mp4")
         # not a form mode: a code mode has no mode.json
         assert [r for r in _st(w)["rows"] if r["kind"] == "form"] == []
         assert w.run(svc.add_code_example, "ANGUIRUS") is None
@@ -2869,6 +2873,9 @@ def test_a_code_example_is_cut_from_the_films_folder_the_person_picks(tmp_path, 
         assert "its own clip, picture, music and calls cut from the films" in _line(w)
         spec = CM.load(str(project), "test_wars")
         assert spec.film["dir"] == films and spec.calls == {"won": "won.wav"}
+        # cut: its page no longer asks for the films folder
+        assert _wait(w, lambda: (_st(w).get("code") or {}).get("slug") == "test_wars")
+        assert _st(w)["code"]["needs_films"] == ""
 
 
 @pytest.mark.usefixtures("preview_modes_on")
@@ -3034,7 +3041,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     sections = HD.sections_for("Modes")
     assert [t for t, _b in sections] == [
         "What it's for", "Which games", "Making a mode", "Several modes", "Try it",
-        "Modes written in C", "The game's own modes", "From a film", "A preview feature"]
+        "Modes written in C", "The game's own modes", "Cut from a video", "A preview feature"]
     bodies = dict(sections)
     assert all(isinstance(b, str) and b for b in bodies.values())
     which = bodies["Which games"]
@@ -3047,10 +3054,13 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert "about a minute" in bodies["Try it"] and "Cancel" in bodies["Try it"]
     assert "used as it is" in bodies["Try it"] and "Start mode now" in bodies["Try it"]
     code = bodies["Modes written in C"]
-    assert "New code mode" in code and "assets.json" in code and "MODE_SDK.md" in code
+    assert "Blank mode in C" in code and "assets.json" in code and "MODE_SDK.md" in code
+    assert "Choose your films folder" in code and "Cut film assets" not in code
     stock = bodies["The game's own modes"]
     assert "All to stock" in stock and "Defaults tab" in stock and "Text tab" in stock
-    assert "never the film" in bodies["From a film"]
+    assert "listed under yours" in stock and "All timers and awards" in stock
+    assert "never the video" in bodies["Cut from a video"]
+    assert "Examples" not in bodies["Making a mode"] and "under Examples" not in json.dumps(bodies)
     assert "as many modes as you make" in bodies["Several modes"] and "counted apart" in bodies["Several modes"]
     for title, body in sections:
         assert "\u2014" not in body, title

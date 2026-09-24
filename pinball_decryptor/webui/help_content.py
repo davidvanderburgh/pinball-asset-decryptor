@@ -2416,8 +2416,9 @@ PREVIEW_HELP = {
              "light and sound calls."),
             ("Which games", _modes_which_games),
             ("Making a mode",
-             "Press New for a blank mode, or pick one under Examples (KAIJU RUSH "
-             "is the one that has run on a machine). Name it, then pick the shot "
+             "New, over the list, makes a blank mode or one from an example (KAIJU "
+             "RUSH is the one that has run on a machine); a project with no mode "
+             "yet offers the same on the page. Name it, then pick the shot "
              "that starts it and how many times, how long it runs, which shots "
              "score and what the first one pays. Everything else is optional: a "
              "screen (a panel in your colours or a picture of your own, showing "
@@ -2454,34 +2455,37 @@ PREVIEW_HELP = {
              "game runs reaches it within a second; a new sound or clip reaches it "
              "at the next Try it."),
             ("Modes written in C",
-             "New code mode… copies the Mode SDK's template into this project's "
-             "modes folder, for what the form cannot do, and opens it; Open "
-             "MODE_SDK.md opens the SDK's guide. The folder's name is the mode's "
+             "New > Mode in C > Blank mode in C… copies the Mode SDK's template into "
+             "this project's modes folder, for what the form cannot do, and opens it; "
+             "Open MODE_SDK.md opens the SDK's guide. The folder's name is the mode's "
              "trigger name (its test triggers are <folder>.start and .stop), so "
              "keep it to letters, digits and _. An assets.json beside the code "
              "names a clip, a picture, music and calls of the mode's own, and Try "
              "it and Write compile the mode in with them. The Code modes line "
-             "lists each one. On a Godzilla title, Examples adds five written in "
-             "C, whose clips, music and calls are cut from your own copy of the "
-             "films by the Cut film assets… button. A code mode has no form and "
-             "is not in the list on the left, so Start mode now cannot reach it."),
+             "lists each one. On a Godzilla title, New > Mode in C adds five "
+             "examples written in C. Their clips, music and calls are cut from "
+             "your own copy of the films: until they are, the example's page says "
+             "which films it needs, with Choose your films folder…. A code mode "
+             "has no form, so Start mode now cannot reach it."),
             ("The game's own modes",
-             "The table at the bottom lists the timers and awards of the modes "
-             "the game shipped with. Pick a row, type a new value and press Set; "
-             "Stock puts that number back to the game's own, and All to stock "
-             "puts every one back. A timer that is an operator setting is the "
+             "The game's own modes are listed under yours. Pick one to see its "
+             "page: its timers and awards (type a new value and press Set; Stock "
+             "puts that number back to the game's own), and on a game whose port "
+             "allows it, a shot that counts as one of its own and a rewrite of its "
+             "shots in C. All timers and awards…, under the list, shows every "
+             "number in one table, and All to stock there puts every one back. A timer that is an operator setting is the "
              "same number the Defaults tab shows, and a number the game works "
              "out in code cannot be changed here (the row says why). Changes are "
              "saved with the project and put on the card by Write. A mode's name "
              "is changed on the Text tab."),
-            ("From a film",
-             "The From a film buttons cut this mode's clip, its sound or its "
-             "screen's picture from a film: pick the film, a start time and a "
-             "length of up to 30 seconds, and whether to keep the film's "
-             "letterbox or fill the frame. The mode keeps only the cut (clip.mp4, "
-             "end.wav, art.png), never the film. A title that cannot use a clip, "
-             "a picture or a sound of the mode's own greys that button, with the "
-             "reason."),
+            ("Cut from a video",
+             "The Cut from a video buttons cut this mode's clip, its sound or its "
+             "screen's picture from a video file of your own (a film, an episode, "
+             "anything): pick the video, a start time and a length of up to 30 "
+             "seconds, and whether to keep its letterbox or fill the frame. The "
+             "mode keeps only the cut (clip.mp4, end.wav, art.png), never the "
+             "video. A title that cannot use a clip, a picture or a sound of the "
+             "mode's own greys that button, with the reason."),
             ("A preview feature",
              "The mode maker is a preview: it is in every copy of the app, switched "
              "off, and a personal code from the app's author switches it on "

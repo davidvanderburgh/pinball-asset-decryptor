@@ -85,6 +85,20 @@ button.modes-list-grp { cursor: pointer; border-radius: 6px; }
 button.modes-list-grp:hover { color: var(--ink-2); background: var(--panel-2); }
 .modes-list-grp:first-child { padding-top: 2px; }
 .modes-list .li.game .ellip { color: var(--ink-2); }
+.modes-list .li.modes-list-all { color: var(--ink-3); gap: 6px; justify-content: flex-start; }
+.modes-list .li.modes-list-all:hover { color: var(--ink-2); }
+
+/* a C example that still needs its films; a game mode's counts-as rows */
+.modes-films { gap: 12px; align-items: center; }
+.modes-ca-row { gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+
+/* the first mode: three ways in */
+.modes-first .modes-editor-bd { gap: 18px; }
+.modes-first-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.modes-first-opt { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.modes-first-opt.rec { border-color: var(--accent); }
+.modes-first-opt > .row { gap: 8px; }
+html.bp-1280 .modes-first-grid { grid-template-columns: minmax(0, 1fr); }
 
 /* one of the game's own modes: a row per number */
 .modes-gm { display: flex; flex-direction: column; gap: 0; }

@@ -341,7 +341,7 @@ def test_the_write_scan_lists_no_mode_rows_with_the_switch_off(
 #: app (service mode, attract mode, a game's own battle modes on tabs that
 #: predate the family), so the list is the family's words, not the word.
 _REVEALING = ("mode maker", "modes tab", "try it", "code mode", "mode file",
-              "mode.json", "film cutter", "from a film", "film cut",
+              "mode.json", "film cutter", "from a film", "film cut", "cut from a video",
               "showcase", "game's own modes", "mode of your own",
               "modes of your own", "mode of our own", "modes of our own",
               "own modes", "your own mode", "mode sdk", "mode runtime",

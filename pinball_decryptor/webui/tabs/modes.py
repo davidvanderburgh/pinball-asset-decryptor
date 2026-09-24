@@ -182,10 +182,11 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
                     "through, and the mode's screen is back when they end. Higher holds more "
                     "back (190: starts and jackpots wait too). 0 leaves the game's display order "
                     "as it is.")
-    FILM_TIP = ("Cut this mode's clip, its sound or its screen's picture from a film: pick "
-                "the film, a start time and a length (up to 30 seconds), and whether to keep "
-                "the film's letterbox or fill the frame. The mode keeps only the cut "
-                "(clip.mp4, end.wav, art.png), never the film.")
+    FILM_TIP = ("Cut this mode's clip, its sound or its screen's picture from a video file of "
+                "your own (a film, an episode, anything): pick the video, a start time and a "
+                "length (up to 30 seconds), and whether to keep its letterbox or fill the "
+                "frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the "
+                "video.")
     STOCK_TIP = (
         "The timers and awards of the modes the game shipped with. Pick a row, type a new "
         "value and press Set. Changes are saved with this project and put on the card by "
@@ -523,10 +524,10 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         if p is None:
             text = "No modes of your own yet."
         elif any(n == "KAIJU RUSH" for n, _s in MP.examples_for(p)):
-            text = ("No modes yet. Press New for a blank mode, or pick one under Examples - "
-                    "KAIJU RUSH is the one that has run on a machine.")
+            text = ("No modes yet. Start from an example (KAIJU RUSH is the one that has run on "
+                    "a machine), or make a blank one.")
         else:
-            text = "No modes yet. Press New for a blank mode, or pick one under Examples."
+            text = "No modes yet. Start from an example, or make a blank one."
         if self._game_ids():
             text += (" The game's own modes are listed under yours: pick one to see and change "
                      "its timers and awards.")
@@ -854,7 +855,7 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
             "clip": spec.clip == "file" and spec.clip_file and "Video: %s" % spec.clip_file or "",
             "sound": self._end_sound_words(spec),
             "clip2": self._clip2_file and "Video: %s" % self._clip2_file or "",
-            "film": FCD.describe(spec) or "Nothing cut from a film yet.",
+            "film": FCD.describe(spec) or "Nothing cut from a video yet.",
         }
         for attr, _mv, _w, _s in self._OWN_SOUNDS:
             name = getattr(spec, attr)
@@ -1806,6 +1807,7 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
                 calls.append({"cue": cue, "wav": wav, "priority": prio,
                               "path": path if path and os.path.isfile(path) else ""})
             film = spec.film or {}
+            needs, needs_files = self._films_needed(spec, folder)
             try:
                 words = CM.describe(slug, spec, prof=self._profile)
             except Exception:                               # noqa: BLE001
@@ -1817,6 +1819,7 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
                 music=spec.music, calls=calls, files=files, describe=words,
                 summary=self._code_words_one(spec),
                 recipe=str(film.get("recipe") or ""),
+                needs_films=needs, needs_files=needs_files,
                 status=("Cannot be built for this card yet: " + self._refusal()
                         if self._refusal() else
                         "Ready to build." if not problems
@@ -1826,6 +1829,28 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         self.set(code=data, status="", save_state="", game_mode=None)
         self._grey_what_the_title_cannot(False)
         self._publish_rows()
+
+    @staticmethod
+    def _films_needed(spec, folder):
+        """``(titles, files)``: the films a C example's recipe cuts from ("Godzilla (1954) and
+        ...") and the file names looked for, while a part it names (clip, picture, music, calls)
+        is not in its folder yet; ``("", "")`` once it is cut, or with no recipe."""
+        from ...plugins.stern import code_modes as CM
+        r = (spec.film or {}).get("recipe") or {}
+        if not r:
+            return "", ""
+        have = {"clip": spec.clip, "art": spec.screen_art, "music": spec.music}
+        cut = all(have[k] and os.path.isfile(os.path.join(folder, have[k]))
+                  for k in ("clip", "art", "music") if r.get(k))
+        if r.get("calls"):
+            cut = cut and bool(spec.calls) and all(
+                wav and os.path.isfile(os.path.join(folder, wav)) for _c, wav, _p in spec.call_list())
+        if cut:
+            return "", ""
+        keys = CM.recipe_films({"recipe": r})
+        titles = [CM.FILM_TITLES.get(k, k) for k in keys]
+        words = titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + " and " + titles[-1]
+        return words, ", ".join(CM.FILMS.get(k, k) for k in keys)
 
     @rpc
     def new_code_mode(self, name):
@@ -1972,8 +1997,8 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         if missing:
             return ("added the example %s as modes/%s with its code. Its clip, picture, music and "
                     "calls are cut from your copy of %s, which was not found, so for now it plays "
-                    "the game's own sounds on a plain panel. Press Cut film assets… and pick the "
-                    "folder that holds the film%s." % (name, slug, CM.missing_words(missing),
+                    "the game's own sounds on a plain panel. On its page, press Choose your films "
+                    "folder… and pick the folder that holds the film%s." % (name, slug, CM.missing_words(missing),
                                                        "s" if len(missing) > 1 else ""))
         return ("added the example %s as modes/%s: its code, and its own clip, picture, music and "
                 "calls cut from the films. Try it builds it in; Write puts it on the card."
@@ -2003,13 +2028,14 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
                 extra = [got]
         return bool(self.add_code_example(name, dirs=extra))
 
-    def recut_code_modes(self, dirs, wait=False):
+    def recut_code_modes(self, dirs, wait=False, only=None):
         from ...plugins.stern import code_modes as CM
         project = self.project()
         if not project:
             return None
         try:
-            code = [(s, c) for s, c in CM.list_code(project) if (c.film or {}).get("recipe")]
+            code = [(s, c) for s, c in CM.list_code(project) if (c.film or {}).get("recipe")
+                    and (only is None or s == only)]
         except CM.CodeModeError as e:
             self._tryit_note(str(e))
             return None
@@ -2046,14 +2072,16 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         return t
 
     @rpc
-    def cut_films(self):
+    def cut_films(self, slug=None):
+        """Choose your films folder… on a C example's page (``slug``), or every C example's
+        film assets at once (no slug)."""
         if not self.project():
             self._tryit_note(MP.NO_PROJECT_HELP)
             return None
         got = self._ask_films_dir("Pick the folder that holds the Godzilla films")
         if not got:
             return None
-        return bool(self.recut_code_modes([got]))
+        return bool(self.recut_code_modes([got], only=slug or None))
 
     # ------------------------------------------------------------------
     # Try it: the footer's calls
@@ -2607,13 +2635,36 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
     # -- the game's own modes in the list, and a page for each ---------------------------
     def _game_ids(self):
         """The ids of the game's own modes the list shows, in the game's order: the ones with
-        a number the person can change (a mode with none, or only read-only ones, has nothing
-        to do here and is left out; the stock dialog still lists every row)."""
+        a number the person can change, and the rules the card's port names (their page takes
+        another shot or a rewrite in C). A mode with neither has nothing to do here and is left
+        out; the stock dialog still lists every row."""
         build = self._stock_build
         if build is None:
             return []
         editable = {n.mode_id for n in build.numbers if n.is_player_facing and n.editable}
+        editable |= self._port_rule_ids()
         return sorted(m for m in build.modes if m in editable)
+
+    def _port_rule_ids(self):
+        """The ids of the game's rules the card's port names (``rule`` lines), when its runtime
+        can take another shot for them or a rewrite; an empty set otherwise."""
+        if not self.project():
+            return set()
+        try:
+            from ...plugins.stern import stock_remap as SR
+            port = self._remap_port()[0]
+            if not port:
+                return set()
+            key = (port, os.path.getmtime(port))
+            if self._rule_ids_cache[0] != key:
+                ids = ({int(rid) for rid, _label, _v in SR.port_rules(port)}
+                       if SR.port_can(port) else set())
+                self._rule_ids_cache = (key, ids)
+            return set(self._rule_ids_cache[1])
+        except Exception:                                   # noqa: BLE001 - the list must never fail on it
+            return set()
+
+    _rule_ids_cache = (None, set())
 
     def _game_rows(self):
         build = self._stock_build
@@ -2653,6 +2704,9 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         self._game_mode = mode_id
         self._set_editor_state(False)
         self.set(code=None, status="", save_state="")
+        if mode_id in self._port_rule_ids():     # its Shots and Advanced sections
+            self.refresh_stock_remap()
+            self.refresh_stock_rewrite()
         self._publish_game_mode()
         self._publish_rows()
 
@@ -2667,7 +2721,11 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         keep_note = cur.get("note", "") if cur.get("id") == mid else ""
         mode = build.modes.get(mid)
         n_edit = sum(1 for r in rows if not r["readonly"])
-        if not rows:
+        rule = mid in self._port_rule_ids()
+        if not rows and rule:
+            about = ("The app found none of this mode's timers, shot counts or awards in the "
+                     "game program. Its shots can still be changed, below.")
+        elif not rows:
             about = ("The app found none of this mode's timers, shot counts or awards in the "
                      "game program, so there is nothing of it to change here.")
         elif not n_edit:
@@ -2679,7 +2737,7 @@ class ModesTab(TitleReadMixin, TryItMixin, StockRemapMixin, StockRewriteMixin, T
         if caveat:
             about += " " + caveat
         self.set(game_mode={
-            "id": mid, "name": build.mode_name(mid), "rows": rows,
+            "id": mid, "name": build.mode_name(mid), "rows": rows, "rule": rule,
             "build": MP.title_label(build.game, build.version),
             "about": about, "starts": list(getattr(mode, "starts", []) or [])[:3],
             "note": keep_note if note is None else note,

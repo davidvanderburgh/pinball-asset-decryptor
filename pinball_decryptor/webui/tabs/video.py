@@ -21,6 +21,8 @@ Store namespace ``video``:
   play       {side, seq}: start that pane once it is loaded
   stop_seq   bumped to stop both panes (tab change, picker opening)
   quality    the "Check the videos on a card" report window
+  best_quality  the "Best quality" option (exported)
+  best       the "Best quality…" window (webui/video_best.py)
   widths     {column key: px} the columns the user dragged (settings.json
              column_widths["video_web"]); the rest fit their content
 """
@@ -34,6 +36,7 @@ import time
 
 from .. import compat
 from .. import video_helpers as vh
+from ..video_best import BEST_TIP, BestQualityMixin
 from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
@@ -45,7 +48,7 @@ NO_PROJECT_TEXT = "Set the project folder on the Extract tab, then click Scan."
 NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
 
 
-class VideoTab(TabService):
+class VideoTab(BestQualityMixin, TabService):
     ns = "video"
     key = "Replace Video"
     label = "Video"
@@ -55,6 +58,7 @@ class VideoTab(TabService):
         "pending_video_assignments", "video_trim_var",
         "video_no_conversion_var", "video_search_var",
         "video_change_filter_var", "reveal_video_slot",
+        "video_best_quality_var",
     )
 
     def __init__(self, window):
@@ -63,6 +67,7 @@ class VideoTab(TabService):
         self.video_change_filter_var = self.var("change_filter", "str", "All")
         self.video_trim_var = self.var("trim", "bool", False)
         self.video_no_conversion_var = self.var("no_conversion", "bool", False)
+        self.video_best_quality_var = self.var("best_quality", "bool", False)
         self._slots = []                 # [VideoSlot] from the last scan
         self._by_rel = {}                # rel -> VideoSlot
         self._assign = {}                # rel -> replacement file path
@@ -111,6 +116,7 @@ class VideoTab(TabService):
                  play={"side": None, "seq": 0}, stop_seq=0,
                  select={"rels": [], "seq": 0},
                  quality=self._quality_state(open_=False),
+                 best_tip=BEST_TIP, best_supported=False,
                  widths=self._saved_widths())
         threading.Thread(target=vh.prune_cache, daemon=True,
                          name="video-cache-prune").start()
@@ -151,8 +157,13 @@ class VideoTab(TabService):
                       "replacement's own length is kept."
                       + (("\n\n" + note) if note else "")),
             quality_report=bool(getattr(caps, "video_quality_report", False)),
+            best_supported=bool(getattr(caps, "video_source_search", False)),
             stern=getattr(mfr, "key", "") == "stern",
             quality=self._quality_state(open_=False))
+        self._b_cancel = True
+        self._b_run += 1
+        self._b_rows = []
+        self.set(best=self._best_state(open_=False))
         self._refresh_list()
         self._update_project()
 
@@ -173,6 +184,7 @@ class VideoTab(TabService):
         self._scan_id += 1
         self._conv_pass += 1
         self._q_cancel = True
+        self._b_cancel = True
 
     def _trace_assets(self):
         """Follow the shared project folder (the Tk mirror label).  Done on
@@ -446,6 +458,10 @@ class VideoTab(TabService):
                 if "video_no_conversion" in staged:
                     self.video_no_conversion_var.set(
                         bool(staged["video_no_conversion"]))
+                # Unlike the two above, never carried over from the last
+                # project: a folder that doesn't say is at the default.
+                self.video_best_quality_var.set(
+                    bool(staged.get("video_best_quality")))
                 self._asis = {
                     rel: bool(v) for rel, v in
                     (staged.get("video_asis_slots") or {}).items()
@@ -1080,10 +1096,15 @@ class VideoTab(TabService):
             'video  option "Use my files as-is — never re-encode"',
             data.get("video_no_conversion"),
             bool(self.video_no_conversion_var.get())))
+        hist.append(history_log.diff_scalar(
+            'video  option "Best quality"',
+            data.get("video_best_quality"),
+            bool(self.video_best_quality_var.get())))
         data["video"] = dict(self._assign)
         data["video_trim"] = bool(self.video_trim_var.get())
         data["video_no_conversion"] = bool(
             self.video_no_conversion_var.get())
+        data["video_best_quality"] = bool(self.video_best_quality_var.get())
         data["video_asis_slots"] = {rel: bool(v)
                                     for rel, v in self._asis.items()}
         data["video_change_filter"] = self.video_change_filter_var.get()

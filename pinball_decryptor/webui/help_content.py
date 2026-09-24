@@ -515,6 +515,34 @@ HELP_CONTENT = {
          "A handful of the game's own clips sit under the bar by design "
          "(long attract loops are encoded lean), so a card with nothing of "
          "yours on it is not expected to come back empty."),
+        ("Best quality from your own files",
+         "Stern Spike 2. A replacement that isn't already an exact match for "
+         "its slot is converted, and by default the conversion is held to "
+         "the bitrate of the clip it replaces, so it fits where that clip "
+         "was. Tick \"Best quality\" (or use \"Best quality…\" on the "
+         "toolbar) and each clip is converted at full quality instead: it "
+         "gets the bits its picture needs, which for a detailed clip is "
+         "more than the stock clip had and for a simple one can be less. "
+         "Build for a 16 GB or 32 GB SD card on the Write tab if they don't "
+         "fit; a build that won't fit says so before it copies anything. "
+         "Converted clips are kept in the project, so building again only "
+         "converts the clips whose file or setting changed.\n\n"
+         "If the project doesn't know which files your clips came from — "
+         "you built the card on another PC, or picked the clips from files "
+         "named nothing like the slots — \"Best quality…\" can find them. "
+         "Pick a card built with your videos, the stock card it was built "
+         "from, and the folder your videos are in, then Find. Every clip "
+         "that card replaced is compared with every video in the folder by "
+         "what it looks like, so names and file types don't matter, and a "
+         "colour clip is told from its black-and-white twin. Where the "
+         "folder has the same video more than once (a master and an "
+         "export, two copies), the best copy is used. Amber rows are worth "
+         "a look before you use them; \"already on the card untouched\" "
+         "means your file went onto the card exactly as it is, so building "
+         "from it again won't make that clip any better. Untick anything "
+         "you don't want, then \"Use these files at best quality\". The "
+         "first search of a big folder takes a few minutes; a second one "
+         "reuses what it read."),
     ],
     "Replace Images": [
         ("Scan and assign",

@@ -325,6 +325,13 @@ class Capabilities:
     # built editions and no build logs left).  The plugin implements
     # ``video_quality``.  Stern Spike 2 only.
     video_quality_report: bool = False
+    # "Best quality…" on the Replace Video tab: re-encode every replaced clip
+    # at constant quality for a card built with room to spare, and find the
+    # files a built card's clips were made from by what they look like (a
+    # modder picked 500 clips by hand from files named nothing like the
+    # slots, and the card was all that was left to go on).  The plugin
+    # implements ``find_video_sources``.  Stern Spike 2 only.
+    video_source_search: bool = False
 
 
 @dataclass(frozen=True)
@@ -657,6 +664,19 @@ class Manufacturer(ABC):
         ``capabilities.video_quality_report`` — the default finds nothing.
         """
         return []
+
+    def find_video_sources(self, card, stock, assets_dir, roots,
+                           cache_dir=None, log=None, progress=None,
+                           cancel=None):
+        """Match every clip the card image *card* replaced (against the
+        stock image *stock*) to a video file under the folders *roots*, by
+        content -> the dict :func:`plugins.stern.source_find.find_video_sources`
+        returns.  Read-only on both images; runs on a worker thread.  Only
+        meaningful for plugins advertising
+        ``capabilities.video_source_search``.
+        """
+        raise NotImplementedError("finding video sources isn't supported "
+                                  "for this manufacturer")
 
     def extract_report_file(self, image_path, ref, out_dir):
         """Copy the file *ref* names off *image_path* into *out_dir* and

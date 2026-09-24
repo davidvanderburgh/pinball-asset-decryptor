@@ -26,6 +26,7 @@ const T = {
   specIntro: "A replacement matching this goes onto the card untouched, at full quality. Anything else has to be converted first — untick \"Use my files as-is\" and the app will do it.",
   specCmd: "To encode your own, start from this and tune whatever you like around it (bitrate, key-frame interval, preset) — the flags below are the parts that have to match:",
   specAn: "The -an is deliberate: this slot's clip has no audio track, and one you add will be played.",
+  best: "Convert every replaced clip at full quality from your own files, for a card built with room to spare (Write tab → SD card size). If this project doesn't know which files your clips came from, it finds them: point it at a card built with your videos and the folder they are in.",
   qTitle: "Check the videos already on a card",
   qIntro: "Measures every clip on a built card image and lists the ones whose bitrate is low enough to look blocky — the same test a Write applies to a replacement, applied after the fact to what is actually on the card. This reads the card image only; nothing is written and nothing is extracted.",
 };
@@ -352,6 +353,106 @@ function QualityWindow({ q }) {
   </div>`;
 }
 
+// "Best quality…": the option, and finding the files a built card's clips
+// were made from (webui/video_best.py).  A window over the tab like the
+// quality report: a search can run for minutes and the tab stays usable.
+function BestWindow({ b }) {
+  const ref = useRef(null);
+  // what is typed in each field, sent when Find is pressed; each follows the
+  // store only when ITS value changes there (one field's commit must not
+  // put the others back to what they were)
+  const fields = useRef({ card: b.card || "", stock: b.stock || "", folder: b.folder || "" });
+  useEffect(() => { fields.current.card = b.card || ""; }, [b.card]);
+  useEffect(() => { fields.current.stock = b.stock || ""; }, [b.stock]);
+  useEffect(() => { fields.current.folder = b.folder || ""; }, [b.folder]);
+  const [off, setOff] = useState({ x: 0, y: 0 });
+  useEffect(() => { if (ref.current) ref.current.focus({ preventScroll: true }); }, []);
+  const startDrag = (e) => {
+    if (e.button !== 0 || e.target.closest("button")) return;
+    e.preventDefault();
+    const z = zoomOf();
+    const x0 = e.clientX, y0 = e.clientY, o0 = off;
+    const lim = (v, m) => Math.max(-m, Math.min(m, v));
+    const move = (ev) => {
+      const mx = Math.max(0, (window.innerWidth / z) / 2 - 80), my = Math.max(0, (window.innerHeight / z) / 2 - 40);
+      setOff({ x: lim(o0.x + (ev.clientX - x0) / z, mx), y: lim(o0.y + (ev.clientY - y0) / z, my) });
+    };
+    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  };
+  function close() { call("video.best_close"); }
+  const onKey = (e) => { if (e.key === "Escape" && !menuOpen()) { e.stopPropagation(); close(); } };
+  const rows = b.rows || [];
+  const cols = [
+    { key: "use", label: "", width: "34px",
+      render: (r) => (r.path ? html`<input type="checkbox" checked=${!!r.use} aria-label=${"Use the file found for " + r.name}
+        onClick=${(e) => e.stopPropagation()} onChange=${(e) => call("video.best_use_row", r.rel, e.target.checked)} />` : null) },
+    { key: "name", label: "Clip", width: "minmax(0,1fr)" },
+    { key: "file", label: "Your file", width: "minmax(0,1.2fr)", titleOf: (r) => r.path || undefined,
+      render: (r) => (r.path ? r.file : html`<span class="muted">not found</span>`) },
+    { key: "match", label: "Match", width: "70px" },
+    { key: "res", label: "Resolution", width: "96px" },
+    { key: "rate", label: "Bitrate", width: "86px" },
+    { key: "note", label: "", width: "minmax(0,.9fr)", titleOf: (r) => r.note || undefined,
+      render: (r) => html`<span class="small muted">${r.note}</span>` },
+  ];
+  const field = (id, k, label) => html`<div class="row" style="gap:8px">
+    <label class="lbl nw vid-blbl" for=${id}>${label}</label>
+    <${Field} id=${id} value=${b[k]} mono cls="grow" disabled=${b.busy}
+      onChange=${(v) => { fields.current[k] = v; }} onCommit=${(v) => call("video.best_set", k, v)} />
+    <${Button} onClick=${() => call("video.best_browse", k)} disabled=${b.busy}>Browse…<//>
+  </div>`;
+  // a typed path counts even if the field never lost focus
+  const find = async () => {
+    if (!b.busy) {
+      const f = { ...fields.current };
+      await call("video.best_set", "card", f.card);
+      await call("video.best_set", "stock", f.stock);
+      await call("video.best_set", "folder", f.folder);
+    }
+    call("video.best_find");
+  };
+  return html`<div class="modal wide vid-qwin vid-bwin" ref=${ref} role="dialog" aria-modal="false"
+      aria-label="Best quality" tabindex="-1" onKeyDown=${onKey}
+      style=${`transform:translate(calc(-50% + ${off.x}px), calc(-50% + ${off.y}px))`}>
+    <div class="hd vid-qwin-hd" onMouseDown=${startDrag}><${Icon} name="film" cls="lg" /><span class="h2">Best quality from your own files</span>
+      <${Button} kind="ghost" size="sm" icon="x" title="Close" onClick=${close} /></div>
+    <div class="bd">
+      <p class="muted small" style="margin:0">${b.intro}</p>
+      <div class="row" style="gap:12px">
+        <${Check} checked=${b.on} label="Convert replacements at best quality" onChange=${(v) => call("video.set_best_quality", v)} />
+        <span class="small muted grow">${b.summary}</span>
+      </div>
+      <div class="vid-bfind">
+        <div class="eyebrow">Find your source files</div>
+        <p class="muted small" style="margin:2px 0 6px">${b.find_intro}</p>
+        ${field("vid-b-card", "card", "Built card:")}
+        ${field("vid-b-stock", "stock", "Stock card:")}
+        <div class="row" style="gap:8px">
+          <label class="lbl nw vid-blbl" for="vid-b-folder">Your videos:</label>
+          <${Field} id="vid-b-folder" value=${b.folder} mono cls="grow" disabled=${b.busy}
+            onChange=${(v) => { fields.current.folder = v; }} onCommit=${(v) => call("video.best_set", "folder", v)} />
+          <${Button} onClick=${() => call("video.best_browse", "folder")} disabled=${b.busy}>Browse…<//>
+          <${Button} onClick=${find}>${b.busy ? "Stop" : "Find"}<//>
+        </div>
+      </div>
+      <div class="row small" style="gap:8px">${b.busy ? html`<${Spinner} />` : null}<span>${b.status}</span></div>
+      <${Table} cls="vid-qtbl vid-btbl" columns=${cols} rows=${rows} rowKey=${(r) => r.rel}
+        rowClass=${(r) => (!r.path ? "muted" : !r.sure ? "warn" : "")}
+        onActivate=${(r) => r.path && call("video.best_reveal", r.rel)}
+        empty=${html`<div class="small muted" style="padding:14px">${b.busy ? "" : "Nothing searched yet."}</div>`} />
+    </div>
+    <div class="ft">
+      ${rows.length ? html`<${Button} kind="ghost" size="sm" onClick=${() => call("video.best_use_all", true)} disabled=${b.busy}>Tick all<//>
+        <${Button} kind="ghost" size="sm" onClick=${() => call("video.best_use_all", false)} disabled=${b.busy}>Untick all<//>` : null}
+      <span class="grow"></span>
+      <${Button} onClick=${close}>Close<//>
+      <${Button} kind="primary" onClick=${() => call("video.best_apply")} disabled=${b.busy}
+        title="Turn best quality on, and use every ticked file as its clip's replacement.">${b.can_apply ? "Use these files at best quality" : "Use best quality"}<//>
+    </div>
+  </div>`;
+}
+
 // -------------------------------------------------------------------- tab
 export default function VideoTab() {
   const s = useNs("video");
@@ -364,6 +465,7 @@ export default function VideoTab() {
   const orig = pv.orig || {};
   const rep = pv.rep || {};
   const q = s.quality || {};
+  const best = s.best || {};
   const [sel, setSel] = useState(() => new Set());
   const anchor = useRef(null);
   const selectJob = useRef(null);
@@ -589,6 +691,7 @@ export default function VideoTab() {
       <${Button} kind="ghost" onClick=${() => call("video.export_csv")} title=${T.csv}>Export CSV<//>
       <${Button} kind="ghost" onClick=${() => call("video.clear_all")} disabled=${!s.can_clear || running} title=${T.clear}>Clear replacements…<//>
       ${s.quality_report ? html`<${Button} kind="ghost" onClick=${() => call("video.quality_open")} title=${T.check}>Check card…<//>` : null}
+      ${s.best_supported ? html`<${Button} kind="ghost" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
     <//>
     ${s.ffmpeg_missing ? html`<${Note} kind="err">${T.ffmpeg}<//>` : null}
     <section class="card vid-card" ref=${cardRef}>
@@ -603,6 +706,8 @@ export default function VideoTab() {
             onChange=${(v) => call("video.set_no_conversion", v)} />
           <${Check} checked=${s.trim} label=${T.trim} title=${s.trim_tip} cls="small" disabled=${!s.trim_enabled}
             onChange=${(v) => call("video.set_trim", v)} />
+          ${s.best_supported ? html`<${Check} checked=${s.best_quality} label="Best quality" title=${s.best_tip} cls="small"
+            onChange=${(v) => call("video.set_best_quality", v)} />` : null}
         </span>
       </div>
       <div class="vid-tblwrap" onMouseDownCapture=${onGripDown}>
@@ -624,5 +729,6 @@ export default function VideoTab() {
     </section>
     ${spec ? html`<${SpecDialog} spec=${spec} onClose=${() => setSpec(null)} />` : null}
     ${q.open ? html`<${QualityWindow} q=${q} />` : null}
+    ${best.open ? html`<${BestWindow} b=${best} />` : null}
   </div>`;
 }

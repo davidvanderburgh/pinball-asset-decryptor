@@ -159,7 +159,8 @@ def test_a_pick_the_stock_clip_also_rejects_is_still_rejected(monkeypatch):
 
 def _fake_stage(store):
     def _stage(slot, rep, trim_to_length=False, no_conversion=False,
-               cancel_cb=None, byte_budget=None, match_bitrate=None):
+               cancel_cb=None, byte_budget=None, match_bitrate=None,
+               best_quality=False):
         store.append((slot.rel_path, no_conversion))
         return True, ""
     return _stage

@@ -88,6 +88,7 @@ _ASSIGN_KEYS = ("audio", "video", "image")
 _AUDIO_FLAG_KEYS = ("audio_loop", "audio_keep", "audio_levels")
 # Toggle values copied verbatim (not per-slot).
 _TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
+                "video_best_quality",
                 "menu_expose_through")
 # Staged Defaults-tab edits.  These need no reconciliation at all: they are
 # keyed by the firmware's own ``AD_`` names and high-score slot labels, which

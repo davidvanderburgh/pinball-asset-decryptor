@@ -628,3 +628,139 @@ def test_real_clips_probe_poster_and_proxy(tmp_path):
         spec = w.call("video.target_spec", "video/a.mp4")
         assert ["Video codec", "H264"] in spec["spec"]
         assert "ffmpeg" in spec["cmd"]
+
+
+# ------------------------------------------------ "Best quality…" (Stern)
+def _fake_search(monkeypatch, found, seen=None):
+    """SternManufacturer.find_video_sources answering *found*
+    ``{rel: (path or None, sure, trimmed, card_copy)}``."""
+    from pinball_decryptor.core import source_match as sm
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+
+    def fake(self, card, stock, assets_dir, roots, cache_dir=None, log=None,
+             progress=None, cancel=None):
+        if seen is not None:
+            seen.update(card=card, stock=stock, roots=roots,
+                        cache_dir=cache_dir)
+        matches, clips = {}, {}
+        for rel, (path, sure, trimmed, copy) in found.items():
+            src = (sm.SourceFile(path=path, size=8_000_000, duration=4.0,
+                                 width=1920, height=1080) if path else None)
+            matches[rel] = sm.Match(key=rel, best=src, score=0.99 if src
+                                    else 0.4, sure=sure, trimmed=trimmed,
+                                    card_copy=copy)
+            clips[rel] = sm.Clip(rel, "", 4.0, 1360, 768, 30.0)
+        return {"matches": matches, "clips": clips, "unnamed": [],
+                "sources": len(found)}
+
+    monkeypatch.setattr(SternManufacturer, "find_video_sources", fake)
+
+
+def test_best_quality_option_is_kept_per_project(tmp_path):
+    proj = _project(tmp_path)
+    other = _project(tmp_path / "b")
+    with web_app(tmp_path, mfr="stern") as w:
+        st = _scan(w, proj)
+        assert st["best_supported"] is True and st["best_quality"] is False
+        assert w.call("video.set_best_quality", True) is True
+        side = json.loads((proj / ".staged_changes.json").read_text())
+        assert side["video_best_quality"] is True
+        # a project that never said is at the default, not the last one's
+        _scan(w, other)
+        assert w.state("video")["best_quality"] is False
+        _scan(w, proj)
+        assert w.state("video")["best_quality"] is True
+
+
+@pytest.mark.parametrize("mfr", ["jjp", "spooky"])
+def test_best_quality_is_stern_only(tmp_path, mfr):
+    with web_app(tmp_path, mfr=mfr) as w:
+        assert w.state("video")["best_supported"] is False
+        assert w.call("video.best_open") is False
+
+
+def test_best_quality_window_finds_and_uses_the_files(tmp_path, monkeypatch):
+    proj = _project(tmp_path)
+    card, stock = tmp_path / "built.raw", tmp_path / "stock.raw"
+    card.write_bytes(b"x")
+    stock.write_bytes(b"y")
+    folder = tmp_path / "masters"
+    folder.mkdir()
+    a, b, c = (folder / "a_master.mov", folder / "b_master.mp4",
+               folder / "c_long.mp4")
+    for p in (a, b, c):
+        p.write_bytes(b"z")
+    seen = {}
+    _fake_search(monkeypatch, {
+        "video/attract.mp4": (str(a), True, False, False),
+        "video/intro.mp4": (str(b), False, False, False),
+        "video/sub/boss.mp4": (str(c), True, True, False),
+    }, seen)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        assert w.call("video.best_open") is True
+        b0 = w.state("video")["best"]
+        assert b0["open"] and "No replacements are picked" in b0["summary"]
+        # nothing picked yet: Find says what is missing
+        w.call("video.best_set", "card", "")
+        assert w.call("video.best_find") is False
+        assert "Pick the built card" in w.asked[-1]["message"]
+        for k, v in (("card", card), ("stock", stock), ("folder", folder)):
+            w.call("video.best_set", k, str(v))
+        assert w.call("video.best_find") is True
+        st = _wait(w, lambda s: not s["best"]["busy"] and s["best"]["rows"])
+        best = st["best"]
+        assert seen["roots"] == [str(folder)]
+        assert seen["cache_dir"] == os.path.join(str(proj), ".write_cache",
+                                                 "fingerprints")
+        rows = {r["rel"]: r for r in best["rows"]}
+        assert rows["video/intro.mp4"]["note"].startswith("worth a look")
+        assert "needs Trim / pad" in rows["video/sub/boss.mp4"]["note"]
+        assert best["found"] == 3 and best["can_apply"]
+        # untick one, then use the rest; the longer file asks about Trim
+        w.call("video.best_use_row", "video/intro.mp4", False)
+        w.answers.append("no")
+        assert w.call("video.best_apply") is True
+        assert "longer than the clip" in w.asked[-1]["message"]
+        side = json.loads((proj / ".staged_changes.json").read_text())
+        assert side["video"] == {"video/attract.mp4": str(a)}
+        assert side["video_best_quality"] is True
+        assert w.state("video")["best_quality"] is True
+        # and again, saying yes to Trim this time
+        w.answers.append("yes")
+        w.call("video.best_use_row", "video/intro.mp4", True)
+        w.call("video.best_apply")
+        side = json.loads((proj / ".staged_changes.json").read_text())
+        assert side["video"] == {"video/attract.mp4": str(a),
+                                 "video/intro.mp4": str(b),
+                                 "video/sub/boss.mp4": str(c)}
+        assert side["video_trim"] is True
+        w.call("video.best_close")
+        assert w.state("video")["best"]["open"] is False
+
+
+def test_a_card_copy_does_not_replace_a_pick_the_project_has(tmp_path,
+                                                             monkeypatch):
+    proj = _project(tmp_path)
+    mine = _mine(tmp_path)
+    extract = tmp_path / "old_extract"
+    extract.mkdir()
+    (extract / "attract.mp4").write_bytes(b"c")
+    _fake_search(monkeypatch, {
+        "video/attract.mp4": (str(extract / "attract.mp4"), True, False,
+                              True)})
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        w.answers.append(str(mine))
+        w.call("video.choose", "video/attract.mp4")
+        w.call("video.best_open")
+        for k, v in (("card", mine), ("stock", tmp_path / "mine"),
+                     ("folder", extract)):
+            w.call("video.best_set", k, str(v))
+        (tmp_path / "stock.raw").write_bytes(b"s")
+        w.call("video.best_set", "stock", str(tmp_path / "stock.raw"))
+        w.call("video.best_find")
+        st = _wait(w, lambda s: not s["best"]["busy"] and s["best"]["rows"])
+        row = st["best"]["rows"][0]
+        assert row["use"] is False
+        assert "already on the card untouched" in row["note"]

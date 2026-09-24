@@ -72,3 +72,12 @@ html.bp-1020 .vid-screen { height: clamp(140px, 30vh, 260px); }
 /* was @media (max-height: 760px) */
 html.bph-760 .vid-screen { height: clamp(96px, 16vh, 170px); }
 html.bph-760 .vid-tbl { min-height: 150px; }
+
+/* "Best quality…": the same kind of window, a little taller for its form */
+.modal.vid-bwin { width: min(980px, calc(100% - 32px)); }
+.vid-bfind { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.vid-blbl { min-width: 88px; }
+.vid-btbl { height: min(40vh, 380px); }
+.vid-btbl .tr.warn > .c { color: var(--warn); }
+.vid-btbl .tr.warn > .c .muted { color: var(--warn); opacity: .8; }
+.vid-btbl input[type="checkbox"] { margin: 0; }

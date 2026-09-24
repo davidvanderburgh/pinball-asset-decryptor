@@ -104,6 +104,17 @@ def preview_modes_on(monkeypatch):
                         lambda feature: feature == "modes" or real(feature))
 
 
+@pytest.fixture
+def not_macos(monkeypatch):
+    """A test of what Windows and Linux do (the SD card size option, the
+    games-partition room measured through the kernel's driver, the texts
+    that name the Write tab's control), pinned there on the macOS CI leg,
+    where the app takes its macOS branches on purpose.  The macOS wording is
+    tested by naming the platform."""
+    if sys.platform == "darwin":
+        monkeypatch.setattr(sys, "platform", "linux")
+
+
 # ---------------------------------------------------------------------------
 # Plugin loading is process-wide.  Force it once per session.
 # ---------------------------------------------------------------------------

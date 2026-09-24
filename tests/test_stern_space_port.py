@@ -6,8 +6,13 @@ size, never to set the control the port ignores."""
 
 import os
 
+import pytest
+
 from pinball_decryptor.plugins.stern import card_size as cs
 from tests.test_webui_card_size import _bare_app
+
+# Windows and Linux: the only platforms SD card size is offered on
+pytestmark = pytest.mark.usefixtures("not_macos")
 
 
 def test_the_port_chain_marks_its_builds_as_fixed_size(monkeypatch):

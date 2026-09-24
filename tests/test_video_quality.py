@@ -229,6 +229,7 @@ def test_an_unsqueezed_blocky_clip_is_not_blamed_on_the_users_export():
     assert "keeps the bitrate you exported it at" in text
 
 
+@pytest.mark.usefixtures("not_macos")
 def test_rebuild_advice_says_whole_clips_need_room():
     """PAD-176: following "build again" for hundreds of clips at once (whole,
     or converted at the stock clip's bitrate) is what ran an 8 GB card's

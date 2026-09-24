@@ -10,6 +10,8 @@ round-trip).
 
 import os
 
+import pytest
+
 from pinball_decryptor.core.checksums import generate_checksums, read_checksums
 from pinball_decryptor.plugins.stern import engine
 
@@ -355,6 +357,7 @@ def test_stern_enables_replace_video_with_a_size_note():
     assert note and "fit" in note.lower()
 
 
+@pytest.mark.usefixtures("not_macos")
 def test_video_size_texts_name_the_games_partition_not_a_byte_budget():
     """PAD-176: the Trim / pad tooltip and the Replace Video help said every
     Spike 2 replacement was fit to its slot's byte size.  An image build puts

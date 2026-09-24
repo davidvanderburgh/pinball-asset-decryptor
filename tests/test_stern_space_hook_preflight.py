@@ -36,6 +36,10 @@ from pinball_decryptor.plugins.stern import manufacturer as stern_mfr
 from tests.test_stern_space_preflight import (V1, V2, _budget, _locate_tiny,
                                               _parts, _stern_card, _tiny_fs)
 
+# Windows and Linux: the prerequisite strip's ext4 row decides, not macOS's
+# e2fsprogs
+pytestmark = pytest.mark.usefixtures("not_macos")
+
 #: the start of an MP4: a file the machine may play as it is
 _MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
 #: the ext4 driver's row on the prerequisite strip, as the tests name it

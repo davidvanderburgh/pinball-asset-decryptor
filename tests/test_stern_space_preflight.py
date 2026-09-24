@@ -27,6 +27,9 @@ from pinball_decryptor.plugins.stern import engine
 from pinball_decryptor.plugins.stern.ext4 import Ext4Reader
 from tests import synthetic
 
+# Windows and Linux: the room measured through the kernel's driver
+pytestmark = pytest.mark.usefixtures("not_macos")
+
 # ---------------------------------------------------------------------------
 # What resize2fs 1.47 did to the stock cards' games partitions (e2e runs on
 # the real images, 2026-09-23): (geometry, from class, to class, free blocks)

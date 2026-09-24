@@ -109,6 +109,7 @@ def test_the_off_reason_names_the_option_the_dialog_really_has(monkeypatch):
     assert 'title="Advanced Audio Options"' in src
 
 
+@pytest.mark.usefixtures("not_macos")
 def test_longer_sound_texts_name_both_limits():
     """PAD-176: every text about longer sounds quoted only the game's 2 GB
     sound-bank limit ("roughly 45 minutes per build").  On a stock 8 GB

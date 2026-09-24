@@ -19,6 +19,10 @@
 /* card image to run */
 .emu-card > .bd { gap: 12px; }
 .emu-src { gap: 8px; }
+.emu-which { align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; }
+.emu-which-t { min-width: 0; flex: 1 1 260px; line-height: 1.45; overflow-wrap: anywhere; }
+.emu-which-dot { margin-right: 4px; }
+.emu-which-b { gap: 8px; flex: 0 0 auto; }
 .emu-machine { gap: 10px 20px; }
 .emu-lblf { gap: 4px; }
 .emu-flags { gap: 18px; flex-wrap: wrap; }

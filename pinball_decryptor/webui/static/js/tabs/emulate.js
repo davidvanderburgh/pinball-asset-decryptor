@@ -72,6 +72,35 @@ function useEndScroll(ref, value) {
   }, [value]);
 }
 
+// Which card this is next to the project in the header (PAD-199).  The header
+// and the Apply box follow the project; the run follows the field above, and
+// a card from anywhere can be picked there.  So say which it is, and offer the
+// project's own cards back.
+function Which({ s }) {
+  const w = s.which;
+  if (!w) return null;
+  const proj = html`<b>${w.project}</b>`;
+  const ours = w.kind === "source" || w.kind === "build";
+  let text;
+  if (w.kind === "source") text = html`The card your project ${proj} was extracted from.`;
+  else if (w.kind === "build") text = html`A card PAD built from your project ${proj}.`;
+  else if (w.kind === "other_build") text = html`Not your project's card: PAD built this one from another project, <b>${w.other}</b>.`;
+  else text = html`Not your project's card: ${proj} was extracted from ${w.source_name
+    ? html`<span class="mono">${w.source_name}</span>` : "a different card"}.`;
+  const also = !ours && s.overrides
+    ? " With the box below ticked, your project's edits run on top of it." : null;
+  const btns = [];
+  if (w.source) btns.push(html`<${Button} size="sm" kind=${ours ? "ghost" : ""} title=${w.source}
+    onClick=${() => call("emulate.use_card", "source")}>Use the extracted card<//>`);
+  if (w.build) btns.push(html`<${Button} size="sm" kind=${ours ? "ghost" : ""} title=${w.build}
+    onClick=${() => call("emulate.use_card", "build")}>Use the last build<//>`);
+  return html`<div class=${cx("note emu-which", !ours && "warn")} role="status">
+    <span class=${cx("small grow emu-which-t", ours && "muted")}>
+      <span class=${cx("emu-which-dot", ours ? "ok-ink" : "warn-ink")}>●</span> ${text}${also}</span>
+    ${btns.length ? html`<div class="row emu-which-b">${btns}</div>` : null}
+  </div>`;
+}
+
 function CardSource({ s }) {
   const pathRef = useRef(null);
   useEndScroll(pathRef, s.card);
@@ -94,6 +123,7 @@ function CardSource({ s }) {
       <${Button} kind="ghost" onClick=${() => call("emulate.open_cache")}
         title="Shows and manages the card cache: the copies of each card on the WSL disk that later boots start from. Deleting frees the space now; the card re-copies on its next boot.">Cache…<//>
     </div>
+    <${Which} s=${s} />
     <div class="grid2 emu-machine">
       <div class="stack emu-lblf"><label class="lbl" for="emu-country">Country (DIP switches)</label>
         <${Select} id="emu-country" ns="emulate" k="country" value=${s.country} options=${countries} title=${s.country_tip} /></div>

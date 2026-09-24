@@ -6,6 +6,7 @@ import os
 
 from pinball_decryptor.core.extract_source import (
     BUILD_RECORD_SUFFIX, SIDE_CAR, amend_extract_source, built_card_source,
+    card_relation, latest_build,
     find_extract_for, other_card_recorded, read_extract_source,
     stale_source_message, version_for_dir, version_hint_for_dir,
     version_hint_from_name, write_extract_source)
@@ -344,3 +345,83 @@ def test_the_transfer_says_baked_mods_are_not_coming(tmp_path):
     assert "intro=intro" in src
     # and it says it in the log too, not only in a dialog that is dismissed
     assert 'append_log(intro' in src
+
+
+# --------------------------------------------------------------------------
+# card_relation: the Emulate tab's "is this the project's card?" (PAD-199)
+# --------------------------------------------------------------------------
+def _project_with_build(tmp_path):
+    src = tmp_path / "godzilla_le-1_16_0.Release.16G.sdcard.raw"
+    _make_image(str(src))
+    proj = tmp_path / "Orchestral"
+    (proj / "build").mkdir(parents=True)
+    write_extract_source(str(proj), str(src))
+    built = proj / "build" / "godzilla-modified.raw"
+    _make_image(str(built))
+    (proj / "build" / ("godzilla-modified.raw" + BUILD_RECORD_SUFFIX)).write_text(
+        json.dumps({"version": 1, "assets": str(proj)}), encoding="utf-8")
+    return src, proj, built
+
+
+def test_card_relation_needs_both_sides(tmp_path):
+    assert card_relation("", str(tmp_path)) is None
+    assert card_relation(str(tmp_path / "x.raw"), "") is None
+
+
+def test_card_relation_names_the_extracted_card(tmp_path):
+    src, proj, built = _project_with_build(tmp_path)
+    rel = card_relation(str(src), str(proj))
+    assert rel["kind"] == "source"
+    assert rel["project"] == "Orchestral"
+    assert rel["source"] == str(src)
+    assert rel["build"] == str(built)
+
+
+def test_card_relation_knows_a_build_of_the_project(tmp_path):
+    src, proj, built = _project_with_build(tmp_path)
+    assert card_relation(str(built), str(proj))["kind"] == "build"
+
+
+def test_card_relation_a_card_from_elsewhere(tmp_path):
+    # The ticket: a custom card from another folder, with the project's
+    # edits ticked on top.  The page says so and offers the project's cards.
+    src, proj, built = _project_with_build(tmp_path)
+    other = tmp_path / "Heisei" / "1.16 Heisei Custom V1.93.raw"
+    other.parent.mkdir()
+    _make_image(str(other))
+    rel = card_relation(str(other), str(proj))
+    assert rel["kind"] == "other"
+    assert rel["source_name"] == src.name
+    assert rel["source"] == str(src) and rel["build"] == str(built)
+
+
+def test_card_relation_a_build_of_another_project(tmp_path):
+    src, proj, built = _project_with_build(tmp_path)
+    rel = card_relation(str(built), str(tmp_path / "Other project"))
+    assert rel["kind"] == "other_build"
+    assert rel["other"] == "Orchestral"
+
+
+def test_card_relation_a_missing_source_offers_nothing(tmp_path):
+    src, proj, built = _project_with_build(tmp_path)
+    os.remove(str(src))
+    rel = card_relation(str(built), str(proj))
+    assert rel["source"] == ""
+    assert rel["source_name"] == src.name
+
+
+def test_latest_build_skips_other_projects_and_half_builds(tmp_path):
+    src, proj, built = _project_with_build(tmp_path)
+    half = proj / "build" / "half.raw"
+    _make_image(str(half))
+    (proj / "build" / ("half.raw" + BUILD_RECORD_SUFFIX)).write_text(
+        json.dumps({"version": 1, "building": True}), encoding="utf-8")
+    alien = proj / "build" / "alien.raw"
+    _make_image(str(alien))
+    (proj / "build" / ("alien.raw" + BUILD_RECORD_SUFFIX)).write_text(
+        json.dumps({"version": 1, "assets": str(tmp_path / "elsewhere")}),
+        encoding="utf-8")
+    os.utime(str(half), (2e9, 2e9))
+    os.utime(str(alien), (2e9, 2e9))
+    assert latest_build(str(proj)) == str(built)
+    assert latest_build(str(tmp_path / "nothing")) is None

@@ -1076,7 +1076,8 @@ def _budget_seen(monkeypatch, tmp_path, **kw):
     got = {}
 
     def fake_stage(slot, rep, trim_to_length=False, no_conversion=False,
-                   cancel_cb=None, byte_budget=None, match_bitrate=None):
+                   cancel_cb=None, byte_budget=None, match_bitrate=None,
+                   best_quality=False):
         got["budget"] = byte_budget
         return True, ""
 
@@ -1231,7 +1232,8 @@ def _rate_seen(monkeypatch, tmp_path, measured=7_600_000, **kw):
     got, measured_paths = {}, []
 
     def fake_stage(slot, rep, trim_to_length=False, no_conversion=False,
-                   cancel_cb=None, byte_budget=None, match_bitrate=None):
+                   cancel_cb=None, byte_budget=None, match_bitrate=None,
+                   best_quality=False):
         got["rate"] = match_bitrate
         return True, ""
 
@@ -1317,3 +1319,164 @@ def test_a_real_conversion_lands_near_the_slots_bitrate(tmp_path):
     assert staged == 1 and not failures
     out_rate = quality_of_file(slot_path).bitrate
     assert out_rate > 0.6 * slot_rate, (out_rate, slot_rate)
+
+
+# --------------------------------------------------------------------------
+# "Best quality": a conversion at constant quality instead of the replaced
+# clip's bitrate, for a card built with room for it.
+# --------------------------------------------------------------------------
+
+def _best_cmd(monkeypatch, tmp_path, *, max_bytes=None, codec="h264",
+              ext=".mp4", width=1360, height=768, fps=30.0):
+    from pinball_decryptor.core import video as V
+    from pinball_decryptor.core.video import VideoInfo
+
+    seen = []
+
+    def fake_run(cmd, limit, cancel_cb=None):
+        seen.append(list(cmd))
+        with open(cmd[-1], "wb") as fh:
+            fh.write(b"x" * 7500)
+        return 0, b"", None
+
+    monkeypatch.setattr(V, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(V, "_run_ffmpeg_watched", fake_run)
+    monkeypatch.setattr(V, "probe_duration", lambda p: 5.0)
+    slot = VideoInfo(path="slot" + ext, vcodec=codec, width=width,
+                     height=height, fps=fps, duration=5.0, has_audio=False,
+                     profile="Main", level=32)
+    ok, detail = V.transcode_video_to(
+        str(tmp_path / "in.mov"), str(tmp_path / ("out" + ext)), slot,
+        max_bytes=max_bytes, match_bitrate=7_600_000, best_quality=True)
+    return ok, detail, seen
+
+
+def test_best_quality_encodes_at_constant_quality_under_a_peak(monkeypatch,
+                                                               tmp_path):
+    from pinball_decryptor.core.video import BEST_CRF, BEST_MAX_BPS
+
+    ok, detail, cmds = _best_cmd(monkeypatch, tmp_path)
+    cmd = cmds[0]
+    assert ok and cmd[cmd.index("-crf") + 1] == str(BEST_CRF)
+    assert "-b:v" not in cmd                  # not held to the stock rate
+    assert int(cmd[cmd.index("-maxrate") + 1]) == BEST_MAX_BPS
+    assert cmd[cmd.index("-profile:v") + 1] == "main"    # ceiling kept
+    assert "flags=lanczos" in cmd[cmd.index("-vf") + 1]
+    assert "best quality" in detail
+
+
+def test_best_quality_peak_scales_with_a_small_slot(monkeypatch, tmp_path):
+    from pinball_decryptor.core.video import BEST_MAX_BPP
+
+    _ok, _d, cmds = _best_cmd(monkeypatch, tmp_path, width=520, height=294)
+    peak = int(cmds[0][cmds[0].index("-maxrate") + 1])
+    assert peak == int(BEST_MAX_BPP * 520 * 294 * 30)
+
+
+def test_a_pinned_budget_still_wins_over_best_quality(monkeypatch, tmp_path):
+    _ok, _d, cmds = _best_cmd(monkeypatch, tmp_path, max_bytes=1_000_000)
+    cmd = cmds[0]
+    assert "-crf" not in cmd
+    assert cmd[cmd.index("-b:v") + 1] == str(int(1_000_000 * 8 * 0.92 / 5.0))
+
+
+def test_staging_hands_best_quality_down_and_skips_the_stock_rate(
+        monkeypatch, tmp_path):
+    from pinball_decryptor.core import video_slots as VS
+
+    got, measured = {}, []
+
+    def fake_stage(slot, rep, trim_to_length=False, no_conversion=False,
+                   cancel_cb=None, byte_budget=None, match_bitrate=None,
+                   best_quality=False):
+        got.update(best=best_quality, rate=match_bitrate)
+        return True, ""
+
+    monkeypatch.setattr(VS, "stage_replacement", fake_stage)
+    monkeypatch.setattr(VS, "_clip_bitrate",
+                        lambda p: measured.append(p) or 7_600_000)
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 900)
+    (tmp_path / "rep.mp4").write_bytes(b"\x00" * 10)
+    slots = {s.rel_path: s for s in scan_video_slots(str(tmp_path),
+                                                     probe=False)}
+    VS.stage_replacements(slots, {"clip.mp4": str(tmp_path / "rep.mp4")},
+                          assets_dir=str(tmp_path), best_quality=True)
+    assert got == {"best": True, "rate": None} and measured == []
+
+
+# --------------------------------------------------------------------------
+# A Write that changes nothing about a clip doesn't convert it again.
+# --------------------------------------------------------------------------
+
+def _count_stagings(monkeypatch):
+    from pinball_decryptor.core import video_slots as VS
+
+    calls = []
+
+    def fake_stage(slot, rep, trim_to_length=False, no_conversion=False,
+                   cancel_cb=None, byte_budget=None, match_bitrate=None,
+                   best_quality=False):
+        calls.append((slot.rel_path, best_quality))
+        with open(slot.abs_path, "wb") as fh:          # what a conversion does
+            fh.write(b"converted" + os.urandom(8))
+        return True, ""
+
+    monkeypatch.setattr(VS, "stage_replacement", fake_stage)
+    monkeypatch.setattr(VS, "_clip_bitrate", lambda p: 7_600_000)
+    return calls
+
+
+def _stage_once(tmp_path, **kw):
+    slots = {s.rel_path: s for s in scan_video_slots(str(tmp_path),
+                                                     probe=False)}
+    return stage_replacements(slots, {"clip.mp4": str(tmp_path / "src"
+                                                      / "rep.mp4")},
+                              assets_dir=str(tmp_path), **kw)
+
+
+def _project(tmp_path):
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 900)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "rep.mp4").write_bytes(b"\x01" * 10)
+
+
+def test_a_second_write_keeps_the_clip_it_already_converted(monkeypatch,
+                                                            tmp_path):
+    calls = _count_stagings(monkeypatch)
+    _project(tmp_path)
+    assert _stage_once(tmp_path) == (1, [])
+    assert _stage_once(tmp_path) == (1, [])            # counted as staged
+    assert len(calls) == 1
+
+
+def test_a_changed_option_source_or_slot_file_converts_again(monkeypatch,
+                                                             tmp_path):
+    calls = _count_stagings(monkeypatch)
+    _project(tmp_path)
+    _stage_once(tmp_path)
+    _stage_once(tmp_path, best_quality=True)            # option changed
+    assert len(calls) == 2
+    (tmp_path / "src" / "rep.mp4").write_bytes(b"\x02" * 12)  # new source
+    _stage_once(tmp_path, best_quality=True)
+    assert len(calls) == 3
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 900)  # a revert put stock back
+    _stage_once(tmp_path, best_quality=True)
+    assert len(calls) == 4
+    _stage_once(tmp_path, best_quality=True)
+    assert len(calls) == 4
+
+
+def test_a_failed_conversion_is_not_remembered(monkeypatch, tmp_path):
+    from pinball_decryptor.core import video_slots as VS
+
+    _project(tmp_path)
+    outcome = [False]
+
+    def fake_stage(slot, rep, **kw):
+        return (outcome[0], "" if outcome[0] else "ffmpeg said no")
+
+    monkeypatch.setattr(VS, "stage_replacement", fake_stage)
+    monkeypatch.setattr(VS, "_clip_bitrate", lambda p: None)
+    assert _stage_once(tmp_path)[0] == 0
+    cache = VS.StagedCache(str(tmp_path))
+    assert "clip.mp4" not in cache.entries

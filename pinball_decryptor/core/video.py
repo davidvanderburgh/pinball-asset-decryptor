@@ -1178,6 +1178,28 @@ def _run_ffmpeg_watched(cmd, limit, cancel_cb=None):
 # attract loops, or a project extracted from a card an older version built.
 CONVERT_FLOOR_BPP = 0.06
 
+# "Best quality" (the Video tab option, for a card built with room to spare):
+# an H.264 conversion at constant quality instead of the replaced clip's
+# bitrate.  CRF 16 is near-transparent for this material; x264's preset and
+# every other setting stay what a conversion has always used, so the stream
+# is shaped exactly like the ones the machine already plays and only the
+# bits spent differ.  The peak is capped for the decoder's sake at
+# BEST_MAX_BPP of the slot's own pixel rate (20 Mbps at 1360x768/30 fps,
+# half as much again as the highest-rate stock clip measured, 13.3 Mbps on
+# Godzilla 1.16) and never above BEST_MAX_BPS.
+BEST_CRF = 16
+BEST_MAX_BPP = 0.64
+BEST_MAX_BPS = 20_000_000
+
+
+def best_quality_cap(info):
+    """The peak bitrate a best-quality conversion into a slot shaped like
+    *info* may reach."""
+    if info is None or info.width <= 0 or info.height <= 0:
+        return BEST_MAX_BPS
+    fps = info.fps if info.fps > 0 else 30.0
+    return int(min(BEST_MAX_BPS, BEST_MAX_BPP * info.width * info.height * fps))
+
 
 def _rate_str(bps):
     """``7.4 Mbps`` / ``820 kbps`` for a log line."""
@@ -1188,7 +1210,7 @@ def _rate_str(bps):
 
 def transcode_video_to(src_path, dst_path, original_info,
                        match_length=False, cancel_cb=None, max_bytes=None,
-                       match_bitrate=None):
+                       match_bitrate=None, best_quality=False):
     """Transcode *src_path* into *dst_path*, whose extension selects the
     output container / codec.
 
@@ -1228,6 +1250,12 @@ def transcode_video_to(src_path, dst_path, original_info,
     that user's card was such a conversion (PAD-171).  The rate is capped, not
     just targeted: a bare ``-b:v`` overshot that clip by a quarter.
 
+    *best_quality* (no budget) replaces that held rate with a constant-quality
+    H.264 encode (:data:`BEST_CRF`, peak capped by :func:`best_quality_cap`)
+    scaled with Lanczos: for a card built with the room to carry it, the clip
+    comes out as good as its source allows rather than as big as the stock
+    clip was.  A VP8/VP9 slot gets the same idea at libvpx's scale.
+
     Requires ffmpeg.
     """
     ffmpeg = find_ffmpeg()
@@ -1256,7 +1284,8 @@ def transcode_video_to(src_path, dst_path, original_info,
         # stretching.
         vf.append(
             f"scale={original_info.width}:{original_info.height}"
-            f":force_original_aspect_ratio=decrease")
+            f":force_original_aspect_ratio=decrease"
+            + (":flags=lanczos" if best_quality else ""))
         vf.append(
             f"pad={original_info.width}:{original_info.height}"
             f":(ow-iw)/2:(oh-ih)/2"
@@ -1303,7 +1332,9 @@ def transcode_video_to(src_path, dst_path, original_info,
     # replaces (see the docstring).  The floor is judged on the slot's own
     # geometry, which is what the output has.
     vmatch = None
-    if (not budget and "libx264" in vargs
+    best = bool(best_quality and not budget)
+    best_cap = best_quality_cap(original_info) if best else 0
+    if (not budget and not best and "libx264" in vargs
             and match_bitrate and match_bitrate > 0):
         floor = 0
         if (original_info and original_info.width > 0
@@ -1345,6 +1376,11 @@ def transcode_video_to(src_path, dst_path, original_info,
                 elif vmatch:
                     cmd += ["-b:v", str(vmatch), "-maxrate", str(vmatch),
                             "-bufsize", str(vmatch * 2)]
+                elif best and "libx264" in vargs:
+                    cmd += ["-crf", str(BEST_CRF), "-maxrate", str(best_cap),
+                            "-bufsize", str(best_cap * 2)]
+                elif best and _is_vpx(vargs):
+                    cmd += ["-crf", "20", "-b:v", "0"]
                 elif _is_vpx(vargs):
                     # Pin constant-quality mode: with no explicit rate control
                     # the libvpx default varies by ffmpeg build (older ones
@@ -1390,6 +1426,9 @@ def transcode_video_to(src_path, dst_path, original_info,
                     actions.append("encoded at %s (the clip it replaces is %s)"
                                    % (_rate_str(size * 8 / enc_dur),
                                       _rate_str(match_bitrate)))
+                elif best and enc_dur:
+                    actions.append("best quality, %s"
+                                   % _rate_str(size * 8 / enc_dur))
                 return True, ", ".join(a for a in actions if a)
             over = (f"still {size} bytes against the slot's {budget} — "
                     f"the build will re-encode it to fit")

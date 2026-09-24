@@ -318,7 +318,8 @@ def _remux_verdict(slot: VideoSlot, replacement_path: str,
 def stage_replacement(slot: VideoSlot, replacement_path: str,
                       trim_to_length: bool = False, no_conversion: bool = False,
                       cancel_cb=None, byte_budget: Optional[int] = None,
-                      match_bitrate: Optional[float] = None):
+                      match_bitrate: Optional[float] = None,
+                      best_quality: bool = False):
     """Stage a single replacement over *slot*.
 
     With *no_conversion* set, the replacement is copied through verbatim and
@@ -346,6 +347,9 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
     *match_bitrate*, when given, is the bitrate of the clip the slot shipped
     with, and a re-encode with no budget is held to it (see
     :func:`core.video.transcode_video_to`).  Copies and remuxes ignore it.
+
+    *best_quality* makes a re-encode with no budget a constant-quality one
+    instead (the Video tab's "Best quality"); *match_bitrate* is then unused.
 
     Returns ``(ok, detail)`` — on success *detail* summarises the conversions
     applied (may be empty, or note a copy-through); on failure it's an error
@@ -415,7 +419,9 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                 ok, detail = transcode_video_to(
                     replacement_path, tmp, slot.info,
                     match_length=trim_to_length, cancel_cb=cancel_cb,
-                    max_bytes=byte_budget, match_bitrate=match_bitrate)
+                    max_bytes=byte_budget,
+                    match_bitrate=None if best_quality else match_bitrate,
+                    best_quality=best_quality)
                 if not ok:
                     _remove(tmp)
                     return False, detail
@@ -446,13 +452,122 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
         return False, str(e)
 
 
+#: Where :func:`stage_replacements` remembers what it last staged into each
+#: slot (see :class:`StagedCache`).
+STAGED_CACHE = os.path.join(".write_cache", "video_staged.json")
+
+
+class StagedCache:
+    """What each slot of a project folder was last staged from, so a Write
+    that changes nothing about a clip does not convert it again.
+
+    Every Write, mod-pack export and Emulate apply used to re-encode every
+    assigned clip from scratch -- tolerable while a conversion was held to
+    the stock clip's bitrate, not once "Best quality" makes each one a
+    constant-quality encode and a retheme has 500 of them.  An entry is the
+    recipe (the source file's path, size and modification time, the slot's
+    shape and every option that reaches the encoder) and the file it made
+    (size and modification time of the slot's file afterwards).  Both have
+    to still hold for the slot to be left alone: a new source, a changed
+    option, a revert that put the stock clip back, or anything else that
+    touched the file, and it is staged again.
+    """
+
+    VERSION = 1
+
+    def __init__(self, assets_dir: Optional[str]):
+        self.path = (os.path.join(assets_dir, STAGED_CACHE)
+                     if assets_dir else None)
+        self.entries: Dict[str, dict] = {}
+        if self.path:
+            try:
+                import json
+                with open(self.path, encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict) and data.get("v") == self.VERSION:
+                    self.entries = dict(data.get("slots") or {})
+            except (OSError, ValueError):
+                pass
+
+    @staticmethod
+    def recipe(slot: VideoSlot, rep: str, orig: Optional[str] = None,
+               **options) -> Optional[str]:
+        """The hash of everything that decides what staging *rep* into
+        *slot* produces.  The slot is identified by its pristine snapshot
+        *orig* when there is one: the clip in the slot is the last
+        conversion by then, and a probe of it can differ in some detail
+        (a level, a profile) from the stock clip every conversion targets."""
+        import hashlib
+        import json
+        try:
+            st = os.stat(rep)
+        except OSError:
+            return None
+        shape = None
+        if orig:
+            try:
+                ost = os.stat(orig)
+                shape = ["orig", ost.st_size, ost.st_mtime_ns]
+            except OSError:
+                shape = None
+        if shape is None and slot.info:
+            info = slot.info
+            shape = [info.vcodec, info.width, info.height,
+                     round(info.fps, 3), info.profile, info.level,
+                     info.has_audio, info.has_alpha, info.pix_fmt]
+        blob = json.dumps([os.path.normcase(os.path.abspath(rep)), st.st_size,
+                           st.st_mtime_ns, slot.ext, shape,
+                           sorted(options.items())], default=str)
+        return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+    def fresh(self, slot: VideoSlot, recipe: Optional[str]) -> bool:
+        e = self.entries.get(slot.rel_path)
+        if not recipe or not isinstance(e, dict) or e.get("recipe") != recipe:
+            return False
+        try:
+            st = os.stat(slot.abs_path)
+        except OSError:
+            return False
+        return (st.st_size == e.get("size")
+                and st.st_mtime_ns == e.get("mtime_ns"))
+
+    def record(self, slot: VideoSlot, recipe: Optional[str]) -> None:
+        if not recipe:
+            self.entries.pop(slot.rel_path, None)
+            return
+        try:
+            st = os.stat(slot.abs_path)
+        except OSError:
+            return
+        self.entries[slot.rel_path] = {"recipe": recipe, "size": st.st_size,
+                                       "mtime_ns": st.st_mtime_ns}
+
+    def forget(self, rel: str) -> None:
+        self.entries.pop(rel, None)
+
+    def save(self) -> None:
+        if not self.path:
+            return
+        import json
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"v": self.VERSION, "slots": self.entries}, f,
+                          indent=0, sort_keys=True)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+
 def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        assignments: Dict[str, str],
                        trim_to_length: bool = False,
                        no_conversion: bool = False,
                        log_cb=None, progress_cb=None, assets_dir=None,
                        cancel_cb=None, pin_byte_size: bool = False,
-                       asis_overrides: Optional[Dict[str, bool]] = None):
+                       asis_overrides: Optional[Dict[str, bool]] = None,
+                       best_quality: bool = False):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their VideoSlot.  Returns
@@ -486,6 +601,14 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     replacement for a 3-second slot would be crushed into the 3-second clip's
     bytes.  The budget is a target, not a gate — a clip that misses it is
     still staged and the build's fit re-encodes it as before.
+
+    *best_quality* re-encodes at constant quality instead of the stock clip's
+    bitrate (see :func:`core.video.transcode_video_to`); a pinned budget
+    still wins where there is one.
+
+    With *assets_dir*, a slot whose file is still exactly what the same
+    source and options produced last time is left as it is
+    (:class:`StagedCache`).
     """
     from .checksums import read_baseline_any
     from . import staged_originals
@@ -497,6 +620,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     failures: List = []
     overrides = dict(asis_overrides or {})
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
+    cache = StagedCache(assets_dir)
+    kept = 0
 
     for i, (rel, rep) in enumerate(items):
         if cancel_cb is not None and cancel_cb():
@@ -535,23 +660,40 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         # without the length matched its bytes are no guide, and a clip the
         # build then has to fit would pay a second generation for it.
         rate = None
-        if not pin_byte_size:
+        if not pin_byte_size and not best_quality:
             rate = _clip_bitrate(orig or slot.abs_path)
+        recipe = cache.recipe(slot, rep, orig, trim=bool(trim_to_length),
+                              noconv=slot_noconv, budget=budget,
+                              rate=round(rate or 0), best=bool(best_quality))
+        if cache.fresh(slot, recipe):
+            staged += 1
+            kept += 1
+            if log_cb:
+                log_cb(f"  ✓ {rel}  (already converted from this file — "
+                       f"kept)", "success")
+            continue
         ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length,
                                        no_conversion=slot_noconv,
                                        cancel_cb=cancel_cb,
                                        byte_budget=budget,
-                                       match_bitrate=rate)
+                                       match_bitrate=rate,
+                                       best_quality=best_quality)
         if ok:
             staged += 1
+            cache.record(slot, recipe)
             if log_cb:
                 msg = f"  ✓ {rel}" + (f"  ({detail})" if detail else "")
                 log_cb(msg, "success")
         else:
+            cache.forget(rel)
             failures.append((rel, detail))
             if log_cb:
                 log_cb(f"  ✗ {rel}: {detail}", "error")
+        cache.save()
 
+    if kept and log_cb:
+        log_cb("%d clip(s) were already converted from the same file with "
+               "the same settings and were kept as they are." % kept, "info")
     if progress_cb:
         progress_cb(total, total, "")
     return staged, failures

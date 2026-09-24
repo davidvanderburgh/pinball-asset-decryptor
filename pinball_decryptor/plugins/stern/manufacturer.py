@@ -317,6 +317,11 @@ class SternManufacturer(Manufacturer):
         # FINISHED card instead — engine.card_video_quality reads every clip's
         # moov off the image in seconds and reports the ones under the bar.
         video_quality_report=True,
+        # Best quality from sources: with the room a bigger SD card gives,
+        # every replaced clip can be re-encoded from its own file at constant
+        # quality; source_find recovers which files those were from a built
+        # card by content, for a project that never recorded them.
+        video_source_search=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.
@@ -732,6 +737,19 @@ class SternManufacturer(Manufacturer):
             return []
         from .engine import card_video_quality
         return card_video_quality(path, log, progress, cancel)
+
+    def find_video_sources(self, card, stock, assets_dir, roots,
+                           cache_dir=None, log=None, progress=None,
+                           cancel=None):
+        for path in (card, stock):
+            if path.lower().endswith(".zip") or \
+                    detect_spike1_game(path) is not None:
+                raise ValueError("Pick Spike 2 card images: %s isn't one."
+                                 % os.path.basename(path))
+        from .source_find import find_video_sources
+        return find_video_sources(card, stock, assets_dir, roots,
+                                  cache_dir=cache_dir, log=log,
+                                  progress=progress, cancel=cancel)
 
     def extract_report_file(self, image_path, ref, out_dir):
         from .compare import extract_ref

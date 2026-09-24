@@ -3899,10 +3899,15 @@ class App:
             return (0, 0, [])
         slots_by_rel, assignments, trim, no_conversion, asis = pend
         from .core.video_slots import stage_replacements
+        from .core import staged_changes
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+        # "Best quality" is read from the folder's own record, which the
+        # Video tab writes the moment it is ticked: the same answer whether
+        # the tab has scanned this folder or not.
+        best = bool(staged_changes.load(assets_dir).get("video_best_quality"))
         self.msg_queue.put(LogMsg(
             f"Applying {len(assignments)} video replacement(s) to the "
-            f"assets folder...", "info"))
+            f"assets folder{' at best quality' if best else ''}...", "info"))
         pin_size = False
         if self._current_mfr is not None:
             try:
@@ -3915,7 +3920,8 @@ class App:
                 slots_by_rel, assignments, trim_to_length=trim,
                 no_conversion=no_conversion, log_cb=log_cb,
                 assets_dir=assets_dir, cancel_cb=cancel_cb,
-                pin_byte_size=pin_size, asis_overrides=asis)
+                pin_byte_size=pin_size, asis_overrides=asis,
+                best_quality=best)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."

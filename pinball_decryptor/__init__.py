@@ -1,3 +1,3 @@
 """Pinball Asset Decryptor — unified decryptor for multiple pinball makers."""
 
-__version__ = "1.5.3"
+__version__ = "1.5.4"

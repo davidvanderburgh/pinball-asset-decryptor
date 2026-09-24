@@ -4340,6 +4340,10 @@ class App:
             # Clear the stamps so the next tab visit re-scans the now-populated
             # folder instead of trusting the path-keyed short-circuit.
             self.window.invalidate_asset_scans()
+            # Grey Extract out until a new run would differ (PAD-206).
+            note = getattr(self.window, "note_extract_done", None)
+            if note is not None:
+                note(in_path, out_path)
         self._last_extract_io = None
         self.window.set_running(False, mode=self._active_mode)
         if self._cancel_requested:

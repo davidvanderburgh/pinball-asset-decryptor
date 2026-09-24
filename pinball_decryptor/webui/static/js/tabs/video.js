@@ -358,8 +358,13 @@ function QualityWindow({ q }) {
 // quality report: a search can run for minutes and the tab stays usable.
 function BestWindow({ b }) {
   const ref = useRef(null);
+  // what is typed in each field, sent when Find is pressed; each follows the
+  // store only when ITS value changes there (one field's commit must not
+  // put the others back to what they were)
   const fields = useRef({ card: b.card || "", stock: b.stock || "", folder: b.folder || "" });
-  useEffect(() => { fields.current = { card: b.card || "", stock: b.stock || "", folder: b.folder || "" }; }, [b.card, b.stock, b.folder]);
+  useEffect(() => { fields.current.card = b.card || ""; }, [b.card]);
+  useEffect(() => { fields.current.stock = b.stock || ""; }, [b.stock]);
+  useEffect(() => { fields.current.folder = b.folder || ""; }, [b.folder]);
   const [off, setOff] = useState({ x: 0, y: 0 });
   useEffect(() => { if (ref.current) ref.current.focus({ preventScroll: true }); }, []);
   const startDrag = (e) => {
@@ -388,7 +393,8 @@ function BestWindow({ b }) {
     { key: "match", label: "Match", width: "70px" },
     { key: "res", label: "Resolution", width: "96px" },
     { key: "rate", label: "Bitrate", width: "86px" },
-    { key: "note", label: "", width: "minmax(0,.9fr)", render: (r) => html`<span class="small muted">${r.note}</span>` },
+    { key: "note", label: "", width: "minmax(0,.9fr)", titleOf: (r) => r.note || undefined,
+      render: (r) => html`<span class="small muted">${r.note}</span>` },
   ];
   const field = (id, k, label) => html`<div class="row" style="gap:8px">
     <label class="lbl nw vid-blbl" for=${id}>${label}</label>
@@ -399,7 +405,7 @@ function BestWindow({ b }) {
   // a typed path counts even if the field never lost focus
   const find = async () => {
     if (!b.busy) {
-      const f = fields.current;
+      const f = { ...fields.current };
       await call("video.best_set", "card", f.card);
       await call("video.best_set", "stock", f.stock);
       await call("video.best_set", "folder", f.folder);

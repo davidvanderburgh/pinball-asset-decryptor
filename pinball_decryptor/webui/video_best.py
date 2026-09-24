@@ -28,11 +28,12 @@ from .rpc import rpc
 
 BEST_TIP = (
     "Convert every replacement at full quality instead of holding it to the "
-    "size of the clip it replaces. The clips come out several times bigger, "
-    "so build for a 16 GB or 32 GB SD card (Write tab → SD card size) if "
-    "they don't fit on 8 GB; a Write that won't fit says so before it copies "
-    "anything. A replacement that already suits its slot still goes on "
-    "exactly as it is.")
+    "size of the clip it replaces. Each clip gets the bits its picture "
+    "needs: a detailed one comes out bigger than the stock clip, a simple "
+    "one can come out smaller. Build for a 16 GB or 32 GB SD card (Write tab "
+    "→ SD card size) if they don't fit on 8 GB; a Write that won't fit says "
+    "so before it copies anything. A replacement that already suits its "
+    "slot still goes on exactly as it is.")
 
 INTRO = (
     "Every replaced clip is re-encoded from your own file at full quality, "
@@ -323,7 +324,7 @@ class BestQualityMixin:
                 if not m.sure:
                     notes.append("worth a look")
                 if m.card_copy:
-                    notes.append("same as the clip on the card")
+                    notes.append("already on the card untouched")
                 if m.same:
                     notes.append("%d other cop%s" % (
                         len(m.same), "y" if len(m.same) == 1 else "ies"))

@@ -763,4 +763,4 @@ def test_a_card_copy_does_not_replace_a_pick_the_project_has(tmp_path,
         st = _wait(w, lambda s: not s["best"]["busy"] and s["best"]["rows"])
         row = st["best"]["rows"][0]
         assert row["use"] is False
-        assert "same as the clip on the card" in row["note"]
+        assert "already on the card untouched" in row["note"]

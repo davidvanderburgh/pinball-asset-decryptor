@@ -105,7 +105,10 @@ the middle of a long file (the TMNT upscale pipeline's problem, not this one).
 
 - 2026-09-23: matcher, card side, best-quality encode, conversion cache, web
   window. Unit tests: `tests/test_source_match.py` (21),
-  `tests/test_video_slots.py` (+7). Real-input proof below.
+  `tests/test_video_slots.py` (+8), `tests/test_webui_video.py` (+5).
+  Real-input proof below.
+- 2026-09-24: **Done.** David confirmed; merged with `/finish`. The hardware
+  run at the 20 Mbps peak is a follow-up driven by user feedback, not a gate.
 
 **Real-input proof (scratchpad scripts, 2026-09-23):**
 

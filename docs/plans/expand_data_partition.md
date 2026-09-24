@@ -107,7 +107,8 @@ card of that class).
 
 ## Status
 
-- **2026-09-23: done on the branch, emulator-proven. Owed: a hardware boot.**
+- **2026-09-23: done on the branch, emulator-proven, ready to merge.** David
+  accepted the emulator proof in place of a hardware boot.
   Commits: `b2e6dd0d` core, `711cda6f` loop device (the truncation fix),
   `7ce92190` Write tab, `1c8403d5` hardening, then the final review's fixes.
 - Proven on real cards (scratchpad scripts `e2e_stageA*.py`, `e2e_stageB_*.py`,
@@ -138,12 +139,12 @@ card of that class).
 - A review sweep (engine, app, machine rootfs, resize2fs source, critic) and a
   final adversarial review (4 lenses, each finding put to a skeptic) found no
   data-safety defect in the final code. Their fixes are in.
-- **Owed before calling it hardware-confirmed:** flash a 16G build and a 32G
-  build to real SD cards and boot a machine. Check that the game reaches
-  attract, settings and audits survive (p5 moved verbatim), a Stern `.spk`
-  update installs onto /games, and a power cycle's boot fsck is clean. The rig
-  never runs the card's kernel 3.14 or its init, so the emulator cannot prove
-  those.
+- **Not proven, by choice:** a hardware boot. David accepted the emulator proof
+  and won't test on a machine himself. The emulator can't cover everything,
+  because the rig never runs the card's kernel 3.14 or its init. Those
+  unproven parts are: the boot-time fsck of the grown p3, a Stern `.spk`
+  update installing onto the grown /games, and settings surviving at their
+  moved LBA across a real boot. If a user reports one of those, start there.
 - **2026-09-23, second pass: the room check before the encode.**
   - Checkpoint commit `753673a3`, then the review fixes. Three reviewers found
     12 confirmed defects in the first cut, then 10 more in the fixes, and

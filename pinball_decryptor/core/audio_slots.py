@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 
 from .audio import (AudioInfo, detect_audio_info, find_ffmpeg,
                     process_modified_audio, transcode_to)
-from .checksums import NON_ASSET_DIRS
+from .checksums import NON_ASSET_DIRS, is_other_extract
 
 # Audio containers we treat as replaceable slots.
 AUDIO_EXTS = (".wav", ".ogg")
@@ -155,8 +155,11 @@ def scan_audio_slots(assets_dir: str, roots=None, exts=None,
             # staged state, never asset slots — the build output (batch 19),
             # and the copies an import drops of files the sender replaced on
             # their card IMAGE, which belong to a .raw and not to this card.
+            # A sub-folder with its own baseline is another card's extract
+            # (Extract Both into a project, PAD-211), never this card's slots.
             dirs[:] = [d for d in dirs
                        if not d.startswith(".")
+                       and not is_other_extract(os.path.join(root, d))
                        and not (d in NON_ASSET_DIRS
                                 and os.path.normcase(os.path.normpath(root))
                                 == os.path.normcase(

@@ -25,6 +25,7 @@ still no quality lost); anything else is a re-encode.  The last two need
 ffmpeg.
 """
 
+import copy
 import os
 import shutil
 from dataclasses import dataclass, replace
@@ -567,6 +568,32 @@ class StagedCache:
             pass
 
 
+#: Per-clip length choices (see :func:`stage_replacements`); a number of
+#: seconds is the third.
+LENGTH_STOCK = "stock"
+LENGTH_FULL = "full"
+
+
+def length_seconds(choice) -> float:
+    """The seconds a per-clip length choice asks for, 0.0 when it isn't a
+    typed length (stock, full, nothing, or garbage out of a sidecar)."""
+    if isinstance(choice, bool) or not isinstance(choice, (int, float)):
+        return 0.0
+    return float(choice) if choice > 0 else 0.0
+
+
+def _with_length(slot: VideoSlot, seconds: float) -> VideoSlot:
+    """*slot* as a clip of *seconds*, so a Trim / pad conversion cuts or
+    pads the replacement to that length instead of the stock clip's."""
+    info = slot.info if slot.info is not None else (
+        detect_video_info(slot.abs_path))
+    if info is None:
+        return slot
+    info = copy.copy(info)
+    info.duration = float(seconds)
+    return replace(slot, info=info, probed=True)
+
+
 def _pristine_slot(slot: VideoSlot, orig: Optional[str]) -> VideoSlot:
     """*slot* as the clip it shipped with, for a conversion to match.
 
@@ -594,7 +621,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        log_cb=None, progress_cb=None, assets_dir=None,
                        cancel_cb=None, pin_byte_size: bool = False,
                        asis_overrides: Optional[Dict[str, bool]] = None,
-                       best_quality: bool = False):
+                       best_quality: bool = False,
+                       length_overrides: Optional[Dict[str, object]] = None):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their VideoSlot.  Returns
@@ -629,6 +657,15 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     bytes.  The budget is a target, not a gate — a clip that misses it is
     still staged and the build's fit re-encodes it as before.
 
+    *length_overrides*, when given, is ``{rel_path: choice}`` and wins over
+    *trim_to_length* for those slots -- the per-clip answer to "how long
+    should this come out": :data:`LENGTH_STOCK` (the stock clip's length),
+    :data:`LENGTH_FULL` (the replacement's own length) or a number of
+    seconds.  A tester's 14 s export for a 6 s slot had to be cut to 6 s,
+    and one tab-wide box couldn't say that for one clip and not the next
+    (PAD-215).  A typed length gets no byte budget: the stock clip's bytes
+    were sized for the stock clip's length.
+
     *best_quality* re-encodes at constant quality, never below the stock
     clip's bitrate (see :func:`core.video.transcode_video_to`); a pinned
     budget still wins where there is one.
@@ -646,6 +683,7 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     staged = 0
     failures: List = []
     overrides = dict(asis_overrides or {})
+    lengths = dict(length_overrides or {})
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
     cache = StagedCache(assets_dir)
     kept = 0
@@ -675,8 +713,16 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         # ``.orig/`` copy exists by now whenever assets_dir is known.
         orig = (staged_originals.snapshot_path(assets_dir, rel)
                 if assets_dir else None)
+        choice = lengths.get(rel)
+        seconds = length_seconds(choice)
+        if choice == LENGTH_FULL:
+            slot_trim = False
+        elif choice == LENGTH_STOCK or seconds:
+            slot_trim = True
+        else:
+            slot_trim = bool(trim_to_length)
         budget = None
-        if pin_byte_size and trim_to_length:
+        if pin_byte_size and slot_trim and not seconds:
             if orig:
                 budget = os.path.getsize(orig)
             elif slot.size > 0:
@@ -689,7 +735,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         rate = None
         if not pin_byte_size:
             rate = _clip_bitrate(orig or slot.abs_path)
-        recipe = cache.recipe(slot, rep, orig, trim=bool(trim_to_length),
+        recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
+                              length=seconds or 0,
                               noconv=slot_noconv, budget=budget,
                               rate=round(rate or 0), best=bool(best_quality))
         if cache.fresh(slot, recipe):
@@ -699,8 +746,11 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                 log_cb(f"  ✓ {rel}  (already converted from this file — "
                        f"kept)", "success")
             continue
-        ok, detail = stage_replacement(_pristine_slot(slot, orig), rep,
-                                       trim_to_length=trim_to_length,
+        target = _pristine_slot(slot, orig)
+        if seconds:
+            target = _with_length(target, seconds)
+        ok, detail = stage_replacement(target, rep,
+                                       trim_to_length=slot_trim,
                                        no_conversion=slot_noconv,
                                        cancel_cb=cancel_cb,
                                        byte_budget=budget,

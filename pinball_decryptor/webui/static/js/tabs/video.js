@@ -563,6 +563,12 @@ export default function VideoTab() {
         { label: "Always use my file as-is", checked: info.asis === "asis", onClick: () => call("video.set_asis", rel, true) },
         { label: "Always convert this clip", checked: info.asis === "convert", onClick: () => call("video.set_asis", rel, false) },
       ] },
+      { label: "This clip's length", submenu: [
+        { label: `Follow the Trim / pad box (${info.length_follow})`, checked: info.length === "box", onClick: () => call("video.set_length", rel, null) },
+        { label: "Match the stock clip", checked: info.length === "stock", onClick: () => call("video.set_length", rel, "stock") },
+        { label: "Keep my file's full length", checked: info.length === "full", onClick: () => call("video.set_length", rel, "full") },
+        { label: info.length === "custom" ? `Set a length… (${info.length_secs} s)` : "Set a length…", checked: info.length === "custom", onClick: () => call("video.set_length", rel, "custom") },
+      ] },
       { sep: true },
       { label: "What this slot needs…", onClick: async () => { const d = await call("video.target_spec", rel); if (d) setSpec(d); } },
       { label: "Open in default app", onClick: () => call("video.open_default", rel, "orig") },

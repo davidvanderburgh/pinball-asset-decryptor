@@ -35,6 +35,7 @@ import threading
 import time
 
 from .. import compat
+from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
 from .. import video_helpers as vh
 from ..video_best import BEST_TIP, BestQualityMixin
 from .base import TabService, rpc
@@ -42,6 +43,19 @@ from .base import TabService, rpc
 log = logging.getLogger(__name__)
 
 _LABEL = "Replace Video"          # MainWindow._REPLACE_LABELS["video"]
+
+
+def _length_ok(choice):
+    """A per-clip length choice worth keeping from a sidecar."""
+    return choice in (LENGTH_STOCK, LENGTH_FULL) or bool(
+        length_seconds(choice))
+
+
+def _length_key(choice):
+    """The row menu's name for a clip's length choice."""
+    if choice is None:
+        return "box"
+    return "custom" if length_seconds(choice) else choice
 _SCAN_LABEL = "Video"             # MainWindow._SCAN_LABELS["video"]
 
 NO_PROJECT_TEXT = "Set the project folder on the Extract tab, then click Scan."
@@ -72,6 +86,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._by_rel = {}                # rel -> VideoSlot
         self._assign = {}                # rel -> replacement file path
         self._asis = {}                  # rel -> per-clip as-is override
+        self._length = {}                # rel -> per-clip length choice
         self._scan_id = 0
         self._scan_dir = ""
         self._scan_dir_prev = ""
@@ -134,6 +149,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._by_rel = {}
         self._assign = {}
         self._asis = {}
+        self._length = {}
         self._scan_dir = ""
         self._changed = set()
         self._foreign = set()
@@ -275,6 +291,8 @@ class VideoTab(BestQualityMixin, TabService):
                 bool(self.video_trim_var.get()),
                 bool(self.video_no_conversion_var.get()),
                 {rel: bool(v) for rel, v in dict(self._asis).items()
+                 if rel in assignments},
+                {rel: v for rel, v in dict(self._length).items()
                  if rel in assignments})
 
     def replacement_folder_mismatches(self, assets_dir):
@@ -321,6 +339,7 @@ class VideoTab(BestQualityMixin, TabService):
         from ...core import staged_changes
         self._assign = {}
         self._asis = {}
+        self._length = {}
         kept = {}
         try:
             from ...plugins.stern import stock_modes
@@ -466,6 +485,10 @@ class VideoTab(BestQualityMixin, TabService):
                     rel: bool(v) for rel, v in
                     (staged.get("video_asis_slots") or {}).items()
                     if rel in self._by_rel}
+                self._length = {
+                    rel: v for rel, v in
+                    (staged.get("video_length_slots") or {}).items()
+                    if rel in self._by_rel and _length_ok(v)}
                 val = staged.get("video_change_filter")
                 if val in vh.CHANGE_FILTER_VALUES:
                     self.video_change_filter_var.set(val)
@@ -480,6 +503,8 @@ class VideoTab(BestQualityMixin, TabService):
                             if rel in self._by_rel}
             self._asis = {rel: v for rel, v in self._asis.items()
                           if rel in self._by_rel}
+            self._length = {rel: v for rel, v in self._length.items()
+                            if rel in self._by_rel}
         folder_changed = scan_dir != self._scan_dir
         self._scan_dir = scan_dir
         self._changed = set()
@@ -796,6 +821,24 @@ class VideoTab(BestQualityMixin, TabService):
             return None
         return staged_originals.snapshot_path(self._scan_dir, rel)
 
+    def _trim_for(self, rel):
+        """Whether *rel* is matched to a length: its own Length choice,
+        else the Trim / pad box."""
+        choice = self._length.get(rel)
+        if choice is None:
+            return bool(self.video_trim_var.get())
+        return choice != LENGTH_FULL
+
+    def _length_cell(self, rel, length):
+        """The Length column, with a clip's own length choice after it."""
+        choice = self._length.get(rel)
+        if choice is None or not self._assign.get(rel):
+            return length
+        secs = length_seconds(choice)
+        word = ("%g s" % secs if secs else
+                "stock" if choice == LENGTH_STOCK else "full")
+        return "%s • %s" % (length, word)
+
     def _asis_for(self, rel):
         """MainWindow._video_asis_for."""
         flag = self._asis.get(rel)
@@ -815,7 +858,7 @@ class VideoTab(BestQualityMixin, TabService):
             ident = (0, 0)
         slot = self._by_rel.get(rel)
         return (rel, path, ident, self._asis_for(rel),
-                bool(self.video_trim_var.get()),
+                self._trim_for(rel),
                 bool(slot is not None and slot.info is not None))
 
     def _conv_cached(self, rel, path):
@@ -863,7 +906,8 @@ class VideoTab(BestQualityMixin, TabService):
         conv = self._conv_cell(rel, rep)
         d = os.path.dirname(rel)
         return {"rel": rel, "name": os.path.basename(rel),
-                "dir": (d + "/") if d else "", "len": length, "res": res,
+                "dir": (d + "/") if d else "",
+                "len": self._length_cell(rel, length), "res": res,
                 "fmt": fmt, "fmt_bad": fmt.endswith("⚠"), "aud": aud,
                 "rep": rep_disp, "rep_cls": cls, "conv": conv,
                 "conv_cls": self._conv_cls(conv)}
@@ -976,7 +1020,6 @@ class VideoTab(BestQualityMixin, TabService):
     def _probe_conv_async(self):
         self._conv_pass += 1
         pass_id = self._conv_pass
-        trim = bool(self.video_trim_var.get())
         pending = [(self._conv_key(rel, path), rel, path)
                    for rel, path in sorted(self._assign.items())]
         pending = [p for p in pending if p[0] not in self._conv_cache]
@@ -985,6 +1028,7 @@ class VideoTab(BestQualityMixin, TabService):
         slots = {rel: self._by_rel.get(rel) for _k, rel, _p in pending}
         stock = {rel: self._stock_path(rel) for _k, rel, _p in pending}
         asis = {rel: self._asis_for(rel) for _k, rel, _p in pending}
+        trims = {rel: self._trim_for(rel) for _k, rel, _p in pending}
 
         def _work():
             out = []
@@ -992,7 +1036,8 @@ class VideoTab(BestQualityMixin, TabService):
                 if self._conv_pass != pass_id:
                     return
                 out.append((key, vh.conv_mode(slots.get(rel), path,
-                                              asis.get(rel, False), trim,
+                                              asis.get(rel, False),
+                                              trims.get(rel, False),
                                               stock.get(rel))))
             self.ctx.loop.post(self._apply_conv, pass_id, out)
 
@@ -1108,6 +1153,7 @@ class VideoTab(BestQualityMixin, TabService):
         data["video_best_quality"] = bool(self.video_best_quality_var.get())
         data["video_asis_slots"] = {rel: bool(v)
                                     for rel, v in self._asis.items()}
+        data["video_length_slots"] = dict(self._length)
         data["video_change_filter"] = self.video_change_filter_var.get()
         names = dict(data.get("replacement_names") or {})
         for rel, path in self._assign.items():
@@ -1198,6 +1244,50 @@ class VideoTab(BestQualityMixin, TabService):
                                       else "be converted"), "info")
         self._save_staged()
         self._update_trim_enabled()
+        self._probe_conv_async()
+        self._refresh_list()
+        if rel == self._current:
+            self._update_note(rel)
+        return True
+
+    @rpc
+    def set_length(self, rel, value):
+        """This clip's own length (PAD-215): None follows the Trim / pad
+        box, "stock" cuts or pads to the stock clip, "full" keeps the
+        replacement's own length, "custom" asks for a number of seconds."""
+        slot = self._by_rel.get(rel)
+        if slot is None:
+            return False
+        if value == "custom":
+            now = length_seconds(self._length.get(rel)) or slot.duration
+            secs = compat.simpledialog.askfloat(
+                "Clip length",
+                "How many seconds should %s run?\n\nA longer replacement "
+                "is cut to this; a shorter one holds its last frame to "
+                "fill it." % os.path.basename(rel),
+                initialvalue=("%g" % round(now, 2)) if now else "",
+                minvalue=0.1, maxvalue=3600)
+            if secs is None:
+                return False
+            value = round(float(secs), 3)
+        if value is None:
+            self._length.pop(rel, None)
+            self.log("Replace Video: %s follows the Trim / pad box again."
+                     % rel, "info")
+        elif value in (LENGTH_STOCK, LENGTH_FULL) or length_seconds(value):
+            self._length[rel] = value
+            what = ("%g s" % value if length_seconds(value) else
+                    "the stock clip's length" if value == LENGTH_STOCK
+                    else "your file's own length")
+            self.log("Replace Video: %s will run %s, whatever the Trim / "
+                     "pad box says." % (rel, what), "info")
+            if self._asis_for(rel):
+                self.log("Replace Video: %s goes on as-is, so its length "
+                         "can't be changed until it is converted (right-"
+                         "click → This clip's conversion)." % rel, "warning")
+        else:
+            return False
+        self._save_staged()
         self._probe_conv_async()
         self._refresh_list()
         if rel == self._current:
@@ -1548,6 +1638,10 @@ class VideoTab(BestQualityMixin, TabService):
             "asis": {None: "box", True: "asis", False: "convert"}[flag],
             "follow": ("as-is" if self.video_no_conversion_var.get()
                        else "convert"),
+            "length": _length_key(self._length.get(rel)),
+            "length_secs": length_seconds(self._length.get(rel)),
+            "length_follow": ("stock length" if self.video_trim_var.get()
+                              else "full length"),
             "reveal": vh.reveal_menu_label(),
             "partition": bool(self.window.tab_visible("Partition Explorer")
                               and getattr(self.window, "find_in_partition",

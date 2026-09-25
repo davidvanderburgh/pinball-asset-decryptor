@@ -1530,3 +1530,40 @@ def test_trim_on_a_later_build_matches_the_stock_length(tmp_path):
     assert staged == 1 and failures == []
     assert any("trim 3.0s→1.0s" in t for t in logs)
     assert detect_video_info(slot).duration < 1.3
+
+
+def test_a_clip_can_choose_its_own_length(tmp_path):
+    # PAD-215: a per-clip length wins over the Trim / pad box both ways --
+    # a typed number of seconds with the box off, full length with it on.
+    from pinball_decryptor.core.video import (detect_video_info, find_ffmpeg,
+                                              find_ffprobe)
+    if not (find_ffmpeg() and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    assets = str(tmp_path / "assets")
+    for name in ("a", "b"):
+        if not _make_testsrc(os.path.join(assets, "video", name + ".mov"),
+                             seconds=1.0, ext="mov"):
+            pytest.skip("ffmpeg could not render the test clip")
+    rep = str(tmp_path / "replacement.mp4")
+    if not _make_testsrc(rep, seconds=3.0, width=320, height=240):
+        pytest.skip("ffmpeg could not render the replacement clip")
+    slots = {s.rel_path: s for s in scan_video_slots(assets)}
+    assigns = {"video/a.mov": rep, "video/b.mov": rep}
+
+    staged, failures = stage_replacements(
+        slots, assigns, trim_to_length=False, assets_dir=assets,
+        length_overrides={"video/a.mov": 2.0})
+    assert staged == 2 and failures == []
+    got = lambda n: detect_video_info(
+        os.path.join(assets, "video", n + ".mov")).duration
+    assert 1.8 < got("a") < 2.3            # the typed 2 s
+    assert got("b") > 2.7                  # box off: full length
+
+    slots = {s.rel_path: s for s in scan_video_slots(assets)}
+    staged, failures = stage_replacements(
+        slots, assigns, trim_to_length=True, assets_dir=assets,
+        length_overrides={"video/a.mov": "full"})
+    assert staged == 2 and failures == []
+    assert got("a") > 2.7                  # full, whatever the box says
+    assert got("b") < 1.3                  # box on: the stock 1 s

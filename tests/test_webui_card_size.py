@@ -1037,7 +1037,7 @@ def test_a_build_that_wont_fit_is_one_clean_dialog(tmp_path, monkeypatch):
             app._active_mode = "write"
             app._cancel_requested = False
             app._chain_flash_after_build = (r"\\.\PhysicalDrive9",
-                                            str(tmp_path / "o.raw"))
+                                            str(tmp_path / "o.raw"), True)
             w.window.set_running(True, mode="write")
         w.run(_building)
         w.asked.clear()
@@ -1098,7 +1098,7 @@ def _refused_run(w, tmp_path, monkeypatch, refusal, answer):
         app._space_refusal = None
         app.pipeline = pipe
         app._chain_flash_after_build = (r"\\.\PhysicalDrive9",
-                                        str(tmp_path / "o.raw"))
+                                        str(tmp_path / "o.raw"), True)
         w.window.set_running(True, mode="write")
     w.run(_building)
     w.asked.clear()
@@ -1134,7 +1134,7 @@ def test_a_refused_build_asks_to_build_for_the_size_that_fits(tmp_path,
         assert msgs[0]["message"] == QUESTION_8_TO_16
         assert wait_for(w, lambda: again)
         assert again == [{"chain_flash_device": r"\\.\PhysicalDrive9",
-                          "again": True}]
+                          "again": True, "chain_flash_verify": True}]
         assert w.run(w.window.card_size_choice) == "16G"
         assert w.app._settings["card_size"] == "16G"
         assert os.environ.get(ENV) == "16G"
@@ -1220,7 +1220,8 @@ def test_the_early_refusal_asks_the_same(tmp_path, monkeypatch):
         w.drain()
         assert [m["message"] for m in _msgs()] == [QUESTION_8_TO_16]
         assert wait_for(w, lambda: again)
-        assert again == [{"chain_flash_device": None, "again": True}]
+        assert again == [{"chain_flash_device": None, "again": True,
+                          "chain_flash_verify": True}]
         monkeypatch.delenv(ENV, raising=False)
 
 

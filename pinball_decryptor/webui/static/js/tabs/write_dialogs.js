@@ -124,6 +124,12 @@ export function FlashDialog({ f }) {
             onChange=${(v) => set("menu", v)} />
           ${f.menu_note ? html`<div class="small muted wr-ind">${f.menu_note}</div>` : null}
         </div>` : null}
+        ${f.verify_offered ? html`<div class="stack" style="gap:2px">
+          <${Check} checked=${f.skip_verify} disabled=${!f.skip_verify_enabled}
+            label="Skip verify — about twice as fast, but the card is not checked after writing"
+            onChange=${(v) => set("skip_verify", v)} />
+          ${f.skip_verify_note ? html`<div class="small err-ink wr-ind">${f.skip_verify_note}</div>` : null}
+        </div>` : null}
         <div class="wr-frow">
           <span class="lbl">${f.target_label}</span>
           <${Select} value=${f.drive === null || f.drive === undefined ? "" : String(f.drive)} options=${driveOpts}

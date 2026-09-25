@@ -109,6 +109,16 @@ class FlashDialog:
                            "to write only the menu; it checks the card "
                            "first.")
 
+    #: What "Skip verify" says under itself once ticked (PAD-217): the risk,
+    #: shown only to someone who asked for it.
+    SKIP_VERIFY_NOTE = ("\u26a0 Risky: the %s is not read back after "
+                        "writing, so a bad %s or card reader can leave one "
+                        "that looks fine here but fails on the machine "
+                        "(SHELL ERROR, or it won't boot), with nothing to "
+                        "say why. Only skip it with a %s and reader you "
+                        "trust, and flash again with verify on if the "
+                        "machine misbehaves.")
+
     def __init__(self, host, manufacturer, on_flash, initial_image=None,
                  on_build_flash=None, build_target="", can_build=False,
                  cannot_build_reason="", has_pending_changes=True,
@@ -163,6 +173,11 @@ class FlashDialog:
         self.menu = False
         self.menu_enabled = False
         self.menu_note = ""
+        # "Skip verify" (PAD-217): off every time the dialog opens, never
+        # remembered - the read-back is what catches a bad write
+        self.verify_offered = bool(getattr(manufacturer, "flash_skip_verify",
+                                           False))
+        self.skip_verify = False
         self.closed = False
         self.build, self.write = self._opening_ticks(initial_choices)
         self.build_path = build_target or ""
@@ -251,6 +266,11 @@ class FlashDialog:
         self._sync_menu_only()
         if publish:
             self.publish()
+
+    def skipping_verify(self):
+        """True when the write about to start will not be read back."""
+        return bool(self.verify_offered and self.skip_verify and self.write
+                    and not self.to_disk())
 
     def _was_flashed(self, img):
         if self._flashed_fn is None:
@@ -420,6 +440,13 @@ class FlashDialog:
             "menu_offered": self.menu_offered, "menu": bool(self.menu),
             "menu_enabled": bool(self.menu_enabled),
             "menu_note": self.menu_note,
+            "verify_offered": bool(self.verify_offered
+                                   and not self.to_disk()),
+            "skip_verify": bool(self.skip_verify),
+            "skip_verify_enabled": writing,
+            "skip_verify_note": (
+                self.SKIP_VERIFY_NOTE % (noun, noun, noun)
+                if self.skipping_verify() else ""),
             "target_label": self.words["target_label"],
             "drives": drives, "drive": sel, "drive_text": self.drive_text,
             "drives_enabled": writing,
@@ -438,6 +465,11 @@ class FlashDialog:
     # the page's edits
     # ------------------------------------------------------------------
     def set(self, key, value):
+        if key == "skip_verify":
+            if self.verify_offered:
+                self.skip_verify = bool(value)
+                self.publish()
+            return
         if key in ("build", "write", "menu"):
             if key == "build" and not self._can_build:
                 return
@@ -667,6 +699,10 @@ class FlashDialog:
                           if building else os.path.basename(img))
             verb = self.words["confirm_verb"]
             mode = self.current_disk_mode()
+            unverified = ("\n\nSkip verify is ticked: the %s will NOT be "
+                          "read back afterwards, so a bad write is not "
+                          "caught here." % noun
+                          if self.skipping_verify() else "")
             if self.menu and not building:
                 if not mb.askyesno(
                         "Write the boot menu?",
@@ -675,8 +711,8 @@ class FlashDialog:
                         "stay as they are, and so do the machine's own "
                         "settings and scores. If the card was not written "
                         "from this image it is refused before anything is "
-                        "written. Proceed?" % (noun, card.display,
-                                               flash_what)):
+                        "written.%s Proceed?" % (noun, card.display,
+                                                 flash_what, unverified)):
                     return False
             elif self.to_disk() and mode == "menu":
                 if not mb.askyesno(
@@ -729,14 +765,15 @@ class FlashDialog:
                         "Erase the %s and continue?" % noun,
                         "%s There is no undo.\n\n  Target: %s\n  Image:  %s"
                         "\n\nMake sure you have a backup of anything on the "
-                        "%s. Proceed?"
-                        % (lead, card.display, flash_what, noun),
+                        "%s.%s Proceed?"
+                        % (lead, card.display, flash_what, noun, unverified),
                         icon="warning"):
                     return False
 
         menu_only = bool(self.menu) and not building
         device_path = card.device_path if (writing and card) else None
         extra = {}
+        skip = {"verify": False} if self.skipping_verify() else {}
         if self.to_disk():
             extra["target"] = self._target()[0]
             mode = self.current_disk_mode()
@@ -750,9 +787,10 @@ class FlashDialog:
         self.close()
         if building:
             if self._on_build_flash is not None:
-                self._on_build_flash(build_path, device_path)
+                self._on_build_flash(build_path, device_path, **skip)
         elif writing and self._on_flash is not None:
-            self._on_flash(img, device_path, menu_only=menu_only, **extra)
+            self._on_flash(img, device_path, menu_only=menu_only, **extra,
+                           **skip)
         return True
 
     def close(self):

@@ -267,6 +267,12 @@ int pm_sound_sid(unsigned request, unsigned sid)
     printf("%6lu SID %u %u\n", now_ms, request, sid);
     return 1;
 }
+int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms)
+{
+    (void)stock; (void)ours;
+    printf("%6lu SWAP %u p%d %u\n", now_ms, request, priority, ms);
+    return 1;
+}
 int pm_sound_playing(unsigned *requests, unsigned *buses, int max)
 {
     int i;

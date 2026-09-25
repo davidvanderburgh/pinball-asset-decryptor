@@ -54,7 +54,8 @@ tools/jjp_emu/mount.sh restores an ISO into (padpath.sh's jjp_slug), so an ISO
 the emulator has run needs no second restore here and one this tool restored
 mounts instantly in the emulator.  A restore lands as sda3.raw.part and is
 renamed only when complete, so an interrupted run leaves nothing a later one
-would trust.  --cache-dir moves the base directory.
+would trust; a cached root that does not read as a JJP root anyway is restored
+again (PAD-218).  --cache-dir moves the base directory.
 
 THE CLI PROTOCOL is mkmulticard.py's, so the Multi-boot tab's parsers hold
 (item 118): `[card] progress a/b p% stage` lines from one byte meter over the
@@ -681,12 +682,30 @@ def piece_paths(mnt, info, part):
     return [os.path.join(mnt, PARTIMAG.lstrip("/"), n) for n, _s in info.pieces.get(part, [])]
 
 
-def cached_root_raw(iso, cache_dir=None, mnt=None, info=None, meter=None):
+def cache_is_a_root(raw):
+    """True when a cached restore reads as a JJP root (root_identity: setenv.sh's GAMENAME,
+    the game binary) - a torn one fails any of those, or debugfs on it."""
+    try:
+        root_identity(raw)
+    except Exception:                                   # noqa: BLE001
+        return False
+    return True
+
+
+def cached_root_raw(iso,cache_dir=None, mnt=None, info=None, meter=None):
     """The rig-shaped restore of an ISO's sda3 (restored here when absent and `mnt` allows)."""
     base = cache_base(iso, cache_dir)
     raw = os.path.join(base, "sda3.raw")
     if os.path.isfile(raw) and os.path.getsize(raw) > 0:
-        return raw
+        if mnt is None or info is None or cache_is_a_root(raw):
+            return raw
+        # PAD-218: a cancelled restore that was never really stopped renamed a
+        # second run's half-written root into place, and every build after
+        # copied it and refused "no GAMENAME ... not a JJP root".  The cache is
+        # only ever a copy of the ISO's pieces, so one that is no JJP root is
+        # thrown away and restored again - never trusted, never a dead end.
+        say("the cached root %s is not a whole JJP root (an interrupted restore): restoring it again" % raw)
+        os.unlink(raw)
     if mnt is None or info is None:
         return None
     os.makedirs(base, exist_ok=True)

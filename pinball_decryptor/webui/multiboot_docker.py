@@ -376,17 +376,32 @@ def exec_argv(line):
     return ["docker", "exec", CONTAINER, "bash", "-lc", line]
 
 
+# every tool a multi-boot run starts inside the container (see kill_running)
+KILL_PATTERN = (r"[m]kjjpmulti|[m]kmulticard|[e]nsurejjpselect|[m]ount\.sh"
+                "|[p]artclone|[x]orriso")
+KILL_LINE = ("pkill -TERM -f '%s'; sleep 2; pkill -KILL -f '%s'; true"
+             % (KILL_PATTERN, KILL_PATTERN))
+
+
 def kill_running():
     """Stop whatever the container is running.
 
     ``Popen.kill()`` reaches the ``docker exec`` CLIENT and leaves the
     process inside the container alone - a cancelled build would otherwise
     go on restoring partitions with nothing watching it.
+
+    NOT ``pkill -P 1`` (PAD-218): a ``docker exec`` process's parent is
+    outside the container (it reads as 0), and every tool is a grandchild of
+    that, so ``-P 1`` matched nothing and Cancel stopped nothing.  The
+    cancelled root restore went on, the next run restored into the same
+    file beside it, and the first one's rename handed over the second's
+    half-written root - which every later build then trusted.  So: match by
+    name, whatever the parent, and ``mount.sh`` too (it is what renames a
+    finished restore into place).  The ``[x]`` brackets keep the pattern
+    from matching this very ``bash -lc`` line, which holds its text.
     """
     try:
-        _docker(["exec", CONTAINER, "bash", "-lc",
-                 "pkill -TERM -P 1 -f 'mkjjpmulti|mkmulticard|ensurejjpselect"
-                 "|partclone|xorriso' || true"], timeout=20)
+        _docker(["exec", CONTAINER, "bash", "-lc", KILL_LINE], timeout=20)
     except Exception:                                   # noqa: BLE001
         pass
 

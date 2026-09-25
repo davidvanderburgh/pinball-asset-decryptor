@@ -458,3 +458,7 @@ lamp 6                 0              LEFT INLANE  # lamp 90, I/O group 7 index 
 lamp 7                 0              SHOOT AGAIN  # lamp 91, I/O group 7 index 61, at 155,584
 lamp 8                 0              RIGHT INLANE  # lamp 92, I/O group 7 index 62, at 250,464
 lamp 9                 0              RIGHT OUTLANE  # lamp 93, I/O group 7 index 63, at 269,531
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x001fd194 0xe92d4010 0xe3084ab0

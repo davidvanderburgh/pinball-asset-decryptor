@@ -2351,6 +2351,27 @@ static int stock_generic(unsigned kinds)
     return 0;
 }
 
+/* item 164: the BALLS IN PLAY route, for a title with no cmode rules (the plain-C titles and Elvira's Rule
+ * classes): the framework's own count of the balls in play (`site balls_in_play`, Beatles 1.29 0x1fd194, found
+ * by its code on every build): while a multiball is being served it answers the balls that multiball asked
+ * for, otherwise the balls installed less those in the trough and the other ball devices. Two or more is a
+ * multiball. It says nothing of the title's other modes, so only PM_STOCK_MULTIBALL is ever answered here.
+ * (The struct that function reads, `data ball_manager`, holds the asked-for count only while the multiball's
+ * own process runs, so it alone is not a witness: 0 through a whole multiball on both Bond builds.) */
+static int stock_balls_route(void)
+{
+    return fn("balls_in_play") && !data("stock_mode_table")
+           && !(data("stock_mode_manager") && fn("stock_battle_running") && fn("stock_multiball_running"));
+}
+
+static int stock_balls(unsigned kinds)
+{
+    unsigned n;
+    if (!pm_player()) return 0;
+    n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
+    return n >= 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY)) ? (int)PM_STOCK_MULTIBALL : 0;
+}
+
 int pm_stock_mode_running(unsigned kinds)
 {
     static const struct { unsigned kind; const char *site; } Q[] = {
@@ -2365,6 +2386,8 @@ int pm_stock_mode_running(unsigned kinds)
         said = 1;
         if (stock_generic_route())
             say("stock modes: can tell, from the game's mode table (%ld modes)", pm_port_value("stock_mode_count", 0));
+        else if (stock_balls_route())
+            say("stock modes: can tell a multiball, from the game's balls in play (not its other modes)");
         else say("stock modes: %s%s%s%s", data("stock_mode_manager") ? "can tell" : "this port cannot tell (no stock_mode_manager)",
             data("stock_mode_manager") && fn("stock_battle_running") ? " battle" : "",
             data("stock_mode_manager") && fn("stock_multiball_running") ? " multiball" : "",
@@ -2374,6 +2397,7 @@ int pm_stock_mode_running(unsigned kinds)
         stock_generic_on = 1;
         return stock_generic(kinds);
     }
+    if (stock_balls_route()) return stock_balls(kinds);
     for (i = 0; i < sizeof Q / sizeof Q[0]; i++) {
         if (!(kinds & Q[i].kind)) continue;
         r = stock_query(Q[i].site);

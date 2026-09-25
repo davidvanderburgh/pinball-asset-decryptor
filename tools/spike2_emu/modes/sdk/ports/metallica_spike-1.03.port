@@ -558,3 +558,7 @@ lamp 51           0              LEFT LOOP SNAKE  # lamp 236, I/O group 10 index
 lamp 52           0              LEFT LOOP GRAVE MARKER  # lamp 237, I/O group 10 index 31, at 64,311
 lamp 71           0              LEFT RAMP SNAKE  # lamp 238, I/O group 10 index 38, at 122,265
 lamp 72           0              LEFT RAMP GRAVE MARKER  # lamp 239, I/O group 10 index 39, at 126,288
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x0036aa88 0xe92d4010 0xe3014350

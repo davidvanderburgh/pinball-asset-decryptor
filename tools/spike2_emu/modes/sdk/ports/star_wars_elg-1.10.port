@@ -410,3 +410,7 @@ lamp 62           0              RAMP 3  # lamp 70, I/O group 5 index 66, at 63,
 lamp 63           0              RAMP 4  # lamp 71, I/O group 5 index 67, at 60,122
 lamp 64           0              RAMP 5  # lamp 72, I/O group 5 index 68, at 58,107
 lamp 65           0              RAMP 6  # lamp 73, I/O group 5 index 69, at 54,90
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x00105bcc 0xe92d4010 0xe30b4a9c

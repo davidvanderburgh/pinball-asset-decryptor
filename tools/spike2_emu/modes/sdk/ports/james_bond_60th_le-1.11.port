@@ -427,3 +427,7 @@ lamp 45           0              HAT TOP LEFT  # lamp 93, I/O group 9 index 49, 
 lamp 46           0              HAT TOP RIGHT  # lamp 94, I/O group 9 index 50, at 109,159
 lamp 47           0              HAT RIGHT  # lamp 95, I/O group 9 index 51, at 122,182
 lamp 49           0              HAT ARROW  # lamp 96, I/O group 9 index 31, at 61,201
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x0016ba6c 0xe92d4010 0xe30d4e08

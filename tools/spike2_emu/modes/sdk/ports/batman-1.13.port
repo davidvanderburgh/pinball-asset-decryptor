@@ -298,3 +298,7 @@ lamp 294              0              BATMAN GI 3  # node/channel 9/25
 lamp 295              0              BATMAN GI 4  # node/channel 9/26
 lamp 296              0              BATMAN GI 5  # node/channel 9/27
 lamp 297              0              BATMAN GI 6  # node/channel 9/28
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x003aafd8 0xe92d4010 0xe3014b6c

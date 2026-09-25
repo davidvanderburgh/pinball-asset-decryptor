@@ -317,3 +317,7 @@ lamp 306              0              LEFT LED1A/B  # node/channel 9/38
 lamp 307,308,309      0              LEFT RGB1  # node/channel 9/39 9/40 9/41
 lamp 310,311,312      0              LEFT RGB2  # node/channel 9/42 9/43 9/44
 lamp 313,314,315      0              LEFT RGB3  # node/channel 9/45 9/46 9/47
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x00383274 0xe92d4010 0xe30e4664

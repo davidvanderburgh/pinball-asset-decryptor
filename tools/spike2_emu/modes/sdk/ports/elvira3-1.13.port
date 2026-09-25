@@ -499,3 +499,7 @@ lamp 487,488,489  0              SPEAKER 20  # lamp 239, I/O group 6 index 58, a
 lamp 490,491,492  0              SPEAKER 21  # lamp 240, I/O group 6 index 61, at 0,0
 lamp 493,494,495  0              SPEAKER 22  # lamp 241, I/O group 6 index 64, at 0,0
 lamp 496,497,498  0              SPEAKER 23  # lamp 242, I/O group 6 index 67, at 0,0
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x003ccc4c 0xe92d4010 0xe30b4aa4

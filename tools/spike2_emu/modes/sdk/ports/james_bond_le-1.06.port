@@ -448,3 +448,7 @@ value lamp_slot_used       36
 value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x003f5870 0xe92d4010 0xe30b44d4

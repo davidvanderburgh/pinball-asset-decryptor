@@ -375,10 +375,10 @@ def test_the_beatles_profile():
     assert MP.read_port(str(BEATLES))["data"]["score_mult"] == 0x543534   # the byte score_add32 multiplies by
     cannot = {part for part in MP.PARTS if not p.can(part)}
     # item 164: Lights go through its named inserts (every insert in the mode's colour)
-    assert cannot == {"screen", "own_sound", "stack"} and p.light_route == "inserts"
+    assert cannot == {"screen", "own_sound"} and p.light_route == "inserts"
+    assert "multiballs" in p.stack_note          # item 164: the framework's balls in play, multiballs only
     assert "scenes a mode's screen goes in" in p.why_not("screen")
     assert "time-up" in p.why_not("own_sound")
-    assert "tells that one of its own modes is running" in p.why_not("stack")
     for part in cannot:
         # the reasons a person reads name the game and no internal word
         assert p.label in p.why_not(part) and "—" not in p.why_not(part)

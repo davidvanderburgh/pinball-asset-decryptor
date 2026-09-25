@@ -316,3 +316,7 @@ lamp 210,211,212      0              WING LEFT 2  # node/channel 8/35 8/36 8/37
 lamp 213,214,215      0              WING LEFT 3  # node/channel 8/39 8/40 8/41
 lamp 216,217,218      0              WING LEFT 4  # node/channel 8/42 8/43 8/44
 lamp 219,220,221      0              WING LEFT 5  # node/channel 8/45 8/46 8/47
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x00186774 0xe92d4010 0xe30843c4

@@ -1447,6 +1447,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         dis["stack"] = bool(why)
         if why:
             reasons["stack"] = "Not on this game: " + why
+        elif getattr(p, "stack_note", ""):
+            reasons["stack"] = p.stack_note         # item 164: live, but multiballs only
         off = []
         for take, part, words in self._FILM_PARTS:
             dis["film_" + take] = not p.can(part)

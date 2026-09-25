@@ -37,26 +37,26 @@ PORTS = {
     "deadpool_le-1.14": (28, 64, True, {"countdown", "own_sound", "screen"}, ("callout", "clips", "own-sound", "messages")),
     # item 162 (2026-09-24): every latest build, proven by a full build check in the emulator
     "godzilla_pro-1.16": (21, 64, True, {"screen"}, EVERY_CAPABILITY),
-    "aerosmith_le-1.15": (43, 64, True, {"countdown", "screen", "stack"}, ("callout", "clips", "own-sound")),
+    "aerosmith_le-1.15": (43, 64, True, {"countdown", "screen"}, ("callout", "clips", "own-sound")),
     "avengers_infinity_le-1.09": (36, 64, True, {"lights", "own_sound", "screen"}, ("callout", "clips", "own-sound")),
-    "batman-1.13": (43, 64, True, ALL - {"events", "lights"}, CALLOUT_SOUND),
+    "batman-1.13": (43, 64, True, ALL - {"events", "lights", "stack"}, CALLOUT_SOUND),
     "elvira3-1.13": (45, 64, True, ALL - {"events", "lights"}, CALLOUT_SOUND),
-    "foo_fighters_le-1.04": (41, 64, True, {"own_sound", "screen", "stack"}, ("callout", "clips", "own-sound")),
-    "james_bond_60th_le-1.11": (37, 64, True, ALL - {"events", "lights", "own_sound"}, CALLOUT_SOUND),
+    "foo_fighters_le-1.04": (41, 64, True, {"own_sound", "screen"}, ("callout", "clips", "own-sound")),
+    "james_bond_60th_le-1.11": (37, 64, True, {"clip", "countdown", "screen"}, CALLOUT_SOUND),
     "led_zeppelin_le-1.22": (31, 32, True, {"clip", "own_sound", "screen"}, ("callout", "screens", "own-sound")),
     "led_zeppelin_pro-1.22": (30, 32, True, {"clip", "own_sound", "screen"}, ("callout", "screens", "own-sound")),
-    "metallica_spike-1.03": (40, 64, True, {"clip", "screen", "stack"}, ("callout", "screens", "own-sound")),
+    "metallica_spike-1.03": (40, 64, True, {"clip", "screen"}, ("callout", "screens", "own-sound")),
     "munsters_le-1.28": (27, 32, True, {"clip", "screen"}, CALLOUT_SOUND),
     "rush_le-1.18": (38, 64, True, {"clip", "screen"}, CALLOUT_SOUND),
-    "star_wars_elg-1.10": (30, 64, True, ALL - {"countdown", "events", "lights"}, CALLOUT_SOUND),
+    "star_wars_elg-1.10": (30, 64, True, {"clip", "own_sound", "screen"}, CALLOUT_SOUND),
     "star_wars_le-1.30": (42, 64, True, {"clip", "own_sound", "screen"}, CALLOUT_SOUND),
-    "uncanny_xmen_le-0.98": (33, 64, True, {"own_sound", "screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
+    "uncanny_xmen_le-0.98": (33, 64, True, {"own_sound", "screen"}, ("callout", "screens", "clips", "own-sound")),
     "jaws_le-1.02": (27, 64, True, {"screen"}, ("callout", "screens", "clips", "own-sound", "messages")),
-    "stranger_things_le-1.12": (39, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
+    "stranger_things_le-1.12": (39, 64, True, {"lights", "screen"}, ("callout", "clips", "own-sound")),
     "king_kong_le-0.97": (55, 64, True, {"screen"}, ("callout", "screens", "clips", "own-sound")),
-    "james_bond_le-1.06": (44, 64, True, {"clip", "screen", "stack"}, CALLOUT_SOUND),
+    "james_bond_le-1.06": (44, 64, True, {"clip", "screen"}, CALLOUT_SOUND),
     "jurassic_park_le-1.16": (38, 64, True, {"own_sound", "screen"}, ("callout", "screens", "clips", "own-sound")),
-    "guardians_le-1.14": (34, 64, True, {"screen", "stack"}, ("callout", "clips", "own-sound")),
+    "guardians_le-1.14": (34, 64, True, {"screen"}, ("callout", "clips", "own-sound")),
     "iron_maiden_le-1.16": (32, 64, True, ALL - {"countdown", "events", "stack"}, CALLOUT_SOUND),
     "sword_of_rage_le-1.18": (35, 64, True, {"lights", "own_sound", "screen"}, ("callout", "clips", "own-sound")),
     "mando_le-1.44": (40, 64, True, {"own_sound", "screen"}, ("callout", "clips", "own-sound")),
@@ -183,7 +183,7 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     # a stack no mode still makes a file every title's runtime reads (one that cannot tell
     # logs so and starts it anyway), and so do the other items' keys
     assert {"stack", "starts", "cooldown"} <= _mode_file_keys()
-    for key in ("aerosmith_le_1_15", "stranger_things_le_1_12"):
+    for key in ("turtles_pro_1_58", "turtles_le_1_59"):
         q = MP.profile(key)
         spec = MP.blank_spec(q)
         spec.stack, spec.starts, spec.cooldown = False, "once_per_ball", 5
@@ -212,6 +212,27 @@ def test_stack_on_the_other_cmode_titles_is_the_mode_table_route(tmp_path):
     p = MP.profile_from_port(str(tmp_path / "jaws_le-9.99.port"))     # the same title, a build not yet seen
     assert p.version == "9.99"
     assert not p.can("stack") and "not yet seen a mode of yours wait" in p.why_not("stack")
+
+
+def test_stack_on_the_titles_with_no_cmode_rules_is_multiballs_only(tmp_path):
+    """item 164: a title with no cmode rules stacks through the framework's count of the balls in play
+    (STACK_BALLS_NEEDS are the sites the runtime's route calls); it waits for multiballs only, and the
+    profile says so in its stack note; a build is offered once seen in the emulator (STACK_BALLS_PROVEN)."""
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    body = src[src.index("static int stock_balls_route"):src.index("int pm_stock_mode_running")]
+    assert set(MP.STACK_BALLS_NEEDS) <= set(re.findall(r'fn\("([a-z_]+)"\)', body))
+    for key in MP.STACK_BALLS_PROVEN:
+        q = MP.profile(key.replace("-", "_").replace(".", "_"))
+        assert q.can("stack"), key
+        assert "waits only for the game's multiballs" in q.stack_note, key
+    for key in MP.STACK_PROVEN:                 # the mode table sees every mode: no note
+        assert MP.profile(key.replace("-", "_").replace(".", "_")).stack_note == "", key
+    text = open(_port("beatles-1.29"), encoding="utf-8").read()
+    text = re.sub(r"^version(\s+)1\.29", r"version\g<1>9.99", text, flags=re.M)
+    (tmp_path / "beatles-9.99.port").write_text(text, encoding="utf-8")
+    p = MP.profile_from_port(str(tmp_path / "beatles-9.99.port"))
+    assert p.version == "9.99" and not p.can("stack")
+    assert "tells a multiball is running but has not yet seen" in p.why_not("stack")
 
 
 def test_every_shipped_port_is_proven():

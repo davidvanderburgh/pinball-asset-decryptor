@@ -955,13 +955,44 @@ slot (the runtime named it; the mode was refused), then a multiball (named, `a m
 (cmode_trex_multiball)` on JP LE). Proven on: Jaws LE 1.02, Jurassic Park LE 1.16, Deadpool
 LE 1.14 and Pro 1.16, Avengers LE 1.09, TMNT Pro 1.59, Led Zeppelin LE 1.22, Munsters LE 1.28,
 Venom LE 1.07, D&D LE 1.00, King Kong LE 0.97, Mandalorian LE 1.44, Iron Maiden LE 1.16, Sword
-of Rage LE 1.18, Rush LE 1.18 and Star Wars LE 1.30 (a mode, and on most a multiball too); John
+of Rage LE 1.18, Rush LE 1.18, Star Wars LE 1.30 and Foo Fighters LE 1.04 (a mode, and on most a multiball too); John
 Wick LE 1.01 and Led Zeppelin Pro 1.22 on a multiball only (the mode the rig started there did not
 stay on: Led Zeppelin runs one song mode at a time). The app offers `stack no` only on those
 (`mode_project.STACK_PROVEN`).
 
-**Not yet.** Foo Fighters LE 1.04 (the rig's first pick was its skill shot, base play there);
-TMNT LE 1.59 (the runtime never saw it in a game: its mode mask keeps a busy bit); the titles
+### Multiballs on the titles with no cmode rules (item 164)
+
+The plain-C titles (The Beatles, Bond, Metallica, Star Wars ELG, Stranger Things, X-Men,
+Aerosmith, Batman, Guardians) and Elvira 3 (its own `Rule` classes) have no mode table the
+runtime can walk. Every Spike 2 build does share the framework's ball code, and its count of
+the balls in play is one function, found on all 34 latest builds by its code (The Beatles
+1.29 `0x1fd194`, 17 to 20 of its first 20 instructions alike, the runner-up at 8 at most):
+
+```
+site balls_in_play         0x001fd194 0xe92d4010 0xe3084ab0
+```
+
+While a multiball is being served it answers the balls the multiball asked for (the
+framework's ball manager, byte `+0xa`); otherwise the balls installed less those in the
+trough and the other ball devices. Two or more is `PM_STOCK_MULTIBALL`. It says nothing of
+the title's other modes, so on these titles `stack no` waits for the game's multiballs only,
+and the Modes tab says so. The ball manager's byte alone is not a witness: it is set only
+while the multiball's own serving process runs (it read 0 through a whole multiball on both
+Bond builds).
+
+**What is proven.** In the emulator, one scripted game per build: nothing running (the
+`stack no` mode started), then a multiball (on The Beatles 1.29 its own, `0x39270`, the TAXMAN
+multiball: all six balls went into play; on the others the framework's own "start a
+multiball" asked for two), `a multiball` answered within 5 s and the mode refused, and
+`nothing` again once the multiball was over. Proven on: The Beatles 1.29, Bond 60th LE 1.11,
+Bond LE 1.06, Metallica 1.03, Star Wars ELG 1.10, Stranger Things LE 1.12, X-Men LE 0.98,
+Batman 66 1.13, Guardians LE 1.14 and Aerosmith LE 1.15 (`mode_project.STACK_BALLS_PROVEN`; the tab says the mode
+waits for multiballs only). The rig cannot serve a SWELF-generation build's balls (its derived
+device table has no coils), so on those the answer was asked 0.3 s after the
+start, before the ball the game could not serve ended the multiball (Batman, Guardians and
+Aerosmith).
+
+**Not yet.** TMNT LE 1.59 (the runtime never saw it in a game: its mode mask keeps a busy bit); the titles
 with no `cmode` class: Elvira 3 (`Rule` / `TransientRule` classes) and the plain-C titles.
 
 ## Ports: why your mode runs on any game

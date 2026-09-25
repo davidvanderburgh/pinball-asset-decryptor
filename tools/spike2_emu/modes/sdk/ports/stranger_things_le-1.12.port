@@ -189,3 +189,7 @@ event bonus_end      0x24
 event tilt_warning   0xb9
 event tilt           0xb7
 event game_over      0x42
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x0042625c 0xe92d4010 0xe3024e94

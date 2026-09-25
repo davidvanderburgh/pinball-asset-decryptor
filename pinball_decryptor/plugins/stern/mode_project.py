@@ -66,6 +66,7 @@ class TitleProfile:
     score_bits: int = 64         # 32 for a port with the 32-bit scoring pair (score_add32 + scores32)
     switch_shots: tuple = ()     # names in ``shots`` that come from the port's `switch` lines
     switch_shots_note: str = ""  # why those are not proven yet; "" when they are (or there are none)
+    stack_note: str = ""         # item 164: what ``stack no`` waits for when it is less than every mode
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
     light_route: str = ""        # item 164: how a mode's Lights run - "language" (the game's own light
@@ -259,8 +260,25 @@ STACK_PROVEN = frozenset({
     "avengers_infinity_le-1.09", "turtles_pro-1.59", "led_zeppelin_le-1.22", "munsters_le-1.28",
     "venom_le-1.07", "dungeons_and_dragons_le-1.00", "king_kong_le-0.97", "mando_le-1.44",
     "iron_maiden_le-1.16", "sword_of_rage_le-1.18", "rush_le-1.18", "star_wars_le-1.30",
-    "john_wick_le-1.01", "led_zeppelin_pro-1.22",
+    "john_wick_le-1.01", "led_zeppelin_pro-1.22", "foo_fighters_le-1.04",
 })
+
+
+#: item 164: the titles with no cmode rules (plain C, Elvira's Rule classes) - the framework's own count of
+#: the balls in play, called by the runtime: it sees a multiball there, not the other modes (sites)
+STACK_BALLS_NEEDS = ("balls_in_play",)
+
+#: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
+#: started again once it ended
+STACK_BALLS_PROVEN = frozenset({
+    "beatles-1.29", "james_bond_60th_le-1.11", "james_bond_le-1.06", "metallica_spike-1.03",
+    "star_wars_elg-1.10", "stranger_things_le-1.12", "uncanny_xmen_le-0.98", "batman-1.13",
+    "guardians_le-1.14", "aerosmith_le-1.15",
+})
+
+
+def _stack_balls(sites):
+    return all(n in sites for n in STACK_BALLS_NEEDS)
 
 
 def _stack_table(data, values):
@@ -625,6 +643,7 @@ def profile_from_port(path):
         no("countdown", "The app does not know which of %(label)s's callouts count down, so the "
                         "game's own voice cannot count down.")
     key = "%s-%s" % (game, version)
+    stack_note = ""
     inserts_ok = _lamp_route(port) and key in LAMPS_PROVEN
     light_route = ""
     if "lights" in runtime and values.get("light_lts"):
@@ -680,6 +699,12 @@ def profile_from_port(path):
         pass
     elif _stack_table(data, values) and key in STACK_PROVEN:
         pass
+    elif _stack_balls(sites) and key in STACK_BALLS_PROVEN:
+        stack_note = ("On %s a mode of yours waits only for the game's multiballs: the app cannot yet "
+                      "see its other modes." % label)
+    elif _stack_balls(sites):
+        no("stack", "The app has found how %(label)s tells a multiball is running but has not yet "
+                    "seen a mode of yours wait for one in the emulator, so it always runs beside them.")
     elif _stack_table(data, values):
         no("stack", "The app has found %(label)s's own modes but has not yet seen a mode of "
                     "yours wait for one in the emulator, so it always runs beside them.")
@@ -727,6 +752,7 @@ def profile_from_port(path):
         score_bits=32 if RUNTIME_CORE_32[0] in sites else 64,
         switch_shots=switch_shots,
         switch_shots_note=switch_note,
+        stack_note=stack_note,
         lamps=_lit_inserts(port) if key in LAMPS_PROVEN else 0,
         light_route=light_route,
         bank_tree=measured.get("bank_tree", "auto_loaded"),

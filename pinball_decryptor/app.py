@@ -3831,6 +3831,9 @@ class App:
                                    self.window.video_no_conversion_var.get())),
                     {rel: bool(v) for rel, v
                      in (saved.get("video_asis_slots") or {}).items()
+                     if rel in assignments},
+                    {rel: v for rel, v
+                     in (saved.get("video_length_slots") or {}).items()
                      if rel in assignments})
         return (slots_by_rel, assignments,
                 frozenset(r for r in (saved.get("image_keep_size") or ())
@@ -3897,7 +3900,8 @@ class App:
                 or self._sidecar_pending(assets_dir, "video"))
         if not pend:
             return (0, 0, [])
-        slots_by_rel, assignments, trim, no_conversion, asis = pend
+        slots_by_rel, assignments, trim, no_conversion, asis = pend[:5]
+        lengths = pend[5] if len(pend) > 5 else {}
         from .core.video_slots import stage_replacements
         from .core import staged_changes
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
@@ -3921,7 +3925,7 @@ class App:
                 no_conversion=no_conversion, log_cb=log_cb,
                 assets_dir=assets_dir, cancel_cb=cancel_cb,
                 pin_byte_size=pin_size, asis_overrides=asis,
-                best_quality=best)
+                best_quality=best, length_overrides=lengths)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."

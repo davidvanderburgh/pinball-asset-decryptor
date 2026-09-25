@@ -193,10 +193,10 @@ def test_pick_persists_and_feeds_the_build(tmp_path):
         assert side["replacement_names"]["video/intro.mp4"] == "mine.mp4"
         assert side["video_trim"] is False
         pend = w.window.pending_video_assignments(str(proj))
-        slots, assigns, trim, noconv, asis = pend
+        slots, assigns, trim, noconv, asis, lengths = pend
         assert assigns == {"video/intro.mp4": str(mine)}
         assert "video/attract.mp4" in slots
-        assert (trim, noconv, asis) == (False, False, {})
+        assert (trim, noconv, asis, lengths) == (False, False, {}, {})
         assert w.window.pending_video_assignments(str(tmp_path)) is None
         assert w.window.replacement_folder_mismatches(str(proj)) == []
         other = tmp_path / "other"
@@ -788,3 +788,36 @@ def test_open_in_default_app(tmp_path, monkeypatch):
         assert w.call("video.open_default", "video/intro.mp4", "rep") is True
         assert opened[-1] == str(mine)
         assert w.call("video.open_default", "video/nope.mp4") is False
+
+
+def test_a_clip_can_choose_its_own_length(tmp_path):
+    # PAD-215: the Trim / pad box is tab-wide; one clip can say stock, full
+    # or a typed number of seconds, and that reaches the build and survives
+    # a fresh session.
+    proj = _project(tmp_path)
+    mine = _mine(tmp_path)
+    rel = "video/intro.mp4"
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        w.answers.append(str(mine))
+        w.call("video.choose", rel)
+        assert w.call("video.row_menu", [rel])["length"] == "box"
+        w.answers.append("6")
+        assert w.call("video.set_length", rel, "custom") is True
+        assert w.asked[-1]["title"] == "Clip length"
+        menu = w.call("video.row_menu", [rel])
+        assert (menu["length"], menu["length_secs"]) == ("custom", 6.0)
+        assert _row(w.state("video"), rel)["len"].endswith("• 6 s")
+        assert w.window.pending_video_assignments(str(proj))[5] == {rel: 6.0}
+        # Cancel on the prompt keeps what was there
+        w.answers.append("cancel")
+        assert w.call("video.set_length", rel, "custom") is False
+        assert w.call("video.set_length", rel, "full") is True
+        side = json.loads((proj / ".staged_changes.json")
+                          .read_text(encoding="utf-8"))
+        assert side["video_length_slots"] == {rel: "full"}
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        _scan(w, proj)
+        assert w.call("video.row_menu", [rel])["length"] == "full"
+        w.call("video.set_length", rel, None)
+        assert w.window.pending_video_assignments(str(proj))[5] == {}

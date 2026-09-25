@@ -4,6 +4,7 @@
 # the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane.
 # program sha1 ddbf86a53a4420b53910f2f604753513b10c58b5, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds.
 
 game           star_wars_le
 version        1.30
@@ -337,6 +338,12 @@ switch 98   0x4000000000       Accelerator opto 2
 switch 99   0x8000000000       Accelerator opto 3
 switch 100  0x10000000000      Accelerator opto 4
 switch 102  0x20000000000      R2d2 mid opto
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 760 (clips 1-5 said "ONE!", "Cool!", "Three!", "Four!", "Five!"); ten_seconds 761 ("Hurry up!")
+callout countdown           760
+callout ten_seconds         761
+value countdown_first 1
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Mini target 1

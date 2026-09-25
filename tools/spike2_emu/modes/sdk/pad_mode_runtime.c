@@ -108,8 +108,9 @@ static uint64_t number(const char **p, int *ok)
 {
     const char *s = *p;
     uint64_t x = 0;
-    int base = 10, got = 0;
+    int base = 10, got = 0, neg = 0;
     while (*s == ' ' || *s == '\t') s++;
+    if (s[0] == '-') { neg = 1; s++; }          /* item 163: `value countdown_step -1` */
     if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
     for (;; s++) {
         int d = hexval(*s);
@@ -120,7 +121,7 @@ static uint64_t number(const char **p, int *ok)
     while (*s == ' ' || *s == '\t') s++;
     *p = s;
     if (ok) *ok = got;
-    return x;
+    return neg ? (uint64_t)0 - x : x;
 }
 
 void pm_commas(char *out, unsigned cap, uint64_t v)
@@ -634,6 +635,20 @@ void pm_callout(unsigned id)
 void pm_callout_nth(unsigned id, unsigned n)
 {
     unsigned f = fn("callout_nth");
+    /* item 163: a title whose countdown list opens with something else names the clip "one" is
+     * in (Iron Maiden 1.16's request 351: a sting, then "One." .. "Five"): `value countdown_first 1`.
+     * A title that says each number with a request of its own names the "one" request and the id
+     * step to the next number (Star Wars ELG 1.10: 168 "One!" .. 164 "Five!"): `value
+     * countdown_step -1`. Every countdown caller asks for clip seconds - 1 of the countdown role
+     * and gets the number. */
+    if (id && id == pm_callout_id("countdown")) {
+        long step = pm_port_value("countdown_step", 0);
+        n += (unsigned)pm_port_value("countdown_first", 0);
+        if (step) {
+            pm_callout((unsigned)((long)id + (long)n * step));
+            return;
+        }
+    }
     if (f && id) ((void (*)(unsigned, unsigned))(unsigned long)f)(id, n);
 }
 
@@ -846,8 +861,80 @@ int pm_callout_own_sound(unsigned carrier, const unsigned char key[8])
     return 1;
 }
 
+/* the sound log (soundlog.on): r0 = the request, r2 = 1 for a numbered variant (sound_census.c) */
+static void on_sound_worker(unsigned *r)
+{
+    say("sound %u %u", r[0], r[2]);
+}
+
+/* ---- item 163: a carrier's STOCK key swapped for an appended record's key, for one play --------
+ * pm_sound_swap makes every lookup of `stock` (the carrier's own record key) take `ours` instead
+ * (a record the build appended and NO descriptor names, so nothing the game plays can reach it), and
+ * gives `request` `priority` without the steal flag, until `ms` (+1/8 +1 s; 10 s when 0) have passed
+ * - then the key and the priority/flags come back (a call again moves the time). Matching on the
+ * key, not on "the next lookup", holds when the worker thread looks it up later, and holds for a
+ * looping descriptor that looks its key up again at every loop. */
+#define SWAPS_MAX 8
+static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; } swaps[SWAPS_MAX];
+static volatile int swaps_live;
+
+int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms)
+{
+    int i, free_i = -1, old;
+    if (!(can & PM_CAN_OWN_SOUND) || !request || !stock || !ours) return 0;
+    for (i = 0; i < SWAPS_MAX; i++) {
+        if (swaps[i].request == request) { free_i = i; break; }
+        if (!swaps[i].request && free_i < 0) free_i = i;
+    }
+    if (free_i < 0) return 0;
+    old = pm_sound_priority(request, priority, 0);
+    if (swaps[free_i].request != request) swaps[free_i].old = old;
+    for (i = 0; i < 8; i++) { swaps[free_i].stock[i] = stock[i]; swaps[free_i].ours[i] = ours[i]; }
+    swaps[free_i].until = pm_ms() + (ms ? ms + ms / 8 + 1000 : 10000);
+    swaps[free_i].request = request;          /* last: the lookup hook reads it */
+    swaps_live = 1;
+    return 1;
+}
+
+static void sound_swaps_tick(void)
+{
+    unsigned long now = pm_ms();
+    int i, live = 0;
+    for (i = 0; i < SWAPS_MAX; i++) {
+        unsigned r = swaps[i].request;
+        if (!r) continue;
+        /* the window only has to cover the lookup, at the start of the play (the channel took the
+         * priority then too): no "while it still sounds" - on Munsters 1.28 the carrier read as
+         * active long after its record, and the swap outlived the call (item 163). The music
+         * re-arms its swap on every poll while the mode runs. */
+        if (now < swaps[i].until) {
+            live = 1;
+            continue;
+        }
+        swaps[i].request = 0;
+        if (swaps[i].old >= 0) pm_sound_priority(r, swaps[i].old >> 8, swaps[i].old & 0xff);
+    }
+    swaps_live = live;
+}
+
+static int key_is(const unsigned char *a, const unsigned char *b)
+{
+    int i;
+    for (i = 0; i < 8; i++) if (a[i] != b[i]) return 0;
+    return 1;
+}
+
 static void on_sound_lookup(unsigned *r)
 {
+    if (swaps_live && r[1]) {
+        const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+        int i;
+        for (i = 0; i < SWAPS_MAX; i++)
+            if (swaps[i].request && key_is(k, swaps[i].stock)) {
+                r[1] = (unsigned)(unsigned long)swaps[i].ours;
+                return;
+            }
+    }
     if (!sound_armed || !sound_key) return;
     sound_armed = 0;
     r[1] = (unsigned)(unsigned long)sound_key;
@@ -3217,6 +3304,7 @@ static void on_tick(unsigned *r)
     }
     clip_tick();
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
+    sound_swaps_tick();                       /* item 163: swapped carrier keys come back */
     events_deliver();
     switches_deliver();
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
@@ -3999,6 +4087,11 @@ static void pad_mode_start(void)
     }
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
     if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);
+    /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
+     * takes is logged ("[pad] sound <request> <n>"), so a check game is also the sound census that
+     * says which stock requests a build never plays (the carriers a mode's own sounds ride on) */
+    if (fn("sound_worker") && pm_trigger("soundlog.on") && hook(fn("sound_worker"), on_sound_worker))
+        say("sound log: every request the sound worker takes (soundlog.on)");
     events_arm();
     switches_arm();                           /* shots from switches, when the port maps some */
     {   /* item 146: the battle roster, when the port has one */

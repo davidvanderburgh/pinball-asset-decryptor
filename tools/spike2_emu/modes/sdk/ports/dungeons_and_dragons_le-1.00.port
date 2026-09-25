@@ -4,6 +4,8 @@
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane.
 # program sha1 c3f5d99793b3c2a29e98b62481bb83448af3ced7, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): time_up.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, time_up.
 
 game           dungeons_and_dragons_le
 version        1.00
@@ -343,6 +345,14 @@ switch 91   0x20000000         Dragon hold 1
 switch 92   0x40000000         Dragon hold 2
 switch 93   0x80000000         Dragon hold 3
 switch 94   0x100000000        Dragon hold 4
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: time_up 2058 ("Your time ran out. / Your time ran out.")
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 2059 (clips 1-5 said "ONE", "2", "Three", "4", "Five"); time_up 2058 ("Your time ran out. / Your time ran out.")
+callout countdown           2059
+callout time_up             2058
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Dragon target left

@@ -275,6 +275,9 @@ def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
     for u in mine:
         if u.get("key") == "music":
             lines.append("music  %d%s" % (int(u["request"]), " %d" % int(u["sid"]) if u.get("sid") else ""))
+    for u in mine:
+        if u.get("stock_key") and u.get("our_key"):     # item 163: swapped in at run time
+            lines.append("swap   %d %s %s" % (int(u["request"]), u["stock_key"], u["our_key"]))
     for cue, _w, _p in spec.call_list():
         u = next((u for u in mine if u.get("key") == call_key(cue)), None)
         if u is None:

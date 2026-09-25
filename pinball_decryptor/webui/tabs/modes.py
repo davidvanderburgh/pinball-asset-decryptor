@@ -1418,6 +1418,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         dis["own_extra"] = bool(why)
         if why:
             reasons["own_extra"] = "Not on this game yet: " + why
+        why = "" if why else self._own_music_why(p)
+        dis["own_music"] = bool(why)
+        if why:
+            reasons["own_music"] = "Not on this game yet: " + why
         dis["lit_shots"] = getattr(p, "lamps", -1) == 0
         if dis["lit_shots"]:
             reasons["lit_shots"] = ("Not on this game yet: the app does not know which light is in "
@@ -1476,6 +1480,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return ""
         return ("the app has not found spare sounds on %s to carry a mode's own start sound, "
                 "shot sound and music, so they cannot be picked here." % p.label)
+
+    @staticmethod
+    def _own_music_why(p):
+        """Why a mode's own MUSIC cannot be carried on title ``p`` when its calls can ("" when it
+        can): item 163, a title whose music plays another way has no stock tune to carry it."""
+        from ...plugins.stern import mode_sounds as MS
+        if p is None:
+            return ""
+        c = MS.carriers(*MS.title_version(p.key))
+        if c is None or c.music:
+            return ""
+        return ("the app has not found a stock tune on %s to carry a mode's own music, so it "
+                "cannot be picked here." % p.label)
 
     def _retarget_for_title(self, spec):
         p = self._profile
@@ -1629,6 +1646,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         for attr, mode_var, words, stem in self._OWN_SOUNDS:
             if what == attr:
                 why = self._own_extra_why(self._shown or self._profile)
+                if not why and attr == "music":
+                    why = self._own_music_why(self._shown or self._profile)
                 if why:
                     # the page greys these three; a call made anyway picks nothing
                     self._say("%s: %s" % (words, why))

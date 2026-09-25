@@ -3,6 +3,7 @@
 # runtime hooked the game, 17 of its 17 shots came from their switches, a drain ended each ball, and
 # the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
 # program sha1 89c916f82269e8a9d8d060ba2708cdec1cef02e5, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown.
 
 game           turtles_le
 version        1.59
@@ -288,6 +289,11 @@ shot 0x40000     Left return lane left
 shot 0x80000     Right return lane
 shot 0x100000    Left top lane
 shot 0x200000    Right top lane
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 441 (clips 1-5 said "ONE", "2", "Three?", "Four!", "Five")
+callout countdown           441
+value countdown_first 1
 
 # ---- callouts and text: COPIED from TMNT Pro 1.59, the same title; unverified ----
 text example_start_shot     Center loop

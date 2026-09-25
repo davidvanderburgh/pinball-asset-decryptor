@@ -32,6 +32,7 @@
 #   multiplier 0x543534) and the scores are u32[4]. So the two entries are named `site score_add32` and
 #   `data scores32`, the runtime's 32-bit scoring pair (MODE_SDK.md, "Ports"): a runtime from before it finds
 #   no core `score_add` / `scores` and hooks NOTHING (fail-closed), instead of passing 64-bit points in r2:r3.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown.
 game           beatles
 version        1.29
 
@@ -263,7 +264,6 @@ switch 51          0x8000000000    Right outlane
 # ---- callouts by role, scenes by role -------------------------------------------------------------
 # countdown: the challenge mode's song clock (0x40f70, AD_CHALLENGE_MODE_SONG_SECONDS) plays
 # sound_nth(385, seconds left - 1) for its last 10 s (0x41030..0x41038). Desk; not heard.
-callout countdown           385
 # ten_seconds / time_up: NOT FOUND (no Beatles timed mode plays a separate request at 10 s or 0 s that
 #   this read found); left out, so the Modes tab greys "Sound: count down" and the game's own call.
 # video_bank: the same id as Godzilla's; 13 Beatles functions load it and find "VideoSurface" in it.
@@ -271,6 +271,10 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 # hud / attract: NOT PLACED. Beatles names only 7 top-level scenes in code (937b6a26 bonus tally,
 #   60ed7e50 bank, ffa461e7, 05d1c47b, d1e3403b, 08065a0c Element_4x3, 713deecc); none is the score
 #   panel or Godzilla's slide-out HUD. A screen needs a measured HUD scene (scene_write profile).
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 385 (clips 1-5 said "WOLF!", "TRUUU", "THREE", "FOUR!", "Five!")
+callout countdown           385
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Left orbit target

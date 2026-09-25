@@ -4,6 +4,7 @@
 # the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane, Lock 1, Lock 2, Lock 3.
 # program sha1 c5f0dbdf995adfdb9c783b604fd1a8eec6fcc300, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): ten_seconds.
 
 game           john_wick_le
 version        1.01
@@ -360,6 +361,10 @@ switch 99   0x8000000000       Top sling
 switch 100  0x10000000000      Lock 1
 switch 101  0x20000000000      Lock 2
 switch 102  0x40000000000      Lock 3
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: ten_seconds 345 ("The clock is ticking. / At least there's still time.")
+callout ten_seconds         345
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Left ramp left tgt

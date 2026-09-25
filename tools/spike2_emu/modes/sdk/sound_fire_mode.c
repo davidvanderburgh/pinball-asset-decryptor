@@ -12,6 +12,13 @@
  *   sound.sid     "<request> <sid>"  pm_sound_sid (sid 0 puts the request's own list back)
  *   sound.fade    "<request> <ms>"   pm_sound_fade, then its voices' volume steps logged twice
  *                               a second until it is over (item 150 follow-up)
+ *   callout.one   "<request>"        pm_callout (the port's callout site: a mode's end call)
+ *   callout.nth   "<request> <n>"    pm_callout_nth (a mode's countdown plays n = seconds - 1)
+ *                               (item 163, modes/voicecheck.sh)
+ *   key.play      "<request> <stock key> <our key> <priority> <ms>"  (keys: 16 hex digits)
+ *                               pm_sound_swap then pm_sound: the carrier plays the record `our key`
+ *                               names (item 163); the bus of the channel that plays it is logged
+ *                               once (pm_sound_playing), and the runtime puts the key back itself
  * and logs each as "[soundfire] ..." in /dump/mode.log. Works in attract too: nothing here
  * waits for a game.
  *
@@ -74,6 +81,8 @@ static unsigned channels_address(void)
 
 static unsigned dump_ms, dump_last_ms, chan_table, vol_watch;
 static unsigned long vol_until;
+static unsigned key_watch;             /* item 163: key.play's request, until its bus is logged */
+static unsigned long key_until;
 static char dump_last[512];
 
 static void dump_channels(void)
@@ -96,6 +105,20 @@ static void dump_channels(void)
     pm_log("ch%s", line[0] ? line : " (none playing)");
 }
 
+/* 16 hex digits -> 8 bytes; the text after them, or 0 */
+static const char *hex_key(const char *s, unsigned char out[8])
+{
+    int i;
+    while (*s == ' ') s++;
+    for (i = 0; i < 16; i++) {
+        int c = s[i], v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                        : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        if (v < 0) return 0;
+        if (i & 1) out[i / 2] = (unsigned char)(out[i / 2] | v); else out[i / 2] = (unsigned char)(v << 4);
+    }
+    return s + 16;
+}
+
 static void on_init(void)
 {
     pm_log("ready on %s %s: sound.fire / sound.active / sound.stop / sound.prio / sound.dump", pm_game(), pm_version());
@@ -104,7 +127,7 @@ static void on_init(void)
 static void on_tick(void)
 {
     static unsigned ticks;
-    char text[48];
+    char text[96];
     unsigned req;
     ticks++;
     if (dump_ms && chan_table && pm_ms() - dump_last_ms >= dump_ms) {
@@ -152,6 +175,53 @@ static void on_tick(void)
         pm_log("fade %d over %d ms: %d", r, ms, pm_sound_fade((unsigned)r, (unsigned)ms));
         vol_watch = (unsigned)r;
         vol_until = pm_ms() + (unsigned)ms + 300;
+    }
+    /* item 163: the port's callout sites, exactly as a mode's countdown and end call use them */
+    if (pm_trigger_text("callout.one", text, sizeof text)) {
+        req = number(text);
+        pm_callout(req);
+        pm_log("callout %u", req);
+    }
+    if (pm_trigger_text("callout.nth", text, sizeof text)) {
+        int r, n;
+        const char *s = signed_number(text, &r);
+        signed_number(s, &n);
+        pm_callout_nth((unsigned)r, (unsigned)n);
+        pm_log("callout_nth %d %d", r, n);
+    }
+    /* item 163: a carrier's own record key swapped for another's, for one play */
+    if (pm_trigger_text("key.play", text, sizeof text)) {
+        unsigned char stock[8], ours[8];
+        int r, prio, ms, ok;
+        const char *s = signed_number(text, &r);
+        s = hex_key(s, stock);
+        s = s ? hex_key(s, ours) : 0;
+        if (!s) {
+            pm_log("key.play: needs <request> <stock key> <our key> <priority> <ms>, keys 16 hex digits");
+        } else {
+            s = signed_number(s, &prio);
+            signed_number(s, &ms);
+            ok = pm_sound_swap((unsigned)r, stock, ours, prio, (unsigned)ms);
+            pm_log("key %d -> %02x%02x%02x%02x%02x%02x%02x%02x at priority %d for %d ms: %s", r, ours[0], ours[1], ours[2],
+                   ours[3], ours[4], ours[5], ours[6], ours[7], prio, ms,
+                   !ok ? "NOT armed" : pm_sound((unsigned)r) ? "played" : "armed, NOT played (no sound_play)");
+            key_watch = ok ? (unsigned)r : 0;
+            key_until = pm_ms() + 2000;
+        }
+    }
+    if (key_watch) {
+        unsigned reqs[8], buses[8];
+        int n = pm_sound_playing(reqs, buses, 8), i;
+        for (i = 0; i < n && i < 8; i++)
+            if (reqs[i] == key_watch) {
+                pm_log("key %u plays on bus 0x%02x", key_watch, buses[i]);
+                key_watch = 0;
+                break;
+            }
+        if (key_watch && (n < 0 || pm_ms() > key_until)) {
+            pm_log("key %u: %s", key_watch, n < 0 ? "no channel table in the port (bus not read)" : "no channel played it");
+            key_watch = 0;
+        }
     }
     if (vol_watch && chan_table) {
         char line[160];

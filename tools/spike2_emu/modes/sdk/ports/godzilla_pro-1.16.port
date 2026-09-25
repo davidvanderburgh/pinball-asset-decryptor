@@ -3,6 +3,7 @@
 # runtime hooked the game, 21 of its 21 shots came from their switches, a drain ended each ball, and
 # the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
 # program sha1 c9fbe1ba3a4f83a93259402fa2abee8f2bdafdb7, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds, time_up.
 
 game           godzilla_pro
 version        1.16
@@ -337,10 +338,13 @@ shot 0x200         Left spinner
 shot 0x2000        Top spinner
 shot 0x20000       Shield ramp spinner
 
-# ---- callouts and text: COPIED from Godzilla Premium/LE 1.16, the same title; unverified ----
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 1287 (clips 1-5 said "ONE", "2", "Three", "4", "Five."); ten_seconds 1291 ("Time is running out!"); time_up 1295 ("Time is up!")
 callout countdown           1287
 callout ten_seconds         1291
 callout time_up             1295
+
+# ---- callouts and text: COPIED from Godzilla Premium/LE 1.16, the same title; unverified ----
 text example_start_shot     Maser target
 text example_clip           Mothra_godzilla_attack20
 text example_lights_on      blele --sweep 0 --lts 224 --red 0 --green 255 --blue 0 --freq 10 --use_alpha 1 --alpha 255

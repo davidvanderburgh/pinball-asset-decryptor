@@ -157,6 +157,24 @@ def test_the_time_up_request_resolves_to_one_record_under_the_builds_mask(monkey
         MW.request_record(b"", b"", params, [_site(1998, stranger)], 1295, mask)
 
 
+def test_a_time_up_call_with_variants_resolves_to_every_variants_record(monkeypatch):
+    """Item 163: Guardians' time-up (254) is three variants ("Time's up." / "You have run out
+    of time!" / "Your time is up!"); a mode's own end sound goes in place of each record, in
+    the sid list's order, and a single-sid request still takes the one-record path."""
+    mask = 0xFFFC0003
+    keys = [struct.pack("<II", 0x1000 + i, 0x80000001 + i) for i in range(3)]
+    params = [{"idx": 40 + i, "findkey": k} for i, k in enumerate(keys)]
+    sites = [_site(500 + i, struct.pack("<II", 0x1000 + i, (0x80000001 + i) | 0x0000ff00))
+             for i in range(3)]
+    monkeypatch.setattr(MW, "request_sids",
+                        lambda elf, head, req: {254: [502, 500, 501], 7: [501]}.get(req, []))
+    assert MW.request_records_all(b"", b"", params, sites, 254, mask) == [42, 40, 41]
+    assert MW.request_records_all(b"", b"", params, sites, 7, mask) == [41]
+    sites[1] = _site(501, struct.pack("<II", 0x7777, 1))
+    with pytest.raises(MW.ModeWriteError, match="sid 501 names no record"):
+        MW.request_records_all(b"", b"", params, sites, 254, mask)
+
+
 def test_a_params_cache_with_only_the_first_key_word_still_resolves(monkeypatch):
     """Measured on the first real build: the cached Godzilla Pro 1.15 params carry
     ``key0`` and no whole ``findkey``, and the chain found no record. The first word is
@@ -446,7 +464,7 @@ def MS_beds(game, version):
 
 def test_a_title_without_measured_carriers_leaves_the_own_sounds_out(tmp_path):
     project = str(tmp_path / "project")
-    tmnt = MP.profile("turtles_pro_1_59")
+    tmnt = MP.profile("turtles_pro_1_58")          # not the latest build: no carriers measured
     slug, _s = MP.new_mode(project, "LOUD", MP.ModeSpec(
         name="LOUD", title=tmnt.key, start_shot=tmnt.example_start_shot,
         scoring_shots=[n for n, _m in tmnt.shots][:1], screen=False, clip="none"))
@@ -459,7 +477,7 @@ def test_a_title_without_measured_carriers_leaves_the_own_sounds_out(tmp_path):
     said = []
     assert MW.choose_own_sounds(project, MW.project_modes(project), (True, ""),
                                 log=lambda m, lvl="info": said.append(m)) == []
-    assert "no stock requests to carry them have been measured for TMNT Pro 1.59" in said[0]
+    assert "no stock requests to carry them have been measured for TMNT Pro 1.58" in said[0]
 
 
 def test_the_scan_and_the_plan_name_each_carried_sound_or_say_it_is_left_out(tmp_path, monkeypatch):

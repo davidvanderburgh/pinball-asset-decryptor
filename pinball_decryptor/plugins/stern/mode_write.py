@@ -496,6 +496,29 @@ def request_record(game_elf, image_head, params, sites, request, mask):
     return found.pop()
 
 
+def request_records_all(game_elf, image_head, params, sites, request, mask):
+    """Every stock record idx *request* can play, in its sid list's order (item 163): a
+    time-up call with variants ("Time's up." / "Your time is up!" ...) names one record per
+    variant, and a mode's own end sound goes in place of each, so whichever the game picks
+    plays it. Raises :class:`ModeWriteError` when a sid names no record or more than one."""
+    from . import engine as E
+    sids = request_sids(game_elf, image_head, request)
+    if len(sids) <= 1:
+        return [request_record(game_elf, image_head, params, sites, request, mask)]
+    by_key = {bytes(p["findkey"]): p["idx"] for p in params if p.get("findkey")}
+    out = []
+    for sid in sids:
+        found = {by_key[E._play_key(s.payload, s.sid, mask)] for s in sites
+                 if s.sid == sid and E._play_key(s.payload, s.sid, mask) in by_key}
+        if len(found) != 1:
+            raise ModeWriteError("request %d's sid %d names %s, not one sound record"
+                                 % (request, sid, sorted(found) or "no record"))
+        idx = found.pop()
+        if idx not in out:
+            out.append(idx)
+    return out
+
+
 def sid_record(params, sites, sid, mask):
     """The stock record idx sound id *sid* names (a music bed's sid, item 150 follow-up): its
     descriptor keys under the build's key *mask* -> the record whose container key it is.
@@ -615,6 +638,8 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
             entry["sid"] = int(got["music_sid"])
             entry["seconds"] = int(getattr(spec, "seconds", 0) or 0)
             taken_beds.append(entry["sid"])
+        if MS.carriers(game, version).swap:
+            entry["swap"] = True        # item 163: swapped in at run time, no stock sound id changes
         out.append(entry)
     return out
 
@@ -638,6 +663,9 @@ def own_cfg_args(project, slug, spec, own_sounds):
     for u in mine:
         if u["key"] == "music" and u.get("sid"):
             requests["music_sid"] = int(u["sid"])     # item 150 follow-up: the mode's own bed
+        if u.get("stock_key") and u.get("our_key"):
+            # item 163: the mode swaps its own record in on this carrier
+            requests.setdefault("swaps", []).append((int(u["request"]), u["stock_key"], u["our_key"]))
     ms = {u["key"]: int(u["ms"]) for u in mine if u.get("ms") and u["key"] != "music"}
     return requests, ms or None
 
@@ -1745,6 +1773,8 @@ def choose_code_sounds(project, code, sound_ok, prof, taken=(), taken_beds=(), l
         if w["music"] and got.get("music_sid"):
             entry["sid"] = int(got["music_sid"])
             taken_beds.append(entry["sid"])
+        if MS.carriers(game, version).swap:
+            entry["swap"] = True        # item 163: swapped in at run time
         entry.pop("priority", None)
         out.append(entry)
     return out

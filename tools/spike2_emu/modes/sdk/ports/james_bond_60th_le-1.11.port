@@ -4,6 +4,7 @@
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane.
 # program sha1 c870f3bc6c56333dae1b27766c6dcdce5a9e8ba2, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): ten_seconds, time_up.
 
 game           james_bond_60th_le
 version        1.11
@@ -315,6 +316,11 @@ switch 94   0x200000000        Left pop bumper
 switch 95   0x400000000        Right pop bumper
 switch 96   0x800000000        Center 3 bank left
 switch 97   0x1000000000       Center 3 bank center
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: ten_seconds 224 ("Time is running out."); time_up 238 ("Time's up! / Get out of there!")
+callout ten_seconds         224
+callout time_up             238
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Target a

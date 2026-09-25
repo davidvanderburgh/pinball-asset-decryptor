@@ -326,13 +326,7 @@ TITLE_SCENES = {
 #: Titles whose callouts ran in the emulator but were never HEARD (the rig is always
 #: muted), in words the Modes tab shows under Sound; the countdown and a sound of the
 #: mode's own stay live there. From the port's own comment on its callouts.
-TITLE_SOUND_UNHEARD = {
-    "jaws_le-1.02": "Jaws LE 1.02's countdown and time-up callouts have played in the emulator "
-                    "only with the sound off, so which sounds they are (and so what a sound of "
-                    "the mode's own replaces) has not been heard yet.",
-    "beatles-1.29": "The Beatles 1.29's countdown callout has played in the emulator only with "
-                    "the sound off, so which sound it is has not been heard yet.",
-}
+TITLE_SOUND_UNHEARD = {}      # item 163: Jaws's and The Beatles' callouts are heard now
 
 #: The game's name for each Spike 2 game directory (the part before an edition word), as the
 #: backglass says it. Every latest Spike 2 build is here; a directory not listed is written
@@ -1663,7 +1657,12 @@ def own_sound_lines(spec, own_sounds, ms=None):
     picked = {k: r for k, r in own_sounds.items() if have.get(k)}
     if "music" in picked and own_sounds.get("music_sid"):
         picked["music_sid"] = own_sounds["music_sid"]      # item 150 follow-up: its own bed
-    return MS.cfg_lines(picked, shot_every=int(spec.sound_shot_every or 1), ms=ms)
+    lines = MS.cfg_lines(picked, shot_every=int(spec.sound_shot_every or 1), ms=ms)
+    carried = {int(r) for k, r in picked.items() if k in MS.SOUND_KEYS}
+    # item 163: the carriers whose own record key the mode swaps for its appended record's
+    lines += ["swap           %d %s %s" % (int(r), stock, ours)
+              for r, stock, ours in own_sounds.get("swaps") or () if int(r) in carried]
+    return lines
 
 
 # ---- how often a mode can start (item 139) -------------------------------------------

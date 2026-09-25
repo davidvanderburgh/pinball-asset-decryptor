@@ -174,7 +174,7 @@ def test_code_sounds_off_or_on_a_title_without_carriers_are_left_out_with_a_line
     assert MW.choose_code_sounds(project, code, (False, "PAD_STERN_MODE_SOUND=0"), GZ,
                                  log=lambda m, *a: said.append(m)) == []
     assert "own sounds are off" in said[-1] and "KING GHIDORAH" in said[-1]
-    tmnt = MP.profile_from_port(MR.port_file("turtles_pro", "1.59"))
+    tmnt = MP.profile_from_port(MR.port_file("turtles_pro", "1.58"))      # not the latest: no carriers
     assert MW.choose_code_sounds(project, code, (True, ""), tmnt, log=lambda m, *a: said.append(m)) == []
     assert "no stock requests to carry them" in said[-1]
 

@@ -4,6 +4,7 @@
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane.
 # program sha1 ffe498952469d35b997f7cedc38405b018d47117, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown.
 
 game           foo_fighters_le
 version        1.04
@@ -20,7 +21,8 @@ site sound_lookup     0x0037d260 0xe92d4038 0xe1a05000
 site score_add        0x0021eeb4 0xe3091f4a 0xe34013bd
 #   callout: through the handler of hook 0x95, as in the reference [The Beatles 1.29, Jaws LE 1.02, Deadpool Pro 1.16, TMNT Pro 1.59]
 site callout          0x002e33f8 0xe92d4010 0xe300ebd0
-# site callout_nth            NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   callout_nth: the callout site's second same-prologue twin (+0x1b4 as on Beatles and Jaws; 39 of 43 masked instructions equal Beatles'), played in the emulator 2026-09-24 (item 163)
+site callout_nth      0x002e35ac 0xe92d4010 0xe300ebd0
 #   candidate: the reference callout_nth calls 0x3387f0, which is 0x2d2d04 in the target - prove what it does before using it
 # site light_run              NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   lamp_group: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool Pro 1.16, TMNT Pro 1.59, Deadpool LE 1.14]
@@ -363,6 +365,11 @@ switch 100  0x2000000000       Up pf spinner opto
 switch 101  0x4000000000       Up pf left target
 switch 102  0x8000000000       Up pf center target
 switch 103  0x10000000000      Up pf right target
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 163 (clips 1-5 said "ONE", "2", "THREE!", "FOUR!", "Five!")
+callout countdown           163
+value countdown_first 1
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Lower right target

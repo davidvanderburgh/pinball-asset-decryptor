@@ -7,6 +7,7 @@
 # runtime hooked the game, 26 of its 27 shots came from their switches, a drain ended each ball, and
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Mid flipper lane.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds, time_up.
 
 game           jaws_le
 version        1.02
@@ -149,15 +150,39 @@ shot 0x20000000000000  Quickshot bottom
 # cmode_timed's own defaults (0x1b8da8 stores them at +0x84/+0x86/+0x88; its countdown virtual
 # 0x1b7c40 plays them): the same roles as Godzilla's 1287/1291/1295. The run was muted: the
 # requests ran without a fault, but which sound plays is not heard yet.
-callout countdown           1386
-callout ten_seconds         1387
-callout time_up             1388
 # Jaws has no slide-out scene like Godzilla's 32e6ae28. UIScoreFrame loads the score panel
 # 9d578751 (the same id as Godzilla's score panel). NOT yet proven as a home for a screen.
 scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
 # the same scene id as Godzilla's; 635 clips, and video_bank.parse walks it
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 1386 (clips 1-5 said "ONE", "2", "3", "FOUR", "Five!"); ten_seconds 1387 ("Quinn, stop wasting time! Hurry up!"); time_up 1388 ("Time's up! / Time's up!")
+callout countdown           1386
+callout ten_seconds         1387
+callout time_up             1388
+
+# ---- sound sites, played in the emulator 2026-09-24 (item 163): drafted from Godzilla LE 1.16's
+# by prologue; the key-swap proof ran on them (pm_sound, pm_sound_swap on sound_lookup, the
+# request table's priority) and the check game's sound log is sound_worker's. The channel
+# struct values are the ones every port with sound sites carries.
+site sound_play       0x004c2fe0 0xe92d4010 0xe30ceda8
+site sound_nth        0x004c3194 0xe92d4010 0xe30ceda8
+site sound_active     0x004c3754 0xe59f3034 0xe2831e62
+site sound_stop       0x004c38ac 0xe92d40f8 0xe1a06000
+site sound_worker     0x004c25cc 0xe92d4ff0 0xe2507000
+data sound_channels         0x008aceb4
+data sound_queue            0x008ad728
+data sound_requests         0x0083efc8
+data sound_request_count    0x006cf780
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Chum bucket target

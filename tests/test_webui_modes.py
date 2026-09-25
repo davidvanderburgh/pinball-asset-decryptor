@@ -432,7 +432,7 @@ def test_jaws_greys_what_its_port_cannot_do(tmp_path, preview_on):
             assert st["dis"][part], part
             assert st["reasons"][part].startswith("Not on this game: "), part
         assert not st["dis"]["events"]              # item 162: Jaws's events were seen firing
-        assert st["reasons"]["sound_unheard"].startswith("Not heard yet: ")
+        assert "sound_unheard" not in st["reasons"]            # item 163: Jaws's callouts are heard
         assert not st["dis"]["clip"]
 
 
@@ -478,7 +478,7 @@ def test_a_passing_check_proves_a_drafted_port(tmp_path, preview_on, monkeypatch
         assert st["check_done"]["text"].startswith("Checked in the emulator: modes run on Deadpool LE")
 
 
-def test_beatles_switch_shots_are_proven_and_its_countdown_unheard(tmp_path, preview_on):
+def test_beatles_switch_shots_are_proven_and_its_countdown_heard(tmp_path, preview_on):
     proj = _card_project(tmp_path / "beatles", "beatles-1_29_0.Release.8G.sdcard.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
@@ -488,7 +488,7 @@ def test_beatles_switch_shots_are_proven_and_its_countdown_unheard(tmp_path, pre
         w.call("modes.new")
         st = w.state("modes")
         assert not st["dis"]["countdown"]
-        assert st["reasons"]["sound_unheard"].startswith("Not heard yet: The Beatles 1.29's countdown")
+        assert "sound_unheard" not in st["reasons"]            # item 163: 385 heard saying one..five
 
 
 def test_tmnt_shots_and_greying(tmp_path, preview_on):
@@ -498,7 +498,8 @@ def test_tmnt_shots_and_greying(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert st["profile"]["label"] == "TMNT Pro 1.59" and len(st["profile"]["shots"]) == 17
-        assert st["dis"]["countdown"] and st["dis"]["own_sound"]
+        # item 163: its countdown is heard (441); no time-up call carries an end sound of its own
+        assert not st["dis"]["countdown"] and st["dis"]["own_sound"]
         assert st["reasons"]["sound"].startswith("Not on this game: ")
         assert st["dis"]["film_clip"] and st["dis"]["film_still"] and st["dis"]["film_sound"]
         assert st["reasons"]["film"].startswith("Not on this game: cutting a clip, a picture for "
@@ -1340,23 +1341,41 @@ def test_the_title_note_carries_the_ports_switch_line_words():
 
 # ---- review fixes: what a title cannot do is greyed with the reason, in plain words -----------
 def test_own_sounds_grey_where_no_carriers_were_measured(tmp_path, preview_on):
-    """Review M1: on a title with no measured carriers (Jaws) the start sound, shot sound and
-    music are greyed with a plain reason, refused on the server, and the Try it words drop the
-    "about a minute" sentence; on Godzilla Premium/LE 1.16 (measured) they stay live."""
-    proj = _card_project(tmp_path / "jaws", "jaws_le-1_02_0.raw")
+    """Review M1: on a title with no measured carriers (TMNT Pro 1.58, not the latest build) the
+    start sound, shot sound and music are greyed with a plain reason, refused on the server, and
+    the Try it words drop the "about a minute" sentence; on Godzilla Premium/LE 1.16 (measured)
+    they stay live. Item 163: Jaws carries them now, and The Beatles greys only the music (no
+    stock tune to carry it)."""
+    proj = _card_project(tmp_path / "tmnt", "turtles_pro-1_58_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
         w.call("modes.new")
         st = w.state("modes")
         assert st["dis"]["own_extra"] and st["own_extra_ok"] is False
         why = st["reasons"]["own_extra"]
-        assert why.startswith("Not on this game yet: ") and "Jaws LE 1.02" in why
+        assert why.startswith("Not on this game yet: ") and "TMNT Pro 1.58" in why
         assert "port" not in why
         asked = len(w.asked)
         assert w.call("modes.choose", "sound_start") is None       # the server refuses too
         assert len(w.asked) == asked                                # no file dialog was opened
-        # a title with no named inserts: "Light the shots that score" is greyed with it
+    proj = _card_project(tmp_path / "jaws", "jaws_le-1_02_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new")
+        st = w.state("modes")
+        assert not st["dis"]["own_extra"] and st["own_extra_ok"] is True
+        # a title with no named inserts: "Light the shots that score" is greyed
         assert st["dis"]["lit_shots"] and "Jaws LE 1.02" in st["reasons"]["lit_shots"]
+    proj = _card_project(tmp_path / "beatles", "beatles-1_29_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new")
+        st = w.state("modes")
+        assert not st["dis"]["own_extra"] and st["dis"]["own_music"]
+        assert "stock tune" in st["reasons"]["own_music"] and "Beatles" in st["reasons"]["own_music"]
+        asked = len(w.asked)
+        assert w.call("modes.choose", "music") is None             # the server refuses the music
+        assert len(w.asked) == asked
     gz = _card_project(tmp_path / "gz", "godzilla_le-1_16_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, gz)

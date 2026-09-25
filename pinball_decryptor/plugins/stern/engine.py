@@ -6509,7 +6509,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             _repoint_descriptors(
                                 gr_path, img_path, params, desc_sites, log,
                                 templates=_mode_bed_templates(
-                                    gr_path, img_path, mode_own_used, log))
+                                    gr_path, img_path, mode_own_used, log),
+                                keep=_mode_swap_idx(mode_own_used))
+                            _mode_swap_keys(mode_own_used, params, log)
                             if cancel():
                                 return None, None, None, None, None
                             _save_grown_consumed(gr_path, img_path, _greads,
@@ -6531,7 +6533,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 progress(30, 100, "Re-pointing the game's "
                                          "play tables at the longer sounds...")
                             _repoint_descriptors(gr_path, img_path, params,
-                                                 desc_sites, log)
+                                                 desc_sites, log,
+                                                 keep=_mode_swap_idx(mode_own_used))
                             if cancel():
                                 return None, None, None, None, None
                             # The derive above walked the firmware's whole
@@ -6586,7 +6589,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             loops=_loop_idx, gains=slot_gains,
                             level_refs=_mode_music_level_refs(
                                 gr_path, img_path, params, desc_sites,
-                                _loop_idx, log),
+                                _loop_idx, log, used=mode_own_used),
                             progress=_span(progress, 45, 75),
                             cancel=cancel)
                         audio_patches.update(_cp)
@@ -6596,7 +6599,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         _repoint_descriptors(
                             gr_path, img_path, params, desc_sites, log,
                             templates=_mode_bed_templates(gr_path, img_path,
-                                                          mode_own_used, log))
+                                                          mode_own_used, log),
+                            keep=_mode_swap_idx(mode_own_used))
+                        _mode_swap_keys(mode_own_used, params, log)
                         # The re-point may move a key inside the region the
                         # fingerprint covers: file the map under the bank as
                         # it now stands too, so the restore below still hits.
@@ -7259,7 +7264,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                               if mode_sound_used else None),
                 "own_sounds": [dict({k: u.get(k) for k in ("slug", "name", "key",
                                                            "request", "idx", "ms")},
-                                    **({"sid": u["sid"]} if u.get("sid") else {}))
+                                    **({"sid": u["sid"]} if u.get("sid") else {}),
+                                    **({k: u[k] for k in ("swap", "stock_key", "our_key")}
+                                       if u.get("swap") else {}))
                                for u in mode_own_used],
                 "p2_offset": _p2_off,
                 "p2_epoch": _p2_epoch,
@@ -13982,6 +13989,30 @@ def _play_key(payload8, sid, mask=_DESC_KEY2_MASK):
 _DESC_KEY2_MASKS = (0xE0001FFF, 0xFC0003FF)
 
 
+def _measured_key_mask(stock, sites):
+    """The second-word key mask read off the build itself (item 163), or None: the key's
+    FIRST word is used whole on every build, so a descriptor payload whose first word
+    names exactly one stock record pairs with it, and the mask is the bits where the
+    payload's and the record's second words always agree AND some record sets.  Most
+    builds match neither known layout (Aerosmith 1.15 measures 0xFFFC0003: 1514 of
+    1514 sites named, none under the other two); Godzilla Premium 1.16 measures the
+    0xE0001FFF it was read to have."""
+    by_w1 = {}
+    for k in stock:
+        by_w1.setdefault(k[:4], []).append(k)
+    agree, ones, n = 0xFFFFFFFF, 0, 0
+    for s in sites:
+        ks = by_w1.get(bytes(s.payload[:4]))
+        if not ks or len(ks) != 1:
+            continue
+        pw2 = struct.unpack_from("<I", s.payload, 4)[0]
+        rw2 = struct.unpack_from("<I", ks[0], 4)[0] & ~(((s.sid >> 16) << 13) & 0xFFFFFFFF)
+        agree &= ~(pw2 ^ rw2) & 0xFFFFFFFF
+        ones |= rw2
+        n += 1
+    return (agree & ones) if n else None
+
+
 def _desc_key_mask(params, sites, log=None):
     """The key mask this build's play tables use: the candidate under which the
     descriptors name the most STOCK records (a grown row counts by its stock key).
@@ -13990,7 +14021,10 @@ def _desc_key_mask(params, sites, log=None):
     winner must name at least twice as many as the runner-up; anything closer is not
     a measurement and is refused rather than re-pointing against a coincidence.  When
     no candidate names anything there is no evidence either way and Led Zeppelin's
-    mask is kept, so the plan refuses per sound with its own reason."""
+    mask is kept, so the plan refuses per sound with its own reason.  A build whose
+    tables match neither known layout gets the mask measured on it
+    (:func:`_measured_key_mask`) when that names ten times what the best known one
+    does."""
     stock = set()
     for p in params:
         k = p.get("stock_findkey") if p.get("grown") else p.get("findkey")
@@ -14002,6 +14036,16 @@ def _desc_key_mask(params, sites, log=None):
         counts.append((len(named), m))
     counts.sort(key=lambda c: -c[0])
     (best, mask), (second, _m2) = counts[0], counts[1]
+    measured = _measured_key_mask(stock, sites)
+    if measured is not None:
+        n = len({_play_key(s.payload, s.sid, measured) for s in sites} & stock)
+        if n and best * 10 < n:
+            if log:
+                log("Play-table key layout 0x%08X, measured on this build: the "
+                    "descriptors name %d of %d sound record(s) (the known layouts "
+                    "%s)." % (measured, n, len(stock), ", ".join(
+                        "0x%08X %d" % (m, c) for c, m in counts)), "info")
+            return measured
     if best == 0:
         return _DESC_KEY2_MASK
     if best < 2 * second:
@@ -14177,42 +14221,76 @@ def _mode_sound_grow(gr_path, img_path, params, sites, audio_edits, grows,
             elf = f.read()
         with open(_lp(img_path), "rb") as f:
             head = f.read(1 << 16)
-        idx = _MW.request_record(elf, head, params, sites,
-                                 mode_sound["request"], mask)
+        idxs = _MW.request_records_all(elf, head, params, sites,
+                                       mode_sound["request"], mask)
     except (RuntimeError, OSError, ValueError, IndexError, struct.error) as e:
         # An unexpected program or an out-of-range request in a profile is a
         # sound that cannot be located, never a failed Write.
         log("Modes: %s ends with the game's own time-up call on this card: its "
             "time-up sound could not be located (%s)." % (name, e), "warning")
         return audio_edits, grows, None
-    if idx in audio_edits:
-        raise RuntimeError(
-            "Modes: %s's own end sound goes in place of sound idx %d (the "
-            "game's time-up call, request %d), and this project also replaces "
-            "that sound. Take one of them out, then Write again."
-            % (name, idx, mode_sound["request"]))
-    p = {q["idx"]: q for q in params}.get(idx)
+    for idx in idxs:
+        if idx in audio_edits:
+            raise RuntimeError(
+                "Modes: %s's own end sound goes in place of sound idx %d (the "
+                "game's time-up call, request %d), and this project also replaces "
+                "that sound. Take one of them out, then Write again."
+                % (name, idx, mode_sound["request"]))
+    rows = {q["idx"]: q for q in params}
     want = _wav_frames_44k(mode_sound["wav"])
-    if p is None or want is None:
+    if any(rows.get(i) is None for i in idxs) or want is None:
         log("Modes: %s ends with the game's own time-up call on this card: %s."
-            % (name, "its sound record is unknown" if p is None else
+            % (name, "its sound record is unknown" if want is not None else
                "its end sound %s is not a WAV this app can read"
                % os.path.basename(mode_sound["wav"])), "warning")
         return audio_edits, grows, None
-    room = emitted_length(p.get("length", 0))
     audio_edits = dict(audio_edits)
-    audio_edits[idx] = mode_sound["wav"]
     grows = dict(grows)
-    grows[idx] = (room, max(int(want), int(p.get("length", 0))))
+    # item 163: a time-up call with variants names one record per variant; each gets
+    # the sound, so whichever the game picks plays it
+    for idx in idxs:
+        p = rows[idx]
+        audio_edits[idx] = mode_sound["wav"]
+        grows[idx] = (emitted_length(p.get("length", 0)),
+                      max(int(want), int(p.get("length", 0))))
+    idx = idxs[0]
     used = dict(mode_sound, idx=idx)
+    if len(idxs) > 1:
+        used["idxs"] = list(idxs)
     log("Modes: %s's own end sound (%s, %.2f s) goes on the card as a new "
-        "record for request %d (sound idx %d, %.2f s on the stock card), and "
+        "record for request %d (sound idx %s, %.2f s on the stock card), and "
         "the game's play tables are re-pointed at it - so the game's own "
         "time-up call plays it too." % (name, os.path.basename(mode_sound["wav"]),
                                          want / 44100.0, mode_sound["request"],
-                                         idx, p.get("length", 0) / 44100.0),
+                                         " / ".join(str(i) for i in idxs),
+                                         rows[idx].get("length", 0) / 44100.0),
         "info")
     return audio_edits, grows, used
+
+
+def _mode_swap_idx(used):
+    """The records of the modes' own sounds SWAPPED in at run time (item 163): grown, and left
+    un-pointed (:func:`_plan_descriptor_repoint` *keep*)."""
+    return {int(u["idx"]) for u in used or () if u.get("swap") and u.get("idx") is not None}
+
+
+def _mode_swap_keys(used, params, log):
+    """Item 163: each swapped sound's ``stock_key`` (its carrier's own record key, what the game
+    looks up) and ``key`` (the appended record's, which the mode swaps in), read off the grown
+    bank's params, into its *used* entry for the mode file (``swap <request> <stock> <ours>``).
+    An entry whose keys are not there is taken out and logged (the mode then plays the game's own)."""
+    byidx = {p["idx"]: p for p in params}
+    for u in list(used or ()):
+        if not u.get("swap"):
+            continue
+        p = byidx.get(int(u["idx"]), {})
+        old, new = p.get("stock_findkey"), p.get("findkey")
+        if not p.get("grown") or not old or not new or bytes(old) == bytes(new):
+            used.remove(u)
+            log("Modes: %s's own %s is not put on this card: its record's key did not come out of "
+                "the grown bank." % (u.get("name"), u.get("key")), "warning")
+            continue
+        u["stock_key"], u["our_key"] = bytes(old).hex(), bytes(new).hex()
 
 
 def _mode_bed_templates(gr_path, img_path, used, log):
@@ -14237,11 +14315,13 @@ def _mode_bed_templates(gr_path, img_path, used, log):
     return out
 
 
-def _mode_music_level_refs(gr_path, img_path, params, sites, loop_idx, log):
+def _mode_music_level_refs(gr_path, img_path, params, sites, loop_idx, log, used=()):
     """``{idx: ref_idx}``: the stock record whose loudness a mode's music bed matches - the
     title's music carrier's own (a stock tune at the game's music level), not the bed sid's
-    stock record, which is a short effect (item 150 follow-up). ``{}`` when it cannot be found,
-    and each bed then matches its own slot as before."""
+    stock record, which is a short effect (item 150 follow-up). The carrier is the one *used*
+    names (the build's own sounds); without one, the first title whose key mask this build has
+    (item 163: many titles share a mask, so the named carrier comes first). ``{}`` when it cannot
+    be found, and each bed then matches its own slot as before."""
     if not loop_idx:
         return {}
     from . import mode_sounds as _MS
@@ -14251,11 +14331,21 @@ def _mode_music_level_refs(gr_path, img_path, params, sites, loop_idx, log):
             elf = f.read()
         with open(_lp(img_path), "rb") as f:
             head = f.read(1 << 16)
-        mask = _desc_key_mask(params, sites)
-        carriers = [c for c in _MS.TITLES.values() if c.key_mask == mask and c.music]
-        if not carriers:
+        # item 163: a swapped music record grows its carrier's own slot, a stock tune at the
+        # game's music level, so matching its own slot (no reference) is already right
+        own = {int(u["idx"]) for u in used or () if u.get("music") and u.get("swap")}
+        if own and set(loop_idx) <= own:
             return {}
-        ref = _MW.request_record(elf, head, params, sites, carriers[0].music[0], mask)
+        mask = _desc_key_mask(params, sites)
+        named = [int(u["request"]) for u in used or () if u.get("music") and u.get("request")]
+        if named:
+            carrier = named[0]
+        else:
+            carriers = [c for c in _MS.TITLES.values() if c.key_mask == mask and c.music]
+            if not carriers:
+                return {}
+            carrier = carriers[0].music[0]
+        ref = _MW.request_record(elf, head, params, sites, carrier, mask)
     except Exception as e:  # noqa: BLE001 - a missing reference only changes a level
         log("Modes: the music beds match their own slots' level (the game's music record "
             "was not found: %s)." % e, "info")
@@ -14331,6 +14421,12 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
                 "%s is not a WAV this app can read" % os.path.basename(wav)), "warning")
             continue
         length = int(p.get("length", 0))
+        if s.get("swap") and not s.get("music") and want > length:
+            # item 163: the carrier's descriptor still says how long it plays
+            log("Modes: %s is not put on this card: %s (%.2f s) is longer than its carrier's own "
+                "record (request %d, %.2f s), which says how long it plays." % (
+                    what, os.path.basename(wav), want / 44100.0, s["request"], length / 44100.0), "warning")
+            continue
         if s.get("music"):
             # item 150 follow-up: always a seamless loop, a whole number of 10 ms steps (so the
             # record's declared duration ends exactly on it), repeated past the stock record
@@ -14352,6 +14448,13 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
         mine.add(idx)
         ms = None if s.get("music") else _MS.sound_ms(_lp(s["wav"]))
         used.append(dict(s, idx=idx, ms=ms))
+        if s.get("swap"):
+            log("Modes: %s (%s, %.2f s) goes on the card as a new record beside request %d's own "
+                "(sound idx %d, %.2f s), which the game still plays; the mode swaps it in for its "
+                "own play only." % (
+                    what, os.path.basename(s["wav"]), _wav_frames_44k(s["wav"]) / 44100.0,
+                    s["request"], idx, length / 44100.0), "info")
+            continue
         log("Modes: %s (%s, %.2f s) goes on the card as a new record for request %d "
             "(sound idx %d, %.2f s on the stock card, a call the game does not play), "
             "and the mode's file names that request." % (
@@ -14360,11 +14463,15 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
     return audio_edits, grows, used
 
 
-def _plan_descriptor_repoint(params, sites, mask=None, family=None):
+def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=()):
     """``({off: bytes}, {sid: ({key8}, duration)})`` -- the writes that
     re-point every descriptor naming a grown sound's stock record at its
     appended record and move its declared duration by the growth, and what
     each touched sid must then resolve to.
+
+    *keep* are grown records whose descriptors stay as they are (item 163, a
+    mode's own sound SWAPPED in at run time): the appended record is in the
+    bank under its own key and nothing the game plays names it.
 
     ``mask`` is the build's key mask; ``None`` measures it from *params* and
     *sites* (:func:`_desc_key_mask`).  *family* (default: the preview switch,
@@ -14380,8 +14487,9 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None):
     if mask is None:
         mask = _desc_key_mask(params, sites) if family else _DESC_KEY2_MASK
     writes, expect = {}, {}
+    keep = {int(i) for i in keep or ()}
     for p in params:
-        if not p.get("grown"):
+        if not p.get("grown") or p["idx"] in keep:
             continue
         old, new = p.get("stock_findkey"), p.get("findkey")
         if not old or not new:
@@ -14502,12 +14610,13 @@ def _music_template_writes(gr_path, staged, templates, expect, mask, log):
     return out, want
 
 
-def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None):
+def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, keep=()):
     """Rewrite the play tables in the staged bank so every descriptor that
     named a grown sound's stock record names its appended record instead,
     then prove it through the game's own resolver on the file as written.
     *templates* ``{bed sid: carrier sid}`` also makes each of those a looping music
-    descriptor (:func:`_music_template_writes`). Returns the ``{off: bytes}`` written."""
+    descriptor (:func:`_music_template_writes`). *keep* are grown records left
+    un-pointed (:func:`_plan_descriptor_repoint`). Returns the ``{off: bytes}`` written."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
     # the key mask measured per build, and durations that end where the audio
@@ -14515,7 +14624,7 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None):
     # one mask and the rounding a build without it uses (_mode_family_on)
     family = _mode_family_on()
     mask = _desc_key_mask(params, sites, log) if family else _DESC_KEY2_MASK
-    writes, expect = _plan_descriptor_repoint(params, sites, mask, family=family)
+    writes, expect = _plan_descriptor_repoint(params, sites, mask, family=family, keep=keep)
     t_writes, t_want = ({}, {})
     if templates:
         t_writes, t_want = _music_template_writes(gr_path, staged, templates, expect, mask, log)
@@ -14565,10 +14674,15 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None):
                         "descriptor (%s); aborting" % (sid, r[2][:40].hex()))
     finally:
         emu.close()
-    n_grown = sum(1 for p in params if p.get("grown"))
+    keep = {int(i) for i in keep or ()}
+    n_grown = sum(1 for p in params if p.get("grown") and p["idx"] not in keep)
     log("Play tables re-pointed: %d descriptor(s) now name the longer copy "
         "of %d sound(s) and declare the new length, confirmed through the "
         "game's own resolver." % (len(expect), n_grown), "info")
+    if keep:
+        log("Play tables: %d sound(s) of the modes' own are in the bank under keys of their own "
+            "and no descriptor names them; each mode swaps its own in for its play (item 163)."
+            % len(keep), "info")
     return writes
 
 

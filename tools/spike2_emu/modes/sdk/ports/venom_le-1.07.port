@@ -4,6 +4,7 @@
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Right lock 1 opto, Right lock 2 opto, Right lock 3 opto, Left lock 1 opto, Left lock 2 opto, Left lock 3 opto, Left outlane, Right outlane.
 # program sha1 43ba72d8b82d8a912c3c28c4a7b46ac77d79680a, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds, time_up.
 
 game           venom_le
 version        1.07
@@ -345,6 +346,12 @@ switch 100  0x1000000000       Left pop bumper
 switch 101  0x2000000000       Right pop bumper
 switch 102  0x4000000000       Top lane-left
 switch 103  0x8000000000       Top lane-right
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 1413 (clips 1-5 said "ONE", "2", "3", "4", "Five."); ten_seconds 758 ("Increase Spider-Sense! Hurry up!"); time_up 1474 ("Time's up, buddy! / Time's up, buddy!")
+callout countdown           1413
+callout ten_seconds         758
+callout time_up             1474
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Left target

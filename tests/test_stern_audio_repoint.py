@@ -347,6 +347,20 @@ def test_the_mask_that_names_the_most_stock_records_is_chosen():
     assert engine._desc_key_mask(params, sites) == MASK
 
 
+def test_a_layout_neither_known_mask_names_is_measured_on_the_build():
+    """Item 163: Aerosmith 1.15's tables match neither known layout (0 records named by
+    each); the mask is read off the build itself, where the first key word pairs each
+    descriptor with its record, and it names them all."""
+    aero = 0xFFFC0003
+    params, sites = _named_card(aero, 40)
+    msgs, log = _capture()
+    got = engine._desc_key_mask(params, sites, log)
+    stock = {p["findkey"] for p in params}
+    assert got not in (GZ, MASK)
+    assert {engine._play_key(s.payload, s.sid, got) for s in sites} == stock
+    assert _said(msgs, "measured on this build")
+
+
 def test_a_grown_row_counts_by_its_stock_key():
     params, sites = _named_card(GZ, 10)
     params[0].update(grown=True, stock_findkey=params[0]["findkey"],
@@ -406,3 +420,31 @@ def test_the_plan_repoints_under_the_godzilla_mask():
     # the bits the mask drops are the descriptor's own and are kept
     assert (struct.unpack("<I", plain[4:])[0] & ~GZ & 0xFFFFFFFF) == \
         (struct.unpack("<I", s.payload[4:])[0] & ~GZ & 0xFFFFFFFF)
+
+
+def test_a_swapped_sound_is_grown_but_its_descriptors_are_left_alone():
+    """Item 163: a mode's own sound SWAPPED in at run time keeps every descriptor as the card had
+    it (nothing the game plays can reach the appended record); the other grown sounds are
+    re-pointed as always, and the swapped one's two keys go to the mode file."""
+    stock, new = _key(0xd2694790, 0x00000d81), _key(0xd7094794, 0x80000b86)
+    other_stock, other_new = _key(0x55, 0x66), _key(0x77, 0x88)
+    sites = [_site(180, 0x2af2bdf2, _key(0xd2694790, 0x1eef6d81)),
+             _site(181, 0x2af2c000, other_stock)]
+    params = [{"idx": 39, "grown": True, "stock_findkey": stock, "findkey": new,
+               "length": 44100, "stock_length": 44100},
+              {"idx": 40, "grown": True, "stock_findkey": other_stock, "findkey": other_new,
+               "length": 44100, "stock_length": 44100}]
+    writes, expect = engine._plan_descriptor_repoint(params, sites, mask=MASK, family=True, keep={39})
+    assert set(expect) == {181}
+    assert 0x2af2bdf2 not in writes and 0x2af2c000 in writes
+    used = [{"name": "A", "key": "sound_start", "request": 900, "idx": 39, "swap": True},
+            {"name": "B", "key": "music", "request": 70, "idx": 40}]
+    assert engine._mode_swap_idx(used) == {39}
+    msgs, log = _capture()
+    engine._mode_swap_keys(used, params, log)
+    assert used[0]["stock_key"] == stock.hex() and used[0]["our_key"] == new.hex()
+    assert "stock_key" not in used[1]
+    # a swapped sound whose key did not come out of the grown bank is taken out, and said so
+    used = [{"name": "A", "key": "sound_start", "request": 900, "idx": 41, "swap": True}]
+    engine._mode_swap_keys(used, params, log)
+    assert used == [] and _said(msgs, "did not come out of the grown bank")

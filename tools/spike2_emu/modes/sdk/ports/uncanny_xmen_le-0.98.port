@@ -5,6 +5,7 @@
 # Shots no press made (their switch is left out of the check, or needs two): Upper shooter lane, Dr flipper tgt, Shot 0x10000000, Right outlane drain.
 # program sha1 0d33470241a7143cfe7b9e39dbcdea83ba6a5b95, portgen revision 3, 7 reference port(s) of framework generation B.
 # 2 shot(s) the app could not name are named after the switch that made them in the check.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown.
 
 game           uncanny_xmen_le
 version        0.98
@@ -407,6 +408,10 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 558 (clips 1-5 said "ONE!", "2", "3", "4", "Five")
+callout countdown           558
 
 # ---- examples a template mode can use on this game ----
 text example_start_shot     X mansion tgt

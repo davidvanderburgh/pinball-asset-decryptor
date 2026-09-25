@@ -7,6 +7,7 @@
 # Emulator-proven 2026-09-24 by a full build check (modes/gamecheck.sh play full, item 162): the
 # runtime hooked the game, 17 of its 17 shots came from their switches, a drain ended each ball, and
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown.
 
 game           turtles_pro
 version        1.59
@@ -102,6 +103,32 @@ shot 0x200000    Right top lane
 # no countdown callout ids: TMNT's timed modes keep none the way Godzilla's and Jaws's do
 # the same scene id as Godzilla's and Jaws's (the target program names it)
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 441 (clips 1-5 said "ONE", "2", "Three?", "Four!", "Five")
+callout countdown           441
+value countdown_first 1
+
+# ---- sound sites, played in the emulator 2026-09-24 (item 163): drafted from Godzilla LE 1.16's
+# by prologue; the key-swap proof ran on them (pm_sound, pm_sound_swap on sound_lookup, the
+# request table's priority) and the check game's sound log is sound_worker's. The channel
+# struct values are the ones every port with sound sites carries.
+site sound_play       0x0034be40 0xe92d4010 0xe305e3f0
+site sound_nth        0x0034bff4 0xe92d4010 0xe305e3f0
+site sound_active     0x0034c5b4 0xe59f3034 0xe2831e62
+site sound_stop       0x0034c70c 0xe92d40f8 0xe1a06000
+site sound_worker     0x0034b42c 0xe92d4ff0 0xe2507000
+data sound_channels         0x006c54fc
+data sound_queue            0x006c5d70
+data sound_requests         0x0062c560
+data sound_request_count    0x00528a38
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Center loop

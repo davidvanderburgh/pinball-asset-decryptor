@@ -5,6 +5,7 @@
 # Shots no press made (their switch is left out of the check, or needs two): Shot 0x2, Shot 0x10, Shot 0x20, Shot 0x200, Shot 0x1000, Shot 0x80000, Shot 0x200000, Shot 0x1000000, Shot 0x2000000, Shot 0x4000000.
 # program sha1 aad880bbb91d1d4989dd17c5fd795cfe0170ed59, portgen revision 3, 7 reference port(s) of framework generation B.
 # 17 shot(s) the app could not name are named after the switch that made them in the check.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, time_up.
 
 game           munsters_le
 version        1.28
@@ -310,6 +311,12 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 611 (clips 1-5 said "One!", "Two", "three", "Four!", "Five"); time_up 616 ("I'm sorry, but your time is up! / That raven says, you're out of time!")
+callout countdown           611
+callout time_up             616
+value countdown_step -1
 
 # ---- examples a template mode can use on this game ----
 text example_start_shot     Lower p/f machine target

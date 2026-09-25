@@ -4,6 +4,7 @@
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane, Coffin lock 1, Coffin lock 2, Coffin lock 3.
 # program sha1 f5d1b36550b44555ff7467ab7ac38e67ab0c874d, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds, time_up.
 
 game           metallica_spike
 version        1.03
@@ -326,6 +327,13 @@ switch 97   0x1000000000       Right loop
 switch 98   0x2000000000       Top lane-left
 switch 99   0x4000000000       Top lane-right
 switch 100  0x8000000000       Lt ramp exit opto
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 572 (clips 1-5 said "ONE", "2", "3", "FOUR", "Five"); ten_seconds 591 ("Hurry, make the shot!"); time_up 663 ("Time's up, loser!")
+callout countdown           572
+callout ten_seconds         591
+callout time_up             663
+value countdown_first 1
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Grave tgt-left

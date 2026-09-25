@@ -32,38 +32,38 @@ PORTS = {
     "godzilla_pro-1.15": (15, 64, True, set(), EVERY_CAPABILITY),   # item 160: + the three spinners
     "godzilla_le-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
-    "turtles_pro-1.59": (17, 32, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
+    "turtles_pro-1.59": (17, 32, True, ALL - {"countdown", "events"}, NO_FRAMEWORK_DISPLAY),
     "deadpool_pro-1.16": (25, 64, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
     "deadpool_le-1.14": (28, 64, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
     # item 162 (2026-09-24): every latest build, proven by a full build check in the emulator
     "godzilla_pro-1.16": (21, 64, True, {"screen", "clip"}, EVERY_CAPABILITY),
-    "aerosmith_le-1.15": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "avengers_infinity_le-1.09": (36, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "aerosmith_le-1.15": (43, 64, True, ALL - {"events", "own_sound"}, CALLOUT_SOUND),
+    "avengers_infinity_le-1.09": (36, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
     "batman-1.13": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
     "elvira3-1.13": (45, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "foo_fighters_le-1.04": (41, 64, True, ALL - {"events"}, ("own-sound",)),
-    "james_bond_60th_le-1.11": (37, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "led_zeppelin_le-1.22": (31, 32, True, ALL - {"events"}, ("screens", "own-sound")),
-    "led_zeppelin_pro-1.22": (30, 32, True, ALL - {"events"}, ("screens", "own-sound")),
-    "metallica_spike-1.03": (40, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
-    "munsters_le-1.28": (27, 32, True, ALL - {"events"}, CALLOUT_SOUND),
-    "rush_le-1.18": (38, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "star_wars_elg-1.10": (30, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "star_wars_le-1.30": (42, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "uncanny_xmen_le-0.98": (33, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
+    "foo_fighters_le-1.04": (41, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "james_bond_60th_le-1.11": (37, 64, True, ALL - {"events", "own_sound"}, CALLOUT_SOUND),
+    "led_zeppelin_le-1.22": (31, 32, True, ALL - {"countdown", "events"}, ('callout', 'screens', 'own-sound')),
+    "led_zeppelin_pro-1.22": (30, 32, True, ALL - {"countdown", "events"}, ('callout', 'screens', 'own-sound')),
+    "metallica_spike-1.03": (40, 64, True, ALL - {"countdown", "events", "own_sound"}, ('callout', 'screens', 'own-sound')),
+    "munsters_le-1.28": (27, 32, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "rush_le-1.18": (38, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "star_wars_elg-1.10": (30, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "star_wars_le-1.30": (42, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "uncanny_xmen_le-0.98": (33, 64, True, ALL - {"countdown", "events"}, ('callout', 'screens', 'own-sound')),
     "jaws_le-1.02": (27, 64, True, ALL - {"clip", "countdown", "events", "own_sound"}, ("callout", "screens", "clips", "own-sound", "messages")),
-    "stranger_things_le-1.12": (39, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "king_kong_le-0.97": (55, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
-    "james_bond_le-1.06": (44, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "jurassic_park_le-1.16": (38, 64, True, ALL - {"events"}, ("callout", "screens", "own-sound")),
-    "guardians_le-1.14": (34, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "iron_maiden_le-1.16": (32, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "sword_of_rage_le-1.18": (35, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "mando_le-1.44": (40, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "turtles_le-1.59": (17, 32, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
-    "dungeons_and_dragons_le-1.00": (33, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "stranger_things_le-1.12": (39, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "king_kong_le-0.97": (55, 64, True, ALL - {"countdown", "events", "own_sound"}, ('callout', 'screens', 'own-sound')),
+    "james_bond_le-1.06": (44, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "jurassic_park_le-1.16": (38, 64, True, ALL - {"countdown", "events"}, ('callout', 'screens', 'own-sound')),
+    "guardians_le-1.14": (34, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "iron_maiden_le-1.16": (32, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "sword_of_rage_le-1.18": (35, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "mando_le-1.44": (40, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "turtles_le-1.59": (17, 32, True, ALL - {"countdown", "events"}, NO_FRAMEWORK_DISPLAY),
+    "dungeons_and_dragons_le-1.00": (33, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
     "john_wick_le-1.01": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "venom_le-1.07": (40, 64, True, ALL - {"events"}, CALLOUT_SOUND),
+    "venom_le-1.07": (40, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
 }
 
 #: the lines a part of a mode puts in the runtime file
@@ -143,8 +143,8 @@ def test_a_profile_per_port(name):
         if part in cannot:
             assert p.label in p.why_not(part) and "\u2014" not in p.why_not(part)
     assert p.runtime_can == runtime
-    # only Jaws keeps a countdown whose callouts ran muted and were never heard
-    assert bool(p.sound_note) == (name == "jaws_le-1.02") and "—" not in p.sound_note
+    # item 163: every countdown's callouts are heard now (Jaws's were the last)
+    assert p.sound_note == ""
     assert bool(p.proven_note) == (not proven)
     assert p.example_start_shot in {n for n, _m in p.shots}
     # it is the profile the tab finds for that card

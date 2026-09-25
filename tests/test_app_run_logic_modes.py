@@ -1401,20 +1401,24 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
             assert st["dis"][part], part
             reason = st["reasons"][part]
             assert "Not on this game" in reason and tmnt.why_not(part) in reason
-        assert st["dis"]["countdown"] and st["dis"]["own_sound"]
-        assert "count down" in st["reasons"]["sound"]
+        # item 163: TMNT Pro 1.59 counts down now (441, heard); it has no time-up call to carry
+        # an end sound of the mode's own
+        assert not st["dis"]["countdown"] and st["dis"]["own_sound"]
+        assert "time is up" in st["reasons"]["sound"] or "time-up" in st["reasons"]["sound"]
         assert st["editor_on"] is True                          # the shots stay live
         # no named inserts and no measured carriers on TMNT: both greyed, with the reason
         assert st["dis"]["lit_shots"] and "TMNT Pro 1.59" in st["reasons"]["lit_shots"]
-        assert st["dis"]["own_extra"] and "spare sounds" in st["reasons"]["own_extra"]
-        assert st["own_extra_ok"] is False
+        # item 163: TMNT Pro 1.59 carries a mode's own start sound, shot sound and music now
+        assert not st["dis"]["own_extra"] and "own_extra" not in st["reasons"]
+        assert st["own_extra_ok"] is True
 
         spec = MP.load(str(project / "modes" / slug / "mode.json"))
         assert spec.title == "turtles_pro_1_59" and spec.start_shot == "Center loop"
         cfg = MP.runtime_cfg(spec, slug)
         assert "trigger        0x00000080 3" in cfg                  # Center loop x3, TMNT's bit
         assert "shots          0x00000210" in cfg                    # Left ramp + Right ramp on TMNT
-        for gone in ("screen_scene", "clip_start", "light_on", "callout_count", "callout_end"):
+        assert "callout_count  441" in cfg                     # item 163: its countdown, heard
+        for gone in ("screen_scene", "clip_start", "light_on", "callout_end"):
             assert gone not in cfg
 
 
@@ -1492,8 +1496,8 @@ def test_modes_tab_jaws_greys_lights_and_screen_and_a_godzilla_mode_is_retargete
                 "until you pick one") in status
         assert "Powerline left, Powerline center, Powerline right are not on Jaws LE 1.02" in status
         assert status.startswith("Ready to build once saved") and "its file is unchanged" in status
-        # the countdown stays live on Jaws, and says its callouts have not been heard
-        assert "not been heard yet" in st["reasons"]["sound_unheard"]
+        # the countdown stays live on Jaws, and its callouts are heard now (item 163)
+        assert not st["dis"]["countdown"] and "sound_unheard" not in st["reasons"]
         _f(w, "award", "1,500,000")                              # an edit: now the card's shots are saved
         _save(w)
         spec = MP.load(str(project / "modes" / "kaiju_rush" / "mode.json"))

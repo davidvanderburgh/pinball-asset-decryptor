@@ -576,6 +576,31 @@ a second; `sound_census_read.py` turns that into per-phase counts and channel ho
 <flags>"` calls `pm_sound_priority`, and `sound.dump "<ms>"` logs the channels playing
 (request, priority, flags, bus, serial) whenever they change.
 
+#### Every other title: the carrier's own key swapped in (item 163)
+
+Godzilla's carriers are its Japanese variants and its music beds are sound ids no request names.
+Neither travels: the newer titles PLAY most of the sound ids their request table leaves out
+(D&D's character banter from u32 sid tables, Foo Fighters' variant structs, Venom and JP lines
+reached from data no static scan finds), so re-pointing one would change a line the game says.
+Every other title (`mode_sounds.TITLES[...].swap`) touches no stock sound id at all:
+
+- **The build** grows each carrier's own record with the mode's sound and leaves every descriptor
+  as the card had it (`engine._plan_descriptor_repoint(keep=...)`), so nothing the game plays
+  names the appended record. The mode file (and a code mode's `.assets`) gets
+  `swap <request> <stock key> <our key>`: the carrier's record key and the appended one's.
+- **The mode** plays the carrier with `pm_sound_swap(request, stock, ours, priority, ms)` armed:
+  the runtime's `sound_lookup` hook hands back OUR key for every lookup of the STOCK one (by key,
+  so the worker thread's later lookup and a looping descriptor's every loop both get ours), and
+  puts it back from its own tick once `ms` (and a second) have played: only the lookup at the start of the play needs it. A call is
+  swapped for its play; the music for as long as the mode runs, then for its fade.
+- **The carrier's descriptor still sets the bus, the loop and HOW LONG it plays.** So a call must
+  be no longer than its carrier's own record (the build refuses a longer one, and the carriers
+  are the title's longest unplayed calls), and the music carrier is a stock tune (minutes long).
+
+| To... | Call |
+|---|---|
+| play a request with another record for one play | `pm_sound_swap(request, stock_key, our_key, priority, ms)` (keys: 8 bytes), then `pm_sound(request)`. 1 = armed; 0 without the port's `sound_lookup` site - then do NOT play it, the carrier would say its own line |
+
 ### A code mode's own clip, screen, music and calls
 
 A mode written in C gets its own sounds and pictures the same way a form mode does: the BUILD adds
@@ -1015,9 +1040,9 @@ pointing here. What each part of the tab needs from the port:
 |---|---|---|
 | Starts on, Shots that score | `shot` lines (and `shot_mask_bits` when the game sends 32 bits), and `switch` lines with a `switch_hit` site | a port not in `SWITCH_SHOTS_PROVEN` says its switch shots are not proven |
 | Examples | `text example_start_shot` | Godzilla's ready-made modes appear wherever every shot they name exists |
-| Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` | `callout ten_seconds` adds the call at 10 s; without it the count is 5..1 only |
+| Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` | `callout ten_seconds` adds the call at 10 s; without it the count is 5..1 only. `value countdown_first <n>` when the request's list opens with something else: the clip "one" is in (Iron Maiden 1.16's 351 opens with a sting, so 1); `pm_callout_nth` adds it to any clip asked of the countdown role. `value countdown_step <1 or -1>` when every number is a request of its own: `callout countdown` names the "one" request and the others follow it by that step (Star Wars ELG 168, Munsters, Jurassic Park Pin count down the ids; Led Zeppelin, Sword of Rage count up) |
 | Sound: the game's own call | `callout time_up` | without it nothing plays when time is up |
-| Sound: my sound | the `sound_lookup` site and `callout time_up` (the call it replaces) | |
+| Sound: my sound | the `sound_lookup` site and `callout time_up` (the call it replaces) | a time-up request with variants (Guardians' 254: "Time's up." / "Your time is up!" ...) gets the sound in place of every variant, so whichever the game picks plays it |
 | Lights | everything `pm_can(PM_CAN_LIGHTS)` needs, including `value light_owner`, and `value light_lts` | |
 | Screen | everything `PM_CAN_SCREENS` needs, and `scene hud` | the HUD scene file MEASURED: its md5 has a `scene_write.py` profile |
 | Clip | everything `PM_CAN_CLIPS` needs, and `scene video_bank` | the bank measured in `mode_project.TITLE_SCENES` and an added clip seen on the screen |

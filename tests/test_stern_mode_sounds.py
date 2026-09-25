@@ -21,7 +21,19 @@ def test_titles_carry_calls_and_music():
         assert 1295 not in c.calls and 1295 not in c.music
     assert MS.carriers("godzilla_le", "1.16").key_mask == 0xE0001FFF
     assert MS.carriers("godzilla_pro", "1.15").key_mask == 0xFC0003FF
-    assert MS.carriers("jaws_le", "1.02") is None
+    assert not MS.carriers("godzilla_le", "1.16").swap
+    # item 163: every other latest build swaps its own sounds in; the four builds the engine cannot
+    # derive (no resolver, so nothing can grow) have none
+    swaps = [k for k, c in MS.TITLES.items() if c.swap]
+    assert len(swaps) >= 29 and ("jaws_le", "1.02") in swaps
+    for key in swaps:
+        c = MS.TITLES[key]
+        assert len(c.calls) == len(set(c.calls)) >= 3, key
+        assert len(c.music) == len(set(c.music)), key
+        assert not set(c.calls) & set(c.music), key
+        assert not c.beds, key
+    for game, version in (("batman", "1.13"), ("deadpool_le", "1.14"), ("deadpool_pro", "1.16"), ("elvira3", "1.13")):
+        assert MS.carriers(game, version) is None
 
 
 def test_assign_is_distinct_and_stable():
@@ -193,7 +205,9 @@ def test_mode_file_c_stops_a_call_after_its_own_length():
                   "S->end_ms = (unsigned)num(&a)"):
         assert field in text
     # every call goes through own_call (item 150 follow-up), which arms the stop when it plays
-    for call in ("own_call(S->start, S->start_ms,", "own_call(S->shot, S->shot_ms,", "own_call(S->end, S->end_ms,"):
+    for call in ("own_call(S->start, own_swap_of(S, S->start), S->start_ms,",
+                 "own_call(S->shot, own_swap_of(S, S->shot), S->shot_ms,",
+                 "own_call(S->end, own_swap_of(S, S->end), S->end_ms,"):
         assert call in text
     body = text[text.index("static void own_call("):text.index("static void own_calls_tick(")]
     assert "own_sounds_stop_after(request, ms);" in body
@@ -495,3 +509,36 @@ def test_an_appended_record_is_encoded_past_its_end_as_silence():
     assert E._extended_row({"length": 7}, 3) == {"length": 10}
     src = inspect.getsource(E._chain_encode_appended)
     assert "_extended_row(p, _APPENDED_TAIL)" in src
+
+
+def test_a_swapped_sound_writes_a_swap_line_for_its_carrier(tmp_path):
+    """Item 163: the mode file names each swapped carrier with its stock key and the appended
+    record's (``swap <request> <stock> <ours>``, read by mode_file.c and pad_mode_assets.h), only
+    for a sound the mode has."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    spec = MP.example("KAIJU RUSH")
+    spec.sound_start, spec.sound_shot, spec.end_sound, spec.music = "s.wav", "", "", ""
+    carried = {"sound_start": 901, "music": 70,
+               "swaps": [(901, "a20a51102c1c0020", "d1eaa8b4ae100000"), (70, "11" * 8, "22" * 8)]}
+    lines = MP.own_sound_lines(spec, carried, {"sound_start": 1200})
+    assert lines == ["sound_start    901 1200", "swap           901 a20a51102c1c0020 d1eaa8b4ae100000"]
+
+
+def test_mode_file_c_and_code_modes_swap_the_carrier_key_right_before_playing():
+    """Item 163: a call with a swap arms pm_sound_swap right before pm_sound and is NOT played when
+    it cannot be armed; the music keeps its swap armed while the mode runs and lets it lapse after
+    the fade. The runtime's lookup hook swaps by KEY (the worker thread looks it up later), and puts
+    the carrier's priority back from its own tick."""
+    text = open(os.path.join(SDK, "mode_file.c"), encoding="utf-8").read()
+    body = text[text.index("static int own_call_try("):text.index("static void own_call(")]
+    assert body.index("pm_sound_swap(request, swap, swap + 8,") < body.index("return pm_sound(request);")
+    assert 'key_is(line, "swap")' in text
+    assert "if (music.swap) pm_sound_swap(S->music, music.swap, music.swap + 8, -1, 0);" in text
+    assets = open(os.path.join(SDK, "pad_mode_assets.h"), encoding="utf-8").read()
+    assert 'pa_is(key, "swap")' in assets
+    call = assets[assets.index("static PA_UNUSED int pa_call("):]
+    assert call.index("pm_sound_swap(c->request, swap, swap + 8,") < call.index("pa_try(a, c->request")
+    rt = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    hook = rt[rt.index("static void on_sound_lookup(unsigned *r)"):]
+    assert hook.index("key_is(k, swaps[i].stock)") < hook.index("if (!sound_armed || !sound_key) return;")
+    assert "sound_swaps_tick();" in rt

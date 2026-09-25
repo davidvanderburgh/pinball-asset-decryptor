@@ -4,6 +4,7 @@
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane.
 # program sha1 1027924b12c1673e5d8f7e1b3df00485c2b5fc1f, portgen revision 3, 1 reference port(s) of framework generation A.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds.
 
 game           mando_le
 version        1.44
@@ -174,6 +175,33 @@ switch 99   0x1000000000       Mini pf target 3
 switch 100  0x2000000000       Mini pf target 4
 switch 101  0x4000000000       Mini pf target 5
 switch 102  0x8000000000       Mini pf target 6 (right)
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 788 (clips 1-5 said "ONE!", "TWO", "THREE", "FOUR!", "Five!"); ten_seconds 713 ("You need to hurry!")
+callout countdown           788
+callout ten_seconds         713
+value countdown_first 1
+
+# ---- sound sites, played in the emulator 2026-09-24 (item 163): drafted from Godzilla LE 1.16's
+# by prologue; the key-swap proof ran on them (pm_sound, pm_sound_swap on sound_lookup, the
+# request table's priority) and the check game's sound log is sound_worker's. The channel
+# struct values are the ones every port with sound sites carries.
+site sound_play       0x00227dc0 0xe92d4010 0xe309e330
+site sound_nth        0x00227f74 0xe92d4010 0xe309e330
+site sound_active     0x00228534 0xe59f3034 0xe2831e62
+site sound_stop       0x0022868c 0xe92d40f8 0xe1a06000
+site sound_worker     0x002273ac 0xe92d4ff0 0xe2507000
+data sound_channels         0x006b943c
+data sound_queue            0x006b9cb0
+data sound_requests         0x00696cb0
+data sound_request_count    0x00579670
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Left 3 bank target top

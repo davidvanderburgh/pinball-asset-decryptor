@@ -4,6 +4,7 @@
 # the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane.
 # program sha1 60c8026e56b0123b9300934405e990fda4d6b500, portgen revision 3, 1 reference port(s) of framework generation A.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds, time_up.
 
 game           rush_le
 version        1.18
@@ -168,6 +169,33 @@ switch 100  0x400000000        Extra ball (front left) switch
 switch 101  0x800000000        Advance time machine (back left) switch
 switch 102  0x1000000000       Frenzy (front right) switch
 switch 103  0x2000000000       Millions (back right) switch
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 293 (clips 1-5 said "One!", "TOO!", "Three!", "For", "Bye!"); ten_seconds 318 ("Hurry up, you're gonna miss your flight!"); time_up 262 ("Better luck next time, dude! / Your time is up, Hoser!")
+callout countdown           293
+callout ten_seconds         318
+callout time_up             262
+
+# ---- sound sites, played in the emulator 2026-09-24 (item 163): drafted from Godzilla LE 1.16's
+# by prologue; the key-swap proof ran on them (pm_sound, pm_sound_swap on sound_lookup, the
+# request table's priority) and the check game's sound log is sound_worker's. The channel
+# struct values are the ones every port with sound sites carries.
+site sound_play       0x003347b8 0xe92d4010 0xe30ae0d8
+site sound_nth        0x0033496c 0xe92d4010 0xe30ae0d8
+site sound_active     0x00334f2c 0xe59f3034 0xe2831e62
+site sound_stop       0x00335084 0xe92d40f8 0xe1a06000
+site sound_worker     0x00333da4 0xe92d4ff0 0xe2507000
+data sound_channels         0x0b68a1e4
+data sound_queue            0x0b68aa58
+data sound_requests         0x0b5fb194
+data sound_request_count    0x004f2488
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Rt ramp lt target

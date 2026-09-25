@@ -4,6 +4,7 @@
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane, Rocket lock 1 opto, Rocket lock 2 opto, Rocket lock 3 opto.
 # program sha1 0e9d539aa6a2496469b638ba12191075f79fcef3, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds, time_up.
 
 game           james_bond_le
 version        1.06
@@ -323,6 +324,13 @@ switch 105  0x10000000000      Left pop bumper
 switch 106  0x20000000000      Right pop bumper
 switch 107  0x40000000000      Pop bumper exit
 switch 108  0x80000000000      Right orbit
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 692 (clips 1-5 said "ONE", "2", "3", "BOO!", "Bye!"); ten_seconds 689 ("Hurry up! Your time is running out!"); time_up 694 ("Time's up!")
+callout countdown           692
+callout ten_seconds         689
+callout time_up             694
+value countdown_first 1
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Side ramp target

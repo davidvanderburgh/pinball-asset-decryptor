@@ -5,6 +5,7 @@
 # Shots no press made (their switch is left out of the check, or needs two): Shot 0x20000, Shot 0x1000000, Shot 0x8000000, Shot 0x10000000, Shot 0x20000000, Shot 0x40000000.
 # program sha1 b6fe09cd662926f85353466b4115963e66e19f6d, portgen revision 3, 7 reference port(s) of framework generation B.
 # 25 shot(s) the app could not name are named after the switch that made them in the check.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds.
 
 game           led_zeppelin_le
 version        1.22
@@ -22,7 +23,8 @@ site sound_lookup     0x0020b058 0xe92d4038 0xe1a05000
 site score_add        0x00276ea8 0xe3041522 0xe3401429
 #   callout: through the handler of hook 0x95, as in the reference [The Beatles 1.29, Jaws LE 1.02, TMNT Pro 1.59, Deadpool Pro 1.16]
 site callout          0x00170990 0xe92d4010 0xe306ea88
-# site callout_nth            NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   callout_nth: the callout site's second same-prologue twin (+0x1b4 as on Beatles and Jaws; 39 of 43 masked instructions equal Beatles'), played in the emulator 2026-09-24 (item 163)
+site callout_nth      0x00170b44 0xe92d4010 0xe306ea88
 #   candidate: the reference callout_nth calls 0x3387f0, which is 0x16cfe8 in the target - prove what it does before using it
 # site light_run              NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   lamp_group: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, TMNT Pro 1.59, Deadpool Pro 1.16, Deadpool LE 1.14]
@@ -317,6 +319,12 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 212 (clips 1-5 said "ONE!", "TWO!", "FREE!", "FOUR!", "Five."); ten_seconds 222 ("Hurry!")
+callout countdown           212
+callout ten_seconds         222
+value countdown_step 1
 
 # ---- examples a template mode can use on this game ----
 text example_start_shot     Left 2 bank target bottom

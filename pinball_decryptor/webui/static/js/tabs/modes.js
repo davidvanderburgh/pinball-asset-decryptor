@@ -496,17 +496,18 @@ function SoundsPage({ s, f, off, dis, rs, labels, files }) {
       <//>
       <${Sec} title="Sounds of its own" reason=${rs.own_extra}>
         <div class="modes-kv top">
-          ${own.map(([attr, mv, words]) => html`
+          ${own.map(([attr, mv, words]) => { const offA = off || dis.own_extra || (attr === "music" && dis.own_music); return html`
             <span class="lbl">${words}</span>
             <div class="stack" style="gap:2px">
               <div class="row wrap">
-                <${Radio} name=${"m-" + attr} value="none" label="Nothing" checked=${f[mv] !== "file"} disabled=${off || dis.own_extra} onChange=${(v) => setF(mv, v, true)} />
-                <${Radio} name=${"m-" + attr} value="file" label="My sound…" checked=${f[mv] === "file"} disabled=${off || dis.own_extra} onChange=${() => call("modes.choose", attr)} />
+                <${Radio} name=${"m-" + attr} value="none" label="Nothing" checked=${f[mv] !== "file"} disabled=${offA} onChange=${(v) => setF(mv, v, true)} />
+                <${Radio} name=${"m-" + attr} value="file" label="My sound…" checked=${f[mv] === "file"} disabled=${offA} onChange=${() => call("modes.choose", attr)} />
               </div>
               ${attr === "sound_shot" ? html`<div class="row"><span class="dim nw">on every</span><${Num} k="sound_shot_every" value=${f.sound_shot_every} disabled=${off || dis.own_extra} width=${64} /><span class="dim nw">scoring shot(s)</span></div>` : null}
               ${labels[attr] ? html`<div class="row small"><span class="dim">${labels[attr]}</span><${PlayButton} path=${files[attr]} />
-                ${!(off || dis.own_extra) ? html`<${Button} size="xs" kind="ghost" onClick=${() => call("modes.choose", attr)}>Change…<//>` : null}</div>` : null}
-            </div>`)}
+                ${!offA ? html`<${Button} size="xs" kind="ghost" onClick=${() => call("modes.choose", attr)}>Change…<//>` : null}</div>` : null}
+              ${attr === "music" && rs.own_music ? html`<div class="modes-reason small">${rs.own_music}</div>` : null}
+            </div>`; })}
         </div>
         ${dis.own_extra ? null : html`<div class="small muted wrap">Each plays in place of a stock call the game never makes. Write puts them on the card, and names any it cannot carry.</div>`}
       <//>

@@ -117,7 +117,9 @@ uint64_t pm_score_add(unsigned player, uint64_t points);
  * useful ones by role: pm_callout_id("ten_seconds"), "countdown", "time_up". */
 unsigned pm_callout_id(const char *role);        /* 0 if the port has no such role */
 void pm_callout(unsigned id);
-void pm_callout_nth(unsigned id, unsigned n);    /* a numbered variant (a countdown's "3") */
+void pm_callout_nth(unsigned id, unsigned n);    /* a numbered variant (a countdown's "3"); on the
+                                                    countdown role n counts from the port's
+                                                    `value countdown_first` (the clip "one" is in) */
 /* A sound the card never shipped: carried by the game's callout `carrier`, with the
  * sound container key the build gave your appended sound (Modes tab / Write).
  * Countdown variants n = 0..4 are proven; others are not measured. */
@@ -147,6 +149,14 @@ int pm_sound_priority(unsigned request, int priority, int flags);
  * pm_sound_playing fills up to `max` requests (and their bus bits: 0x01 music, 0x02 voice) of
  * the channels playing now; returns how many play, or -1 when the port has no channel table. */
 int pm_sound_sid(unsigned request, unsigned sid);
+/* Item 163: a sound of your own with NO stock sound id touched. For ONE play, every lookup of the
+ * carrier's own record key `stock` takes `ours` instead - a record the build appended that no
+ * descriptor names - and `request` plays at `priority` (no steal flag); the key and priority come
+ * back by themselves once `ms` (+1/8 +1 s; 10 s when 0) have passed. Call it
+ * right before pm_sound(request). The carrier's descriptor still says the bus, the loop and how
+ * long it plays, so `ours` must be no longer than the carrier's own record. 1 = armed; 0 when
+ * the port has no sound_lookup site (then do NOT play: the carrier would play its own line). */
+int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms);
 int pm_sound_fade(unsigned request, unsigned ms);
 int pm_sound_playing(unsigned *requests, unsigned *buses, int max);
 

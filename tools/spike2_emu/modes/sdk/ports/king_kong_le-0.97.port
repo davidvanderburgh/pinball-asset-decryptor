@@ -5,6 +5,7 @@
 # Shots no press made (their switch is left out of the check, or needs two): Shot 0x20, Shot 0x40, Shot 0x80, Shot 0x100, Shot 0x400, Shot 0x10000, Shot 0x20000, Shot 0x40000, Shot 0x100000, Shot 0x1000000, Shot 0x1000000000, Shot 0x20000000000, Shot 0x40000000000, Shot 0x80000000000, Shot 0x200000000000, Shot 0x4000000000000, Shot 0x8000000000000, Shot 0x10000000000000, Shot 0x40000000000000.
 # program sha1 034964e23f5e94a4f48e0f1e0a448834c4c4cc9c, portgen revision 3, 7 reference port(s) of framework generation B.
 # 36 shot(s) the app could not name are named after the switch that made them in the check.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, time_up.
 
 game           king_kong_le
 version        0.97
@@ -340,6 +341,11 @@ event ball_end       0x34
 event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 668 (clips 1-5 said "ONE", "TOO", "THREE", "Four.", "Five"); time_up 670 ("TIME'S UP!")
+callout countdown           668
+callout time_up             670
 
 # ---- examples a template mode can use on this game ----
 text example_start_shot     Pit target-bot

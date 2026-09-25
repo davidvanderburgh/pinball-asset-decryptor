@@ -420,7 +420,7 @@ def _grow_card(monkeypatch, tmp_path, params, grown_rows=None, places=None):
 
     repointed = {}
 
-    def repoint(gr, staged, prm, st, log, templates=None):
+    def repoint(gr, staged, prm, st, log, templates=None, keep=()):
         repointed["path"] = staged
         repointed["params"] = prm
         repointed["sites"] = st

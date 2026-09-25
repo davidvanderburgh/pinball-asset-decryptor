@@ -4,6 +4,7 @@
 # the 7 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane, Subway lock 1 opto, Subway lock 2 opto, Subway lock 3 opto.
 # program sha1 c8b80957f10ad88a297b7970ece52aa5a36834d2, portgen revision 3, 1 reference port(s) of framework generation A.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds.
 
 game           avengers_infinity_le
 version        1.09
@@ -178,6 +179,32 @@ switch 106  0x100000000        Left pop bumper
 switch 107  0x200000000        Right pop bumper
 switch 108  0x400000000        Bottom pop bumper
 switch 109  0x800000000        Left ramp exit opto
+
+# ---- sound sites, played in the emulator 2026-09-24 (item 163): drafted from Godzilla LE 1.16's
+# by prologue; the key-swap proof ran on them (pm_sound, pm_sound_swap on sound_lookup, the
+# request table's priority) and the check game's sound log is sound_worker's. The channel
+# struct values are the ones every port with sound sites carries.
+site sound_play       0x0028d3e0 0xe92d4010 0xe308efb8
+site sound_nth        0x0028d594 0xe92d4010 0xe308efb8
+site sound_active     0x0028db54 0xe59f3034 0xe2831e62
+site sound_stop       0x0028dcac 0xe92d40f8 0xe1a06000
+site sound_worker     0x0028c9cc 0xe92d4ff0 0xe2507000
+data sound_channels         0x007290c4
+data sound_queue            0x00729938
+data sound_requests         0x0065be1c
+data sound_request_count    0x005157b8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 559 (clips 1-5 said "ONE!", "2", "3", "FOUR", "Five."); ten_seconds 561 ("Team, we have to hurry!")
+callout countdown           559
+callout ten_seconds         561
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Right bullseye target

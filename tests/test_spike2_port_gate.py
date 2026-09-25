@@ -370,7 +370,7 @@ def test_the_beatles_profile():
     assert p.runtime_can == ("callout", "screens", "own-sound", "messages", "award-screen")
     # the countdown needs only the countdown callout now (Beatles has 385 and no ten-seconds call)
     assert p.can("countdown") and p.callout_countdown == 385 and p.callout_ten_seconds == 0
-    assert "countdown callout" in p.sound_note and "not been heard" in p.sound_note  # run muted
+    assert p.sound_note == ""                          # item 163: 385 heard saying one..five
     assert MP.read_port(str(BEATLES))["data"]["score_mult"] == 0x543534   # the byte score_add32 multiplies by
     cannot = {part for part in MP.PARTS if not p.can(part)}
     assert cannot == {"lights", "screen", "clip", "own_sound", "stack"}

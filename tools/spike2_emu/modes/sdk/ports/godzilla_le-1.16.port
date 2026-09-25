@@ -3,8 +3,9 @@
 # godzilla_le-1_16_0_spike2) the runtime matched all 24 functions, armed with every
 # capability, and template_mode.c ran unchanged: started on three Maser shots, scored both
 # ramps by name, ended on time. A shot census pressed every playfield switch.
-# UNVERIFIED on this build, and marked where they are: the callout ids (the run was
-# muted) and the struct offsets no run exercised (lights, screens, award screen).
+# UNVERIFIED on this build, and marked where they are: the struct offsets no run exercised
+# (lights, screens, award screen).
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds, time_up.
 game           godzilla_le
 version        1.16
 
@@ -101,15 +102,16 @@ shot 0x200         Left spinner
 shot 0x2000        Top spinner
 shot 0x20000       Shield ramp spinner
 
-# ---- callouts by role - COPIED from Pro 1.15, unverified (the run was muted) ------------------------
-callout countdown           1287
-callout ten_seconds         1291
-callout time_up             1295
-
 # ---- scenes by role - the SAME FILES as Pro 1.15 on this card (same ids, same md5) ---------------
 scene hud                   32e6ae280ddaec08e203a02289bb39a04968e7b0
 scene video_bank            60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene attract               394c4a037fb26e12f536c42b2677bfed831f5c98
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 1287 (clips 1-5 said "ONE", "2", "Three", "4", "Five."); ten_seconds 1291 ("You're running out of time!"); time_up 1295 ("Time is up!")
+callout countdown           1287
+callout ten_seconds         1291
+callout time_up             1295
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Maser target
@@ -464,4 +466,3 @@ site tank_seed_wave   0x00109c64 0xe92d47f0 0xe24dd008  # (obj): level + 1, dest
 site tank_destroy     0x00109f8c 0xe3520000 0xe3a03000  # (obj, record, credit): zero it; credit: destroyed + 1, value + 150,000; no tanks left: advance + spawn
 site tank_advance     0x0010a420 0xe5903000 0xe92d4ff0  # (obj): if active, step every tank (retire at the target), then spawn one
 site tank_award_screen_kill 0x001091a8 0xe92d43f0 0xe24dd01c  # (obj, 0xc94, value lo, hi, [sp] random): the kill's award screen and countdown sound
-

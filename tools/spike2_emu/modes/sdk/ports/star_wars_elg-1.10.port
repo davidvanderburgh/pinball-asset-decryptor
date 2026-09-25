@@ -4,6 +4,7 @@
 # the 6 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): R2-d2 lock 1, R2-d2 lock 2, Left outlane, Right outlane.
 # program sha1 ee9ca85b9e074b02ab9d6a54af226c8073c43bf9, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown.
 
 game           star_wars_elg
 version        1.10
@@ -309,6 +310,11 @@ switch 56   0x4000000          Left slingshot
 switch 58   0x8000000          Force target bottom
 switch 59   0x10000000         Force target top
 switch 60   0x20000000         Yoda mystery target
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 168 (clips 1-5 said "One!", "Two!", "3", "FOUR", "Five.")
+callout countdown           168
+value countdown_step -1
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Death star target

@@ -4,6 +4,7 @@
 # the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane.
 # program sha1 a55d58f0c6591d2b7664ce8700b7b3a9f51e2e0d, portgen revision 3, 7 reference port(s) of framework generation B.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds.
 
 game           jurassic_park_le
 version        1.16
@@ -361,6 +362,11 @@ switch 100  0x400000000        Left pop bumper
 switch 101  0x800000000        Right pop bumper
 switch 102  0x1000000000       Top pop bumper
 switch 103  0x2000000000       Target-pops
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 776 (clips 1-5 said "ONE", "2", "Three!", "4", "Five"); ten_seconds 775 ("You almost out of time!")
+callout countdown           776
+callout ten_seconds         775
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Target-bottom right

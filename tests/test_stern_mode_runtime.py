@@ -338,3 +338,14 @@ def test_rebuilding_gives_the_same_bytes(tmp_path):
         assert a.read() == b.read(), "a rebuild of the same sources differs from prebuilt/mode.so"
     with open(MR.sources_file(), "rb") as a, open(out / "SOURCES.sha256", "rb") as b:
         assert a.read().replace(b"\r", b"") == b.read()
+
+
+def test_a_port_value_can_be_negative():
+    """Item 163: `value countdown_step -1` (Star Wars ELG, Munsters, Jurassic Park Pin count their
+    number requests DOWN). The runtime's port number reader took no minus sign, so the line was
+    dropped and every countdown number went to the "one" request's own list."""
+    rt = open(os.path.join(os.path.dirname(__file__), "..", "tools", "spike2_emu", "modes", "sdk",
+                           "pad_mode_runtime.c"), encoding="utf-8").read()
+    body = rt[rt.index("static uint64_t number(const char **p, int *ok)"):]
+    body = body[:body.index("\n}\n")]
+    assert "if (s[0] == '-') { neg = 1; s++; }" in body and "return neg ? (uint64_t)0 - x : x;" in body

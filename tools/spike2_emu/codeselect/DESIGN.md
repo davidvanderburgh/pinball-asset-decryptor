@@ -650,7 +650,13 @@ hardware and one header defends the build:
   last press.  When it goes, the level is written to `--volume-file`
   (`/jjpe/perm/padselect.volume`, beside `padselect.last`; tmp + rename), and
   a level changed just before START is written at the choice; the next boot
-  starts from it.  Every other backend leaves PLUS/MINUS moving the highlight
+  starts from it.  The file's second line, `conf N`, is the card's own
+  `volume=` the level was set under (PAD-216): JJP's installer keeps perm on
+  a same-game reinstall, so a card rebuilt at volume=8 still booted at the
+  old card's remembered 40.  A remembered level is used only while the
+  card's `volume=` (DEF_VOLUME when it names none) is still N; another card
+  level, or a file with no second line (an older menu's), and the card's
+  own `volume=` wins until the buttons are pressed again.  Every other backend leaves PLUS/MINUS moving the highlight
   (`padsw_test.py` checks Stern's).  The media step levels every JJP menu
   sound and music bed to a -3 dBFS peak (`mkjjpmulti.py media` passes
   `selectmedia.py prepare --peak-dbfs -3`; it was -12 until 2026-09-14, which

@@ -25,7 +25,9 @@ drains + inspects what the selector writes.
      differs from an untouched menu's in the middle of the card row, and is
      the untouched frame again once it has gone), and the settled level is
      kept in --volume-file and used by the next run; --volume above the
-     ceiling is cut to it.
+     ceiling is cut to it.  The file names the card's volume= it was set
+     under (PAD-216): a card with another volume=, or a file with no card
+     level (an older menu's), starts at the card's own volume= instead.
 """
 import math
 import os
@@ -154,9 +156,12 @@ def volume_buttons(binp, t, font):
         w.setframerate(44100)
         w.writeframes(b"".join(struct.pack("<hh", x, x) for x in tone))
     conf = os.path.join(t, "jjpio_vol.conf")
-    with open(conf, "w") as f:
-        f.write("image=rootA|A|a\nimage=rootB|B|b\ndefault=0\ntimeout=10\n"
-                "media=%s\nsound_move=move.wav\nvolume=20\nvolume_max=40\n" % media)
+
+    def write_conf(level):
+        with open(conf, "w") as f:
+            f.write("image=rootA|A|a\nimage=rootB|B|b\ndefault=0\ntimeout=10\n"
+                    "media=%s\nsound_move=move.wav\nvolume=%d\nvolume_max=40\n" % (media, level))
+    write_conf(20)
     volfile = os.path.join(t, "jjpio.volume")
     if os.path.exists(volfile):
         os.unlink(volfile)
@@ -180,7 +185,7 @@ def volume_buttons(binp, t, font):
         got = open(choice).read().strip() if os.path.exists(choice) else None
         logtxt = open(log).read() if os.path.exists(log) else ""
         keys = [l.split("key: ", 1)[1].strip() for l in out.splitlines() if "[select] key: " in l]
-        kept = open(volfile).read().strip() if os.path.exists(volfile) else None
+        kept = open(volfile).read().split("\n")[0].strip() if os.path.exists(volfile) else None
         return rc, got, out, logtxt, keys, kept, dump, os.path.join(t, "jjpio_%s.ppm" % tag)
 
     def fail(msg):
@@ -204,6 +209,9 @@ def volume_buttons(binp, t, font):
             ok = fail("log lacks %r" % want)
     if kept != "30":
         ok = fail("%s holds %r, expected '30' (the level at START)" % (volfile, kept))
+    whole = open(volfile).read() if os.path.exists(volfile) else None
+    if whole != "30\nconf 20\n":
+        ok = fail("%s is %r, expected the level and the card's volume=20 under it" % (volfile, whole))
     peaks = click_peaks(dump)
     want_peaks = [tone_peak * g // 256 for g in (64, 76, 64, 76)]   # gain_q8 of 25, 30, 25, 30
     if len(peaks) != 4 or any(abs(a - b) > 2 for a, b in zip(peaks, want_peaks)):
@@ -235,6 +243,36 @@ def volume_buttons(binp, t, font):
     if kept != "35":
         ok = fail("an untouched menu rewrote %s (%r, expected '35')" % (volfile, kept))
 
+    # E (PAD-216): the card is rebuilt with volume=8 and perm kept - the 35
+    # remembered under volume=20 is not used; the card's 8 is, and stays until
+    # a button is pressed
+    write_conf(8)
+    rc, got, out, logtxt, keys, kept, _, _ = run("volnewconf", [])
+    if "volume: remembered 35 was set under volume=20; this card says 8" not in logtxt:
+        ok = fail("the rebuilt card did not set the old remembered level aside:\n%s"
+                  % "\n".join(l for l in logtxt.splitlines() if "volume" in l))
+    if "volume: 8 of 40 (conf volume=)" not in logtxt:
+        ok = fail("the rebuilt card did not start at its own volume=8")
+    rc, got, out, logtxt, keys, kept, _, _ = run("volnewconf2", ["+"])
+    if "[select] volume: 8 -> 10 (of 40)" not in out:
+        ok = fail("Volume+ on the rebuilt card did not step from 8")
+    whole = open(volfile).read() if os.path.exists(volfile) else None
+    if whole != "10\nconf 8\n":
+        ok = fail("%s is %r after a press on the volume=8 card, expected 10 under volume=8" % (volfile, whole))
+    rc, got, out, logtxt, keys, kept, _, _ = run("volnewconf3", [])
+    if "volume: 10 of 40 (remembered in %s)" % volfile not in logtxt:
+        ok = fail("a level set under the same card's volume= was not remembered")
+
+    # F: a file an older menu wrote (a level, no card level) is not used
+    with open(volfile, "w") as f:
+        f.write("40\n")
+    rc, got, out, logtxt, keys, kept, _, _ = run("vollegacy", [])
+    if "names no card level" not in logtxt or "volume: 8 of 40 (conf volume=)" not in logtxt:
+        ok = fail("an older menu's remembered 40 was used over the card's volume=8:\n%s"
+                  % "\n".join(l for l in logtxt.splitlines() if "volume" in l))
+    if kept != "40":
+        ok = fail("an untouched menu rewrote the older file (%r)" % kept)
+
     box = (400, 300, 960, 440)       # the middle of the card row at 1360x768 (draw_volume)
     up, gone, none = (ppm_region(p, *box) for p in (ppm_up, ppm_gone, ppm_none))
     if up == none:
@@ -243,7 +281,7 @@ def volume_buttons(binp, t, font):
         ok = fail("the indicator was still in the frame after it should have gone")
     if ok:
         print("jjpio_test: volume OK (20 -> 25 -> 30 -> 25 -> 30 kept; remembered 30 -> cap 40; "
-              "indicator up and gone; --volume 90 cut to 40)")
+              "indicator up and gone; --volume 90 cut to 40; a new card's volume= beats the old level)")
     return ok
 
 

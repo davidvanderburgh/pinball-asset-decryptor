@@ -192,3 +192,127 @@ event bonus_end      0x24
 event tilt_warning   0xb9
 event tilt           0xb7
 event game_over      0x42
+
+# ---- named inserts (item 164, SWELF generation): framework lamp layers, derived from this build's program
+#   lamp_layers: the first global the lamp-group allocator 0x1e9388 loads
+data lamp_layers            0x0060d16c
+#   light_count: the device table accessor's bound (a light id is the device's index)
+data light_count            0x0060cd50
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the device table 0x5d096c: every LED
+# (class 4) but the cabinet's, a fixture's -R/-G/-B (or -RED/-GRN/-BLU) on one line; no shot ties
+lamp 49               0              PLAYFIELD GI-1  # node/channel 5/0
+lamp 50               0              PLAYFIELD GI-2  # node/channel 5/1
+lamp 51               0              LEFT OUTLANE  # node/channel 5/3
+lamp 52               0              LEFT RETURN LANE-LEFT  # node/channel 5/4
+lamp 53               0              RIGHT RETURN LANE  # node/channel 5/5
+lamp 54               0              RIGHT OUTLANE  # node/channel 5/6
+lamp 55               0              LEFT RETURN LANE-RIGHT  # node/channel 5/7
+lamp 56               0              TOYS IN THE ATTIC  # node/channel 5/8
+lamp 57               0              LEFT ORBIT-ELEVATOR  # node/channel 5/9
+lamp 58               0              RATS IN THE CELLAR  # node/channel 5/10
+lamp 59               0              DUDE LOOKS LIKE A LADY  # node/channel 5/11
+lamp 60               0              BACK IN THE SADDLE  # node/channel 5/12
+lamp 61               0              SWEET EMOTION  # node/channel 5/13
+lamp 62               0              WALK THIS WAY  # node/channel 5/14
+lamp 63               0              SAME OLD SONG N DANCE  # node/channel 5/15
+lamp 64               0              LAST CHILD  # node/channel 5/16
+lamp 65               0              RIGHT SLING FLASH  # node/channel 5/17
+lamp 66               0              LEFT SLING FLASH  # node/channel 5/18
+lamp 67               0              SHOOT AGAIN  # node/channel 5/19
+lamp 68               0              RIGHT ORBIT-ELEVATOR  # node/channel 5/20
+lamp 71,70,69         0              LOVE IN AN ELEVATOR  # node/channel 5/21 5/22 5/23
+lamp 72               0              AEROSMIT(H)  # node/channel 5/24
+lamp 73               0              AEROSMI(T)H  # node/channel 5/25
+lamp 74               0              AEROSM(I)TH  # node/channel 5/26
+lamp 75               0              AEROS(M)ITH  # node/channel 5/27
+lamp 76               0              RIGHT ORBIT FLASH  # node/channel 5/28
+lamp 77               0              SPINNER FLASH  # node/channel 5/29
+lamp 78               0              RIGHT RAMP X  # node/channel 5/30
+lamp 79               0              RIGHT RAMP FLASH  # node/channel 5/31
+lamp 82,81,80         0              LEFT SCOOP ARROW  # node/channel 5/32 5/33 5/34
+lamp 83               0              LEFT SCOOP-RECT  # node/channel 5/35
+lamp 84               0              AE(R)OSMITH  # node/channel 5/36
+lamp 85               0              A(E)ROSMITH  # node/channel 5/37
+lamp 86               0              (A)EROSMITH  # node/channel 5/38
+lamp 87               0              LEFT SCOOP-3  # node/channel 5/39
+lamp 88               0              EXTRA BALL  # node/channel 5/40
+lamp 89               0              LEFT SCOOP X  # node/channel 5/41
+lamp 90               0              LEFT SCOOP FLASH  # node/channel 5/42
+lamp 91               0              LOWER LEFT FLASH  # node/channel 5/43
+lamp 92               0              BILBOARD-1  # node/channel 5/44
+lamp 93               0              BILBOARD-2  # node/channel 5/45
+lamp 94               0              PLAYFIELD GI-3  # node/channel 6/0
+lamp 95               0              GI-BACKPANEL  # node/channel 6/1
+lamp 96               0              UPPER LEFT RAMP FLASH  # node/channel 6/2
+lamp 97,98,99         0              RIGHT ORBIT ARROW  # node/channel 6/3 6/4 6/5
+lamp 100              0              R ORBIT-RECT  # node/channel 6/6
+lamp 101              0              RIGHT ORBIT X  # node/channel 6/7
+lamp 102              0              AER(O)SMITH  # node/channel 6/8
+lamp 103              0              AERO(S)MITH  # node/channel 6/9
+lamp 104              0              TOY BOX X  # node/channel 6/10
+lamp 105              0              RIGHT EJECT X  # node/channel 6/11
+lamp 106              0              R EJECT-2  # node/channel 6/12
+lamp 107              0              TOP SCOOP X  # node/channel 6/13
+lamp 108              0              TOP SCOOP-RECT  # node/channel 6/14
+lamp 109              0              LEFT RAMP X  # node/channel 6/15
+lamp 110              0              LOCK 6  # node/channel 6/16
+lamp 111              0              LOCK 1  # node/channel 6/17
+lamp 112              0              LOCK 2  # node/channel 6/18
+lamp 113              0              LOCK 3  # node/channel 6/19
+lamp 114              0              LOCK 4  # node/channel 6/20
+lamp 115              0              LOCK 5  # node/channel 6/21
+lamp 116              0              TOY BOX TARGET-RIGHT  # node/channel 6/22
+lamp 117              0              LEFT RAMP FLASH  # node/channel 6/23
+lamp 120,119,118      0              RIGHT RAMP ARROW  # node/channel 6/24 6/25 6/26
+lamp 123,122,121      0              RIGHT EJECT ARROW  # node/channel 6/27 6/28 6/29
+lamp 126,125,124      0              TOY BOX ARROW  # node/channel 6/30 6/31 6/32
+lamp 129,128,127      0              TOP SCOOP ARROW  # node/channel 6/33 6/34 6/35
+lamp 132,131,130      0              LEFT RAMP ARROW  # node/channel 6/36 6/37 6/38
+lamp 133              0              TOY BOX FLASH (X2)  # node/channel 6/39
+lamp 136,135,134      0              LEFT POP BUMPER  # node/channel 6/40 6/41 6/42
+lamp 139,138,137      0              RIGHT POP BUMPER  # node/channel 6/43 6/44 6/45
+lamp 142,141,140      0              TOP POP BUMPER  # node/channel 6/46 6/47 6/48
+lamp 143              0              TOY BOX TARGET-LEFT  # node/channel 6/49
+lamp 144              0              LEFT ORBIT X  # node/channel 6/50
+lamp 145              0              L ORBIT-RECT  # node/channel 6/51
+lamp 148,147,146      0              LEFT ORBIT ARROW  # node/channel 6/52 6/53 6/54
+lamp 149              0              POP BUMPERS FLASH  # node/channel 6/55
+lamp 150              0              TOY BOX LID FLASH  # node/channel 6/56
+lamp 151              0              TOY BOX ENTER FLASH (X2)  # node/channel 6/57
+lamp 152              0              GI-UPPER PLAYFIELD  # node/channel 7/0
+lamp 155,154,153      0              U/P TARGET 1 (L)  # node/channel 7/16 7/17 7/18
+lamp 156              0              U/P ELEVATOR FLASH  # node/channel 7/19
+lamp 157              0              U/P FLASH 5  # node/channel 7/20
+lamp 158              0              U/P FLASH 4  # node/channel 7/21
+lamp 159              0              U/P FLASH 3  # node/channel 7/22
+lamp 160              0              U/P FLASH 2  # node/channel 7/23
+lamp 161              0              U/P FLASH 1  # node/channel 7/24
+lamp 164,163,162      0              U/P TARGET 3  # node/channel 7/25 7/26 7/27
+lamp 167,166,165      0              U/P TARGET 2  # node/channel 7/28 7/29 7/30
+lamp 170,169,168      0              U/P TARGET 4  # node/channel 7/31 7/32 7/33
+lamp 173,172,171      0              U/P TARGET 5 (R)  # node/channel 7/34 7/35 7/36
+lamp 174,175,176      0              UP-ARROW  # node/channel 7/37 7/38 7/39
+lamp 177,178,179      0              WING RIGHT 1  # node/channel 8/0 8/1 8/2
+lamp 180,181,182      0              WING RIGHT 2  # node/channel 8/3 8/4 8/5
+lamp 183,184,185      0              WING RIGHT 3  # node/channel 8/7 8/8 8/9
+lamp 186,187,188      0              WING RIGHT 4  # node/channel 8/10 8/11 8/12
+lamp 189,190,191      0              WING RIGHT 5  # node/channel 8/13 8/14 8/15
+lamp 192,193,194      0              LOGO 1  # node/channel 8/16 8/17 8/18
+lamp 195,196,197      0              LOGO 2  # node/channel 8/19 8/20 8/21
+lamp 198,199,200      0              LOGO 3  # node/channel 8/23 8/24 8/25
+lamp 201,202,203      0              LOGO 4  # node/channel 8/26 8/27 8/28
+lamp 204,205,206      0              LOGO 5  # node/channel 8/29 8/30 8/31
+lamp 207,208,209      0              WING LEFT 1  # node/channel 8/32 8/33 8/34
+lamp 210,211,212      0              WING LEFT 2  # node/channel 8/35 8/36 8/37
+lamp 213,214,215      0              WING LEFT 3  # node/channel 8/39 8/40 8/41
+lamp 216,217,218      0              WING LEFT 4  # node/channel 8/42 8/43 8/44
+lamp 219,220,221      0              WING LEFT 5  # node/channel 8/45 8/46 8/47

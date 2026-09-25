@@ -209,3 +209,269 @@ event bonus_end      0x24
 event tilt_warning   0xb9
 event tilt           0xb7
 event game_over      0x42
+
+# ---- named inserts (item 164, SWELF generation): framework lamp layers, derived from this build's program
+#   lamp_layers: the first global the lamp-group allocator 0x2c4a5c loads
+data lamp_layers            0x0b686f90
+#   light_count: the device table accessor's bound (a light id is the device's index)
+data light_count            0x0b6cb680
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the device table 0xb5f2cf4: every LED
+# (class 4) but the cabinet's, a fixture's -R/-G/-B (or -RED/-GRN/-BLU) on one line; no shot ties
+lamp 49               0              SHOOTER ILLUM. 1 (OPTIONAL)  # node/channel 4/9
+lamp 50               0              SHOOTER ILLUM. 2 (OPTIONAL)  # node/channel 4/10
+lamp 52,51,53         0              EXPRESSIVE LIGHTING L 1  # node/channel 1/0 1/1 1/2
+lamp 55,54,56         0              EXPRESSIVE LIGHTING L 2  # node/channel 1/3 1/4 1/5
+lamp 58,57,59         0              EXPRESSIVE LIGHTING L 3  # node/channel 1/6 1/7 1/8
+lamp 61,60,62         0              EXPRESSIVE LIGHTING L 4  # node/channel 1/9 1/10 1/11
+lamp 64,63,65         0              EXPRESSIVE LIGHTING L 5  # node/channel 1/12 1/13 1/14
+lamp 67,66,68         0              EXPRESSIVE LIGHTING L 6  # node/channel 1/15 1/16 1/17
+lamp 70,69,71         0              EXPRESSIVE LIGHTING L 7  # node/channel 1/18 1/19 1/20
+lamp 73,72,74         0              EXPRESSIVE LIGHTING L 8  # node/channel 1/21 1/22 1/23
+lamp 76,75,77         0              EXPRESSIVE LIGHTING L 9  # node/channel 1/24 1/25 1/26
+lamp 79,78,80         0              EXPRESSIVE LIGHTING L 10  # node/channel 1/27 1/28 1/29
+lamp 82,81,83         0              EXPRESSIVE LIGHTING L 11  # node/channel 1/30 1/31 1/32
+lamp 85,84,86         0              EXPRESSIVE LIGHTING L 12  # node/channel 1/33 1/34 1/35
+lamp 88,87,89         0              EXPRESSIVE LIGHTING L 13  # node/channel 1/36 1/37 1/38
+lamp 91,90,92         0              EXPRESSIVE LIGHTING L 14  # node/channel 1/39 1/40 1/41
+lamp 94,93,95         0              EXPRESSIVE LIGHTING L 15  # node/channel 1/42 1/43 1/44
+lamp 97,96,98         0              EXPRESSIVE LIGHTING L 16  # node/channel 1/45 1/46 1/47
+lamp 100,99,101       0              EXPRESSIVE LIGHTING L 17  # node/channel 1/48 1/49 1/50
+lamp 103,102,104      0              EXPRESSIVE LIGHTING L 18  # node/channel 1/51 1/52 1/53
+lamp 106,105,107      0              EXPRESSIVE LIGHTING L 19  # node/channel 1/54 1/55 1/56
+lamp 109,108,110      0              EXPRESSIVE LIGHTING L 20  # node/channel 1/57 1/58 1/59
+lamp 112,111,113      0              EXPRESSIVE LIGHTING L 21  # node/channel 1/60 1/61 1/62
+lamp 115,114,116      0              EXPRESSIVE LIGHTING L 22  # node/channel 1/63 1/64 1/65
+lamp 118,117,119      0              EXPRESSIVE LIGHTING L 23  # node/channel 1/66 1/67 1/68
+lamp 121,120,122      0              EXPRESSIVE LIGHTING L 24  # node/channel 1/69 1/70 1/71
+lamp 124,123,125      0              EXPRESSIVE LIGHTING L 25  # node/channel 1/72 1/73 1/74
+lamp 127,126,128      0              EXPRESSIVE LIGHTING L 26  # node/channel 1/75 1/76 1/77
+lamp 130,129,131      0              EXPRESSIVE LIGHTING L 27  # node/channel 1/78 1/79 1/80
+lamp 133,132,134      0              EXPRESSIVE LIGHTING L 28  # node/channel 1/81 1/82 1/83
+lamp 136,135,137      0              EXPRESSIVE LIGHTING L 29  # node/channel 1/84 1/85 1/86
+lamp 139,138,140      0              EXPRESSIVE LIGHTING L 30  # node/channel 1/87 1/88 1/89
+lamp 142,141,143      0              EXPRESSIVE LIGHTING L 31  # node/channel 1/90 1/91 1/92
+lamp 145,144,146      0              EXPRESSIVE LIGHTING L 32  # node/channel 1/93 1/94 1/95
+lamp 148,147,149      0              EXPRESSIVE LIGHTING L 33  # node/channel 1/96 1/97 1/98
+lamp 151,150,152      0              EXPRESSIVE LIGHTING L 34  # node/channel 1/99 1/100 1/101
+lamp 154,153,155      0              EXPRESSIVE LIGHTING L 35  # node/channel 1/102 1/103 1/104
+lamp 157,156,158      0              EXPRESSIVE LIGHTING L 36  # node/channel 1/105 1/106 1/107
+lamp 160,159,161      0              EXPRESSIVE LIGHTING L 37  # node/channel 1/108 1/109 1/110
+lamp 163,162,164      0              EXPRESSIVE LIGHTING L 38  # node/channel 1/111 1/112 1/113
+lamp 166,165,167      0              EXPRESSIVE LIGHTING L 39  # node/channel 1/114 1/115 1/116
+lamp 169,168,170      0              EXPRESSIVE LIGHTING L 40  # node/channel 1/117 1/118 1/119
+lamp 172,171,173      0              EXPRESSIVE LIGHTING L 41  # node/channel 1/120 1/121 1/122
+lamp 175,174,176      0              EXPRESSIVE LIGHTING L 42  # node/channel 1/123 1/124 1/125
+lamp 178,177,179      0              EXPRESSIVE LIGHTING L 43  # node/channel 1/126 1/127 1/128
+lamp 181,180,182      0              EXPRESSIVE LIGHTING L 44  # node/channel 1/129 1/130 1/131
+lamp 184,183,185      0              EXPRESSIVE LIGHTING L 45  # node/channel 1/132 1/133 1/134
+lamp 187,186,188      0              EXPRESSIVE LIGHTING L 46  # node/channel 1/135 1/136 1/137
+lamp 190,189,191      0              EXPRESSIVE LIGHTING L 47  # node/channel 1/138 1/139 1/140
+lamp 193,192,194      0              EXPRESSIVE LIGHTING L 48  # node/channel 1/141 1/142 1/143
+lamp 196,195,197      0              EXPRESSIVE LIGHTING R 49  # node/channel 1/144 1/145 1/146
+lamp 199,198,200      0              EXPRESSIVE LIGHTING R 50  # node/channel 1/147 1/148 1/149
+lamp 202,201,203      0              EXPRESSIVE LIGHTING R 51  # node/channel 1/150 1/151 1/152
+lamp 205,204,206      0              EXPRESSIVE LIGHTING R 52  # node/channel 1/153 1/154 1/155
+lamp 208,207,209      0              EXPRESSIVE LIGHTING R 53  # node/channel 1/156 1/157 1/158
+lamp 211,210,212      0              EXPRESSIVE LIGHTING R 54  # node/channel 1/159 1/160 1/161
+lamp 214,213,215      0              EXPRESSIVE LIGHTING R 55  # node/channel 1/162 1/163 1/164
+lamp 217,216,218      0              EXPRESSIVE LIGHTING R 56  # node/channel 1/165 1/166 1/167
+lamp 220,219,221      0              EXPRESSIVE LIGHTING R 57  # node/channel 1/168 1/169 1/170
+lamp 223,222,224      0              EXPRESSIVE LIGHTING R 58  # node/channel 1/171 1/172 1/173
+lamp 226,225,227      0              EXPRESSIVE LIGHTING R 59  # node/channel 1/174 1/175 1/176
+lamp 229,228,230      0              EXPRESSIVE LIGHTING R 60  # node/channel 1/177 1/178 1/179
+lamp 232,231,233      0              EXPRESSIVE LIGHTING R 61  # node/channel 1/180 1/181 1/182
+lamp 235,234,236      0              EXPRESSIVE LIGHTING R 62  # node/channel 1/183 1/184 1/185
+lamp 238,237,239      0              EXPRESSIVE LIGHTING R 63  # node/channel 1/186 1/187 1/188
+lamp 241,240,242      0              EXPRESSIVE LIGHTING R 64  # node/channel 1/189 1/190 1/191
+lamp 244,243,245      0              EXPRESSIVE LIGHTING R 65  # node/channel 1/192 1/193 1/194
+lamp 247,246,248      0              EXPRESSIVE LIGHTING R 66  # node/channel 1/195 1/196 1/197
+lamp 250,249,251      0              EXPRESSIVE LIGHTING R 67  # node/channel 1/198 1/199 1/200
+lamp 253,252,254      0              EXPRESSIVE LIGHTING R 68  # node/channel 1/201 1/202 1/203
+lamp 256,255,257      0              EXPRESSIVE LIGHTING R 69  # node/channel 1/204 1/205 1/206
+lamp 259,258,260      0              EXPRESSIVE LIGHTING R 70  # node/channel 1/207 1/208 1/209
+lamp 262,261,263      0              EXPRESSIVE LIGHTING R 71  # node/channel 1/210 1/211 1/212
+lamp 265,264,266      0              EXPRESSIVE LIGHTING R 72  # node/channel 1/213 1/214 1/215
+lamp 268,267,269      0              EXPRESSIVE LIGHTING R 73  # node/channel 1/216 1/217 1/218
+lamp 271,270,272      0              EXPRESSIVE LIGHTING R 74  # node/channel 1/219 1/220 1/221
+lamp 274,273,275      0              EXPRESSIVE LIGHTING R 75  # node/channel 1/222 1/223 1/224
+lamp 277,276,278      0              EXPRESSIVE LIGHTING R 76  # node/channel 1/225 1/226 1/227
+lamp 280,279,281      0              EXPRESSIVE LIGHTING R 77  # node/channel 1/228 1/229 1/230
+lamp 283,282,284      0              EXPRESSIVE LIGHTING R 78  # node/channel 1/231 1/232 1/233
+lamp 286,285,287      0              EXPRESSIVE LIGHTING R 79  # node/channel 1/234 1/235 1/236
+lamp 289,288,290      0              EXPRESSIVE LIGHTING R 80  # node/channel 1/237 1/238 1/239
+lamp 292,291,293      0              EXPRESSIVE LIGHTING R 81  # node/channel 1/240 1/241 1/242
+lamp 295,294,296      0              EXPRESSIVE LIGHTING R 82  # node/channel 1/243 1/244 1/245
+lamp 298,297,299      0              EXPRESSIVE LIGHTING R 83  # node/channel 1/246 1/247 1/248
+lamp 301,300,302      0              EXPRESSIVE LIGHTING R 84  # node/channel 1/249 1/250 1/251
+lamp 304,303,305      0              EXPRESSIVE LIGHTING R 85  # node/channel 1/252 1/253 1/254
+lamp 307,306,308      0              EXPRESSIVE LIGHTING R 86  # node/channel 1/255 1/256 1/257
+lamp 310,309,311      0              EXPRESSIVE LIGHTING R 87  # node/channel 1/258 1/259 1/260
+lamp 313,312,314      0              EXPRESSIVE LIGHTING R 88  # node/channel 1/261 1/262 1/263
+lamp 316,315,317      0              EXPRESSIVE LIGHTING R 89  # node/channel 1/264 1/265 1/266
+lamp 319,318,320      0              EXPRESSIVE LIGHTING R 90  # node/channel 1/267 1/268 1/269
+lamp 322,321,323      0              EXPRESSIVE LIGHTING R 91  # node/channel 1/270 1/271 1/272
+lamp 325,324,326      0              EXPRESSIVE LIGHTING R 92  # node/channel 1/273 1/274 1/275
+lamp 328,327,329      0              EXPRESSIVE LIGHTING R 93  # node/channel 1/276 1/277 1/278
+lamp 331,330,332      0              EXPRESSIVE LIGHTING R 94  # node/channel 1/279 1/280 1/281
+lamp 334,333,335      0              EXPRESSIVE LIGHTING R 95  # node/channel 1/282 1/283 1/284
+lamp 337,336,338      0              EXPRESSIVE LIGHTING R 96  # node/channel 1/285 1/286 1/287
+lamp 408,0,410        0              BOTTOM GI  # node/channel 6/0 6/2
+lamp 409              0              BOTTOM GI-WHT  # node/channel 6/1
+lamp 411              0              LEFT OUTLANE  # node/channel 6/3
+lamp 412              0              LEFT RETURN LANE  # node/channel 6/4
+lamp 413              0              RIGHT RETURN LANE INNER  # node/channel 6/5
+lamp 414              0              RIGHT RETURN LANE OUTER  # node/channel 6/6
+lamp 415              0              RIGHT OUTLANE  # node/channel 6/7
+lamp 416              0              LA VILLA STRANGIATO  # node/channel 6/8
+lamp 417              0              LIMELIGHT  # node/channel 6/9
+lamp 418              0              LEFT SLING FLASH  # node/channel 6/10
+lamp 419              0              RIGHT SLING FLASH  # node/channel 6/11
+lamp 420              0              2112 FLASH  # node/channel 6/15
+lamp 421              0              THE BIG MONEY  # node/channel 6/16
+lamp 422              0              CYGNUS X1 BOOK 1 FLASH  # node/channel 6/17
+lamp 423              0              CYGNUS X1 BOOK 2 FLASH  # node/channel 6/18
+lamp 424              0              THE SPIRIT OF RADIO  # node/channel 6/19
+lamp 425              0              WORKING MAN  # node/channel 6/21
+lamp 426              0              TOM SAWYER  # node/channel 6/22
+lamp 427              0              SHOOT AGAIN (X2)  # node/channel 6/23
+lamp 428              0              DRUMSTICKS DROP  # node/channel 6/24
+lamp 429              0              ELECTRIC GUITAR DROP  # node/channel 6/25
+lamp 430              0              BASS DROP  # node/channel 6/26
+lamp 431              0              UPPER LEFT FLASH  # node/channel 6/28
+lamp 432              0              LEFT POP BUMPER R  # node/channel 6/29
+lamp 433              0              LEFT POP BUMPER G  # node/channel 6/30
+lamp 434              0              LEFT POP BUMPER B  # node/channel 6/31
+lamp 435              0              SHOOT ME LEFT ORBIT R  # node/channel 6/32
+lamp 436              0              SHOOT ME LEFT ORBIT G  # node/channel 6/33
+lamp 437              0              SHOOT ME LEFT ORBIT B  # node/channel 6/34
+lamp 438              0              RECORD LEFT ORBIT R  # node/channel 6/35
+lamp 439              0              RECORD LEFT ORBIT G  # node/channel 6/36
+lamp 440              0              RECORD LEFT ORBIT B  # node/channel 6/37
+lamp 441              0              LEFT ORBIT COMBO 2  # node/channel 6/38
+lamp 442              0              LEFT ORBIT COMBO 1  # node/channel 6/39
+lamp 443              0              RIGHT POP BUMPER R  # node/channel 6/40
+lamp 444              0              RIGHT POP BUMPER G  # node/channel 6/41
+lamp 445              0              RIGHT POP BUMPER B  # node/channel 6/42
+lamp 446              0              BOTTOM POP BUMPER R  # node/channel 6/43
+lamp 447              0              BOTTOM POP BUMPER G  # node/channel 6/44
+lamp 448              0              BOTTOM POP BUMPER B  # node/channel 6/45
+lamp 449              0              LOWER LEFT FLASH  # node/channel 6/46
+lamp 450              0              DRUM CLOCK FLASH  # node/channel 6/47
+lamp 451              0              CLOCK 11  # node/channel 6/48
+lamp 452              0              CLOCK 10  # node/channel 6/49
+lamp 453              0              CLOCK 9  # node/channel 6/50
+lamp 454              0              CLOCK 8  # node/channel 6/51
+lamp 455              0              CLOCK 7  # node/channel 6/52
+lamp 456              0              CLOCK 6  # node/channel 6/53
+lamp 457              0              CLOCK 5  # node/channel 6/54
+lamp 458              0              CLOCK 4  # node/channel 6/55
+lamp 459              0              CLOCK 3  # node/channel 6/56
+lamp 460              0              CLOCK 2  # node/channel 6/57
+lamp 461              0              CLOCK 1  # node/channel 6/58
+lamp 462              0              CLOCK 12  # node/channel 6/59
+lamp 463,0,465        0              TOP GI  # node/channel 7/0 7/2
+lamp 464              0              TOP GI-WHT  # node/channel 7/1
+lamp 466              0              BACKPANEL FLASH  # node/channel 7/3
+lamp 467              0              TIME MACHINE LEFT  # node/channel 7/4
+lamp 468              0              TIME MACHINE CENTER  # node/channel 7/5
+lamp 469              0              TIME MACHINE RIGHT  # node/channel 7/6
+lamp 470              0              SHOOT ME SIDE RAMP R  # node/channel 7/8
+lamp 471              0              SHOOT ME SIDE RAMP G  # node/channel 7/9
+lamp 472              0              SHOOT ME SIDE RAMP B  # node/channel 7/10
+lamp 473              0              SHOOT ME MINI ORBIT R  # node/channel 7/11
+lamp 474              0              SHOOT ME MINI ORBIT G  # node/channel 7/12
+lamp 475              0              SHOOT ME MINI ORBIT B  # node/channel 7/13
+lamp 476              0              RECORD MINI ORBIT R  # node/channel 7/14
+lamp 477              0              RECORD MINI ORBIT G  # node/channel 7/15
+lamp 478              0              RECORD MINI ORBIT B  # node/channel 7/16
+lamp 479              0              MINI ORBIT COMBO 3  # node/channel 7/17
+lamp 480              0              MINI ORBIT COMBO 2  # node/channel 7/18
+lamp 481              0              SIDE RAMP COMBO 3  # node/channel 7/19
+lamp 482              0              SIDE RAMP COMBO 2  # node/channel 7/20
+lamp 483              0              SHOOT ME UPPER SCOOP R  # node/channel 7/21
+lamp 484              0              SHOOT ME UPPER SCOOP G  # node/channel 7/22
+lamp 485              0              SHOOT ME UPPER SCOOP B  # node/channel 7/23
+lamp 486              0              SHOOT ME VUK R  # node/channel 7/24
+lamp 487              0              SHOOT ME VUK G  # node/channel 7/25
+lamp 488              0              SHOOT ME VUK B  # node/channel 7/26
+lamp 489              0              RECORD VUK R  # node/channel 7/27
+lamp 490              0              RECORD VUK G  # node/channel 7/28
+lamp 491              0              RECORD VUK B  # node/channel 7/29
+lamp 492              0              VUK COMBO 3  # node/channel 7/30
+lamp 493              0              VUK COMBO 1  # node/channel 7/31
+lamp 494              0              UPPER SCOOP EXTRA BALL  # node/channel 7/32
+lamp 495              0              LITE LOCK LEFT  # node/channel 7/33
+lamp 496              0              SHOOT ME SPINNER R  # node/channel 7/34
+lamp 497              0              SHOOT ME SPINNER G  # node/channel 7/35
+lamp 498              0              SHOOT ME SPINNER B  # node/channel 7/36
+lamp 499              0              RECORD SPINNER R  # node/channel 7/37
+lamp 500              0              RECORD SPINNER G  # node/channel 7/38
+lamp 501              0              RECORD SPINNER B  # node/channel 7/39
+lamp 502              0              SPINNER COMBO 2  # node/channel 7/40
+lamp 503              0              SPINNER COMBO 1  # node/channel 7/41
+lamp 504              0              SHOOT ME RIGHT RAMP R  # node/channel 7/42
+lamp 505              0              SHOOT ME RIGHT RAMP G  # node/channel 7/43
+lamp 506              0              SHOOT ME RIGHT RAMP B  # node/channel 7/44
+lamp 507              0              RECORD RIGHT RAMP R  # node/channel 7/45
+lamp 508              0              RECORD RIGHT RAMP G  # node/channel 7/46
+lamp 509              0              RECORD RIGHT RAMP B  # node/channel 7/47
+lamp 510              0              TIME MACHINE RAMP 1  # node/channel 7/48
+lamp 511              0              TIME MACHINE RAMP 2  # node/channel 7/49
+lamp 512              0              TIME MACHINE RAMP 3  # node/channel 7/50
+lamp 513              0              TIME MACHINE RAMP 4  # node/channel 7/51
+lamp 514              0              TIME MACHINE RAMP 5  # node/channel 7/52
+lamp 515              0              TIME MACHINE RAMP 6  # node/channel 7/53
+lamp 516              0              SUPER JACKPOT SIDE RAMP  # node/channel 7/54
+lamp 517              0              LITE LOCK RIGHT  # node/channel 7/55
+lamp 518              0              RUS(H) TARGET  # node/channel 7/56
+lamp 519              0              RU(S)H TARGET  # node/channel 7/57
+lamp 520              0              R(U)SH TARGET  # node/channel 7/58
+lamp 521              0              (R)USH TARGET  # node/channel 7/59
+lamp 522              0              RIGHT RAMP COMBO 1  # node/channel 7/60
+lamp 523              0              RIGHT RAMP LITE LOCK  # node/channel 7/61
+lamp 524              0              DRUM SOLO UP RIGHT FLIP  # node/channel 7/62
+lamp 525              0              EXTRA BALL UP RIGHT FLIP  # node/channel 7/63
+lamp 526              0              SHOOT ME RIGHT ORBIT R  # node/channel 7/64
+lamp 527              0              SHOOT ME RIGHT ORBIT G  # node/channel 7/65
+lamp 528              0              SHOOT ME RIGHT ORBIT B  # node/channel 7/66
+lamp 529              0              RECORD RIGHT ORBIT R  # node/channel 7/67
+lamp 530              0              RECORD RIGHT ORBIT G  # node/channel 7/68
+lamp 531              0              RECORD RIGHT ORBIT B  # node/channel 7/69
+lamp 532              0              RIGHT ORBIT COMBO 2  # node/channel 7/70
+lamp 533              0              RIGHT ORBIT MULTI BALL  # node/channel 7/71
+lamp 534              0              LOWER RIGHT FLASH  # node/channel 7/72
+lamp 535              0              LOCK FLASH  # node/channel 7/73
+lamp 536              0              MYSTERY FLASH  # node/channel 7/74
+lamp 537              0              TIME MACHINE FLASH  # node/channel 7/75
+lamp 538              0              RIGHT RAMP FLASH  # node/channel 7/76
+lamp 539              0              UPPER RIGHT FLASH  # node/channel 7/77
+lamp 540              0              LOCK UPPER SCOOP  # node/channel 7/78
+lamp 541              0              LOCK LOWER SCOOP  # node/channel 7/79
+lamp 542              0              BACK GI (X8)  # node/channel 9/0
+lamp 543              0              ALBUM 1  # node/channel 9/1
+lamp 544              0              ALBUM 2  # node/channel 9/2
+lamp 545              0              ALBUM 3  # node/channel 9/3
+lamp 546              0              ALBUM 4  # node/channel 9/4
+lamp 547              0              ALBUM 5  # node/channel 9/5
+lamp 548              0              ALBUM 6  # node/channel 9/6
+lamp 549              0              ALBUM 7  # node/channel 9/7
+lamp 550              0              ALBUM 8  # node/channel 9/8
+lamp 551              0              ALBUM 9  # node/channel 9/9
+lamp 552              0              ALBUM 10  # node/channel 9/10
+lamp 553              0              FRENZY (X2)  # node/channel 9/11
+lamp 554              0              EXTRA BALL (X2)  # node/channel 9/12
+lamp 555              0              MILLIONS (X2)  # node/channel 9/13
+lamp 556              0              ADVANCE TIME MACHINE (X2)  # node/channel 9/14
+lamp 557,558,559      0              GI1  # node/channel 9/20 9/21 9/22
+lamp 560,561,562      0              GI2  # node/channel 9/23 9/24 9/25
+lamp 563,564,565      0              GI3  # node/channel 9/26 9/27 9/28
+lamp 566,567,568      0              GI4  # node/channel 9/29 9/30 9/31

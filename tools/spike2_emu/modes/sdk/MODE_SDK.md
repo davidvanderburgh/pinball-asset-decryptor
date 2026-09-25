@@ -475,7 +475,7 @@ from the build's own program:
   lamp kind 6 (Deadpool Pro, TMNT Pro: left without lights) and single-colour tables with no RGB
   lamp (Star Wars ELG).
 
-**Emulator-proven (2026-09-25):** a mode file's `light_all ff00ff solid` on each of 20 builds.
+**Emulator-proven (2026-09-25):** a mode file's `light_all ff00ff solid` on each of 20 builds (and 5 SWELF builds, below).
 The shim's LED view (`dump/padled`, a board channel per light: node = the light's I/O group +
 1 on most, + 2 on Godzilla, Munsters and TMNT Pro) was copied before the mode, twice while it
 ran, and after it ended. The rule: while the mode ran, every addressed RGB insert (or, on a
@@ -490,12 +490,35 @@ or after, beyond what the game's own show lit.
 - On Jaws and King Kong the game's own shot table ties 26 inserts to shots, so "Light the
   shots that score" works there too.
 
+**The SWELF generation** (Aerosmith, Avengers, Batman, Guardians, Iron Maiden, Mando, Rush,
+Stranger Things and Sword of Rage) has no Godzilla-style light table. Its DEVICE table is found
+through the light accessor instead: 24-byte records whose word 3 points at a {u32, name x5}
+record, word 4 is the board node and channel, and word 5's low half is the class (4 = LED). A
+light id is the device's index, and the game's light count is that table's length (313 on
+Aerosmith, logged by the runtime). The `lamp` lines are every LED but the cabinet's, a
+fixture's -R/-G/-B or -RED/-GRN/-BLU on one line, with the board address in the comment.
+
+The shim reads only some of this generation's boards: it refuses the bank form, about half the
+frames. So the proof is the boards it does read:
+
+| Build | RGB inserts in our colour (before → during) | Single-colour inserts lit (before → during) |
+|---|---|---|
+| Aerosmith | 0 → 11 of 22, on exactly the channels the device table names | |
+| Guardians | 5 → 42 of 76 | |
+| Rush | 3 → 21 of 25 | |
+| Mando | 0 → 4 of 15 | 6 → 26 of 80 |
+| Batman | | 7 → 20 of 72 |
+
+All five went back after the mode ended.
+
 Not yet:
 
-- The SWELF-generation builds: Aerosmith, Avengers, Batman, Guardians, Iron Maiden, Mando,
-  Rush, Stranger Things and Sword of Rage. Their device records differ; the names come
-  through the table the second light accessor finds, but the lamp table is not found yet.
+- Avengers and Iron Maiden: too few readable inserts moved.
+- Stranger Things: its device table reads only 83 records.
+- Sword of Rage: nothing readable moved.
 - TMNT LE: the rig never starts a game there.
+
+Those ports carry no insert lines.
 
 ### Sounds of your own (item 150)
 

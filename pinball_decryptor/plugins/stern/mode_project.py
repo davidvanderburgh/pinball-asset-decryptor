@@ -724,6 +724,9 @@ LAMPS_PROVEN = frozenset((
     "john_wick_le-1.01", "jurassic_park_le-1.16", "king_kong_le-0.97", "led_zeppelin_le-1.22",
     "led_zeppelin_pro-1.22", "metallica_spike-1.03", "munsters_le-1.28", "star_wars_elg-1.10",
     "star_wars_le-1.30", "turtles_pro-1.59", "uncanny_xmen_le-0.98", "venom_le-1.07",
+    # the SWELF generation: the shim reads only some of its boards (it refuses the bank form), so
+    # the proof is the boards it reads - the held colour on the device table's own channels
+    "aerosmith_le-1.15", "batman-1.13", "guardians_le-1.14", "mando_le-1.44", "rush_le-1.18",
 ))
 
 

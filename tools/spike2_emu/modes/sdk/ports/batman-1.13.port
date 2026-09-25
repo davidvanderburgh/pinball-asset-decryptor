@@ -153,3 +153,148 @@ event bonus_end      0x24
 event tilt_warning   0xb9
 event tilt           0xb7
 event game_over      0x42
+
+# ---- named inserts (item 164, SWELF generation): framework lamp layers, derived from this build's program
+#   lamp_layers: the first global the lamp-group allocator 0x436b74 loads
+data lamp_layers            0x007fdedc
+#   light_count: the device table accessor's bound (a light id is the device's index)
+data light_count            0x007f1b68
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the device table 0x71a364: every LED
+# (class 4) but the cabinet's, a fixture's -R/-G/-B (or -RED/-GRN/-BLU) on one line; no shot ties
+lamp 45               0              PLAYFIELD GI-LOWER  # node/channel 5/0
+lamp 46               0              PLAYFIELD GI-SHOOTER  # node/channel 5/1
+lamp 47               0              PLAYFIELD GI-GADGET  # node/channel 5/2
+lamp 48               0              SKILL SHOT 1  # node/channel 5/3
+lamp 49               0              SKILL SHOT 2  # node/channel 5/4
+lamp 50               0              SKILL SHOT 3  # node/channel 5/5
+lamp 51               0              CRANE POS.#1 HOME  # node/channel 5/6
+lamp 52               0              SEASON 1  # node/channel 5/8
+lamp 53               0              RIDDLER STATUS  # node/channel 5/9
+lamp 54               0              PENGUIN STATUS  # node/channel 5/10
+lamp 55               0              JOKER STATUS  # node/channel 5/11
+lamp 56               0              CATWOMAN STATUS  # node/channel 5/12
+lamp 57               0              LEFT OUTLANE  # node/channel 5/13
+lamp 58               0              LEFT RETURN LANE  # node/channel 5/14
+lamp 59               0              LEFT SLINGSHOT FLASH  # node/channel 5/15
+lamp 60               0              BATMAN  # node/channel 5/16
+lamp 61               0              RIGHT OUTLANE  # node/channel 5/17
+lamp 62               0              RIGHT RETURN LANE  # node/channel 5/18
+lamp 63               0              RIGHT SLINGSHOT FLASH  # node/channel 5/19
+lamp 64               0              BAT SYMBOL FLASH  # node/channel 5/20
+lamp 65               0              SEASON 3  # node/channel 5/21
+lamp 66               0              SHOOT AGAIN  # node/channel 5/22
+lamp 67               0              SEASON 2  # node/channel 5/23
+lamp 68               0              CRANE TARGET "X"  # node/channel 5/27
+lamp 69               0              CRANE POS.#4  # node/channel 5/28
+lamp 70               0              CRANE POS.#5  # node/channel 5/29
+lamp 71               0              CRANE POS.#5 MULT.  # node/channel 5/30
+lamp 72               0              CRANE POS.#4 MULT.  # node/channel 5/31
+lamp 73               0              CRANE POS.#2  # node/channel 5/32
+lamp 74               0              TV TARGET-TOP  # node/channel 5/33
+lamp 75               0              TV TARGET-MID  # node/channel 5/34
+lamp 76               0              TV TARGET-BOT  # node/channel 5/35
+lamp 77               0              CRANE POS.#3  # node/channel 5/36
+lamp 78               0              CRANE POS.#3 MULT.  # node/channel 5/37
+lamp 79               0              CRANE POS.#2 MULT.  # node/channel 5/38
+lamp 80               0              LOCK 1  # node/channel 5/40
+lamp 81               0              THE PENGUIN  # node/channel 5/41
+lamp 82,83,84         0              RIGHT RAMP ARROW  # node/channel 5/42 5/43 5/44
+lamp 85               0              SPINNER ARROW  # node/channel 5/46
+lamp 86               0              COMMISSIONER GORDON  # node/channel 5/47
+lamp 87               0              LOCK 2  # node/channel 5/48
+lamp 88,89,90         0              PENGUIN ARROW  # node/channel 5/49 5/50 5/51
+lamp 91               0              SUPER JACKPOT  # node/channel 5/52
+lamp 92               0              LOCK 3  # node/channel 5/53
+lamp 93               0              RIGHT LOOP RIDDLER  # node/channel 5/54
+lamp 94               0              LEFT POP BUMPER  # node/channel 5/55
+lamp 95               0              RIGHT POP BUMPER  # node/channel 5/56
+lamp 96               0              BOTTOM POP BUMPER  # node/channel 5/57
+lamp 97               0              POP BUMPER TARGET  # node/channel 5/58
+lamp 98               0              BAT SIGNAL (OPTIONAL)  # node/channel 5/59
+lamp 99               0              POP BUMPER FLASH  # node/channel 5/60
+lamp 100,101,102      0              RIGHT LOOP ARROW  # node/channel 5/61 5/62 5/63
+lamp 103              0              BACKPANEL GI  # node/channel 6/0
+lamp 104              0              PLAYFIELD GI-TOP  # node/channel 6/1
+lamp 105              0              BACK PANEL FLASH  # node/channel 6/2
+lamp 106              0              LEFT TOP LANE  # node/channel 6/3
+lamp 107              0              CENTER TOP LANE  # node/channel 6/4
+lamp 108              0              RIGHT TOP LANE  # node/channel 6/5
+lamp 109              0              CRANE FLASH  # node/channel 6/6
+lamp 110              0              (G)ADGET TARGET  # node/channel 6/8
+lamp 111              0              G(A)DGET TARGET  # node/channel 6/9
+lamp 112              0              GA(D)GET TARGET  # node/channel 6/10
+lamp 113              0              GAD(G)ET TARGET  # node/channel 6/11
+lamp 114              0              GADG(E)T TARGET  # node/channel 6/12
+lamp 115              0              GADGE(T) TARGET  # node/channel 6/13
+lamp 116              0              CRANE POS.#6 AWAY  # node/channel 6/16
+lamp 117              0              MYSTERY  # node/channel 6/19
+lamp 118              0              SEASONS  # node/channel 6/21
+lamp 119              0              EXTRA BALL  # node/channel 6/22
+lamp 120              0              CRANE POS.#6 MULT.  # node/channel 6/23
+lamp 121,122,123      0              LEFT RAMP ARROW  # node/channel 6/25 6/26 6/27
+lamp 124,125,126      0              LEFT LOOP ARROW  # node/channel 6/28 6/29 6/30
+lamp 127              0              LEFT LOOP RIDDLER  # node/channel 6/31
+lamp 128              0              JO(K)ER  # node/channel 6/32
+lamp 129              0              J(O)KER  # node/channel 6/33
+lamp 130              0              BAT COMPUTER TARGET  # node/channel 6/34
+lamp 131              0              CRIME ANALYZER TARGET  # node/channel 6/35
+lamp 132              0              (J)OKER  # node/channel 6/36
+lamp 133              0              CATWOMAN LEFT BILLBOARD "C"  # node/channel 6/37
+lamp 134              0              CATWOMAN LEFT BILLBOARD "A"  # node/channel 6/38
+lamp 135              0              CATWOMAN LEFT BILLBOARD "T"  # node/channel 6/39
+lamp 136              0              JOKE(R)  # node/channel 6/40
+lamp 137              0              JOK(E)R  # node/channel 6/41
+lamp 138              0              CATWOMAN RIGHT BILLBOARD "C"  # node/channel 6/42
+lamp 139              0              CATWOMAN RIGHT BILLBOARD "A"  # node/channel 6/43
+lamp 140              0              CATWOMAN RIGHT BILLBOARD "T"  # node/channel 6/44
+lamp 141,142,143      0              TURNTABLE ARROW  # node/channel 6/45 6/46 6/47
+lamp 144              0              BAT SPINNER 1  # node/channel 7/0
+lamp 145              0              BAT SPINNER 2  # node/channel 7/1
+lamp 146              0              BAT SPINNER 3  # node/channel 7/2
+lamp 147              0              BAT SPINNER 4  # node/channel 7/3
+lamp 148              0              BAT SPINNER 5  # node/channel 7/4
+lamp 149              0              BAT COMPUTER 1  # node/channel 7/5
+lamp 150              0              BAT COMPUTER 2  # node/channel 7/6
+lamp 151              0              BAT COMPUTER 3  # node/channel 7/7
+lamp 152              0              CRIME ANALYZER 1  # node/channel 7/8
+lamp 153              0              CRIME ANALYZER 2  # node/channel 7/9
+lamp 154              0              CRIME ANALYZER 3  # node/channel 7/10
+lamp 155              0              TURNTABLE REACTOR FLASH  # node/channel 7/11
+lamp 156              0              TURNTABLE BATPHONE  # node/channel 7/12
+lamp 270              0              BAT SIGNAL  # node/channel 8/0 9/0
+lamp 271              0              LOGO  # node/channel 9/1
+lamp 272              0              LEFT BEACON  # node/channel 9/2
+lamp 273              0              RIGHT BEACON  # node/channel 9/3
+lamp 274              0              MARS LIGHT 1  # node/channel 9/4
+lamp 275              0              MARS LIGHT 2  # node/channel 9/5
+lamp 276              0              MARS LIGHT 3  # node/channel 9/6
+lamp 277              0              MARS LIGHT 4  # node/channel 9/7
+lamp 278              0              MARS LIGHT 5  # node/channel 9/8
+lamp 279              0              MARS LIGHT 6  # node/channel 9/9
+lamp 280              0              MARS LIGHT 7  # node/channel 9/10
+lamp 281              0              MARS LIGHT 8  # node/channel 9/11
+lamp 282              0              MARS LIGHT 9  # node/channel 9/12
+lamp 283              0              MARS LIGHT 10  # node/channel 9/13
+lamp 284              0              MARS LIGHT 11  # node/channel 9/14
+lamp 285              0              MARS LIGHT 12  # node/channel 9/15
+lamp 286              0              ROBIN GI 1  # node/channel 9/16
+lamp 287              0              ROBIN GI 2  # node/channel 9/17
+lamp 288              0              ROBIN GI 3  # node/channel 9/18
+lamp 289              0              ROBIN GI 4  # node/channel 9/19
+lamp 290              0              ROBIN GI 5  # node/channel 9/20
+lamp 291              0              ROBIN GI 6  # node/channel 9/21
+lamp 292              0              BATMAN GI 1  # node/channel 9/23
+lamp 293              0              BATMAN GI 2  # node/channel 9/24
+lamp 294              0              BATMAN GI 3  # node/channel 9/25
+lamp 295              0              BATMAN GI 4  # node/channel 9/26
+lamp 296              0              BATMAN GI 5  # node/channel 9/27
+lamp 297              0              BATMAN GI 6  # node/channel 9/28

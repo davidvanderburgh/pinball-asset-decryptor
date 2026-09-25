@@ -475,6 +475,14 @@ HELP_CONTENT = {
          "earlier can't teach the app the wrong frame rate, size or "
          "profile, so a clip cut to the machine's real spec still reads "
          "\"As-is\"."),
+        ("Each clip's length",
+         "Right-click a slot and pick \"This clip's length\" to choose how "
+         "long that one clip plays: follow the Trim / pad box (the default), "
+         "match the stock clip, keep your file's full length, or type a "
+         "length in seconds. A clip with its own length shows it after the "
+         "Length cell. Trim / pad always measures against the stock clip, "
+         "so a slot you already replaced is still fitted to the original "
+         "length on later builds."),
         ("Undo",
          "Right-click a slot to remove an un-built assignment or revert an "
          "already-changed file."),

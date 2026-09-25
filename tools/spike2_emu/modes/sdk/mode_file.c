@@ -48,7 +48,7 @@ struct mode_cfg {
     unsigned char sound_key[8];
     int has_sound_key;
     unsigned sound_callout;
-    char screen_scene[48], screen_node[96], screen_text[128];
+    char screen_scene[96], screen_node[96], screen_text[128];   /* a nested scene id: 40 hex, /, 40 hex */
     char clip_start[96], clip_end[96];
     unsigned starts_game, starts_ball, cooldown_s;   /* item 139: 0 = no limit */
     int stack_no;                   /* item 140: `stack no` - never beside the game's battle or multiball */

@@ -692,14 +692,18 @@ def test_write_reads_only_the_scenes_a_title_can_use():
     tmnt = MP.profile("turtles_pro_1_58")
     assert tmnt.hud_scene == "" and not tmnt.can("screen") and not tmnt.can("clip")
     assert MW.scene_rels(tmnt) == ("", "")
-    # item 164: TMNT Pro 1.59 and the Deadpools add a clip to their bank (no HUD scene still)
+    # item 164: TMNT Pro 1.59 and the Deadpools add a clip to their bank, and a screen to their HUD
+    # scene only where one was seen on the glass
     for key in ("turtles_pro_1_59", "deadpool_pro_1_16", "deadpool_le_1_14"):
         prof = MP.profile(key)
-        assert prof.hud_scene == "" and not prof.can("screen") and prof.can("clip"), key
-        assert MW.scene_rels(prof) == ("", "%s/%s/%s/scene.radium" % (prof.game_dir, lcd, prof.bank_scene)), key
+        assert prof.can("clip"), key
+        hud = "%s/%s/scene.radium" % (prof.game_dir, prof.lcd("hud")) if prof.can("screen") else ""
+        assert MW.scene_rels(prof) == (hud, "%s/%s/%s/scene.radium" % (prof.game_dir, lcd, prof.bank_scene)), key
+    assert MP.profile("turtles_pro_1_59").can("screen")
     jaws = MP.profile("jaws_le_1_02")
-    assert not jaws.can("screen") and jaws.can("clip")
-    assert MW.scene_rels(jaws) == ("", "jaws_le/%s/%s/scene.radium" % (lcd, jaws.bank_scene))
+    assert jaws.can("screen") and jaws.can("clip")          # item 164: its score panel carries a screen
+    assert MW.scene_rels(jaws) == ("jaws_le/%s/%s/scene.radium" % (lcd, jaws.hud_scene),
+                                   "jaws_le/%s/%s/scene.radium" % (lcd, jaws.bank_scene))
 
 
 @pytest.mark.parametrize("key,card_name,card_version", OTHER_TITLES)

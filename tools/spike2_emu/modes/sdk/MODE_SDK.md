@@ -1270,6 +1270,56 @@ Not yet:
 - John Wick: its bank grammar does not parse yet either.
 - Batman and Elvira: no 60ed7e50 bank.
 
+### Screens on every title (item 164)
+
+A mode's own screen goes into a scene the game draws in play. Three things per build:
+
+- **The runtime's finders**, in every port: `site find_node` and `site find_text` are the
+  scene lookup's typed finders (Godzilla LE 1.16 `0x587bac` is the lookup; each of its
+  callers casts what it found with `__dynamic_cast`, and the one casting to `Radium::Sprite`
+  is `find_node`, to `Radium::Text` `find_text`). `value node_visible_vfn 0xa8` (Sprite slot
+  42, one shape on every build) and `value scene_player_scene 0x10`.
+- **Which scene.** Not the attract scene: one the game renders every frame of play. The
+  instrument wraps every virtual of `RadiumScene` (the scene player class) with a counter per
+  object and looks every auto_loaded scene up by id during a game; the scenes whose players
+  were called are the ones drawn. On Godzilla it names the four HUD scenes item 131 found by
+  hand. The pick: the score panel `9d578751` where a title has it, else `7b4db7ef`, else the
+  busiest one that profiles. A nested scene is named `<parent id>/<child id>` (the lookup
+  takes that form; the leaf alone or the parent is not found), and the mode file's
+  `screen_scene` holds 95 characters for it.
+- **Its profile**, read statically (`scene_write.PROFILES`, keyed by the stock file's md5):
+  the root is the Sprite data whose walk ends exactly at the end of the file. Beyond item
+  131's grammar the walk knows a node's colour keys (`[u64 n]` of u32 frame + 8 floats),
+  Shape (`symbol | name | f32 x4 | f32 | its fill Bitmap, inline on first occurrence`), Video
+  (`symbol | name | u32 w | u32 h | u8 | u32 | 2 x [u64 n](frame name, u32 asset)`, Batman 66)
+  and a Text's per-line fonts (`[u64 n](u32 font) u8 u32`). A class the file never
+  registered (Avengers' HUD has no Bitmap) is registered by the first screen inline, `u32
+  FLAG|id` + its name, as the game's own files do. A profile with `append` puts the screen
+  after the last root child (drawn last) instead of before it; object ids start above the
+  file's own where no `FLAG|id` byte pattern appears anywhere in the file.
+
+**What is proven.** In the emulator, one scripted game per build with a magenta panel: none
+before the mode, the panel and its words during it (about 63,000 magenta pixels). Proven on
+32 of the 34 latest builds: Aerosmith, Avengers, Batman 66, The Beatles, Bond 60th, Bond LE,
+Deadpool LE and Pro, D&D, Elvira 3, Foo Fighters, Godzilla LE and Pro 1.16, Guardians, Iron
+Maiden, Jaws, John Wick, JP LE, King Kong, Led Zeppelin LE and Pro, Mandalorian, Metallica,
+Munsters, Rush, Star Wars ELG and LE, Stranger Things, Sword of Rage, TMNT Pro 1.59, X-Men and
+Venom. `mode_project.TITLE_SCENES` carries `screen_proven` for those; the tab offers a screen
+only there. Not yet: TMNT LE 1.59 (no game starts in the rig) and JP The Pin (no port).
+
+Per scene, what the proof runs taught:
+
+- **Covered.** A scene drawn every frame can still lie under another (D&D's `e3ff23bf`, Venom's,
+  SW LE's first pick): the next candidate was used.
+- **Placed.** A nested scene the game places is not at the glass's origin: Deadpool's score card
+  (`9d578751/7bae4376`) sits at 742, 424 and clips to itself, so Deadpool uses
+  `c3328c39/0d167902`. `SceneProfile.origin` moves a screen for a scene whose (0, 0) is not the
+  glass's, and centres the 640x160 panel on the 800x480 glass of Star Wars ELG and Bond 60th.
+- **No words.** Bond 60th's frame (`91b06583`, drawn over everything in play) has no Text and so
+  no font: its screen is the panel alone (`font=None`), and the runtime logs `(text missing)`.
+- **Nested ids.** `screen_scene` was 48 characters, so a nested id was cut and the screen was
+  drawn (authored visible) but never found, shown or hidden: now 96.
+
 ### Ports in the Modes tab
 
 The app's Modes tab makes modes as files (`mode_file.c` runs them), and it reads these

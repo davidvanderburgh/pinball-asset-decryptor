@@ -562,3 +562,6 @@ value stock_mode_count      44
 data typeinfo_cmode         0x004cc6a0
 data typeinfo_cmode_mball   0x004cc98c
 data typeinfo_vmi           0x004c725c
+
+# ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
+scene hud                  7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a

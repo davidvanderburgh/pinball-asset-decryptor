@@ -32,38 +32,38 @@ PORTS = {
     "godzilla_pro-1.15": (15, 64, True, set(), EVERY_CAPABILITY),   # item 160: + the three spinners
     "godzilla_le-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
-    "turtles_pro-1.59": (17, 32, True, {"own_sound", "screen"}, ("callout", "clips", "own-sound", "messages")),
-    "deadpool_pro-1.16": (25, 64, True, {"countdown", "own_sound", "screen"}, ("callout", "clips", "own-sound", "messages")),
-    "deadpool_le-1.14": (28, 64, True, {"countdown", "own_sound", "screen"}, ("callout", "clips", "own-sound", "messages")),
+    "turtles_pro-1.59": (17, 32, True, {"own_sound"}, ("callout", "screens", "clips", "own-sound", "messages")),
+    "deadpool_pro-1.16": (25, 64, True, {"countdown", "own_sound"}, ("callout", "screens", "clips", "own-sound", "messages")),
+    "deadpool_le-1.14": (28, 64, True, {"countdown", "own_sound"}, ("callout", "screens", "clips", "own-sound", "messages")),
     # item 162 (2026-09-24): every latest build, proven by a full build check in the emulator
-    "godzilla_pro-1.16": (21, 64, True, {"screen"}, EVERY_CAPABILITY),
-    "aerosmith_le-1.15": (43, 64, True, {"countdown", "screen"}, ("callout", "clips", "own-sound")),
-    "avengers_infinity_le-1.09": (36, 64, True, {"lights", "own_sound", "screen"}, ("callout", "clips", "own-sound")),
-    "batman-1.13": (43, 64, True, ALL - {"events", "lights", "stack"}, CALLOUT_SOUND),
-    "elvira3-1.13": (45, 64, True, ALL - {"events", "lights", "stack"}, CALLOUT_SOUND),
-    "foo_fighters_le-1.04": (41, 64, True, {"own_sound", "screen"}, ("callout", "clips", "own-sound")),
-    "james_bond_60th_le-1.11": (37, 64, True, {"clip", "countdown", "screen"}, CALLOUT_SOUND),
-    "led_zeppelin_le-1.22": (31, 32, True, {"clip", "own_sound", "screen"}, ("callout", "screens", "own-sound")),
-    "led_zeppelin_pro-1.22": (30, 32, True, {"clip", "own_sound", "screen"}, ("callout", "screens", "own-sound")),
-    "metallica_spike-1.03": (40, 64, True, {"clip", "screen"}, ("callout", "screens", "own-sound")),
-    "munsters_le-1.28": (27, 32, True, {"clip", "screen"}, CALLOUT_SOUND),
-    "rush_le-1.18": (38, 64, True, {"clip", "screen"}, CALLOUT_SOUND),
-    "star_wars_elg-1.10": (30, 64, True, {"clip", "own_sound", "screen"}, CALLOUT_SOUND),
-    "star_wars_le-1.30": (42, 64, True, {"clip", "own_sound", "screen"}, CALLOUT_SOUND),
-    "uncanny_xmen_le-0.98": (33, 64, True, {"own_sound", "screen"}, ("callout", "screens", "clips", "own-sound")),
-    "jaws_le-1.02": (27, 64, True, {"screen"}, ("callout", "screens", "clips", "own-sound", "messages")),
-    "stranger_things_le-1.12": (39, 64, True, {"lights", "screen"}, ("callout", "clips", "own-sound")),
-    "king_kong_le-0.97": (55, 64, True, {"screen"}, ("callout", "screens", "clips", "own-sound")),
-    "james_bond_le-1.06": (44, 64, True, {"clip", "screen"}, CALLOUT_SOUND),
-    "jurassic_park_le-1.16": (38, 64, True, {"own_sound", "screen"}, ("callout", "screens", "clips", "own-sound")),
-    "guardians_le-1.14": (34, 64, True, {"screen"}, ("callout", "clips", "own-sound")),
-    "iron_maiden_le-1.16": (32, 64, True, ALL - {"countdown", "events", "stack"}, CALLOUT_SOUND),
-    "sword_of_rage_le-1.18": (35, 64, True, {"lights", "own_sound", "screen"}, ("callout", "clips", "own-sound")),
-    "mando_le-1.44": (40, 64, True, {"own_sound", "screen"}, ("callout", "clips", "own-sound")),
-    "turtles_le-1.59": (17, 32, True, ALL - {"countdown", "events"}, NO_FRAMEWORK_DISPLAY),
-    "dungeons_and_dragons_le-1.00": (33, 64, True, {"screen"}, ("callout", "clips", "own-sound")),
-    "john_wick_le-1.01": (43, 64, True, ALL - {"events", "lights", "stack"}, CALLOUT_SOUND),
-    "venom_le-1.07": (40, 64, True, {"screen"}, ("callout", "clips", "own-sound")),
+    "godzilla_pro-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
+    "aerosmith_le-1.15": (43, 64, True, {"countdown"}, ("callout", "screens", "clips", "own-sound")),
+    "avengers_infinity_le-1.09": (36, 64, True, {"lights", "own_sound"}, ("callout", "screens", "clips", "own-sound")),
+    "batman-1.13": (43, 64, True, {"clip", "countdown", "own_sound"}, ("callout", "screens", "own-sound")),
+    "elvira3-1.13": (45, 64, True, {"clip", "countdown", "own_sound"}, ("callout", "screens", "own-sound")),
+    "foo_fighters_le-1.04": (41, 64, True, {"own_sound"}, ("callout", "screens", "clips", "own-sound")),
+    "james_bond_60th_le-1.11": (37, 64, True, {"clip", "countdown"}, ("callout", "screens", "own-sound")),
+    "led_zeppelin_le-1.22": (31, 32, True, {"clip", "own_sound"}, ("callout", "screens", "own-sound")),
+    "led_zeppelin_pro-1.22": (30, 32, True, {"clip", "own_sound"}, ("callout", "screens", "own-sound")),
+    "metallica_spike-1.03": (40, 64, True, {"clip"}, ("callout", "screens", "own-sound")),
+    "munsters_le-1.28": (27, 32, True, {"clip"}, ("callout", "screens", "own-sound")),
+    "rush_le-1.18": (38, 64, True, {"clip"}, ("callout", "screens", "own-sound")),
+    "star_wars_elg-1.10": (30, 64, True, {"clip", "own_sound"}, ("callout", "screens", "own-sound")),
+    "star_wars_le-1.30": (42, 64, True, {"clip", "own_sound"}, ("callout", "screens", "own-sound")),
+    "uncanny_xmen_le-0.98": (33, 64, True, {"own_sound"}, ("callout", "screens", "clips", "own-sound")),
+    "jaws_le-1.02": (27, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
+    "stranger_things_le-1.12": (39, 64, True, {"lights"}, ("callout", "screens", "clips", "own-sound")),
+    "king_kong_le-0.97": (55, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
+    "james_bond_le-1.06": (44, 64, True, {"clip"}, ("callout", "screens", "own-sound")),
+    "jurassic_park_le-1.16": (38, 64, True, {"own_sound"}, ("callout", "screens", "clips", "own-sound")),
+    "guardians_le-1.14": (34, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
+    "iron_maiden_le-1.16": (32, 64, True, {"clip", "lights", "own_sound"}, ("callout", "screens", "own-sound")),
+    "sword_of_rage_le-1.18": (35, 64, True, {"lights", "own_sound"}, ("callout", "screens", "clips", "own-sound")),
+    "mando_le-1.44": (40, 64, True, {"own_sound"}, ("callout", "screens", "clips", "own-sound")),
+    "turtles_le-1.59": (17, 32, True, ALL - {"countdown", "events"}, ("callout", "screens", "own-sound", "messages")),
+    "dungeons_and_dragons_le-1.00": (33, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
+    "john_wick_le-1.01": (43, 64, True, {"clip", "countdown", "own_sound"}, ("callout", "screens", "own-sound")),
+    "venom_le-1.07": (40, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
 }
 
 #: the lines a part of a mode puts in the runtime file
@@ -427,7 +427,11 @@ def test_a_renamed_card_waits_for_the_probe(tmp_path, monkeypatch):
 
 
 # ---- the build ships the port ---------------------------------------------------------
-@pytest.mark.parametrize("key", ["turtles_pro_1_59", "jaws_le_1_02", "deadpool_pro_1_16"])
+# item 164: most titles show a screen now; these are ones that still cannot (none is read here)
+_NO_SCREEN = [k for k in sorted(MP.profiles()) if not MP.profile(k).can("screen")][:3]
+
+
+@pytest.mark.parametrize("key", _NO_SCREEN)
 def test_the_build_ships_the_titles_port_and_leaves_out_what_it_cannot_do(tmp_path, key):
     p = MP.profile(key)
     project = tmp_path / "proj"
@@ -462,6 +466,7 @@ def test_a_jaws_mode_builds_its_clip_into_jaws_bank(tmp_path):
     project, out = tmp_path / "proj", tmp_path / "out"
     spec = MP.blank_spec(p, "SHARK CLIP")
     spec.clip, spec.clip_seconds = "title", 1.0
+    spec.screen = False                         # item 164: Jaws shows a screen too; no stock HUD here
     slug, _spec = MP.new_mode(str(project), spec=spec)
     res = MA.build(str(project), None, synthetic(("A", "B")), str(out), ffmpeg=ff)
     bank_rel = "assets/lcd/auto_loaded/%s" % p.bank_scene
@@ -562,6 +567,7 @@ def test_a_build_probes_a_renamed_card_and_uses_its_port(tmp_path, monkeypatch):
     monkeypatch.setattr(MP, "_PROBED", {})
     tmnt = MP.profile("turtles_pro_1_59")
     spec = MP.blank_spec(tmnt, "RUSH")
+    spec.screen = False                         # item 164: TMNT shows a screen now; no stock HUD here
     MP.new_mode(str(project), spec=spec)
     MA.build(str(project), None, None, str(tmp_path / "out"))
     assert calls == [str(image)]
@@ -667,6 +673,7 @@ def test_a_build_refuses_advanced_fields_the_card_lacks_until_the_mode_is_saved_
     project = _card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0")
     kaiju = _advanced_kaiju()
     kaiju.clip = "none"                                          # no stock bank is read here
+    kaiju.screen = False                                         # nor a stock HUD (item 164: Jaws has one)
     slug, _spec = MP.new_mode(str(project), spec=kaiju)
     with pytest.raises(MA.ModeAssetError) as e:
         MA.build(str(project), None, None, str(tmp_path / "out"))

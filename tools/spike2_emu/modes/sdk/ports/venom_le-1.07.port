@@ -568,3 +568,11 @@ value stock_mode_count      94
 data typeinfo_cmode         0x005e0c20
 data typeinfo_cmode_mball   0x005e1014
 data typeinfo_vmi           0x005f5b4c
+
+# ---- a mode's own screen (item 164): the scene lookup's typed finders (find_node casts to Radium::Sprite,
+# find_text to Radium::Text; found through the lookup, Godzilla LE 1.16 0x587bac, by the class each casts to),
+# the node's set-visible (Sprite slot 42) and the scene inside a scene player
+site find_text        0x005377f8 0xe92d4070 0xe24dd008
+
+# ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
+scene hud                  a5a5ca3d705d93c2e9b3e01a7cd075363f5a6319

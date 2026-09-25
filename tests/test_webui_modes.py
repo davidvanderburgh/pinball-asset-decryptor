@@ -428,8 +428,7 @@ def test_jaws_greys_what_its_port_cannot_do(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert st["status"] == "Ready to build."
-        assert st["dis"]["screen"]
-        assert st["reasons"]["screen"].startswith("Not on this game: ")
+        assert not st["dis"]["screen"]              # item 164: its score panel carries a screen
         assert not st["dis"]["stack"]               # item 164: the game's mode table
         assert not st["dis"]["lights"]              # item 164: its inserts, every one in the mode's colour
         assert not st["dis"]["events"]              # item 162: Jaws's events were seen firing
@@ -502,10 +501,9 @@ def test_tmnt_shots_and_greying(tmp_path, preview_on):
         # item 163: its countdown is heard (441); no time-up call carries an end sound of its own
         assert not st["dis"]["countdown"] and st["dis"]["own_sound"]
         assert st["reasons"]["sound"].startswith("Not on this game: ")
-        # item 164: a clip plays on TMNT Pro 1.59 now, so only the picture and the sound are greyed
-        assert not st["dis"]["film_clip"] and st["dis"]["film_still"] and st["dis"]["film_sound"]
-        assert st["reasons"]["film"].startswith("Not on this game: cutting a picture for the screen "
-                                                "or a sound from a film, because")
+        # item 164: a clip plays and a screen shows on TMNT Pro 1.59 now, so only the sound is greyed
+        assert not st["dis"]["film_clip"] and not st["dis"]["film_still"] and st["dis"]["film_sound"]
+        assert st["reasons"]["film"].startswith("Not on this game: cutting a sound from a film, because")
 
 
 def test_a_card_with_no_port_is_read_only(tmp_path, preview_on):

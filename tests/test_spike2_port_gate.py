@@ -375,9 +375,8 @@ def test_the_beatles_profile():
     assert MP.read_port(str(BEATLES))["data"]["score_mult"] == 0x543534   # the byte score_add32 multiplies by
     cannot = {part for part in MP.PARTS if not p.can(part)}
     # item 164: Lights go through its named inserts (every insert in the mode's colour)
-    assert cannot == {"screen", "own_sound"} and p.light_route == "inserts"
+    assert cannot == {"own_sound"} and p.light_route == "inserts"      # item 164: its screen was seen
     assert "multiballs" in p.stack_note          # item 164: the framework's balls in play, multiballs only
-    assert "scenes a mode's screen goes in" in p.why_not("screen")
     assert "time-up" in p.why_not("own_sound")
     for part in cannot:
         # the reasons a person reads name the game and no internal word
@@ -398,7 +397,8 @@ def test_a_beatles_mode_file(tmp_path):
     assert int(lines["trigger"].split()[0], 0) == 0x100000000
     assert int(lines["shots"], 0) == 0x2000000000 | 0x4000000
     assert lines["callout_count"] == "385" and "callout_at" not in lines
-    for key in ("screen_scene", "clip_start", "clip_end", "light_owner", "sound_key"):
+    assert lines["screen_scene"] == p.hud_scene           # item 164: its score panel carries a screen
+    for key in ("clip_start", "clip_end", "light_owner", "sound_key"):
         assert key not in lines
 
 

@@ -387,37 +387,44 @@ def core_missing(port):
 #: - TMNT Pro 1.58 and 1.59 share bank cf92bc5a (344 clips), Deadpool Pro 1.16 and LE 1.14
 #:   bank e0e29301 (84 clips); both walk, and neither port has clip functions.
 TITLE_SCENES = {
-    "godzilla_pro-1.15": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27",
+    "godzilla_pro-1.15": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,
                               bank="fe35b5b897c2b0df6fe583b0168a6cda", clip_proven=True),
-    "godzilla_le-1.16": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27",
+    "godzilla_le-1.16": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,
                              bank="fe35b5b897c2b0df6fe583b0168a6cda", clip_proven=True),
-    "jaws_le-1.02": dict(hud="2714280910e8768b6a17dba50fb150f7",
+    "jaws_le-1.02": dict(screen_proven=True, hud="2714280910e8768b6a17dba50fb150f7", 
                          bank="908389471bb1044c57d8ad25b0471ca8", clip_proven=True),
     "turtles_pro-1.58": dict(bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=False),
-    "turtles_pro-1.59": dict(bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=True),   # item 164: our clip seen on the glass
-    "deadpool_pro-1.16": dict(bank="e0e293019ac1e6977049c83dc8485496", clip_proven=True),   # item 164: our clip seen on the glass
-    "deadpool_le-1.14": dict(bank="e0e293019ac1e6977049c83dc8485496", clip_proven=True),   # item 164: our clip seen on the glass
-    "venom_le-1.07": dict(bank="6a9b1862ee06252a137dacc7bb099d78", clip_proven=True),   # item 164: our clip seen on the glass
-    "led_zeppelin_le-1.22": dict(bank="d294bdb25548df7400a740013a0bf908", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
-    "beatles-1.29": dict(bank="e9101ee9059414046aec49f7ccb4613c", clip_proven=True),   # item 164: our clip seen on the glass
-    "dungeons_and_dragons_le-1.00": dict(bank="62d7aa522a27805655b6819750a0df75", clip_proven=True),   # item 164: our clip seen on the glass
-    "foo_fighters_le-1.04": dict(bank="469deda43d1ebfe2c5d371d5a800d0a9", clip_proven=True),   # item 164: our clip seen on the glass
-    "godzilla_pro-1.16": dict(bank="fe35b5b897c2b0df6fe583b0168a6cda", clip_proven=True),   # item 164: our clip seen on the glass
-    "james_bond_60th_le-1.11": dict(bank="2883a8a9a51ec57c2b74a95d24c9f360", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
-    "james_bond_le-1.06": dict(bank="8813fb4003cef416a6a1179d9677a0b9", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
-    "avengers_infinity_le-1.09": dict(bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=True),   # item 164: our clip seen on the glass
-    "jurassic_park_le-1.16": dict(bank="3e222871d6c38b6b493fdfe59f788133", bank_tree="demand_loaded", clip_proven=True),   # item 164: our clip seen on the glass
-    "king_kong_le-0.97": dict(bank="ed379c6514e73bead614fee25e93d862", clip_proven=True),   # item 164: our clip seen on the glass
-    "led_zeppelin_pro-1.22": dict(bank="d294bdb25548df7400a740013a0bf908", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
-    "metallica_spike-1.03": dict(bank="70fed15b5a82c83747423185ab477a20", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
-    "turtles_le-1.59": dict(bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=False),   # item 164: seen in attract; the rig never started a game
-    "uncanny_xmen_le-0.98": dict(bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=True),   # item 164: our clip seen on the glass
-    "aerosmith_le-1.15": dict(bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # item 164: our clip seen on the glass
-    "guardians_le-1.14": dict(bank="a0683942e100705db906181685dd842e", clip_proven=True),   # item 164: our clip seen on the glass
-    "mando_le-1.44": dict(bank="390b28f5b7ef5b5e3f49edcee3088a29", clip_proven=True),   # item 164: our clip seen on the glass
-    "rush_le-1.18": dict(bank="cbc3c53c829d671cdab994a0fa0b9ef5", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
-    "stranger_things_le-1.12": dict(bank="a6c50224ebf14f37444b84bb632c1b68", clip_proven=True),   # item 164: our clip seen on the glass
-    "sword_of_rage_le-1.18": dict(bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=True),   # item 164: our clip seen on the glass
+    "turtles_pro-1.59": dict(screen_proven=True, hud="e9a5916df0d6c41510453c83e1dd6fb8", bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=True),   # item 164: our clip seen on the glass
+    "deadpool_pro-1.16": dict(screen_proven=True, hud="2039fc21e598c672fa4d45df2283178b", bank="e0e293019ac1e6977049c83dc8485496", clip_proven=True),   # item 164: our clip seen on the glass
+    "deadpool_le-1.14": dict(screen_proven=True, hud="2ce488d819e6f9d8b02e2e28ebc284e0", bank="e0e293019ac1e6977049c83dc8485496", clip_proven=True),   # item 164: our clip seen on the glass
+    "venom_le-1.07": dict(screen_proven=True, hud="2a91907fb78f42cb8eb224ba4322548d", bank="6a9b1862ee06252a137dacc7bb099d78", clip_proven=True),   # item 164: our clip seen on the glass
+    "led_zeppelin_le-1.22": dict(screen_proven=True, hud="52c8fb8417a3ee2442bc31e12563b6fa", bank="d294bdb25548df7400a740013a0bf908", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "beatles-1.29": dict(screen_proven=True, hud="fe7ab9c3143f1db4ebf9c917df8b47fe", bank="e9101ee9059414046aec49f7ccb4613c", clip_proven=True),   # item 164: our clip seen on the glass
+    "dungeons_and_dragons_le-1.00": dict(screen_proven=True, hud="e8bbe9670a9a212f18408a602d7b187b", bank="62d7aa522a27805655b6819750a0df75", clip_proven=True),   # item 164: our clip seen on the glass
+    "foo_fighters_le-1.04": dict(screen_proven=True, hud="3f34991c6809a039dd47b2086a12937a", bank="469deda43d1ebfe2c5d371d5a800d0a9", clip_proven=True),   # item 164: our clip seen on the glass
+    "godzilla_pro-1.16": dict(screen_proven=True, hud="f9daed5a19aafc807bf9eb3c2def6c27", bank="fe35b5b897c2b0df6fe583b0168a6cda", clip_proven=True),   # item 164: our clip seen on the glass
+    "james_bond_60th_le-1.11": dict(screen_proven=True, hud="37d90179d849daf5afcbe4db0cf1cf1d", bank="2883a8a9a51ec57c2b74a95d24c9f360", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "james_bond_le-1.06": dict(screen_proven=True, hud="832c77c669803d557c730a3be09fb9e5", bank="8813fb4003cef416a6a1179d9677a0b9", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "avengers_infinity_le-1.09": dict(screen_proven=True, hud="62614053077f96e15d4d3d89a88d8a20", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=True),   # item 164: our clip seen on the glass
+    "jurassic_park_le-1.16": dict(screen_proven=True, hud="5a57df0fc5f2f441faf8f5a6b012c277", bank="3e222871d6c38b6b493fdfe59f788133", bank_tree="demand_loaded", clip_proven=True),   # item 164: our clip seen on the glass
+    "king_kong_le-0.97": dict(screen_proven=True, hud="cf8da03fa56cd71e414702db70b6aa3d", bank="ed379c6514e73bead614fee25e93d862", clip_proven=True),   # item 164: our clip seen on the glass
+    "led_zeppelin_pro-1.22": dict(screen_proven=True, hud="b8745c86480a44976d95068a7dc773f2", bank="d294bdb25548df7400a740013a0bf908", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "metallica_spike-1.03": dict(screen_proven=True, hud="809cbf843c36555ddbda41c3b4909543", bank="70fed15b5a82c83747423185ab477a20", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "turtles_le-1.59": dict(hud="a337459aee72b3ec5dc9b0a50981e16d", bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=False),   # item 164: seen in attract; the rig never started a game
+    "uncanny_xmen_le-0.98": dict(screen_proven=True, hud="0d31df0d25052d0ec251c18d5b8b33a1", bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=True),   # item 164: our clip seen on the glass
+    "aerosmith_le-1.15": dict(screen_proven=True, hud="53c9a69e39abf2dbb54fd134afe68b01", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # item 164: our clip seen on the glass
+    "guardians_le-1.14": dict(screen_proven=True, hud="f1b87fa9a6f94cddc4aca6268dcd96ea", bank="a0683942e100705db906181685dd842e", clip_proven=True),   # item 164: our clip seen on the glass
+    "mando_le-1.44": dict(screen_proven=True, hud="7b8d6f595c97a76e16bf54bee5d10007", bank="390b28f5b7ef5b5e3f49edcee3088a29", clip_proven=True),   # item 164: our clip seen on the glass
+    "rush_le-1.18": dict(screen_proven=True, hud="a516ede995deda83619a4d57469a8760", bank="cbc3c53c829d671cdab994a0fa0b9ef5", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "stranger_things_le-1.12": dict(screen_proven=True, hud="315de4afdec66df3ea56cc64b5673a95", bank="a6c50224ebf14f37444b84bb632c1b68", clip_proven=True),   # item 164: our clip seen on the glass
+    "sword_of_rage_le-1.18": dict(screen_proven=True, hud="ff7ed4a354fd8f5565250ea1411ef2ed", bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=True),   # item 164: our clip seen on the glass
+    "iron_maiden_le-1.16": dict(screen_proven=True, hud="9b6a1b230e2dcfe050606a7d7bb4c283"),   # item 164: its in-game HUD, read statically
+    "john_wick_le-1.01": dict(screen_proven=True, hud="aa4caf7b0c0a142f39d8c62388601dd1"),   # item 164: its in-game HUD, read statically
+    "munsters_le-1.28": dict(screen_proven=True, hud="9869621883a18ce97bd3446d67dfbbff"),   # item 164: its in-game HUD, read statically
+    "star_wars_le-1.30": dict(screen_proven=True, hud="6ad2d6fb45a03892f43675a9faf8d1ac", ),   # item 164: its in-game HUD, read statically
+    "elvira3-1.13": dict(screen_proven=True, hud="fda0fad4bd0931e1412872f85a232834"),   # item 164: its in-game HUD, read statically
+    "star_wars_elg-1.10": dict(hud="354935f6d901c89105d1a97edd4a559e", screen_proven=True, ),   # item 164: its in-game HUD, read statically
+    "batman-1.13": dict(screen_proven=True, hud="322b14238d0351d6e6ddeb6333e07c8a"),   # item 164: its in-game HUD, read statically
 }
 
 #: Titles whose callouts ran in the emulator but were never HEARD (the rig is always
@@ -673,6 +680,9 @@ def profile_from_port(path):
     elif not measured.get("hud") or not _hud_is_profiled(measured["hud"]):
         no("screen", "The scene a mode's screen goes in on %(label)s has not been measured yet, "
                      "so a screen cannot be added to it.")
+    elif not measured.get("screen_proven"):
+        no("screen", "A screen added to %(label)s's HUD scene has not been seen on the glass in "
+                     "the emulator yet.")
     bank = scenes.get("video_bank", "")
     if measured.get("clip_hidden"):
         no("clip", "A clip added to %(label)s's video bank plays in the emulator but never "

@@ -549,11 +549,10 @@ def test_the_log_and_the_scan_never_promise_a_screen_or_a_clip_the_title_cannot_
     assert screen not in line and clip not in line, line
     assert all(w in line for w in left_out), line
 
-    # the lines follow the title, not one blanket refusal: Jaws takes the clip and not the
-    # screen, and on the mode's own Godzilla both are still promised
+    # the lines follow the title, not one blanket refusal: on Jaws both are promised since item 164,
+    # and on the mode's own Godzilla too
     line = MW.describe([("m", spec)], prof=MP.profile("jaws_le_1_02"))[0]
-    assert screen not in line and clip in line, line
-    assert "not its own screen (Jaws LE 1.02 cannot add one)" in line, line
+    assert screen in line and clip in line and "not its own" not in line, line
     line = MW.describe([("m", spec)])[0]
     assert screen in line and clip in line and "not its own" not in line, line
 

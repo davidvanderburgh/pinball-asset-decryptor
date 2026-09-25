@@ -439,3 +439,6 @@ value lamp_fade            3
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
 site balls_in_play         0x00135c90 0xe92d4010 0xe3094360
+
+# ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
+scene hud                  0da52941985fea0ac31857f47794e990638156bb

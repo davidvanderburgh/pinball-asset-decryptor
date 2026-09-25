@@ -1398,10 +1398,7 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         slug = w.call("modes.new")
         st = _st(w)
         assert "Ready to build" in st["status"]
-        for part in ("screen",):
-            assert st["dis"][part], part
-            reason = st["reasons"][part]
-            assert "Not on this game" in reason and tmnt.why_not(part) in reason
+        assert not st["dis"]["screen"] and tmnt.can("screen")    # item 164: seen on the glass
         assert not st["dis"]["clip"] and not st["dis"]["lights"]    # item 164: clip v2, its inserts
         # item 163: TMNT Pro 1.59 counts down now (441, heard); it has no time-up call to carry
         # an end sound of the mode's own
@@ -1420,7 +1417,8 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         assert "trigger        0x00000080 3" in cfg                  # Center loop x3, TMNT's bit
         assert "shots          0x00000210" in cfg                    # Left ramp + Right ramp on TMNT
         assert "callout_count  441" in cfg                     # item 163: its countdown, heard
-        for gone in ("screen_scene", "clip_start", "light_on", "callout_end"):
+        assert "screen_scene   %s" % MP.profile("turtles_pro_1_59").hud_scene in cfg   # item 164
+        for gone in ("clip_start", "light_on", "callout_end"):
             assert gone not in cfg
 
 
@@ -1468,8 +1466,8 @@ def test_modes_tab_card_with_no_port_points_at_making_a_port(tmp_path):
 
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_jaws_greys_lights_and_screen_and_a_godzilla_mode_is_retargeted(tmp_path, monkeypatch):
-    """Jaws LE 1.02 can count down and add a clip (an added clip played in item 148's run2)
-    and light its inserts (item 164) but has no measured HUD; its 27 shots go in three columns. A Godzilla mode
+    """Jaws LE 1.02 can count down, add a clip (an added clip played in item 148's run2), light
+    its inserts and show a screen (item 164); its 27 shots go in three columns. A Godzilla mode
     already in the project is matched by name: the shots Jaws lacks are dropped and the log
     says which."""
     from pinball_decryptor.plugins.stern import mode_project as MP
@@ -1487,8 +1485,7 @@ def test_modes_tab_jaws_greys_lights_and_screen_and_a_godzilla_mode_is_retargete
         _project(w, project)
         st = _st(w)
         assert len(st["profile"]["shots"]) == 27 and st["profile"]["cols"] == 3
-        for part in ("screen",):
-            assert st["dis"][part] and st["reasons"][part], part
+        assert not st["dis"]["screen"]              # item 164: its score panel carries a screen
         assert not st["dis"]["lights"]              # item 164: every insert in the mode's colour
         assert not st["dis"]["clip"] and "clip" not in st["reasons"]
         assert not st["dis"]["countdown"]
@@ -1528,11 +1525,10 @@ def test_modes_tab_bare_project_knows_no_game(tmp_path):
 
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
-    """Item 148 with items 140 and 142: TMNT Pro 1.59 cannot use a screen picture or a sound
-    of the mode's own, so those two film buttons are greyed, with the reason (its clip is live
-    since item 164, and so is "The game's own modes": the runtime walks its mode table);
-    Jaws LE 1.02 greys only the picture cut. On the machine's Premium 1.16 card
-    everything stays live."""
+    """Item 148 with items 140 and 142: TMNT Pro 1.59 cannot use a sound of the mode's own, so
+    that film button is greyed, with the reason (its clip, its screen and "The game's own modes"
+    are live since item 164); on Jaws LE 1.02 and the machine's Premium 1.16 card everything
+    stays live."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
     tmnt = MP.profile("turtles_pro_1_59")
@@ -1542,9 +1538,9 @@ def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
         assert w.call("modes.new")
         st = _st(w)
         assert not st["dis"]["stack"] and tmnt.can("stack")    # item 164: the game's mode table
-        assert all(st["dis"]["film_" + t] for t in ("still", "sound")) and not st["dis"]["film_clip"]
+        assert st["dis"]["film_sound"] and not st["dis"]["film_still"] and not st["dis"]["film_clip"]
         film = st["reasons"]["film"]
-        assert "a picture for the screen or a sound" in film and "TMNT Pro 1.59" in film
+        assert "a sound" in film and "picture" not in film and "TMNT Pro 1.59" in film
         # item 147's events: TMNT 1.59's port carries the ones item 162's build check saw fire
         assert not st["dis"]["events"] and tmnt.can("events")
 
@@ -1554,8 +1550,7 @@ def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
         assert w.call("modes.new")
         st = _st(w)
         assert {t: st["dis"]["film_" + t] for t in ("clip", "still", "sound")} == {
-            "clip": False, "still": True, "sound": False}
-        assert "cutting a picture for the screen from a film" in st["reasons"]["film"]
+            "clip": False, "still": False, "sound": False}      # item 164: Jaws shows a screen now
 
         premium = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw",
                                       "1.16.0", folder="prem")
@@ -1784,6 +1779,7 @@ def test_modes_tab_a_godzilla_modes_advanced_fields_follow_a_jaws_card(tmp_path)
     project = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0")
     spec = MP.example("KAIJU RUSH")
     spec.clip = "none"                                   # no stock bank is read here
+    spec.screen = False                                  # nor a stock HUD (item 164: Jaws has one)
     spec.shot_award = [["Powerline left", 750000], ["Left ramp", 500000]]
     spec.end_shot = "Powerline right"
     spec.callout_at = [[10, 1291], [3, 1111]]

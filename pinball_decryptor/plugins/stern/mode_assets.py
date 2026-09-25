@@ -460,7 +460,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     screens += _code_screens(project, code, prof)
     if screens:
         hud, _infos = SW.add_screens(stock_hud, screens)
-        write("%s/%s/scene.radium" % (LCD, prof.hud_scene), hud)
+        write("%s/scene.radium" % prof.lcd("hud"), hud)
 
     # the clips: made first (side by side, kept between builds), then one after another into
     # the stock bank
@@ -481,7 +481,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
         if code_clips and not clips:
             bank, _parsed = _add_code_clips(project, code_clips, stock_bank, VB.parse(stock_bank),
                                             prof, out_dir, ffmpeg, result, made)
-            write("%s/%s/scene.radium" % (LCD, prof.bank_scene), bank)
+            write("%s/scene.radium" % prof.lcd("bank"), bank)
             code_clips = []
         if clips:
             bank = stock_bank
@@ -489,7 +489,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
             for slug, spec in clips:
                 names = MP.asset_names(slug)
                 path = VB.next_path(parsed)
-                rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
+                rel = "%s/scene.assets/%s" % (prof.lcd("bank"), path)
                 local = os.path.join(out_dir, *rel.split("/"))
                 os.makedirs(os.path.dirname(local), exist_ok=True)
                 _place_clip(_first_clip_job(project, slug, spec, parsed), local, made, ffmpeg)
@@ -502,7 +502,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
             if code_clips:
                 bank, parsed = _add_code_clips(project, code_clips, bank, parsed, prof, out_dir,
                                                ffmpeg, result, made)
-            write("%s/%s/scene.radium" % (LCD, prof.bank_scene), bank)
+            write("%s/scene.radium" % prof.lcd("bank"), bank)
     finally:
         if scratch:
             shutil.rmtree(scratch, ignore_errors=True)
@@ -568,7 +568,7 @@ def _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, r
     if job is None:
         return bank, parsed
     path = VB.next_path(parsed)
-    rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
+    rel = "%s/scene.assets/%s" % (prof.lcd("bank"), path)
     local = os.path.join(out_dir, *rel.split("/"))
     os.makedirs(os.path.dirname(local), exist_ok=True)
     _place_clip(job, local, made, ffmpeg)
@@ -613,7 +613,7 @@ def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, re
     for slug, spec in code_clips:
         names = MP.asset_names(slug)
         path = VB.next_path(parsed)
-        rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
+        rel = "%s/scene.assets/%s" % (prof.lcd("bank"), path)
         local = os.path.join(out_dir, *rel.split("/"))
         os.makedirs(os.path.dirname(local), exist_ok=True)
         _place_clip(_code_clip_job(project, slug, spec, parsed), local, made, ffmpeg)

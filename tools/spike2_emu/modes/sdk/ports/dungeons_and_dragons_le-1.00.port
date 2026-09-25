@@ -354,6 +354,15 @@ switch 94   0x100000000        Dragon hold 4
 callout countdown           2059
 callout time_up             2058
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4 and the surface's functions sit at Godzilla LE's
+# distances from surface_state; each prologue equals Godzilla LE's. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x0057b778 0xe92d4070 0xe24dd008
+site surface_set_video 0x00572e5c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00570c68 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00570418 0xe5d030d4 0xe92d40f0
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Dragon target left
 

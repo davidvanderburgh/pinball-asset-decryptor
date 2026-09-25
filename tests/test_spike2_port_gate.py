@@ -366,17 +366,17 @@ def test_the_beatles_profile():
     assert set(p.events) == {"game_start", "ball_start", "ball_end", "bonus_start", "bonus_end",
                              "tilt_warning", "tilt", "game_over", "multiball_start"}
     assert p.example_start_shot == "Left orbit target"
-    # what the runtime arms: no lights (no light_run) and no clips (no clip_play)
-    assert p.runtime_can == ("callout", "screens", "own-sound", "messages", "award-screen")
+    # what the runtime arms: no lights (no light_run); clips by clip v2 (item 164: no clip_play,
+    # the video bank's surface played directly - an added clip seen on the glass in a game)
+    assert p.runtime_can == ("callout", "screens", "clips", "own-sound", "messages", "award-screen")
     # the countdown needs only the countdown callout now (Beatles has 385 and no ten-seconds call)
     assert p.can("countdown") and p.callout_countdown == 385 and p.callout_ten_seconds == 0
     assert p.sound_note == ""                          # item 163: 385 heard saying one..five
     assert MP.read_port(str(BEATLES))["data"]["score_mult"] == 0x543534   # the byte score_add32 multiplies by
     cannot = {part for part in MP.PARTS if not p.can(part)}
-    assert cannot == {"lights", "screen", "clip", "own_sound", "stack"}
+    assert cannot == {"lights", "screen", "own_sound", "stack"}
     assert "light shows" in p.why_not("lights")
     assert "scenes a mode's screen goes in" in p.why_not("screen")
-    assert "plays its clips" in p.why_not("clip")
     assert "time-up" in p.why_not("own_sound")
     assert "tells that one of its own modes is running" in p.why_not("stack")
     for part in cannot:

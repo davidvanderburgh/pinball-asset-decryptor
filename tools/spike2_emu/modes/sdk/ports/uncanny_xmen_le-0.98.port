@@ -413,5 +413,14 @@ event game_over      0x47
 # sites played each id and the game's audio was transcribed: countdown 558 (clips 1-5 said "ONE!", "2", "3", "4", "Five")
 callout countdown           558
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4 and the surface's functions sit at Godzilla LE's
+# distances from surface_state; each prologue equals Godzilla LE's. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x004cc4a8 0xe92d4070 0xe24dd008
+site surface_set_video 0x004c3b8c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x004c1998 0xe5d030d4 0xe92d43f0
+site surface_stop     0x004c1148 0xe5d030d4 0xe92d40f0
+
 # ---- examples a template mode can use on this game ----
 text example_start_shot     X mansion tgt

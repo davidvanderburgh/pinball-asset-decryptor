@@ -276,6 +276,15 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 # sites played each id and the game's audio was transcribed: countdown 385 (clips 1-5 said "WOLF!", "TRUUU", "THREE", "FOUR!", "Five!")
 callout countdown           385
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4 and the surface's functions sit at Godzilla LE's
+# distances from surface_state; each prologue equals Godzilla LE's. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x0042da08 0xe92d4070 0xe24dd008
+site surface_set_video 0x004250ec 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00422ef8 0xe5d030d4 0xe92d43f0
+site surface_stop     0x004226a8 0xe5d030d4 0xe92d40f0
+
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Left orbit target
 

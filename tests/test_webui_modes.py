@@ -501,9 +501,10 @@ def test_tmnt_shots_and_greying(tmp_path, preview_on):
         # item 163: its countdown is heard (441); no time-up call carries an end sound of its own
         assert not st["dis"]["countdown"] and st["dis"]["own_sound"]
         assert st["reasons"]["sound"].startswith("Not on this game: ")
-        assert st["dis"]["film_clip"] and st["dis"]["film_still"] and st["dis"]["film_sound"]
-        assert st["reasons"]["film"].startswith("Not on this game: cutting a clip, a picture for "
-                                                "the screen or a sound from a film, because")
+        # item 164: a clip plays on TMNT Pro 1.59 now, so only the picture and the sound are greyed
+        assert not st["dis"]["film_clip"] and st["dis"]["film_still"] and st["dis"]["film_sound"]
+        assert st["reasons"]["film"].startswith("Not on this game: cutting a picture for the screen "
+                                                "or a sound from a film, because")
 
 
 def test_a_card_with_no_port_is_read_only(tmp_path, preview_on):
@@ -1387,17 +1388,18 @@ def test_own_sounds_grey_where_no_carriers_were_measured(tmp_path, preview_on):
 
 
 def test_the_show_page_is_one_sentence_where_nothing_on_it_works(tmp_path, preview_on):
-    """Review: on a title that can show neither a screen nor a clip (TMNT Pro 1.59), the Show
-    page collapses to one sentence and "stays up" / "priority" grey with it."""
-    proj = _card_project(tmp_path / "tmnt", "turtles_pro-1_59_0.raw")
+    """Review: on a title that can show neither a screen nor a clip (TMNT Pro 1.58; 1.59 plays a
+    clip since item 164), the Show page collapses to one sentence and "stays up" / "priority"
+    grey with it."""
+    proj = _card_project(tmp_path / "tmnt", "turtles_pro-1_58_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
         w.call("modes.new")
         st = w.state("modes")
         assert st["dis"]["screen"] and st["dis"]["clip"] and st["dis"]["show_order"]
         assert st["reasons"]["show_all"].startswith("Not on this game yet: a mode cannot show a "
-                                                    "screen or a clip of its own on TMNT Pro 1.59")
-        assert "TMNT Pro 1.59 cannot show either" in st["reasons"]["show_order"]
+                                                    "screen or a clip of its own on TMNT Pro 1.58")
+        assert "TMNT Pro 1.58 cannot show either" in st["reasons"]["show_order"]
 
 
 def test_a_live_try_it_records_a_derived_ports_first_run(tmp_path, preview_on):

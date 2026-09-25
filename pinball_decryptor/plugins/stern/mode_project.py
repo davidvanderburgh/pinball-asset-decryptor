@@ -68,6 +68,14 @@ class TitleProfile:
     switch_shots_note: str = ""  # why those are not proven yet; "" when they are (or there are none)
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
+    bank_tree: str = "auto_loaded"   # item 164: the lcd tree the video bank is in (JP LE, Avengers,
+    hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
+
+    def lcd(self, which):
+        """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
+        if which == "bank":
+            return "assets/lcd/%s/%s" % (self.bank_tree, self.bank_scene)
+        return "assets/lcd/%s/%s" % (self.hud_tree, self.hud_scene)
 
     def can(self, part):
         """True unless this title cannot do ``part`` (one of :data:`PARTS`)."""
@@ -238,6 +246,33 @@ STACK_NEEDS = (("stock_battle_running", "stock_multiball_running"), ("stock_mode
 
 #: What pad_mode_runtime.c needs before it arms each capability (pad_mode_start):
 #: (sites, data, values), copied, in the order its "armed: ... can ..." line prints them.
+#: item 164: CLIP V2 - the newer builds' clips, played on the video bank's VideoSurface itself (no
+#: clip_play / video_player / video_surface function to name; the game draws the surface), as
+#: pad_mode_runtime.c's capability check reads it; plus the bank's scene id, or the game's own
+#: ``video_surface`` getter (it loads a demand_loaded bank: JP LE)
+CLIP_V2_NEEDS = (("surface_find", "surface_set_video", "surface_play", "surface_stop", "surface_state",
+                  "string_new", "resource_get", "dynamic_cast"),
+                 ("resource_manager", "typeinfo_resource", "typeinfo_scene_player"),
+                 ("surface_playing", "scene_player_scene"))
+
+
+#: item 164: CLIP LAYER - the game's full-screen video layer (Deadpool), as the runtime's clip3 check reads it
+CLIP_LAYER_NEEDS = (("layer_add", "layer_remove", "layer_video", "layer_playing", "string_new"),
+                    ("layer_stack", "video_layer"),
+                    ("clip_layer_priority", "layer_video_at"))
+
+
+def _clip_layer(sites, data, values):
+    s, d, v = CLIP_LAYER_NEEDS
+    return all(n in sites for n in s) and all(data.get(n) for n in d) and all(n in values for n in v)
+
+
+def _clip_v2(sites, data, values, scenes):
+    s, d, v = CLIP_V2_NEEDS
+    return (all(n in sites for n in s) and all(data.get(n) for n in d) and all(n in values for n in v)
+            and (bool(scenes.get("video_bank")) or "video_surface" in sites))
+
+
 RUNTIME_NEEDS = {
     "callout": (("callout", "callout_nth"), (), ()),
     "lights": (("light_run", "lamp_group", "show_priority"), ("event_head", "event_current"),
@@ -318,9 +353,30 @@ TITLE_SCENES = {
     "jaws_le-1.02": dict(hud="2714280910e8768b6a17dba50fb150f7",
                          bank="908389471bb1044c57d8ad25b0471ca8", clip_proven=True),
     "turtles_pro-1.58": dict(bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=False),
-    "turtles_pro-1.59": dict(bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=False),
-    "deadpool_pro-1.16": dict(bank="e0e293019ac1e6977049c83dc8485496", clip_proven=False),
-    "deadpool_le-1.14": dict(bank="e0e293019ac1e6977049c83dc8485496", clip_proven=False),
+    "turtles_pro-1.59": dict(bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=True),   # item 164: our clip seen on the glass
+    "deadpool_pro-1.16": dict(bank="e0e293019ac1e6977049c83dc8485496", clip_proven=True),   # item 164: our clip seen on the glass
+    "deadpool_le-1.14": dict(bank="e0e293019ac1e6977049c83dc8485496", clip_proven=True),   # item 164: our clip seen on the glass
+    "venom_le-1.07": dict(bank="6a9b1862ee06252a137dacc7bb099d78", clip_proven=True),   # item 164: our clip seen on the glass
+    "led_zeppelin_le-1.22": dict(bank="d294bdb25548df7400a740013a0bf908", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "beatles-1.29": dict(bank="e9101ee9059414046aec49f7ccb4613c", clip_proven=True),   # item 164: our clip seen on the glass
+    "dungeons_and_dragons_le-1.00": dict(bank="62d7aa522a27805655b6819750a0df75", clip_proven=True),   # item 164: our clip seen on the glass
+    "foo_fighters_le-1.04": dict(bank="469deda43d1ebfe2c5d371d5a800d0a9", clip_proven=True),   # item 164: our clip seen on the glass
+    "godzilla_pro-1.16": dict(bank="fe35b5b897c2b0df6fe583b0168a6cda", clip_proven=True),   # item 164: our clip seen on the glass
+    "james_bond_60th_le-1.11": dict(bank="2883a8a9a51ec57c2b74a95d24c9f360", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "james_bond_le-1.06": dict(bank="8813fb4003cef416a6a1179d9677a0b9", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "avengers_infinity_le-1.09": dict(bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=True),   # item 164: our clip seen on the glass
+    "jurassic_park_le-1.16": dict(bank="3e222871d6c38b6b493fdfe59f788133", bank_tree="demand_loaded", clip_proven=True),   # item 164: our clip seen on the glass
+    "king_kong_le-0.97": dict(bank="ed379c6514e73bead614fee25e93d862", clip_proven=True),   # item 164: our clip seen on the glass
+    "led_zeppelin_pro-1.22": dict(bank="d294bdb25548df7400a740013a0bf908", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "metallica_spike-1.03": dict(bank="70fed15b5a82c83747423185ab477a20", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "turtles_le-1.59": dict(bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=False),   # item 164: seen in attract; the rig never started a game
+    "uncanny_xmen_le-0.98": dict(bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=True),   # item 164: our clip seen on the glass
+    "aerosmith_le-1.15": dict(bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # item 164: our clip seen on the glass
+    "guardians_le-1.14": dict(bank="a0683942e100705db906181685dd842e", clip_proven=True),   # item 164: our clip seen on the glass
+    "mando_le-1.44": dict(bank="390b28f5b7ef5b5e3f49edcee3088a29", clip_proven=True),   # item 164: our clip seen on the glass
+    "rush_le-1.18": dict(bank="cbc3c53c829d671cdab994a0fa0b9ef5", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
+    "stranger_things_le-1.12": dict(bank="a6c50224ebf14f37444b84bb632c1b68", clip_proven=True),   # item 164: our clip seen on the glass
+    "sword_of_rage_le-1.18": dict(bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=True),   # item 164: our clip seen on the glass
 }
 
 #: Titles whose callouts ran in the emulator but were never HEARD (the rig is always
@@ -529,6 +585,8 @@ def profile_from_port(path):
     runtime = tuple(cap for cap, (s, d, v) in RUNTIME_NEEDS.items()
                     if all(n in sites for n in s) and all(data.get(n) for n in d)
                     and all(n in values for n in v))
+    if "clips" not in runtime and (_clip_layer(sites, data, values) or _clip_v2(sites, data, values, port["scene"])):
+        runtime = tuple(c for c in RUNTIME_NEEDS if c in runtime or c == "clips")
     label = title_label(game, version)
     callouts, scenes = port["callout"], port["scene"]
     measured = TITLE_SCENES.get("%s-%s" % (game, version), {})
@@ -564,7 +622,10 @@ def profile_from_port(path):
         no("screen", "The scene a mode's screen goes in on %(label)s has not been measured yet, "
                      "so a screen cannot be added to it.")
     bank = scenes.get("video_bank", "")
-    if "clips" not in runtime:
+    if measured.get("clip_hidden"):
+        no("clip", "A clip added to %(label)s's video bank plays in the emulator but never "
+                   "reaches the screen: the game shows another video there.")
+    elif "clips" not in runtime:
         no("clip", "The app has not found where %(label)s plays its clips, so a mode cannot "
                    "add one yet.")
     elif not bank:
@@ -627,6 +688,8 @@ def profile_from_port(path):
         switch_shots=switch_shots,
         switch_shots_note=switch_note,
         lamps=_lit_inserts(port),
+        bank_tree=measured.get("bank_tree", "auto_loaded"),
+        hud_tree=measured.get("hud_tree", "auto_loaded"),
     )
 
 

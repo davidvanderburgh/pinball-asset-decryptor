@@ -371,6 +371,15 @@ switch 103  0x10000000000      Up pf right target
 callout countdown           163
 value countdown_first 1
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4 and the surface's functions sit at Godzilla LE's
+# distances from surface_state; each prologue equals Godzilla LE's. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x00485710 0xe92d4070 0xe24dd008
+site surface_set_video 0x0047cdf4 0xe5d030d4 0xe92d4ff0
+site surface_play     0x0047ac00 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0047a3b0 0xe5d030d4 0xe92d40f0
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Lower right target
 

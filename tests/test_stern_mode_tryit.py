@@ -689,10 +689,14 @@ def test_write_reads_only_the_scenes_a_title_can_use():
     assert MW.scene_rels(GZ) == ("godzilla_pro/%s/%s/scene.radium" % (lcd, GZ.hud_scene),
                                  "godzilla_pro/%s/%s/scene.radium" % (lcd, GZ.bank_scene))
     assert all(MW.scene_rels(le))
-    for key in ("turtles_pro_1_58", "turtles_pro_1_59", "deadpool_pro_1_16", "deadpool_le_1_14"):
+    tmnt = MP.profile("turtles_pro_1_58")
+    assert tmnt.hud_scene == "" and not tmnt.can("screen") and not tmnt.can("clip")
+    assert MW.scene_rels(tmnt) == ("", "")
+    # item 164: TMNT Pro 1.59 and the Deadpools add a clip to their bank (no HUD scene still)
+    for key in ("turtles_pro_1_59", "deadpool_pro_1_16", "deadpool_le_1_14"):
         prof = MP.profile(key)
-        assert prof.hud_scene == "" and not prof.can("screen") and not prof.can("clip"), key
-        assert MW.scene_rels(prof) == ("", ""), key
+        assert prof.hud_scene == "" and not prof.can("screen") and prof.can("clip"), key
+        assert MW.scene_rels(prof) == ("", "%s/%s/%s/scene.radium" % (prof.game_dir, lcd, prof.bank_scene)), key
     jaws = MP.profile("jaws_le_1_02")
     assert not jaws.can("screen") and jaws.can("clip")
     assert MW.scene_rels(jaws) == ("", "jaws_le/%s/%s/scene.radium" % (lcd, jaws.bank_scene))
@@ -727,23 +731,23 @@ def test_try_it_takes_a_form_mode_on_every_ported_title(tmp_path, monkeypatch, k
 
 def test_a_mode_made_on_godzilla_runs_on_a_tmnt_card_without_its_screen_or_clip(tmp_path, monkeypatch):
     """A mode saved as Godzilla Pro 1.15 with a screen and a title clip, in a project made
-    from a TMNT Pro 1.59 card: its shots are TMNT's by name, and the parts TMNT cannot do are
+    from a TMNT Pro 1.58 card: its shots are TMNT's by name, and the parts TMNT cannot do are
     left out, as a Write build leaves them out."""
     project = str(tmp_path / "proj")
     os.makedirs(project)
-    _name_card(project, "turtles_pro-1_59_0.Release.8G.sdcard.raw", "1.59.0")
+    _name_card(project, "turtles_pro-1_58_0.Release.8G.sdcard.raw", "1.58.0")
     slug, spec = MP.new_mode(project, "LOUD", MP.ModeSpec(
         name="LOUD", start_shot="Left ramp", scoring_shots=["Left ramp", "Right ramp"],
         screen=True, clip="title"))
     assert spec.title == GZ.key
-    monkeypatch.setattr(MT, "card_title", lambda c: ("turtles_pro", "1.59.0", 3))
+    monkeypatch.setattr(MT, "card_title", lambda c: ("turtles_pro", "1.58.0", 3))
     _writes_builder(monkeypatch, [])
     ts = MT.build_set(project, _card(tmp_path), base=str(tmp_path / "try"), ffmpeg=None)
     cfg = open(os.path.join(ts.stage_dir, "mode.cfg"), encoding="utf-8").read()
     assert "shots          0x00000210" in cfg                     # TMNT's Left + Right ramp
     for gone in ("screen_scene", "clip_start"):
         assert gone not in cfg
-    assert ts.specs[slug].title == "turtles_pro_1_59"
+    assert ts.specs[slug].title == "turtles_pro_1_58"
 
 
 @pytest.mark.parametrize("key,card_name,card_version", OTHER_TITLES + (

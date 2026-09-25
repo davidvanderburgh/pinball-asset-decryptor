@@ -295,11 +295,11 @@ def scene_rels(prof):
     where ``prof.can("screen")`` and a clip only where ``prof.can("clip")``, so a build never
     reads the other; item 148's TMNT Pro and Deadpool ports name no HUD scene at all, and a
     lookup of ``turtles_pro/assets/lcd/auto_loaded//scene.radium`` refused every mode there."""
-    def rel(scene, part):
+    def rel(scene, part, which):
         if not scene or not prof.can(part):
             return ""
-        return "%s/%s/%s/scene.radium" % (prof.game_dir, LCD, scene)
-    return rel(prof.hud_scene, "screen"), rel(prof.bank_scene, "clip")
+        return "%s/%s/scene.radium" % (prof.game_dir, prof.lcd(which))
+    return rel(prof.hud_scene, "screen", "hud"), rel(prof.bank_scene, "clip", "bank")
 
 
 def lookup(reader, card_rel):

@@ -131,5 +131,18 @@ event game_over       0x47     # the last ball's drain, after its bonus
 #   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x144904+0x4)
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
+# ---- clip layer (item 164): the game's full-screen VIDEO LAYER. Its own sequences ("SinisterModeTotal")
+# add the layer to the display stack at priority 5 and ask the layer's video object for a clip by name;
+# the video bank's surface alone is not on the glass here. An added clip was seen on the glass in the
+# emulator 2026-09-25 (attract and a game; the HUD back when the layer is removed).
+site layer_add        0x000df920 0xe302ca94 0xe1a03002
+site layer_remove     0x000df938 0xe92d40f8 0xe5913004
+site layer_video      0x00143a34 0xe92d4038 0xe1a04000
+site layer_playing    0x00143a58 0xe92d4008 0xe5903008
+data layer_stack            0x0062a0c8
+data video_layer            0x0062a0ac
+value clip_layer_priority   5
+value layer_video_at        0x14
+
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Lil Deadpool target

@@ -1600,6 +1600,51 @@ void pm_set_text(void *text, const char *words)
  * the display is immediate-mode, so the runtime advances and draws the video player every
  * tick while the surface plays, as the game's own clip loop does. Proven: item 132. */
 static struct { int on, seen; unsigned long started, last; } clip;
+/* item 164: CLIP V2 - the newer builds have no clip_play / video_player / video_surface function
+ * (the lookup is inlined at every call site: Venom 1.07 has 22), so the runtime does what their
+ * code does: the video bank scene (`scene video_bank`, 60ed7e50... on 28 of 30 latest builds), its
+ * root, the node "VideoSurface" by the typed find (`site surface_find`, find_node + 0x2f4 on every
+ * build), then surface_set_video(surface, &name) and surface_play(surface, 0, -1). That surface is
+ * DRAWN BY THE GAME (an added clip seen in a game on 14 builds, emulator 2026-09-25): no draw loop. A port
+ * with `site video_surface` gets the surface from the game's own getter instead: on a build whose
+ * bank is demand_loaded (JP LE) the bank is not in the resource manager until that getter loads it. */
+static int clip_v2;
+static void *clip2_surf;
+/* item 164: CLIP LAYER - Deadpool shows a full-screen video by adding a video LAYER to its display
+ * stack (`data layer_stack`, `data video_layer`: add(stack, layer, priority) = `site layer_add`,
+ * remove(stack, layer) = `site layer_remove`) and asking the layer's video object (at
+ * `value layer_video_at` in the layer) for a clip by name (`site layer_video`: request(obj, &name,
+ * loop); `site layer_playing`: playing(obj)) - the game's own "SinisterModeTotal" sequence. On those
+ * builds the video bank's surface is not on the glass by itself. Emulator-proven on Deadpool LE 1.14
+ * 2026-09-25 (attract and a game; the HUD is back when the layer is removed). */
+static int clip_layer, clip_layer_in;
+
+static void *clip_layer_video(void)
+{
+    return *(void **)(unsigned long)(data("video_layer") + (unsigned)pm_port_value("layer_video_at", 0x14));
+}
+
+static void clip_layer_out(void)
+{
+    if (!clip_layer_in) return;
+    ((void (*)(unsigned, unsigned))(unsigned long)fn("layer_remove"))(data("layer_stack"), data("video_layer"));
+    clip_layer_in = 0;
+}
+
+static void *clip2_surface(void)
+{
+    unsigned str, out[2] = { 0, 0 };
+    void *root;
+    if (site("video_surface"))                /* the game's own getter: it loads a demand_loaded bank */
+        return ((void *(*)(void))(unsigned long)fn("video_surface"))();   /* (JP LE); never cached */
+    if (clip2_surf) return clip2_surf;
+    root = scene("video_bank");
+    if (!root) return 0;
+    str = std_string("VideoSurface");
+    ((void (*)(unsigned *, void *, unsigned *))(unsigned long)fn("surface_find"))(out, root, &str);
+    clip2_surf = (void *)(unsigned long)out[0];
+    return clip2_surf;
+}
 /* item 154 display: our own clip_play calls are marked, so the clip_play hook can tell the game's
  * from ours; the name is kept for the layered background's calls a hold answers with it */
 static volatile int disp_clip_ours, disp_clip_lost;
@@ -1610,6 +1655,36 @@ int pm_clip(const char *name)
 {
     unsigned i;
     if (!(can & PM_CAN_CLIPS) || !name || !*name) return 0;
+    if (clip_layer) {
+        void *video = clip_layer_video();
+        unsigned str;
+        if (!video) { say("clip: the video layer has no video yet - \"%s\" not played", name); return 0; }
+        if (!clip_layer_in)
+            ((void (*)(unsigned, unsigned, unsigned))(unsigned long)fn("layer_add"))
+                (data("layer_stack"), data("video_layer"), (unsigned)pm_port_value("clip_layer_priority", 5));
+        clip_layer_in = 1;
+        str = std_string(name);
+        ((void (*)(void *, unsigned *, int))(unsigned long)fn("layer_video"))(video, &str, 0);
+        clip.on = 1;
+        clip.seen = 0;
+        clip.started = clip.last = pm_ms();
+        return 1;
+    }
+    if (clip_v2) {
+        void *surf = clip2_surface();
+        unsigned str;
+        if (!surf) { say("clip: the video bank's VideoSurface is not there yet - \"%s\" not played", name); return 0; }
+        str = std_string(name);
+        if (!((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str)) {
+            say("clip: the video bank has no clip \"%s\"", name);
+            return 0;
+        }
+        ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
+        clip.on = 1;
+        clip.seen = 0;
+        clip.started = clip.last = pm_ms();
+        return 1;
+    }
     for (i = 0; name[i] && i + 1 < sizeof disp_clip_name; i++) disp_clip_name[i] = name[i];
     disp_clip_name[i] = 0;
     disp_clip_ours = 1;
@@ -1627,7 +1702,13 @@ int pm_clip_playing(void) { return clip.on; }
 void pm_clip_stop(void)
 {
     if (!(can & PM_CAN_CLIPS)) return;
-    ((void (*)(void))(unsigned long)fn("clip_stop"))();
+    if (clip_layer) {
+        clip_layer_out();
+    } else if (clip_v2) {
+        if (clip2_surface()) ((void (*)(void *))(unsigned long)fn("surface_stop"))(clip2_surface());
+    } else {
+        ((void (*)(void))(unsigned long)fn("clip_stop"))();
+    }
     clip.on = 0;
 }
 
@@ -1646,6 +1727,21 @@ static void clip_tick(void)
         return;
     }
     now = pm_ms();
+    if (clip_layer) {                         /* the game draws the layer: watch its video, then take it out */
+        void *video = clip_layer_video();
+        if (video && ((int (*)(void *))(unsigned long)fn("layer_playing"))(video)) clip.seen = 1;
+        else if (clip.seen || now - clip.started > 3000) { clip_layer_out(); clip.on = 0; }
+        clip.last = now;
+        return;
+    }
+    if (clip_v2) {                            /* the game draws it: only watch the surface */
+        surface = clip2_surface();
+        state = surface ? ((int (*)(void *))(unsigned long)fn("surface_state"))(surface) : -1;
+        if (state == playing) clip.seen = 1;
+        else if (clip.seen || now - clip.started > 3000) clip.on = 0;
+        clip.last = now;
+        return;
+    }
     player = ((void *(*)(void))(unsigned long)fn("video_player"))();
     surface = ((void *(*)(void))(unsigned long)fn("video_surface"))();
     display = *(void **)(unsigned long)(data("display_holder") + (unsigned)pm_port_value("display_at", 0));
@@ -1980,7 +2076,7 @@ static void display_arm(void)
     static const char *const es[] = { "display_effect_start", 0 };
     static const char *const ed[] = { "display_effects", "award_screen_arg", "event_current", 0 };
     static const char *const ev[] = { "display_host", "display_mode_level", "display_now_at", "display_priority_at", 0 };
-    if (can & PM_CAN_CLIPS) hook(fn("clip_play"), on_clip_play);
+    if ((can & PM_CAN_CLIPS) && !clip_v2 && !clip_layer) hook(fn("clip_play"), on_clip_play);
     if (!site("display_effect_start") && !site("layered_priority")) return;      /* a port without them: silent */
     if (!site("layered_priority")) {
         if (!have_sites(es) || !have_data(ed) || !have_values(ev)) {
@@ -4071,7 +4167,23 @@ static void pad_mode_start(void)
         if (have_sites(callout_s)) can |= PM_CAN_CALLOUT;
         if (have_sites(light_s) && have_data(light_d) && have_values(light_v)) can |= PM_CAN_LIGHTS;
         if (have_sites(screen_s) && have_data(screen_d) && have_values(screen_v)) can |= PM_CAN_SCREENS;
+        static const char *const clip2_s[] = { "surface_find", "surface_set_video", "surface_play", "surface_stop",
+                                               "surface_state", "string_new", "resource_get", "dynamic_cast", 0 };
+        static const char *const clip2_d[] = { "resource_manager", "typeinfo_resource", "typeinfo_scene_player", 0 };
+        static const char *const clip2_v[] = { "surface_playing", "scene_player_scene", 0 };
+        static const char *const clip3_s[] = { "layer_add", "layer_remove", "layer_video", "layer_playing",
+                                               "string_new", 0 };
+        static const char *const clip3_d[] = { "layer_stack", "video_layer", 0 };
+        static const char *const clip3_v[] = { "clip_layer_priority", "layer_video_at", 0 };
         if (have_sites(clip_s) && have_data(clip_d) && have_values(clip_v)) can |= PM_CAN_CLIPS;
+        else if (have_sites(clip3_s) && have_data(clip3_d) && have_values(clip3_v)) {
+            can |= PM_CAN_CLIPS;          /* item 164: clip layer, the game's full-screen video layer */
+            clip_layer = 1;
+        } else if (have_sites(clip2_s) && have_data(clip2_d) && have_values(clip2_v)
+                 && (pm_scene_id("video_bank") || site("video_surface"))) {
+            can |= PM_CAN_CLIPS;          /* item 164: clip v2, the surface itself */
+            clip_v2 = 1;
+        }
         if (have_sites(sound_s)) can |= PM_CAN_OWN_SOUND;
         if (have_data(msg_d)) can |= PM_CAN_MESSAGES;
         if (have_sites(award_s) && have_data(award_d) && have_values(award_v)) can |= PM_CAN_AWARD_SCREEN;

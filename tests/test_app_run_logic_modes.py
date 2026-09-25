@@ -1376,8 +1376,9 @@ def test_modes_tab_try_it_without_a_card_names_the_projects_own_card(tmp_path, m
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_cannot(tmp_path):
     """Item 148: a project on a TMNT Pro 1.59 card offers TMNT's 17 shots from its port,
-    greys Lights, Screen and Clip and the countdown WITH the reason in words, and New
-    makes a mode whose runtime file carries TMNT's own masks and no line TMNT cannot do."""
+    greys Lights and Screen WITH the reason in words (Clip is live since item 164: an added
+    clip seen on its glass in a game), and New makes a mode whose runtime file carries TMNT's
+    own masks and no line TMNT cannot do."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
     tmnt = MP.profile("turtles_pro_1_59")
@@ -1397,10 +1398,11 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         slug = w.call("modes.new")
         st = _st(w)
         assert "Ready to build" in st["status"]
-        for part in ("lights", "screen", "clip"):
+        for part in ("lights", "screen"):
             assert st["dis"][part], part
             reason = st["reasons"][part]
             assert "Not on this game" in reason and tmnt.why_not(part) in reason
+        assert not st["dis"]["clip"]                            # item 164: clip v2
         # item 163: TMNT Pro 1.59 counts down now (441, heard); it has no time-up call to carry
         # an end sound of the mode's own
         assert not st["dis"]["countdown"] and st["dis"]["own_sound"]
@@ -1526,8 +1528,9 @@ def test_modes_tab_bare_project_knows_no_game(tmp_path):
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
     """Item 148 with items 140 and 142: TMNT Pro 1.59's port names none of the game's own
-    mode queries and cannot use a clip, a screen picture or a sound of the mode's own, so
-    "The game's own modes" and the three film buttons are greyed, each with the reason;
+    mode queries and cannot use a screen picture or a sound of the mode's own, so "The game's
+    own modes" and those two film buttons are greyed, each with the reason (its clip is live
+    since item 164);
     Jaws LE 1.02 greys only the picture cut. On the machine's Premium 1.16 card
     everything stays live."""
     from pinball_decryptor.plugins.stern import mode_project as MP
@@ -1540,9 +1543,9 @@ def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
         st = _st(w)
         assert st["dis"]["stack"]
         assert tmnt.why_not("stack") in st["reasons"]["stack"]
-        assert all(st["dis"]["film_" + t] for t in ("clip", "still", "sound"))
+        assert all(st["dis"]["film_" + t] for t in ("still", "sound")) and not st["dis"]["film_clip"]
         film = st["reasons"]["film"]
-        assert "a clip, a picture for the screen or a sound" in film and "TMNT Pro 1.59" in film
+        assert "a picture for the screen or a sound" in film and "TMNT Pro 1.59" in film
         # item 147's events: TMNT 1.59's port carries the ones item 162's build check saw fire
         assert not st["dis"]["events"] and tmnt.can("events")
 
@@ -1725,7 +1728,7 @@ def test_modes_tab_advanced_and_the_games_call_follow_the_title(tmp_path):
         assert st["dis"]["end_game"]                            # "The game's own call" greyed
         assert "nothing plays when time is up" in st["reasons"]["sound"]
         assert st["editor_on"] is True                          # a shot's own points stay live
-        assert st["dis"]["clip_both"] and "a second clip" in st["reasons"]["clip_both"]
+        assert not st["dis"]["clip_both"]                     # item 164: TMNT Pro 1.59 plays a clip
 
         _set(w, "award:Left orbit", "750000")
         _f(w, "end_shot", "Center loop")

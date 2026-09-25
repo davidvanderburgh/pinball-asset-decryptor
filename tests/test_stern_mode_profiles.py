@@ -32,38 +32,38 @@ PORTS = {
     "godzilla_pro-1.15": (15, 64, True, set(), EVERY_CAPABILITY),   # item 160: + the three spinners
     "godzilla_le-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
-    "turtles_pro-1.59": (17, 32, True, ALL - {"countdown", "events"}, NO_FRAMEWORK_DISPLAY),
-    "deadpool_pro-1.16": (25, 64, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
-    "deadpool_le-1.14": (28, 64, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),
+    "turtles_pro-1.59": (17, 32, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound", "messages")),
+    "deadpool_pro-1.16": (25, 64, True, ALL - {"clip", "events"}, ("callout", "clips", "own-sound", "messages")),
+    "deadpool_le-1.14": (28, 64, True, ALL - {"clip", "events"}, ("callout", "clips", "own-sound", "messages")),
     # item 162 (2026-09-24): every latest build, proven by a full build check in the emulator
-    "godzilla_pro-1.16": (21, 64, True, {"screen", "clip"}, EVERY_CAPABILITY),
-    "aerosmith_le-1.15": (43, 64, True, ALL - {"events", "own_sound"}, CALLOUT_SOUND),
-    "avengers_infinity_le-1.09": (36, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "godzilla_pro-1.16": (21, 64, True, {"screen"}, EVERY_CAPABILITY),
+    "aerosmith_le-1.15": (43, 64, True, ALL - {"clip", "events", "own_sound"}, ("callout", "clips", "own-sound")),
+    "avengers_infinity_le-1.09": (36, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
     "batman-1.13": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
     "elvira3-1.13": (45, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "foo_fighters_le-1.04": (41, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "foo_fighters_le-1.04": (41, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
     "james_bond_60th_le-1.11": (37, 64, True, ALL - {"events", "own_sound"}, CALLOUT_SOUND),
-    "led_zeppelin_le-1.22": (31, 32, True, ALL - {"countdown", "events"}, ('callout', 'screens', 'own-sound')),
-    "led_zeppelin_pro-1.22": (30, 32, True, ALL - {"countdown", "events"}, ('callout', 'screens', 'own-sound')),
-    "metallica_spike-1.03": (40, 64, True, ALL - {"countdown", "events", "own_sound"}, ('callout', 'screens', 'own-sound')),
+    "led_zeppelin_le-1.22": (31, 32, True, ALL - {"countdown", "events"}, ("callout", "screens", "own-sound")),
+    "led_zeppelin_pro-1.22": (30, 32, True, ALL - {"countdown", "events"}, ("callout", "screens", "own-sound")),
+    "metallica_spike-1.03": (40, 64, True, ALL - {"countdown", "events", "own_sound"}, ("callout", "screens", "own-sound")),
     "munsters_le-1.28": (27, 32, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
     "rush_le-1.18": (38, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
     "star_wars_elg-1.10": (30, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
     "star_wars_le-1.30": (42, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
-    "uncanny_xmen_le-0.98": (33, 64, True, ALL - {"countdown", "events"}, ('callout', 'screens', 'own-sound')),
-    "jaws_le-1.02": (27, 64, True, ALL - {"clip", "countdown", "events", "own_sound"}, ("callout", "screens", "clips", "own-sound", "messages")),
-    "stranger_things_le-1.12": (39, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
-    "king_kong_le-0.97": (55, 64, True, ALL - {"countdown", "events", "own_sound"}, ('callout', 'screens', 'own-sound')),
+    "uncanny_xmen_le-0.98": (33, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "screens", "clips", "own-sound")),
+    "jaws_le-1.02": (27, 64, True, {"lights", "screen", "stack"}, ("callout", "screens", "clips", "own-sound", "messages")),
+    "stranger_things_le-1.12": (39, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
+    "king_kong_le-0.97": (55, 64, True, {"lights", "screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
     "james_bond_le-1.06": (44, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
-    "jurassic_park_le-1.16": (38, 64, True, ALL - {"countdown", "events"}, ('callout', 'screens', 'own-sound')),
-    "guardians_le-1.14": (34, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "jurassic_park_le-1.16": (38, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "screens", "clips", "own-sound")),
+    "guardians_le-1.14": (34, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
     "iron_maiden_le-1.16": (32, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
-    "sword_of_rage_le-1.18": (35, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
-    "mando_le-1.44": (40, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
+    "sword_of_rage_le-1.18": (35, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
+    "mando_le-1.44": (40, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
     "turtles_le-1.59": (17, 32, True, ALL - {"countdown", "events"}, NO_FRAMEWORK_DISPLAY),
-    "dungeons_and_dragons_le-1.00": (33, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "dungeons_and_dragons_le-1.00": (33, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
     "john_wick_le-1.01": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "venom_le-1.07": (40, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "venom_le-1.07": (40, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
 }
 
 #: the lines a part of a mode puts in the runtime file
@@ -201,6 +201,62 @@ def test_a_port_marked_not_run_is_unproven_and_says_why(tmp_path):
     port.write_text("# drafted. NOT RUN: never run in the emulator.\n" + src, encoding="utf-8")
     p = MP.profile_from_port(str(port))
     assert p.proven is False and "never run" in p.proven_note
+
+
+def test_clip_v2_needs_are_what_the_runtime_checks():
+    """item 164: CLIP_V2_NEEDS is copied from pad_mode_runtime.c's clip2_s / clip2_d / clip2_v."""
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+
+    def names(var):
+        body = re.search(r"%s\[\] = \{(.*?)\};" % var, src, re.S).group(1)
+        return tuple(re.findall(r'"([a-z_0-9]+)"', body))
+    assert MP.CLIP_V2_NEEDS == (names("clip2_s"), names("clip2_d"), names("clip2_v"))
+    assert MP.CLIP_LAYER_NEEDS == (names("clip3_s"), names("clip3_d"), names("clip3_v"))
+    assert 'pm_scene_id("video_bank") || site("video_surface")' in src
+
+
+def test_deadpool_plays_its_clips_on_the_video_layer(tmp_path):
+    """item 164: the Deadpools' clips go through the game's full-screen video layer, and only with
+    every layer line."""
+    for key in ("deadpool_le-1.14", "deadpool_pro-1.16"):
+        src = (SDK / "ports" / (key + ".port")).read_text(encoding="utf-8")
+        assert "site surface_find" not in src               # the bank's surface alone is not on the glass
+        assert "clips" in MP.profile_from_port(_port(key)).runtime_can
+        port = tmp_path / (key + ".port")
+        port.write_text(_without(src, "video_layer"), encoding="utf-8")
+        assert "clips" not in MP.profile_from_port(str(port)).runtime_can
+
+
+def _without(port_text, *names):
+    return "\n".join(l for l in port_text.split("\n")
+                     if not any(re.match(r"(site|data|value|scene)\s+%s\s" % n, l) for n in names))
+
+
+def test_clip_v2_arms_clips_from_the_surface_lines(tmp_path):
+    """Venom 1.07 has no clip_play: its clips come from the surface lines alone, and go with them."""
+    src = (SDK / "ports" / "venom_le-1.07.port").read_text(encoding="utf-8")
+    assert "clips" in MP.profile_from_port(_port("venom_le-1.07")).runtime_can
+    port = tmp_path / "venom_le-1.07.port"
+    port.write_text(_without(src, "surface_find"), encoding="utf-8")
+    assert "clips" not in MP.profile_from_port(str(port)).runtime_can
+    port.write_text(_without(src, "video_bank"), encoding="utf-8")
+    assert "clips" not in MP.profile_from_port(str(port)).runtime_can
+    # a port with the game's own video_surface getter needs no bank scene id (JP LE's bank is demand_loaded)
+    port.write_text(_without(src, "video_bank") + "\nsite video_surface      0x00100000 0xe92d4070 0xe3065c18\n",
+                    encoding="utf-8")
+    assert "clips" in MP.profile_from_port(str(port)).runtime_can
+
+
+def test_the_bank_and_hud_live_in_their_measured_lcd_tree():
+    gz = MP.GODZILLA_PRO_1_15
+    assert gz.lcd("bank") == "assets/lcd/auto_loaded/" + gz.bank_scene
+    assert gz.lcd("hud") == "assets/lcd/auto_loaded/" + gz.hud_scene
+    trees = {k: v.get("bank_tree", "auto_loaded") for k, v in MP.TITLE_SCENES.items()}
+    assert set(trees.values()) <= {"auto_loaded", "demand_loaded"}
+    for key, tree in trees.items():
+        p = MP.profile(key.replace("-", "_").replace(".", "_"))
+        if p is not None:
+            assert p.bank_tree == tree and p.lcd("bank").startswith("assets/lcd/%s/" % tree)
 
 
 def test_godzilla_pro_1_15_is_unchanged_and_is_what_its_port_says():

@@ -167,6 +167,17 @@ value sound_channel_bus         189
 value sound_channel_voice_ptrs  92
 value sound_voice_volume        48
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is the function the game's own "VideoSurface" lookups call; the surface's functions sit at layout B's
+# distances from surface_state (aerosmith_le-1.15), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x004c5750 0xe92d4070 0xe24dd008
+site surface_set_video 0x004bcfe4 0xe5d03238 0xe92d4ff0
+site surface_play     0x004ba784 0xe5d03238 0xe92d43f0
+site surface_stop     0x004ba288 0xe5d03238 0xe92d40f0
+value surface_playing       2
+value scene_player_scene    0x10
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Demodog target 1 left
 

@@ -1027,6 +1027,91 @@ A port with `site ball_end` keeps it, and the value is not used. On The Beatles 
 site is itself a handler of bus 0x34, called from inside that dispatch. Emulator-proven on The
 Beatles 1.29 with the site taken out of the port: one ball end per drain, a tilted ball's included.
 
+### Clips on the newer builds (clip v2, item 164)
+
+The newer builds have no `clip_play`, `video_player` or `video_surface` function to name.
+The lookup is inlined at every call site (Venom 1.07 has 22). So the runtime does what those
+sites do:
+
+1. It takes the video bank's scene (`scene video_bank`, 60ed7e50... on 28 of 30 latest
+   builds) through `resource_get`, `dynamic_cast` and the root at `scene_player_scene`.
+2. It finds the node "VideoSurface" with the typed find (`site surface_find`). That is
+   `find_node` + 0x2f4 where the port has `find_node`. Otherwise it is the function the
+   game's own "VideoSurface" lookups call. Every build has Godzilla LE's prologue there.
+3. It calls `surface_set_video(surface, &name)`, which returns 0 when the bank has no such
+   clip, then `surface_play(surface, 0, -1)`.
+
+The game draws that surface, so there is no draw loop. `surface_state` reads 2 while the clip
+plays. `surface_stop` stops it.
+
+The port lines:
+
+```
+site surface_find       0x...    # the typed find
+site surface_set_video  0x...    # } at fixed distances from surface_state: layout A (Godzilla
+site surface_play       0x...    # } LE and 21 more: +0x4cac / +0x2ab8 / +0x2268) or layout B
+site surface_stop       0x...    # } (Aerosmith and 8 more: +0x4ddc / +0x257c / +0x2080)
+value surface_playing   2
+value scene_player_scene 0x10
+scene video_bank        60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+```
+
+With `site video_surface` (the game's own getter), the runtime asks that getter for the
+surface on every call instead of looking up the scene. JP LE 1.16 keeps its bank in
+`demand_loaded`, and so does Avengers 1.09, so the bank is not in the resource manager until
+the getter loads it. Both are emulator-proven with an added clip on the glass in a game.
+There `scene video_bank` is not needed. `mode_project.TITLE_SCENES` gives such a title
+`bank_tree="demand_loaded"`, and the build adds the clip under that tree.
+
+**A clip that plays is not a clip on the glass.** On some builds the bank's surface is not
+part of what the game shows at that moment. Led Zeppelin shows the song video on the stage
+screen. The Bonds keep their own video in front. There `pm_clip` returns 1, `surface_state`
+reads 2, and nothing shows, so those ports carry no clip lines. The tab offers Clip only where
+an added clip was SEEN on the screen in the emulator (`clip_proven` in `TITLE_SCENES`).
+
+**The clip layer (Deadpool).** Deadpool shows a full-screen video by adding a video LAYER to
+its display stack. The game's own "SinisterModeTotal" sequence does it this way. The runtime
+does the same:
+
+1. `layer_add(layer_stack, video_layer, clip_layer_priority)`.
+2. `layer_video(video, &name, 0)` on the layer's video object, which sits at
+   `layer_video_at` in the layer.
+3. It watches `layer_playing(video)`. When the clip ends, it calls
+   `layer_remove(layer_stack, video_layer)` and the HUD comes back.
+
+```
+site layer_add        0x...    # add(stack, layer, priority)
+site layer_remove     0x...    # remove(stack, layer)
+site layer_video      0x...    # request(video, &name, loop)
+site layer_playing    0x...    # playing(video)
+data layer_stack      0x...
+data video_layer      0x...
+value clip_layer_priority 5
+value layer_video_at  0x14
+```
+
+When a port has both, the layer route wins over clip v2 (and `clip_play` wins over both).
+Emulator-proven on Deadpool LE 1.14 2026-09-25, in attract and in a game.
+
+**Where a clip is on the glass today (2026-09-25).** In each of these, a mode's added title
+card was seen in a game in the emulator:
+
+- Through clip v2: Aerosmith, Avengers, Beatles, D&D, Foo Fighters, Guardians, JP LE, King
+  Kong, Mando, Stranger Things, Sword of Rage, TMNT Pro 1.59, Venom and X-Men.
+- Through `clip_play`: Godzilla (Pro 1.15, 1.16, Premium/LE) and Jaws.
+- Through the layer: both Deadpools.
+
+Where it plays but never shows, the port carries no clip lines and the tab says so: the Bonds,
+the Led Zeppelins, Metallica and Rush (a concert or song video stays in front).
+
+Not yet:
+
+- TMNT LE 1.59: seen in attract only, because the rig never started a game there.
+- Iron Maiden: its getter plays by name from its own scene player.
+- Munsters and the Star Wars builds: their bank grammar does not parse yet.
+- John Wick: its bank grammar does not parse yet either.
+- Batman and Elvira: no 60ed7e50 bank.
+
 ### Ports in the Modes tab
 
 The app's Modes tab makes modes as files (`mode_file.c` runs them), and it reads these

@@ -347,5 +347,14 @@ event tilt           0xc6
 callout countdown           668
 callout time_up             670
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4 and the surface's functions sit at Godzilla LE's
+# distances from surface_state; each prologue equals Godzilla LE's. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x006577e0 0xe92d4070 0xe24dd008
+site surface_set_video 0x0064eec4 0xe5d030d4 0xe92d4ff0
+site surface_play     0x0064ccd0 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0064c480 0xe5d030d4 0xe92d40f0
+
 # ---- examples a template mode can use on this game ----
 text example_start_shot     Pit target-bot

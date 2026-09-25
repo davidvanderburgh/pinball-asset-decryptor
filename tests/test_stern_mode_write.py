@@ -519,26 +519,26 @@ def test_the_scan_and_the_plan_name_each_carried_sound_or_say_it_is_left_out(tmp
 def test_the_log_and_the_scan_never_promise_a_screen_or_a_clip_the_title_cannot_add(
         tmp_path, monkeypatch):
     """Item 149's loose end: a mode SAVED on Godzilla, with a screen and a 4 s title clip,
-    put in a TMNT Pro 1.59 project gets neither - TMNT's port has no screen or clip
+    put in a TMNT Pro 1.58 project gets neither - TMNT's port has no screen or clip
     functions, so ``mode_assets.build`` skips both - and neither the build log nor the Write
     change scan may say it adds them. The scan reads the card's title from the project's own
     record, so it is right while mode.json still says Godzilla; the log reads the retargeted
     mode :func:`card_modes` hands it. Jaws LE 1.02 can add a clip but no screen."""
     import json
     monkeypatch.delenv(MW.SOUND_ENV, raising=False)
-    tmnt = MP.profile("turtles_pro_1_59")
+    tmnt = MP.profile("turtles_pro_1_58")
     project = str(tmp_path / "proj")
     os.makedirs(project)
-    card = "turtles_pro-1_59_0.Release.8G.sdcard.raw"
+    card = "turtles_pro-1_58_0.Release.8G.sdcard.raw"
     with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
         json.dump({"input_path": "D:\\cards\\" + card, "input_name": card,
-                   "size": 1, "mtime": 1, "card_version": "1.59.0"}, f)
+                   "size": 1, "mtime": 1, "card_version": "1.58.0"}, f)
     _name, spec = MP.example_specs()[0]
     assert (spec.title, spec.screen, spec.clip) == (GZ.key, True, "title")
     MP.new_mode(project, spec=spec)
     screen, clip = "its own screen in the game's HUD scene", "title-card clip"
-    left_out = ("not its own screen (TMNT Pro 1.59 cannot add one)",
-                "not its own clip (TMNT Pro 1.59 cannot add one)")
+    left_out = ("not its own screen (TMNT Pro 1.58 cannot add one)",
+                "not its own clip (TMNT Pro 1.58 cannot add one)")
 
     line = MW.pending_lines(project)[0]                  # the Write change scan
     assert screen not in line and clip not in line, line

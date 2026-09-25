@@ -27,7 +27,7 @@ ffmpeg.
 
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional
 
 from .audio_slots import replace_with_retry
@@ -461,7 +461,7 @@ STAGED_CACHE = os.path.join(".write_cache", "video_staged.json")
 #: Part of every staging recipe: bump it whenever what a conversion produces
 #: changes (encoder flags, rate control, scaling), so a project's cached
 #: conversions from an older version are made again rather than kept.
-CONVERSION_REV = 1
+CONVERSION_REV = 2
 
 
 class StagedCache:
@@ -565,6 +565,26 @@ class StagedCache:
             os.replace(tmp, self.path)
         except OSError:
             pass
+
+
+def _pristine_slot(slot: VideoSlot, orig: Optional[str]) -> VideoSlot:
+    """*slot* as the clip it shipped with, for a conversion to match.
+
+    Once a build has staged a replacement, the file in the slot IS that
+    replacement, and a scan probes it like any other clip.  Matching the next
+    conversion to it matched the user's clip to itself: "Trim / pad" cut a
+    14 s replacement for a 6 s slot to... 14 s, on every build after the
+    first (PAD-215).  The ``.orig/`` snapshot is the stock clip, so its probe
+    is the target whenever there is one."""
+    if not orig or not os.path.isfile(orig):
+        return slot
+    try:
+        info = detect_video_info(orig)
+    except Exception:                                   # noqa: BLE001
+        info = None
+    if info is None:
+        return slot
+    return replace(slot, info=info, probed=True)
 
 
 def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
@@ -679,7 +699,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                 log_cb(f"  ✓ {rel}  (already converted from this file — "
                        f"kept)", "success")
             continue
-        ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length,
+        ok, detail = stage_replacement(_pristine_slot(slot, orig), rep,
+                                       trim_to_length=trim_to_length,
                                        no_conversion=slot_noconv,
                                        cancel_cb=cancel_cb,
                                        byte_budget=budget,

@@ -18,7 +18,7 @@ Brothers, Dutch Pinball).
 import os
 import shutil
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional
 
 from .audio import (AudioInfo, detect_audio_info, find_ffmpeg,
@@ -240,6 +240,22 @@ def stage_replacement(slot: AudioSlot, replacement_path: str,
         return False, str(e)
 
 
+def _pristine_slot(slot: AudioSlot, orig: Optional[str]) -> AudioSlot:
+    """*slot* as the sound it shipped with, for a conversion to match.  After
+    one build the file in the slot is the last replacement, and trimming to
+    ITS length trimmed nothing (PAD-215); the ``.orig/`` snapshot is the
+    stock sound."""
+    if not orig or not os.path.isfile(orig):
+        return slot
+    try:
+        info = detect_audio_info(orig)
+    except Exception:                                   # noqa: BLE001
+        info = None
+    if info is None:
+        return slot
+    return replace(slot, info=info)
+
+
 def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
                        assignments: Dict[str, str],
                        trim_to_length: bool = False,
@@ -281,7 +297,10 @@ def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
         slot_trim = trim_to_length and rel not in keep_full
-        ok, detail = stage_replacement(slot, rep, trim_to_length=slot_trim)
+        orig = (staged_originals.snapshot_path(assets_dir, rel)
+                if assets_dir else None)
+        ok, detail = stage_replacement(_pristine_slot(slot, orig), rep,
+                                       trim_to_length=slot_trim)
         if ok:
             staged += 1
             if log_cb:

@@ -371,3 +371,28 @@ def test_replace_with_retry_reraises_when_everything_fails(tmp_path, monkeypatch
                         lambda *_a: None)
     with pytest.raises(PermissionError):
         replace_with_retry(str(src), str(dst), attempts=2)
+
+
+def test_trim_on_a_later_build_matches_the_stock_length(tmp_path):
+    # PAD-215: after one build the slot holds the replacement, and a rescan
+    # probes THAT.  Trimming to the rescanned length trimmed nothing; the
+    # target must be the .orig/ snapshot of the stock sound.
+    from pinball_decryptor.core.checksums import generate_checksums
+
+    assets = str(tmp_path)
+    _make_wav(str(tmp_path / "audio" / "idx0002.wav"), seconds=1.0)
+    generate_checksums(assets)
+    rep = str(tmp_path / "replacement.wav")
+    _make_wav(rep, seconds=3.0)
+    rel = "audio/idx0002.wav"
+
+    slots = {s.rel_path: s for s in scan_audio_slots(assets)}
+    stage_replacements({rel: slots[rel]}, {rel: rep}, assets_dir=assets)
+    slots = {s.rel_path: s for s in scan_audio_slots(assets)}
+    assert slots[rel].info.duration > 2.5          # the rescan sees the 3 s
+
+    staged, failures = stage_replacements(
+        {rel: slots[rel]}, {rel: rep}, trim_to_length=True, assets_dir=assets)
+    assert staged == 1 and failures == []
+    after = {s.rel_path: s for s in scan_audio_slots(assets)}[rel]
+    assert after.info.duration < 1.1

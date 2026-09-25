@@ -256,6 +256,7 @@ class _NoteStub:
     _conv_cached = VideoTab._conv_cached
     _conv_key = VideoTab._conv_key
     _asis_for = VideoTab._asis_for
+    _trim_for = VideoTab._trim_for
 
     def __init__(self, slot, rep=None, mode=None):
         self._state = {"preview": {"note": None}}
@@ -266,6 +267,7 @@ class _NoteStub:
         self.video_no_conversion_var = _Var(True)
         self.video_trim_var = _Var(False)
         self._asis = {}                   # no per-clip overrides (batch 37)
+        self._length = {}                 # no per-clip lengths (PAD-215)
         if rep and mode is not None:
             self._conv_cache[self._conv_key(slot.rel_path, rep)] = mode
 

@@ -43,11 +43,13 @@ class _ConvStub:
     setting — with no per-clip flag set, the answer is still the box.
     """
     _asis_for = VideoTab._asis_for
+    _trim_for = VideoTab._trim_for
 
     def __init__(self):
         self.video_no_conversion_var = _var(True)
         self.video_trim_var = _var(False)
         self._asis = {}
+        self._length = {}
         self._by_rel = {}
 
 

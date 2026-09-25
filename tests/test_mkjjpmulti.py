@@ -869,3 +869,38 @@ def test_gate_root_pair_names_what_differs(mj):
     assert "game binary differs" in str(e.value)
     assert mj.gate_root_pair(_Info(), rec_other, same, other, 1, True)
 
+
+
+# ============================================================================ restore cache (PAD-218)
+def test_a_torn_cached_root_is_restored_again_not_trusted(mj, tmp_path, monkeypatch):
+    """A cancelled restore that kept running once left a half-written sda3.raw in the
+    cache, and every build copied it and refused "no GAMENAME ... not a JJP root"."""
+    base = tmp_path / "jjp_Sonic-v00.940"
+    base.mkdir()
+    raw = base / "sda3.raw"
+    raw.write_bytes(b"torn")
+    restored = []
+
+    def restore(pieces, dest, meter=None, label="sda3"):
+        restored.append(dest)
+        with open(dest, "wb") as f:
+            f.write(b"whole")
+    monkeypatch.setattr(mj, "restore_pieces", restore)
+    monkeypatch.setattr(mj, "piece_paths", lambda mnt, info, part: [])
+    monkeypatch.setattr(mj, "root_identity",
+                        lambda r: {"gamename": "Sonic"} if open(r, "rb").read() == b"whole"
+                        else (_ for _ in ()).throw(mj.Refused("%s: no GAMENAME" % r)))
+
+    class Info:
+        def piece_bytes(self, part):
+            return 1
+    iso = str(tmp_path / "Sonic-v00.940.iso")
+    # a lookup that cannot restore hands back what is there (plan, the budget)
+    assert mj.cached_root_raw(iso, str(tmp_path)) == str(raw)
+    assert restored == []
+    # one that can restore throws the torn one away and restores it
+    assert mj.cached_root_raw(iso, str(tmp_path), "/mnt", Info()) == str(raw)
+    assert restored == [str(raw)] and raw.read_bytes() == b"whole"
+    # and a whole one is trusted as it is
+    assert mj.cached_root_raw(iso, str(tmp_path), "/mnt", Info()) == str(raw)
+    assert len(restored) == 1

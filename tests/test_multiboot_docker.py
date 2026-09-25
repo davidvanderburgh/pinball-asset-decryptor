@@ -527,3 +527,29 @@ def test_a_container_side_path_is_never_mounted(mac):
     # An absolute path beside it still counts, so the filter is on the
     # tilde and not on "there was something odd in the list".
     assert D.mount_points(["~/x/y", ISO0]) == ["/Volumes/Mac SSD/Sonichedge"]
+
+
+# ------------------------------------------------------------------ cancel
+
+def test_cancel_reaches_the_tools_whatever_their_parent(monkeypatch):
+    """PAD-218: ``pkill -P 1`` matched nothing - a ``docker exec`` process's
+    parent is outside the container - so Cancel left a root restore running,
+    and it later renamed the next run's half-written root into the cache.
+    The line matches by name only, covers mount.sh (the rename), and cannot
+    match its own ``bash -lc`` command line."""
+    seen = []
+    monkeypatch.setattr(D, "_docker", lambda args, timeout=30: seen.append(list(args)))
+    D.kill_running()
+    assert seen and seen[0][:4] == ["exec", D.CONTAINER, "bash", "-lc"]
+    line = seen[0][-1]
+    assert "-P 1" not in line and "pkill -KILL" in line
+    import re
+    pat = re.compile(D.KILL_PATTERN)
+    for cmd in ("bash tools/jjp_emu/mount.sh --root-only /host/x.iso",
+                "bash tools/jjp_emu/ensurejjpselect.sh /host/x.iso /var/tmp/jjpselect",
+                "python3 tools/jjp_emu/mkjjpmulti.py build --primary a",
+                "partclone.restore -C -f 1 -B -s - -o /var/tmp/jjp_x/sda3.raw.part.12",
+                "xorriso -indev a.iso"):
+        assert pat.search(cmd), cmd
+    assert not pat.search(line)
+    assert not pat.search("umount /var/tmp/jjp_x/iso")

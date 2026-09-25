@@ -150,9 +150,13 @@ restore_one() {
     # INTO $dest.part, renamed only when whole.  "Already restored" above is
     # `-s $dest`, so a restore written straight to $dest and cut short (the app
     # closed, WSL idled out) left a torn image that every later run trusted.
-    rm -f "$dest.part"
+    # And the name is THIS run's own ($$), PAD-218: a cancelled restore that
+    # kept going beside a new one used to rename the new one's half-written
+    # $dest.part into place when it finished first.
+    local tmp="$dest.part.$$"
+    rm -f "$dest.part" "$tmp"
     cat "$IMG/$part".*-ptcl-img.gz.* | gunzip -c \
-        | partclone.restore -C -f 1 -B -s - -o "$dest.part" 2>&1 >/dev/null \
+        | partclone.restore -C -f 1 -B -s - -o "$tmp" 2>&1 >/dev/null \
         | tr '\r' '\n' \
         | awk -v part="$part" '
             /Completed:/ {
@@ -161,7 +165,7 @@ restore_one() {
                 if (p > last) { last = p; printf "  %s: %d%%\n", part, p; fflush() }
             }'
     if [ "${PIPESTATUS[2]}" != "0" ]; then
-        echo "  $part: partclone failed" >&2; rm -f "$dest.part"; return 1
+        echo "  $part: partclone failed" >&2; rm -f "$tmp"; return 1
     fi
 
     # partclone writes only the USED blocks, so the file ends at the last used
@@ -171,7 +175,7 @@ restore_one() {
     # the mount always fits.  (ext4 superblock: s_blocks_count_lo @0x400+0x4,
     # s_log_block_size @0x400+0x18 giving block size = 1024<<n.)
     local fs_size
-    fs_size=$(python3 - "$dest.part" <<'PY'
+    fs_size=$(python3 - "$tmp" <<'PY'
 import struct, sys
 with open(sys.argv[1], 'rb') as f:
     f.seek(0x400)
@@ -184,10 +188,10 @@ print(blocks * (1024 << log_bs))
 PY
 )
     if [ -n "$fs_size" ] && [ "$fs_size" -gt 0 ]; then
-        cur=$(stat -c%s "$dest.part")
-        [ "$cur" -lt "$fs_size" ] && truncate -s "$fs_size" "$dest.part"
+        cur=$(stat -c%s "$tmp")
+        [ "$cur" -lt "$fs_size" ] && truncate -s "$fs_size" "$tmp"
     fi
-    mv -f "$dest.part" "$dest"
+    mv -f "$tmp" "$dest"
 }
 
 restore_one sda3 "$BASE/sda3.raw" || { echo "mount.sh: sda3 is required" >&2; exit 7; }

@@ -410,7 +410,10 @@ def test_ensurejjpselect_prints_both_lines():
     with open(os.path.join(os.path.dirname(here), "mount.sh"), encoding="utf-8") as f:
         mount = f.read()
     assert 'if [ "${1:-}" = "--root-only" ]' in mount
-    assert '-o "$dest.part"' in mount and 'mv -f "$dest.part" "$dest"' in mount
+    # into this run's own .part (PAD-218: a second restore beside a cancelled
+    # one must never have its half-written file renamed into place)
+    assert 'local tmp="$dest.part.$$"' in mount
+    assert '-o "$tmp"' in mount and 'mv -f "$tmp" "$dest"' in mount
 
 
 

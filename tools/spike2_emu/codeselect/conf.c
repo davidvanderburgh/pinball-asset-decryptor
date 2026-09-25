@@ -649,11 +649,12 @@ int conf_write_choice(const char *path, int idx)
     return write_index(path, idx, 1, -1, NULL);
 }
 
-int conf_read_volume(const char *path)
+int conf_read_volume(const char *path, int *base)
 {
     FILE *f;
     char line[64];
     int v = -1;
+    if (base) *base = -1;
     if (!path || !*path) return -1;
     f = fopen(path, "r");
     if (!f) return -1;
@@ -663,11 +664,21 @@ int conf_read_volume(const char *path)
         if (n >= 1 && n <= 3 && strspn(s, "0123456789") == n) v = atoi(s);
         if (v > 100) v = -1;
     }
+    /* the card's level it was set against: "conf N" (PAD-216) */
+    if (v >= 0 && base && fgets(line, sizeof line, f)) {
+        char *s = trim(line);
+        if (!strncmp(s, "conf ", 5)) {
+            size_t n;
+            s += 5;
+            n = strlen(s);
+            if (n >= 1 && n <= 3 && strspn(s, "0123456789") == n && atoi(s) <= 100) *base = atoi(s);
+        }
+    }
     fclose(f);
     return v;
 }
 
-int conf_write_volume(const char *path, int volume)
+int conf_write_volume(const char *path, int volume, int base)
 {
     char tmp[512];
     FILE *f;
@@ -678,6 +689,7 @@ int conf_write_volume(const char *path, int volume)
     f = fopen(tmp, "w");
     if (!f) return -1;
     fprintf(f, "%d\n", volume);
+    if (base >= 0 && base <= 100) fprintf(f, "conf %d\n", base);
     if (fflush(f) != 0 || fsync(fileno(f)) != 0) { /* fsync may fail on odd fs: tolerate */ }
     if (fclose(f) != 0) { unlink(tmp); return -1; }
     if (rename(tmp, path) != 0) { int e = errno; unlink(tmp); errno = e; return -1; }

@@ -1361,10 +1361,10 @@ static int volume_step(int v, int dir, int cap)
 
 /* the level on perm, once it has settled - never per press, and never when
  * nothing about it changed */
-static void remember_volume(const char *path, int v, int *saved)
+static void remember_volume(const char *path, int v, int base, int *saved)
 {
     if (!path || !*path || v == *saved) return;
-    if (conf_write_volume(path, v) == 0) {
+    if (conf_write_volume(path, v, base) == 0) {
         sel_log("volume: %d remembered in %s", v, path);
         *saved = v;
     } else {
@@ -1639,7 +1639,7 @@ int main(int argc, char **argv)
     int machine_v = -1;       /* volume=machine: the machine's own 0-63, else -1 */
     /* item 120: whether PLUS/MINUS are this cabinet's volume buttons (jjpio),
      * the ceiling, the level on perm (-1 = none), and whether a press moved it */
-    int vol_keys, vol_cap, vol_saved = -1, vol_touched = 0;
+    int vol_keys, vol_cap, vol_saved = -1, vol_touched = 0, vol_base = -1, vol_conf;
     const char *vol_how = "default", *vol_file;
     long long osd_until = 0;  /* the volume indicator is up until then; 0 = not up */
     int stall_ms = getenv("PADSELECT_STALL_MS") ? atoi(getenv("PADSELECT_STALL_MS")) : 0;
@@ -1692,7 +1692,23 @@ int main(int argc, char **argv)
     vol_file = o.volume_file ? o.volume_file : DEF_VOLFILE;
     vol_cap = VOLUME_CEILING;
     if (c.volume_max >= 0 && c.volume_max < vol_cap) vol_cap = c.volume_max;
-    vol_saved = vol_keys && !o.snapshot ? conf_read_volume(vol_file) : -1;
+    vol_saved = vol_keys && !o.snapshot ? conf_read_volume(vol_file, &vol_base) : -1;
+    /* A REMEMBERED LEVEL BELONGS TO THE CARD IT WAS SET UNDER (PAD-216): JJP's
+     * installer keeps perm on a same-game reinstall, so a rebuilt card with a
+     * new volume= found the old card's level (up to the cap) and played at
+     * it - a lowered volume= did nothing.  The file names the conf level it
+     * was set against; a different one, or none (an older build's file), and
+     * the card's own volume= wins until the buttons are pressed again. */
+    vol_conf = c.volume >= 0 ? c.volume : DEF_VOLUME;
+    if (vol_saved >= 0 && vol_base != vol_conf) {
+        if (vol_base >= 0)
+            sel_log("volume: remembered %d was set under volume=%d; this card says %d, so the card's level is used",
+                    vol_saved, vol_base, vol_conf);
+        else
+            sel_log("volume: remembered %d in %s names no card level (an older menu wrote it); "
+                    "the card's level is used", vol_saved, vol_file);
+        vol_saved = -1;
+    }
     if (o.volume >= 0) { volume = o.volume; vol_how = "--volume"; }
     else if (vol_saved >= 0) { volume = vol_saved; vol_how = "remembered"; }
     else if (c.volume >= 0) { volume = c.volume; vol_how = "conf volume="; }
@@ -2167,7 +2183,7 @@ int main(int argc, char **argv)
             osd_until = 0;
             draw_menu(&g, font, &L, &c, &media, hl, remain, action, audio_missing(au));
             sel_log("volume: indicator off at %d", volume);
-            remember_volume(vol_file, volume, &vol_saved);
+            remember_volume(vol_file, volume, vol_conf, &vol_saved);
         } else if (osd_until) {
             draw_volume(&g, font, &L, volume, vol_cap);
         }
@@ -2199,7 +2215,7 @@ int main(int argc, char **argv)
     }
 
     /* a level the buttons changed in the last moments before START is kept too */
-    if (vol_touched) remember_volume(vol_file, volume, &vol_saved);
+    if (vol_touched) remember_volume(vol_file, volume, vol_conf, &vol_saved);
 
     if (chosen >= 0) {
         /* WHAT THE CARD ACTUALLY BOOTS.  A plain card boots its own image; a

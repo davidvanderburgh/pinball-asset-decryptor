@@ -303,10 +303,13 @@ int conf_card_roll(const struct conf *c, int k);
 int conf_write_choice(const char *path, int idx);
 
 /* THE LEVEL THE FRONT VOLUME BUTTONS SET (JJP, item 120): one line
- * "<0-100>\n" on perm beside the last-choice file, written atomically.
+ * "<0-100>\n" on perm beside the last-choice file, then "conf <0-100>\n":
+ * the card's own level it was set against (PAD-216), written atomically.
  * Read: the level, or -1 when the path is empty, the file is missing or it
- * holds anything but a number 0-100.  Write: 0 ok, -1 with errno. */
-int conf_read_volume(const char *path);
-int conf_write_volume(const char *path, int volume);
+ * holds anything but a number 0-100; *base gets the second line's level, or
+ * -1 when there is none (a file an older build wrote).  Write: 0 ok, -1
+ * with errno. */
+int conf_read_volume(const char *path, int *base);
+int conf_write_volume(const char *path, int volume, int base);
 
 #endif

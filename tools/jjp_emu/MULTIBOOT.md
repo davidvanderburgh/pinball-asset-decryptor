@@ -162,7 +162,11 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   level, restart the countdown, and put "VOLUME n / cap" and a bar over the
   middle of the menu for 2 s ("VOLUME OFF" at 0). When the indicator goes the
   level is written to `/jjpe/perm/padselect.volume`, beside
-  `padselect.last`, and the next boot starts there. They change the MENU's
+  `padselect.last`, and the next boot starts there - but only while the card's
+  `volume=` is the one the level was set under (the file's `conf N` line,
+  PAD-216). JJP's installer keeps perm on a same-game reinstall, so before
+  that a card rebuilt with a lower volume still played at the old card's
+  remembered level; now a new `volume=` wins. They change the MENU's
   level only; the game's operator volume is JJP's own and is not read. In the
   rig they are the switch matrix's Up / = and Down / - keys, from either
   window.

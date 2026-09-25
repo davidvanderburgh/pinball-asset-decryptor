@@ -277,3 +277,14 @@ lamp 142          0              TOPPER BUILDING RIGHT INNER  # lamp 105, I/O gr
 lamp 143          0              TOPPER RAPHAEL  # lamp 106, I/O group 8 index 11, at 0,0
 lamp 144          0              TOPPER TECHNODOME RIGHT  # lamp 107, I/O group 8 index 12, at 0,0
 lamp 145          0              TOPPER DONATELLO  # lamp 108, I/O group 8 index 13, at 0,0
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+# modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
+# by its body), START (active - 6), the typeinfos that tell a cmode and a multiball (cmode_mball) apart
+data stock_mode_table       0x005ef8ec
+value stock_mode_count      54
+value stock_slot_active     45
+value stock_slot_start      39
+data typeinfo_cmode         0x0053a0c4
+data typeinfo_cmode_mball   0x0053e5d0
+data typeinfo_vmi           0x005610d0

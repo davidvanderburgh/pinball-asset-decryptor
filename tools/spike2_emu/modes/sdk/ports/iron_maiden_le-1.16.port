@@ -200,3 +200,14 @@ event bonus_start    0x23
 event bonus_end      0x24
 event tilt_warning   0xb9
 event tilt           0xb7
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+# modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
+# by its body), START (active - 6), the typeinfos that tell a cmode and a multiball (cmode_mball) apart
+data stock_mode_table       0x0057ea30
+value stock_mode_count      15
+value stock_slot_active     15
+value stock_slot_start      8
+data typeinfo_cmode         0x004a5868
+data typeinfo_cmode_mball   0x004a6c64
+data typeinfo_vmi           0x004a2130

@@ -333,3 +333,14 @@ lamp 160          0x80000000000  BOAT FLASH  # lamp 125, I/O group 7 index 66, a
 lamp 161          0xc0000        FISHING REEL FLASH  # lamp 126, I/O group 7 index 55, at 237,137
 lamp 165          0              UPPER PF FLASH  # lamp 130, I/O group 8 index 88, at 105,160
 lamp 166          0              UPPER PF SHIP WHEEL FLASH  # lamp 131, I/O group 8 index 87, at 82,66
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+# modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, shifted
+# by this build's vtable), the typeinfos that tell a cmode and a multiball (cmode_mball) apart
+data stock_mode_table       0x0086a020
+value stock_mode_count      36
+value stock_slot_active     18
+value stock_slot_start      12
+data typeinfo_cmode         0x006e2098
+data typeinfo_cmode_mball   0x006fa754
+data typeinfo_vmi           0x006dfe78

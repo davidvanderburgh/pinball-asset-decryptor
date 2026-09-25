@@ -32,38 +32,38 @@ PORTS = {
     "godzilla_pro-1.15": (15, 64, True, set(), EVERY_CAPABILITY),   # item 160: + the three spinners
     "godzilla_le-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
-    "turtles_pro-1.59": (17, 32, True, {"own_sound", "screen", "stack"}, ("callout", "clips", "own-sound", "messages")),
-    "deadpool_pro-1.16": (25, 64, True, ALL - {"clip", "events", "lights"}, ("callout", "clips", "own-sound", "messages")),
-    "deadpool_le-1.14": (28, 64, True, ALL - {"clip", "events", "lights"}, ("callout", "clips", "own-sound", "messages")),
+    "turtles_pro-1.59": (17, 32, True, {"own_sound", "screen"}, ("callout", "clips", "own-sound", "messages")),
+    "deadpool_pro-1.16": (25, 64, True, {"countdown", "own_sound", "screen"}, ("callout", "clips", "own-sound", "messages")),
+    "deadpool_le-1.14": (28, 64, True, {"countdown", "own_sound", "screen"}, ("callout", "clips", "own-sound", "messages")),
     # item 162 (2026-09-24): every latest build, proven by a full build check in the emulator
     "godzilla_pro-1.16": (21, 64, True, {"screen"}, EVERY_CAPABILITY),
     "aerosmith_le-1.15": (43, 64, True, {"countdown", "screen", "stack"}, ("callout", "clips", "own-sound")),
-    "avengers_infinity_le-1.09": (36, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
+    "avengers_infinity_le-1.09": (36, 64, True, {"lights", "own_sound", "screen"}, ("callout", "clips", "own-sound")),
     "batman-1.13": (43, 64, True, ALL - {"events", "lights"}, CALLOUT_SOUND),
     "elvira3-1.13": (45, 64, True, ALL - {"events", "lights"}, CALLOUT_SOUND),
     "foo_fighters_le-1.04": (41, 64, True, {"own_sound", "screen", "stack"}, ("callout", "clips", "own-sound")),
     "james_bond_60th_le-1.11": (37, 64, True, ALL - {"events", "lights", "own_sound"}, CALLOUT_SOUND),
-    "led_zeppelin_le-1.22": (31, 32, True, ALL - {"countdown", "events", "lights"}, ("callout", "screens", "own-sound")),
-    "led_zeppelin_pro-1.22": (30, 32, True, ALL - {"countdown", "events", "lights"}, ("callout", "screens", "own-sound")),
+    "led_zeppelin_le-1.22": (31, 32, True, {"clip", "own_sound", "screen"}, ("callout", "screens", "own-sound")),
+    "led_zeppelin_pro-1.22": (30, 32, True, {"clip", "own_sound", "screen"}, ("callout", "screens", "own-sound")),
     "metallica_spike-1.03": (40, 64, True, {"clip", "screen", "stack"}, ("callout", "screens", "own-sound")),
-    "munsters_le-1.28": (27, 32, True, {"clip", "screen", "stack"}, CALLOUT_SOUND),
-    "rush_le-1.18": (38, 64, True, {"clip", "screen", "stack"}, CALLOUT_SOUND),
+    "munsters_le-1.28": (27, 32, True, {"clip", "screen"}, CALLOUT_SOUND),
+    "rush_le-1.18": (38, 64, True, {"clip", "screen"}, CALLOUT_SOUND),
     "star_wars_elg-1.10": (30, 64, True, ALL - {"countdown", "events", "lights"}, CALLOUT_SOUND),
-    "star_wars_le-1.30": (42, 64, True, ALL - {"countdown", "events", "lights"}, CALLOUT_SOUND),
+    "star_wars_le-1.30": (42, 64, True, {"clip", "own_sound", "screen"}, CALLOUT_SOUND),
     "uncanny_xmen_le-0.98": (33, 64, True, {"own_sound", "screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
-    "jaws_le-1.02": (27, 64, True, {"screen", "stack"}, ("callout", "screens", "clips", "own-sound", "messages")),
+    "jaws_le-1.02": (27, 64, True, {"screen"}, ("callout", "screens", "clips", "own-sound", "messages")),
     "stranger_things_le-1.12": (39, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
-    "king_kong_le-0.97": (55, 64, True, {"screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
+    "king_kong_le-0.97": (55, 64, True, {"screen"}, ("callout", "screens", "clips", "own-sound")),
     "james_bond_le-1.06": (44, 64, True, {"clip", "screen", "stack"}, CALLOUT_SOUND),
-    "jurassic_park_le-1.16": (38, 64, True, {"own_sound", "screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
+    "jurassic_park_le-1.16": (38, 64, True, {"own_sound", "screen"}, ("callout", "screens", "clips", "own-sound")),
     "guardians_le-1.14": (34, 64, True, {"screen", "stack"}, ("callout", "clips", "own-sound")),
-    "iron_maiden_le-1.16": (32, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
-    "sword_of_rage_le-1.18": (35, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
-    "mando_le-1.44": (40, 64, True, {"own_sound", "screen", "stack"}, ("callout", "clips", "own-sound")),
+    "iron_maiden_le-1.16": (32, 64, True, ALL - {"countdown", "events", "stack"}, CALLOUT_SOUND),
+    "sword_of_rage_le-1.18": (35, 64, True, {"lights", "own_sound", "screen"}, ("callout", "clips", "own-sound")),
+    "mando_le-1.44": (40, 64, True, {"own_sound", "screen"}, ("callout", "clips", "own-sound")),
     "turtles_le-1.59": (17, 32, True, ALL - {"countdown", "events"}, NO_FRAMEWORK_DISPLAY),
-    "dungeons_and_dragons_le-1.00": (33, 64, True, {"screen", "stack"}, ("callout", "clips", "own-sound")),
-    "john_wick_le-1.01": (43, 64, True, ALL - {"events", "lights"}, CALLOUT_SOUND),
-    "venom_le-1.07": (40, 64, True, {"screen", "stack"}, ("callout", "clips", "own-sound")),
+    "dungeons_and_dragons_le-1.00": (33, 64, True, {"screen"}, ("callout", "clips", "own-sound")),
+    "john_wick_le-1.01": (43, 64, True, ALL - {"events", "lights", "stack"}, CALLOUT_SOUND),
+    "venom_le-1.07": (40, 64, True, {"screen"}, ("callout", "clips", "own-sound")),
 }
 
 #: the lines a part of a mode puts in the runtime file
@@ -183,12 +183,35 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     # a stack no mode still makes a file every title's runtime reads (one that cannot tell
     # logs so and starts it anyway), and so do the other items' keys
     assert {"stack", "starts", "cooldown"} <= _mode_file_keys()
-    for key in ("turtles_pro_1_59", "jaws_le_1_02"):
+    for key in ("aerosmith_le_1_15", "stranger_things_le_1_12"):
         q = MP.profile(key)
         spec = MP.blank_spec(q)
         spec.stack, spec.starts, spec.cooldown = False, "once_per_ball", 5
         cfg = _check_text(q, MP.runtime_cfg(spec, "x"), spec.start_shot)
         assert cfg["stack"] == ["no"] and not q.can("stack")
+
+
+def test_stack_on_the_other_cmode_titles_is_the_mode_table_route(tmp_path):
+    """item 164: every cmode title but Godzilla stacks through the game's mode TABLE, walked by the
+    runtime (STACK_TABLE_NEEDS are the names its generic route reads); a build is offered only once a
+    stack no mode was seen held back in the emulator (STACK_PROVEN)."""
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    body = src[src.index("static int stock_class"):src.index("int pm_stock_mode_running")]
+    asked = set(re.findall(r'(?:data|pm_port_value)\("([a-z_]+)"', body))
+    data, values = MP.STACK_TABLE_NEEDS
+    assert set(data) | set(values) <= asked
+    for key in MP.STACK_PROVEN:
+        q = MP.profile(key.replace("-", "_").replace(".", "_"))
+        assert q.can("stack"), key
+        spec = MP.blank_spec(q)
+        spec.stack = False
+        assert _check_text(q, MP.runtime_cfg(spec, "x"), spec.start_shot)["stack"] == ["no"]
+    text = open(_port("jaws_le-1.02"), encoding="utf-8").read()
+    text = re.sub(r"^version(\s+)1\.02", r"version\g<1>9.99", text, flags=re.M)
+    (tmp_path / "jaws_le-9.99.port").write_text(text, encoding="utf-8")
+    p = MP.profile_from_port(str(tmp_path / "jaws_le-9.99.port"))     # the same title, a build not yet seen
+    assert p.version == "9.99"
+    assert not p.can("stack") and "not yet seen a mode of yours wait" in p.why_not("stack")
 
 
 def test_every_shipped_port_is_proven():

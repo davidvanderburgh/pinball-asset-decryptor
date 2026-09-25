@@ -337,3 +337,14 @@ lamp 168              0              RAZOR_CREST FORWARD  # node/channel 6/32
 lamp 169              0              RAZOR_CREST BACKWARD  # node/channel 6/33
 lamp 170              0              MINI PF CW  # node/channel 6/34
 lamp 171              0              MINI PF CCW  # node/channel 6/35
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+# modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
+# by its body), START (active - 6), the typeinfos that tell a cmode and a multiball (cmode_mball) apart
+data stock_mode_table       0x0065a954
+value stock_mode_count      59
+value stock_slot_active     44
+value stock_slot_start      38
+data typeinfo_cmode         0x0059e720
+data typeinfo_cmode_mball   0x0059eab4
+data typeinfo_vmi           0x005e1a54

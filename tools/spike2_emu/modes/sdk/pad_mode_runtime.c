@@ -2223,6 +2223,134 @@ static int stock_query(const char *site_name)
     return ((int (*)(void *, unsigned))(unsigned long)f)((void *)(unsigned long)mgr, 0u) ? 1 : 0;
 }
 
+/* item 164: the GENERIC route, for a title whose manager's own queries are not named (every title but
+ * Godzilla): the runtime walks the game's mode TABLE itself (`data stock_mode_table`, `value
+ * stock_mode_count`: the array its get-mode-by-id accessor reads), keeps the entries whose class
+ * chain reaches `cmode` (their vtable's typeinfo, followed through single-inheritance bases:
+ * `data typeinfo_cmode`, `data typeinfo_cmode_mball`), and asks each its ACTIVE slot (`value
+ * stock_slot_active`, Godzilla's 14). A cmode_mball descendant that is active is a multiball; any
+ * other active cmode is one of the game's modes (its "battle": the title's quests, timed modes...). */
+static int stock_generic_on;
+static char stock_generic_what[80];     /* "one of the game's modes (cmode_trex_chase)": the last one found */
+
+static int stock_class(const unsigned *obj)
+{
+    /* 2 = a cmode_mball, 1 = another cmode, 0 = neither */
+    unsigned ti_mode = data("typeinfo_cmode"), ti_mb = data("typeinfo_cmode_mball"), ti_vmi = data("typeinfo_vmi"), si, vmi, t;
+    int guard = 12;
+    if (!obj || !*obj || !ti_mb) return 0;
+    si = *(const unsigned *)(unsigned long)ti_mb;            /* the vptr of a single-inheritance typeinfo */
+    vmi = ti_vmi ? *(const unsigned *)(unsigned long)ti_vmi : 0;   /* and of a multiple-inheritance one */
+    t = ((const unsigned *)(unsigned long)obj[0])[-1];
+    while (t && guard-- > 0) {
+        const unsigned *ti = (const unsigned *)(unsigned long)t;
+        if (t == ti_mb) return 2;
+        if (t == ti_mode) return 1;
+        if (ti[0] == si) t = ti[2];
+        else if (vmi && ti[0] == vmi) {
+            /* {vptr, name, flags, base count, {base, offset << 8 | flags} x count}: the base at offset 0
+             * (John Wick 1.01's cmode_the_staircase is a cmode_mball and a cwick_mode) */
+            unsigned k, n = ti[3], next = 0;
+            for (k = 0; k < n && k < 8; k++)
+                if (!(ti[5 + 2 * k] >> 8)) { next = ti[4 + 2 * k]; break; }
+            t = next;
+        } else break;
+    }
+    return 0;
+}
+
+static int stock_generic_route(void)
+{
+    return data("stock_mode_table") && !(data("stock_mode_manager") && fn("stock_battle_running") && fn("stock_multiball_running"));
+}
+
+static int stock_entry_active(const unsigned *o, long slot)
+{
+    return (((int (*)(const void *))(unsigned long)((const unsigned *)(unsigned long)o[0])[slot])(o) & 0xff) != 0;
+}
+
+/* The game's BASE PLAY: some titles run modes for the whole ball (Venom 1.07's cmini_mode_01..03 are
+ * active from the plunge on), so "a mode is running" would always be true there. Every tick the runtime
+ * notes the entries running from a ball's start until 2 s after its first score; those are the base
+ * play, not counted, until they are seen stopped (then they count like any other when they run again).
+ * A ball is the player up plus the ball_start events (or ball ends) seen so far. */
+#define N_STOCK_TABLE 160
+static unsigned char stock_base[N_STOCK_TABLE];
+static volatile unsigned stock_ball_ends;       /* on_ball_end, below */
+static unsigned event_count(int id);             /* the events section, below */
+static unsigned stock_ball_key;
+static unsigned long stock_base_until;           /* 0: closed; ~0: open until the ball's first score */
+static uint64_t stock_base_score;
+
+static void stock_base_clear(void)
+{
+    unsigned i;
+    for (i = 0; i < N_STOCK_TABLE; i++) stock_base[i] = 0;
+}
+
+static void stock_generic_tick(void)
+{
+    static unsigned ticks;
+    const unsigned *tab = (const unsigned *)(unsigned long)data("stock_mode_table");
+    long n = pm_port_value("stock_mode_count", 0), slot = pm_port_value("stock_slot_active", -1), i;
+    unsigned p, key;
+    int ev, open;
+    if (!tab || n <= 0 || slot < 0 || !stock_generic_route()) return;
+    if (n > N_STOCK_TABLE) n = N_STOCK_TABLE;
+    p = pm_in_game() ? pm_player() : 0;
+    if (!p) {
+        if (stock_ball_key) { stock_ball_key = 0; stock_base_clear(); }
+        return;
+    }
+    ev = pm_event("ball_start");
+    key = p | (ev >= 0 ? event_count(ev) : stock_ball_ends) << 3;
+    if (key != stock_ball_key) {
+        stock_ball_key = key;
+        stock_base_clear();
+        stock_base_until = ~0UL;
+        stock_base_score = pm_score(p);
+    }
+    if (stock_base_until == ~0UL && pm_score(p) != stock_base_score) stock_base_until = pm_ms() + 2000;
+    if (stock_base_until && stock_base_until != ~0UL && pm_ms() > stock_base_until) stock_base_until = 0;
+    open = stock_base_until != 0;
+    if (!open && ++ticks % 15) return;
+    for (i = 0; i < n; i++) {
+        const unsigned *o = (const unsigned *)(unsigned long)tab[i];
+        if ((!open && !stock_base[i]) || !stock_class(o)) continue;
+        if (!stock_entry_active(o, slot)) stock_base[i] = 0;
+        else if (open && !stock_base[i]) {
+            unsigned ti = ((const unsigned *)(unsigned long)o[0])[-1];
+            const char *nm = ti ? (const char *)(unsigned long)((const unsigned *)(unsigned long)ti)[1] : 0;
+            while (nm && *nm >= '0' && *nm <= '9') nm++;
+            stock_base[i] = 1;
+            say("stock modes: %s runs from the ball's start - the game's base play, not counted while it runs", nm ? nm : "?");
+        }
+    }
+}
+
+static int stock_generic(unsigned kinds)
+{
+    const unsigned *tab = (const unsigned *)(unsigned long)data("stock_mode_table");
+    long n = pm_port_value("stock_mode_count", 0), slot = pm_port_value("stock_slot_active", -1), i;
+    if (!tab || n <= 0 || slot < 0) return -1;
+    if (!pm_player()) return 0;
+    for (i = 0; i < n; i++) {
+        const unsigned *o = (const unsigned *)(unsigned long)tab[i];
+        int c = stock_class(o);
+        if (!c || (i < N_STOCK_TABLE && stock_base[i])) continue;
+        if (!stock_entry_active(o, slot)) continue;
+        if ((c == 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY))) || (c == 1 && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)))) {
+            unsigned ti = ((const unsigned *)(unsigned long)o[0])[-1];
+            const char *nm = ti ? (const char *)(unsigned long)((const unsigned *)(unsigned long)ti)[1] : 0;
+            while (nm && *nm >= '0' && *nm <= '9') nm++;          /* the mangled name's length */
+            pm_snprintf(stock_generic_what, sizeof stock_generic_what, "%s (%s)",
+                        c == 2 ? "a multiball" : "one of the game's modes", nm ? nm : "?");
+            return c == 2 ? (int)PM_STOCK_MULTIBALL : (int)PM_STOCK_BATTLE;
+        }
+    }
+    return 0;
+}
+
 int pm_stock_mode_running(unsigned kinds)
 {
     static const struct { unsigned kind; const char *site; } Q[] = {
@@ -2235,10 +2363,16 @@ int pm_stock_mode_running(unsigned kinds)
     int unknown = 0, r;
     if (!said) {
         said = 1;
-        say("stock modes: %s%s%s%s", data("stock_mode_manager") ? "can tell" : "this port cannot tell (no stock_mode_manager)",
+        if (stock_generic_route())
+            say("stock modes: can tell, from the game's mode table (%ld modes)", pm_port_value("stock_mode_count", 0));
+        else say("stock modes: %s%s%s%s", data("stock_mode_manager") ? "can tell" : "this port cannot tell (no stock_mode_manager)",
             data("stock_mode_manager") && fn("stock_battle_running") ? " battle" : "",
             data("stock_mode_manager") && fn("stock_multiball_running") ? " multiball" : "",
             data("stock_mode_manager") && fn("stock_any_running") ? " any" : "");
+    }
+    if (stock_generic_route()) {
+        stock_generic_on = 1;
+        return stock_generic(kinds);
     }
     for (i = 0; i < sizeof Q / sizeof Q[0]; i++) {
         if (!(kinds & Q[i].kind)) continue;
@@ -2251,6 +2385,8 @@ int pm_stock_mode_running(unsigned kinds)
 
 const char *pm_stock_mode_what(unsigned kind)
 {
+    if (kind && stock_generic_on && stock_generic_what[0]) return stock_generic_what;
+    if ((kind & PM_STOCK_BATTLE) && stock_generic_on) return "one of the game's modes";
     if (kind & PM_STOCK_BATTLE) return "a battle";
     if (kind & PM_STOCK_MULTIBALL) return "a multiball";
     return kind ? "a stock mode" : "nothing";
@@ -3416,6 +3552,7 @@ static void on_tick(unsigned *r)
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     roster_deferred_tick();
+    stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
     lamps_tick();                             /* named inserts: their patterns (lights section) */
 }
@@ -3442,6 +3579,7 @@ static void on_ball_end(unsigned *r)
     const struct pm_mode *m;
     (void)r;
     note_thread("ball_end", &said);
+    stock_ball_ends++;
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
     roster_owed_ball_end();
@@ -3719,6 +3857,8 @@ static struct { char name[40]; unsigned id; char site[40]; int armed; } event_na
 static int n_event_names, n_site_events;
 static volatile unsigned event_fired[N_EVENT_IDS];
 static unsigned event_delivered[N_EVENT_IDS];
+
+static unsigned event_count(int id) { return id >= 0 && id < N_EVENT_IDS ? event_fired[id] : 0; }
 
 static void event_line(const char *s)
 {

@@ -222,10 +222,10 @@ value sound_channel_bus         189
 value sound_channel_voice_ptrs  92
 value sound_voice_volume        48
 value stock_slot_shot   42
-value stock_slot_active 14
+value stock_slot_active 45
 value stock_slot_lit    25
 value stock_field       0x18
-value stock_slot_start      8
+value stock_slot_start      39
 value stock_slot_end        10
 value stock_slot_stop       11
 value stock_slot_running    12
@@ -434,3 +434,12 @@ lamp 147          0              TOPPER BUILDING RIGHT INNER  # lamp 108, I/O gr
 lamp 148          0              TOPPER RAPHAEL  # lamp 109, I/O group 8 index 11, at 0,0
 lamp 149          0              TOPPER TECHNODOME RIGHT  # lamp 110, I/O group 8 index 12, at 0,0
 lamp 150          0              TOPPER DONATELLO  # lamp 111, I/O group 8 index 13, at 0,0
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+# modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
+# by its body), START (active - 6), the typeinfos that tell a cmode and a multiball (cmode_mball) apart
+data stock_mode_table       0x005f22b0
+value stock_mode_count      54
+data typeinfo_cmode         0x0053c894
+data typeinfo_cmode_mball   0x00540e08
+data typeinfo_vmi           0x0056d214

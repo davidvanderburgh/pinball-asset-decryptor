@@ -475,3 +475,14 @@ lamp 557,558,559      0              GI1  # node/channel 9/20 9/21 9/22
 lamp 560,561,562      0              GI2  # node/channel 9/23 9/24 9/25
 lamp 563,564,565      0              GI3  # node/channel 9/26 9/27 9/28
 lamp 566,567,568      0              GI4  # node/channel 9/29 9/30 9/31
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+# modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
+# by its body), START (active - 6), the typeinfos that tell a cmode and a multiball (cmode_mball) apart
+data stock_mode_table       0x0b5b66b0
+value stock_mode_count      36
+value stock_slot_active     46
+value stock_slot_start      40
+data typeinfo_cmode         0x00507e44
+data typeinfo_cmode_mball   0x005092dc
+data typeinfo_vmi           0x00502094

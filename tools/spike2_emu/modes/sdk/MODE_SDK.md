@@ -910,6 +910,60 @@ multiball the player lights turns active, compared with its intro scenes, is not
 (a battle turned active only at its select screen, so a `stack no` shot during a
 multiball's intro may still start).
 
+### The game's own modes on every cmode title (item 164)
+
+Only Godzilla's port names the manager's own queries. Every other title whose rules are
+`cmode` classes (the crule titles included: their `cmode` is abstract) takes a GENERIC route:
+the runtime walks the game's mode TABLE itself.
+
+```
+data stock_mode_table       0x0086a020   # the array the get-mode-by-id accessor reads (Jaws LE 1.02)
+value stock_mode_count      36
+value stock_slot_active     18           # the cmode class's ACTIVE virtual
+value stock_slot_start      12           # its START (read by pm_stock_start and the rig probe)
+data typeinfo_cmode         0x006e2098
+data typeinfo_cmode_mball   0x006fa754
+data typeinfo_vmi           0x006dfe78   # any multiple-inheritance typeinfo: its vptr
+```
+
+- **The table.** Godzilla's get-mode-by-id is `cmp r1, #N ; movw/movt T ; ldr r0, [T, r1, lsl
+  #2]`; its queries load `T - 4` from a literal and step by 4 up to `T + 4 * count`. The table
+  both kinds of code read is the one. Star Wars LE 1.30 has no such accessor: there the table
+  its queries walk most is taken, when every entry is an object pointer.
+- **The class.** An entry counts when its vtable's typeinfo reaches `cmode` through its bases:
+  a single-inheritance typeinfo's base is word 2; a multiple-inheritance one (John Wick's
+  `cmode_the_staircase` is a `cmode_mball` and a `cwick_mode`; Led Zeppelin's song modes) is
+  followed through its base at offset 0. Reaching `cmode_mball` makes it a multiball
+  (`PM_STOCK_MULTIBALL`); any other `cmode` is `PM_STOCK_BATTLE`, logged as `one of the
+  game's modes (<class>)`.
+- **ACTIVE** has one shape on every build: `ldr r2, [r0]`, one vtable load (the RUNNING slot,
+  the "is it overridden?" test), then `ldrb r0, [..] ; cmp r0, #0 ; popne`. Godzilla 14,
+  Jaws 18, Avengers 17, Mando 44, Iron Maiden 15. **START** tests another slot, then
+  RUNNING, through the vtable (Godzilla's 8: slot 7, then 12); Deadpool has no such slot, and
+  its START (13) is the other short slot that tests RUNNING.
+- **Base play.** Some titles run modes for the whole ball: Venom's `cmini_mode_01..03` are
+  active from the plunge on, D&D's `ctraveling` and Foo Fighters' `csuper_skill_shot` at the
+  ball's start. The runtime notes every entry running from a ball's start until 2 s after its
+  first score and does not count it until it is seen stopped. A ball is the player up plus the
+  `ball_start` events (or the ball ends) seen so far.
+
+`stackport.py` (the item's scratch tool) derives all of these from the ELF.
+
+**What is proven.** In the emulator, one scripted game per build: nothing running (the
+`stack no` mode started), then the rig started one of the game's modes through its START
+slot (the runtime named it; the mode was refused), then a multiball (named, `a multiball
+(cmode_trex_multiball)` on JP LE). Proven on: Jaws LE 1.02, Jurassic Park LE 1.16, Deadpool
+LE 1.14 and Pro 1.16, Avengers LE 1.09, TMNT Pro 1.59, Led Zeppelin LE 1.22, Munsters LE 1.28,
+Venom LE 1.07, D&D LE 1.00, King Kong LE 0.97, Mandalorian LE 1.44, Iron Maiden LE 1.16, Sword
+of Rage LE 1.18, Rush LE 1.18 and Star Wars LE 1.30 (a mode, and on most a multiball too); John
+Wick LE 1.01 and Led Zeppelin Pro 1.22 on a multiball only (the mode the rig started there did not
+stay on: Led Zeppelin runs one song mode at a time). The app offers `stack no` only on those
+(`mode_project.STACK_PROVEN`).
+
+**Not yet.** Foo Fighters LE 1.04 (the rig's first pick was its skill shot, base play there);
+TMNT LE 1.59 (the runtime never saw it in a game: its mode mask keeps a busy bit); the titles
+with no `cmode` class: Elvira 3 (`Rule` / `TransientRule` classes) and the plain-C titles.
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in

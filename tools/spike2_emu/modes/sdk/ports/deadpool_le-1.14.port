@@ -301,3 +301,14 @@ lamp 465,466,467  0              SPEAKER 20  # lamp 226, I/O group 6 index 58, a
 lamp 468,469,470  0              SPEAKER 21  # lamp 227, I/O group 6 index 61, at 0,0
 lamp 471,472,473  0              SPEAKER 22  # lamp 228, I/O group 6 index 64, at 0,0
 lamp 474,475,476  0              SPEAKER 23  # lamp 229, I/O group 6 index 67, at 0,0
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+# modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
+# by its body), START (active - 6), the typeinfos that tell a cmode and a multiball (cmode_mball) apart
+data stock_mode_table       0x0062d328
+value stock_mode_count      26
+value stock_slot_active     23
+value stock_slot_start      13
+data typeinfo_cmode         0x00529ca8
+data typeinfo_cmode_mball   0x0052c0cc
+data typeinfo_vmi           0x00517060

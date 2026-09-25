@@ -428,9 +428,9 @@ def test_jaws_greys_what_its_port_cannot_do(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert st["status"] == "Ready to build."
-        for part in ("screen", "stack"):
-            assert st["dis"][part], part
-            assert st["reasons"][part].startswith("Not on this game: "), part
+        assert st["dis"]["screen"]
+        assert st["reasons"]["screen"].startswith("Not on this game: ")
+        assert not st["dis"]["stack"]               # item 164: the game's mode table
         assert not st["dis"]["lights"]              # item 164: its inserts, every one in the mode's colour
         assert not st["dis"]["events"]              # item 162: Jaws's events were seen firing
         assert "sound_unheard" not in st["reasons"]            # item 163: Jaws's callouts are heard

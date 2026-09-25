@@ -218,3 +218,14 @@ lamp 380          0              WOLVERINE SPINNER FLASH  # lamp 182, I/O group 
 lamp 381          0              TRUCK FLASH  # lamp 183, I/O group 7 index 30, at 262,78
 lamp 382          0              POP BUMPER FLASH  # lamp 184, I/O group 8 index 40, at 214,146
 lamp 388          0              EJECT FLASH  # lamp 191, I/O group 8 index 41, at 112,168
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+# modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
+# by its body), START (active - 6), the typeinfos that tell a cmode and a multiball (cmode_mball) apart
+data stock_mode_table       0x006b19e8
+value stock_mode_count      26
+value stock_slot_active     23
+value stock_slot_start      13
+data typeinfo_cmode         0x0059a0f0
+data typeinfo_cmode_mball   0x0059c474
+data typeinfo_vmi           0x0058749c

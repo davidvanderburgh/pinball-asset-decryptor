@@ -1528,10 +1528,9 @@ def test_modes_tab_bare_project_knows_no_game(tmp_path):
 
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
-    """Item 148 with items 140 and 142: TMNT Pro 1.59's port names none of the game's own
-    mode queries and cannot use a screen picture or a sound of the mode's own, so "The game's
-    own modes" and those two film buttons are greyed, each with the reason (its clip is live
-    since item 164);
+    """Item 148 with items 140 and 142: TMNT Pro 1.59 cannot use a screen picture or a sound
+    of the mode's own, so those two film buttons are greyed, with the reason (its clip is live
+    since item 164, and so is "The game's own modes": the runtime walks its mode table);
     Jaws LE 1.02 greys only the picture cut. On the machine's Premium 1.16 card
     everything stays live."""
     from pinball_decryptor.plugins.stern import mode_project as MP
@@ -1542,8 +1541,7 @@ def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
         _project(w, project)
         assert w.call("modes.new")
         st = _st(w)
-        assert st["dis"]["stack"]
-        assert tmnt.why_not("stack") in st["reasons"]["stack"]
+        assert not st["dis"]["stack"] and tmnt.can("stack")    # item 164: the game's mode table
         assert all(st["dis"]["film_" + t] for t in ("still", "sound")) and not st["dis"]["film_clip"]
         film = st["reasons"]["film"]
         assert "a picture for the screen or a sound" in film and "TMNT Pro 1.59" in film

@@ -246,6 +246,27 @@ PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events"
 #: them mode_file.c logs "this game's port cannot tell" and starts the mode anyway.
 STACK_NEEDS = (("stock_battle_running", "stock_multiball_running"), ("stock_mode_manager",))
 
+#: item 164: the GENERIC route every other cmode title takes - the runtime walks the game's mode TABLE
+#: itself and asks each mode its ACTIVE slot (MODE_SDK.md "The game's own modes on every title"):
+#: (data, values)
+STACK_TABLE_NEEDS = (("stock_mode_table", "typeinfo_cmode", "typeinfo_cmode_mball"),
+                     ("stock_mode_count", "stock_slot_active"))
+
+#: item 164: the builds where a ``stack no`` mode was seen held back in the emulator by the table
+#: route (the game's own mode running, then refused; nothing running, then started)
+STACK_PROVEN = frozenset({
+    "jaws_le-1.02", "jurassic_park_le-1.16", "deadpool_le-1.14", "deadpool_pro-1.16",
+    "avengers_infinity_le-1.09", "turtles_pro-1.59", "led_zeppelin_le-1.22", "munsters_le-1.28",
+    "venom_le-1.07", "dungeons_and_dragons_le-1.00", "king_kong_le-0.97", "mando_le-1.44",
+    "iron_maiden_le-1.16", "sword_of_rage_le-1.18", "rush_le-1.18", "star_wars_le-1.30",
+    "john_wick_le-1.01", "led_zeppelin_pro-1.22",
+})
+
+
+def _stack_table(data, values):
+    d, v = STACK_TABLE_NEEDS
+    return all(data.get(n) for n in d) and all(n in values for n in v)
+
 #: What pad_mode_runtime.c needs before it arms each capability (pad_mode_start):
 #: (sites, data, values), copied, in the order its "armed: ... can ..." line prints them.
 #: item 164: CLIP V2 - the newer builds' clips, played on the video bank's VideoSurface itself (no
@@ -655,7 +676,14 @@ def profile_from_port(path):
     elif not callouts.get("time_up"):
         no("own_sound", "The app does not know %(label)s's time-up callout, the one a sound of "
                         "the mode's own plays in place of.")
-    if not (all(n in sites for n in STACK_NEEDS[0]) and all(data.get(n) for n in STACK_NEEDS[1])):
+    if all(n in sites for n in STACK_NEEDS[0]) and all(data.get(n) for n in STACK_NEEDS[1]):
+        pass
+    elif _stack_table(data, values) and key in STACK_PROVEN:
+        pass
+    elif _stack_table(data, values):
+        no("stack", "The app has found %(label)s's own modes but has not yet seen a mode of "
+                    "yours wait for one in the emulator, so it always runs beside them.")
+    else:
         no("stack", "The app has not found how %(label)s tells that one of its own modes is "
                     "running, so a mode of yours cannot wait for them and always runs beside "
                     "them.")

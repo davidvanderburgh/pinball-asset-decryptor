@@ -976,7 +976,9 @@ While a multiball is being served it answers the balls the multiball asked for (
 framework's ball manager, byte `+0xa`); otherwise the balls installed less those in the
 trough and the other ball devices. Two or more is `PM_STOCK_MULTIBALL`. It says nothing of
 the title's other modes, so on these titles `stack no` waits for the game's multiballs only,
-and the Modes tab says so. The ball manager's byte alone is not a witness: it is set only
+and the Modes tab says so. A ball that is out of the trough and every ball device counts as in
+play, so a ball stuck on the playfield (or, in the rig, one of a six-ball multiball the script
+never drained home) makes the next ball read as a multiball until it comes home. The ball manager's byte alone is not a witness: it is set only
 while the multiball's own serving process runs (it read 0 through a whole multiball on both
 Bond builds).
 
@@ -986,14 +988,19 @@ multiball: all six balls went into play; on the others the framework's own "star
 multiball" asked for two), `a multiball` answered within 5 s and the mode refused, and
 `nothing` again once the multiball was over. Proven on: The Beatles 1.29, Bond 60th LE 1.11,
 Bond LE 1.06, Metallica 1.03, Star Wars ELG 1.10, Stranger Things LE 1.12, X-Men LE 0.98,
-Batman 66 1.13, Guardians LE 1.14 and Aerosmith LE 1.15 (`mode_project.STACK_BALLS_PROVEN`; the tab says the mode
+Batman 66 1.13, Guardians LE 1.14, Aerosmith LE 1.15 and Elvira 3 1.13 (`mode_project.STACK_BALLS_PROVEN`; the tab says the mode
 waits for multiballs only). The rig cannot serve a SWELF-generation build's balls (its derived
 device table has no coils), so on those the answer was asked 0.3 s after the
 start, before the ball the game could not serve ended the multiball (Batman, Guardians and
 Aerosmith).
 
-**Not yet.** TMNT LE 1.59 (the runtime never saw it in a game: its mode mask keeps a busy bit); the titles
-with no `cmode` class: Elvira 3 (`Rule` / `TransientRule` classes) and the plain-C titles.
+**Not yet.** TMNT LE 1.59: the runtime named its mode (`ctraining_level_two`) in the emulator,
+but no game ever started there, so no mode was refused. In attract the LE serves a ball to its
+shooter lane and waits for it somewhere (the Pro serves only at a Start); the rig does not know
+where, and a Start is ignored with a ball out, even with the trough reset and 30 credits in. On
+the plain-C titles and Elvira the game's other modes (not its multiballs) are not seen: their
+rules keep no table the runtime can walk (a mode's start bumps an `AUD_..._STARTED` audit, the
+lead for a later item). JP The Pin 1.05 has no port.
 
 ## Ports: why your mode runs on any game
 

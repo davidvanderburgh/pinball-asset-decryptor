@@ -273,7 +273,7 @@ STACK_BALLS_NEEDS = ("balls_in_play",)
 STACK_BALLS_PROVEN = frozenset({
     "beatles-1.29", "james_bond_60th_le-1.11", "james_bond_le-1.06", "metallica_spike-1.03",
     "star_wars_elg-1.10", "stranger_things_le-1.12", "uncanny_xmen_le-0.98", "batman-1.13",
-    "guardians_le-1.14", "aerosmith_le-1.15",
+    "guardians_le-1.14", "aerosmith_le-1.15", "elvira3-1.13",
 })
 
 

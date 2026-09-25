@@ -40,7 +40,7 @@ PORTS = {
     "aerosmith_le-1.15": (43, 64, True, {"countdown", "screen"}, ("callout", "clips", "own-sound")),
     "avengers_infinity_le-1.09": (36, 64, True, {"lights", "own_sound", "screen"}, ("callout", "clips", "own-sound")),
     "batman-1.13": (43, 64, True, ALL - {"events", "lights", "stack"}, CALLOUT_SOUND),
-    "elvira3-1.13": (45, 64, True, ALL - {"events", "lights"}, CALLOUT_SOUND),
+    "elvira3-1.13": (45, 64, True, ALL - {"events", "lights", "stack"}, CALLOUT_SOUND),
     "foo_fighters_le-1.04": (41, 64, True, {"own_sound", "screen"}, ("callout", "clips", "own-sound")),
     "james_bond_60th_le-1.11": (37, 64, True, {"clip", "countdown", "screen"}, CALLOUT_SOUND),
     "led_zeppelin_le-1.22": (31, 32, True, {"clip", "own_sound", "screen"}, ("callout", "screens", "own-sound")),

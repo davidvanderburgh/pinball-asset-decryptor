@@ -60,7 +60,7 @@ PORTS = {
     "iron_maiden_le-1.16": (32, 64, True, {"clip", "lights", "own_sound"}, ("callout", "screens", "own-sound")),
     "sword_of_rage_le-1.18": (35, 64, True, {"lights", "own_sound"}, ("callout", "screens", "clips", "own-sound")),
     "mando_le-1.44": (40, 64, True, {"own_sound"}, ("callout", "screens", "clips", "own-sound")),
-    "turtles_le-1.59": (17, 32, True, ALL - {"countdown", "events"}, ("callout", "screens", "own-sound", "messages")),
+    "turtles_le-1.59": (17, 32, True, {"own_sound"}, ("callout", "screens", "clips", "own-sound", "messages")),
     "dungeons_and_dragons_le-1.00": (33, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "john_wick_le-1.01": (43, 64, True, {"clip", "countdown", "own_sound"}, ("callout", "screens", "own-sound")),
     "venom_le-1.07": (40, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
@@ -183,7 +183,7 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     # a stack no mode still makes a file every title's runtime reads (one that cannot tell
     # logs so and starts it anyway), and so do the other items' keys
     assert {"stack", "starts", "cooldown"} <= _mode_file_keys()
-    for key in ("turtles_pro_1_58", "turtles_le_1_59"):
+    for key in ("turtles_pro_1_58",):
         q = MP.profile(key)
         spec = MP.blank_spec(q)
         spec.stack, spec.starts, spec.cooldown = False, "once_per_ball", 5

@@ -295,6 +295,15 @@ shot 0x200000    Right top lane
 callout countdown           441
 value countdown_first 1
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x004a6bc8 0xe92d4070 0xe24dd008
+site surface_set_video 0x0049e2ac 0xe5d030d4 0xe92d4ff0
+site surface_play     0x0049c0b8 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0049b868 0xe5d030d4 0xe92d40f0
+
 # ---- callouts and text: COPIED from TMNT Pro 1.59, the same title; unverified ----
 text example_start_shot     Center loop
 

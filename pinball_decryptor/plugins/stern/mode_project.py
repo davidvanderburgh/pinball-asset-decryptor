@@ -260,7 +260,7 @@ STACK_PROVEN = frozenset({
     "avengers_infinity_le-1.09", "turtles_pro-1.59", "led_zeppelin_le-1.22", "munsters_le-1.28",
     "venom_le-1.07", "dungeons_and_dragons_le-1.00", "king_kong_le-0.97", "mando_le-1.44",
     "iron_maiden_le-1.16", "sword_of_rage_le-1.18", "rush_le-1.18", "star_wars_le-1.30",
-    "john_wick_le-1.01", "led_zeppelin_pro-1.22", "foo_fighters_le-1.04",
+    "john_wick_le-1.01", "led_zeppelin_pro-1.22", "foo_fighters_le-1.04", "turtles_le-1.59",
 })
 
 
@@ -410,7 +410,7 @@ TITLE_SCENES = {
     "king_kong_le-0.97": dict(screen_proven=True, hud="cf8da03fa56cd71e414702db70b6aa3d", bank="ed379c6514e73bead614fee25e93d862", clip_proven=True),   # item 164: our clip seen on the glass
     "led_zeppelin_pro-1.22": dict(screen_proven=True, hud="b8745c86480a44976d95068a7dc773f2", bank="d294bdb25548df7400a740013a0bf908", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
     "metallica_spike-1.03": dict(screen_proven=True, hud="809cbf843c36555ddbda41c3b4909543", bank="70fed15b5a82c83747423185ab477a20", clip_proven=False, clip_hidden=True),   # item 164: plays, never on the glass
-    "turtles_le-1.59": dict(hud="a337459aee72b3ec5dc9b0a50981e16d", bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=False),   # item 164: seen in attract; the rig never started a game
+    "turtles_le-1.59": dict(screen_proven=True, hud="a337459aee72b3ec5dc9b0a50981e16d", bank="cf92bc5a7a4bb06fcd90a3bb90d55baa", clip_proven=True),   # item 164: our clip seen on the glass
     "uncanny_xmen_le-0.98": dict(screen_proven=True, hud="0d31df0d25052d0ec251c18d5b8b33a1", bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=True),   # item 164: our clip seen on the glass
     "aerosmith_le-1.15": dict(screen_proven=True, hud="53c9a69e39abf2dbb54fd134afe68b01", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # item 164: our clip seen on the glass
     "guardians_le-1.14": dict(screen_proven=True, hud="f1b87fa9a6f94cddc4aca6268dcd96ea", bank="a0683942e100705db906181685dd842e", clip_proven=True),   # item 164: our clip seen on the glass
@@ -787,7 +787,8 @@ LAMPS_PROVEN = frozenset((
     "foo_fighters_le-1.04", "james_bond_60th_le-1.11", "james_bond_le-1.06", "jaws_le-1.02",
     "john_wick_le-1.01", "jurassic_park_le-1.16", "king_kong_le-0.97", "led_zeppelin_le-1.22",
     "led_zeppelin_pro-1.22", "metallica_spike-1.03", "munsters_le-1.28", "star_wars_elg-1.10",
-    "star_wars_le-1.30", "turtles_pro-1.59", "uncanny_xmen_le-0.98", "venom_le-1.07",
+    "star_wars_le-1.30", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98",
+    "venom_le-1.07",
     # the SWELF generation: the shim reads only some of its boards (it refuses the bank form), so
     # the proof is the boards it reads - the held colour on the device table's own channels
     "aerosmith_le-1.15", "batman-1.13", "guardians_le-1.14", "mando_le-1.44", "rush_le-1.18",

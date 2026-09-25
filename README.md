@@ -418,7 +418,10 @@ unbootable. The **Build / flash SD card** button now reads the whole
 card back after writing and compares it byte-for-byte to the image,
 aborting if anything doesn't match, so a bad flash is caught on your PC
 instead of at the machine. (This roughly doubles the flash time; the
-progress bar shows a separate "Verify card" phase.)
+progress bar shows a separate "Verify card" phase.) The dialog's **Skip
+verify** tick leaves the read-back out for one flash. It is off every
+time the dialog opens, and ticking it shows what you give up: a bad write
+is then only found at the machine.
 
 Flashing writes raw disk sectors, which needs administrator access — but
 you no longer have to launch the whole app elevated for it. If the app

@@ -362,6 +362,7 @@ class SternManufacturer(Manufacturer):
                                  "Decode audio", "Checksums")
     direct_ssd_write_phases = ("Scan", "Re-encode audio", "Write to SD card")
     flash_phases = ("Check card", "Write image", "Verify card", "Flush")
+    flash_skip_verify = True
 
     #: ...and the same four for a MENU-ONLY write, named for what they really
     #: do there: the check is "is this the card this image was flashed from",
@@ -1024,10 +1025,10 @@ class SternManufacturer(Manufacturer):
 
     def make_flash_pipeline(self, image_path, device_path,
                             log_cb, phase_cb, progress_cb, done_cb,
-                            menu_only=False):
+                            menu_only=False, verify=True):
         return SternFlashImagePipeline(
             image_path, device_path, log_cb, phase_cb, progress_cb, done_cb,
-            menu_only=menu_only)
+            menu_only=menu_only, verify=verify)
 
     def make_revert_pipeline(self, source, assets_dir, rels,
                              log_cb, phase_cb, progress_cb, done_cb,

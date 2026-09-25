@@ -1164,6 +1164,14 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
 # negligible against the multi-GB read, small enough to report smooth progress.
 _VERIFY_CHUNK = 16 * 1024 * 1024
 
+#: What a flash says in the log when the flash dialog's "Skip verify" was
+#: ticked (PAD-217) - the one run whose card nobody compared to the image.
+SKIP_VERIFY_LOG = ("Verify skipped (you ticked Skip verify): the card will "
+                   "NOT be read back and compared to the image, so a bad "
+                   "write would go unnoticed until the machine. If the "
+                   "machine shows a SHELL ERROR or won't boot, flash again "
+                   "with verify on.")
+
 
 def card_image_extent(read_at, dev_size, tail=2):
     """How many bytes of a card a Stern card IMAGE covers: the end of its last partition plus

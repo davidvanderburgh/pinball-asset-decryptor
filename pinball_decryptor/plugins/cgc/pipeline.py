@@ -37,8 +37,8 @@ from ...core import runtime
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
 from ...core.elevated_flash import flash_image_with_privileges
-from ...core.rawdevice import (FlashCancelled, FlashError, format_size,
-                              is_device_path)
+from ...core.rawdevice import (SKIP_VERIFY_LOG, FlashCancelled, FlashError,
+                              format_size, is_device_path)
 from ...core.staged_originals import ORIG_DIR
 from ...core.transcribe import CALLOUTS_CSV
 from ..williams import wpc_extract
@@ -1388,10 +1388,12 @@ class FlashImagePipeline(BasePipeline):
     Administrator/root and confirms the destructive write before reaching here."""
 
     def __init__(self, image_path, device_path,
-                 log_cb, phase_cb, progress_cb, done_cb):
+                 log_cb, phase_cb, progress_cb, done_cb, verify=True):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image_path = image_path
         self.device_path = device_path
+        #: False = the dialog's "Skip verify" was ticked: no read-back
+        self.verify = bool(verify)
 
     def _run(self):
         self._set_phase(0)  # Check card
@@ -1421,11 +1423,13 @@ class FlashImagePipeline(BasePipeline):
         self._check_cancel()
 
         self._set_phase(1)  # Write image
+        if not self.verify:
+            self._log(SKIP_VERIFY_LOG, "warning")
         try:
             written = flash_image_with_privileges(
                 self.image_path, self.device_path,
                 log=self._log, progress=self._progress,
-                cancel=lambda: self._cancelled,
+                cancel=lambda: self._cancelled, verify=self.verify,
                 on_verify_start=lambda: self._set_phase(2))  # Verify card
         except FlashCancelled:
             self._log("Flash cancelled -- the card is incomplete and must be "

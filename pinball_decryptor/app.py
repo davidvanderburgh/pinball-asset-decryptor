@@ -1864,7 +1864,8 @@ class App:
     # Write
     # ------------------------------------------------------------------
 
-    def _start_write(self, chain_flash_device=None, again=False):
+    def _start_write(self, chain_flash_device=None, again=False,
+                     chain_flash_verify=True):
         """Dispatch a Build.  ``chain_flash_device`` (the Build / flash
         dialog with both sections ticked) makes a successful build chain
         straight into flashing its output onto that device — armed only at
@@ -2102,7 +2103,8 @@ class App:
         if self._current_mfr.supports_build_update():
             write_kwargs["update"] = update
         self._chain_flash_after_build = (
-            (chain_flash_device, output_path) if chain_flash_device else None)
+            (chain_flash_device, output_path, bool(chain_flash_verify))
+            if chain_flash_device else None)
         # what _offer_bigger_card needs if this build is refused for room
         self._last_build_output = output_path
         self._space_refusal = None
@@ -2245,10 +2247,11 @@ class App:
             target=self._run_pipeline_with_audio, args=(assets_dir,),
             daemon=True).start()
 
-    def _on_build_flash_request(self, build_path, device_path):
+    def _on_build_flash_request(self, build_path, device_path, verify=True):
         """The Build / flash dialog's build section was ticked: build to
         *build_path*, then (when *device_path* is set) chain a flash of the
-        fresh build onto that card.
+        fresh build onto that card - read back afterwards unless *verify* is
+        False (the dialog's "Skip verify", PAD-217).
 
         The dialog's Build-to box may have been edited — push it back into
         the Write tab's Output Folder + File Name so ``_start_write`` (and
@@ -2258,11 +2261,12 @@ class App:
             self.window.write_output_var.set(folder)
         if name and getattr(self.window, "write_filename_var", None):
             self.window.write_filename_var.set(name)
-        self._start_write(chain_flash_device=device_path)
+        self._start_write(chain_flash_device=device_path,
+                          chain_flash_verify=verify)
 
     def _start_flash_image(self, image_path, device_path, menu_only=False,
                            target=None, disk_mode=None, image=None,
-                           from_iso=None):
+                           from_iso=None, verify=True):
         """Flash a pre-built image onto a card (dd-style whole-image write).
 
         ``menu_only`` writes ONLY the boot menu partition onto a card this
@@ -2333,6 +2337,10 @@ class App:
         # factory that takes it, and handed to every brand's it was a
         # TypeError out of a plain JJP USB stick (PAD-138).
         extra = {"menu_only": True} if menu_only else {}
+        # ``verify`` the same way: only a plugin that offers "Skip verify"
+        # (``flash_skip_verify``) takes it, and only when it was ticked.
+        if not verify and getattr(mfr, "flash_skip_verify", False):
+            extra["verify"] = False
         try:
             if to_disk:
                 # ``disk_mode`` (item 124): "menu" = only the boot menu,
@@ -4428,12 +4436,12 @@ class App:
                     # completion) — the log carries the hand-off.  after(0,…)
                     # lets this _on_done fully unwind (set_running state,
                     # queue drain) before the flash re-arms the run state.
-                    device_path, image_path = chain_flash
+                    device_path, image_path, verify = chain_flash
                     self.window.append_log(
                         "Build complete — writing the fresh image onto the "
                         "card...", "info")
                     self.root.after(0, lambda: self._start_flash_image(
-                        image_path, device_path))
+                        image_path, device_path, verify=verify))
         else:
             self.window.set_status("Failed")
             title = "Extract Failed" if is_extract else "Write Failed"
@@ -4473,8 +4481,10 @@ class App:
             "SD card size is now %s; building again." % cs.words(fits),
             "info")
         device = chain_flash[0] if chain_flash else None
+        verify = chain_flash[2] if chain_flash else True
         self.root.after(0, lambda: self._start_write(
-            chain_flash_device=device, again=True))
+            chain_flash_device=device, again=True,
+            chain_flash_verify=verify))
         return True
 
     # ------------------------------------------------------------------

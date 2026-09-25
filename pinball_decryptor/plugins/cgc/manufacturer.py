@@ -50,6 +50,7 @@ class CGCManufacturer(Manufacturer):
                       "Decode game data", "Checksums")
     write_phases = ("Detect", "Copy original", "Stage partitions", "Patch")
     flash_phases = ("Check card", "Write image", "Verify card", "Flush")
+    flash_skip_verify = True
     transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
     # Flash-dialog wording.  CGC installs from a microSD card or a USB drive
     # (depends on the cabinet), so the noun covers both; the picker still
@@ -189,9 +190,11 @@ class CGCManufacturer(Manufacturer):
             log_cb, phase_cb, progress_cb, done_cb)
 
     def make_flash_pipeline(self, image_path, device_path,
-                            log_cb, phase_cb, progress_cb, done_cb):
+                            log_cb, phase_cb, progress_cb, done_cb,
+                            verify=True):
         return FlashImagePipeline(
-            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
+            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb,
+            verify=verify)
 
     def make_transcribe_pipeline(self, assets_dir,
                                  log_cb, phase_cb, progress_cb, done_cb,

@@ -19,8 +19,8 @@ from ...core.pipeline_base import BasePipeline, PipelineError
 from ...core.staged_originals import discard as discard_snapshots
 from .formats import detect_game, display_for_key, linux_partitions
 from ...core.elevated_flash import flash_image_with_privileges
-from ...core.rawdevice import (FlashCancelled, FlashError, RawDeviceFile,
-                              format_size, is_device_path)
+from ...core.rawdevice import (SKIP_VERIFY_LOG, FlashCancelled, FlashError,
+                              RawDeviceFile, format_size, is_device_path)
 
 try:                                   # engine import is optional during bring-up
     from . import engine
@@ -616,10 +616,13 @@ class SternFlashImagePipeline(BasePipeline):
     and confirms the destructive write before reaching here."""
 
     def __init__(self, image_path, device_path,
-                 log_cb, phase_cb, progress_cb, done_cb, menu_only=False):
+                 log_cb, phase_cb, progress_cb, done_cb, menu_only=False,
+                 verify=True):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image_path = image_path
         self.device_path = device_path
+        #: False = the dialog's "Skip verify" was ticked: no read-back
+        self.verify = bool(verify)
         #: Write ONLY the boot menu (p2) onto a card this image was already
         #: flashed from - 350 MB instead of the whole image, and it keeps the
         #: machine's own /data and /dump.  See rawdevice.flash_menu_to_device,
@@ -641,11 +644,13 @@ class SternFlashImagePipeline(BasePipeline):
         self._check_cancel()
 
         self._set_phase(1)  # Write image
+        if not self.verify:
+            self._log(SKIP_VERIFY_LOG, "warning")
         try:
             written = flash_image_with_privileges(
                 self.image_path, self.device_path,
                 log=self._log, progress=self._progress,
-                cancel=lambda: self._cancelled,
+                cancel=lambda: self._cancelled, verify=self.verify,
                 on_verify_start=lambda: self._set_phase(2),  # Verify card
                 menu_only=self.menu_only)
         except FlashCancelled:

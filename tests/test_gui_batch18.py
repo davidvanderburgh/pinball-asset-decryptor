@@ -70,7 +70,7 @@ def _chain_run(w, monkeypatch, mode, success, summary):
     app = w.app
     flashed = []
     monkeypatch.setattr(app, "_start_flash_image",
-                        lambda img, dev: flashed.append((img, dev)))
+                        lambda img, dev, verify=True: flashed.append((img, dev)))
     # A chained build must NOT pop the "Write Complete" modal in between.
     monkeypatch.setattr(
         app_mod.messagebox, "showinfo",
@@ -80,7 +80,7 @@ def _chain_run(w, monkeypatch, mode, success, summary):
 
     def _go():
         app._active_mode = mode
-        app._chain_flash_after_build = (FAKE_DEVICE, FAKE_IMG)
+        app._chain_flash_after_build = (FAKE_DEVICE, FAKE_IMG, True)
         app._on_done(success, summary)
     w.run(_go)
     return flashed
@@ -123,14 +123,15 @@ def test_unrelated_success_never_fires_a_stale_chain(tmp_path, monkeypatch):
 
 # ---- A flash on a brand with no menu-only write (PAD-138) -----------------
 
-@pytest.mark.parametrize("key, module, name", [
+@pytest.mark.parametrize("key, module, name, kwargs", [
     ("jjp", "pinball_decryptor.plugins.jjp.usbstick",
-     "UsbStickPreparePipeline"),
+     "UsbStickPreparePipeline", {}),
+    # CGC's factory hands its pipeline the (default) read-back, PAD-217
     ("cgc", "pinball_decryptor.plugins.cgc.manufacturer",
-     "FlashImagePipeline"),
+     "FlashImagePipeline", {"verify": True}),
 ])
 def test_a_flash_starts_on_a_brand_with_no_menu_only_write(
-        tmp_path, monkeypatch, key, module, name):
+        tmp_path, monkeypatch, key, module, name, kwargs):
     """The menu-only write taught Stern's flash factory a ``menu_only``
     keyword and the app handed it to EVERY brand's: a JJP USB stick died with
     "make_flash_pipeline() got an unexpected keyword argument 'menu_only'"
@@ -153,7 +154,7 @@ def test_a_flash_starts_on_a_brand_with_no_menu_only_write(
         try:
             w.run(lambda: w.app._start_flash_image(FAKE_IMG, FAKE_DEVICE,
                                                    menu_only=False))
-            assert made == [((FAKE_IMG, FAKE_DEVICE), {})]
+            assert made == [((FAKE_IMG, FAKE_DEVICE), kwargs)]
         finally:
             def _reset():
                 w.app._active_mode = None
@@ -271,8 +272,8 @@ def test_on_build_flash_request_writes_back_and_arms_chain(
         seen = {}
         monkeypatch.setattr(
             w.app, "_start_write",
-            lambda chain_flash_device=None: seen.update(
-                device=chain_flash_device))
+            lambda chain_flash_device=None, chain_flash_verify=True:
+            seen.update(device=chain_flash_device))
         build_path = os.path.join(os.sep + "builds", "lz-test.raw")
         expected_folder, expected_name = os.path.split(build_path)
         w.run(lambda: w.app._on_build_flash_request(build_path, FAKE_DEVICE))

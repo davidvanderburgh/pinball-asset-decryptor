@@ -387,6 +387,12 @@ class Manufacturer(ABC):
     # ``capabilities.flash_image`` is True) — a dd-style raw copy of a
     # pre-built image onto a card.
     flash_phases: Tuple[str, ...] = ()
+    # The flash reads the card back and compares it to the image (the
+    # "Verify card" phase), and the dialog may offer to skip that: a
+    # "Skip verify" tick, off every time the dialog opens (PAD-217 - the
+    # read-back doubles the flash time).  A plugin that sets this takes
+    # ``verify=`` in ``make_flash_pipeline``; no other plugin is passed it.
+    flash_skip_verify: bool = False
     # A second place the flash dialog can put an image (item 123): (key, wording,
     # drive kind) tuples with the brand's usual medium FIRST; empty = no choice
     # offered.  JJP's second is the game's own disk in a dock, installed on this

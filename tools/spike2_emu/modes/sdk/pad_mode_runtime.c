@@ -998,7 +998,7 @@ int pm_lights_as(unsigned owner, const char *command)
  * So a layer of ours at priority 255, created with no current event, sits on top of every show
  * and is never freed by a show's end; holding an insert is writing its lights' slots with +3 set,
  * and releasing it is clearing +3. Nothing of the game's is hooked or rewritten for this. */
-#define N_LAMPS      192
+#define N_LAMPS      256          /* item 164: Foo Fighters 1.04 names 235 inserts */
 #define LAMP_LAYERS  4
 #define LAMP_MODES   64
 #define LAMP_SAY_MAX 400
@@ -1295,6 +1295,16 @@ int pm_lamp_set(const char *names, unsigned rgb, int pattern, unsigned period_ms
     if (!(can & PM_CAN_LAMPS)) return 0;
     n = lamp_list(names, list, N_LAMPS);
     return lamp_hold(list, n, rgb, pattern, period_ms, names);
+}
+
+/* item 164: every insert the port names - a mode's Lights on a title without the light language
+ * (the whole playfield in the mode's colour) */
+int pm_lamp_all(unsigned rgb, int pattern, unsigned period_ms)
+{
+    int list[N_LAMPS], k;
+    if (!(can & PM_CAN_LAMPS)) return 0;
+    for (k = 0; k < n_lamps; k++) list[k] = k;
+    return lamp_hold(list, n_lamps, rgb, pattern, period_ms, "every insert");
 }
 
 int pm_lamp_shot(uint64_t shots, unsigned rgb, int pattern, unsigned period_ms)

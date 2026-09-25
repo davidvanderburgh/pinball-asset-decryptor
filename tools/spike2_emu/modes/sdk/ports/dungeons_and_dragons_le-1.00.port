@@ -374,3 +374,107 @@ event bonus_start    0x27
 event bonus_end      0x28
 event tilt_warning   0xc7
 event tilt           0xc5
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 90 inserts on the TestMode/Rope_LE-Premium-X8-X9_TOP_rotated_edit_cropped picture; light table 0x744988, device table 0x7472f8, lamp table 0x71e15c (126 lamps)
+# shot masks: the code that builds the cshot objects was not found
+lamp 106          0              DRAGON HEAD  # lamp 3, I/O group 8 index 68, at 110,306
+lamp 105          0              DRAGON EYES  # lamp 4, I/O group 8 index 67, at 114,317
+lamp 30,31,32     0              WEST GATE  # lamp 29, I/O group 7 index 35, at 126,529
+lamp 27,28,29     0              BLUE 1  # lamp 30, I/O group 7 index 38, at 110,535
+lamp 24,25,26     0              BLUE 2  # lamp 31, I/O group 7 index 11, at 113,473
+lamp 60,61,62     0              BLUE 3  # lamp 32, I/O group 7 index 66, at 132,438
+lamp 21,22,23     0              GREENEST  # lamp 33, I/O group 7 index 44, at 113,490
+lamp 36,37,38     0              ORANGE 1  # lamp 34, I/O group 7 index 17, at 174,479
+lamp 18,19,20     0              ORANGE 2  # lamp 35, I/O group 7 index 8, at 99,481
+lamp 66,67,68     0              ORANGE 3  # lamp 36, I/O group 7 index 58, at 108,438
+lamp 15,16,17     0              WHITE 1  # lamp 37, I/O group 7 index 41, at 105,508
+lamp 39,40,41     0              WHITE 2  # lamp 38, I/O group 7 index 20, at 185,490
+lamp 69,70,71     0              WHITE 3  # lamp 39, I/O group 7 index 88, at 187,459
+lamp 63,64,65     0              DRAGONSPEAR CASTLE  # lamp 40, I/O group 7 index 61, at 119,450
+lamp 51,52,53     0              PURPLE 1  # lamp 41, I/O group 7 index 29, at 178,532
+lamp 45,46,47     0              PURPLE 2  # lamp 42, I/O group 7 index 26, at 178,510
+lamp 75,76,77     0              PURPLE 3  # lamp 43, I/O group 7 index 77, at 188,435
+lamp 72,73,74     0              GAUNTLGRYM  # lamp 44, I/O group 7 index 92, at 176,446
+lamp 33,34,35     0              DARK HOLD  # lamp 45, I/O group 7 index 14, at 146,475
+lamp 42,43,44     0              KOBOLD MINING TOWN  # lamp 46, I/O group 7 index 23, at 168,497
+lamp 48,49,50     0              ARABEL  # lamp 47, I/O group 7 index 32, at 160,528
+lamp 81,82,83     0              CHEST 1  # lamp 48, I/O group 7 index 69, at 64,394
+lamp 84,85,86     0              MIMIC 2  # lamp 49, I/O group 7 index 72, at 74,416
+lamp 110,111,112  0              LEFT LOOP 1  # lamp 51, I/O group 8 index 9, at 129,250
+lamp 113,114,115  0              LEFT LOOP 2  # lamp 52, I/O group 8 index 12, at 146,271
+lamp 126,127,128  0              SPINNER 1  # lamp 53, I/O group 8 index 37, at 180,183
+lamp 129,130,131  0              SPINNER 2  # lamp 54, I/O group 8 index 18, at 180,206
+lamp 148,149,150  0              CUBE (X2)  # lamp 55, I/O group 8 index 21, at 243,210
+lamp 152,153,154  0              RIGHT ORBIT 1  # lamp 56, I/O group 8 index 27, at 248,278
+lamp 155,156,157  0              RIGHT ORBIT 2  # lamp 57, I/O group 8 index 24, at 239,304
+lamp 133,134,135  0              RIGHT LOOP 1  # lamp 58, I/O group 8 index 34, at 207,156
+lamp 136,137,138  0              RIGHT LOOP 2  # lamp 59, I/O group 8 index 31, at 201,179
+lamp 119,120,121  0              CENTER RAMP 1  # lamp 60, I/O group 8 index 41, at 143,206
+lamp 122,123,124  0              CENTER RAMP 2  # lamp 61, I/O group 8 index 45, at 156,227
+lamp 89,90,91     0              LEFT ORBIT 1  # lamp 62, I/O group 8 index 58, at 69,313
+lamp 92,93,94     0              LEFT ORBIT 2  # lamp 63, I/O group 8 index 61, at 76,340
+lamp 139,140,141  0              RIGHT RAMP 1  # lamp 64, I/O group 8 index 69, at 224,227
+lamp 142,143,144  0              RIGHT RAMP 2  # lamp 65, I/O group 8 index 75, at 219,251
+lamp 166          0              LEFT GI-WHT  # lamp 67, I/O group 8 index 0, at 0,0
+lamp 164          0              RIGHT GI-WHT  # lamp 68, I/O group 7 index 0, at 0,0
+lamp 168          0              LEFT GI-BLU  # lamp 69, I/O group 8 index 2, at 0,0
+lamp 165          0              RIGHT GI-BLU  # lamp 70, I/O group 7 index 2, at 0,0
+lamp 9            0              LEFT OUTLANE  # lamp 74, I/O group 7 index 47, at 29,485
+lamp 10           0              LEFT RETURN LANE  # lamp 75, I/O group 7 index 48, at 51,467
+lamp 13           0              SHIELD  # lamp 76, I/O group 7 index 49, at 142,579
+lamp 14           0              SHOOT AGAIN  # lamp 77, I/O group 7 index 50, at 142,616
+lamp 11           0              RIGHT RETURN LANE  # lamp 78, I/O group 7 index 51, at 235,467
+lamp 12           0              RIGHT OUTLANE  # lamp 79, I/O group 7 index 52, at 256,485
+lamp 79           0              SECRET DOOR  # lamp 80, I/O group 7 index 53, at 221,390
+lamp 80           0              DOUBLE SCORING  # lamp 81, I/O group 7 index 54, at 240,427
+lamp 174          0              TREASURE CHEST FLASH  # lamp 82, I/O group 7 index 55, at 44,423
+lamp 175          0              CAVE FLASH  # lamp 83, I/O group 8 index 54, at 96,220
+lamp 54           0              NEW CHARACTER 1  # lamp 84, I/O group 7 index 56, at 119,392
+lamp 57           0              RITUAL  # lamp 85, I/O group 7 index 57, at 119,415
+lamp 55           0              NEW CHARACTER 2  # lamp 86, I/O group 7 index 64, at 151,392
+lamp 58           0              UNDERMOUNTAIN  # lamp 87, I/O group 7 index 65, at 151,415
+lamp 87           0              FIZMO  # lamp 88, I/O group 7 index 75, at 82,432
+lamp 88           0              TREASURE  # lamp 89, I/O group 7 index 76, at 94,415
+lamp 78           0              HIDDEN TEMPLE  # lamp 90, I/O group 7 index 80, at 255,356
+lamp 158          0              DRAGON  # lamp 91, I/O group 7 index 81, at 231,329
+lamp 171          0              LOWER LEFT FLASH  # lamp 92, I/O group 7 index 86, at 38,394
+lamp 172          0              LOWER RIGHT FLASH  # lamp 93, I/O group 7 index 87, at 270,435
+lamp 56           0              NEW CHARACTER 3  # lamp 94, I/O group 7 index 91, at 185,392
+lamp 59           0              RESCUE KING  # lamp 95, I/O group 7 index 95, at 185,415
+lamp 132          0              LIGHT DUNGEON  # lamp 98, I/O group 8 index 8, at 180,224
+lamp 116          0              SUPER JACKPOT  # lamp 99, I/O group 8 index 15, at 162,290
+lamp 117          0              DUNGEON  # lamp 100, I/O group 8 index 16, at 181,280
+lamp 147          0              DUNGEON RIGHT TGT  # lamp 101, I/O group 8 index 17, at 232,269
+lamp 151          0              MAGNET  # lamp 102, I/O group 8 index 30, at 258,248
+lamp 125          0              CRITICAL HIT  # lamp 103, I/O group 8 index 40, at 152,183
+lamp 118          0              DUNGEON LEFT TGT  # lamp 104, I/O group 8 index 44, at 136,228
+lamp 104          0              DRAGO(N)  # lamp 105, I/O group 8 index 48, at 152,341
+lamp 159          0              BB DRAGON  # lamp 106, I/O group 8 index 49, at 177,170
+lamp 160          0              BB DUNGEON  # lamp 107, I/O group 8 index 50, at 177,170
+lamp 161          0              BB CUBE  # lamp 108, I/O group 8 index 51, at 177,170
+lamp 162          0              BB DICE GAME  # lamp 109, I/O group 8 index 52, at 177,170
+lamp 95           0              CUBE  # lamp 110, I/O group 8 index 53, at 81,359
+lamp 103          0              DRAG(O)N  # lamp 111, I/O group 8 index 56, at 141,330
+lamp 102          0              DRA(G)ON  # lamp 112, I/O group 8 index 57, at 124,328
+lamp 98           0              DRAGON TGT RIGHT  # lamp 113, I/O group 8 index 64, at 124,304
+lamp 97           0              DRAGON TGT CENT  # lamp 114, I/O group 8 index 65, at 111,309
+lamp 96           0              DRAGON TGT LEFT  # lamp 115, I/O group 8 index 66, at 96,315
+lamp 101          0              DR(A)GON  # lamp 116, I/O group 8 index 72, at 110,332
+lamp 100          0              D(R)AGON  # lamp 117, I/O group 8 index 73, at 103,346
+lamp 99           0              (D)RAGON  # lamp 118, I/O group 8 index 74, at 102,361
+lamp 145          0              EXTRA BALL  # lamp 119, I/O group 8 index 78, at 212,276
+lamp 146          0              ACTION  # lamp 120, I/O group 8 index 79, at 207,297
+lamp 173          0              DUNGEON FLASH  # lamp 121, I/O group 8 index 5, at 182,256
+lamp 245          0              LOWER LEFT SPOT FLASH  # lamp 122, I/O group 7 index 85, at 49,374
+lamp 246          0              LOWER RIGHT SPOT FLASH  # lamp 123, I/O group 8 index 55, at 254,412

@@ -309,3 +309,128 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 111 inserts on the  picture; light table 0x6287f4, device table 0x62a52c, lamp table 0x60a6ac (112 lamps)
+# shot masks: the code that builds the cshot objects was not found
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
+lamp 10,11,12     0              LEFT RETURN LANE LEFT  # lamp 4, I/O group 6 index 6, at 0,0
+lamp 14,15,16     0              RIGHT RETURN LANE  # lamp 5, I/O group 6 index 55, at 0,0
+lamp 99,100,101   0              ROCKSTEADY  # lamp 6, I/O group 6 index 48, at 0,0
+lamp 103,104,105  0              RIGHT ORBIT WEAPON  # lamp 7, I/O group 6 index 52, at 0,0
+lamp 18,19,20     0              TEAM UP  # lamp 8, I/O group 6 index 11, at 0,0
+lamp 92,93,94     0              KRANG  # lamp 9, I/O group 7 index 40, at 0,0
+lamp 82,83,84     0              DONATELLO  # lamp 10, I/O group 6 index 29, at 0,0
+lamp 87,88,89     0              WEAPON  # lamp 11, I/O group 6 index 34, at 0,0
+lamp 96,97,98     0              MONDO JACKPOT  # lamp 12, I/O group 7 index 44, at 0,0
+lamp 4            0              START BUTTON  # lamp 13, I/O group 5 index 2, at 0,0
+lamp 110          0              COIN DOOR GI  # lamp 14, I/O group 5 index 1, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 15, I/O group 5 index 3, at 0,0
+lamp 111          0              BOTTOM GI-RED  # lamp 16, I/O group 6 index 0, at 0,0
+lamp 112          0              BOTTOM GI-WHT  # lamp 17, I/O group 6 index 1, at 0,0
+lamp 113          0              BOTTOM GI-GRN  # lamp 18, I/O group 6 index 2, at 0,0
+lamp 9            0              LEFT OUTLANE  # lamp 19, I/O group 6 index 3, at 0,0
+lamp 133          0              LAIR FLASH  # lamp 20, I/O group 6 index 7, at 0,0
+lamp 136          0              KRANG BODY FLASH  # lamp 21, I/O group 7 index 48, at 0,0
+lamp 17           0              RIGHT OUTLANE  # lamp 22, I/O group 6 index 58, at 0,0
+lamp 23           0              EPISODE 2  # lamp 23, I/O group 6 index 8, at 0,0
+lamp 134          0              LEFT SLING FLASH  # lamp 24, I/O group 6 index 9, at 0,0
+lamp 22           0              EPISODE 6  # lamp 25, I/O group 6 index 10, at 0,0
+lamp 21           0              SHOOT AGAIN  # lamp 26, I/O group 6 index 14, at 0,0
+lamp 135          0              RIGHT SLING FLASH  # lamp 27, I/O group 6 index 15, at 0,0
+lamp 24           0              EPISODE 4  # lamp 28, I/O group 6 index 16, at 0,0
+lamp 25           0              EPISODE 3  # lamp 29, I/O group 6 index 17, at 0,0
+lamp 26           0              EPISODE 1  # lamp 30, I/O group 6 index 18, at 0,0
+lamp 27           0              EPISODE 8  # lamp 31, I/O group 6 index 19, at 0,0
+lamp 43,44,45     0              SHREDDER  # lamp 32, I/O group 6 index 21, at 0,0
+lamp 46           0              FOOT COMBO 1  # lamp 33, I/O group 6 index 24, at 0,0
+lamp 47           0              TURTLE POWER MULTIBALL  # lamp 34, I/O group 6 index 25, at 0,0
+lamp 131          0              PIZZA FLASH RIGHT  # lamp 35, I/O group 6 index 38, at 0,0
+lamp 132          0              COWABUNGA DUDE FLASH  # lamp 36, I/O group 6 index 28, at 0,0
+lamp 29           0              EPISODE 7  # lamp 37, I/O group 6 index 20, at 0,0
+lamp 48,49,50     0              APRIL  # lamp 38, I/O group 6 index 40, at 0,0
+lamp 55           0              APRI(L)  # lamp 39, I/O group 6 index 43, at 0,0
+lamp 54           0              APR(I)L  # lamp 40, I/O group 6 index 44, at 0,0
+lamp 53           0              AP(R)IL  # lamp 41, I/O group 6 index 45, at 0,0
+lamp 52           0              A(P)RIL  # lamp 42, I/O group 6 index 46, at 0,0
+lamp 51           0              (A)PRIL  # lamp 43, I/O group 6 index 47, at 0,0
+lamp 63           0              LEFT ORBIT TRAINING  # lamp 44, I/O group 7 index 58, at 0,0
+lamp 102          0              RIGHT ORBIT TRAINING  # lamp 45, I/O group 6 index 51, at 0,0
+lamp 123          0              LEFT RAMP TRAINING  # lamp 46, I/O group 7 index 49, at 0,0
+lamp 127          0              RIGHT RAMP TRAINING  # lamp 47, I/O group 7 index 62, at 0,0
+lamp 125          0              RIGHT RAMP GLIDER  # lamp 48, I/O group 7 index 63, at 0,0
+lamp 124          0              RIGHT RAMP FLASH  # lamp 49, I/O group 6 index 39, at 0,0
+lamp 59           0              TURTLE LEONARDO  # lamp 50, I/O group 6 index 62, at 0,0
+lamp 58           0              TURTLE DONATELLO  # lamp 51, I/O group 6 index 61, at 0,0
+lamp 57           0              TURTLE RAPHEAL  # lamp 52, I/O group 6 index 60, at 0,0
+lamp 56           0              TURTLE MICHEALANGELO  # lamp 53, I/O group 6 index 59, at 0,0
+lamp 129          0              RIGHT SPINNER FLASH  # lamp 54, I/O group 6 index 63, at 0,0
+lamp 114          0              TOP GI-RED  # lamp 55, I/O group 7 index 0, at 0,0
+lamp 115          0              TOP GI-WHT  # lamp 56, I/O group 7 index 1, at 0,0
+lamp 116          0              TOP GI-GRN  # lamp 57, I/O group 7 index 2, at 0,0
+lamp 117          0              LEFT POP BUMPER  # lamp 58, I/O group 7 index 3, at 0,0
+lamp 118          0              RIGHT POP BUMPER  # lamp 59, I/O group 7 index 4, at 0,0
+lamp 119          0              BOTTOM POP BUMPER  # lamp 60, I/O group 7 index 5, at 0,0
+lamp 76           0              PIZZA TOPPING  # lamp 61, I/O group 7 index 6, at 0,0
+lamp 120          0              POP FLASH  # lamp 62, I/O group 7 index 7, at 0,0
+lamp 38,39,40     0              LEONARDO  # lamp 63, I/O group 7 index 13, at 0,0
+lamp 42           0              JACKPOTO GRANDE  # lamp 64, I/O group 7 index 11, at 0,0
+lamp 41           0              TRAINING  # lamp 65, I/O group 7 index 12, at 0,0
+lamp 31,32,33     0              SPLINTER  # lamp 66, I/O group 7 index 8, at 0,0
+lamp 34           0              (L)AIR  # lamp 67, I/O group 7 index 16, at 0,0
+lamp 35           0              L(A)IR  # lamp 68, I/O group 7 index 17, at 0,0
+lamp 36           0              LA(I)R  # lamp 69, I/O group 7 index 18, at 0,0
+lamp 37           0              LAI(R)  # lamp 70, I/O group 7 index 19, at 0,0
+lamp 13           0              LEFT RETURN LANE RIGHT  # lamp 71, I/O group 7 index 20, at 0,0
+lamp 128          0              UPPER FLIPPER FLASH  # lamp 72, I/O group 7 index 47, at 0,0
+lamp 121          0              LEFT RAMP FLASH  # lamp 73, I/O group 7 index 30, at 0,0
+lamp 126          0              VAN FLASH  # lamp 74, I/O group 7 index 37, at 0,0
+lamp 130          0              PIZZA FLASH LEFT  # lamp 75, I/O group 6 index 37, at 0,0
+lamp 122          0              LEFT RAMP GLIDER  # lamp 76, I/O group 7 index 50, at 0,0
+lamp 60,61,62     0              BEBOP  # lamp 77, I/O group 7 index 55, at 0,0
+lamp 64,65,66     0              LEFT ORBIT WEAPON  # lamp 78, I/O group 7 index 59, at 0,0
+lamp 67           0              LEFT RAMP LEFT X  # lamp 79, I/O group 7 index 21, at 0,0
+lamp 68           0              LEFT RAMP RIGHT X  # lamp 80, I/O group 7 index 25, at 0,0
+lamp 78,79,80     0              START EPISODE  # lamp 81, I/O group 7 index 26, at 0,0
+lamp 81           0              2X PLAYFIELD  # lamp 82, I/O group 7 index 29, at 0,0
+lamp 85           0              FOOT COMBO 2  # lamp 83, I/O group 6 index 32, at 0,0
+lamp 86           0              FOOT COMBO 3  # lamp 84, I/O group 6 index 33, at 0,0
+lamp 90           0              PIZZA SLICE  # lamp 85, I/O group 6 index 26, at 0,0
+lamp 91           0              ADD TIME  # lamp 86, I/O group 6 index 27, at 0,0
+lamp 95           0              FOOT COMBO 2 LOOP  # lamp 87, I/O group 7 index 43, at 0,0
+lamp 69,70,71     0              RAPHAEL  # lamp 88, I/O group 7 index 22, at 0,0
+lamp 28           0              EPISODE 5  # lamp 89, I/O group 7 index 53, at 0,0
+lamp 30           0              FINAL BATTLE  # lamp 90, I/O group 7 index 54, at 0,0
+lamp 72,73,74     0              MICHAEL  # lamp 91, I/O group 7 index 32, at 0,0
+lamp 75           0              EXTRA BALL  # lamp 92, I/O group 7 index 35, at 0,0
+lamp 77           0              NINJA PIZZA PARLOR  # lamp 93, I/O group 7 index 36, at 0,0
+lamp 106          0              TOP LANE LEFT  # lamp 94, I/O group 7 index 38, at 0,0
+lamp 107          0              TOP LANE RIGHT  # lamp 95, I/O group 7 index 39, at 0,0
+lamp 108          0              SPIN DISC CW  # lamp 96, I/O group 7 index 51, at 0,0
+lamp 109          0              SPIN DISC CCW  # lamp 97, I/O group 7 index 52, at 0,0
+lamp 137          0              TOPPER BACK LEFT OUTER  # lamp 98, I/O group 8 index 0, at 0,0
+lamp 138          0              TOPPER BACK LEFT INNER  # lamp 99, I/O group 8 index 1, at 0,0
+lamp 139          0              TOPPER BUILDINGL LEFT OUTER  # lamp 100, I/O group 8 index 2, at 0,0
+lamp 140          0              TOPPER BUILDING LEFT INNER  # lamp 101, I/O group 8 index 3, at 0,0
+lamp 141          0              TOPPER MICHALENGELO  # lamp 102, I/O group 8 index 4, at 0,0
+lamp 142          0              TOPPER TECHNODOME LEFT  # lamp 103, I/O group 8 index 5, at 0,0
+lamp 143          0              TOPPER LEONARDO  # lamp 104, I/O group 8 index 6, at 0,0
+lamp 144          0              TOPPER BACK RIGHT OUTER  # lamp 105, I/O group 8 index 7, at 0,0
+lamp 145          0              TOPPER BACK RIGHT INNER  # lamp 106, I/O group 8 index 8, at 0,0
+lamp 146          0              TOPPER BUILDING RIGHT OUTER  # lamp 107, I/O group 8 index 9, at 0,0
+lamp 147          0              TOPPER BUILDING RIGHT INNER  # lamp 108, I/O group 8 index 10, at 0,0
+lamp 148          0              TOPPER RAPHAEL  # lamp 109, I/O group 8 index 11, at 0,0
+lamp 149          0              TOPPER TECHNODOME RIGHT  # lamp 110, I/O group 8 index 12, at 0,0
+lamp 150          0              TOPPER DONATELLO  # lamp 111, I/O group 8 index 13, at 0,0

@@ -68,6 +68,8 @@ class TitleProfile:
     switch_shots_note: str = ""  # why those are not proven yet; "" when they are (or there are none)
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
+    light_route: str = ""        # item 164: how a mode's Lights run - "language" (the game's own light
+    #                              commands: Godzilla), "inserts" (every insert held in the mode's colour), ""
     bank_tree: str = "auto_loaded"   # item 164: the lcd tree the video bank is in (JP LE, Avengers,
     hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
 
@@ -601,7 +603,17 @@ def profile_from_port(path):
     elif not callouts.get("countdown"):         # ten_seconds is optional: the count is 5..1 without it
         no("countdown", "The app does not know which of %(label)s's callouts count down, so the "
                         "game's own voice cannot count down.")
-    if "lights" not in runtime:
+    key = "%s-%s" % (game, version)
+    inserts_ok = _lamp_route(port) and key in LAMPS_PROVEN
+    light_route = ""
+    if "lights" in runtime and values.get("light_lts"):
+        light_route = "language"
+    elif inserts_ok:
+        light_route = "inserts"          # item 164: every insert in the mode's colour (light_all)
+    elif _lamp_route(port):
+        no("lights", "The app has found %(label)s's inserts but has not yet seen a mode light "
+                     "them in the emulator, so a mode's lights stay off.")
+    elif "lights" not in runtime:
         if all(n in sites for n in RUNTIME_NEEDS["lights"][0]):
             no("lights", "The app has found %(label)s's light shows but not yet which of the "
                          "game's own rules may run one, so its lights cannot be driven.")
@@ -687,7 +699,8 @@ def profile_from_port(path):
         score_bits=32 if RUNTIME_CORE_32[0] in sites else 64,
         switch_shots=switch_shots,
         switch_shots_note=switch_note,
-        lamps=_lit_inserts(port),
+        lamps=_lit_inserts(port) if key in LAMPS_PROVEN else 0,
+        light_route=light_route,
         bank_tree=measured.get("bank_tree", "auto_loaded"),
         hud_tree=measured.get("hud_tree", "auto_loaded"),
     )
@@ -697,6 +710,28 @@ def profile_from_port(path):
 LAMP_NEEDS = (("lamp_group",), ("lamp_layers", "light_count"),
               ("lamp_slot_size", "lamp_slot_level", "lamp_slot_alpha", "lamp_slot_fade",
                "lamp_slot_used", "lamp_group_prio", "lamp_group_next"))
+
+
+#: item 164: the builds whose named inserts a mode has held in the emulator - the node bus (or the
+#: shim's LED view) carried the held colour on the inserts' channels. Until a build is here its
+#: inserts light nothing from the tab: Lights and "Light the shots that score" stay greyed.
+LAMPS_PROVEN = frozenset((
+    "godzilla_le-1.16", "godzilla_pro-1.15", "godzilla_pro-1.16",    # item mode-leds RUN 5/6
+    # item 164 (2026-09-25): a mode file's light_all held every insert in magenta; the shim's LED
+    # view (dump/padled) had the addressed inserts in it while the mode ran, not before or after
+    "beatles-1.29", "deadpool_le-1.14", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.00", "elvira3-1.13",
+    "foo_fighters_le-1.04", "james_bond_60th_le-1.11", "james_bond_le-1.06", "jaws_le-1.02",
+    "john_wick_le-1.01", "jurassic_park_le-1.16", "king_kong_le-0.97", "led_zeppelin_le-1.22",
+    "led_zeppelin_pro-1.22", "metallica_spike-1.03", "munsters_le-1.28", "star_wars_elg-1.10",
+    "star_wars_le-1.30", "turtles_pro-1.59", "uncanny_xmen_le-0.98", "venom_le-1.07",
+))
+
+
+def _lamp_route(port):
+    """The port has the lamp layer and names inserts (what pm_lamp_all needs)."""
+    sites, data, values = LAMP_NEEDS
+    return (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+            and all(n in port["value"] for n in values) and bool(port.get("lamp")))
 
 
 def _lit_inserts(port):
@@ -1620,7 +1655,9 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
         ]
     if spec.clip != "none" and p.can("clip"):
         lines.append("%-14s %s" % ("clip_start" if spec.clip_when == "start" else "clip_end", names["clip"]))
-    if spec.lights and p.can("lights"):
+    if spec.lights and p.can("lights") and p.light_route == "inserts":
+        lines.append("light_all      %s pulse" % spec.light_color.lstrip("#").lower())
+    elif spec.lights and p.can("lights"):
         on, off = light_commands(spec, p)
         lines.append("light_owner    %d" % p.light_owner)
         if on:

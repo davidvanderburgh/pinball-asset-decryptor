@@ -320,3 +320,136 @@ value countdown_step -1
 
 # ---- examples a template mode can use on this game ----
 text example_start_shot     Lower p/f machine target
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 119 inserts on the  picture; light table 0x585c4c, device table 0x5879dc, lamp table 0x56b41c (122 lamps)
+# shot masks: the code that builds the cshot objects was not found
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 50           0              EXTRA BALL  # lamp 3, I/O group 7 index 12, at 0,0
+lamp 51           0              GRANDPA'S LAB  # lamp 4, I/O group 7 index 13, at 0,0
+lamp 52           0              MUNSTER MADNESS ARROW  # lamp 5, I/O group 7 index 14, at 0,0
+lamp 23           0              ADD-A-BALL  # lamp 6, I/O group 6 index 24, at 0,0
+lamp 128          0              LOWER P/F GI  # lamp 7, I/O group 7 index 41, at 0,0
+lamp 140          0              LOWER P/F FLASH LEFT  # lamp 8, I/O group 6 index 6, at 0,0
+lamp 141          0              LOWER P/F FLASH RIGHT  # lamp 9, I/O group 6 index 7, at 0,0
+lamp 125          0              BOTTOM GI-GRN  # lamp 10, I/O group 6 index 1, at 0,0
+lamp 127          0              TOP GI-GRN  # lamp 11, I/O group 7 index 1, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 12, I/O group 5 index 5, at 0,0
+lamp 57,58,59     0              RIGHT ORBIT JACKPOT  # lamp 13, I/O group 7 index 27, at 0,0
+lamp 53,54,55     0              RIGHT RAMP JACKPOT  # lamp 14, I/O group 7 index 16, at 0,0
+lamp 44,45,46     0              HERMAN JACKPOT  # lamp 15, I/O group 6 index 42, at 0,0
+lamp 41,42,43     0              LEFT RAMP JACKPOT  # lamp 16, I/O group 6 index 38, at 0,0
+lamp 38,39,40     0              LEFT ORBIT JACKPOT  # lamp 17, I/O group 6 index 27, at 0,0
+lamp 123          0              COIN DOOR GI  # lamp 18, I/O group 5 index 1, at 0,0
+lamp 4            0              START BUTTON  # lamp 19, I/O group 5 index 2, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 20, I/O group 5 index 3, at 0,0
+lamp 124          0              BOTTOM GI-WHT  # lamp 21, I/O group 6 index 0, at 0,0
+lamp 13           0              RIGHT OUTLANE  # lamp 22, I/O group 6 index 5, at 0,0
+lamp 12           0              RIGHT RETURN LANE  # lamp 23, I/O group 6 index 4, at 0,0
+lamp 36           0              LIL(Y)  # lamp 24, I/O group 7 index 8, at 0,0
+lamp 35           0              LI(L)Y  # lamp 25, I/O group 7 index 9, at 0,0
+lamp 34           0              L(I)LY  # lamp 26, I/O group 7 index 10, at 0,0
+lamp 33           0              (L)ILY  # lamp 27, I/O group 7 index 11, at 0,0
+lamp 14           0              MUNSTER MADNESS  # lamp 28, I/O group 6 index 9, at 0,0
+lamp 15           0              HERMAN COMPLETE  # lamp 29, I/O group 6 index 10, at 0,0
+lamp 16           0              RAVEN COMPLETE  # lamp 30, I/O group 6 index 15, at 0,0
+lamp 17           0              LILY COMPLETE  # lamp 31, I/O group 6 index 8, at 0,0
+lamp 19           0              GRANDPA COMPLETE  # lamp 32, I/O group 6 index 14, at 0,0
+lamp 18           0              SPOT COMPLETE  # lamp 33, I/O group 6 index 11, at 0,0
+lamp 20           0              2X  # lamp 34, I/O group 6 index 12, at 0,0
+lamp 21           0              3X  # lamp 35, I/O group 6 index 13, at 0,0
+lamp 22           0              SHOOT AGAIN  # lamp 36, I/O group 6 index 3, at 0,0
+lamp 64           0              TARGET 4  # lamp 37, I/O group 7 index 31, at 0,0
+lamp 126          0              TOP GI-WHT  # lamp 38, I/O group 7 index 0, at 0,0
+lamp 138          0              BOTTOM POP FLASH  # lamp 39, I/O group 7 index 21, at 0,0
+lamp 62           0              KITTY  # lamp 40, I/O group 7 index 23, at 0,0
+lamp 63           0              TARGET 3  # lamp 41, I/O group 7 index 15, at 0,0
+lamp 47           0              HERMAN 1  # lamp 42, I/O group 6 index 45, at 0,0
+lamp 48           0              HERMAN 2  # lamp 43, I/O group 6 index 46, at 0,0
+lamp 49           0              HERMAN 3  # lamp 44, I/O group 6 index 47, at 0,0
+lamp 61           0              TARGET 2  # lamp 45, I/O group 6 index 41, at 0,0
+lamp 65           0              TOP LANE LEFT  # lamp 46, I/O group 6 index 54, at 0,0
+lamp 66           0              TOP LANE RIGHT  # lamp 47, I/O group 6 index 55, at 0,0
+lamp 71           0              BB ADV RAVEN 1  # lamp 48, I/O group 6 index 34, at 0,0
+lamp 72           0              BB ADV RAVEN 2  # lamp 49, I/O group 6 index 35, at 0,0
+lamp 73           0              BB ADV RAVEN 3  # lamp 50, I/O group 6 index 36, at 0,0
+lamp 74           0              LEFT RAMP BB SPOT  # lamp 51, I/O group 6 index 37, at 0,0
+lamp 67           0              (S)POT  # lamp 52, I/O group 6 index 50, at 0,0
+lamp 68           0              S(P)OT  # lamp 53, I/O group 6 index 51, at 0,0
+lamp 69           0              SP(O)T  # lamp 54, I/O group 6 index 52, at 0,0
+lamp 70           0              SPO(T)  # lamp 55, I/O group 6 index 53, at 0,0
+lamp 75           0              RIGHT RAMP SPOT  # lamp 56, I/O group 7 index 25, at 0,0
+lamp 76           0              RIGHT RAMP MARILYN  # lamp 57, I/O group 7 index 26, at 0,0
+lamp 139          0              POP FLASH  # lamp 58, I/O group 7 index 22, at 0,0
+lamp 136          0              LEFT POP FLASH  # lamp 59, I/O group 7 index 19, at 0,0
+lamp 137          0              RIGHT POP FLASH  # lamp 60, I/O group 7 index 20, at 0,0
+lamp 37           0              EDDIE LEFT ORBIT  # lamp 61, I/O group 6 index 26, at 0,0
+lamp 56           0              EDDIE RIGHT ORBIT  # lamp 62, I/O group 7 index 30, at 0,0
+lamp 131          0              SPOT RAMP FLASH  # lamp 63, I/O group 6 index 49, at 0,0
+lamp 129          0              DRAGULA FLASH  # lamp 64, I/O group 7 index 3, at 0,0
+lamp 130          0              LILY FLASH  # lamp 65, I/O group 7 index 4, at 0,0
+lamp 134          0              HERMAN FLASH  # lamp 66, I/O group 7 index 5, at 0,0
+lamp 132          0              GRANDPA FLASH  # lamp 67, I/O group 7 index 6, at 0,0
+lamp 133          0              GRANDPA EJECT FLASH  # lamp 68, I/O group 7 index 24, at 0,0
+lamp 135          0              HERMAN SPOTLIGHT FLASH  # lamp 69, I/O group 6 index 48, at 0,0
+lamp 24           0              5X DRAGULA  # lamp 70, I/O group 6 index 30, at 0,0
+lamp 25           0              SUPER JACKPOT  # lamp 71, I/O group 6 index 16, at 0,0
+lamp 60           0              TARGET 1  # lamp 72, I/O group 6 index 25, at 0,0
+lamp 26           0              (D)RAGULA  # lamp 73, I/O group 6 index 17, at 0,0
+lamp 27           0              D(R)AGULA  # lamp 74, I/O group 6 index 18, at 0,0
+lamp 28           0              DR(A)GULA  # lamp 75, I/O group 6 index 19, at 0,0
+lamp 29           0              DRA(G)ULA  # lamp 76, I/O group 6 index 20, at 0,0
+lamp 30           0              DRAG(U)LA  # lamp 77, I/O group 6 index 21, at 0,0
+lamp 31           0              DRAGU(L)A  # lamp 78, I/O group 6 index 22, at 0,0
+lamp 32           0              DRAGUL(A)  # lamp 79, I/O group 6 index 23, at 0,0
+lamp 10           0              LEFT RETURN LANE-LEFT  # lamp 80, I/O group 6 index 32, at 0,0
+lamp 11           0              LEFT RETURN LANE-RIGHT  # lamp 81, I/O group 6 index 33, at 0,0
+lamp 9            0              LEFT OUTLANE  # lamp 82, I/O group 6 index 31, at 0,0
+lamp 107          0              TOPPER MOTOR  # lamp 83, I/O group 8 index 0, at 0,0
+lamp 108          0              TOPPER LIGHT #1  # lamp 84, I/O group 8 index 1, at 0,0
+lamp 109          0              TOPPER LIGHT #2  # lamp 85, I/O group 8 index 2, at 0,0
+lamp 110          0              TOPPER LIGHT #3  # lamp 86, I/O group 8 index 3, at 0,0
+lamp 111          0              TOPPER LIGHT #4  # lamp 87, I/O group 8 index 4, at 0,0
+lamp 112          0              TOPPER LIGHT #5  # lamp 88, I/O group 8 index 5, at 0,0
+lamp 113          0              TOPPER LIGHT #6  # lamp 89, I/O group 8 index 6, at 0,0
+lamp 114          0              TOPPER LIGHT #7  # lamp 90, I/O group 8 index 7, at 0,0
+lamp 115          0              TOPPER LIGHT #8  # lamp 91, I/O group 8 index 8, at 0,0
+lamp 116          0              TOPPER LIGHT #9  # lamp 92, I/O group 8 index 9, at 0,0
+lamp 117          0              TOPPER LIGHT #10  # lamp 93, I/O group 8 index 10, at 0,0
+lamp 118          0              TOPPER LIGHT #11  # lamp 94, I/O group 8 index 11, at 0,0
+lamp 119          0              TOPPER LIGHT #12  # lamp 95, I/O group 8 index 12, at 0,0
+lamp 120          0              TOPPER LIGHT #13  # lamp 96, I/O group 8 index 13, at 0,0
+lamp 121          0              TOPPER LIGHT #14  # lamp 97, I/O group 8 index 14, at 0,0
+lamp 122          0              TOPPER LIGHT #15  # lamp 98, I/O group 8 index 15, at 0,0
+lamp 92           0              LOWER P/F RIGHT ORBIT CIRCLE  # lamp 99, I/O group 7 index 32, at 0,0
+lamp 88           0              LOWER P/F RIGHT RAMP CIRCLE  # lamp 100, I/O group 7 index 39, at 0,0
+lamp 142          0              LOWER P/F MACHINE FLASH (X2)  # lamp 101, I/O group 7 index 40, at 0,0
+lamp 84           0              LOWER P/F VUK CIRCLE  # lamp 102, I/O group 7 index 45, at 0,0
+lamp 77,78,79     0              LOWER P/F LEFT ORBIT ARROW  # lamp 103, I/O group 7 index 46, at 0,0
+lamp 81,82,83     0              LOWER P/F VUK ARROW  # lamp 104, I/O group 7 index 42, at 0,0
+lamp 89,90,91     0              LOWER P/F RIGHT ORBIT ARROW  # lamp 105, I/O group 7 index 33, at 0,0
+lamp 85,86,87     0              LOWER P/F RIGHT RAMP ARROW  # lamp 106, I/O group 7 index 36, at 0,0
+lamp 80           0              LOWER P/F LEFT ORBIT CIRCLE  # lamp 107, I/O group 7 index 49, at 0,0
+lamp 0,99,94      0              LOWER P/F LEFT DIGIT  # lamp 108+114, I/O group 7 index 50, at 0,0
+lamp 97           0              LOWER P/F LEFT DIGIT-E  # lamp 109, I/O group 7 index 51, at 0,0
+lamp 98           0              LOWER P/F LEFT DIGIT-F  # lamp 110, I/O group 7 index 52, at 0,0
+lamp 96           0              LOWER P/F LEFT DIGIT-D  # lamp 111, I/O group 7 index 53, at 0,0
+lamp 93           0              LOWER P/F LEFT DIGIT-A  # lamp 112, I/O group 7 index 54, at 0,0
+lamp 95           0              LOWER P/F LEFT DIGIT-C  # lamp 113, I/O group 7 index 55, at 0,0
+lamp 0,106,101    0              LOWER P/F RIGHT DIGIT  # lamp 115+121, I/O group 7 index 57, at 0,0
+lamp 104          0              LOWER P/F RIGHT DIGIT-E  # lamp 116, I/O group 7 index 58, at 0,0
+lamp 105          0              LOWER P/F RIGHT DIGIT-F  # lamp 117, I/O group 7 index 59, at 0,0
+lamp 103          0              LOWER P/F RIGHT DIGIT-D  # lamp 118, I/O group 7 index 60, at 0,0
+lamp 100          0              LOWER P/F RIGHT DIGIT-A  # lamp 119, I/O group 7 index 61, at 0,0
+lamp 102          0              LOWER P/F RIGHT DIGIT-C  # lamp 120, I/O group 7 index 62, at 0,0

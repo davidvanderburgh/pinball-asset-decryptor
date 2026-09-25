@@ -428,9 +428,10 @@ def test_jaws_greys_what_its_port_cannot_do(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert st["status"] == "Ready to build."
-        for part in ("screen", "lights", "stack"):
+        for part in ("screen", "stack"):
             assert st["dis"][part], part
             assert st["reasons"][part].startswith("Not on this game: "), part
+        assert not st["dis"]["lights"]              # item 164: its inserts, every one in the mode's colour
         assert not st["dis"]["events"]              # item 162: Jaws's events were seen firing
         assert "sound_unheard" not in st["reasons"]            # item 163: Jaws's callouts are heard
         assert not st["dis"]["clip"]
@@ -1365,8 +1366,8 @@ def test_own_sounds_grey_where_no_carriers_were_measured(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert not st["dis"]["own_extra"] and st["own_extra_ok"] is True
-        # a title with no named inserts: "Light the shots that score" is greyed
-        assert st["dis"]["lit_shots"] and "Jaws LE 1.02" in st["reasons"]["lit_shots"]
+        # item 164: Jaws's inserts are proven and 26 of them are tied to its shots
+        assert not st["dis"]["lit_shots"]
     proj = _card_project(tmp_path / "beatles", "beatles-1_29_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)

@@ -357,3 +357,248 @@ event bonus_end      0x28
 event tilt_warning   0xc7
 event tilt           0xc5
 event game_over      0x47
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 231 inserts on the  picture; light table 0x5ca3dc, device table 0x5cfddc, lamp table 0x5a8bac (324 lamps)
+# shot masks: the code that builds the cshot objects was not found
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 390          0              DEATH STAR LASER 1  # lamp 95, I/O group 8 index 40, at 0,0
+lamp 391          0              DEATH STAR LASER 2  # lamp 96, I/O group 8 index 41, at 0,0
+lamp 392          0              DEATH STAR LASER 3  # lamp 97, I/O group 8 index 42, at 0,0
+lamp 393          0              DEATH STAR LASER 4  # lamp 98, I/O group 8 index 43, at 0,0
+lamp 394          0              DEATH STAR LASER CENTER  # lamp 99, I/O group 8 index 44, at 0,0
+lamp 395          0              DEATH STAR LEFT  # lamp 100, I/O group 8 index 47, at 0,0
+lamp 396          0              DEATH STAR CENTER  # lamp 101, I/O group 8 index 48, at 0,0
+lamp 397          0              DEATH STAR RIGHT  # lamp 102, I/O group 8 index 49, at 0,0
+lamp 282,283,284  0              LOCKDOWN BUTTON  # lamp 103, I/O group 5 index 5, at 0,0
+lamp 361,362,363  0              RIGHT EJECT ARROW  # lamp 104, I/O group 8 index 9, at 0,0
+lamp 364,365,366  0              RIGHT EJECT X  # lamp 105, I/O group 8 index 13, at 0,0
+lamp 355,356,357  0              RIGHT ORBIT ARROW  # lamp 106, I/O group 8 index 25, at 0,0
+lamp 349,350,351  0              RIGHT RAMP ARROW  # lamp 107, I/O group 8 index 29, at 0,0
+lamp 358,359,360  0              RIGHT ORBIT X  # lamp 108, I/O group 8 index 34, at 0,0
+lamp 352,353,354  0              RIGHT RAMP X  # lamp 109, I/O group 8 index 37, at 0,0
+lamp 328,329,330  0              INNER LOOP LEFT X  # lamp 110, I/O group 9 index 1, at 0,0
+lamp 319,320,321  0              LEFT ORBIT ARROW  # lamp 111, I/O group 9 index 8, at 0,0
+lamp 322,323,324  0              LEFT ORBIT X  # lamp 112, I/O group 9 index 11, at 0,0
+lamp 325,326,327  0              INNER LOOP LEFT ARROW  # lamp 113, I/O group 9 index 19, at 0,0
+lamp 335,336,337  0              LEFT RAMP X  # lamp 114, I/O group 9 index 22, at 0,0
+lamp 341,342,343  0              INNER LOOP RIGHT ARROW  # lamp 115, I/O group 9 index 26, at 0,0
+lamp 344,345,346  0              INNER LOOP RIGHT X  # lamp 116, I/O group 9 index 29, at 0,0
+lamp 373,374,375  0              XWING 3  # lamp 117, I/O group 9 index 34, at 0,0
+lamp 332,333,334  0              LEFT RAMP ARROW  # lamp 118, I/O group 9 index 37, at 0,0
+lamp 398          0              RIGHT EJECT  # lamp 119, I/O group 8 index 32, at 0,0
+lamp 399          0              LEFT SIDE FL  # lamp 120, I/O group 9 index 15, at 0,0
+lamp 280          0              START BUTTON  # lamp 121, I/O group 5 index 2, at 0,0
+lamp 281          0              TOURNAMENT START  # lamp 122, I/O group 5 index 3, at 0,0
+lamp 312          0              SHOOT AGAIN  # lamp 123, I/O group 7 index 3, at 0,0
+lamp 402          0              LEFT SLING FL  # lamp 124, I/O group 7 index 4, at 0,0
+lamp 403          0              RIGHT SLING FL  # lamp 125, I/O group 7 index 5, at 0,0
+lamp 298          0              TATOOINE MINI  # lamp 126, I/O group 7 index 16, at 0,0
+lamp 301          0              TATOOINE THREE  # lamp 127, I/O group 7 index 19, at 0,0
+lamp 300          0              TATOOINE TWO  # lamp 128, I/O group 7 index 18, at 0,0
+lamp 299          0              TATOOINE ONE  # lamp 129, I/O group 7 index 17, at 0,0
+lamp 308          0              LUKE  # lamp 130, I/O group 7 index 12, at 0,0
+lamp 309          0              R2D2  # lamp 131, I/O group 7 index 13, at 0,0
+lamp 310          0              LEIA  # lamp 132, I/O group 7 index 14, at 0,0
+lamp 311          0              HAN  # lamp 133, I/O group 7 index 15, at 0,0
+lamp 302          0              ENDOR MINI  # lamp 134, I/O group 7 index 8, at 0,0
+lamp 303          0              ENDOR ONE  # lamp 135, I/O group 7 index 11, at 0,0
+lamp 304          0              ENDOR TWO  # lamp 136, I/O group 7 index 10, at 0,0
+lamp 305          0              ENDOR THREE  # lamp 137, I/O group 7 index 9, at 0,0
+lamp 306          0              JEDI  # lamp 138, I/O group 7 index 38, at 0,0
+lamp 289          0              SKILL SHOT  # lamp 139, I/O group 7 index 21, at 0,0
+lamp 288          0              RIGHT OUTLANE  # lamp 140, I/O group 7 index 22, at 0,0
+lamp 287          0              RIGHT RETURNLANE  # lamp 141, I/O group 7 index 23, at 0,0
+lamp 294          0              DEATHSTAR MINI  # lamp 142, I/O group 7 index 24, at 0,0
+lamp 295          0              DEATHSTAR ONE  # lamp 143, I/O group 7 index 25, at 0,0
+lamp 296          0              DEATHSTAR TWO  # lamp 144, I/O group 7 index 26, at 0,0
+lamp 297          0              DEATHSTAR THREE  # lamp 145, I/O group 7 index 27, at 0,0
+lamp 290          0              HOTH MINI  # lamp 146, I/O group 7 index 32, at 0,0
+lamp 291          0              HOTH ONE  # lamp 147, I/O group 7 index 33, at 0,0
+lamp 292          0              HOTH TWO  # lamp 148, I/O group 7 index 34, at 0,0
+lamp 293          0              HOTH THREE  # lamp 149, I/O group 7 index 35, at 0,0
+lamp 285          0              LEFT OUTLANE  # lamp 150, I/O group 7 index 36, at 0,0
+lamp 286          0              LEFT RETURNLANE  # lamp 151, I/O group 7 index 37, at 0,0
+lamp 307          0              VICTORY MULTI-BALL  # lamp 152, I/O group 7 index 20, at 0,0
+lamp 339          0              SUPER JACKPOT  # lamp 153, I/O group 7 index 40, at 0,0
+lamp 340          0              ENDOR  # lamp 154, I/O group 7 index 41, at 0,0
+lamp 317          0              FORC(E)  # lamp 155, I/O group 7 index 42, at 0,0
+lamp 316          0              FOR(C)E  # lamp 156, I/O group 7 index 43, at 0,0
+lamp 315          0              FO(R)CE  # lamp 157, I/O group 7 index 44, at 0,0
+lamp 314          0              F(O)RCE  # lamp 158, I/O group 7 index 45, at 0,0
+lamp 313          0              (F)ORCE  # lamp 159, I/O group 7 index 46, at 0,0
+lamp 318          0              LIGHT SABER DUEL  # lamp 160, I/O group 7 index 47, at 0,0
+lamp 382          0              XWING 8  # lamp 161, I/O group 8 index 8, at 0,0
+lamp 381          0              MINI 4  # lamp 162, I/O group 8 index 12, at 0,0
+lamp 383          0              MINI 5  # lamp 163, I/O group 8 index 16, at 0,0
+lamp 368          0              TATOOINE  # lamp 164, I/O group 8 index 17, at 0,0
+lamp 367          0              MYSTERY  # lamp 165, I/O group 8 index 18, at 0,0
+lamp 384          0              XWING 9  # lamp 166, I/O group 8 index 19, at 0,0
+lamp 379          0              MINI 3  # lamp 167, I/O group 8 index 24, at 0,0
+lamp 380          0              XWING 7  # lamp 168, I/O group 8 index 28, at 0,0
+lamp 331          0              DEATH STAR  # lamp 169, I/O group 9 index 0, at 0,0
+lamp 369          0              MINI 1  # lamp 170, I/O group 9 index 4, at 0,0
+lamp 370          0              XWING 1  # lamp 171, I/O group 9 index 5, at 0,0
+lamp 404          0              MILLENNIUM FALCON FL  # lamp 172, I/O group 9 index 6, at 0,0
+lamp 400          0              SPINNER FL  # lamp 173, I/O group 9 index 14, at 0,0
+lamp 338          0              EXTRA BALL  # lamp 174, I/O group 9 index 16, at 0,0
+lamp 372          0              XWING 2  # lamp 175, I/O group 9 index 17, at 0,0
+lamp 371          0              MINI 2  # lamp 176, I/O group 9 index 18, at 0,0
+lamp 347          0              VIDEO MODE  # lamp 177, I/O group 9 index 25, at 0,0
+lamp 348          0              HOTH  # lamp 178, I/O group 9 index 32, at 0,0
+lamp 376          0              XWING 4  # lamp 179, I/O group 9 index 33, at 0,0
+lamp 378          0              XWING 6  # lamp 180, I/O group 9 index 44, at 0,0
+lamp 377          0              XWING 5  # lamp 181, I/O group 9 index 45, at 0,0
+lamp 385          0              TOPLANE LEFT  # lamp 182, I/O group 9 index 46, at 0,0
+lamp 386          0              TOPLANE CENTER  # lamp 183, I/O group 9 index 47, at 0,0
+lamp 387          0              TOPLANE RIGHT  # lamp 184, I/O group 9 index 48, at 0,0
+lamp 388          0              LEFT POP BUMPER  # lamp 185, I/O group 9 index 49, at 0,0
+lamp 389          0              RIGHT POP BUMPER  # lamp 186, I/O group 9 index 50, at 0,0
+lamp 401          0              POPS FL  # lamp 187, I/O group 9 index 51, at 0,0
+lamp 408          0              RIGHT TIE FIGHTER FL  # lamp 188, I/O group 9 index 43, at 0,0
+lamp 405          0              LEFT DEATH STAR FL  # lamp 189, I/O group 9 index 40, at 0,0
+lamp 406          0              LEFT TIE FIGHTER FL  # lamp 190, I/O group 9 index 41, at 0,0
+lamp 407          0              RIGHT DEATH STAR FL  # lamp 191, I/O group 9 index 42, at 0,0
+lamp 410          0              LEFT RED GI  # lamp 192, I/O group 7 index 0, at 0,0
+lamp 412          0              LEFT BLUE GI  # lamp 193, I/O group 7 index 2, at 0,0
+lamp 411          0              LEFT WHITE GI  # lamp 194, I/O group 7 index 1, at 0,0
+lamp 413          0              RIGHT RED GI  # lamp 195, I/O group 8 index 0, at 0,0
+lamp 415          0              RIGHT BLUE GI  # lamp 196, I/O group 8 index 2, at 0,0
+lamp 414          0              RIGHT WHITE GI  # lamp 197, I/O group 8 index 1, at 0,0
+lamp 409          0              COIN DOOR GI  # lamp 198, I/O group 5 index 1, at 0,0
+lamp 422          0              LEFT R2D2  # lamp 199, I/O group 11 index 1, at 0,0
+lamp 423          0              CENTER R2D2  # lamp 200, I/O group 11 index 2, at 0,0
+lamp 424          0              RIGHT R2D2  # lamp 201, I/O group 11 index 3, at 0,0
+lamp 425          0              R2D2 Left GI Flash 1  # lamp 202, I/O group 11 index 4, at 0,0
+lamp 426          0              R2D2 Left GI Flash 1  # lamp 203, I/O group 11 index 5, at 0,0
+lamp 427          0              R2D2 Right GI Flash 1  # lamp 204, I/O group 11 index 6, at 0,0
+lamp 428          0              R2D2 Right GI Flash 1  # lamp 205, I/O group 11 index 7, at 0,0
+lamp 429,430,431  0              SPEAKER 1  # lamp 206, I/O group 6 index 1, at 0,0
+lamp 432,433,434  0              SPEAKER 2  # lamp 207, I/O group 6 index 4, at 0,0
+lamp 435,436,437  0              SPEAKER 3  # lamp 208, I/O group 6 index 7, at 0,0
+lamp 438,439,440  0              SPEAKER 4  # lamp 209, I/O group 6 index 10, at 0,0
+lamp 441,442,443  0              SPEAKER 5  # lamp 210, I/O group 6 index 13, at 0,0
+lamp 444,445,446  0              SPEAKER 6  # lamp 211, I/O group 6 index 16, at 0,0
+lamp 447,448,449  0              SPEAKER 7  # lamp 212, I/O group 6 index 19, at 0,0
+lamp 450,451,452  0              SPEAKER 8  # lamp 213, I/O group 6 index 22, at 0,0
+lamp 453,454,455  0              SPEAKER 9  # lamp 214, I/O group 6 index 25, at 0,0
+lamp 456,457,458  0              SPEAKER 10  # lamp 215, I/O group 6 index 28, at 0,0
+lamp 459,460,461  0              SPEAKER 11  # lamp 216, I/O group 6 index 31, at 0,0
+lamp 462,463,464  0              SPEAKER 12  # lamp 217, I/O group 6 index 34, at 0,0
+lamp 465,466,467  0              SPEAKER 13  # lamp 218, I/O group 6 index 37, at 0,0
+lamp 468,469,470  0              SPEAKER 14  # lamp 219, I/O group 6 index 40, at 0,0
+lamp 471,472,473  0              SPEAKER 15  # lamp 220, I/O group 6 index 43, at 0,0
+lamp 474,475,476  0              SPEAKER 16  # lamp 221, I/O group 6 index 46, at 0,0
+lamp 477,478,479  0              SPEAKER 17  # lamp 222, I/O group 6 index 49, at 0,0
+lamp 480,481,482  0              SPEAKER 18  # lamp 223, I/O group 6 index 52, at 0,0
+lamp 483,484,485  0              SPEAKER 19  # lamp 224, I/O group 6 index 55, at 0,0
+lamp 486,487,488  0              SPEAKER 20  # lamp 225, I/O group 6 index 58, at 0,0
+lamp 489,490,491  0              SPEAKER 21  # lamp 226, I/O group 6 index 61, at 0,0
+lamp 492,493,494  0              SPEAKER 22  # lamp 227, I/O group 6 index 64, at 0,0
+lamp 495,496,497  0              SPEAKER 23  # lamp 228, I/O group 6 index 67, at 0,0
+lamp 681,682,683  0              TOPPER CENTER PANEL 1  # lamp 229, I/O group 13 index 1, at 0,0
+lamp 684,685,686  0              TOPPER CENTER PANEL 2  # lamp 230, I/O group 13 index 4, at 0,0
+lamp 687,688,689  0              TOPPER CENTER PANEL 3  # lamp 231, I/O group 13 index 7, at 0,0
+lamp 690,691,692  0              TOPPER CENTER PANEL 4  # lamp 232, I/O group 13 index 10, at 0,0
+lamp 693,694,695  0              TOPPER CENTER PANEL 5  # lamp 233, I/O group 13 index 13, at 0,0
+lamp 696,697,698  0              TOPPER CENTER PANEL 6  # lamp 234, I/O group 13 index 16, at 0,0
+lamp 699,700,701  0              TOPPER CENTER PANEL 7  # lamp 235, I/O group 13 index 19, at 0,0
+lamp 702,703,704  0              TOPPER CENTER PANEL 8  # lamp 236, I/O group 13 index 22, at 0,0
+lamp 705,706,707  0              TOPPER CENTER PANEL 9  # lamp 237, I/O group 13 index 25, at 0,0
+lamp 708,709,710  0              TOPPER CENTER PANEL 10  # lamp 238, I/O group 13 index 28, at 0,0
+lamp 711,712,713  0              TOPPER CENTER PANEL 11  # lamp 239, I/O group 13 index 31, at 0,0
+lamp 714,715,716  0              TOPPER CENTER PANEL 12  # lamp 240, I/O group 13 index 34, at 0,0
+lamp 717,718,719  0              TOPPER CENTER PANEL 13  # lamp 241, I/O group 13 index 37, at 0,0
+lamp 720,721,722  0              TOPPER CENTER PANEL 14  # lamp 242, I/O group 13 index 40, at 0,0
+lamp 723,724,725  0              TOPPER CENTER PANEL 15  # lamp 243, I/O group 13 index 43, at 0,0
+lamp 726,727,728  0              TOPPER CENTER PANEL 16  # lamp 244, I/O group 13 index 46, at 0,0
+lamp 729,730,731  0              TOPPER CENTER PANEL 17  # lamp 245, I/O group 13 index 49, at 0,0
+lamp 630,631,632  0              TOPPER LEFT PANEL 1  # lamp 246, I/O group 13 index 52, at 0,0
+lamp 633,634,635  0              TOPPER LEFT PANEL 2  # lamp 247, I/O group 13 index 55, at 0,0
+lamp 636,637,638  0              TOPPER LEFT PANEL 3  # lamp 248, I/O group 13 index 58, at 0,0
+lamp 639,640,641  0              TOPPER LEFT PANEL 4  # lamp 249, I/O group 13 index 61, at 0,0
+lamp 642,643,644  0              TOPPER LEFT PANEL 5  # lamp 250, I/O group 13 index 64, at 0,0
+lamp 645,646,647  0              TOPPER LEFT PANEL 6  # lamp 251, I/O group 13 index 67, at 0,0
+lamp 648,649,650  0              TOPPER LEFT PANEL 7  # lamp 252, I/O group 13 index 70, at 0,0
+lamp 651,652,653  0              TOPPER LEFT PANEL 8  # lamp 253, I/O group 13 index 73, at 0,0
+lamp 654,655,656  0              TOPPER LEFT PANEL 9  # lamp 254, I/O group 13 index 76, at 0,0
+lamp 657,658,659  0              TOPPER LEFT PANEL 10  # lamp 255, I/O group 13 index 79, at 0,0
+lamp 660,661,662  0              TOPPER LEFT PANEL 11  # lamp 256, I/O group 13 index 82, at 0,0
+lamp 663,664,665  0              TOPPER LEFT PANEL 12  # lamp 257, I/O group 13 index 85, at 0,0
+lamp 666,667,668  0              TOPPER LEFT PANEL 13  # lamp 258, I/O group 13 index 88, at 0,0
+lamp 669,670,671  0              TOPPER LEFT PANEL 14  # lamp 259, I/O group 13 index 91, at 0,0
+lamp 672,673,674  0              TOPPER LEFT PANEL 15  # lamp 260, I/O group 13 index 94, at 0,0
+lamp 675,676,677  0              TOPPER LEFT PANEL 16  # lamp 261, I/O group 13 index 97, at 0,0
+lamp 678,679,680  0              TOPPER LEFT PANEL 17  # lamp 262, I/O group 13 index 100, at 0,0
+lamp 501,502,503  0              TOPPER FRONT PANEL 1  # lamp 263, I/O group 13 index 103, at 0,0
+lamp 504,505,506  0              TOPPER FRONT PANEL 2  # lamp 264, I/O group 13 index 106, at 0,0
+lamp 507,508,509  0              TOPPER FRONT PANEL 3  # lamp 265, I/O group 13 index 109, at 0,0
+lamp 510,511,512  0              TOPPER FRONT PANEL 4  # lamp 266, I/O group 13 index 112, at 0,0
+lamp 513,514,515  0              TOPPER FRONT PANEL 5  # lamp 267, I/O group 13 index 115, at 0,0
+lamp 516,517,518  0              TOPPER FRONT PANEL 6  # lamp 268, I/O group 13 index 118, at 0,0
+lamp 519,520,521  0              TOPPER FRONT PANEL 7  # lamp 269, I/O group 13 index 121, at 0,0
+lamp 522,523,524  0              TOPPER FRONT PANEL 8  # lamp 270, I/O group 13 index 124, at 0,0
+lamp 525,526,527  0              TOPPER FRONT PANEL 9  # lamp 271, I/O group 13 index 127, at 0,0
+lamp 528,529,530  0              TOPPER FRONT PANEL 10  # lamp 272, I/O group 13 index 130, at 0,0
+lamp 531,532,533  0              TOPPER FRONT PANEL 11  # lamp 273, I/O group 13 index 133, at 0,0
+lamp 534,535,536  0              TOPPER FRONT PANEL 12  # lamp 274, I/O group 13 index 136, at 0,0
+lamp 537,538,539  0              TOPPER FRONT PANEL 13  # lamp 275, I/O group 13 index 139, at 0,0
+lamp 540,541,542  0              TOPPER FRONT PANEL 14  # lamp 276, I/O group 13 index 142, at 0,0
+lamp 543,544,545  0              TOPPER FRONT PANEL 15  # lamp 277, I/O group 13 index 145, at 0,0
+lamp 546,547,548  0              TOPPER FRONT PANEL 16  # lamp 278, I/O group 13 index 148, at 0,0
+lamp 549,550,551  0              TOPPER FRONT PANEL 17  # lamp 279, I/O group 13 index 151, at 0,0
+lamp 552,553,554  0              TOPPER FRONT PANEL 18  # lamp 280, I/O group 13 index 154, at 0,0
+lamp 555,556,557  0              TOPPER FRONT PANEL 19  # lamp 281, I/O group 13 index 157, at 0,0
+lamp 558,559,560  0              TOPPER FRONT PANEL 20  # lamp 282, I/O group 13 index 160, at 0,0
+lamp 561,562,563  0              TOPPER FRONT PANEL 21  # lamp 283, I/O group 13 index 163, at 0,0
+lamp 564,565,566  0              TOPPER FRONT PANEL 22  # lamp 284, I/O group 13 index 166, at 0,0
+lamp 567,568,569  0              TOPPER FRONT PANEL 23  # lamp 285, I/O group 13 index 169, at 0,0
+lamp 570,571,572  0              TOPPER FRONT PANEL 24  # lamp 286, I/O group 13 index 172, at 0,0
+lamp 573,574,575  0              TOPPER FRONT PANEL 25  # lamp 287, I/O group 13 index 175, at 0,0
+lamp 576,577,578  0              TOPPER TOPPER LOWER LEFT 1-1A  # lamp 288, I/O group 13 index 178, at 0,0
+lamp 579,580,581  0              TOPPER TOPPER LOWER LEFT 1-1B  # lamp 289, I/O group 13 index 181, at 0,0
+lamp 582,583,584  0              TOPPER TOPPER LOWER LEFT 2-1A  # lamp 290, I/O group 13 index 184, at 0,0
+lamp 585,586,587  0              TOPPER TOPPER LOWER LEFT 2-1B  # lamp 291, I/O group 13 index 187, at 0,0
+lamp 588,589,590  0              TOPPER TOPPER LOWER LEFT 3-1A  # lamp 292, I/O group 13 index 190, at 0,0
+lamp 591,592,593  0              TOPPER TOPPER LOWER LEFT 3-1B  # lamp 293, I/O group 13 index 193, at 0,0
+lamp 594,595,596  0              TOPPER LEFT EYE 1A  # lamp 294, I/O group 13 index 196, at 0,0
+lamp 597,598,599  0              TOPPER LEFT EYE 1B  # lamp 295, I/O group 13 index 199, at 0,0
+lamp 600,601,602  0              TOPPER LEFT EYE 1C  # lamp 296, I/O group 13 index 202, at 0,0
+lamp 603,604,605  0              TOPPER RIGHT EYE 1A  # lamp 297, I/O group 13 index 205, at 0,0
+lamp 606,607,608  0              TOPPER RIGHT EYE 1B  # lamp 298, I/O group 13 index 208, at 0,0
+lamp 609,610,611  0              TOPPER RIGHT EYE 1C  # lamp 299, I/O group 13 index 211, at 0,0
+lamp 732,733,734  0              TOPPER RIGHT PANEL 1  # lamp 300, I/O group 13 index 214, at 0,0
+lamp 735,736,737  0              TOPPER RIGHT PANEL 2  # lamp 301, I/O group 13 index 217, at 0,0
+lamp 738,739,740  0              TOPPER RIGHT PANEL 3  # lamp 302, I/O group 13 index 220, at 0,0
+lamp 741,742,743  0              TOPPER RIGHT PANEL 4  # lamp 303, I/O group 13 index 223, at 0,0
+lamp 744,745,746  0              TOPPER RIGHT PANEL 5  # lamp 304, I/O group 13 index 226, at 0,0
+lamp 747,748,749  0              TOPPER RIGHT PANEL 6  # lamp 305, I/O group 13 index 229, at 0,0
+lamp 750,751,752  0              TOPPER RIGHT PANEL 7  # lamp 306, I/O group 13 index 232, at 0,0
+lamp 753,754,755  0              TOPPER RIGHT PANEL 8  # lamp 307, I/O group 13 index 235, at 0,0
+lamp 756,757,758  0              TOPPER RIGHT PANEL 9  # lamp 308, I/O group 13 index 238, at 0,0
+lamp 759,760,761  0              TOPPER RIGHT PANEL 10  # lamp 309, I/O group 13 index 241, at 0,0
+lamp 762,763,764  0              TOPPER RIGHT PANEL 11  # lamp 310, I/O group 13 index 244, at 0,0
+lamp 765,766,767  0              TOPPER RIGHT PANEL 12  # lamp 311, I/O group 13 index 247, at 0,0
+lamp 768,769,770  0              TOPPER RIGHT PANEL 13  # lamp 312, I/O group 13 index 250, at 0,0
+lamp 771,772,773  0              TOPPER RIGHT PANEL 14  # lamp 313, I/O group 13 index 253, at 0,0
+lamp 774,775,776  0              TOPPER RIGHT PANEL 15  # lamp 314, I/O group 13 index 256, at 0,0
+lamp 777,778,779  0              TOPPER RIGHT PANEL 16  # lamp 315, I/O group 13 index 259, at 0,0
+lamp 780,781,782  0              TOPPER RIGHT PANEL 17  # lamp 316, I/O group 13 index 262, at 0,0
+lamp 612,613,614  0              TOPPER LOWER RIGHT 1-1A  # lamp 317, I/O group 13 index 265, at 0,0
+lamp 615,616,617  0              TOPPER LOWER RIGHT 1-1B  # lamp 318, I/O group 13 index 268, at 0,0
+lamp 618,619,620  0              TOPPER LOWER RIGHT 2-1A  # lamp 319, I/O group 13 index 271, at 0,0
+lamp 621,622,623  0              TOPPER LOWER RIGHT 2-1B  # lamp 320, I/O group 13 index 274, at 0,0
+lamp 624,625,626  0              TOPPER LOWER RIGHT 3-1A  # lamp 321, I/O group 13 index 277, at 0,0
+lamp 627,628,629  0              TOPPER LOWER RIGHT 3-1B  # lamp 322, I/O group 13 index 280, at 0,0
+lamp 783,784,785  0              TOPPER RIGHT SCREEN  # lamp 323, I/O group 13 index 283, at 0,0

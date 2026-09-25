@@ -168,6 +168,7 @@ def _read_lights(elf, light_tab, dev_tab, limit=2000):
 
 def _read_lamps(elf, lamp_tab, count):
     lamps = []
+    unknown = 0
     for i in range(count):
         o = elf.off(lamp_tab + 8 * i)
         if o is None:
@@ -175,7 +176,11 @@ def _read_lamps(elf, lamp_tab, count):
         p, kind = struct.unpack_from("<II", elf.b, o)
         n = KIND_LIGHTS.get(kind, 0)
         if i and not n:
-            return None
+            # a kind this reader does not know (Deadpool Pro 1.16, TMNT Pro 1.59: kind 6, whose
+            # words are no light list) is left without lights; many of them = not a lamp table
+            unknown += 1
+            if unknown > max(2, count // 20):
+                return None
         po = elf.off(p) if p else None
         ids = list(struct.unpack_from("<%dH" % n, elf.b, po)) if n and po is not None else []
         lamps.append(dict(lamp=i, kind=kind, lights=ids))
@@ -183,12 +188,12 @@ def _read_lamps(elf, lamp_tab, count):
 
 
 def _suffix(name):
-    m = re.search(r"-([RGB])$", name or "")
+    m = re.search(r"\s*-\s*([RGB])$", name or "")      # "LEFT RAMP-R"; Venom: "TOPPER BIKE - R"
     return m.group(1) if m else None
 
 
 def _stem(name):
-    return re.sub(r"-[RGB]$", "", name or "").strip()
+    return re.sub(r"\s*-\s*[RGB]$", "", name or "").strip()
 
 
 def find_tables(elf):
@@ -224,6 +229,12 @@ def find_tables(elf):
             if sorted(_suffix(n) or "" for n in names) == ["B", "G", "R"] and len({_stem(n) for n in names}) == 1:
                 good += 1
         if rgb and good >= 0.9 * len(rgb):
+            return dict(light_tab=lt, dev_tab=dt, lamp_tab=tab, lamp_count=cnt, lights=lights, lamps=lamps)
+        # a title whose inserts are all one colour each (Star Wars ELG 1.10): no RGB lamp to check,
+        # so its single lamps must name LED lights instead
+        mono = [l for l in lamps if len(l["lights"]) == 1]
+        named = sum(1 for l in mono if 0 < l["lights"][0] < len(lights) and lights[l["lights"][0]]["cls"] == 3)
+        if not rgb and len(mono) >= 20 and named >= 0.9 * len(mono):
             return dict(light_tab=lt, dev_tab=dt, lamp_tab=tab, lamp_count=cnt, lights=lights, lamps=lamps)
     raise SystemExit("%s: no lamp table whose RGB lamps are one fixture's -R, -G, -B" % elf.path)
 
@@ -334,10 +345,35 @@ def shot_lamps(elf):
 
 
 # ---- output ---------------------------------------------------------------------------------
-def inserts(elf, image="playfield"):
+_NOT_PLAYFIELD = ("system/", "topper", "backpanel", "back_panel", "speaker", "cabinet", "front", "backbox")
+
+
+def playfield_image(t):
+    """The picture a title draws its playfield inserts on: Godzilla's is "playfield", but each
+    title names its own ("Test/beatles_playfield", "TestMode/Rodeo_LE_Service_Playfield_...").
+    The picture whose name says playfield with the most lights; else the busiest picture that
+    is not the cabinet, the speaker panel, a topper or a back panel; else "" (Deadpool LE draws
+    its playfield lights on no picture)."""
+    count = {}
+    for d in t["lights"]:
+        if d:
+            count[d["image"]] = count.get(d["image"], 0) + 1
+    named = [i for i in count if "playfield" in i.lower()]
+    if named:
+        return max(named, key=lambda i: count[i])
+    rest = [i for i in count if i and not any(w in i.lower() for w in _NOT_PLAYFIELD)]
+    if rest:
+        return max(rest, key=lambda i: count[i])
+    return ""
+
+
+def inserts(elf, image=None):
     """[{lamp, name, lights (R,G,B order), shot mask, group, index, x, y}] for every lamp drawn
-    on `image`, plus how the shot masks were found."""
+    on `image` (None: the title's playfield picture, :func:`playfield_image`), plus how the
+    shot masks were found."""
     t = find_tables(elf)
+    if image is None:
+        image = playfield_image(t)
     lights, lamps = t["lights"], t["lamps"]
     bits, how = shot_lamps(elf)
     by_lamp = {}
@@ -389,8 +425,10 @@ def lamp_line(ins):
         ins["name"], "+".join(map(str, ins["lamps"])), ins["group"], ins["index"], ins["x"], ins["y"])
 
 
-def port_lines(elf, image="playfield"):
+def port_lines(elf, image=None):
     ins, how, t = inserts(elf, image)
+    if image is None:
+        image = playfield_image(t)
     lines = ["# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----",
              "# %d inserts on the %s picture; light table 0x%x, device table 0x%x, lamp table 0x%x (%d lamps)"
              % (len(ins), image, t["light_tab"], t["dev_tab"], t["lamp_tab"], t["lamp_count"]),

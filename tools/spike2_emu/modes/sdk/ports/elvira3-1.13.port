@@ -335,3 +335,167 @@ event ball_start     0x25
 event ball_end       0x34
 event bonus_start    0x27
 event bonus_end      0x28
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 150 inserts on the  picture; light table 0x83d8e0, device table 0x841d7c, lamp table 0x81f98c (243 lamps)
+# shot masks: no class cshot in this program
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 280          0              START BUTTON  # lamp 95, I/O group 5 index 2, at 0,0
+lamp 281          0              TOURNAMENT START BUTTON  # lamp 96, I/O group 5 index 3, at 0,0
+lamp 282,283,284  0              LOCKDOWN BUTTON  # lamp 97, I/O group 5 index 5, at 0,0
+lamp 285          0              LEFT OUTLANE  # lamp 98, I/O group 7 index 50, at 0,0
+lamp 286          0              LEFT RETURN LANE  # lamp 99, I/O group 7 index 51, at 0,0
+lamp 287          0              RIGHT RETURN LANE  # lamp 100, I/O group 7 index 62, at 0,0
+lamp 288          0              RIGHT OUTLANE  # lamp 101, I/O group 7 index 63, at 0,0
+lamp 289          0              DIRECTOR'S CUT  # lamp 102, I/O group 7 index 49, at 0,0
+lamp 290          0              SHOOT AGAIN  # lamp 103, I/O group 7 index 60, at 0,0
+lamp 291          0              "B" LEVEL 1  # lamp 104, I/O group 7 index 56, at 0,0
+lamp 292          0              "B" LEVEL 2  # lamp 105, I/O group 7 index 57, at 0,0
+lamp 293          0              "B" LEVEL 3  # lamp 106, I/O group 7 index 58, at 0,0
+lamp 294          0              "B" LEVEL 4  # lamp 107, I/O group 7 index 59, at 0,0
+lamp 295          0              PHASE 1  # lamp 108, I/O group 7 index 53, at 0,0
+lamp 296          0              PHASE 2  # lamp 109, I/O group 7 index 54, at 0,0
+lamp 297          0              PHASE 3  # lamp 110, I/O group 7 index 55, at 0,0
+lamp 298          0              2X PLAYFIELD  # lamp 111, I/O group 7 index 52, at 0,0
+lamp 299          0              4X PLAYFIELD  # lamp 112, I/O group 7 index 61, at 0,0
+lamp 300          0              LEFT 3-BANK BOT.  # lamp 113, I/O group 8 index 26, at 0,0
+lamp 301          0              LEFT 3-BANK MID.  # lamp 114, I/O group 8 index 25, at 0,0
+lamp 302          0              LEFT 3-BANK TOP  # lamp 115, I/O group 8 index 24, at 0,0
+lamp 303          0              JUNK 1  # lamp 116, I/O group 8 index 27, at 0,0
+lamp 304          0              JUNK 2  # lamp 117, I/O group 8 index 28, at 0,0
+lamp 305          0              JUNK 3  # lamp 118, I/O group 8 index 29, at 0,0
+lamp 306          0              JUNK 4  # lamp 119, I/O group 8 index 30, at 0,0
+lamp 307          0              JUNK 5  # lamp 120, I/O group 8 index 31, at 0,0
+lamp 308          0              RUN FOR YOUR LIFE  # lamp 121, I/O group 7 index 9, at 0,0
+lamp 309          0              SCREAM TEST  # lamp 122, I/O group 7 index 10, at 0,0
+lamp 310          0              MAKEOUT MAYHEM  # lamp 123, I/O group 7 index 11, at 0,0
+lamp 311          0              DANCE FEVER  # lamp 124, I/O group 7 index 12, at 0,0
+lamp 312          0              POOL PARTY  # lamp 125, I/O group 7 index 13, at 0,0
+lamp 313          0              GARG-OIL-GAUGE 1  # lamp 126, I/O group 7 index 20, at 0,0
+lamp 314          0              GARG-OIL-GAUGE 2  # lamp 127, I/O group 7 index 19, at 0,0
+lamp 315          0              GARG-OIL-GAUGE 3  # lamp 128, I/O group 7 index 18, at 0,0
+lamp 316          0              GARG-OIL-GAUGE 4  # lamp 129, I/O group 7 index 17, at 0,0
+lamp 317          0              RIGHT 3-BANK BOT.  # lamp 130, I/O group 7 index 44, at 0,0
+lamp 318          0              RIGHT 3-BANK MID.  # lamp 131, I/O group 7 index 42, at 0,0
+lamp 319          0              RIGHT 3-BANK TOP  # lamp 132, I/O group 7 index 41, at 0,0
+lamp 320,321,322  0              LEFT LOOP ARROW  # lamp 133, I/O group 8 index 13, at 0,0
+lamp 323          0              LEFT LOOP JACKPOT  # lamp 134, I/O group 8 index 9, at 0,0
+lamp 324          0              LEFT LOOP 1  # lamp 135, I/O group 8 index 8, at 0,0
+lamp 325          0              LEFT LOOP 2  # lamp 136, I/O group 8 index 23, at 0,0
+lamp 326,327,328  0              LEFT RAMP ARROW  # lamp 137, I/O group 8 index 20, at 0,0
+lamp 329          0              LEFT RAMP JACKPOT  # lamp 138, I/O group 8 index 19, at 0,0
+lamp 330          0              LEFT RAMP 1  # lamp 139, I/O group 8 index 18, at 0,0
+lamp 331          0              LEFT RAMP 2  # lamp 140, I/O group 8 index 17, at 0,0
+lamp 332          0              LEFT RAMP TRAILER  # lamp 141, I/O group 8 index 16, at 0,0
+lamp 333,334,335  0              DROP TARGET ARROW  # lamp 142, I/O group 8 index 33, at 0,0
+lamp 336          0              ATTIC ATTACK MULTIBALL  # lamp 143, I/O group 8 index 36, at 0,0
+lamp 337          0              ADD-A-ZOMBIE MULTIBALL  # lamp 144, I/O group 8 index 37, at 0,0
+lamp 338          0              WILD WOMEN MULTIBALL  # lamp 145, I/O group 8 index 38, at 0,0
+lamp 339          0              HOUSE TARGET LEFT  # lamp 146, I/O group 8 index 32, at 0,0
+lamp 340          0              HOUSE TARGET RIGHT  # lamp 147, I/O group 8 index 46, at 0,0
+lamp 341,342,343  0              HOUSE ARROW  # lamp 148, I/O group 8 index 39, at 0,0
+lamp 344          0              HOUSE JACKPOT  # lamp 149, I/O group 8 index 42, at 0,0
+lamp 345          0              EXTRA BALL  # lamp 150, I/O group 8 index 43, at 0,0
+lamp 346          0              HOUSE 1  # lamp 151, I/O group 8 index 44, at 0,0
+lamp 347          0              HOUSE 2  # lamp 152, I/O group 8 index 45, at 0,0
+lamp 348          0              FOR SALE/WILD MARKET VALUE  # lamp 153, I/O group 8 index 47, at 0,0
+lamp 349          0              LEFT TOP LANE  # lamp 154, I/O group 8 index 56, at 0,0
+lamp 350          0              RIGHT TOP LANE  # lamp 155, I/O group 8 index 57, at 0,0
+lamp 351,352,353  0              RIGHT RAMP ARROW  # lamp 156, I/O group 8 index 53, at 0,0
+lamp 354          0              RIGHT RAMP JACKPOT  # lamp 157, I/O group 7 index 22, at 0,0
+lamp 355          0              RIGHT RAMP 1  # lamp 158, I/O group 7 index 21, at 0,0
+lamp 356          0              RIGHT RAMP TRAILER  # lamp 159, I/O group 7 index 14, at 0,0
+lamp 357          0              CRYPT TARGET LEFT  # lamp 160, I/O group 7 index 23, at 0,0
+lamp 358          0              CRYPT TARGET RIGHT  # lamp 161, I/O group 7 index 48, at 0,0
+lamp 359,360,361  0              CRYPT ARROW  # lamp 162, I/O group 7 index 45, at 0,0
+lamp 362          0              CRYPT JACKPOT  # lamp 163, I/O group 7 index 15, at 0,0
+lamp 363          0              CRYPT 1  # lamp 164, I/O group 7 index 16, at 0,0
+lamp 364,365,366  0              RIGHT LOOP ARROW  # lamp 165, I/O group 7 index 33, at 0,0
+lamp 367          0              RIGHT LOOP JACKPOT  # lamp 166, I/O group 7 index 36, at 0,0
+lamp 368          0              RIGHT LOOP 1  # lamp 167, I/O group 7 index 37, at 0,0
+lamp 369          0              RIGHT LOOP 2  # lamp 168, I/O group 7 index 38, at 0,0
+lamp 370          0              HOUSE WINDOW 1  # lamp 169, I/O group 7 index 24, at 0,0
+lamp 371          0              HOUSE WINDOW 2  # lamp 170, I/O group 7 index 25, at 0,0
+lamp 372          0              HOUSE WINDOW 3  # lamp 171, I/O group 7 index 26, at 0,0
+lamp 373          0              HOUSE WINDOW 4  # lamp 172, I/O group 7 index 27, at 0,0
+lamp 374          0              HOUSE WINDOW 5  # lamp 173, I/O group 7 index 28, at 0,0
+lamp 375          0              HOUSE WINDOW 6  # lamp 174, I/O group 7 index 29, at 0,0
+lamp 376          0              HOUSE WINDOW 7  # lamp 175, I/O group 7 index 30, at 0,0
+lamp 377          0              HOUSE WINDOW 8  # lamp 176, I/O group 7 index 31, at 0,0
+lamp 378          0              HOUSE WINDOW 9  # lamp 177, I/O group 7 index 32, at 0,0
+lamp 379          0              HOUSE WINDOW 10  # lamp 178, I/O group 7 index 39, at 0,0
+lamp 380          0              HOUSE TURRET  # lamp 179, I/O group 7 index 40, at 0,0
+lamp 381,382,383  0              LEFT FLOOD  # lamp 180, I/O group 7 index 3, at 0,0
+lamp 384,385,386  0              RIGHT FLOOD  # lamp 181, I/O group 8 index 3, at 0,0
+lamp 393          0              LEFT POP BUMPER  # lamp 182, I/O group 8 index 60, at 0,0
+lamp 394          0              RIGHT POP BUMPER  # lamp 183, I/O group 8 index 61, at 0,0
+lamp 395          0              BOTTOM POP BUMPER  # lamp 184, I/O group 8 index 62, at 0,0
+lamp 396          0              POP BUMPER FLASH  # lamp 185, I/O group 8 index 63, at 0,0
+lamp 397          0              RIGHT RAMP FLASH  # lamp 186, I/O group 8 index 48, at 0,0
+lamp 398          0              CRYPT FLASH  # lamp 187, I/O group 8 index 50, at 0,0
+lamp 399          0              CRYPT VUK FLASH  # lamp 188, I/O group 8 index 49, at 0,0
+lamp 400          0              TRUNK FLASH  # lamp 189, I/O group 8 index 51, at 0,0
+lamp 401          0              LOWER LEFT RAMP FLASH  # lamp 190, I/O group 8 index 52, at 0,0
+lamp 402          0              GAPPA ANGRY FLASH  # lamp 191, I/O group 7 index 8, at 0,0
+lamp 403          0              JUMP AROUND FLASH  # lamp 192, I/O group 7 index 43, at 0,0
+lamp 404          0              LOCK FLASH  # lamp 193, I/O group 7 index 6, at 0,0
+lamp 405          0              CELLAR FLASH  # lamp 194, I/O group 8 index 58, at 0,0
+lamp 406          0              MOON  # lamp 195, I/O group 8 index 7, at 0,0
+lamp 407          0              SKILL SHOT  # lamp 196, I/O group 8 index 6, at 0,0
+lamp 408          0              LOWER RIGHT RAMP FLASH  # lamp 197, I/O group 7 index 7, at 0,0
+lamp 387          0              COIN DOOR GI  # lamp 198, I/O group 5 index 1, at 0,0
+lamp 388          0              LOWER PLAYFIELD GI  # lamp 199, I/O group 7 index 0, at 0,0
+lamp 389          0              SHOOTER LANE GI  # lamp 200, I/O group 7 index 1, at 0,0
+lamp 390          0              MID PLAYFIELD GI  # lamp 201, I/O group 7 index 2, at 0,0
+lamp 391          0              UPPER PLAYFIELD GI  # lamp 202, I/O group 8 index 0, at 0,0
+lamp 392          0              BACKPANEL PLAYFIELD GI  # lamp 203, I/O group 8 index 1, at 0,0
+lamp 414          0              TOPPER GARGOYLE LEFT 1 (X2)  # lamp 204, I/O group 9 index 1, at 0,0
+lamp 415          0              TOPPER GARGOYLE LEFT 2 (X2)  # lamp 205, I/O group 9 index 2, at 0,0
+lamp 416          0              TOPPER GARGOYLE LEFT 3  # lamp 206, I/O group 9 index 3, at 0,0
+lamp 417          0              TOPPER GARGOYLE LEFT 4  # lamp 207, I/O group 9 index 4, at 0,0
+lamp 418          0              TOPPER GARGOYLE LEFT 5  # lamp 208, I/O group 9 index 5, at 0,0
+lamp 419          0              TOPPER SKULL LEFT EYES (X2)  # lamp 209, I/O group 9 index 6, at 0,0
+lamp 420          0              TOPPER CENTER 1  # lamp 210, I/O group 9 index 7, at 0,0
+lamp 421          0              TOPPER CENTER 2  # lamp 211, I/O group 9 index 8, at 0,0
+lamp 422          0              TOPPER CENTER 3  # lamp 212, I/O group 9 index 9, at 0,0
+lamp 423          0              TOPPER GARGOYLE RIGHT 1 (X2)  # lamp 213, I/O group 9 index 10, at 0,0
+lamp 424          0              TOPPER GARGOYLE RIGHT 2 (X2)  # lamp 214, I/O group 9 index 11, at 0,0
+lamp 425          0              TOPPER GARGOYLE RIGHT 3  # lamp 215, I/O group 9 index 12, at 0,0
+lamp 426          0              TOPPER GARGOYLE RIGHT 4  # lamp 216, I/O group 9 index 13, at 0,0
+lamp 427          0              TOPPER GARGOYLE RIGHT 5  # lamp 217, I/O group 9 index 14, at 0,0
+lamp 428          0              TOPPER SKULL RIGHT EYES (X2)  # lamp 218, I/O group 9 index 15, at 0,0
+lamp 429          0              TOPPER LID GI  # lamp 219, I/O group 9 index 0, at 0,0
+lamp 430,431,432  0              SPEAKER 1  # lamp 220, I/O group 6 index 1, at 0,0
+lamp 433,434,435  0              SPEAKER 2  # lamp 221, I/O group 6 index 4, at 0,0
+lamp 436,437,438  0              SPEAKER 3  # lamp 222, I/O group 6 index 7, at 0,0
+lamp 439,440,441  0              SPEAKER 4  # lamp 223, I/O group 6 index 10, at 0,0
+lamp 442,443,444  0              SPEAKER 5  # lamp 224, I/O group 6 index 13, at 0,0
+lamp 445,446,447  0              SPEAKER 6  # lamp 225, I/O group 6 index 16, at 0,0
+lamp 448,449,450  0              SPEAKER 7  # lamp 226, I/O group 6 index 19, at 0,0
+lamp 451,452,453  0              SPEAKER 8  # lamp 227, I/O group 6 index 22, at 0,0
+lamp 454,455,456  0              SPEAKER 9  # lamp 228, I/O group 6 index 25, at 0,0
+lamp 457,458,459  0              SPEAKER 10  # lamp 229, I/O group 6 index 28, at 0,0
+lamp 460,461,462  0              SPEAKER 11  # lamp 230, I/O group 6 index 31, at 0,0
+lamp 463,464,465  0              SPEAKER 12  # lamp 231, I/O group 6 index 34, at 0,0
+lamp 466,467,468  0              SPEAKER 13  # lamp 232, I/O group 6 index 37, at 0,0
+lamp 469,470,471  0              SPEAKER 14  # lamp 233, I/O group 6 index 40, at 0,0
+lamp 472,473,474  0              SPEAKER 15  # lamp 234, I/O group 6 index 43, at 0,0
+lamp 475,476,477  0              SPEAKER 16  # lamp 235, I/O group 6 index 46, at 0,0
+lamp 478,479,480  0              SPEAKER 17  # lamp 236, I/O group 6 index 49, at 0,0
+lamp 481,482,483  0              SPEAKER 18  # lamp 237, I/O group 6 index 52, at 0,0
+lamp 484,485,486  0              SPEAKER 19  # lamp 238, I/O group 6 index 55, at 0,0
+lamp 487,488,489  0              SPEAKER 20  # lamp 239, I/O group 6 index 58, at 0,0
+lamp 490,491,492  0              SPEAKER 21  # lamp 240, I/O group 6 index 61, at 0,0
+lamp 493,494,495  0              SPEAKER 22  # lamp 241, I/O group 6 index 64, at 0,0
+lamp 496,497,498  0              SPEAKER 23  # lamp 242, I/O group 6 index 67, at 0,0

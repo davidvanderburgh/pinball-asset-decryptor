@@ -27,7 +27,7 @@ def main(argv):
     ap.add_argument("elf")
     ap.add_argument("--port", action="store_true", help="print the port's lamp lines")
     ap.add_argument("--lights", action="store_true", help="print every light")
-    ap.add_argument("--image", default="playfield")
+    ap.add_argument("--image", default=None, help="the picture (default: the title's playfield picture)")
     a = ap.parse_args(argv)
     elf = _lib.Elf(a.elf)
     if a.port:

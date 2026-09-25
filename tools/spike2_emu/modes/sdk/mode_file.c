@@ -884,6 +884,8 @@ static uint64_t shot_value(struct slot *M, uint64_t mask, unsigned n)
  *   light_insert   <colour> <pattern> <ms> <name>[,<name>...]   inserts by the game's own name
  *   light_shots    <colour> [pattern] [ms]             every shot that scores in this mode (`shots`
  *                                                      and every `shot_award`), lit while it runs
+ *   light_all      <colour> [pattern] [ms]             every insert the port names (item 164: a mode's
+ *                                                      Lights on a title without the light language)
  *   light_priority <1-255>                             the layer's priority (255, the top, when absent)
  * colour: rrggbb hex (a # before it is fine) or red, green, blue, yellow, orange, purple, cyan,
  * white, pink. pattern: solid (the default), blink, pulse, chase (across the line's inserts).
@@ -895,6 +897,7 @@ static uint64_t shot_value(struct slot *M, uint64_t mask, unsigned n)
 #define LIGHT_SHOTS     1
 #define LIGHT_INSERT    2
 #define LIGHT_SCORING   3
+#define LIGHT_ALL       4
 static struct {
     unsigned n, prio;
     struct { int kind, pattern; uint64_t bits; unsigned rgb, ms; char names[LIGHT_NAMES_MAX]; } l[LIGHT_LINES_MAX];
@@ -971,6 +974,7 @@ static int own_lights_key(struct slot *M, const char *line)
     if ((a = key_is(line, "light")) != 0) { kind = LIGHT_SHOTS; bits = num(&a); }
     else if ((a = key_is(line, "light_insert")) != 0) kind = LIGHT_INSERT;
     else if ((a = key_is(line, "light_shots")) != 0) kind = LIGHT_SCORING;
+    else if ((a = key_is(line, "light_all")) != 0) kind = LIGHT_ALL;
     if (!kind) return 0;
     if (kind == LIGHT_SHOTS && !bits) { pm_log("light needs shot bits - ignored: %.60s", line); return 1; }
     if (!light_colour(&a, &rgb)) { pm_log("light: no colour (rrggbb or a colour's name) - ignored: %.60s", line); return 1; }
@@ -1010,6 +1014,7 @@ static void own_lights_start(struct slot *M)
         const typeof(own_lights[0].l[0]) *L = &own_lights[M->index].l[k];
         if (L->kind == LIGHT_SHOTS) held += pm_lamp_shot(L->bits, L->rgb, L->pattern, L->ms);
         else if (L->kind == LIGHT_SCORING) held += pm_lamp_shot(scoring_bits(M), L->rgb, L->pattern, L->ms);
+        else if (L->kind == LIGHT_ALL) held += pm_lamp_all(L->rgb, L->pattern, L->ms);
         else held += pm_lamp_set(L->names, L->rgb, L->pattern, L->ms);
     }
     pm_log("lights: %d insert(s) held while it runs (layer %u)", held,

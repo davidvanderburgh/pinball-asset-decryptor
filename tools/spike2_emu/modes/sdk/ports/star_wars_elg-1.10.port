@@ -328,3 +328,85 @@ event ball_end       0x34
 event bonus_start    0x27
 event bonus_end      0x28
 event game_over      0x47
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 68 inserts on the TestMode/Playfield_AK_SW_PIN_DIAG_GRAPHIC_cropped picture; light table 0x572a74, device table 0x573e14, lamp table 0x55a2ec (82 lamps)
+# shot masks: no class cshot in this program
+lamp 66           0              DEATH STAR (X2)  # lamp 3, I/O group 5 index 51, at 49,60
+lamp 67           0              PLAYFIELD GI 1  # lamp 4, I/O group 5 index 0, at 0,0
+lamp 68           0              PLAYFIELD GI 2  # lamp 5, I/O group 5 index 1, at 0,0
+lamp 69           0              PLAYFIELD GI 3  # lamp 6, I/O group 5 index 2, at 0,0
+lamp 3            0              LEFT OUTLANE  # lamp 7, I/O group 5 index 3, at 21,353
+lamp 4            0              LEFT RETURN LANE  # lamp 8, I/O group 5 index 4, at 39,342
+lamp 5            0              RIGHT RETURN LANE  # lamp 9, I/O group 5 index 5, at 181,342
+lamp 6            0              RIGHT OUTLANE  # lamp 10, I/O group 5 index 6, at 199,353
+lamp 7            0              SHOOT AGAIN  # lamp 11, I/O group 5 index 7, at 110,448
+lamp 13           0              BONUS 1  # lamp 12, I/O group 5 index 8, at 72,353
+lamp 14           0              BONUS 2  # lamp 13, I/O group 5 index 9, at 80,353
+lamp 15           0              BONUS 3  # lamp 14, I/O group 5 index 10, at 89,353
+lamp 16           0              BONUS 4  # lamp 15, I/O group 5 index 11, at 97,353
+lamp 17           0              BONUS 5  # lamp 16, I/O group 5 index 12, at 106,353
+lamp 18           0              BONUS 10  # lamp 17, I/O group 5 index 13, at 114,353
+lamp 19           0              BONUS 20  # lamp 18, I/O group 5 index 14, at 123,353
+lamp 20           0              BONUS 30  # lamp 19, I/O group 5 index 15, at 131,353
+lamp 21           0              BONUS 40  # lamp 20, I/O group 5 index 16, at 140,353
+lamp 22           0              BONUS ?  # lamp 21, I/O group 5 index 17, at 148,353
+lamp 9            0              HAN  # lamp 22, I/O group 5 index 18, at 80,333
+lamp 10           0              LEIA  # lamp 23, I/O group 5 index 19, at 100,333
+lamp 11           0              R2-D2  # lamp 24, I/O group 5 index 20, at 120,333
+lamp 12           0              LUKE  # lamp 25, I/O group 5 index 21, at 140,333
+lamp 23           0              2X  # lamp 26, I/O group 5 index 22, at 95,371
+lamp 24           0              3X  # lamp 27, I/O group 5 index 23, at 110,371
+lamp 25           0              DOUBLE SCORING  # lamp 28, I/O group 5 index 24, at 124,371
+lamp 26           0              JEDI MULTIBALL  # lamp 29, I/O group 5 index 25, at 110,388
+lamp 29           0              FO(R)CE  # lamp 30, I/O group 5 index 26, at 39,289
+lamp 30           0              FOR(C)E  # lamp 31, I/O group 5 index 27, at 39,275
+lamp 31           0              FORC(E)  # lamp 32, I/O group 5 index 28, at 39,261
+lamp 33           0              LEFT LUKE 10K  # lamp 33, I/O group 5 index 29, at 29,195
+lamp 34           0              LEFT LUKE 25K  # lamp 34, I/O group 5 index 30, at 24,179
+lamp 35           0              LEFT LUKE ARROW  # lamp 35, I/O group 5 index 31, at 22,161
+lamp 36           0              LEFT HAN 10K  # lamp 36, I/O group 5 index 32, at 43,172
+lamp 37           0              LEFT HAN 25K  # lamp 37, I/O group 5 index 33, at 41,155
+lamp 38           0              LEFT HAN ARROW  # lamp 38, I/O group 5 index 34, at 40,138
+lamp 43           0              TOP LANE LEFT  # lamp 39, I/O group 5 index 35, at 87,34
+lamp 44           0              TOP LANE CENTER  # lamp 40, I/O group 5 index 36, at 107,34
+lamp 45           0              TOP LANE RIGHT  # lamp 41, I/O group 5 index 37, at 126,34
+lamp 47           0              EXTRA BALL  # lamp 42, I/O group 5 index 38, at 122,171
+lamp 46           0              R2-D2 ARROW  # lamp 43, I/O group 5 index 39, at 122,152
+lamp 70           0              MILLENNIUM FALCON (OPTIONAL)  # lamp 44, I/O group 5 index 40, at 69,165
+lamp 42           0              R2-D2 MULTIBALL  # lamp 45, I/O group 5 index 41, at 112,227
+lamp 41           0              DROP TARGET RIGHT  # lamp 46, I/O group 5 index 42, at 102,212
+lamp 40           0              DROP TARGET CENTER  # lamp 47, I/O group 5 index 43, at 91,220
+lamp 39           0              DROP TARGET LEFT  # lamp 48, I/O group 5 index 44, at 80,228
+lamp 48           0              LEIA SPINNER 10K  # lamp 49, I/O group 5 index 45, at 142,141
+lamp 49           0              LEIA SPINNER 25K  # lamp 50, I/O group 5 index 46, at 142,125
+lamp 50           0              LEIA SPINNER ARROW  # lamp 51, I/O group 5 index 47, at 142,108
+lamp 51           0              RIGHT RAMP ARROW  # lamp 52, I/O group 5 index 48, at 163,179
+lamp 52           0              TIE FIGHTER MULTIBALL  # lamp 53, I/O group 5 index 49, at 161,199
+lamp 53           0              TIE FIGHTER HURRY UP  # lamp 54, I/O group 5 index 50, at 160,215
+lamp 66           0              DEATH STAR (X2)  # lamp 55, I/O group 5 index 51, at 49,60
+lamp 54           0              LEIA 10K  # lamp 59, I/O group 5 index 55, at 189,150
+lamp 55           0              LEIA 25K  # lamp 60, I/O group 5 index 56, at 193,134
+lamp 56           0              LEIA ARROW  # lamp 61, I/O group 5 index 57, at 197,117
+lamp 57           0              RIGHT LUKE ARROW  # lamp 62, I/O group 5 index 58, at 206,169
+lamp 58           0              RIGHT LUKE 25K  # lamp 63, I/O group 5 index 59, at 201,185
+lamp 59           0              RIGHT LUKE 10K  # lamp 64, I/O group 5 index 60, at 196,201
+lamp 32           0              YODA MYSTERY  # lamp 65, I/O group 5 index 61, at 181,264
+lamp 27           0              (F)ORCE  # lamp 66, I/O group 5 index 62, at 39,316
+lamp 28           0              F(O)RCE  # lamp 67, I/O group 5 index 63, at 39,302
+lamp 60           0              RAMP 1  # lamp 68, I/O group 5 index 64, at 69,165
+lamp 61           0              RAMP 2  # lamp 69, I/O group 5 index 65, at 66,150
+lamp 62           0              RAMP 3  # lamp 70, I/O group 5 index 66, at 63,136
+lamp 63           0              RAMP 4  # lamp 71, I/O group 5 index 67, at 60,122
+lamp 64           0              RAMP 5  # lamp 72, I/O group 5 index 68, at 58,107
+lamp 65           0              RAMP 6  # lamp 73, I/O group 5 index 69, at 54,90

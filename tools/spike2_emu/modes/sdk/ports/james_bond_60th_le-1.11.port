@@ -335,3 +335,95 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 78 inserts on the Test/scaled_playfield picture; light table 0x5ce6dc, device table 0x5d229c, lamp table 0x5ad34c (226 lamps)
+# shot masks: no class cshot in this program
+lamp 102          0              BOTTOM ARCH-LEFT  # lamp 9, I/O group 8 index 0, at 0,0
+lamp 103          0              BOTTOM ARCH-RIGHT  # lamp 10, I/O group 8 index 1, at 0,0
+lamp 104          0              MID PLAYFIELD GI  # lamp 11, I/O group 8 index 2, at 0,0
+lamp 112          0              SPOTLIGHT LEFT  # lamp 12, I/O group 8 index 3, at 43,205
+lamp 113          0              SPOTLIGHT RIGHT  # lamp 13, I/O group 8 index 4, at 160,214
+lamp 16           0              RIGHT RETURN 1  # lamp 14, I/O group 8 index 5, at 138,351
+lamp 17           0              RIGHT RETURN 2  # lamp 15, I/O group 8 index 6, at 148,345
+lamp 18           0              RIGHT RETURN 3  # lamp 16, I/O group 8 index 7, at 157,339
+lamp 33           0              GADGET 3  # lamp 17, I/O group 8 index 8, at 108,289
+lamp 12           0              SHOOT AGAIN  # lamp 18, I/O group 8 index 9, at 95,383
+lamp 19           0              100 BONUS  # lamp 19, I/O group 8 index 10, at 95,356
+lamp 20           0              200 BONUS  # lamp 20, I/O group 8 index 11, at 95,346
+lamp 21           0              300 BONUS  # lamp 21, I/O group 8 index 12, at 95,335
+lamp 22           0              400 BONUS  # lamp 22, I/O group 8 index 13, at 95,325
+lamp 23           0              500 BONUS  # lamp 23, I/O group 8 index 14, at 95,315
+lamp 24           0              600 BONUS  # lamp 24, I/O group 8 index 15, at 95,304
+lamp 34           0              GADGET 4  # lamp 25, I/O group 8 index 16, at 123,281
+lamp 52           0              TARGET C  # lamp 26, I/O group 8 index 17, at 149,233
+lamp 53           0              TARGET ADVANCE BONUS  # lamp 27, I/O group 8 index 18, at 167,248
+lamp 54           0              COLLECT BONUS  # lamp 28, I/O group 8 index 19, at 147,275
+lamp 10           0              RIGHT RETURN LANE  # lamp 29, I/O group 8 index 20, at 156,289
+lamp 11           0              RIGHT OUTLANE  # lamp 30, I/O group 8 index 21, at 171,304
+lamp 30           0              TRIPLE BONUS  # lamp 31, I/O group 8 index 22, at 106,272
+lamp 28           0              1000 BONUS  # lamp 32, I/O group 8 index 23, at 95,263
+lamp 27           0              900 BONUS  # lamp 33, I/O group 8 index 24, at 95,273
+lamp 26           0              800 BONUS  # lamp 34, I/O group 8 index 25, at 95,284
+lamp 25           0              700 BONUS  # lamp 35, I/O group 8 index 26, at 95,294
+lamp 29           0              DOUBLE BONUS  # lamp 36, I/O group 8 index 27, at 83,272
+lamp 32           0              GADGET 2  # lamp 37, I/O group 8 index 28, at 82,289
+lamp 37           0              LEFT LANE-LOCK  # lamp 38, I/O group 8 index 29, at 20,203
+lamp 38           0              Q BRANCH  # lamp 39, I/O group 8 index 30, at 39,220
+lamp 114          0              LOWER LEFT SPINNER FLASH  # lamp 40, I/O group 8 index 31, at 31,235
+lamp 36           0              LOWER LEFT SPINNER  # lamp 41, I/O group 8 index 32, at 36,247
+lamp 35           0              TARGET A  # lamp 42, I/O group 8 index 33, at 40,261
+lamp 9            0              LEFT RETURN LANE  # lamp 43, I/O group 8 index 34, at 34,289
+lamp 8            0              LEFT OUTLANE  # lamp 44, I/O group 8 index 35, at 19,304
+lamp 13           0              LEFT RETURN 1  # lamp 45, I/O group 8 index 36, at 34,339
+lamp 14           0              LEFT RETURN 2  # lamp 46, I/O group 8 index 37, at 43,345
+lamp 15           0              LEFT RETURN 3  # lamp 47, I/O group 8 index 38, at 52,351
+lamp 31           0              GADGET 1  # lamp 48, I/O group 8 index 39, at 68,281
+lamp 105          0              TOP PLAYFIELD GI-LEFT  # lamp 49, I/O group 9 index 0, at 0,0
+lamp 106          0              TOP PLAYFIELD GI-RIGHT  # lamp 50, I/O group 9 index 1, at 0,0
+lamp 59           0              CENTER 3 BANK LEFT  # lamp 52, I/O group 9 index 3, at 95,142
+lamp 60           0              CENTER 3 BANK CENTER  # lamp 53, I/O group 9 index 4, at 107,143
+lamp 61           0              CENTER 3 BANK RIGHT  # lamp 54, I/O group 9 index 5, at 118,144
+lamp 118          0              LEFT POP FLASH  # lamp 55, I/O group 9 index 6, at 92,88
+lamp 119          0              RIGHT POP FLASH  # lamp 56, I/O group 9 index 7, at 121,111
+lamp 50           0              INLINE DROP LOCK  # lamp 57, I/O group 9 index 12, at 142,168
+lamp 55           0              UPPER LEFT SPINNER BULLSEYE  # lamp 58, I/O group 9 index 13, at 29,81
+lamp 115          0              UPPER LEFT SPINNER FLASH  # lamp 59, I/O group 9 index 14, at 27,68
+lamp 56           0              TOP LEFT SCOOP  # lamp 60, I/O group 9 index 15, at 44,85
+lamp 57           0              TARGET B  # lamp 61, I/O group 9 index 16, at 60,121
+lamp 58           0              CENTER SPINNER BULLSEYE  # lamp 62, I/O group 9 index 17, at 73,83
+lamp 116          0              CENTER SPINNER FLASH  # lamp 63, I/O group 9 index 18, at 73,69
+lamp 65           0              0_07  # lamp 64, I/O group 9 index 19, at 97,38
+lamp 66           0              0_0_7  # lamp 65, I/O group 9 index 20, at 113,38
+lamp 67           0              00_7  # lamp 66, I/O group 9 index 21, at 130,38
+lamp 117          0              RIGHT SPINNER FLASH  # lamp 67, I/O group 9 index 22, at 157,192
+lamp 123          0              SPOTLIGHT SPINNER FLASH  # lamp 68, I/O group 9 index 23, at 18,214
+lamp 124          0              PARALLAX FLASH  # lamp 69, I/O group 9 index 24, at 160,47
+lamp 62           0              CAPTIVE BALL 1  # lamp 70, I/O group 9 index 25, at 133,134
+lamp 63           0              CAPTIVE BALL 2  # lamp 71, I/O group 9 index 26, at 137,113
+lamp 64           0              CAPTIVE BALL 3  # lamp 72, I/O group 9 index 27, at 142,94
+lamp 120          0              CAPTIVE BALL FLASH  # lamp 73, I/O group 9 index 28, at 153,59
+lamp 121          0              TOP LEFT SCOOP FLASH  # lamp 74, I/O group 9 index 29, at 40,29
+lamp 122          0              TOP RIGHT SCOOP FLASH  # lamp 75, I/O group 9 index 30, at 168,65
+lamp 51           0              RIGHT SPINNER BULLSEYE  # lamp 76, I/O group 9 index 32, at 152,205
+lamp 39           0              LEFT 4 BANK 'D'  # lamp 86, I/O group 9 index 42, at 49,189
+lamp 40           0              LEFT 4 BANK 'N'  # lamp 87, I/O group 9 index 43, at 49,177
+lamp 41           0              LEFT 4 BANK 'O'  # lamp 88, I/O group 9 index 44, at 50,166
+lamp 42           0              LEFT 4 BANK 'B'  # lamp 89, I/O group 9 index 45, at 50,154
+lamp 48           0              HAT BOTTOM RIGHT  # lamp 90, I/O group 9 index 46, at 109,206
+lamp 43           0              HAT BOTTOM LEFT  # lamp 91, I/O group 9 index 47, at 82,206
+lamp 44           0              HAT LEFT  # lamp 92, I/O group 9 index 48, at 68,182
+lamp 45           0              HAT TOP LEFT  # lamp 93, I/O group 9 index 49, at 82,159
+lamp 46           0              HAT TOP RIGHT  # lamp 94, I/O group 9 index 50, at 109,159
+lamp 47           0              HAT RIGHT  # lamp 95, I/O group 9 index 51, at 122,182
+lamp 49           0              HAT ARROW  # lamp 96, I/O group 9 index 31, at 61,201

@@ -32,38 +32,38 @@ PORTS = {
     "godzilla_pro-1.15": (15, 64, True, set(), EVERY_CAPABILITY),   # item 160: + the three spinners
     "godzilla_le-1.16": (21, 64, True, set(), EVERY_CAPABILITY),
     "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
-    "turtles_pro-1.59": (17, 32, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound", "messages")),
-    "deadpool_pro-1.16": (25, 64, True, ALL - {"clip", "events"}, ("callout", "clips", "own-sound", "messages")),
-    "deadpool_le-1.14": (28, 64, True, ALL - {"clip", "events"}, ("callout", "clips", "own-sound", "messages")),
+    "turtles_pro-1.59": (17, 32, True, {"own_sound", "screen", "stack"}, ("callout", "clips", "own-sound", "messages")),
+    "deadpool_pro-1.16": (25, 64, True, ALL - {"clip", "events", "lights"}, ("callout", "clips", "own-sound", "messages")),
+    "deadpool_le-1.14": (28, 64, True, ALL - {"clip", "events", "lights"}, ("callout", "clips", "own-sound", "messages")),
     # item 162 (2026-09-24): every latest build, proven by a full build check in the emulator
     "godzilla_pro-1.16": (21, 64, True, {"screen"}, EVERY_CAPABILITY),
     "aerosmith_le-1.15": (43, 64, True, ALL - {"clip", "events", "own_sound"}, ("callout", "clips", "own-sound")),
     "avengers_infinity_le-1.09": (36, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
     "batman-1.13": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "elvira3-1.13": (45, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "foo_fighters_le-1.04": (41, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
-    "james_bond_60th_le-1.11": (37, 64, True, ALL - {"events", "own_sound"}, CALLOUT_SOUND),
-    "led_zeppelin_le-1.22": (31, 32, True, ALL - {"countdown", "events"}, ("callout", "screens", "own-sound")),
-    "led_zeppelin_pro-1.22": (30, 32, True, ALL - {"countdown", "events"}, ("callout", "screens", "own-sound")),
-    "metallica_spike-1.03": (40, 64, True, ALL - {"countdown", "events", "own_sound"}, ("callout", "screens", "own-sound")),
-    "munsters_le-1.28": (27, 32, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
+    "elvira3-1.13": (45, 64, True, ALL - {"events", "lights"}, CALLOUT_SOUND),
+    "foo_fighters_le-1.04": (41, 64, True, {"own_sound", "screen", "stack"}, ("callout", "clips", "own-sound")),
+    "james_bond_60th_le-1.11": (37, 64, True, ALL - {"events", "lights", "own_sound"}, CALLOUT_SOUND),
+    "led_zeppelin_le-1.22": (31, 32, True, ALL - {"countdown", "events", "lights"}, ("callout", "screens", "own-sound")),
+    "led_zeppelin_pro-1.22": (30, 32, True, ALL - {"countdown", "events", "lights"}, ("callout", "screens", "own-sound")),
+    "metallica_spike-1.03": (40, 64, True, {"clip", "screen", "stack"}, ("callout", "screens", "own-sound")),
+    "munsters_le-1.28": (27, 32, True, {"clip", "screen", "stack"}, CALLOUT_SOUND),
     "rush_le-1.18": (38, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
-    "star_wars_elg-1.10": (30, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
-    "star_wars_le-1.30": (42, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
-    "uncanny_xmen_le-0.98": (33, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "screens", "clips", "own-sound")),
-    "jaws_le-1.02": (27, 64, True, {"lights", "screen", "stack"}, ("callout", "screens", "clips", "own-sound", "messages")),
+    "star_wars_elg-1.10": (30, 64, True, ALL - {"countdown", "events", "lights"}, CALLOUT_SOUND),
+    "star_wars_le-1.30": (42, 64, True, ALL - {"countdown", "events", "lights"}, CALLOUT_SOUND),
+    "uncanny_xmen_le-0.98": (33, 64, True, {"own_sound", "screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
+    "jaws_le-1.02": (27, 64, True, {"screen", "stack"}, ("callout", "screens", "clips", "own-sound", "messages")),
     "stranger_things_le-1.12": (39, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
-    "king_kong_le-0.97": (55, 64, True, {"lights", "screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
-    "james_bond_le-1.06": (44, 64, True, ALL - {"countdown", "events", "own_sound"}, CALLOUT_SOUND),
-    "jurassic_park_le-1.16": (38, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "screens", "clips", "own-sound")),
+    "king_kong_le-0.97": (55, 64, True, {"screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
+    "james_bond_le-1.06": (44, 64, True, {"clip", "screen", "stack"}, CALLOUT_SOUND),
+    "jurassic_park_le-1.16": (38, 64, True, {"own_sound", "screen", "stack"}, ("callout", "screens", "clips", "own-sound")),
     "guardians_le-1.14": (34, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
     "iron_maiden_le-1.16": (32, 64, True, ALL - {"countdown", "events"}, CALLOUT_SOUND),
     "sword_of_rage_le-1.18": (35, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
     "mando_le-1.44": (40, 64, True, ALL - {"clip", "countdown", "events"}, ("callout", "clips", "own-sound")),
     "turtles_le-1.59": (17, 32, True, ALL - {"countdown", "events"}, NO_FRAMEWORK_DISPLAY),
-    "dungeons_and_dragons_le-1.00": (33, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
-    "john_wick_le-1.01": (43, 64, True, ALL - {"events"}, CALLOUT_SOUND),
-    "venom_le-1.07": (40, 64, True, {"lights", "screen", "stack"}, ("callout", "clips", "own-sound")),
+    "dungeons_and_dragons_le-1.00": (33, 64, True, {"screen", "stack"}, ("callout", "clips", "own-sound")),
+    "john_wick_le-1.01": (43, 64, True, ALL - {"events", "lights"}, CALLOUT_SOUND),
+    "venom_le-1.07": (40, 64, True, {"screen", "stack"}, ("callout", "clips", "own-sound")),
 }
 
 #: the lines a part of a mode puts in the runtime file
@@ -83,7 +83,7 @@ def _mode_file_keys():
     keys = set(re.findall(r'\b(?:TEXT|NUM|NUM64)\("([a-z_]+)"', body))
     keys |= set(re.findall(r'key_is\(line, "([a-z_]+)"\)', body))
     # and the keys of the helpers cfg_line hands a line to (starts_line, stack_line, ...)
-    for helper in re.findall(r'if \(([a-z_]+_line)\(M, line\)\) return;', body):
+    for helper in re.findall(r'if \(([a-z_]+_(?:line|key))\(M, line\)\) return;', body):
         start = src.index("static int %s(" % helper)
         keys |= set(re.findall(r'key_is\(line, "([a-z_]+)"\)', src[start:src.index("\n}\n", start)]))
     assert {"name", "trigger", "seconds", "shots", "award", "callout_at"} <= keys

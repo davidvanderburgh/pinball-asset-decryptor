@@ -374,8 +374,8 @@ def test_the_beatles_profile():
     assert p.sound_note == ""                          # item 163: 385 heard saying one..five
     assert MP.read_port(str(BEATLES))["data"]["score_mult"] == 0x543534   # the byte score_add32 multiplies by
     cannot = {part for part in MP.PARTS if not p.can(part)}
-    assert cannot == {"lights", "screen", "own_sound", "stack"}
-    assert "light shows" in p.why_not("lights")
+    # item 164: Lights go through its named inserts (every insert in the mode's colour)
+    assert cannot == {"screen", "own_sound", "stack"} and p.light_route == "inserts"
     assert "scenes a mode's screen goes in" in p.why_not("screen")
     assert "time-up" in p.why_not("own_sound")
     assert "tells that one of its own modes is running" in p.why_not("stack")

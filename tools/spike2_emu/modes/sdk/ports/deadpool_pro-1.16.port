@@ -114,3 +114,107 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   lamp_layers: the first global the lamp-group allocator 0x1ee4d0 loads
+data lamp_layers            0x006e0fb8
+#   light_count: the light table accessor's bound
+data light_count            0x006e7c50
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 86 inserts on the playfield picture; light table 0x677e7c, device table 0x67bb6c, lamp table 0x657174 (230 lamps)
+# shot masks: the code that builds the cshot objects was not found
+lamp 285          0              LEFT OUTLANE  # lamp 98, I/O group 7 index 16, at 38,482
+lamp 286          0              LEFT INLANE  # lamp 99, I/O group 7 index 17, at 61,469
+lamp 287          0              RIGHT INLANE  # lamp 100, I/O group 7 index 22, at 243,469
+lamp 288          0              RIGHT OUTLANE  # lamp 101, I/O group 7 index 23, at 266,482
+lamp 289          0              REGENERATE  # lamp 102, I/O group 7 index 15, at 38,456
+lamp 290          0              JUGGERNAUT  # lamp 103, I/O group 7 index 18, at 106,472
+lamp 291          0              MYSTIQUE  # lamp 104, I/O group 7 index 19, at 152,472
+lamp 292          0              SABRETOOTH  # lamp 105, I/O group 7 index 20, at 198,472
+lamp 293          0              T-REX  # lamp 106, I/O group 7 index 9, at 129,503
+lamp 294          0              MEGALODON  # lamp 107, I/O group 7 index 8, at 175,503
+lamp 298          0              2X  # lamp 108, I/O group 7 index 13, at 152,550
+lamp 295          0              3X  # lamp 109, I/O group 7 index 10, at 131,542
+lamp 297          0              4X  # lamp 110, I/O group 7 index 14, at 173,542
+lamp 296          0              5X  # lamp 111, I/O group 7 index 12, at 152,533
+lamp 299          0              SHOOT AGAIN  # lamp 112, I/O group 7 index 11, at 152,603
+lamp 300          0              (D)EAD  # lamp 113, I/O group 8 index 13, at 72,365
+lamp 301          0              D(E)AD  # lamp 114, I/O group 8 index 14, at 72,383
+lamp 302          0              DE(A)D  # lamp 115, I/O group 8 index 15, at 72,401
+lamp 303          0              DEA(D)  # lamp 116, I/O group 8 index 8, at 72,419
+lamp 304          0              (P)OOL  # lamp 117, I/O group 7 index 41, at 245,366
+lamp 305          0              P(O)OL  # lamp 118, I/O group 7 index 40, at 245,384
+lamp 306          0              PO(O)L  # lamp 119, I/O group 7 index 25, at 245,402
+lamp 307          0              POO(L)  # lamp 120, I/O group 7 index 24, at 245,420
+lamp 308          0              SAURON  # lamp 121, I/O group 7 index 21, at 211,442
+lamp 309          0              MR SINISTER  # lamp 122, I/O group 7 index 32, at 195,403
+lamp 310          0              DAZZLER TEAM UP  # lamp 123, I/O group 8 index 20, at 63,325
+lamp 311          0              DISCO  # lamp 124, I/O group 8 index 21, at 53,282
+lamp 312          0              LEFT ORBIT WEAPON  # lamp 125, I/O group 8 index 22, at 46,256
+lamp 313,314,315  0              LEFT ORBIT ARROW  # lamp 126, I/O group 8 index 23, at 41,237
+lamp 316          0              LEFT KATANA 1  # lamp 127, I/O group 8 index 9, at 114,379
+lamp 317          0              LEFT KATANA 2  # lamp 128, I/O group 8 index 10, at 108,362
+lamp 318          0              LEFT KATANA 3  # lamp 129, I/O group 8 index 11, at 102,345
+lamp 319          0              LEFT RAMP WEAPON  # lamp 130, I/O group 8 index 12, at 97,329
+lamp 320,321,322  0              LEFT RAMP ARROW  # lamp 131, I/O group 8 index 18, at 90,310
+lamp 323          0              SPECIAL  # lamp 132, I/O group 8 index 33, at 103,263
+lamp 324          0              COLOSSUS TEAM UP  # lamp 133, I/O group 8 index 32, at 98,256
+lamp 325          0              INNER LOOP WEAPON  # lamp 134, I/O group 8 index 55, at 94,226
+lamp 326,327,328  0              INNER LOOP ARROW  # lamp 135, I/O group 8 index 52, at 90,246
+lamp 329          0              QUEST  # lamp 136, I/O group 8 index 34, at 123,301
+lamp 330          0              MYSTERY  # lamp 137, I/O group 8 index 35, at 129,280
+lamp 331          0              EXTRA BALL  # lamp 138, I/O group 8 index 36, at 124,259
+lamp 332          0              WEAPON JACKPOT  # lamp 139, I/O group 8 index 43, at 121,238
+lamp 333          0              BATTLE  # lamp 140, I/O group 8 index 51, at 117,216
+lamp 334          0              LEFT EYE  # lamp 141, I/O group 7 index 35, at 152,347
+lamp 335          0              RIGHT EYE  # lamp 142, I/O group 7 index 36, at 175,346
+lamp 336          0              3-BANK DROP TARGET LEFT  # lamp 143, I/O group 7 index 37, at 165,285
+lamp 337          0              3-BANK DROP TARGET CENTER  # lamp 144, I/O group 7 index 38, at 181,293
+lamp 338          0              3-BANK DROP TARGET RIGHT  # lamp 145, I/O group 7 index 39, at 197,301
+lamp 339          0              COLOSSAL JACKPOT  # lamp 146, I/O group 8 index 44, at 140,235
+lamp 340,341,342  0              LIL DP FLOOD  # lamp 147, I/O group 7 index 3, at 195,263
+lamp 343          0              RIGHT KATANA 1  # lamp 148, I/O group 7 index 33, at 208,378
+lamp 344          0              RIGHT KATANA 2  # lamp 149, I/O group 7 index 34, at 213,361
+lamp 345          0              RIGHT KATANA 3  # lamp 150, I/O group 7 index 47, at 219,344
+lamp 346          0              RIGHT RAMP WEAPON  # lamp 151, I/O group 7 index 48, at 224,327
+lamp 347,348,349  0              RIGHT RAMP ARROW  # lamp 152, I/O group 7 index 51, at 231,308
+lamp 350          0              LOCK  # lamp 153, I/O group 7 index 63, at 243,272
+lamp 351          0              DOMINO TEAM UP  # lamp 154, I/O group 7 index 42, at 250,340
+lamp 352          0              RIGHT ORBIT WEAPON  # lamp 155, I/O group 7 index 43, at 259,321
+lamp 353,354,355  0              RIGHT ORBIT ARROW  # lamp 156, I/O group 7 index 44, at 265,303
+lamp 356          0              WOLVERINE TEAM UP  # lamp 157, I/O group 8 index 45, at 142,186
+lamp 357          0              CENTER LOOP WEAPON  # lamp 158, I/O group 8 index 46, at 142,144
+lamp 358,359,360  0              CENTER LOOP ARROW  # lamp 159, I/O group 8 index 47, at 142,125
+lamp 389          0              BOTTOM POP BUMPER  # lamp 160, I/O group 8 index 37, at 173,228
+lamp 390          0              LEFT POP BUMPER  # lamp 161, I/O group 8 index 38, at 177,154
+lamp 391          0              RIGHT POP BUMPER  # lamp 162, I/O group 8 index 39, at 223,183
+lamp 361          0              BAM(!)  # lamp 163, I/O group 7 index 26, at 174,69
+lamp 362          0              BA(M)!  # lamp 164, I/O group 7 index 27, at 199,73
+lamp 363          0              TOP LANE RIGHT CENTER  # lamp 165, I/O group 7 index 28, at 224,77
+lamp 364          0              TOP LANE RIGHT  # lamp 166, I/O group 7 index 29, at 249,80
+lamp 365          0              KATANA HANDLE 1  # lamp 167, I/O group 7 index 52, at 266,233
+lamp 366          0              KATANA HANDLE 2  # lamp 168, I/O group 7 index 53, at 266,219
+lamp 367          0              KATANA HANDLE 3  # lamp 169, I/O group 7 index 54, at 266,204
+lamp 368          0              KATANA HANDLE 4  # lamp 170, I/O group 7 index 55, at 266,191
+lamp 369          0              KATANA HANDLE 5  # lamp 171, I/O group 7 index 56, at 266,176
+lamp 370          0              KATANA HANDLE 6  # lamp 172, I/O group 7 index 57, at 266,162
+lamp 371          0              KATANA HANDLE 7  # lamp 173, I/O group 7 index 58, at 266,148
+lamp 373          0              BOTTOM GI  # lamp 175, I/O group 7 index 0, at 0,0
+lamp 374          0              MID LEFT GI  # lamp 176, I/O group 7 index 1, at 0,0
+lamp 375          0              MID RIGHT GI  # lamp 177, I/O group 7 index 2, at 0,0
+lamp 376          0              UPPER LEFT GI  # lamp 178, I/O group 8 index 0, at 0,0
+lamp 377          0              UPPER RIGHT GI  # lamp 179, I/O group 8 index 1, at 0,0
+lamp 379          0              DAZZLER SPINNER FLASH  # lamp 181, I/O group 8 index 19, at 59,303
+lamp 380          0              WOLVERINE SPINNER FLASH  # lamp 182, I/O group 8 index 50, at 142,113
+lamp 381          0              TRUCK FLASH  # lamp 183, I/O group 7 index 30, at 262,78
+lamp 382          0              POP BUMPER FLASH  # lamp 184, I/O group 8 index 40, at 214,146
+lamp 388          0              EJECT FLASH  # lamp 191, I/O group 8 index 41, at 112,168

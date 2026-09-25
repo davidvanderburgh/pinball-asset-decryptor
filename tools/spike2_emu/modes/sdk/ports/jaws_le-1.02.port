@@ -197,3 +197,139 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   lamp_layers: the first global the lamp-group allocator 0x3d7f00 loads
+data lamp_layers            0x008a3d84
+#   light_count: the light table accessor's bound
+data light_count            0x008a78dc
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 118 inserts on the playfield picture; light table 0x8310bc, device table 0x834acc, lamp table 0x7de04c (221 lamps)
+# shot masks: read from 55 cshot objects built by 0x23cb50
+lamp 9            0x10           LEFT OUTLANE  # lamp 6, I/O group 7 index 9, at 31,494
+lamp 10           0x8            LEFT RETURN LANE  # lamp 7, I/O group 7 index 10, at 55,469
+lamp 11           0x20           RIGHT RETURN LANE  # lamp 8, I/O group 7 index 12, at 239,469
+lamp 12           0              SHOOT AGAIN  # lamp 9, I/O group 7 index 11, at 147,615
+lamp 13           0              LEFT RETURN 1  # lamp 10, I/O group 7 index 13, at 84,569
+lamp 14           0              LEFT RETURN 2  # lamp 11, I/O group 7 index 14, at 71,561
+lamp 15           0              LEFT RETURN 3  # lamp 12, I/O group 7 index 15, at 58,552
+lamp 16           0              RIGHT RETURN 1  # lamp 13, I/O group 7 index 16, at 211,569
+lamp 17           0              RIGHT RETURN 2  # lamp 14, I/O group 7 index 17, at 223,561
+lamp 18           0              RIGHT RETURN 3  # lamp 15, I/O group 7 index 18, at 236,552
+lamp 19           0              MAKO SHARK  # lamp 16, I/O group 7 index 8, at 106,452
+lamp 20           0              HAMMERHEAD SHARK  # lamp 17, I/O group 7 index 19, at 126,449
+lamp 21           0              GREAT WHITE  # lamp 18, I/O group 7 index 28, at 147,446
+lamp 22           0              TIGER SHARK  # lamp 19, I/O group 7 index 37, at 168,449
+lamp 23           0              THRESHER SHARK  # lamp 20, I/O group 7 index 38, at 187,452
+lamp 24           0              SEARCH  # lamp 21, I/O group 7 index 47, at 119,482
+lamp 25           0              4TH OF JULY  # lamp 22, I/O group 7 index 42, at 147,476
+lamp 26           0              RESCUE  # lamp 23, I/O group 7 index 39, at 174,482
+lamp 27           0              BARREL HOOK  # lamp 24, I/O group 7 index 46, at 126,502
+lamp 28           0              SHARK CAGE  # lamp 25, I/O group 7 index 43, at 147,497
+lamp 29           0              DART  # lamp 26, I/O group 7 index 40, at 167,502
+lamp 30           0              BINOCULARS  # lamp 27, I/O group 7 index 45, at 132,520
+lamp 31           0              OXYGEN  # lamp 28, I/O group 7 index 44, at 147,516
+lamp 32           0              TRACKER  # lamp 29, I/O group 7 index 41, at 161,520
+lamp 33           0              READY BARREL  # lamp 30, I/O group 7 index 85, at 72,416
+lamp 34           0              PIPIT  # lamp 31, I/O group 7 index 87, at 73,435
+lamp 35           0              LIGHT MACHETE  # lamp 32, I/O group 7 index 86, at 90,426
+lamp 36           0x4000000000   3 BANK BOTTOM  # lamp 33, I/O group 7 index 84, at 79,396
+lamp 37           0x8000000000   3 BANK MID  # lamp 34, I/O group 7 index 83, at 83,379
+lamp 38           0x10000000000  3 BANK TOP  # lamp 35, I/O group 7 index 82, at 86,362
+lamp 39           0              FF SUPER BUOYS  # lamp 36, I/O group 7 index 57, at 103,403
+lamp 40           0              FF SUPER LIFE RING  # lamp 37, I/O group 7 index 58, at 117,399
+lamp 41           0              FF CAST N CATCH  # lamp 38, I/O group 7 index 59, at 124,386
+lamp 42           0              FF LIGHT VIDEO MODE  # lamp 39, I/O group 7 index 61, at 122,372
+lamp 43           0              FF NIGHT SEARCH  # lamp 40, I/O group 7 index 62, at 110,363
+lamp 44           0x7800000000000 QUICKSHOT  # lamp 41, I/O group 7 index 51, at 70,333
+lamp 45           0              HARPOON  # lamp 42, I/O group 7 index 81, at 95,343
+lamp 46           0              QUICKSHOT 1X  # lamp 43, I/O group 7 index 48, at 33,379
+lamp 47           0              QUICKSHOT 2X  # lamp 44, I/O group 7 index 49, at 33,360
+lamp 48           0              QUICKSHOT 4X  # lamp 45, I/O group 7 index 50, at 33,340
+lamp 49           0              COLLECT QUICKSHOT  # lamp 46, I/O group 7 index 29, at 152,331
+lamp 50           0              ATTACH BARREL  # lamp 47, I/O group 7 index 30, at 162,349
+lamp 51,52,53     0x1000000000   FIN  # lamp 48, I/O group 7 index 31, at 179,362
+lamp 54           0              ENCOUNTER JACKPOT  # lamp 49, I/O group 7 index 34, at 200,364
+lamp 55           0              EXTRA BALL  # lamp 50, I/O group 7 index 35, at 220,358
+lamp 56           0              BARREL 1  # lamp 51, I/O group 8 index 48, at 182,313
+lamp 57           0              BARREL 2  # lamp 52, I/O group 8 index 64, at 200,310
+lamp 58           0              BARREL 3  # lamp 53, I/O group 8 index 71, at 211,324
+lamp 59,60,61     0              FIN TARGET 1  # lamp 54, I/O group 8 index 52, at 166,277
+lamp 62,63,64     0              FIN TARGET 2  # lamp 55, I/O group 8 index 49, at 178,272
+lamp 65,66,67     0              FIN TARGET 3  # lamp 56, I/O group 8 index 55, at 197,269
+lamp 68,69,70     0              FIN TARGET 4  # lamp 57, I/O group 8 index 61, at 214,274
+lamp 71,72,73     0              FIN TARGET 5  # lamp 58, I/O group 8 index 58, at 229,283
+lamp 74,75,76     0              FIN TARGET 6  # lamp 59, I/O group 8 index 68, at 244,299
+lamp 77,78,79     0              FIN TARGET 7  # lamp 60, I/O group 8 index 65, at 247,310
+lamp 80           0x400000000000 ADVANCE BOUNTY RIGHT  # lamp 61, I/O group 7 index 23, at 280,348
+lamp 81           0              ACTIVATE FISHFINDER  # lamp 62, I/O group 7 index 24, at 273,375
+lamp 82           0x800000000    LIGHT LIFE RING  # lamp 63, I/O group 7 index 25, at 211,393
+lamp 83,84,85     0x100000000f00 WEST BEACH  # lamp 64, I/O group 8 index 8, at 57,252
+lamp 86           0              WEST BEACH RESCUE TOP  # lamp 65, I/O group 8 index 11, at 61,269
+lamp 87           0              WEST BEACH RESCUE LEFT  # lamp 66, I/O group 8 index 12, at 58,282
+lamp 88           0              WEST BEACH RESCUE RIGHT  # lamp 67, I/O group 8 index 13, at 70,279
+lamp 89           0              WEST BEACH SHARK  # lamp 68, I/O group 8 index 14, at 67,296
+lamp 90           0              WEST BEACH CLOSED X  # lamp 69, I/O group 8 index 15, at 71,312
+lamp 91           0x100000000    TARGET 1  # lamp 70, I/O group 7 index 36, at 84,288
+lamp 92,93,94     0x1c000000     MARINA  # lamp 71, I/O group 8 index 16, at 93,240
+lamp 95           0              MARINA RESCUE TOP  # lamp 72, I/O group 8 index 19, at 97,257
+lamp 96           0              MARINA RESCUE LEFT  # lamp 73, I/O group 8 index 20, at 92,268
+lamp 97           0              MARINA RESCUE RIGHT  # lamp 74, I/O group 8 index 21, at 105,266
+lamp 98           0              MARINA SHARK  # lamp 75, I/O group 8 index 22, at 101,283
+lamp 99           0              MARINA CLOSED X  # lamp 76, I/O group 8 index 23, at 105,299
+lamp 100          0x400000       CHUMLINE ADVANCE  # lamp 77, I/O group 7 index 52, at 120,259
+lamp 101          0              ADVANCE BOUNTY LEFT  # lamp 78, I/O group 7 index 53, at 125,285
+lamp 102,103,104  0x20000000     NORTH BEACH  # lamp 79, I/O group 8 index 24, at 136,195
+lamp 105          0              NORTH BEACH RESCUE TOP  # lamp 80, I/O group 8 index 27, at 136,211
+lamp 106          0              NORTH BEACH RESCUE LEFT  # lamp 81, I/O group 8 index 28, at 131,222
+lamp 107          0              NORTH BEACH RESCUE RIGHT  # lamp 82, I/O group 8 index 29, at 144,220
+lamp 108          0              NORTH BEACH SHARK  # lamp 83, I/O group 8 index 30, at 139,254
+lamp 109          0              NORTH BEACH CLOSED X  # lamp 84, I/O group 8 index 31, at 140,277
+lamp 110          0x800000       BOAT HIT LEFT  # lamp 85, I/O group 8 index 3, at 170,202
+lamp 111          0x1000000      BOAT HIT CENTER  # lamp 86, I/O group 8 index 4, at 179,202
+lamp 112          0x2000000      BOAT HIT RIGHT  # lamp 87, I/O group 8 index 5, at 188,202
+lamp 113          0x200000000    TARGET 2  # lamp 88, I/O group 7 index 26, at 210,234
+lamp 114          0x400000000    TARGET 3  # lamp 89, I/O group 7 index 27, at 250,234
+lamp 115,116,117  0x230000       THE POND  # lamp 90, I/O group 8 index 32, at 241,188
+lamp 118          0              THE POND RESCUE TOP  # lamp 91, I/O group 8 index 35, at 238,206
+lamp 119          0              THE POND RESCUE LEFT  # lamp 92, I/O group 8 index 36, at 230,215
+lamp 120          0              THE POND RESCUE RIGHT  # lamp 93, I/O group 8 index 37, at 242,217
+lamp 121          0              THE POND SHARK  # lamp 94, I/O group 8 index 38, at 233,231
+lamp 122          0              THE POND CLOSED X  # lamp 95, I/O group 8 index 39, at 229,247
+lamp 123,124,125  0x40000000     EAST BEACH  # lamp 96, I/O group 8 index 40, at 277,201
+lamp 126          0              EAST BEACH RESCUE TOP  # lamp 97, I/O group 8 index 43, at 272,217
+lamp 127          0              EAST BEACH RESCUE LEFT  # lamp 98, I/O group 8 index 44, at 265,226
+lamp 128          0              EAST BEACH RESCUE RIGHT  # lamp 99, I/O group 8 index 45, at 277,228
+lamp 129          0              EAST BEACH SHARK  # lamp 100, I/O group 8 index 46, at 266,242
+lamp 130          0              EAST BEACH CLOSED X  # lamp 101, I/O group 8 index 47, at 262,258
+lamp 131          0              ORCA BB LEFT  # lamp 102, I/O group 7 index 70, at 75,49
+lamp 132          0              ORCA BB RIGHT  # lamp 103, I/O group 7 index 71, at 126,49
+lamp 133          0              SHARK BB 1 TOP  # lamp 104, I/O group 7 index 75, at 156,133
+lamp 134          0              SHARK BB 2  # lamp 105, I/O group 7 index 76, at 156,133
+lamp 135          0              SHARK BB 3  # lamp 106, I/O group 7 index 77, at 156,133
+lamp 136          0              SHARK BB 4 BOT  # lamp 107, I/O group 7 index 78, at 156,133
+lamp 140,141,142  0              UPPER PF RAMP  # lamp 111, I/O group 8 index 80, at 67,130
+lamp 143,144,145  0              UPPER PF SHIP WHEEL  # lamp 112, I/O group 8 index 83, at 85,117
+lamp 146          0              UPPER PF RADIO  # lamp 113, I/O group 8 index 86, at 50,153
+lamp 148          0              BOTTOM GI (X6)  # lamp 115, I/O group 7 index 0, at 0,0
+lamp 149          0              TOP GI (X8)  # lamp 116, I/O group 7 index 1, at 0,0
+lamp 150          0              BOTTOM ARCH GI (X3)  # lamp 117, I/O group 7 index 2, at 0,0
+lamp 154          0              MID RIGHT SPOTLIGHT  # lamp 119, I/O group 7 index 56, at 264,270
+lamp 155          0              LOWER LEFT SPOTLIGHT  # lamp 120, I/O group 7 index 20, at 41,447
+lamp 156          0              LOWER RIGHT SPOTLIGHT  # lamp 121, I/O group 7 index 21, at 219,509
+lamp 157          0x20000000000  FISH FINDER MULTIBALL FLASH  # lamp 122, I/O group 7 index 60, at 104,382
+lamp 158          0x80           POP BUMPER  # lamp 123, I/O group 7 index 22, at 256,355
+lamp 159          0              WEST BEACH FLASHER  # lamp 124, I/O group 7 index 54, at 47,206
+lamp 160          0x80000000000  BOAT FLASH  # lamp 125, I/O group 7 index 66, at 179,230
+lamp 161          0xc0000        FISHING REEL FLASH  # lamp 126, I/O group 7 index 55, at 237,137
+lamp 165          0              UPPER PF FLASH  # lamp 130, I/O group 8 index 88, at 105,160
+lamp 166          0              UPPER PF SHIP WHEEL FLASH  # lamp 131, I/O group 8 index 87, at 82,66

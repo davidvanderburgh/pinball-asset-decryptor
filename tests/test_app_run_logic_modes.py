@@ -1376,8 +1376,8 @@ def test_modes_tab_try_it_without_a_card_names_the_projects_own_card(tmp_path, m
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_cannot(tmp_path):
     """Item 148: a project on a TMNT Pro 1.59 card offers TMNT's 17 shots from its port,
-    greys Lights and Screen WITH the reason in words (Clip is live since item 164: an added
-    clip seen on its glass in a game), and New makes a mode whose runtime file carries TMNT's
+    greys Screen WITH the reason in words (Clip and Lights are live since item 164: an added
+    clip seen on its glass in a game, its inserts held in the mode's colour), and New makes a mode whose runtime file carries TMNT's
     own masks and no line TMNT cannot do."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
@@ -1398,11 +1398,11 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         slug = w.call("modes.new")
         st = _st(w)
         assert "Ready to build" in st["status"]
-        for part in ("lights", "screen"):
+        for part in ("screen",):
             assert st["dis"][part], part
             reason = st["reasons"][part]
             assert "Not on this game" in reason and tmnt.why_not(part) in reason
-        assert not st["dis"]["clip"]                            # item 164: clip v2
+        assert not st["dis"]["clip"] and not st["dis"]["lights"]    # item 164: clip v2, its inserts
         # item 163: TMNT Pro 1.59 counts down now (441, heard); it has no time-up call to carry
         # an end sound of the mode's own
         assert not st["dis"]["countdown"] and st["dis"]["own_sound"]
@@ -1469,7 +1469,7 @@ def test_modes_tab_card_with_no_port_points_at_making_a_port(tmp_path):
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_jaws_greys_lights_and_screen_and_a_godzilla_mode_is_retargeted(tmp_path, monkeypatch):
     """Jaws LE 1.02 can count down and add a clip (an added clip played in item 148's run2)
-    but has no lights and no measured HUD; its 27 shots go in three columns. A Godzilla mode
+    and light its inserts (item 164) but has no measured HUD; its 27 shots go in three columns. A Godzilla mode
     already in the project is matched by name: the shots Jaws lacks are dropped and the log
     says which."""
     from pinball_decryptor.plugins.stern import mode_project as MP
@@ -1487,8 +1487,9 @@ def test_modes_tab_jaws_greys_lights_and_screen_and_a_godzilla_mode_is_retargete
         _project(w, project)
         st = _st(w)
         assert len(st["profile"]["shots"]) == 27 and st["profile"]["cols"] == 3
-        for part in ("lights", "screen"):
+        for part in ("screen",):
             assert st["dis"][part] and st["reasons"][part], part
+        assert not st["dis"]["lights"]              # item 164: every insert in the mode's colour
         assert not st["dis"]["clip"] and "clip" not in st["reasons"]
         assert not st["dis"]["countdown"]
         assert st["form"]["start_shot"] == "Chum bucket target"

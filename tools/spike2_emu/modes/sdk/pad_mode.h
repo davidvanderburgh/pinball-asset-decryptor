@@ -200,6 +200,7 @@ const char *pm_lamp_at(int i, uint64_t *shots);            /* the i-th insert's 
 int pm_lamp_find(const char *name);                        /* its index, or -1 */
 int pm_lamp_set(const char *names, unsigned rgb, int pattern, unsigned period_ms);
 int pm_lamp_shot(uint64_t shots, unsigned rgb, int pattern, unsigned period_ms);   /* a shot's inserts */
+int pm_lamp_all(unsigned rgb, int pattern, unsigned period_ms);      /* every insert the port names */
 int pm_lamp_release(const char *names);
 int pm_lamp_release_shot(uint64_t shots);
 int pm_lamp_release_all(void);                             /* every insert THIS mode holds */

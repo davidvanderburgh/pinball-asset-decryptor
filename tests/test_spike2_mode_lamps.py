@@ -92,7 +92,7 @@ def test_the_app_reads_the_lamp_lines_and_an_old_port_has_none(tmp_path):
     name, lights, shot = port["lamp"][0]
     assert isinstance(name, str) and len(lights) == 3 and isinstance(shot, int)
     assert port["value"]["lamp_slot_size"] == 40 and port["data"]["lamp_layers"]
-    old = MP.read_port(str(SDK / "ports" / "jaws_le-1.02.port"))
+    old = MP.read_port(str(SDK / "ports" / "turtles_pro-1.58.port"))   # item 164: Jaws names its inserts now
     assert old["lamp"] == []
 
 

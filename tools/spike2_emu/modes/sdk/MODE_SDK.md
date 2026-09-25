@@ -454,6 +454,49 @@ layers whenever they change), and two raw porting reads, `slots <lists> <output 
 (every layer's slot for one light and the compositor's output record) and `wiremap <board table>
 <board count>` (every light the output stage sends, and the board channel it goes out on).
 
+### Lights on every title (item 164)
+
+Only Godzilla, Jaws and King Kong carry the game's light language (`blele`), so `pm_lights`
+cannot work on the rest. The named-insert layer above works on every framework measured, so a
+mode's Lights go through it there: `pm_lamp_all(rgb, pattern, ms)` holds every insert the
+port names (mode file: `light_all <colour> [pattern] [ms]`), and the tab writes
+`light_all <colour> pulse` for a title whose profile says `light_route` "inserts".
+
+Every port whose inserts `lamp_map.py` can read carries the block now. It takes four things
+from the build's own program:
+
+- **`data lamp_layers`**: the first global the lamp-group allocator loads. The allocator is
+  the first call inside the port's `lamp_group`.
+- **`data light_count`**: the light table accessor's bound. Both agree with every port that
+  had them before.
+- **The slot layout and fade**: Godzilla's values.
+- **The `lamp` lines**: read on the title's own playfield picture (`lampmap.playfield_image`),
+  since each title names its own. `lamp_map.py` also reads `-R` written as ` - R` (Venom),
+  lamp kind 6 (Deadpool Pro, TMNT Pro: left without lights) and single-colour tables with no RGB
+  lamp (Star Wars ELG).
+
+**Emulator-proven (2026-09-25):** a mode file's `light_all ff00ff solid` on each of 20 builds.
+The shim's LED view (`dump/padled`, a board channel per light: node = the light's I/O group +
+1 on most, + 2 on Godzilla, Munsters and TMNT Pro) was copied before the mode, twice while it
+ran, and after it ended. The rule: while the mode ran, every addressed RGB insert (or, on a
+title with none, every single-colour insert) read R >= 200, G <= 40, B >= 200; none did before
+or after, beyond what the game's own show lit.
+
+- The 20 builds: Beatles, both Deadpools, D&D, Elvira, Foo Fighters, both Bonds, Jaws, John
+  Wick, JP LE, King Kong, both Led Zeppelins, Metallica, Munsters, both Star Wars, TMNT Pro
+  1.59, X-Men and Venom.
+- Deadpool LE held 23 of 30 (its arrows are addressed but stay dark: another output path).
+- Star Wars LE held 29 of 38.
+- On Jaws and King Kong the game's own shot table ties 26 inserts to shots, so "Light the
+  shots that score" works there too.
+
+Not yet:
+
+- The SWELF-generation builds: Aerosmith, Avengers, Batman, Guardians, Iron Maiden, Mando,
+  Rush, Stranger Things and Sword of Rage. Their device records differ; the names come
+  through the table the second light accessor finds, but the lamp table is not found yet.
+- TMNT LE: the rig never starts a game there.
+
 ### Sounds of your own (item 150)
 
 The game plays sounds by REQUEST id: a request names one or more sound ids, and each of
@@ -1128,7 +1171,7 @@ pointing here. What each part of the tab needs from the port:
 | Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` | `callout ten_seconds` adds the call at 10 s; without it the count is 5..1 only. `value countdown_first <n>` when the request's list opens with something else: the clip "one" is in (Iron Maiden 1.16's 351 opens with a sting, so 1); `pm_callout_nth` adds it to any clip asked of the countdown role. `value countdown_step <1 or -1>` when every number is a request of its own: `callout countdown` names the "one" request and the others follow it by that step (Star Wars ELG 168, Munsters, Jurassic Park Pin count down the ids; Led Zeppelin, Sword of Rage count up) |
 | Sound: the game's own call | `callout time_up` | without it nothing plays when time is up |
 | Sound: my sound | the `sound_lookup` site and `callout time_up` (the call it replaces) | a time-up request with variants (Guardians' 254: "Time's up." / "Your time is up!" ...) gets the sound in place of every variant, so whichever the game picks plays it |
-| Lights | everything `pm_can(PM_CAN_LIGHTS)` needs, including `value light_owner`, and `value light_lts` | |
+| Lights | everything `pm_can(PM_CAN_LIGHTS)` needs, including `value light_owner`, and `value light_lts` (the game's light language); or, item 164, the named-insert lines (`PM_CAN_LAMPS`) on a build in `mode_project.LAMPS_PROVEN` | through the inserts the tab writes `light_all <colour> pulse`: every insert the port names breathes in the mode's colour while it runs |
 | Screen | everything `PM_CAN_SCREENS` needs, and `scene hud` | the HUD scene file MEASURED: its md5 has a `scene_write.py` profile |
 | Clip | everything `PM_CAN_CLIPS` needs, and `scene video_bank` | the bank measured in `mode_project.TITLE_SCENES` and an added clip seen on the screen |
 | The game's own modes (`stack`) | the `stock_battle_running` and `stock_multiball_running` sites and `data stock_mode_manager` (see "The game's own modes") | without them a `stack no` mode logs that the port cannot tell, and starts anyway |

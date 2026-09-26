@@ -50,7 +50,8 @@ site clip_play        0x0004cb7c 0xe92d43f0 0xe24dd014
 #   video_player: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
 site video_player     0x0004c96c 0xe92d4010 0xe3014e84
 #   video_surface: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
-site video_surface    0x0004c990 0xe92d4070 0xe3015e84
+# site video_surface  0x0004c990 - NOT USED (item 164): it answers 60ed7e50's surface, which plays under the
+#   bank below; the runtime finds the surface of the bank this port names instead
 #   surface_state: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site surface_state    0x004be9a0 0xe5900550 0xe2800008
 #   player_advance: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
@@ -206,7 +207,8 @@ data switch_count           0x006b47ec
 #   scene hud: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Jaws LE 1.02]
 scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
 #   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x526d4+0x4) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
-scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+# item 164: the bank the game draws in play (413 clips); 60ed7e50 plays under it and is never seen
+scene video_bank           08a4e1ca48f4991791de79f1cd36294b247488cc
 # scene attract                NOT PLACED: the target program never names 394c4a03 (derived an address, but it holds no 40-hex id)
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
@@ -365,6 +367,15 @@ switch 102  0x40000000000      Lock 3
 # ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
 # sites played each id and the game's audio was transcribed: ten_seconds 345 ("The clock is ticking. / At least there's still time.")
 callout ten_seconds         345
+
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x004cbf68 0xe92d4070 0xe24dd008
+site surface_set_video 0x004c364c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x004c1458 0xe5d030d4 0xe92d43f0
+site surface_stop     0x004c0c08 0xe5d030d4 0xe92d40f0
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Left ramp left tgt

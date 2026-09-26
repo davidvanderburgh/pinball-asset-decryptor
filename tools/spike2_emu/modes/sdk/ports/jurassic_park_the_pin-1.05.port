@@ -414,3 +414,17 @@ lamp 56           0              RAPTOR PEN BOLT FLASH  # lamp 55, I/O group 5 i
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
 site balls_in_play         0x002f3cd8 0xe92d4010 0xe3054574
+
+# ---- the game's own modes (item 164): the framework's game flags - set 0x152d60 / write 0x152da8 / get
+# 0x152df8, the bitmap pointer at [0x594a40 + 4], its size in bits at [0x4beff8]. Each dinosaur mode's
+# start sets a flag of its own (the stock table's start functions): Brachiosaurus 0x72bdc 39, Stegosaurus
+# 0x90860 40, Triceratops 0x92760 41, Pteranodon 0x79a34 42, Gallimimus 0x78f1c 43. Multiballs are the
+# balls-in-play count's.
+data game_flags             0x00594a40
+value game_flags_at         4
+data game_flag_count        0x004beff8
+value mode_flag_1           39
+value mode_flag_2           40
+value mode_flag_3           41
+value mode_flag_4           42
+value mode_flag_5           43

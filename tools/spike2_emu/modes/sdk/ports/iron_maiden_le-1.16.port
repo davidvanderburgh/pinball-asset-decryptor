@@ -78,8 +78,8 @@ data switch_records         0x0053727c
 data switch_count           0x00589820
 
 # ---- scenes ----
-#   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x609d0+0x4) [TMNT Pro 1.58]
-scene video_bank           45a4e8c6251510e3f7b11f8b21f227e1fa49f331
+# item 164: the one-clip background bank the game draws in play (IronMaiden_CloudLoop)
+scene video_bank           b4a9165e20c26e565e1cbcf77f4915b79c9991f0
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
 value mode_mask_busy        0x210
@@ -189,6 +189,16 @@ value sound_channel_bus         189
 value sound_channel_voice_ptrs  92
 value sound_voice_volume        48
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout B's
+# distances from surface_state (aerosmith_le-1.15), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x00420800 0xe92d4070 0xe24dd008
+site surface_set_video 0x00418094 0xe5d03238 0xe92d4ff0
+site surface_play     0x00415834 0xe5d03238 0xe92d43f0
+site surface_stop     0x00415338 0xe5d03238 0xe92d40f0
+value surface_playing       2
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Super jackpot target
 
@@ -222,3 +232,137 @@ value scene_player_scene    0x10
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a
+
+# ---- named inserts (item 164, SWELF generation): framework lamp layers, derived from this build's program
+#   lamp_layers: the first global the lamp-group allocator 0x2c184c loads
+data lamp_layers            0x006155ec
+#   light_count: the device table accessor's bound (a light id is the device's index)
+data light_count            0x00635b04
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the device table 0x5681b8: every LED
+# (class 4) but the cabinet's, a fixture's -R/-G/-B (or -RED/-GRN/-BLU) on one line; no shot ties
+lamp 48,0,0           0              BOTTOM GI  # node/channel 5/0
+lamp 49               0              BOTTOM GI-WHT  # node/channel 5/1
+lamp 50               0              SPOT RIGHT  # node/channel 5/3
+lamp 51               0              RIGHT SIDE FLASH  # node/channel 5/4
+lamp 52               0              MODE 1  # node/channel 5/8
+lamp 53               0              SHOOT AGAIN  # node/channel 5/10
+lamp 54               0              MODE 2  # node/channel 5/11
+lamp 55               0              MODE 3  # node/channel 5/12
+lamp 56               0              MODE 4  # node/channel 5/13
+lamp 57               0              MODE 5  # node/channel 5/14
+lamp 58               0              2 MINUTES TO MIDNIGHT  # node/channel 5/15
+lamp 59               0              POWER SPINNERS  # node/channel 5/16
+lamp 60               0              LOCK 2  # node/channel 5/17
+lamp 61               0              LOCK 1  # node/channel 5/18
+lamp 62               0              RIGHT LIGHTNING FLASH  # node/channel 5/19
+lamp 63               0              LEFT OUTLANE  # node/channel 5/20
+lamp 64               0              LEFT INLANE  # node/channel 5/21
+lamp 65               0              RIGHT INLANE  # node/channel 5/22
+lamp 66               0              RIGHT OUTLANE  # node/channel 5/23
+lamp 67               0              POWER POPS  # node/channel 5/24
+lamp 68               0              POWER TARGETS  # node/channel 5/25
+lamp 69               0              POWER RAMPS  # node/channel 5/26
+lamp 70               0              POWER ORBITS  # node/channel 5/27
+lamp 71               0              CYBER MULTIBALL  # node/channel 5/28
+lamp 72               0              3X PLAYFIELD  # node/channel 5/29
+lamp 73               0              LEFT LIGHTNING FLASH  # node/channel 5/30
+lamp 74               0              2X PLAYFIELD  # node/channel 5/31
+lamp 75,76,77         0              LEFT RAMP ARROW  # node/channel 5/32 5/33 5/34
+lamp 78,79,80         0              CLAIRVOYANT ORB  # node/channel 5/35 5/36 5/37
+lamp 81               0              POWER JACKPOT  # node/channel 5/40
+lamp 82,83,84         0              SPINNER ARROW LEFT  # node/channel 5/41 5/42 5/43
+lamp 85               0              SPINNER LEFT  # node/channel 5/44
+lamp 86               0              LEFT SPINNER FLASH  # node/channel 5/45
+lamp 87               0              ADVANCE REVIVE  # node/channel 5/46
+lamp 88               0              ORB ARROW  # node/channel 5/47
+lamp 89               0              BEAST  # node/channel 5/48
+lamp 90               0              BOUNTY 4  # node/channel 5/49
+lamp 91               0              BOUNTY 3  # node/channel 5/50
+lamp 92               0              SKILL SHOT  # node/channel 5/51
+lamp 93               0              BOUNTY 2  # node/channel 5/52
+lamp 94               0              X2  # node/channel 5/53
+lamp 95               0              EXTRA BALL  # node/channel 5/54
+lamp 96               0              BOUNTY 1  # node/channel 5/55
+lamp 97               0              LEFT POP BUMPER FLASH  # node/channel 5/57
+lamp 98               0              RIGHT POP BUMPER  # node/channel 5/58
+lamp 99               0              BOTTOM POP BUMPER  # node/channel 5/59
+lamp 100              0              X1  # node/channel 5/60
+lamp 101,0,0          0              TOP GI  # node/channel 6/0
+lamp 102              0              TOP GI-WHT  # node/channel 6/1
+lamp 103              0              BACKPANEL GI  # node/channel 6/2
+lamp 104              0              TOMB FLASH  # node/channel 6/3
+lamp 105              0              PHARAOH FLASH  # node/channel 6/4
+lamp 106              0              SARCOPHAGUS FLASH  # node/channel 6/5
+lamp 107              0              BULLSEYE CENTER BLU  # node/channel 6/6
+lamp 108              0              BULLSEYE RED (X2)  # node/channel 6/7
+lamp 109              0              BOTTOM DROP  # node/channel 6/8
+lamp 110              0              MID DROP  # node/channel 6/9
+lamp 111              0              MUM(M)Y  # node/channel 6/10
+lamp 112              0              MUMM(Y)  # node/channel 6/11
+lamp 113,114,115      0              BIG LOOP ARROW  # node/channel 6/12 6/13 6/14
+lamp 116              0              LOOP JACKPOT-LEFT  # node/channel 6/15
+lamp 117              0              SPOT LEFT  # node/channel 6/16
+lamp 118              0              RIGHT SPINNER FLASH  # node/channel 6/17
+lamp 119              0              250K  # node/channel 6/18
+lamp 120              0              500K  # node/channel 6/19
+lamp 121              0              750K  # node/channel 6/20
+lamp 122              0              1M  # node/channel 6/21
+lamp 123              0              2X LOOP  # node/channel 6/22
+lamp 124              0              TOMB-BB  # node/channel 6/23
+lamp 125              0              RAMPS-BB  # node/channel 6/24
+lamp 126              0              TOP DROP  # node/channel 6/25
+lamp 127,128,129      0              MINI LOOP ARROW  # node/channel 6/26 6/27 6/28
+lamp 130              0              LOOP JACKPOT-RIGHT  # node/channel 6/29
+lamp 131              0              MU(M)MY  # node/channel 6/30
+lamp 132              0              SPINNER RIGHT  # node/channel 6/31
+lamp 133              0              BATTLE  # node/channel 6/32
+lamp 134              0              LOCK FLASH  # node/channel 6/33
+lamp 135,136,137      0              SPINNER ARROW RIGHT  # node/channel 6/34 6/35 6/36
+lamp 138              0              (M)UMMY  # node/channel 6/37
+lamp 139              0              LEFT ORBIT  # node/channel 6/38
+lamp 140              0              M(U)MMY  # node/channel 6/39
+lamp 141              0              SUPER JACKPOT  # node/channel 6/40
+lamp 142              0              X3  # node/channel 6/41
+lamp 143              0              X4  # node/channel 6/42
+lamp 144              0              LOCK LIT  # node/channel 6/43
+lamp 145              0              SCOOP FLASH  # node/channel 6/44
+lamp 146,147,148      0              CENTER ARROW  # node/channel 6/45 6/46 6/47
+lamp 149,150,151      0              RIGHT RAMP ARROW  # node/channel 6/48 6/49 6/50
+lamp 152              0              RAMPS  # node/channel 6/51
+lamp 153              0              RIGHT ORBIT  # node/channel 6/52
+lamp 154,155,156      0              RIGHT ORBIT ARROW  # node/channel 6/53 6/54 6/55
+lamp 158,157,159      0              INTELLIGENT DOME 1  # node/channel 7/0 7/1 7/2
+lamp 161,160,162      0              INTELLIGENT DOME 2  # node/channel 7/3 7/4 7/5
+lamp 164,163,165      0              INTELLIGENT DOME 3  # node/channel 7/6 7/7 7/8
+lamp 167,166,168      0              INTELLIGENT DOME 4  # node/channel 7/9 7/10 7/11
+lamp 170,169,171      0              INTELLIGENT DOME 5  # node/channel 7/12 7/13 7/14
+lamp 173,172,174      0              INTELLIGENT DOME 6  # node/channel 7/15 7/16 7/17
+lamp 176,175,177      0              INTELLIGENT DOME 7  # node/channel 7/18 7/19 7/20
+lamp 179,178,180      0              INTELLIGENT DOME 8  # node/channel 7/21 7/22 7/23
+lamp 182,181,183      0              INTELLIGENT DOME 9  # node/channel 7/24 7/25 7/26
+lamp 185,184,186      0              INTELLIGENT DOME 10  # node/channel 7/27 7/28 7/29
+lamp 188,187,189      0              INTELLIGENT DOME 11  # node/channel 7/30 7/31 7/32
+lamp 191,190,192      0              INTELLIGENT DOME 12  # node/channel 7/33 7/34 7/35
+lamp 207              0              BACK LEFT 1  # node/channel 8/2 9/2
+lamp 208              0              BACK LEFT 2  # node/channel 8/3 9/3
+lamp 209              0              BACK LEFT 3  # node/channel 8/4 9/4
+lamp 210              0              BACK LEFT 4  # node/channel 8/5 9/5
+lamp 211              0              BACK LEFT 5  # node/channel 8/6 9/6
+lamp 212              0              BACK RIGHT 1  # node/channel 8/7 9/7
+lamp 213              0              BACK RIGHT 2  # node/channel 8/8 9/8
+lamp 214              0              BACK RIGHT 3  # node/channel 8/9 9/9
+lamp 215              0              BACK RIGHT 4  # node/channel 8/10 9/10
+lamp 216              0              BACK RIGHT 5  # node/channel 8/11 9/11
+lamp 217              0              PILOT X2  # node/channel 8/12 9/12
+lamp 218              0              PLANE X2  # node/channel 8/13 9/13
+lamp 219              0              LEFT WING  # node/channel 8/14 9/14
+lamp 220              0              RIGHT WING  # node/channel 8/15 9/15

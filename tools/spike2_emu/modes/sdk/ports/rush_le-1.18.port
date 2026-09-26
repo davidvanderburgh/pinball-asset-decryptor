@@ -79,7 +79,8 @@ data switch_count           0x0b665358
 
 # ---- scenes ----
 #   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x609d0+0x4) [TMNT Pro 1.58]
-scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+# item 164: the background video bank - the game draws it OVER 60ed7e50 in play, so a clip goes here
+scene video_bank           914f6bd9d17b4173189d7fa751d0cb2daae94d92
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
 value mode_mask_busy        0x210
@@ -196,6 +197,16 @@ value sound_channel_voices      188
 value sound_channel_bus         189
 value sound_channel_voice_ptrs  92
 value sound_voice_volume        48
+
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout B's
+# distances from surface_state (aerosmith_le-1.15), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x0046d4b0 0xe92d4070 0xe24dd008
+site surface_set_video 0x00464d44 0xe5d03238 0xe92d4ff0
+site surface_play     0x004624e4 0xe5d03238 0xe92d43f0
+site surface_stop     0x00461fe8 0xe5d03238 0xe92d40f0
+value surface_playing       2
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Rt ramp lt target

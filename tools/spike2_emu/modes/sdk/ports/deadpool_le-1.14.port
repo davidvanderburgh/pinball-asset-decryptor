@@ -5,6 +5,7 @@
 # TARGET RUSH started on the third Lil Deadpool target and ended on its clock and on a drain
 # (END (ball ended)), and every event below fired when it should. Its event bus is two ids smaller than
 # Godzilla's (cmp r0, #205), and so are its tilt ids: 0xc6 is the warning here, 0xc4 the tilt.
+# Callouts heard in the emulator 2026-09-25 (item 164, the item 163 pipeline): countdown.
 game           deadpool_le
 version        1.14
 
@@ -143,6 +144,12 @@ data layer_stack            0x0062a0c8
 data video_layer            0x0062a0ac
 value clip_layer_priority   5
 value layer_video_at        0x14
+
+# ---- callouts, heard in the emulator 2026-09-25 (item 164): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 962 (clips 1-5 said "One!", "Two!", "3!", "Four.", "Five.")
+callout countdown           962
+value countdown_first 5
+value countdown_stride 5
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Lil Deadpool target

@@ -202,7 +202,9 @@ data switch_count           0x0089d738
 #   scene hud: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Jaws LE 1.02]
 scene hud                  6fb393447ae7e3c2e1c629efff24bd1991ac1368/7de1c1596973efa1e95d16d7cb9229f4c6d36db9
 #   scene video_bank: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
-scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+# item 164: the bank the game draws in play is NESTED under 6fb39344 (1403 clips); the top-level 60ed7e50
+# is a 989-byte stub, so a clip added there played and was never seen
+scene video_bank           6fb393447ae7e3c2e1c629efff24bd1991ac1368/60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 # scene attract                NOT PLACED: the target program never names 394c4a03 (no code that loads it could be lined up)
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
@@ -332,6 +334,15 @@ callout ten_seconds         689
 callout time_up             694
 value countdown_first 1
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x00583280 0xe92d4070 0xe24dd008
+site surface_set_video 0x0057a964 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00578770 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00577f20 0xe5d030d4 0xe92d40f0
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Side ramp target
 
@@ -457,3 +468,22 @@ site balls_in_play         0x003f5870 0xe92d4010 0xe30b44d4
 # find_text to Radium::Text; found through the lookup, Godzilla LE 1.16 0x587bac, by the class each casts to),
 # the node's set-visible (Sprite slot 42) and the scene inside a scene player
 site find_text        0x00582a28 0xe92d4070 0xe24dd008
+
+# ---- the game's own modes (item 164): the framework's game flags (set 0x321510 / clear 0x3214c8; the bitmap
+# pointer at [holder + 4], its size in bits at the count global). Each mode's start sets a flag of its
+# own that its stop clears; multiballs are the balls-in-play count's:
+#   102  Bust out 0x620bc
+#   104  What's that 0x1ceb40
+#   85  Ahoy Mr Bond wizard 0x20530
+#   42  Upside down hurry-ups 0x1c7df0/0x1c9f60
+#   141  Bullshit scoring 0x5be50
+#   139  Victory laps 0x1cbc2c
+data game_flags             0x00829200
+value game_flags_at         4
+data game_flag_count        0x005f64b0
+value mode_flag_1           102
+value mode_flag_2           104
+value mode_flag_3           85
+value mode_flag_4           42
+value mode_flag_5           141
+value mode_flag_6           139

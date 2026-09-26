@@ -511,14 +511,13 @@ frames. So the proof is the boards it does read:
 
 All five went back after the mode ended.
 
-Not yet:
+Later the same day, with the insert lines back in: Avengers (2 of 2 readable colour inserts held,
+none before), Sword of Rage (8 of 24, none before) and Iron Maiden (5 of 21, 1 before) - the same
+partial proof. TMNT LE: all 18 colour inserts once its game started.
 
-- Avengers and Iron Maiden: too few readable inserts moved.
-- Stranger Things: its device table reads only 83 records.
-- Sword of Rage: nothing readable moved.
-- TMNT LE: the rig never starts a game there.
-
-Those ports carry no insert lines.
+Not yet: Stranger Things - its inserts are driven in the BANK form on bank 1 (`[nbcmd] 90`, `b0`,
+`b2` with the prefix 0x24 / 0x34), which the shim refuses. Its port carries the lines; the tab
+leaves Lights off until one is seen.
 
 ### Sounds of your own (item 150)
 
@@ -662,6 +661,15 @@ Every other title (`mode_sounds.TITLES[...].swap`) touches no stock sound id at 
 - **The carrier's descriptor still sets the bus, the loop and HOW LONG it plays.** So a call must
   be no longer than its carrier's own record (the build refuses a longer one, and the carriers
   are the title's longest unplayed calls), and the music carrier is a stock tune (minutes long).
+
+**The end sound on a carrier (item 164).** On a title whose time-up callout is not known, there is
+no request to re-point for the end sound, so it rides a carrier like the start and shot sounds:
+the mode file says `sound_end <request> <ms>` with its `swap` line, and mode_file.c plays it when
+time runs out. Each mode gets its own (a card no longer carries one end sound for the whole game
+on those titles). `mode_project.end_sound_carried` says a title has the carriers for it. Heard in
+the emulator at time-up, after the game's own countdown, on 16 builds (2026-09-25): Avengers, The
+Beatles, Foo Fighters, Iron Maiden, John Wick, JP LE, JP The Pin, the Led Zeppelins, Mandalorian,
+the Star Wars builds, Sword of Rage, the TMNTs and X-Men.
 
 | To... | Call |
 |---|---|
@@ -998,10 +1006,34 @@ TMNT LE 1.59 was proven the same way once its game started (`ctraining_level_two
 no mode back). In attract the LE keeps serving balls until its trough is empty and only then
 takes a Start, so the scripted check presses Start for about two and a half minutes.
 
-**Not yet.** On the plain-C titles and Elvira the game's other modes (not its multiballs) are
-not seen: their rules keep no table the runtime can walk (a mode's start bumps an
-`AUD_..._STARTED` audit, the lead for a later item). JP The Pin 1.05 takes the balls-in-play
-route (`site balls_in_play`, the framework's count), proven the same way on 2026-09-25.
+JP The Pin 1.05 takes the balls-in-play route (`site balls_in_play`, the framework's count),
+proven the same way on 2026-09-25.
+
+**The other modes, from their FLAGS (item 164).** The plain-C framework keeps a bitset of game
+flags, saved per player (JP The Pin 1.05: set 0x152d60, clear 0x152d18, get 0x152df8; the bitmap
+pointer at [0x594a40 + 4], its size in bits at [0x4beff8]), and a mode's START sets a flag of its
+own that its stop clears (Stegosaurus 0x90860 sets 40; 0x90718 and 0x9090c clear it). The flag
+functions have one shape on every plain-C build, so they are found by their code; each mode's
+flag is read off its start function in the build's stock table, and kept only when a clear of its
+own exists (a flag set by many starts, or never cleared, would hold a mode back for ever). The
+port names them:
+
+```
+data game_flags             0x00594a40      # the holder; the bitmap pointer is at + game_flags_at
+value game_flags_at         4
+data game_flag_count        0x004beff8      # its size in bits
+value mode_flag_1           39              # .. mode_flag_32: any of them set is one of the game's modes
+```
+
+and the runtime answers "one of the game's modes (flag N)" beside the multiball count. Proven in
+the emulator (2026-09-25, a stack no mode held back while the mode its start was called for ran):
+JP The Pin (Stegosaurus, 40), Star Wars ELG (Inner loop, 86), Stranger Things (Bust out, 78) and
+Bond LE (Bust out, 102 - which cleared when it ended, and the next start went ahead);
+`mode_project.STACK_FLAGS_PROVEN`, and the tab drops its "multiballs only" note there.
+
+**Not yet.** Aerosmith's double scoring only pulses its flag (96). The Beatles' song modes, X-Men,
+Guardians, Bond 60th, Metallica, Batman and Elvira keep no flag of their own that a start sets (X-Men
+keeps its state in each mode's object), or their starts take arguments: multiballs only there.
 
 ## Ports: why your mode runs on any game
 
@@ -1260,16 +1292,30 @@ card was seen in a game in the emulator:
 - Through `clip_play`: Godzilla (Pro 1.15, 1.16, Premium/LE) and Jaws.
 - Through the layer: both Deadpools.
 
-Where it plays but never shows, the port carries no clip lines and the tab says so: the Bonds,
-the Led Zeppelins, Metallica and Rush (a concert or song video stays in front).
+**More banks (item 164, 2026-09-25, each seen on the glass in a game):**
+
+- A Video's SECOND list (`video_bank._marked`): clips with frame markers - a name and an id, and on
+  the id's first occurrence an f32 fps and [u64 n] (u32 frame, marker name). Empty on Godzilla,
+  whose bank walked by accident; Munsters ("EndOfBallBonus": Pause, Explosion), the Star Wars builds
+  ("SW5_SCENE_001": MUSIC_START) and John Wick carry some. All 33 banks parse now.
+- The bank the game DRAWS is not always 60ed7e50: the Led Zeppelins, Metallica and Rush draw a
+  background bank, 914f6bd9 (their song and concert videos), over it; Bond LE's real bank is nested,
+  6fb39344/60ed7e50 (the top-level one is a 989-byte stub); John Wick draws 08a4e1ca (413 clips).
+  The port's `scene video_bank` names the one on the glass, and a clip goes there.
+- A derived `site video_surface` getter that answers another surface is commented out (JP The Pin,
+  John Wick): the runtime then finds the surface of the bank the port names.
+- A one-clip bank keeps its clip at the top of scene.assets (`2.asset` itself); the next clip is
+  `3.asset` beside it (`video_bank.next_path`).
+
+Seen: Star Wars LE and ELG, the Led Zeppelins, Rush, Bond LE, John Wick, JP The Pin.
 
 Not yet:
 
-- TMNT LE 1.59: seen in attract only, because the rig never started a game there.
-- Iron Maiden: its getter plays by name from its own scene player.
-- Munsters and the Star Wars builds: their bank grammar does not parse yet.
-- John Wick: its bank grammar does not parse yet either.
-- Batman and Elvira: no 60ed7e50 bank.
+- Munsters and Iron Maiden: the clip plays in their one-clip background banks, but the HUD's own
+  artwork covers the whole glass in a game; a clip would have to go in the HUD scene.
+- Metallica: played on 914f6bd9, and the song video stayed in front.
+- Bond 60th: no bank among the scenes it draws in play.
+- Batman and Elvira: no 60ed7e50 bank; they play video through another player.
 
 ### Screens on every title (item 164)
 
@@ -1337,7 +1383,7 @@ pointing here. What each part of the tab needs from the port:
 |---|---|---|
 | Starts on, Shots that score | `shot` lines (and `shot_mask_bits` when the game sends 32 bits), and `switch` lines with a `switch_hit` site | a port not in `SWITCH_SHOTS_PROVEN` says its switch shots are not proven |
 | Examples | `text example_start_shot` | Godzilla's ready-made modes appear wherever every shot they name exists |
-| Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` | `callout ten_seconds` adds the call at 10 s; without it the count is 5..1 only. `value countdown_first <n>` when the request's list opens with something else: the clip "one" is in (Iron Maiden 1.16's 351 opens with a sting, so 1); `pm_callout_nth` adds it to any clip asked of the countdown role. `value countdown_step <1 or -1>` when every number is a request of its own: `callout countdown` names the "one" request and the others follow it by that step (Star Wars ELG 168, Munsters, Jurassic Park Pin count down the ids; Led Zeppelin, Sword of Rage count up) |
+| Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` | `callout ten_seconds` adds the call at 10 s; without it the count is 5..1 only. `value countdown_first <n>` when the request's list opens with something else: the clip "one" is in (Iron Maiden 1.16's 351 opens with a sting, so 1); `pm_callout_nth` adds it to any clip asked of the countdown role. `value countdown_step <n>` when every number is a request of its own: `callout countdown` names the "one" request and the others follow it by that step (Star Wars ELG 168, Munsters, Jurassic Park Pin, Batman 66 1061 count down the ids; Led Zeppelin, Sword of Rage count up; Bond 60th 542 steps by 2, each number in two voices). `value countdown_stride <n>` when one request holds every number in several voices, number by number: the clip for the count is `n * stride + countdown_first` (Deadpool LE 962 / Pro 967: five voices each, "ten" first, so first 5, stride 5) |
 | Sound: the game's own call | `callout time_up` | without it nothing plays when time is up |
 | Sound: my sound | the `sound_lookup` site and `callout time_up` (the call it replaces) | a time-up request with variants (Guardians' 254: "Time's up." / "Your time is up!" ...) gets the sound in place of every variant, so whichever the game picks plays it |
 | Lights | everything `pm_can(PM_CAN_LIGHTS)` needs, including `value light_owner`, and `value light_lts` (the game's light language); or, item 164, the named-insert lines (`PM_CAN_LAMPS`) on a build in `mode_project.LAMPS_PROVEN` | through the inserts the tab writes `light_all <colour> pulse`: every insert the port names breathes in the mode's colour while it runs |

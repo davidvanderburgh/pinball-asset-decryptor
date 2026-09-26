@@ -200,7 +200,8 @@ data score_mult             0x0055958c
 #   scene hud: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Jaws LE 1.02]
 scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
 #   scene video_bank: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, TMNT Pro 1.59, Deadpool LE 1.14, Deadpool Pro 1.16]
-scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+# item 164: the one-clip background bank the game draws in play; 60ed7e50 is not drawn in a game
+scene video_bank           69db8744b5d8af379df941aa607874c8888878c9
 #   scene attract: derived: the target code loads it (derived from 1 places, e.g. 0x2bd88+0x14) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
 scene attract              60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
@@ -317,6 +318,15 @@ event game_over      0x47
 callout countdown           611
 callout time_up             616
 value countdown_step -1
+
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x004322f0 0xe92d4070 0xe24dd008
+site surface_set_video 0x004299d4 0xe5d030d4 0xe92d4ff0
+site surface_play     0x004277e0 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00426f90 0xe5d030d4 0xe92d40f0
 
 # ---- examples a template mode can use on this game ----
 text example_start_shot     Lower p/f machine target

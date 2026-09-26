@@ -346,6 +346,11 @@ data typeinfo_vmi           0x00517060
 # the node's set-visible (Sprite slot 42) and the scene inside a scene player
 site find_node        0x0048934c 0xe92d4070 0xe24dd008
 site find_text        0x00488de8 0xe92d4070 0xe24dd008
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x004d6458 0xe92d40f8 0xe2505000
+site agent_begin      0x004e0db4 0xe590c004 0xe1a00001
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  c3328c39b0e29f78e9ff45db674248b1d245887d/0d167902e97be9e342b1950754601e41c79f615e

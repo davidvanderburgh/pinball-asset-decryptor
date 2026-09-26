@@ -466,3 +466,8 @@ site tank_seed_wave   0x00109c64 0xe92d47f0 0xe24dd008  # (obj): level + 1, dest
 site tank_destroy     0x00109f8c 0xe3520000 0xe3a03000  # (obj, record, credit): zero it; credit: destroyed + 1, value + 150,000; no tanks left: advance + spawn
 site tank_advance     0x0010a420 0xe5903000 0xe92d4ff0  # (obj): if active, step every tank (retire at the target), then spawn one
 site tank_award_screen_kill 0x001091a8 0xe92d43f0 0xe24dd01c  # (obj, 0xc94, value lo, hi, [sp] random): the kill's award screen and countdown sound
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x005d5bd0 0xe92d40f8 0xe2505000
+site agent_begin      0x005e053c 0xe590c004 0xe1a00001

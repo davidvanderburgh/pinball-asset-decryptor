@@ -64,6 +64,8 @@ class TitleProfile:
     cannot: tuple = ()           # ((part, reason), ...) - PARTS this title cannot do, and why
     sound_note: str = ""         # what is not known yet about the title's callouts (never heard)
     score_bits: int = 64         # 32 for a port with the 32-bit scoring pair (score_add32 + scores32)
+    insider_gate: bool = False   # item 166: the port names agent_header + agent_begin, so the runtime
+    #                              keeps every score report off Insider Connected (a must for a card)
     switch_shots: tuple = ()     # names in ``shots`` that come from the port's `switch` lines
     switch_shots_note: str = ""  # why those are not proven yet; "" when they are (or there are none)
     stack_note: str = ""         # item 164: what ``stack no`` waits for when it is less than every mode
@@ -134,6 +136,7 @@ GODZILLA_PRO_1_15 = TitleProfile(
     # runtime's "can" line or asking for the example shot gets the port's answer here too
     example_start_shot="Maser target",
     runtime_can=("callout", "lights", "screens", "clips", "own-sound", "messages", "award-screen"),
+    insider_gate=True,
 )
 
 # ---- item 147: the game's events a mode can start or end on ------------------------
@@ -303,6 +306,21 @@ def _stack_flags(data, values):
     return bool(data.get("game_flags")) and "mode_flag_1" in values
 
 
+#: item 165: the plain-C titles whose TIMED modes a ``stack no`` mode was seen wait for in the emulator: the
+#: framework's live records (``site live_records``, the check every timed mode's start begins with) asked
+#: about each mode's own record ids (``value mode_records_1`` ..). Until a build is here its note says
+#: multiballs only.
+STACK_RECORDS_PROVEN = frozenset({
+    "aerosmith_le-1.15",              # 2026-09-26: Double Scoring (ids 237..238) held a stack no mode back, and
+                                      # 60 s later its records were gone and the mode started
+    "guardians_le-1.14",              # the same with its Double Scoring (ids 232..233)
+})
+
+
+def _stack_records(sites, values):
+    return "live_records" in sites and "mode_records_1" in values
+
+
 def _stack_balls(sites):
     return all(n in sites for n in STACK_BALLS_NEEDS)
 
@@ -360,6 +378,22 @@ RUNTIME_NEEDS = {
 #: with `switch` lines for shot_dispatch, value ball_end_event with site hook_dispatch for ball_end,
 #: and the 32-bit scoring pair.
 RUNTIME_CORE = (("tick", "shot_dispatch", "ball_end", "score_add"), ("cur_player", "scores"))
+#: item 166: the Insider Connected score gate - the request header constructor and the message-begin
+#: thunk (pad_mode_runtime.c insider_arm). A port without both arms nothing, and no mode goes on a card
+#: whose port lacks them: a mode scores through the game's own scoring, and the card grades itself
+#: valid, so Insider Connected would take a mode's points as real scores.
+INSIDER_GATE_SITES = ("agent_header", "agent_begin")
+#: what the Modes page and a Write say about a card that carries modes
+INSIDER_NOTE = ("Insider Connected: players still log in on a card with modes, but the machine "
+                "sends no game, score, high-score or achievement report to Insider Connected. A "
+                "mode's points are not the game's stock scoring, so they stay on the machine.")
+
+
+def insider_gate_words(label):
+    """Why modes cannot go on *label*'s card: its port lacks the score gate."""
+    return ("%s's port has no Insider Connected score gate (agent_header and agent_begin), so "
+            "modes cannot be put on its card: a mode's points would reach Insider Connected as "
+            "real scores. Work the port out again (MODE_SDK.md, \"Insider Connected\")." % label)
 #: the 32-bit scoring pair (The Beatles 1.29: score_add(u8 player r0, u32 points r1), u32 scores)
 RUNTIME_CORE_32 = ("score_add32", "scores32")
 #: ids below this are the game's event bus ids (pad_mode_runtime.c N_BUS_IDS)
@@ -745,6 +779,9 @@ def profile_from_port(path):
         pass
     elif _stack_balls(sites) and key in STACK_BALLS_PROVEN and _stack_flags(data, values)             and key in STACK_FLAGS_PROVEN:
         pass                                  # item 164: its other modes too, from their flags
+    elif _stack_balls(sites) and key in STACK_BALLS_PROVEN and _stack_records(sites, values) \
+            and key in STACK_RECORDS_PROVEN:
+        pass                                  # item 165: its timed modes too, from the framework's live records
     elif _stack_balls(sites) and key in STACK_BALLS_PROVEN:
         stack_note = ("On %s a mode of yours waits only for the game's multiballs: the app cannot yet "
                       "see its other modes." % label)
@@ -791,6 +828,7 @@ def profile_from_port(path):
         shot_mask_bits=values.get("shot_mask_bits", 64),
         runtime_can=runtime,
         cannot=tuple(cannot),
+        insider_gate=all(n in sites for n in INSIDER_GATE_SITES),
         # item 147's events, as pad_mode_runtime.c's events_arm would arm them: a bus event
         # needs hook_dispatch, a site event its site. What each run measured is in the port.
         events=events,
@@ -825,12 +863,16 @@ LAMPS_PROVEN = frozenset((
     "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22", "metallica_spike-1.03", "munsters_le-1.28",
     "star_wars_elg-1.10", "star_wars_le-1.30", "turtles_le-1.59", "turtles_pro-1.59",
     "uncanny_xmen_le-0.98", "venom_le-1.07",
-    # the SWELF generation: the shim reads only some of its boards (it refuses the bank form), so
-    # the proof is the boards it reads - the held colour on the device table's own channels
+    # the SWELF generation, item 165 (2026-09-26): the lamp lines are LIGHT-table ids now (the earlier
+    # device indices lit the wrong inserts, and the topper), and the proof is id-exact - light_all held
+    # every insert in magenta AND light_insert held three named ones in grey, and the shim's LED view
+    # (its enumeration gate gone, its 0x84/0x85 single-lamp writes read) had exactly that on the boards
+    # it reads while the mode ran, not before or after: Aerosmith 104/104, Avengers 121/121, Guardians
+    # 112/112, Iron Maiden 112/114, Mando 92/92, Rush 151/151 (its expressive-lighting strip past bank 0
+    # is not in the plane), Stranger Things 92/92 - each with its three named inserts at grey
     "aerosmith_le-1.15", "batman-1.13", "guardians_le-1.14", "mando_le-1.44", "rush_le-1.18",
-    # item 164 (2026-09-25, later): the lamp lines back in, the same partial proof - Avengers 2/2 colour
-    # inserts held (0 before), Sword of Rage 8/24 (0 before), Iron Maiden 5/21 (1 before)
     "avengers_infinity_le-1.09", "sword_of_rage_le-1.18", "iron_maiden_le-1.16",
+    "stranger_things_le-1.12",
 ))
 
 

@@ -611,3 +611,8 @@ data typeinfo_vmi           0x00564be4
 # find_text to Radium::Text; found through the lookup, Godzilla LE 1.16 0x587bac, by the class each casts to),
 # the node's set-visible (Sprite slot 42) and the scene inside a scene player
 site find_text        0x004cb710 0xe92d4070 0xe24dd008
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x00518cb8 0xe92d40f8 0xe2505000
+site agent_begin      0x00523624 0xe590c004 0xe1a00001

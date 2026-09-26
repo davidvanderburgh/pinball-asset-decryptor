@@ -247,6 +247,11 @@ data typeinfo_vmi           0x0051f4c0
 # the node's set-visible (Sprite slot 42) and the scene inside a scene player
 site find_node        0x0049420c 0xe92d4070 0xe24dd008
 site find_text        0x00493ca8 0xe92d4070 0xe24dd008
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x004e0ca0 0xe92d40f8 0xe2505000
+site agent_begin      0x004eb5fc 0xe590c004 0xe1a00001
 value node_visible_vfn      0xa8
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
@@ -255,8 +260,8 @@ scene hud                  6cd5668f1f8189d6aa5e79203f12a0d0a4c90038
 # ---- named inserts (item 164, SWELF generation): framework lamp layers, derived from this build's program
 #   lamp_layers: the first global the lamp-group allocator 0x1bc654 loads
 data lamp_layers            0x006bd32c
-#   light_count: the device table accessor's bound (a light id is the device's index)
-data light_count            0x006def84
+#   light_count: the lamp pool's slot count (the light table's, item 165; not the device table's)
+data light_count            0x006bd1b8
 #   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
 value lamp_slot_size       40
 value lamp_slot_level      2
@@ -266,129 +271,133 @@ value lamp_slot_used       36
 value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
-# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the device table 0x657c9c: every LED
-# (class 4) but the cabinet's, a fixture's -R/-G/-B (or -RED/-GRN/-BLU) on one line; no shot ties
-lamp 46               0              SHOOTER ILLUM. R (OPTIONAL)  # node/channel 4/9
-lamp 47               0              SHOOTER ILLUM. G (OPTIONAL)  # node/channel 4/10
-lamp 48               0              SHOOTER ILLUM. B (OPTIONAL)  # node/channel 4/11
-lamp 49               0              BOTTOM GI-LEFT (X8)  # node/channel 5/0
-lamp 50               0              BOTTOM GI-RIGHT (X8)  # node/channel 5/1
-lamp 51               0              SHOOT AGAIN  # node/channel 5/3
-lamp 52               0              LEFT SPINNER FLASH  # node/channel 5/4
-lamp 53               0              VUK FLASH  # node/channel 5/5
-lamp 54               0              BLACK PANTHER-COLLECT  # node/channel 5/8
-lamp 55               0              RIGHT RETURN LANE  # node/channel 5/9
-lamp 56               0              RIGHT OUTLANE  # node/channel 5/10
-lamp 57               0              RIGHT BULLSEYE  # node/channel 5/11
-lamp 58               0              SCOOP ARROW  # node/channel 5/12
-lamp 59               0              CHANGE GEM  # node/channel 5/13
-lamp 60               0              THOR-COLLECT  # node/channel 5/14
-lamp 61               0              BLACK WIDOW-COLLECT  # node/channel 5/15
-lamp 62               0              CAPTAIN AMERICA-COLLECT  # node/channel 5/16
-lamp 63               0              IRON MAN-COLLECT  # node/channel 5/17
-lamp 64               0              HULK-COLLECT  # node/channel 5/18
-lamp 65,66,67         0              DROPS GEM  # node/channel 5/19 5/20 5/21
-lamp 68               0              LEFT OUTLANE  # node/channel 5/22
-lamp 69               0              LEFT RETURN LANE  # node/channel 5/23
-lamp 70               0              ANGLE SENSOR XYZ0  # node/channel 5/24
-lamp 71               0              ANGLE SENSOR XYZ1  # node/channel 5/25
-lamp 72               0              ANGLE SENSOR FS  # node/channel 5/26
-lamp 74               0              GLOVE GEM 1  # node/channel 5/28
-lamp 75               0              GLOVE GEM 2  # node/channel 5/29
-lamp 76               0              GLOVE GEM 3  # node/channel 5/30
-lamp 77               0              GLOVE GEM 4  # node/channel 5/31
-lamp 78               0              GLOVE GEM 5  # node/channel 5/32
-lamp 79               0              GLOVE GEM 6  # node/channel 5/33
-lamp 80               0              SOUL GEM  # node/channel 5/34
-lamp 81               0              BLACK ORDER  # node/channel 5/35
-lamp 82,83,84         0              MARVEL GEM  # node/channel 5/36 5/37 5/38
-lamp 85               0              THOR POWER UP  # node/channel 5/39
-lamp 86               0              THOR MULTIBALL  # node/channel 5/40
-lamp 87               0              THANOS BATTLE  # node/channel 5/43
-lamp 88,89,90         0              MARVEL  # node/channel 5/44 5/45 5/46
-lamp 91,92,93         0              LEFT SUBWAY  # node/channel 5/47 5/48 5/49
-lamp 94,95,96         0              CENTER SUBWAY  # node/channel 5/50 5/51 5/52
-lamp 97,98,99         0              RIGHT SUBWAY  # node/channel 5/53 5/54 5/55
-lamp 100              0              DROP TARGET GRID 9  # node/channel 5/56
-lamp 101              0              DROP TARGET GRID 8  # node/channel 5/57
-lamp 102              0              DROP TARGET GRID 7  # node/channel 5/58
-lamp 103,104,105      0              LEFT SPINNER  # node/channel 5/59 5/60 5/61
-lamp 106              0              DROP TARGET GRID 6  # node/channel 5/62
-lamp 107              0              DROP TARGET GRID 3  # node/channel 5/63
-lamp 108              0              DROP TARGET GRID 5  # node/channel 5/64
-lamp 109              0              DROP TARGET GRID 2  # node/channel 5/65
-lamp 110              0              DROP TARGET GRID 4  # node/channel 5/66
-lamp 111              0              DROP TARGET GRID 1  # node/channel 5/67
-lamp 112              0              TOP GI-LEFT (X6)  # node/channel 6/0
-lamp 113              0              TOP GI-RIGHT (X6)  # node/channel 6/1
-lamp 114              0              SKILL SHOT ROLLOVER  # node/channel 6/3
-lamp 115              0              TOWER LOCK 3  # node/channel 6/5
-lamp 116              0              TOWER LOCK 2  # node/channel 6/6
-lamp 117              0              TOWER LOCK 1  # node/channel 6/7
-lamp 118              0              LEFT BULLSEYE  # node/channel 6/8
-lamp 119,120,121      0              POPS GEM  # node/channel 6/9 6/10 6/11
-lamp 122              0              CAPTAIN AMERICA  # node/channel 6/12
-lamp 123,124,125      0              POPS  # node/channel 6/13 6/14 6/15
-lamp 126,127,128      0              LEFT RAMP  # node/channel 6/16 6/17 6/18
-lamp 129,130,131      0              LEFT ORBIT GEM  # node/channel 6/19 6/20 6/21
-lamp 132              0              HULK  # node/channel 6/22
-lamp 133,134,135      0              TOWER  # node/channel 6/23 6/24 6/25
-lamp 136              0              HAWKEYE CHALLENGE  # node/channel 6/26
-lamp 137              0              IRON MAN  # node/channel 6/27
-lamp 138              0              BLACK WIDOW  # node/channel 6/28
-lamp 139,140,141      0              LEFT RAMP GEM  # node/channel 6/29 6/30 6/31
-lamp 142              0              COLLECT GEM  # node/channel 6/32
-lamp 143,144,145      0              RIGHT RAMP  # node/channel 6/33 6/34 6/35
-lamp 146,147,148      0              INNER LOOP  # node/channel 6/36 6/37 6/38
-lamp 149              0              CENTER BULLSEYE  # node/channel 6/39
-lamp 150              0              LEFT POP BUMPER  # node/channel 6/40
-lamp 151              0              RIGHT POP BUMPER  # node/channel 6/41
-lamp 152              0              BOTTOM POP BUMPER  # node/channel 6/42
-lamp 153              0              TOWER FLASH  # node/channel 6/43
-lamp 154              0              SANCTUM FLASH  # node/channel 6/44
-lamp 155              0              EXTRA BALL  # node/channel 6/45
-lamp 156              0              ADD-A-BALL  # node/channel 6/46
-lamp 157              0              SPOT IRON  # node/channel 6/47
-lamp 158              0              BACKPANEL FLASH 1 (L)  # node/channel 6/48
-lamp 159              0              BACKPANEL FLASH 2  # node/channel 6/49
-lamp 160              0              BACKPANEL FLASH 3 (R)  # node/channel 6/50
-lamp 161              0              (T)HOR  # node/channel 6/51
-lamp 162              0              T(H)OR  # node/channel 6/52
-lamp 163              0              TH(O)R  # node/channel 6/53
-lamp 164              0              THO(R)  # node/channel 6/54
-lamp 165              0              GLOVE SPOTLIGHT  # node/channel 6/55
-lamp 166,167,168      0              RIGHT ORBIT GEM  # node/channel 6/56 6/57 6/58
-lamp 169              0              BLACK PANTHER  # node/channel 6/59
-lamp 170,171,172      0              RIGHT ORBIT  # node/channel 6/60 6/61 6/62
-lamp 173,174,175      0              STRANG(E)  # node/channel 6/63 6/64 6/65
-lamp 176,177,178      0              STRA(N)GE  # node/channel 6/66 6/67 6/68
-lamp 179,180,181      0              STRAN(G)E  # node/channel 6/69 6/70 6/71
-lamp 182              0              EYE OF AGAMOTTO  # node/channel 6/72
-lamp 183,184,185      0              DISC  # node/channel 6/73 6/74 6/75
-lamp 186,187,188      0              STR(A)NGE  # node/channel 6/76 6/77 6/78
-lamp 189              0              DISC SPIN CW  # node/channel 6/79
-lamp 190              0              PORTAL LOCK  # node/channel 6/80
-lamp 191,192,193      0              S(T)RANGE  # node/channel 6/81 6/82 6/83
-lamp 194              0              DISC SPIN CCW  # node/channel 6/84
-lamp 195,196,197      0              ST(R)ANGE  # node/channel 6/85 6/86 6/87
-lamp 198              0              OPEN PORTAL  # node/channel 6/88
-lamp 199              0              DISC FLASH  # node/channel 6/89
-lamp 200,201,202      0              (S)TRANGE  # node/channel 6/93 6/94 6/95
-lamp 203              0              DR STRANGE HANDS-LEFT  # node/channel 7/0
-lamp 204              0              DR STRANGE HANDS-RIGHT  # node/channel 7/1
-lamp 205              0              BACK LED 1  # node/channel 7/7
-lamp 206              0              BACK LED 2  # node/channel 7/8
-lamp 207              0              BACK LED 3  # node/channel 7/9
-lamp 208              0              BACK LED 4  # node/channel 7/10
-lamp 209              0              BACK LED 5  # node/channel 7/11
-lamp 210              0              BACK LED 6  # node/channel 7/12
-lamp 211              0              BACK LED 7  # node/channel 7/13
-lamp 212              0              BACK LED 8  # node/channel 7/14
-lamp 213              0              LEFT GI STRIP  # node/channel 7/23
-lamp 214              0              RIGHT GI STRIP  # node/channel 7/24
-lamp 215              0              INFINITY STONE 1  # node/channel 7/25
-lamp 216              0              INFINITY STONE 2  # node/channel 7/26
-lamp 217              0              INFINITY STONE 3  # node/channel 7/27
-lamp 218              0              INFINITY STONE 4  # node/channel 7/28
-lamp 219              0              INFINITY STONE 5  # node/channel 7/29
-lamp 220              0              INFINITY STONE 6  # node/channel 7/30
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the LIGHT table 0x655820 (186 lights; record i names
+# its device, the ids the lamp layers' slots go by), each light's name, board node and channel from the device
+# table 0x657c9c; a fixture's -R/-G/-B on one line; the cabinet, a topper's pixels and control outputs left out.
+# The comment's node is the BUS node (the node table's id for the device's node number). Item 165: the
+# earlier block wrote device indices as light ids, which are not the same on this generation.
+lamp 9                0              LEFT OUTLANE  # node/channel 8/22
+lamp 10               0              LEFT RETURN LANE  # node/channel 8/23
+lamp 11               0              RIGHT RETURN LANE  # node/channel 8/9
+lamp 12               0              RIGHT OUTLANE  # node/channel 8/10
+lamp 13               0              SHOOT AGAIN  # node/channel 8/3
+lamp 14,15,16         0              DROPS GEM  # node/channel 8/19 8/20 8/21
+lamp 17               0              HULK-COLLECT  # node/channel 8/18
+lamp 18               0              IRON MAN-COLLECT  # node/channel 8/17
+lamp 19               0              CAPTAIN AMERICA-COLLECT  # node/channel 8/16
+lamp 20               0              BLACK WIDOW-COLLECT  # node/channel 8/15
+lamp 21               0              THOR-COLLECT  # node/channel 8/14
+lamp 22               0              BLACK PANTHER-COLLECT  # node/channel 8/8
+lamp 23               0              DROP TARGET GRID 1  # node/channel 8/67
+lamp 24               0              DROP TARGET GRID 2  # node/channel 8/65
+lamp 25               0              DROP TARGET GRID 3  # node/channel 8/63
+lamp 26               0              DROP TARGET GRID 4  # node/channel 8/66
+lamp 27               0              DROP TARGET GRID 5  # node/channel 8/64
+lamp 28               0              DROP TARGET GRID 6  # node/channel 8/62
+lamp 29               0              DROP TARGET GRID 7  # node/channel 8/58
+lamp 30               0              DROP TARGET GRID 8  # node/channel 8/57
+lamp 31               0              DROP TARGET GRID 9  # node/channel 8/56
+lamp 32               0              SOUL GEM  # node/channel 8/34
+lamp 33               0              BLACK ORDER  # node/channel 8/35
+lamp 34               0              THANOS BATTLE  # node/channel 8/43
+lamp 35               0              RIGHT BULLSEYE  # node/channel 8/11
+lamp 36               0              SCOOP ARROW  # node/channel 8/12
+lamp 37               0              CHANGE GEM  # node/channel 8/13
+lamp 38,39,40         0              LEFT SPINNER  # node/channel 8/59 8/60 8/61
+lamp 41,42,43         0              LEFT ORBIT GEM  # node/channel 9/19 9/20 9/21
+lamp 44               0              HULK  # node/channel 9/22
+lamp 45,46,47         0              TOWER  # node/channel 9/23 9/24 9/25
+lamp 48               0              HAWKEYE CHALLENGE  # node/channel 9/26
+lamp 49               0              IRON MAN  # node/channel 9/27
+lamp 50               0              TOWER LOCK 1  # node/channel 9/7
+lamp 51               0              TOWER LOCK 2  # node/channel 9/6
+lamp 52               0              TOWER LOCK 3  # node/channel 9/5
+lamp 53               0              DISC SPIN CCW  # node/channel 9/84
+lamp 54,55,56         0              DISC  # node/channel 9/73 9/74 9/75
+lamp 57               0              DISC SPIN CW  # node/channel 9/79
+lamp 58,59,60         0              (S)TRANGE  # node/channel 9/93 9/94 9/95
+lamp 61,62,63         0              S(T)RANGE  # node/channel 9/81 9/82 9/83
+lamp 64,65,66         0              ST(R)ANGE  # node/channel 9/85 9/86 9/87
+lamp 67,68,69         0              STR(A)NGE  # node/channel 9/76 9/77 9/78
+lamp 70,71,72         0              STRA(N)GE  # node/channel 9/66 9/67 9/68
+lamp 73,74,75         0              STRAN(G)E  # node/channel 9/69 9/70 9/71
+lamp 76,77,78         0              STRANG(E)  # node/channel 9/63 9/64 9/65
+lamp 79               0              OPEN PORTAL  # node/channel 9/88
+lamp 80               0              PORTAL LOCK  # node/channel 9/80
+lamp 81               0              EYE OF AGAMOTTO  # node/channel 9/72
+lamp 82,83,84         0              LEFT RAMP GEM  # node/channel 9/29 9/30 9/31
+lamp 85,86,87         0              INNER LOOP  # node/channel 9/36 9/37 9/38
+lamp 88               0              CENTER BULLSEYE  # node/channel 9/39
+lamp 89               0              BLACK WIDOW  # node/channel 9/28
+lamp 90,91,92         0              LEFT RAMP  # node/channel 9/16 9/17 9/18
+lamp 93,94,95         0              RIGHT RAMP  # node/channel 9/33 9/34 9/35
+lamp 96               0              COLLECT GEM  # node/channel 9/32
+lamp 97               0              LEFT BULLSEYE  # node/channel 9/8
+lamp 98               0              EXTRA BALL  # node/channel 9/45
+lamp 99               0              ADD-A-BALL  # node/channel 9/46
+lamp 100              0              SPOT IRON  # node/channel 9/47
+lamp 101,102,103      0              POPS GEM  # node/channel 9/9 9/10 9/11
+lamp 104              0              CAPTAIN AMERICA  # node/channel 9/12
+lamp 105,106,107      0              POPS  # node/channel 9/13 9/14 9/15
+lamp 108              0              SKILL SHOT ROLLOVER  # node/channel 9/3
+lamp 109,110,111      0              MARVEL GEM  # node/channel 8/36 8/37 8/38
+lamp 112              0              (T)HOR  # node/channel 9/51
+lamp 113              0              T(H)OR  # node/channel 9/52
+lamp 114              0              TH(O)R  # node/channel 9/53
+lamp 115              0              THO(R)  # node/channel 9/54
+lamp 116,117,118      0              MARVEL  # node/channel 8/44 8/45 8/46
+lamp 119              0              THOR POWER UP  # node/channel 8/39
+lamp 120              0              THOR MULTIBALL  # node/channel 8/40
+lamp 121,122,123      0              RIGHT ORBIT GEM  # node/channel 9/56 9/57 9/58
+lamp 124              0              BLACK PANTHER  # node/channel 9/59
+lamp 125,126,127      0              RIGHT ORBIT  # node/channel 9/60 9/61 9/62
+lamp 128,129,130      0              LEFT SUBWAY  # node/channel 8/47 8/48 8/49
+lamp 131,132,133      0              CENTER SUBWAY  # node/channel 8/50 8/51 8/52
+lamp 134,135,136      0              RIGHT SUBWAY  # node/channel 8/53 8/54 8/55
+lamp 137              0              GLOVE GEM 1  # node/channel 8/28
+lamp 138              0              GLOVE GEM 2  # node/channel 8/29
+lamp 139              0              GLOVE GEM 3  # node/channel 8/30
+lamp 140              0              GLOVE GEM 4  # node/channel 8/31
+lamp 141              0              GLOVE GEM 5  # node/channel 8/32
+lamp 142              0              GLOVE GEM 6  # node/channel 8/33
+lamp 143              0              ANGLE SENSOR XYZ0  # node/channel 8/24
+lamp 144              0              ANGLE SENSOR XYZ1  # node/channel 8/25
+lamp 145              0              ANGLE SENSOR FS  # node/channel 8/26
+lamp 148              0              BOTTOM GI-LEFT (X8)  # node/channel 8/0
+lamp 149              0              BOTTOM GI-RIGHT (X8)  # node/channel 8/1
+lamp 150              0              TOP GI-LEFT (X6)  # node/channel 9/0
+lamp 151              0              TOP GI-RIGHT (X6)  # node/channel 9/1
+lamp 152              0              LEFT SPINNER FLASH  # node/channel 8/4
+lamp 153              0              VUK FLASH  # node/channel 8/5
+lamp 154              0              TOWER FLASH  # node/channel 9/43
+lamp 155              0              LEFT POP BUMPER  # node/channel 9/40
+lamp 156              0              RIGHT POP BUMPER  # node/channel 9/41
+lamp 157              0              BOTTOM POP BUMPER  # node/channel 9/42
+lamp 158              0              GLOVE SPOTLIGHT  # node/channel 9/55
+lamp 159              0              BACKPANEL FLASH 1 (L)  # node/channel 9/48
+lamp 160              0              BACKPANEL FLASH 2  # node/channel 9/49
+lamp 161              0              BACKPANEL FLASH 3 (R)  # node/channel 9/50
+lamp 162              0              SANCTUM FLASH  # node/channel 9/44
+lamp 163              0              DISC FLASH  # node/channel 9/89
+lamp 164              0              SHOOTER ILLUM. R (OPTIONAL)  # node/channel 1/9
+lamp 165              0              SHOOTER ILLUM. G (OPTIONAL)  # node/channel 1/10
+lamp 166              0              SHOOTER ILLUM. B (OPTIONAL)  # node/channel 1/11
+lamp 167              0              DR STRANGE HANDS-LEFT  # node/channel 12/0
+lamp 168              0              DR STRANGE HANDS-RIGHT  # node/channel 12/1
+lamp 169              0              BACK LED 1  # node/channel 12/7
+lamp 170              0              BACK LED 2  # node/channel 12/8
+lamp 171              0              BACK LED 3  # node/channel 12/9
+lamp 172              0              BACK LED 4  # node/channel 12/10
+lamp 173              0              BACK LED 5  # node/channel 12/11
+lamp 174              0              BACK LED 6  # node/channel 12/12
+lamp 175              0              BACK LED 7  # node/channel 12/13
+lamp 176              0              BACK LED 8  # node/channel 12/14
+lamp 177              0              LEFT GI STRIP  # node/channel 12/23
+lamp 178              0              RIGHT GI STRIP  # node/channel 12/24
+lamp 179              0              INFINITY STONE 1  # node/channel 12/25
+lamp 180              0              INFINITY STONE 2  # node/channel 12/26
+lamp 181              0              INFINITY STONE 3  # node/channel 12/27
+lamp 182              0              INFINITY STONE 4  # node/channel 12/28
+lamp 183              0              INFINITY STONE 5  # node/channel 12/29
+lamp 184              0              INFINITY STONE 6  # node/channel 12/30
+

@@ -439,4 +439,9 @@ site tank_seed_wave   0x0010742c 0xe92d47f0 0xe24dd008  # delta
 site tank_destroy     0x00107754 0xe3520000 0xe3a03000  # delta; (obj, record, credit)
 site tank_advance     0x00107be8 0xe5903000 0xe92d4ff0  # delta
 site tank_award_screen_kill 0x00106970 0xe92d43f0 0xe24dd01c  # delta
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x005c5a70 0xe92d40f8 0xe2505000
+site agent_begin      0x005d03dc 0xe590c004 0xe1a00001
 

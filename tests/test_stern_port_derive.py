@@ -215,6 +215,8 @@ site tick             0x00010000 0xe92d4010 0xe1a00000
 site shot_dispatch    0x00010008 0xe8bd8010 0xe92d4010
 site ball_end         0x00010000 0xe92d4010 0xe1a00000
 site score_add        0x00010000 0xe92d4010 0xe1a00000
+site agent_header     0x00010000 0xe92d4010 0xe1a00000
+site agent_begin      0x00010000 0xe92d4010 0xe1a00000
 data cur_player             0x00020000
 data scores                 0x00020010
 shot 0x1         Left ramp

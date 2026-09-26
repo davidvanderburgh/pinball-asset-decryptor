@@ -146,7 +146,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "Make a game mode of your own: what starts it, how long it runs, which shots "
         "score, and what the display, lights and speakers do while it runs. Modes are "
         "saved in this project and put on the card by Write, like the other tabs' "
-        "changes. One runs at a time.")
+        "changes. One runs at a time. With modes on the card, players still log in "
+        "to Insider Connected, but the machine sends it no scores, high scores or "
+        "achievements: a mode's points are not the game's stock scoring.")
 
     NAME_TIP = ("What the mode is called. It is the title on its screen and clip unless you "
                 "give those their own.")
@@ -298,7 +300,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
                  no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
                  game_hidden=0, check_offer=False, check_wanted=False, check_done=None,
-                 check_tip=self.CHECK_TIP)
+                 check_tip=self.CHECK_TIP, insider_note="")
         self._show_starts_words()
 
     # ------------------------------------------------------------------
@@ -1286,6 +1288,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                         % (name, profile.label, card.source, len(profile.shots)))
             if kind == "none" or (self.get("reading") or {}).get("card") not in ("", None, name):
                 self._clear_reading()          # nothing read here, or another card's words
+        insider_note = ""
+        if profile is not None and not profile.insider_gate:
+            no_port = note = MP.insider_gate_words(profile.label)   # item 166: no gate, no modes
+        elif profile is not None:
+            insider_note = MP.INSIDER_NOTE
         self._no_port = no_port
         self._profile = profile
         self._card_bound = bool(card is not None and card.game_dir and profile is not None)
@@ -1317,7 +1324,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  title_via=via, no_card=no_port == MP.NO_CARD_HELP,
                  title_label=profile.label if profile is not None else "",
                  title_port=MP.file_name(profile.port) if profile is not None else "",
-                 title_shots=len(profile.shots) if profile is not None else 0)
+                 title_shots=len(profile.shots) if profile is not None else 0,
+                 insider_note=insider_note)
         if profile is not None and profile.key != self._applied_key:
             self._apply_profile(profile)
         elif profile is None:

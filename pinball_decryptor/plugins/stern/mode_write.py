@@ -221,6 +221,8 @@ def card_refusal(project, probe=True, real_card=False):
         return ""
     if prof is None:
         return MP.no_port_words(MP.title_label(card.game_dir, card.version))
+    if not prof.insider_gate:                 # item 166: a mode's points must not reach Insider
+        return MP.insider_gate_words(prof.label)
     if real_card and derived_not_run(prof):
         return try_it_first_words(prof.label)
     return ""
@@ -1220,6 +1222,7 @@ def install_p2(image_path, payload, epoch, log=None, executor=None, timeout=900)
     out = executor.run(install_command(executor, image_path, payload, epoch), timeout=timeout)
     line = next((l for l in out.splitlines() if l.startswith("[mode]")), out.strip())
     log("Modes: %s" % line, "info")
+    log("Modes: %s" % MP.INSIDER_NOTE, "info")
     return line
 
 

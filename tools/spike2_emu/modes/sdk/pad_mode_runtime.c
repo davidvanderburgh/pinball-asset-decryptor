@@ -523,6 +523,52 @@ static int hook(unsigned addr, hook_fn logger)
     return 1;
 }
 
+/* ---- a veto hook: the logger decides whether the function runs at all ----------------------
+ * The trampoline above, with one more step. The logger gets the same saved registers and
+ * returns non-zero to REFUSE: the function is not entered and its caller gets r0 = 1 (what the
+ * game's message builders return for "failed"). Zero, and the original two words run and the
+ * function continues, with the caller's stack as it was - so a function that takes stack
+ * arguments is hooked as well. Sixteen words:
+ *   0 push {r0-r3,ip,lr}   1 mov r0,sp   2 nop   3 ldr ip,[pc,#32] -> t[13]   4 blx ip
+ *   5 cmp r0,#0   6 pop {r0-r3,ip,lr}   7 movne r0,#1   8 bxne lr   9,10 the original words
+ *   11 ldr pc,[pc,#4] -> t[14]   12 -   13 the logger   14 addr+8   15 -
+ * A literal load among the two words is not moved here (this refuses it): the sites that take a
+ * veto (the Insider Connected gate's) start with plain register instructions, and the port
+ * tools refuse pc-relative words for a hooked site. words_match() in ANOTHER object does not
+ * follow this shape (it reads t[14] and t[15] as the moved words), and no other object hooks
+ * these sites. (tests read the constants) */
+typedef int (*veto_fn)(unsigned *regs);
+static int hook_veto(unsigned addr, veto_fn logger)
+{
+    unsigned *p = (unsigned *)(unsigned long)addr, *t;
+    if (!addr || (tramp_used + 1) * 16 > 1024) return 0;
+    if ((p[0] & 0x0F7F0000u) == 0x051F0000u || (p[1] & 0x0F7F0000u) == 0x051F0000u) return 0;
+    t = tramp + tramp_used++ * 16;
+    t[0] = 0xe92d500fu;   /* push {r0,r1,r2,r3,ip,lr} */
+    t[1] = 0xe1a0000du;   /* mov r0, sp */
+    t[2] = 0xe1a00000u;   /* nop */
+    t[3] = 0xe59fc020u;   /* ldr ip, [pc, #32] -> t[13] */
+    t[4] = 0xe12fff3cu;   /* blx ip */
+    t[5] = 0xe3500000u;   /* cmp r0, #0 */
+    t[6] = 0xe8bd500fu;   /* pop {r0,r1,r2,r3,ip,lr}: the flags survive a pop */
+    t[7] = 0x13a00001u;   /* movne r0, #1 */
+    t[8] = 0x112fff1eu;   /* bxne lr */
+    t[9] = p[0];          /* the original two words */
+    t[10] = p[1];
+    t[11] = 0xe59ff004u;  /* ldr pc, [pc, #4] -> t[14] */
+    t[12] = 0u;
+    t[13] = (unsigned)(unsigned long)logger;
+    t[14] = addr + 8u;
+    t[15] = 0u;
+    mprotect(tramp, sizeof tramp, 7);
+    mprotect((void *)(unsigned long)(addr & ~0xfffu), 0x2000, 7);
+    p[1] = (unsigned)(unsigned long)t;
+    p[0] = 0xe51ff004u;   /* ldr pc, [pc, #-4] */
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    __builtin___clear_cache((char *)p, (char *)(p + 2));
+    return 1;
+}
+
 /* ---- the game, right now ------------------------------------------------------------- */
 unsigned pm_player(void)
 {
@@ -1501,14 +1547,24 @@ static int lamps_checked(void)
     for (k = 0; k < n_lamps; k++)
         for (c = 0; c < 3; c++)
             if (lamps[k].light[c] >= n) bad++;
-    if (bad) {
+    /* item 165: a FEW ids past the count are the light table's tail this build does not count (Batman 66's
+     * static table has 186 records and the game counts 179: the last seven are lights the model lacks), so
+     * only those lines are dropped and the rest hold; MANY past it are another build's lines, and none hold. */
+    if (bad && bad * 4 > n_lamps * 3) {
         say("lamps: %d light id(s) are past this game's %u lights - the lamp lines are another build's; no lamps", bad, n);
         for (k = 0; k < n_lamps; k++) lamp_let_go(k);
         can &= ~PM_CAN_LAMPS;
         done = -1;
         return 0;
     }
-    say("lamps: the game counts %u lights; every lamp line is within them", n);
+    if (bad) {
+        for (k = 0; k < n_lamps; k++)
+            for (c = 0; c < 3; c++)
+                if (lamps[k].light[c] >= n) lamps[k].light[c] = 0;     /* never written (lamp_write skips a 0) */
+        say("lamps: the game counts %u lights; %d light id(s) past them are dropped, the other lamp lines hold", n, bad);
+    } else {
+        say("lamps: the game counts %u lights; every lamp line is within them", n);
+    }
     done = 1;
     return 1;
 }
@@ -2424,12 +2480,52 @@ static int stock_flags(void)
     return 0;
 }
 
+/* item 165: the plain-C framework's LIVE RECORDS. Every timed mode's start on these builds begins by asking the
+ * framework whether one of the mode's own records is alive - Beatles 1.29 0x1ac0e0(lo, hi), Aerosmith 1.15
+ * 0x2e98fc, Guardians 1.14 0x186f08, Metallica 1.03 0x2b9290: a walk of the list of live records (its head at a
+ * global, a u16 id at +0 of each, the next at +0x84) that answers 1 when an id in [lo, hi] is found - and refuses
+ * to start while one is (Drive My Car asks about 192..193, Should Have Known Better 194..195, Ticket to Ride
+ * 196..197, Super Scoring on Aerosmith 239..241). So the same question, asked by us, says the mode is running.
+ * The port names the function (`site live_records`) and each mode's ids (`value mode_records_1` ..
+ * `mode_records_32`: lo | hi << 16) with the mode's name (`text mode_records_name_N`). */
+static char stock_records_what[80];
+
+static int stock_records_route(void)
+{
+    return fn("live_records") && pm_port_value("mode_records_1", 0) > 0;
+}
+
+static int stock_records(void)
+{
+    unsigned i, v, lo, hi;
+    char name[28];
+    const char *label;
+    for (i = 1; i <= 32; i++) {
+        pm_snprintf(name, sizeof name, "mode_records_%u", i);
+        v = (unsigned)pm_port_value(name, 0);
+        if (!v) break;
+        lo = v & 0xffffu;
+        hi = v >> 16;
+        if (((unsigned (*)(unsigned, unsigned))(unsigned long)fn("live_records"))(lo, hi)) {
+            pm_snprintf(name, sizeof name, "mode_records_name_%u", i);
+            label = pm_port_text(name);
+            pm_snprintf(stock_records_what, sizeof stock_records_what, "one of the game's modes (%s)",
+                        label ? label : name);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int stock_balls(unsigned kinds)
 {
     unsigned n;
     if (!pm_player()) return 0;
     stock_flags_what[0] = 0;
+    stock_records_what[0] = 0;
     if (stock_flags_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_flags())
+        return (int)PM_STOCK_BATTLE;
+    if (stock_records_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_records())
         return (int)PM_STOCK_BATTLE;
     n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
     return n >= 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY)) ? (int)PM_STOCK_MULTIBALL : 0;
@@ -2451,6 +2547,9 @@ int pm_stock_mode_running(unsigned kinds)
             say("stock modes: can tell, from the game's mode table (%ld modes)", pm_port_value("stock_mode_count", 0));
         else if (stock_balls_route() && stock_flags_route())
             say("stock modes: can tell a multiball, from the game's balls in play, and its other modes, from their flags");
+        else if (stock_balls_route() && stock_records_route())
+            say("stock modes: can tell a multiball, from the game's balls in play, and its timed modes, from the "
+                "framework's live records");
         else if (stock_balls_route())
             say("stock modes: can tell a multiball, from the game's balls in play (not its other modes)");
         else say("stock modes: %s%s%s%s", data("stock_mode_manager") ? "can tell" : "this port cannot tell (no stock_mode_manager)",
@@ -2476,6 +2575,7 @@ const char *pm_stock_mode_what(unsigned kind)
 {
     if (kind && stock_generic_on && stock_generic_what[0]) return stock_generic_what;
     if ((kind & PM_STOCK_BATTLE) && stock_flags_what[0]) return stock_flags_what;
+    if ((kind & PM_STOCK_BATTLE) && stock_records_what[0]) return stock_records_what;
     if ((kind & PM_STOCK_BATTLE) && stock_generic_on) return "one of the game's modes";
     if (kind & PM_STOCK_BATTLE) return "a battle";
     if (kind & PM_STOCK_MULTIBALL) return "a multiball";
@@ -4364,6 +4464,93 @@ static int port_gate(void)
     return 1;
 }
 
+/* ---- Insider Connected: no score leaves a machine that carries modes ---------------------------
+ * A mode scores through the game's own score_add, so its points are not stock scoring, and the
+ * card's validation bypass makes the game grade itself P/P/P: Insider Connected would take those
+ * games as real. The game builds every report itself and hands it to Stern's agent (conagent)
+ * over a local socket; the login, the heartbeat and the message of the day are the agent's own
+ * and are not touched. Two sites, the same on every build measured (36 of 36, 2026-09-26):
+ *   agent_header  the request header constructor: r1 is the endpoint path ("/api/v3/game/...")
+ *   agent_begin   the message-begin thunk every sender calls next: refused (r0 = 1) for a score
+ *                 report, and the sender takes its own failure path - it logs "Failed to begin
+ *                 construction of GAME_SESSION_END message", the outgoing queue drops the entry
+ *                 (a failed send is dequeued, never retried) and the game plays on.
+ * What is refused: the game session (start, update, end: the players and their scores), the
+ * high-score table report, and the game-event stream achievements are earned from. Everything
+ * else the game sends (audits, alerts, home team, player properties, the free-game code, the
+ * configuration and descriptor queries) goes out as before.
+ * The gate is REQUIRED: a port without both sites arms nothing (insider_arm), and the app refuses
+ * to put modes on a card whose port lacks them (mode_write.card_refusal). */
+#define INSIDER_ENDPOINT_MAX 96
+static char insider_endpoint[INSIDER_ENDPOINT_MAX];
+static unsigned insider_dropped[4];
+static const char *const INSIDER_BLOCKED[] = {
+    "/api/v3/game/session_",              /* session_start, session_update, session_end */
+    "/api/v1/game/high_score_events",     /* the high-score table (HSTD_REPORT) */
+    "/ingest/v1/game/game_events",        /* the event stream (GAME_EVENTS): achievements */
+    0
+};
+
+static int str_starts(const char *s, const char *prefix)
+{
+    if (!s || !prefix) return 0;
+    while (*prefix && *s == *prefix) { s++; prefix++; }
+    return *prefix == 0;
+}
+
+/* 1 + the index of the blocked prefix an endpoint starts with, 0 for one that may go out.
+ * (tests lift it verbatim) */
+static int insider_blocked(const char *endpoint)
+{
+    int i;
+    for (i = 0; INSIDER_BLOCKED[i]; i++)
+        if (str_starts(endpoint, INSIDER_BLOCKED[i])) return i + 1;
+    return 0;
+}
+
+static void on_agent_header(unsigned *r)
+{
+    const char *s = (const char *)(unsigned long)r[1];
+    if (s && s[0] == '/') str_copy(insider_endpoint, sizeof insider_endpoint, s, INSIDER_ENDPOINT_MAX - 1);
+    else insider_endpoint[0] = 0;
+}
+
+static int on_agent_begin(unsigned *r)
+{
+    int i = insider_blocked(insider_endpoint);
+    unsigned n;
+    (void)r;
+    if (!i) return 0;
+    n = ++insider_dropped[i - 1];
+    if (n == 1)
+        say("insider: %s is not sent to Insider Connected (the game logs a failed message and plays on)",
+            insider_endpoint);
+    else if ((n & 15) == 0)
+        say("insider: %s not sent, %u times", insider_endpoint, n);
+    insider_endpoint[0] = 0;
+    return 1;
+}
+
+/* 1 = the gate is up. 0 = this port cannot keep scores off Insider Connected: NOTHING is hooked
+ * and the game runs stock, whatever else the port names. */
+static int insider_arm(void)
+{
+    static const char *const s[] = { "agent_header", "agent_begin", 0 };
+    if (!have_sites(s)) {
+        say("insider: the port has no agent_header/agent_begin, so a mode's points could reach "
+            "Insider Connected as real scores - NOTHING IS HOOKED, the game runs stock");
+        return 0;
+    }
+    if (!hook(fn("agent_header"), on_agent_header) || !hook_veto(fn("agent_begin"), on_agent_begin)) {
+        say("insider: the gate could not be hooked - NOTHING IS HOOKED, the game runs stock");
+        return 0;
+    }
+    say("insider: score reports stay on this machine (the game session, high scores and game "
+        "events; agent_header 0x%08x, agent_begin 0x%08x); the login and the rest of Insider "
+        "Connected are untouched", fn("agent_header"), fn("agent_begin"));
+    return 1;
+}
+
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -4384,6 +4571,7 @@ static void pad_mode_start(void)
             port.dropped, port.n_site, N_SITES, port.n_data, N_DATA, port.n_value, N_VALUES, port.n_shot, N_SHOTS,
             port.n_switch, N_SWITCHES);
     if (!port_gate()) return;
+    if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */
     {
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };
         static const char *const light_s[] = { "light_run", "lamp_group", "show_priority", 0 };

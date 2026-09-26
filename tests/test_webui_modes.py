@@ -968,6 +968,8 @@ site tick             0x000c0210 0xe92d4038 0xe3a00037
 site shot_dispatch    0x0003e314 0xe92d4ff0 0xe3045b18
 site ball_end         0x0004b5e8 0xe92d40f8 0xe30e6c04
 site score_add        0x0015ee3c 0xe3041d0e 0xe3401087
+site agent_header     0x0047a7a8 0xe92d40f8 0xe2505000
+site agent_begin      0x00485114 0xe590c004 0xe1a00001
 
 data cur_player             0x0054322c
 data scores                 0x005b3578

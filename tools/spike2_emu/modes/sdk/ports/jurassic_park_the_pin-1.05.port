@@ -414,6 +414,11 @@ lamp 56           0              RAPTOR PEN BOLT FLASH  # lamp 55, I/O group 5 i
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
 site balls_in_play         0x002f3cd8 0xe92d4010 0xe3054574
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x004a14f8 0xe92d40f8 0xe2505000
+site agent_begin      0x004abe64 0xe590c004 0xe1a00001
 
 # ---- the game's own modes (item 164): the framework's game flags - set 0x152d60 / write 0x152da8 / get
 # 0x152df8, the bitmap pointer at [0x594a40 + 4], its size in bits at [0x4beff8]. Each dinosaur mode's

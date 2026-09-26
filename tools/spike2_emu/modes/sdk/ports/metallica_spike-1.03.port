@@ -575,3 +575,24 @@ lamp 72           0              LEFT RAMP GRAVE MARKER  # lamp 239, I/O group 1
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
 site balls_in_play         0x0036aa88 0xe92d4010 0xe3014350
+
+# ---- the game's own modes (item 165): the framework's LIVE RECORDS. Every timed mode's start begins by
+# asking 0x2b9290(lo, hi) whether one of its own records is alive (a walk of the list at [0x6fe9508]: u16 id at +0,
+# next at +0x84) and refuses to start while one is; asked by the runtime, it says the mode is running.
+# Each mode's ids are read off its start (or the function reading its timer adjustment) in the stock table.
+site live_records          0x002b9290 0xe3092508 0xe34026fe
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x00536120 0xe92d40f8 0xe2505000
+site agent_begin      0x00540a7c 0xe590c004 0xe1a00001
+value mode_records_1       0x00b800b6      # Battery Mode: ids 182..184
+text mode_records_name_1   Battery Mode
+value mode_records_2       0x00bd00bb      # Enter Sandman Mode: ids 187..189
+text mode_records_name_2   Enter Sandman Mode
+value mode_records_3       0x00c200c0      # Enter Sandman Mode Collect Select: ids 192..194
+text mode_records_name_3   Enter Sandman Mode Collect Select
+value mode_records_4       0x00e100df      # Seventy Two Seasons Mode: ids 223..225
+text mode_records_name_4   Seventy Two Seasons Mode
+value mode_records_5       0x00e800e7      # The Unforgiven Mode: ids 231..232
+text mode_records_name_5   The Unforgiven Mode

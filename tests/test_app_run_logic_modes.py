@@ -3047,7 +3047,8 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
 
     sections = HD.sections_for("Modes")
     assert [t for t, _b in sections] == [
-        "What it's for", "Which games", "Making a mode", "Several modes", "Another card",
+        "What it's for", "Which games", "Making a mode", "Several modes",
+        "Scores and Insider Connected", "Another card",
         "Try it", "Modes written in C", "The game's own modes", "Cut from a video",
         "A preview feature"]
     bodies = dict(sections)

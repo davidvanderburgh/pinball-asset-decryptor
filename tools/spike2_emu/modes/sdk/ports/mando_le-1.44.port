@@ -229,8 +229,8 @@ event tilt           0xb7
 # ---- named inserts (item 164, SWELF generation): framework lamp layers, derived from this build's program
 #   lamp_layers: the first global the lamp-group allocator 0x1f23f4 loads
 data lamp_layers            0x006b4f2c
-#   light_count: the device table accessor's bound (a light id is the device's index)
-data light_count            0x006b91a4
+#   light_count: the lamp pool's slot count (the light table's, item 165; not the device table's)
+data light_count            0x00744950
 #   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
 value lamp_slot_size       40
 value lamp_slot_level      2
@@ -240,103 +240,106 @@ value lamp_slot_used       36
 value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
-# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the device table 0x692658: every LED
-# (class 4) but the cabinet's, a fixture's -R/-G/-B (or -RED/-GRN/-BLU) on one line; no shot ties
-lamp 47,0,0           0              LEFT PLAYFIELD GI  # node/channel 5/0
-lamp 48               0              LEFT PLAYFIELD GI-WHT  # node/channel 5/1
-lamp 49               0              RIGHT OUTLANE  # node/channel 5/3
-lamp 50               0              RIGHT RETURN LANE  # node/channel 5/4
-lamp 51               0              SCOPE LANE  # node/channel 5/5
-lamp 52               0              LEFT RETURN LANE  # node/channel 5/6
-lamp 53               0              LEFT OUTLANE  # node/channel 5/7
-lamp 54               0              SHOOT AGAIN  # node/channel 5/8
-lamp 55               0              ENCOUNTERS 1  # node/channel 5/9
-lamp 56               0              ENCOUNTERS 2  # node/channel 5/10
-lamp 57               0              ENCOUNTERS 3  # node/channel 5/11
-lamp 58               0              YOU HAVE WHAT I WANT  # node/channel 5/12
-lamp 59               0              RAZORCREST 3  # node/channel 5/13
-lamp 60               0              RAZORCREST 2  # node/channel 5/14
-lamp 61               0              RAZORCREST 1  # node/channel 5/15
-lamp 62               0              PRECIOUS CARGO  # node/channel 5/16
-lamp 63               0              THIS IS THE WAY  # node/channel 5/17
-lamp 64               0              I LIKE THOSE ODDS  # node/channel 5/18
-lamp 65               0              MISSION 5  # node/channel 5/19
-lamp 66               0              MISSION 4  # node/channel 5/20
-lamp 67               0              MISSION 3  # node/channel 5/21
-lamp 68               0              MISSION 2  # node/channel 5/22
-lamp 69               0              MISSION 1  # node/channel 5/23
-lamp 70               0              LEFT 3 BANK-TOP  # node/channel 5/24
-lamp 71               0              LEFT 3 BANK-MID  # node/channel 5/25
-lamp 72               0              LEFT 3 BANK-BOTTOM  # node/channel 5/26
-lamp 73,74,75         0              LEFT ORBIT  # node/channel 5/27 5/28 5/29
-lamp 76               0              LEFT ORBIT-CHILD  # node/channel 5/30
-lamp 77               0              LEFT ORBIT-HUNTER  # node/channel 5/31
-lamp 78               0              LEFT RAMP-MISSION  # node/channel 5/32
-lamp 79               0              +1X LEFT R  # node/channel 5/33
-lamp 80               0              +1X LEFT G  # node/channel 5/34
-lamp 81               0              +1X LEFT B  # node/channel 5/35
-lamp 82               0              +1X RIGHT R  # node/channel 5/36
-lamp 83               0              +1X RIGHT G  # node/channel 5/37
-lamp 84               0              +1X RIGHT B  # node/channel 5/38
-lamp 85               0              +1X BOTTOM R  # node/channel 5/39
-lamp 86               0              +1X BOTTOM G  # node/channel 5/40
-lamp 87               0              +1X BOTTOM B  # node/channel 5/41
-lamp 88               0              ENCOUNTERS  # node/channel 5/42
-lamp 89               0              (C) HILD A  # node/channel 5/43
-lamp 90               0              C (H) ILD  # node/channel 5/44
-lamp 91               0              CH (I) LD  # node/channel 5/45
-lamp 92               0              CHI (L) D  # node/channel 5/46
-lamp 93               0              CHIL (D)  # node/channel 5/47
-lamp 94               0              UPPER LEFT FLASH  # node/channel 5/48
-lamp 95               0              LOWER LEFT FLASH  # node/channel 5/49
-lamp 96               0              LEFT POP BUMPER  # node/channel 5/50
-lamp 97               0              RIGHT POP BUMPER  # node/channel 5/51
-lamp 98               0              CHILD SPOT  # node/channel 5/52
-lamp 99               0              BACKPANEL FLASH  # node/channel 5/53
-lamp 100,101,102      0              LEFT RAMP  # node/channel 5/54 5/55 5/56
-lamp 103,104,105      0              LEFT SCOOP  # node/channel 5/57 5/58 5/59
-lamp 106,107,108      0              RAZOR 1  # node/channel 5/60 5/61 5/62
-lamp 109,110,111      0              RAZOR 2  # node/channel 5/63 5/64 5/65
-lamp 112,113,114      0              RAZOR 3  # node/channel 5/66 5/67 5/68
-lamp 115              0              FOUNDRY  # node/channel 5/69
-lamp 116              0              EXTRA BALL  # node/channel 5/70
-lamp 117              0              LEFT SCOOP-MISSION  # node/channel 5/71
-lamp 118,0,0          0              RIGHT PLAYFIELD GI  # node/channel 6/0
-lamp 119              0              RIGHT PLAYFIELD GI-WHT  # node/channel 6/1
-lamp 120              0              BACKPANEL GI  # node/channel 6/2
-lamp 121,122,123      0              RIGHT SCOOP  # node/channel 6/8 6/9 6/10
-lamp 124              0              RIGHT RAMP-LEFT TARGET  # node/channel 6/11
-lamp 125,126,127      0              RIGHT RAMP  # node/channel 6/12 6/13 6/14
-lamp 128              0              RIGHT RAMP-RIGHT TARGET  # node/channel 6/15
-lamp 129,130,131      0              RIGHT ORBIT  # node/channel 6/16 6/17 6/18
-lamp 132              0              RIGHT ORBIT-THE CHILD  # node/channel 6/19
-lamp 133              0              RIGHT ORBIT-BOUNTY HUNTER  # node/channel 6/20
-lamp 134              0              RIGHT RAMP-MISSION  # node/channel 6/21
-lamp 135              0              MINI PF SPOT  # node/channel 6/22
-lamp 136              0              RAZOR CREST SHIP (X2)  # node/channel 6/23
-lamp 137              0              LOWER RIGHT FLASH  # node/channel 6/24
-lamp 138              0              UP DN SCOOP FLASH  # node/channel 6/28
-lamp 139              0              RIGHT RAMP - SCOPE R  # node/channel 6/25
-lamp 140              0              RIGHT 2 BANK-BOBA  # node/channel 6/26
-lamp 141              0              RIGHT 2 BANK-FETT  # node/channel 6/27
-lamp 142              0              RIGHT RAMP-AMBUSH  # node/channel 6/31
-lamp 143              0              RIGHT SCOOP-AMBUSH  # node/channel 6/36
-lamp 144              0              RIGHT SCOOP-SCOPE L  # node/channel 6/37
-lamp 145              0              SCOPE MID  # node/channel 6/38
-lamp 146              0              SUPER JACKPOT  # node/channel 6/39
-lamp 147              0              LEVEL 1  # node/channel 6/40
-lamp 148              0              LEVEL 2  # node/channel 6/41
-lamp 149              0              LEVEL 3  # node/channel 6/42
-lamp 150,151,152      0              MPF-ENCOUNTER 6  # node/channel 6/43 6/44 6/45
-lamp 153,154,155      0              MPF-ENCOUNTER 5  # node/channel 6/46 6/47 6/48
-lamp 156,157,158      0              MPF-ENCOUNTER 4  # node/channel 6/49 6/50 6/51
-lamp 159,160,161      0              MPF-ENCOUNTER 3  # node/channel 6/52 6/53 6/54
-lamp 162,163,164      0              MPF-ENCOUNTER 2  # node/channel 6/55 6/56 6/57
-lamp 165,166,167      0              MPF-ENCOUNTER 1  # node/channel 6/58 6/59 6/60
-lamp 168              0              RAZOR_CREST FORWARD  # node/channel 6/32
-lamp 169              0              RAZOR_CREST BACKWARD  # node/channel 6/33
-lamp 170              0              MINI PF CW  # node/channel 6/34
-lamp 171              0              MINI PF CCW  # node/channel 6/35
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the LIGHT table 0x68fec0 (232 lights; record i names
+# its device, the ids the lamp layers' slots go by), each light's name, board node and channel from the device
+# table 0x692658; a fixture's -R/-G/-B on one line; the cabinet, a topper's pixels and control outputs left out.
+# The comment's node is the BUS node (the node table's id for the device's node number). Item 165: the
+# earlier block wrote device indices as light ids, which are not the same on this generation.
+lamp 9                0              LEFT OUTLANE  # node/channel 8/7
+lamp 10               0              LEFT RETURN LANE  # node/channel 8/6
+lamp 11               0              RIGHT OUTLANE  # node/channel 8/3
+lamp 12               0              RIGHT RETURN LANE  # node/channel 8/4
+lamp 13               0              SHOOT AGAIN  # node/channel 8/8
+lamp 14               0              SCOPE LANE  # node/channel 8/5
+lamp 15               0              MISSION 1  # node/channel 8/23
+lamp 16               0              MISSION 2  # node/channel 8/22
+lamp 17               0              MISSION 3  # node/channel 8/21
+lamp 18               0              MISSION 4  # node/channel 8/20
+lamp 19               0              MISSION 5  # node/channel 8/19
+lamp 20               0              I LIKE THOSE ODDS  # node/channel 8/18
+lamp 21               0              RAZORCREST 1  # node/channel 8/15
+lamp 22               0              RAZORCREST 2  # node/channel 8/14
+lamp 23               0              RAZORCREST 3  # node/channel 8/13
+lamp 24               0              PRECIOUS CARGO  # node/channel 8/16
+lamp 25               0              ENCOUNTERS 1  # node/channel 8/9
+lamp 26               0              ENCOUNTERS 2  # node/channel 8/10
+lamp 27               0              ENCOUNTERS 3  # node/channel 8/11
+lamp 28               0              YOU HAVE WHAT I WANT  # node/channel 8/12
+lamp 29               0              THIS IS THE WAY  # node/channel 8/17
+lamp 30               0              +1X LEFT R  # node/channel 8/33
+lamp 31               0              +1X LEFT G  # node/channel 8/34
+lamp 32               0              +1X LEFT B  # node/channel 8/35
+lamp 33               0              +1X RIGHT R  # node/channel 8/36
+lamp 34               0              +1X RIGHT G  # node/channel 8/37
+lamp 35               0              +1X RIGHT B  # node/channel 8/38
+lamp 36               0              +1X BOTTOM R  # node/channel 8/39
+lamp 37               0              +1X BOTTOM G  # node/channel 8/40
+lamp 38               0              +1X BOTTOM B  # node/channel 8/41
+lamp 39               0              LEFT 3 BANK-TOP  # node/channel 8/24
+lamp 40               0              LEFT 3 BANK-MID  # node/channel 8/25
+lamp 41               0              LEFT 3 BANK-BOTTOM  # node/channel 8/26
+lamp 42               0              RIGHT 2 BANK-BOBA  # node/channel 9/26
+lamp 43               0              RIGHT 2 BANK-FETT  # node/channel 9/27
+lamp 44,45,46         0              LEFT ORBIT  # node/channel 8/27 8/28 8/29
+lamp 47               0              LEFT ORBIT-CHILD  # node/channel 8/30
+lamp 48               0              LEFT ORBIT-HUNTER  # node/channel 8/31
+lamp 49,50,51         0              LEFT SCOOP  # node/channel 8/57 8/58 8/59
+lamp 52               0              FOUNDRY  # node/channel 8/69
+lamp 53               0              EXTRA BALL  # node/channel 8/70
+lamp 54               0              LEFT SCOOP-MISSION  # node/channel 8/71
+lamp 55,56,57         0              LEFT RAMP  # node/channel 8/54 8/55 8/56
+lamp 58               0              ENCOUNTERS  # node/channel 8/42
+lamp 59               0              LEFT RAMP-MISSION  # node/channel 8/32
+lamp 60,61,62         0              RAZOR 1  # node/channel 8/60 8/61 8/62
+lamp 63,64,65         0              RAZOR 2  # node/channel 8/63 8/64 8/65
+lamp 66,67,68         0              RAZOR 3  # node/channel 8/66 8/67 8/68
+lamp 69,70,71         0              RIGHT SCOOP  # node/channel 9/8 9/9 9/10
+lamp 72               0              SUPER JACKPOT  # node/channel 9/39
+lamp 73               0              RIGHT SCOOP-SCOPE L  # node/channel 9/37
+lamp 74               0              RIGHT SCOOP-AMBUSH  # node/channel 9/36
+lamp 75               0              SCOPE MID  # node/channel 9/38
+lamp 76               0              RIGHT RAMP-LEFT TARGET  # node/channel 9/11
+lamp 77               0              RIGHT RAMP-RIGHT TARGET  # node/channel 9/15
+lamp 78,79,80         0              RIGHT RAMP  # node/channel 9/12 9/13 9/14
+lamp 81               0              RIGHT RAMP - SCOPE R  # node/channel 9/25
+lamp 82               0              RIGHT RAMP-AMBUSH  # node/channel 9/31
+lamp 83               0              RIGHT RAMP-MISSION  # node/channel 9/21
+lamp 84,85,86         0              RIGHT ORBIT  # node/channel 9/16 9/17 9/18
+lamp 87               0              RIGHT ORBIT-THE CHILD  # node/channel 9/19
+lamp 88               0              RIGHT ORBIT-BOUNTY HUNTER  # node/channel 9/20
+lamp 89               0              (C) HILD A  # node/channel 8/43
+lamp 90               0              C (H) ILD  # node/channel 8/44
+lamp 91               0              CH (I) LD  # node/channel 8/45
+lamp 92               0              CHI (L) D  # node/channel 8/46
+lamp 93               0              CHIL (D)  # node/channel 8/47
+lamp 94               0              RAZOR CREST SHIP (X2)  # node/channel 9/23
+lamp 95,96,97         0              MPF-ENCOUNTER 1  # node/channel 9/58 9/59 9/60
+lamp 98,99,100        0              MPF-ENCOUNTER 2  # node/channel 9/55 9/56 9/57
+lamp 101,102,103      0              MPF-ENCOUNTER 3  # node/channel 9/52 9/53 9/54
+lamp 104,105,106      0              MPF-ENCOUNTER 4  # node/channel 9/49 9/50 9/51
+lamp 107,108,109      0              MPF-ENCOUNTER 5  # node/channel 9/46 9/47 9/48
+lamp 110,111,112      0              MPF-ENCOUNTER 6  # node/channel 9/43 9/44 9/45
+lamp 113              0              LEVEL 1  # node/channel 9/40
+lamp 114              0              LEVEL 2  # node/channel 9/41
+lamp 115              0              LEVEL 3  # node/channel 9/42
+lamp 117,0,0          0              LEFT PLAYFIELD GI  # node/channel 8/0
+lamp 118              0              LEFT PLAYFIELD GI-WHT  # node/channel 8/1
+lamp 119,0,0          0              RIGHT PLAYFIELD GI  # node/channel 9/0
+lamp 120              0              RIGHT PLAYFIELD GI-WHT  # node/channel 9/1
+lamp 121              0              BACKPANEL GI  # node/channel 9/2
+lamp 122              0              LOWER LEFT FLASH  # node/channel 8/49
+lamp 123              0              UPPER LEFT FLASH  # node/channel 8/48
+lamp 124              0              LEFT POP BUMPER  # node/channel 8/50
+lamp 125              0              RIGHT POP BUMPER  # node/channel 8/51
+lamp 126              0              CHILD SPOT  # node/channel 8/52
+lamp 127              0              BACKPANEL FLASH  # node/channel 8/53
+lamp 128              0              MINI PF SPOT  # node/channel 9/22
+lamp 129              0              LOWER RIGHT FLASH  # node/channel 9/24
+lamp 130              0              UP DN SCOOP FLASH  # node/channel 9/28
+lamp 131              0              RAZOR_CREST FORWARD  # node/channel 9/32
+lamp 132              0              RAZOR_CREST BACKWARD  # node/channel 9/33
+lamp 133              0              MINI PF CW  # node/channel 9/34
+lamp 134              0              MINI PF CCW  # node/channel 9/35
 
 # ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
 # modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
@@ -354,6 +357,11 @@ data typeinfo_vmi           0x005e1a54
 # the node's set-visible (Sprite slot 42) and the scene inside a scene player
 site find_node        0x004f975c 0xe92d4070 0xe24dd008
 site find_text        0x004f91f8 0xe92d4070 0xe24dd008
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x005466f0 0xe92d40f8 0xe2505000
+site agent_begin      0x0055104c 0xe590c004 0xe1a00001
 value node_visible_vfn      0xa8
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)

@@ -376,6 +376,11 @@ site surface_find     0x005712b8 0xe92d4070 0xe24dd008
 site surface_set_video 0x0056899c 0xe5d030d4 0xe92d4ff0
 site surface_play     0x005667a8 0xe5d030d4 0xe92d43f0
 site surface_stop     0x00565f58 0xe5d030d4 0xe92d40f0
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x005be008 0xe92d40f8 0xe2505000
+site agent_begin      0x005c8974 0xe590c004 0xe1a00001
 scene video_bank            60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
 # ---- callouts and text: a start shot for a template mode ----

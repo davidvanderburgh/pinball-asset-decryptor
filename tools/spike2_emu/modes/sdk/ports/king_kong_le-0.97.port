@@ -355,6 +355,11 @@ site surface_find     0x006577e0 0xe92d4070 0xe24dd008
 site surface_set_video 0x0064eec4 0xe5d030d4 0xe92d4ff0
 site surface_play     0x0064ccd0 0xe5d030d4 0xe92d43f0
 site surface_stop     0x0064c480 0xe5d030d4 0xe92d40f0
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x006a4530 0xe92d40f8 0xe2505000
+site agent_begin      0x006aee9c 0xe590c004 0xe1a00001
 
 # ---- examples a template mode can use on this game ----
 text example_start_shot     Pit target-bot

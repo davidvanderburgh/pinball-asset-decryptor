@@ -468,6 +468,11 @@ site balls_in_play         0x003f5870 0xe92d4010 0xe30b44d4
 # find_text to Radium::Text; found through the lookup, Godzilla LE 1.16 0x587bac, by the class each casts to),
 # the node's set-visible (Sprite slot 42) and the scene inside a scene player
 site find_text        0x00582a28 0xe92d4070 0xe24dd008
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x005d0020 0xe92d40f8 0xe2505000
+site agent_begin      0x005da98c 0xe590c004 0xe1a00001
 
 # ---- the game's own modes (item 164): the framework's game flags (set 0x321510 / clear 0x3214c8; the bitmap
 # pointer at [holder + 4], its size in bits at the count global). Each mode's start sets a flag of its

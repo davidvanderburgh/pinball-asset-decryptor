@@ -190,6 +190,11 @@ text example_clip           Beach_panic_intro
 
 # ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
 site hook_dispatch    0x0032772c 0xe35000cf 0xe92d4038
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x00685d68 0xe92d40f8 0xe2505000
+site agent_begin      0x006906d4 0xe590c004 0xe1a00001
 event game_start     0x4d
 event ball_start     0x25
 event ball_end       0x34

@@ -925,6 +925,7 @@ export default function ModesTab() {
     <${ReadingPanel} r=${s.reading} />
     ${s.title_note ? html`<${TitleNote} s=${s} />` : null}
     <${CheckNote} s=${s} />
+    ${s.insider_note ? html`<div class="modes-note"><${Note} kind="info">${s.insider_note}<//></div>` : null}
     <div class="modes-body">
       <${ModeList} s=${s} onNewCode=${() => setNewCode(true)} onAllNumbers=${() => setStock(true)} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`

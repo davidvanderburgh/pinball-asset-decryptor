@@ -2448,6 +2448,16 @@ PREVIEW_HELP = {
              "after that one ends starts it. A card carries one end sound of a "
              "mode's own: the first mode that has one, and the Sound section says "
              "whose."),
+            ("Scores and Insider Connected",
+             "A mode scores through the game's own scoring, so its points are not "
+             "the game's stock scoring. With modes on the card, players still log "
+             "in to Insider Connected and see its message of the day, but the "
+             "machine sends it no game, no scores, no high scores and no "
+             "achievements: the mode runtime holds those reports back on the "
+             "machine, the game logs each as a failed message and plays on. The "
+             "page says so under the title, and a title whose port cannot do this "
+             "(one worked out before the gate existed) cannot carry modes until "
+             "its port is worked out again."),
             ("Another card",
              "Copy to…, under the list, copies every mode here into another "
              "card's project: pick that project's folder. Each mode goes with "

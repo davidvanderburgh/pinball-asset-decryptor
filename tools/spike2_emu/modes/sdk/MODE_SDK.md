@@ -1034,10 +1034,35 @@ Bond LE (Bust out, 102 - which cleared when it ended, and the next start went ah
 71, whose start takes one argument; it cleared too);
 `mode_project.STACK_FLAGS_PROVEN`, and the tab drops its "multiballs only" note there.
 
-**Not yet.** Aerosmith's double scoring only pulses its flag (96). The Beatles' songs: one start was
-found (0x4a8b8, flag 70, cleared by 0x4a97c), the other four were not, so it stays multiballs only.
-X-Men keeps its state in each mode's object (its starts are called through vtables); Guardians, Bond
-60th, Metallica and Elvira show no mode flag set by a start: multiballs only there.
+**The framework's live records (item 165), where a mode sets no flag.** Every TIMED mode's start on
+the plain-C builds begins with the same question to the framework: "is one of my records alive?" -
+Beatles 1.29 `0x1ac0e0(lo, hi)`, Aerosmith 1.15 `0x2e98fc`, Guardians 1.14 `0x186f08`, Metallica 1.03
+`0x2b9290`, one shape on every build (found by its code): a walk of the list of live records (its
+head at a global, a u16 id at +0 of each record, the next at +0x84) that answers 1 when an id in
+[lo, hi] is found - and the start refuses to run while one is (Drive My Car asks about 192..193,
+Should Have Known Better 194..195, Ticket to Ride 196..197; Super Scoring on Aerosmith 239..241).
+Asked by the runtime, the same question says the mode is running. The port names the function and
+each mode's ids, read off its start (or the function that reads its timer adjustment) in the
+build's stock table:
+
+```
+site live_records          0x001ac0e0 0xe3052d00 0xe340205b
+value mode_records_1       0x00c100c0      # Drive My Car: ids 192..193 (lo | hi << 16)
+text mode_records_name_1   Drive My Car
+```
+
+and the runtime answers "one of the game's modes (Drive My Car)"; `mode_project.STACK_RECORDS_PROVEN`
+lists the builds where a `stack no` mode was seen held back by it in the emulator: Aerosmith and
+Guardians (2026-09-26: nothing running, the mode started; Double Scoring's start called, the runtime
+named it and the mode was refused; a minute later its records were gone and the mode started again).
+The Beatles' port carries the lines too, but there a song's records are alive from the ball's start
+(Ticket to Ride in one game, Should Have Known Better in another, Drive My Car once its start was
+called), so it is not in the proven set: a `stack no` mode there would seldom start.
+
+**Not yet.** Aerosmith's Headphone Hurryup and Guardians' take no such question first; Bond 60th's
+film modes are not in the stock table at all (only its multiballs are audited); X-Men keeps its
+state in each mode's object (`Mode_Shared` singletons, their starts called through vtables by
+`GamePlayModes`) and Elvira's modes are `TransientRule` objects: multiballs only there.
 
 ## Ports: why your mode runs on any game
 
@@ -1557,6 +1582,38 @@ shot a port leaves unnamed (`Shot 0x..`) never matches.
 6. **It shows up in the Modes tab by itself** once the file is in `ports/`: a project on that
    card offers its shots. Screen and Clip also need the title's HUD and bank scenes measured
    (see "Ports in the Modes tab").
+
+## Insider Connected: no score leaves a machine that carries modes
+
+A mode scores through the game's own `score_add`, so its points are not stock scoring, and a
+card the app wrote grades itself P/P/P (the validation bypass), so Insider Connected would take
+those games as real. The runtime therefore keeps every score report on the machine. The game
+builds each report itself and hands it to Stern's agent (`conagent`) over a local socket; two
+sites in the port say where (`pad_mode_runtime.c`, `insider_arm`):
+
+| Site | What it is | Found by |
+|---|---|---|
+| `agent_header` | the request header constructor: r1 is the endpoint path (`/api/v3/game/session_end`, ...) | the first call after a sender loads its endpoint string |
+| `agent_begin` | the message-begin thunk every sender calls next (`ldr ip,[r0,#4]; mov r0,r1; mov r1,ip; b <impl>`) | the call the sender follows with `cmp r0, #0` |
+
+The runtime records the endpoint at `agent_header` and REFUSES `agent_begin` (a veto hook,
+`hook_veto`: the caller gets r0 = 1, the builder's own "failed") when the endpoint starts with
+`/api/v3/game/session_` (the game session: its players and their scores), `/api/v1/game/high_score_events`
+(the high-score table) or `/ingest/v1/game/game_events` (the event stream achievements are earned
+from). The sender then logs `Failed to begin construction of GAME_SESSION_END message`, the
+outgoing queue drops the entry (a failed send is dequeued, never retried) and the game plays on.
+The login, the heartbeat and the message of the day are the agent's own; audits, alerts, the
+home team, player properties, the free-game code and the descriptor queries go out as before.
+`mode.log` says `insider: score reports stay on this machine ...` at boot and names each endpoint
+the first time it is held back.
+
+**The gate is required.** A port without both sites arms nothing (`insider: the port has no
+agent_header/agent_begin ... NOTHING IS HOOKED, the game runs stock`), and the app refuses to
+put modes on a card whose port lacks them (`mode_write.card_refusal`, the Modes page says why).
+Both sites have the same first two words on all 36 builds measured (`0xe92d40f8 0xe2505000` and
+`0xe590c004 0xe1a00001`) and are found structurally from the `/api/v3/game/session_end` string:
+every shipped port and recipe carries them, and a port drafted from a recipe gets them the same
+way as any other site.
 
 ## Events: starting a mode on what the game does
 

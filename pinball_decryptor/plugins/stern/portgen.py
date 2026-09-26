@@ -36,7 +36,8 @@ import numpy as np
 #: through the scores) fills what no reference places
 #: 3: four one-place rodata tables (Godzilla's Ebirah stage awards and lamp table, the tank path and
 #: spot list) are carried like layered_displays
-REVISION = 3
+#: 4: the Insider Connected score gate (agent_header + agent_begin), which every port must carry
+REVISION = 4
 RECIPE_FORMAT = 1
 
 CORE_SITES = ("tick", "shot_dispatch", "ball_end", "score_add")
@@ -45,7 +46,8 @@ CORE_DATA = ("cur_player", "scores")
 #: scores) or 32-bit (score_add32(player, u32 points in r1) into u32 scores32, The Beatles and
 #: Star Wars ELG). A port names ONE pair; the runtime refuses a port with neither.
 SCORE_PAIRS = (("score_add", "scores"), ("score_add32", "scores32"))
-HOOKED = ("tick", "shot_dispatch", "ball_end", "sound_lookup", "hook_dispatch", "switch_edge")
+HOOKED = ("tick", "shot_dispatch", "ball_end", "sound_lookup", "hook_dispatch", "switch_edge",
+          "agent_header", "agent_begin")     # item 166: the Insider Connected score gate
 # values that are one title's rules, not the framework's: Godzilla's are Tesla Strike's
 # light owner and light set, and its powerline-tower award screen
 TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type")

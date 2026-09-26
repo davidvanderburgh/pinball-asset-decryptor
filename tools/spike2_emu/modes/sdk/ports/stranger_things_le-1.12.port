@@ -199,6 +199,11 @@ site balls_in_play         0x0042625c 0xe92d4010 0xe3024e94
 # the node's set-visible (Sprite slot 42) and the scene inside a scene player
 site find_node        0x004c545c 0xe92d4070 0xe24dd008
 site find_text        0x004c4ef8 0xe92d4070 0xe24dd008
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x005122e8 0xe92d40f8 0xe2505000
+site agent_begin      0x0051cc44 0xe590c004 0xe1a00001
 value node_visible_vfn      0xa8
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)

@@ -465,24 +465,3 @@ site balls_in_play         0x001fd194 0xe92d4010 0xe3084ab0
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  9d57875196c613785a1eee010c55223a0f1aa821/68f53edf22edb8b5fb918e77ebb222a139a6a0e6
-
-# ---- the game's own modes (item 165): the framework's LIVE RECORDS. Every timed mode's start begins by
-# asking 0x1ac0e0(lo, hi) whether one of its own records is alive (a walk of the list at [0x5b5d00]: u16 id at +0,
-# next at +0x84) and refuses to start while one is; asked by the runtime, it says the mode is running.
-# Each mode's ids are read off its start (or the function reading its timer adjustment) in the stock table.
-site live_records          0x001ac0e0 0xe3052d00 0xe340205b
-# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
-# message-begin thunk every sender calls next; the runtime refuses the score reports there
-# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
-site agent_header     0x0047a7a8 0xe92d40f8 0xe2505000
-site agent_begin      0x00485114 0xe590c004 0xe1a00001
-value mode_records_1       0x00bf00be      # All My Loving: ids 190..191
-text mode_records_name_1   All My Loving
-value mode_records_2       0x00c100c0      # Drive My Car: ids 192..193
-text mode_records_name_2   Drive My Car
-value mode_records_3       0x00c300c2      # Should Have Known Better: ids 194..195
-text mode_records_name_3   Should Have Known Better
-value mode_records_4       0x00c500c4      # Ticket to Ride: ids 196..197
-text mode_records_name_4   Ticket to Ride
-value mode_records_5       0x00c700c6      # It Wont Be Long: ids 198..199
-text mode_records_name_5   It Wont Be Long

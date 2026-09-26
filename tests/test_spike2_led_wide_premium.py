@@ -157,7 +157,7 @@ def shim(tmp_path_factory):
         pytest.skip("rig not present")
     if not CC:
         pytest.skip("no C compiler on this host")
-    funcs = "\n".join(_extract(n) for n in ("popcount8", "led_wide_long", "led_wide_walk", "led_node_wide_publish"))
+    funcs = "\n".join(_extract(n) for n in ("popcount8", "led_wide_long", "led_wide_walk", "led_wide_strip_bank", "led_node_wide_publish"))
     d = tmp_path_factory.mktemp("ledpremium")
     (d / "h.c").write_text(HARNESS.replace("@FUNCS@", funcs), encoding="utf-8")
     exe = d / ("h.exe" if os.name == "nt" else "h")

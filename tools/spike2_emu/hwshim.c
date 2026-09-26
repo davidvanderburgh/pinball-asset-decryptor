@@ -10929,6 +10929,32 @@ static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
     return 1;
 }
 
+/* ★ THE BANK FORM (item 165, read off Stranger Things LE 1.12's topper board,
+ * node 12, and the builder's path B: batman 0x518b78, Stranger Things 0x4ece40).
+ * A board with more than 96 lamps takes them in BANKS of 96: the command's B
+ * field is set to 0x10 as a marker and the real B moves into a PREFIX byte with
+ * the bank above it - body[0] = bank << 5 | B - and the body that follows is
+ * the ordinary one for the command with that B, its indices within the bank.
+ * Measured: every one of the eight commands the topper spoke (90 91 92 93 b0 b1
+ * b2 b3, 72 RGB pixels = 216 channels in banks 0..2) closes exactly this way,
+ * and until this was read every one of them was refused - which is what put a
+ * whole board in wide_skipped. Returns the bank (0 for a frame with no prefix),
+ * rewriting cmd, body and blen for the walk; -1 for a malformed prefix. Only
+ * bank 0 fits the [16][96] plane: the others are walked (they vote, and count
+ * as decoded) and published nowhere. leddecode.wide_bank is the twin. */
+static int led_wide_strip_bank(unsigned *cmd, const unsigned char **body, unsigned *blen)
+{
+    unsigned pre;
+    if ((*cmd & 0x1c) != 0x10) return 0;
+    if (*blen < 2) return -1;
+    pre = (*body)[0];
+    if (pre & 0x03) return -1;
+    *cmd = (*cmd & ~0x1cu) | (pre & 0x1cu);
+    (*body)++;
+    (*blen)--;
+    return (int)(pre >> 5);
+}
+
 /* Does this TITLE speak the swelf dialect? Fed one bit per frame that reached
  * the walk; answers "not yet / no / yes".
  *
@@ -11005,6 +11031,7 @@ static int led_wide_publish(unsigned node, unsigned cmd,
 {
     unsigned char idx[96], val[96];
     unsigned cnt = 0, i;
+    int bank;
 
     /* 0x80..0xbf AND NOTHING ELSE, which is a bound the builder proves rather
      * than one chosen to be safe: cmd = 0x80 | ((M|B) & 0x7f) | A with M <=
@@ -11015,11 +11042,12 @@ static int led_wide_publish(unsigned node, unsigned cmd,
      * wide_skipped read 8381 against 267 on the first live run, which is a
      * counter measuring protocol chatter rather than lamp frames we failed. */
     if ((cmd & 0xc0) != 0x80 || blen < 1) return 0;
+    bank = led_wide_strip_bank(&cmd, &body, &blen);
 
     /* The long bitmap body is refused on THIS path, as the walk refused it before
      * item mode-leds: the per-title verdict and what it publishes stay exactly
      * what they were. The per-node path below (led_node_wide_publish) reads it. */
-    if (led_wide_long(cmd, body, blen) || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+    if (bank < 0 || led_wide_long(cmd, body, blen) || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
         led_wide_dialect(0);
         led_map();
         if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
@@ -11043,21 +11071,27 @@ static int led_wide_publish(unsigned node, unsigned cmd,
      * announcer above - a rate, not a count. */
     if (!led_wide_dialect(1)) return 0;
 
-    /* An index the board itself never announced is a parse that landed on a
-     * lamp that does not exist. Only checked when the board DID enumerate -
-     * several of these boards never send the 6-byte walk at all, and a gate
-     * that fails closed on them would put the whole generation back in the
-     * dark for no gain. */
-    if (led_count[node])
-        for (i = 0; i < cnt; i++)
-            if (!led_known[node][idx[i]]) {
-                led_map();
-                if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
-                return 0;
-            }
-
+    /* ★ NO ENUMERATION GATE HERE ANY MORE (item 165, Stranger Things LE 1.12).
+     * This used to refuse a frame addressing any index the board "never
+     * announced" in the 6-byte 0x84/0x85 walk. On this generation those frames
+     * are not an inventory at all: they are single-lamp WRITES (0x84 off, 0x85
+     * on - the grammar below reads them so), and the board sends them all game
+     * long for whichever lamps its show touches one at a time. So led_known
+     * held "the lamps written singly so far", and a bitmap frame carrying the
+     * whole playfield was refused for the first lamp in it that had not yet
+     * been. Measured on a traced Stranger Things game with a mode holding 81
+     * inserts: node 8 sent one 36-lamp frame and node 9 one 29-lamp frame the
+     * moment the hold began, the wire showed them, and the plane never moved -
+     * every one of those frames died here. The exact-close rule and the title's
+     * 200-frame vote are the safety; a frame that passes both and names a lamp
+     * outside the walk costs a cell nobody maps, which is nothing beside a
+     * board that never publishes. */
     led_map();
     if (!led_shm) return 0;
+    if (bank > 0) {                          /* walked and counted; no plane to put it in */
+        if (led_shm_len >= 8192) led_shm->wide_decoded++;
+        return 1;
+    }
     for (i = 0; i < cnt; i++) {
         if (node < 16 && idx[i] < 96) led_wide_owns[node][idx[i]] = 1;
         led_val(node, idx[i], val[i]);
@@ -11114,9 +11148,11 @@ static int led_node_wide_publish(unsigned node, unsigned cmd,
 {
     unsigned char idx[96], val[96];
     unsigned cnt = 0, i, ok;
+    int bank;
     if (node >= 16 || (cmd & 0xc0) != 0x80 || blen < 1 || led_wide_settled()) return 0;
     if (led_node_verdict[node] < 0) return 0;
-    ok = (unsigned)led_wide_walk(body, blen, cmd, idx, val, &cnt);
+    bank = led_wide_strip_bank(&cmd, &body, &blen);     /* item 165: a banked board's prefix */
+    ok = bank >= 0 && led_wide_walk(body, blen, cmd, idx, val, &cnt);
     if (!led_node_verdict[node]) {
         if (ok && cnt < 2) return 0;             /* one lamp: no vote           */
         led_node_votes[node]++;
@@ -11135,11 +11171,15 @@ static int led_node_wide_publish(unsigned node, unsigned cmd,
     }
     /* nothing is taken from the title's own vote while it is still drawing its sample */
     if (!ok || led_wide_verdict < 0) return 0;
-    if (led_count[node])                         /* a lamp the board never announced */
-        for (i = 0; i < cnt; i++)
-            if (!led_known[node][idx[i]]) return 0;
+    /* no enumeration gate: on a board that voted for this grammar the 0x84/0x85
+     * six-byte frames were single-lamp writes, not an inventory - see the same
+     * note in led_wide_publish (item 165) */
     led_map();
     if (!led_shm) return 0;
+    if (bank > 0) {                              /* walked and counted; no plane to put it in */
+        if (led_shm_len >= 8192) led_shm->wide_decoded++;
+        return 1;
+    }
     for (i = 0; i < cnt; i++) {
         led_wide_owns[node][idx[i]] = 1;
         led_val(node, idx[i], val[i]);
@@ -11408,7 +11448,15 @@ static void led_publish(const unsigned char *p, int n)
                 led_order[node][led_count[node]++] = p[3];
             led_known[node][p[3]] = 1;
         }
-        return;
+        /* ★ ON A BOARD THAT SPEAKS THE SWELF GRAMMAR THIS FRAME IS A LAMP WRITE
+         * (item 165): 0x84 = one lamp to 0x00, 0x85 = one lamp to 0xff, sent
+         * all game long (Stranger Things node 8: 60 and 46 of them in six
+         * seconds of attract, SHOOT AGAIN blinking through 84/85 alone). Once
+         * the board's own vote, or the title's, has said yes, it is read as
+         * one - the enumeration above is still recorded, since it costs
+         * nothing and led_order is the godzilla bitmap's only key. Before a
+         * verdict, and on every other board, exactly as before. */
+        if (!(led_node_verdict[node] > 0 || led_wide_settled())) return;
     }
 
     /* THE SWELF-GENERATION DIALECT, tried on every board and BEFORE the

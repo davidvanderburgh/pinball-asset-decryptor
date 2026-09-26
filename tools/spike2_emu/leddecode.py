@@ -318,6 +318,45 @@ def wide_decode(b):
     return idxs, vals
 
 
+def wide_bank(b):
+    """★ THE BANK FORM (item 165), the twin of hwshim.c's led_wide_strip_bank.
+
+    A board with more than 96 lamps takes them in BANKS of 96 (Stranger Things
+    LE 1.12's topper, node 12: 72 RGB pixels, 216 channels, banks 0..2). The
+    builder's path B (batman 0x518b78, Stranger Things 0x4ece40) sets the
+    command's B field to 0x10 as a marker and moves the real B into a PREFIX
+    byte with the bank above it - body[0] = bank << 5 | B - and the body that
+    follows is the ordinary one for the command with that B, its indices
+    within the bank. Measured: all eight commands the topper spoke (90 91 92
+    93 b0 b1 b2 b3) close exactly this way.
+
+    Returns (bank, frame): the bank and the frame rewritten for wide_decode
+    (bank 0 and the frame itself when it carries no prefix), or None for a
+    malformed prefix. Only bank 0 fits the [16][96] plane; the shim walks the
+    others, counts them as decoded, and publishes nothing for them.
+    """
+    if len(b) < 6 or not b[0] & 0x80:
+        return None
+    cmd, body = b[2], b[3:-2]
+    if cmd & 0x1C != 0x10:
+        return 0, b
+    if len(body) < 2 or body[0] & 0x03:
+        return None
+    pre = body[0]
+    cmd2 = (cmd & ~0x1C) | (pre & 0x1C)
+    return pre >> 5, bytes([b[0], b[1] - 1, cmd2]) + body[1:] + b[-2:]
+
+
+def wide_decode_any(b):
+    """(bank, idxs, vals) for a plain or a bank-form frame, or None"""
+    r = wide_bank(b)
+    if r is None:
+        return None
+    bank, frame = r
+    d = wide_decode(frame)
+    return (bank, d[0], d[1]) if d else None
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)

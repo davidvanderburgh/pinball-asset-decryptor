@@ -1055,9 +1055,11 @@ and the runtime answers "one of the game's modes (Drive My Car)"; `mode_project.
 lists the builds where a `stack no` mode was seen held back by it in the emulator: Aerosmith and
 Guardians (2026-09-26: nothing running, the mode started; Double Scoring's start called, the runtime
 named it and the mode was refused; a minute later its records were gone and the mode started again).
-The Beatles' port carries the lines too, but there a song's records are alive from the ball's start
-(Ticket to Ride in one game, Should Have Known Better in another, Drive My Car once its start was
-called), so it is not in the proven set: a `stack no` mode there would seldom start.
+The Beatles asks the same question (its five songs, ids 190..199) but its songs run TOGETHER: one is
+alive from the ball's start (It Won't Be Long in one game, Ticket to Ride in another), each start
+adds its own, and all of them clear at the ball's end - so a `stack no` mode there would almost
+never start, and the lines were not kept. Metallica's starts take a song index and refuse a bare
+call, so its lines (derived the same way) were not kept either until a run proves them.
 
 **Not yet.** Aerosmith's Headphone Hurryup and Guardians' take no such question first; Bond 60th's
 film modes are not in the stock table at all (only its multiballs are audited); X-Men keeps its

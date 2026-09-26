@@ -212,8 +212,8 @@ scene hud                  8d4b1e7add4280a7790929a643df09196c28c29f
 # ---- named inserts (item 164, SWELF generation): framework lamp layers, derived from this build's program
 #   lamp_layers: the first global the lamp-group allocator 0x1b81f4 loads
 data lamp_layers            0x00775a40
-#   light_count: the device table accessor's bound (a light id is the device's index)
-data light_count            0x007e03dc
+#   light_count: the lamp pool's slot count (the light table's, item 165; not the device table's)
+data light_count            0x007bba08
 #   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
 value lamp_slot_size       40
 value lamp_slot_level      2
@@ -223,39 +223,92 @@ value lamp_slot_used       36
 value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
-# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the device table 0x759454: every LED
-# (class 4) but the cabinet's, a fixture's -R/-G/-B (or -RED/-GRN/-BLU) on one line; no shot ties
-lamp 46               0              SHOOTER ILLUM. 1 (OPTIONAL)  # node/channel 4/9
-lamp 47               0              SHOOTER ILLUM. 2 (OPTIONAL)  # node/channel 4/10
-lamp 48               0              BOTTOM GI-WHT(X11)  # node/channel 5/0
-lamp 49               0              BOTTOM GI-VIO(X9)  # node/channel 5/1
-lamp 50               0              LEFT OUTLANE  # node/channel 5/3
-lamp 51               0              LEFT RETURN LANE  # node/channel 5/4
-lamp 52               0              SPELL OF PROTECTION  # node/channel 5/5
-lamp 53               0              RIGHT RETURN LANE  # node/channel 5/6
-lamp 54               0              RIGHT OUTLANE  # node/channel 5/7
-lamp 55               0              FINAL SHOWDOWN  # node/channel 5/8
-lamp 56               0              5-WAY COMBO  # node/channel 5/9
-lamp 57               0              SEND IT BACK  # node/channel 5/10
-lamp 58               0              DEMODOG  # node/channel 5/11
-lamp 59               0              DEMOGORGON  # node/channel 5/12
-lamp 60               0              LIGHT THE FIRE  # node/channel 5/13
-lamp 61               0              TK MULTIBALL  # node/channel 5/14
-lamp 62               0              TURN UP THE HEAT!  # node/channel 5/15
-lamp 63               0              LURE DART!  # node/channel 5/16
-lamp 64               0              MORSE CODE!  # node/channel 5/17
-lamp 65               0              WHAT MAMA SAYS  # node/channel 5/18
-lamp 66               0              SAVE WILL!  # node/channel 5/19
-lamp 67               0              QUARTER HUNT!  # node/channel 5/20
-lamp 68               0              DEMODO(G)  # node/channel 5/21
-lamp 69               0              2X PLAYFIELD MULTIPLIER  # node/channel 5/22
-lamp 70               0              SHOOT AGAIN  # node/channel 5/23
-lamp 73               0              4 BANK DROP 1 LEFT  # node/channel 5/26
-lamp 74               0              4 BANK DROP 2  # node/channel 5/27
-lamp 75               0              4 BANK DROP 3  # node/channel 5/28
-lamp 76               0              4 BANK DROP 4 RIGHT  # node/channel 5/29
-lamp 79,80,81         0              CENTER LANE ARROW  # node/channel 5/32 5/33 5/34
-lamp 82               0              BUST OUT!  # node/channel 5/35
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the LIGHT table 0x756334 (341 lights; record i names
+# its device, the ids the lamp layers' slots go by), each light's name, board node and channel from the device
+# table 0x759454; a fixture's -R/-G/-B on one line; the cabinet, a topper's pixels and control outputs left out.
+# The comment's node is the BUS node (the node table's id for the device's node number). Item 165: the
+# earlier block wrote device indices as light ids, which are not the same on this generation.
+lamp 9                0              LEFT OUTLANE  # node/channel 8/3
+lamp 10               0              LEFT RETURN LANE  # node/channel 8/4
+lamp 11               0              SPELL OF PROTECTION  # node/channel 8/5
+lamp 12               0              RIGHT RETURN LANE  # node/channel 8/6
+lamp 13               0              RIGHT OUTLANE  # node/channel 8/7
+lamp 14               0              5-WAY COMBO  # node/channel 8/9
+lamp 15               0              SEND IT BACK  # node/channel 8/10
+lamp 16               0              DEMODOG  # node/channel 8/11
+lamp 17               0              DEMOGORGON  # node/channel 8/12
+lamp 18               0              LIGHT THE FIRE  # node/channel 8/13
+lamp 19               0              TK MULTIBALL  # node/channel 8/14
+lamp 20               0              FINAL SHOWDOWN  # node/channel 8/8
+lamp 21               0              2X PLAYFIELD MULTIPLIER  # node/channel 8/22
+lamp 22               0              SHOOT AGAIN  # node/channel 8/23
+lamp 23,24,25         0              LEFT EJECT ARROW  # node/channel 9/50 9/51 9/52
+lamp 26               0              2X SCORING  # node/channel 9/53
+lamp 27,28,29         0              LEFT ORBIT ARROW  # node/channel 9/44 9/45 9/46
+lamp 33,34,35         0              LEFT RAMP ARROW  # node/channel 9/19 9/20 9/21
+lamp 36               0              LOCK  # node/channel 9/18
+lamp 40,41,42         0              LEFT LANE ARROW  # node/channel 9/15 9/16 9/17
+lamp 43               0              EXTRA BALL  # node/channel 9/10
+lamp 44               0              DEMODOG ATTACK  # node/channel 9/9
+lamp 45               0              MYSTERY  # node/channel 9/8
+lamp 46,47,48         0              CENTER LANE ARROW  # node/channel 8/32 8/33 8/34
+lamp 49               0              BUST OUT!  # node/channel 8/35
+lamp 50               0              TRAP 'EM  # node/channel 8/36
+lamp 51               0              WHAT'S THAT?  # node/channel 8/37
+lamp 52               0              RUN WILL!  # node/channel 8/38
+lamp 53               0              CAN'T STOP THIS!  # node/channel 8/39
+lamp 54,55,56         0              RIGHT LANE ARROW  # node/channel 8/51 8/52 8/53
+lamp 57               0              BURN IT BACK  # node/channel 8/54
+lamp 58,59,60         0              RIGHT RAMP ARROW  # node/channel 8/61 8/62 8/63
+lamp 64,65,66         0              RIGHT ORBIT ARROW  # node/channel 8/57 8/58 8/59
+lamp 70               0              WHERE'S BARB?  # node/channel 9/48
+lamp 71               0              MONSTER HUNTING!  # node/channel 9/49
+lamp 72               0              BULLIES!  # node/channel 9/57
+lamp 73               0              GET ME OUT!  # node/channel 9/58
+lamp 74               0              OPERATION MIRKWOOD!  # node/channel 9/59
+lamp 75               0              FOLLOW THE COMPASS!  # node/channel 9/60
+lamp 76               0              QUARTER HUNT!  # node/channel 8/20
+lamp 77               0              SAVE WILL!  # node/channel 8/19
+lamp 78               0              WHAT MAMA SAYS  # node/channel 8/18
+lamp 79               0              MORSE CODE!  # node/channel 8/17
+lamp 80               0              LURE DART!  # node/channel 8/16
+lamp 81               0              TURN UP THE HEAT!  # node/channel 8/15
+lamp 82               0              BREAK OUT!  # node/channel 9/63
+lamp 83               0              JUNK YARD  # node/channel 9/62
+lamp 84               0              IT'S A TRAP!  # node/channel 9/61
+lamp 85               0              (D)EMODOG  # node/channel 9/54
+lamp 86               0              D(E)MODOG  # node/channel 9/55
+lamp 87               0              LITE LOCK LEFT  # node/channel 9/24
+lamp 88               0              LITE LOCK RIGHT  # node/channel 9/25
+lamp 89               0              DE(M)ODOG  # node/channel 9/32
+lamp 90               0              DEM(O)DOG  # node/channel 9/33
+lamp 91               0              DEMO(D)OG  # node/channel 8/50
+lamp 92               0              DEMOD(O)G  # node/channel 8/60
+lamp 93               0              DEMODO(G)  # node/channel 8/21
+lamp 94               0              4 BANK DROP 1 LEFT  # node/channel 8/26
+lamp 95               0              4 BANK DROP 2  # node/channel 8/27
+lamp 96               0              4 BANK DROP 3  # node/channel 8/28
+lamp 97               0              4 BANK DROP 4 RIGHT  # node/channel 8/29
+lamp 98               0              BACKPANEL 1  # node/channel 9/11
+lamp 99               0              BACKPANEL 2  # node/channel 9/12
+lamp 100              0              BACKPANEL 3  # node/channel 9/13
+lamp 101              0              BACKPANEL 4  # node/channel 9/14
+lamp 106              0              BOTTOM GI-WHT(X11)  # node/channel 8/0
+lamp 107              0              BOTTOM GI-VIO(X9)  # node/channel 8/1
+lamp 108              0              TOP GI-WHT(X3)  # node/channel 9/0
+lamp 109              0              TOP GI-VIO(X3)  # node/channel 9/1
+lamp 110              0              DEMOGORGON LEFT FLASH  # node/channel 9/34
+lamp 111              0              DEMOGORGON FRONT FLASH  # node/channel 9/35
+lamp 112              0              DEMOGORGON BODY FLASH  # node/channel 9/36
+lamp 113              0              EJECT FLASH  # node/channel 9/26
+lamp 114              0              LEFT ORBIT FLASH  # node/channel 9/27
+lamp 115              0              LEFT BACKPANEL FLASH  # node/channel 9/37
+lamp 116              0              UPPER RIGHT RAMP FLASH  # node/channel 9/38
+lamp 117              0              LEFT POP BUMPER  # node/channel 9/39
+lamp 118              0              RIGHT POP BUMPER  # node/channel 9/40
+lamp 119              0              LOWER RIGHT RAMP FLASH  # node/channel 8/49
+lamp 120              0              SHOOTER ILLUM. 1 (OPTIONAL)  # node/channel 1/9
+lamp 121              0              SHOOTER ILLUM. 2 (OPTIONAL)  # node/channel 1/10
 
 # ---- the game's own modes (item 164): the framework's game flags (set 0x436eb4 / clear 0x436e6c; the bitmap
 # pointer at [holder + 4], its size in bits at the count global). Each mode's start sets a flag of its

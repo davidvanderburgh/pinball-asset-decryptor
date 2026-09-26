@@ -52,7 +52,7 @@ PORTS = {
     "star_wars_le-1.30": (42, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "uncanny_xmen_le-0.98": (33, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "jaws_le-1.02": (27, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
-    "stranger_things_le-1.12": (39, 64, True, {"lights"}, ("callout", "screens", "clips", "own-sound")),
+    "stranger_things_le-1.12": (39, 64, True, set(), ("callout", "screens", "clips", "own-sound")),   # item 165: its inserts lit
     "king_kong_le-0.97": (55, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "james_bond_le-1.06": (44, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "jurassic_park_le-1.16": (38, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
@@ -225,8 +225,8 @@ def test_stack_on_the_titles_with_no_cmode_rules_is_multiballs_only(tmp_path):
     for key in MP.STACK_BALLS_PROVEN:
         q = MP.profile(key.replace("-", "_").replace(".", "_"))
         assert q.can("stack"), key
-        if key in MP.STACK_FLAGS_PROVEN:        # item 164: its other modes too, from their flags
-            assert q.stack_note == "", key
+        if key in MP.STACK_FLAGS_PROVEN or key in MP.STACK_RECORDS_PROVEN:
+            assert q.stack_note == "", key      # item 164/165: its other modes too, from their flags or records
         else:
             assert "waits only for the game's multiballs" in q.stack_note, key
     for key in MP.STACK_PROVEN:                 # the mode table sees every mode: no note

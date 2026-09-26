@@ -53,27 +53,46 @@ Zeppelin 1.22 measured has the same id on both, as do Godzilla Pro 1.15 and 1.16
 (`test_title_family_and_callouts_kept_within_it` pins this). Another title's id is
 still dropped: the same number plays some other sound there.
 
-**Led Zeppelin Pro 1.22's unnamed shots.** See Status.
+**Led Zeppelin Pro 1.22's unnamed shots** are named after the LE 1.22 port's names
+for the same bits, at the desk (no rig): both builds' `cshot` objects (read with
+`portshots.cpp_shots`' unicorn machine) carry a MESSAGE ID per shot at +12, the same
+id per bit on both (3029..3057 and 3061 in mask order; the LE adds 0x40000000 =
+3160), and the Pro's own switch table has the same switches (3 BANK DROP-Z/E/P,
+ICARUS TARGET, LEFT/RIGHT ORBIT, the three RAMP EXIT OPTOs). The one to read with
+care is 0x200000, the LE's SIDE RAMP EXIT OPTO: the Pro has no side ramp switch
+(HERMIT TARGET stands in its table where the LE has the ELECTRIC MAGIC SPINNER OPTO),
+yet a press made that shot in the Pro's check. The port's header says all this. The
+recipe was rebuilt (`port_tool.py recipe`). Not census-proven.
 
 What it deliberately does not do: no merge of two projects' modes, no rename on the
 way, no build. The copies are for the person to look at in THAT project's Modes tab.
+Message ids are not read statically (the remap is filled at boot and the sorted u16
+id runs are per module); the message oracle in `reference_spike2_message_oracle_godzilla`
+is the way to read a `cshot`'s own name if that is ever wanted.
 
 ## Status
 
 - 2026-09-25: branch made from main `647c6778`. Copy to..., the family rule for
   callouts, the words moved into `mode_project`, unit tests and the web-tab test,
-  the help tip and the SDK doc. Proven by the targeted tests and by running the app
-  from the worktree (see below).
+  the help tip and the SDK doc (`a89dd3ae`). Then Led Zeppelin Pro's shots named
+  and its recipe rebuilt. Proven by the targeted tests (`test_stern_mode_profiles`,
+  `test_webui_modes`, `test_app_run_logic_modes`, `test_stern_port_derive`,
+  `test_stern_mode_runtime`) and a copy between real card projects on this machine
+  (see below). Done: David can merge it.
 
 ## How to test it
 
 - `python scripts/testpick.py` on the diff; or directly
-  `python -m pytest tests/test_stern_mode_profiles.py tests/test_webui_modes.py -q -k "family or copy"`.
+  `python -m pytest tests/test_stern_mode_profiles.py tests/test_webui_modes.py tests/test_stern_port_derive.py -q`.
 - In the app (from this worktree, the preview switch on): open a card project with a
   mode, Modes tab, **Copy to...** under the list, pick another card project's folder.
   The message box names each mode as "runs as it is" or "open it there and pick
   again", and the log has a line per mode. Open the other project: the modes are
   there, the ones to fix show what they lack.
-- Real input: a Godzilla Premium 1.16 project's KAIJU RUSH to a Godzilla Pro 1.16
-  project (carried as is), and to a TMNT Pro 1.59 project (to fix: the Powerlines and
-  the Maser target are Godzilla's).
+- Real input (done 2026-09-25, `copy_modes` from a script): a real Godzilla Premium
+  1.16 project with nine modes (eight form modes with their films, 211 MB, and one
+  code mode) into a Godzilla Pro 1.16 project: all eight carried as they are, the
+  code mode as it is. The same into a TMNT Pro 1.59 project: all eight "open it there
+  and pick again", each naming the Godzilla shots TMNT lacks (Powerlines, Maser and
+  Godzilla targets, Building, Big loop, the shields) and the start shot it falls back
+  to (Center loop). The source project was unchanged.

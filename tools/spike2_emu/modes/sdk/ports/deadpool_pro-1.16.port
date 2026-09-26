@@ -3,6 +3,7 @@
 # Emulator-proven 2026-09-24 by a full build check (modes/gamecheck.sh play full, item 162): the
 # runtime hooked the game, 25 of its 25 shots came from their switches, a drain ended each ball, and
 # the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
+# Callouts heard in the emulator 2026-09-25 (item 164, the item 163 pipeline): countdown.
 
 game           deadpool_pro
 version        1.16
@@ -100,6 +101,12 @@ data layer_stack            0x006ae600
 data video_layer            0x006ae5e4
 value clip_layer_priority   5
 value layer_video_at        0x14
+
+# ---- callouts, heard in the emulator 2026-09-25 (item 164): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 967 (clips 1-5 said "One!", "Two!", "3!", "Four.", "Five.")
+callout countdown           967
+value countdown_first 5
+value countdown_stride 5
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Lil Deadpool target

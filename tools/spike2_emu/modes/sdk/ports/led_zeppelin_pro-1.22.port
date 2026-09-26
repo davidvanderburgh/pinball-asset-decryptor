@@ -216,7 +216,8 @@ data score_mult             0x041fd420
 # scene hud                    NOT PLACED: the target program never names 32e6ae28 (no code that loads it could be lined up)
 #   candidate: a006d93aebfe914b5ef463053ab8d9af71d095c5, the first id after "NetScoreFrameOverlay" in the target, as in the reference - prove it holds this role
 #   scene video_bank: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, TMNT Pro 1.59, Deadpool Pro 1.16, Deadpool LE 1.14]
-scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+# item 164: the background video bank - the game draws it OVER 60ed7e50 in play, so a clip goes here
+scene video_bank           914f6bd9d17b4173189d7fa751d0cb2daae94d92
 #   scene attract: derived: the target code loads it (derived from 1 places, e.g. 0x2075c+0x28) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
 scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
 
@@ -336,6 +337,15 @@ event game_over      0x47
 callout countdown           212
 callout ten_seconds         222
 value countdown_step 1
+
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x00438e40 0xe92d4070 0xe24dd008
+site surface_set_video 0x00430524 0xe5d030d4 0xe92d4ff0
+site surface_play     0x0042e330 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0042dae0 0xe5d030d4 0xe92d40f0
 
 # ---- examples a template mode can use on this game ----
 text example_start_shot     Left 2 bank target bottom

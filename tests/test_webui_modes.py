@@ -498,12 +498,12 @@ def test_tmnt_shots_and_greying(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert st["profile"]["label"] == "TMNT Pro 1.59" and len(st["profile"]["shots"]) == 17
-        # item 163: its countdown is heard (441); no time-up call carries an end sound of its own
-        assert not st["dis"]["countdown"] and st["dis"]["own_sound"]
-        assert st["reasons"]["sound"].startswith("Not on this game: ")
-        # item 164: a clip plays and a screen shows on TMNT Pro 1.59 now, so only the sound is greyed
-        assert not st["dis"]["film_clip"] and not st["dis"]["film_still"] and st["dis"]["film_sound"]
-        assert st["reasons"]["film"].startswith("Not on this game: cutting a sound from a film, because")
+        # item 163: its countdown is heard (441); item 164: with no time-up call known, a mode's own
+        # end sound rides a carrier (heard at time-up in the emulator), so nothing is greyed
+        assert not st["dis"]["countdown"] and not st["dis"]["own_sound"]
+        assert st["dis"]["end_game"] and "time-up callout" in st["reasons"]["sound"]
+        assert not st["dis"]["film_clip"] and not st["dis"]["film_still"] and not st["dis"]["film_sound"]
+        assert "film" not in st["reasons"]
 
 
 def test_a_card_with_no_port_is_read_only(tmp_path, preview_on):

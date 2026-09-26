@@ -203,3 +203,72 @@ value node_visible_vfn      0xa8
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  8d4b1e7add4280a7790929a643df09196c28c29f
+
+# ---- named inserts (item 164, SWELF generation): framework lamp layers, derived from this build's program
+#   lamp_layers: the first global the lamp-group allocator 0x1b81f4 loads
+data lamp_layers            0x00775a40
+#   light_count: the device table accessor's bound (a light id is the device's index)
+data light_count            0x007e03dc
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - the device table 0x759454: every LED
+# (class 4) but the cabinet's, a fixture's -R/-G/-B (or -RED/-GRN/-BLU) on one line; no shot ties
+lamp 46               0              SHOOTER ILLUM. 1 (OPTIONAL)  # node/channel 4/9
+lamp 47               0              SHOOTER ILLUM. 2 (OPTIONAL)  # node/channel 4/10
+lamp 48               0              BOTTOM GI-WHT(X11)  # node/channel 5/0
+lamp 49               0              BOTTOM GI-VIO(X9)  # node/channel 5/1
+lamp 50               0              LEFT OUTLANE  # node/channel 5/3
+lamp 51               0              LEFT RETURN LANE  # node/channel 5/4
+lamp 52               0              SPELL OF PROTECTION  # node/channel 5/5
+lamp 53               0              RIGHT RETURN LANE  # node/channel 5/6
+lamp 54               0              RIGHT OUTLANE  # node/channel 5/7
+lamp 55               0              FINAL SHOWDOWN  # node/channel 5/8
+lamp 56               0              5-WAY COMBO  # node/channel 5/9
+lamp 57               0              SEND IT BACK  # node/channel 5/10
+lamp 58               0              DEMODOG  # node/channel 5/11
+lamp 59               0              DEMOGORGON  # node/channel 5/12
+lamp 60               0              LIGHT THE FIRE  # node/channel 5/13
+lamp 61               0              TK MULTIBALL  # node/channel 5/14
+lamp 62               0              TURN UP THE HEAT!  # node/channel 5/15
+lamp 63               0              LURE DART!  # node/channel 5/16
+lamp 64               0              MORSE CODE!  # node/channel 5/17
+lamp 65               0              WHAT MAMA SAYS  # node/channel 5/18
+lamp 66               0              SAVE WILL!  # node/channel 5/19
+lamp 67               0              QUARTER HUNT!  # node/channel 5/20
+lamp 68               0              DEMODO(G)  # node/channel 5/21
+lamp 69               0              2X PLAYFIELD MULTIPLIER  # node/channel 5/22
+lamp 70               0              SHOOT AGAIN  # node/channel 5/23
+lamp 73               0              4 BANK DROP 1 LEFT  # node/channel 5/26
+lamp 74               0              4 BANK DROP 2  # node/channel 5/27
+lamp 75               0              4 BANK DROP 3  # node/channel 5/28
+lamp 76               0              4 BANK DROP 4 RIGHT  # node/channel 5/29
+lamp 79,80,81         0              CENTER LANE ARROW  # node/channel 5/32 5/33 5/34
+lamp 82               0              BUST OUT!  # node/channel 5/35
+
+# ---- the game's own modes (item 164): the framework's game flags (set 0x436eb4 / clear 0x436e6c; the bitmap
+# pointer at [holder + 4], its size in bits at the count global). Each mode's start sets a flag of its
+# own that its stop clears; multiballs are the balls-in-play count's:
+#   78  Bust out 0x3da74
+#   80  What's that 0x1902a0
+#   32  Upside down hurry-ups 0x187da4/0x18bd88
+#   131  Double scoring 0x7a8e8
+#   111  Bullshit scoring 0x35274
+#   99  Demogorgon challenge 0x5ef8c
+#   109  Victory laps 0x18df7c
+data game_flags             0x008238d8
+value game_flags_at         4
+data game_flag_count        0x0052f584
+value mode_flag_1           78
+value mode_flag_2           80
+value mode_flag_3           32
+value mode_flag_4           131
+value mode_flag_5           111
+value mode_flag_6           99
+value mode_flag_7           109

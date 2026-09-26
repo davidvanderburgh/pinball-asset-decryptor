@@ -147,7 +147,24 @@ def _video(r, registered, ids):
                 raise VideoBankError("%r refers to clip id %d, which is not that clip" % (cname, cid))
             clip = Clip(cname, cid, None, None, start, r.o)
         vm.entries.append(clip)
+    _marked(r, ids)
     return name, w, h, vm
+
+
+def _marked(r, ids):
+    """A Video's SECOND list (item 164): clips with frame markers, empty on Godzilla. Each is a
+    name and an object id; on the id's first occurrence (FLAG) its body follows - f32 fps, then
+    [u64 n] n x (u32 frame, marker name). Munsters 1.28 ("EndOfBallBonus": Pause, Explosion),
+    Star Wars LE 1.30 and ELG 1.10 ("SW5_SCENE_001": MUSIC_START), John Wick 1.01."""
+    for _ in range(r.u64()):
+        r.string()
+        mid = r.u32()
+        if mid & FLAG:
+            ids.append(mid & ~FLAG)
+            r.skip(4)
+            for _m in range(r.u64()):
+                r.u32()
+                r.string()
 
 
 def parse(data):
@@ -167,7 +184,6 @@ def parse(data):
     ptr = r.u32()
     ids.append(ptr & ~FLAG)
     vname, w, h, library = _video(r, registered, ids)
-    r.u64()
     r.u64()
     r.skip(4 + 4 + 4 + 16)                              # stage w, h, fps, rgba
     r.u32()
@@ -198,7 +214,6 @@ def parse(data):
         if r.u64():
             raise VideoBankError("node %r has a frame map" % nname)
     r.u64()
-    r.u64()
     labels = []
     for _ in range(r.u64()):
         labels.append((r.string(), r.u32()))
@@ -221,7 +236,13 @@ def _sorted_at(vm, name):
 
 
 def next_path(bank):
-    """The next unused ``<dir>/<n>.asset`` in the directory the stock clips share."""
+    """The next unused ``<dir>/<n>.asset`` in the directory the stock clips share. A bank whose
+    clips sit at the top of ``scene.assets`` (item 164: Munsters' and Iron Maiden's one-clip
+    background banks, ``2.asset`` itself) gets the next unused ``<n>.asset`` beside them."""
+    if bank.library.entries and all("/" not in c.path for c in bank.library.entries):
+        used = [int(c.path[:-6]) for c in bank.library.entries
+                if c.path.endswith(".asset") and c.path[:-6].isdigit()]
+        return "%d.asset" % (max(used, default=-1) + 1)
     dirs = {c.path.rsplit("/", 1)[0] for c in bank.library.entries}
     if len(dirs) != 1:
         raise VideoBankError("the clips are in %d directories; name the path" % len(dirs))

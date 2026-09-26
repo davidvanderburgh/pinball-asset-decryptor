@@ -639,11 +639,13 @@ void pm_callout_nth(unsigned id, unsigned n)
      * in (Iron Maiden 1.16's request 351: a sting, then "One." .. "Five"): `value countdown_first 1`.
      * A title that says each number with a request of its own names the "one" request and the id
      * step to the next number (Star Wars ELG 1.10: 168 "One!" .. 164 "Five!"): `value
-     * countdown_step -1`. Every countdown caller asks for clip seconds - 1 of the countdown role
-     * and gets the number. */
+     * countdown_step -1`. A title whose request holds every number in several voices, number by
+     * number, names the stride between numbers (Deadpool LE 1.14's 962: "ten" x5, "one" x5, "two"
+     * x5 ..: `value countdown_first 5`, `value countdown_stride 5`). Every countdown caller asks
+     * for clip seconds - 1 of the countdown role and gets the number. */
     if (id && id == pm_callout_id("countdown")) {
-        long step = pm_port_value("countdown_step", 0);
-        n += (unsigned)pm_port_value("countdown_first", 0);
+        long step = pm_port_value("countdown_step", 0), stride = pm_port_value("countdown_stride", 1);
+        n = n * (unsigned)(stride > 0 ? stride : 1) + (unsigned)pm_port_value("countdown_first", 0);
         if (step) {
             pm_callout((unsigned)((long)id + (long)n * step));
             return;
@@ -2364,10 +2366,47 @@ static int stock_balls_route(void)
            && !(data("stock_mode_manager") && fn("stock_battle_running") && fn("stock_multiball_running"));
 }
 
+/* item 164: the plain-C titles' OTHER modes. Their framework keeps a bitset of game flags (JP The Pin 1.05:
+ * set 0x152d60, write 0x152da8, get 0x152df8; the bitmap pointer at [0x594a40 + 4], its size in bits at
+ * [0x4beff8]) and each mode's START sets a flag of its own (Stegosaurus 0x90860: flag 40) that its end clears.
+ * The port names the flags (`value mode_flag_1` .. `mode_flag_32`, each mode's, read off its start function
+ * in the build's stock table) and the bitmap (`data game_flags`, `value game_flags_at`, `data
+ * game_flag_count`). Any of them set is one of the game's modes. */
+static char stock_flags_what[64];
+
+static int stock_flags_route(void)
+{
+    return data("game_flags") && pm_port_value("mode_flag_1", 0) > 0;
+}
+
+static int stock_flags(void)
+{
+    const unsigned char *bits;
+    unsigned count, i, id;
+    char name[20];
+    bits = *(const unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
+    if (!bits) return 0;
+    count = data("game_flag_count") ? *(const unsigned *)(unsigned long)data("game_flag_count") : 0;
+    for (i = 1; i <= 32; i++) {
+        pm_snprintf(name, sizeof name, "mode_flag_%u", i);
+        id = (unsigned)pm_port_value(name, 0);
+        if (!id) break;
+        if (count && id >= count) continue;
+        if (bits[id >> 3] >> (id & 7) & 1) {
+            pm_snprintf(stock_flags_what, sizeof stock_flags_what, "one of the game's modes (flag %u)", id);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int stock_balls(unsigned kinds)
 {
     unsigned n;
     if (!pm_player()) return 0;
+    stock_flags_what[0] = 0;
+    if (stock_flags_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_flags())
+        return (int)PM_STOCK_BATTLE;
     n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
     return n >= 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY)) ? (int)PM_STOCK_MULTIBALL : 0;
 }
@@ -2386,6 +2425,8 @@ int pm_stock_mode_running(unsigned kinds)
         said = 1;
         if (stock_generic_route())
             say("stock modes: can tell, from the game's mode table (%ld modes)", pm_port_value("stock_mode_count", 0));
+        else if (stock_balls_route() && stock_flags_route())
+            say("stock modes: can tell a multiball, from the game's balls in play, and its other modes, from their flags");
         else if (stock_balls_route())
             say("stock modes: can tell a multiball, from the game's balls in play (not its other modes)");
         else say("stock modes: %s%s%s%s", data("stock_mode_manager") ? "can tell" : "this port cannot tell (no stock_mode_manager)",
@@ -2410,6 +2451,7 @@ int pm_stock_mode_running(unsigned kinds)
 const char *pm_stock_mode_what(unsigned kind)
 {
     if (kind && stock_generic_on && stock_generic_what[0]) return stock_generic_what;
+    if ((kind & PM_STOCK_BATTLE) && stock_flags_what[0]) return stock_flags_what;
     if ((kind & PM_STOCK_BATTLE) && stock_generic_on) return "one of the game's modes";
     if (kind & PM_STOCK_BATTLE) return "a battle";
     if (kind & PM_STOCK_MULTIBALL) return "a multiball";

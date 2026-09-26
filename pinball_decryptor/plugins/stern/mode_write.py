@@ -577,6 +577,8 @@ def choose_end_sound(project, modes, sound_ok, log=None):
     slug, spec = with_sound[0]
     wav = os.path.join(MP.mode_folder(project, slug), spec.end_sound)
     prof = MP.profile(spec.title)
+    if end_on_carrier(prof):
+        return None         # item 164: each mode's end sound rides a carrier (choose_own_sounds)
     for _g, other in with_sound[1:]:
         log("Modes: %s has its own end sound too, but a card carries one (the time-up "
             "callout is re-pointed for the whole game); it ends with %s's." % (other.name, spec.name),
@@ -588,7 +590,26 @@ def choose_end_sound(project, modes, sound_ok, log=None):
 #: plays, its record grown to hold the sound. The END call is not one of them: it stays on the
 #: title's time-up request (:func:`choose_end_sound`), the path the hardware card proved.
 CARRIED_SOUNDS = ("sound_start", "sound_shot", "music")
-SOUND_WORDS = {"sound_start": "start sound", "sound_shot": "shot sound", "music": "music"}
+SOUND_WORDS = {"sound_start": "start sound", "sound_shot": "shot sound", "music": "music",
+               "sound_end": "end sound"}
+#: the spec field each carried sound's WAV is in (the end sound's is ``end_sound``)
+_SPEC_FIELD = {"sound_end": "end_sound"}
+
+
+def end_on_carrier(prof):
+    """item 164: a title whose time-up callout is not known carries a mode's END sound on a
+    carrier too (mode_file.c ``sound_end``), one per mode, instead of re-pointing the time-up
+    request - :func:`.mode_project.end_sound_carried`."""
+    return not prof.callout_time_up
+
+
+def carried_keys(prof):
+    """The sound keys a build puts on carriers for *prof*'s title."""
+    return CARRIED_SOUNDS + (("sound_end",) if end_on_carrier(prof) else ())
+
+
+def _wav_name(spec, key):
+    return getattr(spec, _SPEC_FIELD.get(key, key), "")
 
 
 def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
@@ -600,8 +621,11 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
     carriers, or the carriers run out (Godzilla has ONE music carrier, so a second mode's
     music). Nothing is built here."""
     log = log or (lambda *a, **k: None)
-    wanted = [(slug, spec, key) for slug, spec in modes for key in CARRIED_SOUNDS
-              if getattr(spec, key, "")]
+    if not modes:
+        return []
+    prof = MP.profile(modes[0][1].title)
+    wanted = [(slug, spec, key) for slug, spec in modes for key in carried_keys(prof)
+              if _wav_name(spec, key)]
     if not wanted:
         return []
     ok, why = sound_ok
@@ -610,7 +634,6 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
             "music of %s are not put on the card." % (why, _names(wanted)), "info")
         return []
     from . import mode_sounds as MS
-    prof = MP.profile(modes[0][1].title)
     game, version = MS.title_version(prof.key)
     if MS.carriers(game, version) is None:
         log("Modes: the start sound, shot sound and music of %s are not put on this card: no "
@@ -630,7 +653,7 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
         request = got[key]
         taken.append(request)
         entry = {"slug": slug, "name": spec.name, "key": key, "request": int(request),
-                 "wav": os.path.join(MP.mode_folder(project, slug), getattr(spec, key)),
+                 "wav": os.path.join(MP.mode_folder(project, slug), _wav_name(spec, key)),
                  "music": key == "music"}
         if key == "music" and got.get("music_sid"):
             # item 150 follow-up: the mode's own bed, on the one music carrier, long enough that the
@@ -789,7 +812,17 @@ def describe(modes, result=None, prof=None):
             parts.append("a %.0f s title-card clip (a new file)" % float(spec.clip_seconds))
         elif spec.clip == "file":
             parts.append("its own clip %s (a new file)" % spec.clip_file)
-        if spec.end_sound:
+        if spec.end_sound and p is not None and end_on_carrier(p):
+            # item 164: no time-up callout known - the end sound rides a carrier of its own
+            mine = [u for u in (getattr(result, "own_sounds", None) or ())
+                    if u.get("slug") == slug and u.get("key") == "sound_end"]
+            if result is None:
+                parts.append("its own end sound %s" % spec.end_sound)
+            elif mine:
+                parts.append("its own end sound %s (request %d)" % (spec.end_sound, mine[0]["request"]))
+            else:
+                parts.append("not its own end sound (this card cannot carry it; the log says why)")
+        elif spec.end_sound:
             chosen = None if result is None else (result.end_sound or {}).get("slug")
             if result is None or chosen == slug:
                 parts.append("its own end sound %s" % spec.end_sound)

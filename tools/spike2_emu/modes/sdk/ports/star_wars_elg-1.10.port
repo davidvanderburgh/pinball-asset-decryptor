@@ -316,6 +316,15 @@ switch 60   0x20000000         Yoda mystery target
 callout countdown           168
 value countdown_step -1
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x0043bdf0 0xe92d4070 0xe24dd008
+site surface_set_video 0x004334d4 0xe5d030d4 0xe92d4ff0
+site surface_play     0x004312e0 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00430a90 0xe5d030d4 0xe92d40f0
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Death star target
 
@@ -422,3 +431,16 @@ site find_text        0x0043b598 0xe92d4070 0xe24dd008
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a/835949dafb924a7cfeb0ec0fe2a3a4d8696d4aea
+
+# ---- the game's own modes (item 164): the framework's game flags (set 0x28a27c / clear 0x28a234; the bitmap
+# pointer at [holder + 4], its size in bits at the count global). Each mode's start sets a flag of its
+# own that its stop clears; multiballs are the balls-in-play count's:
+#   86  Inner loop 0x6bcc0
+#   88  Orbits 0x6ad3c
+#   87  Ramps 0x5eff0
+data game_flags             0x005929cc
+value game_flags_at         4
+data game_flag_count        0x004a7b00
+value mode_flag_1           86
+value mode_flag_2           88
+value mode_flag_3           87

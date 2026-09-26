@@ -70,6 +70,30 @@ def _strip(new, name):
     return bytes(out)
 
 
+
+def synthetic_marked(names=("Alpha", "Delta", "zeta"), mark_id=90):
+    """item 164: a bank whose Videos carry the SECOND list - clips with frame markers (Munsters 1.28's
+    "EndOfBallBonus": Pause at 73, Explosion at 281). In the library the marked clip's id is new
+    (FLAG): f32 fps and its markers follow; in the surface it is named by id alone."""
+    names = list(names)
+    n = len(names)
+    marked_lib = (struct.pack("<Q", 1) + _s("Bonus") + struct.pack("<If", F | mark_id, 30.0)
+                  + struct.pack("<Q", 2) + struct.pack("<I", 73) + _s("Pause") + struct.pack("<I", 281) + _s("Explosion"))
+    marked_surf = struct.pack("<Q", 1) + _s("Bonus") + struct.pack("<I", mark_id)
+    out = b"" + struct.pack("<Q", 1) + struct.pack("<I", 2) + struct.pack("<I", F | 1) + _s("Video")
+    out += struct.pack("<I", F | 1) + _video(names, True) + marked_lib
+    out += struct.pack("<Q", 0) + struct.pack("<II5f", 1360, 768, 12.0, 0, 0, 0, 1.0)
+    out += struct.pack("<I", 0) + _s("") + struct.pack("<I", 2) + struct.pack("<Q", 1)
+    node = struct.pack("<I", F | (n + 2)) + _s("VideoSurface") + struct.pack("<I", 1)
+    node += struct.pack("<Q", 2) + struct.pack("<IB", 1, 1) + struct.pack("<IB", 2, 1)
+    node += struct.pack("<Q", 0)
+    node += struct.pack("<Q", 1) + struct.pack("<I", 1) + struct.pack("<16f", *([1.0] + [0.0] * 15))
+    node += struct.pack("<Q", 1) + struct.pack("<III", 1, 1, F | (n + 3)) + _video(names, False) + marked_surf
+    node += struct.pack("<Q", 0)
+    out += node + struct.pack("<Q", 0)
+    out += struct.pack("<Q", 2) + _s("Normal") + struct.pack("<I", 1) + _s("SquareCrop") + struct.pack("<I", 2)
+    return out
+
 # ---- synthetic ------------------------------------------------------------------------
 def test_synthetic_bank_walks():
     bank = VB.parse(synthetic())
@@ -160,3 +184,32 @@ def test_stock_bank_grows_by_one_clip_and_nothing_stock_moves():
     assert after.pop("KaijuRush_Clip") == (0x25A, "2.asset/598.asset", 1257317)
     assert after == before
     assert _strip(new, "KaijuRush_Clip") == data
+
+
+def test_a_bank_with_marked_clips_walks_and_grows():
+    """item 164: Munsters, Star Wars LE/ELG and John Wick keep marked clips in each Video's second
+    list, which the walk used to read as a string length. A new clip takes an id above the marked one."""
+    data = synthetic_marked()
+    bank = VB.parse(data)
+    assert [c.name for c in bank.library.entries] == ["Alpha", "Delta", "zeta"]
+    assert bank.max_id >= 90 and bank.labels == [("Normal", 1), ("SquareCrop", 2)]
+    new, info = VB.add_clip(data, "Mode_Clip", 1234)
+    assert info["clip_id"] == bank.max_id + 1 and info["clip_id"] > 90
+    grown = VB.parse(new)
+    assert [c.name for c in grown.surface.entries] == ["Alpha", "Delta", "Mode_Clip", "zeta"]
+    assert _strip(new, "Mode_Clip") == data
+
+
+def test_a_one_clip_bank_at_the_top_of_its_assets_grows_beside_it():
+    """item 164: Munsters' and Iron Maiden's background banks hold one clip at ``2.asset`` itself,
+    not in a folder of numbered clips; the next clip is ``3.asset`` beside it."""
+    data = synthetic(names=("attract_background",))
+    bank = VB.parse(data)
+    lib = bank.library.entries[0]
+    top = data[:lib.start] + data[lib.start:lib.end].replace(_s("2.asset/0.asset"), _s("2.asset")) + data[lib.end:]
+    bank = VB.parse(top)
+    assert [c.path for c in bank.library.entries] == ["2.asset"]
+    assert VB.next_path(bank) == "3.asset"
+    new, info = VB.add_clip(top, "Mode_Clip", 99)
+    assert info["path"] == "3.asset"
+    assert {c.name: c.path for c in VB.parse(new).library.entries} == {"Mode_Clip": "3.asset", "attract_background": "2.asset"}

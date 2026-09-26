@@ -4,6 +4,7 @@
 # the 8 events below fired where their names say (a tilted ball, three balls to the game's end).
 # Shots no press made (their switch is left out of the check, or needs two): Left outlane, Right outlane, Turntable lock 1, Turntable lock 2, Turntable lock 3.
 # program sha1 4e11096f5e2d4ad24a5eb0fc9bee4722b2a06908, portgen revision 3, 1 reference port(s) of framework generation A.
+# Callouts heard in the emulator 2026-09-25 (item 164, the item 163 pipeline): countdown, time_up.
 
 game           batman
 version        1.13
@@ -140,6 +141,12 @@ switch 107  0x8000000000       Bat phone target (x2)
 switch 108  0x10000000000      Bat hit target
 switch 109  0x20000000000      Joker target 1
 switch 110  0x40000000000      Joker target 2
+
+# ---- callouts, heard in the emulator 2026-09-25 (item 164): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 1061 (clips 1-5 said "One!", "(two)", "3", "(four)", "(five)"); time_up 1495 ("Oh gosh Batman we're out of time!")
+callout countdown           1061
+callout time_up             1495
+value countdown_step -1
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     (G)adget target

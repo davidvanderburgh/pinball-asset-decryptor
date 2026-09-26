@@ -1400,10 +1400,10 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         assert "Ready to build" in st["status"]
         assert not st["dis"]["screen"] and tmnt.can("screen")    # item 164: seen on the glass
         assert not st["dis"]["clip"] and not st["dis"]["lights"]    # item 164: clip v2, its inserts
-        # item 163: TMNT Pro 1.59 counts down now (441, heard); it has no time-up call to carry
-        # an end sound of the mode's own
-        assert not st["dis"]["countdown"] and st["dis"]["own_sound"]
-        assert "time is up" in st["reasons"]["sound"] or "time-up" in st["reasons"]["sound"]
+        # item 163: TMNT Pro 1.59 counts down now (441, heard); item 164: it has no time-up call, so a
+        # mode's own end sound rides a carrier of its own (heard at time-up in the emulator)
+        assert not st["dis"]["countdown"] and not st["dis"]["own_sound"]
+        assert "time-up" in st["reasons"]["sound"]              # nothing of the game's own plays then
         assert st["editor_on"] is True                          # the shots stay live
         # no named inserts and no measured carriers on TMNT: both greyed, with the reason
         assert st["dis"]["lit_shots"] and "TMNT Pro 1.59" in st["reasons"]["lit_shots"]
@@ -1525,10 +1525,10 @@ def test_modes_tab_bare_project_knows_no_game(tmp_path):
 
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
-    """Item 148 with items 140 and 142: TMNT Pro 1.59 cannot use a sound of the mode's own, so
-    that film button is greyed, with the reason (its clip, its screen and "The game's own modes"
-    are live since item 164); on Jaws LE 1.02 and the machine's Premium 1.16 card everything
-    stays live."""
+    """Item 148 with items 140 and 142: Deadpool LE 1.14 cannot use a sound of the mode's own (no
+    time-up call, no carriers measured), so that film button is greyed, with the reason; TMNT Pro
+    1.59's modes wait for the game's own ("The game's own modes", item 164) and keep its events;
+    on Jaws LE 1.02 and the machine's Premium 1.16 card everything stays live."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
     tmnt = MP.profile("turtles_pro_1_59")
@@ -1538,11 +1538,17 @@ def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
         assert w.call("modes.new")
         st = _st(w)
         assert not st["dis"]["stack"] and tmnt.can("stack")    # item 164: the game's mode table
-        assert st["dis"]["film_sound"] and not st["dis"]["film_still"] and not st["dis"]["film_clip"]
-        film = st["reasons"]["film"]
-        assert "a sound" in film and "picture" not in film and "TMNT Pro 1.59" in film
         # item 147's events: TMNT 1.59's port carries the ones item 162's build check saw fire
         assert not st["dis"]["events"] and tmnt.can("events")
+
+        dp = _modes_card_project(tmp_path, "deadpool_le-1_14_0.Release.8G.sdcard.raw", "1.14.0",
+                                 folder="dp")
+        _project(w, dp)
+        assert w.call("modes.new")
+        st = _st(w)
+        assert st["dis"]["film_sound"] and not st["dis"]["film_still"] and not st["dis"]["film_clip"]
+        film = st["reasons"]["film"]
+        assert "a sound" in film and "picture" not in film and "Deadpool LE 1.14" in film
 
         jaws = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0",
                                    folder="jaws")

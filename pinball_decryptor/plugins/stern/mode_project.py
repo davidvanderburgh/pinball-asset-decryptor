@@ -295,6 +295,7 @@ STACK_FLAGS_PROVEN = frozenset({
     "star_wars_elg-1.10",             # Inner loop (flag 86)
     "stranger_things_le-1.12",        # Bust out (flag 78)
     "james_bond_le-1.06",             # Bust out (flag 102), and the flag cleared when it ended
+    "batman-1.13",                    # Shame (flag 71, its start takes one argument), cleared when it ended
 })
 
 

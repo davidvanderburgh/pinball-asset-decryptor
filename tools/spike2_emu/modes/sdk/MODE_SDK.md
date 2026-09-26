@@ -669,7 +669,9 @@ time runs out. Each mode gets its own (a card no longer carries one end sound fo
 on those titles). `mode_project.end_sound_carried` says a title has the carriers for it. Heard in
 the emulator at time-up, after the game's own countdown, on 16 builds (2026-09-25): Avengers, The
 Beatles, Foo Fighters, Iron Maiden, John Wick, JP LE, JP The Pin, the Led Zeppelins, Mandalorian,
-the Star Wars builds, Sword of Rage, the TMNTs and X-Men.
+the Star Wars builds, Sword of Rage, the TMNTs and X-Men; then Deadpool LE and Pro and Elvira 3 once a
+sound census (the scripted game with the runtime's sound log on) gave them carriers of their own and their
+ports gained the sound sites (item 163 had left them out: their catalogs were built from empty site caches).
 
 | To... | Call |
 |---|---|
@@ -1027,13 +1029,15 @@ value mode_flag_1           39              # .. mode_flag_32: any of them set i
 
 and the runtime answers "one of the game's modes (flag N)" beside the multiball count. Proven in
 the emulator (2026-09-25, a stack no mode held back while the mode its start was called for ran):
-JP The Pin (Stegosaurus, 40), Star Wars ELG (Inner loop, 86), Stranger Things (Bust out, 78) and
-Bond LE (Bust out, 102 - which cleared when it ended, and the next start went ahead);
+JP The Pin (Stegosaurus, 40), Star Wars ELG (Inner loop, 86), Stranger Things (Bust out, 78),
+Bond LE (Bust out, 102 - which cleared when it ended, and the next start went ahead) and Batman 66 (Shame,
+71, whose start takes one argument; it cleared too);
 `mode_project.STACK_FLAGS_PROVEN`, and the tab drops its "multiballs only" note there.
 
-**Not yet.** Aerosmith's double scoring only pulses its flag (96). The Beatles' song modes, X-Men,
-Guardians, Bond 60th, Metallica, Batman and Elvira keep no flag of their own that a start sets (X-Men
-keeps its state in each mode's object), or their starts take arguments: multiballs only there.
+**Not yet.** Aerosmith's double scoring only pulses its flag (96). The Beatles' songs: one start was
+found (0x4a8b8, flag 70, cleared by 0x4a97c), the other four were not, so it stays multiballs only.
+X-Men keeps its state in each mode's object (its starts are called through vtables); Guardians, Bond
+60th, Metallica and Elvira show no mode flag set by a start: multiballs only there.
 
 ## Ports: why your mode runs on any game
 
@@ -1316,6 +1320,11 @@ Not yet:
 - Metallica: played on 914f6bd9, and the song video stayed in front.
 - Bond 60th: no bank among the scenes it draws in play.
 - Batman and Elvira: no 60ed7e50 bank; they play video through another player.
+
+**Screen words on a font that lacks the glyphs.** A scene embeds only the glyphs its own text uses, so on
+some builds the words line cannot be drawn and Radium logs `Glyph 'A' not found in embedded font`: every
+font in Deadpool LE/Pro's HUD holds " 0x" only; Metallica's holds digits and no letters; The Beatles' has no
+space or comma. The panel still shows; the words are missing or partial there.
 
 ### Screens on every title (item 164)
 

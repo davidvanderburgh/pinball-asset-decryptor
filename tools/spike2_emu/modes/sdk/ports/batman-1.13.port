@@ -148,6 +148,27 @@ callout countdown           1061
 callout time_up             1495
 value countdown_step -1
 
+# ---- sound sites, played in the emulator 2026-09-24 (item 163): drafted from Godzilla LE 1.16's
+# by prologue; the key-swap proof ran on them (pm_sound, pm_sound_swap on sound_lookup, the
+# request table's priority) and the check game's sound log is sound_worker's. The channel
+# struct values are the ones every port with sound sites carries.
+site sound_play       0x00271208 0xe92d4010 0xe30be150
+site sound_nth        0x002713bc 0xe92d4010 0xe30be150
+site sound_active     0x0027197c 0xe59f3034 0xe2831e62
+site sound_stop       0x00271ad4 0xe92d40f8 0xe1a06000
+site sound_worker     0x002707f4 0xe92d4ff0 0xe2507000
+data sound_channels         0x0076b25c
+data sound_queue            0x0076bad0
+data sound_requests         0x0071e3f4
+data sound_request_count    0x00577fac
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     (G)adget target
 
@@ -320,3 +341,14 @@ value scene_player_scene    0x10
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  b59deafd663e85b406a4d490cd2b2bdf8efcf13a
+
+# ---- the game's own modes (item 164): the framework's game flags (set 0x25f758 / clear 0x25f710; the bitmap
+# pointer at [holder + 4], its size in bits at the count global). Each mode's start sets a flag of its
+# own that its stop clears; multiballs are the balls-in-play count's:
+#   58  Major villain wizard mode 0x125b84
+#   71  Shame mode 0x1b822c
+data game_flags             0x0076ac10
+value game_flags_at         4
+data game_flag_count        0x00561288
+value mode_flag_1           58
+value mode_flag_2           71

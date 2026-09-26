@@ -1525,10 +1525,9 @@ def test_modes_tab_bare_project_knows_no_game(tmp_path):
 
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
-    """Item 148 with items 140 and 142: Deadpool LE 1.14 cannot use a sound of the mode's own (no
-    time-up call, no carriers measured), so that film button is greyed, with the reason; TMNT Pro
-    1.59's modes wait for the game's own ("The game's own modes", item 164) and keep its events;
-    on Jaws LE 1.02 and the machine's Premium 1.16 card everything stays live."""
+    """Item 148 with items 140 and 142: TMNT Pro 1.59's modes wait for the game's own ("The game's own
+    modes", item 164) and keep its events; on Deadpool LE 1.14, Jaws LE 1.02 and the machine's
+    Premium 1.16 card every film cut stays live (item 164: Deadpool carries a sound of its own now)."""
     from pinball_decryptor.plugins.stern import mode_project as MP
 
     tmnt = MP.profile("turtles_pro_1_59")
@@ -1546,9 +1545,9 @@ def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(tmp_path):
         _project(w, dp)
         assert w.call("modes.new")
         st = _st(w)
-        assert st["dis"]["film_sound"] and not st["dis"]["film_still"] and not st["dis"]["film_clip"]
-        film = st["reasons"]["film"]
-        assert "a sound" in film and "picture" not in film and "Deadpool LE 1.14" in film
+        # item 164: its end sound rides a carrier of its own now, so every film cut stays live
+        assert not any(st["dis"]["film_" + t] for t in ("clip", "still", "sound"))
+        assert "film" not in st["reasons"]
 
         jaws = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0",
                                    folder="jaws")

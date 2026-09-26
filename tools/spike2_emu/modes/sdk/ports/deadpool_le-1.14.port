@@ -151,6 +151,27 @@ callout countdown           962
 value countdown_first 5
 value countdown_stride 5
 
+# ---- sound sites, played in the emulator 2026-09-24 (item 163): drafted from Godzilla LE 1.16's
+# by prologue; the key-swap proof ran on them (pm_sound, pm_sound_swap on sound_lookup, the
+# request table's priority) and the check game's sound log is sound_worker's. The channel
+# struct values are the ones every port with sound sites carries.
+site sound_play       0x001fb2b8 0xe92d4010 0xe303e4d0
+site sound_nth        0x001fb46c 0xe92d4010 0xe303e4d0
+site sound_active     0x001fba2c 0xe59f3034 0xe2831e62
+site sound_stop       0x001fbb84 0xe92d40f8 0xe1a06000
+site sound_worker     0x001fa8a4 0xe92d4ff0 0xe2507000
+data sound_channels         0x006635dc
+data sound_queue            0x00663e50
+data sound_requests         0x006029b0
+data sound_request_count    0x005127c0
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Lil Deadpool target
 

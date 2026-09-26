@@ -22,18 +22,18 @@ def test_titles_carry_calls_and_music():
     assert MS.carriers("godzilla_le", "1.16").key_mask == 0xE0001FFF
     assert MS.carriers("godzilla_pro", "1.15").key_mask == 0xFC0003FF
     assert not MS.carriers("godzilla_le", "1.16").swap
-    # item 163: every other latest build swaps its own sounds in; the four builds the engine cannot
-    # derive (no resolver, so nothing can grow) have none
+    # item 163: every other latest build swaps its own sounds in; item 164: Deadpool LE/Pro and Elvira 3
+    # too, once a sound census gave them carriers. Batman 66 has none (its end sound re-points its
+    # time-up call, as Godzilla's does)
     swaps = [k for k, c in MS.TITLES.items() if c.swap]
-    assert len(swaps) >= 29 and ("jaws_le", "1.02") in swaps
+    assert len(swaps) >= 32 and ("jaws_le", "1.02") in swaps and ("elvira3", "1.13") in swaps
     for key in swaps:
         c = MS.TITLES[key]
         assert len(c.calls) == len(set(c.calls)) >= 3, key
         assert len(c.music) == len(set(c.music)), key
         assert not set(c.calls) & set(c.music), key
         assert not c.beds, key
-    for game, version in (("batman", "1.13"), ("deadpool_le", "1.14"), ("deadpool_pro", "1.16"), ("elvira3", "1.13")):
-        assert MS.carriers(game, version) is None
+    assert MS.carriers("batman", "1.13") is None
 
 
 def test_assign_is_distinct_and_stable():

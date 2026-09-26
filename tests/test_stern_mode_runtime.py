@@ -41,6 +41,7 @@ PORTS = [
     ("jaws_le", "1.02"),
     ("john_wick_le", "1.01"),
     ("jurassic_park_le", "1.16"),
+    ("jurassic_park_the_pin", "1.05"),
     ("king_kong_le", "0.97"),
     ("led_zeppelin_le", "1.22"),
     ("led_zeppelin_pro", "1.22"),

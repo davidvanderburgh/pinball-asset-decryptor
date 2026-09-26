@@ -561,6 +561,16 @@ PROFILES = {
         root_frames=1, root_count_at=0x177706, root_count=2,
         insert_at=0x177BFD, insert_before=(0x80000027, 'frame_instance'),
         first_free_id=0x600, in_game=True, new_poly=('text',), origin=(280.0, 40.0)),
+    "6f3c2dbd6a176794ca54794f41f699fd": SceneProfile(
+        label='Jurassic Park Pin 1.05 in-game 60ed7e50 (item 164, read statically)',
+        scene_id='60ed7e5036b8ce09d35a3e101ea6fc1380b37d97', tree='auto_loaded',
+        md5='6f3c2dbd6a176794ca54794f41f699fd', size=14097,
+        poly={'sprite': 2, 'bitmap': 3, 'text': 4},
+        symbol={'sprite': 0, 'bitmap': 0, 'text': 1},
+        font=None, text_align=0, text_spacing=(0.0, 0.0), text_tail=(0, 0),
+        root_frames=1, root_count_at=0x23A3, root_count=1,
+        insert_at=0x3701, insert_before=(0x00000000, ''),
+        first_free_id=0x100, in_game=True, new_poly=('sprite', 'bitmap', 'text'), append=b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00', origin=(0.0, -124.0)),
 }
 
 
@@ -637,7 +647,31 @@ def add_screen(data, name, art_rgba, words, x=360.0, y=200.0, words_at=None,
     return new, info
 
 
-def add_screens(data, screens):
+def _rebased(p, stock, data):
+    """``p`` (measured on ``stock``) moved onto ``data``: the same scene after other edits that
+    only INSERTED bytes before the profile's two offsets - a clip added to the video bank when
+    the bank is also the scene a screen goes in (item 164: JP The Pin 1.05 draws one scene, its
+    video bank). Each offset is found again by the stock bytes around it, which must appear
+    exactly once in the window the growth allows."""
+    grow = len(data) - len(stock)
+    if grow < 0:
+        raise SceneWriteError("%s: the edited scene is smaller than the stock one" % p.label)
+
+    def moved(at, after):
+        for width in (16, 64, 256, 1024):       # a trailer of zeros matches at several shifts
+            lo = max(0, at - width)
+            key = stock[lo:at + after]
+            hits = [i for i in range(lo, lo + grow + 1) if data[i:i + len(key)] == key]
+            if len(hits) == 1:
+                return hits[0] + (at - lo)
+        raise SceneWriteError("%s: 0x%x is not one place in the edited scene" % (p.label, at))
+
+    return SceneProfile(**{**p.__dict__, "size": len(data),
+                           "root_count_at": moved(p.root_count_at, 8),
+                           "insert_at": moved(p.insert_at, max(len(p.append), 16))})
+
+
+def add_screens(data, screens, stock=None):
     """Splice SEVERAL screens into a profiled stock scene in one pass (item 127: a card
     carries several modes, item 133 - and this refuses any file that is not the measured
     stock one, so screens cannot be added one call at a time). ``screens`` is a list of
@@ -645,9 +679,18 @@ def add_screens(data, screens):
     ``x``, ``y``, ``words_at``, ``art_name``, ``words_name``). Each takes the next seven
     object ids and becomes one more root child, in order. Returns (new bytes, [info]).
 
+    ``stock`` is given when ``data`` is that stock scene already grown by insertions of
+    another kind (a clip: :func:`_rebased`); the profile is the stock one's.
+
     Every screen is authored visible, and every one needs the mode.so that hides it."""
-    p = profile_for(data)
-    check(data, p)
+    if stock is None:
+        p = profile_for(data)
+        check(data, p)
+    else:
+        p = profile_for(stock)
+        check(stock, p)
+        p = _rebased(p, stock, data)
+        check(data, p)
     if not screens:
         raise SceneWriteError("no screens to add")
     names = [s["name"] for s in screens]

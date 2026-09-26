@@ -1000,8 +1000,8 @@ takes a Start, so the scripted check presses Start for about two and a half minu
 
 **Not yet.** On the plain-C titles and Elvira the game's other modes (not its multiballs) are
 not seen: their rules keep no table the runtime can walk (a mode's start bumps an
-`AUD_..._STARTED` audit, the lead for a later item). JP The Pin 1.05 has events and shots only
-so far.
+`AUD_..._STARTED` audit, the lead for a later item). JP The Pin 1.05 takes the balls-in-play
+route (`site balls_in_play`, the framework's count), proven the same way on 2026-09-25.
 
 ## Ports: why your mode runs on any game
 
@@ -1301,12 +1301,15 @@ A mode's own screen goes into a scene the game draws in play. Three things per b
 
 **What is proven.** In the emulator, one scripted game per build with a magenta panel: none
 before the mode, the panel and its words during it (about 63,000 magenta pixels). Proven on
-33 of the 34 latest builds: Aerosmith, Avengers, Batman 66, The Beatles, Bond 60th, Bond LE,
+all 34 latest builds: Aerosmith, Avengers, Batman 66, The Beatles, Bond 60th, Bond LE,
 Deadpool LE and Pro, D&D, Elvira 3, Foo Fighters, Godzilla LE and Pro 1.16, Guardians, Iron
-Maiden, Jaws, John Wick, JP LE, King Kong, Led Zeppelin LE and Pro, Mandalorian, Metallica,
+Maiden, Jaws, John Wick, JP LE, JP The Pin, King Kong, Led Zeppelin LE and Pro, Mandalorian, Metallica,
 Munsters, Rush, Star Wars ELG and LE, Stranger Things, Sword of Rage, TMNT LE and Pro 1.59,
 X-Men and Venom. `mode_project.TITLE_SCENES` carries `screen_proven` for those; the tab offers a screen
-only there. Not yet: JP The Pin 1.05.
+only there. JP The Pin 1.05 draws one scene in play, 60ed7e50, which is also its video bank:
+a build adds the clips to it first and the screens after them (`scene_write.add_screens(...,
+stock=)` moves the stock profile past what the clips inserted), and its screen is a panel with
+no words (the scene has no Text).
 
 Per scene, what the proof runs taught:
 

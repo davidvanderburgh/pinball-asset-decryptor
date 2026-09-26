@@ -271,3 +271,31 @@ def test_add_screens_on_the_stock_hud_scene():
     assert struct.unpack_from("<Q", new, 0x0E16E1)[0] == 5
     at = 0x0E4BE3 + sum(i["node_bytes"] for i in infos)
     assert new[at + 12:at + 33] == b"BattleSlideOut_Artbox"
+
+
+def test_add_screens_onto_a_scene_other_edits_grew_first(monkeypatch):
+    """item 164: JP The Pin 1.05's HUD scene is also its video bank, so a build adds the clips
+    first and then the screens, through the stock profile moved past what the clips inserted -
+    here 24 bytes before the root count and 40 inside the root, ahead of a trailer of zeros that
+    matches at several shifts unless more of the bytes before it are taken."""
+    count_at, at = 64, 336
+    stock = bytearray(bytes(range(256)) + b"\x22" * 64 + b"\x00" * 32)
+    struct.pack_into("<I", stock, count_at - 4, 1)
+    struct.pack_into("<Q", stock, count_at, 3)
+    stock = bytes(stock)
+    md5 = hashlib.md5(stock).hexdigest()
+    real = SW.PROFILES["f9daed5a19aafc807bf9eb3c2def6c27"]
+    monkeypatch.setitem(SW.PROFILES, md5, SW.SceneProfile(**{
+        **real.__dict__, "md5": md5, "size": len(stock), "root_count_at": count_at, "root_count": 3,
+        "insert_at": at, "append": b"\x00" * 16, "insert_before": (0, "")}))
+    grown = stock[:10] + b"\x33" * 24 + stock[10:100] + b"\x44" * 40 + stock[100:]
+    screens = [dict(name="Mode_Screen", art_rgba=_art(), words="HI")]
+    ref, _ = SW.add_screens(stock, screens)
+    new, infos = SW.add_screens(grown, screens, stock=stock)
+    node = ref[at:at + infos[0]["node_bytes"]]
+    moved = at + 64
+    assert new[moved:moved + len(node)] == node
+    assert struct.unpack_from("<Q", new, count_at + 24)[0] == 4
+    assert new[:count_at + 24] == grown[:count_at + 24] and new[moved + len(node):] == grown[moved:]
+    with pytest.raises(SW.SceneWriteError, match="is not one place"):
+        SW.add_screens(grown[:at + 60] + b"\x55" + grown[at + 64:], screens, stock=stock)

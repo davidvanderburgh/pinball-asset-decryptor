@@ -458,14 +458,21 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
                             words="%s A SHOT" % "{:,}".format(int(spec.award)),
                             words_name=names["screen_text"].split(".", 1)[1]))
     screens += _code_screens(project, code, prof)
-    if screens:
-        hud, _infos = SW.add_screens(stock_hud, screens)
-        write("%s/scene.radium" % prof.lcd("hud"), hud)
 
     # the clips: made first (side by side, kept between builds), then one after another into
     # the stock bank
     clips = [(slug, spec) for slug, spec in found if spec.clip != "none" and prof.can("clip")]
     code_clips = [(slug, c) for slug, c in code if c.clip and prof.can("clip")]
+    # item 164: a title whose video bank IS the scene its screens go in (JP The Pin 1.05 draws one
+    # scene) gets the clips first and then the screens, onto the grown bank - the bank's walk
+    # refuses anything but clips, and the screens' offsets are moved past what the clips added
+    shared = bool(screens) and bool(clips or code_clips) and prof.lcd("hud") == prof.lcd("bank")
+    if screens and not shared:
+        hud, _infos = SW.add_screens(stock_hud, screens)
+        write("%s/scene.radium" % prof.lcd("hud"), hud)
+
+    def with_screens(bank):
+        return SW.add_screens(bank, screens, stock=stock_bank)[0] if shared else bank
     made, scratch = {}, None
     if clips or code_clips:
         if not ffmpeg:
@@ -481,7 +488,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
         if code_clips and not clips:
             bank, _parsed = _add_code_clips(project, code_clips, stock_bank, VB.parse(stock_bank),
                                             prof, out_dir, ffmpeg, result, made)
-            write("%s/scene.radium" % prof.lcd("bank"), bank)
+            write("%s/scene.radium" % prof.lcd("bank"), with_screens(bank))
             code_clips = []
         if clips:
             bank = stock_bank
@@ -502,7 +509,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
             if code_clips:
                 bank, parsed = _add_code_clips(project, code_clips, bank, parsed, prof, out_dir,
                                                ffmpeg, result, made)
-            write("%s/scene.radium" % prof.lcd("bank"), bank)
+            write("%s/scene.radium" % prof.lcd("bank"), with_screens(bank))
     finally:
         if scratch:
             shutil.rmtree(scratch, ignore_errors=True)

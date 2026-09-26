@@ -5,6 +5,7 @@
 # Shots no press made (their switch is left out of the check, or needs two): Shot 0x20000, Shot 0x40000000, Shot 0x200000000.
 # program sha1 2edcffd1f0383289f1635c98f25c0d5fe06b7655, portgen revision 3, 7 reference port(s) of framework generation B.
 # 29 shot(s) the app could not name are named after the switch that made them in the check.
+# Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds.
 
 game           jurassic_park_the_pin
 version        1.05
@@ -48,7 +49,9 @@ site set_text         0x00437c7c 0xe92d47f0 0xe1a06000
 #   candidate: the reference clip_stop calls 0x1b7e24, which is 0x44830 in the target - prove what it does before using it
 # site video_player           NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   video_surface: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
-site video_surface    0x0002fa5c 0xe92d4070 0xe302554c
+# site video_surface  0x0002fa5c - NOT USED (item 164): with it the runtime asks this for the clip surface
+#   and the game spun at the mode's clip start in the emulator 2026-09-25; the bank scene's own
+#   VideoSurface (surface_find below) is the surface its clips play on
 #   surface_state: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site surface_state    0x004471e0 0xe5900550 0xe2800008
 #   player_advance: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
@@ -316,5 +319,98 @@ event bonus_start    0x27
 event bonus_end      0x28
 event game_over      0x47
 
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# sites played each id and the game's audio was transcribed: countdown 273 (clips 1-5 said "ONE", "2", "Three", "BORE!", "Five!"); ten_seconds 327 ("WE HAVE TO HURRY!")
+callout countdown           273
+callout ten_seconds         327
+value countdown_step -1
+
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x004547a8 0xe92d4070 0xe24dd008
+site surface_set_video 0x0044be8c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00449c98 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00449448 0xe5d030d4 0xe92d40f0
+
 # ---- examples a template mode can use on this game ----
 text example_start_shot     3-Bank drop tgt left
+
+# ---- a mode's own screen (item 164): the scene lookup's typed finders (find_node casts to Radium::Sprite,
+# find_text to Radium::Text; found through the lookup, Godzilla LE 1.16 0x587bac, by the class each casts to),
+# the node's set-visible (Sprite slot 42) and the scene inside a scene player
+site find_text        0x00453f50 0xe92d4070 0xe24dd008
+
+# ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
+scene hud                  60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 52 inserts on the Test/jurassic_park_the_pin_playfield picture; light table 0x582ae4, device table 0x583f54, lamp table 0x56bf78 (84 lamps)
+# shot masks: no class cshot in this program
+lamp 45           0              PLAYFIELD GI-RED  # lamp 3, I/O group 5 index 0, at 0,0
+lamp 46           0              Playfield GI-WHT  # lamp 4, I/O group 5 index 1, at 0,0
+lamp 3            0              LEFT OUTLANE  # lamp 6, I/O group 5 index 3, at 27,352
+lamp 4            0              LEFT RETURN LANE  # lamp 7, I/O group 5 index 4, at 44,342
+lamp 5            0              RIGHT RETURN LANE  # lamp 8, I/O group 5 index 5, at 183,342
+lamp 6            0              RIGHT OUTLANE  # lamp 9, I/O group 5 index 6, at 200,352
+lamp 7            0              SHOOT AGAIN  # lamp 10, I/O group 5 index 7, at 113,445
+lamp 13           0              ESCAPE NUBLAR  # lamp 11, I/O group 5 index 8, at 77,261
+lamp 14           0              TRICERITOPS MODE  # lamp 12, I/O group 5 index 9, at 73,284
+lamp 22           0              CONTROL ROOM TOP  # lamp 13, I/O group 5 index 10, at 50,270
+lamp 21           0              CONTROL ROOM MID  # lamp 14, I/O group 5 index 11, at 48,283
+lamp 20           0              CONTROL ROOM BOTTOM  # lamp 15, I/O group 5 index 12, at 46,297
+lamp 23           0              LEFT ORBIT ARROW  # lamp 16, I/O group 5 index 13, at 32,192
+lamp 24           0              LEFT ORBIT C  # lamp 17, I/O group 5 index 14, at 35,206
+lamp 25           0              LEFT ORBIT RESCUE  # lamp 18, I/O group 5 index 15, at 38,220
+lamp 26           0              LEFT RAMP ARROW  # lamp 19, I/O group 5 index 16, at 59,208
+lamp 27           0              LEFT RAMP H  # lamp 20, I/O group 5 index 17, at 62,223
+lamp 28           0              LEFT RAMP RESCUE  # lamp 21, I/O group 5 index 18, at 64,236
+lamp 17           0              BRACHIOSAURUS MODE  # lamp 22, I/O group 5 index 19, at 76,310
+lamp 9            0              2X  # lamp 23, I/O group 5 index 20, at 96,354
+lamp 10           0              3X  # lamp 24, I/O group 5 index 21, at 114,344
+lamp 11           0              5X  # lamp 25, I/O group 5 index 22, at 132,358
+lamp 12           0              RESTORE POWER  # lamp 26, I/O group 5 index 23, at 114,367
+lamp 29           0              LEFT LOOP ARROW  # lamp 27, I/O group 5 index 24, at 72,146
+lamp 30           0              LEFT LOOP A  # lamp 28, I/O group 5 index 25, at 74,160
+lamp 31           0              LEFT LOOP RESCUE  # lamp 29, I/O group 5 index 26, at 77,173
+lamp 53           0              LEFT SPINNER FLASH  # lamp 30, I/O group 5 index 27, at 64,106
+lamp 16           0              STEGOSAURUS MODE  # lamp 31, I/O group 5 index 28, at 109,292
+lamp 15           0              PTERANODON MODE  # lamp 32, I/O group 5 index 29, at 98,275
+lamp 19           0              DOUBLE SCORE  # lamp 33, I/O group 5 index 30, at 93,299
+lamp 50           0              LEFT T-REX FLASH  # lamp 34, I/O group 5 index 31, at 24,236
+lamp 32           0              SUPER JACKPOT  # lamp 35, I/O group 5 index 32, at 102,131
+lamp 54           0              T-REX BOLT FLASH  # lamp 36, I/O group 5 index 33, at 106,163
+lamp 48           0              TOP POP BUMPER  # lamp 37, I/O group 5 index 34, at 134,115
+lamp 49           0              BOTTOM POP BUMPER  # lamp 38, I/O group 5 index 35, at 155,154
+lamp 33           0              SMART MISSLE  # lamp 39, I/O group 5 index 36, at 142,147
+lamp 51           0              RIGHT T-REX FLASH  # lamp 40, I/O group 5 index 37, at 186,130
+lamp 52           0              BACKPANEL FLASH  # lamp 41, I/O group 5 index 38, at 163,32
+lamp 18           0              GALLIMIMUS MODE  # lamp 42, I/O group 5 index 39, at 108,320
+lamp 42           0              DNA LEFT  # lamp 43, I/O group 5 index 40, at 145,51
+lamp 43           0              DNA CENTER  # lamp 44, I/O group 5 index 41, at 164,57
+lamp 44           0              DNA RIGHT  # lamp 45, I/O group 5 index 42, at 182,51
+lamp 36           0              RIGHT RAMP ARROW  # lamp 46, I/O group 5 index 43, at 144,249
+lamp 37           0              RIGHT RAMP O  # lamp 47, I/O group 5 index 44, at 138,262
+lamp 38           0              RIGHT RAMP RESCUE  # lamp 48, I/O group 5 index 45, at 133,274
+lamp 34           0              SPINO ARROW  # lamp 49, I/O group 5 index 46, at 132,235
+lamp 35           0              EXTRA BALL  # lamp 50, I/O group 5 index 47, at 173,295
+lamp 55           0              RIGHT SPINNER FLASH  # lamp 51, I/O group 5 index 48, at 189,200
+lamp 39           0              RIGHT ORBIT ARROW  # lamp 52, I/O group 5 index 49, at 177,234
+lamp 40           0              RIGHT ORBIT S  # lamp 53, I/O group 5 index 50, at 172,248
+lamp 41           0              RIGHT ORBIT RESCUE  # lamp 54, I/O group 5 index 51, at 167,261
+lamp 56           0              RAPTOR PEN BOLT FLASH  # lamp 55, I/O group 5 index 52, at 193,267
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+# 0x1fd194, found here by its code); two or more is a multiball
+site balls_in_play         0x002f3cd8 0xe92d4010 0xe3054574

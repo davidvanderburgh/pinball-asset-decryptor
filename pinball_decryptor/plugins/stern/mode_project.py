@@ -273,7 +273,7 @@ STACK_BALLS_NEEDS = ("balls_in_play",)
 STACK_BALLS_PROVEN = frozenset({
     "beatles-1.29", "james_bond_60th_le-1.11", "james_bond_le-1.06", "metallica_spike-1.03",
     "star_wars_elg-1.10", "stranger_things_le-1.12", "uncanny_xmen_le-0.98", "batman-1.13",
-    "guardians_le-1.14", "aerosmith_le-1.15", "elvira3-1.13",
+    "guardians_le-1.14", "aerosmith_le-1.15", "elvira3-1.13", "jurassic_park_the_pin-1.05",
 })
 
 
@@ -425,6 +425,7 @@ TITLE_SCENES = {
     "elvira3-1.13": dict(screen_proven=True, hud="fda0fad4bd0931e1412872f85a232834"),   # item 164: its in-game HUD, read statically
     "star_wars_elg-1.10": dict(hud="354935f6d901c89105d1a97edd4a559e", screen_proven=True, ),   # item 164: its in-game HUD, read statically
     "batman-1.13": dict(screen_proven=True, hud="322b14238d0351d6e6ddeb6333e07c8a"),   # item 164: its in-game HUD, read statically
+    "jurassic_park_the_pin-1.05": dict(screen_proven=True, hud="6f3c2dbd6a176794ca54794f41f699fd", bank="6f3c2dbd6a176794ca54794f41f699fd", clip_proven=True),   # item 164: our clip and screen seen on the glass, one scene is both its HUD and its video bank
 }
 
 #: Titles whose callouts ran in the emulator but were never HEARD (the rig is always
@@ -785,10 +786,10 @@ LAMPS_PROVEN = frozenset((
     # view (dump/padled) had the addressed inserts in it while the mode ran, not before or after
     "beatles-1.29", "deadpool_le-1.14", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.00", "elvira3-1.13",
     "foo_fighters_le-1.04", "james_bond_60th_le-1.11", "james_bond_le-1.06", "jaws_le-1.02",
-    "john_wick_le-1.01", "jurassic_park_le-1.16", "king_kong_le-0.97", "led_zeppelin_le-1.22",
-    "led_zeppelin_pro-1.22", "metallica_spike-1.03", "munsters_le-1.28", "star_wars_elg-1.10",
-    "star_wars_le-1.30", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98",
-    "venom_le-1.07",
+    "john_wick_le-1.01", "jurassic_park_le-1.16", "jurassic_park_the_pin-1.05", "king_kong_le-0.97",
+    "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22", "metallica_spike-1.03", "munsters_le-1.28",
+    "star_wars_elg-1.10", "star_wars_le-1.30", "turtles_le-1.59", "turtles_pro-1.59",
+    "uncanny_xmen_le-0.98", "venom_le-1.07",
     # the SWELF generation: the shim reads only some of its boards (it refuses the bank form), so
     # the proof is the boards it reads - the held colour on the device table's own channels
     "aerosmith_le-1.15", "batman-1.13", "guardians_le-1.14", "mando_le-1.44", "rush_le-1.18",

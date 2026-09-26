@@ -412,6 +412,10 @@ def core_missing(port):
 #:   and the game's own screen was back at 10 s).
 #: - TMNT Pro 1.58 and 1.59 share bank cf92bc5a (344 clips), Deadpool Pro 1.16 and LE 1.14
 #:   bank e0e29301 (84 clips); both walk, and neither port has clip functions.
+#: item 164: titles whose voice never says a lone number - every callout on the card transcribed
+#: (t2/numscan.py, 2026-09-26) - so no countdown can be made of the game's own voice
+COUNTDOWN_NO_NUMBERS = frozenset({"aerosmith_le-1.15", "john_wick_le-1.01", "elvira3-1.13"})
+
 TITLE_SCENES = {
     "godzilla_pro-1.15": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,
                               bank="fe35b5b897c2b0df6fe583b0168a6cda", clip_proven=True),
@@ -673,6 +677,9 @@ def profile_from_port(path):
     if "callout" not in runtime:
         no("countdown", "The app has not found how %(label)s plays its callouts, so the game's "
                         "own voice cannot count down.")
+    elif not callouts.get("countdown") and "%s-%s" % (game, version) in COUNTDOWN_NO_NUMBERS:
+        no("countdown", "%(label)s's voice never says a number on its own (every callout on the "
+                        "card was checked), so the game's own voice cannot count down.")
     elif not callouts.get("countdown"):         # ten_seconds is optional: the count is 5..1 without it
         no("countdown", "The app does not know which of %(label)s's callouts count down, so the "
                         "game's own voice cannot count down.")

@@ -695,3 +695,12 @@ def test_a_build_refuses_advanced_fields_the_card_lacks_until_the_mode_is_saved_
     assert "end_shot" not in cfg
     assert saved.countdown and jaws.can("countdown")             # the countdown's own line, then Advanced's
     assert cfg["callout_at"] == ["10 1387", "10 1387", "5 1388"]
+
+
+def test_a_title_with_no_spoken_numbers_says_so():
+    """item 164: every callout on Aerosmith, John Wick and Elvira was transcribed and none is a lone
+    number, so the Modes tab says that rather than that the countdown is not found yet."""
+    import os
+    for key in MP.COUNTDOWN_NO_NUMBERS:
+        prof = MP.profile_from_port(os.path.join(MP.PORTS_DIR, key + ".port"))
+        assert "never says a number on its own" in prof.why_not("countdown"), key

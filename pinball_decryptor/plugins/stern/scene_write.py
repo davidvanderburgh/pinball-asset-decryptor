@@ -160,6 +160,8 @@ class SceneProfile:
                               # the first screen registers each inline, u32 FLAG|id + its name, as the game does
     video: tuple = ()         # item 164: (class id, symbol key) a grafted Video takes (:func:`add_screens`
                               # ``clips``) - a free class id and one past the library's highest key
+    words_font: tuple = ()    # item 164: (Font class id, symbol key) for the card's full system font, carried
+                              # in because this file's own fonts lack the words' glyphs (:func:`carried_font`)
 
 
 PROFILES = {
@@ -212,7 +214,7 @@ PROFILES = {
         font=(10100, 'WonderBarOutline'), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=10, root_count_at=0xA93771, root_count=58,
         insert_at=0xC28EA5, insert_before=(0x800077CF, 'NetUser4'),
-        first_free_id=0x7900, in_game=True),
+        first_free_id=0x7900, in_game=True, words_font=(3, 1639)),
     "ab5a66fa89ef57cfe38b7820978cc08c": SceneProfile(
         label='Deadpool LE 1.14 in-game 9d578751 (item 164, read statically)',
         scene_id='9d57875196c613785a1eee010c55223a0f1aa821/7bae43761f538dd582c19f3973bcedcc2b7ab6dd', tree='auto_loaded',
@@ -312,7 +314,7 @@ PROFILES = {
         font=(860, 'Stern_DharmaGothicPBold_Glyphs_StoneLighten'), text_align=2, text_spacing=(2.0, -2.0), text_tail=(0, 0),
         root_frames=6, root_count_at=0x63D32B, root_count=30,
         insert_at=0x65973C, insert_before=(0x80000E1E, 'Balls_Instance_ConcertMode'),
-        first_free_id=0xF00, in_game=True, video=(6, 174)),
+        first_free_id=0xF00, in_game=True, video=(6, 174), words_font=(1, 175)),
     "9869621883a18ce97bd3446d67dfbbff": SceneProfile(
         label='The Munsters LE 1.28 in-game 9d578751 (item 164, read statically)',
         scene_id='9d57875196c613785a1eee010c55223a0f1aa821', tree='auto_loaded',
@@ -542,7 +544,7 @@ PROFILES = {
         font=(26, ''), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=1, root_count_at=0xE0E66, root_count=23,
         insert_at=0xE349D, insert_before=(0x8000008E, 'TextBox100pt_Instance0'),
-        first_free_id=0x100, in_game=True, new_poly=('bitmap',)),
+        first_free_id=0x100, in_game=True, new_poly=('bitmap',), words_font=(1, 75)),
     "2039fc21e598c672fa4d45df2283178b": SceneProfile(
         label='Deadpool Pro 1.16 in-game c3328c39 (item 164, read statically)',
         scene_id='c3328c39b0e29f78e9ff45db674248b1d245887d/0d167902e97be9e342b1950754601e41c79f615e', tree='auto_loaded',
@@ -552,7 +554,7 @@ PROFILES = {
         font=(26, ''), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=1, root_count_at=0xE0E66, root_count=23,
         insert_at=0xE349D, insert_before=(0x8000008E, 'TextBox100pt_Instance0'),
-        first_free_id=0x100, in_game=True, new_poly=('bitmap',)),
+        first_free_id=0x100, in_game=True, new_poly=('bitmap',), words_font=(1, 75)),
     "37d90179d849daf5afcbe4db0cf1cf1d": SceneProfile(
         label='James Bond 60th LE 1.11 in-game 91b06583 (item 164, read statically)',
         scene_id='91b0658329efa06d4da89c23a162b41dfcee5202', tree='auto_loaded',
@@ -762,7 +764,127 @@ def _graft(p, data, clips, ids):
 GRAFT_IDS = 5
 
 
-def add_screens(data, screens, stock=None, clips=None):
+# ---- item 164: a FULL font carried into a scene whose own fonts lack the glyphs -------------
+# A scene embeds only the glyphs its own text uses: Deadpool's HUD fonts hold " 0x", Metallica's
+# digits, The Beatles' no space or comma. Every card also carries the framework's system scenes, and
+# one of them opens its library with a complete font (HelveticaNeueBlack, 114 glyphs), so that entry
+# is copied from the card into the HUD's library and the screen's words use it. Its grammar (walked
+# to its last byte on the card)::
+#
+#     entry   u32 key | class (FLAG|id + "Font", or the bare id) | u32 FLAG|font id | Font
+#     Font    u32 key | name | face | u8 | u8 | [u64 n] u16 chars | [u64 s] sizes | u64 0
+#     size    u32 | u32 FLAG|size id | u32 the font's KEY | f32 f32 f32 | u8 | [u64 g] glyphs
+#     glyph   u16 char | u32 FLAG|glyph id | 7 f32 | u8 | 4 f32 (uv) | page | u64 0
+#     page    u32 bare id (0: none), or a texture on its first use (texture_new's grammar)
+#
+# (A HUD's own fonts end in named style variants - "Stern_GovtAgentBB_BlackOutline" - where the
+# system font's tail is empty.) A Text names no Font: its font field is one SIZE object's id, and
+# its name map the variant ("" = the base sizes) - Deadpool's words use id 26, its HUD font's fifth
+# size. So the words take the carried size nearest 50 px of line height. Every object id in the
+# entry is renumbered from ``base`` up (they must not meet the HUD's own), the pages' bare
+# references with them, and the key where the entry and its sizes name it.
+SYSTEM_FONT_SCENE = ("assets/lcd/demand_loaded/bc0792d8dc81e8aa30b987246a5ce97c40cd6833/"
+                     "0d349f5f898e96d26e5ecefebe09b3344ba50424/scene.radium")
+FONT_ID_GAP = 0x800           # the carried font's ids start this far past the profile's first free id
+WORDS_LINE = 50.0             # the line height (px) the words' size is chosen nearest to
+
+
+class _Walk:
+    def __init__(self, d, o):
+        self.d, self.o = d, o
+        self.ids, self.pages, self.keys, self.sizes = [], [], [], []
+
+    def take(self, fmt):
+        v = struct.unpack_from(fmt, self.d, self.o)
+        self.o += struct.calcsize(fmt)
+        return v[0] if len(v) == 1 else v
+
+    def string(self):
+        n = self.take("<Q")
+        if n > 4096:
+            raise SceneWriteError("the system font does not walk: a %d-byte string at 0x%x" % (n, self.o))
+        self.o += n
+        return self.d[self.o - n:self.o]
+
+    def new(self):
+        v = self.take("<I")
+        if not v & FLAG:
+            raise SceneWriteError("the system font does not walk: no new object at 0x%x" % (self.o - 4))
+        self.ids.append((self.o - 4, v & ~FLAG))
+
+    def page(self):
+        v = self.take("<I")
+        if not v & FLAG:
+            if v:
+                self.pages.append((self.o - 4, v))
+            return
+        self.ids.append((self.o - 4, v & ~FLAG))
+        w, h, fmt = self.take("<3I")
+        self.string()
+        n = self.take("<I")
+        self.o += n
+
+
+def _walk_font(d, o=9):
+    """Walk the font entry at ``o``: (key, class bytes span, face, end, walk)."""
+    w = _Walk(d, o)
+    key = w.take("<I")
+    cls_at = w.o
+    if w.take("<I") & FLAG and w.string() != b"Font":
+        raise SceneWriteError("the system scene's first library entry is not a Font")
+    cls_end = w.o
+    w.new()
+    w.keys.append(w.o)
+    if w.take("<I") != key:
+        raise SceneWriteError("the system font's key does not repeat")
+    w.string()
+    face = w.string().decode("latin1")
+    w.o += 2
+    n = w.take("<Q")
+    w.o += 2 * n
+    for _ in range(w.take("<Q")):
+        w.o += 4
+        w.new()
+        w.keys.append(w.o)
+        if w.take("<I") != key:
+            raise SceneWriteError("a system font size does not name its font")
+        w.sizes.append((w.ids[-1][1], struct.unpack_from("<f", d, w.o)[0]))
+        w.o += 13
+        for _ in range(w.take("<Q")):
+            w.o += 2
+            w.new()
+            w.o += 29 + 16
+            w.page()
+            if w.take("<Q"):
+                raise SceneWriteError("a system font glyph has a list the walk does not know")
+    if w.take("<Q"):
+        raise SceneWriteError("the system font has a tail the walk does not know")
+    return key, (cls_at, cls_end), face, w.o, w
+
+
+def carried_font(source, font_class, key, base):
+    """The system scene's font as a library entry of another scene: (entry bytes, the id of the
+    size the words use, its variant name ""). ``font_class`` is that scene's own Font class id,
+    ``key`` a free symbol key, ``base`` the first of the object ids it takes."""
+    if not source or source[0] != 1:
+        raise SceneWriteError("the system font's scene is not a scene")
+    old_key, (cls_at, cls_end), _face, end, w = _walk_font(source)
+    if not w.sizes:
+        raise SceneWriteError("the system font has no sizes")
+    top = max(i for _a, i in w.ids)
+    if sorted(i for _a, i in w.ids) != list(range(1, top + 1)):
+        raise SceneWriteError("the system font's object ids are not 1..%d" % top)
+    patch = {a: FLAG | (base + i - 1) for a, i in w.ids}
+    patch.update({a: base + i - 1 for a, i in w.pages})
+    patch.update({a: key for a in w.keys})
+    out = bytearray(source[cls_end:end])
+    for at, v in patch.items():
+        struct.pack_into("<I", out, at - cls_end, v)
+    size_id = min(w.sizes, key=lambda s: abs(s[1] - WORDS_LINE))[0]
+    return u32(key) + u32(font_class) + bytes(out), base + size_id - 1, ""
+
+
+def add_screens(data, screens, stock=None, clips=None, font_source=None):
     """Splice SEVERAL screens into a profiled stock scene in one pass (item 127: a card
     carries several modes, item 133 - and this refuses any file that is not the measured
     stock one, so screens cannot be added one call at a time). ``screens`` is a list of
@@ -776,6 +898,9 @@ def add_screens(data, screens, stock=None, clips=None):
     ``clips`` ([(name, path under scene.assets, file size)]) grafts a Video into the scene (item
     164, :func:`_graft`): a root child ``VideoSurface`` before the screens, which play over it.
     The info then carries ``video_scene``. Screens may be empty when clips are given.
+
+    ``font_source`` (the card's :data:`SYSTEM_FONT_SCENE`) carries its full font into a scene whose
+    profile names ``words_font``, and the screens' words use it (:func:`carried_font`).
 
     Every screen is authored visible, and every one needs the mode.so that hides it."""
     if stock is None:
@@ -791,10 +916,16 @@ def add_screens(data, screens, stock=None, clips=None):
     names = [s["name"] for s in screens]
     if len(set(names)) != len(names):
         raise SceneWriteError("two screens share a name: %r" % names)
+    libs, font = [], {}
+    if p.words_font and font_source and screens:
+        entry, size_id, variant = carried_font(font_source, p.words_font[0], p.words_font[1],
+                                               p.first_free_id + FONT_ID_GAP)
+        libs.append(entry)
+        font = {"font": (size_id, variant)}
     groups, infos = [], []
     for i, s in enumerate(screens):
         words_name = s.get("words_name") or s["name"] + "_Words"
-        sub = SceneProfile(**{**p.__dict__, "first_free_id": p.first_free_id + 7 * i,
+        sub = SceneProfile(**{**p.__dict__, "first_free_id": p.first_free_id + 7 * i, **font,
                               "new_poly": p.new_poly if i == 0 else ()})       # registered once, by the first
         group, ids = screen(sub, s["name"], s["art_rgba"], s["words"], s.get("x", 360.0),
                             s.get("y", 200.0), s.get("words_at"), art_name=s.get("art_name"),
@@ -810,16 +941,17 @@ def add_screens(data, screens, stock=None, clips=None):
             "screen_text": s["name"] + "." + words_name,
             "tree": p.tree, "in_game": p.in_game, "node_bytes": len(group),
         })
-    lib = b""
     if clips:
         base = p.first_free_id + 7 * len(screens)
         ids = list(range(base, base + GRAFT_IDS + len(clips)))
         for nid in ids:
             if struct.pack("<I", FLAG | nid) in data:
                 raise SceneWriteError("%s: object id 0x%x is already used" % (p.label, nid))
-        lib, surf = _graft(p, data, clips, ids)
+        entry, surf = _graft(p, data, clips, ids)
+        libs.append(entry)
         groups.insert(0, surf)
         infos.append({"video_scene": p.scene_id, "tree": p.tree, "node_bytes": len(surf)})
+    lib = b"".join(libs)
     lib_at = _stage_at(data, p) - 8 if lib else p.root_count_at
     new = (bytearray(data[:lib_at]) + lib + bytearray(data[lib_at:p.insert_at]) + b"".join(groups)
            + bytearray(data[p.insert_at:]))
@@ -827,5 +959,5 @@ def add_screens(data, screens, stock=None, clips=None):
     if lib:
         if new[0] != 1:
             raise SceneWriteError("%s: the library does not start at byte 1" % p.label)
-        struct.pack_into("<Q", new, 1, struct.unpack_from("<Q", new, 1)[0] + 1)
+        struct.pack_into("<Q", new, 1, struct.unpack_from("<Q", new, 1)[0] + len(libs))
     return bytes(new), infos

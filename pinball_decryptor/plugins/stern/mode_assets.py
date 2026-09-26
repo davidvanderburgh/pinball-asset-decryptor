@@ -389,11 +389,12 @@ def mode_file_name(slot):
 
 
 def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=None, prof=None,
-          progress=None):
+          progress=None, stock_font=b""):
     """Build every mode in ``project`` (or the slugs in ``only``) from the stock scenes.
 
     ``stock_hud`` / ``stock_bank`` are the stock bytes of the title's HUD scene and video
-    bank. Writes ``out_dir/<game tree path>`` and ``out_dir/padmode/<mode files>``, and
+    bank; ``stock_font`` the card's system scene whose full font a HUD with too few glyphs
+    takes for its screens' words (item 164, :func:`.scene_write.carried_font`), or ``b""``. Writes ``out_dir/<game tree path>`` and ``out_dir/padmode/<mode files>``, and
     returns a :class:`ModeBuild`. Refuses - naming every reason - if any mode is invalid.
 
     ``code`` is the project's CODE modes with their own assets (``[(slug, CodeAssets)]``,
@@ -471,15 +472,15 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     # and the clips go into the HUD in a Video grafted there, with the screens in the same pass
     if (clips or code_clips) and prof.lcd("hud") == prof.lcd("bank") and SW.grafts_video(stock_hud):
         _build_grafted(project, prof, stock_hud, screens, clips, code_clips, out_dir, ffmpeg,
-                       result, write, progress)
+                       result, write, progress, stock_font)
         clips = code_clips = []
         screens = []
     if screens and not shared:
-        hud, _infos = SW.add_screens(stock_hud, screens)
+        hud, _infos = SW.add_screens(stock_hud, screens, font_source=stock_font)
         write("%s/scene.radium" % prof.lcd("hud"), hud)
 
     def with_screens(bank):
-        return SW.add_screens(bank, screens, stock=stock_bank)[0] if shared else bank
+        return SW.add_screens(bank, screens, stock=stock_bank, font_source=stock_font)[0] if shared else bank
     made, scratch = {}, None
     if clips or code_clips:
         if not ffmpeg:
@@ -646,7 +647,7 @@ class _Frame:
 
 
 def _build_grafted(project, prof, stock_hud, screens, clips, code_clips, out_dir, ffmpeg, result,
-                   write, progress=None):
+                   write, progress=None, stock_font=b""):
     """Item 164: every clip into a Video grafted into the HUD scene (:func:`scene_write.add_screens`
     ``clips``), each file at ``<hud>/scene.assets/<n>.asset``, and the screens in the same pass."""
     if not ffmpeg:
@@ -675,5 +676,5 @@ def _build_grafted(project, prof, stock_hud, screens, clips, code_clips, out_dir
     finally:
         if scratch:
             shutil.rmtree(scratch, ignore_errors=True)
-    hud, _infos = SW.add_screens(stock_hud, screens, clips=entries)
+    hud, _infos = SW.add_screens(stock_hud, screens, clips=entries, font_source=stock_font)
     write("%s/scene.radium" % prof.lcd("hud"), hud)

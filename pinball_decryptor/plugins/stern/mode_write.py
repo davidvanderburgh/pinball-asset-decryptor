@@ -708,7 +708,7 @@ def mode_file_text(project, slug, spec, own_sounds):
 
 
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
-         log=None, end_sound="choose", own_sounds=None, progress=None):
+         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b""):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -742,6 +742,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     tree = os.path.join(scratch, "tree")
     try:
         kw = {"code": code, "prof": prof} if code else {}     # a form-mode build is called as before
+        if stock_font:
+            kw["stock_font"] = stock_font
         if progress is not None:
             kw["progress"] = progress
         build = mode_assets.build(project, stock_hud, stock_bank, tree, ffmpeg=ffmpeg, **kw)

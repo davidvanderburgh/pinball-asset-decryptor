@@ -7017,6 +7017,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     raise _MW.ModeWriteError("the card's game program was not "
                                              "found")
                 _hud_rel, _bank_rel = _MW.scene_rels(_mprof)
+                # item 164: the system scene whose full font a HUD with too few glyphs
+                # takes for its screens' words (absent: the words keep the HUD's font)
+                from . import scene_write as _SWF
+                _font_node = (_MW.lookup(reader, "%s/%s" % (_mprof.game_dir, _SWF.SYSTEM_FONT_SCENE))
+                              if _hud_rel else None)
                 mode_plan = _MW.plan(
                     assets_dir,
                     reader.read_file_bytes(_mnodes[_hud_rel]) if _hud_rel else b"",
@@ -7024,7 +7029,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     bytes(reader.read_file_bytes(fw_node)),
                     os.path.join(grow_work, "modes"), log=log,
                     end_sound=mode_sound_used, own_sounds=mode_own_used,
-                    progress=_span(progress, 91, 94))
+                    progress=_span(progress, 91, 94),
+                    stock_font=(bytes(reader.read_file_bytes(_font_node))
+                                if _font_node is not None else b""))
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
                           for p, _i, n in reader.iter_regular_files(
                               min_size=1, max_depth=20)}

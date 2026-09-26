@@ -1351,7 +1351,24 @@ functions are layout B's, stop at surface_state + 0x2080 as on Aerosmith).
 **Screen words on a font that lacks the glyphs.** A scene embeds only the glyphs its own text uses, so on
 some builds the words line cannot be drawn and Radium logs `Glyph 'A' not found in embedded font`: every
 font in Deadpool LE/Pro's HUD holds " 0x" only; Metallica's holds digits and no letters; The Beatles' has no
-space or comma. The panel still shows; the words are missing or partial there.
+space or comma. So those HUDs take a FULL font from the card itself (item 164, 2026-09-26): every card
+carries the framework's system scenes, and `demand_loaded/bc0792d8.../0d349f5f.../scene.radium` opens its
+library with HelveticaNeueBlack, 114 glyphs. A build reads it off the card (`scene_write.SYSTEM_FONT_SCENE`,
+the engine passes it as `stock_font`), walks it to its last byte (`scene_write._walk_font`), renumbers
+every object id in it past the HUD's own, rewrites its key and class, and appends it to the HUD's library
+(`scene_write.carried_font`, profile field `words_font = (Font class id, free key)`).
+
+Two things learned doing it:
+
+- A Text names no Font. Its font field is the id of one SIZE object inside a font, and its name map
+  names the style variant ("" for the base sizes; a HUD font's variants are its outlines, such as
+  "Stern_GovtAgentBB_BlackOutline"). The words take the carried size nearest 50 px of line height.
+- A Font's grammar: key, class, FLAG|id, then key, name, face, two bytes, the chars (u16), the sizes
+  (u32, FLAG|id, the font's KEY, 3 f32, a byte, the glyphs), then the variants. A glyph is 63 bytes:
+  char, FLAG|id, 7 f32, a byte, 4 f32 of UV, its atlas page (inline the first time, then a bare id),
+  and an empty list.
+
+Seen in a game, words drawn: Deadpool LE and Pro, Metallica (its live "TOTAL 0" too), The Beatles.
 
 ### Screens on every title (item 164)
 

@@ -368,3 +368,57 @@ def test_a_video_graft_refuses_what_it_cannot_do(monkeypatch):
     data, p, _ = _fake_hud(monkeypatch)
     with pytest.raises(SW.SceneWriteError, match="no screens"):
         SW.add_screens(data, [])
+
+
+# ---- item 164: the card's system font carried into a HUD whose fonts lack the glyphs ------
+def _glyph(ch, gid, page):
+    return (struct.pack("<H", ch) + struct.pack("<I", SW.FLAG | gid) + struct.pack("<7f", *range(7)) + b"\0"
+            + struct.pack("<4f", 0, 0, 1, 1) + page + struct.pack("<Q", 0))
+
+
+def _system_font():
+    """u8 1 | [u64 1] one Font entry (key 1, class registered, ids 1..5: font, size, glyph, page,
+    glyph) whose second glyph names the page by bare id, then another entry's first bytes."""
+    page = SW.texture_new(4, 4, 4, b"\x07" * 16)
+    body = (struct.pack("<I", 1) + SW.string("") + SW.string("Face") + b"\0\0"
+            + struct.pack("<Q", 2) + struct.pack("<2H", 0x20, 0x41)
+            + struct.pack("<Q", 1) + struct.pack("<I", 900) + struct.pack("<I", SW.FLAG | 2) + struct.pack("<I", 1)
+            + struct.pack("<3f", 1, 2, 3) + b"\0" + struct.pack("<Q", 2)
+            + _glyph(0x20, 3, page) + _glyph(0x41, 5, struct.pack("<I", 4)) + struct.pack("<Q", 0))
+    entry = struct.pack("<I", 1) + struct.pack("<I", SW.FLAG | 1) + SW.string("Font") + struct.pack("<I", SW.FLAG | 1) + body
+    return b"\x01" + struct.pack("<Q", 2) + entry + struct.pack("<II", 2, SW.FLAG | 2), entry
+
+
+def test_the_system_font_is_renumbered_into_another_scene():
+    src, entry = _system_font()
+    out, size_id, variant = SW.carried_font(src, 3, 99, 0x500)
+    assert (size_id, variant) == (0x501, "")                        # the words name a SIZE, not the font
+    key, cls, face2, end, w = SW._walk_font(b"\x01" + struct.pack("<Q", 1) + out)
+    assert key == 99 and face2 == "Face" and end == 9 + len(out)
+    assert out[4:8] == struct.pack("<I", 3)                          # the scene's own Font class, bare
+    assert sorted(i for _a, i in w.ids) == [0x500, 0x501, 0x502, 0x503, 0x504]
+    assert [v for _a, v in w.pages] == [0x503]                       # the bare page follows its texture
+    assert b"\x07" * 16 in out
+
+
+def test_the_system_font_walk_refuses_what_it_does_not_know():
+    src, entry = _system_font()
+    with pytest.raises(SW.SceneWriteError, match="not a Font"):
+        SW.carried_font(src.replace(b"Font", b"Fonx"), 3, 99, 0x500)
+    bad = bytearray(src)
+    bad[bad.index(struct.pack("<I", 900)) + 8:bad.index(struct.pack("<I", 900)) + 12] = struct.pack("<I", 7)
+    with pytest.raises(SW.SceneWriteError, match="does not name its font"):
+        SW.carried_font(bytes(bad), 3, 99, 0x500)
+
+
+def test_a_profile_with_words_font_gives_the_words_the_carried_font(monkeypatch):
+    data, p, lib_end = _fake_hud(monkeypatch)
+    monkeypatch.setitem(SW.PROFILES, p.md5, SW.SceneProfile(**{**p.__dict__, "words_font": (3, 99),
+                                                               "font": (7, "Own")}))
+    src, _entry = _system_font()
+    carried, size_id, _variant = SW.carried_font(src, 3, 99, p.first_free_id + SW.FONT_ID_GAP)
+    new, _infos = SW.add_screens(data, [dict(name="Mode_Screen", art_rgba=_art(), words="HI")], font_source=src)
+    assert new[lib_end:lib_end + len(carried)] == carried            # the library's last entry
+    assert struct.unpack_from("<Q", new, 1)[0] == 3
+    assert (struct.pack("<I", size_id) + struct.pack("<Q", 1) + SW.string("")) in new
+    assert SW.string("Own") not in new

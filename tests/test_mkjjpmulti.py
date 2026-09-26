@@ -413,7 +413,7 @@ def test_conf_volume_is_quiet_and_capped_for_a_jjp_machine(mj):
     """Item 120 / PAD-219: a JJP machine plays the menu through amplifiers it keeps at
     full, so the conf always says a level (the default when none is given) and the cap,
     and the builder refuses past it.  The scale is 0-100 like Stern's (the selector's
-    JJP build plays 100 at 30% of the samples); it was 0-40 with 20 the default."""
+    JJP build plays 100 at 10% of the samples); it was 0-40 with 20 the default."""
     bare = mj.parse_images_conf(mj.render_images_conf(["rootA", "rootB"], ["a", "b"]))
     assert bare["volume"] == mj.VOLUME_DEFAULT == 50
     assert bare["volume_max"] == mj.VOLUME_MAX == 100

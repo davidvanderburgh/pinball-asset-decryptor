@@ -70,7 +70,7 @@ class MultibootBackend:
     #: game's own stream down, so the menu's number is the level the speakers
     #: get: 50 was "very high" on the first GNR.  The builder refuses above
     #: the cap too, and the selector's JJP build cannot pass it.  Both
-    #: platforms show 0-100 (PAD-219): the JJP selector plays its 100 at 30%
+    #: platforms show 0-100 (PAD-219): the JJP selector plays its 100 at 10%
     #: of the samples, so the number means the same thing on both and the
     #: old 0-40 scale, on which 8 was still "at max" on a Sonic, is gone.
     volume_default: int

@@ -636,8 +636,8 @@ hardware and one header defends the build:
 - **The menu's sound on a JJP machine (item 120).**  JJP runs its amplifier
   chain at full and turns only the game's own stream down, so the menu's
   software gain is the level the speakers get (volume 50 was "very high" on
-  the first GNR).  The JJP build (Makefile) therefore plays its 100 at 30% of
-  the samples (`VOLUME_FULL_PCT=30`, PAD-219: the scale was 0-40 with
+  the first GNR).  The JJP build (Makefile) therefore plays its 100 at 10% of
+  the samples (`VOLUME_FULL_PCT=10`, PAD-219: the scale was 0-40 with
   `DEF_VOLUME=20`, and 20 was already high on the GNR and 8 "at max" on
   cooltoy's Sonic; the operator's number is 0-100 as on Stern, `DEF_VOLUME=50`,
   `VOLUME_CEILING=100`) - nothing passes the ceiling: not `volume=`, not

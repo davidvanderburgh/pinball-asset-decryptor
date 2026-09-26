@@ -64,7 +64,7 @@ CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
             -DDEF_FONT='"/jjpe/gen1/padselect/font.ttf"' \
             -DDEF_MEDIA='"/jjpe/gen1/padselect/media"' \
             -DDEF_VOLFILE='"/jjpe/perm/padselect.volume"' \
-            -DDEF_VOLUME=50 -DVOLUME_CEILING=100 -DVOLUME_FULL_PCT=30 -DVOL_STEP=10 \
+            -DDEF_VOLUME=50 -DVOLUME_CEILING=100 -DVOLUME_FULL_PCT=10 -DVOL_STEP=10 \
             -DALSA_LATENCY_US=60000 -DALSA_LEAD_MS=60 -DALSA_START_PERIODS=1 -DALSA_REOPEN_ON_XRUN=1 \
             -DAUDIO_PULSE=1 \
             -DCARD_FONT='"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"' \
@@ -72,8 +72,9 @@ CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
 # THE MENU'S SOUND ON A JJP MACHINE (item 120).  JJP keeps its amplifier chain
 # at full and turns only the game's own stream down, so the menu's software
 # gain IS the volume the speakers get.  The operator's number is 0-100 as on
-# Stern, but 100 plays at 30% of the samples (VOLUME_FULL_PCT, PAD-219: on the
-# old 0-40 scale 20 was already high and 8 "at max" on a Sonic), the default
+# Stern, but 100 plays at 10% of the samples (VOLUME_FULL_PCT, PAD-219: on the
+# old 0-40 scale 20 was already high on the GNR and 8 "at max" on a Sonic, so
+# the new loudest is the old 10 and the default of 50 the old 5), the default
 # is 50, a press of the front Volume+/- buttons steps by 10, and the level
 # they set is remembered on perm.  And a 60 ms ALSA buffer instead of the
 # Stern card's 500 ms, which put

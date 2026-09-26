@@ -90,7 +90,7 @@
  *                            volume=, --volume or the remembered level say
  *                            (item 120; the build's own VOLUME_CEILING, 100,
  *                            is the most it can be; the JJP build's 100 plays
- *                            at 30% of the samples, VOLUME_FULL_PCT, PAD-219)
+ *                            at 10% of the samples, VOLUME_FULL_PCT, PAD-219)
  *   key_left=<byte>.<bit>    JJP only (--input jjpio): where the LEFT flipper
  *   key_right=<byte>.<bit>   / RIGHT flipper / START / Volume+ / Volume- sit
  *   key_start=<byte>.<bit>   in the I/O board's 64-byte frame, active low.

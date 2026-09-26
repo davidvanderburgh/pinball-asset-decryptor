@@ -22,7 +22,7 @@ drains + inspects what the selector writes.
      step the menu's level by 10 (the JJP build's VOL_STEP) within
      volume_max=, never move the highlight, play the move sound at the new
      level (the --audio-dump's clicks peak at exactly the tone times each
-     gain, where 100 is 30% of full: VOLUME_FULL_PCT, PAD-219), draw the
+     gain, where 100 is 10% of full: VOLUME_FULL_PCT, PAD-219), draw the
      indicator (the headless frame
      differs from an untouched menu's in the middle of the card row, and is
      the untouched frame again once it has gone), and the settled level is
@@ -198,11 +198,11 @@ def volume_buttons(binp, t, font):
         return False
 
     # THE JJP BUILD'S NUMBERS (PAD-219): a press steps by 10 (VOL_STEP), and
-    # the mix gain of a level is level * 30% * 256 / 10000 (VOLUME_FULL_PCT=30:
-    # 100 plays at 30% of the samples).  The conf's volume_max=40 keeps the
+    # the mix gain of a level is level * 10% * 256 / 10000 (VOLUME_FULL_PCT=10:
+    # 100 plays at 10% of the samples).  The conf's volume_max=40 keeps the
     # cap legs short; the build's own ceiling is 100.
     def gain_q8(level):
-        return level * 30 * 256 // 10000
+        return level * 10 * 256 // 10000
 
     # A: up, down, the indicator goes, up again, START
     rc, got, out, logtxt, keys, kept, dump, _ = run("vol", ["+", "-", "wait", "+"])

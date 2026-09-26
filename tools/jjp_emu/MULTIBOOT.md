@@ -151,7 +151,7 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
 
 - **The JJP build** asks for a 60 ms buffer and logs the one granted
   (`audio: alsa buffer N frames (M ms), period ...`); its number is 0-100
-  as on Stern, starting at 50 (`DEF_VOLUME`), but 100 plays at 30% of the
+  as on Stern, starting at 50 (`DEF_VOLUME`), but 100 plays at 10% of the
   samples (`VOLUME_FULL_PCT`, PAD-219: the scale was 0-40 with 20 the
   default, and 20 was already high on the GNR and 8 "at max" on cooltoy's
   Sonic). Nothing takes it past 100 (`VOLUME_CEILING`): not `volume=`, not

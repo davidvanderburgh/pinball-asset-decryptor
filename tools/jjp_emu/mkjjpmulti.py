@@ -209,7 +209,7 @@ JJP_UPDATE_POLICIES = ("refuse", "allow")
 #: (root A's asound.state holds 0 dB, scripts/audio/mute.pl sets 100%) and turns only the
 #: game's own stream down to the operator volume, so the menu's software gain is the level
 #: the speakers get - volume=50 was "very high" on the first GNR.  The number is 0-100 as on
-#: Stern, but the selector's JJP build plays 100 at 30% of the samples (VOLUME_FULL_PCT,
+#: Stern, but the selector's JJP build plays 100 at 10% of the samples (VOLUME_FULL_PCT,
 #: PAD-219: the scale was 0-40 with 20 the default, and 20 was already high on David's GNR
 #: and 8 "at max" on cooltoy's Sonic).  A middling default, a cap this builder refuses past,
 #: the machine's own Volume+/- buttons stepping within it, and every menu sound and music

@@ -200,10 +200,12 @@ static struct audio_sink *null_open(void)
 }
 
 /* THE FULL SCALE (PAD-219): what volume 100 plays at, as a percent of the
- * samples.  100 on every build but JJP's, which sets 30: a JJP machine runs
+ * samples.  100 on every build but JJP's, which sets 10: a JJP machine runs
  * its amplifiers at full while the menu plays, and on the old 0-40 scale 20
- * was already high on David's GNR and 8 "at max" on cooltoy's Sonic.  The
- * number the operator sees and sets stays 0-100; only what it buys changed. */
+ * was already high on David's GNR and 8 "at max" on cooltoy's Sonic - so the
+ * new loudest is the old 10 (-20 dB), under both, and the default of 50 is
+ * the old 5 (-26 dB).  The number the operator sees and sets stays 0-100;
+ * only what it buys changed. */
 #ifndef VOLUME_FULL_PCT
 #define VOLUME_FULL_PCT 100
 #endif

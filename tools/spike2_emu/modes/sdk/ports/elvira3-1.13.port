@@ -324,6 +324,19 @@ switch 107  0x40000000000      Right pop bumper
 switch 108  0x80000000000      Bottom pop bumper
 switch 109  0x100000000000     Top lane left
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x005382c8 0xe92d4070 0xe24dd008
+site surface_set_video 0x0052f9ac 0xe5d030d4 0xe92d4ff0
+site surface_play     0x0052d7b8 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0052cf68 0xe5d030d4 0xe92d40f0
+# item 164: no bank this title draws in a game shows a clip, so a mode's clips go in the HUD, in a
+# Video the app grafts there (scene_write.py add_screens clips); hidden until a clip plays
+scene video_bank           fb70914f6b52e9c3d8f2db191946bbafe87ae44f
+value clip_surface_hide     1
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Left 3-bank target bot.
 

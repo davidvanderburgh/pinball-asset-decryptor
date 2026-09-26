@@ -231,6 +231,20 @@ def available():
     return True, msg
 
 
+#: The one directory a delivery may CREATE: a scene's ``scene.assets``, when the scene's own
+#: directory is there (item 164: a clip grafted into The Munsters' HUD scene, which has no
+#: asset files of its own). Any other missing directory still stops the delivery by name.
+MAKE_DIR = "scene.assets"
+
+
+def _makes_dir(card_rel):
+    """The ``(dir, its parent)`` a job may create, or ``None``."""
+    parts = card_rel.strip("/").split("/")
+    if len(parts) >= 3 and parts[-2] == MAKE_DIR:
+        return "/".join(parts[:-1]), "/".join(parts[:-2])
+    return None
+
+
 def _bash_script(loop_off, jobs_exec, image_exec):
     """Compose the mount → free-space check → cp → sync → unmount script.
 
@@ -278,6 +292,13 @@ def _bash_script(loop_off, jobs_exec, image_exec):
     ]
     for i, (card_rel, src) in enumerate(jobs_exec):
         tgt = '"$MP"/' + shlex.quote(card_rel)
+        made = _makes_dir(card_rel)
+        if made:
+            lines.append('if [ ! -e "$MP"/%s ] && [ -d "$MP"/%s ]; then mkdir "$MP"/%s; '
+                         'chown --reference="$MP"/%s "$MP"/%s; chmod --reference="$MP"/%s "$MP"/%s; fi'
+                         % (shlex.quote(made[0]), shlex.quote(made[1]), shlex.quote(made[0]),
+                            shlex.quote(made[1]), shlex.quote(made[0]), shlex.quote(made[1]),
+                            shlex.quote(made[0])))
         lines.append(
             'if [ ! -e "$(dirname %s)" ]; then '
             'echo "PAD_GROW_NODIR %s" >&2; exit 4; fi' % (tgt, shlex.quote(card_rel)))
@@ -508,6 +529,9 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
                 # directory: debugfs would otherwise fail deep inside `write`
                 # with nothing saying which parent was missing.
                 parent = card_rel.rsplit("/", 1)[0] if "/" in card_rel else ""
+                made = _makes_dir(card_rel)
+                if made and _debugfs_file_size(tools, dev, made[0], 60) is None:
+                    _debugfs(tools, dev, 'mkdir "/%s"' % made[0], 120)
                 if parent:
                     prc, pout = _run_tool(
                         [tools["debugfs"], "-R", 'stat "/%s"' % parent, dev],
@@ -604,6 +628,17 @@ if [ "$d" -gt 0 ]; then need=$((need + d))
 echo "PAD_GROW_ITEM $d @REL@"; fi
 '''
 
+_PINNED_MKDIR = r'''if [ -z "$(fst @DIR@)" ] && [ -n "$(fst @UP@)" ]; then
+    set -- $(fst @UP@); dmode=$(printf "%o" $((8#40000 | 8#$2)))
+    printf 'mkdir "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
+        @DIR@ @DIR@ "$dmode" @DIR@ "$3" @DIR@ "$4" > "$LOG.cmd"
+    debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
+    bad=$(grep -v '^debugfs\|^$' "$LOG" || true)
+    if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS "@DIR@": $bad" >&2; exit 6; fi
+    echo "PAD_GROW_MKDIR "@DIR@
+fi
+'''
+
 _PINNED_SPACE = r'''avail=$((fb * bs))
 if [ "$need" -gt "$avail" ]; then echo "PAD_GROW_ENOSPC need=$need avail=$avail" >&2; exit 3; fi
 echo "PAD_GROW_SPACE need=$need avail=$avail"
@@ -656,6 +691,9 @@ def _pinned_script(part_offset, jobs_exec, image_exec, epoch):
     out.append(_PINNED_SPACE)
     for i, (rel, src) in enumerate(jobs_exec):
         tgt = "/" + rel
+        made = _makes_dir(rel)
+        if made:
+            out.append(_PINNED_MKDIR.replace("@DIR@", q("/" + made[0])).replace("@UP@", q("/" + made[1])))
         out.append(_PINNED_JOB.replace("@TGT@", q(tgt))
                    .replace("@PARENT@", q(tgt.rsplit("/", 1)[0] or "/"))
                    .replace("@SRC@", q(src))

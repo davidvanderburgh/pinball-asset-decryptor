@@ -157,3 +157,44 @@ def test_a_file_whose_directory_is_missing_stops_the_delivery(tmp_path):
     script = ext4_grow._pinned_script(OFF, [("nope/x.asset", str(src))], str(card), EPOCH)
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
     assert r.returncode == 4 and "PAD_GROW_NODIR" in r.stderr
+
+
+@needs_e2fs
+def test_a_scene_assets_directory_is_made_and_no_other(tmp_path):
+    """item 164: a clip grafted into a scene with no asset files (The Munsters' HUD) lands in a
+    ``scene.assets`` the card never had - made with its scene directory's mode and owner, the
+    same bytes both times. Any other missing directory still stops the delivery."""
+    base = _card(tmp_path)
+    src = tmp_path / "clip"
+    src.write_bytes(os.urandom(40000))
+    jobs = [("g/bank/scene.assets/1.asset", str(src))]
+    a, b = tmp_path / "a.raw", tmp_path / "b.raw"
+    shutil.copyfile(base, a)
+    shutil.copyfile(base, b)
+    assert "PAD_GROW_MKDIR" in _run(a, jobs)
+    _run(b, jobs)
+    assert a.read_bytes() == b.read_bytes()
+    ref = tmp_path / "ref.img"
+    with open(a, "rb") as f:
+        f.seek(OFF)
+        ref.write_bytes(f.read(16384 * 4096))
+    d, up = _stat(str(ref), "/g/bank/scene.assets"), _stat(str(ref), "/g/bank")
+    assert "Type: directory" in d
+    mode = lambda st: st.split("Mode:", 1)[1].split()[0]
+    assert mode(d) == mode(up)
+    got = subprocess.run(["debugfs", "-R", "cat /g/bank/scene.assets/1.asset", str(ref)],
+                         capture_output=True).stdout
+    assert got == src.read_bytes()
+    for rel in ("g/nope/scene.assets/1.asset", "g/bank/other/1.asset"):
+        script = ext4_grow._pinned_script(OFF, [(rel, str(src))], str(base), EPOCH)
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        assert r.returncode == 4 and "PAD_GROW_NODIR" in r.stderr, rel
+
+
+def test_only_a_scene_assets_directory_may_be_made():
+    assert ext4_grow._makes_dir("g/assets/lcd/auto_loaded/9d57/scene.assets/1.asset") == (
+        "g/assets/lcd/auto_loaded/9d57/scene.assets", "g/assets/lcd/auto_loaded/9d57")
+    assert ext4_grow._makes_dir("g/bank/598.asset") is None
+    assert ext4_grow._makes_dir("scene.assets/1.asset") is None
+    s = ext4_grow._bash_script(OFF, [("g/b/scene.assets/1.asset", "/s")], "/c.raw")
+    assert 'mkdir "$MP"/g/b/scene.assets' in s and "PAD_GROW_NODIR" in s

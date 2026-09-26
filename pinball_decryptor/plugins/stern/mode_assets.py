@@ -467,6 +467,13 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     # scene) gets the clips first and then the screens, onto the grown bank - the bank's walk
     # refuses anything but clips, and the screens' offsets are moved past what the clips added
     shared = bool(screens) and bool(clips or code_clips) and prof.lcd("hud") == prof.lcd("bank")
+    # item 164: a title that draws no video bank in play (The Munsters) names its HUD as the bank,
+    # and the clips go into the HUD in a Video grafted there, with the screens in the same pass
+    if (clips or code_clips) and prof.lcd("hud") == prof.lcd("bank") and SW.grafts_video(stock_hud):
+        _build_grafted(project, prof, stock_hud, screens, clips, code_clips, out_dir, ffmpeg,
+                       result, write, progress)
+        clips = code_clips = []
+        screens = []
     if screens and not shared:
         hud, _infos = SW.add_screens(stock_hud, screens)
         write("%s/scene.radium" % prof.lcd("hud"), hud)
@@ -629,3 +636,44 @@ def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, re
         bank, _info = VB.add_clip(bank, names["clip"], os.path.getsize(local), path)
         parsed = VB.parse(bank)
     return bank, parsed
+
+
+@dataclass
+class _Frame:
+    """A clip's frame size, where the bank's parse would give it."""
+    width: int
+    height: int
+
+
+def _build_grafted(project, prof, stock_hud, screens, clips, code_clips, out_dir, ffmpeg, result,
+                   write, progress=None):
+    """Item 164: every clip into a Video grafted into the HUD scene (:func:`scene_write.add_screens`
+    ``clips``), each file at ``<hud>/scene.assets/<n>.asset``, and the screens in the same pass."""
+    if not ffmpeg:
+        raise ModeAssetError("building a clip needs ffmpeg, and none was found")
+    frame = _Frame(*SW.video_size(stock_hud))
+    todo = []
+    for slug, spec in clips:
+        todo.append((_first_clip_job(project, slug, spec, frame), MP.asset_names(slug)["clip"]))
+        second = _second_clip_job(project, slug, spec, frame)
+        if second is not None:
+            todo.append((second, MP.second_clip_name(slug)))
+    todo += [(_code_clip_job(project, slug, c, frame), MP.asset_names(slug)["clip"])
+             for slug, c in code_clips]
+    made, scratch = make_clips([job for job, _name in todo], ffmpeg, progress=progress)
+    entries = []
+    try:
+        for n, (job, name) in enumerate(todo, 1):
+            path = "%d.asset" % n
+            rel = "%s/scene.assets/%s" % (prof.lcd("hud"), path)
+            local = os.path.join(out_dir, *rel.split("/"))
+            os.makedirs(os.path.dirname(local), exist_ok=True)
+            _place_clip(job, local, made, ffmpeg)
+            result.files.append(rel)
+            result.new_files.append(rel)
+            entries.append((name, path, os.path.getsize(local)))
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
+    hud, _infos = SW.add_screens(stock_hud, screens, clips=entries)
+    write("%s/scene.radium" % prof.lcd("hud"), hud)

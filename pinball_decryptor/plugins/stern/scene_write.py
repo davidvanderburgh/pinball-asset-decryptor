@@ -158,6 +158,8 @@ class SceneProfile:
                               # places: Deadpool's score card sits at 742, 424) - a screen's x, y are glass pixels
     new_poly: tuple = ()      # classes the file never registered (item 164: Avengers' HUD has no Bitmap):
                               # the first screen registers each inline, u32 FLAG|id + its name, as the game does
+    video: tuple = ()         # item 164: (class id, symbol key) a grafted Video takes (:func:`add_screens`
+                              # ``clips``) - a free class id and one past the library's highest key
 
 
 PROFILES = {
@@ -250,7 +252,7 @@ PROFILES = {
         font=(341, ''), text_align=1, text_spacing=(2.0, 0.0), text_tail=(1, 0),
         root_frames=8, root_count_at=0x2B7261, root_count=19,
         insert_at=0x2BEE8F, insert_before=(0x800008B8, 'NetUser4'),
-        first_free_id=0x900, in_game=True),
+        first_free_id=0x900, in_game=True, video=(6, 103)),
     "aa4caf7b0c0a142f39d8c62388601dd1": SceneProfile(
         label='John Wick LE 1.01 in-game 9d578751 (item 164, read statically)',
         scene_id='9d57875196c613785a1eee010c55223a0f1aa821', tree='auto_loaded',
@@ -310,7 +312,7 @@ PROFILES = {
         font=(860, 'Stern_DharmaGothicPBold_Glyphs_StoneLighten'), text_align=2, text_spacing=(2.0, -2.0), text_tail=(0, 0),
         root_frames=6, root_count_at=0x63D32B, root_count=30,
         insert_at=0x65973C, insert_before=(0x80000E1E, 'Balls_Instance_ConcertMode'),
-        first_free_id=0xF00, in_game=True),
+        first_free_id=0xF00, in_game=True, video=(6, 174)),
     "9869621883a18ce97bd3446d67dfbbff": SceneProfile(
         label='The Munsters LE 1.28 in-game 9d578751 (item 164, read statically)',
         scene_id='9d57875196c613785a1eee010c55223a0f1aa821', tree='auto_loaded',
@@ -320,7 +322,7 @@ PROFILES = {
         font=(627, 'Blackmoor_Outline_Thick'), text_align=1, text_spacing=(-22.0, 0.0), text_tail=(0, 0),
         root_frames=3, root_count_at=0x85E6FA, root_count=18,
         insert_at=0x88ACC2, insert_before=(0x80000E7A, 'BallInPlayAnimation'),
-        first_free_id=0xF00, in_game=True),
+        first_free_id=0xF00, in_game=True, video=(5, 163)),
     "a516ede995deda83619a4d57469a8760": SceneProfile(
         label='Rush LE 1.18 in-game 28aff8e6 (item 164, read statically)',
         scene_id='28aff8e66e7c61dc4722a30ee31e22d1afe094d6/efd9321ee61c0467eaaecb1369842d69eed4a6aa', tree='auto_loaded',
@@ -460,7 +462,7 @@ PROFILES = {
         font=(105, 'Stern_HouseofTerror_OutlineWhite'), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=1, root_count_at=0x131178, root_count=7,
         insert_at=0x133CB2, insert_before=(0x8000012C, 'Per_Instance7'),
-        first_free_id=0x400, in_game=True),
+        first_free_id=0x400, in_game=True, video=(5, 9)),
     "832c77c669803d557c730a3be09fb9e5": SceneProfile(
         label='James Bond 007 LE 1.06 in-game 6fb39344 (item 164, read statically)',
         scene_id='6fb393447ae7e3c2e1c629efff24bd1991ac1368/7de1c1596973efa1e95d16d7cb9229f4c6d36db9', tree='auto_loaded',
@@ -480,7 +482,7 @@ PROFILES = {
         font=(817, 'Batman66_Outline'), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=4, root_count_at=0xCCAE50, root_count=14,
         insert_at=0xD67B03, insert_before=(0x8000193C, 'FourPlayerGame'),
-        first_free_id=0x1B00, in_game=True),
+        first_free_id=0x1B00, in_game=True, video=(6, 293)),
     "e8bbe9670a9a212f18408a602d7b187b": SceneProfile(
         label='Dungeons & Dragons LE 1.00 in-game b237b728 (item 164, read statically)',
         scene_id='b237b7288453dee42f8299bea3fb57de90e6e473', tree='auto_loaded',
@@ -560,7 +562,7 @@ PROFILES = {
         font=None, text_align=0, text_spacing=(0.0, 0.0), text_tail=(0, 0),
         root_frames=1, root_count_at=0x177706, root_count=2,
         insert_at=0x177BFD, insert_before=(0x80000027, 'frame_instance'),
-        first_free_id=0x600, in_game=True, new_poly=('text',), origin=(280.0, 40.0)),
+        first_free_id=0x600, in_game=True, new_poly=('text',), origin=(280.0, 40.0), video=(4, 9)),
     "6f3c2dbd6a176794ca54794f41f699fd": SceneProfile(
         label='Jurassic Park Pin 1.05 in-game 60ed7e50 (item 164, read statically)',
         scene_id='60ed7e5036b8ce09d35a3e101ea6fc1380b37d97', tree='auto_loaded',
@@ -671,7 +673,96 @@ def _rebased(p, stock, data):
                            "insert_at": moved(p.insert_at, max(len(p.append), 16))})
 
 
-def add_screens(data, screens, stock=None):
+# ---- item 164: a VIDEO grafted into a scene with none --------------------------------------
+# Some titles draw no video bank in play (The Munsters' bank 69db8744 is its attract background),
+# so a clip added there plays and is never seen. The HUD scene IS drawn, so the clip goes in it,
+# in the grammar of a stock bank (video_bank.py): one more LIBRARY entry - the Video, registered
+# with each clip's path and size - and one more root child, the Sprite "PadMode_Clips", holding a
+# node "VideoSurface" whose component names the same clips by bare id. The runtime's clip route
+# finds "PadMode_Clips.VideoSurface" on the scene the port's `scene video_bank` names (`value
+# clip_surface_hide 1`), and hides the Sprite while no clip plays: a surface keeps a finished clip's
+# last frame on the glass, and a VideoSurface is no Sprite, so it cannot be hidden itself (the
+# Sprite's visibility slot crashes the game on it - emulator, The Munsters 2026-09-26). The library
+# is ``u8 1 | [u64 n] entries``, and after it come ``u64 0`` and the stage (u32 w, u32 h, f32 fps,
+# f32 rgba) just before the root.
+VIDEO_NODE = "VideoSurface"
+VIDEO_GROUP = "PadMode_Clips"
+
+
+def _stage_at(data, p):
+    """The stage's offset: the root (u32 symbol | name | u32 frames | u64 count) ends at
+    ``p.root_count_at``, and the stage's 28 bytes and a u64 0 are before it."""
+    for n in range(0, 65):
+        name_at = p.root_count_at - 4 - n - 8
+        if name_at >= 40 and struct.unpack_from("<Q", data, name_at)[0] == n:
+            at = name_at - 4 - 28
+            w, h = struct.unpack_from("<II", data, at)
+            if struct.unpack_from("<Q", data, at - 8)[0] == 0 and 64 <= w <= 4096 and 64 <= h <= 4096:
+                return at
+    raise SceneWriteError("%s: no stage before the root" % p.label)
+
+
+def grafts_video(data):
+    """True when ``data`` is a profiled scene a Video can be grafted into."""
+    p = PROFILES.get(hashlib.md5(data).hexdigest())
+    return bool(p and p.video)
+
+
+def video_size(data):
+    """(w, h) of a profiled scene's stage: the size a clip grafted into it is made at."""
+    p = profile_for(data)
+    return struct.unpack_from("<II", data, _stage_at(data, p))
+
+
+def _video_body(symbol, name, w, h, entries):
+    return (u32(symbol) + string(name) + u32(w) + u32(h) + u32(1) + b"\0"
+            + u64(len(entries)) + b"".join(entries) + u64(0))
+
+
+def _graft(p, data, clips, ids):
+    """(library entry, node) for ``clips`` [(name, path, size)] with object ids from ``ids``."""
+    if not p.video:
+        raise SceneWriteError("%s: no Video can be grafted into it (no class id measured)" % p.label)
+    if string(VIDEO_GROUP) in data:
+        raise SceneWriteError("%s: the scene already has a %s" % (p.label, VIDEO_GROUP))
+    if "sprite" in p.new_poly:
+        raise SceneWriteError("%s: the scene registers no Sprite to hold a Video" % p.label)
+    poly, key = p.video
+    reg = struct.pack("<I", FLAG | poly)            # a class registration: FLAG|id, then its name
+    registered = False                              # the file's own Video class (Batman's HUD) is used
+    at = data.find(reg)
+    while 0 <= at < len(data) - 13:
+        n = struct.unpack_from("<Q", data, at + 4)[0]
+        if 3 <= n <= 24 and data[at + 12:at + 13].isupper():
+            if data[at + 12:at + 12 + n] != b"Video":
+                raise SceneWriteError("%s: class id %d is already registered" % (p.label, poly))
+            registered = True
+        at = data.find(reg, at + 1)
+    w, h = struct.unpack_from("<II", data, _stage_at(data, p))
+    clips = sorted(clips, key=lambda c: c[0].encode("latin1"))     # a std::map, sorted by name
+    if len({c[0] for c in clips}) != len(clips):
+        raise SceneWriteError("two clips share a name")
+    o_lib, p_node, o_comp, p_group, o_group = ids[:GRAFT_IDS]
+    cid = {c[0]: ids[GRAFT_IDS + i] for i, c in enumerate(clips)}
+    name = "video.pad_mode_clips"
+    lib = (u32(key) + (u32(poly) if registered else u32(FLAG | poly) + string("Video")) + u32(FLAG | o_lib)
+           + _video_body(key, name, w, h, [string(c) + u32(FLAG | cid[c]) + string(path) + u32(size)
+                                           for c, path, size in clips]))
+    surf = node(FLAG | p_node, VIDEO_NODE, 1, [(1, 1)], [(1, matrix())],
+                [(1, poly, FLAG | o_comp, _video_body(key, name, w, h,
+                                                      [string(c) + u32(cid[c]) for c, _p, _s in clips]))])
+    # at the scene's own (0, 0): the Video fills the scene's stage, wherever the game places the scene
+    group = node(FLAG | p_group, VIDEO_GROUP, 1, [(1, 1)], [(1, matrix())],
+                 [(1, p.poly["sprite"], FLAG | o_group, sprite_body(p.symbol["sprite"], [surf]))])
+    return lib, group
+
+
+#: object ids a graft takes before its clips': the Video, the surface node and its component, the
+#: Sprite node and its component
+GRAFT_IDS = 5
+
+
+def add_screens(data, screens, stock=None, clips=None):
     """Splice SEVERAL screens into a profiled stock scene in one pass (item 127: a card
     carries several modes, item 133 - and this refuses any file that is not the measured
     stock one, so screens cannot be added one call at a time). ``screens`` is a list of
@@ -682,6 +773,10 @@ def add_screens(data, screens, stock=None):
     ``stock`` is given when ``data`` is that stock scene already grown by insertions of
     another kind (a clip: :func:`_rebased`); the profile is the stock one's.
 
+    ``clips`` ([(name, path under scene.assets, file size)]) grafts a Video into the scene (item
+    164, :func:`_graft`): a root child ``VideoSurface`` before the screens, which play over it.
+    The info then carries ``video_scene``. Screens may be empty when clips are given.
+
     Every screen is authored visible, and every one needs the mode.so that hides it."""
     if stock is None:
         p = profile_for(data)
@@ -691,7 +786,7 @@ def add_screens(data, screens, stock=None):
         check(stock, p)
         p = _rebased(p, stock, data)
         check(data, p)
-    if not screens:
+    if not screens and not clips:
         raise SceneWriteError("no screens to add")
     names = [s["name"] for s in screens]
     if len(set(names)) != len(names):
@@ -715,6 +810,22 @@ def add_screens(data, screens, stock=None):
             "screen_text": s["name"] + "." + words_name,
             "tree": p.tree, "in_game": p.in_game, "node_bytes": len(group),
         })
-    new = bytearray(data[:p.insert_at]) + b"".join(groups) + bytearray(data[p.insert_at:])
-    struct.pack_into("<Q", new, p.root_count_at, p.root_count + len(screens))
+    lib = b""
+    if clips:
+        base = p.first_free_id + 7 * len(screens)
+        ids = list(range(base, base + GRAFT_IDS + len(clips)))
+        for nid in ids:
+            if struct.pack("<I", FLAG | nid) in data:
+                raise SceneWriteError("%s: object id 0x%x is already used" % (p.label, nid))
+        lib, surf = _graft(p, data, clips, ids)
+        groups.insert(0, surf)
+        infos.append({"video_scene": p.scene_id, "tree": p.tree, "node_bytes": len(surf)})
+    lib_at = _stage_at(data, p) - 8 if lib else p.root_count_at
+    new = (bytearray(data[:lib_at]) + lib + bytearray(data[lib_at:p.insert_at]) + b"".join(groups)
+           + bytearray(data[p.insert_at:]))
+    struct.pack_into("<Q", new, p.root_count_at + len(lib), p.root_count + len(groups))
+    if lib:
+        if new[0] != 1:
+            raise SceneWriteError("%s: the library does not start at byte 1" % p.label)
+        struct.pack_into("<Q", new, 1, struct.unpack_from("<Q", new, 1)[0] + 1)
     return bytes(new), infos

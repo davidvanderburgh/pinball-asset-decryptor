@@ -177,3 +177,38 @@ def test_build_adds_a_second_clip_for_clip_both(tmp_path):
     assert by_name["PadMode_beta_Clip"] == "2.asset/5.asset" and "PadMode_beta_Clip2" not in by_name
     alpha = open(os.path.join(out, "padmode", "mode.cfg"), encoding="utf-8").read()
     assert "clip_start     PadMode_alpha_Clip\n" in alpha and "clip_end       PadMode_alpha_Clip2\n" in alpha
+
+
+def test_grafted_clips_go_in_the_hud_beside_the_screens(tmp_path, monkeypatch):
+    """item 164: a title that draws no bank in play names its HUD as the bank; every clip goes in a
+    Video grafted into the HUD, its file at <hud>/scene.assets/<n>.asset, in one pass with the screens."""
+    import dataclasses
+    from pinball_decryptor.plugins.stern import scene_write as SW
+    from tests.test_stern_scene_write import _fake_hud, _art
+    hud, _p, _ = _fake_hud(monkeypatch)
+    project, out = str(tmp_path / "proj"), str(tmp_path / "out")
+    alpha = _mode(project, "Alpha", screen=False, clip="title", clip_seconds=1.0)
+    found, _broken = MP.list_modes(project)
+    prof = dataclasses.replace(MP.GODZILLA_PRO_1_15, bank_scene=MP.GODZILLA_PRO_1_15.hud_scene)
+    sizes = []
+
+    def encode(job, path, ffmpeg):
+        sizes.append((job.w, job.h))
+        with open(path, "wb") as f:
+            f.write(b"\0" * 1234)
+    monkeypatch.setattr(MA, "_encode_clip", encode)
+    monkeypatch.setattr(MA, "make_clips", lambda jobs, ffmpeg, progress=None: ({}, None))
+    result = MA.ModeBuild(out_dir=out)
+    written = {}
+
+    def write(rel, data):
+        written[rel] = data
+        result.files.append(rel)
+    MA._build_grafted(project, prof, hud, [dict(name="S", art_rgba=_art(), words="HI")], found, [], out,
+                      "ffmpeg", result, write)
+    rel = prof.lcd("hud") + "/scene.assets/1.asset"
+    assert result.new_files == [rel] and os.path.getsize(os.path.join(out, *rel.split("/"))) == 1234
+    assert sizes == [(1360, 768)]                                    # the HUD's stage
+    new = written[prof.lcd("hud") + "/scene.radium"]
+    assert SW.string(MP.asset_names(alpha)["clip"]) + struct.pack("<I", SW.FLAG | (_p.first_free_id + 7 + 5)) in new
+    assert SW.string("PadMode_Clips") in new and SW.string("S") in new

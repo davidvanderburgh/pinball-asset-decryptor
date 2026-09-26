@@ -201,7 +201,10 @@ data switch_count           0x00629380
 # ---- scenes ----
 # scene hud                    NOT PLACED: the target program never names 32e6ae28 (no code that loads it could be lined up)
 #   scene video_bank: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02, TMNT Pro 1.59]
-scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+# item 164: no bank this title draws in a game shows a clip, so a mode's clips go in the HUD, in a
+# Video the app grafts there (scene_write.py add_screens clips); hidden until a clip plays
+scene video_bank           91b0658329efa06d4da89c23a162b41dfcee5202
+value clip_surface_hide     1
 # scene attract                NOT PLACED: the target program never names 394c4a03 (no code that loads it could be lined up)
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
@@ -325,6 +328,15 @@ callout countdown           542
 callout ten_seconds         224
 callout time_up             238
 value countdown_step 2
+
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout A's
+# distances from surface_state (godzilla_le-1.16), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x00488eb8 0xe92d4070 0xe24dd008
+site surface_set_video 0x0048059c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x0047e3a8 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0047db58 0xe5d030d4 0xe92d40f0
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Target a

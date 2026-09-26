@@ -299,3 +299,72 @@ def test_add_screens_onto_a_scene_other_edits_grew_first(monkeypatch):
     assert new[:count_at + 24] == grown[:count_at + 24] and new[moved + len(node):] == grown[moved:]
     with pytest.raises(SW.SceneWriteError, match="is not one place"):
         SW.add_screens(grown[:at + 60] + b"\x55" + grown[at + 64:], screens, stock=stock)
+
+
+# ---- item 164: a Video grafted into a scene with none (The Munsters' HUD) -------------------
+def _fake_hud(monkeypatch, video=(5, 163), extra=b""):
+    """u8 1 | library [u64 2] | u64 0 | stage | root (symbol, "", frames 1, [u64 3]) | children,
+    the last of them "Other", the insertion point."""
+    lib = b"\x11" * 40
+    stage = struct.pack("<II5f", 1360, 768, 30.0, 0.0, 0.0, 0.0, 1.0)
+    head = b"\x01" + struct.pack("<Q", 2) + lib + struct.pack("<Q", 0) + stage
+    root = struct.pack("<I", 0) + struct.pack("<Q", 0) + struct.pack("<I", 1)
+    count_at = len(head) + len(root)
+    kids = b"\x22" * 60 + extra
+    other = struct.pack("<IQ", SW.FLAG | 0xD3, 5) + b"Other" + b"\x33" * 30
+    data = head + root + struct.pack("<Q", 3) + kids + other
+    at = len(data) - len(other)
+    md5 = hashlib.md5(data).hexdigest()
+    real = SW.PROFILES["f9daed5a19aafc807bf9eb3c2def6c27"]
+    prof = SW.SceneProfile(**{**real.__dict__, "md5": md5, "size": len(data), "root_count_at": count_at,
+                              "root_count": 3, "insert_at": at, "insert_before": (SW.FLAG | 0xD3, "Other"),
+                              "video": video})
+    monkeypatch.setitem(SW.PROFILES, md5, prof)
+    return data, prof, len(head) - len(stage) - 8
+
+
+def test_a_video_grafts_into_the_library_and_the_root(monkeypatch):
+    data, p, lib_end = _fake_hud(monkeypatch)
+    assert SW.grafts_video(data) and SW.video_size(data) == (1360, 768)
+    clips = [("PadMode_b_Clip", "2.asset", 700), ("PadMode_a_Clip", "1.asset", 500)]
+    new, infos = SW.add_screens(data, [dict(name="Mode_Screen", art_rgba=_art(), words="HI")], clips=clips)
+    assert struct.unpack_from("<Q", new, 1)[0] == 3                     # one more library entry
+    first = p.first_free_id + 7                                         # after the screen's seven ids
+    entry = (struct.pack("<I", 163) + struct.pack("<I", SW.FLAG | 5) + SW.string("Video")
+             + struct.pack("<I", SW.FLAG | first) + struct.pack("<I", 163) + SW.string("video.pad_mode_clips")
+             + struct.pack("<IIIB", 1360, 768, 1, 0) + struct.pack("<Q", 2)
+             + SW.string("PadMode_a_Clip") + struct.pack("<I", SW.FLAG | (first + 5)) + SW.string("1.asset")
+             + struct.pack("<I", 500)
+             + SW.string("PadMode_b_Clip") + struct.pack("<I", SW.FLAG | (first + 6)) + SW.string("2.asset")
+             + struct.pack("<I", 700) + struct.pack("<Q", 0))
+    assert new[lib_end:lib_end + len(entry)] == entry                   # sorted by name, before u64 0 + stage
+    assert new[:lib_end] == data[:1] + struct.pack("<Q", 3) + data[9:lib_end]
+    grow = len(entry)
+    assert struct.unpack_from("<Q", new, p.root_count_at + grow)[0] == 5     # the surface and the screen
+    at = p.insert_at + grow
+    group = _parse_node(new[at:])
+    assert group["name"] == "PadMode_Clips"
+    inner = new.index(SW.string("VideoSurface"), at) - 4          # the surface, inside the Sprite
+    assert _parse_node(new[inner:])["name"] == "VideoSurface" and inner < at + infos[1]["node_bytes"]
+    assert new[at + infos[1]["node_bytes"]:].startswith(struct.pack("<I", SW.FLAG | p.first_free_id))
+    assert new.endswith(data[p.insert_at:])
+    assert infos[1]["video_scene"] == p.scene_id
+
+
+def test_a_video_graft_refuses_what_it_cannot_do(monkeypatch):
+    data, p, _ = _fake_hud(monkeypatch, video=())
+    assert not SW.grafts_video(data)
+    with pytest.raises(SW.SceneWriteError, match="no Video can be grafted"):
+        SW.add_screens(data, [], clips=[("C", "1.asset", 1)])
+    data, p, _ = _fake_hud(monkeypatch, extra=SW.string("PadMode_Clips"))
+    with pytest.raises(SW.SceneWriteError, match="already has a PadMode_Clips"):
+        SW.add_screens(data, [], clips=[("C", "1.asset", 1)])
+    data, p, _ = _fake_hud(monkeypatch, extra=struct.pack("<I", SW.FLAG | 5) + SW.string("Movie"))
+    with pytest.raises(SW.SceneWriteError, match="class id 5 is already registered"):
+        SW.add_screens(data, [], clips=[("C", "1.asset", 1)])
+    data, p, _ = _fake_hud(monkeypatch, extra=struct.pack("<I", SW.FLAG | 5) + SW.string("Video"))
+    new, _ = SW.add_screens(data, [], clips=[("C", "1.asset", 1)])      # the file's own Video class
+    assert new.count(SW.string("Video")) == 1
+    data, p, _ = _fake_hud(monkeypatch)
+    with pytest.raises(SW.SceneWriteError, match="no screens"):
+        SW.add_screens(data, [])

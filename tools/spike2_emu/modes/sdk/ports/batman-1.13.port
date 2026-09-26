@@ -169,6 +169,20 @@ value sound_channel_bus         189
 value sound_channel_voice_ptrs  92
 value sound_voice_volume        48
 
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+# game draws it. The typed find is find_node + 0x2f4; the surface's functions sit at layout B's
+# distances from surface_state (aerosmith_le-1.15), each prologue equal to it. A clip was seen on the glass in
+# the emulator 2026-09-25 (item 164).
+site surface_find     0x004f1488 0xe92d4070 0xe24dd008
+site surface_set_video 0x004e8d1c 0xe5d03238 0xe92d4ff0
+site surface_play     0x004e64bc 0xe5d03238 0xe92d43f0
+site surface_stop     0x004e5fc0 0xe5d03238 0xe92d40f0
+value surface_playing       2
+# item 164: no bank this title draws in a game shows a clip, so a mode's clips go in the HUD, in a
+# Video the app grafts there (scene_write.py add_screens clips); hidden until a clip plays
+scene video_bank           b59deafd663e85b406a4d490cd2b2bdf8efcf13a
+value clip_surface_hide     1
+
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     (G)adget target
 

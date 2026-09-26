@@ -79,7 +79,10 @@ data switch_count           0x00589820
 
 # ---- scenes ----
 # item 164: the one-clip background bank the game draws in play (IronMaiden_CloudLoop)
-scene video_bank           b4a9165e20c26e565e1cbcf77f4915b79c9991f0
+# item 164: no bank this title draws in a game shows a clip, so a mode's clips go in the HUD, in a
+# Video the app grafts there (scene_write.py add_screens clips); hidden until a clip plays
+scene video_bank           7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a
+value clip_surface_hide     1
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
 value mode_mask_busy        0x210

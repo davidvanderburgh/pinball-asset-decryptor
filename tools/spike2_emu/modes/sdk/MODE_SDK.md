@@ -1313,13 +1313,40 @@ card was seen in a game in the emulator:
 
 Seen: Star Wars LE and ELG, the Led Zeppelins, Rush, Bond LE, John Wick, JP The Pin.
 
-Not yet:
+**A Video GRAFTED into the HUD (item 164, 2026-09-26).** Some titles draw no bank a clip can show
+on in a game: the Munsters' and Iron Maiden's one-clip banks are covered by the HUD's own artwork,
+Metallica's song video stays in front of 914f6bd9, Bond 60th draws no bank in play, and Batman and
+Elvira have no 60ed7e50. Their clips go in the HUD scene itself, which the game draws all game
+(`scene_write.add_screens(..., clips=)`, `mode_assets._build_grafted`):
 
-- Munsters and Iron Maiden: the clip plays in their one-clip background banks, but the HUD's own
-  artwork covers the whole glass in a game; a clip would have to go in the HUD scene.
-- Metallica: played on 914f6bd9, and the song video stayed in front.
-- Bond 60th: no bank among the scenes it draws in play.
-- Batman and Elvira: no 60ed7e50 bank; they play video through another player.
+- one more LIBRARY entry, the Video registered with each clip's path and size (a free class id and
+  one past the library's highest symbol key, measured per file: `SceneProfile.video`; a file that
+  already registers "Video", Batman's HUD, has it used bare);
+- one more root child, the Sprite `PadMode_Clips`, holding a node `VideoSurface` whose component
+  names the same clips by bare id, before the screens (a mode's screen plays over its clip);
+- each clip file at `<hud>/scene.assets/<n>.asset`. A HUD with no asset files has no scene.assets
+  folder, and a Write creates exactly that folder (`ext4_grow.MAKE_DIR`), with its scene folder's
+  mode and owner; any other missing folder still stops the Write.
+
+The port names the HUD as its bank and turns the hiding on:
+
+```
+scene video_bank           <the HUD's id>
+value clip_surface_hide     1
+```
+
+The runtime then finds the surface as `PadMode_Clips.VideoSurface`. A surface keeps a finished clip's
+LAST FRAME on the glass, so the runtime hides the Sprite until a clip plays and hides it again when
+the clip ends or is stopped. The surface itself cannot be hidden: it is no Sprite, and the Sprite's
+visibility slot on it crashed the game.
+
+The Sprite sits at the scene's own (0, 0), not at a screen's `origin`: the Video fills the scene's
+stage wherever the game places the scene (Bond 60th's HUD is an 800x480 frame).
+
+Seen in a game, 2026-09-26 (the HUD as it was before the mode, the clip at the start, the HUD back
+when it ended): The Munsters, Iron Maiden, Metallica (in front of its song video), Bond 60th,
+Batman 66 and Elvira. Bond 60th, Batman and Elvira also gained clip v2's sites (Batman's surface
+functions are layout B's, stop at surface_state + 0x2080 as on Aerosmith).
 
 **Screen words on a font that lacks the glyphs.** A scene embeds only the glyphs its own text uses, so on
 some builds the words line cannot be drawn and Radium logs `Glyph 'A' not found in embedded font`: every

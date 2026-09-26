@@ -1622,6 +1622,24 @@ static struct { int on, seen; unsigned long started, last; } clip;
  * bank is demand_loaded (JP LE) the bank is not in the resource manager until that getter loads it. */
 static int clip_v2;
 static void *clip2_surf;
+/* item 164: a surface the app GRAFTED into a scene the game draws all game (The Munsters' HUD:
+ * `value clip_surface_hide 1`) keeps a finished clip's last frame on the glass, so the Sprite
+ * "PadMode_Clips" holding it is hidden until a clip plays and hidden again when the clip ends
+ * (pm_show, as a screen is). The surface itself is no Sprite: its visibility slot crashes the game. */
+static int clip2_hidden, clip2_said;
+static unsigned long clip2_tried;
+
+static void clip2_show(int on)
+{
+    void *node;
+    if (!pm_port_value("clip_surface_hide", 0)) return;
+    node = pm_node("video_bank", "PadMode_Clips");
+    if (!node) return;
+    if (!clip2_said) say("clip: the grafted clips' Sprite is found - %s", on ? "shown" : "hidden until a clip plays");
+    clip2_said = 1;
+    pm_show(node, on);
+    clip2_hidden = !on;
+}
 /* item 164: CLIP LAYER - Deadpool shows a full-screen video by adding a video LAYER to its display
  * stack (`data layer_stack`, `data video_layer`: add(stack, layer, priority) = `site layer_add`,
  * remove(stack, layer) = `site layer_remove`) and asking the layer's video object (at
@@ -1652,7 +1670,7 @@ static void *clip2_surface(void)
     if (clip2_surf) return clip2_surf;
     root = scene("video_bank");
     if (!root) return 0;
-    str = std_string("VideoSurface");
+    str = std_string(pm_port_value("clip_surface_hide", 0) ? "PadMode_Clips.VideoSurface" : "VideoSurface");
     ((void (*)(unsigned *, void *, unsigned *))(unsigned long)fn("surface_find"))(out, root, &str);
     clip2_surf = (void *)(unsigned long)out[0];
     return clip2_surf;
@@ -1691,6 +1709,7 @@ int pm_clip(const char *name)
             say("clip: the video bank has no clip \"%s\"", name);
             return 0;
         }
+        clip2_show(1);
         ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
         clip.on = 1;
         clip.seen = 0;
@@ -1718,6 +1737,7 @@ void pm_clip_stop(void)
         clip_layer_out();
     } else if (clip_v2) {
         if (clip2_surface()) ((void (*)(void *))(unsigned long)fn("surface_stop"))(clip2_surface());
+        clip2_show(0);
     } else {
         ((void (*)(void))(unsigned long)fn("clip_stop"))();
     }
@@ -1731,6 +1751,10 @@ static void clip_tick(void)
     unsigned long now;
     long playing = pm_port_value("surface_playing", 2);
     display_tick();                           /* item 154 display: the hold, the covered state */
+    if (!clip.on && clip_v2 && !clip2_hidden && pm_ms() - clip2_tried > 1000) {
+        clip2_tried = pm_ms();                /* a grafted surface out of sight, once its scene is up */
+        clip2_show(0);
+    }
     if (!clip.on) return;
     if (disp_clip_lost) {                     /* item 154 display: the game played a clip of its own */
         clip.on = 0;
@@ -1750,7 +1774,7 @@ static void clip_tick(void)
         surface = clip2_surface();
         state = surface ? ((int (*)(void *))(unsigned long)fn("surface_state"))(surface) : -1;
         if (state == playing) clip.seen = 1;
-        else if (clip.seen || now - clip.started > 3000) clip.on = 0;
+        else if (clip.seen || now - clip.started > 3000) { clip.on = 0; clip2_show(0); }
         clip.last = now;
         return;
     }

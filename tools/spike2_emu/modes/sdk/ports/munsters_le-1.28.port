@@ -200,8 +200,11 @@ data score_mult             0x0055958c
 #   scene hud: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Jaws LE 1.02]
 scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
 #   scene video_bank: COPIED, unverified (no code that loads it could be lined up; the target program names the same id) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, TMNT Pro 1.59, Deadpool LE 1.14, Deadpool Pro 1.16]
-# item 164: the one-clip background bank the game draws in play; 60ed7e50 is not drawn in a game
-scene video_bank           69db8744b5d8af379df941aa607874c8888878c9
+# item 164: no bank is drawn in a game (60ed7e50 is not, and 69db8744 is the attract background), so a
+# mode's clips go in the HUD, in a Video the app grafts there (scene_write.py add_screens clips)
+scene video_bank           9d57875196c613785a1eee010c55223a0f1aa821
+# the grafted surface keeps a finished clip's last frame on the HUD: hidden until a clip plays
+value clip_surface_hide     1
 #   scene attract: derived: the target code loads it (derived from 1 places, e.g. 0x2bd88+0x14) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02]
 scene attract              60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 

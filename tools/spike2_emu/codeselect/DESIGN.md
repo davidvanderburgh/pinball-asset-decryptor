@@ -653,12 +653,12 @@ hardware and one header defends the build:
   last press.  When it goes, the level is written to `--volume-file`
   (`/jjpe/perm/padselect.volume`, beside `padselect.last`; tmp + rename), and
   a level changed just before START is written at the choice; the next boot
-  starts from it.  The same indicator is up for the menu's first 3 s on its
-  own (`VOL_OSD_START_MS`, PAD-219: a Sonic that played "at max" at
-  volume=20, 8 and 10 alike, with the PAD-216 fix on the card - which level
-  the menu holds, and whether the sound is even the menu's, is answered by a
-  look at the glass), and a start indicator alone writes nothing: only a
-  press does (`vol_touched`).  The file's second line, `conf N`, is the card's own
+  starts from it.  The indicator is up only after a press, never on its
+  own: v1.16.0 (PAD-219) opened every JJP menu with it up for 3 s, to put
+  the level on the glass while cooltoy's Sonic was "at max" whatever the
+  card said, and once the scale itself was found to be the cause David had
+  it taken out again.  A level no button moved is never written
+  (`vol_touched`).  The file's second line, `conf N`, is the card's own
   `volume=` the level was set under (PAD-216): JJP's installer keeps perm on
   a same-game reinstall, so a card rebuilt at volume=8 still booted at the
   old card's remembered 40.  A remembered level is used only while the

@@ -150,15 +150,18 @@ software gain is the level the speakers get. On the first GNR the menu at
 buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
 
 - **The JJP build** asks for a 60 ms buffer and logs the one granted
-  (`audio: alsa buffer N frames (M ms), period ...`); starts at 20
-  (`DEF_VOLUME`), and nothing takes it past 40 (`VOLUME_CEILING`): not
-  `volume=`, not `--volume`, not the remembered level. `volume_max=` in the
-  conf can only lower it; `mkjjpmulti.py` always writes `volume=` and
-  `volume_max=40` and refuses a volume above 40.
+  (`audio: alsa buffer N frames (M ms), period ...`); its number is 0-100
+  as on Stern, starting at 50 (`DEF_VOLUME`), but 100 plays at 30% of the
+  samples (`VOLUME_FULL_PCT`, PAD-219: the scale was 0-40 with 20 the
+  default, and 20 was already high on the GNR and 8 "at max" on cooltoy's
+  Sonic). Nothing takes it past 100 (`VOLUME_CEILING`): not `volume=`, not
+  `--volume`, not the remembered level. `volume_max=` in the conf can only
+  lower it; `mkjjpmulti.py` always writes `volume=` and `volume_max=100`
+  and refuses a volume above 100.
 - **The machine's front Volume+ / Volume- buttons** (byte 1 bits 5 and 6,
   active low: `dswitch_plus` "Up / Volume+ Button" and `dswitch_minus` "Down /
   Volume- Button" in GNR's device table; `key_plus=` / `key_minus=` move them)
-  step the menu's level by 5 within the cap, play the move sound at the new
+  step the menu's level by 10 within the cap, play the move sound at the new
   level, restart the countdown, and put "VOLUME n / cap" and a bar over the
   middle of the menu for 2 s ("VOLUME OFF" at 0). When the indicator goes the
   level is written to `/jjpe/perm/padselect.volume`, beside
@@ -169,7 +172,7 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   remembered level; now a new `volume=` wins. They change the MENU's
   level only; the game's operator volume is JJP's own and is not read. In the
   rig they are the switch matrix's Up / = and Down / - keys, from either
-  window. The menu also opens with "VOLUME n / 40" up for its first 3 s on
+  window. The menu also opens with "VOLUME n / 100" up for its first 3 s on
   its own (PAD-219: cooltoy's Sonic was "at max" at volume=20, 8 and 10
   alike, with the PAD-216 fix on the card, and no machine log to read; the
   number on the glass says which level the menu holds, and a Down press

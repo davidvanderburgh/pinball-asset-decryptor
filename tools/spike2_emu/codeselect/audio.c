@@ -199,6 +199,22 @@ static struct audio_sink *null_open(void)
     return &ns->base;
 }
 
+/* THE FULL SCALE (PAD-219): what volume 100 plays at, as a percent of the
+ * samples.  100 on every build but JJP's, which sets 30: a JJP machine runs
+ * its amplifiers at full while the menu plays, and on the old 0-40 scale 20
+ * was already high on David's GNR and 8 "at max" on cooltoy's Sonic.  The
+ * number the operator sees and sets stays 0-100; only what it buys changed. */
+#ifndef VOLUME_FULL_PCT
+#define VOLUME_FULL_PCT 100
+#endif
+
+static int gain_of(int volume)
+{
+    if (volume < 0) volume = 0;
+    if (volume > 100) volume = 100;
+    return volume * VOLUME_FULL_PCT * 256 / 10000;
+}
+
 struct audio *audio_open(const char *mode, const char *fmt_path, int volume, const char *dump_path)
 {
     struct audio *a = calloc(1, sizeof *a);
@@ -207,7 +223,7 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
     pthread_mutex_init(&a->lock, NULL);
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
-    a->gain_q8 = volume * 256 / 100;
+    a->gain_q8 = gain_of(volume);
     if (!mode || !*mode) mode = "auto";
 
     if (!strcmp(mode, "none")) {
@@ -262,8 +278,8 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
         else sel_log("audio: dumping the mix to %s", dump_path);
         if (a->dump && !a->sink) a->sink = null_open();
     }
-    if (a->sink) sel_log("audio: sink %s, lead %d ms, volume %d (gain %d/256)",
-                         a->sink->name, a->sink->lead_ms, volume, a->gain_q8);
+    if (a->sink) sel_log("audio: sink %s, lead %d ms, volume %d (gain %d/256; 100 = %d%% of full)",
+                         a->sink->name, a->sink->lead_ms, volume, a->gain_q8, VOLUME_FULL_PCT);
     if (a->sink) {
         if (pthread_create(&a->th, NULL, pump_thread, a) == 0) {
             a->th_on = 1;
@@ -296,7 +312,7 @@ void audio_set_volume(struct audio *a, int volume)
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
     pthread_mutex_lock(&a->lock);
-    a->gain_q8 = volume * 256 / 100;
+    a->gain_q8 = gain_of(volume);
     pthread_mutex_unlock(&a->lock);
     if (a->sink) sel_log("audio: volume %d (gain %d/256)", volume, a->gain_q8);
 }

@@ -69,7 +69,10 @@ class MultibootBackend:
     #: 120).  A JJP machine keeps its amplifiers at full and turns only the
     #: game's own stream down, so the menu's number is the level the speakers
     #: get: 50 was "very high" on the first GNR.  The builder refuses above
-    #: the cap too, and the selector's JJP build cannot pass it.
+    #: the cap too, and the selector's JJP build cannot pass it.  Both
+    #: platforms show 0-100 (PAD-219): the JJP selector plays its 100 at 30%
+    #: of the samples, so the number means the same thing on both and the
+    #: old 0-40 scale, on which 8 was still "at max" on a Sonic, is gone.
     volume_default: int
     volume_max: int
     #: "The game's own attract video" as a picture choice.  A Stern card's
@@ -215,7 +218,7 @@ JJP = MultibootBackend(
     status_checks=(("card", "Install ISO"), ("images", "Images"),
                    ("built", "Built"), ("ready", "Ready for the stick")),
     max_cards=2, groups=False, compact=False, machine_volume=False,
-    volume_default=20, volume_max=40, attract_clip=False,
+    volume_default=50, volume_max=100, attract_clip=False,
     update=False, bypass=False, extract=False, read_card=False,
     selector_default="/var/tmp/jjpselect",
     selector_suffix="/jjpe/gen1/padselect", selector_binary="jjpe/gen1/padselect/jjpselect",

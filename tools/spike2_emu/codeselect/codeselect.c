@@ -91,7 +91,9 @@
 #ifndef DEF_VOLFILE
 #define DEF_VOLFILE  ""
 #endif
-#define VOL_STEP     5              /* one Volume+/- press */
+#ifndef VOL_STEP
+#define VOL_STEP     5              /* one Volume+/- press (the JJP build: 10 of its 0-100) */
+#endif
 #define VOL_OSD_MS   2000           /* the indicator stays this long after the last press */
 /* THE INDICATOR AT THE START (PAD-219): on a JJP machine the menu opens with
  * "VOLUME n / cap" up for this long, unasked.  cooltoy's Sonic played "at max"

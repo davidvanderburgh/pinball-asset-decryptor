@@ -88,7 +88,7 @@ def test_jjp_words_and_gating(tmp_path):
         assert w_["add_text"] == "Add the second ISO…"
         assert not (w_["read_card"] or w_["extract"] or w_["compact"]
                     or w_["groups"] or w_["machine_volume"])
-        assert w_["volume_max"] == 40
+        assert w_["volume_max"] == 100          # 0-100 like Stern (PAD-219)
         assert [c["label"] for c in s["checks"]] == [
             "Install ISO", "Images", "Built", "Ready for the stick"]
         # a JJP install has no random cards
@@ -603,7 +603,7 @@ def test_menu_settings_number_bounds_are_published(tmp_path):
         assert s["md"]["default_max"] == 1       # Tk's Spinbox 0..images-1
         assert s["w"]["volume_max"] == 100
     with web_app(tmp_path / "j", mfr="jjp") as w:
-        assert _st(w)["w"]["volume_max"] == 40
+        assert _st(w)["w"]["volume_max"] == 100
 
 
 # ------------------------------------------------------------ Build / flash

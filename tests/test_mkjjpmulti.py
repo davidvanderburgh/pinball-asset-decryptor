@@ -410,27 +410,30 @@ def test_conf_refusals(mj):
 
 
 def test_conf_volume_is_quiet_and_capped_for_a_jjp_machine(mj):
-    """Item 120: a JJP machine plays the menu through amplifiers it keeps at full, so the
-    conf always says a level (the quiet default when none is given) and the cap, and the
-    builder refuses past it."""
+    """Item 120 / PAD-219: a JJP machine plays the menu through amplifiers it keeps at
+    full, so the conf always says a level (the default when none is given) and the cap,
+    and the builder refuses past it.  The scale is 0-100 like Stern's (the selector's
+    JJP build plays 100 at 30% of the samples); it was 0-40 with 20 the default."""
     bare = mj.parse_images_conf(mj.render_images_conf(["rootA", "rootB"], ["a", "b"]))
-    assert bare["volume"] == mj.VOLUME_DEFAULT == 20
-    assert bare["volume_max"] == mj.VOLUME_MAX == 40
-    assert mj.parse_images_conf(mj.render_images_conf(["rootA", "rootB"], ["a", "b"], volume=40))["volume"] == 40
+    assert bare["volume"] == mj.VOLUME_DEFAULT == 50
+    assert bare["volume_max"] == mj.VOLUME_MAX == 100
+    assert mj.parse_images_conf(mj.render_images_conf(["rootA", "rootB"], ["a", "b"], volume=100))["volume"] == 100
     with pytest.raises(mj.Refused):
-        mj.render_images_conf(["rootA", "rootB"], ["a", "b"], volume=41)
+        mj.render_images_conf(["rootA", "rootB"], ["a", "b"], volume=101)
     assert "volume_max" in mj.CONF_KEYS
 
 
-def test_conf_for_args_brings_an_old_loud_menu_under_the_cap(mj, capsys):
-    old = mj.parse_images_conf("image=rootA|a|\nimage=rootB|b|\nvolume=50\n")      # a pre-120 install
+def test_conf_for_args_keeps_an_existing_menus_volume(mj, capsys):
+    """An install's volume=50 (loud on the old 0-40 scale, where the builder used to bring
+    it down to 40) is a middling level on the 0-100 scale and is kept as it stands."""
+    old = mj.parse_images_conf("image=rootA|a|\nimage=rootB|b|\nvolume=50\n")
     a = argparse.Namespace(titles=None, subtitles=None, timeout=None, default=None, volume=None, heading=None,
                            theme=None, color=None, conf=None, jjp_update=None, debug_log=False)
     p = mj.parse_images_conf(mj.conf_for_args(mj.DEVICES, a, existing=old))
-    assert p["volume"] == 40 and p["volume_max"] == 40
+    assert p["volume"] == 50 and p["volume_max"] == 100
     said = capsys.readouterr()
-    assert "above the JJP cap" in said.out + said.err
-    a.volume = 50                                 # asked for outright: refused, not quietly cut
+    assert "above the JJP cap" not in said.out + said.err
+    a.volume = 101                                # asked for above the cap outright: refused
     with pytest.raises(mj.Refused):
         mj.conf_for_args(mj.DEVICES, a, existing=old)
 
@@ -449,9 +452,9 @@ def test_media_step_levels_every_sound_and_caps_the_volume(mj, monkeypatch, tmp_
                            visual_only=False, work=None, cache_dir=None)
     assert mj.cmd_media(a) == 0
     argv = seen[-1]
-    assert argv[argv.index("--volume") + 1] == "20"
+    assert argv[argv.index("--volume") + 1] == "50"      # the default is 50 of 100 (PAD-219)
     assert argv[argv.index("--peak-dbfs") + 1] == "-3"
-    a.volume = 41
+    a.volume = 101
     with pytest.raises(mj.Refused):
         mj.cmd_media(a)
 

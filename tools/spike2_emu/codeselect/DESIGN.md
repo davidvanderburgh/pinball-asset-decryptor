@@ -636,15 +636,18 @@ hardware and one header defends the build:
 - **The menu's sound on a JJP machine (item 120).**  JJP runs its amplifier
   chain at full and turns only the game's own stream down, so the menu's
   software gain is the level the speakers get (volume 50 was "very high" on
-  the first GNR).  The JJP build (Makefile) therefore sets `DEF_VOLUME=20`,
-  `VOLUME_CEILING=40` - nothing passes it: not `volume=`, not `--volume`,
-  not the remembered level; a conf's `volume_max=` can only lower it - and a
+  the first GNR).  The JJP build (Makefile) therefore plays its 100 at 30% of
+  the samples (`VOLUME_FULL_PCT=30`, PAD-219: the scale was 0-40 with
+  `DEF_VOLUME=20`, and 20 was already high on the GNR and 8 "at max" on
+  cooltoy's Sonic; the operator's number is 0-100 as on Stern, `DEF_VOLUME=50`,
+  `VOLUME_CEILING=100`) - nothing passes the ceiling: not `volume=`, not
+  `--volume`, not the remembered level; a conf's `volume_max=` can only lower it - and a
   60 ms ALSA buffer (`ALSA_LATENCY_US`) where the Stern card keeps 500 ms,
   because `audio_pump()` keeps the buffer full and a new sound joins behind
   all of it; the buffer the device granted is logged (`audio: alsa buffer N
   frames (M ms)`).  On `--input jjpio` PLUS/MINUS are the VOLUME buttons, not
-  a second LEFT/RIGHT: each press steps the level by 5 (to the next multiple
-  of 5 that way) within the ceiling, plays the move sound at the new level,
+  a second LEFT/RIGHT: each press steps the level by 10 (`VOL_STEP`; to the
+  next multiple of 10 that way) within the ceiling, plays the move sound at the new level,
   restarts the countdown, and draws an indicator over the middle of the card
   row - "VOLUME n / cap" and a bar, "VOLUME OFF" at 0 - for 2 s after the
   last press.  When it goes, the level is written to `--volume-file`

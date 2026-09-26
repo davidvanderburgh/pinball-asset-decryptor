@@ -19,9 +19,11 @@ drains + inspects what the selector writes.
      still runs, times out and writes the default - a dead button never
      keeps a machine from booting - and the log says so once.
   5. the front Volume+ / Volume- buttons (byte 1 bits 5 / 6, item 120): they
-     step the menu's level by 5 within volume_max=, never move the highlight,
-     play the move sound at the new level (the --audio-dump's clicks peak at
-     exactly the tone times each gain), draw the indicator (the headless frame
+     step the menu's level by 10 (the JJP build's VOL_STEP) within
+     volume_max=, never move the highlight, play the move sound at the new
+     level (the --audio-dump's clicks peak at exactly the tone times each
+     gain, where 100 is 30% of full: VOLUME_FULL_PCT, PAD-219), draw the
+     indicator (the headless frame
      differs from an untouched menu's in the middle of the card row, and is
      the untouched frame again once it has gone), and the settled level is
      kept in --volume-file and used by the next run; --volume above the
@@ -195,18 +197,24 @@ def volume_buttons(binp, t, font):
         print("jjpio_test: FAIL (volume) " + msg)
         return False
 
-    # A: up, up, down, the indicator goes, up again, START
-    rc, got, out, logtxt, keys, kept, dump, _ = run("vol", ["+", "+", "-", "wait", "+"])
+    # THE JJP BUILD'S NUMBERS (PAD-219): a press steps by 10 (VOL_STEP), and
+    # the mix gain of a level is level * 30% * 256 / 10000 (VOLUME_FULL_PCT=30:
+    # 100 plays at 30% of the samples).  The conf's volume_max=40 keeps the
+    # cap legs short; the build's own ceiling is 100.
+    def gain_q8(level):
+        return level * 30 * 256 // 10000
+
+    # A: up, down, the indicator goes, up again, START
+    rc, got, out, logtxt, keys, kept, dump, _ = run("vol", ["+", "-", "wait", "+"])
     if rc != 0 or got != "0":
         ok = fail("exit %d, choice %r: a volume button moved the highlight (expected '0')" % (rc, got))
-    if keys != ["plus", "plus", "minus", "plus", "start"]:
+    if keys != ["plus", "minus", "plus", "start"]:
         ok = fail("key sequence %r" % keys)
-    for want in ("[select] volume: 20 -> 25 (of 40)", "[select] volume: 25 -> 30 (of 40)",
-                 "[select] volume: 30 -> 25 (of 40)"):
+    for want in ("[select] volume: 20 -> 30 (of 40)", "[select] volume: 30 -> 20 (of 40)"):
         if want not in out:
             ok = fail("stdout lacks %r" % want)
-    for want in ("volume: 20 of 40 (conf volume=); Volume+/- step it by 5, kept in " + volfile,
-                 "volume: indicator off at 25", "volume: 25 remembered in " + volfile,
+    for want in ("volume: 20 of 40 (conf volume=); Volume+/- step it by 10, kept in " + volfile,
+                 "volume: indicator off at 20", "volume: 20 remembered in " + volfile,
                  "volume: 30 remembered in " + volfile):
         if want not in logtxt:
             ok = fail("log lacks %r" % want)
@@ -216,19 +224,19 @@ def volume_buttons(binp, t, font):
     if whole != "30\nconf 20\n":
         ok = fail("%s is %r, expected the level and the card's volume=20 under it" % (volfile, whole))
     peaks = click_peaks(dump)
-    want_peaks = [tone_peak * g // 256 for g in (64, 76, 64, 76)]   # gain_q8 of 25, 30, 25, 30
-    if len(peaks) != 4 or any(abs(a - b) > 2 for a, b in zip(peaks, want_peaks)):
+    want_peaks = [tone_peak * gain_q8(v) // 256 for v in (30, 20, 30)]
+    if len(peaks) != 3 or any(abs(a - b) > 2 for a, b in zip(peaks, want_peaks)):
         ok = fail("move-sound peaks %r, expected %r (tone %d times each level's gain)"
                   % (peaks, want_peaks, tone_peak))
     else:
         print("jjpio_test: volume steps heard at peaks %r (tone %d)" % (peaks, tone_peak))
 
-    # B: the remembered 30 is used; up to the cap and one past it; START with the indicator up
+    # B: the remembered 30 is used; up to the cap and past it; START with the indicator up
     rc, got, out, logtxt, keys, kept, _, ppm_up = run("voltop", ["+", "+", "+"])
     if "volume: 30 of 40 (remembered in %s)" % volfile not in logtxt:
         ok = fail("the second run did not start at the remembered 30:\n%s"
                   % "\n".join(l for l in logtxt.splitlines() if "volume" in l))
-    for want in ("[select] volume: 35 -> 40 (of 40)", "[select] volume: 40 -> 40 (of 40), at the top"):
+    for want in ("[select] volume: 30 -> 40 (of 40)", "[select] volume: 40 -> 40 (of 40), at the top"):
         if want not in out:
             ok = fail("stdout lacks %r" % want)
     if kept != "40":
@@ -236,34 +244,34 @@ def volume_buttons(binp, t, font):
 
     # C: down once, let the indicator go, START - the frame is the untouched menu again
     rc, got, out, logtxt, keys, kept, _, ppm_gone = run("volgone", ["-", "wait"])
-    if kept != "35":
-        ok = fail("%s holds %r, expected '35'" % (volfile, kept))
+    if kept != "30":
+        ok = fail("%s holds %r, expected '30'" % (volfile, kept))
 
     # D (PAD-219): nothing pressed.  As the menu opens the indicator is up on
-    # its own for 3 s - the frame at 1.5 s holds "VOLUME 35 / 40" - and that
+    # its own for 3 s - the frame at 1.5 s holds "VOLUME 30 / 40" - and that
     # writes nothing; once it has gone (the "wait"), the frame is the untouched
     # menu, still nothing written, and --volume past the ceiling is cut to it
     rc, got, out, logtxt, keys, kept, _, ppm_start = run("volstart", [])
-    if "volume: indicator on at 35 for 3000 ms" not in logtxt:
+    if "volume: indicator on at 30 for 3000 ms" not in logtxt:
         ok = fail("the menu did not open with the indicator up:\n%s"
                   % "\n".join(l for l in logtxt.splitlines() if "volume" in l))
-    if kept != "35" or re.search(r"volume: \d+ remembered in", logtxt):
-        ok = fail("the start indicator rewrote %s (%r, expected '35' and no write)" % (volfile, kept))
+    if kept != "30" or re.search(r"volume: \d+ remembered in", logtxt):
+        ok = fail("the start indicator rewrote %s (%r, expected '30' and no write)" % (volfile, kept))
     rc, got, out, logtxt, keys, kept, _, ppm_none = run("volnone", ["wait"], ["--volume", "90"])
     if "volume: 90 (--volume) is above the ceiling, 40 is used" not in logtxt:
         ok = fail("--volume 90 was not cut to the ceiling")
     if "volume: indicator off at 40" not in logtxt:
         ok = fail("the start indicator did not go on its own:\n%s"
                   % "\n".join(l for l in logtxt.splitlines() if "volume" in l))
-    if kept != "35" or re.search(r"volume: \d+ remembered in", logtxt):
-        ok = fail("an untouched menu rewrote %s (%r, expected '35')" % (volfile, kept))
+    if kept != "30" or re.search(r"volume: \d+ remembered in", logtxt):
+        ok = fail("an untouched menu rewrote %s (%r, expected '30')" % (volfile, kept))
 
-    # E (PAD-216): the card is rebuilt with volume=8 and perm kept - the 35
+    # E (PAD-216): the card is rebuilt with volume=8 and perm kept - the 30
     # remembered under volume=20 is not used; the card's 8 is, and stays until
     # a button is pressed
     write_conf(8)
     rc, got, out, logtxt, keys, kept, _, _ = run("volnewconf", [])
-    if "volume: remembered 35 was set under volume=20; this card says 8" not in logtxt:
+    if "volume: remembered 30 was set under volume=20; this card says 8" not in logtxt:
         ok = fail("the rebuilt card did not set the old remembered level aside:\n%s"
                   % "\n".join(l for l in logtxt.splitlines() if "volume" in l))
     if "volume: 8 of 40 (conf volume=)" not in logtxt:
@@ -297,7 +305,7 @@ def volume_buttons(binp, t, font):
     if at_start == none:
         ok = fail("no indicator in the frame drawn 1.5 s into an untouched menu (PAD-219)")
     if ok:
-        print("jjpio_test: volume OK (20 -> 25 -> 30 -> 25 -> 30 kept; remembered 30 -> cap 40; "
+        print("jjpio_test: volume OK (20 -> 30 -> 20 -> 30 kept; remembered 30 -> cap 40; "
               "indicator up at the start, after a press, and gone; --volume 90 cut to 40; "
               "a new card's volume= beats the old level)")
     return ok

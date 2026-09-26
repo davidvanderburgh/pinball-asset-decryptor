@@ -575,3 +575,8 @@ lamp 72           0              LEFT RAMP GRAVE MARKER  # lamp 239, I/O group 1
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
 site balls_in_play         0x0036aa88 0xe92d4010 0xe3014350
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x00536120 0xe92d40f8 0xe2505000
+site agent_begin      0x00540a7c 0xe590c004 0xe1a00001

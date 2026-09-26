@@ -462,6 +462,11 @@ lamp 9                 0              RIGHT OUTLANE  # lamp 93, I/O group 7 inde
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
 site balls_in_play         0x001fd194 0xe92d4010 0xe3084ab0
+# Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
+# message-begin thunk every sender calls next; the runtime refuses the score reports there
+# (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")
+site agent_header     0x0047a7a8 0xe92d40f8 0xe2505000
+site agent_begin      0x00485114 0xe590c004 0xe1a00001
 
 # ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
 scene hud                  9d57875196c613785a1eee010c55223a0f1aa821/68f53edf22edb8b5fb918e77ebb222a139a6a0e6

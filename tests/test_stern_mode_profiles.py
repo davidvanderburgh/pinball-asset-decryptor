@@ -64,6 +64,7 @@ PORTS = {
     "dungeons_and_dragons_le-1.00": (33, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "john_wick_le-1.01": (43, 64, True, {"clip", "countdown", "own_sound"}, ("callout", "screens", "own-sound")),
     "venom_le-1.07": (40, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
+    "jurassic_park_the_pin-1.05": (32, 64, True, ALL - {"events"}, CALLOUT_SOUND),
 }
 
 #: the lines a part of a mode puts in the runtime file

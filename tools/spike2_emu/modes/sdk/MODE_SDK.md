@@ -994,13 +994,14 @@ device table has no coils), so on those the answer was asked 0.3 s after the
 start, before the ball the game could not serve ended the multiball (Batman, Guardians and
 Aerosmith).
 
-**Not yet.** TMNT LE 1.59: the runtime named its mode (`ctraining_level_two`) in the emulator,
-but no game ever started there, so no mode was refused. In attract the LE serves a ball to its
-shooter lane and waits for it somewhere (the Pro serves only at a Start); the rig does not know
-where, and a Start is ignored with a ball out, even with the trough reset and 30 credits in. On
-the plain-C titles and Elvira the game's other modes (not its multiballs) are not seen: their
-rules keep no table the runtime can walk (a mode's start bumps an `AUD_..._STARTED` audit, the
-lead for a later item). JP The Pin 1.05 has no port.
+TMNT LE 1.59 was proven the same way once its game started (`ctraining_level_two` held a stack
+no mode back). In attract the LE keeps serving balls until its trough is empty and only then
+takes a Start, so the scripted check presses Start for about two and a half minutes.
+
+**Not yet.** On the plain-C titles and Elvira the game's other modes (not its multiballs) are
+not seen: their rules keep no table the runtime can walk (a mode's start bumps an
+`AUD_..._STARTED` audit, the lead for a later item). JP The Pin 1.05 has events and shots only
+so far.
 
 ## Ports: why your mode runs on any game
 
@@ -1300,12 +1301,12 @@ A mode's own screen goes into a scene the game draws in play. Three things per b
 
 **What is proven.** In the emulator, one scripted game per build with a magenta panel: none
 before the mode, the panel and its words during it (about 63,000 magenta pixels). Proven on
-32 of the 34 latest builds: Aerosmith, Avengers, Batman 66, The Beatles, Bond 60th, Bond LE,
+33 of the 34 latest builds: Aerosmith, Avengers, Batman 66, The Beatles, Bond 60th, Bond LE,
 Deadpool LE and Pro, D&D, Elvira 3, Foo Fighters, Godzilla LE and Pro 1.16, Guardians, Iron
 Maiden, Jaws, John Wick, JP LE, King Kong, Led Zeppelin LE and Pro, Mandalorian, Metallica,
-Munsters, Rush, Star Wars ELG and LE, Stranger Things, Sword of Rage, TMNT Pro 1.59, X-Men and
-Venom. `mode_project.TITLE_SCENES` carries `screen_proven` for those; the tab offers a screen
-only there. Not yet: TMNT LE 1.59 (no game starts in the rig) and JP The Pin (no port).
+Munsters, Rush, Star Wars ELG and LE, Stranger Things, Sword of Rage, TMNT LE and Pro 1.59,
+X-Men and Venom. `mode_project.TITLE_SCENES` carries `screen_proven` for those; the tab offers a screen
+only there. Not yet: JP The Pin 1.05.
 
 Per scene, what the proof runs taught:
 

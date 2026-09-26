@@ -263,7 +263,7 @@ class Feeder:
         self.lane = next((i for i in (self._switch(rows, n) for n in ballmodel.LANE_NAMES)
                           if i is not None), None)
         coils = coilmap.load(gameinfo.table("device_xy.txt", self.game) or "")
-        self.eject_coil = coilmap.address(coils, coilmap.TROUGH)
+        self.eject_coil = coilmap.eject_address(coils)
         self.plunge_coil = coilmap.address(coils, coilmap.AUTO_PLUNGER)
         self.seen = {}
         self.last_feed = 0.0

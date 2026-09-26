@@ -165,7 +165,7 @@ def main():
     rows = trough.load_list(os.path.join(tables, "switch_list.txt"))
     positions, how = trough.find(rows)
     coils = coilmap.load(os.path.join(tables, "device_xy.txt"))
-    eject = coilmap.address(coils, coilmap.TROUGH)
+    eject = coilmap.eject_address(coils)
     plunger = coilmap.address(coils, coilmap.AUTO_PLUNGER)
     lane = next((r["id"] for r in rows
                  if (r["name"] or "").upper().strip() == "SHOOTER LANE"), None)

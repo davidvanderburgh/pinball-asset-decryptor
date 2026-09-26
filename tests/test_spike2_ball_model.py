@@ -143,6 +143,22 @@ def test_the_eject_address_is_per_title_and_not_node_8(coilmap):
                            coilmap.AUTO_PLUNGER) == (8, 4)
 
 
+def test_an_unnamed_trough_is_index_1_beside_the_auto_plunger(coilmap):
+    """JP The Pin 1.05 names six coils and not the trough; every title naming both has the
+    trough at index 1 on the plunger's board. Only when that slot is free and the plunger is 4."""
+    named = coilmap.parse(GZ_COILS)
+    assert coilmap.eject_address(named) == coilmap.address(named, coilmap.TROUGH) == (8, 1)
+    pin = [c for c in named if c["name"] != coilmap.TROUGH]
+    assert coilmap.address(pin, coilmap.TROUGH) is None
+    assert coilmap.eject_address(pin) == (8, 1)
+    taken = pin + [dict(pin[0], name="SOMETHING ELSE", index=1)]
+    taken[-1]["node"] = 8
+    assert coilmap.eject_address(taken) is None
+    moved = [dict(c, index=5) if c["name"] == coilmap.AUTO_PLUNGER else c for c in pin]
+    assert coilmap.eject_address(moved) is None
+    assert coilmap.eject_address([]) is None
+
+
 def test_a_board_the_enumeration_cannot_name_gives_none_not_a_guess(coilmap):
     """jaws_le's group 8 toys. A guessed node would watch the wrong wire."""
     shark = coilmap.by_name(coilmap.parse(JAWS_COILS), "SHARK MOTOR UP/DOWN")

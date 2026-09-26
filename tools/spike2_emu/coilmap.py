@@ -635,6 +635,28 @@ def address(coils, name):
     return (c["node"], c["index"])
 
 
+def eject_address(coils):
+    """(node, index) of the trough EJECT, or None: the named TROUGH row, else index 1 beside
+    the AUTO PLUNGER.
+
+    JP The Pin 1.05's device table names six coils and the trough is not one of them, so a
+    feeder that asked by name never saw a ball served, and no ball it could not see could
+    drain (item 162). On every one of the 27 latest titles whose table names BOTH coils the
+    trough is index 1 on the auto plunger's own board, which is index 4 (census 2026-09-25,
+    devicexy over each title's game binary). So the eject is read off that pair - but only
+    when the plunger IS index 4 and nothing else in the table is named at index 1 there.
+    """
+    got = address(coils, TROUGH)
+    if got is not None:
+        return got
+    plunger = address(coils, AUTO_PLUNGER)
+    if plunger is None or plunger[1] != 4:
+        return None
+    if any(c.get("node") == plunger[0] and c.get("index") == 1 for c in coils):
+        return None
+    return (plunger[0], 1)
+
+
 def for_game(tables_dir):
     """Every coil for a title, given its built tables directory."""
     return load(os.path.join(tables_dir or "", "device_xy.txt"))

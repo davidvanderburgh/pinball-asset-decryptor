@@ -96,3 +96,12 @@ is the way to read a `cshot`'s own name if that is ever wanted.
   and pick again", each naming the Godzilla shots TMNT lacks (Powerlines, Maser and
   Godzilla targets, Building, Big loop, the shields) and the start shot it falls back
   to (Center loop). The source project was unchanged.
+- In the app (done 2026-09-26, the server from this worktree in the browser, preview
+  switch on): Project menu > Open project on a copy of that Godzilla Premium project,
+  Modes tab lists its 8 modes + 1 in C, **Copy to...** under the list, the folder
+  dialog on an empty Godzilla Pro 1.16 project, Choose this folder. The "Copy modes"
+  box read "Copied 9 modes ... 8 run on Godzilla Pro 1.16 as they are; 1 code mode
+  copied as it is" with a line per mode, the log had the same lines, and opening the
+  destination project showed "Godzilla Pro 1.16 · 21 shots · 8 modes + 1 in C" with
+  ATOMIC BREATH "Ready to build". On disk: 9 folders, 203 MB, every mode.json now
+  titled for Pro 1.16, the code mode's C file in place.

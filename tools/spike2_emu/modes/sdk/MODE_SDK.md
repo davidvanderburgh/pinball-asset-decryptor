@@ -1368,7 +1368,8 @@ Two things learned doing it:
   char, FLAG|id, 7 f32, a byte, 4 f32 of UV, its atlas page (inline the first time, then a bare id),
   and an empty list.
 
-Seen in a game, words drawn: Deadpool LE and Pro, Metallica (its live "TOTAL 0" too), The Beatles.
+Seen in a game, words drawn: Deadpool LE and Pro, Metallica (its live "TOTAL 0" too), The Beatles, and
+Elvira, whose one HUD font has a single 256 px size (its words drew huge and blurred; now 53 px).
 
 ### Screens on every title (item 164)
 

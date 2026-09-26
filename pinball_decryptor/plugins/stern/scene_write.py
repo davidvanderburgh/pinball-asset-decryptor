@@ -464,7 +464,7 @@ PROFILES = {
         font=(105, 'Stern_HouseofTerror_OutlineWhite'), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=1, root_count_at=0x131178, root_count=7,
         insert_at=0x133CB2, insert_before=(0x8000012C, 'Per_Instance7'),
-        first_free_id=0x400, in_game=True, video=(5, 9)),
+        first_free_id=0x400, in_game=True, video=(5, 9), words_font=(1, 10)),
     "832c77c669803d557c730a3be09fb9e5": SceneProfile(
         label='James Bond 007 LE 1.06 in-game 6fb39344 (item 164, read statically)',
         scene_id='6fb393447ae7e3c2e1c629efff24bd1991ac1368/7de1c1596973efa1e95d16d7cb9229f4c6d36db9', tree='auto_loaded',

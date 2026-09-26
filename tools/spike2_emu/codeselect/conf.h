@@ -88,8 +88,9 @@
  *                            themes.json); a bad value is counted and ignored
  *   volume_max=<0-100>       the menu's level never goes above this, whatever
  *                            volume=, --volume or the remembered level say
- *                            (item 120; the build's own VOLUME_CEILING - 40 on
- *                            JJP, 100 on Stern - is the most it can be)
+ *                            (item 120; the build's own VOLUME_CEILING, 100,
+ *                            is the most it can be; the JJP build's 100 plays
+ *                            at 10% of the samples, VOLUME_FULL_PCT, PAD-219)
  *   key_left=<byte>.<bit>    JJP only (--input jjpio): where the LEFT flipper
  *   key_right=<byte>.<bit>   / RIGHT flipper / START / Volume+ / Volume- sit
  *   key_start=<byte>.<bit>   in the I/O board's 64-byte frame, active low.

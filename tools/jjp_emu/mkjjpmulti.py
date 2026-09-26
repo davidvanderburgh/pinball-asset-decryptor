@@ -208,12 +208,15 @@ JJP_UPDATE_POLICIES = ("refuse", "allow")
 #: THE MENU'S VOLUME ON A JJP MACHINE (item 120).  JJP runs its amplifier chain at full
 #: (root A's asound.state holds 0 dB, scripts/audio/mute.pl sets 100%) and turns only the
 #: game's own stream down to the operator volume, so the menu's software gain is the level
-#: the speakers get - volume=50 was "very high" on the first GNR.  A quiet default, a cap
-#: this builder refuses past (the selector's JJP build cannot pass it either, and the
-#: machine's own Volume+/- buttons step within it), and every menu sound and music bed the
-#: media step writes peak-levelled to one mark, so no source file arrives louder than planned.
-VOLUME_DEFAULT = 20
-VOLUME_MAX = 40
+#: the speakers get - volume=50 was "very high" on the first GNR.  The number is 0-100 as on
+#: Stern, but the selector's JJP build plays 100 at 10% of the samples (VOLUME_FULL_PCT,
+#: PAD-219: the scale was 0-40 with 20 the default, and 20 was already high on David's GNR
+#: and 8 "at max" on cooltoy's Sonic).  A middling default, a cap this builder refuses past,
+#: the machine's own Volume+/- buttons stepping within it, and every menu sound and music
+#: bed the media step writes peak-levelled to one mark, so no source file arrives louder
+#: than planned.
+VOLUME_DEFAULT = 50
+VOLUME_MAX = 100
 # -3 dBFS, not -12: at -12 on top of volume 20 the menu's 40 ms click peaked 20 dB under
 # the pre-120 menu David called very loud, and on the GNR that read as no sound at all
 # (2026-09-14).  At -3 the default sits 11 dB under it and the cap 5 dB under it.

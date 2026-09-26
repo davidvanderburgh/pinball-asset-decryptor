@@ -65,13 +65,14 @@ def test_backend_lookup_and_defaults():
 
 
 def test_menu_volume_default_and_cap_follow_the_platform():
-    """Item 120: a JJP machine keeps its amplifiers at full while the menu plays, so its
-    menu starts quiet and cannot pass 40; Stern's card keeps 50 and 0-100."""
-    assert (JJP.volume_default, JJP.volume_max) == (20, 40)
+    """Item 120 / PAD-219: both platforms show 0-100 and start at 50; a JJP machine keeps
+    its amplifiers at full while the menu plays, so the JJP selector plays its 100 at 10%
+    of the samples (the old 0-40 scale, on which 8 was still "at max", is gone)."""
+    assert (JJP.volume_default, JJP.volume_max) == (50, 100)
     assert (STERN.volume_default, STERN.volume_max) == (50, 100)
-    loud = mt.validate_form(jjp_form(volume=41), sources=False)
-    assert any(e.startswith("Volume is 0-40.") for e in loud), loud
-    assert not any(e.startswith("Volume is") for e in mt.validate_form(jjp_form(volume=40), sources=False))
+    loud = mt.validate_form(jjp_form(volume=101), sources=False)
+    assert any(e.startswith("Volume is 0-100.") for e in loud), loud
+    assert not any(e.startswith("Volume is") for e in mt.validate_form(jjp_form(volume=100), sources=False))
     rows = [ImageRow(path="D:/a.raw"), ImageRow(path="D:/b.raw")]
     assert not any(e.startswith("Volume is")
                    for e in mt.validate_form(MultibootForm(images=rows, volume=41), sources=False))

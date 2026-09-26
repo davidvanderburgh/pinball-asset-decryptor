@@ -28,6 +28,9 @@ drains + inspects what the selector writes.
      ceiling is cut to it.  The file names the card's volume= it was set
      under (PAD-216): a card with another volume=, or a file with no card
      level (an older menu's), starts at the card's own volume= instead.
+     The menu opens with the indicator up for 3 s on its own (PAD-219), and
+     that alone writes nothing: the frame 1.5 s into an untouched run holds
+     it, the frame after it has gone is the plain menu, the file is as it was.
 """
 import math
 import os
@@ -236,11 +239,23 @@ def volume_buttons(binp, t, font):
     if kept != "35":
         ok = fail("%s holds %r, expected '35'" % (volfile, kept))
 
-    # D: nothing pressed, and --volume past the ceiling
-    rc, got, out, logtxt, keys, kept, _, ppm_none = run("volnone", [], ["--volume", "90"])
+    # D (PAD-219): nothing pressed.  As the menu opens the indicator is up on
+    # its own for 3 s - the frame at 1.5 s holds "VOLUME 35 / 40" - and that
+    # writes nothing; once it has gone (the "wait"), the frame is the untouched
+    # menu, still nothing written, and --volume past the ceiling is cut to it
+    rc, got, out, logtxt, keys, kept, _, ppm_start = run("volstart", [])
+    if "volume: indicator on at 35 for 3000 ms" not in logtxt:
+        ok = fail("the menu did not open with the indicator up:\n%s"
+                  % "\n".join(l for l in logtxt.splitlines() if "volume" in l))
+    if kept != "35" or re.search(r"volume: \d+ remembered in", logtxt):
+        ok = fail("the start indicator rewrote %s (%r, expected '35' and no write)" % (volfile, kept))
+    rc, got, out, logtxt, keys, kept, _, ppm_none = run("volnone", ["wait"], ["--volume", "90"])
     if "volume: 90 (--volume) is above the ceiling, 40 is used" not in logtxt:
         ok = fail("--volume 90 was not cut to the ceiling")
-    if kept != "35":
+    if "volume: indicator off at 40" not in logtxt:
+        ok = fail("the start indicator did not go on its own:\n%s"
+                  % "\n".join(l for l in logtxt.splitlines() if "volume" in l))
+    if kept != "35" or re.search(r"volume: \d+ remembered in", logtxt):
         ok = fail("an untouched menu rewrote %s (%r, expected '35')" % (volfile, kept))
 
     # E (PAD-216): the card is rebuilt with volume=8 and perm kept - the 35
@@ -274,14 +289,17 @@ def volume_buttons(binp, t, font):
         ok = fail("an untouched menu rewrote the older file (%r)" % kept)
 
     box = (400, 300, 960, 440)       # the middle of the card row at 1360x768 (draw_volume)
-    up, gone, none = (ppm_region(p, *box) for p in (ppm_up, ppm_gone, ppm_none))
+    up, gone, none, at_start = (ppm_region(p, *box) for p in (ppm_up, ppm_gone, ppm_none, ppm_start))
     if up == none:
         ok = fail("no indicator in the frame drawn while it was up")
     if gone != none:
         ok = fail("the indicator was still in the frame after it should have gone")
+    if at_start == none:
+        ok = fail("no indicator in the frame drawn 1.5 s into an untouched menu (PAD-219)")
     if ok:
         print("jjpio_test: volume OK (20 -> 25 -> 30 -> 25 -> 30 kept; remembered 30 -> cap 40; "
-              "indicator up and gone; --volume 90 cut to 40; a new card's volume= beats the old level)")
+              "indicator up at the start, after a press, and gone; --volume 90 cut to 40; "
+              "a new card's volume= beats the old level)")
     return ok
 
 

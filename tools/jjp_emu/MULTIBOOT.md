@@ -169,7 +169,12 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   remembered level; now a new `volume=` wins. They change the MENU's
   level only; the game's operator volume is JJP's own and is not read. In the
   rig they are the switch matrix's Up / = and Down / - keys, from either
-  window.
+  window. The menu also opens with "VOLUME n / 40" up for its first 3 s on
+  its own (PAD-219: cooltoy's Sonic was "at max" at volume=20, 8 and 10
+  alike, with the PAD-216 fix on the card, and no machine log to read; the
+  number on the glass says which level the menu holds, and a Down press
+  that leaves the sound as loud says it is not the menu's). A start
+  indicator writes nothing to perm; only a press does.
 - **The media** the JJP media step writes is peak-levelled: every menu sound
   and music bed to -3 dBFS (`selectmedia.py prepare --peak-dbfs -3`; -12 until
   2026-09-14, when the GNR's 40 ms click at -26 dBFS read as no sound at all), so no

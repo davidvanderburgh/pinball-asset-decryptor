@@ -93,6 +93,15 @@
 #endif
 #define VOL_STEP     5              /* one Volume+/- press */
 #define VOL_OSD_MS   2000           /* the indicator stays this long after the last press */
+/* THE INDICATOR AT THE START (PAD-219): on a JJP machine the menu opens with
+ * "VOLUME n / cap" up for this long, unasked.  cooltoy's Sonic played "at max"
+ * at volume=20, 8 and 10 alike, and a card built with the PAD-216 fix on it
+ * changed nothing; whether the level the menu holds is his volume= or the
+ * cap, and whether the sound he hears is even the menu's, is a thing a
+ * photograph of the glass answers and the builder's log cannot.  Off the
+ * machine (--snapshot, every other backend) nothing is shown, and a start
+ * indicator alone writes nothing to perm: only a press does. */
+#define VOL_OSD_START_MS 3000
 #define HEADLESS_W   1360
 #define HEADLESS_H   768
 #define MAX_VISIBLE  4              /* cards in a row; more = carousel */
@@ -2019,6 +2028,13 @@ int main(int argc, char **argv)
     gfx_clean(&g);
     music_clip = media.music[hl];
     if (music_clip) music_voice = audio_play(au, music_clip, 1);
+    /* the level on the glass as the menu opens (PAD-219): the loop below draws
+     * the indicator over the menu until osd_until, as after a press */
+    if (vol_keys && !snapshot) {
+        osd_until = start + VOL_OSD_START_MS;
+        sel_log("volume: indicator on at %d for %d ms (the menu's start; only a press writes the level)",
+                volume, VOL_OSD_START_MS);
+    }
 
     /* the loop's own account: how many passes, the longest one (a stall this
      * long is a press that can be missed on a polled backend and a hitch in
@@ -2183,7 +2199,9 @@ int main(int argc, char **argv)
             osd_until = 0;
             draw_menu(&g, font, &L, &c, &media, hl, remain, action, audio_missing(au));
             sel_log("volume: indicator off at %d", volume);
-            remember_volume(vol_file, volume, vol_conf, &vol_saved);
+            /* the start indicator (PAD-219) settles nothing: a level no
+             * button moved is not written to perm */
+            if (vol_touched) remember_volume(vol_file, volume, vol_conf, &vol_saved);
         } else if (osd_until) {
             draw_volume(&g, font, &L, volume, vol_cap);
         }

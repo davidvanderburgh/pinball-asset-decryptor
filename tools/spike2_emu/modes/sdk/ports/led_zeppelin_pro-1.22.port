@@ -5,6 +5,18 @@
 # Shots no press made (their switch is left out of the check, or needs two): Shot 0x20000, Shot 0x1000000, Shot 0x8000000, Shot 0x10000000, Shot 0x20000000.
 # program sha1 c7d18db97aa783fc1af2e8ce1a4c646f4ecdbb9a, portgen revision 3, 7 reference port(s) of framework generation B.
 # 25 shot(s) the app could not name are named after the switch that made them in the check.
+# The 11 the check left as "?" (0x80..0x800, 0x40000..0x800000) were named on 2026-09-25 after the LE 1.22
+# port's names for the same bits, read at the desk: both builds' cshot objects carry the SAME message id per
+# bit (3029..3057, 3061, in mask order; the LE adds 0x40000000 = 3160), and the Pro's own switch table has the
+# same switches (3 BANK DROP-Z/E/P, ICARUS TARGET, LEFT/RIGHT ORBIT, the LEFT/CENTER/RIGHT RAMP EXIT OPTOs).
+# One exception to read with care: 0x200000 (message 3050, the LE's SIDE RAMP EXIT OPTO) - the Pro has no side
+# ramp switch (HERMIT TARGET stands in its table where the LE has the ELECTRIC MAGIC SPINNER OPTO), yet a
+# press made that shot in the Pro's check. The name is the game's own shot, not a Pro switch.
+# Check this game, 2026-09-26, on these names: 25 of the 30 shots came from their switches - every one of the
+# 11 among them - a drain ended the ball and 5 events fired. WHICH switch made each is not in the record: the
+# rig's switch list names this build's node-9 switches (ids 78-91: the drops, Icarus, the orbits, the ramp
+# optos, Hermit) "?", so the check could not say, and its raw log was cleared by the next run. A census with
+# the raw marks read straight after the run would close that.
 # Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds.
 
 game           led_zeppelin_pro
@@ -284,23 +296,23 @@ shot 0x8             Mid 3 bank target-l
 shot 0x10            Mid 3 bank target-e
 shot 0x20            Mid 3 bank target-d
 shot 0x40            Mid 3 bank target-l 2
-shot 0x80            ?
-shot 0x100           ? 2
-shot 0x200           ? 3
-shot 0x400           ? 4
-shot 0x800           ? 5
+shot 0x80            3 Bank drop-z
+shot 0x100           3 Bank drop-e
+shot 0x200           3 Bank drop-p
+shot 0x400           3 Bank drop-p 2
+shot 0x800           Icarus target
 shot 0x1000          Right 4 bank target-r
 shot 0x2000          Right 4 bank target-o
 shot 0x4000          Right 4 bank target-c
 shot 0x8000          Right 4 bank target-k
 shot 0x10000         Right 4 bank target-k 2
 shot 0x20000         Shot 0x20000
-shot 0x40000         ? 6
-shot 0x80000         ? 7
-shot 0x100000        ? 8
-shot 0x200000        ? 9
-shot 0x400000        ? 10
-shot 0x800000        ? 11
+shot 0x40000         Left orbit
+shot 0x80000         Left ramp exit opto
+shot 0x100000        Center ramp exit opto
+shot 0x200000        Side ramp exit opto
+shot 0x400000        Right ramp exit opto
+shot 0x800000        Right orbit
 shot 0x1000000       Shot 0x1000000
 shot 0x2000000       Left return lane
 shot 0x4000000       Right return lane

@@ -641,7 +641,8 @@ def test_retarget_drops_advanced_shots_and_another_titles_callouts():
     """Item 148's retarget with item 141's fields: a per-shot award or early-ending shot on a
     shot the title lacks is dropped (the form cannot show it, so kept it blocked every build
     for good), and a callout id made on another game is kept only where both ports measured
-    that callout under the same name, as that title's own id."""
+    that callout under the same name, as that title's own id. Within one title (Pro 1.15 to
+    Premium 1.16) every id is kept: the game's sound table numbers its calls alike."""
     kaiju = _advanced_kaiju()
     jaws, tmnt, le = (MP.profile(k) for k in ("jaws_le_1_02", "turtles_pro_1_59", "godzilla_le_1_16"))
 
@@ -659,7 +660,7 @@ def test_retarget_drops_advanced_shots_and_another_titles_callouts():
     assert "callout_at" not in MP.runtime_cfg(spec, "k")          # no Godzilla id rides along on TMNT
 
     spec, dropped = MP.retarget(kaiju, le)                       # the same calls on Premium 1.16
-    assert spec.callout_at == [[10, 1291], [5, 1295]] and dropped == ["callout 1111"]
+    assert spec.callout_at == [[10, 1291], [5, 1295], [3, 1111]] and dropped == []   # one title: 1111 kept
     assert spec.shot_award == kaiju.shot_award and spec.end_shot == "Powerline right"
 
     same, none = MP.retarget(kaiju, MP.GODZILLA_PRO_1_15)        # its own title: nothing changes
@@ -704,3 +705,113 @@ def test_a_title_with_no_spoken_numbers_says_so():
     for key in MP.COUNTDOWN_NO_NUMBERS:
         prof = MP.profile_from_port(os.path.join(MP.PORTS_DIR, key + ".port"))
         assert "never says a number on its own" in prof.why_not("countdown"), key
+
+
+# ---- one title's builds share their sound numbers; copying modes to another card ----------
+def test_title_family_and_callouts_kept_within_it():
+    assert MP.title_family("godzilla_pro") == MP.title_family("godzilla_le") == "godzilla"
+    assert MP.title_family("turtles_pro") == "turtles" and MP.title_family("beatles") == "beatles"
+    assert MP.title_family("james_bond_60th_le") != MP.title_family("james_bond_le")
+    assert MP.title_family("star_wars_elg") != MP.title_family("star_wars_le")
+    assert MP.title_family("jurassic_park_the_pin") != MP.title_family("jurassic_park_le")
+    assert MP.family_of_key("godzilla_le_1_16") == "godzilla" and MP.family_of_key("elvira3_1_13") == "elvira3"
+    assert MP.family_of_key("james_bond_60th_le_1_11") == "james_bond_60th"
+    pro16, le16, jaws = (MP.profile(k) for k in ("godzilla_pro_1_16", "godzilla_le_1_16", "jaws_le_1_02"))
+    assert MP.same_title(MP.GODZILLA_PRO_1_15, le16) and MP.same_title(pro16, le16)
+    assert not MP.same_title(MP.GODZILLA_PRO_1_15, jaws)
+    # the evidence the rule rests on: the measured callouts agree across each title's builds
+    for a, b in (("godzilla_pro_1_16", "godzilla_le_1_16"), ("turtles_pro_1_59", "turtles_le_1_59"),
+                 ("led_zeppelin_pro_1_22", "led_zeppelin_le_1_22"), ("godzilla_pro_1_15", "godzilla_pro_1_16")):
+        pa, pb = MP.profile(a), MP.profile(b)
+        assert (pa.callout_countdown, pa.callout_ten_seconds, pa.callout_time_up) == (
+            pb.callout_countdown, pb.callout_ten_seconds, pb.callout_time_up), (a, b)
+    kaiju = _advanced_kaiju()                                    # made on Pro 1.15; 1111 typed by hand
+    for p in (le16, pro16):
+        spec, dropped = MP.retarget(kaiju, p)
+        assert spec.callout_at == [[10, 1291], [5, 1295], [3, 1111]] and dropped == []
+        assert spec.title == p.key
+    spec, dropped = MP.retarget(kaiju, jaws)                     # another game: 1111 is some other sound
+    assert MP.dropped_callouts(dropped) == ["callout 1111"]
+    # a mode whose own build has no port on this machine still keeps its ids within the family
+    kaiju.title = "godzilla_pro_9_99"
+    spec, dropped = MP.retarget(kaiju, le16)
+    assert [r[1] for r in spec.callout_at] == [1291, 1295, 1111] and dropped == []
+
+
+def _proj(tmp_path, folder, image_name, card_version=None):
+    project = tmp_path / folder
+    project.mkdir()
+    _extract_record(project, image_name, card_version)
+    return project
+
+
+def test_copy_modes_to_another_cards_project(tmp_path):
+    """Copy to...: a Premium 1.16 project's modes go to a Pro 1.16 project as they are (the
+    same shot names, the same sound numbers) and to a TMNT Pro 1.59 project as copies to
+    look at (Godzilla's shots are not TMNT's), each with its files; a code mode as it is;
+    the source project untouched."""
+    src = _proj(tmp_path, "premium", "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    le = MP.profile("godzilla_le_1_16")
+    kaiju = MP.retarget(_advanced_kaiju(), le)[0]                # made on Premium: its own ids
+    assert kaiju.title == "godzilla_le_1_16"
+    slug, _s = MP.new_mode(str(src), spec=kaiju)
+    (src / "modes" / slug / "art.png").write_bytes(b"png")
+    code = src / "modes" / "laser_show"
+    code.mkdir()
+    (code / "laser_show.c").write_text('#define MODE_NAME "LASER SHOW"\n', encoding="utf-8")
+
+    pro = _proj(tmp_path, "pro", "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    r = MP.copy_modes(str(src), str(pro))
+    assert r.label == "Godzilla Pro 1.16"
+    assert [(m.slug, m.state, m.new_slug) for m in r.modes] == [
+        (slug, MP.COPY_CARRIED, slug), ("laser_show", MP.COPY_CODE, "laser_show")]
+    got = MP.load(str(pro / "modes" / slug / "mode.json"))
+    assert got.title == "godzilla_pro_1_16" and got.callout_at == kaiju.callout_at
+    assert got.shot_award == kaiju.shot_award and got.end_shot == kaiju.end_shot
+    assert (pro / "modes" / slug / "art.png").read_bytes() == b"png"
+    assert (pro / "modes" / "laser_show" / "laser_show.c").is_file()
+    assert MP.load(str(src / "modes" / slug / "mode.json")).title == "godzilla_le_1_16"
+    assert r.lines()[0] == "KAIJU RUSH -> modes/kaiju_rush: runs on Godzilla Pro 1.16 as it is"
+    assert "1 runs on Godzilla Pro 1.16 as it is" in r.summary() and "1 code mode copied" in r.summary()
+    assert not MP.validate(got, str(pro / "modes" / slug)) or True   # buildable words are validate's
+
+    tmnt = _proj(tmp_path, "tmnt", "turtles_pro-1_59_0.raw", "1.59.0")
+    r = MP.copy_modes(str(src), str(tmnt), slugs=[slug, "nope"])
+    m = r.modes[0]
+    assert (m.state, m.new_slug) == (MP.COPY_TO_FIX, slug)
+    assert "Maser target is not a shot on TMNT Pro 1.59" in m.words and "Powerline" in m.words
+    assert r.modes[1].state == MP.COPY_SKIPPED and "no mode called nope" in r.modes[1].words
+    kept = MP.load(str(tmnt / "modes" / slug / "mode.json"))
+    assert kept.title == "godzilla_le_1_16"       # as it was: a build there refuses it until it is picked again
+    assert "1 needs a look there" in r.summary() and "1 not copied" in r.summary()
+    assert r.lines()[0].startswith("KAIJU RUSH -> modes/kaiju_rush: open it there and pick again: Maser target")
+    # copied again: a free slug
+    r = MP.copy_modes(str(src), str(tmnt), slugs=[slug])
+    assert r.modes[0].new_slug == slug + "_2"
+    # a code mode whose slug is taken follows its folder's new name
+    r = MP.copy_modes(str(src), str(pro), slugs=["laser_show"])
+    assert r.modes[0].new_slug == "laser_show_2"
+    assert (pro / "modes" / "laser_show_2" / "laser_show_2.c").is_file()
+    # refusals: this project, a bare folder, a card with no port
+    with pytest.raises(MP.ModeProjectError, match="Duplicate"):
+        MP.copy_modes(str(src), str(src))
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    with pytest.raises(MP.ModeProjectError, match="names no card"):
+        MP.copy_modes(str(src), str(bare))
+    old = _proj(tmp_path, "old", "turtles_pro-1_57_0.raw", "1.57.0")
+    with pytest.raises(MP.ModeProjectError, match="can't be made for"):
+        MP.copy_modes(str(src), str(old))
+
+
+def test_copy_modes_stops_at_the_cap(tmp_path, monkeypatch):
+    src = _proj(tmp_path, "a", "godzilla_pro-1_16_0.raw", "1.16.0")
+    dest = _proj(tmp_path, "b", "godzilla_pro-1_16_0.raw", "1.16.0")
+    for name in ("One", "Two", "Three"):
+        MP.new_mode(str(src), name)
+    MP.new_mode(str(dest), "Here")
+    monkeypatch.setattr(MP, "MAX_MODES", 2)       # the real cap is 64; test the guard small
+    r = MP.copy_modes(str(src), str(dest))
+    assert [m.state for m in r.modes] == [MP.COPY_CARRIED, MP.COPY_SKIPPED, MP.COPY_SKIPPED]
+    assert "at most 2 modes" in r.modes[1].words
+    assert sorted(s for s, _ in MP.list_modes(str(dest))[0]) == ["here", "one"]

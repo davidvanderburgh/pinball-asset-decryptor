@@ -2448,6 +2448,17 @@ PREVIEW_HELP = {
              "after that one ends starts it. A card carries one end sound of a "
              "mode's own: the first mode that has one, and the Sound section says "
              "whose."),
+            ("Another card",
+             "Copy to…, under the list, copies every mode here into another "
+             "card's project: pick that project's folder. Each mode goes with "
+             "its picture, clip and sounds, and is matched to that card's shots "
+             "by name, as opening it there would match it. A mode that loses "
+             "nothing is saved for that card and builds there as it is; one that "
+             "names a shot the card lacks is copied as it was, and the message "
+             "says to open it there and pick its shots. Another version of the "
+             "same game, or its Pro beside the Premium, keeps every sound "
+             "number; another game keeps only the callouts the app measured on "
+             "both."),
             ("Try it",
              "Try it builds this project's modes exactly as Write puts them on a "
              "card, then starts the card in the Emulate tab with them; the run is "

@@ -1466,7 +1466,11 @@ edits the mode there. Advanced's fields follow the same rule: a per-shot award o
 early-ending shot on a shot the card's game lacks is dropped from the form, and a callout
 id made on another title is kept only where both ports name that callout alike (Godzilla's
 ten-seconds call 1291 becomes Jaws's 1387); any other id is dropped, since the same number
-plays some other sound on another game, and the build refuses the mode until it is edited. Today: Godzilla Pro 1.15 and Premium/LE 1.16 have every section; Jaws LE
+plays some other sound on another game, and the build refuses the mode until it is edited -
+unless the two builds are ONE title (`mode_project.same_title`: another version, or the Pro beside
+the Premium/LE), whose sound table numbers its calls alike, so every id is kept: each callout the
+Pro and LE ports of Godzilla 1.16, TMNT 1.59 and Led Zeppelin 1.22 measured has one id on both, as
+do Godzilla Pro 1.15 and 1.16. Today: Godzilla Pro 1.15 and Premium/LE 1.16 have every section; Jaws LE
 1.02 has no lights (no light owner) and no screen (its score panel is not measured), and
 has clips (a title card added to its bank played on the glass in the emulator); TMNT Pro and
 Deadpool Pro have shots and scoring only, Deadpool LE 1.14 events too. The Beatles 1.29 has shots (its own and from
@@ -1474,6 +1478,18 @@ switches), 32-bit scoring, the countdown and events; lights, screen, clip, a sou
 mode's own and `stack` are greyed. Only the two Godzilla ports name the game's own mode
 queries, so `stack` is greyed on every other title, and only they, The Beatles and Deadpool LE carry
 events, so "An event" is greyed on every other title.
+
+**Copying modes to another card's project (Copy to..., under the list).** A mode is not tied
+to a build: `mode_project.copy_modes(src, dest)` copies every mode folder of one project (picture,
+clip and sounds too) into another card's project and matches each to that card's title exactly as
+opening it there would (`retarget`). A mode that loses nothing is saved for the title, so it builds
+there as it is; one that names a shot the card lacks is copied as it was, so a build there keeps
+refusing it until it is opened and its shots picked, and the report (a message box, and a log line
+per mode) says which and why in the tab's own words (`retarget_words`). Code modes are copied as
+they are. So a Premium project's modes move to the Pro, or from 1.58 to 1.59, in one pass; what
+decides how clean the move is is the two ports' shot NAMES: the Pro and LE ports of Godzilla 1.16,
+TMNT 1.59 and Led Zeppelin 1.22 name their shots alike, Deadpool LE has three the Pro lacks, and a
+shot a port leaves unnamed (`Shot 0x..`) never matches.
 
 ### Making a port for another game or version
 

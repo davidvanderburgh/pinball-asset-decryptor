@@ -287,7 +287,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
-                 cap_text="", new_ok=False, ex_ok=False, dup_ok=False, del_ok=False,
+                 cap_text="", new_ok=False, ex_ok=False, dup_ok=False, del_ok=False, copy_ok=False,
                  examples=[], open=False, editor_on=False, form=dict(self.f),
                  shots_on=[], awards=dict(self._shot_awards), shots_text="", status="",
                  save_state="", labels={}, files={}, starts_words="", preview=None,
@@ -1514,48 +1514,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @staticmethod
     def _retarget_words(old, new, dropped, p):
-        words = []
-        if old.start_shot and new.start_shot != old.start_shot:
-            words.append("%s is not a shot on %s, so it starts on %s until you pick one" % (
-                old.start_shot, p.label, new.start_shot))
-        gone = [s for s in old.scoring_shots if s in dropped]
-        if gone:
-            words.append("%s %s not on %s, so %s left out of the shots that score" % (
-                ", ".join(gone), "is" if len(gone) == 1 else "are", p.label,
-                "it is" if len(gone) == 1 else "they are"))
-        words += ModesTab._retarget_advanced_words(old, new, dropped, p)
-        return "; ".join(words)
+        """What opening ``old`` on this card changed, in words: :func:`.mode_project.retarget_words`
+        (the same words Copy to... reports)."""
+        return MP.retarget_words(old, new, dropped, p)
 
     @staticmethod
     def _retarget_advanced_words(old, new, dropped, p):
-        words = []
-        rows = old.shot_award if isinstance(old.shot_award, list) else []
-        paid = []
-        for row in rows:
-            if (isinstance(row, (list, tuple)) and len(row) == 2 and row[0] in dropped
-                    and row[0] not in paid):
-                paid.append(row[0])
-        if paid:
-            words.append("%s %s not on %s, so %s own points %s left out" % (
-                ", ".join(paid), "is" if len(paid) == 1 else "are", p.label,
-                "its" if len(paid) == 1 else "their", "are"))
-        if isinstance(old.end_shot, str) and old.end_shot and not new.end_shot:
-            words.append("%s is not on %s, so no shot ends the mode early until you pick one" % (
-                old.end_shot, p.label))
-        calls = MP.dropped_callouts(dropped)
-        if calls:
-            words.append("%s %s a sound number of another game and no callout measured on %s, "
-                         "so %s left out" % (", ".join(calls), "is" if len(calls) == 1 else "are each",
-                                              p.label, "it is" if len(calls) == 1 else "they are"))
-        before = old.callout_at if isinstance(old.callout_at, list) else []
-        moved = ["callout %s is %s" % (a[1], b[1]) for a, b in zip(
-            [r for r in before if isinstance(r, (list, tuple)) and len(r) == 2
-             and MP.CALLOUT_DROPPED % MP._int_or_none(r[1]) not in calls],
-            [r for r in new.callout_at if isinstance(r, (list, tuple)) and len(r) == 2])
-            if MP._int_or_none(a[1]) != MP._int_or_none(b[1])]
-        if moved:
-            words.append("%s on %s, the same call" % (", ".join(moved), p.label))
-        return words
+        return MP.retarget_advanced_words(old, new, dropped, p)
 
     def _note_retarget_in_status(self):
         note = self._retarget_note
@@ -1749,6 +1714,33 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.refresh(select=slug)
         return slug
 
+    @rpc
+    def copy_to(self, dest=None):
+        """Copy to..., under the list: this project's modes go into another card's project
+        (``dest``, else its folder is asked for), each matched to that card's title as opening
+        it there would match it (:func:`.mode_project.copy_modes`). A message box sums it up
+        and the log gets a line per mode; the copies are looked at in THAT project's Modes
+        tab, so nothing here changes. Returns the report, or None."""
+        project = self.project()
+        if not project:
+            return None
+        self._save_if_edited()
+        if not dest:
+            dest = self.window.ask_folder(
+                "modes_copy_to", "Copy the modes to another card's project: pick its folder",
+                initialdir=os.path.dirname(os.path.normpath(project)))
+        if not dest:
+            return None
+        try:
+            report = MP.copy_modes(project, os.path.normpath(str(dest)))
+        except MP.ModeProjectError as e:
+            compat.messagebox.showinfo("Copy modes", str(e))
+            return None
+        for line in report.lines():
+            self._say("copied to %s: %s" % (report.dest, line))
+        compat.messagebox.showinfo("Copy modes", report.summary())
+        return report.to_json()
+
     def delete_mode(self, slug):
         MP.delete_mode(self.project(), slug)
         self._say("deleted modes/%s" % slug)
@@ -1806,7 +1798,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return "%s (the game's own sounds)" % spec.name
 
     def _refresh_code_modes(self, project):
-        self.set(code_words=self.code_modes_words(project), cut_ok=bool(project))
+        self.set(code_words=self.code_modes_words(project), cut_ok=bool(project),
+                 copy_ok=bool(project) and bool(self._slugs or self._code_list))
 
     def _show_code(self, slug):
         """The code mode ``slug`` in the editor's place: its Code and Assets panes."""

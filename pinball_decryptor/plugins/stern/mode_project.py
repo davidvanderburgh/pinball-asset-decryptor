@@ -869,7 +869,8 @@ LAMPS_PROVEN = frozenset((
     # (its enumeration gate gone, its 0x84/0x85 single-lamp writes read) had exactly that on the boards
     # it reads while the mode ran, not before or after: Aerosmith 104/104, Avengers 121/121, Guardians
     # 112/112, Iron Maiden 112/114, Mando 92/92, Rush 151/151 (its expressive-lighting strip past bank 0
-    # is not in the plane), Stranger Things 92/92 - each with its three named inserts at grey
+    # is not in the plane), Stranger Things 92/92, Sword of Rage, and Batman 121/125 once the runtime dropped
+    # the four ids past its 179 counted lights instead of every lamp - each with three named inserts at grey
     "aerosmith_le-1.15", "batman-1.13", "guardians_le-1.14", "mando_le-1.44", "rush_le-1.18",
     "avengers_infinity_le-1.09", "sword_of_rage_le-1.18", "iron_maiden_le-1.16",
     "stranger_things_le-1.12",

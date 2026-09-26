@@ -1426,6 +1426,40 @@ def examples_for(p):
     return [(spec.name, spec)]
 
 
+#: The model suffixes a Spike 2 game dir carries: the title behind ``godzilla_pro`` and
+#: ``godzilla_le`` is ``godzilla``. ``james_bond_60th_le`` and ``james_bond_le`` stay two
+#: titles, as do ``star_wars_le`` and ``star_wars_elg``, ``jurassic_park_le`` and
+#: ``jurassic_park_the_pin``: only a model word comes off.
+MODEL_SUFFIXES = ("_pro", "_le", "_premium", "_prem")
+
+
+def title_family(game_dir):
+    """The title behind a build's game dir with its model taken off (``turtles_pro`` and
+    ``turtles_le`` -> ``turtles``), so the builds of one game can be told from another
+    game's. A game dir with no model word is its own family (``beatles``, ``batman``)."""
+    g = (game_dir or "").lower().strip()
+    for s in MODEL_SUFFIXES:
+        if g.endswith(s) and len(g) > len(s):
+            return g[:-len(s)]
+    return g
+
+
+def family_of_key(key):
+    """:func:`title_family` of a profile key (``godzilla_le_1_16`` -> ``godzilla``): a key
+    is the game dir and the version with its dots as underscores, so the version comes off
+    first. Answers for a title whose port this machine no longer has, too."""
+    return title_family(re.sub(r"(_\d+)+$", "", str(key or "")))
+
+
+def same_title(a, b):
+    """Are profiles ``a`` and ``b`` builds of ONE title - another version, or the Pro beside
+    the Premium/LE? Such builds number their calls alike: every callout the Pro and LE ports
+    of Godzilla 1.16, TMNT 1.59 and Led Zeppelin 1.22 measured has the same id on both, as
+    do Godzilla Pro 1.15 and 1.16, so a callout id typed on one is kept on the other
+    (:func:`retarget`). Another title's id is some other sound, and is dropped."""
+    return title_family(a.game_dir) == title_family(b.game_dir)
+
+
 def retarget(spec, p):
     """``spec`` for title ``p``: a COPY whose shots are matched by NAME. Returns
     ``(copy, dropped)``, ``dropped`` being the shot names ``p`` does not have. A start
@@ -1461,8 +1495,10 @@ def _retarget_advanced(out, old_key, p, names, dropped):
     kept it would block every build until the file was edited by hand. A callout id made
     on ANOTHER title is a number in that game's sound table, so it is kept only where it is
     a callout both titles measured under the same name (:func:`callout_choices`: Godzilla's
-    "Ten seconds left" 1291 is 1387 on Jaws); any other id is dropped as ``"callout <id>"``.
-    A row that is not ``[seconds, id]`` is left for :func:`validate` to name."""
+    "Ten seconds left" 1291 is 1387 on Jaws); any other id is dropped as ``"callout <id>"``
+    - unless the two builds are ONE title (:func:`same_title`: another version, or the Pro
+    beside the Premium/LE), whose sound table numbers its calls alike: then it is kept as it
+    is. A row that is not ``[seconds, id]`` is left for :func:`validate` to name."""
     if isinstance(out.shot_award, list):
         kept = []
         for row in out.shot_award:
@@ -1485,6 +1521,7 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         old = None
     was = {n: label for label, n in callout_choices(old) if n} if old is not None else {}
     now = {label: n for label, n in callout_choices(p) if n}
+    family = family_of_key(old_key) == title_family(p.game_dir)
     kept = []
     for row in out.callout_at:
         cid = _int_or_none(row[1]) if isinstance(row, (list, tuple)) and len(row) == 2 else None
@@ -1493,6 +1530,8 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         elif was.get(cid) in now:
             new = now[was[cid]]
             kept.append(row if new == cid else [row[0], new])
+        elif family:
+            kept.append(row)            # the same game's sound table: the id is the same call
         else:
             dropped.append(CALLOUT_DROPPED % cid)
     out.callout_at = kept
@@ -1512,6 +1551,221 @@ def retarget_refusal(spec, dropped, p):
             p.label))
     return "%s %s: open it in the Modes tab and pick %s for this card." % (
         spec.name, " and ".join(words), "again" if calls else "its shots")
+
+
+def retarget_words(old, new, dropped, p):
+    """What :func:`retarget` changed taking ``old`` to title ``p`` (``new`` and ``dropped``
+    are its returns), as one sentence for the person; "" when nothing changed. The Modes
+    tab says it in its status line when a mode is opened on another card's project, and
+    :func:`copy_modes` in its report."""
+    words = []
+    if old.start_shot and new.start_shot != old.start_shot:
+        words.append("%s is not a shot on %s, so it starts on %s until you pick one" % (
+            old.start_shot, p.label, new.start_shot))
+    gone = [s for s in old.scoring_shots if s in dropped]
+    if gone:
+        words.append("%s %s not on %s, so %s left out of the shots that score" % (
+            ", ".join(gone), "is" if len(gone) == 1 else "are", p.label,
+            "it is" if len(gone) == 1 else "they are"))
+    words += retarget_advanced_words(old, new, dropped, p)
+    return "; ".join(words)
+
+
+def retarget_advanced_words(old, new, dropped, p):
+    """The Advanced part of :func:`retarget_words`: per-shot points and an early-ending shot
+    on a shot the title lacks, callouts of another game left out, and the measured callouts
+    that moved to the title's own ids."""
+    words = []
+    rows = old.shot_award if isinstance(old.shot_award, list) else []
+    paid = []
+    for row in rows:
+        if (isinstance(row, (list, tuple)) and len(row) == 2 and row[0] in dropped
+                and row[0] not in paid):
+            paid.append(row[0])
+    if paid:
+        words.append("%s %s not on %s, so %s own points %s left out" % (
+            ", ".join(paid), "is" if len(paid) == 1 else "are", p.label,
+            "its" if len(paid) == 1 else "their", "are"))
+    if isinstance(old.end_shot, str) and old.end_shot and not new.end_shot:
+        words.append("%s is not on %s, so no shot ends the mode early until you pick one" % (
+            old.end_shot, p.label))
+    calls = dropped_callouts(dropped)
+    if calls:
+        words.append("%s %s a sound number of another game and no callout measured on %s, "
+                     "so %s left out" % (", ".join(calls), "is" if len(calls) == 1 else "are each",
+                                          p.label, "it is" if len(calls) == 1 else "they are"))
+    before = old.callout_at if isinstance(old.callout_at, list) else []
+    moved = ["callout %s is %s" % (a[1], b[1]) for a, b in zip(
+        [r for r in before if isinstance(r, (list, tuple)) and len(r) == 2
+         and CALLOUT_DROPPED % _int_or_none(r[1]) not in calls],
+        [r for r in new.callout_at if isinstance(r, (list, tuple)) and len(r) == 2])
+        if _int_or_none(a[1]) != _int_or_none(b[1])]
+    if moved:
+        words.append("%s on %s, the same call" % (", ".join(moved), p.label))
+    return words
+
+
+# ---- copying modes to another card's project ----------------------------------------
+#: What :func:`copy_modes` says became of each mode.
+COPY_CARRIED = "carried"      # saved for the destination's card: it builds there as it is
+COPY_TO_FIX = "to fix"        # copied as it was: open it there and pick what the card lacks
+COPY_CODE = "code"            # a code mode, copied as it is
+COPY_SKIPPED = "skipped"      # not copied; ``words`` says why
+
+
+@dataclass
+class CopiedMode:
+    slug: str                 # in the project it came from
+    name: str
+    state: str                # one of the COPY_* words
+    new_slug: str = ""        # in the destination; "" when it was not copied
+    words: str = ""           # what changed on the way, or why it was not copied
+
+    def line(self, label):
+        """One line for the log: where it went, and what to do about it."""
+        if self.state == COPY_SKIPPED:
+            return "%s: not copied: %s" % (self.name, self.words)
+        where = "%s -> modes/%s" % (self.name, self.new_slug)
+        if self.state == COPY_CODE:
+            return "%s: a code mode, copied as it is (%s)" % (where, self.words)
+        if self.state == COPY_TO_FIX:
+            return "%s: open it there and pick again: %s" % (where, self.words)
+        return "%s: runs on %s as it is%s" % (where, label, "; " + self.words if self.words else "")
+
+    def to_json(self):
+        return {"slug": self.slug, "name": self.name, "state": self.state,
+                "new_slug": self.new_slug, "words": self.words}
+
+
+@dataclass
+class CopyReport:
+    src: str
+    dest: str
+    label: str                # the destination card's title, as its port names it
+    modes: list = field(default_factory=list)
+
+    def of(self, state):
+        return [m for m in self.modes if m.state == state]
+
+    def lines(self):
+        return [m.line(self.label) for m in self.modes]
+
+    def summary(self):
+        """The words for a message box: the counts, then a line per mode."""
+        copied = [m for m in self.modes if m.state != COPY_SKIPPED]
+        parts = []
+        n = len(self.of(COPY_CARRIED))
+        if n:
+            parts.append("%d run%s on %s as %s" % (n, "s" if n == 1 else "", self.label,
+                                                  "it is" if n == 1 else "they are"))
+        n = len(self.of(COPY_TO_FIX))
+        if n:
+            parts.append("%d need%s a look there: open %s in that project's Modes tab and pick "
+                         "what %s lacks" % (n, "s" if n == 1 else "", "it" if n == 1 else "each",
+                                             self.label))
+        n = len(self.of(COPY_CODE))
+        if n:
+            parts.append("%d code mode%s copied as %s" % (n, "" if n == 1 else "s",
+                                                          "it is" if n == 1 else "they are"))
+        n = len(self.of(COPY_SKIPPED))
+        if n:
+            parts.append("%d not copied" % n)
+        head = "Copied %d mode%s into %s for %s." % (len(copied), "" if len(copied) == 1 else "s",
+                                                     self.dest, self.label)
+        if parts:
+            head += " " + "; ".join(parts) + "."
+        return head + ("\n\n" + "\n".join(self.lines()) if self.modes else "")
+
+    def to_json(self):
+        return {"src": self.src, "dest": self.dest, "label": self.label,
+                "modes": [m.to_json() for m in self.modes]}
+
+
+def _free_slug(project, base, taken):
+    """``base``, else ``base_2``, ``base_3``...: the first not in ``taken`` and not a folder
+    under ``project``'s modes."""
+    slug, n = base, 2
+    while slug in taken or os.path.exists(mode_folder(project, slug)):
+        slug, n = "%s_%d" % (base, n), n + 1
+    return slug
+
+
+def copy_modes(src, dest, slugs=None):
+    """Copy the modes of project ``src`` into project ``dest``, for the card ``dest`` was made
+    from. Each mode goes as its whole folder (picture, clip and sounds too) and is matched
+    to that card's title the way opening it there would be (:func:`retarget`: shots by
+    NAME, callouts by role or within the title family). A mode that loses nothing is saved
+    for the title, so it builds there as it is; one that names a shot the card lacks is
+    copied as it was, so a build there keeps refusing it until it is opened and its shots
+    picked - its words say which. A code mode (``modes/<slug>/<slug>.c``) is copied as it
+    is. ``slugs`` picks some; None takes them all. Nothing in ``src`` changes.
+
+    Returns a :class:`CopyReport`. Raises :class:`ModeProjectError` when ``dest`` is
+    ``src`` itself, names no card, or is a card with no port."""
+    src = os.path.normpath(str(src or ""))
+    dest = os.path.normpath(str(dest or ""))
+    for folder in (src, dest):
+        if not folder or not os.path.isdir(folder):
+            raise ModeProjectError("%s is not a folder" % (folder or "(no folder)"))
+    if _norm_path(src) == _norm_path(dest):
+        raise ModeProjectError("that is this project: Duplicate copies a mode within it")
+    card, p = project_profile(dest)
+    if card is None:
+        raise ModeProjectError("%s names no card, so the app does not know which game its modes "
+                               "would be for: extract a card into it first (Extract tab)." % dest)
+    if not card.game_dir:
+        raise ModeProjectError("the app has not read which game the card of %s is: open that "
+                               "project in the Extract tab first." % dest)
+    if p is None:
+        raise ModeProjectError(NO_PORT_HELP % card.label())
+    from . import code_modes as CM
+    found, broken = list_modes(src)
+    specs, why_broken = dict(found), dict(broken)
+    codes = CM.code_slugs(src)
+    want = list(slugs) if slugs is not None else [s for s, _ in found] + codes
+    report = CopyReport(src=src, dest=dest, label=p.label)
+    there = list_modes(dest)[0]
+    taken = {s for s, _ in there} | set(CM.code_slugs(dest))
+    room = MAX_MODES - len(there)
+    for slug in want:
+        if slug in specs:
+            spec = specs[slug]
+            if room <= 0:
+                report.modes.append(CopiedMode(slug, spec.name, COPY_SKIPPED, words=(
+                    "a card holds at most %d modes, and %s has them" % (MAX_MODES, dest))))
+                continue
+            new, dropped = retarget(spec, p)
+            new_slug = _free_slug(dest, slug, taken)
+            shutil.copytree(mode_folder(src, slug), mode_folder(dest, new_slug))
+            taken.add(new_slug)
+            room -= 1
+            words = retarget_words(spec, new, dropped, p)
+            if dropped:
+                report.modes.append(CopiedMode(slug, spec.name, COPY_TO_FIX, new_slug, words))
+            else:
+                save(dest, new_slug, new)
+                report.modes.append(CopiedMode(slug, spec.name, COPY_CARRIED, new_slug, words))
+        elif slug in codes:
+            try:
+                name = CM.load(src, slug).name
+            except (OSError, ValueError):
+                name = slug.upper()
+            new_slug = _free_slug(dest, slug, taken)
+            shutil.copytree(mode_folder(src, slug), mode_folder(dest, new_slug))
+            if new_slug != slug:
+                # a code mode is modes/<slug>/<slug>.c: the file follows its folder's new name
+                os.replace(os.path.join(mode_folder(dest, new_slug), slug + ".c"),
+                           os.path.join(mode_folder(dest, new_slug), new_slug + ".c"))
+            taken.add(new_slug)
+            report.modes.append(CopiedMode(slug, name, COPY_CODE, new_slug,
+                                           "a build says if %s lacks a shot it names" % p.label))
+        elif slug in why_broken:
+            report.modes.append(CopiedMode(slug, slug, COPY_SKIPPED,
+                                           words="its mode file does not load: %s" % why_broken[slug]))
+        else:
+            report.modes.append(CopiedMode(slug, slug, COPY_SKIPPED,
+                                           words="no mode called %s in %s" % (slug, src)))
+    return report
 
 
 def duplicate_mode(project, slug):

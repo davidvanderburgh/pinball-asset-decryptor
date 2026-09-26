@@ -1459,3 +1459,32 @@ def test_the_game_mode_page_reads_like_the_defaults_tab(tmp_path, preview_on, be
         assert timer["number"] == "Time"                 # "Drive My Car Time" under Drive My Car
         assert "DRIVE MY CAR TIME" in timer["hint"] and "AD_MODE_DRIVE_MY_CAR_TIMER" in timer["hint"]
         assert g["build"] == "The Beatles 1.29"
+
+
+def test_copy_to_puts_the_modes_in_another_cards_project(tmp_path, preview_on):
+    """Copy to..., under the list: this project's modes go to the project whose folder is
+    picked, matched to that card; a message box sums it up and the log has a line per mode."""
+    src = _card_project(tmp_path / "premium", "godzilla_le-1_16_0.raw")
+    dest = _card_project(tmp_path / "pro", "godzilla_pro-1_16_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, src, card=None)
+        assert w.state("modes")["copy_ok"] is False
+        assert w.call("modes.example", "KAIJU RUSH") == "kaiju_rush"
+        assert w.state("modes")["copy_ok"] is True
+        # cancelled: nothing copied
+        w.answers.append("")
+        assert w.call("modes.copy_to") is None
+        assert w.asked[-1]["title"].startswith("Copy the modes to another card's project")
+        assert _modes_on_disk(dest) == []
+        w.answers.append(str(dest))
+        r = w.call("modes.copy_to")
+        assert r["label"] == "Godzilla Pro 1.16"
+        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "kaiju_rush")]
+        assert _modes_on_disk(dest) == ["kaiju_rush"]
+        assert w.asked[-1]["title"] == "Copy modes"
+        assert w.asked[-1]["message"].startswith("Copied 1 mode into ")
+        assert "KAIJU RUSH -> modes/kaiju_rush: runs on Godzilla Pro 1.16 as it is" in w.asked[-1]["message"]
+        # this project itself is refused in a message box
+        w.answers.append(str(src))
+        assert w.call("modes.copy_to") is None
+        assert w.asked[-1]["title"] == "Copy modes" and "Duplicate" in w.asked[-1]["message"]

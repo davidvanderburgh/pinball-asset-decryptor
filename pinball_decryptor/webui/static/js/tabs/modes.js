@@ -270,6 +270,8 @@ function ModeList({ s, onNewCode, onAllNumbers }) {
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
       <div class="row" style="gap:6px">
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>
+        <${Button} size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
+          title="Copy every mode here into another card's project: pick that project's folder. Each is matched to that card's shots by name, and the app says which need a look there.">Copy to…<//>
         <${Button} size="sm" kind="ghost" icon="trash" disabled=${!s.del_ok} onClick=${() => call("modes.delete")}>Delete<//>
       </div>
     </div>

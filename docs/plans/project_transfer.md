@@ -62,7 +62,14 @@ ICARUS TARGET, LEFT/RIGHT ORBIT, the three RAMP EXIT OPTOs). The one to read wit
 care is 0x200000, the LE's SIDE RAMP EXIT OPTO: the Pro has no side ramp switch
 (HERMIT TARGET stands in its table where the LE has the ELECTRIC MAGIC SPINNER OPTO),
 yet a press made that shot in the Pro's check. The port's header says all this. The
-recipe was rebuilt (`port_tool.py recipe`). Not census-proven.
+recipe was rebuilt (`port_tool.py recipe`). Check this game on 2026-09-26 (the app's
+own flow, this worktree, the Pro card in the emulator): 25 of the 30 shots came from
+their switches, every one of the 11 renamed among them, a drain ended the ball and 5
+events fired. Which switch made each is not in the record: the rig's switch list names
+this build's node-9 switches (ids 78-91) "?", so the check reports "?" for them, and the
+raw mode log with the marks was cleared by a run another session started right after.
+Owed: a census read straight after the run (or the rig naming those switches) would
+tie each name to its switch.
 
 What it deliberately does not do: no merge of two projects' modes, no rename on the
 way, no build. The copies are for the person to look at in THAT project's Modes tab.

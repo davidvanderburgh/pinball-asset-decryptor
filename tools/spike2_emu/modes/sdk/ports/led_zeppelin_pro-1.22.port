@@ -11,7 +11,12 @@
 # same switches (3 BANK DROP-Z/E/P, ICARUS TARGET, LEFT/RIGHT ORBIT, the LEFT/CENTER/RIGHT RAMP EXIT OPTOs).
 # One exception to read with care: 0x200000 (message 3050, the LE's SIDE RAMP EXIT OPTO) - the Pro has no side
 # ramp switch (HERMIT TARGET stands in its table where the LE has the ELECTRIC MAGIC SPINNER OPTO), yet a
-# press made that shot in the Pro's check. The name is the game's own shot, not a Pro switch. Not census-proven.
+# press made that shot in the Pro's check. The name is the game's own shot, not a Pro switch.
+# Check this game, 2026-09-26, on these names: 25 of the 30 shots came from their switches - every one of the
+# 11 among them - a drain ended the ball and 5 events fired. WHICH switch made each is not in the record: the
+# rig's switch list names this build's node-9 switches (ids 78-91: the drops, Icarus, the orbits, the ramp
+# optos, Hermit) "?", so the check could not say, and its raw log was cleared by the next run. A census with
+# the raw marks read straight after the run would close that.
 # Callouts heard in the emulator 2026-09-24 (item 163): countdown, ten_seconds.
 
 game           led_zeppelin_pro

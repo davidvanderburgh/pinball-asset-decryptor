@@ -2045,7 +2045,9 @@ def test_tree_settings_reads_captions_off_a_game_elf(mk):
     from tests.test_stern_adjustments import make_elf
     rows = mk.tree_settings(make_elf([("AD_INVALID", 0, 0, 0), ("AD_FREE_PLAY", 0, 0, 1),
                                       ("AD_BALLS_PER_GAME", 3, 1, 10)]))
-    assert [r[0] for r in rows] == ["AD_FREE_PLAY", "AD_BALLS_PER_GAME"]
+    # this synthetic ELF points every descriptor at ONE caption, and the machine stores one
+    # record per caption: one row, the last setting spelt that way
+    assert [r[0] for r in rows] == ["AD_BALLS_PER_GAME"]
     assert all(isinstance(r[1], str) and r[1] for r in rows)
     assert mk.tree_settings(b"not an elf") is None
 

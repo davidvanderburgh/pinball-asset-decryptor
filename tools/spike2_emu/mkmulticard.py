@@ -6536,24 +6536,10 @@ def tree_settings(elf):
     is left out rather than keyed by a guess.  'where' is '' for the Adjustments menu, 'service'
     for another service screen, 'debug' for no menu at all, None when the menu could not be read.
     """
-    _v, _s, _e, adjustments = _stern_plugins()
-    from pinball_decryptor.plugins.stern import menu_visibility
-    try:
-        table = adjustments.AdjustmentTable(elf)
-    except ValueError:
-        return None
-    mode = adjustments._caption_mode(table)
-    where = menu_visibility.statuses(table) or {}
-    out = []
-    for i in range(1, table.count):
-        name = table.names[i]
-        if not name or not name.startswith("AD_"):
-            continue
-        direct, indirect = adjustments._caption_at(table, i)
-        cap = indirect if mode == "indirect" else direct
-        if adjustments._is_caption(cap):
-            out.append([name, cap, where.get(i)])
-    return out
+    _stern_plugins()                                      # puts the app's package on the path
+    from pinball_decryptor.plugins.stern import spb
+    rows = spb.elf_captions(elf)
+    return [[name, cap, where] for name, cap, where in rows.values()] if rows else None
 
 
 def tree_settings_at(image, part, subdir=None):

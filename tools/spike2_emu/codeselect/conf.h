@@ -21,6 +21,13 @@
  *                            "what if i want RANDOM|CUSTOM1|CUSTOM2?").
  *                            Without it a group CONSUMES its members, which is
  *                            the forty-variant jukebox and stays the default.
+ *   note=<index>|<text>      one line the menu draws under the card row while
+ *                            that image's card is highlighted, in place of the
+ *                            "< 1 / 3 >" counter (PAD-233: mkmulticard writes
+ *                            what the image's game code version costs in
+ *                            settings when its title is on the card at another
+ *                            version).  A group card draws none; an index that
+ *                            names no image is ignored.
  *   default=<index>          highlight when there is no usable last-choice file
  *                            (an IMAGE index; a member highlights its group's
  *                            card, unless that member keeps a card of its own)
@@ -164,6 +171,9 @@ struct conf_image {
     char music[CONF_STR];     /* WAV looped while highlighted, or "" */
     char confirm[CONF_STR];   /* WAV played when THIS image is confirmed, or
                                * "" = use the menu-wide sound_confirm */
+    char note[CONF_STR];      /* note=<N>|<text>: one line drawn under the card
+                               * row while this image's card is highlighted,
+                               * or "" (PAD-233) */
 };
 
 /* A GROUP CARD.  `card` is what the menu draws - the same seven display

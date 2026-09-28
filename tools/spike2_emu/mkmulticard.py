@@ -330,6 +330,15 @@ CONF_KEYS = ("default", "timeout", "heading", "text_size", "counter", "countdown
 SCORES_NAME_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$")
 
 
+def conf_note(text):
+    """One images.conf `note=` text: a single line, capped to what the selector stores."""
+    return " ".join(str(text or "").split())[:NOTE_MAX]
+
+
+#: The longest `note=` text written: the selector's CONF_STR (200) less its terminator, with room.
+NOTE_MAX = 190
+
+
 def check_scores_name(name, where="scores"):
     """A `scores=` name, or Refused - the same rule select.sh applies on the machine."""
     name = (name or "").strip()
@@ -1822,7 +1831,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
                        groups=None, default_card=None, heading=None, text_size=None,
-                       counter=None, countdown_word=None, footer=None, scores=None):
+                       counter=None, countdown_word=None, footer=None, scores=None, notes=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1958,6 +1967,12 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
             raise Refused("scores: image %d is not on the card (%d images)" % (int(i), len(devices)))
         if name:
             out.append("scores=%d|%s" % (int(i), check_scores_name(name)))
+    # PAD-233: {index: one line} the menu draws while that image is highlighted - what its
+    # game code version costs in settings.  One line, never a '|' the reader would split on
+    for i, text in sorted((notes or {}).items()):
+        text = conf_note(text)
+        if text and 0 <= int(i) < len(devices):
+            out.append("note=%d|%s" % (int(i), text))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -2020,7 +2035,8 @@ def parse_images_conf(text):
             "timeout": 15, "heading": None, "text_size": None,
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
-            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}}
+            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {},
+            "notes": {}}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -2091,6 +2107,11 @@ def parse_images_conf(text):
             # "the selector's own wording", and only the absent one can follow the
             # buttons the machine has
             conf["footer"] = val.strip()
+        elif key == "note":
+            # PAD-233: <index>|<text>; a line the selector would not draw is dropped
+            idx, _sep, text = val.partition("|")
+            if idx.strip().isdigit() and conf_note(text):
+                conf["notes"][int(idx.strip())] = conf_note(text)
         elif key == "scores":
             # PAD-226: dropped (the image shares) when select.sh would refuse it too
             idx, _sep, name = val.partition("|")
@@ -3282,7 +3303,7 @@ def machine_volume_for(path, part, subdir=None):
     return out
 
 
-def conf_for_plan(plan, args, existing=None, media=None):
+def conf_for_plan(plan, args, existing=None, media=None, versions=None):
     """images.conf text for the card: --conf verbatim, else generated from the layout with the
     flags, falling back to `existing` (a parsed conf already on the card) then to defaults.
     `media` (plan_media's answer) supplies the per-image media rows, the sounds and the volume;
@@ -3322,6 +3343,12 @@ def conf_for_plan(plan, args, existing=None, media=None):
         scores = {i: check_scores_name(x, "--own-scores") for i, x in enumerate(own.split(";")) if x.strip()}
     else:
         scores = dict(ex.get("scores") or {}) if same_n else {}
+    # PAD-233: the settings notes follow the images' own game code when it was read (build,
+    # update); an inject reads none, so a card of the same shape keeps the notes it carries
+    if versions is not None:
+        notes = settings_notes(versions)
+    else:
+        notes = dict(ex.get("notes") or {}) if same_n else {}
     default = args.default if getattr(args, "default", None) is not None else (ex["default"] if ex["default"] is not None else 0)
     timeout = args.timeout if getattr(args, "timeout", None) is not None else (ex["timeout"] if ex["timeout"] is not None else 15)
     font = SELECT_DIR + "/font.ttf"
@@ -3426,7 +3453,8 @@ def conf_for_plan(plan, args, existing=None, media=None):
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
                               groups=groups, default_card=default_card, heading=heading,
                               text_size=text_size, counter=counter,
-                              countdown_word=countdown_word, footer=footer, scores=scores)
+                              countdown_word=countdown_word, footer=footer, scores=scores,
+                              notes=notes)
 
 
 # ============================================================================= the JSON sidecars
@@ -5290,7 +5318,7 @@ def _update_locked(a, ts, card, dry):
     # the menu: re-injected when the image list moved or the menu flags say something new
     list_changed = any(a_.action != "keep" for a_ in actions)
     media = plan_media(a.media_dir, len(newplan.trees)) if a.media_dir else None
-    newconf = conf_for_plan(newplan, a, existing=conf_now, media=media)
+    newconf = conf_for_plan(newplan, a, existing=conf_now, media=media, versions=versions)
     u["inject"] = bool(list_changed or a.media_dir or newconf.strip() != render_images_conf_text(conf_now).strip())
     if a.expect_bytes is not None and u["size"] > a.expect_bytes * (1 + UPDATE_SLACK) + UPDATE_SLACK_BYTES:
         u["notes"].append("the update would write %s, more than the %s expected: a source changed since it was measured"
@@ -5491,7 +5519,7 @@ def render_images_conf_text(conf):
         # changed and every update re-injects its menu for nothing
         heading=conf.get("heading"), text_size=conf.get("text_size"),
         counter=conf.get("counter"), countdown_word=conf.get("countdown_word"),
-        footer=conf.get("footer"), scores=conf.get("scores"))
+        footer=conf.get("footer"), scores=conf.get("scores"), notes=conf.get("notes"))
 
 
 # ============================================================================= reading a card back
@@ -6649,6 +6677,24 @@ def settings_cost(recs):
             lines.append("They define exactly the same settings, so nothing is lost.")
         parts.append(" ".join(lines))
     return "\n\n".join(parts) or None
+
+
+def settings_notes(recs):
+    """{image index: the one line the boot menu draws under the row while that image is
+    highlighted} (images.conf `note=`, PAD-233) for every image whose title is on the card at
+    another version: how many settings carry over from each other version, and how many do not.
+    Empty when no title runs two versions."""
+    notes = collections.OrderedDict()
+    for p in settings_pairs(recs):
+        lost = len(p["only_a"]) + len(p["only_b"]) + len(p["renamed"])
+        for mine, mver, over in ((p["a"], p["a_version"], p["b_version"]),
+                                 (p["b"], p["b_version"], p["a_version"])):
+            part = "%d settings carry over from %s%s" % (
+                p["shared"], over, (", %d do not" % lost) if lost else ", all of them")
+            for i in mine:
+                notes[i] = (notes[i] + "; " + part) if i in notes else \
+                    "Game code %s: %s" % (mver, part)
+    return collections.OrderedDict(sorted(notes.items()))
 
 
 def _distinct(recs, key):
@@ -9181,7 +9227,7 @@ def main(argv=None):
                     for name in media["files"]:
                         say("media %s: %s" % (name, media["kinds"][name]))
                     say("media: %d files, %s" % (len(media["files"]), _gb(media["total"])))
-                conf = conf_for_plan(plan, a, media=media)          # generated (and validated) before the long copy
+                conf = conf_for_plan(plan, a, media=media, versions=versions)  # generated (and validated) before the long copy
                 manifests = selector_manifests(plan, conf, a.media_dir, [a.primary] + list(a.extra),
                                                versions=versions)
                 stage_selector(a.selector_dir, tempfile.mkdtemp(prefix="mkmulticard.chk."), conf, hook_game_script(SYNTH_GAME),

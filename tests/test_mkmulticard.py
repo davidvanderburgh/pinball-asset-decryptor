@@ -1489,6 +1489,40 @@ def test_conf_for_plan_takes_own_scores_from_the_flag_else_the_card(mk):
         mk.conf_for_plan(plan, argparse.Namespace(own_scores=";../x"), existing=ex)
 
 
+def test_the_menu_note_says_what_each_version_costs_in_settings(mk):
+    """PAD-233: `note=<N>|<text>` is the line the menu draws while image N is highlighted."""
+    recs = [_srec(mk, 0, "1.59.0", _S159), _srec(mk, 1, "1.58.0", _S158, fw="1.19.0"),
+            _srec(mk, 2, "1.59.0", _S159)]
+    notes = mk.settings_notes(recs)
+    assert notes == {0: "Game code 1.59.0: 1 settings carry over from 1.58.0, 4 do not",
+                     1: "Game code 1.58.0: 1 settings carry over from 1.59.0, 4 do not",
+                     2: "Game code 1.59.0: 1 settings carry over from 1.58.0, 4 do not"}
+    assert mk.settings_notes([_vrec(mk, 0), _vrec(mk, 1)]) == {}
+    same = [_srec(mk, 0, "1.59.0", _S158), _srec(mk, 1, "1.59.1", _S158)]
+    assert mk.settings_notes(same)[1].endswith("carry over from 1.59.0, all of them")
+
+
+def test_images_conf_carries_the_notes_and_conf_for_plan_rewrites_them_from_the_versions(mk):
+    plan = _two_image_plan(mk)
+    assert "note=" not in _menu_conf(mk, plan)
+    text = _menu_conf(mk, plan, notes={1: "Game code 1.58.0:\n228 carry | 53 do not", 5: "no image"})
+    assert "note=1|Game code 1.58.0: 228 carry | 53 do not\n" in text   # one line, index kept
+    assert "note=5" not in text                                         # no such image
+    conf = mk.parse_images_conf(text)
+    assert conf["notes"] == {1: "Game code 1.58.0: 228 carry | 53 do not"}
+    assert mk.render_images_conf_text(conf) == text                     # the update's round trip
+    assert len(mk.conf_note("x" * 500)) == mk.NOTE_MAX
+    # an inject reads no versions: the card's own notes ride through...
+    assert "note=1|Game code 1.58.0" in mk.conf_for_plan(plan, argparse.Namespace(), existing=conf)
+    # ...and a build or update writes what the images' own game code says, even nothing at all
+    recs = [_srec(mk, 0, "1.59.0", _S159), _srec(mk, 1, "1.58.0", _S158, fw="1.19.0")]
+    out = mk.conf_for_plan(plan, argparse.Namespace(), existing=conf, versions=recs)
+    assert "note=0|Game code 1.59.0: 1 settings carry over from 1.58.0, 4 do not\n" in out
+    assert "228 carry" not in out
+    assert "note=" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=conf,
+                                           versions=[_vrec(mk, 0), _vrec(mk, 1)])
+
+
 def test_conf_for_plan_takes_the_heading_from_the_flag_else_the_card(mk):
     plan = _two_image_plan(mk)
     ex = mk.parse_images_conf(_menu_conf(mk, plan, heading="OLD LINE"))

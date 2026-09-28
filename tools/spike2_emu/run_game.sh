@@ -289,6 +289,13 @@ if [ -n "${PAD_CARD:-}" ]; then
             # a card whose counter line is off and whose countdown says
             # 'Launching' must preview as that card, not as the default menu.
             printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|color_[a-z_]+)[[:space:]]*=' || true
+            # ...and note= (PAD-233: what an image's game code costs in settings),
+            # on the group lines' gate: a note names its image by INDEX, so it
+            # rides only when the card's image lines and the trees resolved
+            # here are the same count - otherwise it would sit on the wrong card.
+            if [ "$(printf '%s\n' "$SEL_CARDCONF" | grep -cE '^[[:space:]]*image[[:space:]]*=')" = "$SEL_N" ]; then
+                printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*note[[:space:]]*=' || true
+            fi
         } > "$R/dump/codeselect.conf"
         # ★ PAD-226: THE CARD'S OWN INDEX FOR EACH DEVICE, and the store name its
         # scores= line gives it. The menu above counts the trees it found; the

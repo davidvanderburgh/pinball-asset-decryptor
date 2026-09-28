@@ -1252,9 +1252,23 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
      * (counter=off, PAD-190: somebody whose menu is seven cards of their own
      * artwork does not need the menu counting them).  A carousel is the only
      * layout that has it: two to four cards are all on the glass at once. */
-    if (L->carousel && c->counter) {
-        snprintf(buf, sizeof buf, "<   %d / %d   >", hl + 1, L->n);
-        gfx_text_center(g, f, 26 * s, W / 2, (int)(626 * s), buf, TH(L, FOOTER));
+    /* ...unless the highlighted image carries a NOTE (PAD-233): what its game
+     * code version costs in settings, when its title is on the card at another
+     * version.  It takes the counter's row - the one free line under the cards
+     * in every layout - in the heading's colour, shrunk and cut to the glass
+     * like every line that is not ours.  A group card has none of its own. */
+    {
+        int b = conf_card_boots(c, hl);
+        const char *note = (b >= 0 && b < c->n) ? c->img[b].note : "";
+        const int wmax = W - (int)(80 * s);
+        if (*note) {
+            float npx = gfx_fit_px(f, note, wmax, 26 * s, 18 * s);
+            gfx_ellipsize(f, npx, note, wmax, cut, sizeof cut);
+            gfx_text_center(g, f, npx, W / 2, (int)(626 * s), cut, TH(L, HEADING));
+        } else if (L->carousel && c->counter) {
+            snprintf(buf, sizeof buf, "<   %d / %d   >", hl + 1, L->n);
+            gfx_text_center(g, f, 26 * s, W / 2, (int)(626 * s), buf, TH(L, FOOTER));
+        }
     }
 
     /* Both bottom lines are SHRUNK and then CUT to the glass. Shrinking alone

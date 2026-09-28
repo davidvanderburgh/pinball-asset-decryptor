@@ -712,6 +712,14 @@ def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_
     assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
 
 
+def test_the_cards_notes_reach_the_emulator_conf_only_when_the_indexes_line_up():
+    """PAD-233: `note=<N>|...` names its image by index, as a group line does, so it rides on
+    the same gate - the card's image lines and the trees resolved here must be the same count."""
+    outer = _select_outer()
+    gate = outer.index("""grep -cE '^[[:space:]]*image[[:space:]]*=')" = "$SEL_N" ]; then""")
+    assert "grep -E '^[[:space:]]*note[[:space:]]*='" in outer[gate:gate + 300]
+
+
 def test_the_cards_heading_and_colours_reach_the_emulator_conf():
     """PAD-141: "The title did not update on the build and still says 'select
     game code' when run in the emulator."  The Multi-boot tab had written

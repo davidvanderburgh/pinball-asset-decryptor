@@ -39,6 +39,11 @@
 #   countdown_word=TEXT  the first word of the countdown line - "starting
 #                <title> in 9 s" by default; countdown_word=Launching says
 #                that instead, and countdown_word= (empty) drops the word
+#   note=N|TEXT  one line drawn under the cards, in place of the counter, while
+#                image N's card is highlighted. The card builder writes what an
+#                image's game code version costs in settings when its title is on
+#                the card at another version ("Game code 1.58.0: 228 settings
+#                carry over from 1.59.0, 53 do not"); a group card draws none
 #   font=PATH    optional TrueType font (default: /usr/local/codeselect/font.ttf,
 #                then the card's /usr/local/spike/VeraMono.ttf)
 #   media=DIR    where the media names live (default /usr/local/codeselect/media)

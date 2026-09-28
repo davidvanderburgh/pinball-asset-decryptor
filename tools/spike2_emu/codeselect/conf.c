@@ -500,6 +500,14 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 c->color[r] = rgb;
                 c->color_set[r] = 1;
             }
+        } else if (!strcmp(key, "note")) {
+            /* <index>|<text> - the image lines need not all be read yet, so
+             * the slot is filled by index and an index past the last image
+             * line is simply never drawn */
+            char *bar = strchr(val, '|');
+            int k = atoi(val);
+            if (bar && k >= 0 && k < CONF_MAX_IMAGES && isdigit((unsigned char)*val))
+                copy_field(c->img[k].note, trim(bar + 1));
         }
         /* unknown keys are ignored so the file can grow */
     }

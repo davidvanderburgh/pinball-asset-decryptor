@@ -1994,6 +1994,13 @@ def test_the_version_gate_findings_come_back_worst_first():
         "version_mismatch": "1.59.0 and 1.13.0.",
     })
     assert worst == "These images are not the same game."
+    # PAD-233: the named settings ride in the full text, under the version
+    head, full = multiboot_core.version_alarm({
+        "version_mismatch": "1.59.0 and 1.58.0.",
+        "settings_cost": "turtles_pro: 228 settings carry over. COIN DOOR goes back.",
+    })
+    assert head == "These images are not the same game code version."
+    assert full.splitlines()[-1].endswith("COIN DOOR goes back.")
 
 
 def test_a_menu_read_off_an_sd_card_is_not_an_unreadable_version():

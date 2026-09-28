@@ -1921,6 +1921,101 @@ def test_inspect_reports_each_images_version_and_the_mismatch_sentences(mk, tmp_
     assert "VERSION WARNING:" in table
 
 
+#: PAD-233: a slice of the real TMNT pair - 1.59 has COIN DOOR and a debug-only setting 1.58
+#: lacks, 1.58 has MUSIC VOLUME, and Stern renamed the GI brightness caption between them.
+_S159 = [["AD_BALLS_PER_GAME", "BALLS PER GAME", ""], ["AD_COIN_DOOR", "COIN DOOR", "service"],
+         ["AD_TEST_MENU_COLORS", "TEST MENU COLORS", "debug"],
+         ["AD_GI_MAX_BRIGHTNESS", "DEPRECATED GI LED MAX BRIGHTNESS", "debug"]]
+_S158 = [["AD_BALLS_PER_GAME", "BALLS PER GAME", ""], ["AD_MUSIC_VOLUME", "MUSIC VOLUME", "service"],
+         ["AD_GI_MAX_BRIGHTNESS", "GI LED MAX BRIGHTNESS", ""]]
+
+
+def _srec(mk, i, version, settings, **kw):
+    r = _vrec(mk, i, version=version, **kw)
+    r["settings"] = settings
+    return r
+
+
+def test_the_settings_cost_names_what_carries_falls_back_and_reverts(mk):
+    recs = [_srec(mk, 0, "1.59.0", _S159), _srec(mk, 1, "1.58.0", _S158, fw="1.19.0")]
+    [p] = mk.settings_pairs(recs)
+    assert (p["a"], p["b"], p["shared"]) == ([0], [1], 1)
+    assert p["only_a"] == [["COIN DOOR", "service"], ["TEST MENU COLORS", "debug"]]
+    assert p["only_b"] == [["MUSIC VOLUME", "service"]]
+    assert p["renamed"] == [["DEPRECATED GI LED MAX BRIGHTNESS", "GI LED MAX BRIGHTNESS"]]
+    text = mk.version_findings(recs)["settings_cost"]
+    assert "share 1 settings, which carry over" in text
+    # a setting an operator can see is NAMED; one no menu reaches is only counted
+    assert "2 settings only image 0 (1.59.0) has go back to their default while image 1 runs: " \
+           "COIN DOOR, plus 1 no menu shows." in text
+    assert "1 setting only image 1 (1.58.0) has goes back to its default while image 0 runs: " \
+           "MUSIC VOLUME." in text
+    assert "1 setting Stern renamed between the builds reverts on every swap: DEPRECATED GI LED " \
+           "MAX BRIGHTNESS on image 0 is GI LED MAX BRIGHTNESS on image 1." in text
+    assert "TEST MENU COLORS" not in text
+
+
+def test_the_settings_cost_is_one_paragraph_per_pair_of_builds(mk):
+    """Two images of the same build are one side of the pair, and a different title is not
+    costed setting by setting (nothing carries at all; title_mismatch says so)."""
+    recs = [_srec(mk, 0, "1.59.0", _S159), _srec(mk, 1, "1.59.0", _S159),
+            _srec(mk, 2, "1.58.0", _S158, fw="1.19.0"),
+            _srec(mk, 3, "1.13.0", _S158, title="godzilla_le")]
+    pairs = mk.settings_pairs(recs)
+    assert [(p["a"], p["b"]) for p in pairs] == [([0, 1], [2])]
+    assert "images 0, 1 (1.59.0) and image 2 (1.58.0)" in mk.settings_cost(recs)
+    # the same captions on both sides: nothing is lost, and said so
+    same = [_srec(mk, 0, "1.59.0", _S158), _srec(mk, 1, "1.59.1", _S158)]
+    assert "exactly the same settings, so nothing is lost" in mk.settings_cost(same)
+    # no settings read (same version, or an ELF whose table was not found): no sentence
+    assert mk.settings_cost([_vrec(mk, 0), _vrec(mk, 1, version="1.58.0")]) is None
+
+
+def test_the_settings_cost_caps_the_names_it_lists(mk):
+    many = [["AD_X%d" % i, "SETTING %d" % i, ""] for i in range(12)]
+    recs = [_srec(mk, 0, "1.59.0", many), _srec(mk, 1, "1.58.0", many[:1])]
+    text = mk.settings_cost(recs)
+    assert "SETTING 8" in text and "SETTING 9" not in text and "and 3 more" in text
+
+
+def test_the_refusal_and_the_table_carry_this_cards_settings(mk, capsys):
+    recs = [_srec(mk, 0, "1.59.0", _S159), _srec(mk, 1, "1.58.0", _S158, fw="1.19.0")]
+    with pytest.raises(mk.Refused) as e:
+        mk.check_versions(recs)
+    assert "SETTINGS on this card:\nturtles_pro: image 0 (1.59.0)" in str(e.value)
+    assert "43 settings" not in str(e.value)       # never another card's measured numbers
+    mk.print_version_table(recs, mk.check_versions(recs, allow=True))
+    out = capsys.readouterr().out
+    assert "== settings" in out and "SETTINGS: turtles_pro: image 0 (1.59.0)" in out
+
+
+def test_settings_are_read_only_for_a_title_at_two_versions(mk, monkeypatch):
+    seen = []
+    monkeypatch.setattr(mk, "tree_settings_at", lambda img, part, sub: seen.append(img) or _S158)
+    same = [_vrec(mk, 0), _vrec(mk, 1)]
+    mk.attach_settings(same, [("a", None, None), ("b", None, None)])
+    assert seen == [] and [r["settings"] for r in same] == [None, None]
+    mixed = [_vrec(mk, 0), _vrec(mk, 1, version="1.58.0"), _vrec(mk, 2, title="godzilla_le")]
+    mk.attach_settings(mixed, [("a", None, None), ("b", None, None), ("c", None, None)])
+    assert seen == ["a", "b"] and mixed[2]["settings"] is None
+
+    def boom(img, part, sub):
+        raise OSError("gone")
+    monkeypatch.setattr(mk, "tree_settings_at", boom)
+    bad = [_vrec(mk, 0), _vrec(mk, 1, version="1.58.0")]
+    mk.attach_settings(bad, [("a", None, None), ("b", None, None)])  # never raises
+    assert bad[0]["settings"] is None and "could not be read (OSError: gone)" in bad[0]["notes"][0]
+
+
+def test_tree_settings_reads_captions_off_a_game_elf(mk):
+    from tests.test_stern_adjustments import make_elf
+    rows = mk.tree_settings(make_elf([("AD_INVALID", 0, 0, 0), ("AD_FREE_PLAY", 0, 0, 1),
+                                      ("AD_BALLS_PER_GAME", 3, 1, 10)]))
+    assert [r[0] for r in rows] == ["AD_FREE_PLAY", "AD_BALLS_PER_GAME"]
+    assert all(isinstance(r[1], str) and r[1] for r in rows)
+    assert mk.tree_settings(b"not an elf") is None
+
+
 def test_inspect_is_silent_about_versions_when_the_images_match(mk, tmp_path, monkeypatch, capsys):
     out, _srcs, _plan = _loaded_card(
         mk, tmp_path, monkeypatch,

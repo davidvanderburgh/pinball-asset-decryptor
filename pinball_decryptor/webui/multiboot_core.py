@@ -3798,6 +3798,9 @@ VERSION_ALARMS = (
     ("node_fw_mismatch", "These images carry different node board firmware."),
     ("unknown_version", "The game code version of an image could not be "
                         "read."),
+    # PAD-233: never the headline (a version mismatch always comes with it);
+    # it is the part of the full text that NAMES what this card costs
+    ("settings_cost", "Some settings do not carry between these images."),
 )
 
 

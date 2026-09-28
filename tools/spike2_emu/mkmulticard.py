@@ -6452,7 +6452,7 @@ def plan_identities(plan, progress=say):
     """One :func:`read_tree` record per image, read from the SOURCE images - so `plan` and
     `build` can refuse before a byte is written.  A tree that cannot be read becomes a record
     with version None and the reason in its notes; nothing here raises."""
-    out = []
+    out, where = [], []
     for i, (dev, path) in enumerate(zip(plan.devices(), [plan.primary] + list(plan.extras))):
         rec = collections.OrderedDict([("index", i), ("device", dev), ("source", path)])
         try:
@@ -6462,14 +6462,16 @@ def plan_identities(plan, progress=say):
                                     % (path, type(e).__name__, e)))
         rec["device"] = dev                               # the card's device, not the source's
         out.append(rec)
+        where.append((path, source_part(path), None))
         if progress:
             progress("image %d %s: %s %s (%s)" % (i, dev, rec["title"], rec["version"], rec["version_source"]))
+    attach_settings(out, where)
     return out
 
 
 def card_identities(card, plan=None, progress=None):
     """One :func:`read_tree` record per games tree ON the card (what verify and inspect report)."""
-    out = []
+    out, where = [], []
     for i, part, sub in card_trees(card, plan):
         dev = device_name(part.num, sub)
         rec = collections.OrderedDict([("index", i), ("device", dev), ("source", card)])
@@ -6480,8 +6482,10 @@ def card_identities(card, plan=None, progress=None):
                                     % (type(e).__name__, e)))
         rec["device"] = dev
         out.append(rec)
+        where.append((card, part, sub))
         if progress:
             progress("image %d %s: %s %s (%s)" % (i, dev, rec["title"], rec["version"], rec["version_source"]))
+    attach_settings(out, where)
     return out
 
 
@@ -6493,6 +6497,158 @@ def _unread_tree(dev, why):
         ("elf_version", None), ("elf_name", None), ("elf_date", None),
         ("node_fw", []), ("node_fw_version", None), ("node_fw_digest", None),
         ("bypass", "error"), ("notes", [why])])
+
+
+def tree_settings(elf):
+    """[[AD name, menu caption, where the operator edits it]] for every operator setting the
+    game ELF defines - or None when its adjustment table cannot be located.
+
+    The caption is the one the machine keys the setting's stored value by (the SHA1 of the
+    caption, byte for byte, so it is kept unstripped); a descriptor whose caption cannot be read
+    is left out rather than keyed by a guess.  'where' is '' for the Adjustments menu, 'service'
+    for another service screen, 'debug' for no menu at all, None when the menu could not be read.
+    """
+    _v, _s, _e, adjustments = _stern_plugins()
+    from pinball_decryptor.plugins.stern import menu_visibility
+    try:
+        table = adjustments.AdjustmentTable(elf)
+    except ValueError:
+        return None
+    mode = adjustments._caption_mode(table)
+    where = menu_visibility.statuses(table) or {}
+    out = []
+    for i in range(1, table.count):
+        name = table.names[i]
+        if not name or not name.startswith("AD_"):
+            continue
+        direct, indirect = adjustments._caption_at(table, i)
+        cap = indirect if mode == "indirect" else direct
+        if adjustments._is_caption(cap):
+            out.append([name, cap, where.get(i)])
+    return out
+
+
+def tree_settings_at(image, part, subdir=None):
+    """:func:`tree_settings` of the game ELF in one games tree of `image`."""
+    _v, _s, ext4, _adj = _stern_plugins()
+    with open(image, "rb") as f:
+        rd = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+        _t, _g, _gi, gnode = tree_game(rd, tree_root_inode(rd, subdir))
+        return tree_settings(rd.read_file_bytes(gnode))
+
+
+def attach_settings(recs, where):
+    """Give each record a 'settings' list (:func:`tree_settings`) when, and only when, its title
+    appears on this card at more than one game code version - the one case whose cost is decided
+    setting by setting.  `where` holds each record's (image, Part, subdir) for the second read;
+    the other records get None, and a read that fails leaves a note, never an exception."""
+    vers = collections.defaultdict(set)
+    for r in recs:
+        if r.get("title") and r.get("version"):
+            vers[r["title"]].add(r["version"])
+    for r, (image, part, sub) in zip(recs, where):
+        r["settings"] = None
+        if len(vers.get(r.get("title"), ())) < 2:
+            continue
+        try:
+            r["settings"] = tree_settings_at(image, part, sub)
+        except Exception as e:                            # a settings read never breaks a build
+            r["notes"].append("its settings could not be read (%s: %s)" % (type(e).__name__, e))
+        if r["settings"] is None:
+            r["notes"].append("its settings table could not be located, so what carries to and "
+                              "from the other version is not named")
+
+
+#: How many captions a settings sentence names before it says 'and N more'.
+SETTINGS_NAMED = 8
+
+
+def settings_pairs(recs):
+    """What each same-title, different-version pair of builds on the card costs, setting by
+    setting -> [OrderedDict], one per pair of BUILDS (images running the same version are one
+    build).  Keys: title, a / b (image indices), a_version / b_version, shared (how many
+    captions both builds spell the same way - they carry over), only_a / only_b ([caption,
+    where] of the settings one build alone has - they fall back to that build's default while
+    the other runs) and renamed ([old caption, new caption]: the same setting under a new
+    caption, which reverts).  Images whose settings were not read take no part."""
+    builds = collections.OrderedDict()
+    for r in recs:
+        if r.get("settings") is not None:
+            builds.setdefault((r["title"], r["version"]), []).append(r)
+    keys = list(builds)
+    out = []
+    for x, kx in enumerate(keys):
+        for ky in keys[x + 1:]:
+            if kx[0] != ky[0]:
+                continue
+            ra, rb = builds[kx][0], builds[ky][0]
+            a = {cap: (name, w) for name, cap, w in ra["settings"]}
+            b = {cap: (name, w) for name, cap, w in rb["settings"]}
+            an = {name: cap for name, cap, _w in ra["settings"]}
+            bn = {name: cap for name, cap, _w in rb["settings"]}
+            renamed = [[an[n], bn[n]] for n in an if n in bn and an[n] != bn[n]
+                       and an[n] not in b and bn[n] not in a]
+            moved = {c for pair in renamed for c in pair}
+            out.append(collections.OrderedDict([
+                ("title", kx[0]),
+                ("a", [r["index"] for r in builds[kx]]), ("a_version", kx[1]),
+                ("b", [r["index"] for r in builds[ky]]), ("b_version", ky[1]),
+                ("shared", len(set(a) & set(b))),
+                ("only_a", [[c, a[c][1]] for c in a if c not in b and c not in moved]),
+                ("only_b", [[c, b[c][1]] for c in b if c not in a and c not in moved]),
+                ("renamed", renamed)]))
+    return out
+
+
+def _captions(caps, limit=SETTINGS_NAMED):
+    """'COIN DOOR, KNOCKER STYLE and 3 more' - captions as the menu prints them."""
+    caps = [" ".join(c.split()) for c in caps]
+    head = ", ".join(caps[:limit])
+    return head + (" and %d more" % (len(caps) - limit) if len(caps) > limit else "")
+
+
+def _only_sentence(only, own, other):
+    """One build's settings the other lacks: the ones an operator can see are named, the
+    unreachable ones are only counted."""
+    seen = [c for c, w in only if w != "debug"]
+    hidden = len(only) - len(seen)
+    one = len(only) == 1
+    text = ("%d setting%s only %s has go%s back to %s default while %s runs: "
+            % (len(only), "" if one else "s", own, "es" if one else "", "its" if one else "their", other))
+    if not seen:
+        return text + "%s no menu shows." % ("it is one" if one else "all of them are ones")
+    return text + _captions(seen) + (", plus %d no menu shows." % hidden if hidden else ".")
+
+
+def _images(idx):
+    return ("image %d" % idx[0]) if len(idx) == 1 else ("images " + ", ".join(str(i) for i in idx))
+
+
+def settings_cost(recs):
+    """The settings sentence for the card (or None): for each same-title pair of versions, how
+    many settings carry, and NAMED, the ones that fall back to a default and the ones that
+    revert because Stern renamed them.  Read off the two ELFs in hand, not a measured example."""
+    parts = []
+    for p in settings_pairs(recs):
+        a = "%s (%s)" % (_images(p["a"]), p["a_version"])
+        b = "%s (%s)" % (_images(p["b"]), p["b_version"])
+        lines = ["%s: %s and %s share %d settings, which carry over between them."
+                 % (p["title"], a, b, p["shared"])]
+        if p["only_a"]:
+            lines.append(_only_sentence(p["only_a"], a, _images(p["b"])))
+        if p["only_b"]:
+            lines.append(_only_sentence(p["only_b"], b, _images(p["a"])))
+        if p["renamed"]:
+            lines.append("%d setting%s Stern renamed between the builds revert%s on every swap: %s."
+                         % (len(p["renamed"]), "" if len(p["renamed"]) == 1 else "s",
+                            "s" if len(p["renamed"]) == 1 else "",
+                            "; ".join("%s on %s is %s on %s"
+                                      % (_captions([o]), _images(p["a"]), _captions([n]), _images(p["b"]))
+                                      for o, n in p["renamed"][:SETTINGS_NAMED])))
+        if not (p["only_a"] or p["only_b"] or p["renamed"]):
+            lines.append("They define exactly the same settings, so nothing is lost.")
+        parts.append(" ".join(lines))
+    return "\n\n".join(parts) or None
 
 
 def _distinct(recs, key):
@@ -6515,6 +6671,9 @@ def version_findings(recs):
     node_fw_mismatch   the images ship different NODE BOARD firmware sets - the one failure
                        here that needs service, and it can happen with matching versions
     unknown_version    a tree whose version could not be read at all
+    settings_cost      PAD-233: for each same-title pair of versions, the settings that carry,
+                       NAMED, and the ones that fall back to a default or revert - read off the
+                       two ELFs (:func:`settings_cost`); None when no title runs two versions
     version_only       the version sentence WITHOUT the title one folded in, so the refusal can
                        put the two on their own lines; readers want version_mismatch
     """
@@ -6548,6 +6707,7 @@ def version_findings(recs):
                                              for r in unread)))
     return collections.OrderedDict([("title_mismatch", title_bad), ("version_mismatch", version_bad),
                                     ("node_fw_mismatch", fw_bad), ("unknown_version", unknown),
+                                    ("settings_cost", settings_cost(recs)),
                                     ("version_only", version_only)])
 
 
@@ -6602,6 +6762,16 @@ def print_version_table(recs, findings=None):
     for key in ("version_mismatch", "node_fw_mismatch", "unknown_version"):
         if found.get(key):                    # title_mismatch is folded into version_mismatch
             print("WARNING: %s" % found[key])
+    if found.get("settings_cost"):
+        print_settings_cost(found["settings_cost"])
+
+
+def print_settings_cost(text):
+    """The `== settings` block: what each same-title pair of versions costs, one paragraph per
+    pair, printed whether or not the gate is overridden - the operator is told either way."""
+    print("== settings")
+    for para in text.split("\n\n"):
+        print("SETTINGS: %s" % para)
 
 
 #: What a version difference actually costs, in the operator's own terms.  Measured on a TMNT
@@ -6614,11 +6784,12 @@ node board's NVRAM keyed by the SHA1 of each setting's MENU CAPTION, not by its 
 caption both builds spell the same way carries over untouched (11 of 11 measured across a TMNT
 1.59 -> 1.58 -> 1.59 round trip, with 202 of the 228 shared captions renumbered in between).
 
-What a version difference DOES cost is narrower, and all of it is real:
+What a version difference DOES cost is narrower, and all of it is real (THIS card's settings
+are named above, read off its own game code):
   * a setting only ONE build has falls back to that build's compiled default whenever you boot
-    the other one (43 settings of TMNT 1.59 and 13 of 1.58 on that measured pair);
+    the other one;
   * a setting Stern RENAMED between the builds REVERTS - the new caption hashes to a slot that
-    has never been written (3 on that pair);
+    has never been written;
   * the store keeps only THREE generations, so two boots of the other build erase a
     build-exclusive value for good.
 
@@ -6676,8 +6847,10 @@ def check_versions(recs, allow=False, flag="--allow-version-mismatch"):
         % (r["index"], r["device"], r["title"] or "?", r["version"] or "UNKNOWN",
            _fw_label(r))
         for r in recs)
-    raise Refused("%s\n\n%s\n\n%s\n\nIf you know all of that and want this card anyway, pass %s."
-                  % ("\n\n".join(bad), rows, VERSION_COST, flag))
+    cost = findings["settings_cost"]
+    raise Refused("%s\n\n%s\n\n%s%s\n\nIf you know all of that and want this card anyway, pass %s."
+                  % ("\n\n".join(bad), rows, ("SETTINGS on this card:\n" + cost + "\n\n") if cost else "",
+                     VERSION_COST, flag))
 
 
 def bypass_card(card, plan=None, dry_run=False):
@@ -7119,6 +7292,8 @@ def inspect_card(card, media_out=None):
             ("node_fw", tree.get("node_fw") or []), ("node_fw_version", tree.get("node_fw_version")),
             ("node_fw_digest", tree.get("node_fw_digest")),
             ("built_version", b.get("version")), ("built_title_dir", b.get("title_dir"))]))
+    attach_settings(treerecs, [(path,) + trees[r["device"]] if r["device"] in trees else (path, None, None)
+                               for r in treerecs])
     findings = version_findings(treerecs)
     media = []
     if isdir.get("media"):
@@ -7204,6 +7379,9 @@ def inspect_card(card, media_out=None):
         ("version_mismatch", findings["version_mismatch"]),
         ("node_fw_mismatch", findings["node_fw_mismatch"]),
         ("unknown_version", findings["unknown_version"]),
+        # PAD-233: what each same-title pair of versions costs, setting by setting (null when no
+        # title runs two versions)
+        ("settings_cost", findings["settings_cost"]),
         ("selector", sel), ("warnings", warnings)])
 
 
@@ -7281,6 +7459,8 @@ def print_inspect(rep):
     for key in ("version_mismatch", "node_fw_mismatch", "unknown_version"):
         if rep.get(key):
             print("VERSION WARNING: %s" % rep[key])
+    if rep.get("settings_cost"):
+        print_settings_cost(rep["settings_cost"])
     tr = rep.get("trees")
     if tr:
         print("trees      recorded %s; %s free for updates; synced %s%s"

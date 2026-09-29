@@ -593,3 +593,63 @@ def test_turn_a_picture_and_give_text_a_drop_shadow(tmp_path):
         assert w.call("text_scenes.tree_reset", sh["id"])
         assert _ops(folder) == []
         w.call("text_scenes.close")
+
+
+def test_several_picked_at_once_move_and_hide_together(tmp_path):
+    """DragonRR (PAD-279): "select multiple items with shift" to move a line of words at
+    once.  Ctrl-click adds to the selection (or takes one out), Shift-click in Layers picks a
+    run; a move of the selection is one edit per node and one undo step."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        hits = _tv(w)["hits"]
+        art = next(h for h in hits if h["name"] == "Art")["id"]
+        title = next(h for h in hits if h["name"] == "Title")["id"]
+        assert w.call("text_scenes.tree_select", art)
+        a0 = _tv(w)["props"]
+        assert w.call("text_scenes.tree_select", title, "add")
+        tv = _tv(w)
+        assert tv["sels"] == [art, title] and tv["sel"] == title
+        assert len(tv["sel_boxes"]) == 2
+        t0 = tv["props"]
+
+        # moved together: one op each, one undo step
+        assert w.call("text_scenes.tree_move_many", [art, title], 20, 5)
+        ops = _ops(folder)
+        assert sorted(op["node"] for op in ops) == sorted([art, title])
+        assert len({op.get("group") for op in ops}) == 1
+        # a second drag of the same pair folds in, as a drag of one does
+        assert w.call("text_scenes.tree_move_many", [art, title], 5, 0)
+        assert len(_ops(folder)) == 2
+        tv = _tv(w)
+        assert tv["sels"] == [art, title]
+        assert (tv["props"]["x"], tv["props"]["y"]) == (t0["x"] + 25, t0["y"] + 5)
+        assert w.call("text_scenes.tree_select", art)
+        assert _tv(w)["sels"] == [art]
+        assert (_tv(w)["props"]["x"], _tv(w)["props"]["y"]) == (a0["x"] + 25, a0["y"] + 5)
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == []
+
+        # Ctrl-click again takes it out; Shift-click in Layers picks the run between
+        assert w.call("text_scenes.tree_select", title, "add")
+        assert w.call("text_scenes.tree_select", title, "add")
+        assert _tv(w)["sels"] == [art]
+        order = [l["id"] for l in _tv(w)["layers"]]
+        assert w.call("text_scenes.tree_select", art)       # (a range runs from the last click)
+        assert w.call("text_scenes.tree_select", title, "range")
+        a, b = sorted((order.index(art), order.index(title)))
+        assert sorted(_tv(w)["sels"]) == sorted(order[a:b + 1])
+        assert _tv(w)["sels"][-1] == title
+
+        # hidden together, one undo step; a plain click picks one again
+        assert w.call("text_scenes.tree_visible_many", [art, title], False)
+        assert not any(h["id"] in (art, title) for h in _tv(w)["hits"])
+        assert w.call("text_scenes.tree_undo")
+        assert _ops(folder) == []
+        assert w.call("text_scenes.tree_remove_many", [art, title])
+        assert {op["node"] for op in _ops(folder)} == {art, title}
+        assert w.call("text_scenes.tree_visible_many", [art, title], True)
+        assert _ops(folder) == []
+        w.call("text_scenes.close")

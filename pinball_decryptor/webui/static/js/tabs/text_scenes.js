@@ -427,8 +427,13 @@ function TreeTop({ s, onMenu }) {
   </div>`;
 }
 
+// Ctrl (Cmd on a Mac) adds a layer to the selection or takes it out; Shift selects a run of
+// them in the Layers list (PAD-279).
+const pickHow = (e, range) => (range && e.shiftKey ? "range" : e.ctrlKey || e.metaKey || e.shiftKey ? "add" : "");
+
 function TreeLayers({ t }) {
   const listRef = useRef(null);
+  const sels = t.sels || [];
   useEffect(() => {
     if (t.sel == null || !listRef.current) return;
     const el = listRef.current.querySelector(`[data-node="${t.sel}"]`);
@@ -437,10 +442,11 @@ function TreeLayers({ t }) {
   return html`<div class="scenes-contents tree-layers" ref=${listRef} role="tree" aria-label="Layers">
     <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span></div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
-        class=${cx("sc-item", "ly-item", t.sel === l.id && "sel", !l.drawn && "ly-off")}
+        class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && "ly-off")}
         style=${`padding-left:${10 + l.depth * 14}px`}
         title=${!l.drawn && !l.hidden ? "Not on the screen at this moment: click to see it on top while it is selected, and edit it" : null}
-        onClick=${() => call("text_scenes.tree_select", l.id)}>
+        onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
+        onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
       <button type="button" class="ly-eye"
         title=${l.hidden ? "Hidden — show it again" : l.drawn ? "Hide it"
           : "Not on the screen at this moment: see it on top while it is selected"}
@@ -569,6 +575,13 @@ function TreeCanvas({ s }) {
   const nudgeT = useRef(null);
   const [hover, setHover] = useState(null);
   const p = t.props;
+  // the selection (PAD-279: several at once): what a drag, the arrow keys and Delete act on.
+  // *key* names it for the edits shown by hand and the layers the server draws for it.
+  const sels = p ? ((t.sels || []).length ? t.sels : [p.id]) : [];
+  const multi = sels.length > 1;
+  const keyOf = (ids) => ids.join(",");
+  const moveCall = (ids, dx, dy) => (ids.length > 1 ? call("text_scenes.tree_move_many", ids, dx, dy)
+    : call("text_scenes.tree_move", ids[0], dx, dy));
   useEffect(() => { setPend(null); setDrag(null); }, [t.card]);
   // a redraw came in: the edits it draws are no longer shown by hand
   useEffect(() => {
@@ -580,10 +593,11 @@ function TreeCanvas({ s }) {
   }, [shownRev]);
   useEffect(() => () => clearTimeout(nudgeT.current), []);
 
-  const send = (id, op, fn) => {
+  const send = (ids, op, fn) => {
+    const id = keyOf(ids);
     wantRef.current = Math.max(wantRef.current, t.rev || 0) + 1;
     const w = wantRef.current;
-    setPend((q) => ({ id, ops: [{ ...op, want: w }, ...(q && q.id === id ? q.ops : [])] }));
+    setPend((q) => ({ id, ids, ops: [{ ...op, want: w }, ...(q && q.id === id ? q.ops : [])] }));
     const drop = () => setPend((q) => {
       if (!q) return q;
       const ops = q.ops.filter((o) => o.want !== w);
@@ -598,7 +612,7 @@ function TreeCanvas({ s }) {
     if (!head || head.want != null) return;
     wantRef.current = Math.max(wantRef.current, t.rev || 0) + 1;
     const w = wantRef.current;
-    const id = q.id, dx = head.dx, dy = head.dy;
+    const id = q.id, ids = q.ids, dx = head.dx, dy = head.dy;
     setPend((r) => (r && r.id === id && r.ops[0] && r.ops[0].want == null
       ? { ...r, ops: [{ ...r.ops[0], want: w }, ...r.ops.slice(1)] } : r));
     const drop = () => setPend((r) => {
@@ -606,16 +620,17 @@ function TreeCanvas({ s }) {
       const ops = r.ops.filter((o) => o.want !== w);
       return ops.length ? { ...r, ops } : null;
     });
-    call("text_scenes.tree_move", id, dx, dy).then((ok) => { if (ok === false) drop(); }, drop);
+    moveCall(ids, dx, dy).then((ok) => { if (ok === false) drop(); }, drop);
   };
   // arrow keys: shown at once, sent as one move when the keys rest
-  const nudge = (id, dx, dy) => {
+  const nudge = (ids, dx, dy) => {
+    const id = keyOf(ids);
     if (pendRef.current && pendRef.current.id !== id) flushNudge();
     setPend((q) => {
       const ops = q && q.id === id ? q.ops : [];
       const head = ops[0];
-      if (head && head.want == null) return { id, ops: [{ ...head, dx: head.dx + dx, dy: head.dy + dy }, ...ops.slice(1)] };
-      return { id, ops: [{ m: "move", dx, dy, want: null }, ...ops] };
+      if (head && head.want == null) return { id, ids, ops: [{ ...head, dx: head.dx + dx, dy: head.dy + dy }, ...ops.slice(1)] };
+      return { id, ids, ops: [{ m: "move", dx, dy, want: null }, ...ops] };
     });
     clearTimeout(nudgeT.current);
     nudgeT.current = setTimeout(flushNudge, 350);
@@ -630,7 +645,7 @@ function TreeCanvas({ s }) {
     for (let i = hits.length - 1; i >= 0; i--) if (inPoly(hits[i].pts, x, y)) return hits[i];
     return null;
   };
-  const selBox = p && p.x != null ? { x: p.x, y: p.y, w: p.w, h: p.h } : null;
+  const selBox = p && !multi && p.x != null ? { x: p.x, y: p.y, w: p.w, h: p.h } : null;
   const corner = (x, y) => {
     if (!selBox) return null;
     const r = box.current.getBoundingClientRect();
@@ -648,13 +663,17 @@ function TreeCanvas({ s }) {
     box.current.setPointerCapture(e.pointerId);
     if (corner(x, y)) {
       const cx0 = selBox.x + selBox.w / 2, cy0 = selBox.y + selBox.h / 2;
-      setDrag({ mode: "scale", id: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1 });
+      setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1 });
       return;
     }
     const h = pick(x, y);
-    if (!h) { call("text_scenes.tree_select", null); setDrag(null); return; }
-    if (!p || h.id !== p.id) call("text_scenes.tree_select", h.id);
-    setDrag({ mode: "move", id: h.id, x0: x, y0: y, dx: 0, dy: 0 });
+    const how = pickHow(e, false);
+    if (!h) { if (!how) call("text_scenes.tree_select", null); setDrag(null); return; }
+    if (how) { call("text_scenes.tree_select", h.id, how); setDrag(null); return; }
+    // a picture already in a selection of several drags them all
+    const ids = multi && sels.includes(h.id) ? sels : [h.id];
+    if (!p || (ids.length === 1 && h.id !== p.id)) call("text_scenes.tree_select", h.id);
+    setDrag({ mode: "move", id: keyOf(ids), ids, x0: x, y0: y, dx: 0, dy: 0 });
   };
   const move = (e) => {
     const [x, y] = toStage(e);
@@ -668,17 +687,20 @@ function TreeCanvas({ s }) {
     if (!d) return;
     if (d.mode === "move" && Math.abs(d.dx) + Math.abs(d.dy) >= 1) {
       const dx = Math.round(d.dx), dy = Math.round(d.dy);
-      send(d.id, { m: "move", dx, dy }, () => call("text_scenes.tree_move", d.id, dx, dy));
+      send(d.ids, { m: "move", dx, dy }, () => moveCall(d.ids, dx, dy));
     }
     if (d.mode === "scale" && Math.abs(d.f - 1) > 0.01)
-      send(d.id, { m: "scale", cx: d.cx, cy: d.cy, f: d.f }, () => call("text_scenes.tree_scale", d.id, d.f));
+      send([d.node], { m: "scale", cx: d.cx, cy: d.cy, f: d.f }, () => call("text_scenes.tree_scale", d.node, d.f));
   };
   const key = (e) => {
     if (!p) return;
     const step = e.shiftKey ? 10 : 1;
     const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
-    if (moves[e.key]) { e.preventDefault(); nudge(p.id, ...moves[e.key]); }
-    else if (e.key === "Delete") { e.preventDefault(); flushNudge(); call("text_scenes.tree_remove", p.id); }
+    if (moves[e.key]) { e.preventDefault(); nudge(sels, ...moves[e.key]); }
+    else if (e.key === "Delete") {
+      e.preventDefault(); flushNudge();
+      if (multi) call("text_scenes.tree_remove_many", sels); else call("text_scenes.tree_remove", p.id);
+    }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); flushNudge(); call("text_scenes.tree_undo"); }
   };
 
@@ -694,8 +716,8 @@ function TreeCanvas({ s }) {
   const layered = imgOps.length > 0 && lay && lay.key === `${live}:${shownRev}`;
   const loading = s.tree_loading || (!full && !s.canvas_msg);
   const busy = !loading && (s.tree_busy || !!(pend && pend.ops.some((o) => o.want == null || o.want > shownRev)));
-  const hov = hover != null && (!p || hover !== p.id) ? (t.hits || []).filter((h) => h.id === hover) : [];
-  const selPolys = p ? (t.hits || []).filter((h) => h.id === p.id) : [];
+  const hov = hover != null && !sels.includes(hover) ? (t.hits || []).filter((h) => h.id === hover) : [];
+  const selPolys = (t.hits || []).filter((h) => sels.includes(h.id));
   return html`<div class=${cx("scenes-canvas tree-canvas", loading && "loading")} ref=${box} tabIndex="0" onKeyDown=${key}
       style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}
       onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${() => setHover(null)}>
@@ -711,6 +733,8 @@ function TreeCanvas({ s }) {
       <g transform=${svgTf(lineOps)}>
         ${selPolys.map((h, i) => html`<polygon key=${"s" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-sel" />`)}
         ${selBox ? html`<rect x=${selBox.x} y=${selBox.y} width=${selBox.w} height=${selBox.h} class="tree-box" />` : null}
+        ${multi ? (t.sel_boxes || []).map(([bx, by, bw, bh], i) =>
+          html`<rect key=${"b" + i} x=${bx} y=${by} width=${bw} height=${bh} class="tree-box" />`) : null}
         ${selBox ? [[selBox.x, selBox.y], [selBox.x + selBox.w, selBox.y], [selBox.x, selBox.y + selBox.h],
           [selBox.x + selBox.w, selBox.y + selBox.h]].map(([hx, hy], i) =>
           html`<rect key=${"k" + i} x=${hx - 7} y=${hy - 7} width="14" height="14" class="tree-handle" />`) : null}
@@ -752,7 +776,15 @@ function TreeSide({ t, play, playFrame }) {
       </label>`)}
     </details>` : null}
     <span class="eyebrow">Selected</span>
-    ${p ? html`<div class="tree-props">
+    ${p && (t.sels || []).length > 1 ? html`<div class="tree-props">
+      <div class="small"><b>${t.sels.length} selected</b></div>
+      <div class="small muted">Drag any of them on the preview, or use the arrow keys, to move them together. Ctrl-click one to take it out; click one on its own to pick just that.</div>
+      <div class="tree-row">
+        <${Button} size="xs" title="Hide every selected layer" onClick=${() => call("text_scenes.tree_visible_many", t.sels, false)}>Hide<//>
+        <${Button} size="xs" title="Show every selected layer again" onClick=${() => call("text_scenes.tree_visible_many", t.sels, true)}>Show<//>
+      </div>
+    </div>`
+    : p ? html`<div class="tree-props">
       <div class="small ellip" title=${p.name}><b>${p.name}</b> <span class="muted">${p.kind}${p.added ? ", added" : ""}</span></div>
       ${p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.x != null ? html`<div class="tree-row">
@@ -799,7 +831,7 @@ function TreeSide({ t, play, playFrame }) {
         <${Button} size="xs" title="A dark copy of this text just beneath it, a few pixels down and right. It is selected after, to move, tint or remove."
           onClick=${() => call("text_scenes.tree_shadow", p.id)}>Add a drop shadow<//>
       </div>` : null}
-    </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers.</div>`}
+    </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers. Ctrl-click (or Shift-click) to pick several and move them together.</div>`}
     ${(t.notes || []).length ? html`<div class="small warn-ink">${t.notes.join("; ")}</div>` : null}
   </div>`;
 }

@@ -104,7 +104,9 @@ def add(assets_dir, card, op):
     edits = load(assets_dir)
     ops = edits.setdefault(card, [])
     last = ops[-1] if ops else None
-    if last and last.get("node") == op.get("node") and last["op"] == op["op"] == "move":
+    if last and "group" in last:                 # a group's edit stays one undo step
+        ops.append(op)
+    elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "move":
         last["dx"] = round(last["dx"] + op["dx"], 3)
         last["dy"] = round(last["dy"] + op["dy"], 3)
         if not last["dx"] and not last["dy"]:
@@ -127,6 +129,35 @@ def add(assets_dir, card, op):
     return ops
 
 
+def add_group(assets_dir, card, group):
+    """Append the ops of one edit made to several nodes at once (PAD-279: a multiple selection
+    moved or hidden together) as one undo step.  A move of the same nodes straight after the
+    last one folds into it, so a drag or a run of arrow keys is still one step."""
+    group = [dict(op) for op in group]
+    if len(group) == 1:
+        return add(assets_dir, card, group[0])
+    edits = load(assets_dir)
+    ops = edits.setdefault(card, [])
+    tail = ops[-len(group):] if len(ops) >= len(group) else []
+    gid = tail[0].get("group") if tail else None
+    if (gid is not None and all(o.get("group") == gid for o in tail)
+            and (len(ops) == len(group) or ops[-len(group) - 1].get("group") != gid)
+            and all(o["op"] == "move" for o in tail + group)
+            and [o["node"] for o in tail] == [o["node"] for o in group]):
+        for last, op in zip(tail, group):
+            last["dx"] = round(last["dx"] + op["dx"], 3)
+            last["dy"] = round(last["dy"] + op["dy"], 3)
+        if all(not o["dx"] and not o["dy"] for o in tail):
+            del ops[-len(group):]
+    else:
+        gid = max([o.get("group", 0) for o in ops] + [0]) + 1
+        for op in group:
+            op["group"] = gid
+            ops.append(op)
+    save(assets_dir, edits)
+    return ops
+
+
 def reset_node(assets_dir, card, node):
     """Drop every op on *node* (and, when it was ADDED, the node itself)."""
     edits = load(assets_dir)
@@ -145,8 +176,11 @@ def drop(assets_dir, card, node, kind):
 
 def undo(assets_dir, card):
     edits = load(assets_dir)
-    if edits.get(card):
-        edits[card].pop()
+    ops = edits.get(card)
+    if ops:
+        gid = ops.pop().get("group")
+        while gid is not None and ops and ops[-1].get("group") == gid:
+            ops.pop()
         save(assets_dir, edits)
 
 

@@ -42,7 +42,9 @@ class TreeEditMixin:
         self._trees = None           # {card path: manifest} (lazy)
         self._tframe = {}            # card -> root frame shown
         self._tpins = {}             # card -> {node id: frame}
-        self._tsel = None            # selected node id
+        self._tsel = None            # selected node id (the last one picked)
+        self._tsels = []             # every selected node, in the order picked (PAD-279)
+        self._tanchor = None         # where a Shift-click range in Layers starts
         self._tpeek = None           # a selected layer the game is not drawing now, drawn on top
         self._tdraws = []            # the draw list of the last render
         self._tworlds = {}
@@ -149,8 +151,9 @@ class TreeEditMixin:
         once, self._tonce = self._tonce, []
         self._tree_publish(card, man, frame, list(notes) + once)
         self.set(pic_note=self._missing_note(draws))
-        sel = self._tsel
-        split = self._tree_split(draws, sel) if sel is not None else set()
+        sels = self._tree_sels()
+        sel = sels[0] if len(sels) == 1 else ",".join(str(n) for n in sels) or None
+        split = self._tree_split(draws, sels) if sels else set()
         job = {"token": token, "rev": self._trev, "card": card, "man": man, "frame": frame,
                "pins": pins, "draws": draws, "bg": self._bg, "sel": sel if split else None,
                "split": split, "text_edits": self._pending_texts(card, None),
@@ -302,15 +305,16 @@ class TreeEditMixin:
         cur.update(map=index, srcs=srcs, done=done)
         self.set(tree_play=cur)
 
-    def _tree_split(self, draws, nid):
-        """The indices of *draws* node *nid* draws (itself and what is inside it): they run
-        together in draw order, or the canvas gets no layers for it."""
+    def _tree_split(self, draws, nids):
+        """The indices of *draws* the nodes *nids* draw (themselves and what is inside them):
+        they run together in draw order, or the canvas gets no layers for them."""
+        nids = {nids} if isinstance(nids, int) else set(nids)
         got = []
         for i, d in enumerate(draws):
             p, hops = d["node"], 0
-            while p is not None and p != nid and hops < 256:
+            while p is not None and p not in nids and hops < 256:
                 p, hops = self._tparents.get(p), hops + 1
-            if p == nid:
+            if p in nids:
                 got.append(i)
         if not got or got[-1] - got[0] + 1 != len(got):
             return set()
@@ -429,12 +433,16 @@ class TreeEditMixin:
                            "edits": "; ".join(edited_nodes.get(n["id"], []))})
         sel = self._tsel if self._tsel in index else None
         self._tsel = sel
+        sels = self._tree_sels()
+        multi = len(sels) > 1
         self.set(tree_live=self._live_note(card))
         self.set(tree=True, tree_view={
             "card": card, "stage": [w, h], "frame": frame,
             "frames": int(man["root"].get("frames") or 1),
             "moment": "f:%d" % frame, "moments": moments, "states": states,
-            "hits": hits, "layers": layers, "sel": sel,
+            "hits": hits, "layers": layers, "sel": sel, "sels": sels,
+            "sel_boxes": [[round(b[0]), round(b[1]), round(b[2] - b[0]), round(b[3] - b[1])]
+                          for b in map(self._tree_box, sels) if b] if multi else [],
             "props": self._tree_props(card, man, sel, ops) if sel is not None else None,
             "edits": len(ops), "notes": list(notes), "rev": self._trev,
             "all_edits": scene_edit.count(self.assets_dir),
@@ -471,6 +479,31 @@ class TreeEditMixin:
                 "layer": sibs.index(n) + 1, "layers": len(sibs),
                 "drawn": nid in self._tworlds,
                 "peek": nid == self._tpeek and nid in self._tworlds}
+
+    def _tree_sels(self):
+        """Every selected node, the last one picked (``_tsel``) last.  Whatever selects a
+        node on its own (``_tsel`` set elsewhere) leaves just that one selected."""
+        index = self._tparents
+        if self._tsel is None or self._tsel not in index:
+            self._tsels = []
+            return []
+        sels = [n for n in self._tsels if n in index and n != self._tsel]
+        if self._tsel not in self._tsels:
+            sels = []
+        self._tsels = sels + [self._tsel]
+        return list(self._tsels)
+
+    def _tree_top(self, nodes):
+        """*nodes* less those inside another of them: moving a sprite moves what is in it."""
+        got = set(nodes)
+        out = []
+        for n in nodes:
+            p, hops = self._tparents.get(n), 0
+            while p is not None and p not in got and hops < 256:
+                p, hops = self._tparents.get(p), hops + 1
+            if p is None:
+                out.append(n)
+        return out
 
     def _tree_box(self, nid):
         """The glass box ``(x0, y0, x1, y1)`` of everything node *nid* draws now."""
@@ -613,17 +646,25 @@ class TreeEditMixin:
         return True
 
     @rpc
-    def tree_select(self, node=None):
+    def tree_select(self, node=None, how=""):
         """Select a layer.  One the game is not drawing at this moment is drawn on top, where
         it sits, for as long as it stays selected (DragonRR, PAD-276: clicking a greyed layer
         went to another moment of the scene, and greyed the one that was showing); only when
-        the sprite it sits in is off now too does the preview go to where the game shows it."""
+        the sprite it sits in is off now too does the preview go to where the game shows it.
+
+        *how* picks several at once (DragonRR, PAD-279: "a line of words" moved together):
+        ``add`` (Ctrl-click) adds the node to the selection or takes it out again, ``range``
+        (Shift-click in Layers) selects every layer from the last one clicked to this one."""
         card, _man = self._tree_card()
         if card is None:
             return False
         node = int(node) if node not in (None, "") else None
+        if how in ("add", "range") and node is not None and self._tsel is not None:
+            return self._tree_select_more(card, node, how)
         peeked, self._tpeek = self._tpeek, None
         self._tsel = node
+        self._tsels = [node] if node is not None else []
+        self._tanchor = node
         if node is not None and node == peeked:
             self._tpeek = node
             self._render_tree_preview(self._sel, quiet=True)
@@ -646,9 +687,104 @@ class TreeEditMixin:
             self._tree_publish(card, self._tman, self._tree_frame(card, _man))
         return True
 
+    def _tree_select_more(self, card, node, how):
+        sels = self._tree_sels()
+        if how == "add":
+            if node in sels:
+                sels.remove(node)
+                if not sels:
+                    return self.tree_select(None)
+            else:
+                sels.append(node)
+            self._tanchor = node
+        else:
+            order = [n["id"] for n, _p, _d in _walk_man(self._tman)]
+            anchor = self._tanchor if self._tanchor in order else sels[-1]
+            if node not in order or anchor not in order:
+                return False
+            a, b = order.index(anchor), order.index(node)
+            step = 1 if b >= a else -1
+            sels = order[a:b + step if b + step >= 0 else None:step]
+        if len(sels) == 1:
+            anchor = self._tanchor
+            self.tree_select(sels[0])
+            self._tanchor = anchor
+            return True
+        peeked, self._tpeek = self._tpeek, None
+        self._tsels, self._tsel = sels, sels[-1]
+        # the picture changes only when a layer shown on top while picked stops being picked
+        self._render_tree_preview(self._sel, quiet=peeked is None)
+        return True
+
     # ------------------------------------------------------------------
     # edits
     # ------------------------------------------------------------------
+    def _tree_add_group(self, ops):
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None or not ops:
+            return False
+        try:
+            scene_edit.add_group(self.assets_dir, card, ops)
+        except OSError as e:
+            compat.messagebox.showerror("Scene edit", str(e))
+            return False
+        self._tree_refresh()
+        return True
+
+    def _tree_nodes(self, nodes):
+        if isinstance(nodes, (int, str)):
+            nodes = [nodes]
+        return [int(n) for n in nodes or ()]
+
+    @rpc
+    def tree_move_many(self, nodes, dx, dy):
+        """Move several nodes by the same (dx, dy) glass pixels: one edit, one undo step.  A
+        node inside another that is moving too is left to move with it."""
+        from ..plugins.stern import scene_eval
+        ops = []
+        for node in self._tree_top(self._tree_nodes(nodes)):
+            parent = (self._tworlds.get(node) or (scene_eval.IDENTITY,))[0]
+            lx, ly = scene_eval.to_parent(parent, float(dx), float(dy))
+            if abs(lx) >= 1e-6 or abs(ly) >= 1e-6:
+                ops.append({"op": "move", "node": node, "dx": round(lx, 3), "dy": round(ly, 3)})
+        return self._tree_add_group(ops)
+
+    @rpc
+    def tree_visible_many(self, nodes, on):
+        """Hide (or show again) several nodes at once."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        nodes = self._tree_nodes(nodes)
+        if on:
+            for node in nodes:
+                scene_edit.drop(self.assets_dir, card, node, "visible")
+            self._tree_refresh()
+            return True
+        hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
+        return self._tree_add_group([{"op": "visible", "node": n, "on": False}
+                                     for n in nodes if n not in hidden])
+
+    @rpc
+    def tree_remove_many(self, nodes):
+        """Delete on a multiple selection: ADDED nodes are removed, the game's own hidden."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        nodes = self._tree_top(self._tree_nodes(nodes))
+        added = {n["id"] for n, _p, _d in _walk_man(self._tman) if n.get("added")}
+        for node in nodes:
+            if node in added:
+                scene_edit.reset_node(self.assets_dir, card, node)
+        own = [n for n in nodes if n not in added]
+        if own:
+            return self.tree_visible_many(own, False)
+        self._tree_refresh()
+        return True
+
     def _tree_add(self, op):
         from ..plugins.stern import scene_edit
         card, _man = self._tree_card()

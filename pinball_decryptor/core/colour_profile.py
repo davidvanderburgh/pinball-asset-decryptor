@@ -559,12 +559,18 @@ def machine_view(assets_dir):
     if display is None and screen is None:
         return None
 
+    def overlay(rgb):
+        return display.apply_array(rgb)
+
     def view(rgb):
         if display is not None:
             rgb = display.apply_array(rgb)
         if screen is not None:
             rgb = screen.undo_array(rgb) if undo else screen.apply_array(rgb)
         return rgb
+    # the overlay alone (PAD-328): what a picture that passes the screen by
+    # still gets, since the game draws the overlay over everything
+    view.overlay = overlay if display is not None else None
     return view
 
 

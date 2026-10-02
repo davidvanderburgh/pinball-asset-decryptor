@@ -940,7 +940,9 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     will: applied to the finished frame before the backdrop, and to each layer (PAD-312).
     With *as_made*, a picture whose colour switch is off (*pictures*' ``"skip"``) passes the
     screen by and shows its own colours (PAD-325): its share of each pixel is kept apart as
-    it is drawn and added back after the rest is viewed, so what covers it still covers it."""
+    it is drawn and added back after the rest is viewed, so what covers it still covers it.
+    The whole screen overlay still reaches it (*view*'s ``overlay``, PAD-328): the game
+    draws that over everything, the user's own files included."""
     try:
         import numpy as np
         from PIL import Image
@@ -1067,6 +1069,9 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
         own[..., 3] = s[..., 3] * 255.0
         rest = np.maximum(out - own, 0.0).clip(0, 255).astype("uint8")
         seen = viewed(rest, view).astype(np.float32)
+        overlay = getattr(view, "overlay", None)
+        if overlay is not None:
+            own = viewed(own.clip(0, 255).astype("uint8"), overlay).astype(np.float32)
         return (seen + own).clip(0, 255).astype("uint8")
 
     if not split:

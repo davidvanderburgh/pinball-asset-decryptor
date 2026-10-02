@@ -118,3 +118,25 @@ def test_the_gear_menu_turns_it_off_and_on_and_scenes_follows(tmp_path):
         w.call("ui.settings_action", "toggle_scenes_own_colours")
         w.drain()
         assert w.run(svc._as_made) is True
+
+
+def test_a_switched_off_pick_still_gets_the_whole_screen_overlay(tmp_path):
+    """PAD-328: the game draws the overlay over everything, the user's own files too;
+    only the machine screen is passed by."""
+    from pinball_decryptor.plugins.stern import scene_render as R
+    proj = _project(tmp_path)
+    darker_red = cp.Profile(name="Less red", gain=(0.5, 1.0, 1.0))
+    cp.store(proj, darker_red)                                # the whole screen overlay
+    cp.store_screen_profile(proj, cp.Profile(name="Black and white", saturation=0.0))
+    view = cp.machine_view(proj)
+    assert view.overlay is not None
+    draws = [_draw("scene_textures/stock.png", 0), _draw("scene_textures/mine.png", 8)]
+    img = np.asarray(R.render_tree(proj, {"stage": [16, 8, 30]}, draws=draws,
+                                   pictures=R.pending_pictures(proj), sizes={},
+                                   view=view, as_made=True))
+    want = darker_red.apply_array(np.asarray([[[220, 30, 30]]], np.uint8))[0, 0]
+    assert np.abs(img[4, 12].astype(int) - want.astype(int)).max() <= 1   # overlay, in colour
+    assert img[4, 2, 0] == img[4, 2, 1] == img[4, 2, 2]                    # stock: screened
+    # no overlay set: nothing to apply to it
+    cp.store(proj, None)
+    assert cp.machine_view(proj).overlay is None

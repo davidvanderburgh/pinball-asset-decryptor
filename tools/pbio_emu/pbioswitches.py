@@ -33,9 +33,11 @@ def profile(key):
     t = pbiotitles.get(key)
     sws = {n: s for n, s in t["switches"].items() if s != "UNUSED"}
     b = t["buttons"]
-    cab = {"start": b["start"], "coin": b["coin"], "launch": b["launch"],
+    cab = {"start": b["start"], "coin": b["coin"],
            "tilt": b["tilt"], "exit": b["escape"], "down": b["down"],
            "up": b["up"], "enter": b["enter"]}
+    if "launch" in b:               # Queen has none: its flippers launch
+        cab["launch"] = b["launch"]
     for n, s in sws.items():
         if s in FLIPPERS:
             cab.setdefault(FLIPPERS[s], n)

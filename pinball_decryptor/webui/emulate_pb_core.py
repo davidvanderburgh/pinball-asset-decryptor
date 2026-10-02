@@ -1,5 +1,6 @@
 """Emulate tab for Pinball Brothers - the Tk-free facts of its two rigs,
-``tools/pb_emu`` (Predator) and ``tools/pbio_emu`` (Alien, ABBA; PAD-315).
+``tools/pb_emu`` (Predator) and ``tools/pbio_emu`` (Alien, ABBA; PAD-315;
+Queen, PAD-326).
 The tab itself is ``webui/tabs/emulate_pb.py``.
 
 Predator is two native x86-64 Linux programs (pinprog, the rules; vidprog,
@@ -13,11 +14,10 @@ ABBA and Queen run on PB's own I/O boards (the hardware PB inherited from
 Heighway), a different rig - the same idea (the game's own two programs, an
 emulated board), a different board: ``tools/pbio_emu/README.md``.  The file a
 person picks says which rig runs it (``kind_of``); the rest of the tab is the
-same.  Queen is recognised but not run: its updates are deltas over a restore
-image this project has never had, and without the image there is no switch
-map for it either (``QUEEN_TEXT``).  ABBA runs with its screens dark: its
-updates carry the program and the sound, not the factory image's pictures
-and videos (``TITLE_NOTES``).
+same.  Queen's updates are deltas over its restore image
+(clonezilla-live-queen20d.iso), which carries its media; the rig stacks
+them.  ABBA runs with its screens dark: its updates carry the program and
+the sound, not the factory image's pictures and videos (``TITLE_NOTES``).
 
 A PB update is a FULL .upd and then DELTAS over it; a person picks the
 version they want and the rig finds the rest of the chain beside it
@@ -57,16 +57,14 @@ SUPPORTED = (
      re.compile(r"^(pbap4\w*\.upd|clonezilla-live-.*alien.*\.iso)$", re.I)),
     ("ABBA", "pbio",
      re.compile(r"^(pbap1\w*\.upd|clonezilla-live-.*abba.*\.iso)$", re.I)),
+    ("Queen", "pbio",
+     re.compile(r"^(pbq\w*\.upd|clonezilla-live-.*queen.*\.iso)$", re.I)),
 )
-#: Recognised, not run (QUEEN_TEXT says why).
-QUEEN = re.compile(r"^(pbq\w*\.upd|clonezilla-live-.*queen.*\.iso)$", re.I)
-QUEEN_TEXT = ("Queen can't be emulated yet. Its updates (pbq….upd) carry only "
-              "what changed since the factory image, so the emulator would "
-              "also need Queen's restore image (clonezilla-live-queen….iso, "
-              "from Pinball Brothers) - and a map of Queen's switches, which "
-              "can only be made from that image.")
 #: Said when the game starts, and on the page while it runs.
 TITLE_NOTES = {
+    "Queen": ("Queen has no Launch button: both flippers launch the ball, "
+              "and start the song picked on the song select each ball "
+              "begins with."),
     "ABBA": ("ABBA plays, but its screens stay dark: its update files carry "
              "the program and the sound, not the pictures and videos the "
              "factory installed. Play it from the playfield window."),
@@ -87,8 +85,9 @@ PHASES = ("Unpack", "Board", "Game", "Ready")
 EXIT_TEXT = {
     3: "Not enough free space in the app's Linux to unpack this update.",
     4: "This file is not one of the Pinball Brothers games the emulator "
-       "runs (Predator, Alien, ABBA): pick the game's .upd update, or "
-       "Alien's restore image (clonezilla-live-alien40.iso).",
+       "runs (Predator, Alien, ABBA, Queen): pick the game's .upd update, "
+       "or a restore image (clonezilla-live-alien40.iso, "
+       "clonezilla-live-queen20d.iso).",
     5: "The update could not be unpacked, or holds no game program - if you "
        "picked a delta (pbpp_predator_game_1_0_1.upd), the full update it "
        "builds on (pbpp_predator_game_1_0.upd) must be in the same folder.",
@@ -97,15 +96,19 @@ EXIT_TEXT = {
        "700 MB) - check the connection and press Start again.",
 }
 PBIO_EXIT_TEXT = {
-    3: "Not enough free space in the app's Linux to unpack this game (a "
-       "restore image needs about 4 GB, a full update about 2.5 GB).",
+    3: "Not enough free space in the app's Linux to unpack this game "
+       "(Alien's restore image needs about 4 GB, Queen's about 22 GB "
+       "while it unpacks and 10 GB after, a full update about 2.5 GB).",
     4: EXIT_TEXT[4],
     5: "The game could not be unpacked, or these files hold no complete "
        "game. A small follow-up update (pbap412.upd, pbap145.upd) needs the "
        "full update it builds on (pbap411.upd, pbap141.upd) in the same "
        "folder - and the first start needs Alien's restore image "
        "(clonezilla-live-alien40.iso) there too: it is the machine's own "
-       "Linux, which every one of these games runs on.",
+       "Linux, which every one of these games runs on. Queen's updates "
+       "(pbq….upd) need Queen's own restore image "
+       "(clonezilla-live-queen20d.iso) beside them: it holds Queen's "
+       "pictures, videos and sound.",
     6: "The game did not reach attract mode.",
 }
 
@@ -137,10 +140,6 @@ def supported_file(path):
     return bool(_match(path)[0])
 
 
-def is_queen(path):
-    return bool(QUEEN.match(_base(path)))
-
-
 def title_of(path):
     """The game a supported file is for, else ""."""
     return _match(path)[0]
@@ -148,7 +147,7 @@ def title_of(path):
 
 def kind_of(path):
     """The rig that runs *path*: "pb" (Predator: tools/pb_emu), "pbio"
-    (Alien, ABBA: tools/pbio_emu), else ""."""
+    (Alien, ABBA, Queen: tools/pbio_emu), else ""."""
     return _match(path)[1]
 
 
@@ -309,8 +308,7 @@ def cache_label(entry):
         return "Emulator setup (Predator's libraries)"
     if entry.get("kind") in ("os", "update"):
         src = entry.get("src") or name.split("-", 1)[-1]
-        title = (title_of(src) or ("Queen" if is_queen(src) else "")
-                 or "Pinball Brothers")
+        title = title_of(src) or "Pinball Brothers"
         what = "machine image" if entry["kind"] == "os" else "update"
         return "%s %s (%s)" % (title, what, src)
     m = re.match(r"^([a-z]+)_([0-9_]+)-[0-9a-f]+$", name)

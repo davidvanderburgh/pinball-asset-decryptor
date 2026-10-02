@@ -1,8 +1,7 @@
 """Emulate PB tab: run a Pinball Brothers game on this PC from its update
-file - Predator on its rig (tools/pb_emu), Alien and ABBA on the I/O-board
-rig (tools/pbio_emu, PAD-315); the file picked says which
-(``emulate_pb_core.kind_of``), and the rest of the tab is the same.  Queen
-is recognised and refused with the reason.
+file - Predator on its rig (tools/pb_emu), Alien, ABBA and Queen on the
+I/O-board rig (tools/pbio_emu, PAD-315, PAD-326); the file picked says
+which (``emulate_pb_core.kind_of``), and the rest of the tab is the same.
 
 Built on the American Pinball tab (webui/tabs/emulate_ap.py), the template
 every maker's Emulate tab follows (David, PAD-271: "modeled off the same look
@@ -53,19 +52,20 @@ INTRO = ("Run a Pinball Brothers game on this PC. Supported: %s. The "
          "the game its screen and every switch.\n"
          "Pick the update for the version you want to play; a smaller "
          "follow-up update needs the full one it builds on in the same "
-         "folder. Alien can also start from its restore image "
-         "(clonezilla-live-alien40.iso), which Alien and ABBA need beside "
-         "their updates the first time." % ", ".join(pb.supported_names()))
+         "folder. Alien and Queen can also start from their restore images "
+         "(clonezilla-live-alien40.iso, clonezilla-live-queen20d.iso), "
+         "which their updates need beside them the first time (ABBA's: "
+         "Alien's)." % ", ".join(pb.supported_names()))
 
-FILE_TIP = ("A game's update file (pbpp_predator_game_….upd, pbap….upd) or "
-            "Alien's restore image (clonezilla-live-alien40.iso). It is only "
+FILE_TIP = ("A game's update file (pbpp_predator_game_….upd, pbap….upd, "
+            "pbq….upd) or a restore image (clonezilla-live-alien40.iso, "
+            "clonezilla-live-queen20d.iso). It is only "
             "read: the emulator unpacks it once (a few minutes) and keeps "
             "it, so the next start is quicker.")
 
-#: the Supported games card: the games not run yet, and why
-PENDING = ["Queen"]
-PENDING_NOTE = ("Queen can't be emulated yet: it needs its restore image from "
-                "Pinball Brothers, which we don't have.")
+#: the Supported games card: the games not run yet, and why (none now)
+PENDING = []
+PENDING_NOTE = ""
 
 VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
               "while the game plays (the same knob every Emulate tab shares). "
@@ -603,16 +603,14 @@ class EmulatePBTab(RigTabMixin, TabService):
             compat.messagebox.showinfo(
                 "Emulate",
                 "Pick a game's update file first (pbpp_predator_game_….upd, "
-                "pbap….upd) or Alien's restore image "
-                "(clonezilla-live-alien40.iso).\n\n"
+                "pbap….upd, pbq….upd) or a restore image "
+                "(clonezilla-live-alien40.iso, clonezilla-live-queen20d.iso)."
+                "\n\n"
                 "Supported: %s." % ", ".join(pb.supported_names()))
             return
         if not os.path.isfile(path):
             compat.messagebox.showinfo("Emulate", "There is no file at\n%s"
                                        % path)
-            return
-        if pb.is_queen(path):
-            compat.messagebox.showinfo("Emulate", pb.QUEEN_TEXT)
             return
         if not pb.supported_file(path):
             compat.messagebox.showinfo("Emulate", pb.EXIT_TEXT[4])

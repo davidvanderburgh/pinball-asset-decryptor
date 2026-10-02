@@ -50,7 +50,7 @@ reboot to bootloader (logged, nothing reboots).
 Behaviour, from the title's profile (pbiotitles.py):
   * the trough starts full; the eject coil moves a ball to the shooter lane
     half a second later; the launch coil empties the lane; `drain` returns
-    a ball.  `plunge` presses the Launch button.
+    a ball.  `plunge` presses the Launch button (Queen: both flippers).
   * a flipper button closes its end-of-stroke switch while held.
   * Alien's tongue: GPIO 6 runs the motor, GPIO 7 says forward; the rig
     moves it at the game's own rate and makes TONGUE MICRO at home and at
@@ -270,9 +270,12 @@ class Board:
             self.trough_changed()
 
     def plunge(self):
-        b = self.title["buttons"]["launch"]
-        self.set_switch(b, 1, "plunge")
-        self.later(0.3, self.set_switch, b, 0, "plunge")
+        """The Launch button - or, on a title without one (Queen), the
+        buttons its profile launches with."""
+        b = self.title["buttons"].get("launch")
+        for sw in self.title.get("plunge", [b]):
+            self.set_switch(sw, 1, "plunge")
+            self.later(0.3, self.set_switch, sw, 0, "plunge")
 
     def balls_state(self):
         shooter = 1 if self.state.get(self.shooter) else 0

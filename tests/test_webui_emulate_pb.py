@@ -40,11 +40,10 @@ def test_pb_shows_the_tab_and_says_what_it_runs(rig, tmp_path):
                       "emulate_bof", "emulate_dp", "emulate_spooky"):
             assert not tabs[other]["visible"]
         s = w.state(NS)
-        assert s["supported"] == ["Predator", "Alien", "ABBA"]
-        assert "Supported: Predator, Alien, ABBA" in s["intro"]
-        # Queen is named as not yet, with the reason (PAD-315)
-        assert s["pending"] == ["Queen"]
-        assert "restore image" in s["pending_note"]
+        assert s["supported"] == ["Predator", "Alien", "ABBA", "Queen"]
+        assert "Supported: Predator, Alien, ABBA, Queen" in s["intro"]
+        # Queen runs now (PAD-326): nothing is "not yet"
+        assert s["pending"] == [] and not s["pending_note"]
         assert s["go_label"] == "Start" and s["go_enabled"]
         assert [c["label"] for c in s["cells"]] == [
             "Game", "Version", "Balls", "Switches", "Window", "Memory", "Uptime"]
@@ -95,8 +94,10 @@ def test_an_empty_field_uses_a_game_file_picked_on_select_card(tmp_path):
         w.window.extract_input_var.set(
             r"D:\Pinball\images\Pinball Brothers\clonezilla-live-alien40.iso")
         assert svc.file_path().endswith("clonezilla-live-alien40.iso")
-        # Queen's is not one it runs
+        # Queen's runs too (PAD-326); another maker's image does not
         w.window.extract_input_var.set(r"D:\Pinball\images\Pinball Brothers\pbq0210G.upd")
+        assert svc.file_path().endswith("pbq0210G.upd")
+        w.window.extract_input_var.set(r"D:\Pinball\images\Spooky\clonezilla-live-tcm.iso")
         assert svc.file_path() == ""
         # its own field wins
         w.window.pb_emulate_file_var.set(r"C:\mods\pbpp_predator_game_1_0.upd")
@@ -120,21 +121,33 @@ def test_start_without_a_file_asks_and_runs_nothing(rig, monkeypatch, tmp_path):
         assert ran == [] and not _svc(w)._busy
 
 
-def test_start_refuses_queen_with_the_reason(rig, monkeypatch, tmp_path):
+def test_start_runs_queen_on_the_io_board_rig(rig, monkeypatch, tmp_path):
+    """PAD-326: Queen was refused ("can't be emulated yet") until its restore
+    image was in hand; now its file starts the I/O-board rig, with the note
+    that its flippers launch."""
     from pinball_decryptor.webui import compat
     from pinball_decryptor.webui import emulate_pb_core as core
     seen, said = [], []
-    monkeypatch.setattr(core, "rig_cmd_root", lambda *a, **k: seen.append(a) or ["true"])
+    monkeypatch.setattr(core, "rig_cmd_root",
+                        lambda *a, **k: seen.append((a, k)) or ["true"])
     with web_app(tmp_path, mfr="pb") as w:
+        svc = _svc(w)
         monkeypatch.setattr(compat.messagebox, "showinfo",
                             lambda title, text, **k: said.append(text))
         f = tmp_path / "pbq0210G.upd"
         f.write_bytes(b"x")
         w.window.pb_emulate_file_var.set(str(f))
-        _svc(w)._start_async()
-        assert seen == [] and not _svc(w)._busy
-        assert said and "Queen can't be emulated yet" in said[-1]
-        assert "clonezilla-live-queen" in said[-1]
+        monkeypatch.setattr(svc, "_refuse_off", lambda: False)
+        monkeypatch.setattr(svc, "_run_streaming", lambda *a, **k: 1)
+        svc._start_async()
+        end = time.time() + 5
+        while not seen and time.time() < end:
+            time.sleep(0.02)
+        assert not said
+        args, kw = seen[0]
+        assert args[0] == "watch.sh" and kw.get("kind") == "pbio"
+        assert "PAD_TITLE=Queen" in kw["env"]
+        assert "flippers launch" in core.TITLE_NOTES["Queen"]
 
 
 # ------------------------------------------------------------ the poll
@@ -271,8 +284,8 @@ def test_supported_file_is_by_name():
         assert core.title_of(name) == title, name
         assert core.kind_of(name) == "pbio", name
     for name in ("pbq0210G.upd", "clonezilla-live-queen20d.iso"):
-        assert not core.supported_file(name) and core.is_queen(name)
-        assert core.kind_of(name) == ""
+        assert core.supported_file(name) and core.title_of(name) == "Queen"
+        assert core.kind_of(name) == "pbio"
     # another maker's restore image is not a PB game
     assert not core.supported_file("clonezilla-live-tcm_prod.iso")
     assert core.version_of("pbpp_predator_game_1_0_1.upd") == "1.0.1"

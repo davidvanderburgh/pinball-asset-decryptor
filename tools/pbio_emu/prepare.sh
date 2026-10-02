@@ -15,7 +15,8 @@
 # from a clonezilla-live-*.iso beside the first update - every title runs on
 # the same Buildroot image (their programs need nothing it lacks), so
 # Alien's restore ISO can carry ABBA.  The build must end up with the game's
-# media: a delta update on its own (Queen's pbq0210G.upd) is refused.
+# media: a delta update on its own (Queen's pbq0210G.upd without
+# clonezilla-live-queen20d.iso under it) is refused.
 #
 # Exit: 0 ok, 2 bad args / not root, 3 no disk space, 4 not a title this rig
 # knows (pbiotitles.py), 5 no game in it / damaged.
@@ -51,7 +52,7 @@ prep_os() {
         # root 3.3 GB, sda3 logs 488 MB)
         best=; bsize=0
         for p in $(cat "$img/parts"); do
-            s=$(cat "$img/$p".*-img.* 2>/dev/null | wc -c)
+            s=$(stat -c %s "$img/$p".*-img.* 2>/dev/null | awk '{t += $1} END {print t + 0}')
             [ "$s" -gt "$bsize" ] && { best=$p; bsize=$s; }
         done
         [ -n "$best" ] || { umount "$m"; echo "prepare.sh: no partition images in $img" >&2; exit 5; }
@@ -63,8 +64,10 @@ prep_os() {
         local unz="pigz -dc"
         case "$f" in *.zst.*) unz="zstd -dc" ;; *.xz.*) unz="xz -dc" ;; *.bz2.*) unz="bzip2 -dc" ;; esac
         if echo "$f" | grep -q '\.dd-ptcl-img\.'; then
-            # dd-ptcl: a raw copy of the partition, compressed and split
-            cat "$img/$best".dd-ptcl-img.* | $unz > "$d/root.img.partial"
+            # dd-ptcl: a raw copy of the partition, compressed and split.
+            # Written sparse: Queen's is 22 GB, most of it zeros.
+            cat "$img/$best".dd-ptcl-img.* | $unz |
+                dd of="$d/root.img.partial" bs=1M conv=sparse iflag=fullblock status=none
         else
             cat "$img/$best".*-ptcl-img.* | $unz |
                 partclone.restore -C -s - -O "$d/root.img.partial" --restore_raw_file -q

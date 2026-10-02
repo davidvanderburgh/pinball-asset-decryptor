@@ -17,14 +17,17 @@ monitor; `--sheet` saves one DMD frame of every video the game played,
 drawn from the card's own `DMD/_D?/*.VID`; `--nvram` keeps both EEPROMs
 between runs (on a blank one the game behaves as just updated - Domino's
 asks for a restart - so run twice). It is headless and silent; it opens no
-window and plays nothing. There is no live DMD view, text/score overlay,
-sound, switch input, rig or Emulate tab yet.
+window and plays nothing. `--closed 32,34,35 --tap coin@14 --tap start@15`
+holds switches and presses buttons (Jetsons: a game starts). There is no
+live DMD view, text/score overlay, sound, coil/ball model, rig or Emulate
+tab yet.
 
 | file | what |
 |---|---|
 | `pic32.py` | the game CPU: flash/RAM/SFRs, GPIO, UART TX, timers, interrupts (by hand, through an EPC trampoline), I2C1 master, CP0 Count |
 | `proplink.py` | the bit-banged PIC <-> Propeller link: framing, the sync handshake, the Propeller-side EEPROM |
 | `i2c.py` | the PIC-side I2C chips: 24LC256-style EEPROM (0x50), DS1307-style RTC (0x68) |
+| `board.py` | the switch inputs: cabinet shift register (Start, Coin, ...) and the 8x8 playfield matrix |
 | `av.py` | the Propeller's picture, high level: video packets -> card files -> DMD frames (via the plugin's `p3_video.py`) |
 | `run.py` | boots a PRG with all of the above and logs it |
 

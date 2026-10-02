@@ -2,6 +2,7 @@
 
 Usage: python -m tools.pinheck_emu.run <GAME_Vnnn.PRG> [seconds]
                 [--card DIR] [--sheet PNG] [--nvram DIR] [--quiet]
+                [--closed 34,35,32] [--tap coin@15 --tap start@16]
 
 Prints the game's serial monitor (UART1) and every packet it sends the
 Propeller (hex + the bytes as text). Jetsons V004 and Domino's V006 get past
@@ -13,12 +14,17 @@ both EEPROMs (the board's I2C one and the Propeller's) between runs, as
 the machine does between power-ups: on a blank EEPROM a game treats itself
 as just updated (Domino's then shows "System has been updated, Please
 restart your machine" and waits), so a second run is the normal boot.
+``--closed`` holds playfield switches shut (matrix numbers, row * 8 +
+column; Jetsons: 34 and 35 are trough balls, 32 the shooter lane - without
+the trough a coin shows "MISSING BALLS"); ``--tap name@seconds`` presses a
+cabinet switch (start, coin, menu, enter, lflip, rflip, tilt) for 150 ms.
 """
 import argparse
 import os
 import time
 
 from tools.pinheck_emu.av import Av
+from tools.pinheck_emu.board import Board
 from tools.pinheck_emu.i2c import Eeprom24, Rtc1307
 from tools.pinheck_emu.pic32 import Pic32
 from tools.pinheck_emu.proplink import PropLink
@@ -36,7 +42,11 @@ def _load(nvram, name, size):
     return None
 
 
-def boot(prg, seconds, log=None, card=None, nvram=None):
+TAP_MS = 150
+
+
+def boot(prg, seconds, log=None, card=None, nvram=None, closed=(), taps=()):
+    """``taps``: (seconds, cabinet switch name) presses, in any order."""
     pic = Pic32(prg)
     pic.i2c_devices[0x50] = eeprom = Eeprom24(_load(nvram, *NVRAM[0]))
     pic.i2c_devices[0x68] = Rtc1307()
@@ -50,8 +60,21 @@ def boot(prg, seconds, log=None, card=None, nvram=None):
 
     link = PropLink(pic, on_packet=on_packet, eeprom=_load(nvram, *NVRAM[1]))
     link.av = av
+    link.board = board = Board(pic)
+    for n in closed:
+        board.set(int(n))
+    # press/release events in emulated ms, run between them
+    end = int(seconds * 1000)
+    events = sorted(e for e in [(int(t * 1000), n, True) for t, n in taps] +
+                    [(int(t * 1000) + TAP_MS, n, False) for t, n in taps] if e[0] < end)
     try:
-        pic.run_ms(int(seconds * 1000))
+        now = 0
+        for ms, name, down in events + [(end, None, None)]:
+            if ms > now:
+                pic.run_ms(ms - now)
+                now = ms
+            if name:
+                board.set(name, down)
     finally:
         if nvram:
             os.makedirs(nvram, exist_ok=True)
@@ -68,6 +91,8 @@ def main(argv=None):
     ap.add_argument("--card")
     ap.add_argument("--sheet")
     ap.add_argument("--nvram")
+    ap.add_argument("--closed", default="", help="matrix switches held shut, e.g. 34,35")
+    ap.add_argument("--tap", action="append", default=[], help="name@seconds, e.g. coin@15")
     ap.add_argument("--quiet", action="store_true", help="no packet lines")
     a = ap.parse_args(argv)
     prg = open(a.prg, "rb").read()
@@ -78,7 +103,12 @@ def main(argv=None):
         print("PKT %s  %s" % (pkt.hex(" "), text))
 
     t0 = time.time()
-    pic, link = boot(prg, a.seconds, None if a.quiet else log, card, a.nvram)
+    taps = []
+    for t in a.tap:
+        name, _, at = t.partition("@")
+        taps.append((float(at), name.lower()))
+    closed = [int(n) for n in a.closed.split(",") if n.strip()]
+    pic, link = boot(prg, a.seconds, None if a.quiet else log, card, a.nvram, closed, taps)
     print("ran %.1f s emulated (%d M insns) in %.1f s; %d packets"
           % (pic.millis / 1000, pic.insns // 1_000_000, time.time() - t0, len(link.packets)))
     print("interrupts by vector:", dict(pic.irq_counts))

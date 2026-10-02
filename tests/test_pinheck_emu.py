@@ -254,3 +254,72 @@ def test_idle_loops_are_found_by_their_code():
     gpoff = find_millis_gp_offset(bytes(flash))
     assert gpoff == -0x7984
     assert find_idle_loops(bytes(flash), gpoff) == {0x9D001114: DELAY, 0x9D00120C: WAIT}
+
+
+# --- switches: the cabinet shift register and the playfield matrix ---------
+
+class PinPic:
+    def __init__(self):
+        self.on_lat = []
+        self.pins_in = {p: 0xFFFF for p in "ABCDEFG"}
+        self.lat = {p: 0 for p in "ABCDEFG"}
+
+    def write(self, port, value):
+        old, self.lat[port] = self.lat[port], value
+        for f in self.on_lat:
+            f(port, old, value)
+
+
+def read_cabinet(pic):
+    """houseKeeping()'s loop: 16 x (clock E0, read F0), MSB first, inverted;
+    then latch G8 low-high."""
+    cab = 0
+    for _ in range(16):
+        pic.write("E", 1)
+        pic.write("E", 0)
+        cab = (cab << 1) | (0 if pic.pins_in["F"] & 1 else 1)
+    pic.write("G", 0)
+    pic.write("G", 1 << 8)
+    return cab
+
+
+def test_cabinet_switches_read_as_the_game_reads_them():
+    from tools.pinheck_emu.board import Board
+    pic = PinPic()
+    pic.write("G", 1 << 8)
+    b = Board(pic)
+    assert read_cabinet(pic) == 1 << 1            # door shut
+    b.set("start")
+    read_cabinet(pic)                             # pressed after the last latch
+    assert read_cabinet(pic) == (1 << 1) | (1 << 12)
+    b.set("start", False)
+    b.set("coin")
+    read_cabinet(pic)
+    assert read_cabinet(pic) == (1 << 1) | (1 << 7)   # the game's [E99000]: 00 82
+
+
+def test_matrix_switch_shows_on_its_row_only():
+    from tools.pinheck_emu.board import Board
+    pic = PinPic()
+    b = Board(pic)
+    b.set(10)                                     # row 1, column 2
+    b.set(63)
+    pic.write("D", 0xFF00 & ~(1 << 9))            # row 1 driven low
+    assert pic.pins_in["D"] & 0xFF == 0xFF & ~(1 << 2)
+    pic.write("D", 0xFF00 & ~(1 << 8))            # row 0: nothing closed
+    assert pic.pins_in["D"] & 0xFF == 0xFF
+    pic.write("D", 0xFF00 & ~(1 << 15))           # row 7
+    assert pic.pins_in["D"] & 0xFF == 0x7F
+    b.set(63, False)
+    assert pic.pins_in["D"] & 0xFF == 0xFF
+
+
+def test_serial_monitor_input():
+    pic = bare_machine()
+    pic.sfr[0x1F881060] = 1 << 27                 # U1RX enabled (no handler: just flags)
+    pic.serial_in(b"[E")
+    sta = lambda: pic._read(None, 0x6010, 4, None)
+    rx = lambda: pic._read(None, 0x6030, 4, None)
+    assert sta() & 1                              # URXDA
+    assert (rx(), rx()) == (ord("["), ord("E"))
+    assert not sta() & 1

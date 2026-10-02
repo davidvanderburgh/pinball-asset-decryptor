@@ -115,6 +115,26 @@ Domino's sends `ff 00.. 02` to stop a video, and names `AT0`, which is not
 on its card (`DMD/_DA` has AT1, AT9, ATI, ATS.. but no AT0) - the real
 machine presumably shows nothing there either.
 
+## Pass 5 (2026-10-02): switches - a Jetsons game starts
+
+`board.py`: the cabinet buttons come through a 16-bit shift register read
+in houseKeeping() (coil enable RG15, GI data RG7, clock RE0, data RF0,
+latch RG8, twice a millisecond), bit numbers as AMH's gs_pins.h (Door 1,
+RFlip 3, LFlip 4, Menu 5, Enter 6, Coin 7, Tilt 8, Start 12); the playfield
+matrix is LATD's high byte (row, active low) and PORTD's low byte (columns)
+in the Timer3 handler, switch = row * 8 + column. Checked against the
+game's own serial dump: UART1 receive now works, and `[E99000]` returns
+`00 02` idle (door shut), `10 02` with Start, `00 82` with Coin, and the
+right row byte for matrix switches 0, 10 and 63.
+
+With a coin and Start and no balls, Jetsons plays `ADD` ("MISSING BALLS").
+Trying each matrix row from a snapshot of the running machine found the
+trough: switches 34 and 35 must both be closed, and 32 is the shooter lane.
+`run.py --closed 32,34,35 --tap coin@14 --tap start@15` gives `ADD`, then
+`GET` ("GET READY!!") and `SK1` ("SKILL SHOT / LEFT SPINNER / HOLD LAUNCH
+BUTTON FOR POWER") - a game has started. Next: the coils (the trough eject
+should move a ball to 32 by itself) and the rest of the switch map.
+
 ## Recommended design
 
 1. **Game CPU: emulate it** (Unicorn), running the user's own PRG unmodified.

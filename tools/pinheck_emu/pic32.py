@@ -8,7 +8,9 @@ parts of the chip the games touch are modelled:
   to ``on_lat`` listeners; inputs come from ``pins_in`` (what the board drives
   onto the pins, idle high), read back through PORTx.
 * UART1..6 transmit: everything the game prints lands in ``uart`` (UART1 is
-  its serial monitor).
+  its serial monitor). UART1 receive: ``serial_in()`` types into it (the
+  game's ``[E99000]``-style commands), interrupt driven like chipKIT's
+  HardwareSerial.
 * Timers 1..5 and the interrupt controller. Unicorn has no PIC32 EIC, so
   interrupts are delivered by hand between slices of instructions: when a
   flag in IFSx is set, enabled in IECx and Status.IE is on, the CPU is sent
@@ -74,6 +76,7 @@ TX_PRESCALE = (1, 2, 4, 8, 16, 32, 64, 256)
 IRQ_VECTOR = {4: 4, 8: 8, 12: 12, 16: 16, 20: 20, 26: 24, 27: 24, 28: 24,
               29: 25, 30: 25, 31: 25}
 I2C1, I2C1_MASTER_IRQ = 0x1F805300, 31
+U1RX_IRQ = 27
 SEN, RSEN, PEN, RCEN, ACKEN = 1, 2, 4, 8, 16
 ACKSTAT, RBF = 1 << 15, 1 << 1
 
@@ -138,6 +141,7 @@ class Pic32:
         self.pins_in = {p: 0xFFFF for p in PORTS}
         self.on_lat = []            # f(port, old, new)
         self.uart = bytearray()
+        self.uart_rx = collections.deque()  # bytes typed into the serial monitor
         self.i2c_devices = {}       # 7-bit address -> device (see I2CDevice)
         self.i2c_log = collections.deque(maxlen=1000)  # (address, 'w'|'r', bytes), latest
         self._i2c = None            # [address, read?, data, address next?] of the open transfer
@@ -184,7 +188,15 @@ class Pic32:
             if reg & ~3 == 0x20:                                # LATx
                 return self.lat[port]
         if (a & ~0x1FF) in UART_BASES and (a & 0x1FF) == 0x10:  # UxSTA
-            return 0x100 | self.sfr[a]                          # TRMT, never full
+            rx = 1 if a == UART_BASES[0] + 0x10 and self.uart_rx else 0     # URXDA
+            return 0x100 | (self.sfr[a] & ~1) | rx              # TRMT, never full
+        if a == UART_BASES[0] + 0x30:                           # U1RXREG
+            if not self.uart_rx:
+                return 0
+            b = self.uart_rx.popleft()
+            if self.uart_rx:
+                self._deferred.append(U1RX_IRQ)
+            return b
         if a == 0x1F80F000:                                     # OSCCON: PLL locked
             return self.sfr[a] | 0x20
         return self.sfr[a & ~3]
@@ -216,6 +228,11 @@ class Pic32:
             self._i2c_step(r == I2C1 + 0x50, value & 0xFF)
         elif any(r == con for con, _ in TIMERS.values()):
             self._next.clear()                                  # re-time the timers
+
+    def serial_in(self, data):
+        """Type ``data`` into the game's serial monitor (UART1 RX)."""
+        self.uart_rx.extend(data)
+        self._deferred.append(U1RX_IRQ)
 
     # --- I2C1 master ----------------------------------------------------------
     def _i2c_step(self, trn, byte):

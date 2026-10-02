@@ -97,22 +97,22 @@ GAME_DB = {
     },
     "americas_most_haunted": {
         "display": "America's Most Haunted",
-        "platform": "P3 / Multimorphic platform, DMD display",
+        "platform": "pinHeck System (PIC32 game CPU + Propeller A/V), DMD display",
         "era": "p3",
     },
     "rob_zombie": {
         "display": "Rob Zombie's Spookshow International",
-        "platform": "P3 / Multimorphic platform, DMD display",
+        "platform": "pinHeck System (PIC32 game CPU + Propeller A/V), DMD display",
         "era": "p3",
     },
     "dominos": {
         "display": "Domino's Spectacular Pinball Adventure",
-        "platform": "P3 / Multimorphic platform, DMD display",
+        "platform": "pinHeck System (PIC32 game CPU + Propeller A/V), DMD display",
         "era": "p3",
     },
     "jetsons": {
         "display": "Jetsons",
-        "platform": "P3 / Multimorphic platform, DMD display",
+        "platform": "pinHeck System (PIC32 game CPU + Propeller A/V), DMD display",
         "era": "p3",
     },
     "legends_of_tera": {
@@ -166,7 +166,8 @@ UNITY_GAMES = {"Beetlejuice", "Scooby-Doo", "Texas Chainsaw Massacre",
 # Games that use Godot (assets embedded in PCK inside executable)
 GODOT_GAMES = {"Looney Tunes"}
 
-# P3 DMD games (Ben Heck's Multimorphic P3 platform)
+# Ben Heck's pinHeck System DMD games (PIC32 + Parallax Propeller boards,
+# not Multimorphic P3; the P3_ names are historical)
 P3_GAMES = {"America's Most Haunted",
             "Rob Zombie's Spookshow International",
             "Domino's Spectacular Pinball Adventure",

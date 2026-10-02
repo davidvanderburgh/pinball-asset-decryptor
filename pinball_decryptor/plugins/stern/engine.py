@@ -12260,7 +12260,8 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
     log("Booting firmware codec engine...", "info")
     emu = Spike2Emu(gr_path, img_path)
     emu.boot()
-    emu.warm_slots_for_grown(list(byidx.values()))
+    emu.warm_slots_for_grown(list(byidx.values()),
+                             edited=[idx for idx, _w in edits])
     patches, skipped, results = {}, [], {}
     gr = sr = None
     ends = _slot_end_map(byidx.values())
@@ -12335,7 +12336,8 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
     # task: the task tuple is the cache's edit list too, and one dict per
     # worker keeps both shapes unchanged.
     pool = ctx.Pool(nworkers, initializer=init_encode_worker,
-                    initargs=(gr_path, img_path, params, gains or {}))
+                    initargs=(gr_path, img_path, params, gains or {},
+                              [idx for idx, _w in edits]))
     patches, skipped, done_idx, results = {}, [], set(), {}
     try:
         # Confirm a worker actually booted (a stalled/unguarded pool raises here
@@ -13762,7 +13764,10 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
     emu = Spike2Emu(gr_path, img_path)
     try:
         emu.boot()
-        emu.warm_slots_for_grown(params)
+        # the replaced sounds' bodies are ours now: settle their codec keys
+        # from the card's other sounds (PAD-331)
+        emu.warm_slots_for_grown(
+            params, edited=[owners[o]["idx"] for o in patches if o in owners])
         if not isinstance(emu.mm, _BodyOverlay):
             emu.mm = _BodyOverlay(emu.mm)
         for off in sorted(patches):

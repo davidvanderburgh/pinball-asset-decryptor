@@ -1180,6 +1180,11 @@ def test_a_drain_or_a_tilt_hands_every_insert_and_the_display_back_at_once(harne
     assert "END lamps held 0" in out                                                # nothing left lit
     assert re.search(r"^\s*%d DISPLAY (0 %s|released %s)" % (t, re.escape(mode), re.escape(mode)), out, re.M) \
         or "display priority 0" in out.splitlines()[-1]
+    # PAD-301: the mode's HUD (its total) goes down with it: the game's end-of-ball bonus or the tilt has the
+    # screen, and a total kept up for its seconds sat on the bonus screen's words on a machine
+    slug = {"KING GHIDORAH": "ghidorah_heads", "OXYGEN DESTROYER": "oxygen_destroyer", "MASER BARRAGE": "maser_barrage",
+            "FINAL WARS": "final_wars", "ANGUIRUS": "anguirus_assist", "MELTDOWN": "meltdown"}[mode]
+    assert t in _hid(out, slug), out[-1500:]
 
 
 # ---- MELTDOWN: a multiball of our own (hud-layers) ----------------------------------------------------------

@@ -485,11 +485,15 @@ static void on_tick(void)
 static void on_ball_end(void)
 {
     end("ball ended");
+    kit_hud_drop_now();                            /* PAD-301: the game's end-of-ball bonus has the screen */
 }
 
 static void on_event(unsigned id)
 {
-    if (kit_is_tilt(id)) end("tilted");           /* its lights go dark with the game's */
+    if (kit_is_tilt(id)) {
+        end("tilted");                             /* its lights go dark with the game's */
+        kit_hud_drop_now();
+    }
 }
 
 static const struct pm_mode anguirus_assist = {

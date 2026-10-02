@@ -636,9 +636,16 @@ static KIT_UNUSED void kit_end_after(unsigned long ms)
     pm_log("the ending keeps the screen for %lu s", ms / 1000);
 }
 
+static KIT_UNUSED void kit_hud_drop_now(void);    /* the HUD section, below */
+
 static KIT_UNUSED void kit_end_now(void)
 {
     pm_display_priority(0);                /* an ending's hold, given up at once */
+    /* PAD-301: and the mode's HUD with it. A drain or a tilt hands the screen to the game's own end-of-ball
+     * bonus (or the tilt) at once; a total left up for TOTAL_SHOWN_MS sat on the bonus screen's words
+     * (David's Premium, 2026-10-01: MASER BARRAGE ended by a drain, "text sitting over the top of other
+     * text"). */
+    kit_hud_drop_now();
 }
 
 /* ---- the stacking question -------------------------------------------------------------------
@@ -778,6 +785,12 @@ static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
         h->noting = 0;
     }
     if (h->group) pm_show(h->group, on);
+}
+
+/* whichever mode's HUD is up, down now (kit_end_now: a drain or a tilt) */
+static KIT_UNUSED void kit_hud_drop_now(void)
+{
+    if (kit_hud_up) kit_hud_show(kit_hud_up, 0);
 }
 
 /* hide the HUD `ms` from now (0 = now): a mode's TOTAL stays up that long after its end */

@@ -14,7 +14,10 @@ Two packet layouts are known:
   black is see-through. What its other bytes mean is not known yet.
 
 Text: AMH's 0x12 (byte 0 = column << 4 | row, in 8-pixel cells; then
-ASCII) and Rob Zombie's 0x0F (byte 0 = line, then ASCII, centred). Text
+ASCII) and Rob Zombie's 0x0F (byte 0 = line, then ASCII, centred).
+Scores: AMH's 0x03 ``SetScore`` (byte 0 the player 1..4, bytes 1..4 the
+score) in every game; kept in ``scores`` - the window shows them beside the
+DMD, as where the A/V chip draws them is not known yet. Text
 stays until the next video starts. It is drawn with the card's own font
 sprite ``DMD/_DZ/ZMF.spr`` when there is one (AMH's: a 128x32 4bpp sheet of
 8x8 glyphs, ASCII 32..95), else with a small built-in font - the colour
@@ -25,7 +28,7 @@ import os
 
 from pinball_decryptor.plugins.spooky import p3_video
 
-VIDEO, QUEUE, TEXT, TEXT_RZ = 0x02, 0x06, 0x12, 0x0F
+VIDEO, QUEUE, TEXT, TEXT_RZ, SCORE = 0x02, 0x06, 0x12, 0x0F, 0x03
 FPS = p3_video.DEFAULT_FPS
 
 
@@ -153,6 +156,7 @@ class Av:
         self.layers = {}            # layer -> [Vid, start ms, loop]
         self.queue = []             # (Vid, loop)
         self.texts = {}             # (x, y) -> str
+        self.scores = {}            # player 1..4 -> score
         self.font = None
         self.size = None            # (w, h) of the display, from the first video
         self.layout = None          # "amh" or "jetsons", from the first video packet
@@ -175,6 +179,10 @@ class Av:
 
     def packet(self, pkt, millis):
         cmd = pkt[15]
+        if cmd == SCORE:
+            if 1 <= pkt[0] <= 4:
+                self.scores[pkt[0]] = int.from_bytes(pkt[1:5], "little")
+            return
         if cmd in (VIDEO, QUEUE):
             if pkt[0] == 0xFF and not any(pkt[1:5]):
                 if cmd == VIDEO:

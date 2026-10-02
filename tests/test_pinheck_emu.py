@@ -485,3 +485,11 @@ def test_machine_unpacks_an_update_zip(tmp_path):
         empty = tmp_path / "e.zip"
         zipfile.ZipFile(empty, "w").close()
         unpack(str(empty), str(tmp_path / "cache"))
+
+
+def test_screen_keeps_the_players_scores(tmp_path):
+    from tools.pinheck_emu.av import Av
+    av = Av(str(tmp_path))
+    av.packet(bytes([1]) + (4851).to_bytes(4, "little") + bytes(10) + b"\x03", 0)
+    av.packet(bytes([7]) + (99).to_bytes(4, "little") + bytes(10) + b"\x03", 0)   # not a player
+    assert av.scores == {1: 4851}

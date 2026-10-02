@@ -216,6 +216,7 @@ class Machine:
             "coils": [n for t, n in self.fired if ms - t < 1500][-6:],
             "playing": [c.name for c in list(self.sound.channels.values())],
             "closed": sorted(self.board.matrix),
+            "scores": {str(k): v for k, v in sorted(self.av.scores.items())},
             "held": sorted(str(h) for h in self.held),
             "uart": self.pic.uart[-600:].decode("latin1", "replace"),
         }

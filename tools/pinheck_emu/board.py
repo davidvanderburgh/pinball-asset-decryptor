@@ -98,8 +98,9 @@ class Balls:
         self.in_trough = len(self.trough) if count is None else count
         self.in_shooter = False
         self.in_play = 0
+        self._rolling = False           # a ball on its way to the shooter lane
         self._due = []                  # (millis, fn)
-        pins = coil_pins()
+        pins = coil_pins(game)
         self._load = pins[game["load"]]
         self._plunge = pins[game["plunge"]]
         self.ready_bit = game.get("ready")
@@ -134,17 +135,30 @@ class Balls:
 
     def _lat(self, port, old, new):
         rose = lambda pin: port == pin[0] and new & pin[1] and not old & pin[1]
-        if rose(self._load) and self.in_trough and not self.in_shooter:
+        if rose(self._load) and self.in_trough and not self.in_shooter                 and not self._rolling:
+            # one firing may be several pulses (Domino's PWMs its LOAD BALL):
+            # one ball per firing
             self.in_trough -= 1
+            self._rolling = True
             self._show()
 
             def arrive():
                 self.in_shooter = True
+                self._rolling = False
             self._later(self.ROLL_MS, arrive)
         elif rose(self._plunge) and self.in_shooter:
             self.in_shooter = False
             self.in_play += 1
             self._show()
+
+    def plunge(self):
+        """The player's hand plunger: the ball in the shooter lane goes."""
+        if not self.in_shooter:
+            return False
+        self.in_shooter = False
+        self.in_play += 1
+        self._show()
+        return True
 
     def drain(self):
         """A ball in play falls to the trough."""

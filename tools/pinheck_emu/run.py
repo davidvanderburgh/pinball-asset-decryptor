@@ -45,8 +45,11 @@ def _load(nvram, name, size):
 TAP_MS = 150
 
 
-def boot(prg, seconds, log=None, card=None, nvram=None, closed=(), taps=()):
-    """``taps``: (seconds, cabinet switch name) presses, in any order."""
+def boot(prg, seconds, log=None, card=None, nvram=None, closed=(), taps=(),
+         on_ms=(), link_box=None):
+    """``taps``: (seconds, cabinet switch name) presses, in any order;
+    ``on_ms``: f(millis) after every emulated millisecond; ``link_box``: a
+    list the link is appended to before the run starts."""
     pic = Pic32(prg)
     pic.i2c_devices[0x50] = eeprom = Eeprom24(_load(nvram, *NVRAM[0]))
     pic.i2c_devices[0x68] = Rtc1307()
@@ -61,6 +64,9 @@ def boot(prg, seconds, log=None, card=None, nvram=None, closed=(), taps=()):
     link = PropLink(pic, on_packet=on_packet, eeprom=_load(nvram, *NVRAM[1]))
     link.av = av
     link.board = board = Board(pic)
+    pic.on_ms.extend(on_ms)
+    if link_box is not None:
+        link_box.append(link)
     for n in closed:
         board.set(int(n))
     # press/release events in emulated ms, run between them
@@ -93,6 +99,8 @@ def main(argv=None):
     ap.add_argument("--nvram")
     ap.add_argument("--closed", default="", help="matrix switches held shut, e.g. 34,35")
     ap.add_argument("--tap", action="append", default=[], help="name@seconds, e.g. coin@15")
+    ap.add_argument("--frames", help="save the DMD every --every seconds into this folder")
+    ap.add_argument("--every", type=float, default=0.5)
     ap.add_argument("--quiet", action="store_true", help="no packet lines")
     a = ap.parse_args(argv)
     prg = open(a.prg, "rb").read()
@@ -108,12 +116,31 @@ def main(argv=None):
         name, _, at = t.partition("@")
         taps.append((float(at), name.lower()))
     closed = [int(n) for n in a.closed.split(",") if n.strip()]
-    pic, link = boot(prg, a.seconds, None if a.quiet else log, card, a.nvram, closed, taps)
+    frames = []
+    if a.frames:
+        os.makedirs(a.frames, exist_ok=True)
+        step = max(1, int(a.every * 1000))
+
+        def grab(ms):
+            if ms % step == 0 and link_box and link_box[0].av:
+                img = link_box[0].av.frame(ms)
+                if img.getbbox():
+                    path = os.path.join(a.frames, "%07d.png" % ms)
+                    img.resize((img.width * 4, img.height * 4)).save(path)
+                    frames.append(path)
+        frame_hooks = [grab]
+    else:
+        frame_hooks = []
+    link_box = []
+    pic, link = boot(prg, a.seconds, None if a.quiet else log, card, a.nvram, closed, taps,
+                     on_ms=frame_hooks, link_box=link_box)
     print("ran %.1f s emulated (%d M insns) in %.1f s; %d packets"
           % (pic.millis / 1000, pic.insns // 1_000_000, time.time() - t0, len(link.packets)))
     print("interrupts by vector:", dict(pic.irq_counts))
     print("I2C transfers: %d, first: %s" % (len(pic.i2c_log), list(pic.i2c_log)[:6]))
     print("videos:", " ".join("%s@%.1f" % (n or "?", ms / 1000) for ms, n, _ in link.av.played))
+    if frames:
+        print("frames: %d in %s" % (len(frames), a.frames))
     if a.sheet:
         print("sheet:", a.sheet if link.av.contact_sheet(a.sheet) else "no videos found on the card")
     print("UART:")

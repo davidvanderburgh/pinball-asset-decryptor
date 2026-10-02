@@ -173,6 +173,31 @@ shows the skill shot, launches on the button, reacts to playfield switches
 (ball save, `BS0`). The game's switch test shows numbers only ("LAST SWITCH
 n"), so playfield switches have numbers, not names.
 
+## Pass 7 (2026-10-02): all three games play; a live screen
+
+Coil pins are per coil number on the board; names are per game (each
+game's SOLENOID TEST), now `games.PINS` + per-game `coils`. Found the same
+way as Jetsons' (a snapshot after attract, then trials):
+
+| | trough | shooter | ready (dedicated) | launch | load / plunge coils |
+|---|---|---|---|---|---|
+| Jetsons | 35, 34 | 32 | bit 10 | bit 2 (button) | LOAD COIL (4) / PLUNGER (5) |
+| Domino's | 1, 2, 3 | 0 | bit 10 | hand plunger | LOAD BALL (17) / PLUNGER (16, auto) |
+| Rob Zombie | 1..7 (all needed) | 0 | bit 10 | hand plunger | BALL LOAD (17) / AUTOPLUNGER (16) |
+
+Domino's PWMs its LOAD BALL (several pulses per firing), so the model moves
+one ball per firing. With `Balls.plunge()` for the hand plunger, a ball is
+served, plunged, scores (Domino's SSF/JAD/JAL/EBA, Rob Zombie BS1/K01/
+JAC/ROA) and is re-served by the auto-plunger on a drain in ball save.
+
+`av.py` is now a live screen (`Av.frame(millis)`): AMH's video layout for
+Domino's and Rob Zombie (attribute bit 7 loops, 0x06 queues, a first byte
+of 255 only sets the priority - the `ff ..` packets read as "stop" before),
+Jetsons' layers (byte 0, black see-through), frames at 30 fps, and text
+(0x12 at 8-pixel cells; Rob Zombie's 0x0F lines, centred) drawn with the
+card's ZMF.spr font (Rob Zombie: "FREE PLAY") or a built-in one. Frames
+are numpy lookups, ~2.5 ms each. `run.py --frames DIR` saves the screen.
+
 ## Recommended design
 
 1. **Game CPU: emulate it** (Unicorn), running the user's own PRG unmodified.

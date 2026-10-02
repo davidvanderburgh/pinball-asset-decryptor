@@ -201,16 +201,18 @@ def _card_with_vid(tmp_path, name, frames=3):
 
 def test_av_finds_the_video_in_either_packet_layout(tmp_path):
     from tools.pinheck_emu.av import Av
-    av = Av(_card_with_vid(tmp_path, "ZMA"))
-    jetsons = bytes([0]) + b"ZMA" + bytes(3) + b"\xff" + bytes(6) + b"\x01\x02"
-    dominos = b"ZMA\x81\x00\xff" + bytes(9) + b"\x02"
-    av.packet(jetsons, 8100)
-    av.packet(dominos, 9000)
-    av.packet(b"\xff" + bytes(14) + b"\x02", 9500)            # stop
+    card = _card_with_vid(tmp_path, "ZMA")
+    jet = Av(card)
+    jet.packet(bytes([3]) + b"ZMA" + bytes(3) + b"\xff" + bytes(6) + b"\x01\x02", 8100)
+    assert jet.layout == "jetsons" and 3 in jet.layers
+    av = Av(card)
+    av.packet(b"ZMA\x81\x00\xff" + bytes(9) + b"\x02", 9000)
+    av.packet(b"\xff" + bytes(14) + b"\x02", 9500)            # videoPriority(0)
     av.packet(b"AT0\x80\x00\xff" + bytes(9) + b"\x02", 9600)  # not on the card
     av.packet(bytes(15) + b"\x01", 9700)                      # a sound: ignored
+    assert av.layout == "amh" and av.layers[0][2] is True     # attribute bit 7 = loop
     assert [(ms, n) for ms, n, _ in av.played] == [
-        (8100, "ZMA"), (9000, "ZMA"), (9500, "stop"), (9600, "AT0 (not on card)")]
+        (9000, "ZMA"), (9500, "priority"), (9600, "AT0 (not on card)")]
     v = av.played[0][2]
     assert (v.width, v.height, v.bpp, v.frames) == (128, 32, 8, 3)
     img = v.image(0, pixel_size=2)
@@ -334,8 +336,8 @@ def test_balls_follow_the_load_and_plunger_coils():
     balls = Balls(b, GAMES["JET"])
     assert b.matrix == {34, 35} and 10 in b.cabinet       # full trough, ball at the eject point
     tick = lambda ms: [f(ms) for f in pic.on_ms]
-    pulse = lambda name: (pic.write(coil_pins()[name][0], coil_pins()[name][1]),
-                          pic.write(coil_pins()[name][0], 0))
+    pulse = lambda name: (pic.write(coil_pins(GAMES["JET"])[name][0], coil_pins(GAMES["JET"])[name][1]),
+                          pic.write(coil_pins(GAMES["JET"])[name][0], 0))
     pulse("LOAD COIL")
     assert b.matrix == {35} and 32 not in b.matrix         # rolling
     tick(Balls.ROLL_MS)
@@ -349,3 +351,72 @@ def test_balls_follow_the_load_and_plunger_coils():
     assert b.matrix == {34, 35} and balls.in_trough == 2
     b.set("launch")
     assert 2 in b.cabinet                                  # Jetsons' launch button
+
+
+def _vid(tmp_path, name, frames, colour):
+    """A 128x32 8bpp VID whose frame n is all ``colour[n]``."""
+    d = tmp_path / "DMD" / ("_D" + name[0])
+    d.mkdir(parents=True, exist_ok=True)
+    header = bytes([128, 32, 128, 32, 8, frames, 15]) + bytes(505)
+    (d / (name + ".VID")).write_bytes(header + b"".join(bytes([c]) * 4096 for c in colour))
+
+
+def test_screen_plays_loops_and_queues(tmp_path):
+    from tools.pinheck_emu.av import FPS, Av
+    _vid(tmp_path, "AAA", 3, (0xE0, 0x1C, 0x03))          # red, green, blue
+    _vid(tmp_path, "BBB", 1, (0xFF,))
+    av = Av(str(tmp_path))
+    frame_ms = 1000 // FPS + 1
+    av.packet(b"AAA\x00\x00\x01" + bytes(9) + b"\x02", 0)    # play once
+    av.packet(b"BBB\x80\x00\x01" + bytes(9) + b"\x06", 10)   # then BBB, looping
+    px = lambda ms: av.frame(ms).getpixel((5, 5))
+    assert px(0)[0] > 200 and px(frame_ms)[1] > 200 and px(2 * frame_ms)[2] > 200
+    assert px(10 * frame_ms) == (255, 255, 255)              # queued BBB took over
+    assert px(500 * frame_ms) == (255, 255, 255)             # and loops
+    av.packet(b"AAA\x80\x00\x01" + bytes(9) + b"\x02", 1000)
+    assert px(1000 + 3 * frame_ms)[0] > 200                  # looped back to frame 0
+
+
+def test_screen_draws_text_until_the_next_video(tmp_path):
+    from tools.pinheck_emu.av import Av
+    _vid(tmp_path, "AAA", 1, (0,))
+    av = Av(str(tmp_path))
+    av.packet(b"AAA\x00\x00\x01" + bytes(9) + b"\x02", 0)
+    av.packet(bytes([0x11]) + b"HI" + bytes(12) + b"\x12", 5)    # column 1, row 1
+    lit = [(x, y) for x in range(128) for y in range(32) if av.frame(10).getpixel((x, y)) != (0, 0, 0)]
+    assert lit and all(8 <= x < 24 and 8 <= y < 16 for x, y in lit)
+    av.packet(b"AAA\x00\x00\x01" + bytes(9) + b"\x02", 20)
+    assert av.frame(30).getbbox() is None
+
+
+def test_screen_uses_the_cards_font_sprite(tmp_path):
+    from tools.pinheck_emu.av import Av
+    _vid(tmp_path, "AAA", 1, (0,))
+    z = tmp_path / "DMD" / "_DZ"
+    z.mkdir(parents=True)
+    sheet = bytearray(2048)
+    for row in range(8):                     # glyph A (ASCII 65 -> cell 33 = row 2, col 1): solid
+        for col in range(4):
+            sheet[(16 + row) * 64 + 4 + col] = 0xFF
+    (z / "ZMF.spr").write_bytes(bytes(512) + bytes(sheet))
+    av = Av(str(tmp_path))
+    av.packet(b"AAA\x00\x00\x01" + bytes(9) + b"\x02", 0)
+    av.packet(bytes([0x00]) + b"A" + bytes(13) + b"\x12", 5)
+    img = av.frame(10)
+    assert all(img.getpixel((x, y)) != (0, 0, 0) for x in range(8) for y in range(8))
+    assert img.getpixel((8, 0)) == (0, 0, 0)
+
+
+def test_screen_layers_jetsons_videos(tmp_path):
+    from tools.pinheck_emu.av import Av
+    _vid(tmp_path, "AAA", 1, (0xE0,))
+    d = tmp_path / "DMD" / "_DB"
+    d.mkdir(parents=True)
+    half = bytes(64) + bytes([0x03]) * 64            # one row: left half black, right blue
+    (d / "BBB.VID").write_bytes(bytes([128, 32, 128, 32, 8, 1, 15]) + bytes(505) + half * 32)
+    av = Av(str(tmp_path))
+    av.packet(bytes([3]) + b"AAA" + bytes(11) + b"\x02", 0)
+    av.packet(bytes([4]) + b"BBB" + bytes(11) + b"\x02", 0)
+    img = av.frame(5)
+    assert img.getpixel((10, 5))[0] > 200          # black is see-through: red below
+    assert img.getpixel((100, 5))[2] > 200         # blue on top

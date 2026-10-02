@@ -1259,7 +1259,8 @@ def install_command(ex, image_path, payload, epoch):
     for a in payload.get("extras") or ():
         args += ["--file", ex.to_exec_path(ab(a))]       # item 160: stock.cfg
     args += ["--port", ex.to_exec_path(ab(payload["port"]))]
-    return ("cd %s && E2FSPROGS_FAKE_TIME=%d python3 mode_install.py %s"
+    # PAD-314: run as a plain Linux user, debugfs and e2fsck sit in /sbin, off the PATH
+    return ("cd %s && PATH=\"$PATH:/sbin:/usr/sbin\" E2FSPROGS_FAKE_TIME=%d python3 mode_install.py %s"
             % (q(ex.to_exec_path(tools_dir())), int(epoch), " ".join(q(a) for a in args)))
 
 

@@ -295,3 +295,50 @@ def test_debugfs_grow_partial_failure_reports_grown_count(monkeypatch,
             lambda *a, **k: None, lambda: False, 600)
     assert ei.value.grown == 1        # a.mov landed before b.mov failed
     assert state["fsck"] == 1         # the image was still reconciled
+
+
+# ---- PAD-314 (Ales, Linux desktop): native Linux writes with debugfs, as a Mac does ----------
+def test_available_on_linux_takes_the_debugfs_route_without_root(monkeypatch):
+    """Every build on a Linux desktop left its new files off the card: the loop mount
+    needs root, and a GUI app has no terminal for sudo to ask on, so the probe died
+    before it ran. debugfs writes the user's own image as the user."""
+    monkeypatch.setattr(ext4_grow.sys, "platform", "linux")
+    ex = _FakeExecutor(loop_ok=False)
+    monkeypatch.setattr(ext4_grow, "create_executor", lambda: ex)
+    monkeypatch.setattr(ext4_grow, "_find_e2fsprogs",
+                        lambda: {"debugfs": "/sbin/debugfs", "e2fsck": "/sbin/e2fsck"})
+    ok, msg = ext4_grow.available()
+    assert ok and "debugfs" in msg
+    assert ex.commands == []                      # no loop probe, no sudo
+    monkeypatch.setattr(ext4_grow, "_find_e2fsprogs", lambda: None)
+    ok, msg = ext4_grow.available()
+    assert not ok and "apt install e2fsprogs" in msg and "brew" not in msg
+
+
+def test_grow_files_on_linux_goes_through_debugfs(monkeypatch, tmp_path):
+    src = tmp_path / "big.mp4"
+    src.write_bytes(b"x" * 100)
+    monkeypatch.setattr(ext4_grow.sys, "platform", "linux")
+    seen = []
+    monkeypatch.setattr(ext4_grow, "_grow_files_debugfs",
+                        lambda *a, **k: (seen.append(a), 1)[1])
+    monkeypatch.setattr(ext4_grow, "create_executor",
+                        lambda: (_ for _ in ()).throw(AssertionError("no executor on Linux")))
+    assert ext4_grow.grow_files("/card.raw", 4096, [("video/a.mov", str(src))]) == 1
+    assert seen and seen[0][0] == "/card.raw" and seen[0][1] == 4096
+
+
+def test_e2fsprogs_is_looked_for_in_sbin_on_linux(monkeypatch, tmp_path):
+    """Debian keeps debugfs in /sbin, which a user's PATH leaves out."""
+    import shutil
+    assert "/sbin" in ext4_grow.E2FSPROGS_DIRS and "/usr/sbin" in ext4_grow.E2FSPROGS_DIRS
+    sbin = tmp_path / "sbin"
+    sbin.mkdir()
+    for name in ("debugfs", "e2fsck"):
+        (sbin / name).write_bytes(b"")
+    monkeypatch.setattr(ext4_grow, "E2FSPROGS_DIRS", (str(sbin),))
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    assert ext4_grow._find_e2fsprogs() == {"debugfs": str(sbin / "debugfs"),
+                                           "e2fsck": str(sbin / "e2fsck")}
+    monkeypatch.setattr(ext4_grow, "E2FSPROGS_DIRS", (str(tmp_path / "nowhere"),))
+    assert ext4_grow._find_e2fsprogs() is None

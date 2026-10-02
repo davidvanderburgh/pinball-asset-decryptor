@@ -10,11 +10,16 @@ Two packet layouts are known:
   Zombie: 0x02 play, 0x06 queue after the current one (an empty name
   clears the queue); bytes 0..2 the name, byte 3 attributes (bit 7 = loop),
   byte 5 priority; a first byte of 255 only sets the priority.
-* Jetsons': byte 0 a layer, bytes 1..3 the name. Layers are drawn in order,
-  black is see-through. What its other bytes mean is not known yet. Its
-  text is a layer of its own: 0x12 puts a line up (byte 0 = column << 4 |
-  line, bit 3 a flag not decoded), 0x06 ``n ff ff ..`` clears line n,
-  ``13 03 01`` / ``13 03 00`` show / hide the text; a new video keeps it.
+* Jetsons': byte 0 a slot, bytes 1..3 the name, byte 7 a priority (a LOWER
+  value wins: its skill-shot screen, 01, takes over from GET READY, c8, the
+  moment the ball is in the lane), byte 8 the slot to play next when this
+  one has played out (the attract logo, slot 4 -> 3, and "PRESENTS", slot 3
+  -> 4, take turns; a slot naming itself repeats). One video shows at a
+  time. This is read from the packets and the video lengths, not from the
+  Propeller's code. Its text is a layer of its own: 0x12 puts a line up
+  (byte 0 = column << 4 | line, bit 3 a flag not decoded), 0x06 ``n ff ff
+  ..`` clears line n, ``13 03 01`` / ``13 03 00`` show / hide the text; a
+  new video keeps it.
 
 Text: AMH's 0x12 (byte 0 = column << 4 | row, in 8-pixel cells; then
 ASCII) and Rob Zombie's 0x0F (byte 0 = line, then ASCII, centred).
@@ -159,6 +164,8 @@ class Av:
         self.texts = {}             # (x, y) -> str
         self.scores = {}            # player 1..4 -> score
         self.text_on = True         # Jetsons' 13 03 xx
+        self.slots = {}             # Jetsons: slot -> (Vid, priority, next slot, name)
+        self.cur = None             # Jetsons: [slot playing, its start ms]
         self.font = None
         self.size = None            # (w, h) of the display, from the first video
         self.layout = None          # "amh" or "jetsons", from the first video packet
@@ -222,6 +229,14 @@ class Av:
             if cmd == QUEUE and self.layout != "jetsons":
                 self.queue.append((v, loop))
                 return
+            if self.layout == "jetsons":
+                # slot, priority (byte 7, LOWER wins), next slot (byte 8)
+                self.slots[layer] = (v, pkt[7], pkt[8], name)
+                cur = self.slots.get(self.cur[0]) if self.cur else None
+                if cur is None or pkt[7] <= cur[1] or self.cur[0] == layer:
+                    self.cur = [layer, millis]
+                self.played.append((millis, name, v))
+                return
             self.layers[layer] = [v, millis, loop]
             if self.layout != "jetsons":        # AMH: a new video flushes the text
                 self.texts.clear()
@@ -241,6 +256,25 @@ class Av:
         from PIL import Image
         w, h = self.size or (128, 32)
         img = Image.new("RGB", (w, h))
+        if self.layout == "jetsons" and self.cur:
+            slot, start = self.cur
+            v = self.slots[slot][0]
+            n = (millis - start) * FPS // 1000
+            hops = 0
+            while n >= v.frames and hops < 8:     # played out: on to its next slot
+                nxt = self.slots[slot][2]
+                if nxt not in self.slots:
+                    self.cur = None
+                    break
+                start += v.frames * 1000 // FPS
+                slot = nxt
+                self.cur = [slot, start]
+                v = self.slots[slot][0]
+                n = (millis - start) * FPS // 1000
+                hops += 1
+            if self.cur:
+                f = v.rgb(min(n, v.frames - 1))
+                img.paste(f if f.size == (w, h) else f.resize((w, h)), (0, 0))
         for layer in sorted(self.layers):
             v, start, loop = self.layers[layer]
             n = (millis - start) * FPS // 1000
@@ -252,7 +286,10 @@ class Av:
                 elif loop:
                     n %= v.frames
                 else:
-                    n = v.frames - 1
+                    # played out: it leaves the screen (what is under it -
+                    # another layer, the text - shows), as on the machine
+                    del self.layers[layer]
+                    continue
             f = v.rgb(n)
             if f.size != (w, h):
                 f = f.resize((w, h))

@@ -207,7 +207,7 @@ def test_av_finds_the_video_in_either_packet_layout(tmp_path):
     card = _card_with_vid(tmp_path, "ZMA")
     jet = Av(card)
     jet.packet(bytes([3]) + b"ZMA" + bytes(3) + b"\xff" + bytes(6) + b"\x01\x02", 8100)
-    assert jet.layout == "jetsons" and 3 in jet.layers
+    assert jet.layout == "jetsons" and 3 in jet.slots
     av = Av(card)
     av.packet(b"ZMA\x81\x00\xff" + bytes(9) + b"\x02", 9000)
     av.packet(b"\xff" + bytes(14) + b"\x02", 9500)            # videoPriority(0)
@@ -413,19 +413,32 @@ def test_screen_uses_the_cards_font_sprite(tmp_path):
     assert img.getpixel((8, 0)) == (0, 0, 0)
 
 
-def test_screen_layers_jetsons_videos(tmp_path):
-    from tools.pinheck_emu.av import Av
-    _vid(tmp_path, "AAA", 1, (0xE0,))
-    d = tmp_path / "DMD" / "_DB"
-    d.mkdir(parents=True)
-    half = bytes(64) + bytes([0x03]) * 64            # one row: left half black, right blue
-    (d / "BBB.VID").write_bytes(bytes([128, 32, 128, 32, 8, 1, 15]) + bytes(505) + half * 32)
+def _jet(slot, name, prio, nxt):
+    """A Jetsons video packet: slot, name, priority (byte 7), next slot (byte 8)."""
+    return bytes([slot]) + name + bytes([0, 0, 0, prio, nxt]) + bytes(6) + b"\x02"
+
+
+def test_jetsons_slots_take_turns_and_the_lower_priority_byte_wins(tmp_path):
+    from tools.pinheck_emu.av import FPS, Av
+    _vid(tmp_path, "LOG", 3, (0xE0,) * 3)       # red, 3 frames
+    _vid(tmp_path, "PRE", 2, (0x1C,) * 2)       # green, 2 frames
+    _vid(tmp_path, "GET", 2, (0x03,) * 2)       # blue
+    _vid(tmp_path, "SKL", 2, (0xFF,) * 2)       # white
     av = Av(str(tmp_path))
-    av.packet(bytes([3]) + b"AAA" + bytes(11) + b"\x02", 0)
-    av.packet(bytes([4]) + b"BBB" + bytes(11) + b"\x02", 0)
-    img = av.frame(5)
-    assert img.getpixel((10, 5))[0] > 200          # black is see-through: red below
-    assert img.getpixel((100, 5))[2] > 200         # blue on top
+    f = 1000 // FPS + 1
+    px = lambda ms: av.frame(ms).getpixel((5, 5))
+    av.packet(_jet(4, b"LOG", 0xC8, 3), 0)      # the attract pair: 4 -> 3 -> 4
+    av.packet(_jet(3, b"PRE", 0xC8, 4), 0)      # equal priority: takes over
+    assert px(0)[1] > 200                        # PRE
+    assert px(2 * f)[0] > 200                    # played out -> slot 4, LOG
+    assert px(5 * f)[1] > 200                    # -> slot 3, PRE again
+    av.packet(_jet(5, b"GET", 0xC8, 5), 1000)   # GET READY, repeats itself
+    assert px(1000 + 5 * f)[2] > 200
+    av.packet(_jet(0, b"SKL", 0x01, 0), 1300)   # lower byte: wins at once
+    assert px(1300)[:3] == (255, 255, 255)
+    av.packet(_jet(4, b"LOG", 0xFF, 0), 1400)   # higher byte: only loaded
+    assert px(1400)[:3] == (255, 255, 255)
+    assert av.layout == "jetsons" and not av.layers
 
 
 # --- sound -----------------------------------------------------------------

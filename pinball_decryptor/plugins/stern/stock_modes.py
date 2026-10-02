@@ -1400,14 +1400,22 @@ def kept_by_revert_all(data):
     ``.staged_changes.json``): its ``stock_modes`` record with every value cleared (the
     rows it ever changed are kept), else nothing. Every change is dropped, but the project
     still manages the game's own modes, so the next Write puts a card of this project that
-    holds our words back to stock instead of stopping at "Nothing to write"."""
+    holds our words back to stock instead of stopping at "Nothing to write".
+
+    The Color profile tab's machine screen (PAD-324) is kept as it is: it
+    describes the user's machine for the Scenes preview, not a change."""
+    from ...core.colour_profile import SCREEN_KEY
+    kept = {}
+    if isinstance(data, dict) and isinstance(data.get(SCREEN_KEY), dict):
+        kept[SCREEN_KEY] = data[SCREEN_KEY]
     rec = data.get(STAGE_KEY) if isinstance(data, dict) else None
     if not isinstance(rec, dict):
-        return {}
+        return kept
     out = {"build": rec.get("build"), "values": {}}
     if isinstance(rec.get("touched"), list) and rec["touched"]:
         out["touched"] = sorted({str(k) for k in rec["touched"]})
-    return {STAGE_KEY: out}
+    kept[STAGE_KEY] = out
+    return kept
 
 
 def fingerprint(assets_dir):

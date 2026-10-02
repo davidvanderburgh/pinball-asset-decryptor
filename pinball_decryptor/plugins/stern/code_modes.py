@@ -11,6 +11,7 @@ code mode, or one of its Examples). What it plays of its own sits beside it, nam
       "screen": true,                its own screen on the HUD (PadMode_<slug>_Screen)
       "screen_art": "screen.png",    the picture ("" = a generated panel with the name)
       "words_on_art": true,          its progress words sit on the picture's bottom band
+      "screen_layout": {"x": 40, ...},  where the screen goes (PAD-323; {} = placed automatically)
       "clip": "clip.mp4",            its start clip ("" = none)
       "music": "music.wav",          its own music bed ("" = none)
       "calls": {"sever": "sever.wav", "spike": {"wav": "spike.wav", "priority": 3}},
@@ -75,6 +76,7 @@ class CodeAssets:
     words_on_art: bool = False
     panel_color: str = "#146e28"
     title_color: str = "#ffe600"
+    screen_layout: dict = field(default_factory=dict)   # PAD-323: as a form mode's (mode_assets.LAYOUT_KEYS)
     clip: str = ""
     music: str = ""
     calls: dict = field(default_factory=dict)
@@ -204,6 +206,8 @@ def validate(spec, folder=None):
         secs = -1
     if not 1 <= secs <= SECONDS_MAX:
         out.append("%s: seconds is the longest the mode runs, 1 to %d." % (spec.name, SECONDS_MAX))
+    from .mode_assets import layout_problems             # PAD-323
+    out += ["%s: %s." % (spec.name, w) for w in layout_problems(spec.screen_layout)]
     calls = spec.call_list() if isinstance(spec.calls, dict) else None
     if calls is None:
         out.append("%s: calls maps each cue to a WAV." % spec.name)

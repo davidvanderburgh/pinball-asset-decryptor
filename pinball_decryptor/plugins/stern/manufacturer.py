@@ -184,7 +184,9 @@ def _ext4_grow_prereqs(platform):
     .sidx had already been rewritten (PAD-13, a 489-video write that shipped
     nothing).  macOS needs e2fsprogs' ``debugfs`` (probed in the same
     keg-only locations ``ext4_grow._find_e2fsprogs`` searches); native Linux
-    mounts ext4 itself — nothing to declare."""
+    takes the same debugfs route since PAD-314 (a loop mount needs root, which a
+    desktop app has no terminal to ask sudo for), so it declares e2fsprogs too,
+    looked for where Debian keeps it off a user's PATH (/sbin, /usr/sbin)."""
     if platform == "win32":
         return (
             Prerequisite(name="WSL2", where="wsl", probe=LOOP_PROBE,
@@ -210,6 +212,16 @@ def _ext4_grow_prereqs(platform):
                       "command -v debugfs",
                 reason=_EXT4_GROW_REASON,
                 install_hint="brew install e2fsprogs"),
+        )
+    if platform.startswith("linux"):                     # PAD-314
+        return (
+            Prerequisite(
+                name="e2fsprogs", where="host",
+                probe="command -v debugfs || test -x /sbin/debugfs || "
+                      "test -x /usr/sbin/debugfs",
+                reason=_EXT4_GROW_REASON,
+                install_hint="sudo apt install e2fsprogs  (Debian/Ubuntu; other "
+                             "distros: the e2fsprogs package)"),
         )
     return ()
 

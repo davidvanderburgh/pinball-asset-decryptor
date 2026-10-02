@@ -644,10 +644,11 @@ def check(data, p):
 
 
 def screen(p, name, art_rgba, words, x, y, words_at=None, words_rgba=(1.0, 0.9, 0.0, 1.0),
-           art_name=None, words_name=None):
+           art_name=None, words_name=None, scale=1.0, words_scale=1.0):
     """A root Sprite ``name`` holding an art Bitmap (our texture) and a words Text,
     named ``<name>_Art`` / ``<name>_Words`` unless given. Returns (bytes, the seven
-    object ids it uses)."""
+    object ids it uses). PAD-323: ``scale`` sizes the whole screen (picture and words) about
+    its top-left corner at (x, y), ``words_scale`` the words alone about their own place."""
     art_name = art_name or name + "_Art"
     words_name = words_name or name + "_Words"
     art = np.asarray(art_rgba, dtype=np.uint8)
@@ -667,11 +668,13 @@ def screen(p, name, art_rgba, words, x, y, words_at=None, words_rgba=(1.0, 0.9, 
                       bitmap_body(p.symbol["bitmap"], w, h, texture_new(tex, w, h, blob)))])
     kids = [art_node]
     if p.font:          # item 164: a scene with no Text of its own (Bond 60th's frame) has no font to use
-        kids.append(node(FLAG | p_txt, words_name, 1, [(1, 1)], [(1, matrix(tx=wx, ty=wy))],
+        kids.append(node(FLAG | p_txt, words_name, 1, [(1, 1)],
+                         [(1, matrix(words_scale, words_scale, tx=wx, ty=wy))],
                          [(1, poly["text"], FLAG | o_txt,
                            text_body(p.symbol["text"], (0.0, -40.0, float(w), 48.0), words_rgba, words,
                                      p.font[0], p.font[1], p.text_align, p.text_spacing, *p.text_tail))]))
-    group = node(FLAG | p_group, name, 1, [(1, 1)], [(1, matrix(tx=x - p.origin[0], ty=y - p.origin[1]))],
+    group = node(FLAG | p_group, name, 1, [(1, 1)],
+                 [(1, matrix(scale, scale, tx=x - p.origin[0], ty=y - p.origin[1]))],
                  [(1, poly["sprite"], FLAG | o_group,
                    sprite_body(p.symbol["sprite"], kids))])
     return group, ids
@@ -695,22 +698,61 @@ def _rebased(p, stock, data):
     the bank is also the scene a screen goes in (item 164: JP The Pin 1.05 draws one scene, its
     video bank). Each offset is found again by the stock bytes around it, which must appear
     exactly once in the window the growth allows."""
-    grow = len(data) - len(stock)
-    if grow < 0:
+    if len(data) < len(stock):
         raise SceneWriteError("%s: the edited scene is smaller than the stock one" % p.label)
-
-    def moved(at, after):
-        for width in (16, 64, 256, 1024):       # a trailer of zeros matches at several shifts
-            lo = max(0, at - width)
-            key = stock[lo:at + after]
-            hits = [i for i in range(lo, lo + grow + 1) if data[i:i + len(key)] == key]
-            if len(hits) == 1:
-                return hits[0] + (at - lo)
-        raise SceneWriteError("%s: 0x%x is not one place in the edited scene" % (p.label, at))
-
     return SceneProfile(**{**p.__dict__, "size": len(data),
-                           "root_count_at": moved(p.root_count_at, 8),
-                           "insert_at": moved(p.insert_at, max(len(p.append), 16))})
+                           "root_count_at": _moved_at(p, stock, data, p.root_count_at, 8),
+                           "insert_at": _moved_at(p, stock, data, p.insert_at,
+                                                  max(len(p.append), 16))})
+
+
+def _moved_at(p, stock, data, at, after):
+    """Offset *at* of *stock* found again in *data* (the same scene grown by insertions before
+    it, :func:`_rebased`) by the stock bytes around it, which must appear exactly once in the
+    window the growth allows."""
+    grow = len(data) - len(stock)
+    for width in (16, 64, 256, 1024):       # a trailer of zeros matches at several shifts
+        lo = max(0, at - width)
+        key = stock[lo:at + after]
+        hits = [i for i in range(lo, lo + grow + 1) if data[i:i + len(key)] == key]
+        if len(hits) == 1:
+            return hits[0] + (at - lo)
+    raise SceneWriteError("%s: 0x%x is not one place in the edited scene" % (p.label, at))
+
+
+def root_children(data):
+    """``[(name, offset)]`` of a scene's root children in draw order (the first is drawn first,
+    under the rest), and the offset just past the last one as ``("", end)``: where a screen
+    goes to be drawn under a given child (PAD-323, :func:`add_screens` ``order``)."""
+    from . import scene_tree
+    try:
+        kids = scene_tree.parse(data).root["kids"]
+    except scene_tree.SceneTreeError as e:
+        raise SceneWriteError("the scene does not read as a tree, so a screen cannot be put "
+                              "under its own pictures: %s" % e)
+    out = [(n.name, n.at) for n in kids]
+    if kids:
+        out.append(("", kids[-1].end))
+    return out
+
+
+def _order_offsets(p, data, stock, screens):
+    """``{screen index: offset}`` for the screens given an ``order`` (PAD-323): the root child
+    of the STOCK scene it is drawn under (0 = under every one of the scene's own, a number past
+    the last = over them all), moved onto *data* when it is that scene grown (``stock``). A scene
+    whose classes the first screen registers (``new_poly``) keeps every screen at its measured
+    place: a class must be named before it is used, so the screens stay in slot order."""
+    want = {i: s.get("order") for i, s in enumerate(screens) if s.get("order") is not None}
+    if not want or p.new_poly:
+        return {}
+    kids = root_children(stock if stock is not None else data)
+    if not kids:
+        return {}
+    out = {}
+    for i, k in want.items():
+        at = kids[max(0, min(int(k), len(kids) - 1))][1]
+        out[i] = at if stock is None else _moved_at(p, stock, data, at, 16)
+    return out
 
 
 # ---- item 164: a VIDEO grafted into a scene with none --------------------------------------
@@ -967,8 +1009,11 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
     carries several modes, item 133 - and this refuses any file that is not the measured
     stock one, so screens cannot be added one call at a time). ``screens`` is a list of
     dicts of :func:`screen`'s arguments (``name``, ``art_rgba``, ``words``, and optionally
-    ``x``, ``y``, ``words_at``, ``art_name``, ``words_name``). Each takes the next seven
-    object ids and becomes one more root child, in order. Returns (new bytes, [info]).
+    ``x``, ``y``, ``words_at``, ``art_name``, ``words_name``, ``scale``, ``words_scale``). Each
+    takes the next seven object ids and becomes one more root child, in order, at the
+    profile's measured place - or, given ``order`` (PAD-323: the person put it under the HUD's
+    own pictures in the Scenes editor), just before the stock root child of that index
+    (:func:`_order_offsets`). Returns (new bytes, [info]).
 
     ``stock`` is given when ``data`` is that stock scene already grown by insertions of
     another kind (a clip: :func:`_rebased`); the profile is the stock one's.
@@ -1005,19 +1050,25 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
         libs.append(entry)
         font = {"font": (size_id, variant)}
     groups, infos = [], []
+    placed = _order_offsets(p, data, stock, screens)
+    under = []                  # (offset, group) of the screens placed by their order
     for i, s in enumerate(screens):
         words_name = s.get("words_name") or s["name"] + "_Words"
         sub = SceneProfile(**{**p.__dict__, "first_free_id": p.first_free_id + 7 * i, **font,
                               "new_poly": p.new_poly if i == 0 else ()})       # registered once, by the first
         group, ids = screen(sub, s["name"], s["art_rgba"], s["words"], s.get("x", 360.0),
                             s.get("y", 200.0), s.get("words_at"), art_name=s.get("art_name"),
-                            words_name=words_name)
+                            words_name=words_name, scale=s.get("scale", 1.0),
+                            words_scale=s.get("words_scale", 1.0))
         for nid in ids:
             if struct.pack("<I", FLAG | nid) in data:
                 raise SceneWriteError("%s: object id 0x%x is already used" % (p.label, nid))
         if string(s["name"]) in data:
             raise SceneWriteError("%s: a node called %s is already in the scene" % (p.label, s["name"]))
-        groups.append(group)
+        if i in placed:
+            under.append((placed[i], group))
+        else:
+            groups.append(group)
         infos.append({
             "screen_scene": p.scene_id, "screen_node": s["name"],
             "screen_text": s["name"] + "." + words_name,
@@ -1047,9 +1098,17 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
                       "node_bytes": sum(len(g) for g in hud_groups)})
     lib = b"".join(libs)
     lib_at = _stage_at(data, p) - 8 if lib else p.root_count_at
-    new = (bytearray(data[:lib_at]) + lib + bytearray(data[lib_at:p.insert_at]) + b"".join(groups)
-           + bytearray(data[p.insert_at:]))
-    struct.pack_into("<Q", new, p.root_count_at + len(lib), p.root_count + len(groups))
+    # every insertion in file order: the library before the root, then the screens an order
+    # placed, then the rest at the measured place (after any ordered to the same offset, as
+    # they are drawn over them)
+    cuts = sorted([(lib_at, 0, lib)] + [(at, 1, g) for at, g in under]
+                  + [(p.insert_at, 2, b"".join(groups))], key=lambda c: (c[0], c[1]))
+    new, last = bytearray(), 0
+    for at, _k, blob in cuts:
+        new += data[last:at] + blob
+        last = at
+    new += data[last:]
+    struct.pack_into("<Q", new, p.root_count_at + len(lib), p.root_count + len(groups) + len(under))
     if lib:
         if new[0] != 1:
             raise SceneWriteError("%s: the library does not start at byte 1" % p.label)

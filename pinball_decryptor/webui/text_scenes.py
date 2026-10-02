@@ -24,6 +24,7 @@ import threading
 
 from . import compat
 from .rpc import rpc
+from .scene_mode_layout import ModeLayoutMixin
 from .text_scenes_tree import TreeEditMixin
 
 log = logging.getLogger(__name__)
@@ -89,11 +90,13 @@ TIPS = {
     "machine": "Drawn the way the machine's screen will show it: through the "
                "whole screen overlay, if one is set, and then through the "
                "screen itself, which shows middle shades too bright and too "
-               "blue (the Color profile tab's individual files profile, "
-               "undone). A picture with that profile switched on comes back "
-               "to what your PC shows; the game's own art, and a file left "
-               "in its own colors, look the way the machine really shows "
-               "them. Untick to see every picture in the PC's own colors.",
+               "blue. The screen is the Color profile tab's Machine screen, "
+               "and you can adjust it there; until you do, it is the "
+               "individual files profile, undone. A picture with that "
+               "profile switched on comes back to what your PC shows; the "
+               "game's own art, and a file left in its own colors, look the "
+               "way the machine really shows them. Untick to see every "
+               "picture in the PC's own colors.",
     "behind": "What the scene is laid over.\n\nThe machine draws on BLACK, "
               "so that is the true picture — but a black outline on a black "
               "frame is as invisible here as it is there. Pick a light "
@@ -282,7 +285,7 @@ def glyph_atlas_rel(assets, rel):
     return None
 
 
-class TextScenesService(TreeEditMixin):
+class TextScenesService(ModeLayoutMixin, TreeEditMixin):
     ns = "text_scenes"
 
     def __init__(self, tab):
@@ -345,7 +348,7 @@ class TextScenesService(TreeEditMixin):
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
                  tree_loading=False, tree_img_rev=0, preparing=None, tree_live=None,
-                 card_note="", pic_note="", tree_play=None)
+                 card_note="", pic_note="", tree_play=None, mode_layout=None)
 
     def is_open(self):
         return self._alive
@@ -372,6 +375,8 @@ class TextScenesService(TreeEditMixin):
                         break
             except Exception:                        # noqa: BLE001
                 pass
+        if self._mlay is not None and self._mlay["assets"] != assets:
+            self._mlay = None                  # PAD-323: another project's scenes
         if self._alive:
             if self.assets_dir != assets:
                 self.assets_dir = assets
@@ -424,6 +429,7 @@ class TextScenesService(TreeEditMixin):
             self._bulk["cancel"] = True
         self._live_layout = None
         self._cancel_live_job()
+        self._mlay = None
         self._token += 1
         self._alive = False
         self._sel = None

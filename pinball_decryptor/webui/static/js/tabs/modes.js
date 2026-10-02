@@ -68,6 +68,8 @@ const T = {
   penalty: "A minus number takes points away: a wrong shot costs the player that much each time, as a flat amount, and the score stops at 0. A shot with a minus number cannot also be one that scores.",
 };
 
+// PAD-323: the Show page's way into the Scenes editor with the mode's screen in it
+const LAYOUT_TIP = "Opens the Scenes editor on the game's HUD with this screen in it: drag it, size it, move its words on their own, or send it to the back to put it under the HUD's own pictures. Saved into the mode as you go; without it the app places the screen itself.";
 const PAGES = [["mode", "Mode"], ["show", "Show"], ["lights", "Lights"], ["sounds", "Sounds"], ["scoring", "Scoring"]];
 const PATTERNS = ["Solid", "Blink", "Pulse", "Chase"];
 const STATE_WORDS = { preflight: "Preparing", building: "Building", installing: "Installing", starting: "Starting",
@@ -488,6 +490,11 @@ function ShowPage({ s, f, off, dis, rs, labels, files, showClip }) {
         ${f.art_mode === "file" && !scrOff ? html`<${Button} size="xs" kind="ghost" onClick=${() => call("modes.choose", "art")}>Change…<//>` : null}</div>` : null}
       <div class="thumb modes-preview">${pv && pv.path ? html`<img src=${mediaUrl(pv.path)} alt="The mode's screen" />`
         : pv && pv.text ? html`<span class="small">${pv.text}</span>` : html`<span class="small muted">${f.screen ? "" : "No screen of its own"}</span>`}</div>
+      <div class="row small modes-layout">
+        <${Button} size="xs" disabled=${scrOff || !f.screen} title=${LAYOUT_TIP}
+          onClick=${() => call("modes.lay_out_screen")}>Lay out on the screen…<//>
+        <span class="dim">${s.screen_laid_out ? "Where you put it in the Scenes editor" : "Placed automatically"}</span>
+      </div>
     <//>
     <div class="stack" style="gap:14px">
       <${Sec} title="Clip" reason=${rs.clip}>
@@ -760,6 +767,9 @@ function CodePane({ s }) {
             ? c.recipe.map((line) => html`<span class="wrap" key=${line}>${line}</span>`) : "none"}</span>
         </div>
         ${c.files && c.files.art ? html`<div class="thumb modes-preview"><img src=${mediaUrl(c.files.art)} alt="The mode's picture" /></div>` : null}
+        ${c.screen ? html`<div class="row small modes-layout">
+          <${Button} size="xs" title=${LAYOUT_TIP} onClick=${() => call("modes.lay_out_screen", c.slug)}>Lay out on the screen…<//>
+          <span class="dim">${c.laid_out ? "Where you put it in the Scenes editor" : "Placed automatically"}</span></div>` : null}
         ${(c.calls || []).length ? html`<div class="stack" style="gap:2px"><span class="lbl">Calls</span>
           ${c.calls.map((x) => html`<div class="row small" key=${x.cue}><span class="mono">${x.cue}</span><span class="dim">${x.wav}</span><span class="muted">priority ${x.priority}</span><${PlayButton} path=${x.path} /></div>`)}</div>` : null}
         ${c.describe ? html`<div class="small muted wrap">${c.describe}</div>` : null}`}

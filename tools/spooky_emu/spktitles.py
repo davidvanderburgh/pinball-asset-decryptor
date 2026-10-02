@@ -39,6 +39,9 @@ the game around it:
   uname    what `uname -r` says to the game, where it matters
   seed     ["<file in /game>:<file in the update>", ...] - files a machine
            has from the factory, copied in when missing
+  manual_plunger  the cabinet has a shooter rod as well as Launch (Halloween,
+           Ultraman): Plunge lets the ball go itself when the game does not
+           fire its launch coil.  The Warden games have none (spkwarden.plunge)
   board    "pinotaur" for a Pinotaur game (spkpinotaur.py); else the Warden
   aliases  cabinet names -> switch numbers, where not the Warden's
            (CABINET_ALIASES)
@@ -320,6 +323,9 @@ TITLES = {
         "trough": [65, 22, 21, 20, 16, 19, 18], "jam": 64, "shooter": 23,
         # coil 18 "trough", 21 "launch"; installed_balls defaults to 7.
         "eject": [18], "launch": {21: 23}, "balls": 7,
+        # A manual shooter: the launch coil fires only for ball saves and
+        # multiballs, so Plunge lets the ball go itself (spkwarden.plunge).
+        "manual_plunger": True,
         # The board reports raw inputs and the game inverts its reversed
         # optos (scoops, subway) itself, so at rest they read open here.
         # The pumpkin drop bank's switches read made while its targets
@@ -350,6 +356,7 @@ TITLES = {
         "seed": ["highscores.config:config/default_highscores.config"],
         "trough": [65, 22, 21, 20, 16, 19, 18], "jam": 64, "shooter": 23,
         "eject": [18], "launch": {21: 23}, "balls": 7,
+        "manual_plunger": True,
         "rest": [27, 28, 29],
         "sets": {11: {27: 1, 28: 1, 29: 1}, 12: {31: 1}, 13: {31: 0},
                  7: {30: 1}, 6: {30: 0}, 4: {26: 0}, 5: {6: 0}},

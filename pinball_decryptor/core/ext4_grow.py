@@ -178,12 +178,22 @@ def loop_unavailable_reason(ex, what="card image"):
                     "distro itself has stopped starting and no package or "
                     "conversion will help" % (what, detail))
         return ("this system can't create a loop device to mount the %s "
-                "(%s); load the loop module (modprobe loop) or reboot, "
-                "then try again" % (what, detail))
+                "(%s); a loop device needs root, so run the app as root or "
+                "with passwordless sudo, load the loop module (modprobe loop) "
+                "or reboot, then try again" % (what, detail))
+
+
+#: Where e2fsprogs keeps its binaries off a user's PATH: macOS (Homebrew keg-only,
+#: MacPorts) and native Linux (Debian's /sbin and /usr/sbin are root's PATH only).
+E2FSPROGS_DIRS = ("/opt/homebrew/opt/e2fsprogs/sbin",     # Homebrew ARM
+                  "/usr/local/opt/e2fsprogs/sbin",        # Homebrew Intel
+                  "/opt/local/sbin",                      # MacPorts
+                  "/sbin", "/usr/sbin")                   # Linux (PAD-314)
 
 
 def _find_e2fsprogs():
-    """Locate macOS e2fsprogs binaries (Homebrew keg-only, so not on PATH).
+    """Locate the e2fsprogs binaries: macOS keeps them keg-only (Homebrew) and a
+    Linux user's PATH leaves out /sbin, where Debian puts them.
 
     Returns ``{"debugfs": path, "e2fsck": path}`` or ``None`` if either is
     missing.  dumpe2fs is deliberately NOT used: 1.47.x resolves its device
@@ -193,9 +203,7 @@ def _find_e2fsprogs():
     instead, which never goes through blkid.
     """
     import shutil
-    dirs = ("/opt/homebrew/opt/e2fsprogs/sbin",     # Homebrew ARM
-            "/usr/local/opt/e2fsprogs/sbin",        # Homebrew Intel
-            "/opt/local/sbin")                      # MacPorts
+    dirs = E2FSPROGS_DIRS
     tools = {}
     for name in ("debugfs", "e2fsck"):
         for d in dirs:
@@ -211,13 +219,29 @@ def _find_e2fsprogs():
     return tools
 
 
+#: How to install e2fsprogs, per platform (the debugfs route's one need)
+E2FSPROGS_HINT = {"darwin": "brew install e2fsprogs",
+                  "linux": "sudo apt install e2fsprogs (Debian/Ubuntu), or your distro's "
+                           "e2fsprogs package"}
+
+
+def uses_debugfs(platform=None):
+    """Does this platform write into the card image with e2fsprogs' debugfs instead
+    of a loop mount? macOS always has; native Linux since PAD-314 (Ales): the loop
+    mount needs root, which a GUI app has no terminal to ask sudo for, so every build
+    on a Linux desktop left its new files off the card. debugfs writes a user's own
+    image file as the user."""
+    p = platform or sys.platform
+    return p == "darwin" or p.startswith("linux")
+
+
 def available():
     """``(ok, message)`` — whether ext4 growth can run on this platform."""
-    if sys.platform == "darwin":
+    if uses_debugfs():
         if _find_e2fsprogs() is None:
-            return False, ("e2fsprogs isn't installed — install it with: "
-                           "brew install e2fsprogs")
-        return True, "macOS debugfs"
+            return False, ("e2fsprogs isn't installed — install it with: %s"
+                           % E2FSPROGS_HINT["darwin" if sys.platform == "darwin" else "linux"])
+        return True, "macOS debugfs" if sys.platform == "darwin" else "Linux debugfs"
     try:
         ex = create_executor()
     except Exception as e:  # noqa: BLE001
@@ -340,7 +364,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
                 "it was time to copy them onto the card." % len(missing))
         return 0
 
-    if sys.platform == "darwin":
+    if uses_debugfs():                   # macOS, and native Linux (PAD-314)
         return _grow_files_debugfs(image_path, part_offset, jobs, log, cancel,
                                    timeout)
 
@@ -469,8 +493,9 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
     if tools is None:
         raise Ext4GrowUnavailable(
             "Can't grow files on this system: e2fsprogs isn't "
-            "installed (brew install e2fsprogs). The affected videos keep "
-            "their stock content on the card.")
+            "installed (%s). The affected videos keep "
+            "their stock content on the card."
+            % E2FSPROGS_HINT["darwin" if sys.platform == "darwin" else "linux"])
     if "?" in image_path:
         # unix_io splits the device name on '?' for its offset= suffix.
         raise Ext4GrowError(

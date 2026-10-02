@@ -29,6 +29,17 @@ class CommandError(Exception):
         super().__init__(f"Command failed (exit {returncode}): {cmd}\n{output}")
 
 
+def _passwordless_sudo():
+    """1 = ``sudo`` runs a command here with no password asked (``sudo -n true``);
+    0 = it would prompt, is not installed, or hangs."""
+    try:
+        r = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True,
+                           timeout=15, stdin=subprocess.DEVNULL)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 class CommandExecutor:
     def __init__(self):
         self._current_proc = None
@@ -223,10 +234,21 @@ class WslExecutor(CommandExecutor):
 
 
 class NativeExecutor(CommandExecutor):
+    """Native Linux. Root when the process is root, or when sudo works WITHOUT a
+    password (``sudo -n true``, asked once); otherwise the user's own shell. A GUI
+    app has no terminal for sudo to ask on, so ``sudo bash -c`` from it fails
+    before the command runs - which is how every card write on a Linux desktop
+    failed at the loop-device probe (PAD-314, Ales). What needs no root (debugfs on
+    the user's own image, the mode payload's installer, a compile) now runs as the
+    user; what does (a loop mount) fails with its own permission error."""
+    _sudo_ok = None                     # None = not asked yet (class-wide: one ask a run)
+
     def _prefix(self):
         if hasattr(os, "getuid") and os.getuid() == 0:
             return ["bash", "-c"]
-        return ["sudo", "bash", "-c"]
+        if NativeExecutor._sudo_ok is None:
+            NativeExecutor._sudo_ok = _passwordless_sudo()
+        return ["sudo", "bash", "-c"] if NativeExecutor._sudo_ok else ["bash", "-c"]
 
     def run(self, bash_cmd, timeout=120):
         full_cmd = [*self._prefix(), bash_cmd]

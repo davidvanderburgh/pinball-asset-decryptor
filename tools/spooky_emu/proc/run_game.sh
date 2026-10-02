@@ -15,7 +15,9 @@
 #                shot.sh shows a hidden run)
 #   --audio      play sound through WSLg's PulseAudio (default: SDL's disk
 #                writer into /dev/null).  A hidden run stays silent unless
-#                PAD_AUDIO_ASKED=1 (tools/rigboard.sh)
+#                PAD_AUDIO_ASKED=1 (tools/rigboard.sh).  PAD_AUDIO_CTL (the
+#                app's audio_ctl.json, a Linux path) holds it at the app's
+#                Volume / Mute, live (tools/spooky_emu/spkvol.py)
 #
 # The game runs in a network + mount namespace of the rig's own: the rig's
 # copy of the build is bind-mounted where the machine keeps it
@@ -66,6 +68,8 @@ rm -f "$SPP_RIG/game/$DIR/title"
 echo "$BUILD" > "$SPP_RIG/build"
 echo "$VISIBLE" > "$SPP_RIG/visible"
 echo "$TITLE" > "$SPP_RIG/title"
+echo "$NAME" > "$SPP_RIG/name"
+touch "$(realpath "$BUILD")/used"            # the Cache window's "Last played"
 # The game creates files anywhere in its tree (config/game_user_*.yaml,
 # /game/log.txt), so it owns every directory; the files stay root's - they
 # are the cache's own inodes (hard links), and the game must not rewrite
@@ -98,6 +102,13 @@ PATH=$SPP_PY3/bin:$PATH PAD_SLOT=$SPP_SLOT bash "$SPP_PROC/hw.sh" --yaml "$SPP_R
 FPGA=$(. "$SPP_PROC/procpath.sh"; echo "$PROC_FPGA")
 CTL=$(. "$SPP_PROC/procpath.sh"; echo "$PROC_CTL")
 chmod 666 "$FPGA"
+# The virtual playfield's table (the AP window's format, as the Warden
+# games'), from the same yaml, numbered as the board numbers it.
+SHOOTER=$(echo "$BALLS" | tr ' ' '\n' | sed -n 's/^shooter=//p')
+"$SPP_PY3/bin/python3" "$SPP_TOOLS/sppswitches.py" "$SPP_RIG/game/$DIR/$YAML" "$NAME" "$SHOOTER" \
+    > "$SPP_RIG/switches.json.tmp" 2>> "$SPP_RIG/rig.log" \
+    && mv "$SPP_RIG/switches.json.tmp" "$SPP_RIG/switches.json" \
+    || echo "run_game.sh: no switches.json - the virtual playfield will not open" >&2
 
 # A hidden run's Xvfb starts inside the namespace (netns.sh): WSLg mounts
 # /tmp/.X11-unix read-only, so Xvfb can only listen on its abstract socket,
@@ -105,6 +116,7 @@ chmod 666 "$FPGA"
 if [ $VISIBLE = 1 ]; then DISP=${DISPLAY:-:0}; XVFB=0; else DISP=$SPP_DISPLAY; XVFB=1; fi
 echo "$DISP" > "$SPP_RIG/display"
 echo "$SCREEN" > "$SPP_RIG/screen"
+echo "$SCREEN" > "$SPP_RIG/window"
 
 AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
 if [ "$AUDIO" = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
@@ -132,6 +144,12 @@ for i in $(seq 1 1800); do
     [ "$i" -gt 50 ] && ! spp_alive game && break
     sleep 0.1
 done
+# The app's Volume / Mute, live, as on the Warden rig: spkvol.py finds the
+# game's (and Alice Cooper's player's) streams by SPK_MARK (netns.sh).
+if [ "$AUDIO" = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S /mnt/wslg/PulseServer ] && spp_alive game; then
+    setsid -f python3 "$SPP_TOOLS/../spkvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$SPP_RIG" \
+        < /dev/null >> "$SPP_RIG/spkvol.log" 2>&1
+fi
 if spp_alive game && [ -f "$SPP_RIG/attract" ]; then
     rigboard_post spooky-proc "$SPP_SLOT" "$(spp_pid game)" "$(basename "$BUILD")" "$NAME" "$VISIBLE" "$AUDIO"
     echo "Ready: $(basename "$BUILD"), slot $SPP_SLOT, display $DISP"

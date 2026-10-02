@@ -218,7 +218,10 @@ no pactl), polls `status.sh` (key=value, AP's keys) and stops with `stop.sh`;
 to the board through `ctl.sh --stream`, one JSON reply per request - the
 requests AP's game answers: `state`, `sw <n> <0|1>`, `tap <n> [ms]`,
 `rip <n> <0|1>`, `plunge` (presses Launch: the game fires the ball in),
-`drain`, `reset`, `pause <0|1>` (SIGSTOP/SIGCONT the game), plus `leds`. A
+`drain`, `reset`, `pause <0|1>` (SIGSTOP/SIGCONT the game), plus `leds`.
+Plunge presses Launch also with the lane empty - Scooby-Doo's character
+select and Evil Dead's movie select are confirmed with it - and on a Warden
+game never lets the ball go by itself (PAD-321, below). A
 press is held at least 120 ms: the games believe a Start / menu edge only
 after asking the board again. By hand, all in PAD-Runtime as root;
 `PAD_SLOT=N` picks a slot (default 0) - take a riglock slot first:
@@ -249,7 +252,12 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
   run by hand on `proc/`; the Emulate Spooky tab does not offer them yet.
 * **Halloween's plunger**: sw.py `plunge` presses its Launch button (84);
   the game fires its launch coil for ball saves and multiballs, and
-  otherwise the rig lets the ball go after 1.5 s as a manual shooter would.
+  otherwise the rig lets the ball go after 1.5 s as a manual shooter would
+  (`manual_plunger` in the profile; Ultraman the same). The Warden games
+  have no shooter rod, so there the ball waits for the game's launch coil:
+  the rig used to let it go after 1.5 s on every title, and Evil Dead,
+  whose first Launch after Start picks the movie, then had a ball it never
+  launched - after its drain it served no other (PAD-321).
   Its subway, scoops, crossover and lock mechanisms are switches you press
   yourself.
 * **It draws on the GPU.** Mesa's d3d12 driver renders the games' OpenGL
@@ -258,9 +266,11 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
   attract measured 52-65 fps hidden at 1920x1080 and 66-80 fps in the
   1280x720 desktop window, ~170% CPU (2026-09-30, an AMD Radeon iGPU);
   Mesa's llvmpipe (the old default, and the fallback where WSL has no GPU;
-  `SPK_GL=llvmpipe` forces it) managed 5.5-7.8 fps on ~500% CPU. The other
-  five titles were not measured on d3d12 (Halloween was proven on
-  llvmpipe, before the GPU renderer landed). `status.sh` reports `gl=` and
+  `SPK_GL=llvmpipe` forces it) managed 5.5-7.8 fps on ~500% CPU. All seven
+  on d3d12, hidden at 1920x1080 (PAD-321, 2026-10-02): Beetlejuice 55-60
+  fps in play, Scooby-Doo 105-120, Looney Tunes 240+ (127% CPU); Texas
+  Chainsaw, Evil Dead, Halloween and Ultraman hold themselves at 30 fps
+  (their own frame cap: 13-25% of one core). `status.sh` reports `gl=` and
   `fps=` (Mesa's HUD, sampled once a second into `$SPK_RIG/hud/fps`, drawn
   nowhere). ~3 GB of memory; on llvmpipe `LP_NUM_THREADS` is capped at 4
   (`SPK_LP_THREADS`).
@@ -271,9 +281,15 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
   not modelled.
 * One build of each title was run. Looney Tunes' 2025.03.01 stable build and
   Beetlejuice's v2026.06.11.13 were not.
-* Sound (`PAD_AUDIO=1`) was run for Beetlejuice only, and the visible
-  (desktop) window for Beetlejuice only (muted, to measure its frame rate).
-  Rig runs stay muted.
+* Sound: all seven play through PulseAudio and follow the app's Volume /
+  Mute (PAD-321: each stream moved to a null sink with PAD-Runtime's
+  speakers muted; 30% gives 0.3x the level, Mute silence). Rig runs stay
+  muted.
+* **The window** on the desktop moves by its title bar and resizes from its
+  edges, and the game scales its picture to the size (PAD-321, a mouse
+  drag on Beetlejuice). The Unity titles' hints say min size = max size (a
+  cabinet build), but WSLg's window manager does not hold a window to
+  them; a window manager that did would need them cleared.
 * No lights in the virtual playfield: the board decodes every LED write
   (`leds`), but the Spooky games ship no map from LED numbers to insert
   positions, so the window's light grid stays empty.

@@ -762,7 +762,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._publish_form()
         self._set_editor_state(True)
         self._dirty = False
-        self.set(save_state="saved", code=None, game_mode=None)
+        self.set(save_state="saved", code=None, game_mode=None,
+                 screen_laid_out=bool(MA.clean_layout(spec.screen_layout)))
         self._after_change()
 
     def collect(self):
@@ -1769,6 +1770,45 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return name
 
     @rpc
+    def lay_out_screen(self, slug=None):
+        """PAD-323: "Lay out on the screen…" - the Scenes editor on the title's HUD scene with
+        this mode's screen in it, to move, size and put under the HUD's own pictures; the
+        layout is saved into the mode (``screen_layout``)."""
+        project = self.project()
+        slug = slug or self._code_slug or self._slug
+        if not project or not slug:
+            return False
+        self._save_if_edited()
+        text = self.window.service("text")
+        scenes = getattr(text, "scenes", None)
+        if scenes is None:
+            self._say("Lay out on the screen: the Scenes tab is not available.")
+            return False
+        ok, why = scenes.open_mode_layout(project, slug)
+        if not ok:
+            compat.messagebox.showinfo("Lay out on the screen", "The screen cannot be laid out "
+                                       "in the Scenes editor: %s." % why)
+        return ok
+
+    def layout_changed(self, slug):
+        """The Scenes editor saved mode *slug*'s ``screen_layout`` into its file: the mode
+        held here takes it too, so the next save of the form keeps it."""
+        project = self.project()
+        if not project:
+            return
+        if self._spec is not None and self._slug == slug:
+            try:
+                got = MP.load(os.path.join(MP.mode_folder(project, slug), MP.MODE_FILE))
+            except (OSError, ValueError):
+                return
+            self._spec.screen_layout = dict(got.screen_layout or {})
+            if slug in self._found:
+                self._found[slug].screen_layout = dict(got.screen_layout or {})
+            self.set(screen_laid_out=bool(MA.clean_layout(got.screen_layout)))
+        elif self._code_slug == slug:
+            self._show_code(slug)
+
+    @rpc
     def choose(self, what):
         """"My picture…", "My video…", "My sound…" and the second clip's video."""
         if what == "art":
@@ -2089,6 +2129,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 name=spec.name, seconds=spec.seconds, screen=bool(spec.screen),
                 screen_art=spec.screen_art, words_on_art=bool(spec.words_on_art),
                 panel_color=spec.panel_color, title_color=spec.title_color, clip=spec.clip,
+                laid_out=bool(MA.clean_layout(spec.screen_layout)),
                 music=spec.music, calls=calls, clips=clips, hud=dict(spec.hud or {}), files=files, describe=words,
                 summary=self._code_words_one(spec),
                 recipe=CM.recipe_lines(film.get("recipe")),

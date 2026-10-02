@@ -1470,6 +1470,9 @@ class ModeSpec:
     screen_art: str = ""                 # a PNG in the mode folder; "" = a generated panel
     panel_color: str = "#146e28"
     title_color: str = "#ffe600"
+    # PAD-323: where the screen goes, as laid out in the Scenes editor ({} = placed automatically;
+    # mode_assets.LAYOUT_KEYS: x, y, scale, words_x, words_y, words_scale, order)
+    screen_layout: dict = field(default_factory=dict)
     # the clip: played full screen on the game's video surface (item 132)
     clip: str = "none"                   # none | title | file
     clip_title: str = ""                 # "" = the mode's name
@@ -2270,6 +2273,8 @@ def validate(spec, folder=None):
             out.append("The %s file %s is not in the mode's folder." % (label, name))
     if spec.clip == "file" and not spec.clip_file:
         out.append("Choose the video file for the clip.")
+    from .mode_assets import layout_problems             # PAD-323
+    out += ["The mode's screen cannot be placed: %s." % w for w in layout_problems(spec.screen_layout)]
     out += _validate_own_sounds(spec, folder)
     out += validate_starts(spec)
     out += _validate_film_cut(spec, folder)

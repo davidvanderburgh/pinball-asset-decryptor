@@ -14,6 +14,10 @@
 // Scenes) that are switched on: the two boxes here for every file of a
 // kind, and each file's own box on the Images and Video tabs and in the
 // Scenes layers.  The same sliders and preview serve whichever is showing.
+//
+// PAD-324: a third mode, "Machine screen", is not a correction but the
+// screen itself: what the machine does to what it is given.  Only the
+// Scenes preview's "As on the machine" draws through it; nothing is written.
 
 import { html, useState, useEffect, useRef, useCallback, PageHead, Card, Button, Field, Select, Seg, Note, Check,
          Icon, tip, call, cx, mediaUrl } from "../core/ui.js";
@@ -70,7 +74,7 @@ function correct(src, dst, p) {
 }
 
 // ------------------------------------------------------------- the preview
-function Preview({ s, p }) {
+function Preview({ s, p, screen }) {
   const beforeRef = useRef(null);
   const afterRef = useRef(null);
   const wrapRef = useRef(null);
@@ -142,10 +146,10 @@ function Preview({ s, p }) {
       <canvas class="cp-before" ref=${beforeRef} style=${`clip-path: inset(0 ${100 - split}% 0 0)`}></canvas>
       <div class="cp-handle" style=${`left:${split}%`}><span class="cp-knob"><${Icon} name="left" /><${Icon} name="right" /></span></div>
       <span class="cp-tag cp-tag-l">Your picture</span>
-      <span class="cp-tag cp-tag-r">Written to the card</span>
+      <span class="cp-tag cp-tag-r">${screen ? "On the machine's screen" : "Written to the card"}</span>
     </div>
     ${failed ? html`<${Note} kind="warn">That picture could not be shown here. Pick another one, or the test card.<//>` : null}
-    <p class="small muted cp-why">${previewWords(p)} Drag the line to compare.</p>
+    <p class="small muted cp-why">${screen ? screenWords(p) : previewWords(p)} Drag the line to compare.</p>
   </div>`;
 }
 
@@ -160,8 +164,18 @@ function previewWords(p) {
   return "The right side is meant to look off here: it is corrected for the machine's screen, which shifts it back to what you made.";
 }
 
+// PAD-324: the right side is the screen's version of the left, not a fix.
+function screenWords(p) {
+  const sat = Number(p.saturation), lift = Number(p.lift || 0);
+  if (sat === 0) return "The right side is how this screen shows the left: in black and white.";
+  const same = sat === 1 && lift === 0
+    && [0, 1, 2].every((i) => Number(p.gamma[i]) === 1 && Number(p.gain[i]) === 1);
+  if (same) return "No change: this screen shows colors exactly as your PC does.";
+  return "The right side is how this screen shows the left.";
+}
+
 // -------------------------------------------------------------- the curves
-function Curves({ p }) {
+function Curves({ p, screen }) {
   const t = tables(p);
   const W = 120;
   const path = (tab) => {
@@ -179,7 +193,9 @@ function Curves({ p }) {
       <path d=${`M0 ${W}L${W} 0`} class="cp-diag" />
       ${CH.map((c) => html`<path d=${path(t[c.key])} class=${"cp-curve " + c.cls} />`)}
     </svg>
-    <figcaption class="small muted">Each line is one color: your shade along the bottom, what is written up the side. Below the dashed line means darker on the card.</figcaption>
+    <figcaption class="small muted">${screen
+      ? "Each line is one color: the shade given to the screen along the bottom, what it shows up the side. Above the dashed line means the screen shows it brighter."
+      : "Each line is one color: your shade along the bottom, what is written up the side. Below the dashed line means darker on the card."}</figcaption>
   </figure>`;
 }
 
@@ -201,6 +217,7 @@ const darker = (g) => (Math.abs(g - 1) < 0.005 ? "unchanged"
 const pct = (v) => `${Math.round(v * 100)}%`;
 
 function Controls({ s, p, update }) {
+  const screen = s.per_file && s.mode === "screen";
   const lim = s.limits || {};
   const [glo, ghi] = lim.gamma || [0.5, 2.5];
   const [klo, khi] = lim.gain || [0.5, 1.5];
@@ -226,11 +243,13 @@ function Controls({ s, p, update }) {
       <label class="lbl" for="cp-name">Profile name</label>
       <${Field} id="cp-name" value=${p.name} onChange=${(v) => update({ name: v })} placeholder="e.g. Godzilla, my machine" />
     </div>
-    <${Curves} p=${p} />
+    <${Curves} p=${p} screen=${s.per_file && s.mode === "screen"} />
 
     <div class="cp-group">
       <div class="cp-group-hd"><span class="h3">Middle shades</span>
-        <span class="small muted">The machine shows a color's middle shades too bright? Darken them here.</span></div>
+        <span class="small muted">${screen
+          ? "How bright this screen shows each color's middle shades. Scenes not blue enough? Turn blue brighter."
+          : "The machine shows a color's middle shades too bright? Darken them here."}</span></div>
       ${CH.map((c) => html`<${Slider} cls=${c.cls} label=${c.name} value=${p.gamma[c.key]} min=${glo} max=${ghi} step="0.01"
           show=${darker} onInput=${(v) => setCh("gamma", c.key, v)} left="brighter" right="darker"
           hint=${"How bright the middle shades of " + c.name.toLowerCase() + " come out. Black and full " + c.name.toLowerCase() + " stay where they are."} />`)}
@@ -238,7 +257,9 @@ function Controls({ s, p, update }) {
 
     <div class="cp-group">
       <div class="cp-group-hd"><span class="h3">Color level</span>
-        <span class="small muted">A tint everywhere, even in white? Turn that color down.</span></div>
+        <span class="small muted">${screen
+          ? "A tint this screen puts on everything, even white."
+          : "A tint everywhere, even in white? Turn that color down."}</span></div>
       ${CH.map((c) => html`<${Slider} cls=${c.cls} label=${c.name} value=${p.gain[c.key]} min=${klo} max=${khi} step="0.01"
           show=${pct} onInput=${(v) => setCh("gain", c.key, v)} left="less" right="more"
           hint=${"Turns " + c.name.toLowerCase() + " down or up in every shade, white included."} />`)}
@@ -247,7 +268,8 @@ function Controls({ s, p, update }) {
     <div class="cp-group">
       <div class="cp-group-hd"><span class="h3">Whole picture</span></div>
       <${Check} checked=${p.saturation === 0} label="Black and white"
-        title="Every replaced picture and video in greys, for a black-and-white playfield. Your other settings still apply on top. Untick for full color."
+        title=${screen ? "A screen that shows everything in greys, the game's own art too. Untick for full color."
+          : "Every replaced picture and video in greys, for a black-and-white playfield. Your other settings still apply on top. Untick for full color."}
         onChange=${(v) => update({ saturation: v ? 0 : 1 })} />
       <${Slider} label="Color strength" value=${p.saturation} min=${slo} max=${shi} step="0.01" show=${pct}
         onInput=${(v) => update({ saturation: v })} left="grey" right="vivid"
@@ -264,7 +286,14 @@ function Controls({ s, p, update }) {
 const MODES = [
   { value: "display", label: "Adjust whole screen overlay", title: "One correction drawn over everything the game shows: its own art, videos, mode screens, text and your replacements. No file is changed." },
   { value: "assets", label: "Adjust individual files", title: "A correction baked into the replaced pictures and videos you switch on (and pictures added in Scenes). The game's own art is left as Stern made it." },
+  { value: "screen", label: "Machine screen (preview only)", title: "Not a correction: how the machine's screen changes what it is given. Only the Scenes preview uses it, when As on the machine is ticked. Nothing is written to the card." },
 ];
+
+const MODE_WORDS = {
+  display: "Drawn over everything the game shows, its own art included; no file is changed.",
+  assets: "Baked into the replaced files you switch on; the game's own art is left alone.",
+  screen: "How the machine's screen changes what it is given. Only the Scenes preview uses it; nothing is written to the card.",
+};
 
 function countWords(n) {
   const parts = [];
@@ -291,9 +320,17 @@ function WhichFiles({ s }) {
 
 function Explainer({ s }) {
   const assets = s.per_file && s.mode === "assets";
+  const screen = s.per_file && s.mode === "screen";
   return html`<${Card} title="What this does" cls="cp-explain">
     <p>A pinball machine's screen doesn't show colors the way your PC monitor does. On a Stern Godzilla, for example, middle greys come out too bright and too blue, and the darkest shades all sink into the same black.</p>
-    ${assets ? html`<p>This profile corrects the files you choose, and only those. When you build, PAD shifts the colors of each switched-on picture or video the opposite way as it is staged, so the machine's screen shifts them back to what you made. The game's own art is left as Stern made it for this screen.</p>
+    ${screen ? html`<p>This profile is that screen. With As on the machine ticked, Scenes draws everything through it, after the whole screen overlay: the game's own art, your replaced files and the pictures you add. It is not a correction, and nothing is written to the card.</p>
+    <ul class="cp-facts">
+      <li><${Icon} name="check" />Until you set one, it is the individual files profile, undone: what Scenes has shown so far. Same as individual files puts that back.</li>
+      <li><${Icon} name="check" />Scenes looks bluer than your PC, but not blue enough for your machine? Turn the middle shades brighter here, most of all blue.</li>
+      <li><${Icon} name="check" />Saved with this project, so each machine has its own. Save a copy and Load move it between projects.</li>
+      <li><${Icon} name="check" />Revert all and the Write tab leave it alone: it describes your machine, not a change to the card.</li>
+    </ul>`
+    : assets ? html`<p>This profile corrects the files you choose, and only those. When you build, PAD shifts the colors of each switched-on picture or video the opposite way as it is staged, so the machine's screen shifts them back to what you made. The game's own art is left as Stern made it for this screen.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
       <li><${Icon} name="check" />The whole screen overlay still applies on top, if you set one: the game draws these files through it like everything else.</li>
@@ -313,7 +350,9 @@ function Explainer({ s }) {
       <li><${Icon} name="check" />The game's own art is left alone on this machine: PAD can only correct what you replace.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
     </ul>`}
-    <p class="small muted">Best way to tune it: put the test card on the machine, photograph the screen, and nudge the sliders until the photo matches what you see here on the left.</p>
+    <p class="small muted">${screen
+      ? "Best way to tune it: put the test card on the machine, photograph the screen, and nudge the sliders until the right side here matches the photo."
+      : "Best way to tune it: put the test card on the machine, photograph the screen, and nudge the sliders until the photo matches what you see here on the left."}</p>
   <//>`;
 }
 
@@ -342,9 +381,13 @@ export default function ColorTab() {
 
   const samples = [...(s.samples || []), { value: "browse", label: "Another picture..." }];
   const assets = s.per_file && s.mode === "assets";
+  const screen = s.per_file && s.mode === "screen";
   const nFiles = Object.values(s.asset_counts || {}).reduce((a, b) => a + (b || 0), 0);
   const note = !s.has_project
     ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
+    : screen
+      ? (s.screen_stored ? html`<${Note} kind="ok">${"Scenes draws every picture through “" + (s.name || "My screen") + "” when As on the machine is ticked. Nothing is written to the card."}<//>`
+        : html`<${Note} kind="info">${"Scenes uses the individual files profile, undone (“" + (s.name || "") + "”). Move a slider or pick a starting point to set this machine's own screen."}<//>`)
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`
@@ -364,13 +407,14 @@ export default function ColorTab() {
     <//>
     ${s.per_file ? html`<div class="row cp-modes">
       <${Seg} value=${s.mode || "display"} options=${MODES} onChange=${(v) => call("color.set_mode", v)} />
-      <span class="small muted">${assets ? "Baked into the replaced files you switch on; the game's own art is left alone." : "Drawn over everything the game shows, its own art included; no file is changed."}</span>
+      <span class="small muted">${MODE_WORDS[s.mode] || MODE_WORDS.display}</span>
     </div>
-    <${Note} kind="info" cls="cp-both"><b>Both can be on at once.</b> ${assets
+    ${screen ? html`<${Note} kind="info" cls="cp-both"><b>Preview only.</b> Scenes draws the game's own art and your files through this, after the whole screen overlay. The two corrections are not changed by it.<//>`
+    : html`<${Note} kind="info" cls="cp-both"><b>Both can be on at once.</b> ${assets
       ? (s.display_active ? `The whole screen overlay “${s.display_name}” is on too: the game draws these files through it like everything else.`
         : "No whole screen overlay is set: only the files you switch on here are corrected.")
       : (nFiles ? `The individual files profile “${s.asset_name}” is on too, baked into ${countWords(s.asset_counts || {})}; the overlay is drawn over those as well.`
-        : "No individual file is switched on; switch files on under Adjust individual files to correct only your own art.")}<//>` : null}
+        : "No individual file is switched on; switch files on under Adjust individual files to correct only your own art.")}<//>`}` : null}
     ${note}
     ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
     <div class="cp-grid">
@@ -379,7 +423,7 @@ export default function ColorTab() {
             <${Select} sm value=${s.sample || "card"} options=${samples} width=${260}
               onChange=${(v) => call("color.pick_sample", v)} title="The picture to try the profile on" />
           </div>`}>
-          <${Preview} s=${s} p=${p} />
+          <${Preview} s=${s} p=${p} screen=${screen} />
         <//>
         <${Explainer} s=${s} />
       </div>

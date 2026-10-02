@@ -15,8 +15,14 @@ the ZIP; the .pkg is only read.
 
 <name> defaults to <title>_<version>: rm_20220902 (the date in the file
 name), ac_<the newest WHATSNEW.txt version>.  `title` in the build says
-which game it is (rm | ac).  Total Nuclear Annihilation's key is not known
-(exit 4).
+which game it is (rm | ac), `src` which file it came from (the Emulate tab's
+Cache window shows it) and `src_key` that file's name, size and time: the
+same file again finds its build without decrypting it (Alice Cooper's
+version is only known from inside).  The last line is `build=<name>`
+(watch.sh reads it).
+
+Exit 3: not enough free space; 4: not a P-ROC game this knows (Total Nuclear
+Annihilation's key is not known), or damaged.
 """
 import argparse
 import os
@@ -75,6 +81,41 @@ def decrypt(pkg, out_zip, key):
     os.truncate(out_zip, size)
 
 
+def src_key(pkg):
+    st = os.stat(pkg)
+    return "%s %d %d" % (os.path.basename(pkg), st.st_size, int(st.st_mtime))
+
+
+def cached(key):
+    """The finished build made from the file with this src_key, or None."""
+    try:
+        names = sorted(os.listdir(SPP_CACHE))
+    except OSError:
+        return None
+    for name in names:
+        d = os.path.join(SPP_CACHE, name)
+        try:
+            with open(os.path.join(d, "src_key")) as f:
+                if f.read().strip() == key and os.path.exists(os.path.join(d, "title")):
+                    return name
+        except OSError:
+            continue
+    return None
+
+
+def room_for(pkg):
+    """The ZIP and its unpacked tree side by side: about 2.5x the .pkg."""
+    if not hasattr(os, "statvfs"):         # the tests, on Windows
+        return True
+    st = os.statvfs(SPP_CACHE)
+    return st.f_bavail * st.f_frsize >= int(os.path.getsize(pkg) * 2.5)
+
+
+def ready(out):
+    print("prepare.py: %s ready (--force to redo)" % out)
+    print("build=%s" % os.path.basename(out))
+
+
 def version(title, pkg, out):
     if title == "rm":
         m = re.search(r"(\d{8})", os.path.basename(pkg))
@@ -102,15 +143,26 @@ def main():
     # Unpacked under a scratch name first: the version is read from the ZIP.
     tmp = os.path.join(SPP_CACHE, ".unpack-%s-%d" % (title, os.getpid()))
     if a.name and os.path.exists(os.path.join(SPP_CACHE, a.name, "title")) and not a.force:
-        print("prepare.py: %s ready (--force to redo)" % os.path.join(SPP_CACHE, a.name))
+        ready(os.path.join(SPP_CACHE, a.name))
         return
+    key = src_key(a.pkg)
+    hit = None if a.force or a.name else cached(key)
+    if hit:
+        ready(os.path.join(SPP_CACHE, hit))
+        return
+    if not room_for(a.pkg):
+        print("prepare.py: not enough free space in %s to unpack %s" % (SPP_CACHE, a.pkg),
+              file=sys.stderr)
+        sys.exit(3)
     shutil.rmtree(tmp, ignore_errors=True)
     tmp_zip = tmp + ".zip"
     decrypt(a.pkg, tmp_zip, keys()[key_name])
     try:
         with zipfile.ZipFile(tmp_zip) as z:
             if marker not in z.namelist():
-                sys.exit("prepare.py: %s has no %s - not the game its name says" % (a.pkg, marker))
+                print("prepare.py: %s has no %s - not the game its name says" % (a.pkg, marker),
+                      file=sys.stderr)
+                sys.exit(4)
             for info in z.infolist():
                 z.extract(info, tmp)
                 mode = info.external_attr >> 16
@@ -118,7 +170,8 @@ def main():
                     os.chmod(os.path.join(tmp, info.filename), mode & 0o777)
     except zipfile.BadZipFile:
         shutil.rmtree(tmp, ignore_errors=True)
-        sys.exit("prepare.py: %s did not decrypt to a ZIP (wrong key?)" % a.pkg)
+        print("prepare.py: %s did not decrypt to a ZIP (wrong key?)" % a.pkg, file=sys.stderr)
+        sys.exit(4)
     finally:
         os.remove(tmp_zip)
     # Alice Cooper's archive carries no execute bits on its Unity player.
@@ -129,13 +182,20 @@ def main():
     out = os.path.join(SPP_CACHE, name)
     if os.path.exists(os.path.join(out, "title")) and not a.force:
         shutil.rmtree(tmp, ignore_errors=True)
-        print("prepare.py: %s ready (--force to redo)" % out)
+        with open(os.path.join(out, "src_key"), "w") as f:
+            f.write(key + "\n")
+        ready(out)
         return
     shutil.rmtree(out, ignore_errors=True)
+    with open(os.path.join(tmp, "src"), "w") as f:
+        f.write(os.path.abspath(a.pkg) + "\n")
+    with open(os.path.join(tmp, "src_key"), "w") as f:
+        f.write(key + "\n")
     with open(os.path.join(tmp, "title"), "w") as f:
         f.write(title + "\n")
     os.rename(tmp, out)
     print("prepare.py: %s (title %s)" % (out, title))
+    print("build=%s" % name)
 
 
 if __name__ == "__main__":

@@ -472,21 +472,8 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
         return path
 
     # the screens, all in one pass over the stock HUD scene
-    screens = []
-    for slug, spec in found:
-        if not spec.screen or not prof.can("screen"):
-            continue
-        names = MP.asset_names(slug)
-        folder = MP.mode_folder(project, slug)
-        art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
-               else panel_art(spec.screen_title or spec.name, spec.panel_color, spec.title_color))
-        x, y, words_at = screen_place(art)                 # PAD-314: a big picture stays on the glass
-        if words_at is not None:                           # ... with its words on a darkened band of it
-            art = band_art(art)
-        screens.append(dict(name=names["screen_node"], art_rgba=art,
-                            words="%s A SHOT" % "{:,}".format(int(spec.award)),
-                            words_name=names["screen_text"].split(".", 1)[1],
-                            x=x, y=y, words_at=words_at))
+    screens = [with_layout(form_screen(project, slug, spec), spec.screen_layout)
+               for slug, spec in found if spec.screen and prof.can("screen")]
     screens += _code_screens(project, code, prof)
     huds = _code_huds(code, prof, hud_font)
 
@@ -624,7 +611,108 @@ def _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, r
     return bank, VB.parse(bank)
 
 
-# ---- a CODE mode's own screen and clip (the intricate modes' own audio and video) --------------
+# ---- a mode's screen: what it shows and where ------------------------------------------------
+def form_screen(project, slug, spec):
+    """A form mode's screen for :func:`.scene_write.add_screens`, placed automatically
+    (:func:`screen_place`): its picture or the generated panel, and its words."""
+    names = MP.asset_names(slug)
+    folder = MP.mode_folder(project, slug)
+    art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
+           else panel_art(spec.screen_title or spec.name, spec.panel_color, spec.title_color))
+    x, y, words_at = screen_place(art)                 # PAD-314: a big picture stays on the glass
+    if words_at is not None:                           # ... with its words on a darkened band of it
+        art = band_art(art)
+    return dict(name=names["screen_node"], art_rgba=art,
+                words="%s A SHOT" % "{:,}".format(int(spec.award)),
+                words_name=names["screen_text"].split(".", 1)[1],
+                x=x, y=y, words_at=words_at)
+
+
+def code_screen(project, slug, spec):
+    """A code mode's screen, as :func:`form_screen`: named after its folder
+    (``PadMode_<slug>_Screen``, the names a code mode looks for), its picture or a generated
+    panel, and its words on the picture's band or under it. The words start as the mode's name;
+    the mode writes its own from then on."""
+    names = MP.asset_names(slug)
+    folder = MP.mode_folder(project, slug)
+    art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
+           else panel_art(spec.name, spec.panel_color, spec.title_color))
+    x, y, words_at = screen_place(                     # PAD-314: a big picture stays on the glass
+        art, code_words_at(art) if (spec.screen_art and spec.words_on_art) else None)
+    return dict(name=names["screen_node"], art_rgba=art, words=spec.name,
+                words_name=names["screen_text"].split(".", 1)[1],
+                x=x, y=y, words_at=words_at)
+
+
+#: PAD-323: what a mode's ``screen_layout`` holds (MODE_PARAMETERS.md), all optional: the
+#: picture's top-left on the glass, the whole screen's size, the words' place on the picture and
+#: their own size, and the HUD scene's root child the screen is drawn under (0 = under all of it)
+LAYOUT_KEYS = ("x", "y", "scale", "words_x", "words_y", "words_scale", "order")
+_LAYOUT_SPAN = {"x": (-4096.0, 4096.0), "y": (-4096.0, 4096.0), "scale": (0.05, 20.0),
+                "words_x": (-4096.0, 4096.0), "words_y": (-4096.0, 4096.0),
+                "words_scale": (0.05, 20.0), "order": (0, 4096)}
+
+
+def _layout_value_ok(k, v):
+    """A ``screen_layout`` value that builds: a number in its span (``order`` a whole one)."""
+    lo, hi = _LAYOUT_SPAN[k]
+    ok = isinstance(v, int) if k == "order" else isinstance(v, (int, float))
+    return ok and not isinstance(v, bool) and lo <= v <= hi
+
+
+def layout_problems(layout):
+    """Why a ``screen_layout`` cannot be built, as sentences (empty = fine). A key whose value is
+    null is the same as a key not given."""
+    if layout in (None, {}):
+        return []
+    if not isinstance(layout, dict):
+        return ["its screen layout is not a set of numbers"]
+    out = []
+    given = {k for k, v in layout.items() if v is not None}
+    for k in sorted(given):
+        if k not in _LAYOUT_SPAN:
+            out.append("its screen layout has %r, which is not one of %s" % (k, ", ".join(LAYOUT_KEYS)))
+        elif not _layout_value_ok(k, layout[k]):
+            lo, hi = _LAYOUT_SPAN[k]
+            out.append("its screen layout's %s is %r, not a number from %s to %s"
+                       % (k, layout[k], lo, hi))
+    if ("words_x" in given) != ("words_y" in given):
+        out.append("its screen layout gives the words' %s without their %s"
+                   % (("x", "y") if "words_x" in given else ("y", "x")))
+    return out
+
+
+def clean_layout(layout):
+    """The parts of a ``screen_layout`` that build (:func:`layout_problems` names the rest)."""
+    if not isinstance(layout, dict):
+        return {}
+    out = {}
+    for k in LAYOUT_KEYS:
+        v = layout.get(k)
+        if v is not None and _layout_value_ok(k, v):
+            out[k] = int(v) if k == "order" else float(v)
+    if ("words_x" in out) != ("words_y" in out):
+        out.pop("words_x", None)
+        out.pop("words_y", None)
+    return out
+
+
+def with_layout(screen, layout):
+    """*screen* (:func:`form_screen` / :func:`code_screen`) placed as its ``screen_layout``
+    says (PAD-323: laid out in the Scenes editor); a key it does not give stays as placed
+    automatically, so a mode with none builds exactly as before."""
+    lay = clean_layout(layout)
+    if not lay:
+        return screen
+    out = dict(screen)
+    for k in ("x", "y", "scale", "words_scale", "order"):
+        if k in lay:
+            out[k] = lay[k]
+    if "words_x" in lay:
+        out["words_at"] = (lay["words_x"], lay["words_y"])
+    return out
+
+
 def screen_place(art, words_at=None):
     """Where a mode's screen goes on the glass (PAD-314, Ales's Metallica picture): ``(x, y,
     words_at)`` for :func:`.scene_write.screen`. The generated 640x160 panel sits where it always
@@ -667,24 +755,10 @@ def code_words_at(art):
 
 
 def _code_screens(project, code, prof):
-    """The screens of the project's code modes, for :func:`build`'s one pass over the HUD scene:
-    each named after its folder (``PadMode_<slug>_Screen``, the names a code mode looks for), its
-    picture or a generated panel, and its words on the picture's band or under it. The words start
-    as the mode's name; the mode writes its own from then on."""
-    out = []
-    for slug, spec in code or ():
-        if not spec.screen or not prof.can("screen"):
-            continue
-        names = MP.asset_names(slug)
-        folder = MP.mode_folder(project, slug)
-        art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
-               else panel_art(spec.name, spec.panel_color, spec.title_color))
-        x, y, words_at = screen_place(                     # PAD-314: a big picture stays on the glass
-            art, code_words_at(art) if (spec.screen_art and spec.words_on_art) else None)
-        out.append(dict(name=names["screen_node"], art_rgba=art, words=spec.name,
-                        words_name=names["screen_text"].split(".", 1)[1],
-                        x=x, y=y, words_at=words_at))
-    return out
+    """The screens of the project's code modes (:func:`code_screen`, laid out as each one's
+    ``screen_layout`` says), for :func:`build`'s one pass over the HUD scene."""
+    return [with_layout(code_screen(project, slug, spec), getattr(spec, "screen_layout", None))
+            for slug, spec in code or () if spec.screen and prof.can("screen")]
 
 
 def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None):

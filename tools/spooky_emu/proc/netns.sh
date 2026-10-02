@@ -30,7 +30,7 @@ run_as() {      # <log> <cmd...>: as $SPP_USER, env built from scratch
         PULSE_SERVER="${PULSE_SERVER:-}" \
         LD_LIBRARY_PATH="$E/lib" PYSDL2_DLL_PATH="$E/lib" \
         PYTHONPATH="$SPP_STUB:$SPP_SITE" PROC_EMU_FPGA="$PROC_EMU_FPGA" SPP_LOG="$SPP_RIG/rig.log" SPP_OSFILES="${SPP_OSFILES:-}" \
-        SPP_BALLS="${SPP_BALLS:-}" PROC_EMU_CTL="${PROC_EMU_CTL:-}" \
+        SPP_BALLS="${SPP_BALLS:-}" PROC_EMU_CTL="${PROC_EMU_CTL:-}" SPK_MARK="$SPP_RIG" \
         PYGAME_HIDE_SUPPORT_PROMPT=1 \
         "$@" < /dev/null > "$log" 2>&1 &
     echo $!

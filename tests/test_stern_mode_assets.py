@@ -243,3 +243,85 @@ def test_the_words_band_darkens_only_the_bottom_of_a_picture():
     assert (out[-1, :, :3] < 40).all() and (out[-1, :, 3] >= 217).all()   # the bottom row: 85% black
     assert (out[328 + 10, :, :3] < out[328 + 2, :, :3]).all()             # darker on the way down
     assert (art == 200).all()                              # the mode's picture itself is untouched
+
+
+# ---- PAD-323: a screen laid out in the Scenes editor -------------------------------------------
+def test_a_screen_layout_overrides_only_what_it_gives():
+    """mode.json ``screen_layout`` (the Scenes editor's): each key it gives replaces the automatic
+    placement; a key it does not give, or none at all, leaves the screen as it was placed."""
+    art = MA.panel_art("ALPHA")
+    auto = dict(name="S", art_rgba=art, words="W", x=360.0, y=200.0, words_at=None)
+    assert MA.with_layout(auto, {}) is auto and MA.with_layout(auto, None) is auto
+    got = MA.with_layout(auto, {"x": 12, "y": 30.5, "scale": 0.5, "words_x": 4, "words_y": 90,
+                                "words_scale": 2, "order": 0})
+    assert (got["x"], got["y"], got["scale"], got["words_at"], got["words_scale"], got["order"]) \
+        == (12.0, 30.5, 0.5, (4.0, 90.0), 2.0, 0)
+    assert auto["x"] == 360.0                              # the automatic one is not changed
+    assert MA.with_layout(auto, {"y": 10})["x"] == 360.0
+    # what cannot be built is named by validation and never built
+    bad = {"x": "left", "scale": 0, "order": 1.5, "words_x": 3, "colour": 1}
+    words = " ".join(MA.layout_problems(bad))
+    for k in ("x is 'left'", "scale is 0", "order is 1.5", "words' x without their y", "'colour'"):
+        assert k in words, k
+    assert MA.clean_layout(bad) == {}
+    spec = MP.ModeSpec(title=MP.GODZILLA_PRO_1_15.key, screen_layout={"scale": -1})
+    assert any("cannot be placed" in p for p in MP.validate(spec))
+
+
+def test_a_mode_without_a_layout_builds_byte_for_byte_as_before(tmp_path):
+    """Every mode made before PAD-323 has no ``screen_layout``: its screen is the same bytes."""
+    from pinball_decryptor.plugins.stern import scene_write as SW
+    art = MA.panel_art("ALPHA")
+    p = SW.PROFILES["f9daed5a19aafc807bf9eb3c2def6c27"]
+    plain, _ = SW.screen(p, "PadMode_a_Screen", art, "1,000,000 A SHOT", 360.0, 200.0)
+    same, _ = SW.screen(p, "PadMode_a_Screen", art, "1,000,000 A SHOT", 360.0, 200.0,
+                        scale=1.0, words_scale=1.0)
+    assert plain == same
+    half, _ = SW.screen(p, "PadMode_a_Screen", art, "1,000,000 A SHOT", 360.0, 200.0, scale=0.5)
+    assert len(half) == len(plain) and half != plain
+    assert SW.matrix(0.5, 0.5, tx=360.0, ty=200.0) in half
+    if not os.path.exists(HUD):
+        pytest.skip("stock HUD scene not present")
+    stock = open(HUD, "rb").read()
+    outs = []
+    for i, layout in enumerate(({}, {"order": None})):
+        project, out = str(tmp_path / ("p%d" % i)), str(tmp_path / ("o%d" % i))
+        _mode(project, "Alpha", clip="none", screen_layout=layout)
+        MA.build(project, stock, b"", out)
+        rel = "assets/lcd/auto_loaded/%s/scene.radium" % MP.GODZILLA_PRO_1_15.hud_scene
+        outs.append(open(os.path.join(out, *rel.split("/")), "rb").read())
+    assert outs[0] == outs[1]
+
+
+def test_a_screen_laid_out_under_the_hud_is_the_scenes_first_child(tmp_path):
+    """``order`` 0: the screen is the HUD scene's FIRST root child, drawn under every one of its own
+    pictures (David: "the wall image below the HUD"); the other modes stay where they always go, and
+    the scene still walks as a tree to its last byte with each screen where it was laid out."""
+    if not os.path.exists(HUD):
+        pytest.skip("stock HUD scene not present")
+    from pinball_decryptor.plugins.stern import scene_tree as ST
+    stock = open(HUD, "rb").read()
+    project, out = str(tmp_path / "proj"), str(tmp_path / "out")
+    _mode(project, "Alpha", clip="none", screen_layout={"order": 0, "x": 0, "y": 0, "scale": 2.0,
+                                                         "words_x": 300, "words_y": 120})
+    _mode(project, "Beta", clip="none")
+    _mode(project, "Gamma", clip="none", screen_layout={"order": 2})
+    MA.build(project, stock, b"", out)
+    rel = "assets/lcd/auto_loaded/%s/scene.radium" % MP.GODZILLA_PRO_1_15.hud_scene
+    hud = open(os.path.join(out, *rel.split("/")), "rb").read()
+    kids = ST.parse(hud).root["kids"]
+    assert [k.name for k in kids] == [
+        "PadMode_alpha_Screen", "TeslaSlideOut_Artbox", "DoubleScoringSlideOut_Artbox",
+        "PadMode_gamma_Screen", "PadMode_beta_Screen", "BattleSlideOut_Artbox"]
+    alpha = kids[0]
+    m = alpha.tracks[0][1]
+    assert (m[0], m[5], m[12], m[13]) == (2.0, 2.0, 0.0, 0.0)
+    words = alpha.components[0].obj.body["kids"][1]
+    assert (words.tracks[0][1][12], words.tracks[0][1][13]) == (300.0, 120.0)
+    # the object ids are still handed out in slot order: alpha's are the first seven
+    assert alpha.id == SW_first_free()
+
+
+def SW_first_free():
+    from pinball_decryptor.plugins.stern import scene_write as SW
+    return SW.PROFILES["f9daed5a19aafc807bf9eb3c2def6c27"].first_free_id

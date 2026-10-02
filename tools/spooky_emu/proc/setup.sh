@@ -21,8 +21,10 @@
 set -eu
 . "$(dirname "$0")/sppath.sh"
 SITE=$SPP_ROOT/site
-[ -f "$SITE/.ready" ] && { echo "setup.sh: $SITE ready"; exit 0; }
+# AP's env first, even when the site is ready: the two live apart, and a
+# pruned AP env leaves a site with nothing to run it on.
 [ -f "$SPP_PY/.ready" ] || bash "$SPP_TOOLS/../../ap_emu/setup.sh"
+[ -f "$SITE/.ready" ] && { echo "setup.sh: $SITE ready"; exit 0; }
 rm -rf "$SITE"
 mkdir -p "$SITE"
 "$SPP_PY/bin/pip" install -q --no-cache-dir --only-binary=:all: --target "$SITE" \

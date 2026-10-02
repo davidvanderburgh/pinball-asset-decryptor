@@ -15,8 +15,18 @@ own, and so is Halloween on its Pinotaur board (PAD-268; Ultraman not yet).
 into the shooter lane, launched by its own launch coil, switches hit and
 scoring (Rick and Morty: 1,800 from three sling hits; Alice Cooper: 11,130
 after the skill shot and slings), all hidden on a private display. Both from
-`D:\Pinball\images\Spooky`; the restore images were not needed. Wiring this
-into the app's Emulate tab is a follow-up ticket.
+`D:\Pinball\images\Spooky`; the restore images were not needed.
+
+**In the app (PAD-319):** the Emulate Spooky tab runs both from their .pkg.
+`tools/spooky_emu`'s own scripts hand them here: `watch.sh` sends a
+`rm-gamecode*` / `ac-gamecode*` file to this `watch.sh` (setup.sh when the
+Python is missing - exit 7 if that fails - then prepare.py, run_game.sh),
+and `status.sh`, `stop.sh`, `cancel.sh`, `cache.sh` and `ctl.sh` answer for
+whichever kind runs on the slot. The virtual playfield is the Warden games'
+window (`spkpf.py`): `sppswitches.py` writes its table from the machine yaml
+(numbered as the board numbers it), and `sppctl.py` answers its requests -
+spkwarden's protocol - from proc_emu's board. Volume / Mute follow live
+through `../spkvol.py`, which finds the game's streams by `SPK_MARK`.
 
 ## Why this is small
 
@@ -98,7 +108,6 @@ hidden run stays silent unless asked, tools/rigboard.sh). The game's output is
 
 ## What is open
 
-* **Not in the app yet**: the Emulate tab is a follow-up ticket.
 * **Heavy**: Rick and Morty preloads its assets (~4 GB resident); Alice
   Cooper's Unity player renders on llvmpipe.
 * No physics beyond the trough and the shooter lane: scoops, ramps, the

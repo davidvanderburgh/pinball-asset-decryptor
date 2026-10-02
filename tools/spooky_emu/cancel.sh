@@ -32,5 +32,13 @@ if [ -n "$WP" ] && kill -0 "$WP" 2>/dev/null; then
 fi
 rm -f "$PIDF"
 rm -rf "$SPK_CACHE"/*.partial
+# proc/prepare.py's half-unpacked .pkg: .unpack-<title>-<pid>[.zip], dropped
+# once its prepare.py is gone (another slot's may still be unpacking)
+for u in "$SPK_PROC_ROOT"/cache/.unpack-*; do
+    [ -e "$u" ] || continue
+    p=${u##*-}; p=${p%.zip}
+    kill -0 "$p" 2>/dev/null || rm -rf "$u"
+done
 bash "$SPK_TOOLS/killgame.sh" >/dev/null 2>&1
+spk_proc_present && bash "$SPK_PROC/killgame.sh" >/dev/null 2>&1
 echo "cancelled=$did"

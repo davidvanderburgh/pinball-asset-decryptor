@@ -164,13 +164,19 @@ def test_state_plunge_drain_and_reset(board):
     assert st["switches"] == {"1": 1, "3": 1, "4": 1, "5": 1, "6": 1, "7": 1}
     assert st["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
     assert "err" in _ask(board, "drain")                     # nothing in play
-    assert "err" in _ask(board, "plunge")                    # lane empty
+    # Plunge presses the Launch button, also with the lane empty (a
+    # character / movie select takes it); no ball moves
+    assert _ask(board, "plunge") == {"ok": True}
+    assert board.sent[-2:] == [bytes([RX, 1, 85]), bytes([RX, 0, 85])]
+    assert _ask(board, "state")["balls"] == {"trough": 6, "shooter": 0, "in_play": 0}
     board.host_bytes(bytes([TX, 133, 51]))                   # serve
     assert _ask(board, "state")["balls"]["shooter"] == 1
-    # Plunge presses the Launch button (no Warden game has a manual
-    # plunger); the lane empties either way
+    # No Warden game has a manual plunger: the ball stays in the lane until
+    # the game fires its launch coil (PAD-321: a ball the rig let go by
+    # itself was one Evil Dead never saw launched)
     assert _ask(board, "plunge") == {"ok": True}
-    assert bytes([RX, 1, 85]) in board.sent
+    assert _ask(board, "state")["balls"] == {"trough": 5, "shooter": 1, "in_play": 0}
+    board.host_bytes(bytes([TX, 133, 54]))                   # LAUNCH
     assert _ask(board, "state")["balls"] == {"trough": 5, "shooter": 0, "in_play": 1}
     assert _ask(board, "drain") == {"ok": True}
     assert _ask(board, "state")["balls"]["trough"] == 6
@@ -342,7 +348,9 @@ def test_evil_dead_serves_to_the_lane_its_diverter_points_at(make):
     assert b.balls_state()["shooter"] == 2
     b.host_bytes(bytes([TX, 133, 14]))                     # RIGHT AUTO LAUNCHER
     assert b.state[15] == 0 and b.state[14] == 1
-    assert _ask(b, "plunge") == {"ok": True} and b.state[14] == 0
+    assert _ask(b, "plunge") == {"ok": True} and b.state[14] == 1
+    b.host_bytes(bytes([TX, 133, 13]))                     # LEFT AUTO LAUNCHER
+    assert b.state[14] == 0
 
 
 def test_evil_dead_drop_banks_stand_back_up(make):
@@ -673,6 +681,8 @@ def test_pinotaur_serves_launches_and_plunges_on_its_own_buttons(pino):
     assert pino.balls == 6 and pino.state[23] == 1 and pino.state[18] == 0
     assert _ask(pino, "plunge") == {"ok": True}
     assert bytes([PRX, 89, 0x80 | 84]) in pino.sent        # its Launch is 84
+    # a shooter rod too: the ball goes without the launch coil
+    assert pino.state[23] == 0 and pino.balls_state()["in_play"] == 1
     pino.host_bytes(_msg(23, 18, 0))
     pino.host_bytes(_msg(23, 21, 0))                       # "launch"
     assert pino.state[23] == 0 and pino.balls_state()["in_play"] == 2
@@ -751,3 +761,4 @@ def test_the_game_window_gets_the_playfield_keys_but_not_the_games_own():
     assert "PAD_GAMEKEYS:-$VISIBLE" in run and "tget own_keys" in run
     titles = _import_rig("spktitles").TITLES
     assert set(titles["bj"]["own_keys"]) >= {"Enter", "Space", "ArrowLeft", "ArrowRight"}
+

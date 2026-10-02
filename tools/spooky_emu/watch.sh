@@ -12,7 +12,10 @@
 #   == Unpack ==, == Board ==, == Game ==, == Ready ==
 # Exit: 0 ready, 2 bad args / not root, 3 no disk space, 4 not a game this
 # emulator knows (or damaged), 5 no game in it, 6 the game did not reach
-# attract mode.
+# attract mode, 7 setting up failed (the P-ROC games' Python downloads once).
+#
+# Rick and Morty's and Alice Cooper's game-code .pkg go to proc/watch.sh (the
+# P-ROC rig, PAD-319); one slot runs one game, so each kind stops the other's.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/spkpath.sh"
@@ -24,6 +27,13 @@ UPD=${1:-}
 mkdir -p "$SPK_ROOT"
 echo $$ > "$SPK_ROOT/watch$SPK_SLOT.pid"
 trap 'rm -f "$SPK_ROOT/watch$SPK_SLOT.pid"' EXIT
+
+if spk_proc_file "$UPD"; then
+    bash "$HERE/killgame.sh" >/dev/null 2>&1
+    bash "$SPK_PROC/watch.sh" "$UPD"
+    exit $?
+fi
+spk_proc_present && bash "$SPK_PROC/killgame.sh" >/dev/null 2>&1
 
 echo "== Unpack =="
 PREP=$SPK_ROOT/prepare$SPK_SLOT.out

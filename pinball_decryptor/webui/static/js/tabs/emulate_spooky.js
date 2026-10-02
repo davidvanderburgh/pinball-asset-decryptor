@@ -58,7 +58,7 @@ export default function EmulateSpooky() {
           <div class="spk-games">
             ${supported.map((g) => html`<${Chip} kind="ok" dot>${g}<//>`)}
           </div>
-          <span class="small muted">Not yet: Rick and Morty, Alice Cooper's Nightmare Castle and Total Nuclear Annihilation (a different board), or the DMD games (America's Most Haunted, Rob Zombie, Domino's, Jetsons).</span>
+          <span class="small muted">Not yet: Total Nuclear Annihilation (its update cannot be opened yet), or the DMD games (America's Most Haunted, Rob Zombie, Domino's, Jetsons).</span>
         <//>
       </div>
     </div>

@@ -1259,7 +1259,8 @@ def install_command(ex, image_path, payload, epoch):
     for a in payload.get("extras") or ():
         args += ["--file", ex.to_exec_path(ab(a))]       # item 160: stock.cfg
     args += ["--port", ex.to_exec_path(ab(payload["port"]))]
-    return ("cd %s && E2FSPROGS_FAKE_TIME=%d python3 mode_install.py %s"
+    # PAD-314: run as a plain Linux user, debugfs and e2fsck sit in /sbin, off the PATH
+    return ("cd %s && PATH=\"$PATH:/sbin:/usr/sbin\" E2FSPROGS_FAKE_TIME=%d python3 mode_install.py %s"
             % (q(ex.to_exec_path(tools_dir())), int(epoch), " ".join(q(a) for a in args)))
 
 
@@ -1578,6 +1579,8 @@ def _settings_only_reason(kept, now):
         if not isinstance(a, dict) or not isinstance(b, dict):
             return "a mode's file does not read"
         diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+        if not a.get("screen_layout") and not b.get("screen_layout"):
+            diff.discard("screen_layout")     # PAD-323: a file saved before it had none = {}
         if diff - SETTINGS_ONLY_FIELDS:
             return "a mode's screen, clip, sound or name changed"
         if diff & _SETTINGS_ONLY_UNLESS_MUSIC and (a.get("music") or b.get("music")):

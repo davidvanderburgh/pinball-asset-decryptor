@@ -13,11 +13,14 @@
 #             on its next Start - nothing is lost (settings and high scores
 #             live in $SPK_ROOT/nv<slot>, not in the cache).
 # Last line of --drop is `dropped=<count>`.
+# The P-ROC games' builds (proc/prepare.py: rm_<date>, ac_<version>) are
+# listed and dropped here too - one window for every Spooky game.
 . "$(dirname "$0")/spkpath.sh"
+PROC_CACHE=$SPK_PROC_ROOT/cache
 
 in_use() {          # the builds running games use, one per line
     local r p
-    for r in "$SPK_ROOT"/rig*/; do
+    for r in "$SPK_ROOT"/rig*/ "$SPK_PROC_ROOT"/rig*/; do
         p=$(cat "$r/game.pid" 2>/dev/null)
         [ -n "$p" ] && kill -0 "$p" 2>/dev/null && basename "$(cat "$r/build" 2>/dev/null)"
     done
@@ -34,6 +37,13 @@ case "${1:-}" in
                 "used=$(stat -c %Y "$b/used" 2>/dev/null || stat -c %Y "$exe")" \
                 "src=$(cat "$b/src" 2>/dev/null)"
         done
+        for b in "$PROC_CACHE"/*/; do
+            [ -f "$b/title" ] || continue
+            n=$(basename "$b")
+            echo "entry=$n kind=build kb=$(du -sk "$b" 2>/dev/null | cut -f1)" \
+                "used=$(stat -c %Y "$b/used" 2>/dev/null || stat -c %Y "$b/title")" \
+                "src=$(cat "$b/src" 2>/dev/null)"
+        done
         mkdir -p "$SPK_ROOT"
         echo "disk=$(df -Pk "$SPK_ROOT" | awk 'NR==2 {print $4, $2}')"
         ;;
@@ -43,9 +53,11 @@ case "${1:-}" in
         n=0
         for e in "$@"; do
             case "$e" in */*|.|..|"") echo "refused=$e not a cache entry"; continue ;; esac
-            [ -d "$SPK_CACHE/$e" ] || { echo "refused=$e not a cache entry"; continue; }
+            d=$SPK_CACHE/$e
+            [ -d "$d" ] || d=$PROC_CACHE/$e
+            [ -d "$d" ] || { echo "refused=$e not a cache entry"; continue; }
             echo "$used" | grep -qx "$e" && { echo "refused=$e in use"; continue; }
-            rm -rf --one-file-system "$SPK_CACHE/$e"
+            rm -rf --one-file-system "$d"
             echo "dropped $e"
             n=$((n + 1))
         done

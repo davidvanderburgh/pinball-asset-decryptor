@@ -13,6 +13,11 @@
 #                :90+, Dutch Pinball :120+, American Pinball :140+)
 #   SPK_SHIM     the LD_PRELOAD shim that maps /dev/WARDEN onto the rig's
 #                board (build.sh)
+#   SPK_PROC     proc/: the P-ROC games' rig (Rick and Morty, Alice Cooper;
+#                its own paths in proc/sppath.sh).  watch.sh hands their
+#                files there, and status / stop / cancel / cache / ctl
+#                answer for whichever of the two runs on the slot
+#   SPK_PROC_RIG that rig's folder for this slot (SPP_RIG there)
 SPK_TOOLS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SPK_SLOT=${PAD_SLOT:-0}
 SPK_ROOT=${SPK_ROOT:-/var/tmp/pad_spooky}
@@ -20,6 +25,9 @@ SPK_CACHE=$SPK_ROOT/cache
 SPK_RIG=$SPK_ROOT/rig$SPK_SLOT
 SPK_DISPLAY=${SPK_DISPLAY:-:$((160 + SPK_SLOT))}
 SPK_SHIM=$SPK_TOOLS/spkshim.so
+SPK_PROC=$SPK_TOOLS/proc
+SPK_PROC_ROOT=${SPP_ROOT:-/var/tmp/pad_spkproc}
+SPK_PROC_RIG=$SPK_PROC_ROOT/rig$SPK_SLOT
 
 # The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
 # this rig's runs where the triage dashboard and the app can see them.
@@ -48,6 +56,25 @@ spk_slot_pids() {
     for p in $(pgrep -f 'main\.x86_64|spkwarden\.py'); do
         tr '\0' '\n' 2>/dev/null < "/proc/$p/environ" | grep -qx "SPK_MARK=$SPK_RIG" && echo "$p"
     done
+}
+
+# A P-ROC game's update file (proc/prepare.py tells them apart the same way;
+# Total Nuclear Annihilation goes there too, to be refused by name).
+spk_proc_file() {
+    case "$(basename "$1" | tr 'A-Z' 'a-z')" in
+        rm-gamecode*|ac-gamecode*|tna-gamecode*) return 0 ;;
+    esac
+    return 1
+}
+# Is this slot's P-ROC game up / anything of it left (a pid file)?
+spk_proc_alive() {
+    local p; p=$(cat "$SPK_PROC_RIG/game.pid" 2>/dev/null)
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+spk_proc_present() {
+    local f
+    for f in game unity ns xvfb; do [ -f "$SPK_PROC_RIG/$f.pid" ] && return 0; done
+    return 1
 }
 
 # Has this slot's game reached attract mode?  Each title says how it shows

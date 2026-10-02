@@ -8,7 +8,9 @@
 #   window=WxH  switches=<count>  slot=  attract=0|1               (while running)
 #   gl=d3d12|llvmpipe  fps=<frames a second, last sample>         (while running)
 #   switches_json=<the virtual playfield's table, Linux path>      (once written)
+# While the slot runs a P-ROC game, proc/status.sh answers (the same keys).
 . "$(dirname "$0")/spkpath.sh"
+spk_proc_alive && exec bash "$SPK_PROC/status.sh"
 echo "wsl=1"
 if spk_game_alive; then
     P=$(spk_game_pid)

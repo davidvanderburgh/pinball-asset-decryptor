@@ -5,7 +5,10 @@ Spooky's games since Halloween are native x86-64 Linux programs (Unity or
 Godot), so like Barrels of Fun there is no CPU to emulate and no key: the
 rig stands in for the one board each talks to over USB serial (Spooky's
 "Warden" playfield controller, or Halloween's and Ultraman's "Pinotaur").
-See ``tools/spooky_emu/README.md``.
+See ``tools/spooky_emu/README.md``.  Rick and Morty and Alice Cooper's
+Nightmare Castle are Python games on a P3-ROC: the rig's ``proc/`` half
+runs them on ``tools/proc_emu``'s board (PAD-269), and the rig's scripts
+send their files there, so this tab drives them the same way (PAD-319).
 
 ``SUPPORTED`` is every title the rig runs, told apart by the update file's
 name the way the machine tells them apart (PAD-316).  The tab names them up
@@ -23,7 +26,7 @@ import os
 import pathlib
 import sys
 
-from pinball_decryptor.core import runtime
+from pinball_decryptor.core import rigslot, runtime
 from pinball_decryptor.webui import rig as _rig
 
 #: The rig ships next to this package.  ``PAD_SPOOKY_EMU_DIR`` moves it.
@@ -36,9 +39,10 @@ POLL_IDLE_MS = 10000
 POLL_FIRST_MS = 700
 
 #: The Spooky games the emulator runs: (display name, the rig's title key
-#: (tools/spooky_emu/spktitles.py), the update file's name patterns, lower
-#: case).  A .pkg is told apart by its name, as the machine and the Spooky
-#: plugin's PKG_FILENAME_PATTERNS do; a Write-tab build keeps that name.
+#: (tools/spooky_emu/spktitles.py; proc/prepare.py's TITLES for the P-ROC
+#: games), the update file's name patterns, lower case).  A .pkg is told
+#: apart by its name, as the machine and the Spooky plugin's
+#: PKG_FILENAME_PATTERNS do; a Write-tab build keeps that name.
 SUPPORTED = (
     ("Beetlejuice", "bj", ("*.beetlejuice",)),
     ("Scooby-Doo", "scooby", ("*.scooby",)),
@@ -47,7 +51,12 @@ SUPPORTED = (
     ("Looney Tunes", "looney", ("*.looney",)),
     ("Halloween", "h78", ("code_h78*.pkg",)),
     ("Ultraman", "um", ("code_um*.pkg",)),
+    ("Rick and Morty", "rm", ("rm-gamecode*.pkg",)),
+    ("Alice Cooper's Nightmare Castle", "ac", ("ac-gamecode*.pkg",)),
 )
+
+#: The P-ROC games' title keys (tools/spooky_emu/proc).
+PROC_KEYS = ("rm", "ac")
 
 #: The file picker's filter: every pattern above, once.
 FILE_PATTERNS = " ".join(sorted({"*." + p.rsplit(".", 1)[1]
@@ -69,6 +78,8 @@ EXIT_TEXT = {
        "it is damaged.",
     5: "The file opened but holds no game program.",
     6: "The game did not reach attract mode.",
+    7: "Setting up the emulator failed - it downloads the game's Python the "
+       "first time, so check the internet connection and Start again.",
 }
 
 
@@ -103,7 +114,9 @@ def rig_available():
                for s in ("watch.sh", "stop.sh", "status.sh", "cancel.sh",
                          "cache.sh", "ctl.sh", "spkshim.so", "spkwarden.py",
                          "spkswitches.py", "spkpf.py", "spkvol.py",
-                         "spktitles.py"))
+                         "spktitles.py", "proc/watch.sh", "proc/prepare.py",
+                         "proc/run_game.sh", "proc/sppctl.py",
+                         "proc/sppswitches.py"))
 
 
 def platform_ok():
@@ -120,14 +133,22 @@ def rig_distro():
     return runtime.distro_for("spooky")
 
 
-def rig_cmd(*args, **kw):
+def _rig_kw(kw):
+    """*kw* for webui/rig.py: the distro, and the rig slot this app drives
+    first in the env (``rigslot.rig_env``: empty on an ordinary install -
+    rig 0 - and PAD_SLOT / PAD_LABEL for an app a ticket started, so its runs
+    stay off rig 0, as the Stern and PB tabs' do; PAD-319)."""
     kw.setdefault("distro", rig_distro())
-    return _rig.rig_cmd(rig_dir(), *args, **kw)
+    kw["env"] = rigslot.rig_env() + list(kw.get("env") or ())
+    return kw
+
+
+def rig_cmd(*args, **kw):
+    return _rig.rig_cmd(rig_dir(), *args, **_rig_kw(kw))
 
 
 def rig_cmd_root(*args, **kw):
-    kw.setdefault("distro", rig_distro())
-    return _rig.rig_cmd_root(rig_dir(), *args, **kw)
+    return _rig.rig_cmd_root(rig_dir(), *args, **_rig_kw(kw))
 
 
 def state_text(info):

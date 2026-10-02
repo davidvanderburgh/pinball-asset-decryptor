@@ -49,9 +49,9 @@ INTRO = ("Run a Spooky Pinball game on this PC. Supported: %s. The "
 
 FILE_TIP = ("The game's update file, named as the machine wants it "
             "(v….beetlejuice, v….scooby, ….ed, ….looney, tcm-….pkg, "
-            "code_H78.pkg, code_UM.pkg). It is only read: the emulator "
-            "unpacks it once (a few minutes) and keeps it, so the next start "
-            "is quicker.")
+            "code_H78.pkg, code_UM.pkg, rm-gamecode-….pkg, "
+            "ac-gamecode.pkg). It is only read: the emulator unpacks it once "
+            "(a few minutes) and keeps it, so the next start is quicker.")
 
 VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
               "while the game plays (the same knob every Emulate tab shares). "

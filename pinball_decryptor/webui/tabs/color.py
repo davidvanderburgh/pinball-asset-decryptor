@@ -20,6 +20,13 @@ the two tab-wide boxes here; each file's own switch is on the Images and
 Video tabs and in the Scenes layers.  The same sliders, preview, Save a
 copy and Load serve whichever mode is showing.
 
+THE MACHINE SCREEN (PAD-324).  A third Spike 2 mode: not a correction but
+the screen itself, what the machine does to what it is given.  Only the
+Scenes preview's "As on the machine" uses it; nothing is written to the
+card, the Write tab lists nothing, and Revert all leaves it (it describes
+the user's machine, not a change to the card).  Until one is stored the
+mode shows the individual files profile, undone, which is what Scenes uses.
+
 The PREVIEW is drawn by the page itself (static/js/tabs/color.js) with the
 same maths, so a slider moves the picture as it is dragged; this side only
 says which picture: a test card PAD draws, or one of the user's own.
@@ -102,7 +109,9 @@ class ColorTab(TabService):
         super().__init__(window)
         self._prof = None            # the project's profile (None = No change)
         self._asset = None           # the chosen-files profile (PAD-312)
-        self._mode = "display"       # "display" | "assets"
+        self._screen = None          # the machine screen (PAD-324)
+        self._screen_stored = False
+        self._mode = "display"       # "display" | "assets" | "screen"
         self._on_display = False
         self._rev = 0
         self._sample = "card"
@@ -128,21 +137,30 @@ class ColorTab(TabService):
         self._project = assets
         prof = None
         asset = None
+        screen, stored = None, False
         if assets and os.path.isdir(assets):
             try:
                 prof = cp.for_project(assets)
                 asset = cp.asset_profile(assets)
+                screen, stored = cp.screen_shown(assets)
             except Exception:                           # noqa: BLE001
                 log.exception("color profile load")
         self._prof = prof
         self._asset = asset
+        self._screen = screen
+        self._screen_stored = stored
         self._rev += 1
         self._publish(problems=[])
 
     def _assets_mode(self):
         return self._mode == "assets" and self._on_display
 
+    def _screen_mode(self):
+        return self._mode == "screen" and self._on_display
+
     def _shown(self):
+        if self._screen_mode():
+            return self._screen or cp.SCREEN_PRESETS[0][1]
         if self._assets_mode():
             return self._asset or cp.PRESETS[0][1]
         return self._prof or cp.Profile(name="No change")
@@ -168,9 +186,23 @@ class ColorTab(TabService):
         p = self._shown()
         assets = self._project
         state = self._asset_state(assets)
-        active = (self._prof is not None if not self._assets_mode()
-                  else bool(state["asset_active"]
-                            and sum(state["asset_counts"].values())))
+        if self._screen_mode():
+            active = self._screen_stored
+        elif self._assets_mode():
+            active = bool(state["asset_active"]
+                          and sum(state["asset_counts"].values()))
+        else:
+            active = self._prof is not None
+        if self._screen_mode():
+            presets = [{"key": k,
+                        "label": cp.SCREEN_PRESET_LABELS.get(k)
+                        or (v.name if v is not None else k),
+                        "tip": cp.SCREEN_PRESET_TIPS.get(k, "")}
+                       for k, v in cp.SCREEN_PRESETS]
+        else:
+            presets = [{"key": k, "label": v.name,
+                        "tip": cp.PRESET_TIPS.get(k, "")}
+                       for k, v in cp.PRESETS]
         values = dict(
             name=p.name, gamma=list(p.gamma), gain=list(p.gain),
             lift=max(p.lift), saturation=p.saturation, rev=self._rev,
@@ -179,12 +211,11 @@ class ColorTab(TabService):
             display_active=self._prof is not None,
             display_name=self._prof.label() if self._prof is not None else "",
             asset_name=(self._asset or cp.PRESETS[0][1]).label(),
+            screen_stored=self._screen_stored,
             project=assets,
             **state,
             has_project=bool(assets and os.path.isdir(assets)),
-            presets=[{"key": k, "label": v.name,
-                      "tip": cp.PRESET_TIPS.get(k, "")}
-                     for k, v in cp.PRESETS],
+            presets=presets,
             limits={k: list(v) for k, v in LIMITS.items()})
         if problems is not None:
             values["problems"] = list(problems)
@@ -197,6 +228,21 @@ class ColorTab(TabService):
             self.toast("Choose a project folder on the Extract tab first.",
                        "error")
             return False
+        if self._screen_mode():
+            # the machine screen: preview only, nothing pending; None goes
+            # back to the individual files profile, undone
+            try:
+                cp.store_screen_profile(assets, prof)
+                self._screen, self._screen_stored = cp.screen_shown(assets)
+            except Exception as e:                      # noqa: BLE001
+                self.set(problems=["could not save the machine screen "
+                                   "(%s)" % e])
+                return False
+            if rev:
+                self._rev += 1
+            self._publish(problems=[])
+            self._tell_scenes()
+            return True
         if self._assets_mode():
             # the chosen-files profile: No change is stored as itself, so
             # the switches keep their places while the files go on as made
@@ -247,11 +293,25 @@ class ColorTab(TabService):
                 except Exception:                       # noqa: BLE001
                     log.exception("color profile %s.%s", ns, name)
 
+    def _tell_scenes(self):
+        """An open Scenes editor draws again through the new screen."""
+        try:
+            fn = getattr(self.window.service("text"),
+                         "scenes_pictures_changed", None)
+        except Exception:                               # noqa: BLE001
+            fn = None
+        if fn is not None:
+            try:
+                fn()
+            except Exception:                           # noqa: BLE001
+                log.exception("color profile scenes redraw")
+
     @rpc
     def set_mode(self, mode):
-        """Whole screen / Chosen files (Spike 2): which profile the sliders
-        and the preview show."""
-        mode = "assets" if mode == "assets" and self._on_display else "display"
+        """Whole screen / Chosen files / Machine screen (Spike 2): which
+        profile the sliders and the preview show."""
+        mode = (mode if mode in ("assets", "screen") and self._on_display
+                else "display")
         if mode != self._mode:
             self._mode = mode
             self._rev += 1
@@ -318,11 +378,16 @@ class ColorTab(TabService):
             kw["saturation"] = round(_clamp("saturation",
                                             params["saturation"]), 3)
         if kw["name"] in ("", "No change"):
-            kw["name"] = "My profile"
+            kw["name"] = "My screen" if self._screen_mode() else "My profile"
         return self._store(cp.Profile(**kw))
 
     @rpc
     def preset(self, key):
+        if self._screen_mode():
+            for k, prof in cp.SCREEN_PRESETS:
+                if k == key:
+                    return self._store(prof, rev=True)
+            return False
         for k, prof in cp.PRESETS:
             if k == key:
                 return self._store(None if k == "none" else prof, rev=True)
@@ -384,7 +449,8 @@ class ColorTab(TabService):
         return True
 
     def clear_replace_assignments(self, assets_dir):
-        """Revert all: the project's profiles go with its other changes."""
+        """Revert all: the project's profiles go with its other changes.
+        The machine screen stays: it is the user's machine, not a change."""
         try:
             cp.store(assets_dir, None)
             cp.store_asset_profile(assets_dir, None)

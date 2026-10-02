@@ -68,7 +68,8 @@ window's page) drives this board exactly as it drives an AP game:
     sw <n> <0|1>        hold / release a switch
     tap <n> [ms]        press and release (150 ms)
     rip <n> <0|1>       flip a switch while held (a spinner spinning)
-    plunge              the Launch button: the game fires the ball into play
+    plunge              press the Launch button: the game fires the ball
+                        into play (or takes it as a select)
     drain               a ball in play (or in the shooter lane) to the trough
     reset               every ball back in the trough
     pause <0|1>         freeze / thaw the game (SIGSTOP / SIGCONT)
@@ -498,16 +499,22 @@ class Board:
         self.later(SHOOTER_DELAY, self.set_switch, lane, 1, "ball served")
 
     def plunge(self):
-        """The Warden games have no manual plunger: the Launch button makes
-        the game fire its launch coil, which (fire) moves the ball into
-        play.  A ball that only LEAVES the lane, without that coil, is one
-        the game never saw launched - it sits in the skill shot and ignores
-        the playfield.  So press Launch; if the game does not fire the coil
-        (a tilt, a mode holding the ball), let the ball go anyway."""
+        """Press the Launch button.  The Warden games have no manual
+        plunger: Launch makes the game fire its launch coil, which (fire)
+        moves the ball into play, and a ball that only LEAVES the lane is
+        one the game never saw launched.  So the ball stays until the game
+        fires: Evil Dead takes the first Launch after Start as "this
+        movie", and a ball let go by the rig then sat in its skill shot -
+        after the drain it never served another (PAD-321).  With the lane
+        empty the press still goes in: Scooby-Doo's character select and
+        Evil Dead's movie select are confirmed with Launch.  A cabinet with
+        a shooter rod too ("manual_plunger": Halloween, Ultraman) fires the
+        coil only for ball saves and multiballs; there the ball goes after
+        1.5 s, as a player's pull sends it."""
         full = [n for n in self.lanes if self.state.get(n)]
         self.set_switch(self.launch_button, 1, "plunge")
         self.later(0.2, self.set_switch, self.launch_button, 0, "plunge")
-        if full:
+        if full and self.title.get("manual_plunger"):
             self.later(1.5, self.set_switch, full[0], 0, "plunged")
 
     def drain(self):
@@ -565,8 +572,6 @@ class Board:
                 self.set_switch(full[0], 0, "drained", True)
             self.drain()
         elif p[0] == "plunge":
-            if not any(self.state.get(n) for n in self.lanes):
-                return json.dumps({"err": "no ball in the shooter lane"})
             self.plunge()
         elif p[0] == "reset":
             for n in self.lanes:

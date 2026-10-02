@@ -59,6 +59,10 @@ KEY = "color_profile"
 
 #: The chosen-files profile (PAD-312) and its switches, in the same file.
 ASSET_KEY = "asset_color_profile"
+#: The machine's screen as the Scenes preview draws it (PAD-324): what the
+#: screen does to what it is given, preview only, never written to a card.
+#: Absent = the individual files profile, undone (PAD-312's model).
+SCREEN_KEY = "screen_profile"
 ALL_IMAGES_KEY = "color_all_images"
 ALL_VIDEOS_KEY = "color_all_videos"
 IMAGE_SLOTS_KEY = "image_color_slots"
@@ -183,6 +187,22 @@ class Profile:
                 x = x / k
             out.append(int(min(max(x * 255.0 + 0.5, 0), 255)))
         return out
+
+    def inverse(self):
+        """A forward profile that does what :meth:`undo_array` does (PAD-324):
+        the screen this profile corrects for, as sliders can show it.  Exact
+        for gamma and gain; the lift is dropped (it has no forward form) and
+        the saturation is mixed before the shades rather than after, so it
+        is a close starting point, not a bit-exact copy.  Black and white
+        cannot be undone and gives full color back."""
+        gamma = tuple(1.0 / g if g > 0 else 1.0 for g in self.gamma)
+        gain = tuple((k ** -g) if k > 0 else 1.0
+                     for k, g in zip(self.gain, self.gamma))
+        sat = 1.0 / self.saturation if self.saturation > 0 else 1.0
+        r = lambda v: round(v, 3)                       # noqa: E731
+        return Profile(name=self.name, gamma=tuple(r(v) for v in gamma),
+                       gain=tuple(r(v) for v in gain), lift=(0.0, 0.0, 0.0),
+                       saturation=r(sat))
 
     def undo_array(self, rgb):
         """*rgb* (uint8 ``(h, w, 3)``) as the machine's screen would show
@@ -482,18 +502,60 @@ def added_picture_colour(assets_dir, op, settings=None, prof=None):
     return prof if on else None
 
 
+def screen_profile(assets_dir):
+    """The machine's screen stored for *assets_dir* (PAD-324), or ``None``:
+    then the Scenes preview takes the individual files profile, undone."""
+    from . import staged_changes
+    d = staged_changes.load(assets_dir).get(SCREEN_KEY) if assets_dir else None
+    return _from_dict(d) if isinstance(d, dict) else None
+
+
+def store_screen_profile(assets_dir, prof):
+    """Set the machine's screen of *assets_dir* (``None`` = back to the
+    individual files profile, undone).  No change IS stored: it says the
+    PC shows what the machine does.  Preview only, so nothing is pending."""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    if prof is None:
+        data.pop(SCREEN_KEY, None)
+    else:
+        data[SCREEN_KEY] = _profile_dict(prof)
+    staged_changes.save(assets_dir, data)
+
+
+def screen_shown(assets_dir):
+    """The screen the Scenes preview uses now, as sliders can show it:
+    the stored one, else the individual files profile's :meth:`inverse`.
+    ``(profile, stored)``."""
+    prof = screen_profile(assets_dir)
+    if prof is not None:
+        return prof, True
+    files = asset_profile(assets_dir)
+    inv = files.inverse()
+    if files == PRESETS[0][1]:
+        name = "Recommended screen"
+    elif inv.is_identity():
+        name = "No change"
+    else:
+        name = "%s, undone" % files.label()
+    return Profile(name=name, gamma=inv.gamma, gain=inv.gain, lift=inv.lift,
+                   saturation=inv.saturation), False
+
+
 def machine_view(assets_dir):
     """A function ``rgb uint8 array -> rgb uint8 array`` showing a frame of
     *assets_dir* the way the machine's screen will (PAD-312): through the
     whole-screen profile, as the game's shaders draw it, then through the
-    screen itself, taken as the inverse of the chosen-files profile (that
-    profile is the correction measured for the screen, so undoing it IS the
-    screen).  A picture baked with the chosen-files profile comes back to
-    what the PC shows; the game's own art and an uncorrected file come out
-    as the machine really shows them.  ``None`` when there is nothing to
-    show (no whole-screen profile, and No change on the chosen files)."""
+    screen itself.  The screen is the one stored on the Color profile tab
+    (PAD-324, applied forwards), else the inverse of the chosen-files
+    profile (that profile is the correction measured for the screen, so
+    undoing it IS the screen).  ``None`` when there is nothing to show."""
     display = active(assets_dir)
-    screen = asset_active(assets_dir)
+    stored = screen_profile(assets_dir)
+    if stored is not None:
+        screen, undo = (None if stored.is_identity() else stored), False
+    else:
+        screen, undo = asset_active(assets_dir), True
     if display is None and screen is None:
         return None
 
@@ -501,7 +563,7 @@ def machine_view(assets_dir):
         if display is not None:
             rgb = display.apply_array(rgb)
         if screen is not None:
-            rgb = screen.undo_array(rgb)
+            rgb = screen.undo_array(rgb) if undo else screen.apply_array(rgb)
         return rgb
     return view
 
@@ -591,6 +653,32 @@ PRESETS = (
 )
 
 #: The tab's tooltip for each starting point: how it was made.
+#: The Machine screen mode's starting points (PAD-324): what the screen
+#: does, so Recommended is the measured correction run forwards the other way.
+SCREEN_PRESETS = (
+    ("screen_recommended", Profile(
+        name="Recommended screen", **{
+            k: v for k, v in vars(PRESETS[0][1].inverse()).items()
+            if k != "name"})),
+    ("none", Profile(name="No change")),
+    ("bw", Profile(name="Black and white", saturation=0.0)),
+    ("follow", None),
+)
+
+SCREEN_PRESET_LABELS = {"follow": "Same as individual files"}
+
+SCREEN_PRESET_TIPS = {
+    "screen_recommended": (
+        "The screen measured on a real Stern Spike 2 Godzilla: a mid grey "
+        "(128, 128, 128) came out around (164, 187, 226), too bright and "
+        "most of all too blue, while white stayed white. A phone photo is "
+        "not a color meter: nudge it until Scenes matches your machine."),
+    "none": "The machine shows colors exactly as your PC does.",
+    "bw": "A screen that shows everything in greys, the game's own art too.",
+    "follow": ("The individual files profile, undone: what Scenes used "
+               "before you set a screen of your own."),
+}
+
 PRESET_TIPS = {
     "recommended": (
         "Made from photos of a display test card on a real Stern Spike 2 "

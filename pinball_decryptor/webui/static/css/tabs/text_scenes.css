@@ -178,6 +178,7 @@ html.bph-760 .scenes-card { flex: 0 0 auto; height: 780px; }
 html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
 .scenes-prep-bar .prog { background: var(--line); }
 .scenes-warn { flex: 0 0 auto; margin: 0; padding: 7px 10px; }
+.scenes-modelay { align-items: center; gap: 8px; }
 /* a scene's state (DragonRR): orange = changed, not written to a card yet; green = written */
 .sc-name { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .sc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; vertical-align: middle; }

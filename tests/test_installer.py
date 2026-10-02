@@ -1524,9 +1524,13 @@ def test_stern_declares_ext4_grow_prereq_per_platform():
         assert d in mac.probe, f"macOS probe must search {d}"
     assert "brew install e2fsprogs" in mac.install_hint
 
-    # Native Linux mounts ext4 itself -- declaring a prereq there would show
-    # a permanently-unfixable indicator.
-    assert _ext4_grow_prereqs("linux") == ()
+    # Native Linux takes the debugfs route too (PAD-314: a loop mount needs root a
+    # desktop app cannot ask for), so it declares e2fsprogs, looked for in /sbin
+    # and /usr/sbin, which Debian keeps off a user's PATH.
+    (lin,) = _ext4_grow_prereqs("linux")
+    assert lin.name == "e2fsprogs" and lin.where == "host"
+    assert "/sbin/debugfs" in lin.probe and "/usr/sbin/debugfs" in lin.probe
+    assert "apt install e2fsprogs" in lin.install_hint
 
     # And the live registry actually carries the current platform's entry in
     # the Spike 2 (default-era) strip.

@@ -41,6 +41,7 @@ if [ -f "$SPP_TOOLS/../../rigboard.sh" ]; then
     . "$SPP_TOOLS/../../rigboard.sh"
 else
     rigboard_post() { :; }; rigboard_clear() { :; }; rigboard_audio() { echo "${2:-0}"; }
+    rigboard_visible() { echo "${PAD_VISIBLE:-1}"; }
 fi
 
 if [ -z "${SPP_USER:-}" ]; then
@@ -51,4 +52,13 @@ spp_pid() { cat "$SPP_RIG/$1.pid" 2>/dev/null; }
 spp_alive() {
     local p; p=$(spp_pid "$1")
     [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+# Every process of this slot's game, found by the marker netns.sh puts in
+# their environment (SPK_MARK): what the game forked lives on after it, as
+# an orphan of WSL's init, and holds no pid file.
+spp_mark_pids() {
+    local p
+    for p in $(pgrep -u "$SPP_USER" . 2>/dev/null); do
+        tr '\0' '\n' 2>/dev/null < "/proc/$p/environ" | grep -qx "SPK_MARK=$SPP_RIG" && echo "$p"
+    done
 }

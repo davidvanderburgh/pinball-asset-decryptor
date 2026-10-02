@@ -135,6 +135,14 @@ Source: "{#ProjectDir}\tools\ap_emu\*"; DestDir: "{app}\tools\ap_emu"; \
 Source: "{#ProjectDir}\tools\spooky_emu\*"; DestDir: "{app}\tools\spooky_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.beetlejuice"
+; The pinHeck emulator (tools/pinheck_emu, PAD-320): the Emulate Spooky tab's
+; DMD games (Jetsons, Domino's, Rob Zombie).  Pure Python on the app's own
+; Python - no WSL - with its window's page (page/*.html, .js, .css) and the
+; rig windows' web host from tools/spike2_emu.  The unpacked update zip and
+; the EEPROMs live under %LOCALAPPDATA%, never here.
+Source: "{#ProjectDir}\tools\pinheck_emu\*"; DestDir: "{app}\tools\pinheck_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.zip,*.PRG,*.prg"
 ; The Pinball Brothers rig (tools/pb_emu, PAD-271): the Emulate PB tab.  Like
 ; the BoF rig it carries one BUILT file, pbshim.so, so .so must never join
 ; the excludes.  Its switch window is tools/ap_emu's virtual playfield and

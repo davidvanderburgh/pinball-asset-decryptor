@@ -183,6 +183,30 @@ def _sw(v):
     return int(v) if str(v).isdigit() else str(v)
 
 
+def run_script(app, script):
+    """--script: press things at emulated times (see main)."""
+    steps = []
+    for item in script.split(","):
+        name, _, when = item.strip().partition("@")
+        at, _, hold = when.partition(":")
+        steps.append((float(at), name, float(hold or 0.15)))
+    for at, name, hold in sorted(steps):
+        while app.machine.status()["seconds"] < at:
+            time.sleep(0.05)
+        m = app.machine
+        if name == "power":                 # times after it count from the new boot
+            app.power_cycle()
+        elif name == "plunge":
+            m.plunge()
+        elif name == "drain":
+            m.drain()
+        else:
+            sw = _sw(name)
+            m.press(sw)
+            time.sleep(hold)
+            m.release(sw)
+
+
 def watch_parent(app, host):
     """Close when the app's pipe closes (its Stop)."""
     try:
@@ -202,11 +226,19 @@ def main(argv=None):
                     help="close the window when stdin closes (the app's Stop)")
     ap.add_argument("--x", type=int)
     ap.add_argument("--y", type=int)
+    ap.add_argument("--script", default="",
+                    help="timed presses for tests and proof shots: comma-separated "
+                         "name@seconds[:hold], e.g. coin@14,start@15,launch@19:1.2,"
+                         "plunge@20,8@22,drain@25 (a number is a playfield switch; "
+                         "power@6 power-cycles, and later times count from that boot)")
     ap.add_argument("--headless", type=float, default=0,
                     help="no window: run this many seconds and print the status (tests)")
     args = ap.parse_args(argv)
     app = App(args.game, args.audio_ctl, args.mute)
     threading.Thread(target=app.poll_audio_ctl, daemon=True, name="pinheck-vol").start()
+    if args.script:
+        threading.Thread(target=run_script, args=(app, args.script), daemon=True,
+                         name="pinheck-script").start()
     if args.headless:
         time.sleep(args.headless)
         print(json.dumps({k: v for k, v in app.state("main")["status"].items() if k != "uart"}))

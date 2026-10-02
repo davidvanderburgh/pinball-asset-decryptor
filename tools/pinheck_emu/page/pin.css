@@ -16,6 +16,7 @@
   --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
 body { font-family: var(--sans); font-size: 13px; line-height: 1.4; -webkit-font-smoothing: antialiased; user-select: none; }
 #app { height: 100%; display: flex; flex-direction: column; }

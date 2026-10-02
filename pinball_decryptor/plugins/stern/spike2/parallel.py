@@ -92,7 +92,8 @@ _ENC_SR = None
 _ENC_GAINS = None
 
 
-def init_encode_worker(game_real_path, image_path, params, gains=None):
+def init_encode_worker(game_real_path, image_path, params, gains=None,
+                       edited=()):
     global _ENC_EMU, _ENC_BYIDX, _ENC_ENDS, _ENC_GR, _ENC_SR, _ENC_GAINS
     from ..engine import _slot_end_map
     from .emulator import Spike2Emu
@@ -106,9 +107,10 @@ def init_encode_worker(game_real_path, image_path, params, gains=None):
     _ENC_BYIDX = {p["idx"]: p for p in params}
     _ENC_ENDS = _slot_end_map(params)
     # A grown sound's placeholder body would mislead the codec sub-slot probe,
-    # so settle those keys from real card audio first (see
-    # Spike2Emu.warm_slots_for_grown).  A no-op when nothing was grown.
-    _ENC_EMU.warm_slots_for_grown(params)
+    # and so would an edited sound's body on a card PAD already built (the
+    # last build's replacement, PAD-331), so settle those keys from other card
+    # audio first (see Spike2Emu.warm_slots_for_grown).
+    _ENC_EMU.warm_slots_for_grown(params, edited=edited)
     _ENC_GR = _ENC_SR = None
 
 

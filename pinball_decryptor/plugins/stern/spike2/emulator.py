@@ -1814,9 +1814,10 @@ class Spike2Emu:
             rms = max(rms, float(np.sqrt(np.mean(np.asarray(res[1], float) ** 2))))
         return sf, rms
 
-    def warm_slots_for_grown(self, params):
-        """Resolve the codec entry of every GROWN sound from a stock sound of
-        the same ``(scale, chan)`` before anything decodes the grown one.
+    def warm_slots_for_grown(self, params, edited=()):
+        """Resolve the codec entry of every GROWN sound, and of every sound in
+        *edited* (the idx a Write is about to re-encode), from another sound of
+        the same ``(scale, chan)`` before anything decodes the sound itself.
 
         :meth:`_resolve_entry` chooses between codec sub-slots by decoding the
         sound and scoring the result, and caches the winner per ``(scale,
@@ -1826,11 +1827,24 @@ class Spike2Emu:
         Zeppelin LE 1.22: every re-encode of the grown sound then failed to
         decode back to the audio it was given, while the very same sound at its
         stock length was bit-exact; seeded from a stock sound it was bit-exact
-        too.  Cheap and harmless when nothing is grown."""
-        want = {(p["scale"], p["chan"]) for p in params if p.get("grown")}
+        too.
+
+        An edited sound is the same trap on a card PAD already built: its body
+        is the replacement the last build wrote, and loud, dense audio there
+        (flat AND loud is what the probe takes for the wrong codec) settled
+        the key on the noise entry.  Every re-encode of that sound then failed
+        its bit-exact self-test and was skipped, so the earlier replacement
+        stayed on the card whatever the user picked or reverted to, and a
+        project changing only that sound got "Nothing could be written"
+        (PAD-331, Godzilla LE 1.16).  Cheap and harmless when nothing is grown
+        or edited."""
+        edited = set(edited)
+        want = {(p["scale"], p["chan"]) for p in params
+                if p.get("grown") or p["idx"] in edited}
         for key in sorted(want - set(self._slot_cache)):
             for q in params:
                 if (q["scale"], q["chan"]) == key and not q.get("grown") \
+                        and q["idx"] not in edited \
                         and q.get("length", 0) > 8000:
                     try:
                         self._resolve_entry(q)

@@ -93,6 +93,23 @@ Speed: about 0.5x real time (60 s emulated in 114 s) with the lamp handler
 at 8 kHz. Before a playable rig: deliver T2 less often (its only output is
 lamp PWM), or batch it.
 
+## Pass 3 (2026-10-02): the DMD shows the attract art
+
+`tools/pinheck_emu/av.py` follows the video packets and draws the DMD from
+the card's own VIDs with the plugin's `p3_video.py`; `run.py --sheet` saves
+one frame per video played. Jetsons shows its logo and "PRESENTS"; several
+videos start at the same instant (a queue - the 0x06-style enqueue is not
+modelled, so the sheet shows the queued ones too).
+
+Domino's "stall" was the game, not the emulator: on a blank EEPROM it
+writes its version (`600BAFA`) and shows the video `KAC` - "System has been
+updated / Please restart your machine" - and waits. `run.py --nvram DIR`
+now keeps both EEPROMs between runs, and the second boot prints `Version:
+006`, loads high scores and runs attract (`ATT` "FawzmaGames", `WBJ`, ...).
+Domino's sends `ff 00.. 02` to stop a video, and names `AT0`, which is not
+on its card (`DMD/_DA` has AT1, AT9, ATI, ATS.. but no AT0) - the real
+machine presumably shows nothing there either.
+
 ## Recommended design
 
 1. **Game CPU: emulate it** (Unicorn), running the user's own PRG unmodified.
@@ -118,9 +135,10 @@ lamp PWM), or batch it.
 
 Milestones, each its own run of proof:
 - A. handshake answered: DONE in pass 2 (Jetsons and Domino's).
-- B. attract: the packet log shows the attract video commands - DONE for
-  Jetsons (pass 2). Left: decode the remaining commands, play the VIDs on a
-  DMD view through `p3_video.py`, find what Domino's attract waits for.
+- B. attract: DONE as stills - both games' attract videos drawn from the
+  card (pass 3). Left: a live DMD (frame timing, the video queue, the 0x12
+  text and score overlays from the `.FNT` files), and the commands still
+  undecoded.
 - C. coin + start + a ball with switch pokes; scores drawn; sound (muted, from
   the level log).
 - D. AMH / Rob Zombie once their update files are on disk (none on D: today).

@@ -9,23 +9,27 @@ Unicorn and stands in for the Propeller at the packet level.
 Plan and findings: `docs/plans/spooky-pinheck-emulator.md`.
 
 ```
-python -m tools.pinheck_emu.run <GAME_Vnnn.PRG> [seconds]
+python -m tools.pinheck_emu.run <GAME_Vnnn.PRG> [seconds] --nvram <dir> --sheet <png> [--quiet]
 ```
 
 prints every packet the game sends the Propeller and the game's serial
-monitor. It is headless and silent; it opens no window and plays nothing.
-There is no rig, DMD view, switch input or Emulate tab yet.
+monitor; `--sheet` saves one DMD frame of every video the game played,
+drawn from the card's own `DMD/_D?/*.VID`; `--nvram` keeps both EEPROMs
+between runs (on a blank one the game behaves as just updated - Domino's
+asks for a restart - so run twice). It is headless and silent; it opens no
+window and plays nothing. There is no live DMD view, text/score overlay,
+sound, switch input, rig or Emulate tab yet.
 
 | file | what |
 |---|---|
 | `pic32.py` | the game CPU: flash/RAM/SFRs, GPIO, UART TX, timers, interrupts (by hand, through an EPC trampoline), I2C1 master, CP0 Count |
 | `proplink.py` | the bit-banged PIC <-> Propeller link: framing, the sync handshake, the Propeller-side EEPROM |
 | `i2c.py` | the PIC-side I2C chips: 24LC256-style EEPROM (0x50), DS1307-style RTC (0x68) |
+| `av.py` | the Propeller's picture, high level: video packets -> card files -> DMD frames (via the plugin's `p3_video.py`) |
 | `run.py` | boots a PRG with all of the above and logs it |
 
-Status (2026-10-02): Jetsons V004 gets through the handshake and settings
-and runs its attract cycle (videos, high-score text, sounds as packets).
-Domino's V006 gets through the handshake and settings and starts attract.
-About 0.5x real time.
+Status (2026-10-02): Jetsons V004 and Domino's V006 (second boot) run their
+attract cycles; the sheets show the real attract art (the Jetsons logo and
+"PRESENTS", Domino's "FawzmaGames"). About 0.5x real time.
 
 Tests: `tests/test_pinheck_emu.py` (synthetic, no game files).

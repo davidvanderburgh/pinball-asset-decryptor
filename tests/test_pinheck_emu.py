@@ -186,3 +186,51 @@ def test_i2c_master_reaches_the_device_and_naks_an_empty_address():
     w(0x08, 1)
     w(0x50, 0x68 << 1)          # nobody at 0x68 here
     assert pic.sfr[0x1F805310] & (1 << 15)          # NAK
+
+
+# --- the A/V side: video packets -> files on the card -> DMD frames --------
+
+def _card_with_vid(tmp_path, name, frames=3):
+    d = tmp_path / "DMD" / ("_D" + name[0])
+    d.mkdir(parents=True, exist_ok=True)
+    header = bytes([128, 32, 128, 32, 8, frames, 15]) + bytes(505)
+    body = b"\xE0" * 4096 + bytes(4096 * (frames - 1))   # frame 0 red, others black
+    (d / (name + ".VID")).write_bytes(header + body)
+    return str(tmp_path)
+
+
+def test_av_finds_the_video_in_either_packet_layout(tmp_path):
+    from tools.pinheck_emu.av import Av
+    av = Av(_card_with_vid(tmp_path, "ZMA"))
+    jetsons = bytes([0]) + b"ZMA" + bytes(3) + b"\xff" + bytes(6) + b"\x01\x02"
+    dominos = b"ZMA\x81\x00\xff" + bytes(9) + b"\x02"
+    av.packet(jetsons, 8100)
+    av.packet(dominos, 9000)
+    av.packet(b"\xff" + bytes(14) + b"\x02", 9500)            # stop
+    av.packet(b"AT0\x80\x00\xff" + bytes(9) + b"\x02", 9600)  # not on the card
+    av.packet(bytes(15) + b"\x01", 9700)                      # a sound: ignored
+    assert [(ms, n) for ms, n, _ in av.played] == [
+        (8100, "ZMA"), (9000, "ZMA"), (9500, "stop"), (9600, "AT0 (not on card)")]
+    v = av.played[0][2]
+    assert (v.width, v.height, v.bpp, v.frames) == (128, 32, 8, 3)
+    img = v.image(0, pixel_size=2)
+    assert img.size == (256, 64)
+    assert img.getpixel((0, 0))[0] > 200                      # RGB332 0xE0 = full red
+
+
+def test_av_contact_sheet(tmp_path):
+    from tools.pinheck_emu.av import Av
+    av = Av(_card_with_vid(tmp_path, "ATT"))
+    sheet = tmp_path / "sheet.png"
+    assert not av.contact_sheet(str(sheet))                   # nothing played yet
+    av.packet(b"ATT\x81\x00\xff" + bytes(9) + b"\x02", 2800)
+    assert av.contact_sheet(str(sheet)) and sheet.stat().st_size > 0
+
+
+def test_nvram_files_load_only_at_their_size(tmp_path):
+    from tools.pinheck_emu.run import NVRAM, _load
+    (tmp_path / NVRAM[0][0]).write_bytes(b"\x01" * NVRAM[0][1])
+    (tmp_path / NVRAM[1][0]).write_bytes(b"\x01" * 10)          # torn: ignored
+    assert _load(str(tmp_path), *NVRAM[0]) == bytearray(b"\x01" * NVRAM[0][1])
+    assert _load(str(tmp_path), *NVRAM[1]) is None
+    assert _load(None, *NVRAM[0]) is None

@@ -1,45 +1,94 @@
 """Run a pinHeck game's PRG headless and print what it says (PAD-320).
 
 Usage: python -m tools.pinheck_emu.run <GAME_Vnnn.PRG> [seconds]
+                [--card DIR] [--sheet PNG] [--nvram DIR] [--quiet]
 
 Prints the game's serial monitor (UART1) and every packet it sends the
 Propeller (hex + the bytes as text). Jetsons V004 and Domino's V006 get past
-"PROPELLER SYNC CHECK" to "HANDSHAKE DONE" against tools.pinheck_emu.proplink.
+"PROPELLER SYNC CHECK" into attract against tools.pinheck_emu.proplink.
+``--card`` is the game's SD-card folder (holding DMD/ and SFX/, default:
+the PRG's folder); ``--sheet`` saves one frame of every video the game
+played, in order - the attract sequence at a glance. ``--nvram`` keeps
+both EEPROMs (the board's I2C one and the Propeller's) between runs, as
+the machine does between power-ups: on a blank EEPROM a game treats itself
+as just updated (Domino's then shows "System has been updated, Please
+restart your machine" and waits), so a second run is the normal boot.
 """
-import sys
+import argparse
+import os
 import time
 
+from tools.pinheck_emu.av import Av
 from tools.pinheck_emu.i2c import Eeprom24, Rtc1307
 from tools.pinheck_emu.pic32 import Pic32
 from tools.pinheck_emu.proplink import PropLink
 
 
-def boot(prg, seconds, log=None):
+NVRAM = (("i2c_eeprom.bin", 0x8000), ("prop_eeprom.bin", 8192 * 4))
+
+
+def _load(nvram, name, size):
+    path = os.path.join(nvram, name) if nvram else None
+    if path and os.path.isfile(path):
+        data = bytearray(open(path, "rb").read())
+        if len(data) == size:
+            return data
+    return None
+
+
+def boot(prg, seconds, log=None, card=None, nvram=None):
     pic = Pic32(prg)
-    pic.i2c_devices[0x50] = Eeprom24()
+    pic.i2c_devices[0x50] = eeprom = Eeprom24(_load(nvram, *NVRAM[0]))
     pic.i2c_devices[0x68] = Rtc1307()
-    link = PropLink(pic, on_packet=log)
-    pic.run_ms(int(seconds * 1000))
+    av = Av(card) if card else None
+
+    def on_packet(pkt):
+        if av:
+            av.packet(pkt, pic.millis)
+        if log:
+            log(pkt)
+
+    link = PropLink(pic, on_packet=on_packet, eeprom=_load(nvram, *NVRAM[1]))
+    link.av = av
+    try:
+        pic.run_ms(int(seconds * 1000))
+    finally:
+        if nvram:
+            os.makedirs(nvram, exist_ok=True)
+            for (name, _), data in zip(NVRAM, (eeprom.data, link.eeprom)):
+                with open(os.path.join(nvram, name), "wb") as f:
+                    f.write(data)
     return pic, link
 
 
-def main(argv):
-    prg = open(argv[1], "rb").read()
-    seconds = float(argv[2]) if len(argv) > 2 else 8
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("prg")
+    ap.add_argument("seconds", nargs="?", type=float, default=8)
+    ap.add_argument("--card")
+    ap.add_argument("--sheet")
+    ap.add_argument("--nvram")
+    ap.add_argument("--quiet", action="store_true", help="no packet lines")
+    a = ap.parse_args(argv)
+    prg = open(a.prg, "rb").read()
+    card = a.card or os.path.dirname(os.path.abspath(a.prg))
 
     def log(pkt):
         text = "".join(chr(b) if 32 <= b < 127 else "." for b in pkt)
         print("PKT %s  %s" % (pkt.hex(" "), text))
 
     t0 = time.time()
-    pic, link = boot(prg, seconds, log)
+    pic, link = boot(prg, a.seconds, None if a.quiet else log, card, a.nvram)
     print("ran %.1f s emulated (%d M insns) in %.1f s; %d packets"
           % (pic.millis / 1000, pic.insns // 1_000_000, time.time() - t0, len(link.packets)))
     print("interrupts by vector:", dict(pic.irq_counts))
     print("I2C transfers: %d, first: %s" % (len(pic.i2c_log), list(pic.i2c_log)[:6]))
+    print("videos:", " ".join("%s@%.1f" % (n or "?", ms / 1000) for ms, n, _ in link.av.played))
+    if a.sheet:
+        print("sheet:", a.sheet if link.av.contact_sheet(a.sheet) else "no videos found on the card")
     print("UART:")
     print(pic.uart.decode("latin1"))
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main()

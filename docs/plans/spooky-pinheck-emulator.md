@@ -135,6 +135,28 @@ trough: switches 34 and 35 must both be closed, and 32 is the shooter lane.
 BUTTON FOR POWER") - a game has started. Next: the coils (the trough eject
 should move a ball to 32 by itself) and the rest of the switch map.
 
+## Pass 5b (2026-10-02): Rob Zombie and AMH files arrived
+
+David added `D:\Pinball\images\Spookyzupdate_V26.zip` and `AMH_SD_V023.zip`.
+
+- **Rob Zombie V26** (`RZO_V026.PRG` + `PRP_V008.BIN` - not the same image
+  as Domino's V008): boots unchanged - sync OK, `1A00BAFA` written, first
+  boot `KAC` (restart), second boot the banner and attract. Its attract
+  videos (`KBK`, `KBL`) are all-zero frames: the picture is drawn over them
+  by text/number/sprite commands. Its text is command `0x0F` (byte 0 = line,
+  then ASCII: "FREE PLAY", "HIGH SCORES", "1 - COW", "20000000"), where
+  Jetsons uses `0x12` - the command sets differ per game, as expected.
+  Its card has AMH's sprite font `ZMF.spr` (512-byte header, then a 128x32
+  4bpp glyph sheet: 16 x 4 cells of 8x8, ASCII 32..95 - the layout AMH's
+  `LoadAlpha` reads) plus `ZZ?.FNT` files not decoded yet.
+- **AMH V023**: the zip is the SD card only (DMD, SFX, `PROP_023.BIN`,
+  VERSION.TXT "CODE REVISION 23"). There is **no PIC32 program** in it - the
+  game CPU was not updated from the card. The public benheck/AMH repository
+  is source only (`amh_pic32_ver023.pde`, the same revision), with no
+  compiled program and no license file. AMH needs either a dumped PRG or a
+  build from that source with the chipKIT toolchain (for David's own use;
+  nothing built from it could ship with PAD) - David's call.
+
 ## Recommended design
 
 1. **Game CPU: emulate it** (Unicorn), running the user's own PRG unmodified.
@@ -166,7 +188,8 @@ Milestones, each its own run of proof:
   undecoded.
 - C. coin + start + a ball with switch pokes; scores drawn; sound (muted, from
   the level log).
-- D. AMH / Rob Zombie once their update files are on disk (none on D: today).
+- D. Rob Zombie: boots to attract (pass 5b); its screens need the text
+  overlay. AMH: no game-CPU program in its update (see pass 5b).
 
 ## Grade
 

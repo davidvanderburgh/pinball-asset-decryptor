@@ -28,6 +28,7 @@
   <main class="body">
     <section class="dmdwrap"><div class="dmd"><img id="dmd" alt="The machine's display"><div class="dots"></div></div></section>
     <section class="panel">
+     <div class="pcol">
       <div class="row" id="buttons">
         <button class="btn" data-sw="coin" data-key="5" title="Insert a coin (5)">Coin <kbd>5</kbd></button>
         <button class="btn primary" data-sw="start" data-key="1" title="Start (1)">Start <kbd>1</kbd></button>
@@ -45,7 +46,9 @@
       </div>
       <div class="eyebrow gl">Playfield switches <span class="hint">click: tap · right-click: hold closed</span></div>
       <div class="grid" id="grid"></div>
-      <div class="eyebrow gl">Lamps <span class="hint">the 8 x 8 inserts as the game lights them (lamp = column x 8 + row)</span></div>
+     </div>
+     <div class="pcol side">
+      <div class="eyebrow gl">Lamps <span class="hint">as the game lights them (lamp = column x 8 + row)</span></div>
       <div class="lamps" id="lamps"></div>
       <div class="facts">
         <div><span class="eyebrow">Scores</span> <span id="scores" class="mono">—</span></div>
@@ -56,6 +59,7 @@
         <pre id="uart" class="mono"></pre>
         <form id="sform"><input id="sin" class="mono" placeholder="[HELP!!]" autocomplete="off"><button class="btn sm">Send</button></form>
       </details>
+     </div>
     </section>
   </main>
 </div>

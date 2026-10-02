@@ -130,7 +130,8 @@ function show(s) {
   $("clock").textContent = fmt(s.seconds);
   $("speed").textContent = "×" + (s.speed || 0).toFixed(2);
   $("balls").textContent = s.trough == null ? "—" : ("Trough " + s.trough + " · Lane " + (s.shooter ? 1 : 0) + " · Play " + s.in_play);
-  const sc = Object.entries(s.scores || {});
+  // the game sends a score for all four players; show the ones in the game
+  const sc = Object.entries(s.scores || {}).filter(([k, v]) => k === "1" || v > 0);
   $("scores").textContent = sc.length ? sc.map(([k, v]) => "P" + k + " " + Number(v).toLocaleString("en-US")).join("   ") : "—";
   $("coils").textContent = (s.coils && s.coils.length) ? s.coils.join(", ") : "—";
   $("playing").textContent = (s.playing && s.playing.length) ? s.playing.join(", ") : "—";

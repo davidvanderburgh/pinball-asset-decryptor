@@ -12,6 +12,7 @@ export const css = true;
 
 // Word for word from the Tk tab (gui/main_window.py _build_video_tab).
 const T = {
+  look: "Show both clips the way the machine's screen will: through the whole screen overlay, then the Machine screen set on the Color profile tab. A replacement with its Color switch on also gets the correction it is built with; one switched off shows as you made it, with the overlay (the gear menu's \u201cSwitched-off files in their own colors\u201d turns that off). Only the preview changes: no clip is re-encoded. Untick for the PC's own colors.",
   intro: "Assign a replacement clip to any slot — a matching clip is used as-is, anything else is auto-re-encoded — then build the update on the Write tab.",
   ffmpeg: "ffmpeg not found — replacing video needs ffmpeg to re-encode + preview clips. Install it with “Install Missing” above the tabs.",
   project: "The project folder — shared by every tab. It is set on the Extract tab. Click to open it.",
@@ -155,7 +156,27 @@ function fitColumns(rows) {
 }
 const zoomOf = () => parseFloat(document.documentElement.style.zoom) || 1;
 
-function Pane({ pane, side, play, stopSeq, onEmptyPlay, head }) {
+// PAD-329: As on the machine.  The service hands each player its colour
+// steps (core/colour_profile.py filter_step: a saturation matrix and a gamma
+// curve per channel); they become one SVG filter the <video> is drawn
+// through, live on the GPU, in sRGB as the profile's maths is.
+function LookFilter({ id, steps }) {
+  if (!steps || !steps.length) return null;
+  const prims = [];
+  steps.forEach((st, i) => {
+    if (st.m) prims.push(html`<feColorMatrix key=${"m" + i} type="matrix" values=${st.m.join(" ")} />`);
+    if (st.f) prims.push(html`<feComponentTransfer key=${"f" + i}>
+      <feFuncR type="gamma" amplitude=${st.f[0][0]} exponent=${st.f[0][1]} offset=${st.f[0][2]} />
+      <feFuncG type="gamma" amplitude=${st.f[1][0]} exponent=${st.f[1][1]} offset=${st.f[1][2]} />
+      <feFuncB type="gamma" amplitude=${st.f[2][0]} exponent=${st.f[2][1]} offset=${st.f[2][2]} />
+    </feComponentTransfer>`);
+  });
+  return html`<svg class="vid-lookdefs" width="0" height="0" aria-hidden="true" focusable="false">
+    <filter id=${id} color-interpolation-filters="sRGB">${prims}</filter>
+  </svg>`;
+}
+
+function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const vref = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
@@ -236,15 +257,19 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head }) {
   else if (!facts) overlay = html`<div class="hint">loading frame…</div>`;
   else if (!playing && pos === 0 && pane.poster_note && !pane.poster) overlay = html`<div class="hint">${pane.poster_note}</div>`;
 
+  const steps = look && look.on ? look[side] : null;
+  const fid = "vid-look-" + side;
+  const fstyle = steps && steps.length ? `filter: url(#${fid})` : undefined;
   return html`<div class="vid-pane">
     ${head}
+    <${LookFilter} id=${fid} steps=${steps} />
     <div class="vid-screen">
-      ${pane.path && src ? html`<video key=${pane.seq + ":" + src} ref=${vref} src=${mediaUrl(src)}
+      ${pane.path && src ? html`<video key=${pane.seq + ":" + src} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
           poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="metadata" playsinline
           onPlay=${() => setPlaying(true)} onPause=${() => setPlaying(false)} onEnded=${onEnded}
           onTimeUpdate=${(e) => { if (!e.currentTarget.paused) setPos(e.currentTarget.currentTime); }} onError=${onError}
           onLoadedData=${onReady} onCanPlay=${onReady}></video>`
-        : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" />` : null}
+        : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" style=${fstyle} />` : null}
       ${overlay}
     </div>
     <div class="row vid-transport">
@@ -464,6 +489,7 @@ export default function VideoTab() {
   const view = s.view || [];
   const rows = useMemo(() => view.map((i) => allRows[i]).filter(Boolean), [s.rows, s.view]);
   const pv = s.preview || {};
+  const look = s.look || {};
   const orig = pv.orig || {};
   const rep = pv.rep || {};
   const q = s.quality || {};
@@ -754,10 +780,14 @@ export default function VideoTab() {
       </div>
       <div class="vid-preview">
         ${pv.note ? html`<${Note} kind=${pv.note.kind}><b>${pv.note.text.replace(/^[⚠✗]\s*/, "")}</b><//>` : null}
+        ${look.offered ? html`<div class="row vid-look">
+          <${Check} checked=${look.on !== false} label="As on the machine" cls="small"
+            title=${T.look} onChange=${(v) => call("video.set_machine_look", v)} />
+        </div>` : null}
         <div class="vid-panes">
-          <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} />
+          <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />
           <span class="vid-vsep"></span>
-          <${Pane} pane=${rep} side="rep" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${repHead} />
+          <${Pane} pane=${rep} side="rep" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${repHead} look=${look} />
         </div>
       </div>
     </section>

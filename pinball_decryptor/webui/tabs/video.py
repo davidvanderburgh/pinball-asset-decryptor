@@ -88,6 +88,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._asis = {}                  # rel -> per-clip as-is override
         self._length = {}                # rel -> per-clip length choice
         self._color = {}                 # rel -> per-clip colour switch (PAD-312)
+        self._mlook = True               # As on the machine on the players (PAD-329)
         self._color_all = False          # the Color profile tab's "every replaced video"
         self._scan_id = 0
         self._scan_dir = ""
@@ -194,6 +195,39 @@ class VideoTab(BestQualityMixin, TabService):
         self._default_assets_from_extract()
         self._update_project()
         self._maybe_rescan()
+        self.publish_look()
+
+    # -- As on the machine on the players (PAD-329) ------------------------
+    def publish_look(self):
+        """The colour steps the two players draw through: the Color profile
+        tab's profiles change elsewhere, so this is worked out again whenever
+        the tab shows, a row loads, or a switch moves."""
+        offered = self._per_file_colour()
+        look = {"offered": offered, "on": bool(self._mlook), "orig": [], "rep": []}
+        folder = self._assets_path()
+        if offered and self._mlook and folder and os.path.isdir(folder):
+            rel = self._current
+            switch = self._color_state(rel) if rel else None
+            var = getattr(self.window, "scenes_own_colours_var", None)
+            try:
+                own = True if var is None else bool(var.get())
+            except Exception:                           # noqa: BLE001
+                own = True
+            try:
+                from ...core import colour_profile
+                look.update(colour_profile.video_look(folder, switch, own))
+            except Exception:                           # noqa: BLE001
+                log.exception("video machine look")
+        if look != self.get("look"):
+            self.set(look=look)
+
+    @rpc
+    def set_machine_look(self, on):
+        """As on the machine: the players show the clips the way the
+        machine's screen will, or in the PC's own colours."""
+        self._mlook = bool(on)
+        self.publish_look()
+        return True
 
     def on_running(self, running, mode):
         self._running = bool(running)
@@ -946,6 +980,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._color_all = bool(folder and staged_changes.load(folder).get(
             "color_all_videos"))
         self._refresh_list()
+        self.publish_look()
 
     def _color_changed(self):
         for ns, name in (("color", "asset_switches_changed"),
@@ -980,6 +1015,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._save_staged()
         self._refresh_list()
         self._color_changed()
+        self.publish_look()
         return True
 
     def _put_row(self, i, row):
@@ -1965,6 +2001,7 @@ class VideoTab(BestQualityMixin, TabService):
             self._play_seq += 1
             self.set(play={"side": autoplay, "seq": self._play_seq})
         self._update_note(rel)
+        self.publish_look()
 
     def _pick_state(self, rel):
         return {"can_clear": bool(rel and self._targets([rel])),

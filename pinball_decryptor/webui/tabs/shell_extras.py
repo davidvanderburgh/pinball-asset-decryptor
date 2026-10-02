@@ -309,12 +309,13 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
              "label": "Show previous sessions in the log",
              "checked": bool(self.show_log_history_var.get())}]})
         items.append({"id": "toggle_scenes_own_colours",
-                      "label": "Scenes: switched-off files in their own colors",
+                      "label": "Switched-off files in their own colors",
                       "checked": bool(self.scenes_own_colours_var.get()),
-                      "title": ("With As on the machine ticked, a picture whose color "
-                                "switch is off (red in the Layers list) shows as you made "
-                                "it instead of through the machine's screen. Untick to "
-                                "draw every picture through the screen.")})
+                      "title": ("With As on the machine ticked, in Scenes and on the "
+                                "Video tab's players, a file whose color switch is off "
+                                "shows as you made it instead of through the machine's "
+                                "screen (the whole screen overlay still applies). Untick "
+                                "to draw every file through the screen.")})
         items.append({"sep": True})
         vq = self.voice_quality_var.get()
         items.append({"label": "Voice recognition quality", "submenu": [
@@ -486,12 +487,13 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         if fn is not None:
             fn(on)
         self.publish_settings_items()
-        try:
-            redraw = getattr(self.window.service("text"), "scenes_pictures_changed", None)
-            if redraw is not None:
-                redraw()
-        except Exception:                               # noqa: BLE001
-            log.exception("scenes redraw")
+        for ns, name in (("text", "scenes_pictures_changed"), ("video", "publish_look")):
+            try:
+                redraw = getattr(self.window.service(ns), name, None)
+                if redraw is not None:
+                    redraw()
+            except Exception:                           # noqa: BLE001
+                log.exception("%s redraw", ns)
         return True
 
     def _toggle_log_history(self):

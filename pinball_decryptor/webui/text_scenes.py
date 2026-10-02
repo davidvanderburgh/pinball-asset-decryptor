@@ -97,7 +97,8 @@ TIPS = {
                "the game's own art looks the way the machine really shows "
                "it. A file whose color switch is off (red in Layers) shows "
                "as you made it, so you can see it against the game's own "
-               "art; the gear menu's Scenes setting turns that off. Untick "
+               "art; the gear menu's 'Switched-off files in their own "
+               "colors' turns that off. Untick "
                "to see every picture in the PC's own colors.",
     "behind": "What the scene is laid over.\n\nThe machine draws on BLACK, "
               "so that is the true picture — but a black outline on a black "

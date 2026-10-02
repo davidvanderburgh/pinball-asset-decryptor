@@ -542,6 +542,52 @@ def screen_shown(assets_dir):
                    saturation=inv.saturation), False
 
 
+def filter_step(prof):
+    """*prof* as one step of a browser colour filter (PAD-329): ``{"m"}`` the
+    saturation mix as an SVG feColorMatrix's 20 values (None when it mixes
+    nothing) and ``{"f"}`` each channel's feFuncR/G/B ``type="gamma"``
+    amplitude, exponent and offset.  lift + (1 - lift) * min(in * gain, 1) **
+    gamma is amplitude * in ** exponent + offset clamped to 1, so it is the
+    same curve; ``None`` for a profile that changes nothing."""
+    if prof is None or prof.is_identity():
+        return None
+    m = None
+    if prof.saturation != 1.0:
+        rows = prof.matrix()
+        m = []
+        for i in range(3):
+            m += [round(v, 5) for v in rows[i]] + [0.0, 0.0]
+        m += [0.0, 0.0, 0.0, 1.0, 0.0]
+    f = [[round((1.0 - lo) * (k ** g), 5), round(g, 5), round(lo, 5)]
+         for g, k, lo in zip(prof.gamma, prof.gain, prof.lift)]
+    return {"m": m, "f": f}
+
+
+def video_look(assets_dir, switch, own_colours):
+    """The colour steps the Video tab's players draw through with As on the
+    machine ticked (PAD-329), as :func:`filter_step` dicts: ``{"orig",
+    "rep"}``.  The original: the whole screen overlay, then the machine
+    screen.  A replacement: its baked individual-files correction when its
+    Color switch is on (*switch* True), the overlay, then the screen, except
+    when its switch is off (*switch* False) and *own_colours* (the gear
+    menu's setting): then it passes the screen by, as a switched-off picture
+    does in Scenes.  The screen is the Color profile tab's Machine screen,
+    else the individual files profile undone (:func:`screen_shown`)."""
+    overlay = active(assets_dir)
+    screen = screen_shown(assets_dir)[0]
+    if screen is not None and screen.is_identity():
+        screen = None
+    files = asset_active(assets_dir)
+    orig = [filter_step(p) for p in (overlay, screen)]
+    rep = []
+    if switch and files is not None:
+        rep.append(filter_step(files))
+    rep.append(filter_step(overlay))
+    if not (switch is False and own_colours):
+        rep.append(filter_step(screen))
+    return {"orig": [s for s in orig if s], "rep": [s for s in rep if s]}
+
+
 def machine_view(assets_dir):
     """A function ``rgb uint8 array -> rgb uint8 array`` showing a frame of
     *assets_dir* the way the machine's screen will (PAD-312): through the

@@ -53,10 +53,24 @@ SUPPORTED = (
     ("Ultraman", "um", ("code_um*.pkg",)),
     ("Rick and Morty", "rm", ("rm-gamecode*.pkg",)),
     ("Alice Cooper's Nightmare Castle", "ac", ("ac-gamecode*.pkg",)),
+    # the DMD games (PAD-320): Ben Heck's pinHeck boards, emulated in
+    # tools/pinheck_emu - the update zip as Spooky ships it, or its PRG
+    ("Jetsons", "jet", ("jetsons_code*.zip", "jet_v*.prg")),
+    ("Domino's Spectacular Pinball Adventure", "dom", ("dom_v*.zip", "dom_v*.prg")),
+    ("Rob Zombie's Spookshow International", "rzo", ("rzupdate_v*.zip", "rzo_v*.prg")),
 )
 
 #: The P-ROC games' title keys (tools/spooky_emu/proc).
 PROC_KEYS = ("rm", "ac")
+
+#: The pinHeck DMD games' title keys: no WSL rig - the game runs in a window
+#: of its own on this PC's Python (tools/pinheck_emu/window.py).
+PINHECK_KEYS = ("jet", "dom", "rzo")
+
+#: tools/pinheck_emu, beside the Spooky rig.  ``PAD_PINHECK_EMU_DIR`` moves it.
+DEFAULT_PINHECK_DIR = str(
+    pathlib.Path(__file__).resolve().parents[2] / "tools" / "pinheck_emu"
+)
 
 #: The file picker's filter: every pattern above, once.
 FILE_PATTERNS = " ".join(sorted({"*." + p.rsplit(".", 1)[1]
@@ -100,6 +114,35 @@ def title_of(path):
 def supported_file(path):
     """Is *path* an update of a game the emulator runs?"""
     return bool(title_of(path))
+
+
+def key_of(path):
+    """The title key of the game *path* is an update of, or ""."""
+    title = title_of(path)
+    return next((k for n, k, _p in SUPPORTED if n == title), "")
+
+
+def is_pinheck(path):
+    """Is *path* one of the pinHeck DMD games (a window, not the WSL rig)?"""
+    return key_of(path) in PINHECK_KEYS
+
+
+def pinheck_dir():
+    return os.environ.get("PAD_PINHECK_EMU_DIR") or DEFAULT_PINHECK_DIR
+
+
+def pinheck_available():
+    d = pinheck_dir()
+    return all(os.path.isfile(os.path.join(d, f))
+               for f in ("window.py", "machine.py", "pic32.py", "page/index.html"))
+
+
+def pinheck_cmd(py, path, audio_ctl):
+    """The pinHeck game window's command line: the game runs in it, so the
+    window IS the run; ``--parent-pipe`` closes it when the app closes its
+    stdin (Stop)."""
+    return [py, os.path.join(pinheck_dir(), "window.py"), path, "--parent-pipe",
+            "--audio-ctl", audio_ctl]
 
 
 def rig_dir():

@@ -1,0 +1,75 @@
+/* The pinHeck game window, in Pinball Asset Decryptor's own design (the
+   virtual playfield's tokens: dark panels, IBM Plex, one amber accent). */
+
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-display: swap; src: local("IBM Plex Sans"), url(/fonts/ibm-plex-sans-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Sans Condensed"; font-weight: 600; font-display: swap; src: local("IBM Plex Sans Condensed SemiBold"), url(/fonts/ibm-plex-sans-condensed-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: local("IBM Plex Mono"), url(/fonts/ibm-plex-mono-latin-400-normal.woff2) format("woff2"); }
+
+:root {
+  color-scheme: dark;
+  --bg: #15171a; --bg-2: #1b1e22; --panel: #22262b; --panel-2: #2a2f35; --panel-3: #323841;
+  --line: #333940; --line-2: #414951; --ink: #e9eae7; --ink-2: #b7bbb9; --ink-3: #8b9196;
+  --accent: #e8a33d; --accent-ink: #1b1d1f; --accent-soft: rgba(232,163,61,.14);
+  --ok: #6fc07a; --warn: #e0b34a; --err: #f0705f; --key: #7ecbff;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --sans: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
+  --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+body { font-family: var(--sans); font-size: 13px; line-height: 1.4; -webkit-font-smoothing: antialiased; user-select: none; }
+#app { height: 100%; display: flex; flex-direction: column; }
+.mono { font-family: var(--mono); }
+.eyebrow { font-family: var(--cond); text-transform: uppercase; letter-spacing: .08em; font-size: 11px; color: var(--ink-3); font-weight: 600; }
+.hint { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px; }
+button { font: inherit; color: inherit; }
+kbd { font: 500 10.5px var(--mono); color: var(--ink-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.btn.primary kbd { color: var(--accent-ink); border-color: rgba(0,0,0,.3); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--ink); font-family: var(--cond); font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: var(--panel-3); border-color: var(--ink-3); }
+.btn:active:not(:disabled), .btn.down { transform: translateY(1px); background: var(--accent-soft); border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.sm { height: 24px; padding: 0 9px; font-size: 12px; }
+
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+.ttl h1 { margin: 0; font: 600 18px var(--cond); }
+.chips { display: flex; gap: 6px; margin-left: auto; }
+.chip { height: 24px; display: inline-flex; align-items: center; padding: 0 9px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); color: var(--ink-2); font-size: 12px; }
+.acts { display: flex; gap: 8px; align-items: center; }
+.vol { display: inline-flex; gap: 6px; align-items: center; }
+.vol input { width: 110px; accent-color: var(--accent); }
+.note { margin: 8px 16px 0; padding: 7px 10px; border-radius: 6px; background: rgba(224,179,74,.14); color: var(--warn); }
+
+.body { flex: 1 1 auto; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; min-height: 0; overflow: auto; }
+.dmdwrap { display: flex; justify-content: center; }
+/* as wide as fits, but never taller than ~42% of the window (pin.js sets --ratio) */
+.dmd { position: relative; width: min(100%, calc(42vh * var(--ratio, 4))); background: #000; border-radius: 6px; border: 1px solid var(--line); overflow: hidden; }
+.dmd img { display: block; width: 100%; image-rendering: pixelated; }
+/* the dot look: a black lattice over the enlarged pixels (8 x 8 per dot at 1024 px) */
+.dots { position: absolute; inset: 0; pointer-events: none;
+  background-image: linear-gradient(to right, rgba(0,0,0,.55) 1.5px, transparent 1.5px),
+                    linear-gradient(to bottom, rgba(0,0,0,.55) 1.5px, transparent 1.5px);
+  background-size: calc(100% / 128) calc(100% / var(--rows, 32)); }
+
+.panel { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 18px; align-items: start; }
+.pcol { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.side .facts { flex-direction: column; gap: 6px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.svc { gap: 6px; }
+.gl { margin-top: 2px; }
+.grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.sw { height: 30px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); font: 500 12px var(--mono); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.sw:hover { border-color: var(--ink-3); }
+.sw .r { font: 600 10px var(--cond); text-transform: uppercase; color: var(--ink-3); }
+.sw.closed { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+.sw.held { box-shadow: inset 0 0 0 2px var(--accent); }
+.facts { display: flex; flex-wrap: wrap; gap: 18px; color: var(--ink-2); }
+.serial pre { max-height: 140px; overflow: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0; white-space: pre-wrap; font-size: 11.5px; color: var(--ink-2); }
+.serial form { display: flex; gap: 6px; }
+.serial input { flex: 1; height: 26px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 0 8px; }
+.lamps { display: grid; grid-template-columns: repeat(8, 22px); gap: 8px; }
+.lamp { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line-2);
+  background: rgba(255, 196, 92, calc(var(--on, 0) * 1)); box-shadow: 0 0 calc(var(--on, 0) * 8px) rgba(255,196,92,.8); }

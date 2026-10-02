@@ -47,11 +47,14 @@ def test_spooky_shows_the_tab_and_says_what_it_runs(rig, tmp_path):
         assert s["supported"] == [
             "Beetlejuice", "Scooby-Doo", "Texas Chainsaw Massacre",
             "Evil Dead", "Looney Tunes", "Halloween", "Ultraman",
-            "Rick and Morty", "Alice Cooper's Nightmare Castle"]
+            "Rick and Morty", "Alice Cooper's Nightmare Castle",
+            "Jetsons", "Domino's Spectacular Pinball Adventure",
+            "Rob Zombie's Spookshow International"]
         assert ("Supported: Beetlejuice, Scooby-Doo, Texas Chainsaw "
                 "Massacre, Evil Dead, Looney Tunes, Halloween, Ultraman, "
-                "Rick and Morty, Alice Cooper's Nightmare Castle."
-                in s["intro"])
+                "Rick and Morty, Alice Cooper's Nightmare Castle, Jetsons, "
+                "Domino's Spectacular Pinball Adventure, Rob Zombie's "
+                "Spookshow International." in s["intro"])
         assert s["go_label"] == "Start" and s["go_enabled"]
         assert [c["label"] for c in s["cells"]] == [
             "Game", "Version", "Switches", "Window", "Memory", "Uptime"]
@@ -92,7 +95,7 @@ def test_browse_asks_for_a_spooky_update(tmp_path):
         w.answers.append(str(f))
         assert w.call(NS + ".browse")
         assert ["Spooky game update",
-                "*.beetlejuice *.ed *.looney *.pkg *.scooby"] in w.asked[-1]["filetypes"]
+                "*.beetlejuice *.ed *.looney *.pkg *.prg *.scooby *.zip"] in w.asked[-1]["filetypes"]
         assert w.window.spooky_emulate_file_var.get() == str(f)
 
 
@@ -270,11 +273,16 @@ def test_while_starting_the_button_is_cancel(rig, monkeypatch, tmp_path):
     # the P-ROC games (PAD-319)
     ("rm-gamecode-20220902.pkg", "Rick and Morty"),
     (r"D:\Pinball\images\Spooky\AC-GAMECODE.pkg", "Alice Cooper's Nightmare Castle"),
-    # a key nobody has, restore images, DMD games: not yet
+    # the pinHeck DMD games (PAD-320): the update zip, or its PRG
+    ("Jetsons_Code.zip", "Jetsons"),
+    (r"D:\Pinball\images\Spooky\DOM_v6.zip", "Domino's Spectacular Pinball Adventure"),
+    ("rzupdate_V26.zip", "Rob Zombie's Spookshow International"),
+    ("JET_V004.PRG", "Jetsons"),
+    # a key nobody has, restore images, AMH (no game program): not yet
     ("tna-gamecode.pkg", ""),
     ("rm-gamecode-20220902.zip", ""),
     ("ED_clonezilla_base_image_2025_02_27.iso", ""),
-    ("Jetsons_Code.zip", ""),
+    ("AMH_SD_V023.zip", ""),
     ("v2026.09.15.11.beetlejuice.zip", ""),
     ("", ""),
 ])
@@ -298,13 +306,18 @@ def test_every_supported_title_is_one_the_rig_runs():
     rig = pathlib.Path(core.DEFAULT_RIG_DIR) / "proc"
     run = (rig / "run_game.sh").read_text()
     for name, key, _pats in core.SUPPORTED:
-        if key in core.PROC_KEYS:
+        if key in core.PINHECK_KEYS:
+            # no WSL rig: tools/pinheck_emu's own profile names it
+            from tools.pinheck_emu.games import GAMES
+            assert GAMES[key.upper()]["title"] == name
+        elif key in core.PROC_KEYS:
             # the P-ROC rig's profile names it (run_game.sh NAME=)
             assert 'NAME="%s"' % name in run, key
         else:
             assert spktitles.TITLES[key]["name"] == name
     assert {k for _n, k, _p in core.SUPPORTED} == \
-        set(spktitles.TITLES) | set(core.PROC_KEYS)
+        set(spktitles.TITLES) | set(core.PROC_KEYS) | set(core.PINHECK_KEYS)
+    assert core.pinheck_available()
     assert set(core.PROC_KEYS) == {"rm", "ac"}
     assert "        rm-gamecode*|ac-gamecode*|tna-gamecode*)" in \
         (rig.parent / "spkpath.sh").read_text()
@@ -327,6 +340,61 @@ def test_start_refuses_a_file_it_does_not_run(rig, monkeypatch, tmp_path):
         svc._start_async()
         assert seen == [] and not svc._busy
         assert "tna-gamecode.pkg is not an update" in said[-1][1]
+
+
+def test_a_dmd_game_runs_in_its_own_window_not_the_rig(rig, monkeypatch, tmp_path):
+    """PAD-320: Jetsons / Domino's / Rob Zombie start tools/pinheck_emu's
+    game window on this PC's Python - no WSL command - and the window is the
+    run: the status says it runs, Stop closes it."""
+    import os
+    import subprocess
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    from pinball_decryptor.webui.tabs import emulate_spooky as tab
+    launched, wsl = [], []
+
+    class Proc:
+        def __init__(self, cmd, **kw):
+            launched.append(cmd)
+            self.stdin = open(tmp_path / "pipe", "wb")
+            self.alive = True
+
+        def poll(self):
+            return None if self.alive else 0
+
+        def wait(self, timeout=None):
+            self.alive = False
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", Proc)
+    monkeypatch.setattr(tab, "windows_python", lambda *a, **k: "py.exe")
+    monkeypatch.setattr(tab.rigslot, "hidden", lambda: False)
+    monkeypatch.setattr(core, "rig_cmd_root", lambda *a, **k: wsl.append(a))
+    monkeypatch.setattr(core, "rig_cmd", lambda *a, **k: wsl.append(a))
+    z = tmp_path / "Jetsons_Code.zip"
+    z.write_bytes(b"")
+    with web_app(tmp_path, mfr="spooky") as w:
+        _spooky(w)
+        svc = _svc(w)
+        w.window.spooky_emulate_file_var.set(str(z))
+        monkeypatch.setattr(svc, "_refuse_off", lambda: False)
+        svc._start_async()
+        cmd = launched[-1]
+        assert cmd[0] == "py.exe"
+        assert cmd[1].endswith(os.path.join("pinheck_emu", "window.py"))
+        assert cmd[2] == str(z) and "--parent-pipe" in cmd
+        assert cmd[cmd.index("--audio-ctl") + 1].endswith("audio_ctl.json")
+        info = svc._read_status()
+        assert info["running"] == "1" and info["title_name"] == "Jetsons"
+        assert info["pinheck"] == "1"
+        svc._apply(info)
+        assert w.state(NS)["pinheck"] and w.state(NS)["up"]
+        proc = svc._ph_proc
+        svc._stop_async()
+        end = time.time() + 5
+        while proc.alive and time.time() < end:
+            time.sleep(0.02)
+        assert not proc.alive and svc._ph_proc is None
+        assert not wsl
 
 
 def test_start_passes_sound_and_the_volume_control(rig, monkeypatch, tmp_path):

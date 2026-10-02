@@ -42,7 +42,9 @@ from .base import TabService, rpc
 
 INTRO = ("Run a Spooky Pinball game on this PC. Supported: %s. The "
          "emulator stands in for the machine's controller board and gives the "
-         "game a window, sound and every switch.\n"
+         "game a window, sound and every switch. The DMD games (Jetsons, "
+         "Domino's, Rob Zombie) run from their update zip in a window of "
+         "their own, without the app's Linux.\n"
          "Pick the machine's update file, or one the Write tab built, to play "
          "a mod before it goes on a USB stick."
          % ", ".join(spk.supported_names()))
@@ -50,8 +52,10 @@ INTRO = ("Run a Spooky Pinball game on this PC. Supported: %s. The "
 FILE_TIP = ("The game's update file, named as the machine wants it "
             "(v….beetlejuice, v….scooby, ….ed, ….looney, tcm-….pkg, "
             "code_H78.pkg, code_UM.pkg, rm-gamecode-….pkg, "
-            "ac-gamecode.pkg). It is only read: the emulator unpacks it once "
-            "(a few minutes) and keeps it, so the next start is quicker.")
+            "ac-gamecode.pkg; for the DMD games the zip as Spooky ships it: "
+            "Jetsons_Code.zip, DOM_v6.zip, rzupdate_V26.zip). It is only read: "
+            "the emulator unpacks it once and keeps it, so the next start is "
+            "quicker.")
 
 VOLUME_TIP = ("The game's sound on this PC - Volume and Mute follow at once, "
               "while the game plays (the same knob every Emulate tab shares). "
@@ -95,6 +99,11 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         self._cancelling = False
         #: the virtual playfield (spkpf.py), when this app opened one
         self._sw_proc = None
+        #: a pinHeck DMD game's window (tools/pinheck_emu/window.py): the
+        #: game runs in it, so while it is open that game is the run
+        self._ph_proc = None
+        self._ph_title = ""
+        self._ph_t0 = 0.0
         #: the Cache window: open?, its entries by name, the selection
         self._cache_open = False
         self._cache_entries = {}
@@ -214,7 +223,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
     @rpc
     def switches(self):
         """Open (or bring back) the virtual playfield for the running game."""
-        if rig_off() or not self._last_up:
+        if rig_off() or not self._last_up or self._pinheck_up():
             return False
         info = dict(self._info)
 
@@ -475,6 +484,9 @@ class EmulateSpookyTab(RigTabMixin, TabService):
             return
         if self._refuse_off():
             return
+        if spk.is_pinheck(path):
+            self._start_pinheck(path)
+            return
         self._busy = True
         # No spinner on the button while starting: it is the Cancel button
         # now, and the footer ladder shows the progress.
@@ -518,6 +530,72 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         threading.Thread(target=work, daemon=True,
                          name="pad-spooky-start").start()
 
+    # ------------------------------------------------------------------
+    # the pinHeck DMD games (PAD-320): no WSL, no rig - the game runs in a
+    # window of its own on this PC's Python (tools/pinheck_emu/window.py)
+    # ------------------------------------------------------------------
+    def _start_pinheck(self, path):
+        if rigslot.hidden():
+            self._log("Spooky: a hidden run opens no window, and a DMD game "
+                      "runs in its window (PAD_HIDDEN=0 in this app's "
+                      "environment shows it).")
+            return False
+        py = windows_python()
+        if not py or not spk.pinheck_available():
+            self._log("Spooky: could not start %s - no Python to run its "
+                      "window with, or tools/pinheck_emu is missing."
+                      % spk.title_of(path))
+            return False
+        try:
+            self._ph_proc = subprocess.Popen(
+                spk.pinheck_cmd(py, path, audio_ctl_file()),
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, creationflags=_rig.CREATE_FLAGS)
+        except Exception as exc:                           # noqa: BLE001
+            self._ph_proc = None
+            self._log("Spooky: could not start %s: %s" % (spk.title_of(path), exc))
+            return False
+        self._ph_title = spk.title_of(path)
+        self._ph_t0 = time.time()
+        self._started_here = True
+        self._log("Spooky: %s runs in its own window - the display, the "
+                  "buttons, every switch and the sound. Its first start "
+                  "unpacks the update once; a first boot of Domino's or Rob "
+                  "Zombie asks for a restart (the window's Power cycle)."
+                  % self._ph_title)
+        self._poll_now()
+        return True
+
+    def _pinheck_up(self):
+        return self._ph_proc is not None and self._ph_proc.poll() is None
+
+    def _pinheck_info(self):
+        secs = int(time.time() - self._ph_t0)
+        return {"wsl": "1", "running": "1", "attract": "1", "pinheck": "1",
+                "title_name": self._ph_title, "uptime_s": str(secs),
+                "window": "its own", "switches": "64 + cabinet",
+                "version": ""}
+
+    def _close_pinheck(self, wait=False):
+        proc, self._ph_proc = self._ph_proc, None
+        if proc is None or proc.poll() is not None:
+            return
+
+        def work():
+            try:
+                if proc.stdin is not None:
+                    proc.stdin.close()
+                proc.wait(timeout=self.SW_CLOSE_S)
+                return
+            except Exception:                              # noqa: BLE001
+                pass
+            _kill_tree(proc)
+        if wait:
+            work()
+        else:
+            threading.Thread(target=work, daemon=True,
+                             name="pad-spooky-pinheck-close").start()
+
     def _footer_line(self, line):
         for head, kind, pct, text in spk.FOOTER_STEPS:
             if line.startswith(head):
@@ -532,6 +610,13 @@ class EmulateSpookyTab(RigTabMixin, TabService):
 
     def _stop_async(self):
         if self._refuse_off():
+            return
+        if self._pinheck_up():
+            self._started_here = False
+            self._close_pinheck()
+            self._log("Spooky: %s stopped (its settings and high scores are "
+                      "kept)." % self._ph_title)
+            self._poll_now()
             return
         self._busy = True
         self._go_busy = True
@@ -569,6 +654,9 @@ class EmulateSpookyTab(RigTabMixin, TabService):
     # polling
     # ------------------------------------------------------------------
     def _read_status(self):
+        if self._pinheck_up():
+            return self._pinheck_info()
+        self._ph_proc = None
         return self._run_status(spk.rig_cmd("status.sh"))
 
     def _footer_from_info(self):
@@ -607,7 +695,8 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                   cells=[{"label": lbl, "key": k, "value": values.get(k, "—")}
                          for lbl, k in CELLS],
                   note="" if spk.rig_available() else self.get("note"),
-                  up=up, ready=ready, game=game)
+                  up=up, ready=ready, game=game,
+                  pinheck=info.get("pinheck") == "1")
         if not self._busy:
             kw["go_label"] = "Stop" if up else "Start"
             kw["go_enabled"] = spk.rig_available()
@@ -626,6 +715,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         self._stopped = True
         self._cancel_poll()
         self._close_switches(wait=True)
+        self._close_pinheck(wait=True)
         if rig_off() or not spk.rig_available() or not spk.platform_ok():
             return
         if not self._started_here or not (self._last_up or self._busy):

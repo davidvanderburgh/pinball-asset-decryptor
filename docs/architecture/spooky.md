@@ -1,6 +1,6 @@
 # Spooky Pinball (`spooky`) — Architecture
 
-> The `spooky` plugin handles the widest format spread of any manufacturer in the app: six distinct file extensions, four encryption/signing schemes (AES-256-CBC, GPG symmetric, GPG signed, plus plaintext), two game engines (Unity and Godot 4), Ben Heck's P3/Multimorphic DMD video format, and Clonezilla disk-image restore archives. Most of its load-bearing decoders are **byte-for-byte lifts** from the standalone `spooky_decryptor` repo (a regression firewall enforced by [`tests/verify_no_upstream_regression.py`](../../tests/verify_no_upstream_regression.py)); only `formats.py` and `pipeline.py` are re-orchestrated for the unified `BasePipeline` contract. Extract decrypts/decompresses any supported input to a folder of loose assets (+ engine-specific PCK/asset extraction); Write re-encrypts a modified folder back into an installable machine-update file.
+> The `spooky` plugin handles the widest format spread of any manufacturer in the app: six distinct file extensions, four encryption/signing schemes (AES-256-CBC, GPG symmetric, GPG signed, plus plaintext), two game engines (Unity and Godot 4), the DMD video format of Ben Heck's pinHeck System (PIC32 + Parallax Propeller, often mislabelled P3/Multimorphic; the `P3_`/`p3_` names in the code are historical), and Clonezilla disk-image restore archives. Most of its load-bearing decoders are **byte-for-byte lifts** from the standalone `spooky_decryptor` repo (a regression firewall enforced by [`tests/verify_no_upstream_regression.py`](../../tests/verify_no_upstream_regression.py)); only `formats.py` and `pipeline.py` are re-orchestrated for the unified `BasePipeline` contract. Extract decrypts/decompresses any supported input to a folder of loose assets (+ engine-specific PCK/asset extraction); Write re-encrypts a modified folder back into an installable machine-update file.
 
 ## At a glance
 
@@ -309,6 +309,19 @@ The `identical`/`import-only` set is the **regression firewall**: any accidental
 - [`core/audio.py`](../../pinball_decryptor/core/audio.py) — shared Replace-Audio toolkit (plugin `audio.py` + `transcode_to` + ffplay preview).
 - [`core/audio_slots.py`](../../pinball_decryptor/core/audio_slots.py) — Replace-Audio slot scan + staging.
 - [`tests/verify_no_upstream_regression.py`](../../tests/verify_no_upstream_regression.py) — upstream-lift parity guard.
+
+## Emulating the DMD games (tools/pinheck_emu, PAD-320)
+
+Jetsons, Domino's and Rob Zombie run on Ben Heck's pinHeck board, not Linux:
+a PIC32MX795 runs `<GAME>_Vnnn.PRG`, a Parallax Propeller draws the DMD and
+plays the sound from the SD card. `tools/pinheck_emu` runs the PRG
+unmodified on Unicorn (interrupts, timers, I2C EEPROM and clock, the
+switch inputs, the coils) and stands in for the Propeller at the packet
+level: the card's own VIDs and wavs, drawn and mixed in Python. The
+Emulate Spooky tab starts it in a window of its own (`window.py`) for an
+update zip or PRG it recognises by name; no WSL. America's Most Haunted's
+update has no game program, so it cannot run. Findings, packet formats
+and what is still approximate: [docs/plans/spooky-pinheck-emulator.md](../plans/spooky-pinheck-emulator.md).
 
 ## Related docs
 

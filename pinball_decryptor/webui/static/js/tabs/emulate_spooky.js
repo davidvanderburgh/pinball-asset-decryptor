@@ -6,7 +6,8 @@
 // playfield is AP's window (tools/spooky_emu/spkpf.py -> tools/ap_emu/appf.py);
 // it opens by itself when the game reaches attract.  "Playfield window" is a
 // real button, as on the AP and PB tabs: as ghost text beside Stop it read as
-// a label, and a player never found the window (PAD-295, PAD-313).
+// a label, and a player never found the window (PAD-295, PAD-313).  A DMD
+// game (pinHeck, PAD-320) runs in a window of its own, so it has no button.
 
 import { html, PageHead, Card, Button, PathField, Chip, Note, call } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -28,7 +29,7 @@ export default function EmulateSpooky() {
   const footer = html`
     <${Button} kind=${goKind} size="big" icon=${stopish ? "stop" : "play"} busy=${s.go_busy}
       disabled=${!s.go_enabled} onClick=${() => call("emulate_spooky.toggle")}>${s.go_label || "Start"}<//>
-    ${up ? html`<${Button} icon="external" title=${s.switches_tip}
+    ${up && !s.pinheck ? html`<${Button} icon="external" title=${s.switches_tip}
       onClick=${() => call("emulate_spooky.switches")}>Playfield window<//>` : null}
     <span class="emu-sp"></span>
     <${VolumeControl} ns="emulate_spooky" s=${s} title=${s.volume_tip} />`;
@@ -40,7 +41,7 @@ export default function EmulateSpooky() {
           extra=${s.game ? html`<${Chip} kind="ok" dot>${s.game}<//>` : null} footer=${footer}>
           <label class="small">Update file</label>
           <${PathField} ns="emulate_spooky" k="file" value=${s.file} title=${s.file_tip} history=${hist}
-            placeholder="v2026.09.15.11.beetlejuice, code_UM.pkg… - or a build from Write" onBrowse=${() => call("emulate_spooky.browse")}
+            placeholder="v2026.09.15.11.beetlejuice, code_UM.pkg, Jetsons_Code.zip… - or a build from Write" onBrowse=${() => call("emulate_spooky.browse")}
             extra=${html`<${Button} kind="ghost" disabled=${!s.rig_ok} onClick=${() => call("emulate_spooky.open_cache")}
               title="Shows and manages what the emulator keeps in the app's Linux: each game unpacked from its update file. Deleting frees the space now; it is unpacked again on the next Start.">Cache…<//>`} />
           <span class="small muted">${s.file_tip}</span>
@@ -58,7 +59,7 @@ export default function EmulateSpooky() {
           <div class="spk-games">
             ${supported.map((g) => html`<${Chip} kind="ok" dot>${g}<//>`)}
           </div>
-          <span class="small muted">Not yet: Total Nuclear Annihilation (its update cannot be opened yet), or the DMD games (America's Most Haunted, Rob Zombie, Domino's, Jetsons).</span>
+          <span class="small muted">Not yet: Total Nuclear Annihilation (its update cannot be opened yet), or America's Most Haunted (its update holds no game program - the machine's own was never on the card).</span>
         <//>
       </div>
     </div>

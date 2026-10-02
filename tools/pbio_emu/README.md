@@ -13,7 +13,7 @@ in their environment, never by name.
 |---|---|---|
 | Alien | `clonezilla-live-alien40.iso` (4.0, the whole machine); `pbap412.upd` over it (4.1.2) | attract, played (PAD-272) |
 | ABBA | `pbap141.upd` + `pbap145.upd` (1.45), over Alien's ISO | attract, played - but a **black screen**: its factory media are not on D: (below) |
-| Queen | `pbq0210G.upd` (delta only) | refused: no full base (below) |
+| Queen | `clonezilla-live-queen20d.iso` (2.0D, the whole machine, 10 GB); `pbq0210G.upd` over it (2.1G) | attract, played (PAD-326), both versions |
 
 "Played" = coins, Start, the ball served by the game's own trough coil to
 the shooter lane, launched by its own launch coil when Launch is pressed,
@@ -58,7 +58,8 @@ Per title (`pbiotitles.py`): the firmware version the board reports, the
 X screen and vidprog's arguments, the switch table, trough, coils.  Alien:
 firmware 0.72, `-2` on 2166x768.  ABBA: firmware 1.03 (it and Queen refuse
 anything below 1.00 - "Invalid FW version": the newer boards), one
-1920x1080 screen, no `-2`.
+1920x1080 screen, no `-2`.  Queen: firmware 1.03 (its 103.uf2, and the
+factory log's "IO HW 0.04 FW 1.03"), one 1920x1080 screen.
 
 ## The I/O board (pbioboard.py)
 
@@ -152,15 +153,26 @@ credit.  Presses closer than ~1 s apart are debounced away by the game.
   is not on D:.  Five of its six fonts come from Alien's image under the
   same names; `BoringSansBold.ttf` exists nowhere here and is a DejaVu Sans
   Bold stand-in - without a font vidprog aborts.
-* **Queen needs its restore ISO.**  Only a delta update
-  (`pbq0210G.upd`: new pinprog/vidprog and service pictures) is on D:;
-  its media come from the full image, `clonezilla-live-queen20d.iso`
-  (10 GB, PB's public Google Drive), which was not downloaded.  With it,
-  Queen should need only a profile (its pinprog speaks the same protocol
-  and needs no library Alien's image lacks).  `prepare.sh` refuses the
-  delta alone.
+* **Queen (PAD-326)** runs from its restore ISO,
+  `clonezilla-live-queen20d.iso` (10 GB, PB's public Google Drive): its
+  root partition is a raw `dd` image of 22 GB, restored sparse (9.5 GB on
+  disk, about 5 minutes), with the whole 8.5 GB of media.  `pbq0210G.upd`
+  (2.1G) is a delta over it; picking it alone finds the ISO beside it.
+  Its profile came from a `PBIO_NAMES=1` boot (96 switches: trough
+  57/58/60-63, jam 56, shooter lane 59) and from what the game fired:
+  coil 1 TROUGH RELEASE on every "TROUGH: kicking now", coil 0 AUTO LAUNCH,
+  coil 19 LEFT VUK (sw 27), coil 5 RIGHT VUK (sw 10).  **Queen has no
+  Launch button**: the flippers launch ("FLIPPER PLUNGER"), and every
+  ball starts on a song select that both flippers confirm - so the
+  profile has `plunge: [77, 78]` (both flipper buttons) and no `launch`
+  button, and the playfield window's Space key is not taken from the
+  left flipper.  Played: coins, Start, song select, both flippers ->
+  "SHOOTER LETS ROCK" and the song running, shots scored (1,100,220 on
+  ball 1), a drain answered by bonus and ball 2, or by the ball save's
+  auto-launch.  The CENTER SAUCER's kicker is not modelled (a tap scores
+  it; a held switch stays made).
 * **In the app since PAD-315**: the Emulate PB tab runs this rig when the
-  picked file is Alien's or ABBA's (`emulate_pb_core.kind_of`), and
+  picked file is Alien's, ABBA's or (PAD-326) Queen's (`emulate_pb_core.kind_of`), and
   Predator's rig otherwise.  One file is enough: `watch.sh` with one file
   stacks what it builds on (`pbiofiles.py chain`: the newest full update
   of that title at or below it, else its restore ISO).  The playfield

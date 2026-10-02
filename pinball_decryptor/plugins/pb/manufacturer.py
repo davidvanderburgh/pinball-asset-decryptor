@@ -27,8 +27,8 @@ class PBManufacturer(Manufacturer):
         # for games that ship none.
         replace_video=True,
         # Predator (PAD-271): its two programs run in the app's Linux on an
-        # emulated FAST Neuron (tools/pb_emu); Alien and ABBA on PB's own
-        # emulated I/O board (tools/pbio_emu, PAD-315).  Not Queen yet.
+        # emulated FAST Neuron (tools/pb_emu); Alien, ABBA and Queen on PB's
+        # own emulated I/O board (tools/pbio_emu, PAD-315, PAD-326).
         emulate_pb=True,
     )
     input_spec = InputSpec(

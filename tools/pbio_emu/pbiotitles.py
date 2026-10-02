@@ -54,6 +54,27 @@ ABBA_SWITCHES = (
     "UNUSED|KICKBACK|BJORN O TARGET|HELICOPTER START 1|HELICOPTER START 2|"
     "RIGHT UPPER EOS").split("|")
 
+QUEEN_SWITCHES = (
+    "RIGHT RAMP MADE|CAPTIVE BALL|RIGHT ORBIT TOP|LEFT ORBIT TOP|"
+    "LEFT RAMP MADE|TOP LANE 1|TOP LANE 2|TOP LANE 3|RAMP LOCK 3|"
+    "RAMP LOCK 2|RIGHT VUK|RAMP LOCK 1|GUITAR LOCK 3|"
+    "GUITAR TARGET HIGH|RIGHT POP BUMPER|LEFT POP BUMPER|GUITAR LOCK 2|"
+    "GUITAR TARGET MIDDLE|GUITAR LOCK 1|RIGHT ORBIT MIDDLE|"
+    "RIGHT RAMP ENTER|GUITAR TARGET LOW|LEFT ORBIT BOTTOM|"
+    "RED SPECIAL ACTIVE|CENTER SAUCER|BOTTOM POP BUMPER|GUITAR EXIT|"
+    "LEFT VUK|RIGHT STANDUP|LEFT RAMP ENTER|BASS G|CENTER DROP TARGET|"
+    "BASS D|RIGHT ORBIT BOTTOM|BASS A|LEFT SPINNER|BASS E|"
+    "LEFT DROP TARGET|RIGHT DROP TARGET|PIANO WHITE 4|PIANO BLACK 3|"
+    "PIANO WHITE 3|PIANO BLACK 2|PIANO WHITE 2|PIANO BLACK 1|"
+    "PIANO WHITE 1|LAUNCH LANE UPPER|LEFT OUTLANE|RIGHT OUTLANE|"
+    "LEFT INLANE|RIGHT INLANE|RIGHT SLING|LEFT SLING|KICKBACK|LEFT EOS|"
+    "RIGHT EOS|TROUGH JAM|TROUGH 1|TROUGH 2|SHOOTER|TROUGH 3|TROUGH 4|"
+    "TROUGH 5|TROUGH 6|UNUSED|UNUSED|UNUSED|UNUSED|UNUSED|UNUSED|"
+    "UNUSED|UP|ENTER|ESCAPE|DOWN|START BUTTON|UNUSED|LEFT BUTTON|"
+    "RIGHT BUTTON|LEFT BUTTON 2|RIGHT BUTTON 2|UNUSED|COIN 1|COIN 2|"
+    "COIN 3|COIN 4|INTERLOCK|COIN BOX ALARM|TILT|LOCK DOWN BAR|UNUSED|"
+    "UNUSED|UNUSED|UNUSED|UNUSED|UNUSED").split("|")
+
 TITLES = {
     "alien": {
         "name": "Alien",
@@ -100,6 +121,29 @@ TITLES = {
         "eos": {16: 27, 17: 28, 18: 29},
         "buttons": {"start": 5, "launch": 3, "coin": 2, "tilt": 15,
                     "enter": 13, "escape": 10, "up": 12, "down": 11},
+    },
+    "queen": {
+        "name": "Queen",
+        "dir": "queen",
+        "firmware": [1, 3, 0],      # 103.uf2; the factory log: FW 1.03
+        "screen": "1920x1080", "vidargs": "",
+        "switches": {n: s for n, s in enumerate(QUEEN_SWITCHES)},
+        "trough": [57, 58, 60, 61, 62, 63],
+        "jam": 56,
+        "shooter": 59,
+        "eject": [1],           # TROUGH RELEASE
+        "launch": [0],          # AUTO LAUNCH
+        # LEFT VUK (sw 27) coil 19, RIGHT VUK (sw 10) coil 5
+        "kickouts": {19: [27], 5: [10]},
+        "rest": [],
+        # LEFT BUTTON, RIGHT BUTTON
+        "eos": {77: 54, 78: 55},
+        # No Launch button: the flippers launch ("FLIPPER PLUNGER") - both
+        # at once, which also starts the song picked on the song select
+        # every ball begins with.  `plunge` presses these.
+        "plunge": [77, 78],
+        "buttons": {"start": 75, "coin": 82, "tilt": 88,
+                    "enter": 72, "escape": 73, "up": 71, "down": 74},
     },
 }
 

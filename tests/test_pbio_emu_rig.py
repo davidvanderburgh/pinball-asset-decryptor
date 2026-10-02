@@ -60,6 +60,13 @@ def abba(tmp_path, monkeypatch):
     b.log.close()
 
 
+@pytest.fixture
+def queen(tmp_path, monkeypatch):
+    b = _board(tmp_path, monkeypatch, "queen")
+    yield b
+    b.log.close()
+
+
 # --- framing ---------------------------------------------------------------
 
 def test_frames_split_short_and_long_forms_and_keep_a_partial():
@@ -163,6 +170,27 @@ def test_abba_serves_from_coil_0_and_launches_with_coil_1(abba):
     assert abba.state[37] == 0
 
 
+def test_queen_serves_from_coil_1_launches_with_coil_0_and_kicks_its_vuks(queen):
+    """PAD-326, from a played Queen 2.1G: coil 1 fired on every "TROUGH:
+    kicking now", coil 0 is AUTO LAUNCH; LEFT VUK 19, RIGHT VUK 5."""
+    assert queen.firmware == (1, 3, 0) and queen.balls == 6
+    _coil(queen, 1, 5)
+    assert queen.state[59] == 1 and queen.balls == 5      # SHOOTER
+    _coil(queen, 0, 5)
+    assert queen.state[59] == 0
+    queen.set_switch(27, 1, now=True)
+    _coil(queen, 19, 5)
+    assert queen.state[27] == 0
+
+
+def test_queen_plunges_with_both_flippers(queen):
+    """No Launch button: both flipper buttons launch (and confirm the song
+    select every ball starts on)."""
+    queen.command("plunge")
+    for sw in (77, 78):
+        assert bytes([0x54, 0x31, sw, 1]) in queen.sent
+
+
 def test_flipper_button_closes_its_eos(board):
     board.set_switch(77, 1, now=True)
     assert board.state[48] == 1
@@ -232,7 +260,8 @@ def test_plunge_presses_the_launch_button(board):
 def test_profiles_are_whole(key):
     t = titles.get(key)
     assert len(t["switches"]) == 96
-    for n in t["trough"] + [t["shooter"]] + list(t["buttons"].values()):
+    for n in (t["trough"] + [t["shooter"]] + list(t["buttons"].values())
+              + t.get("plunge", [])):
         assert t["switches"][n] != "UNUSED", (key, n)
     assert t["screen"] and t["firmware"]
 
@@ -308,9 +337,12 @@ def test_a_delta_with_no_full_update_stands_on_its_restore_image(tmp_path):
     assert _chain(d, "pbap412.upd") == ["clonezilla-live-alien40.iso", "pbap412.upd"]
     # no Queen image here: the delta alone (prepare.sh refuses it, saying why)
     assert _chain(d, "pbq0210G.upd") == ["pbq0210G.upd"]
+    # with Queen's own image beside it, that is its base - not Alien's
+    (d / "clonezilla-live-queen20d.iso").write_bytes(b"")
+    assert _chain(d, "pbq0210G.upd") == ["clonezilla-live-queen20d.iso", "pbq0210G.upd"]
 
 
-@pytest.mark.parametrize("key", ["alien", "abba"])
+@pytest.mark.parametrize("key", ["alien", "abba", "queen"])
 def test_the_playfield_table_is_predators_format(key):
     t = pbioswitches.table(key)
     prof = titles.get(key)
@@ -321,7 +353,11 @@ def test_the_playfield_table_is_predators_format(key):
     rows = {r["keys"]: r for r in t["rows"]}
     b = prof["buttons"]
     assert rows["1"]["ns"] == [b["start"]] and rows["5"]["ns"] == [b["coin"]]
-    assert rows["Space"]["ns"] == [b["launch"]] and rows["T"]["ns"] == [b["tilt"]]
+    assert rows["T"]["ns"] == [b["tilt"]]
+    if "launch" in b:
+        assert rows["Space"]["ns"] == [b["launch"]]
+    else:                   # Queen: Space must not take the left flipper
+        assert "Space" not in rows
     # the flipper buttons on the arrows; their EOS switches get no key
     assert rows["Left"]["ns"] and rows["Right"]["ns"]
     eos = {s["n"] for s in t["switches"] if "Eos" in s["label"]}

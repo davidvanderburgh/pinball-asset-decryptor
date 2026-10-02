@@ -1858,16 +1858,14 @@ HELP_CONTENT = {
     "Emulate PB": [
         ("What it does",
          "Runs the real Pinball Brothers game on this PC, in its own window. "
-         "Supported: Predator, Alien and ABBA. Each game is two native Linux "
-         "programs (the rules and the screen), so nothing is emulated but "
-         "the machine's controller boards - Predator's FAST boards, or the "
-         "I/O boards Alien and ABBA share: the emulator answers the game "
-         "the way those boards would, with six balls in the trough, and "
-         "gives you a way to press every switch. Predator has its sound; "
-         "Alien and ABBA run silent for now. ABBA's screens stay dark: its "
-         "update files carry the program and the sound, not the pictures "
-         "and videos the factory installed. Queen can't be emulated yet: "
-         "it needs its restore image from Pinball Brothers."),
+         "Supported: Predator, Alien, ABBA and Queen. Each game is two "
+         "native Linux programs (the rules and the screen), so nothing is "
+         "emulated but the machine's controller boards - Predator's FAST "
+         "boards, or the I/O boards Alien, ABBA and Queen share: the "
+         "emulator answers the game the way those boards would, with six "
+         "balls in the trough, and gives you a way to press every switch. "
+         "ABBA's screens stay dark: its update files carry the program and "
+         "the sound, not the pictures and videos the factory installed."),
         ("Which file to pick",
          "The .upd update file for the version you want to play - the one "
          "the machine installs from a USB stick. Pinball Brothers ships one "
@@ -1879,9 +1877,12 @@ HELP_CONTENT = {
          "then pbap412.upd for Alien, pbap141.upd then pbap145.upd for "
          "ABBA), and also need Alien's restore image "
          "(clonezilla-live-alien40.iso) in that folder the first time: it "
-         "is the machine's own Linux, which both games run on. Pick the "
-         "restore image itself to play Alien as it left the factory. The "
-         "files are only read."),
+         "is the machine's own Linux, which both games run on. Queen's "
+         "updates (pbq0210G.upd) carry only what changed, so Queen needs "
+         "its own restore image (clonezilla-live-queen20d.iso, about "
+         "10 GB) beside them: it holds Queen's pictures, videos and sound. "
+         "Pick a restore image itself to play the game as it left the "
+         "factory. The files are only read."),
         ("Setting up",
          "The first time, the emulator downloads the libraries Predator "
          "needs for its sound and video (about 700 MB) into the app's "
@@ -1897,7 +1898,10 @@ HELP_CONTENT = {
          "spinning). There is no ball physics: Start serves a ball to the "
          "shooter lane, the Launch button (Space) fires it into play, you "
          "press the switches it would hit, and Drain sends it back to the "
-         "trough. With that window or the game's own window focused, the "
+         "trough. Queen has no Launch button: both flippers launch, and "
+         "also start the song picked on the song select each ball begins "
+         "with (F does both). With that window or the game's own window "
+         "focused, the "
          "arrow keys are the flippers, 1 is Start, 5 a coin, Space the Launch button, T tilt, "
          "the letters beside the playfield switches press them, F plunges, "
          "D drains, Backspace, -, = and Enter are the coin door's buttons, "
@@ -1905,9 +1909,8 @@ HELP_CONTENT = {
          "\"Playfield window\" on this tab brings it back."),
         ("Volume",
          "Volume and Mute on this tab (and the VOL bar in the playfield "
-         "window) set Predator's sound live, as on every Emulate tab. The "
-         "game's own volume is in its service menu. Alien and ABBA have no "
-         "sound in the emulator yet."),
+         "window) set the game's sound live, as on every Emulate tab. The "
+         "game's own volume is in its service menu."),
         ("Cancel and Stop",
          "While a game is starting the Start button is Cancel; it stops the "
          "start and throws a half-unpacked copy away. Stop ends the game and "

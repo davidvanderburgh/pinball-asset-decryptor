@@ -310,12 +310,6 @@ The `identical`/`import-only` set is the **regression firewall**: any accidental
 - [`core/audio_slots.py`](../../pinball_decryptor/core/audio_slots.py) — Replace-Audio slot scan + staging.
 - [`tests/verify_no_upstream_regression.py`](../../tests/verify_no_upstream_regression.py) — upstream-lift parity guard.
 
-## Related docs
-
-- [`docs/AP_PKG_RE.md`](../AP_PKG_RE.md) — American Pinball `.pkg` reverse-engineering (relevant to the AP-before-spooky detection ordering).
-- [`docs/CGC_BNK_RE.md`](../CGC_BNK_RE.md) — CGC sound-bank format (contrasts with spooky's loose-audio Replace-Audio model).
-- `tests/test_spooky_e2e.py` — Extract→modify→Write→re-extract round-trip that guards the ported `formats.py`/`pipeline.py`.
-
 ## Emulating the DMD games (tools/pinheck_emu, PAD-320)
 
 Jetsons, Domino's and Rob Zombie run on Ben Heck's pinHeck board, not Linux:
@@ -328,3 +322,9 @@ Emulate Spooky tab starts it in a window of its own (`window.py`) for an
 update zip or PRG it recognises by name; no WSL. America's Most Haunted's
 update has no game program, so it cannot run. Findings, packet formats
 and what is still approximate: [docs/plans/spooky-pinheck-emulator.md](../plans/spooky-pinheck-emulator.md).
+
+## Related docs
+
+- [`docs/AP_PKG_RE.md`](../AP_PKG_RE.md) — American Pinball `.pkg` reverse-engineering (relevant to the AP-before-spooky detection ordering).
+- [`docs/CGC_BNK_RE.md`](../CGC_BNK_RE.md) — CGC sound-bank format (contrasts with spooky's loose-audio Replace-Audio model).
+- `tests/test_spooky_e2e.py` — Extract→modify→Write→re-extract round-trip that guards the ported `formats.py`/`pipeline.py`.

@@ -141,6 +141,12 @@ class Pic32:
         self.pins_in = {p: 0xFFFF for p in PORTS}
         self.on_lat = []            # f(port, old, new)
         self.on_ms = []             # f(millis), after every emulated millisecond
+        self._watch = {}            # port -> [f(port, old, new)], see watch()
+        #: deliver timer n's interrupt every Nth period only. The lamp
+        #: driver (Timer2) runs at up to 40 kHz and only multiplexes lamps;
+        #: machine.py thins it to make real time (lamps PWM slower).
+        self.timer_divide = {}
+        self._timer_count = collections.Counter()
         self.uart = bytearray()
         self.uart_rx = collections.deque()  # bytes typed into the serial monitor
         self.i2c_devices = {}       # 7-bit address -> device (see I2CDevice)
@@ -172,6 +178,12 @@ class Pic32:
                 mu.mem_write(0x1D000000 + o, bytes(4))         # nop
                 mu.hook_add(UC_HOOK_CODE, self._read_count, begin=a, end=a,
                             user_data=UC_MIPS_REG_0 + ((w >> 16) & 31))
+
+    def watch(self, ports, f):
+        """f(port, old, new) when a latch in ``ports`` (e.g. "EG") changes -
+        cheaper than ``on_lat``, which hears every port."""
+        for port in ports:
+            self._watch.setdefault(port, []).append(f)
 
     # --- SFRs ---------------------------------------------------------------
     def _port(self, a):
@@ -213,6 +225,8 @@ class Pic32:
             self.lat[port] = new
             if new != old:
                 for f in self.on_lat:
+                    f(port, old, new)
+                for f in self._watch.get(port, ()):
                     f(port, old, new)
             return
         if shadow == 4:
@@ -409,7 +423,9 @@ class Pic32:
                 self._deferred.clear()
                 for n, due in list(self._next.items()):
                     if self.clock >= due:
-                        self.raise_irq(TIMERS[n][1])
+                        self._timer_count[n] += 1
+                        if self._timer_count[n] % self.timer_divide.get(n, 1) == 0:
+                            self.raise_irq(TIMERS[n][1])
                         self._next[n] = due + (self._timer_period(n) or MS)
                 self._service()
             if self._gpoff is not None:

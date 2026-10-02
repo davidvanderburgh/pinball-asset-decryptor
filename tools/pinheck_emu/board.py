@@ -27,7 +27,7 @@ class Board:
         self.matrix = set()               # closed playfield switches (0..63)
         self._snapshot = 0
         self._k = 0
-        pic.on_lat.append(self._lat)
+        pic.watch("DEG", self._lat)
         self._latch()
         self._rows(pic.lat["D"])
 
@@ -106,7 +106,7 @@ class Balls:
         self.ready_bit = game.get("ready")
         if game.get("launch") is not None:
             board.names["launch"] = game["launch"]
-        board.pic.on_lat.append(self._lat)
+        board.pic.watch({self._load[0], self._plunge[0]}, self._lat)
         board.pic.on_ms.append(self._tick)
         self._now = 0
         self._show()

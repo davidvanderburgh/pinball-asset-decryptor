@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pinHeck</title>
+<link rel="stylesheet" href="/static/pin.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="ttl"><span class="eyebrow">Spooky Pinball · pinHeck</span><h1 id="title">…</h1></div>
+    <div class="chips">
+      <span class="chip mono" id="clock">0:00</span>
+      <span class="chip mono" id="speed" title="Emulated seconds per real second">×1.00</span>
+      <span class="chip" id="balls" title="Balls: in the trough, in the shooter lane, in play">—</span>
+    </div>
+    <div class="acts">
+      <button class="btn sm" id="pause" title="Pause the game (P)">Pause</button>
+      <button class="btn sm" id="power" title="Switch the machine off and on. Its settings, audits and high scores are kept.">Power cycle</button>
+      <label class="vol" title="The game's sound on this PC - the same knob every Emulate tab shares.">
+        <button class="btn sm" id="mute">Mute</button>
+        <input type="range" id="gain" min="0" max="100" value="100">
+      </label>
+    </div>
+  </header>
+  <div class="note" id="note" hidden></div>
+  <main class="body">
+    <section class="dmdwrap"><div class="dmd"><img id="dmd" alt="The machine's display"><div class="dots"></div></div></section>
+    <section class="panel">
+      <div class="row" id="buttons">
+        <button class="btn" data-sw="coin" data-key="5" title="Insert a coin (5)">Coin <kbd>5</kbd></button>
+        <button class="btn primary" data-sw="start" data-key="1" title="Start (1)">Start <kbd>1</kbd></button>
+        <button class="btn" data-hold="lflip" data-key="z" title="Left flipper (Z or Left Shift)">L flipper <kbd>Z</kbd></button>
+        <button class="btn" data-hold="rflip" data-key="/" title="Right flipper (/ or Right Shift)">R flipper <kbd>/</kbd></button>
+        <button class="btn" data-hold="launch" data-key="Enter" id="launch" title="The launch button: hold for power, let go to fire (Enter)">Launch <kbd>Enter</kbd></button>
+        <button class="btn" id="plunge" data-key=" " title="Pull the plunger: the ball in the shooter lane goes into play (Space)">Plunge <kbd>Space</kbd></button>
+        <button class="btn" id="drain" data-key="d" title="The ball in play falls down the drain into the trough (D)">Drain <kbd>D</kbd></button>
+        <button class="btn" data-sw="tilt" data-key="t" title="Tilt bob (T)">Tilt <kbd>T</kbd></button>
+      </div>
+      <div class="row svc">
+        <span class="eyebrow">Coin door</span>
+        <button class="btn sm" data-sw="menu" data-key="m" title="Service menu (M)">Menu <kbd>M</kbd></button>
+        <button class="btn sm" data-sw="enter" data-key="e" title="Service Enter (E). In the menu the flippers move.">Enter <kbd>E</kbd></button>
+      </div>
+      <div class="eyebrow gl">Playfield switches <span class="hint">click: tap · right-click: hold closed</span></div>
+      <div class="grid" id="grid"></div>
+      <div class="facts">
+        <div><span class="eyebrow">Coils</span> <span id="coils" class="mono">—</span></div>
+        <div><span class="eyebrow">Sound</span> <span id="playing" class="mono">—</span></div>
+      </div>
+      <details class="serial"><summary class="eyebrow">Serial monitor</summary>
+        <pre id="uart" class="mono"></pre>
+        <form id="sform"><input id="sin" class="mono" placeholder="[HELP!!]" autocomplete="off"><button class="btn sm">Send</button></form>
+      </details>
+    </section>
+  </main>
+</div>
+<script src="/static/pin.js"></script>
+</body>
+</html>

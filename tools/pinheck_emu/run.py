@@ -17,14 +17,18 @@ restart your machine" and waits), so a second run is the normal boot.
 ``--closed`` holds playfield switches shut (matrix numbers, row * 8 +
 column; Jetsons: 34 and 35 are trough balls, 32 the shooter lane - without
 the trough a coin shows "MISSING BALLS"); ``--tap name@seconds`` presses a
-cabinet switch (start, coin, menu, enter, lflip, rflip, tilt) for 150 ms.
+cabinet switch (start, coin, menu, enter, lflip, rflip, tilt, launch) for
+150 ms. A game in ``games.GAMES`` (Jetsons, Domino's, Rob Zombie) gets its
+balls: a full trough, served and launched by its own coils.
 """
 import argparse
 import os
 import time
 
+from tools.pinheck_emu.audio import Sound
 from tools.pinheck_emu.av import Av
-from tools.pinheck_emu.board import Board
+from tools.pinheck_emu.board import Balls, Board
+from tools.pinheck_emu.games import game_of
 from tools.pinheck_emu.i2c import Eeprom24, Rtc1307
 from tools.pinheck_emu.pic32 import Pic32
 from tools.pinheck_emu.proplink import PropLink
@@ -46,24 +50,30 @@ TAP_MS = 150
 
 
 def boot(prg, seconds, log=None, card=None, nvram=None, closed=(), taps=(),
-         on_ms=(), link_box=None):
+         on_ms=(), link_box=None, game=None):
     """``taps``: (seconds, cabinet switch name) presses, in any order;
     ``on_ms``: f(millis) after every emulated millisecond; ``link_box``: a
-    list the link is appended to before the run starts."""
+    list the link is appended to before the run starts; ``game``: a
+    ``games.GAMES`` entry - its trough is filled and its coils move balls
+    (``link.balls``)."""
     pic = Pic32(prg)
     pic.i2c_devices[0x50] = eeprom = Eeprom24(_load(nvram, *NVRAM[0]))
     pic.i2c_devices[0x68] = Rtc1307()
     av = Av(card) if card else None
+    sound = Sound(card) if card else None
 
     def on_packet(pkt):
         if av:
             av.packet(pkt, pic.millis)
+            sound.packet(pkt, pic.millis)
         if log:
             log(pkt)
 
     link = PropLink(pic, on_packet=on_packet, eeprom=_load(nvram, *NVRAM[1]))
     link.av = av
+    link.sound = sound
     link.board = board = Board(pic)
+    link.balls = Balls(board, game) if game else None
     pic.on_ms.extend(on_ms)
     if link_box is not None:
         link_box.append(link)
@@ -101,6 +111,8 @@ def main(argv=None):
     ap.add_argument("--tap", action="append", default=[], help="name@seconds, e.g. coin@15")
     ap.add_argument("--frames", help="save the DMD every --every seconds into this folder")
     ap.add_argument("--every", type=float, default=0.5)
+    ap.add_argument("--sound-log", action="store_true",
+                    help="mix the sound in emulated time (never played) and print what started")
     ap.add_argument("--quiet", action="store_true", help="no packet lines")
     a = ap.parse_args(argv)
     prg = open(a.prg, "rb").read()
@@ -117,6 +129,12 @@ def main(argv=None):
         taps.append((float(at), name.lower()))
     closed = [int(n) for n in a.closed.split(",") if n.strip()]
     frames = []
+    level_hooks = []
+    if a.sound_log:
+        def level(ms):
+            if ms % 50 == 0 and link_box and link_box[0].sound:
+                link_box[0].sound.level(ms)
+        level_hooks.append(level)
     if a.frames:
         os.makedirs(a.frames, exist_ok=True)
         step = max(1, int(a.every * 1000))
@@ -128,12 +146,12 @@ def main(argv=None):
                     path = os.path.join(a.frames, "%07d.png" % ms)
                     img.resize((img.width * 4, img.height * 4)).save(path)
                     frames.append(path)
-        frame_hooks = [grab]
+        frame_hooks = [grab] + level_hooks
     else:
-        frame_hooks = []
+        frame_hooks = level_hooks
     link_box = []
     pic, link = boot(prg, a.seconds, None if a.quiet else log, card, a.nvram, closed, taps,
-                     on_ms=frame_hooks, link_box=link_box)
+                     on_ms=frame_hooks, link_box=link_box, game=game_of(a.prg))
     print("ran %.1f s emulated (%d M insns) in %.1f s; %d packets"
           % (pic.millis / 1000, pic.insns // 1_000_000, time.time() - t0, len(link.packets)))
     print("interrupts by vector:", dict(pic.irq_counts))
@@ -141,6 +159,14 @@ def main(argv=None):
     print("videos:", " ".join("%s@%.1f" % (n or "?", ms / 1000) for ms, n, _ in link.av.played))
     if frames:
         print("frames: %d in %s" % (len(frames), a.frames))
+    if a.sound_log and link.sound:
+        lv = link.sound.levels
+        loud = [float(t.split()[1]) for _, t in lv if t.startswith("rms")]
+        print("sound: %s" % " ".join("%s@%.1f" % (t, ms / 1000) for ms, t in lv
+                                      if not t.startswith("rms")))
+        if loud:
+            print("sound level: max rms %.0f, %d%% of 50 ms blocks above 100"
+                  % (max(loud), 100 * sum(1 for v in loud if v > 100) // len(loud)))
     if a.sheet:
         print("sheet:", a.sheet if link.av.contact_sheet(a.sheet) else "no videos found on the card")
     print("UART:")

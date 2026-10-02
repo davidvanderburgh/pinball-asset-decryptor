@@ -43,7 +43,7 @@ class PropLink:
         self.reply = bytes(16)      # clocked out during the next packet
         self._bits = 0
         self._buf = bytearray(16)
-        pic.on_lat.append(self._lat)
+        pic.watch(PORT, self._lat)
         self._sdi(0)
 
     def _sdi(self, bit):

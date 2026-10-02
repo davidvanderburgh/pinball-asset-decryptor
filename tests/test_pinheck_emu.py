@@ -39,6 +39,9 @@ class FakePic:
         self.pins_in = {"F": 0xFFFF}
         self.latf = 0
 
+    def watch(self, ports, f):
+        self.on_lat.append(lambda port, old, new: port in ports and f(port, old, new))
+
     def set(self, bits, on):
         old = self.latf
         self.latf = old | bits if on else old & ~bits
@@ -266,6 +269,9 @@ class PinPic:
         self.pins_in = {p: 0xFFFF for p in "ABCDEFG"}
         self.lat = {p: 0 for p in "ABCDEFG"}
 
+    def watch(self, ports, f):
+        self.on_lat.append(lambda port, old, new: port in ports and f(port, old, new))
+
     def write(self, port, value):
         old, self.lat[port] = self.lat[port], value
         for f in self.on_lat:
@@ -420,3 +426,62 @@ def test_screen_layers_jetsons_videos(tmp_path):
     img = av.frame(5)
     assert img.getpixel((10, 5))[0] > 200          # black is see-through: red below
     assert img.getpixel((100, 5))[2] > 200         # blue on top
+
+
+# --- sound -----------------------------------------------------------------
+
+def _wav(path, seconds, rate=22050, level=8000):
+    import wave
+    path.parent.mkdir(parents=True, exist_ok=True)
+    n = int(seconds * rate)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(struct.pack("<h", level) * 2 * n)
+
+
+def test_sound_plays_queues_and_stops_music(tmp_path):
+    from tools.pinheck_emu.audio import RATE, Sound
+    _wav(tmp_path / "SFX" / "_FC" / "C01.wav", 0.1)
+    _wav(tmp_path / "SFX" / "_FZ" / "ZBB.wav", 0.05, level=1000)
+    s = Sound(str(tmp_path))
+    s.packet(b"\x00C01\xff" + bytes(10) + b"\x01", 1000)           # ch 0, C01
+    s.packet(b"ZBB" + bytes(12) + b"\x09", 1000)                    # music by name
+    assert [t for _, t in s.levels] == ["ch0 C01", "music ZBB"]
+    a = s.mix(RATE // 20)                                           # 50 ms
+    assert abs(int(a[0, 0]) - 9000) < 50                           # both, summed
+    s.mix(RATE // 10)                                               # C01 has ended
+    assert 0 not in s.channels and 3 in s.channels                  # music repeats
+    s.packet(b"z" + bytes(14) + b"\x10", 2000)                      # fade 0 0 = stop
+    assert 3 not in s.channels
+    s.packet(b"\x00C99\xff" + bytes(10) + b"\x01", 3000)
+    assert s.levels[-1] == (3000, "missing C99")
+
+
+def test_sound_priority_and_master_volume(tmp_path):
+    from tools.pinheck_emu.audio import Sound
+    _wav(tmp_path / "SFX" / "_FC" / "C01.wav", 0.5)
+    _wav(tmp_path / "SFX" / "_FC" / "C02.wav", 0.5, level=100)
+    s = Sound(str(tmp_path))
+    s.packet(b"\x00C01\xc8" + bytes(10) + b"\x01", 0)
+    s.packet(b"\x00C02\x10" + bytes(10) + b"\x01", 0)               # lower: ignored
+    assert s.channels[0].name == "C01"
+    s.master = 0.0
+    assert not s.mix(512).any()                                     # muted
+
+
+def test_machine_unpacks_an_update_zip(tmp_path):
+    import zipfile
+    from tools.pinheck_emu.machine import unpack
+    z = tmp_path / "Game_Code.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("Game/JET_V004.PRG", b"\0" * 64)
+        f.writestr("Game/DMD/_DA/AAA.VID", b"")
+    prg, card = unpack(str(z), str(tmp_path / "cache"))
+    assert prg.endswith("JET_V004.PRG") and card.endswith("Game")
+    assert unpack(str(z), str(tmp_path / "cache")) == (prg, card)      # once
+    with pytest.raises(ValueError):
+        empty = tmp_path / "e.zip"
+        zipfile.ZipFile(empty, "w").close()
+        unpack(str(empty), str(tmp_path / "cache"))

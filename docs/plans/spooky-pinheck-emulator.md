@@ -42,20 +42,56 @@ bytes back at the same time.
 
 ## Feasibility: proven for the game CPU
 
-`tools/pinheck_emu/boot_probe.py` loads the PRG into
-[Unicorn](https://www.unicorn-engine.org/) (MIPS32 LE, already installed),
-maps flash/RAM/SFRs, bumps `millis()` every 80 000 instructions (in place of
-the core-timer interrupt), and prints UART1:
+Pass 1 booted the PRG on [Unicorn](https://www.unicorn-engine.org/) (MIPS32
+LE, already installed) as far as `PROPELLER SYNC CHECK...`, where it waits
+for the A/V chip. Unicorn reports a spurious `UC_ERR_READ_UNMAPPED` when an
+instruction-count slice ends; it is ignored while PC is in flash.
 
-| Game | Result |
+## Pass 2 (2026-10-02): handshake answered, attract running
+
+`tools/pinheck_emu/` (README there) now has the game CPU (`pic32.py`), the
+Propeller link (`proplink.py`) and the I2C chips (`i2c.py`);
+`python -m tools.pinheck_emu.run <PRG> [seconds]` prints the serial monitor
+and every packet sent to the Propeller.
+
+| Game | Result (emulated seconds) |
 |---|---|
-| Jetsons `JET_V004.PRG` | runs crt0 + Arduino setup, prints `PROPELLER SYNC CHECK......`, then polls PORTF (the SDI line) for the Propeller's answer |
-| Domino's `DOM_V006.PRG` | same, `PROPELLER SYNC CHECK........` |
+| Jetsons `JET_V004.PRG` | `PROPELLER SYNC CHECK...OK`, Propeller EEPROM read/written and verified, the full `pinHeck System 2011-2016` banner, the RTC time, then the attract cycle: videos ZMA, ATK, ATD, KJB, KGB, ATR, ATE (all on its card under `DMD/_D?/`), the TOP 5 HIGH SCORES text, number and sound packets - 40-60 s, repeating |
+| Domino's `DOM_V006.PRG` | `PROPELLER SYNC CHECKOK`, `NAMING GAME`, default scores written, first attract video (`KAC`); then a quiet main loop for the rest of 45 s - not yet known whether it waits for a Propeller status or a timer |
 
-Speed: 400 M instructions in 6-8 s of wall time (~55-65 MIPS) with Python
-MMIO hooks - about real time for an 80 MHz M4K. Unicorn reports a spurious
-`UC_ERR_READ_UNMAPPED` when an instruction-count slice ends; the probe
-ignores it while PC is in flash.
+What it took (all in `pic32.py` / `proplink.py` docstrings):
+- **Link pins**: SDO = RF5, CLK = RF12, SDI = RF13; LSB first, 16 bytes.
+  The **sync** packet is `AA '0'..'=' '#'`; the Propeller answers the pattern
+  moved to bytes 0..13 plus `AA AA` (Domino's checks the pattern, Jetsons only
+  the AAs). Everything else is AMH's format: command in byte 15, `FF` = plain
+  exchange; EEPROM `20`/`21`/`22` exactly as AMH's `Interpret`.
+- **Interrupts**: delivered by hand at slice boundaries through a 4-word
+  trampoline in boot flash that loads EPC (Unicorn has no API for it, and a
+  handler that `eret`s to an unset EPC jumps to 0); stopped at the handler's
+  `eret`. chipKIT vectors jump through a RAM table at 0xA0001CD0. Live: T2
+  (lamps, 8 kHz), T3 (switches, 2 kHz), T4, I2C1 master. A handler that
+  never returns is an error, not a silent stack leak (that leak ate the
+  vector table once).
+- **CP0 Count**: Unicorn's never moves and `delayMicroseconds()` (inside the
+  switch handler) spins on it: the three `mfc0 rt,$9` in each PRG are
+  patched to nops and a hook supplies clock/2.
+- **I2C on the PIC side**: a 24LC256-style EEPROM at 0x50 (the game's own
+  settings, read 4 bytes at a time; the game hangs forever if it NAKs) and a
+  DS1307-style RTC at 0x68. I2C completions are flagged after the handler
+  returns, as the real bus takes time.
+- **Inputs idle high**: with them low the game read the menu buttons as held
+  and went into its service menu.
+
+Packets seen (Jetsons; Domino's puts the video name in bytes 0..2 instead):
+`02` video (bytes 1..3 = file name, `ZMA` = `DMD/_DZ/ZMA.VID`; bytes 0, 7,
+8 and 14 vary and are not decoded yet), `01` sound (`C01` = `SFX/_FC/C01.wav`), `12`
+text line (byte 0 = slot, then ASCII), `0e` high-score entry (rank, score
+LE, initials), `10` volume/settings, `04`, `06`, `09`, `0c`, `0f`, `13`,
+`23`, `27`, `29` not decoded yet.
+
+Speed: about 0.5x real time (60 s emulated in 114 s) with the lamp handler
+at 8 kHz. Before a playable rig: deliver T2 less often (its only output is
+lamp PWM), or batch it.
 
 ## Recommended design
 
@@ -81,9 +117,10 @@ ignores it while PC is in flash.
    Emulate tab in the Spooky manufacturer like the Warden one.
 
 Milestones, each its own run of proof:
-- A. handshake answered: PRG prints `HANDSHAKE DONE` and the version banner
-  (needs the sync reply format - from the PRP's `MCU:SYNC` code path).
-- B. attract: packet log shows the attract video commands; DMD shows the VIDs.
+- A. handshake answered: DONE in pass 2 (Jetsons and Domino's).
+- B. attract: the packet log shows the attract video commands - DONE for
+  Jetsons (pass 2). Left: decode the remaining commands, play the VIDs on a
+  DMD view through `p3_video.py`, find what Domino's attract waits for.
 - C. coin + start + a ball with switch pokes; scores drawn; sound (muted, from
   the level log).
 - D. AMH / Rob Zombie once their update files are on disk (none on D: today).
@@ -91,6 +128,6 @@ Milestones, each its own run of proof:
 ## Grade
 
 S3 (these games cannot be tried at all today, but nothing breaks). D4 after
-this pass: the mechanism is known and the CPU half is shown to run; what is
-left is a new instrument (the rig) plus reverse-engineering the closed colour
-Propeller protocol over several runs.
+pass 1: the mechanism is known and the CPU half is shown to run. Still D4
+after pass 2: the game CPU now runs a colour game's attract unaided, but
+what is left is the DMD/sound side, switches and the rig - several runs.

@@ -1069,11 +1069,13 @@ HELP_CONTENT = {
          "it: through the whole screen overlay, then through the screen "
          "itself (the Machine screen on the Color profile tab, which you can "
          "adjust; until you do, the individual files profile, undone). The "
-         "game's own art "
-         "and a file left in its own colors look the way the machine really "
-         "shows them; a picture with the profile switched on comes back to "
-         "what your PC shows. Untick As on the machine, beside Behind, for "
-         "the PC's own colors."),
+         "game's own art looks the way the machine really shows it; a "
+         "picture with the profile switched on comes back to what your PC "
+         "shows. A file whose color switch is off (red in Layers) shows as "
+         "you made it, so you can see it against the game's own art; the "
+         "gear menu's 'Scenes: switched-off files in their own colors' "
+         "turns that off. Untick As on the machine, beside Behind, for the "
+         "PC's own colors."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

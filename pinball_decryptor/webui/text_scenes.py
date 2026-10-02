@@ -93,10 +93,12 @@ TIPS = {
                "blue. The screen is the Color profile tab's Machine screen, "
                "and you can adjust it there; until you do, it is the "
                "individual files profile, undone. A picture with that "
-               "profile switched on comes back to what your PC shows; the "
-               "game's own art, and a file left in its own colors, look the "
-               "way the machine really shows them. Untick to see every "
-               "picture in the PC's own colors.",
+               "profile switched on comes back to what your PC shows, and "
+               "the game's own art looks the way the machine really shows "
+               "it. A file whose color switch is off (red in Layers) shows "
+               "as you made it, so you can see it against the game's own "
+               "art; the gear menu's Scenes setting turns that off. Untick "
+               "to see every picture in the PC's own colors.",
     "behind": "What the scene is laid over.\n\nThe machine draws on BLACK, "
               "so that is the true picture — but a black outline on a black "
               "frame is as invisible here as it is there. Pick a light "

@@ -422,6 +422,8 @@ class App:
             on_folder_state_written=self._on_folder_state_written,
             initial_show_log_history=bool(s.get("show_log_history", True)),
             on_show_log_history_change=self._on_show_log_history_change,
+            initial_scenes_own_colours=bool(s.get("scenes_own_colours", True)),
+            on_scenes_own_colours_change=self._on_scenes_own_colours_change,
             initial_compare_row_limit=s.get("compare_row_limit"),
             on_compare_row_limit_change=self._on_compare_row_limit_change,
             on_stage_pending=self.stage_pending_replacements,
@@ -5815,6 +5817,11 @@ class App:
     def _on_show_log_history_change(self, show):
         """Persist the ⚙ "Show previous sessions in the log" toggle."""
         self._settings["show_log_history"] = bool(show)
+        self._save_settings()
+
+    def _on_scenes_own_colours_change(self, on):
+        """Persist the ⚙ "Scenes: switched-off files in their own colors" toggle (PAD-325)."""
+        self._settings["scenes_own_colours"] = bool(on)
         self._save_settings()
 
     def _on_compare_row_limit_change(self, choice):

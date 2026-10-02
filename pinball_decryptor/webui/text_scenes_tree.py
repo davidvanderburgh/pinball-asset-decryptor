@@ -223,7 +223,7 @@ class TreeEditMixin:
         split = self._tree_split(draws, sels) if sels else set()
         job = {"token": token, "rev": self._trev, "card": card, "man": man, "frame": frame,
                "pins": pins, "draws": draws, "bg": self._bg, "sel": sel if split else None,
-               "view": self._machine_view(),
+               "view": self._machine_view(), "as_made": self._as_made(),
                "split": split, "text_edits": self._pending_texts(card, None),
                "colors": self._pending_colors(card), "tmp": self._tmpdir(),
                "cache": self._tcache, "assets": self.assets_dir,
@@ -436,6 +436,14 @@ class TreeEditMixin:
             log.exception("machine view")
             return None
 
+    def _as_made(self):
+        """⚙ Scenes: switched-off files in their own colors (PAD-325, on by default)."""
+        var = getattr(self.window, "scenes_own_colours_var", None)
+        try:
+            return True if var is None else bool(var.get())
+        except Exception:                            # noqa: BLE001
+            return True
+
     @rpc
     def set_machine_look(self, on):
         """As on the machine: draw the preview the way the machine's screen will show it
@@ -502,7 +510,7 @@ class TreeEditMixin:
                "hidden": set(self._tree_view_hidden(card)),
                "text_edits": self._pending_texts(card, None), "colors": self._pending_colors(card),
                "pictures": self._tree_pictures(), "sizes": self._tree_sizes(),
-               "view": self._machine_view(),
+               "view": self._machine_view(), "as_made": self._as_made(),
                "tmp": self._tmpdir(), "assets": self.assets_dir, "cache": self._tcache}
         self.set(tree_play={"run": "p%d" % id(state), "fps": fps, "frames": frames,
                             "map": [], "srcs": [], "done": False})
@@ -540,7 +548,7 @@ class TreeEditMixin:
                         background=job["bg"], colors=job["colors"],
                         text_edits=job["text_edits"], cache=job["cache"],
                         pictures=job["pictures"], sizes=job["sizes"], inks=inks,
-                        view=job.get("view"))
+                        view=job.get("view"), as_made=job.get("as_made", False))
                     path = os.path.join(job["tmp"], "%s_%d.png" % (tag, len(srcs)))
                     if img is not None:
                         img.save(path, compress_level=1)
@@ -607,7 +615,8 @@ class TreeEditMixin:
                 job["assets"], job["man"], job["frame"], pins=job["pins"], fonts=self._fonts,
                 background=job["bg"], colors=job["colors"], text_edits=job["text_edits"],
                 draws=job["draws"], cache=job["cache"], split=job["split"] or None,
-                pictures=job.get("pictures"), sizes=job.get("sizes"), view=job.get("view"))
+                pictures=job.get("pictures"), sizes=job.get("sizes"), view=job.get("view"),
+                as_made=job.get("as_made", False))
         except Exception:                            # noqa: BLE001
             log.exception("scene tree render")
         if got is None:

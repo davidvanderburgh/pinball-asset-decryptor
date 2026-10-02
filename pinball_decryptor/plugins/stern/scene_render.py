@@ -692,6 +692,21 @@ def _composite(canvas, patch, x0, y0, mul, add=(0, 0, 0, 0), premultiplied=True,
     dst[..., 3:4] = a + dst[..., 3:4] * (1.0 - a)
 
 
+def _composite_skip(skip, patch, x0, y0, mul, add, own, premultiplied=True,
+                    additive=False):
+    """Keep *skip* (the part of the frame drawn by pictures that pass the machine screen by,
+    PAD-325) in step with the frame: *own* draws are laid on it as on the frame; any other
+    draw covers what is under it by its own coverage (an additive one covers nothing)."""
+    if own:
+        _composite(skip, patch, x0, y0, mul, add, premultiplied, additive)
+        return
+    if additive:
+        return
+    h, w = patch.shape[:2]
+    dst = skip[y0:y0 + h, x0:x0 + w]
+    dst *= 1.0 - patch[..., 3:4] / 255.0 * float(mul[3])
+
+
 def _load_png(assets_dir, rel, cache):
     """*rel*'s picture, from *cache* while the file is unchanged (an editor keeps one cache
     for many renders; a picture replaced on the Images tab is read again)."""
@@ -727,7 +742,9 @@ def pending_pictures(assets_dir):
     baked into it, or None}}``.  A pick not built yet is drawn from its own file, so a
     replacement shows in the Scenes tab the moment it is picked.  Pictures added in Scenes
     are listed too, for their colour (PAD-312): the preview shows a switched-on file the way
-    the Write bakes it."""
+    the Write bakes it.  ``"skip"`` is True for the user's own picture whose colour switch is
+    OFF (red in the Layers list): with :func:`render_tree`'s *as_made* the machine screen
+    passes it by and it shows its own colours (PAD-325)."""
     try:
         from ...core import staged_changes, colour_profile
         data = staged_changes.load(assets_dir) or {}
@@ -736,19 +753,21 @@ def pending_pictures(assets_dir):
     keep = set(data.get("image_keep_size") or ())
     try:
         prof = colour_profile.asset_active(assets_dir)
-        settings = colour_profile.asset_settings(assets_dir) if prof else None
+        settings = colour_profile.asset_settings(assets_dir)
     except Exception:
         prof, settings = None, None
     out = {}
     for rel, src in (data.get("image") or {}).items():
         if not isinstance(rel, str) or not rel.startswith("images/"):
             continue
-        on = bool(prof and src
-                  and colour_profile.asset_applies(settings, "images", rel))
+        path = src if isinstance(src, str) and os.path.isfile(src) else None
+        switch = bool(settings is not None and src
+                      and colour_profile.asset_applies(settings, "images", rel))
         out[rel[len("images/"):]] = {
-            "path": src if isinstance(src, str) and os.path.isfile(src) else None,
-            "keep": rel in keep, "colour": prof if on else None}
-    if prof is not None:
+            "path": path, "keep": rel in keep,
+            "colour": prof if (prof and switch) else None,
+            "skip": bool(path and settings is not None and not switch)}
+    if settings is not None:
         try:
             from . import scene_edit
             for ops in scene_edit.load(assets_dir).values():
@@ -756,11 +775,19 @@ def pending_pictures(assets_dir):
                     if not (isinstance(op, dict) and op.get("op") == "add_picture"):
                         continue
                     rel = op.get("image") or ""
-                    c = colour_profile.added_picture_colour(assets_dir, op, settings, prof)
-                    if c is not None and rel and rel not in out:
+                    if not rel or rel in out:
+                        continue
+                    on = colour_profile.asset_applies(settings, "images", rel,
+                                                      own=op.get("color"))
+                    if on and prof is not None:
                         path = os.path.join(assets_dir, "images", *rel.split("/"))
                         if os.path.isfile(path):
-                            out[rel] = {"path": path, "keep": True, "colour": c}
+                            out[rel] = {"path": path, "keep": True, "colour": prof,
+                                        "skip": False}
+                    elif not on:
+                        # drawn from the project's own file as before; only marked
+                        out[rel] = {"path": None, "keep": False, "colour": None,
+                                    "skip": True}
         except Exception:
             pass
     return out
@@ -889,7 +916,8 @@ def text_lines(text, width, wrap, measure):
 
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 background=None, colors=None, text_edits=None, draws=None, cache=None,
-                split=None, pictures=None, sizes=None, inks=None, view=None):
+                split=None, pictures=None, sizes=None, inks=None, view=None,
+                as_made=False):
     """The scene in manifest *man* (:func:`scene_eval.manifest`) at root *frame* as an RGB
     ``PIL.Image`` - every picture with its own place, scale, tilt and fade, in draw order, from
     the project folder's CURRENT PNGs and glyph slices.  *pins* / *hidden* are
@@ -909,7 +937,10 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     the caller's to drop when the glyphs may have changed; without it nothing is kept.
 
     *view* (core.colour_profile ``machine_view``) shows the frame as the machine's screen
-    will: applied to the finished frame before the backdrop, and to each layer (PAD-312)."""
+    will: applied to the finished frame before the backdrop, and to each layer (PAD-312).
+    With *as_made*, a picture whose colour switch is off (*pictures*' ``"skip"``) passes the
+    screen by and shows its own colours (PAD-325): its share of each pixel is kept apart as
+    it is drawn and added back after the rest is viewed, so what covers it still covers it."""
     try:
         import numpy as np
         from PIL import Image
@@ -929,10 +960,21 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     split = set(split or ())
     layers = [np.zeros((h, w, 4), np.float32) for _i in range(3 if split else 1)]
     canvas = layers[0]
+
+    def _skipped(d):
+        return (d["kind"] in ("bitmap", "flip")
+                and bool(((pictures or {}).get(d.get("image")) or {}).get("skip")))
+
+    skips = None
+    if view is not None and as_made and any(_skipped(d) for d in draws):
+        skips = [np.zeros_like(c) for c in layers]
+    skip = skips[0] if skips else None
     by_key = None
     for i, d in enumerate(draws):
         if split:
-            canvas = layers[1] if i in split else (layers[2] if i > min(split) else layers[0])
+            k = 1 if i in split else (2 if i > min(split) else 0)
+            canvas = layers[k]
+            skip = skips[k] if skips else None
         if d["mul"][3] <= 0.0:
             continue
         if d["kind"] in ("bitmap", "flip"):
@@ -942,6 +984,9 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             got = _warp(img, d["m"], w, h)
             if got is not None:
                 _composite(canvas, got[0], got[1], got[2], d["mul"], d["add"])
+                if skip is not None:
+                    _composite_skip(skip, got[0], got[1], got[2], d["mul"], d["add"],
+                                    _skipped(d))
         elif d["kind"] == "text":
             if by_key is None:
                 if fonts is None:
@@ -995,6 +1040,10 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 if got is not None:
                     _composite(canvas, got[0], got[1], got[2], mul, d["add"],
                                premultiplied=False, additive=(fr.font_fmt(font) == 4))
+                    if skip is not None:
+                        _composite_skip(skip, got[0], got[1], got[2], mul, d["add"], False,
+                                        premultiplied=False,
+                                        additive=(fr.font_fmt(font) == 4))
         elif d["kind"] in ("video", "spine"):
             # no picture of its own in the project: outline where it plays
             outline = Image.new("RGBA", (max(1, int(d.get("w") or 64)),
@@ -1003,21 +1052,43 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             if got is not None:
                 _composite(canvas, got[0], got[1], got[2], d["mul"], d["add"],
                            premultiplied=False)
+                if skip is not None:
+                    _composite_skip(skip, got[0], got[1], got[2], d["mul"], d["add"], False,
+                                    premultiplied=False)
     spec = background_spec(background)
 
-    def flat(c):
+    def flat(c, s=None):
         out = c.copy()
         out[..., 3] = c[..., 3] * 255.0
-        return viewed(out.clip(0, 255).astype("uint8"), view)
+        if s is None:
+            return viewed(out.clip(0, 255).astype("uint8"), view)
+        # the skipped share is kept out of the view and laid back on after
+        own = s.copy()
+        own[..., 3] = s[..., 3] * 255.0
+        rest = np.maximum(out - own, 0.0).clip(0, 255).astype("uint8")
+        seen = viewed(rest, view).astype(np.float32)
+        return (seen + own).clip(0, 255).astype("uint8")
 
     if not split:
-        return _over_background(flat(layers[0]), spec)
+        return _over_background(flat(layers[0], skips[0] if skips else None), spec)
     under, sel, over = layers
-    full = over.copy()
-    full += sel * (1.0 - over[..., 3:4])
-    full += under * ((1.0 - sel[..., 3:4]) * (1.0 - over[..., 3:4]))
 
-    def straight(c):
+    def stack(o, m, u):
+        out = o.copy()
+        out += m * (1.0 - over[..., 3:4])
+        out += u * ((1.0 - sel[..., 3:4]) * (1.0 - over[..., 3:4]))
+        return out
+
+    full = stack(over, sel, under)
+    full_s = stack(skips[2], skips[1], skips[0]) if skips else None
+
+    def straight(c, s=None):
+        if s is not None:
+            p = flat(c, s).astype(np.float32)
+            a = p[..., 3:4]
+            rgb = np.where(a > 0.5, p[..., :3] * 255.0 / np.maximum(a, 1.0), 0.0)
+            out = np.concatenate([rgb, a], axis=2).clip(0, 255).astype("uint8")
+            return Image.fromarray(out, "RGBA")
         a = c[..., 3:4]
         rgb = np.where(a > 1e-6, c[..., :3] / np.maximum(a, 1e-6), 0.0)
         out = np.concatenate([rgb, a * 255.0], axis=2).clip(0, 255).astype("uint8")
@@ -1026,6 +1097,7 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             out[..., :3] = view(out[..., :3])
         return Image.fromarray(out, "RGBA")
 
-    return {"full": _over_background(flat(full), spec),
-            "under": _over_background(flat(under), spec),
-            "sel": straight(sel), "over": straight(over)}
+    sk = skips or (None, None, None)
+    return {"full": _over_background(flat(full, full_s), spec),
+            "under": _over_background(flat(under, sk[0]), spec),
+            "sel": straight(sel, sk[1]), "over": straight(over, sk[2])}

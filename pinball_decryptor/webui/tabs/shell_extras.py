@@ -79,6 +79,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
     icon = ""
     exports = (
         "voice_quality_var", "update_interval_var", "show_log_history_var",
+        "scenes_own_colours_var",
         "set_update_check_running", "show_update_banner",
         "show_up_to_date_toast", "open_update_download_dialog",
         "apply_preview_features",
@@ -97,6 +98,11 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         self.show_log_history_var = self.var(
             "show_log_history", "bool",
             bool(cb.get("initial_show_log_history", True)))
+        # PAD-325: with As on the machine ticked, a picture whose colour switch is off
+        # shows its own colours in Scenes instead of passing through the machine screen
+        self.scenes_own_colours_var = self.var(
+            "scenes_own_colours", "bool",
+            bool(cb.get("initial_scenes_own_colours", True)))
         self._update_check_busy = False
         self._update_available = None       # (version, url, installer|None)
         self._update_banner_url = None
@@ -158,6 +164,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
             "open_log_file": self._open_log_history,
             "project_log": self._open_project_log,
             "toggle_log_history": self._toggle_log_history,
+            "toggle_scenes_own_colours": self._toggle_scenes_own_colours,
             "voice_quality": self._pick_voice_quality,
             "clear_voice_models": self._clear_voice_models,
             "recheck_prereqs": self._recheck_prereqs,
@@ -301,6 +308,13 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
             {"id": "toggle_log_history",
              "label": "Show previous sessions in the log",
              "checked": bool(self.show_log_history_var.get())}]})
+        items.append({"id": "toggle_scenes_own_colours",
+                      "label": "Scenes: switched-off files in their own colors",
+                      "checked": bool(self.scenes_own_colours_var.get()),
+                      "title": ("With As on the machine ticked, a picture whose color "
+                                "switch is off (red in the Layers list) shows as you made "
+                                "it instead of through the machine's screen. Untick to "
+                                "draw every picture through the screen.")})
         items.append({"sep": True})
         vq = self.voice_quality_var.get()
         items.append({"label": "Voice recognition quality", "submenu": [
@@ -464,6 +478,21 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
                    "full history in the log file) · this session below "
                    "────────────" % LOG_SEED_LINES)
         self.set(log_seed={"lines": lines, "cut": cut})
+
+    def _toggle_scenes_own_colours(self):
+        on = not bool(self.scenes_own_colours_var.get())
+        self.scenes_own_colours_var.set(on)
+        fn = self.window.cb.get("on_scenes_own_colours_change")
+        if fn is not None:
+            fn(on)
+        self.publish_settings_items()
+        try:
+            redraw = getattr(self.window.service("text"), "scenes_pictures_changed", None)
+            if redraw is not None:
+                redraw()
+        except Exception:                               # noqa: BLE001
+            log.exception("scenes redraw")
+        return True
 
     def _toggle_log_history(self):
         show = not bool(self.show_log_history_var.get())

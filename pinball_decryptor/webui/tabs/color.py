@@ -282,6 +282,7 @@ class ColorTab(TabService):
         chosen-files switches and the corrected pictures."""
         for ns, name in (("images", "color_all_changed"),
                          ("video", "color_all_changed"),
+                         ("video", "publish_look"),
                          ("text", "scenes_pictures_changed")):
             try:
                 fn = getattr(self.window.service(ns), name, None)
@@ -294,17 +295,19 @@ class ColorTab(TabService):
                     log.exception("color profile %s.%s", ns, name)
 
     def _tell_scenes(self):
-        """An open Scenes editor draws again through the new screen."""
-        try:
-            fn = getattr(self.window.service("text"),
-                         "scenes_pictures_changed", None)
-        except Exception:                               # noqa: BLE001
-            fn = None
-        if fn is not None:
+        """An open Scenes editor draws again through the new screen, and the
+        Video tab's players follow (PAD-330)."""
+        for ns, name in (("text", "scenes_pictures_changed"),
+                         ("video", "publish_look")):
             try:
-                fn()
+                fn = getattr(self.window.service(ns), name, None)
             except Exception:                           # noqa: BLE001
-                log.exception("color profile scenes redraw")
+                fn = None
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:                       # noqa: BLE001
+                    log.exception("color profile %s redraw", ns)
 
     @rpc
     def set_mode(self, mode):

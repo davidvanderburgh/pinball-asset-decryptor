@@ -678,14 +678,17 @@ HELP_CONTENT = {
          "back, on this card or another one. Slots the file doesn't set keep "
          "what they have, and slots this card doesn't have are skipped. The "
          "file only names your files, it doesn't hold them."),
-        ("As on the machine (Spike 2)",
-         "Ticked, the two players show the clips the way the machine's screen "
-         "will: through the whole screen overlay, then through the Machine "
-         "screen set on the Color profile tab. A replacement with its Color "
-         "switch on also gets the correction it is built with. One with its "
-         "switch off shows as you made it (with the overlay), unless the gear "
-         "menu's 'Switched-off files in their own colors' is unticked. Only "
-         "the preview changes: no clip is re-encoded for it."),
+        ("Preview colors (Spike 2)",
+         "The row above the players shows the clips the way the machine will, "
+         "with a switch for each step: the Whole screen overlay, the "
+         "Individual files correction (a replacement with its Color switch "
+         "on) and the Machine screen. Turn them on and off to see what each "
+         "one does; all three off is your PC's own colors. A replacement with "
+         "its Color switch off skips the Machine screen (it still gets the "
+         "overlay), unless the gear menu's 'Switched-off files in their own "
+         "colors' is unticked. Click a name to open it on the Color profile "
+         "tab. Only the preview changes: the card is not, and no clip is "
+         "re-encoded for it."),
     ],
     "Replace Images": [
         ("Scan and assign",
@@ -1072,18 +1075,18 @@ HELP_CONTENT = {
          "The game's own pictures have no switch (a blue lock in Scenes). "
          "Both can be on at once: the overlay is drawn over the baked files "
          "like everything else."),
-        ("As on the machine (Scenes)",
-         "The Scenes preview is drawn the way the machine's screen will show "
-         "it: through the whole screen overlay, then through the screen "
-         "itself (the Machine screen on the Color profile tab, which you can "
-         "adjust; until you do, the individual files profile, undone). The "
-         "game's own art looks the way the machine really shows it; a "
-         "picture with the profile switched on comes back to what your PC "
-         "shows. A file whose color switch is off (red in Layers) shows as "
-         "you made it, so you can see it against the game's own art; the "
-         "gear menu's 'Switched-off files in their own colors' "
-         "turns that off. Untick As on the machine, beside Behind, for the "
-         "PC's own colors."),
+        ("Preview colors (Scenes)",
+         "The row under the Scenes preview draws the scene the way the "
+         "machine will, with a switch for each step: the Whole screen "
+         "overlay, the Individual files correction (the files you switch on) "
+         "and the Machine screen (set on the Color profile tab; until you "
+         "set one, the individual files profile, undone). Turn them on and "
+         "off to see what each one does; all three off is your PC's own "
+         "colors. A file whose color switch is off (red in Layers) skips the "
+         "Machine screen so you can see it against the game's own art, and "
+         "still gets the overlay; the gear menu's 'Switched-off files in "
+         "their own colors' turns that off. Click a name to open it on the "
+         "Color profile tab. Only the preview changes: the card is not."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

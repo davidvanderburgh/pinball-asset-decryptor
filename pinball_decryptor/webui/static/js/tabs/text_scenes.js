@@ -5,6 +5,7 @@
 import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Select, Seg, Table, Modal, openMenu, InfoBadge, Check,
          Icon, Progress, Spinner, tip, call, mediaUrl, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { LookRow } from "../core/look.js";
 
 // Load its own sheet once.
 const CSS_HREF = "/static/css/tabs/text_scenes.css";
@@ -375,12 +376,8 @@ export function ScenesPage() {
             <${Select} sm value=${s.bg} options=${s.bgs || []} onChange=${(v) => call("text_scenes.set_bg", v)} />
             <${InfoBadge} text=${tips.behind} />
           </div>
-          <div class="scenes-ctl">
-            <${Check} checked=${s.machine_look !== false} label="As on the machine" cls="small"
-              onChange=${(v) => call("text_scenes.set_machine_look", v)} />
-            <${InfoBadge} text=${tips.machine} />
-          </div>
         </div>
+        <${LookRow} look=${s.look} ns="text_scenes" />
         ${layout ? html`<${LayoutEditor} key=${layout.kind + "\u0000" + layout.text} d=${layout} />` : null}
         ${editor || s.preparing ? null : html`<div class="row scenes-bottom">
           <div class="thumb scenes-thumb">${s.thumb ? html`<img src=${mediaUrl(s.thumb)} alt="" />` : null}</div>

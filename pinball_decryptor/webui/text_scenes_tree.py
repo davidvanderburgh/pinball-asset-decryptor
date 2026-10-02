@@ -421,20 +421,57 @@ class TreeEditMixin:
     def _tree_pictures(self):
         """The Images tab's picks (read each time: they change on another tab)."""
         from ..plugins.stern import scene_render
-        return scene_render.pending_pictures(self.assets_dir)
+        return scene_render.pending_pictures(self.assets_dir,
+                                             bake=self._look_sw()["files"])
+
+    def _look_sw(self):
+        """The preview's three switches (PAD-330): the whole screen overlay, the
+        individual files correction and the machine screen, each on or off."""
+        sw = getattr(self, "_lsw", None)
+        if sw is None:
+            sw = self._lsw = {"overlay": True, "files": True, "screen": True}
+        return sw
 
     def _machine_view(self):
-        """How the machine's screen will show the frame (PAD-312: DragonRR, "with no
-        colour profile selected all images in scenes should look like they would do if
-        installed on the table"), or None with the As on the machine tick off."""
-        if not getattr(self, "_mlook", True):
+        """How the machine's screen will show the frame (PAD-312), through the preview's
+        overlay and screen switches (PAD-330); None with both off."""
+        sw = self._look_sw()
+        if not (sw["overlay"] or sw["screen"]):
             return None
         try:
             from ..core import colour_profile
-            return colour_profile.machine_view(self.assets_dir)
+            return colour_profile.machine_view(self.assets_dir, overlay_on=sw["overlay"],
+                                               screen_on=sw["screen"])
         except Exception:                            # noqa: BLE001
             log.exception("machine view")
             return None
+
+    def _publish_look(self):
+        """The switches and what each one names, for the row under the preview."""
+        parts = None
+        try:
+            from ..core import colour_profile
+            parts = colour_profile.preview_parts(self.assets_dir)
+        except Exception:                            # noqa: BLE001
+            log.exception("preview parts")
+        sw = dict(self._look_sw())
+        self.set(look={"sw": sw, "parts": parts}, machine_look=any(sw.values()))
+
+    def _look_changed(self):
+        self._publish_look()
+        if self._sel:
+            self._trev = getattr(self, "_trev", 0) + 1
+            self._render_preview(self._sel)
+
+    @rpc
+    def set_look_part(self, part, on):
+        """One of the preview's three switches: "overlay", "files" or "screen".  Only the
+        preview changes; nothing staged for the card moves."""
+        if part not in ("overlay", "files", "screen"):
+            return False
+        self._look_sw()[part] = bool(on)
+        self._look_changed()
+        return True
 
     def _as_made(self):
         """⚙ Scenes: switched-off files in their own colors (PAD-325, on by default)."""
@@ -446,13 +483,12 @@ class TreeEditMixin:
 
     @rpc
     def set_machine_look(self, on):
-        """As on the machine: draw the preview the way the machine's screen will show it
-        (the whole-screen profile, then the screen's own distortion), or in the PC's own
-        colours.  The scene is drawn again either way."""
-        self._mlook = bool(on)
-        self.set(machine_look=self._mlook)
-        if self._sel:
-            self._render_preview(self._sel)
+        """All three preview switches at once: as on the machine, or the PC's own colours
+        (what the single As on the machine tick did before PAD-330)."""
+        sw = self._look_sw()
+        for k in sw:
+            sw[k] = bool(on)
+        self._look_changed()
         return True
 
     def _tree_sizes(self):
@@ -1500,6 +1536,8 @@ class TreeEditMixin:
     def pictures_changed(self):
         """The Images tab moved a picture's colour switch: this scene is drawn again
         (the preview shows a switched-on file the way the Write bakes it)."""
+        if getattr(self, "_alive", False):
+            self._publish_look()                     # a profile's name or its count moved
         if not getattr(self, "_alive", False) or not self._sel:
             return
         self._trev += 1

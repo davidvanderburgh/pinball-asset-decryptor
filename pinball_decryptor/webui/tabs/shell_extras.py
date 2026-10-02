@@ -98,7 +98,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         self.show_log_history_var = self.var(
             "show_log_history", "bool",
             bool(cb.get("initial_show_log_history", True)))
-        # PAD-325: with As on the machine ticked, a picture whose colour switch is off
+        # PAD-325: with the Machine screen previewed, a picture whose colour switch is off
         # shows its own colours in Scenes instead of passing through the machine screen
         self.scenes_own_colours_var = self.var(
             "scenes_own_colours", "bool",
@@ -311,8 +311,9 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         items.append({"id": "toggle_scenes_own_colours",
                       "label": "Switched-off files in their own colors",
                       "checked": bool(self.scenes_own_colours_var.get()),
-                      "title": ("With As on the machine ticked, in Scenes and on the "
-                                "Video tab's players, a file whose color switch is off "
+                      "title": ("With the Machine screen switched on under Preview "
+                                "colors, in Scenes and on the Video tab's players, a "
+                                "file whose color switch is off "
                                 "shows as you made it instead of through the machine's "
                                 "screen (the whole screen overlay still applies). Untick "
                                 "to draw every file through the screen.")})

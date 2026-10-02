@@ -17,7 +17,7 @@
 //
 // PAD-324: a third mode, "Machine screen", is not a correction but the
 // screen itself: what the machine does to what it is given.  Only the
-// Scenes preview's "As on the machine" draws through it; nothing is written.
+// preview (Scenes, the Video tab's players) draws through it; nothing is written.
 
 import { html, useState, useEffect, useRef, useCallback, PageHead, Card, Button, Field, Select, Seg, Note, Check,
          Icon, tip, call, cx, mediaUrl } from "../core/ui.js";
@@ -286,7 +286,7 @@ function Controls({ s, p, update }) {
 const MODES = [
   { value: "display", label: "Adjust whole screen overlay", title: "One correction drawn over everything the game shows: its own art, videos, mode screens, text and your replacements. No file is changed." },
   { value: "assets", label: "Adjust individual files", title: "A correction baked into the replaced pictures and videos you switch on (and pictures added in Scenes). The game's own art is left as Stern made it." },
-  { value: "screen", label: "Machine screen (preview only)", title: "Not a correction: how the machine's screen changes what it is given. Only the Scenes preview uses it, when As on the machine is ticked. Nothing is written to the card." },
+  { value: "screen", label: "Machine screen (preview only)", title: "Not a correction: how the machine's screen changes what it is given. Only the preview uses it (Scenes and the Video tab's players), when its Machine screen switch is on. Nothing is written to the card." },
 ];
 
 const MODE_WORDS = {
@@ -323,7 +323,7 @@ function Explainer({ s }) {
   const screen = s.per_file && s.mode === "screen";
   return html`<${Card} title="What this does" cls="cp-explain">
     <p>A pinball machine's screen doesn't show colors the way your PC monitor does. On a Stern Godzilla, for example, middle greys come out too bright and too blue, and the darkest shades all sink into the same black.</p>
-    ${screen ? html`<p>This profile is that screen. With As on the machine ticked, Scenes draws everything through it, after the whole screen overlay: the game's own art, your replaced files and the pictures you add. It is not a correction, and nothing is written to the card.</p>
+    ${screen ? html`<p>This profile is that screen. With the Machine screen switched on under Preview colors, Scenes and the Video tab's players draw everything through it, after the whole screen overlay: the game's own art, your replaced files and the pictures you add. It is not a correction, and nothing is written to the card.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Until you set one, it is the individual files profile, undone: what Scenes has shown so far. Same as individual files puts that back.</li>
       <li><${Icon} name="check" />Scenes looks bluer than your PC, but not blue enough for your machine? Turn the middle shades brighter here, most of all blue.</li>
@@ -386,7 +386,7 @@ export default function ColorTab() {
   const note = !s.has_project
     ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
     : screen
-      ? (s.screen_stored ? html`<${Note} kind="ok">${"Scenes draws every picture through “" + (s.name || "My screen") + "” when As on the machine is ticked. Nothing is written to the card."}<//>`
+      ? (s.screen_stored ? html`<${Note} kind="ok">${"The preview draws every picture through “" + (s.name || "My screen") + "” when its Machine screen switch is on. Nothing is written to the card."}<//>`
         : html`<${Note} kind="info">${"Scenes uses the individual files profile, undone (“" + (s.name || "") + "”). Move a slider or pick a starting point to set this machine's own screen."}<//>`)
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})

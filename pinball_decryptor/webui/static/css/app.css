@@ -377,3 +377,17 @@ html.h-short .page { padding-top: 12px; gap: 10px; }
   .boot-lamps i { opacity: .6; }
   .boot-ball { left: calc(50% - 10px); }
 }
+
+/* PAD-330: the preview's three colour switches (static/js/core/look.js), the
+   same row under the Scenes preview and above the Video tab's players */
+.look-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; padding: 8px 12px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); flex: 0 0 auto; }
+.look-row.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.look-head { font-weight: 600; color: var(--ink); }
+.look-item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.look-item.unset { opacity: .55; }
+.look-name { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-size: 12px;
+  cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.look-name:hover { text-decoration-style: solid; }
+.look-note { margin-left: auto; font-size: 12px; color: var(--ink-3); }

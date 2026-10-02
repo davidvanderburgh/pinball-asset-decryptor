@@ -563,7 +563,8 @@ def filter_step(prof):
     return {"m": m, "f": f}
 
 
-def video_look(assets_dir, switch, own_colours):
+def video_look(assets_dir, switch, own_colours, overlay_on=True, files_on=True,
+               screen_on=True):
     """The colour steps the Video tab's players draw through with As on the
     machine ticked (PAD-329), as :func:`filter_step` dicts: ``{"orig",
     "rep"}``.  The original: the whole screen overlay, then the machine
@@ -572,12 +573,15 @@ def video_look(assets_dir, switch, own_colours):
     when its switch is off (*switch* False) and *own_colours* (the gear
     menu's setting): then it passes the screen by, as a switched-off picture
     does in Scenes.  The screen is the Color profile tab's Machine screen,
-    else the individual files profile undone (:func:`screen_shown`)."""
-    overlay = active(assets_dir)
-    screen = screen_shown(assets_dir)[0]
+    else the individual files profile undone (:func:`screen_shown`).
+
+    *overlay_on* / *files_on* / *screen_on* are the preview's three switches
+    (PAD-330): each leaves its own step out, and nothing else."""
+    overlay = active(assets_dir) if overlay_on else None
+    screen = screen_shown(assets_dir)[0] if screen_on else None
     if screen is not None and screen.is_identity():
         screen = None
-    files = asset_active(assets_dir)
+    files = asset_active(assets_dir) if files_on else None
     orig = [filter_step(p) for p in (overlay, screen)]
     rep = []
     if switch and files is not None:
@@ -588,17 +592,22 @@ def video_look(assets_dir, switch, own_colours):
     return {"orig": [s for s in orig if s], "rep": [s for s in rep if s]}
 
 
-def machine_view(assets_dir):
+def machine_view(assets_dir, overlay_on=True, screen_on=True):
     """A function ``rgb uint8 array -> rgb uint8 array`` showing a frame of
     *assets_dir* the way the machine's screen will (PAD-312): through the
     whole-screen profile, as the game's shaders draw it, then through the
     screen itself.  The screen is the one stored on the Color profile tab
     (PAD-324, applied forwards), else the inverse of the chosen-files
     profile (that profile is the correction measured for the screen, so
-    undoing it IS the screen).  ``None`` when there is nothing to show."""
-    display = active(assets_dir)
+    undoing it IS the screen).  ``None`` when there is nothing to show.
+
+    *overlay_on* / *screen_on* are two of the preview's switches (PAD-330;
+    the third, the individual files bake, is the picture list's)."""
+    display = active(assets_dir) if overlay_on else None
     stored = screen_profile(assets_dir)
-    if stored is not None:
+    if not screen_on:
+        screen, undo = None, False
+    elif stored is not None:
         screen, undo = (None if stored.is_identity() else stored), False
     else:
         screen, undo = asset_active(assets_dir), True
@@ -647,6 +656,30 @@ def asset_counts(assets_dir):
                     out["added"] += 1
     except Exception:                                   # noqa: BLE001
         pass
+    return out
+
+
+def preview_parts(assets_dir):
+    """What the preview's three switches name (PAD-330): ``{"overlay":
+    {"name", "set"}, "files": {"name", "set", "count"}, "screen": {"name",
+    "set", "stored"}}``.  ``set`` False greys a switch out: no overlay, or an
+    individual files profile that changes nothing or reaches no file, or a
+    screen that changes nothing."""
+    out = {"overlay": {"name": "", "set": False},
+           "files": {"name": "", "set": False, "count": 0},
+           "screen": {"name": "", "set": False, "stored": False}}
+    if not assets_dir:
+        return out
+    over = active(assets_dir)
+    if over is not None:
+        out["overlay"] = {"name": over.label(), "set": True}
+    files = asset_profile(assets_dir)
+    n = sum(asset_counts(assets_dir).values())
+    out["files"] = {"name": files.label(), "count": n,
+                    "set": bool(n and not files.is_identity())}
+    shown, stored = screen_shown(assets_dir)
+    out["screen"] = {"name": shown.label(), "stored": stored,
+                     "set": not shown.is_identity()}
     return out
 
 

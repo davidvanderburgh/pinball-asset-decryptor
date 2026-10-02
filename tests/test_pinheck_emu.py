@@ -323,3 +323,29 @@ def test_serial_monitor_input():
     assert sta() & 1                              # URXDA
     assert (rx(), rx()) == (ord("["), ord("E"))
     assert not sta() & 1
+
+
+def test_balls_follow_the_load_and_plunger_coils():
+    from tools.pinheck_emu.board import Balls, Board
+    from tools.pinheck_emu.games import GAMES, coil_pins
+    pic = PinPic()
+    pic.on_ms = []
+    b = Board(pic)
+    balls = Balls(b, GAMES["JET"])
+    assert b.matrix == {34, 35} and 10 in b.cabinet       # full trough, ball at the eject point
+    tick = lambda ms: [f(ms) for f in pic.on_ms]
+    pulse = lambda name: (pic.write(coil_pins()[name][0], coil_pins()[name][1]),
+                          pic.write(coil_pins()[name][0], 0))
+    pulse("LOAD COIL")
+    assert b.matrix == {35} and 32 not in b.matrix         # rolling
+    tick(Balls.ROLL_MS)
+    assert b.matrix == {35, 32}
+    pulse("LOAD COIL")                                     # lane taken: nothing moves
+    assert balls.in_trough == 1
+    pulse("PLUNGER")
+    assert 32 not in b.matrix and balls.in_play == 1
+    assert balls.drain() and not balls.drain()
+    tick(2 * Balls.ROLL_MS)
+    assert b.matrix == {34, 35} and balls.in_trough == 2
+    b.set("launch")
+    assert 2 in b.cabinet                                  # Jetsons' launch button

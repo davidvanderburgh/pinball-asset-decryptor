@@ -157,6 +157,22 @@ David added `rzupdate_V26.zip` and `AMH_SD_V023.zip` to `D:\Pinball\images\Spook
   build from that source with the chipKIT toolchain (for David's own use;
   nothing built from it could ship with PAD) - David's call.
 
+## Pass 6 (2026-10-02): coils and balls - a Jetsons ball is played
+
+No coil moved after Start, so the coils were mapped from the game's own
+SOLENOID TEST (service menu: Enter, right flipper to "TEST: SOLENOID",
+Enter; each Enter fires the coil named on screen): 24 coils, from KNOCKER
+(RC2) to SOL23 (RA9), now in `games.py`. The game still never fired LOAD
+COIL (RE6) because it waits for a dedicated input: cabinet bit 10 is closed
+while a ball sits at the trough's eject point (AMH checks a trough switch
+for the same thing). Cabinet bit 2 is the launch button: held and released,
+it fires PLUNGER (RE7). With `board.Balls` modelling trough -> shooter lane
+-> play -> drain on those coils, a Jetsons game serves its ball by itself,
+shows the skill shot, launches on the button, reacts to playfield switches
+(videos PMA, D0H, GE1, GE2, the shaker coil) and re-serves a drained ball
+(ball save, `BS0`). The game's switch test shows numbers only ("LAST SWITCH
+n"), so playfield switches have numbers, not names.
+
 ## Recommended design
 
 1. **Game CPU: emulate it** (Unicorn), running the user's own PRG unmodified.

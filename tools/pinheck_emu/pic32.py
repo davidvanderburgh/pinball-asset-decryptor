@@ -140,6 +140,7 @@ class Pic32:
         # inputs idle high: the board's switch and button lines are pulled up
         self.pins_in = {p: 0xFFFF for p in PORTS}
         self.on_lat = []            # f(port, old, new)
+        self.on_ms = []             # f(millis), after every emulated millisecond
         self.uart = bytearray()
         self.uart_rx = collections.deque()  # bytes typed into the serial monitor
         self.i2c_devices = {}       # 7-bit address -> device (see I2CDevice)
@@ -414,6 +415,8 @@ class Pic32:
             if self._gpoff is not None:
                 self.mu.mem_write(self.millis_addr, struct.pack("<I", (self.millis + 1) & 0xFFFFFFFF))
             self._parked = False
+            for f in self.on_ms:
+                f(self.millis)
 
 
 class I2CDevice:

@@ -86,3 +86,7 @@ html.bph-760 .vid-tbl { min-height: 150px; }
 .vid-colorcell { display: flex; justify-content: center; }
 .vid-color { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; margin: 0; }
 .vid-color.own { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+
+/* PAD-329: As on the machine above the players; the filter defs take no room */
+.vid-look { margin: 0 0 6px; }
+.vid-lookdefs { position: absolute; width: 0; height: 0; overflow: hidden; }

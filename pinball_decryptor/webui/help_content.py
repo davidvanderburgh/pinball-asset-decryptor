@@ -678,6 +678,14 @@ HELP_CONTENT = {
          "back, on this card or another one. Slots the file doesn't set keep "
          "what they have, and slots this card doesn't have are skipped. The "
          "file only names your files, it doesn't hold them."),
+        ("As on the machine (Spike 2)",
+         "Ticked, the two players show the clips the way the machine's screen "
+         "will: through the whole screen overlay, then through the Machine "
+         "screen set on the Color profile tab. A replacement with its Color "
+         "switch on also gets the correction it is built with. One with its "
+         "switch off shows as you made it (with the overlay), unless the gear "
+         "menu's 'Switched-off files in their own colors' is unticked. Only "
+         "the preview changes: no clip is re-encoded for it."),
     ],
     "Replace Images": [
         ("Scan and assign",
@@ -1073,7 +1081,7 @@ HELP_CONTENT = {
          "picture with the profile switched on comes back to what your PC "
          "shows. A file whose color switch is off (red in Layers) shows as "
          "you made it, so you can see it against the game's own art; the "
-         "gear menu's 'Scenes: switched-off files in their own colors' "
+         "gear menu's 'Switched-off files in their own colors' "
          "turns that off. Untick As on the machine, beside Behind, for the "
          "PC's own colors."),
     ],

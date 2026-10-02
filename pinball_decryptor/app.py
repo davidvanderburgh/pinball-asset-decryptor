@@ -1206,14 +1206,50 @@ class App:
                 "installer/install_prerequisites.ps1.")
             return
 
-        import subprocess
-        # Re-launch PowerShell elevated; the script needs admin for
-        # winget install + wsl --install.
-        subprocess.Popen([
-            "powershell", "-NoProfile", "-Command",
-            f"Start-Process powershell -Verb RunAs -ArgumentList "
-            f"'-NoProfile -ExecutionPolicy Bypass -File \"{script}\"'",
-        ])
+        # A worker thread: ShellExecuteEx waits for the UAC answer, and the
+        # started-check then waits out its grace period.
+        threading.Thread(target=self._run_install_prereqs_win,
+                         args=(script,), daemon=True).start()
+
+    def _run_install_prereqs_win(self, script):
+        """Run install_prerequisites.ps1 in an elevated PowerShell (it needs
+        admin for winget install + wsl --install) and say so when that
+        window never starts the script (PAD-327: a blank window on hotel
+        Wi-Fi, and the app said nothing)."""
+        from .core import prereq_launch
+        marker = prereq_launch.new_marker_path()
+        try:
+            console = prereq_launch.ElevatedConsole(
+                prereq_launch.installer_args(script, marker),
+                cwd=os.path.dirname(script))
+        except Exception:
+            console = None
+        if console is None or (console.error and not console.declined):
+            # The route this used before PAD-327, for anything that stops
+            # ShellExecuteEx itself.
+            import subprocess
+            subprocess.Popen([
+                "powershell", "-NoProfile", "-Command",
+                f"Start-Process powershell -Verb RunAs -ArgumentList "
+                f"'-NoProfile -ExecutionPolicy Bypass -File \"{script}\"'",
+            ])
+            return
+        if console.declined:
+            return
+        try:
+            stuck = prereq_launch.watch_started(marker, console.running)
+        finally:
+            console.close()
+            prereq_launch.remove_marker(marker)
+        if stuck:
+            self.msg_queue.put(LogMsg(
+                "[prerequisites] the installer's PowerShell window has not "
+                "started the installer after %d s."
+                % prereq_launch.STARTED_GRACE_S, "warning"))
+            self.msg_queue.put(UiCallMsg(
+                lambda: messagebox.showwarning(
+                    "Install Prerequisites",
+                    prereq_launch.NOT_STARTED_TEXT)))
 
     def _install_prereqs_darwin(self):
         """Install Missing on a Mac: install the missing host tools with the

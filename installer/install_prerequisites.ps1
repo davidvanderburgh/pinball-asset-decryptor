@@ -19,6 +19,15 @@
 .NOTES
     Must run as Administrator (WSL install + admin-scope winget).
 #>
+param(
+    # Install Missing passes a temp-file path; writing it is this script's
+    # first act, so the app can tell a PowerShell that never got this far
+    # (blank window on hotel Wi-Fi, PAD-327) from one that is running.
+    [string]$StartedMarker = ""
+)
+if ($StartedMarker) {
+    try { Set-Content -LiteralPath $StartedMarker -Value $PID -ErrorAction Stop } catch {}
+}
 
 # --- Console encoding ----------------------------------------------------
 # winget emits its progress bars as UTF-8 box characters (U+2588, U+2592).

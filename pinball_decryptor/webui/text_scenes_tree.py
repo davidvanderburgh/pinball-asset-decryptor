@@ -827,7 +827,8 @@ class TreeEditMixin:
         if len(pics) != 1:
             return None
         d = pics[0]
-        size = _kept_size(self._tree_pictures().get(d["image"]) or {})
+        size = _kept_size(self._tree_pictures().get(d["image"]) or {}, self.assets_dir,
+                          d["image"])
         if size is None:
             size = self._tree_sizes().get(d["image"])
         if size is None:
@@ -859,7 +860,7 @@ class TreeEditMixin:
             if d["kind"] != "bitmap" or not d.get("image") or own is None \
                     or tuple(d["m"]) != tuple(own):
                 continue
-            size = _kept_size(picks.get(d["image"]) or {})
+            size = _kept_size(picks.get(d["image"]) or {}, self.assets_dir, d["image"])
             if size is not None:
                 d["w"], d["h"] = size
 
@@ -1917,9 +1918,15 @@ def _colour_switch(n, kind, pics, picks, settings, added_op):
     return None
 
 
-def _kept_size(pick):
-    """The size an Images-tab pick is written at when it keeps its own size, else None."""
-    return _file_size(pick["path"]) if pick.get("keep") and pick.get("path") else None
+def _kept_size(pick, assets_dir, rel):
+    """The size an Images-tab pick is written at when it keeps its own size, else None.  A
+    pick whose file is gone is drawn from the project's own file, which a Write has already
+    made that size (scene_render._picture), so the box is that file's size (DragonRR, PAD-332:
+    the box stayed the stock size, up and left of the picture)."""
+    if not pick.get("keep"):
+        return None
+    return _file_size(pick.get("path")
+                      or os.path.join(assets_dir, "images", *rel.split("/")))
 
 
 def _walk_man(man):

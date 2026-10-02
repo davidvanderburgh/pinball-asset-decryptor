@@ -543,6 +543,44 @@ def test_an_exact_size_in_pixels(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_a_kept_size_pick_whose_file_is_gone_boxes_the_picture_drawn(tmp_path):
+    """DragonRR (PAD-332): a Write puts a kept-size pick over the project's own file at its
+    own size.  With the pick's source file gone (moved, renamed) the preview draws that
+    project file, so its box is that size too, not the stock picture's (which sat up and
+    left of the art)."""
+    from PIL import Image
+    from pinball_decryptor.core import staged_changes
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    rel = next(o for o in man["objects"].values()
+               if o.get("kind") == "Bitmap" and o.get("image"))["image"]
+    stock = Image.open(str(folder / "images" / rel)).size
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_select", art)
+        p = _tv(w)["props"]
+        sx, w0, h0 = p["pic"]["sx"], p["w"], p["h"]
+        assert (p["pic"]["w"], p["pic"]["h"]) == stock
+        # what the Write left: the project's file at the pick's own (bigger) size, and the
+        # pick itself pointing at a file that is no longer there
+        grown = (stock[0] * 2, stock[1] * 2)
+        Image.new("RGBA", grown, (20, 220, 40, 255)).save(str(folder / "images" / rel))
+        staged_changes.save(str(folder), {"image": {"images/" + rel: str(tmp_path / "gone.png")},
+                                          "image_keep_size": ["images/" + rel]})
+        w.call("text_scenes.tree_moment", "f:%d" % _tv(w)["frame"])
+        tv = _tv(w)
+        p = tv["props"]
+        assert (p["pic"]["w"], p["pic"]["h"]) == grown
+        assert abs(p["w"] - w0 * 2) <= 1.5 and abs(p["h"] - h0 * 2) <= 1.5
+        assert p["pic"]["sx"] == sx
+        pts = next(h for h in tv["hits"] if h["id"] == art)["pts"]
+        xs = [q[0] for q in pts]
+        assert abs((max(xs) - min(xs)) - w0 * 2) <= 1.5
+        w.call("text_scenes.close")
+
+
 def test_a_pictures_own_size_and_scale_and_draw_it_1_to_1(tmp_path):
     """DragonRR (PAD-277): Stern ships Credits_Text at 1044 x 264 and lets the game shrink it,
     which leaves jagged edges.  The panel shows a picture's own size and the scale it is drawn

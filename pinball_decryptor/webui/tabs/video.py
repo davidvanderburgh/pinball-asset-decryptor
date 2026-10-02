@@ -88,7 +88,8 @@ class VideoTab(BestQualityMixin, TabService):
         self._asis = {}                  # rel -> per-clip as-is override
         self._length = {}                # rel -> per-clip length choice
         self._color = {}                 # rel -> per-clip colour switch (PAD-312)
-        self._mlook = True               # As on the machine on the players (PAD-329)
+        # the preview's three switches on the players (PAD-329, PAD-330)
+        self._lsw = {"overlay": True, "files": True, "screen": True}
         self._color_all = False          # the Color profile tab's "every replaced video"
         self._scan_id = 0
         self._scan_dir = ""
@@ -203,9 +204,17 @@ class VideoTab(BestQualityMixin, TabService):
         tab's profiles change elsewhere, so this is worked out again whenever
         the tab shows, a row loads, or a switch moves."""
         offered = self._per_file_colour()
-        look = {"offered": offered, "on": bool(self._mlook), "orig": [], "rep": []}
+        sw = dict(self._lsw)
+        look = {"offered": offered, "on": any(sw.values()), "sw": sw, "parts": None,
+                "orig": [], "rep": []}
         folder = self._assets_path()
-        if offered and self._mlook and folder and os.path.isdir(folder):
+        if offered and folder and os.path.isdir(folder):
+            try:
+                from ...core import colour_profile
+                look["parts"] = colour_profile.preview_parts(folder)
+            except Exception:                           # noqa: BLE001
+                log.exception("preview parts")
+        if offered and look["on"] and folder and os.path.isdir(folder):
             rel = self._current
             switch = self._color_state(rel) if rel else None
             var = getattr(self.window, "scenes_own_colours_var", None)
@@ -215,17 +224,30 @@ class VideoTab(BestQualityMixin, TabService):
                 own = True
             try:
                 from ...core import colour_profile
-                look.update(colour_profile.video_look(folder, switch, own))
+                look.update(colour_profile.video_look(
+                    folder, switch, own, overlay_on=sw["overlay"],
+                    files_on=sw["files"], screen_on=sw["screen"]))
             except Exception:                           # noqa: BLE001
                 log.exception("video machine look")
         if look != self.get("look"):
             self.set(look=look)
 
     @rpc
+    def set_look_part(self, part, on):
+        """One of the preview's three switches: "overlay", "files" or
+        "screen" (PAD-330).  Only the players change."""
+        if part not in self._lsw:
+            return False
+        self._lsw[part] = bool(on)
+        self.publish_look()
+        return True
+
+    @rpc
     def set_machine_look(self, on):
-        """As on the machine: the players show the clips the way the
-        machine's screen will, or in the PC's own colours."""
-        self._mlook = bool(on)
+        """All three switches at once: as on the machine, or the PC's own
+        colours."""
+        for k in self._lsw:
+            self._lsw[k] = bool(on)
         self.publish_look()
         return True
 

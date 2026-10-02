@@ -736,7 +736,7 @@ def picture_sizes(assets_dir):
     return out
 
 
-def pending_pictures(assets_dir):
+def pending_pictures(assets_dir, bake=True):
     """The Images tab's picks, as a scene render uses them: ``{picture rel: {"path":
     replacement file or None, "keep": keep its own size, "colour": the chosen-files profile
     baked into it, or None}}``.  A pick not built yet is drawn from its own file, so a
@@ -744,7 +744,8 @@ def pending_pictures(assets_dir):
     are listed too, for their colour (PAD-312): the preview shows a switched-on file the way
     the Write bakes it.  ``"skip"`` is True for the user's own picture whose colour switch is
     OFF (red in the Layers list): with :func:`render_tree`'s *as_made* the machine screen
-    passes it by and it shows its own colours (PAD-325)."""
+    passes it by and it shows its own colours (PAD-325).  *bake* False is the preview's
+    Individual files switch turned off (PAD-330): no picture gets its correction drawn in."""
     try:
         from ...core import staged_changes, colour_profile
         data = staged_changes.load(assets_dir) or {}
@@ -756,6 +757,8 @@ def pending_pictures(assets_dir):
         settings = colour_profile.asset_settings(assets_dir)
     except Exception:
         prof, settings = None, None
+    if not bake:
+        prof = None
     out = {}
     for rel, src in (data.get("image") or {}).items():
         if not isinstance(rel, str) or not rel.startswith("images/"):

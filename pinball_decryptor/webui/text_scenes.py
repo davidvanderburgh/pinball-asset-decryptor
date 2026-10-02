@@ -87,19 +87,6 @@ TIPS = {
              "scene's own rate looks wrong: how long each individual frame "
              "is held is still undecoded, so a sequence with held frames "
              "plays faster here than on the machine.",
-    "machine": "Drawn the way the machine's screen will show it: through the "
-               "whole screen overlay, if one is set, and then through the "
-               "screen itself, which shows middle shades too bright and too "
-               "blue. The screen is the Color profile tab's Machine screen, "
-               "and you can adjust it there; until you do, it is the "
-               "individual files profile, undone. A picture with that "
-               "profile switched on comes back to what your PC shows, and "
-               "the game's own art looks the way the machine really shows "
-               "it. A file whose color switch is off (red in Layers) shows "
-               "as you made it, so you can see it against the game's own "
-               "art; the gear menu's 'Switched-off files in their own "
-               "colors' turns that off. Untick "
-               "to see every picture in the PC's own colors.",
     "behind": "What the scene is laid over.\n\nThe machine draws on BLACK, "
               "so that is the true picture — but a black outline on a black "
               "frame is as invisible here as it is there. Pick a light "
@@ -346,7 +333,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                  screens=[], screen=_ALL_SCREENS, animated=False,
                  fps_choice=_FPS_FROM_FILE, fps_choices=list(_FPS_CHOICES),
                  bg=self._bg, bgs=self._bg_names(), bg_rgb=self._bg_rgb(),
-                 machine_look=getattr(self, "_mlook", True),
+                 machine_look=any((getattr(self, "_lsw", None) or {"a": True}).values()),
                  exporting=False, bulk=False, rebuilding=False,
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
@@ -396,6 +383,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             self._bg = self._bg_names()[0]
             self._reset_state()
             self.reload(preselect, focus_text)
+        self._publish_look()
         self._raise()
         return True
 

@@ -7,12 +7,12 @@ import { html, useEffect, useMemo, useRef, useState, PageHead, Button, Field, Ch
          Note, Table, Empty, Modal, Icon, Spinner, openMenu, menuOpen, tip, call, cx, mediaUrl }
   from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { LookRow } from "../core/look.js";
 
 export const css = true;
 
 // Word for word from the Tk tab (gui/main_window.py _build_video_tab).
 const T = {
-  look: "Show both clips the way the machine's screen will: through the whole screen overlay, then the Machine screen set on the Color profile tab. A replacement with its Color switch on also gets the correction it is built with; one switched off shows as you made it, with the overlay (the gear menu's \u201cSwitched-off files in their own colors\u201d turns that off). Only the preview changes: no clip is re-encoded. Untick for the PC's own colors.",
   intro: "Assign a replacement clip to any slot — a matching clip is used as-is, anything else is auto-re-encoded — then build the update on the Write tab.",
   ffmpeg: "ffmpeg not found — replacing video needs ffmpeg to re-encode + preview clips. Install it with “Install Missing” above the tabs.",
   project: "The project folder — shared by every tab. It is set on the Extract tab. Click to open it.",
@@ -156,7 +156,7 @@ function fitColumns(rows) {
 }
 const zoomOf = () => parseFloat(document.documentElement.style.zoom) || 1;
 
-// PAD-329: As on the machine.  The service hands each player its colour
+// PAD-329/330: the preview's colour switches.  The service hands each player its colour
 // steps (core/colour_profile.py filter_step: a saturation matrix and a gamma
 // curve per channel); they become one SVG filter the <video> is drawn
 // through, live on the GPU, in sRGB as the profile's maths is.
@@ -780,10 +780,7 @@ export default function VideoTab() {
       </div>
       <div class="vid-preview">
         ${pv.note ? html`<${Note} kind=${pv.note.kind}><b>${pv.note.text.replace(/^[⚠✗]\s*/, "")}</b><//>` : null}
-        ${look.offered ? html`<div class="row vid-look">
-          <${Check} checked=${look.on !== false} label="As on the machine" cls="small"
-            title=${T.look} onChange=${(v) => call("video.set_machine_look", v)} />
-        </div>` : null}
+        ${look.offered ? html`<${LookRow} look=${look} ns="video" />` : null}
         <div class="vid-panes">
           <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />
           <span class="vid-vsep"></span>

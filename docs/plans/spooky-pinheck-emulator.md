@@ -198,6 +198,33 @@ Jetsons' layers (byte 0, black see-through), frames at 30 fps, and text
 card's ZMF.spr font (Rob Zombie: "FREE PLAY") or a built-in one. Frames
 are numpy lookups, ~2.5 ms each. `run.py --frames DIR` saves the screen.
 
+## Pass 8 (2026-10-02): playable in the app
+
+- **Window** (`window.py`, `page/`, `machine.py`): the game runs in real time
+  on the app's own Python (no WSL) in a window in the app's design, with the
+  DMD, buttons and keys, all 64 switches, lamps, scores, coils, sound
+  (`audio.py`, sounddevice, the shared Volume / Mute), Pause, Power cycle.
+  Real time took: per-port pin listeners (the cabinet clock toggles 64 000
+  times a second), the lamp timer thinned to every 8th interrupt (same
+  packets and videos as a full run), a pacing loop that catches up in
+  chunks (Windows sleeps overshoot) - 1.00x for all three games.
+- **Emulate Spooky tab**: the three games are supported titles, told apart
+  by the update zip's or PRG's name; Start opens the window, Stop closes it.
+  The installer ships tools/pinheck_emu.
+- **Sound**: AMH's packets (0x01/0x08/0x0D/0x10) in all three games plus the
+  colour games' music by name (0x09).
+- **Lamps**: the lamp driver's port B multiplex, as AMH's LightDriver.
+- **Jetsons' screen**: one video at a time by slot, byte 7 a priority where
+  the lower value wins, byte 8 the next slot; text a layer of its own (0x06
+  lines, 13 03 on/off) on a 4-pixel advance. Domino's and Rob Zombie use
+  AMH's video layout. Non-looping videos leave the screen when they end.
+
+Still approximate or missing: the colour games' .FNT fonts and sprites,
+scores drawn on the DMD (the games' large digits), the undecoded commands,
+lamp names, playfield switch names (the games' switch tests show numbers
+only). America's Most Haunted: no game program in its update - waiting on
+David (a dumped PIC32, or a build from the public source for his own use).
+
 ## Recommended design
 
 1. **Game CPU: emulate it** (Unicorn), running the user's own PRG unmodified.
@@ -229,8 +256,9 @@ Milestones, each its own run of proof:
   undecoded.
 - C. coin + start + a ball with switch pokes; scores drawn; sound (muted, from
   the level log).
-- D. Rob Zombie: boots to attract (pass 5b); its screens need the text
-  overlay. AMH: no game-CPU program in its update (see pass 5b).
+- C. coin + start + a ball, scores, sound: DONE for all three (passes 6-8).
+- D. Rob Zombie: DONE (passes 5b-8). AMH: no game-CPU program in its update
+  (see pass 5b) - David's call.
 
 ## Grade
 

@@ -137,7 +137,7 @@ should move a ball to 32 by itself) and the rest of the switch map.
 
 ## Pass 5b (2026-10-02): Rob Zombie and AMH files arrived
 
-David added `D:\Pinball\images\Spookyzupdate_V26.zip` and `AMH_SD_V023.zip`.
+David added `rzupdate_V26.zip` and `AMH_SD_V023.zip` to `D:\Pinball\images\Spooky`.
 
 - **Rob Zombie V26** (`RZO_V026.PRG` + `PRP_V008.BIN` - not the same image
   as Domino's V008): boots unchanged - sync OK, `1A00BAFA` written, first

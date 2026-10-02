@@ -30,6 +30,7 @@ sound, switch input, rig or Emulate tab yet.
 
 Status (2026-10-02): Jetsons V004 and Domino's V006 (second boot) run their
 attract cycles; the sheets show the real attract art (the Jetsons logo and
-"PRESENTS", Domino's "FawzmaGames"). About 0.5x real time.
+"PRESENTS", Domino's "FawzmaGames"). About 1.5x real time (40 s in
+26-27 s), with the idle skip in `pic32.py`.
 
 Tests: `tests/test_pinheck_emu.py` (synthetic, no game files).

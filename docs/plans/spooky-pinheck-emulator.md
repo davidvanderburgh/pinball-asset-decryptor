@@ -89,9 +89,14 @@ text line (byte 0 = slot, then ASCII), `0e` high-score entry (rank, score
 LE, initials), `10` volume/settings, `04`, `06`, `09`, `0c`, `0f`, `13`,
 `23`, `27`, `29` not decoded yet.
 
-Speed: about 0.5x real time (60 s emulated in 114 s) with the lamp handler
-at 8 kHz. Before a playable rig: deliver T2 less often (its only output is
-lamp PWM), or batch it.
+Speed: about 0.5x real time (60 s emulated in 114 s) after pass 2, nearly
+all of it Unicorn running instructions (~42 MIPS for an 80 MHz part). Pass 4
+measured where they go: 74% in `while (millis() == last);` and most of boot
+in `delay()`, against 2% in interrupt handlers. Both loops are now found by
+their code and parked until the next millisecond (interrupts still run on
+time): Jetsons 40 s in 26.8 s and Domino's in 25.9 s, ~1.5x real time, with
+the same packets and serial output as a full run (only the random attract
+picks differ, the game seeds them from timing).
 
 ## Pass 3 (2026-10-02): the DMD shows the attract art
 

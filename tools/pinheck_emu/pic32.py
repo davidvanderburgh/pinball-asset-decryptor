@@ -25,6 +25,14 @@ parts of the chip the games touch are modelled:
   1 us per column). Every ``mfc0 rt,$9`` in the PRG (three in Jetsons and
   Domino's) is patched to a nop and a hook fills rt with clock/2, moved on
   by 8 per read inside a slice so a spin loop always gets out.
+* Idle skip: the games' main loop spends ~3/4 of the CPU spinning on
+  ``while (millis() == last);`` (about 74% of instructions in Jetsons'
+  attract; 2% go to interrupt handlers), and boot is full of ``delay()``.
+  Both loops are found by their code (``find_idle_loops``); a hook on the
+  loop's branch ends the slice when it is about to go round again, and the
+  main code stays parked until the next millisecond. Timer and I2C
+  interrupts still run at their own clocks, so only instructions that could
+  not change anything are skipped. ``idle_skip = False`` runs every one.
 * ``millis()``: the core-timer interrupt is NOT delivered (Unicorn's CP0
   Count/Compare do not follow our clock); instead the core's millisecond
   counter is bumped once per 80 000 instructions. Its address is found from
@@ -70,6 +78,39 @@ SEN, RSEN, PEN, RCEN, ACKEN = 1, 2, 4, 8, 16
 ACKSTAT, RBF = 1 << 15, 1 << 1
 
 
+WAIT, DELAY = "wait", "delay"
+
+
+def _gp_off(word):
+    off = word & 0xFFFF
+    return off - 0x10000 if off & 0x8000 else off
+
+
+def find_idle_loops(prg, gpoff):
+    """{branch address: kind} for the loops that only wait for millis():
+
+    WAIT  ``while (millis() == last);``:  ``jal G; nop; lw v1,last(gp);
+          beq v0,v1,-4`` where G is the getter ``lw v0,<millis>(gp); jr ra``
+    DELAY chipKIT's ``delay()``:  ``lw v0,<millis>(gp); subu v0,v0,s1;
+          sltu v0,v0,s0; bnez v0,back`` (the back edge calls the task
+          scheduler, which only runs tasks that are due by millis)."""
+    found = {}
+    for o in range(0, min(len(prg), FLASH_SIZE) - 16, 4):
+        w0, w1, w2, w3 = struct.unpack_from("<4I", prg, o)
+        if w0 >> 16 == 0x8F82 and _gp_off(w0) == gpoff and w1 == 0x00511023 \
+                and w2 == 0x0050102B and w3 >> 16 == 0x1440:
+            found[FLASH + o + 12] = DELAY
+        if w0 >> 26 != 3 or w1 or w2 >> 16 != 0x8F83 or w3 != 0x1043FFFC:
+            continue
+        g = ((FLASH & 0xF0000000) | ((w0 & 0x3FFFFFF) << 2)) - FLASH
+        if not 0 <= g < len(prg) - 8:
+            continue
+        g0, g1 = struct.unpack_from("<2I", prg, g)
+        if g0 >> 16 == 0x8F82 and g1 == 0x03E00008 and _gp_off(g0) == gpoff:
+            found[FLASH + o + 12] = WAIT
+    return found
+
+
 def find_millis_gp_offset(prg):
     """The gp offset of the core's millis counter, from delay()'s loop:
     ``lw v0,off(gp); subu v0,v0,s1; sltu v0,v0,s0``."""
@@ -110,6 +151,13 @@ class Pic32:
         self.millis_addr = None
         self._in_isr = False
         self._count = 0
+        self.idle_skip = True
+        self.idle_stops = 0
+        self._parked = False        # main code idle until millis() moves
+        self._resumed_at = None     # the idle branch the main code resumes on
+        self._idle_loops = find_idle_loops(prg, self._gpoff) if chipkit else {}
+        for a, kind in self._idle_loops.items():
+            mu.hook_add(UC_HOOK_CODE, self._idle, begin=a, end=a, user_data=kind)
         for o in range(0, min(len(prg), FLASH_SIZE) - 3, 4):
             w = struct.unpack_from("<I", prg, o)[0]
             a = FLASH + o
@@ -235,6 +283,23 @@ class Pic32:
                     best = (p, vec, irq)
         return best
 
+    def _idle(self, uc, address, size, kind):
+        if not self.idle_skip or self._in_isr:
+            return
+        # The stop lands before the branch and the hook fires again when the
+        # main code resumes there: let that one pass, so the loop goes round
+        # once and reads the new millis() before it is judged again.
+        if self._resumed_at == address:
+            self._resumed_at = None
+            return
+        v0 = uc.reg_read(UC_MIPS_REG_0 + 2)
+        spinning = (v0 == uc.reg_read(UC_MIPS_REG_0 + 3)) if kind == WAIT else v0 != 0
+        if spinning:
+            self.idle_stops += 1
+            self._parked = True
+            self._resumed_at = address
+            uc.emu_stop()
+
     def _read_count(self, uc, address, size, reg):
         self._count = max(self._count + 8, self.clock // 2) & 0xFFFFFFFF
         uc.reg_write(reg, self._count)
@@ -291,7 +356,7 @@ class Pic32:
             if not FLASH <= pc < FLASH + FLASH_SIZE:
                 raise RuntimeError("game CPU stopped at %08x: %s" % (pc, e))
         self.pc = self.mu.reg_read(UC_MIPS_REG_PC)
-        self.clock += count
+        self.clock += count     # an idle stop counts the rest of the slice as passed
 
     @property
     def insns(self):
@@ -317,7 +382,10 @@ class Pic32:
                         if per:
                             self._next[n] = self.clock + per
                 step = min([end] + list(self._next.values())) - self.clock
-                self._slice(max(step, 100))
+                if self._parked:
+                    self.clock += max(step, 100)    # nothing to run but handlers
+                else:
+                    self._slice(max(step, 100))
                 for irq in self._deferred:
                     self.raise_irq(irq)
                 self._deferred.clear()
@@ -328,6 +396,7 @@ class Pic32:
                 self._service()
             if self._gpoff is not None:
                 self.mu.mem_write(self.millis_addr, struct.pack("<I", (self.millis + 1) & 0xFFFFFFFF))
+            self._parked = False
 
 
 class I2CDevice:

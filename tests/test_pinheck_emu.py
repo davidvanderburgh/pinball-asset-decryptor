@@ -234,3 +234,23 @@ def test_nvram_files_load_only_at_their_size(tmp_path):
     assert _load(str(tmp_path), *NVRAM[0]) == bytearray(b"\x01" * NVRAM[0][1])
     assert _load(str(tmp_path), *NVRAM[1]) is None
     assert _load(None, *NVRAM[0]) is None
+
+
+def test_idle_loops_are_found_by_their_code():
+    from tools.pinheck_emu.pic32 import DELAY, WAIT, find_idle_loops, find_millis_gp_offset
+    flash = bytearray(0x3000)
+    # delay(): lw s1/v0,millis(gp) ... loop: jal sched; nop; lw v0,millis(gp);
+    # subu; sltu; bnez v0,loop  (millis at gp-0x7984, as in Jetsons V004)
+    struct.pack_into("<6I", flash, 0x1100, 0x0F400000, 0, 0x8F82867C, 0x00511023,
+                     0x0050102B, 0x1440FFFA)
+    # the millis getter, and a while (millis() == last); loop calling it
+    struct.pack_into("<3I", flash, 0x2000, 0x8F82867C, 0x03E00008, 0)
+    jal = 0x0C000000 | ((0x9D002000 >> 2) & 0x3FFFFFF)
+    struct.pack_into("<5I", flash, 0x1200, jal, 0, 0x8F8384FC, 0x1043FFFC, 0)
+    # the same loop on a getter of something else is not idle
+    struct.pack_into("<3I", flash, 0x2100, 0x8F828600, 0x03E00008, 0)
+    jal2 = 0x0C000000 | ((0x9D002100 >> 2) & 0x3FFFFFF)
+    struct.pack_into("<5I", flash, 0x1300, jal2, 0, 0x8F8384FC, 0x1043FFFC, 0)
+    gpoff = find_millis_gp_offset(bytes(flash))
+    assert gpoff == -0x7984
+    assert find_idle_loops(bytes(flash), gpoff) == {0x9D001114: DELAY, 0x9D00120C: WAIT}

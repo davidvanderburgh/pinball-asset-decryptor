@@ -87,6 +87,8 @@ class Machine:
                                    game=self.game or None)
         self.board, self.balls, self.av, self.sound = (
             self.link.board, self.link.balls, self.link.av, self.link.sound)
+        from tools.pinheck_emu.board import Lamps
+        self.lamps = Lamps(self.pic)
         # the lamp driver only multiplexes lamps nobody sees here: every 8th
         # interrupt is enough, and the game is otherwise unchanged (same
         # packets and videos as a full run, PAD-320 pass 8)
@@ -216,6 +218,7 @@ class Machine:
             "coils": [n for t, n in self.fired if ms - t < 1500][-6:],
             "playing": [c.name for c in list(self.sound.channels.values())],
             "closed": sorted(self.board.matrix),
+            "lamps": self.lamps.levels(),
             "scores": {str(k): v for k, v in sorted(self.av.scores.items())},
             "held": sorted(str(h) for h in self.held),
             "uart": self.pic.uart[-600:].decode("latin1", "replace"),

@@ -11,7 +11,10 @@ Two packet layouts are known:
   clears the queue); bytes 0..2 the name, byte 3 attributes (bit 7 = loop),
   byte 5 priority; a first byte of 255 only sets the priority.
 * Jetsons': byte 0 a layer, bytes 1..3 the name. Layers are drawn in order,
-  black is see-through. What its other bytes mean is not known yet.
+  black is see-through. What its other bytes mean is not known yet. Its
+  text is a layer of its own: 0x12 puts a line up (byte 0 = column << 4 |
+  line, bit 3 a flag not decoded), 0x06 ``n ff ff ..`` clears line n,
+  ``13 03 01`` / ``13 03 00`` show / hide the text; a new video keeps it.
 
 Text: AMH's 0x12 (byte 0 = column << 4 | row, in 8-pixel cells; then
 ASCII) and Rob Zombie's 0x0F (byte 0 = line, then ASCII, centred).
@@ -28,7 +31,7 @@ import os
 
 from pinball_decryptor.plugins.spooky import p3_video
 
-VIDEO, QUEUE, TEXT, TEXT_RZ, SCORE = 0x02, 0x06, 0x12, 0x0F, 0x03
+VIDEO, QUEUE, TEXT, TEXT_RZ, SCORE, GRAPHICS = 0x02, 0x06, 0x12, 0x0F, 0x03, 0x13
 FPS = p3_video.DEFAULT_FPS
 
 
@@ -114,7 +117,9 @@ class Vid:
 
 
 class Font:
-    """The card's 8x8 font sprite, or a built-in stand-in."""
+    """The card's 8x8 font sprite (AMH's, on Rob Zombie's card too), else the
+    built-in 3x5 font on a 4-pixel advance (tinyfont.py) - the colour games'
+    own ``.FNT`` fonts are not decoded yet."""
     def __init__(self, card):
         self.sheet = None
         path = os.path.join(card, "DMD", "_DZ", "ZMF.spr")
@@ -122,16 +127,12 @@ class Font:
             data = open(path, "rb").read()
             if len(data) >= 512 + 2048:
                 self.sheet = data[512:512 + 2048]       # 128x32, 4bpp
-        if self.sheet is None:
-            from PIL import ImageFont
-            self.ttf = ImageFont.load_default(size=8)
+        self.advance = 8 if self.sheet is not None else 4
 
     def draw(self, img, x, y, text, colour=(255, 140, 0)):
         if self.sheet is None:
-            from PIL import ImageDraw
-            d = ImageDraw.Draw(img)
-            d.fontmode = "1"
-            d.text((x, y - 1), text, font=self.ttf, fill=colour)
+            from tools.pinheck_emu import tinyfont
+            tinyfont.draw(img, x, y, text, colour)
             return
         for ch in text.upper():
             c = ord(ch) - 32
@@ -157,6 +158,7 @@ class Av:
         self.queue = []             # (Vid, loop)
         self.texts = {}             # (x, y) -> str
         self.scores = {}            # player 1..4 -> score
+        self.text_on = True         # Jetsons' 13 03 xx
         self.font = None
         self.size = None            # (w, h) of the display, from the first video
         self.layout = None          # "amh" or "jetsons", from the first video packet
@@ -183,6 +185,19 @@ class Av:
             if 1 <= pkt[0] <= 4:
                 self.scores[pkt[0]] = int.from_bytes(pkt[1:5], "little")
             return
+        if self.layout == "jetsons" and cmd == QUEUE:
+            # Jetsons' 0x06 is its text lines' command, not a video queue:
+            # 06 n ff ff .. clears line n, 06 80 n .. sets line n up
+            if pkt[0] < 8 and all(b == 0xFF for b in pkt[1:8]):
+                line = pkt[0] * 8
+                self.texts = {k: t for k, t in self.texts.items()
+                              if not (k[0] != "rz" and k[1] == line)}
+            return
+        if self.layout == "jetsons" and cmd == GRAPHICS and pkt[0] == 3:
+            self.text_on = bool(pkt[1])         # 13 03 01 shows the text, 13 03 00 hides it
+            if not self.text_on:
+                self.texts.clear()
+            return
         if cmd in (VIDEO, QUEUE):
             if pkt[0] == 0xFF and not any(pkt[1:5]):
                 if cmd == VIDEO:
@@ -208,11 +223,17 @@ class Av:
                 self.queue.append((v, loop))
                 return
             self.layers[layer] = [v, millis, loop]
-            self.texts.clear()
+            if self.layout != "jetsons":        # AMH: a new video flushes the text
+                self.texts.clear()
             self.played.append((millis, name, v))
         elif cmd == TEXT or (cmd == TEXT_RZ and self.layout == "amh" and pkt[0] < 8):
             text = bytes(pkt[1:15]).split(b"\0")[0].split(b"\xff")[0].decode("latin1")
-            key = ("rz", pkt[0]) if cmd == TEXT_RZ else ((pkt[0] >> 4) * 8, (pkt[0] & 15) * 8)
+            if cmd == TEXT_RZ:
+                key = ("rz", pkt[0])
+            elif self.layout == "jetsons":      # line in bits 0..2; bit 3 a flag, not decoded
+                key = ((pkt[0] >> 4) * 8, (pkt[0] & 7) * 8)
+            else:
+                key = ((pkt[0] >> 4) * 8, (pkt[0] & 15) * 8)
             self.texts[key] = text
 
     def frame(self, millis):
@@ -237,18 +258,16 @@ class Av:
                 f = f.resize((w, h))
             mask = f.convert("L").point(lambda p: 255 if p else 0)
             img.paste(f, (0, 0), mask)
-        if self.texts:
+        if self.texts and self.text_on:
             if self.font is None:
                 self.font = Font(self.card)
             for key, text in self.texts.items():
                 if key[0] == "rz":
                     lines = sorted(k[1] for k in self.texts if k[0] == "rz")
                     y = (h - 8 * len(lines)) // 2 + 8 * lines.index(key[1])
-                    x = max(0, (w - 8 * len(text)) // 2)
+                    x = max(0, (w - self.font.advance * len(text)) // 2)
                 else:
                     x, y = key
-                    if y >= h:          # Jetsons' row bit 3 - a second size, not decoded
-                        y = (y - 64) * 2 if y >= 64 else y % h
                 self.font.draw(img, x, y, text)
         return img
 

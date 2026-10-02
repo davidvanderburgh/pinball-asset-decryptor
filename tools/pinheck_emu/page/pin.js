@@ -45,6 +45,17 @@ for (let i = 0; i < 64; i++) {
   cells.push(b);
 }
 
+// ------------------------------------------------------------------- lamps
+const lampGrid = $("lamps");
+const lampCells = [];
+for (let i = 0; i < 64; i++) {
+  const d = document.createElement("span");
+  d.className = "lamp";
+  d.title = "Lamp " + i + " (column " + (i >> 3) + ", row " + (i & 7) + ")";
+  lampGrid.appendChild(d);
+  lampCells.push(d);
+}
+
 // ----------------------------------------------------------------- buttons
 const keyMap = {};
 document.querySelectorAll("[data-sw]").forEach((b) => {
@@ -125,6 +136,8 @@ function show(s) {
   $("playing").textContent = (s.playing && s.playing.length) ? s.playing.join(", ") : "—";
   const closed = new Set(s.closed || []);
   cells.forEach((c, i) => c.classList.toggle("closed", closed.has(i)));
+  const lamps = s.lamps || [];
+  lampCells.forEach((c, i) => c.style.setProperty("--on", lamps[i] || 0));
   const pre = $("uart"); const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
   pre.textContent = s.uart || ""; if (atEnd) pre.scrollTop = pre.scrollHeight;
   if (s.error) { $("note").hidden = false; $("note").textContent = "The game stopped: " + s.error; }

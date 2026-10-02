@@ -170,3 +170,30 @@ class Balls:
             self.in_trough = min(self.in_trough + 1, len(self.trough))
         self._later(self.ROLL_MS, land)
         return True
+
+
+class Lamps:
+    """The 8 x 8 lamp matrix, as the lamp driver (Timer2) multiplexes it on
+    port B - AMH's LightDriver: the low byte is the column being lit (one
+    bit), the high byte the rows lit in it, cycling columns and PWM steps.
+    ``levels()`` is each lamp's share of 'on' over its recent visits, 0..1;
+    lamp n = column * 8 + row (AMH's lamp numbering)."""
+    DECAY = 0.85
+
+    def __init__(self, pic):
+        self.level = [0.0] * 64
+        pic.watch("B", self._lat)
+
+    def _lat(self, port, old, new):
+        col = new & 0xFF
+        if not col or col & (col - 1):
+            return                          # blanking, or not one column
+        c = col.bit_length() - 1
+        rows = new >> 8
+        d = self.DECAY
+        for r in range(8):
+            n = c * 8 + r
+            self.level[n] = self.level[n] * d + (1 - d) * ((rows >> r) & 1)
+
+    def levels(self):
+        return [round(v, 2) for v in self.level]

@@ -493,3 +493,48 @@ def test_screen_keeps_the_players_scores(tmp_path):
     av.packet(bytes([1]) + (4851).to_bytes(4, "little") + bytes(10) + b"\x03", 0)
     av.packet(bytes([7]) + (99).to_bytes(4, "little") + bytes(10) + b"\x03", 0)   # not a player
     assert av.scores == {1: 4851}
+
+
+def test_lamps_follow_the_multiplexed_port_b():
+    from tools.pinheck_emu.board import Lamps
+    pic = PinPic()
+    lamps = Lamps(pic)
+    for _ in range(40):
+        pic.write("B", (0b00000101 << 8) | (1 << 2))   # column 2: rows 0 and 2 lit
+        pic.write("B", 0)                                # blanking: ignored
+        pic.write("B", (0 << 8) | (1 << 3))              # column 3: nothing lit
+    lv = lamps.levels()
+    assert lv[2 * 8 + 0] > 0.9 and lv[2 * 8 + 2] > 0.9
+    assert lv[2 * 8 + 1] == 0 and lv[3 * 8 + 0] == 0
+
+
+def test_jetsons_text_layer_rules(tmp_path):
+    """Jetsons: a video keeps the text; 06 n ff.. clears line n; 13 03 00
+    hides it all. Lines are 8 pixels, columns 8, glyphs 4 wide (tinyfont)."""
+    from tools.pinheck_emu.av import Av
+    _vid(tmp_path, "AAA", 1, (0,))
+    av = Av(str(tmp_path))
+    av.packet(bytes([1]) + b"AAA" + bytes(11) + b"\x02", 0)        # Jetsons layout
+    av.packet(bytes([0x13]) + b"1 - COW" + bytes(7) + b"\x12", 1)  # column 1, line 3
+    av.packet(bytes([0x28]) + b"TOP" + bytes(11) + b"\x12", 1)     # line 0, flag bit 3
+    av.packet(bytes([3, 1]) + bytes(13) + b"\x13", 2)
+    av.packet(bytes([1]) + b"AAA" + bytes(11) + b"\x02", 3)        # a new video
+    assert set(av.texts) == {(8, 24), (16, 0)}
+    lit = lambda img: {(x // 8, y // 8) for x in range(128) for y in range(32)
+                       if img.getpixel((x, y)) != (0, 0, 0)}
+    assert (1, 3) in lit(av.frame(4)) and (2, 0) in lit(av.frame(4))
+    av.packet(bytes([3]) + b"\xff" * 7 + bytes(7) + b"\x06", 5)    # clear line 3
+    assert set(av.texts) == {(16, 0)}
+    av.packet(bytes([3, 0]) + bytes(13) + b"\x13", 6)              # text off
+    assert not av.texts and av.frame(7).getbbox() is None
+
+
+def test_tiny_font_covers_the_games_screens():
+    from PIL import Image
+    from tools.pinheck_emu import tinyfont
+    for text in ("TOP 5", "HIGH SCORES", "1 - COW", "20,000,000", "PLAYER:1 BALL:1", "<L -EXIT- R>"):
+        assert all(ch in tinyfont.GLYPHS for ch in text.upper()), text
+    img = Image.new("RGB", (16, 8))
+    tinyfont.draw(img, 0, 0, "11", (255, 0, 0))
+    assert img.getpixel((1, 1)) == (255, 0, 0) and img.getpixel((5, 1)) == (255, 0, 0)
+    assert all(len(r) == 3 for g in tinyfont.GLYPHS.values() for r in g)

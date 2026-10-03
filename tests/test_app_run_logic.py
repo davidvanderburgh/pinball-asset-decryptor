@@ -1253,3 +1253,35 @@ def test_video_poster_explains_a_frame_it_cannot_show(tmp_path, monkeypatch):
     poster, note = vh.representative_poster(str(tmp_path / "clip.mp4"),
                                             dur=10.0)
     assert poster is None and note == vh.NOTE_NO_FRAME
+
+
+def test_a_stock_clip_switched_on_reaches_the_build_with_no_pick(tmp_path, monkeypatch):
+    """PAD-336: the Video tab's Advanced box + a stock clip's switch is all a
+    build needs to stage it (no replacement picked anywhere)."""
+    from pinball_decryptor.core import colour_profile, staged_changes, video_slots
+
+    assets = tmp_path / "extract336"
+    (assets / "video").mkdir(parents=True)
+    (assets / "video" / "attract.mp4").write_bytes(b"STOCK")
+    staged_changes.save(str(assets), {
+        "video_color_stock": True,
+        "video_color_slots": {"video/attract.mp4": True}})
+    seen = {}
+
+    def fake(slots, assignments, **kw):
+        seen.update(assignments)
+        return len(assignments), []
+
+    monkeypatch.setattr(video_slots, "stage_replacements", fake)
+    with web_app(tmp_path, mfr="stern") as w:
+        app = w.app
+        mfr = app._current_mfr
+        if not (mfr and mfr.colour_profile_on_display()):
+            pytest.skip("this manufacturer corrects the files on the display")
+        presets = dict(colour_profile.PRESETS)
+        # a profile that changes nothing: nothing to bake, nothing staged
+        colour_profile.store_asset_profile(str(assets), presets["none"])
+        assert app._stage_pending_video(str(assets)) == (0, 0, [])
+        colour_profile.store_asset_profile(str(assets), presets["bw"])
+        assert app._stage_pending_video(str(assets)) == (1, 1, [])
+        assert seen == {"video/attract.mp4": video_slots.STOCK_SOURCE}

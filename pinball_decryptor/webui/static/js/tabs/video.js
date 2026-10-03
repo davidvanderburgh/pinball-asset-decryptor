@@ -100,12 +100,23 @@ const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 5
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
                 aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert" };
 // PAD-312: the chosen-files color profile, baked into this clip as it is converted
-const COLOR_TIP = "Green: the Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Red: it goes on the card in its own colors. Blue lock: the game's own clip, never touched. A switch you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
+const COLOR_TIP = "Green: the Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Red: it goes on the card in its own colors. Blue lock: the game's own clip, never touched (tick Advanced to unlock it). A switch you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
+// PAD-336: the Advanced box unlocks the game's own clips on this tab only
+const ADV_TIP = { head: "Advanced: unlock the game's own clips", lines: [
+  "Gives the game's own clips a Color switch too, on this tab only. Pictures in Images and Scenes keep their locks.",
+  "A clip you switch on is re-encoded from its original with the Color profile tab's individual files profile when you build.",
+  "Untick it to lock them again; any clip already built that way gets its original back."] };
 // PAD-334: the same blue lock / red / green palette as a picture's switch in Scenes
 const colorTip = (r) => (r.col_lock
   ? { head: "Color: the game's own clip", lines: [
       "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
-      "Choose a replacement to correct a clip of your own."] }
+      "Choose a replacement to correct a clip of your own, or tick Advanced to unlock it."] }
+  : r.col_stock
+  ? { head: r.col ? "Color: the game's own clip, corrected" : "Color: the game's own clip, as shipped", lines: [
+      ["Click", r.col ? "leave it as the game shipped it" : "correct its colors for the machine"],
+      r.col ? "It is re-encoded from its original with the individual files profile when you build."
+        : "Unlocked by Advanced. It stays as the game shipped it.",
+      "Set for this clip only: the Every replaced video box never reaches the game's own clips."] }
   : { head: r.col ? "Color: corrected for the machine" : "Color: its own colors", lines: [
       ["Click", r.col ? "keep its own colors" : "correct its colors for the machine"],
       r.col ? "The Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that)."
@@ -690,7 +701,7 @@ export default function VideoTab() {
       render: (r) => (r.col_lock
         ? html`<span class="vid-color locked" aria-label="The game's own clip: no color switch" ...${tip(colorTip(r))}><${Icon} name="lock" /></span>`
         : r.col == null ? "" : html`<button type="button" class=${cx("vid-color", r.col ? "on" : "off", r.col_own && "own")}
-        aria-label="Correct this clip's colors for the machine" aria-pressed=${r.col ? "true" : "false"} ...${tip(colorTip(r))}
+        aria-label=${r.col_stock ? "Correct the game's own clip's colors for the machine" : "Correct this clip's colors for the machine"} aria-pressed=${r.col ? "true" : "false"} ...${tip(colorTip(r))}
         onClick=${(e) => { e.stopPropagation(); if (e.detail > 1) { e.preventDefault(); return; } call("video.set_color", r.rel, !r.col); }}>
         <${Icon} name="palette" /></button>`) },
     { key: "conv", label: "Convert", width: convWidth, sort: "conv", titleOf: (r) => r.conv,
@@ -781,6 +792,8 @@ export default function VideoTab() {
             onChange=${(v) => call("video.set_trim", v)} />
           ${s.best_supported ? html`<${Check} checked=${s.best_quality} label="Best quality" title=${s.best_tip} cls="small"
             onChange=${(v) => call("video.set_best_quality", v)} />` : null}
+          ${s.color_offered ? html`<span ...${tip(ADV_TIP)}><${Check} checked=${s.color_stock} label="Advanced" cls="small"
+            onChange=${(v) => call("video.set_color_stock", v)} /></span>` : null}
         </span>
       </div>
       <div class="vid-tblwrap" onMouseDownCapture=${onGripDown}>

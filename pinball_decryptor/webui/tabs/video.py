@@ -88,6 +88,10 @@ class VideoTab(BestQualityMixin, TabService):
         self._asis = {}                  # rel -> per-clip as-is override
         self._length = {}                # rel -> per-clip length choice
         self._color = {}                 # rel -> per-clip colour switch (PAD-312)
+        # the Advanced box (PAD-336): the game's own clips get a switch too,
+        # and these are the ones switched on
+        self._color_stock = False
+        self._stock_on = set()
         # the preview's three switches on the players (PAD-329, PAD-330)
         self._lsw = {"overlay": True, "files": True, "screen": True}
         self._color_all = False          # the Color profile tab's "every replaced video"
@@ -136,6 +140,7 @@ class VideoTab(BestQualityMixin, TabService):
                  select={"rels": [], "seq": 0},
                  quality=self._quality_state(open_=False),
                  best_tip=BEST_TIP, best_supported=False,
+                 color_offered=False, color_stock=False,
                  widths=self._saved_widths())
         threading.Thread(target=vh.prune_cache, daemon=True,
                          name="video-cache-prune").start()
@@ -156,6 +161,8 @@ class VideoTab(BestQualityMixin, TabService):
         self._length = {}
         self._color = {}
         self._color_all = False
+        self._color_stock = False
+        self._stock_on = set()
         self._scan_dir = ""
         self._changed = set()
         self._foreign = set()
@@ -401,6 +408,8 @@ class VideoTab(BestQualityMixin, TabService):
         self._asis = {}
         self._length = {}
         self._color = {}
+        self._color_stock = False
+        self._stock_on = set()
         kept = {}
         try:
             from ...plugins.stern import stock_modes
@@ -553,6 +562,12 @@ class VideoTab(BestQualityMixin, TabService):
                     (staged.get("video_color_slots") or {}).items()
                     if rel in self._by_rel}
                 self._color_all = bool(staged.get("color_all_videos"))
+                self._color_stock = bool(staged.get("video_color_stock"))
+                self._stock_on = {rel for rel, v in self._color.items()
+                                  if v and not self._assign.get(rel)
+                                  and self._color_stock}
+                self._color = {rel: v for rel, v in self._color.items()
+                               if self._assign.get(rel)}
                 val = staged.get("video_change_filter")
                 if val in vh.CHANGE_FILTER_VALUES:
                     self.video_change_filter_var.set(val)
@@ -571,6 +586,8 @@ class VideoTab(BestQualityMixin, TabService):
                             if rel in self._by_rel}
             self._color = {rel: v for rel, v in self._color.items()
                            if rel in self._by_rel}
+            self._stock_on = {rel for rel in self._stock_on
+                              if rel in self._by_rel}
         folder_changed = scan_dir != self._scan_dir
         self._scan_dir = scan_dir
         self._changed = set()
@@ -978,7 +995,9 @@ class VideoTab(BestQualityMixin, TabService):
                 "rep": rep_disp, "rep_cls": cls, "conv": conv,
                 "conv_cls": self._conv_cls(conv),
                 "col": self._color_state(rel), "col_own": rel in self._color,
-                "col_lock": self._color_locked(rel)}
+                "col_lock": self._color_locked(rel),
+                "col_stock": bool(self._color_stock
+                                  and not self._assign.get(rel))}
 
     # -- the chosen-files colour profile (PAD-312) ------------------------
     def _per_file_colour(self):
@@ -991,16 +1010,47 @@ class VideoTab(BestQualityMixin, TabService):
             return False
 
     def _color_state(self, rel):
-        if not (rel and self._assign.get(rel) and self._per_file_colour()):
+        if not (rel and self._per_file_colour()):
             return None
+        if not self._assign.get(rel):
+            # the game's own clip: a switch only with Advanced ticked
+            # (PAD-336), and only its own (the tab-wide box never reaches it)
+            return (rel in self._stock_on) if self._color_stock else None
         own = self._color.get(rel)
         return bool(self._color_all if own is None else own)
 
     def _color_locked(self, rel):
         """The game's own clip (PAD-334): no switch, shown as a lock, the
-        way Scenes shows a stock picture."""
+        way Scenes shows a stock picture, until Advanced unlocks it."""
         return bool(rel and not self._assign.get(rel)
-                    and self._per_file_colour())
+                    and not self._color_stock and self._per_file_colour())
+
+    @rpc
+    def set_color_stock(self, on):
+        """The Advanced box (PAD-336): unlock the Color switch on the game's
+        own clips.  Unticked, they lock again and any of them already built
+        with the profile get their original file back."""
+        on = bool(on)
+        if on == self._color_stock or not self._per_file_colour():
+            return False
+        self._color_stock = on
+        back = []
+        if not on:
+            was = sorted(self._stock_on)
+            self._stock_on = set()
+            back = [] if self._is_running() else self._put_back(was)
+        if on:
+            msg = ("the game's own clips are unlocked: each one's Color "
+                   "switch can bake the individual files profile into it")
+        else:
+            msg = "the game's own clips are locked again" + (
+                " (%d put back to the original)" % len(back) if back else "")
+        self.log("Replace Video: %s." % msg, "info")
+        self._save_staged()
+        self._refresh_list()
+        self._color_changed()
+        self.publish_look()
+        return True
 
     def color_all_changed(self):
         """The Color profile tab moved its "every replaced video" box."""
@@ -1028,6 +1078,9 @@ class VideoTab(BestQualityMixin, TabService):
     def set_color(self, rel, value):
         """This clip's own colour switch (PAD-312): True / False, or None
         to follow the Color profile tab's box again."""
+        if (rel in self._by_rel and not self._assign.get(rel)
+                and self._color_stock and self._per_file_colour()):
+            return self._set_stock_color(rel, bool(value))
         if not (rel in self._by_rel and self._assign.get(rel)
                 and self._per_file_colour()):
             return False
@@ -1041,6 +1094,29 @@ class VideoTab(BestQualityMixin, TabService):
             self.log("Replace Video: %s %s." % (
                 rel, "gets the chosen-files color profile" if value
                 else "goes on the card in its own colors"), "info")
+        self._save_staged()
+        self._refresh_list()
+        self._color_changed()
+        self.publish_look()
+        return True
+
+    def _set_stock_color(self, rel, on):
+        """A game's own clip's switch, with Advanced ticked (PAD-336): on,
+        the next build re-encodes it from its original with the individual
+        files profile; off, a clip already built that way gets its original
+        file back."""
+        if on == (rel in self._stock_on):
+            return True
+        if on:
+            self._stock_on.add(rel)
+            self.log("Replace Video: %s (the game's own clip) gets the "
+                     "individual files color profile at the next build; it "
+                     "is re-encoded for that." % rel, "info")
+        else:
+            self._stock_on.discard(rel)
+            back = [] if self._is_running() else self._put_back([rel])
+            self.log("Replace Video: %s stays as the game shipped it%s." % (
+                rel, " (its original file is back)" if back else ""), "info")
         self._save_staged()
         self._refresh_list()
         self._color_changed()
@@ -1141,6 +1217,8 @@ class VideoTab(BestQualityMixin, TabService):
                 "No slots match the search and the Show filter."
         values["counts"] = {"changed": changed_total, "total": total,
                             "shown": len(view)}
+        values["color_offered"] = bool(total and self._per_file_colour())
+        values["color_stock"] = self._color_stock
         self.set(**values)
         # the rail's count beside "Video" (the designs' rail: "Video 1")
         try:
@@ -1290,6 +1368,12 @@ class VideoTab(BestQualityMixin, TabService):
                                     for rel, v in self._asis.items()}
         data["video_length_slots"] = dict(self._length)
         slots = {rel: v for rel, v in self._color.items() if rel in self._assign}
+        if self._color_stock:
+            slots.update((rel, True) for rel in self._stock_on
+                         if not self._assign.get(rel))
+            data["video_color_stock"] = True
+        else:
+            data.pop("video_color_stock", None)
         if slots:
             data["video_color_slots"] = slots
         else:
@@ -1485,6 +1569,7 @@ class VideoTab(BestQualityMixin, TabService):
             del self._assign[rel]
             self._color.pop(rel, None)
         restored = self._put_back(applied)
+        self._stock_on.difference_update(rels)
         self._save_staged()
         gone = list(dict.fromkeys(picks + restored))
         if len(gone) == 1:
@@ -1812,7 +1897,8 @@ class VideoTab(BestQualityMixin, TabService):
             "length_secs": length_seconds(self._length.get(rel)),
             "length_follow": ("stock length" if self.video_trim_var.get()
                               else "full length"),
-            "color": (None if self._color_state(rel) is None else
+            "color": (None if (self._color_state(rel) is None
+                               or not self._assign.get(rel)) else
                       {None: "box", True: "on", False: "off"}[
                           self._color.get(rel)]),
             "color_follow": "corrected" if self._color_all else "own colors",

@@ -619,6 +619,12 @@ def _with_length(slot: VideoSlot, seconds: float) -> VideoSlot:
     return replace(slot, info=info, probed=True)
 
 
+#: The "replacement" of a game's own clip whose Color switch is on (PAD-336):
+#: staging re-encodes the slot from its ``.orig/`` snapshot with the
+#: individual files profile baked in.
+STOCK_SOURCE = "<stock clip>"
+
+
 def _pristine_slot(slot: VideoSlot, orig: Optional[str]) -> VideoSlot:
     """*slot* as the clip it shipped with, for a conversion to match.
 
@@ -712,6 +718,11 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     chosen = ({} if colour is not None
               else colour_profile.asset_map(assets_dir, "videos",
                                             [rel for rel, _r in items]))
+    # A game's own clip unlocked on the Video tab (PAD-336) is its own
+    # replacement: re-encoded from its original only to bake the colors in,
+    # so with no profile to bake (or no original to keep) it is left alone.
+    items = [(rel, rep) for rel, rep in items
+             if rep != STOCK_SOURCE or (assets_dir and rel in chosen)]
     total = len(items)
     staged = 0
     failures: List = []
@@ -728,7 +739,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        "replacement(s).", "error")
             break
         slot = slots_by_rel[rel]
-        slot_noconv = bool(overrides.get(rel, no_conversion))
+        stock = rep == STOCK_SOURCE
+        slot_noconv = False if stock else bool(overrides.get(rel, no_conversion))
         if progress_cb:
             progress_cb(i, total, rel)
         if log_cb:
@@ -736,7 +748,12 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
             if rel in overrides and bool(overrides[rel]) != bool(no_conversion):
                 note = ("  (this clip is set to go on as-is)" if slot_noconv
                         else "  (this clip is set to be converted)")
-            log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}{note}", "info")
+            if stock:
+                log_cb(f"Staging {rel}  ←  the game's own clip, with the "
+                       f"individual files color profile", "info")
+            else:
+                log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}{note}",
+                       "info")
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
         # The budget is the PRISTINE original's length.  slot.size is only
@@ -746,6 +763,15 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         # ``.orig/`` copy exists by now whenever assets_dir is known.
         orig = (staged_originals.snapshot_path(assets_dir, rel)
                 if assets_dir else None)
+        if stock:
+            if not orig:
+                failures.append((rel, "its original could not be kept, so "
+                                      "it was left as it is"))
+                if log_cb:
+                    log_cb(f"  ✗ {rel}: its original could not be kept, so "
+                           f"it was left as it is", "error")
+                continue
+            rep = orig
         choice = lengths.get(rel)
         seconds = length_seconds(choice)
         if choice == LENGTH_FULL:

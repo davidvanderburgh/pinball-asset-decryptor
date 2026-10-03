@@ -4008,7 +4008,11 @@ class App:
                 or not assets_dir or not os.path.isdir(assets_dir)):
             return None
         saved = staged_changes.load(assets_dir)
-        if not saved.get(kind):
+        # the game's own clips unlocked for color on the Video tab (PAD-336)
+        from .core import colour_profile
+        stock = (colour_profile.stock_video_rels(saved)
+                 if kind == "video" else [])
+        if not saved.get(kind) and not stock:
             return None
 
         def _hook(name):
@@ -4067,7 +4071,7 @@ class App:
                 'If this project or your replacement files moved to another '
                 'PC or drive, Project ▾ → "Relink moved files…" re-points '
                 'them all from one folder you pick.', "info"))
-        if not assignments:
+        if not assignments and not any(r in slots_by_rel for r in stock):
             return None
 
         if kind == "audio":
@@ -4166,8 +4170,26 @@ class App:
             return (0, 0, [])
         slots_by_rel, assignments, trim, no_conversion, asis = pend[:5]
         lengths = pend[5] if len(pend) > 5 else {}
-        from .core.video_slots import stage_replacements
-        from .core import staged_changes
+        from .core.video_slots import STOCK_SOURCE, stage_replacements
+        from .core import colour_profile, staged_changes
+        # the game's own clips switched on for color (PAD-336): each one is
+        # its own replacement, re-encoded with the profile baked in, and
+        # only where there is one to bake (Spike 2, a profile that changes
+        # something)
+        assignments = dict(assignments)
+        mfr = self._current_mfr
+        try:
+            per_file = bool(mfr is not None
+                            and mfr.colour_profile_on_display()
+                            and colour_profile.asset_active(assets_dir))
+        except Exception:                               # noqa: BLE001
+            per_file = False
+        for rel in (colour_profile.stock_video_rels(
+                staged_changes.load(assets_dir)) if per_file else ()):
+            if rel in slots_by_rel and not assignments.get(rel):
+                assignments[rel] = STOCK_SOURCE
+        if not assignments:
+            return (0, 0, [])
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         # "Best quality" is read from the folder's own record, which the
         # Video tab writes the moment it is ticked: the same answer whether

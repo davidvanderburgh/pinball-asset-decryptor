@@ -185,6 +185,9 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     # The game's own pictures switched on behind the Images tab's advanced
     # unlock (PAD-335): staged from their pristine bytes (the .orig/
     # snapshot, so a second build never corrects twice), profile baked in.
+    # a picture picked again: a copy kept from its earlier build is stale
+    for rel, _r in items:
+        colour_profile.discard_uncorrected(assets_dir, rel)
     stock = set()
     if colour is None and assets_dir and colour_profile.asset_active(
             assets_dir) is not None:
@@ -194,6 +197,19 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
             chosen.update(colour_profile.asset_map(
                 assets_dir, "images", sorted(stock)))
             items += [(rel, None) for rel in sorted(stock)]
+        # The user's own pictures an earlier build put here, pick gone
+        # (PAD-345): corrected from their kept uncorrected copy, never from
+        # .orig/ (Stern's picture), so a second build never corrects twice.
+        prof = colour_profile.asset_active(assets_dir)
+        for rel in colour_profile.built_image_on(assets_dir):
+            if rel not in slots_by_rel or rel in dict(items):
+                continue
+            kept = colour_profile.keep_uncorrected(assets_dir, rel)
+            if kept:
+                chosen[rel] = prof
+                items.append((rel, kept))
+                # already the size the build made it: never fitted again
+                keep_size = frozenset(keep_size) | {rel}
     total = len(items)
     staged = 0
     failures: List = []

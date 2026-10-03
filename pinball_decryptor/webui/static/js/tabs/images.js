@@ -500,7 +500,7 @@ export default function ImagesTab() {
           ${p.color ? html`<div class="img-keeprow img-colorrow">
             <${Check} checked=${!!p.color.on} onChange=${(v) => call("images.set_color", prevRel, v)}
               label="Correct its colors for the machine" title=${COLOR_TIP} />
-            <span class="small muted">${p.color.stock ? "The game's own picture (unlocked): corrected from its original" : p.color.own ? "Set for this picture" : p.color.all ? "Follows the Color profile tab (every replaced picture)" : "Follows the Color profile tab (no replaced picture)"}${p.color.on ? ` · “${p.color.name}” is baked in when you build.` : "."}</span>
+            <span class="small muted">${p.color.stock ? "The game's own picture (unlocked): corrected from its original" : p.color.built ? "Your picture from an earlier build: corrected from its uncorrected copy, which goes back when this is off" : p.color.own ? "Set for this picture" : p.color.all ? "Follows the Color profile tab (every replaced picture)" : "Follows the Color profile tab (no replaced picture)"}${p.color.on ? ` · “${p.color.name}” is baked in when you build.` : "."}</span>
           </div>` : null}
         </div>` : null}
         <${Thumb} cls="img-op" path=${p.orig} ver=${p.ver} label="Original" />

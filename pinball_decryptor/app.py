@@ -4281,7 +4281,8 @@ class App:
         if (mfr is None or not getattr(mfr.capabilities, "replace_image",
                                        False)
                 or not assets_dir or not os.path.isdir(assets_dir)
-                or not colour_profile.stock_image_rels(assets_dir)):
+                or not (colour_profile.stock_image_rels(assets_dir)
+                        or colour_profile.built_image_on(assets_dir))):
             return None
         from .core.image_slots import scan_image_slots
         try:

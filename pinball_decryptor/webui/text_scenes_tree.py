@@ -736,6 +736,7 @@ class TreeEditMixin:
         from ..core import colour_profile as _cp
         settings = _cp.asset_settings(self.assets_dir)
         unlock = self._colour_unlock()
+        built = _cp.built_image_rels(self.assets_dir)
         picks = self._tree_pictures()
         added_ops = {int(op["id"]): op for op in ops
                      if op.get("op") == "add_picture" and op.get("id") is not None}
@@ -751,7 +752,8 @@ class TreeEditMixin:
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "pics": ["images/" + rel for rel in pics],
                            "color": _colour_switch(n, kind, pics, picks, settings,
-                                                   added_ops.get(n["id"]), unlock["on"]),
+                                                   added_ops.get(n["id"]), unlock["on"],
+                                                   built),
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
                            "part_off": n["id"] in self._tpart_off,
@@ -1529,13 +1531,15 @@ class TreeEditMixin:
             # there, a game picture's switch lives only while the box is ticked, so neither
             # way keeps one: ticking never wakes a switch left from an old pick (PAD-345)
             picks = data.get("image") or {}
+            built = _cp.built_image_rels(self.assets_dir, data)
             slots = data.get(_cp.IMAGE_SLOTS_KEY) or {}
-            stock = [r for r in slots if not picks.get(r)]
+            stock = [r for r in slots if not picks.get(r) and r not in built]
             if on:
                 data[_cp.STOCK_IMAGES_KEY] = True
             else:
                 data.pop(_cp.STOCK_IMAGES_KEY, None)
-            slots = {r: v for r, v in slots.items() if picks.get(r)}
+            # a built picture's switch is the user's own: the box never touches it
+            slots = {r: v for r, v in slots.items() if picks.get(r) or r in built}
             if slots:
                 data[_cp.IMAGE_SLOTS_KEY] = slots
             else:
@@ -1555,6 +1559,16 @@ class TreeEditMixin:
             return images if images is not None and images._live(self.assets_dir) else None
         except Exception:                                # noqa: BLE001
             return None
+
+    def _put_back_built(self, rel):
+        """A built picture's switch went off (PAD-345): its uncorrected copy goes back."""
+        from ..core import colour_profile as _cp
+        try:
+            if self.window._is_running():
+                return False
+        except Exception:                                # noqa: BLE001
+            pass
+        return _cp.put_back_uncorrected(self.assets_dir, rel)
 
     def _put_back_stock(self, rels):
         """Game pictures whose switch went off or was locked again with the Images tab not
@@ -1614,14 +1628,18 @@ class TreeEditMixin:
             # the Images tab has not scanned this folder: its own record is the file
             from ..core import colour_profile as _cp
             from ..core import staged_changes
-            stock = not (staged_changes.load(self.assets_dir).get("image") or {}).get(rel)
+            data = staged_changes.load(self.assets_dir)
+            built = rel in _cp.built_image_rels(self.assets_dir, data)
+            stock = not built and not (data.get("image") or {}).get(rel)
             if stock and not _cp.stock_images_unlocked(self.assets_dir):
                 return False
-            # a game picture has no box to follow: off is no switch at all
+            # a game picture (or a built one) has no box to follow: off is no switch at all
             _cp.set_asset_slot(self.assets_dir, "images", rel,
-                               None if stock and not on else bool(on))
+                               None if (stock or built) and not on else bool(on))
             if stock and not on:
                 self._put_back_stock([rel])
+            if built and not on:
+                self._put_back_built(rel)
             try:
                 images.color_all_changed()
             except Exception:                            # noqa: BLE001
@@ -1992,12 +2010,14 @@ def _file_size(path):
         return None
 
 
-def _colour_switch(n, kind, pics, picks, settings, added_op, unlocked=False):
+def _colour_switch(n, kind, pics, picks, settings, added_op, unlocked=False, built=()):
     """A layer's colour switch for the Layers list (PAD-312): ``{"on", "own"}`` for a
     picture the chosen-files profile can reach (an added one, or one with an Images-tab
     replacement), ``{"locked": True}`` for the game's own picture, ``None`` for a layer that
     draws no single picture.  With the advanced box ticked (*unlocked*, PAD-344) the game's
-    own picture has a switch too, ``"stock": True``: only its own, never the tab's box."""
+    own picture has a switch too, ``"stock": True``: only its own, never the tab's box.
+    The user's own picture an earlier build put in the folder (*built*, pick gone, PAD-345)
+    is never locked: ``"built": True``, its own switch only, as on the Images tab."""
     from ..core import colour_profile as _cp
     if added_op is not None:
         own = added_op.get("color")
@@ -2008,6 +2028,10 @@ def _colour_switch(n, kind, pics, picks, settings, added_op, unlocked=False):
         return None
     rel = pics[0]
     pick = picks.get(rel) or {}
+    if "images/" + rel in built:
+        full = "images/" + rel
+        return {"on": bool(settings["images"].get(full)), "own": True, "rel": full,
+                "built": True}
     if pick.get("path") and not pick.get("stock"):
         full = "images/" + rel
         return {"on": _cp.asset_applies(settings, "images", full),

@@ -806,7 +806,7 @@ def _picture(assets_dir, rel, cache, pictures=None, sizes=None):
     colour = pick.get("colour")
     if img is not None and colour is not None:
         # the chosen-files profile, as the Write bakes it in (PAD-312)
-        ck = ("colour", src or rel, colour.gamma, colour.gain, colour.lift, colour.saturation)
+        ck = ("colour", src or rel, colour.key())
         got = cache.get(ck)
         if got and got[0] is img:
             img = got[1]

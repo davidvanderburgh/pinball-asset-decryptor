@@ -125,6 +125,7 @@ def _f(v):
 
 def tunable_terms(prof):
     """:data:`TUNABLE_TEMPLATE` with *prof*'s numbers in its slots."""
+    prof = prof.folded()      # brightness and contrast ride in gain/gamma
     nums = ((prof.saturation,) + tuple(prof.gain) + tuple(prof.gamma)
             + tuple(prof.lift) + tuple(prof.lift))
     out = TUNABLE_TEMPLATE
@@ -388,6 +389,7 @@ def tunable_in(raw):
 
 def _numbers(prof):
     """A profile's numbers as the shader text spells them (``%.6f``)."""
+    prof = prof.folded()
     return tuple(_f(x) for x in prof.gamma + prof.gain + prof.lift
                  + (prof.saturation,))
 

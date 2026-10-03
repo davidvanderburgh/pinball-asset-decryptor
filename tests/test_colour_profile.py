@@ -109,6 +109,74 @@ def test_to_text_round_trips_and_keeps_the_header(tmp_path):
     assert cp.to_text(RECOMMENDED) == cp.DEFAULT_TEXT
 
 
+# -- brightness and contrast (PAD-333) ---------------------------------------
+
+def test_brightness_and_contrast_fold_into_the_channel_curves():
+    """clip(in * b * k) ** c first, then the channel's own curve: the folded
+    table is that, shade for shade, and a mid grey keeps its place."""
+    base = cp.Profile(gamma=(1.1, 1.2, 1.35), lift=(0.05, 0.05, 0.05))
+    b, c = 1.2, 1.3
+    prof = cp.Profile(gamma=base.gamma, lift=base.lift, brightness=b,
+                      contrast=c)
+    k = 2 * 0.5 ** (1 / c)
+    for ch in range(3):
+        g, lo = base.gamma[ch], base.lift[ch]
+        want = [int(min(max((lo + (1 - lo) * (min(v / 255 * b * k, 1) ** c)
+                             ** g) * 255 + 0.5, 0), 255)) for v in range(256)]
+        assert prof.table(ch) == want
+    mid = cp.Profile(contrast=1.5).table(0)
+    assert abs(mid[128] - 128) <= 1 and mid[32] < 32 and mid[224] > 224
+    assert cp.Profile(contrast=0.6).table(0)[32] > 32
+    assert cp.Profile(brightness=0.8).table(0)[255] == 204
+    assert not prof.is_identity() and cp.Profile(contrast=1.0).is_identity()
+
+
+def test_brightness_and_contrast_reach_every_backend(tmp_path):
+    from pinball_decryptor.plugins.stern import shader_profile
+    prof = cp.Profile(name="Mine", gamma=(1.1, 1.2, 1.35), brightness=0.9,
+                      contrast=1.2)
+    folded = prof.folded()
+    assert folded.brightness == 1.0 and folded.contrast == 1.0
+    assert [folded.table(c) for c in range(3)] == [prof.table(c) for c in range(3)]
+    # the shaders are written with the folded numbers, in the fixed slots
+    assert shader_profile.tunable_terms(prof) == shader_profile.tunable_terms(folded)
+    assert cp.filter_step(prof) == cp.filter_step(folded)
+    # saved, staged and read back, and a cache key that moves with them
+    path = cp.save(prof, str(tmp_path / "m.txt"))
+    back, problems = cp.read_file(path)
+    assert problems == [] and back == prof
+    cp.store(str(tmp_path), prof)
+    assert cp.for_project(str(tmp_path)) == prof
+    assert prof.key() != cp.Profile(name="Mine", gamma=prof.gamma).key()
+    # a profile without them keeps the key (and staged file) it had
+    assert RECOMMENDED.key() == "%s|%s|%s|%s" % (
+        RECOMMENDED.gamma, RECOMMENDED.gain, RECOMMENDED.lift,
+        RECOMMENDED.saturation)
+    cp.store(str(tmp_path), RECOMMENDED)
+    from pinball_decryptor.core import staged_changes
+    assert "contrast" not in staged_changes.load(str(tmp_path))[cp.KEY]
+
+
+def test_ffmpeg_matches_pillow_with_brightness_and_contrast(tmp_path):
+    from pinball_decryptor.core.video import find_ffmpeg
+    ff = find_ffmpeg()
+    if not ff:
+        pytest.skip("no ffmpeg")
+    prof = cp.Profile(gamma=(1.1, 1.2, 1.35), saturation=0.9, brightness=1.15,
+                      contrast=1.3)
+    src = _ramp()
+    src.save(tmp_path / "in.png")
+    r = subprocess.run([ff, "-y", "-loglevel", "error",
+                        "-i", str(tmp_path / "in.png"),
+                        "-vf", ",".join(prof.ffmpeg_filters() + ["format=rgb24"]),
+                        str(tmp_path / "out.png")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    a = np.asarray(prof.apply_image(src), int)
+    b = np.asarray(PIL.open(tmp_path / "out.png").convert("RGB"), int)
+    assert np.abs(a - b).max() <= 3
+
+
 # -- a staged change of the project ------------------------------------------
 
 def test_a_project_has_no_profile_until_one_is_staged(tmp_path):
@@ -292,6 +360,16 @@ def test_color_tab_stages_on_the_project(tmp_path):
         prof = cp.for_project(str(proj))
         assert prof.gamma == (1.5, 1.0, 2.5)          # clamped to the slider
         assert prof.lift == (0.1, 0.1, 0.1)
+
+        # PAD-333: brightness and contrast, typed or slid, clamped the same
+        w.call("color.set_params", {"brightness": 1.25, "contrast": 9})
+        w.drain()
+        prof = cp.for_project(str(proj))
+        assert (prof.brightness, prof.contrast) == (1.25, 1.5)
+        assert prof.gamma == (1.5, 1.0, 2.5)          # the rest kept
+        s = w.state("color")
+        assert (s["brightness"], s["contrast"]) == (1.25, 1.5)
+        assert s["limits"]["contrast"] == [0.5, 1.5]
 
         w.call("color.preset", "none")                # No change = off
         w.drain()

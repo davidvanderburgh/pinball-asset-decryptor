@@ -73,6 +73,13 @@ pyinstaller \
     `# from beside the package, exactly as they run Spike 2's mkmulticard.py.` \
     `# Neither installer carried it, so both said it was missing (PAD-162).` \
     --add-data "$ROOT_DIR/tools/jjp_emu:tools/jjp_emu" \
+    `# The Barrels of Fun rig: the BOF Multi-boot tab runs` \
+    `# tools/bof_emu/mkbofmulti.py the same way (PAD-342), and that reads the` \
+    `# programs' Godot pack directories with plugins.bof.pck_directory from a` \
+    `# bare python3 - so the two leaf modules ship as files beside the rig.` \
+    --add-data "$ROOT_DIR/tools/bof_emu:tools/bof_emu" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/pck_directory.py:pinball_decryptor/plugins/bof" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
     `# carried. The gear menu's "Install Prerequisites" looks for it beside` \
     `# the package (app.py::_find_prereqs_script_linux) and an AppImage user` \

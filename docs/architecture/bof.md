@@ -229,6 +229,19 @@ The GUI preview uses `peek_next_update_version(assets_dir)` ([pipeline.py:800](.
 - **Fonts:** `.fontdata` (`FontFile`, RSCC-Zstd wrapped) → `.ttf`/`.otf` via `_decode_fontdata` ([source_converter.py:488](../../pinball_decryptor/plugins/bof/source_converter.py#L488)). On May-path Write, `may_packer` re-wraps a modified `.fontdata` into a fresh RSCC container (stripping any restored `RSRC` magic first); but the `.ttf`/`.otf`→`.fontdata` inverse encoder itself is not implemented, so editing the editable font file does not round-trip today. (unverified end-to-end)
 - **Scripts/scenes:** `.gdc` (compiled GDScript, `GDSC` magic), `.scn` (binary `PackedScene`), `.res` (binary resource). Now extracted byte-exact from the directory (they used to come out oversized under the marker scan). `.gd` source recompilation to `.gdc` is supported on the **pre-May GDRE path only** (`_recompile_scripts`, needs the bytecode revision from `gdre_export.log`). Substitution is still off: `.gdc`/`.scn`/`.res` are not in `may_packer._SUBSTITUTABLE_EXTS`. There's no longer a byte-boundary reason for that — the directory gives exact bounds — so it's a deliberate hold until edited scripts/scenes are actually tested on hardware.
 
+## Multi-boot (PAD-342)
+
+The Multi-boot tab's BOF backend builds ONE `.fun` that carries several builds of one
+title and a boot menu (`tools/bof_emu/mkbofmulti.py`; the whole design and its proof are
+in [tools/bof_emu/MULTIBOOT.md](../../tools/bof_emu/MULTIBOOT.md)). The machine's own
+updater installs it: the primary's program as a normal update would, every other build as
+a delta against it (FAT32 holds no file of 4 GiB, and a mod shares most of its packed
+files with stock - `delta_ops` matches them through `pck_directory`), the update's
+`update.sh` runs the install step that rebuilds and checks them, and its `.bash_profile`
+carries one hook block that runs the menu (`bofselect`: the framebuffer, the FAST
+Neuron's `SA:` levels) and hard-links the chosen program to `craze/GDCraze.x86_64`.
+Labyrinth only: Dune's and Winchester's updaters differ and are refused by name.
+
 ## Mod Pack / delta / direct-SSD
 
 - **Mod Pack:** supported (`modpack=True`). `export_mod_pack()` ([pipeline.py:318](../../pinball_decryptor/plugins/bof/pipeline.py#L318)) zips only files whose current MD5 differs from the `.checksums.md5` baseline; `import_mod_pack()` ([pipeline.py:360](../../pinball_decryptor/plugins/bof/pipeline.py#L360)) extracts a mod-pack zip over the assets folder.

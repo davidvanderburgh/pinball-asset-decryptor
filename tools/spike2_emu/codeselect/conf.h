@@ -119,6 +119,14 @@
  *                            bar Action button beside START is
  *                            key_start=3.0,3.4 (David, 2026-09-14).  A Stern
  *                            card ignores them.
+ *   switch_left=<n>[,<n2>]   Barrels of Fun only (--input fast, PAD-342): the
+ *   switch_right=<n>[,<n2>]  LEFT flipper / RIGHT flipper / START as switch
+ *   switch_start=<n>[,<n2>]  numbers in the FAST Neuron's SA: reply, and after
+ *                            a comma a second switch that does the same
+ *                            (Labyrinth's LAUNCH button beside START:
+ *                            switch_start=14,20).  Absent = Labyrinth's 15,
+ *                            22, 14; a value that is not 0-255 is warned
+ *                            about and ignored.
  *
  * A GROUP IS NEVER FATAL.  A member index naming no image line is dropped, a
  * group left with no member is dropped, an image named by two groups belongs
@@ -294,6 +302,7 @@ struct conf {
     int bad_colors;    /* color_ keys with an unknown role or a value that is not RRGGBB: ignored, counted */
     int jjp_byte[5], jjp_bit[5];   /* key_left/right/start/plus/minus= (byte -1 when absent) */
     int jjp_byte2[5], jjp_bit2[5]; /* ...and the second position after the comma (byte -1 = none) */
+    int fast_sw[3], fast_sw2[3];   /* switch_left/right/start= (-1 when absent), and the second switch */
 };
 
 /* 0 ok (c->n >= 1), -1 error with a message in err. */

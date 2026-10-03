@@ -294,6 +294,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     {
         int k;
         for (k = 0; k < 5; k++) c->jjp_byte[k] = c->jjp_bit[k] = c->jjp_byte2[k] = c->jjp_bit2[k] = -1;
+        for (k = 0; k < 3; k++) c->fast_sw[k] = c->fast_sw2[k] = -1;
     }
     f = fopen(path, "r");
     if (!f) {
@@ -521,6 +522,32 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 c->jjp_bit[k] = bt;
                 c->jjp_byte2[k] = b2;
                 c->jjp_bit2[k] = bt2;
+            }
+        } else if (!strcmp(key, "switch_left") || !strcmp(key, "switch_right") || !strcmp(key, "switch_start")) {
+            /* BOF (--input fast, PAD-342): a switch number in the Neuron's
+             * SA: reply, and after a comma a second one that does the same.
+             * Out loud and never fatal, like key_*= above */
+            int k = !strcmp(key, "switch_left") ? 0 : !strcmp(key, "switch_right") ? 1 : 2;
+            char *end = NULL;
+            long a = strtol(val, &end, 10), b = -1;
+            int ok = end != val && a >= 0 && a <= 255;
+            if (ok && *end == ',') {
+                char *end2 = NULL;
+                b = strtol(end + 1, &end2, 10);
+                if (end2 == end + 1 || b < 0 || b > 255 || *end2) {
+                    conf_warn(c, "%s:%d: %s=%s: the second switch is not 0-255 and is ignored",
+                              path, lineno, key, val);
+                    b = -1;
+                }
+            } else if (ok && *end) {
+                ok = 0;
+            }
+            if (!ok) {
+                conf_warn(c, "%s:%d: %s=%s is not a switch number 0-255: the default is used",
+                          path, lineno, key, val);
+            } else {
+                c->fast_sw[k] = (int)a;
+                c->fast_sw2[k] = (int)b;
             }
         } else if (!strncmp(key, "color_", 6)) {
             /* one colour on top of the theme.  An unknown role or a value

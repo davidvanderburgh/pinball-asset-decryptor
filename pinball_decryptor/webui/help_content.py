@@ -2850,6 +2850,23 @@ HELP_CONTENT = {
          "that image's own ISO, keeping the machine's settings and scores. "
          "Both images must be the same game version (they share one settings "
          "partition); the build refuses a mismatch and says why."),
+        ("A Barrels of Fun machine (one update file)",
+         "Pick Barrels of Fun on the picker and the tab takes the stock .fun "
+         "of a game and up to three more builds of it - a mod, say - and "
+         "Build update... writes ONE .fun under the game's own name (lab.fun "
+         "for Labyrinth). Copy it onto a FAT32 USB stick and install it the "
+         "way every Barrels of Fun update is installed: nothing is opened "
+         "up. The install puts the first build in place, rebuilds the others "
+         "from it and checks each one, and from the next power-up the machine "
+         "shows the menu on its own screen before the game starts: flippers "
+         "choose, START or LAUNCH boots, and the countdown boots the build "
+         "chosen last. Every build after the first is carried as its "
+         "difference from the first, which is what keeps two builds under "
+         "the 4 GB one FAT32 file can be; the size strip says when it does "
+         "not. All builds share the game's one set of settings and scores, "
+         "the menu has no sound, and installing any normal update afterwards "
+         "takes the menu away again. Labyrinth is supported; Dune and "
+         "Winchester update differently and are not yet."),
     ],
 }
 

@@ -182,6 +182,18 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     chosen = ({} if colour is not None
               else colour_profile.asset_map(assets_dir, "images",
                                             [rel for rel, _r in items]))
+    # The game's own pictures switched on behind the Images tab's advanced
+    # unlock (PAD-335): staged from their pristine bytes (the .orig/
+    # snapshot, so a second build never corrects twice), profile baked in.
+    stock = set()
+    if colour is None and assets_dir and colour_profile.asset_active(
+            assets_dir) is not None:
+        stock = {rel for rel in colour_profile.stock_image_rels(
+            assets_dir, {rel for rel, _r in items}) if rel in slots_by_rel}
+        if stock:
+            chosen.update(colour_profile.asset_map(
+                assets_dir, "images", sorted(stock)))
+            items += [(rel, None) for rel in sorted(stock)]
     total = len(items)
     staged = 0
     failures: List = []
@@ -192,7 +204,10 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
         if progress_cb:
             progress_cb(i, total, rel)
         if log_cb:
-            log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
+            log_cb(f"Staging {rel}  ←  "
+                   + (os.path.basename(rep) if rep else
+                      "its own picture, colors corrected for the machine"),
+                   "info")
         original = None
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
@@ -205,6 +220,8 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
             snap = staged_originals.snapshot_path(assets_dir, rel)
             if snap:
                 original = detect_image_info(snap)
+            if rep is None:
+                rep = snap or slot.abs_path
         ok, detail = stage_replacement(slot, rep, keep_size=rel in keep_size,
                                        original_info=original,
                                        colour=colour or chosen.get(rel))

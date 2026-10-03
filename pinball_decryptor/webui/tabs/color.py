@@ -451,9 +451,13 @@ class ColorTab(TabService):
                               brightness=prof.brightness,
                               contrast=prof.contrast, ranges=prof.ranges,
                               curves=prof.curves)
+        problems = list(problems)
+        if prof.has_extras() and not self._screen_mode():
+            problems.append("its color ranges and curves apply to the "
+                            "Machine screen only, so they were left out here")
         self._store(prof, rev=True)
         if problems:
-            self.set(problems=list(problems))
+            self.set(problems=problems)
         self.toast("Loaded %s" % prof.label(), "success")
         return True
 

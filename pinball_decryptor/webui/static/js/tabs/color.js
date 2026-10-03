@@ -557,8 +557,11 @@ function CurveEditor({ s, p, update }) {
     put(next);
   };
   const at = (e) => {
+    // the viewBox is -4 -4 263 263: a 4-unit margin keeps the end points' circles whole
     const box = svgRef.current.getBoundingClientRect();
-    return [clamp(((e.clientX - box.left) / box.width) * 255, 0, 255), clamp(255 - ((e.clientY - box.top) / box.height) * 255, 0, 255)];
+    const x = ((e.clientX - box.left) / box.width) * 263 - 4;
+    const y = ((e.clientY - box.top) / box.height) * 263 - 4;
+    return [clamp(x, 0, 255), clamp(255 - y, 0, 255)];
   };
   const down = (e) => {
     const [x, y] = at(e);
@@ -575,6 +578,13 @@ function CurveEditor({ s, p, update }) {
   const move = (e) => { if (drag.current >= 0 && e.currentTarget.hasPointerCapture(e.pointerId)) { const [x, y] = at(e); setPt(drag.current, x, y); } };
   const up = () => { drag.current = -1; };
   const removeAt = (i) => { if (pts.length > 2) put(pts.filter((_q, j) => j !== i)); };
+  // on the svg, not the circle: the pointer capture a click takes retargets
+  // the double-click to the svg, so a circle never sees it
+  const dbl = (e) => {
+    const [x, y] = at(e);
+    const i = pts.findIndex((q) => Math.abs(q[0] - x) < 8 && Math.abs(q[1] - y) < 8);
+    if (i >= 0) removeAt(i);
+  };
   const addPoint = () => {
     if (pts.length >= maxPts) return;
     let best = 0;
@@ -605,14 +615,13 @@ function CurveEditor({ s, p, update }) {
     <div class="cp-curve-body">
       <svg ref=${svgRef} class="cp-curve-box" viewBox="-4 -4 263 263" role="img"
           aria-label=${`${name} curve: click to add a point, drag to move it, double-click to remove it`}
-          onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
+          onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onDblClick=${dbl}>
         <rect x="0" y="0" width="255" height="255" class="cp-grid" />
         <path d="M64 0V255M128 0V255M191 0V255M0 64H255M0 128H255M0 191H255" class="cp-grid-line" />
         <path d="M0 255L255 0" class="cp-diag" />
         ${others.map((c) => html`<path d=${path(curveTable(curves[c.value]))} class=${"cp-curve faint " + CURVE_CLS[c.value]} />`)}
         <path d=${path(curveTable(pts))} class=${"cp-curve " + CURVE_CLS[ch]} />
-        ${pts.map((q, i) => html`<circle cx=${q[0]} cy=${255 - q[1]} r="5" class=${"cp-pt " + CURVE_CLS[ch]}
-          onDblClick=${(e) => { e.stopPropagation(); removeAt(i); }} />`)}
+        ${pts.map((q) => html`<circle cx=${q[0]} cy=${255 - q[1]} r="5" class=${"cp-pt " + CURVE_CLS[ch]} />`)}
       </svg>
       <div class="cp-pts">
         <div class="cp-pts-hd small muted"><span></span><span>Input</span><span>Output</span><span></span></div>
@@ -672,6 +681,7 @@ function Explainer({ s }) {
     <ul class="cp-facts">
       <li><${Icon} name="check" />Until you set one, it is the individual files profile, undone: what Scenes has shown so far. Same as individual files puts that back.</li>
       <li><${Icon} name="check" />Scenes looks bluer than your PC, but not blue enough for your machine? Turn the middle shades brighter here, most of all blue.</li>
+      <li><${Icon} name="check" />One band of colors off, like a sea that comes out teal? Color ranges below the preview changes just that band and leaves greys alone. Curves bends the shades with points of your own, all three colors together or one at a time. Both are this screen's alone: a build never gets them.</li>
       <li><${Icon} name="check" />Saved with this project, so each machine has its own. Save a copy and Load move it between projects.</li>
       <li><${Icon} name="check" />Revert all and the Write tab leave it alone: it describes your machine, not a change to the card.</li>
     </ul>`

@@ -27,6 +27,20 @@ replacements and the pictures you add (a test card included). Tick the gear
 menu's "Switched-off files in their own colors" to let a picture whose Color
 switch is off skip the machine screen instead (it is off by default).
 
+**Until a Machine screen is stored**, the preview uses the individual files
+profile *undone*: the inverse of step 3 per channel (`x = ((in - lift) / (1 -
+lift)) ** (1 / gamma) / gain`, held at the edge where the correction clipped),
+then a saturation mix of `1 / saturation` (black and white cannot be undone
+and is left alone). That is the screen the correction was measured for.
+
+**How Scenes applies it**: the frame is accumulated with colour premultiplied
+by coverage; before the backdrop is laid under it, each pixel's straight
+colour is taken (`rgb / alpha`), put through the screen, and multiplied back,
+so a soft edge keeps its edge. Every layer gets it: the game's own art, your
+replacements, the pictures you add. "Export picture…" writes what the preview
+shows, so turn the Machine screen switch off under Preview colors to export
+without it. The card build never includes it.
+
 ## Steps every profile has
 
 Numbers are per channel (red, green, blue) unless noted. `in` and `out` are
@@ -54,7 +68,8 @@ and named, never applied.
 
 These two come after steps 1 to 3, and only on the Machine screen (the
 shaders have fixed slots for steps 1 to 3 and nothing else, so a build's
-profiles never carry them).
+profiles never carry them: the whole screen overlay and individual files
+profiles drop any `range` or `curve_` line, and Load... says so).
 
 4. **Colour ranges**, each in turn (up to 6). For a pixel with
    `max = max(R, G, B)`, `min = min(R, G, B)`:

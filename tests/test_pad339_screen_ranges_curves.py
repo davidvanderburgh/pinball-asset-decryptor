@@ -112,6 +112,50 @@ def test_the_video_players_get_the_curves_as_tables():
     assert "t" not in cp.filter_step(cp.Profile(gamma=(1.2, 1.2, 1.2)))
 
 
+def test_a_builds_profiles_drop_them_even_from_a_hand_edited_file(tmp_path):
+    """A sidecar with ranges or curves on the whole screen overlay or the
+    individual files profile (hand-edited, or an older copy): neither reaches
+    a card, so neither profile carries them."""
+    d = str(tmp_path)
+    extras = {"ranges": [[205, 50, 30, 15, 0.8, 0.85, 0.15]],
+              "curves": {"rgb": [[0, 0], [64, 48], [255, 255]]}}
+    base = {"name": "x", "gamma": [1.1, 1.1, 1.1], "gain": [1, 1, 1],
+            "lift": [0, 0, 0], "saturation": 1.0}
+    staged_changes.save(d, {cp.KEY: dict(base, **extras),
+                            cp.ASSET_KEY: dict(base, **extras)})
+    assert cp.for_project(d).ranges == () and cp.for_project(d).curves == ()
+    assert cp.asset_profile(d).ranges == () and cp.asset_profile(d).curves == ()
+    assert cp.for_project(d).gamma == (1.1, 1.1, 1.1)
+    # the shaders' numbers are the plain ones too
+    assert cp.active(d).folded().has_extras() is False
+
+
+def test_load_in_another_mode_says_the_extras_were_left_out(tmp_path):
+    from tests.webui_harness import web_app
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    prof = cp.Profile(name="Mine", gamma=(0.9, 0.9, 0.9), ranges=(_sea_range(),))
+    path = tmp_path / "mine.txt"
+    cp.save(prof, str(path))
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "extract", "output", str(proj))
+        w.call("ui.select_tab", "color")
+        w.drain()
+        w.window.ask_open = lambda *a, **k: str(path)
+        assert w.call("color.load_file") is True
+        w.drain()
+        s = w.state("color")
+        assert s["ranges"] == [] and any("Machine screen only" in p for p in s["problems"])
+        assert cp.for_project(str(proj)).gamma == (0.9, 0.9, 0.9)
+        assert w.call("color.set_mode", "screen") == "screen"
+        w.drain()
+        assert w.call("color.load_file") is True
+        w.drain()
+        s = w.state("color")
+        assert s["problems"] == [] and len(s["ranges"]) == 1
+        assert cp.screen_profile(str(proj)).ranges == prof.ranges
+
+
 def test_scenes_draws_through_them(tmp_path):
     d = str(tmp_path)
     prof = cp.Profile(name="Mine", ranges=(_sea_range(),))

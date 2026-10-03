@@ -1089,6 +1089,17 @@ HELP_CONTENT = {
          "The game's own pictures have no switch (a blue lock) until Advanced unlocks them on the Images or Video tab. "
          "Both can be on at once: the overlay is drawn over the baked files "
          "like everything else."),
+        ("Machine screen (Spike 2, preview only)",
+         "Not a correction but the screen itself: what your machine does to "
+         "what it is given. Scenes and the Video tab's players draw through "
+         "it when its switch under Preview colors is on; nothing is written "
+         "to the card and Revert all leaves it. Besides the sliders it has "
+         "Color ranges (one band of hues at a time: hue, width, soft edge, "
+         "hue shift, saturation and brightness, with greys protected) and "
+         "Curves (RGB, then Red, Green and Blue, through points you drag or "
+         "type). Every control has a number box and a reset; new ones "
+         "change nothing until moved. Save a copy keeps them; loaded into "
+         "the other two modes they are left out."),
         ("Preview colors (Scenes)",
          "The row under the Scenes preview draws the scene the way the "
          "machine will, with a switch for each step: the Whole screen "

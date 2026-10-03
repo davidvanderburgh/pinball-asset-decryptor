@@ -677,7 +677,9 @@ def for_project(assets_dir):
     """The profile staged for *assets_dir*, or ``None`` (none staged)."""
     from . import staged_changes
     d = staged_changes.load(assets_dir).get(KEY)
-    return _from_dict(d) if isinstance(d, dict) else None
+    prof = _from_dict(d) if isinstance(d, dict) else None
+    # colour ranges and curves are the machine screen's alone (PAD-339)
+    return prof.plain() if prof is not None else None
 
 
 def store(assets_dir, prof):
@@ -756,7 +758,7 @@ def asset_profile(assets_dir):
     from . import staged_changes
     d = staged_changes.load(assets_dir).get(ASSET_KEY)
     prof = _from_dict(d) if isinstance(d, dict) else None
-    return prof if prof is not None else PRESETS[0][1]
+    return prof.plain() if prof is not None else PRESETS[0][1]
 
 
 def asset_stored(assets_dir):

@@ -67,6 +67,7 @@ replacement is.  The tab-wide box never reaches a stock picture.
 
 import contextlib
 import functools
+import os
 import threading
 from dataclasses import dataclass
 
@@ -982,8 +983,114 @@ def stock_image_rels(assets_dir, assigned=()):
     if not stock_images_unlocked(assets_dir):
         return []
     settings = asset_settings(assets_dir)
+    built = built_image_rels(assets_dir)
     return sorted(rel for rel, on in settings["images"].items()
-                  if on and rel not in assigned)
+                  if on and rel not in assigned and rel not in built)
+
+
+# -- the user's own pictures built earlier (PAD-345) ---------------------------
+
+#: Where a built picture's uncorrected bytes wait while its colour switch is
+#: on (a dotfolder: the slot scanners and the Write's diff skip it).
+UNCORRECTED_DIR = ".uncorrected"
+
+
+def built_image_rels(assets_dir, data=None):
+    """The user's own pictures an earlier build put in the project folder
+    whose pick is gone (the Images tab's "changed on disk (name)" rows):
+    the sidecar still names the replacement.  They are not the game's own
+    pictures, so they are never locked and never rebuilt from the .orig/
+    snapshot (that is Stern's picture, not the user's)."""
+    if not assets_dir:
+        return set()
+    if data is None:
+        from . import staged_changes
+        data = staged_changes.load(assets_dir)
+    names = data.get("replacement_names") or {}
+    picks = data.get("image") or {}
+    if not isinstance(names, dict):
+        return set()
+    if not isinstance(picks, dict):
+        picks = {}
+    return {str(rel) for rel, name in names.items()
+            if name and str(rel).startswith("images/") and not picks.get(rel)}
+
+
+def built_image_on(assets_dir):
+    """The built pictures (:func:`built_image_rels`) switched on: only their
+    own switch counts, never the Every replaced picture box (the file may
+    have been built corrected before; a box ticked later must not correct
+    every one of them again)."""
+    built = built_image_rels(assets_dir)
+    if not built:
+        return []
+    settings = asset_settings(assets_dir)
+    return sorted(rel for rel in built if settings["images"].get(rel))
+
+
+def uncorrected_path(assets_dir, rel):
+    """The kept uncorrected copy of built picture *rel*, or ``None``."""
+    if not assets_dir or not rel:
+        return None
+    p = os.path.join(assets_dir, UNCORRECTED_DIR, *rel.split("/"))
+    return p if os.path.isfile(p) else None
+
+
+def keep_uncorrected(assets_dir, rel):
+    """Copy built picture *rel* aside before a correction is baked into it,
+    once: the copy is then what every correction starts from and what goes
+    back when the switch goes off.  Returns the copy's path, or ``None``."""
+    got = uncorrected_path(assets_dir, rel)
+    if got:
+        return got
+    import shutil
+    src = os.path.join(assets_dir, *rel.split("/"))
+    if not os.path.isfile(src):
+        return None
+    dst = os.path.join(assets_dir, UNCORRECTED_DIR, *rel.split("/"))
+    try:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+    except OSError:
+        return None
+    return dst
+
+
+def discard_uncorrected(assets_dir, rel):
+    """A new pick replaces built picture *rel*: its kept copy is stale."""
+    p = uncorrected_path(assets_dir, rel)
+    if p:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def put_back_uncorrected(assets_dir, rel):
+    """Built picture *rel*'s switch went off: its uncorrected copy goes back
+    over the project's file.  True when one did."""
+    import shutil
+    src = uncorrected_path(assets_dir, rel)
+    if not src:
+        return False
+    try:
+        shutil.copy2(src, os.path.join(assets_dir, *rel.split("/")))
+        os.remove(src)
+    except OSError:
+        return False
+    root = os.path.join(assets_dir, UNCORRECTED_DIR)
+    d = os.path.dirname(src)
+    while os.path.normcase(d) != os.path.normcase(root) and d.startswith(root):
+        try:
+            os.rmdir(d)
+        except OSError:
+            break
+        d = os.path.dirname(d)
+    try:
+        os.rmdir(root)
+    except OSError:
+        pass
+    return True
 
 
 def added_picture_colour(assets_dir, op, settings=None, prof=None):
@@ -1176,6 +1283,7 @@ def asset_counts(assets_dir):
     picks = data.get("image") if isinstance(data.get("image"), dict) else {}
     out["images"] += len(stock_image_rels(
         assets_dir, {r for r, src in picks.items() if src}))
+    out["images"] += len(built_image_on(assets_dir))
     try:
         from ..plugins.stern import scene_edit
         for ops in scene_edit.load(assets_dir).values():

@@ -796,6 +796,17 @@ def pending_pictures(assets_dir, bake=True):
                     "keep": False, "colour": prof, "skip": False, "stock": True}
         except Exception:
             pass
+        # the user's own pictures built earlier, pick gone (PAD-345): drawn from their
+        # kept uncorrected copy once a build corrected the project's file
+        try:
+            for rel in colour_profile.built_image_on(assets_dir):
+                path = (colour_profile.uncorrected_path(assets_dir, rel)
+                        or os.path.join(assets_dir, *rel.split("/")))
+                out[rel[len("images/"):]] = {
+                    "path": path, "keep": True, "colour": prof, "skip": False,
+                    "built": True}
+        except Exception:
+            pass
     if settings is not None:
         try:
             from . import scene_edit

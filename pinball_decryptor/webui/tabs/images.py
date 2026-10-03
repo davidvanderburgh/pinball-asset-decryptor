@@ -510,7 +510,7 @@ class ImagesTab(TabService):
                 self._color = {
                     r: bool(v) for r, v in
                     (staged.get("image_color_slots") or {}).items()
-                    if r in self._assignments
+                    if r in self._assignments or self._is_built(r)
                     or (self._color_unlocked and r in self._by_rel)}
                 self._color_all = bool(staged.get("color_all_images"))
                 self._warn_dropped_assignments(staged.get("image"),
@@ -770,6 +770,13 @@ class ImagesTab(TabService):
             if isinstance(name, str) and name.strip()}
         return data
 
+    def _is_built(self, rel):
+        """The user's own picture an earlier build put in the folder, its pick
+        gone (a "changed on disk (name)" row, PAD-345): never the game's own
+        picture, so never locked and never rebuilt from .orig/ (Stern's)."""
+        return bool(rel and not self._assignments.get(rel)
+                    and self._remembered_rep_name(rel))
+
     def _remembered_rep_name(self, rel):
         if not self._scan_dir or not self._rep_names:
             return ""
@@ -794,7 +801,7 @@ class ImagesTab(TabService):
             data["image_keep_size"] = sorted(
                 r for r in self._keep_size if r in self._assignments)
             slots = {r: v for r, v in self._color.items()
-                     if r in self._assignments
+                     if r in self._assignments or self._is_built(r)
                      or (self._color_unlocked and r in self._by_rel)}
             if slots:
                 data["image_color_slots"] = slots
@@ -979,7 +986,8 @@ class ImagesTab(TabService):
         if not (rel and self._per_file_colour()):
             return None
         if not self._assignments.get(rel):
-            if not (self._color_unlocked and rel in self._by_rel):
+            if not (self._is_built(rel)
+                    or (self._color_unlocked and rel in self._by_rel)):
                 return None
             return bool(self._color.get(rel))
         own = self._color.get(rel)
@@ -990,6 +998,7 @@ class ImagesTab(TabService):
         switch, shown as a blue lock, the way Scenes and Video show it."""
         return bool(rel and not self._assignments.get(rel)
                     and not self._color_unlocked
+                    and not self._is_built(rel)
                     and self._per_file_colour())
 
     def _offers_color(self):
@@ -1012,7 +1021,8 @@ class ImagesTab(TabService):
                      "each one can have the individual files color profile "
                      "baked in when you build.", "info")
         else:
-            stock = [r for r in self._color if not self._assignments.get(r)]
+            stock = [r for r in self._color if not self._assignments.get(r)
+                     and not self._is_built(r)]
             for r in stock:
                 del self._color[r]
             if not self._is_running():
@@ -1040,8 +1050,12 @@ class ImagesTab(TabService):
             name = cp.asset_profile(self._assets_dir() or "").label()
         except Exception:                               # noqa: BLE001
             name = "colour profile"
-        return {"on": on, "own": rel in self._color, "all": self._color_all,
-                "name": name, "stock": not self._assignments.get(rel)}
+        row = {"on": on, "own": rel in self._color, "all": self._color_all,
+               "name": name, "stock": not self._assignments.get(rel)
+               and not self._is_built(rel)}
+        if self._is_built(rel):
+            row["built"] = True                     # PAD-345: the user's own
+        return row
 
     def color_all_changed(self):
         """The Color profile tab moved its "every replaced picture" box."""
@@ -1075,10 +1089,20 @@ class ImagesTab(TabService):
         None to follow the Color profile tab's box again."""
         if not (rel in self._by_rel and self._per_file_colour()):
             return False
-        stock = not self._assignments.get(rel)
+        built = self._is_built(rel)
+        stock = not self._assignments.get(rel) and not built
         if stock and not self._color_unlocked:
             return False
-        if stock and not value:
+        if built and not value:
+            # the user's own built picture: its uncorrected copy goes back
+            from ...core import colour_profile as cp
+            self._color.pop(rel, None)
+            back = (not self._is_running()
+                    and cp.put_back_uncorrected(self._scan_dir, rel))
+            self.log("Replace Images: %s keeps its own colors%s." % (
+                rel, " (its uncorrected copy is back in the project folder)"
+                if back else ""), "info")
+        elif stock and not value:
             # a game picture has no box to follow: off is no switch, and a
             # copy a build already corrected gets its own colors back
             self._color.pop(rel, None)
@@ -1579,8 +1603,13 @@ class ImagesTab(TabService):
                 names.pop(rel, None)
             data["replacement_names"] = names
             staged_changes.save(scan_dir, data)
+        from ...core import colour_profile as cp
         for rel in done:
             self._rep_names.pop(rel, None)
+            # back to the game's own picture: a built one's switch and kept
+            # uncorrected copy go with it (PAD-345)
+            self._color.pop(rel, None)
+            cp.discard_uncorrected(scan_dir, rel)
         history_log.record(scan_dir, [
             "%s  %s  put back to the extract's original (its replacement "
             "was cleared)" % ("image", rel) for rel in done])

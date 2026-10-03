@@ -1517,29 +1517,63 @@ class TreeEditMixin:
         if not self.assets_dir or not self._colour_unlock()["offered"]:
             return False
         on = bool(on)
-        images = self.window.service("images")
-        try:
-            images.set_color_unlocked(on)
-        except Exception:                                # noqa: BLE001
-            log.exception("scene colour unlock")
+        images = self._images_here()
+        if images is not None:
+            try:
+                images.set_color_unlocked(on)
+            except Exception:                            # noqa: BLE001
+                log.exception("scene colour unlock")
         data = staged_changes.load(self.assets_dir)
         if bool(data.get(_cp.STOCK_IMAGES_KEY)) != on:
-            # the Images tab has not scanned this folder: its own record is the file
+            # the Images tab has not scanned this folder: its own record is the file.  As
+            # there, a game picture's switch lives only while the box is ticked, so neither
+            # way keeps one: ticking never wakes a switch left from an old pick (PAD-345)
+            picks = data.get("image") or {}
+            slots = data.get(_cp.IMAGE_SLOTS_KEY) or {}
+            stock = [r for r in slots if not picks.get(r)]
             if on:
                 data[_cp.STOCK_IMAGES_KEY] = True
             else:
                 data.pop(_cp.STOCK_IMAGES_KEY, None)
-                picks = data.get("image") or {}
-                slots = {r: v for r, v in (data.get(_cp.IMAGE_SLOTS_KEY) or {}).items()
-                         if picks.get(r)}
-                if slots:
-                    data[_cp.IMAGE_SLOTS_KEY] = slots
-                else:
-                    data.pop(_cp.IMAGE_SLOTS_KEY, None)
+            slots = {r: v for r, v in slots.items() if picks.get(r)}
+            if slots:
+                data[_cp.IMAGE_SLOTS_KEY] = slots
+            else:
+                data.pop(_cp.IMAGE_SLOTS_KEY, None)
             staged_changes.save(self.assets_dir, data)
+            if not on:
+                self._put_back_stock(stock)
         self.pictures_changed()
         self._tree_refresh()
         return True
+
+    def _images_here(self):
+        """The Images tab when it has this folder scanned, else None: its switches are
+        another project's then, and this folder's own record is its sidecar (PAD-345)."""
+        images = self.window.service("images")
+        try:
+            return images if images is not None and images._live(self.assets_dir) else None
+        except Exception:                                # noqa: BLE001
+            return None
+
+    def _put_back_stock(self, rels):
+        """Game pictures whose switch went off or was locked again with the Images tab not
+        on this folder: a build already corrected the project's file, so its pristine copy
+        goes back, as the Images tab does (DragonRR, PAD-345: unticking the box left the
+        corrected picture in the preview)."""
+        from ..core import history_log, staged_originals
+        try:
+            if self.window._is_running():
+                return []
+        except Exception:                                # noqa: BLE001
+            pass
+        done = [r for r in rels if staged_originals.revert(self.assets_dir, r)]
+        if done:
+            history_log.record(self.assets_dir, [
+                "image  %s  put back to the extract's original (its color switch went "
+                "off)" % r for r in done])
+            log.info("Scenes: %d corrected game picture(s) put back", len(done))
+        return done
 
     @rpc
     def tree_color(self, node, on):
@@ -1569,11 +1603,13 @@ class TreeEditMixin:
             return False
         rel = "images/" + pics[0]
         images = self.window.service("images")
+        here = self._images_here()
         done = False
-        try:
-            done = bool(images.set_color(rel, bool(on)))
-        except Exception:                                # noqa: BLE001
-            log.exception("scene colour switch")
+        if here is not None:
+            try:
+                done = bool(here.set_color(rel, bool(on)))
+            except Exception:                            # noqa: BLE001
+                log.exception("scene colour switch")
         if not done:
             # the Images tab has not scanned this folder: its own record is the file
             from ..core import colour_profile as _cp
@@ -1584,6 +1620,8 @@ class TreeEditMixin:
             # a game picture has no box to follow: off is no switch at all
             _cp.set_asset_slot(self.assets_dir, "images", rel,
                                None if stock and not on else bool(on))
+            if stock and not on:
+                self._put_back_stock([rel])
             try:
                 images.color_all_changed()
             except Exception:                            # noqa: BLE001

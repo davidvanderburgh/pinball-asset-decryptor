@@ -735,6 +735,7 @@ class TreeEditMixin:
         # PAD-312: each picture's colour switch (the chosen-files profile baked into it)
         from ..core import colour_profile as _cp
         settings = _cp.asset_settings(self.assets_dir)
+        unlock = self._colour_unlock()
         picks = self._tree_pictures()
         added_ops = {int(op["id"]): op for op in ops
                      if op.get("op") == "add_picture" and op.get("id") is not None}
@@ -750,7 +751,7 @@ class TreeEditMixin:
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "pics": ["images/" + rel for rel in pics],
                            "color": _colour_switch(n, kind, pics, picks, settings,
-                                                   added_ops.get(n["id"])),
+                                                   added_ops.get(n["id"]), unlock["on"]),
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
                            "part_off": n["id"] in self._tpart_off,
@@ -779,6 +780,10 @@ class TreeEditMixin:
             # PAD-293: the preview's eyes differ from the game's (Reset puts them back)
             "view_apart": view != self._tree_hidden(card) or bool(self._tforce.get(card)),
             "solo": (self._tsolo.get((self.assets_dir, card)) or (None,))[0],
+            # PAD-344: the Layers list's advanced box, the Images tab's unlock
+            "color_unlock": unlock if any(
+                (l["color"] or {}).get("locked") or (l["color"] or {}).get("stock")
+                for l in layers) else None,
             "can_undo": bool(ops or (self._tree_hist(card) or {}).get("undo")),
             "can_redo": bool((self._tree_hist(card) or {}).get("redo")),
             "all_edits": scene_edit.count(self.assets_dir),
@@ -1491,12 +1496,57 @@ class TreeEditMixin:
             return True
         return self._tree_add({"op": "visible", "node": node, "on": False})
 
+    def _colour_unlock(self):
+        """The advanced "Unlock the game's own pictures" box (PAD-344): the Images tab's
+        own (PAD-335), offered only where the individual files profile is (Spike 2)."""
+        from ..core import colour_profile as _cp
+        mfr = getattr(self.window, "current_mfr", None)
+        try:
+            offered = bool(mfr is not None and mfr.colour_profile_on_display())
+        except Exception:                            # noqa: BLE001
+            offered = False
+        return {"offered": offered,
+                "on": offered and _cp.stock_images_unlocked(self.assets_dir)}
+
+    @rpc
+    def tree_color_unlocked(self, on):
+        """The Layers list's advanced box (PAD-344, DragonRR): the game's own pictures get
+        a colour switch too, here and on the Images tab (one setting, the Images tab's
+        PAD-335 unlock).  Off locks them again and puts back any a build corrected."""
+        from ..core import colour_profile as _cp, staged_changes
+        if not self.assets_dir or not self._colour_unlock()["offered"]:
+            return False
+        on = bool(on)
+        images = self.window.service("images")
+        try:
+            images.set_color_unlocked(on)
+        except Exception:                                # noqa: BLE001
+            log.exception("scene colour unlock")
+        data = staged_changes.load(self.assets_dir)
+        if bool(data.get(_cp.STOCK_IMAGES_KEY)) != on:
+            # the Images tab has not scanned this folder: its own record is the file
+            if on:
+                data[_cp.STOCK_IMAGES_KEY] = True
+            else:
+                data.pop(_cp.STOCK_IMAGES_KEY, None)
+                picks = data.get("image") or {}
+                slots = {r: v for r, v in (data.get(_cp.IMAGE_SLOTS_KEY) or {}).items()
+                         if picks.get(r)}
+                if slots:
+                    data[_cp.IMAGE_SLOTS_KEY] = slots
+                else:
+                    data.pop(_cp.IMAGE_SLOTS_KEY, None)
+            staged_changes.save(self.assets_dir, data)
+        self.pictures_changed()
+        self._tree_refresh()
+        return True
+
     @rpc
     def tree_color(self, node, on):
         """A layer's colour switch (PAD-312): the chosen-files profile is baked into its
         picture (an added one, or an Images-tab replacement), or the picture goes on the card
-        in its own colours.  The game's own pictures have no switch: Stern made them for the
-        machine's screen; replace one on the Images tab to correct it."""
+        in its own colours.  The game's own pictures have no switch (Stern made them for the
+        machine's screen) until the Layers list's advanced box unlocks them (PAD-344)."""
         from ..plugins.stern import scene_edit
         card, man = self._tree_card()
         if card is None:
@@ -1527,7 +1577,13 @@ class TreeEditMixin:
         if not done:
             # the Images tab has not scanned this folder: its own record is the file
             from ..core import colour_profile as _cp
-            _cp.set_asset_slot(self.assets_dir, "images", rel, bool(on))
+            from ..core import staged_changes
+            stock = not (staged_changes.load(self.assets_dir).get("image") or {}).get(rel)
+            if stock and not _cp.stock_images_unlocked(self.assets_dir):
+                return False
+            # a game picture has no box to follow: off is no switch at all
+            _cp.set_asset_slot(self.assets_dir, "images", rel,
+                               None if stock and not on else bool(on))
             try:
                 images.color_all_changed()
             except Exception:                            # noqa: BLE001
@@ -1898,11 +1954,12 @@ def _file_size(path):
         return None
 
 
-def _colour_switch(n, kind, pics, picks, settings, added_op):
+def _colour_switch(n, kind, pics, picks, settings, added_op, unlocked=False):
     """A layer's colour switch for the Layers list (PAD-312): ``{"on", "own"}`` for a
     picture the chosen-files profile can reach (an added one, or one with an Images-tab
     replacement), ``{"locked": True}`` for the game's own picture, ``None`` for a layer that
-    draws no single picture."""
+    draws no single picture.  With the advanced box ticked (*unlocked*, PAD-344) the game's
+    own picture has a switch too, ``"stock": True``: only its own, never the tab's box."""
     from ..core import colour_profile as _cp
     if added_op is not None:
         own = added_op.get("color")
@@ -1912,11 +1969,16 @@ def _colour_switch(n, kind, pics, picks, settings, added_op):
     if len(pics) != 1:
         return None
     rel = pics[0]
-    if (picks.get(rel) or {}).get("path"):
+    pick = picks.get(rel) or {}
+    if pick.get("path") and not pick.get("stock"):
         full = "images/" + rel
         return {"on": _cp.asset_applies(settings, "images", full),
                 "own": settings["images"].get(full) is not None, "rel": full}
     if kind in ("Bitmap", "Shape", "StreamingFlipbook"):
+        if unlocked:
+            full = "images/" + rel
+            return {"on": bool(settings["images"].get(full)), "own": True, "rel": full,
+                    "stock": True}
         return {"locked": True}
     return None
 

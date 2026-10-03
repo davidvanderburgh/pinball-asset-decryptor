@@ -593,18 +593,24 @@ const gameTip = (l) => ({
     `The preview is not changed; the eye hides it here.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
-// own colours (red), or the game's own picture, which has no switch (blue lock)
+// own colours (red), or the game's own picture, which has no switch (blue lock) until the
+// Layers list's advanced box unlocks it (PAD-344)
 const colorTip = (l) => {
   const c = l.color || {};
   if (c.locked) return { head: "Color: the game's own picture", lines: [
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
-    "Replace it on the Images tab to correct a picture of your own." ] };
+    "Replace it on the Images tab to correct a picture of your own, or tick Unlock the game's own pictures above the layers." ] };
   return { head: c.on ? "Color: corrected for the machine" : "Color: its own colors", lines: [
     ["Click", c.on ? "keep its own colors" : "correct its colors for the machine"],
     c.on ? "The Color profile tab's individual files profile is baked into this picture when you build; the preview shows it."
       : "It goes on the card in its own colors.",
-    c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
+    c.stock ? "The game's own picture, unlocked: corrected from its original when you build, so never twice."
+      : c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
 };
+const UNLOCK_TIP = { head: "Advanced: unlock the game's own pictures", lines: [
+  "Off: the game's own pictures are locked (blue lock), so the individual files profile is never applied to them twice by accident.",
+  "On: each one gets a red / green color switch too. A green one is corrected from its original when you build.",
+  "The same box as on the Images tab. Turning it off locks them again in their own colors." ] };
 const rowTip = (l) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
   lines: [
@@ -681,7 +687,10 @@ function TreeLayers({ t }) {
     <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span>
       ${t.solo != null ? html`<button type="button" class="ly-solo small"
         ...${tip({ head: "One layer is shown alone", lines: [["Click", "bring the other layers back"], ["Alt+click", "its eye does the same"]] })}
-        onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
+        onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}
+      ${t.color_unlock && t.color_unlock.offered ? html`<span class="ly-unlock" ...${tip(UNLOCK_TIP)}>
+        <${Check} checked=${!!t.color_unlock.on} onChange=${(v) => call("text_scenes.tree_color_unlocked", v)}
+          label="Unlock the game's own pictures" /></span>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
         class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game")}
         style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l))}

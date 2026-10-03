@@ -784,6 +784,19 @@ def pending_pictures(assets_dir, bake=True):
             "colour": prof if (prof and switch) else None,
             "skip": bool(path and settings is not None and not switch)}
     if settings is not None:
+        # the game's own pictures switched on behind the advanced unlock (PAD-335 /
+        # PAD-344): drawn from their pristine snapshot, so a build that already corrected
+        # the project's file is not corrected a second time here (nor shown corrected
+        # with the preview's Individual files switch off)
+        try:
+            from ...core import staged_originals
+            for rel in colour_profile.stock_image_rels(assets_dir, set(data.get("image") or ())):
+                out[rel[len("images/"):]] = {
+                    "path": staged_originals.snapshot_path(assets_dir, rel),
+                    "keep": False, "colour": prof, "skip": False, "stock": True}
+        except Exception:
+            pass
+    if settings is not None:
         try:
             from . import scene_edit
             for ops in scene_edit.load(assets_dir).values():

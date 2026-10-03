@@ -39,7 +39,7 @@ const colorTip = (r) => (r.cl
         : "It goes on the card in its own colors.",
       r.cg ? "The game's own picture, unlocked: corrected from its original when you build."
         : r.co ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture."] });
-const UNLOCK_TIP = "Advanced. Off: the game's own pictures are locked (blue lock), and only the pictures you replace can have the individual files color profile baked in. On: every picture on this tab gets a color switch, so a game picture can be corrected for the machine too. It is staged from its original when you build, so building again never corrects it twice. Only this tab: Scenes and Video keep their locks. Turning it off puts the game's pictures back in their own colors.";
+const UNLOCK_TIP = "Advanced. Off: the game's own pictures are locked (blue lock), and only the pictures you replace can have the individual files color profile baked in. On: every picture on this tab gets a color switch, so a game picture can be corrected for the machine too. It is staged from its original when you build, so building again never corrects it twice. The same box as the one above the Scenes tab's Layers list; Video has its own. Turning it off puts the game's pictures back in their own colors.";
 
 const TAG_CLS = { assigned: "img-picked", changed: "img-ondisk", foreign: "img-stray" };
 

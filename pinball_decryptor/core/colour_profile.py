@@ -58,9 +58,9 @@ compose: the game then draws the baked file through the display-wide one.
 Where the display-wide profile corrects the files itself (not Spike 2) it
 wins, and the chosen-files switches are not offered.
 
-The game's own pictures are locked out of it, except on the Images tab's
-advanced "Unlock the game's own pictures" box (PAD-335,
-:data:`STOCK_IMAGES_KEY`): then a stock picture with its own switch on is
+The game's own pictures are locked out of it, except on the advanced
+"Unlock the game's own pictures" box, one setting shown on the Images tab
+(PAD-335) and above the Scenes Layers list (PAD-344) (:data:`STOCK_IMAGES_KEY`): then a stock picture with its own switch on is
 staged from its pristine bytes with the profile baked in, the way a
 replacement is.  The tab-wide box never reaches a stock picture.
 """

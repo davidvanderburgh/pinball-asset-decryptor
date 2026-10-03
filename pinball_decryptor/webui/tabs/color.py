@@ -42,10 +42,8 @@ from ...core import colour_profile as cp
 
 log = logging.getLogger(__name__)
 
-#: limits of the page's controls; the file accepts a wider range (parse())
-LIMITS = {"gamma": (0.5, 2.5), "gain": (0.5, 1.5), "lift": (0.0, 0.3),
-          "saturation": (0.0, 2.0), "brightness": (0.5, 1.5),
-          "contrast": (0.5, 1.5)}
+#: limits of the page's controls: the whole range a file accepts (PAD-338)
+LIMITS = cp.LIMITS
 
 _CARD_CACHE = []
 

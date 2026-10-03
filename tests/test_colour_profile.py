@@ -358,18 +358,20 @@ def test_color_tab_stages_on_the_project(tmp_path):
         w.call("color.set_params", {"gamma": [1.5, 1.0, 9.0], "lift": 0.1})
         w.drain()
         prof = cp.for_project(str(proj))
-        assert prof.gamma == (1.5, 1.0, 2.5)          # clamped to the slider
+        assert prof.gamma == (1.5, 1.0, 5.0)          # clamped to the slider
         assert prof.lift == (0.1, 0.1, 0.1)
 
         # PAD-333: brightness and contrast, typed or slid, clamped the same
         w.call("color.set_params", {"brightness": 1.25, "contrast": 9})
         w.drain()
         prof = cp.for_project(str(proj))
-        assert (prof.brightness, prof.contrast) == (1.25, 1.5)
-        assert prof.gamma == (1.5, 1.0, 2.5)          # the rest kept
+        assert (prof.brightness, prof.contrast) == (1.25, 4.0)
+        assert prof.gamma == (1.5, 1.0, 5.0)          # the rest kept
         s = w.state("color")
-        assert (s["brightness"], s["contrast"]) == (1.25, 1.5)
-        assert s["limits"]["contrast"] == [0.5, 1.5]
+        assert (s["brightness"], s["contrast"]) == (1.25, 4.0)
+        # PAD-338: the sliders reach as far as a file may
+        assert s["limits"] == {k: list(v) for k, v in cp.LIMITS.items()}
+        assert s["limits"]["brightness"][0] == 0 and s["limits"]["gain"][0] == 0
 
         w.call("color.preset", "none")                # No change = off
         w.drain()
@@ -449,3 +451,19 @@ def test_staging_a_profile_changes_the_write_tabs_fingerprint(project):
     before = write_scan.fingerprint(None, str(project), 0, True)
     cp.store(str(project), dict(cp.PRESETS)["bw"])
     assert write_scan.fingerprint(None, str(project), 0, True) != before
+
+
+def test_pad338_full_range_stays_in_shader_slots():
+    """PAD-338: brightness 0 is black; the widest brightness / gain / gamma /
+    contrast fold to numbers the shader's [0, 10) slots hold, so the
+    preview and the machine agree at the ends too."""
+    lo = {k: v[0] for k, v in cp.LIMITS.items()}
+    hi = {k: v[1] for k, v in cp.LIMITS.items()}
+    assert lo["brightness"] == 0.0 and lo["gain"] == 0.0
+    black = cp.Profile(brightness=0.0)
+    assert all(black.table(c)[255] == 0 for c in range(3))
+    wide = cp.Profile(gamma=(hi["gamma"],) * 3, gain=(hi["gain"],) * 3,
+                      brightness=hi["brightness"], contrast=hi["contrast"])
+    gamma, gain, _ = wide.curve()
+    assert max(gamma + gain) <= cp.CURVE_MAX
+    assert cp.parse("brightness = 0" + chr(10) + "gain = 0 0 0")[1] == []

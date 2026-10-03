@@ -251,6 +251,8 @@ class ImagesTab(TabService):
         self._keep_size = set()
         self._color = {}        # rel -> this picture's own colour switch (PAD-312)
         self._color_all = False  # the Color profile tab's "every replaced picture" box
+        # the advanced box (PAD-335): the game's own pictures take a switch too
+        self._color_unlocked = False
         self._groups = {}
         self._group_occ = {}
         self._groups_all = {}
@@ -291,6 +293,7 @@ class ImagesTab(TabService):
                  empty={"text": EMPTY_NO_FOLDER, "busy": False},
                  sort={"key": "#0", "desc": False},
                  cols={"n": False, "keep": False, "color": False},
+                 color_unlock={"offered": False, "on": False},
                  can_clear=False,
                  running=False, preview=self._empty_preview(), dir="",
                  focus=None, total=0, shown=0,
@@ -337,6 +340,7 @@ class ImagesTab(TabService):
         self._keep_size = set()
         self._color = {}
         self._color_all = False
+        self._color_unlocked = False
         self._scan_dir = ""
         self._changed_on_disk = set()
         self._foreign_rels = set()
@@ -501,10 +505,13 @@ class ImagesTab(TabService):
                 self._keep_size = {
                     r for r in (staged.get("image_keep_size") or ())
                     if r in self._assignments}
+                self._color_unlocked = bool(
+                    staged.get("image_color_unlocked"))
                 self._color = {
                     r: bool(v) for r, v in
                     (staged.get("image_color_slots") or {}).items()
-                    if r in self._assignments}
+                    if r in self._assignments
+                    or (self._color_unlocked and r in self._by_rel)}
                 self._color_all = bool(staged.get("color_all_images"))
                 self._warn_dropped_assignments(staged.get("image"),
                                                scan_dir)
@@ -787,11 +794,16 @@ class ImagesTab(TabService):
             data["image_keep_size"] = sorted(
                 r for r in self._keep_size if r in self._assignments)
             slots = {r: v for r, v in self._color.items()
-                     if r in self._assignments}
+                     if r in self._assignments
+                     or (self._color_unlocked and r in self._by_rel)}
             if slots:
                 data["image_color_slots"] = slots
             else:
                 data.pop("image_color_slots", None)
+            if self._color_unlocked:
+                data["image_color_unlocked"] = True
+            else:
+                data.pop("image_color_unlocked", None)
             data["image_change_filter"] = self.image_change_filter_var.get()
             data["image_group_by_scene"] = bool(
                 self.image_group_by_scene_var.get())
@@ -962,15 +974,61 @@ class ImagesTab(TabService):
 
     def _color_state(self, rel):
         """``True`` / ``False`` for a replaced picture (its own switch, else
-        the tab-wide box), ``None`` when there is nothing to correct."""
-        if not (rel and self._assignments.get(rel)
-                and self._per_file_colour()):
+        the tab-wide box) or, behind the advanced unlock, a game picture (its
+        own switch only, PAD-335); ``None`` when there is nothing to correct."""
+        if not (rel and self._per_file_colour()):
             return None
+        if not self._assignments.get(rel):
+            if not (self._color_unlocked and rel in self._by_rel):
+                return None
+            return bool(self._color.get(rel))
         own = self._color.get(rel)
         return bool(self._color_all if own is None else own)
 
+    def _color_locked(self, rel):
+        """The game's own picture with the advanced box off (PAD-335): no
+        switch, shown as a blue lock, the way Scenes and Video show it."""
+        return bool(rel and not self._assignments.get(rel)
+                    and not self._color_unlocked
+                    and self._per_file_colour())
+
     def _offers_color(self):
-        return bool(self._assignments) and self._per_file_colour()
+        return bool(self._slots) and self._per_file_colour()
+
+    @rpc
+    def set_color_unlocked(self, value):
+        """The advanced "Unlock the game's own pictures" box (PAD-335): a
+        game picture gets a color switch of its own.  Turning it off drops
+        those switches and puts back any game picture a build corrected."""
+        if not self._per_file_colour():
+            return False
+        value = bool(value)
+        if value == self._color_unlocked:
+            return True
+        self._color_unlocked = value
+        restored = []
+        if value:
+            self.log("Replace Images: the game's own pictures are unlocked: "
+                     "each one can have the individual files color profile "
+                     "baked in when you build.", "info")
+        else:
+            stock = [r for r in self._color if not self._assignments.get(r)]
+            for r in stock:
+                del self._color[r]
+            if not self._is_running():
+                restored = self._put_back_originals(
+                    self._applied_replacement_rels(stock))
+            self.log("Replace Images: the game's own pictures are locked "
+                     "again%s." % (
+                         "; %d corrected one(s) have their own colors back "
+                         "in the project folder" % len(restored)
+                         if restored else ""), "info")
+        self._save_staged_changes()
+        self._refresh_image_list()
+        if self._current_rel:
+            self._render_preview(self._current_rel)
+        self._color_changed()
+        return True
 
     def _color_row(self, rel):
         """The preview pane's switch: ``{on, own, all, name}`` or None."""
@@ -983,7 +1041,7 @@ class ImagesTab(TabService):
         except Exception:                               # noqa: BLE001
             name = "colour profile"
         return {"on": on, "own": rel in self._color, "all": self._color_all,
-                "name": name}
+                "name": name, "stock": not self._assignments.get(rel)}
 
     def color_all_changed(self):
         """The Color profile tab moved its "every replaced picture" box."""
@@ -1015,10 +1073,22 @@ class ImagesTab(TabService):
     def set_color(self, rel, value):
         """This picture's own colour switch (PAD-312): True / False, or
         None to follow the Color profile tab's box again."""
-        if not (rel in self._by_rel and self._assignments.get(rel)
-                and self._per_file_colour()):
+        if not (rel in self._by_rel and self._per_file_colour()):
             return False
-        if value is None:
+        stock = not self._assignments.get(rel)
+        if stock and not self._color_unlocked:
+            return False
+        if stock and not value:
+            # a game picture has no box to follow: off is no switch, and a
+            # copy a build already corrected gets its own colors back
+            self._color.pop(rel, None)
+            back = ([] if self._is_running() else
+                    self._put_back_originals(
+                        self._applied_replacement_rels([rel])))
+            self.log("Replace Images: %s keeps the game's own colors%s." % (
+                rel, " (its original is back in the project folder)"
+                if back else ""), "info")
+        elif value is None:
             self._color.pop(rel, None)
             self.log("Replace Images: %s follows the Color profile tab's "
                      "box again (%s)." % (
@@ -1067,7 +1137,8 @@ class ImagesTab(TabService):
         return {"r": rel, "s": res, "f": s.format_summary(),
                 "o": source_label(rel), "k": self._keep_state(rel),
                 "p": disp, "t": tag, "c": self._color_state(rel),
-                "co": rel in self._color}
+                "co": rel in self._color, "cl": self._color_locked(rel),
+                "cg": not rep}
 
     def _publish_chunks(self, which=None):
         """Send the rows (all chunks, or the chunk numbers in *which*)."""
@@ -1208,6 +1279,8 @@ class ImagesTab(TabService):
                  sort={"key": col, "desc": bool(desc)},
                  cols={"n": grouped, "keep": self._offers_keep_size(),
                        "color": self._offers_color()},
+                 color_unlock={"offered": self._per_file_colour(),
+                               "on": self._color_unlocked},
                  empty=empty)
         self._update_clear_all()
 
@@ -1876,7 +1949,7 @@ class ImagesTab(TabService):
             items.append({"label": "Correct its colors for the machine"
                           if not state else "Keep its own colors",
                           "act": "color_off" if state else "color_on"})
-            if iid in self._color:
+            if iid in self._color and self._assignments.get(iid):
                 items.append({"label": "Colors: follow the Color profile "
                               "tab's box again", "act": "color_box"})
         src = source_label(iid)

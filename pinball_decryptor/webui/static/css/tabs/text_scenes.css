@@ -192,3 +192,4 @@ html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
 .tree-keep { gap: 6px; cursor: pointer; margin-top: -2px; }
 .tree-playing { position: absolute; left: 10px; bottom: 8px; padding: 2px 9px; border-radius: 999px; background: rgba(12, 12, 16, .7); color: #f2f2f5; pointer-events: none; }
 .tree-layers .sc-head { display: flex; align-items: center; gap: 8px; }
+.tree-layers .ly-unlock { margin-left: auto; font-size: 12px; }

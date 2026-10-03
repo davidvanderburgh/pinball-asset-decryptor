@@ -61,7 +61,9 @@ def main():
                 time.sleep(1)
                 st = state().get("images") or {}
                 stock = None
-                for chunk in (st.get("chunks") or {}).values():
+                for key, chunk in st.items():
+                    if not key.startswith("rows_"):
+                        continue
                     for row in chunk or ():
                         if (row and "530x726" in row.get("r", "")
                                 and row["r"] != base.PORTRAIT):

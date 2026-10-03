@@ -34,13 +34,17 @@ const CH = [
   { key: 2, name: "Blue", cls: "b" },
 ];
 
+// the shader slots' ceiling (core/colour_profile.py CURVE_MAX)
+const CURVE_MAX = 9.999999;
+
 // PAD-333: brightness and contrast folded into each channel's gain and gamma,
 // as core/colour_profile.py Profile.curve does.
 function curve(p) {
   const b = Number(p.brightness ?? 1), c = Math.max(Number(p.contrast ?? 1), 0.01);
   if (b === 1 && c === 1) return { gamma: p.gamma, gain: p.gain };
   const k = Math.max(b, 0) * 2 * Math.pow(0.5, 1 / c);
-  return { gamma: p.gamma.map((g) => g * c), gain: p.gain.map((g) => k * Math.pow(Math.max(g, 0), 1 / c)) };
+  return { gamma: p.gamma.map((g) => Math.min(g * c, CURVE_MAX)),
+           gain: p.gain.map((g) => Math.min(k * Math.pow(Math.max(g, 0), 1 / c), CURVE_MAX)) };
 }
 
 function tables(p) {
@@ -214,6 +218,8 @@ function Curves({ p, screen }) {
 // of the profile holds; the words beside it say what it does.  A number in
 // range moves the slider as it is typed; leaving the box (or Enter) puts an
 // out-of-range one at the nearest end, Escape puts back the number it had.
+// PAD-338: Middle shades show the file's gamma upside down (1 / gamma), so
+// on every slider a bigger number and the right end mean more.
 function NumBox({ value, min, max, step, onInput, label }) {
   const places = String(step).includes(".") ? String(step).split(".")[1].length : 0;
   const fmt = (v) => Number(v).toFixed(places);
@@ -243,15 +249,18 @@ function NumBox({ value, min, max, step, onInput, label }) {
     }} /></span>`;
 }
 
-function Slider({ label, value, min, max, step, show, onInput, hint, cls, left, right }) {
+// PAD-338: `scale` puts the track on another footing than the number (pos /
+// val: number to track position and back, with the track's own min, max, step).
+function Slider({ label, value, min, max, step, show, onInput, hint, cls, left, right, scale }) {
+  const sc = scale || { pos: (v) => v, val: (x) => x, min, max, step };
   return html`<div class=${cx("cp-slider", cls)}>
     <div class="cp-sl-hd">
       <span class="cp-sl-name" ...${tip(hint)}>${label}</span>
       <span class="cp-sl-val mono">${show(value)}</span>
       <${NumBox} value=${value} min=${min} max=${max} step=${step} onInput=${onInput} label=${label} />
     </div>
-    <input type="range" min=${min} max=${max} step=${step} value=${value} aria-label=${label}
-      onInput=${(e) => onInput(Number(e.target.value))} />
+    <input type="range" min=${sc.min} max=${sc.max} step=${sc.step} value=${sc.pos(value)} aria-label=${label}
+      onInput=${(e) => onInput(sc.val(Number(e.target.value)))} />
     ${left || right ? html`<div class="cp-sl-ends small muted"><span>${left}</span><span>${right}</span></div>` : null}
   </div>`;
 }
@@ -263,12 +272,17 @@ const pct = (v) => `${Math.round(v * 100)}%`;
 function Controls({ s, p, update }) {
   const screen = s.per_file && s.mode === "screen";
   const lim = s.limits || {};
-  const [glo, ghi] = lim.gamma || [0.5, 2.5];
-  const [klo, khi] = lim.gain || [0.5, 1.5];
-  const [llo, lhi] = lim.lift || [0, 0.3];
-  const [slo, shi] = lim.saturation || [0, 2];
-  const [blo, bhi] = lim.brightness || [0.5, 1.5];
-  const [clo, chi] = lim.contrast || [0.5, 1.5];
+  const [glo, ghi] = lim.gamma || [0.1, 5];
+  const [klo, khi] = lim.gain || [0, 4];
+  const [llo, lhi] = lim.lift || [0, 0.9];
+  const [slo, shi] = lim.saturation || [0, 4];
+  const [blo, bhi] = lim.brightness || [0, 4];
+  const [clo, chi] = lim.contrast || [0.1, 4];
+  // PAD-338: middle shades as 1 / gamma (bigger = brighter) on a log track,
+  // so 1 sits mid-way and each end is as far from it as the file allows
+  const mids = { pos: (v) => Math.log(v), val: (x) => Math.round(Math.exp(x) * 100) / 100,
+                 min: Math.log(1 / ghi), max: Math.log(1 / glo), step: 0.001 };
+  const inv = (g) => Math.round((1 / g) * 100) / 100;
   const setCh = (key, c, v) => { const arr = p[key].slice(); arr[c] = v; update({ [key]: arr }); };
   const presets = s.presets || [];
   const extra = html`<div class="row cp-file">
@@ -296,8 +310,8 @@ function Controls({ s, p, update }) {
         <span class="small muted">${screen
           ? "How bright this screen shows each color's middle shades. Scenes not blue enough? Turn blue brighter."
           : "The machine shows a color's middle shades too bright? Darken them here."}</span></div>
-      ${CH.map((c) => html`<${Slider} cls=${c.cls} label=${c.name} value=${p.gamma[c.key]} min=${glo} max=${ghi} step="0.01"
-          show=${darker} onInput=${(v) => setCh("gamma", c.key, v)} left="brighter" right="darker"
+      ${CH.map((c) => html`<${Slider} cls=${c.cls} label=${c.name} value=${inv(p.gamma[c.key])} min=${inv(ghi)} max=${inv(glo)} step="0.01"
+          scale=${mids} show=${(v) => darker(1 / v)} onInput=${(v) => setCh("gamma", c.key, 1 / v)} left="darker" right="brighter"
           hint=${"How bright the middle shades of " + c.name.toLowerCase() + " come out. Black and full " + c.name.toLowerCase() + " stay where they are."} />`)}
     </div>
 

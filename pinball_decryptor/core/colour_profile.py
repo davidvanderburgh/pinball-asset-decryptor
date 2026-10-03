@@ -129,6 +129,19 @@ contrast = 1.00
 """
 
 
+#: every number's range, for a file and for the tab's sliders alike (PAD-338:
+#: the sliders used to stop well inside it).  Gamma and contrast stop short
+#: of 0, where every shade would turn white or black.
+LIMITS = {"gamma": (0.1, 5.0), "gain": (0.0, 4.0), "lift": (0.0, 0.9),
+          "saturation": (0.0, 4.0), "brightness": (0.0, 4.0),
+          "contrast": (0.1, 4.0)}
+
+#: the largest folded gain or gamma: the shader's ``%.6f`` slots hold
+#: [0, 10) (plugins/stern/shader_profile.py), so every use stops there too
+#: and the machine draws what the preview did.
+CURVE_MAX = 9.999999
+
+
 @dataclass(frozen=True)
 class Profile:
     name: str = ""
@@ -154,8 +167,9 @@ class Profile:
             return self.gamma, self.gain, self.lift
         c = max(c, 0.01)
         k = max(b, 0.0) * 2.0 * 0.5 ** (1.0 / c)
-        return (tuple(g * c for g in self.gamma),
-                tuple(k * max(g, 0.0) ** (1.0 / c) for g in self.gain),
+        return (tuple(min(g * c, CURVE_MAX) for g in self.gamma),
+                tuple(min(k * max(g, 0.0) ** (1.0 / c), CURVE_MAX)
+                      for g in self.gain),
                 self.lift)
 
     def folded(self):
@@ -318,9 +332,7 @@ def parse(text):
     skipped and named; it never raises."""
     fields = {}
     problems = []
-    limits = {"gamma": (0.1, 5.0), "gain": (0.0, 4.0), "lift": (0.0, 0.9),
-              "saturation": (0.0, 4.0), "brightness": (0.1, 4.0),
-              "contrast": (0.1, 4.0)}
+    limits = LIMITS
     single = ("saturation", "brightness", "contrast")
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.split("#", 1)[0].strip()

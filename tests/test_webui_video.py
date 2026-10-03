@@ -821,3 +821,31 @@ def test_a_clip_can_choose_its_own_length(tmp_path):
         assert w.call("video.row_menu", [rel])["length"] == "full"
         w.call("video.set_length", rel, None)
         assert w.window.pending_video_assignments(str(proj))[5] == {}
+
+
+def test_color_column_locks_the_games_own_clips(tmp_path):
+    """PAD-334: like a Scenes layer, a stock clip shows a lock and a replaced
+    one a red (own colors) or green (corrected) switch."""
+    proj = _project(tmp_path)
+    mine = _mine(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        st = _scan(w, proj)
+        if not w.run(lambda: w.window.service("video")._per_file_colour()):
+            pytest.skip("this manufacturer corrects the files on the display")
+        assert all(r["col_lock"] and r["col"] is None for r in st["rows"])
+        w.answers.append(str(mine))
+        assert w.call("video.choose", "video/intro.mp4") is True
+        r = _row(w.state("video"), "video/intro.mp4")
+        assert not r["col_lock"] and r["col"] is False
+        assert w.call("video.set_color", "video/intro.mp4", True)
+        r = _row(w.state("video"), "video/intro.mp4")
+        assert r["col"] is True and r["col_own"] is True
+        assert _row(w.state("video"), "video/attract.mp4")["col_lock"] is True
+        assert w.call("video.set_color", "video/attract.mp4", True) is False
+
+
+def test_color_column_has_no_lock_where_the_display_corrects(tmp_path):
+    proj = _project(tmp_path)
+    with web_app(tmp_path, mfr="jjp") as w:
+        st = _scan(w, proj)
+        assert not any(r["col_lock"] for r in st["rows"])

@@ -100,7 +100,17 @@ const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 5
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
                 aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert" };
 // PAD-312: the chosen-files color profile, baked into this clip as it is converted
-const COLOR_TIP = "On: the Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Off: it goes on the card in its own colors. The game's own clips are never touched. A box you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
+const COLOR_TIP = "Green: the Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Red: it goes on the card in its own colors. Blue lock: the game's own clip, never touched. A switch you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
+// PAD-334: the same blue lock / red / green palette as a picture's switch in Scenes
+const colorTip = (r) => (r.col_lock
+  ? { head: "Color: the game's own clip", lines: [
+      "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
+      "Choose a replacement to correct a clip of your own."] }
+  : { head: r.col ? "Color: corrected for the machine" : "Color: its own colors", lines: [
+      ["Click", r.col ? "keep its own colors" : "correct its colors for the machine"],
+      r.col ? "The Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that)."
+        : "It goes on the card in its own colors.",
+      r.col_own ? "Set for this clip." : "Follows the Color profile tab's box for every replaced video."] });
 // The long-named columns share the width that is left over (more or less
 // of it); the others keep the width that fits them, so a narrow window
 // shortens names, never "MP4 h264 30fps" or a length.
@@ -632,7 +642,7 @@ export default function VideoTab() {
   // the last column never takes a drag; it only stretches once every
   // stretching column is one the user sized (Tk _pin_tree_columns)
   const convWidth = flexLeft ? `calc(${fit.conv}px)` : `minmax(${fit.conv}px,1fr)`;
-  const colorCol = allRows.some((r) => r.col != null);
+  const colorCol = allRows.some((r) => r.col != null || r.col_lock);
   const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "rep"].reduce((a, k) =>
     a + (tuned[k] ? Math.max(36, tuned[k]) : FLEX.includes(k) ? COL_MIN[k] : fit[k]), 0) + fit.conv
     + (colorCol ? fit.col + 10 : 0) + 7 * 10 + 20;
@@ -677,9 +687,12 @@ export default function VideoTab() {
       render: (r) => html`<button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>` },
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
-      render: (r) => (r.col == null ? "" : html`<input type="checkbox" class=${cx("vid-color", r.col_own && "own")} checked=${!!r.col}
-        aria-label="Correct this clip's colors for the machine" ...${tip(COLOR_TIP)}
-        onClick=${(e) => { e.stopPropagation(); if (e.detail > 1) { e.preventDefault(); return; } call("video.set_color", r.rel, !r.col); }} />`) },
+      render: (r) => (r.col_lock
+        ? html`<span class="vid-color locked" aria-label="The game's own clip: no color switch" ...${tip(colorTip(r))}><${Icon} name="lock" /></span>`
+        : r.col == null ? "" : html`<button type="button" class=${cx("vid-color", r.col ? "on" : "off", r.col_own && "own")}
+        aria-label="Correct this clip's colors for the machine" aria-pressed=${r.col ? "true" : "false"} ...${tip(colorTip(r))}
+        onClick=${(e) => { e.stopPropagation(); if (e.detail > 1) { e.preventDefault(); return; } call("video.set_color", r.rel, !r.col); }}>
+        <${Icon} name="palette" /></button>`) },
     { key: "conv", label: "Convert", width: convWidth, sort: "conv", titleOf: (r) => r.conv,
       render: (r) => html`<span class=${r.conv_cls === "bad" ? "err-ink" : r.conv_cls === "stray" ? "warn-ink" : ""}>${r.conv}</span>` },
   ].filter(Boolean);

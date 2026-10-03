@@ -27,6 +27,11 @@ card, the Write tab lists nothing, and Revert all leaves it (it describes
 the user's machine, not a change to the card).  Until one is stored the
 mode shows the individual files profile, undone, which is what Scenes uses.
 
+COLOR RANGES AND CURVES (PAD-339, PAD-343).  First the machine screen's
+alone, now every mode's: the files bake them (Pillow, ffmpeg .cube tables)
+and the Spike 2 overlay draws them in its shaders (shader_profile
+``extras_glsl``), so the same cards show whichever mode is open.
+
 The PREVIEW is drawn by the page itself (static/js/tabs/color.js) with the
 same maths, so a slider moves the picture as it is dragged; this side only
 says which picture: a test card PAD draws, or one of the user's own.
@@ -237,10 +242,6 @@ class ColorTab(TabService):
             self.toast("Choose a project folder on the Extract tab first.",
                        "error")
             return False
-        if prof is not None and not self._screen_mode():
-            # colour ranges and curves are the machine screen's alone
-            # (PAD-339): a build's profiles have no step for them
-            prof = prof.plain()
         if self._screen_mode():
             # the machine screen: preview only, nothing pending; None goes
             # back to the Recommended screen
@@ -376,9 +377,9 @@ class ColorTab(TabService):
     @rpc
     def set_params(self, params):
         """The page's sliders: any of name, gamma [r g b], gain [r g b],
-        lift (one number, all three), saturation, brightness, contrast, and
-        on the machine screen (PAD-339) ranges [[7 numbers], ...] and
-        curves {channel: [[in, out], ...]}."""
+        lift (one number, all three), saturation, brightness, contrast,
+        ranges [[7 numbers], ...] and curves {channel: [[in, out], ...]}
+        (PAD-339 on the machine screen, PAD-343 in every mode)."""
         p = self._shown()
         kw = dict(name=p.name, gamma=p.gamma, gain=p.gain, lift=p.lift,
                   saturation=p.saturation, brightness=p.brightness,
@@ -396,7 +397,7 @@ class ColorTab(TabService):
         for key in ("saturation", "brightness", "contrast"):
             if key in params:
                 kw[key] = round(_clamp(key, params[key]), 3)
-        if self._screen_mode() and ("ranges" in params or "curves" in params):
+        if "ranges" in params or "curves" in params:
             ranges, curves = cp.extras_from(
                 params.get("ranges", [list(r) for r in p.ranges]),
                 params.get("curves", {ch: pts for ch, pts in p.curves}))
@@ -462,9 +463,6 @@ class ColorTab(TabService):
                               contrast=prof.contrast, ranges=prof.ranges,
                               curves=prof.curves)
         problems = list(problems)
-        if prof.has_extras() and not self._screen_mode():
-            problems.append("its color ranges and curves apply to the "
-                            "Machine screen only, so they were left out here")
         self._store(prof, rev=True)
         if problems:
             self.set(problems=problems)

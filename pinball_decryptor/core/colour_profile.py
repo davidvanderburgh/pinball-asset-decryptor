@@ -66,6 +66,7 @@ replacement is.  The tab-wide box never reaches a stock picture.
 """
 
 import contextlib
+import functools
 import threading
 from dataclasses import dataclass
 
@@ -143,10 +144,10 @@ LIMITS = {"gamma": (0.1, 5.0), "gain": (0.0, 4.0), "lift": (0.0, 0.9),
 #: and the machine draws what the preview did.
 CURVE_MAX = 9.999999
 
-# -- the machine screen's extra steps (PAD-339) --------------------------------
+# -- the extra steps: colour ranges and curves (PAD-339, PAD-343) -------------
 #
-# The Machine screen (SCREEN_KEY) is preview only, so it is not held to the
-# shader's few fixed slots: on top of the steps every profile has it can carry
+# First the Machine screen's alone (SCREEN_KEY, preview only), now every
+# profile's (PAD-343): on top of the steps every profile has it can carry
 # COLOUR RANGES (hue, saturation and brightness of one band of hues, e.g. the
 # sea's cyan-blue, with grey left alone) and CURVES (a master one for all
 # three channels, then one per channel, through points the user places).
@@ -166,6 +167,12 @@ CURVE_MAX = 9.999999
 #
 # A range with shift 0 and saturation and brightness 1, and a curve through
 # (0, 0) and (255, 255) alone, change nothing.
+#
+# Where each is applied: Pillow and numpy as above; ffmpeg as a lut3d (the
+# ranges) and a lut1d (the curves) from .cube files (_ffmpeg_extras); the
+# Spike 2 whole screen overlay as GLSL after the shader's fixed slots
+# (plugins/stern/shader_profile.py extras_glsl).  The multi-boot menu's
+# Color correction (PAD-307) rewrites only the slots, so it leaves them be.
 
 #: a colour range's numbers, in the order a file and the page hold them
 RANGE_FIELDS = ("hue", "width", "soft", "shift", "saturation", "brightness",
@@ -324,7 +331,7 @@ class Profile:
     saturation: float = 1.0
     brightness: float = 1.0
     contrast: float = 1.0
-    #: PAD-339, the machine screen only: colour ranges (:data:`RANGE_FIELDS`
+    #: PAD-339 (the machine screen's), PAD-343 (every profile's): colour ranges (:data:`RANGE_FIELDS`
     #: tuples) and curves (``((channel, ((x, y), ...)), ...)``, channels from
     #: :data:`CURVE_CHANNELS`); see the steps above :func:`curve_table`
     ranges: tuple = ()
@@ -342,8 +349,7 @@ class Profile:
                 or any(pts != CURVE_IDENTITY for _ch, pts in self.curves))
 
     def plain(self):
-        """The profile without its colour ranges and curves: what a build's
-        profiles hold (the shaders, ffmpeg and Pillow have no such step)."""
+        """The profile without its colour ranges and curves."""
         if not (self.ranges or self.curves):
             return self
         import dataclasses
@@ -455,6 +461,21 @@ class Profile:
                 % (ch, lo, 1.0 - lo, k, g))
         if exprs:
             out.append("lutrgb=" + ":".join(exprs))
+        return out + self._ffmpeg_extras()
+
+    def _ffmpeg_extras(self):
+        """The colour ranges and curves as ffmpeg filters (PAD-343): the
+        ranges as a ``lut3d``, the curves as a ``lut1d`` (exact: one entry
+        per level), each a .cube file written once per profile, since ffmpeg
+        has no inline form of either."""
+        out = []
+        live = [r for r in self.ranges if not range_neutral(r)]
+        if live:
+            out.append("lut3d=file=%s:interp=tetrahedral"
+                       % _cube_arg(_cube_3d(live)))
+        tabs = self.curve_tables()
+        if tabs is not None:
+            out.append("lut1d=file=%s" % _cube_arg(_cube_1d(tabs)))
         return out
 
     def apply_array(self, rgb):
@@ -544,6 +565,60 @@ class Profile:
         if alpha is not None:
             rgb.putalpha(alpha)
         return rgb if alpha is not None else rgb.convert("RGB")
+
+
+#: Grid points per side of the colour ranges' 3D table: 65 keeps a video
+#: within a few levels of the same picture through Pillow (33 was 12 off)
+CUBE_SIZE = 65
+
+
+def _cube_file(text):
+    """*text* as a .cube file in the temp folder, named by its contents (so
+    a profile's file is written once and two profiles never share one)."""
+    import hashlib
+    import os
+    import tempfile
+    d = os.path.join(tempfile.gettempdir(), "pad_colour_luts")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, hashlib.sha1(text.encode()).hexdigest()[:20]
+                        + ".cube")
+    if not os.path.isfile(path):
+        tmp = "%s.%d.tmp" % (path, os.getpid())
+        with open(tmp, "w", encoding="ascii", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    return path
+
+
+def _cube_3d(ranges):
+    """The .cube file of *ranges* (:func:`apply_ranges`), red fastest."""
+    return _cube_file(_cube_3d_text(tuple(ranges), CUBE_SIZE))
+
+
+@functools.lru_cache(maxsize=8)
+def _cube_3d_text(ranges, n):
+    import numpy as np
+    axis = np.linspace(0.0, 255.0, n)
+    b, g, r = np.meshgrid(axis, axis, axis, indexing="ij")
+    grid = np.stack([r, g, b], -1).reshape(-1, 1, 3)
+    out = np.clip(apply_ranges(grid, ranges) / 255.0, 0.0, 1.0).reshape(-1, 3)
+    lines = ["LUT_3D_SIZE %d" % n]
+    lines += ["%.6f %.6f %.6f" % tuple(v) for v in out]
+    return "\n".join(lines) + "\n"
+
+
+def _cube_1d(tables):
+    """The .cube file of ``[r, g, b]`` 256-entry tables."""
+    lines = ["LUT_1D_SIZE 256"]
+    lines += ["%.6f %.6f %.6f" % (tables[0][v] / 255.0, tables[1][v] / 255.0,
+                                  tables[2][v] / 255.0) for v in range(256)]
+    return _cube_file("\n".join(lines) + "\n")
+
+
+def _cube_arg(path):
+    """*path* as a filtergraph option value: forward slashes, the drive's
+    colon escaped, quoted (a Windows path breaks the graph otherwise)."""
+    return "'%s'" % path.replace("\\", "/").replace(":", "\\:")
 
 
 def _numbers(text, n):
@@ -679,9 +754,7 @@ def for_project(assets_dir):
     """The profile staged for *assets_dir*, or ``None`` (none staged)."""
     from . import staged_changes
     d = staged_changes.load(assets_dir).get(KEY)
-    prof = _from_dict(d) if isinstance(d, dict) else None
-    # colour ranges and curves are the machine screen's alone (PAD-339)
-    return prof.plain() if prof is not None else None
+    return _from_dict(d) if isinstance(d, dict) else None
 
 
 def store(assets_dir, prof):
@@ -760,7 +833,7 @@ def asset_profile(assets_dir):
     from . import staged_changes
     d = staged_changes.load(assets_dir).get(ASSET_KEY)
     prof = _from_dict(d) if isinstance(d, dict) else None
-    return prof.plain() if prof is not None else PRESETS[0][1]
+    return prof if prof is not None else PRESETS[0][1]
 
 
 def asset_stored(assets_dir):
@@ -1006,7 +1079,7 @@ def filter_step(prof):
     f = [[round((1.0 - lo) * (k ** g), 5), round(g, 5), round(lo, 5)]
          for g, k, lo in zip(*prof.curve())]
     out = {"m": m, "f": f}
-    # PAD-339: a machine screen's curves as feFuncR/G/B type="table" (65
+    # PAD-339: a profile's curves as feFuncR/G/B type="table" (65
     # values, straight between them); its colour ranges have no SVG form
     tabs = prof.curve_tables()
     if tabs is not None:
@@ -1165,7 +1238,7 @@ def _num(v):
 
 def to_text(prof):
     """The file text for *prof*: the explanatory header, then its values
-    (a machine screen's colour ranges and curves after them, PAD-339)."""
+    (its colour ranges and curves after them, PAD-339)."""
     head = DEFAULT_TEXT.split("\nname =", 1)[0]
     out = ("%s\nname = %s\ngamma = %s\ngain = %s\nlift = %s\n"
            "saturation = %.2f\nbrightness = %.2f\ncontrast = %.2f\n"
@@ -1184,7 +1257,7 @@ def to_text(prof):
 
 #: what a machine screen's extra lines mean, written above them
 EXTRAS_HELP = """
-# Machine screen only (the Scenes preview), applied after the lines above:
+# Color ranges and curves, applied after the lines above:
 #   range = hue width soft shift saturation brightness protect
 #           one band of hues (degrees: 0 red, 120 green, 240 blue), its
 #           width and soft edge, the hue shift, saturation and brightness

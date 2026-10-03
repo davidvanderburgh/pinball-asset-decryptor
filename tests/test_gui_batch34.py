@@ -266,6 +266,9 @@ class _ImageMetaStub:
     _changed_on_disk_cell = ImagesTab._changed_on_disk_cell
     _remembered_rep_name = ImagesTab._remembered_rep_name
     _keep_state = ImagesTab._keep_state
+    _color_state = ImagesTab._color_state
+    _color_locked = ImagesTab._color_locked
+    _per_file_colour = ImagesTab._per_file_colour
 
     def __init__(self, rel, changed=(), assigned=None, foreign=()):
         self._scan_id = 7
@@ -278,6 +281,11 @@ class _ImageMetaStub:
         self._foreign_rels = set(foreign)
         self._scan_dir = ""
         self._rep_names = {}
+        # the row's Color column (PAD-335): no manufacturer, so nothing to correct
+        self.mfr = None
+        self._color = {}
+        self._color_all = False
+        self._color_unlocked = False
 
     def _can_keep_size(self, _rel):
         return False

@@ -1,6 +1,7 @@
 """Install Missing on Windows: the elevated installer is started directly and
 a window that never starts the script is reported (PAD-327)."""
 
+import os
 import queue
 import sys
 import types
@@ -82,6 +83,11 @@ class _FakeConsole:
         self.closed = True
 
 
+# The install folder, spelled with this OS's separator: the app takes its
+# dirname, and a backslash is no separator off Windows.
+PAD_DIR = os.path.join("C:" + os.sep, "Program Files", "PAD")
+
+
 def _run(monkeypatch, console, stuck):
     fake = types.SimpleNamespace(msg_queue=queue.Queue())
     made = {}
@@ -100,7 +106,7 @@ def _run(monkeypatch, console, stuck):
     import subprocess
     monkeypatch.setattr(subprocess, "Popen", lambda argv: popen.append(argv))
     app_module.App._run_install_prereqs_win(
-        fake, r"C:\Program Files\PAD\install_prerequisites.ps1")
+        fake, os.path.join(PAD_DIR, "install_prerequisites.ps1"))
     msgs = []
     while not fake.msg_queue.empty():
         msgs.append(fake.msg_queue.get_nowait())
@@ -113,7 +119,7 @@ def test_stuck_window_gets_a_box(monkeypatch):
     assert not popen
     assert console.closed
     assert "-StartedMarker" in console.args
-    assert made["cwd"] == r"C:\Program Files\PAD"
+    assert made["cwd"] == PAD_DIR
     assert any(isinstance(m, LogMsg) for m in msgs)
     assert any(isinstance(m, UiCallMsg) for m in msgs)
 

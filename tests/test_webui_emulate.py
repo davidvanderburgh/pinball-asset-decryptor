@@ -660,7 +660,9 @@ def test_launch_with_runs_the_preparation(tmp_path, monkeypatch):
         assert not any("watch.sh" in " ".join(c) for c in rec.calls)
 
 
-def test_try_it_and_play_bring_the_tab_forward(tmp_path, monkeypatch):
+def test_try_it_starts_the_run_and_leaves_the_page_where_it_is(tmp_path, monkeypatch):
+    """PAD-314: Try it no longer switches to the Emulate tab, refused or accepted; the
+    page it was pressed on shows the run."""
     card = tmp_path / "godzilla_le-1_16_0.raw"
     card.write_bytes(b"\0" * 512)
     with web_app(tmp_path, mfr="stern") as w:
@@ -673,7 +675,7 @@ def test_try_it_and_play_bring_the_tab_forward(tmp_path, monkeypatch):
         w.run(lambda: w.window.emulate_card_var.set(str(card)))
         ok, why = w.run(svc.try_it, lambda c: [])
         assert ok is True and why == ""
-        assert w.state("shell")["tab"] == NS
+        assert w.state("shell")["tab"] == "extract"
         _wait(w, lambda: svc._proc is None and not svc._starting)
         st = w.run(svc.launch_state)
         assert st["card"] == str(card) and st["overrides"] is False

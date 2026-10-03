@@ -457,6 +457,8 @@ def test_rig_commands_carry_the_apps_rig_slot(monkeypatch):
     """An app a ticket started drives its own rig (PAD_SLOT), as the Stern
     and PB tabs do - before PAD-319 every Spooky run went to rig 0."""
     from pinball_decryptor.webui import emulate_spooky_core as core
+    # the root launch is WSL's (rig_cmd_root refuses off Windows): build it as Windows does
+    monkeypatch.setattr(core._rig.sys, "platform", "win32")
     monkeypatch.setattr(core, "rig_distro", lambda: "PAD-Runtime")
     monkeypatch.setenv("PAD_SLOT", "2")
     monkeypatch.setenv("PAD_LABEL", "PAD-319")

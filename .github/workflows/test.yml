@@ -119,14 +119,19 @@ jobs:
       # Every test that failed and then passed on a retry is a FLAKE: it can
       # pass or fail on the same code, so it finds no regressions and only
       # costs releases.  Listed on the run (annotations + summary) so the next
-      # session deletes it (memory: feedback_delete_flaky_tests).
+      # session deletes it (memory: feedback_delete_flaky_tests).  A test that
+      # was retried and still FAILED is not one: it is a real break, red on
+      # every run, and calling it flaky hid seven of them for 30 runs (PAD-340).
       - name: Flaky tests
         if: always()
         shell: bash
         run: |
           [ -f pytest.log ] || exit 0
           grep -oE 'RERUN +tests/[^ ]+|tests/[^ ]+ RERUN' pytest.log \
-            | grep -oE 'tests/[^ ]+' | sort -u > flaky.txt || true
+            | grep -oE 'tests/[^ ]+' | sort -u > rerun.txt || true
+          grep -oE '(FAILED|ERROR) +tests/[^ ]+' pytest.log \
+            | grep -oE 'tests/[^ ]+' | sort -u > failed.txt || true
+          comm -23 rerun.txt failed.txt > flaky.txt
           if [ -s flaky.txt ]; then
             echo "### Flaky tests on ${{ matrix.os }} (passed on a retry: delete them)" >> "$GITHUB_STEP_SUMMARY"
             while read -r t; do

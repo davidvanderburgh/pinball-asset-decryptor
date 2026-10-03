@@ -479,9 +479,10 @@ def test_modes_tab_try_it_says_it_does_not_run_on_a_mac_yet(tmp_path, monkeypatc
 @pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_try_it_refused_stays_on_the_modes_tab_and_says_why(tmp_path, monkeypatch):
     """feature/emulate-prepare: a refused Try it (no card picked, a run up, the edits box
-    ticked) used to land the user on the Emulate tab with nothing happening on it. Now the
-    tab only comes forward on acceptance, and the Emulate service hands the Modes tab its
-    own reason: the hand-off answers ``(accepted, reason)``."""
+    ticked) used to land the user on the Emulate tab with nothing happening on it. The
+    Emulate service hands the Modes tab its own reason: the hand-off answers
+    ``(accepted, reason)``. Since PAD-314 an accepted Try it stays on Modes too, where the
+    mode being tried is open and the footer shows the run."""
     with web_app(tmp_path, mfr="stern") as w:
         svc, _ran, _handed, _card = _tryit_setup(w, tmp_path, monkeypatch)
         svc.__dict__.pop("_try_fn", None)            # the real hand-off, to the real service
@@ -499,11 +500,11 @@ def test_modes_tab_try_it_refused_stays_on_the_modes_tab_and_says_why(tmp_path, 
         assert w.run(svc._try_fn, svc.tryit_prepare) == (False, why)
         assert handed == [svc.tryit_prepare]
         assert w.state("shell")["tab"] == "modes"
-        # accepted: the tab comes forward, and the answer is (True, "")
+        # accepted: the answer is (True, "") and the page still stays on Modes (PAD-314)
         monkeypatch.setattr(emu, "launch_with", lambda prepare: True)
         assert w.run(svc._try_fn, svc.tryit_prepare) == (True, "")
         w.drain()
-        assert w.state("shell")["tab"] == "emulate"
+        assert w.state("shell")["tab"] == "modes"
 
 
 @pytest.mark.usefixtures("preview_modes_on")

@@ -24,6 +24,8 @@
 // curves (master, then red, green, blue, through points placed by hand),
 // applied after the other steps.  The maths mirrors core/colour_profile.py
 // (apply_ranges, curve_table); its comment there spells out every step.
+// PAD-343: every mode has them now; the files bake them and the Spike 2
+// overlay's shaders draw them (plugins/stern/shader_profile.py extras_glsl).
 
 import { html, useState, useEffect, useRef, useCallback, PageHead, Card, Button, Field, Select, Seg, Note, Check,
          Icon, tip, call, cx, mediaUrl } from "../core/ui.js";
@@ -681,7 +683,7 @@ function Explainer({ s }) {
     <ul class="cp-facts">
       <li><${Icon} name="check" />Until you set one, it is the Recommended screen, tuned on a real Spike 2. Same as individual files uses that profile, undone, instead.</li>
       <li><${Icon} name="check" />Scenes looks bluer than your PC, but not blue enough for your machine? Turn the middle shades brighter here, most of all blue.</li>
-      <li><${Icon} name="check" />One band of colors off, like a sea that comes out teal? Color ranges below the preview changes just that band and leaves greys alone. Curves bends the shades with points of your own, all three colors together or one at a time. Both are this screen's alone: a build never gets them.</li>
+      <li><${Icon} name="check" />One band of colors off, like a sea that comes out teal? Color ranges below the preview changes just that band and leaves greys alone. Curves bends the shades with points of your own, all three colors together or one at a time.</li>
       <li><${Icon} name="check" />Saved with this project, so each machine has its own. Save a copy and Load move it between projects.</li>
       <li><${Icon} name="check" />Revert all and the Write tab leave it alone: it describes your machine, not a change to the card.</li>
     </ul>`
@@ -689,6 +691,7 @@ function Explainer({ s }) {
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
       <li><${Icon} name="check" />The whole screen overlay still applies on top, if you set one: the game draws these files through it like everything else.</li>
+      <li><${Icon} name="check" />Color ranges and Curves below the preview are baked in too, after the sliders: fix one band of colors, or bend the shades point by point.</li>
       <li><${Icon} name="check" />The Scenes preview shows a switched-on picture the way it will be written, so you can judge it in place.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
     </ul>`
@@ -696,6 +699,7 @@ function Explainer({ s }) {
     <ul class="cp-facts">
       <li><${Icon} name="check" />No picture or video file is changed, yours or the game's. The correction lives in the game program itself, so it can never be applied twice.</li>
       <li><${Icon} name="check" />Pick No change and build again for the game's own colors.</li>
+      <li><${Icon} name="check" />Color ranges and Curves below the preview are drawn by the game too, after the sliders. The multi-boot menu's Color correction changes the sliders only; ranges and curves stay as you built them.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
       <li><${Icon} name="check" />See it in the emulator to check it in the game. The colors are set when the game starts, so each change restarts it.</li>
       <li><${Icon} name="check" />Only your own new pictures and videos need it? Adjust individual files above: that profile is baked into the files you pick, and the game's own art is left alone.</li>
@@ -703,6 +707,7 @@ function Explainer({ s }) {
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
       <li><${Icon} name="check" />The game's own art is left alone on this machine: PAD can only correct what you replace.</li>
+      <li><${Icon} name="check" />Color ranges and Curves below the preview are baked in too, after the sliders.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
     </ul>`}
     <p class="small muted">${screen
@@ -785,8 +790,8 @@ export default function ColorTab() {
           </div>`}>
           <${Preview} s=${s} p=${p} screen=${screen} />
         <//>
-        ${screen ? html`<${Ranges} s=${s} p=${p} update=${update} />
-        <${CurveEditor} s=${s} p=${p} update=${update} />` : null}
+        <${Ranges} s=${s} p=${p} update=${update} />
+        <${CurveEditor} s=${s} p=${p} update=${update} />
         <${Explainer} s=${s} />
       </div>
       <div class="cp-side">

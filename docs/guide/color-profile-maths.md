@@ -66,12 +66,15 @@ Limits: gamma 0.1..5, gain 0..4, lift 0..0.9, saturation 0..4,
 brightness 0..4, contrast 0.1..4. A value outside them in a file is skipped
 and named, never applied.
 
-## Machine screen only: colour ranges, then curves
+## Colour ranges, then curves
 
-These two come after steps 1 to 3, and only on the Machine screen (the
-shaders have fixed slots for steps 1 to 3 and nothing else, so a build's
-profiles never carry them: the whole screen overlay and individual files
-profiles drop any `range` or `curve_` line, and Load... says so).
+These two come after steps 1 to 3, on every profile: the Machine screen, the
+individual files and the whole screen overlay. Files get them baked in
+(ffmpeg applies the ranges through a 65-point 3D table and the curves through
+a 256-entry 1D table, within a few levels of a picture). On Spike 2 the
+overlay's shaders draw them after the fixed slots; the multi-boot menu's
+Color correction rewrites only those slots, so the ranges and curves stay as
+built.
 
 4. **Colour ranges**, each in turn (up to 6). For a pixel with
    `max = max(R, G, B)`, `min = min(R, G, B)`:

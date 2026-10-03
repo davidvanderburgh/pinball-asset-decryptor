@@ -1,7 +1,8 @@
 """PAD-339: the machine screen's colour ranges and curves.  Preview only:
 they belong to the Machine screen (the Scenes preview's "As on the
 machine"), come after its other steps (ranges, then the master curve, then
-each channel's), are neutral when new, and never reach a build's profiles."""
+each channel's) and are neutral when new.  PAD-343 gave them to every
+profile; tests/test_pad343_profile_extras_everywhere.py covers the builds."""
 
 import json
 import os
@@ -112,10 +113,9 @@ def test_the_video_players_get_the_curves_as_tables():
     assert "t" not in cp.filter_step(cp.Profile(gamma=(1.2, 1.2, 1.2)))
 
 
-def test_a_builds_profiles_drop_them_even_from_a_hand_edited_file(tmp_path):
-    """A sidecar with ranges or curves on the whole screen overlay or the
-    individual files profile (hand-edited, or an older copy): neither reaches
-    a card, so neither profile carries them."""
+def test_a_builds_profiles_keep_them_from_a_hand_edited_file(tmp_path):
+    """PAD-343: a sidecar with ranges or curves on the whole screen overlay
+    or the individual files profile: both profiles carry them to the card."""
     d = str(tmp_path)
     extras = {"ranges": [[205, 50, 30, 15, 0.8, 0.85, 0.15]],
               "curves": {"rgb": [[0, 0], [64, 48], [255, 255]]}}
@@ -123,14 +123,13 @@ def test_a_builds_profiles_drop_them_even_from_a_hand_edited_file(tmp_path):
             "lift": [0, 0, 0], "saturation": 1.0}
     staged_changes.save(d, {cp.KEY: dict(base, **extras),
                             cp.ASSET_KEY: dict(base, **extras)})
-    assert cp.for_project(d).ranges == () and cp.for_project(d).curves == ()
-    assert cp.asset_profile(d).ranges == () and cp.asset_profile(d).curves == ()
-    assert cp.for_project(d).gamma == (1.1, 1.1, 1.1)
-    # the shaders' numbers are the plain ones too
-    assert cp.active(d).folded().has_extras() is False
+    for prof in (cp.for_project(d), cp.asset_profile(d)):
+        assert len(prof.ranges) == 1 and prof.curves[0][0] == "rgb"
+        assert prof.gamma == (1.1, 1.1, 1.1)
+    assert cp.active(d).has_extras()
 
 
-def test_load_in_another_mode_says_the_extras_were_left_out(tmp_path):
+def test_load_in_another_mode_keeps_the_extras(tmp_path):
     from tests.webui_harness import web_app
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -145,8 +144,8 @@ def test_load_in_another_mode_says_the_extras_were_left_out(tmp_path):
         assert w.call("color.load_file") is True
         w.drain()
         s = w.state("color")
-        assert s["ranges"] == [] and any("Machine screen only" in p for p in s["problems"])
-        assert cp.for_project(str(proj)).gamma == (0.9, 0.9, 0.9)
+        assert s["problems"] == [] and len(s["ranges"]) == 1
+        assert cp.for_project(str(proj)).ranges == prof.ranges
         assert w.call("color.set_mode", "screen") == "screen"
         w.drain()
         assert w.call("color.load_file") is True
@@ -167,7 +166,7 @@ def test_scenes_draws_through_them(tmp_path):
     assert tuple(view(rgb)[0][1]) == GREY
 
 
-def test_color_tab_keeps_them_on_the_machine_screen_only(tmp_path):
+def test_color_tab_keeps_them_in_every_mode(tmp_path):
     from tests.webui_harness import web_app
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -193,16 +192,21 @@ def test_color_tab_keeps_them_on_the_machine_screen_only(tmp_path):
         w.drain()
         scr = cp.screen_profile(str(proj))
         assert scr.gamma == (0.9, 0.9, 0.9) and len(scr.ranges) == 1 and scr.curves
-        # a build's profiles never take them
-        assert w.call("color.set_mode", "display") == "display"
-        w.drain()
-        w.call("color.set_params", {"ranges": [[205, 50, 30, 15, 0.8, 0.85, 0.15]],
-                                    "gamma": [1.1, 1.1, 1.1]})
-        w.drain()
-        disp = cp.for_project(str(proj))
-        assert disp.gamma == (1.1, 1.1, 1.1) and disp.ranges == () and disp.curves == ()
-        assert w.state("color")["ranges"] == []
-        assert "ranges" not in staged_changes.load(str(proj))[cp.KEY]
+        # PAD-343: the whole screen overlay and the individual files take
+        # them too
+        for mode, key in (("display", cp.KEY), ("assets", cp.ASSET_KEY)):
+            assert w.call("color.set_mode", mode) == mode
+            w.drain()
+            w.call("color.set_params", {"ranges": [[205, 50, 30, 15, 0.8, 0.85, 0.15]],
+                                        "curves": {"b": [[0, 0], [255, 230]]},
+                                        "gamma": [1.1, 1.1, 1.1]})
+            w.drain()
+            assert w.state("color")["ranges"] == [[205.0, 50.0, 30.0, 15.0, 0.8, 0.85, 0.15]]
+            stored = staged_changes.load(str(proj))[key]
+            assert len(stored["ranges"]) == 1 and stored["curves"]["b"] == [[0, 0], [255, 230]]
+        disp, files = cp.for_project(str(proj)), cp.asset_profile(str(proj))
+        assert disp.gamma == (1.1, 1.1, 1.1) and len(disp.ranges) == 1
+        assert files.curves == (("b", ((0.0, 0.0), (255.0, 230.0))),)
 
 
 _PARITY = r"""

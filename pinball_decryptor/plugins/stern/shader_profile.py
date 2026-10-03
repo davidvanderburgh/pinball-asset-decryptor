@@ -152,9 +152,95 @@ def correction_glsl(prof, premultiplied, qualified=False):
     else:
         body.append("%sfloat a=f.a;%svec3 c=clamp(f.rgb,0.0,1.0);" % (q, q))
     body.append(tunable_terms(prof))
+    extras = extras_glsl(prof, qualified)
+    if extras:
+        body.append("c=%s(c);" % _EXTRAS)
     body.append("return vec4(c*a,a);" if premultiplied
                 else "return vec4(c,a);")
-    return "%svec4 %s(%svec4 f){%s}" % (q, _FUNC, q, "".join(body))
+    return extras + "%svec4 %s(%svec4 f){%s}" % (q, _FUNC, q, "".join(body))
+
+
+#: The colour ranges' and curves' function (PAD-343), defined before
+#: ``pad_cp`` and called after its fixed slots.  Its own function because
+#: ``pad_cp``'s body is read back as one brace-free run (:data:`_FUNC_RE`).
+_EXTRAS = "pad_cx"
+_RANGE = "pad_cr"
+
+#: Where the curves are sampled: every 8th level and the last, straight
+#: between them (within a level or two of the 256-entry tables)
+_KNOTS = tuple(range(0, 256, 8)) + (255,)
+
+
+def _range_glsl(q):
+    """``pad_cr``: one colour range on ``c`` (0..1), the maths of
+    core/colour_profile.py ``apply_ranges`` with the 0..255 values as
+    0..1."""
+    f, v = q + "float", q + "vec3"
+    return (
+        "%(v)s %(n)s(%(v)s c,%(f)s hu,%(f)s wd,%(f)s sf,%(f)s sh,%(f)s sa,"
+        "%(f)s br,%(f)s pr){"
+        "%(f)s mx=max(c.r,max(c.g,c.b));%(f)s ch=mx-min(c.r,min(c.g,c.b));"
+        "if(ch<=0.0)return c;"
+        "%(f)s h;"
+        "if(mx==c.r)h=mod((c.g-c.b)/ch,6.0);"
+        "else if(mx==c.g)h=(c.b-c.r)/ch+2.0;"
+        "else h=(c.r-c.g)/ch+4.0;"
+        "h*=60.0;"
+        "%(f)s d=abs(mod(h-hu+180.0,360.0)-180.0);"
+        "%(f)s w;"
+        "if(wd>=360.0)w=1.0;"
+        "else if(sf>0.0)w=smoothstep(0.0,1.0,1.0-(d-wd*0.5)/sf);"
+        "else w=d<=wd*0.5?1.0:0.0;"
+        "if(pr>0.0)w*=smoothstep(0.0,1.0,ch/pr);"
+        "if(w<=0.0)return c;"
+        "%(f)s h2=mod(h+sh*w,360.0);"
+        "%(f)s s2=clamp(ch/mx*(1.0+(sa-1.0)*w),0.0,1.0);"
+        "%(f)s v2=clamp(mx*(1.0+(br-1.0)*w),0.0,1.0);"
+        "%(v)s k=mod(vec3(5.0,3.0,1.0)+h2/60.0,6.0);"
+        "return v2-v2*s2*clamp(min(k,4.0-k),0.0,1.0);}"
+        % {"f": f, "v": v, "n": _RANGE})
+
+
+def _curve_glsl(tables):
+    """Statements taking ``c`` through the ``[r, g, b]`` 256-entry curve
+    *tables*: a sum of ramps, one per stretch between knots (stretches of
+    one slope merged)."""
+    pts = [(k / 255.0, tuple(t[k] / 255.0 for t in tables)) for k in _KNOTS]
+    segs = []
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        slope = tuple((b - a) / (x1 - x0) for a, b in zip(y0, y1))
+        if segs and all(abs(a - b) < 1e-9 for a, b in zip(segs[-1][2], slope)):
+            segs[-1][1] = x1
+        else:
+            segs.append([x0, x1, slope])
+    out = ["c=vec3(%.6f,%.6f,%.6f)" % pts[0][1]]
+    for x0, x1, slope in segs:
+        if any(slope):
+            out.append("+vec3(%.6f,%.6f,%.6f)*clamp(c-%.6f,0.0,%.6f)"
+                       % (slope + (x0, x1 - x0)))
+    return "".join(out) + ";"
+
+
+def extras_glsl(prof, qualified=False):
+    """The GLSL of *prof*'s colour ranges and curves (PAD-343), ``pad_cx``
+    (and ``pad_cr`` for the ranges), or ``""`` when it has none that change
+    anything, so a profile without them builds exactly the shader it did."""
+    if not prof.has_extras():
+        return ""
+    from ...core.colour_profile import range_neutral
+    q = "highp " if qualified else ""
+    live = [r for r in prof.ranges if not range_neutral(r)]
+    head = _range_glsl(q) if live else ""
+    body = []
+    for hue, width, soft, shift, sat, bright, protect in live:
+        body.append("c=%s(c,%s);" % (_RANGE, ",".join(
+            "%.6f" % v for v in (hue, width, soft, shift, sat, bright,
+                                 protect))))
+    tabs = prof.curve_tables()
+    if tabs is not None:
+        body.append(_curve_glsl(tabs))
+    body.append("return clamp(c,0.0,1.0);")
+    return head + "%svec3 %s(%svec3 c){%s}" % (q, _EXTRAS, q, "".join(body))
 
 
 def _premultiplied(text):

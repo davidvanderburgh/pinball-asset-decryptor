@@ -679,7 +679,7 @@ function Explainer({ s }) {
     <p>A pinball machine's screen doesn't show colors the way your PC monitor does. On a Stern Godzilla, for example, middle greys come out too bright and too blue, and the darkest shades all sink into the same black.</p>
     ${screen ? html`<p>This profile is that screen. With the Machine screen switched on under Preview colors, Scenes and the Video tab's players draw everything through it, after the whole screen overlay: the game's own art, your replaced files and the pictures you add. It is not a correction, and nothing is written to the card.</p>
     <ul class="cp-facts">
-      <li><${Icon} name="check" />Until you set one, it is the individual files profile, undone: what Scenes has shown so far. Same as individual files puts that back.</li>
+      <li><${Icon} name="check" />Until you set one, it is the Recommended screen, tuned on a real Spike 2. Same as individual files uses that profile, undone, instead.</li>
       <li><${Icon} name="check" />Scenes looks bluer than your PC, but not blue enough for your machine? Turn the middle shades brighter here, most of all blue.</li>
       <li><${Icon} name="check" />One band of colors off, like a sea that comes out teal? Color ranges below the preview changes just that band and leaves greys alone. Curves bends the shades with points of your own, all three colors together or one at a time. Both are this screen's alone: a build never gets them.</li>
       <li><${Icon} name="check" />Saved with this project, so each machine has its own. Save a copy and Load move it between projects.</li>
@@ -745,7 +745,9 @@ export default function ColorTab() {
     ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
     : screen
       ? (s.screen_stored ? html`<${Note} kind="ok">${"The preview draws every picture through “" + (s.name || "My screen") + "” when its Machine screen switch is on. Nothing is written to the card."}<//>`
-        : html`<${Note} kind="info">${"Scenes uses the individual files profile, undone (“" + (s.name || "") + "”). Move a slider or pick a starting point to set this machine's own screen."}<//>`)
+        : s.screen_follow
+          ? html`<${Note} kind="info">${"Scenes uses the individual files profile, undone (“" + (s.name || "") + "”). Move a slider or pick a starting point to set this machine's own screen."}<//>`
+          : html`<${Note} kind="info">${"Scenes uses the Recommended screen, tuned on a real Spike 2. Move a slider or pick a starting point to set this machine's own screen."}<//>`)
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`

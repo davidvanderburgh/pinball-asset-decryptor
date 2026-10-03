@@ -472,6 +472,7 @@ def test_the_machine_view_undoes_the_profile_and_the_overlay_cancels_it():
 
 def test_machine_view_follows_both_profiles(tmp_path):
     d = str(tmp_path)
+    cp.store_screen_profile(d, None, follow=True)     # PAD-341: no longer the default
     cp.store_asset_profile(d, cp.Profile(name="No change"))
     assert cp.machine_view(d) is None                 # nothing to show
     cp.store_asset_profile(d, None)                   # Recommended again

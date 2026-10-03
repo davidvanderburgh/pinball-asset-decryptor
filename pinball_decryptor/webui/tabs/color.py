@@ -214,6 +214,9 @@ class ColorTab(TabService):
             display_name=self._prof.label() if self._prof is not None else "",
             asset_name=(self._asset or cp.PRESETS[0][1]).label(),
             screen_stored=self._screen_stored,
+            screen_follow=bool(self._screen_mode() and assets
+                               and os.path.isdir(assets)
+                               and cp.screen_follows(assets)),
             project=assets,
             **state,
             has_project=bool(assets and os.path.isdir(assets)),
@@ -226,8 +229,9 @@ class ColorTab(TabService):
             values["problems"] = list(problems)
         self.set(**values)
 
-    def _store(self, prof, rev=False):
-        """Stage *prof* for the project (``None`` or no change = none)."""
+    def _store(self, prof, rev=False, follow=False):
+        """Stage *prof* for the project (``None`` or no change = none;
+        *follow*: the machine screen follows the individual files one)."""
         assets = self._project
         if not (assets and os.path.isdir(assets)):
             self.toast("Choose a project folder on the Extract tab first.",
@@ -239,9 +243,9 @@ class ColorTab(TabService):
             prof = prof.plain()
         if self._screen_mode():
             # the machine screen: preview only, nothing pending; None goes
-            # back to the individual files profile, undone
+            # back to the Recommended screen
             try:
-                cp.store_screen_profile(assets, prof)
+                cp.store_screen_profile(assets, prof, follow=follow)
                 self._screen, self._screen_stored = cp.screen_shown(assets)
             except Exception as e:                      # noqa: BLE001
                 self.set(problems=["could not save the machine screen "
@@ -406,21 +410,27 @@ class ColorTab(TabService):
         if self._screen_mode():
             for k, prof in cp.SCREEN_PRESETS:
                 if k == key:
-                    return self._store(prof, rev=True)
+                    return self._store(prof, rev=True, follow=k == "follow")
             return False
         for k, prof in cp.PRESETS:
             if k == key:
                 return self._store(None if k == "none" else prof, rev=True)
         return False
 
+    def _save_name(self):
+        """Save a copy's file name for the mode on show (PAD-341)."""
+        if self._screen_mode():
+            return "Machine Color Profile.txt"
+        if self._assets_mode():
+            return "File Color Profile.txt"
+        return "Overlay Profile.txt" if self._on_display             else "Color Profile.txt"
+
     @rpc
     def save_copy(self):
         p = self._shown()
-        stem = "".join(c if c.isalnum() or c in "-_ " else "_"
-                       for c in (p.name or "profile")).strip() or "profile"
         path = self.window.ask_save(
             "colour_profile", "Save a copy of this color profile",
-            initialfile=stem + ".txt", defaultextension=".txt",
+            initialfile=self._save_name(), defaultextension=".txt",
             filetypes=[("Color profile", "*.txt"), ("All files", "*.*")])
         if not path:
             return False

@@ -1105,7 +1105,7 @@ HELP_CONTENT = {
          "machine will, with a switch for each step: the Whole screen "
          "overlay, the Individual files correction (the files you switch on) "
          "and the Machine screen (set on the Color profile tab; until you "
-         "set one, the individual files profile, undone). Turn them on and "
+         "set one, the Recommended screen). Turn them on and "
          "off to see what each one does; all three off is your PC's own "
          "colors. The Machine screen reaches the whole picture, a test card "
          "you added included. Tick the gear menu's 'Switched-off files in "

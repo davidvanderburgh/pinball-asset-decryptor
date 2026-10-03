@@ -27,7 +27,9 @@ replacements and the pictures you add (a test card included). Tick the gear
 menu's "Switched-off files in their own colors" to let a picture whose Color
 switch is off skip the machine screen instead (it is off by default).
 
-**Until a Machine screen is stored**, the preview uses the individual files
+**Until a Machine screen is stored**, the preview uses the Recommended screen
+(PAD-341: ranges and curves tuned on a real Spike 2, applied forwards).
+**With "Same as individual files" picked**, it uses the individual files
 profile *undone*: the inverse of step 3 per channel (`x = ((in - lift) / (1 -
 lift)) ** (1 / gamma) / gain`, held at the edge where the correction clipped),
 then a saturation mix of `1 / saturation` (black and white cannot be undone

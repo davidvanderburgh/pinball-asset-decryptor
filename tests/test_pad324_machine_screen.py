@@ -44,13 +44,19 @@ def test_the_inverse_runs_the_correction_backwards():
     assert cp.Profile(saturation=0.0).inverse().is_identity()
 
 
-def test_with_no_screen_stored_scenes_looks_as_it_did(tmp_path):
+def test_with_no_screen_stored_scenes_uses_the_recommended_screen(tmp_path):
     d = str(tmp_path)
     assert cp.screen_profile(d) is None
     shown, stored = cp.screen_shown(d)
-    assert stored is False and shown.name == "Recommended screen"
-    assert shown.gamma == SCREEN["screen_recommended"].gamma
+    assert stored is False and shown == SCREEN["screen_recommended"]
     rgb = _rgb()
+    assert cp.machine_view(d)(rgb).tobytes() == \
+        SCREEN["screen_recommended"].apply_array(rgb).tobytes()
+    # Same as individual files: the PAD-324 look, Recommended undone
+    cp.store_screen_profile(d, None, follow=True)
+    assert cp.screen_profile(d) is None and cp.screen_follows(d)
+    shown, stored = cp.screen_shown(d)
+    assert stored is False and shown.name == "Recommended, undone"
     assert cp.machine_view(d)(rgb).tobytes() == \
         RECOMMENDED.undo_array(rgb).tobytes()
 
@@ -75,6 +81,7 @@ def test_a_black_and_white_screen_greys_the_games_own_art(tmp_path):
     """The case undoing a profile could never show: a monochrome screen."""
     d = str(tmp_path)
     rgb = _rgb()
+    cp.store_screen_profile(d, None, follow=True)
     cp.store_asset_profile(d, dict(cp.PRESETS)["bw"])
     assert cp.machine_view(d)(rgb).tobytes() == rgb.tobytes()   # B&W undone: nothing
     cp.store_screen_profile(d, SCREEN["bw"])
@@ -89,7 +96,7 @@ def test_no_change_screen_shows_the_pc_colors_and_none_follows_again(tmp_path):
     assert cp.machine_view(d) is None
     cp.store_screen_profile(d, None)
     assert cp.screen_profile(d) is None
-    assert cp.machine_view(d) is not None             # Recommended, undone
+    assert cp.machine_view(d) is not None             # the Recommended screen
 
 
 def test_color_tab_has_a_machine_screen_mode(tmp_path):
@@ -127,7 +134,12 @@ def test_color_tab_has_a_machine_screen_mode(tmp_path):
         w.drain()
         s = w.state("color")
         assert cp.screen_profile(str(proj)) is None
-        assert s["screen_stored"] is False and s["name"] == "Recommended screen"
+        assert cp.screen_follows(str(proj)) and s["screen_follow"] is True
+        assert s["screen_stored"] is False and s["name"] == "Recommended, undone"
+        w.call("color.preset", "screen_recommended")
+        w.drain()
+        s = w.state("color")
+        assert s["screen_follow"] is False and s["ranges"] and s["curves"]
         # the other modes keep their own presets
         assert w.call("color.set_mode", "assets") == "assets"
         w.drain()

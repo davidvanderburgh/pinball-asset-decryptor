@@ -22,10 +22,10 @@ filters run with `color-interpolation-filters="sRGB"`).
 | Machine screen (preview only) | what the machine's screen does | only the previews: Scenes "As on the machine" and the Video tab's players. Never written to a card. |
 
 The Scenes preview shows a frame as: the whole screen overlay, then the
-machine screen. A picture whose Color switch is off skips the machine screen
-while the gear menu's "Switched-off files in their own colors" setting is on
-(it is on by default). Untick that setting to send every picture through the
-machine screen, an added test card included.
+machine screen, over the whole composited frame: the game's own art, your
+replacements and the pictures you add (a test card included). Tick the gear
+menu's "Switched-off files in their own colors" to let a picture whose Color
+switch is off skip the machine screen instead (it is off by default).
 
 ## Steps every profile has
 

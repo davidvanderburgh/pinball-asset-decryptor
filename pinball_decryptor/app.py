@@ -422,7 +422,7 @@ class App:
             on_folder_state_written=self._on_folder_state_written,
             initial_show_log_history=bool(s.get("show_log_history", True)),
             on_show_log_history_change=self._on_show_log_history_change,
-            initial_scenes_own_colours=bool(s.get("scenes_own_colours", True)),
+            initial_scenes_own_colours=bool(s.get("scenes_own_colours", False)),
             on_scenes_own_colours_change=self._on_scenes_own_colours_change,
             initial_compare_row_limit=s.get("compare_row_limit"),
             on_compare_row_limit_change=self._on_compare_row_limit_change,

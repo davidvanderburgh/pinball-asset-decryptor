@@ -101,23 +101,25 @@ def test_the_editors_layers_keep_it_too(tmp_path):
     assert under[4, 2, 0] == under[4, 2, 1] == under[4, 2, 2]
 
 
-def test_the_gear_menu_turns_it_off_and_on_and_scenes_follows(tmp_path):
+def test_the_gear_menu_turns_it_on_and_off_and_scenes_follows(tmp_path):
+    """Off by default since PAD-339: the machine screen reaches the whole frame,
+    an added test card included, until the gear menu says otherwise."""
     from tests.webui_harness import web_app
     with web_app(tmp_path, mfr="stern") as w:
         items = w.state("shell")["settings_items"]
         it = next(i for i in items if i.get("id") == "toggle_scenes_own_colours")
-        assert it["checked"] is True
+        assert it["checked"] is False
         svc = w.window.service("text").scenes
-        assert w.run(svc._as_made) is True
+        assert w.run(svc._as_made) is False
         w.call("ui.settings_action", "toggle_scenes_own_colours")
         w.drain()
         it = next(i for i in w.state("shell")["settings_items"]
                   if i.get("id") == "toggle_scenes_own_colours")
-        assert it["checked"] is False
-        assert w.run(svc._as_made) is False
+        assert it["checked"] is True
+        assert w.run(svc._as_made) is True
         w.call("ui.settings_action", "toggle_scenes_own_colours")
         w.drain()
-        assert w.run(svc._as_made) is True
+        assert w.run(svc._as_made) is False
 
 
 def test_a_switched_off_pick_still_gets_the_whole_screen_overlay(tmp_path):

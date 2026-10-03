@@ -102,7 +102,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         # shows its own colours in Scenes instead of passing through the machine screen
         self.scenes_own_colours_var = self.var(
             "scenes_own_colours", "bool",
-            bool(cb.get("initial_scenes_own_colours", True)))
+            bool(cb.get("initial_scenes_own_colours", False)))
         self._update_check_busy = False
         self._update_available = None       # (version, url, installer|None)
         self._update_banner_url = None
@@ -315,8 +315,9 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
                                 "colors, in Scenes and on the Video tab's players, a "
                                 "file whose color switch is off "
                                 "shows as you made it instead of through the machine's "
-                                "screen (the whole screen overlay still applies). Untick "
-                                "to draw every file through the screen.")})
+                                "screen (the whole screen overlay still applies). Off "
+                                "(the default) draws every file through the screen, "
+                                "an added test card too.")})
         items.append({"sep": True})
         vq = self.voice_quality_var.get()
         items.append({"label": "Voice recognition quality", "submenu": [

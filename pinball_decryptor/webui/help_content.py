@@ -692,10 +692,10 @@ HELP_CONTENT = {
          "with a switch for each step: the Whole screen overlay, the "
          "Individual files correction (a replacement with its Color switch "
          "on) and the Machine screen. Turn them on and off to see what each "
-         "one does; all three off is your PC's own colors. A replacement with "
-         "its Color switch off skips the Machine screen (it still gets the "
-         "overlay), unless the gear menu's 'Switched-off files in their own "
-         "colors' is unticked. Click a name to open it on the Color profile "
+         "one does; all three off is your PC's own colors. Every clip goes "
+         "through the Machine screen; tick the gear menu's 'Switched-off "
+         "files in their own colors' to let a replacement with its Color "
+         "switch off skip it (it still gets the overlay). Click a name to open it on the Color profile "
          "tab. Only the preview changes: the card is not, and no clip is "
          "re-encoded for it."),
     ],
@@ -1096,10 +1096,11 @@ HELP_CONTENT = {
          "and the Machine screen (set on the Color profile tab; until you "
          "set one, the individual files profile, undone). Turn them on and "
          "off to see what each one does; all three off is your PC's own "
-         "colors. A file whose color switch is off (red in Layers) skips the "
-         "Machine screen so you can see it against the game's own art, and "
-         "still gets the overlay; the gear menu's 'Switched-off files in "
-         "their own colors' turns that off. Click a name to open it on the "
+         "colors. The Machine screen reaches the whole picture, a test card "
+         "you added included. Tick the gear menu's 'Switched-off files in "
+         "their own colors' to let a file whose color switch is off (red in "
+         "Layers) skip it, to see it against the game's own art; it still "
+         "gets the overlay. Click a name to open it on the "
          "Color profile tab. Only the preview changes: the card is not."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a

@@ -30,6 +30,15 @@ GLSL the shaders get:
    too bright), gain below 1 pulls a channel down overall, lift raises the
    darkest values.
 
+BRIGHTNESS AND CONTRAST (PAD-333) are two more numbers on the profile, but
+no new term in the maths: both act on the shade before step 2, as
+``clip(in * brightness * k) ** contrast`` with ``k = 2 * 0.5 ** (1 /
+contrast)`` (so a mid grey stays a mid grey and contrast is the slope
+there), and that folds exactly into each channel's own gain and gamma
+(:meth:`Profile.curve`).  So every place that applies a profile (Pillow,
+ffmpeg, the shaders, the browser previews) gets them with no change of its
+own, and the machine's boot menu still finds its fixed shader slots.
+
 A COPY is plain ``key = value`` text (:func:`to_text`, :func:`read_file`), so
 a user can keep one per machine, share it, or edit it in any text editor and
 Load it back.  Unknown keys and bad values are skipped and named, never fatal.
@@ -92,6 +101,8 @@ DEFAULT_TEXT = """\
 #   gain        multiplies the channel (0.9 = 10% less of that colour)
 #   lift        raises the darkest values (0.05 = black becomes 13 of 255)
 #   saturation  1 = unchanged, below 1 = less colour, above 1 = more
+#   brightness  1 = unchanged, 1.2 = 20% brighter, 0.8 = 20% darker
+#   contrast    1 = unchanged, above 1 = more, below 1 = less
 #
 # "Recommended": made from photos of a display test card on a Stern Spike 2
 # machine (a Godzilla), whose middle shades show too bright and too blue.
@@ -101,6 +112,8 @@ gamma = 1.10 1.20 1.35
 gain = 1.00 1.00 1.00
 lift = 0.00 0.00 0.00
 saturation = 0.90
+brightness = 1.00
+contrast = 1.00
 """
 
 
@@ -111,10 +124,43 @@ class Profile:
     gain: tuple = (1.0, 1.0, 1.0)
     lift: tuple = (0.0, 0.0, 0.0)
     saturation: float = 1.0
+    brightness: float = 1.0
+    contrast: float = 1.0
 
     def is_identity(self):
         return (self.gamma == (1.0, 1.0, 1.0) and self.gain == (1.0, 1.0, 1.0)
-                and self.lift == (0.0, 0.0, 0.0) and self.saturation == 1.0)
+                and self.lift == (0.0, 0.0, 0.0) and self.saturation == 1.0
+                and self.brightness == 1.0 and self.contrast == 1.0)
+
+    def curve(self):
+        """``(gamma, gain, lift)`` per channel with the brightness and
+        contrast folded in (PAD-333): ``clip(in * b * k) ** c`` then
+        ``clip(y * gain) ** gamma`` is ``clip(in * b * k * gain ** (1 / c))
+        ** (c * gamma)``.  Every use of the maths goes through this."""
+        b, c = self.brightness, self.contrast
+        if b == 1.0 and c == 1.0:
+            return self.gamma, self.gain, self.lift
+        c = max(c, 0.01)
+        k = max(b, 0.0) * 2.0 * 0.5 ** (1.0 / c)
+        return (tuple(g * c for g in self.gamma),
+                tuple(k * max(g, 0.0) ** (1.0 / c) for g in self.gain),
+                self.lift)
+
+    def folded(self):
+        """The same correction with brightness and contrast 1: the numbers
+        the shaders are written with (plugins/stern/shader_profile.py)."""
+        gamma, gain, lift = self.curve()
+        return Profile(name=self.name, gamma=tuple(gamma), gain=tuple(gain),
+                       lift=tuple(lift), saturation=self.saturation)
+
+    def key(self):
+        """Every number, as text: a cache key that changes with any of them.
+        A profile at brightness and contrast 1 spells what it always did."""
+        out = "%s|%s|%s|%s" % (self.gamma, self.gain, self.lift,
+                               self.saturation)
+        if self.brightness != 1.0 or self.contrast != 1.0:
+            out += "|%s|%s" % (self.brightness, self.contrast)
+        return out
 
     def label(self):
         return self.name or "colour profile"
@@ -131,7 +177,8 @@ class Profile:
 
     def table(self, channel):
         """256 output values for input 0..255 on *channel* (0 r, 1 g, 2 b)."""
-        g, k, lo = self.gamma[channel], self.gain[channel], self.lift[channel]
+        gamma, gain, lift = self.curve()
+        g, k, lo = gamma[channel], gain[channel], lift[channel]
         out = []
         for v in range(256):
             x = min(max(v / 255.0 * k, 0.0), 1.0)
@@ -149,8 +196,9 @@ class Profile:
                 "%s%s=%.6f" % (names[i], names[j], m[i][j])
                 for i in range(3) for j in range(3)))
         exprs = []
+        gamma, gain, lift = self.curve()
         for i, ch in enumerate(("r", "g", "b")):
-            g, k, lo = self.gamma[i], self.gain[i], self.lift[i]
+            g, k, lo = gamma[i], gain[i], lift[i]
             if g == 1.0 and k == 1.0 and lo == 0.0:
                 continue
             # commas inside an option are escaped for the filtergraph parser
@@ -177,7 +225,8 @@ class Profile:
         """The inverse of :meth:`table` on *channel*: what the machine's
         screen does to a value this profile corrects (PAD-312).  Where the
         correction clips, the inverse holds at the edge."""
-        g, k, lo = self.gamma[channel], self.gain[channel], self.lift[channel]
+        gamma, gain, lift = self.curve()
+        g, k, lo = gamma[channel], gain[channel], lift[channel]
         out = []
         for v in range(256):
             y = v / 255.0
@@ -195,9 +244,10 @@ class Profile:
         the saturation is mixed before the shades rather than after, so it
         is a close starting point, not a bit-exact copy.  Black and white
         cannot be undone and gives full color back."""
-        gamma = tuple(1.0 / g if g > 0 else 1.0 for g in self.gamma)
+        fwd_gamma, fwd_gain, _lift = self.curve()
+        gamma = tuple(1.0 / g if g > 0 else 1.0 for g in fwd_gamma)
         gain = tuple((k ** -g) if k > 0 else 1.0
-                     for k, g in zip(self.gain, self.gamma))
+                     for k, g in zip(fwd_gain, fwd_gamma))
         sat = 1.0 / self.saturation if self.saturation > 0 else 1.0
         r = lambda v: round(v, 3)                       # noqa: E731
         return Profile(name=self.name, gamma=tuple(r(v) for v in gamma),
@@ -257,7 +307,9 @@ def parse(text):
     fields = {}
     problems = []
     limits = {"gamma": (0.1, 5.0), "gain": (0.0, 4.0), "lift": (0.0, 0.9),
-              "saturation": (0.0, 4.0)}
+              "saturation": (0.0, 4.0), "brightness": (0.1, 4.0),
+              "contrast": (0.1, 4.0)}
+    single = ("saturation", "brightness", "contrast")
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -275,7 +327,7 @@ def parse(text):
             problems.append("line %d: unknown setting '%s'" % (n, key))
             continue
         try:
-            nums = _numbers(val, 1 if key == "saturation" else 3)
+            nums = _numbers(val, 1 if key in single else 3)
         except ValueError as e:
             problems.append("line %d: %s %s" % (n, key, e))
             continue
@@ -284,7 +336,7 @@ def parse(text):
             problems.append("line %d: %s must be between %g and %g"
                             % (n, key, lo, hi))
             continue
-        fields[key] = nums[0] if key == "saturation" else nums
+        fields[key] = nums[0] if key in single else nums
     return Profile(**fields), problems
 
 
@@ -294,7 +346,9 @@ def _from_dict(d):
                        gamma=tuple(float(v) for v in d["gamma"])[:3],
                        gain=tuple(float(v) for v in d["gain"])[:3],
                        lift=tuple(float(v) for v in d["lift"])[:3],
-                       saturation=float(d["saturation"]))
+                       saturation=float(d["saturation"]),
+                       brightness=float(d.get("brightness", 1.0)),
+                       contrast=float(d.get("contrast", 1.0)))
     except (KeyError, TypeError, ValueError):
         return None
 
@@ -356,15 +410,19 @@ def signature(assets_dir):
     prof = active(assets_dir)
     if prof is None:
         return ""
-    return "%s|%s|%s|%s" % (prof.gamma, prof.gain, prof.lift, prof.saturation)
+    return prof.key()
 
 
 # -- the chosen-files profile (PAD-312) ---------------------------------------
 
 def _profile_dict(prof):
-    return {"name": prof.name, "gamma": list(prof.gamma),
-            "gain": list(prof.gain), "lift": list(prof.lift),
-            "saturation": prof.saturation}
+    out = {"name": prof.name, "gamma": list(prof.gamma),
+           "gain": list(prof.gain), "lift": list(prof.lift),
+           "saturation": prof.saturation}
+    if prof.brightness != 1.0 or prof.contrast != 1.0:
+        out["brightness"] = prof.brightness
+        out["contrast"] = prof.contrast
+    return out
 
 
 def asset_profile(assets_dir):
@@ -559,7 +617,7 @@ def filter_step(prof):
             m += [round(v, 5) for v in rows[i]] + [0.0, 0.0]
         m += [0.0, 0.0, 0.0, 1.0, 0.0]
     f = [[round((1.0 - lo) * (k ** g), 5), round(g, 5), round(lo, 5)]
-         for g, k, lo in zip(prof.gamma, prof.gain, prof.lift)]
+         for g, k, lo in zip(*prof.curve())]
     return {"m": m, "f": f}
 
 
@@ -690,8 +748,8 @@ def asset_signature(assets_dir):
     if prof is None:
         return ""
     s = asset_settings(assets_dir)
-    return "%s|%s|%s|%s|%s|%s|%s|%s" % (
-        prof.gamma, prof.gain, prof.lift, prof.saturation,
+    return "%s|%s|%s|%s|%s" % (
+        prof.key(),
         s["all_images"], s["all_videos"], sorted(s["images"].items()),
         sorted(s["videos"].items()))
 
@@ -704,9 +762,10 @@ def to_text(prof):
     """The file text for *prof*: the explanatory header, then its values."""
     head = DEFAULT_TEXT.split("\nname =", 1)[0]
     return ("%s\nname = %s\ngamma = %s\ngain = %s\nlift = %s\n"
-            "saturation = %.2f\n" % (head, prof.name or "My profile",
-                                     _fmt(prof.gamma), _fmt(prof.gain),
-                                     _fmt(prof.lift), prof.saturation))
+            "saturation = %.2f\nbrightness = %.2f\ncontrast = %.2f\n"
+            % (head, prof.name or "My profile", _fmt(prof.gamma),
+               _fmt(prof.gain), _fmt(prof.lift), prof.saturation,
+               prof.brightness, prof.contrast))
 
 
 def save(prof, path):

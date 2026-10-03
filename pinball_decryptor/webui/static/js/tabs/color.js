@@ -34,10 +34,20 @@ const CH = [
   { key: 2, name: "Blue", cls: "b" },
 ];
 
+// PAD-333: brightness and contrast folded into each channel's gain and gamma,
+// as core/colour_profile.py Profile.curve does.
+function curve(p) {
+  const b = Number(p.brightness ?? 1), c = Math.max(Number(p.contrast ?? 1), 0.01);
+  if (b === 1 && c === 1) return { gamma: p.gamma, gain: p.gain };
+  const k = Math.max(b, 0) * 2 * Math.pow(0.5, 1 / c);
+  return { gamma: p.gamma.map((g) => g * c), gain: p.gain.map((g) => k * Math.pow(Math.max(g, 0), 1 / c)) };
+}
+
 function tables(p) {
   const out = [];
+  const cv = curve(p);
   for (let c = 0; c < 3; c++) {
-    const g = p.gamma[c], k = p.gain[c], lo = p.lift;
+    const g = cv.gamma[c], k = cv.gain[c], lo = p.lift;
     const t = new Uint8ClampedArray(256);
     for (let v = 0; v < 256; v++) {
       const x = Math.min(Math.max((v / 255) * k, 0), 1);
@@ -158,7 +168,7 @@ function Preview({ s, p, screen }) {
 function previewWords(p) {
   const sat = Number(p.saturation), lift = Number(p.lift || 0);
   if (sat === 0) return "The right side is how the machine will show it: in black and white.";
-  const same = sat === 1 && lift === 0
+  const same = sat === 1 && lift === 0 && Number(p.brightness ?? 1) === 1 && Number(p.contrast ?? 1) === 1
     && [0, 1, 2].every((i) => Number(p.gamma[i]) === 1 && Number(p.gain[i]) === 1);
   if (same) return "No change: the card gets your picture exactly as it is.";
   return "The right side is meant to look off here: it is corrected for the machine's screen, which shifts it back to what you made.";
@@ -168,7 +178,7 @@ function previewWords(p) {
 function screenWords(p) {
   const sat = Number(p.saturation), lift = Number(p.lift || 0);
   if (sat === 0) return "The right side is how this screen shows the left: in black and white.";
-  const same = sat === 1 && lift === 0
+  const same = sat === 1 && lift === 0 && Number(p.brightness ?? 1) === 1 && Number(p.contrast ?? 1) === 1
     && [0, 1, 2].every((i) => Number(p.gamma[i]) === 1 && Number(p.gain[i]) === 1);
   if (same) return "No change: this screen shows colors exactly as your PC does.";
   return "The right side is how this screen shows the left.";
@@ -200,11 +210,45 @@ function Curves({ p, screen }) {
 }
 
 // ---------------------------------------------------------------- controls
+// PAD-333: the slider's own number, typed.  It is the number a saved copy
+// of the profile holds; the words beside it say what it does.  A number in
+// range moves the slider as it is typed; leaving the box (or Enter) puts an
+// out-of-range one at the nearest end, Escape puts back the number it had.
+function NumBox({ value, min, max, step, onInput, label }) {
+  const places = String(step).includes(".") ? String(step).split(".")[1].length : 0;
+  const fmt = (v) => Number(v).toFixed(places);
+  const [draft, setDraft] = useState(null);
+  const undo = useRef(false), start = useRef(value);
+  const commit = (txt) => {
+    const v = Number(txt);
+    if (undo.current) { undo.current = false; setDraft(null); if (start.current !== value) onInput(start.current); return; }
+    if (txt !== "" && Number.isFinite(v)) {
+      const got = Math.min(Math.max(v, Number(min)), Number(max));
+      if (got !== value) onInput(got);
+    }
+    setDraft(null);
+  };
+  return html`<span class="field sm cp-sl-num"><input type="number" min=${min} max=${max} step=${step}
+    value=${draft ?? fmt(value)} aria-label=${label + " value"}
+    onFocus=${(e) => { start.current = value; setDraft(fmt(value)); e.target.select(); }}
+    onInput=${(e) => {
+      const txt = e.target.value, v = Number(txt);
+      setDraft(txt);
+      if (txt !== "" && Number.isFinite(v) && v >= Number(min) && v <= Number(max)) onInput(v);
+    }}
+    onBlur=${(e) => commit(e.target.value)}
+    onKeyDown=${(e) => {
+      if (e.key === "Enter") e.target.blur();
+      else if (e.key === "Escape") { undo.current = true; e.target.blur(); }
+    }} /></span>`;
+}
+
 function Slider({ label, value, min, max, step, show, onInput, hint, cls, left, right }) {
   return html`<div class=${cx("cp-slider", cls)}>
     <div class="cp-sl-hd">
       <span class="cp-sl-name" ...${tip(hint)}>${label}</span>
       <span class="cp-sl-val mono">${show(value)}</span>
+      <${NumBox} value=${value} min=${min} max=${max} step=${step} onInput=${onInput} label=${label} />
     </div>
     <input type="range" min=${min} max=${max} step=${step} value=${value} aria-label=${label}
       onInput=${(e) => onInput(Number(e.target.value))} />
@@ -223,6 +267,8 @@ function Controls({ s, p, update }) {
   const [klo, khi] = lim.gain || [0.5, 1.5];
   const [llo, lhi] = lim.lift || [0, 0.3];
   const [slo, shi] = lim.saturation || [0, 2];
+  const [blo, bhi] = lim.brightness || [0.5, 1.5];
+  const [clo, chi] = lim.contrast || [0.5, 1.5];
   const setCh = (key, c, v) => { const arr = p[key].slice(); arr[c] = v; update({ [key]: arr }); };
   const presets = s.presets || [];
   const extra = html`<div class="row cp-file">
@@ -267,6 +313,12 @@ function Controls({ s, p, update }) {
 
     <div class="cp-group">
       <div class="cp-group-hd"><span class="h3">Whole picture</span></div>
+      <${Slider} label="Brightness" value=${p.brightness} min=${blo} max=${bhi} step="0.01" show=${pct}
+        onInput=${(v) => update({ brightness: v })} left="darker" right="brighter"
+        hint=${screen ? "How bright this screen shows everything." : "Every shade darker or brighter. Above 100% the brightest shades turn white."} />
+      <${Slider} label="Contrast" value=${p.contrast} min=${clo} max=${chi} step="0.01" show=${pct}
+        onInput=${(v) => update({ contrast: v })} left="flatter" right="punchier"
+        hint=${screen ? "How far apart this screen pulls dark and bright shades." : "Above 100% pulls dark shades darker and bright shades brighter; below 100% brings them closer. A middle grey stays where it is."} />
       <${Check} checked=${p.saturation === 0} label="Black and white"
         title=${screen ? "A screen that shows everything in greys, the game's own art too. Untick for full color."
           : "Every replaced picture and video in greys, for a black-and-white playfield. Your other settings still apply on top. Untick for full color."}
@@ -361,6 +413,7 @@ export default function ColorTab() {
   const fromStore = () => ({
     name: s.name || "", gamma: (s.gamma || [1, 1, 1]).slice(), gain: (s.gain || [1, 1, 1]).slice(),
     lift: Number(s.lift || 0), saturation: s.saturation == null ? 1 : Number(s.saturation),
+    brightness: s.brightness == null ? 1 : Number(s.brightness), contrast: s.contrast == null ? 1 : Number(s.contrast),
   });
   const [p, setP] = useState(fromStore);
   const pending = useRef({});

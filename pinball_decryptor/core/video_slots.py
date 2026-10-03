@@ -779,9 +779,7 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         # another (PAD-305); with none the recipe is exactly what it was.
         clip_colour = colour or chosen.get(rel)
         if clip_colour is not None:
-            gop["colour"] = "%s|%s|%s|%s" % (
-                clip_colour.gamma, clip_colour.gain, clip_colour.lift,
-                clip_colour.saturation)
+            gop["colour"] = clip_colour.key()
         recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
                               length=seconds or 0,
                               noconv=slot_noconv, budget=budget,

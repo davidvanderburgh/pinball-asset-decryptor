@@ -44,7 +44,8 @@ log = logging.getLogger(__name__)
 
 #: limits of the page's controls; the file accepts a wider range (parse())
 LIMITS = {"gamma": (0.5, 2.5), "gain": (0.5, 1.5), "lift": (0.0, 0.3),
-          "saturation": (0.0, 2.0)}
+          "saturation": (0.0, 2.0), "brightness": (0.5, 1.5),
+          "contrast": (0.5, 1.5)}
 
 _CARD_CACHE = []
 
@@ -205,7 +206,8 @@ class ColorTab(TabService):
                        for k, v in cp.PRESETS]
         values = dict(
             name=p.name, gamma=list(p.gamma), gain=list(p.gain),
-            lift=max(p.lift), saturation=p.saturation, rev=self._rev,
+            lift=max(p.lift), saturation=p.saturation,
+            brightness=p.brightness, contrast=p.contrast, rev=self._rev,
             active=active, mode=self._mode if self._on_display else "display",
             per_file=self._on_display,
             display_active=self._prof is not None,
@@ -363,10 +365,11 @@ class ColorTab(TabService):
     @rpc
     def set_params(self, params):
         """The page's sliders: any of name, gamma [r g b], gain [r g b],
-        lift (one number, all three), saturation."""
+        lift (one number, all three), saturation, brightness, contrast."""
         p = self._shown()
         kw = dict(name=p.name, gamma=p.gamma, gain=p.gain, lift=p.lift,
-                  saturation=p.saturation)
+                  saturation=p.saturation, brightness=p.brightness,
+                  contrast=p.contrast)
         params = params or {}
         if "name" in params:
             kw["name"] = str(params["name"] or "").strip()[:60]
@@ -377,9 +380,9 @@ class ColorTab(TabService):
         if "lift" in params:
             v = round(_clamp("lift", params["lift"]), 3)
             kw["lift"] = (v, v, v)
-        if "saturation" in params:
-            kw["saturation"] = round(_clamp("saturation",
-                                            params["saturation"]), 3)
+        for key in ("saturation", "brightness", "contrast"):
+            if key in params:
+                kw[key] = round(_clamp(key, params[key]), 3)
         if kw["name"] in ("", "No change"):
             kw["name"] = "My screen" if self._screen_mode() else "My profile"
         return self._store(cp.Profile(**kw))
@@ -430,7 +433,9 @@ class ColorTab(TabService):
         if not prof.name:
             prof = cp.Profile(name=os.path.splitext(os.path.basename(path))[0],
                               gamma=prof.gamma, gain=prof.gain,
-                              lift=prof.lift, saturation=prof.saturation)
+                              lift=prof.lift, saturation=prof.saturation,
+                              brightness=prof.brightness,
+                              contrast=prof.contrast)
         self._store(prof, rev=True)
         if problems:
             self.set(problems=list(problems))

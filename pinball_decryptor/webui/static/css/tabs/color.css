@@ -53,7 +53,9 @@ html.bp-1020 .cp-grid { grid-template-columns: minmax(0, 1fr); }
 .cp-slider.r input[type=range] { accent-color: #e5534b; }
 .cp-slider.g input[type=range] { accent-color: #57ab5a; }
 .cp-slider.b input[type=range] { accent-color: #539bf5; }
-.cp-sl-val { color: var(--ink-2); font-size: 12px; }
+.cp-sl-val { color: var(--ink-2); font-size: 12px; margin-left: auto; }
+.cp-sl-num { flex: 0 0 70px; width: 70px; }
+.cp-sl-num input { text-align: right; }
 .cp-slider input[type=range] { width: 100%; margin: 0; }
 .cp-sl-ends { display: flex; justify-content: space-between; font-size: 11px; margin-top: -2px; }
 

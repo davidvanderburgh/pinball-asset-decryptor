@@ -84,6 +84,10 @@ IMAGE_SLOTS_KEY = "image_color_slots"
 VIDEO_SLOTS_KEY = "video_color_slots"
 #: The Images tab's advanced box (PAD-335): the game's own pictures unlocked.
 STOCK_IMAGES_KEY = "image_color_unlocked"
+#: The Video tab's Advanced box (PAD-336): the game's own clips get a Color
+#: switch too, and one switched on is re-encoded from its own original with
+#: the individual files profile.  Off (absent), they stay locked.
+STOCK_VIDEOS_KEY = "video_color_stock"
 
 #: Rec.601 luma weights: the grey a pixel is desaturated toward.
 _LUMA = (0.299, 0.587, 0.114)
@@ -551,6 +555,28 @@ def asset_map(assets_dir, kind, rels):
     return {rel: prof for rel in rels if asset_applies(settings, kind, rel)}
 
 
+def stock_videos_unlocked(data):
+    """The Video tab's Advanced box, from a loaded sidecar *data*."""
+    return bool(isinstance(data, dict) and data.get(STOCK_VIDEOS_KEY))
+
+
+def stock_video_rels(data):
+    """The game's own clips switched on with the Advanced box ticked
+    (PAD-336), from a loaded sidecar *data*: only a clip's own switch counts
+    (the Every replaced video box never reaches a stock clip), and a clip
+    with a replacement picked is not stock."""
+    if not stock_videos_unlocked(data):
+        return []
+    slots = data.get(VIDEO_SLOTS_KEY)
+    picks = data.get("video") or {}
+    if not isinstance(slots, dict):
+        return []
+    if not isinstance(picks, dict):
+        picks = {}
+    return sorted(str(rel) for rel, on in slots.items()
+                  if on and not picks.get(rel))
+
+
 def stock_images_unlocked(assets_dir):
     """Is the Images tab's advanced "Unlock the game's own pictures" box
     ticked (PAD-335)?"""
@@ -731,6 +757,7 @@ def asset_counts(assets_dir):
         if isinstance(picks, dict):
             out[kind] = sum(1 for rel, src in picks.items()
                             if src and asset_applies(settings, kind, rel))
+    out["videos"] += len(stock_video_rels(data))
     picks = data.get("image") if isinstance(data.get("image"), dict) else {}
     out["images"] += len(stock_image_rels(
         assets_dir, {r for r, src in picks.items() if src}))

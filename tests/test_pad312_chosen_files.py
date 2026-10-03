@@ -540,3 +540,56 @@ def test_a_switch_moved_on_the_images_tab_reaches_the_scenes_editor(tmp_path):
         assert calls == ["drawn", "drawn"]
         s = w.state("color")
         assert s["display_active"] is False and s["asset_name"] == "Recommended"
+
+
+def test_an_unlocked_stock_clip_is_re_encoded_from_its_own_original(tmp_path, monkeypatch):
+    """PAD-336: with the Video tab's Advanced box ticked, a game's own clip
+    switched on is staged from its ``.orig/`` snapshot with the profile."""
+    from pinball_decryptor.core import video_slots, staged_originals
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    seen = {}
+
+    def fake_stage(slot, rep, **kw):
+        with open(rep, "rb") as f:
+            seen[slot.rel_path] = (f.read(), kw.get("colour"),
+                                   kw.get("no_conversion"))
+        with open(slot.abs_path, "wb") as f:
+            f.write(b"recoloured")
+        return True, "ok"
+
+    monkeypatch.setattr(video_slots, "stage_replacement", fake_stage)
+    monkeypatch.setattr(video_slots, "_clip_bitrate", lambda p: None)
+    monkeypatch.setattr(video_slots, "_slot_keyint", lambda p: 0)
+    f = proj / "stock.mp4"
+    f.write_bytes(b"stock")
+    slot = video_slots.VideoSlot(rel_path="stock.mp4", abs_path=str(f),
+                                 ext=".mp4", info=None, size=5, probed=False)
+    data = {"video_color_slots": {"stock.mp4": True}}
+    assert cp.stock_video_rels(data) == []
+    data["video_color_stock"] = True
+    assert cp.stock_video_rels(data) == ["stock.mp4"]
+    assert cp.stock_video_rels(dict(data, video={"stock.mp4": "x"})) == []
+    staged_changes.save(str(proj), data)
+    assert cp.asset_counts(str(proj))["videos"] == 1
+    with cp.forced(False):
+        n, fails = video_slots.stage_replacements(
+            {"stock.mp4": slot}, {"stock.mp4": video_slots.STOCK_SOURCE},
+            assets_dir=str(proj), no_conversion=True)
+    assert n == 1 and not fails
+    assert seen.pop("stock.mp4") == (b"stock", RECOMMENDED, False)
+    # the next build keeps it: never a second generation of the slot
+    with cp.forced(False):
+        n, fails = video_slots.stage_replacements(
+            {"stock.mp4": slot}, {"stock.mp4": video_slots.STOCK_SOURCE},
+            assets_dir=str(proj), no_conversion=True)
+    assert n == 1 and not fails and not seen
+    assert staged_originals.revert(str(proj), "stock.mp4")
+    assert f.read_bytes() == b"stock"
+    # switched off (the slot's own switch gone), nothing is staged
+    staged_changes.save(str(proj), {"video_color_stock": True})
+    with cp.forced(False):
+        n, fails = video_slots.stage_replacements(
+            {"stock.mp4": slot}, {"stock.mp4": video_slots.STOCK_SOURCE},
+            assets_dir=str(proj))
+    assert n == 0 and not fails and not seen

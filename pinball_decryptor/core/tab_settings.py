@@ -28,7 +28,7 @@ SECTIONS = {
               "grow_keep_whole", "audio_trim"),
     "video": ("video", "video_asis_slots", "video_length_slots",
               "video_trim", "video_no_conversion", "video_best_quality",
-              "video_color_slots", "color_all_videos"),
+              "video_color_slots", "color_all_videos", "video_color_stock"),
 }
 #: The section holding each media tab's replacement picks.
 PICKS = {"images": "image", "audio": "audio", "video": "video"}

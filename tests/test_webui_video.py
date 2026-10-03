@@ -849,3 +849,42 @@ def test_color_column_has_no_lock_where_the_display_corrects(tmp_path):
     with web_app(tmp_path, mfr="jjp") as w:
         st = _scan(w, proj)
         assert not any(r["col_lock"] for r in st["rows"])
+
+
+def test_advanced_unlocks_the_games_own_clips(tmp_path):
+    """PAD-336: the Advanced box gives a stock clip its own Color switch
+    (the Every replaced video box never reaches it), the sidecar keeps it,
+    and unticking locks the clips again and puts a built one back."""
+    from pinball_decryptor.core import colour_profile, staged_originals
+    proj = _project(tmp_path)
+    rel = "video/attract.mp4"
+    with web_app(tmp_path, mfr="stern") as w:
+        st = _scan(w, proj)
+        if not w.run(lambda: w.window.service("video")._per_file_colour()):
+            pytest.skip("this manufacturer corrects the files on the display")
+        assert st["color_offered"] is True and st["color_stock"] is False
+        assert w.call("video.set_color", rel, True) is False
+        assert w.call("video.set_color_stock", True) is True
+        r = _row(w.state("video"), rel)
+        assert not r["col_lock"] and r["col"] is False and r["col_stock"]
+        assert w.call("video.set_color", rel, True) is True
+        assert _row(w.state("video"), rel)["col"] is True
+        side = json.loads((proj / ".staged_changes.json")
+                          .read_text(encoding="utf-8"))
+        assert side["video_color_stock"] is True
+        assert colour_profile.stock_video_rels(side) == [rel]
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        _scan(w, proj)
+        assert w.state("video")["color_stock"] is True
+        assert _row(w.state("video"), rel)["col"] is True
+        # as a build leaves it: the original kept, the slot re-encoded
+        staged_originals.snapshot(str(proj), rel, None)
+        (proj / "video" / "attract.mp4").write_bytes(b"recoloured")
+        assert w.call("video.set_color_stock", False) is True
+        r = _row(w.state("video"), rel)
+        assert r["col_lock"] and r["col"] is None
+        assert (proj / "video" / "attract.mp4").read_bytes() != b"recoloured"
+        side = json.loads((proj / ".staged_changes.json")
+                          .read_text(encoding="utf-8"))
+        assert "video_color_stock" not in side
+        assert not colour_profile.stock_video_rels(side)

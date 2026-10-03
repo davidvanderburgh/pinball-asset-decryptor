@@ -78,6 +78,8 @@ ASSET_KEY = "asset_color_profile"
 #: screen does to what it is given, preview only, never written to a card.
 #: Absent = the individual files profile, undone (PAD-312's model).
 SCREEN_KEY = "screen_profile"
+#: stored under SCREEN_KEY alone: "Same as individual files" (PAD-341)
+SCREEN_FOLLOW = "follow"
 ALL_IMAGES_KEY = "color_all_images"
 ALL_VIDEOS_KEY = "color_all_videos"
 IMAGE_SLOTS_KEY = "image_color_slots"
@@ -928,21 +930,38 @@ def added_picture_colour(assets_dir, op, settings=None, prof=None):
     return prof if on else None
 
 
-def screen_profile(assets_dir):
-    """The machine's screen stored for *assets_dir* (PAD-324), or ``None``:
-    then the Scenes preview takes the individual files profile, undone."""
+def _screen_stored(assets_dir):
+    """What the project stores for its machine screen: a dict, or ``None``."""
     from . import staged_changes
     d = staged_changes.load(assets_dir).get(SCREEN_KEY) if assets_dir else None
-    return _from_dict(d) if isinstance(d, dict) else None
+    return d if isinstance(d, dict) else None
 
 
-def store_screen_profile(assets_dir, prof):
+def screen_profile(assets_dir):
+    """The machine's screen stored for *assets_dir* (PAD-324), or ``None``:
+    then the Scenes preview takes the Recommended screen (PAD-341), or the
+    individual files profile, undone, when :func:`screen_follows`."""
+    d = _screen_stored(assets_dir)
+    return _from_dict(d) if d is not None and not d.get(SCREEN_FOLLOW)         else None
+
+
+def screen_follows(assets_dir):
+    """True when the project picked "Same as individual files": the screen
+    is that profile, undone (what every project had before PAD-341)."""
+    d = _screen_stored(assets_dir)
+    return bool(d and d.get(SCREEN_FOLLOW))
+
+
+def store_screen_profile(assets_dir, prof, follow=False):
     """Set the machine's screen of *assets_dir* (``None`` = back to the
-    individual files profile, undone).  No change IS stored: it says the
-    PC shows what the machine does.  Preview only, so nothing is pending."""
+    Recommended screen; *follow* = the individual files profile, undone).
+    No change IS stored: it says the PC shows what the machine does.
+    Preview only, so nothing is pending."""
     from . import staged_changes
     data = staged_changes.load(assets_dir)
-    if prof is None:
+    if follow:
+        data[SCREEN_KEY] = {SCREEN_FOLLOW: True}
+    elif prof is None:
         data.pop(SCREEN_KEY, None)
     else:
         data[SCREEN_KEY] = _profile_dict(prof)
@@ -951,16 +970,16 @@ def store_screen_profile(assets_dir, prof):
 
 def screen_shown(assets_dir):
     """The screen the Scenes preview uses now, as sliders can show it:
-    the stored one, else the individual files profile's :meth:`inverse`.
-    ``(profile, stored)``."""
+    the stored one, else the Recommended screen, else (following) the
+    individual files profile's :meth:`inverse`.  ``(profile, stored)``."""
     prof = screen_profile(assets_dir)
     if prof is not None:
         return prof, True
+    if not screen_follows(assets_dir):
+        return SCREEN_PRESETS[0][1], False
     files = asset_profile(assets_dir)
     inv = files.inverse()
-    if files == PRESETS[0][1]:
-        name = "Recommended screen"
-    elif inv.is_identity():
+    if inv.is_identity():
         name = "No change"
     else:
         name = "%s, undone" % files.label()
@@ -1042,8 +1061,10 @@ def machine_view(assets_dir, overlay_on=True, screen_on=True):
         screen, undo = None, False
     elif stored is not None:
         screen, undo = (None if stored.is_identity() else stored), False
-    else:
+    elif screen_follows(assets_dir):
         screen, undo = asset_active(assets_dir), True
+    else:
+        screen, undo = SCREEN_PRESETS[0][1], False
     if display is None and screen is None:
         return None
 
@@ -1202,14 +1223,30 @@ PRESETS = (
     ("bw", Profile(name="Black and white", saturation=0.0)),
 )
 
-#: The tab's tooltip for each starting point: how it was made.
+#: The Machine screen a project starts from (PAD-341): tuned by a user on
+#: a real Stern Spike 2 against photos of the machine's screen, so it says
+#: what the screen does (applied forwards), with the colour ranges and
+#: curves (PAD-339) a global gamma could not reach: teal blues, warm
+#: oranges, a red that sits low in the mids.
+SCREEN_DEFAULT_TEXT = """name = Recommended screen
+gamma = 1.00 1.00 1.00
+gain = 1.00 1.00 1.00
+lift = 0.00 0.00 0.00
+saturation = 1.00
+brightness = 1.00
+contrast = 1.00
+range = 195 60 30 10 0.87 1.33 0.15
+range = 30 40 20 0 0.9 1 0.05
+curve_rgb = 0 0, 24 20, 64 92, 128 180, 192 224, 255 255
+curve_red = 0 0, 32 32, 64 56, 128 106, 191 176, 224 216, 255 252
+curve_green = 0 0, 224 224, 255 253
+curve_blue = 0 0, 32 35, 64 76, 128 156, 192 210, 255 255
+"""
+
 #: The Machine screen mode's starting points (PAD-324): what the screen
-#: does, so Recommended is the measured correction run forwards the other way.
+#: does.  The first is the default a project's preview uses (PAD-341).
 SCREEN_PRESETS = (
-    ("screen_recommended", Profile(
-        name="Recommended screen", **{
-            k: v for k, v in vars(PRESETS[0][1].inverse()).items()
-            if k != "name"})),
+    ("screen_recommended", parse(SCREEN_DEFAULT_TEXT)[0]),
     ("none", Profile(name="No change")),
     ("bw", Profile(name="Black and white", saturation=0.0)),
     ("follow", None),
@@ -1219,14 +1256,14 @@ SCREEN_PRESET_LABELS = {"follow": "Same as individual files"}
 
 SCREEN_PRESET_TIPS = {
     "screen_recommended": (
-        "The screen measured on a real Stern Spike 2 Godzilla: a mid grey "
-        "(128, 128, 128) came out around (164, 187, 226), too bright and "
-        "most of all too blue, while white stayed white. A phone photo is "
-        "not a color meter: nudge it until Scenes matches your machine."),
+        "The default: tuned on a real Stern Spike 2 against photos of its "
+        "screen. Middle shades come out much brighter, blues lean teal and "
+        "turn richer, red sits a little low. A phone photo is not a color "
+        "meter: nudge it until Scenes matches your machine."),
     "none": "The machine shows colors exactly as your PC does.",
     "bw": "A screen that shows everything in greys, the game's own art too.",
-    "follow": ("The individual files profile, undone: what Scenes used "
-               "before you set a screen of your own."),
+    "follow": ("The individual files profile, undone: the screen that "
+               "correction was made for."),
 }
 
 PRESET_TIPS = {

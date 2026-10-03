@@ -177,7 +177,10 @@ def test_color_tab_keeps_them_on_the_machine_screen_only(tmp_path):
         w.drain()
         assert w.call("color.set_mode", "screen") == "screen"
         w.drain()
-        assert w.state("color")["ranges"] == [] and w.state("color")["curves"] == {}
+        # the Recommended screen starts with its own (PAD-341)
+        rec = dict(cp.SCREEN_PRESETS)["screen_recommended"]
+        assert w.state("color")["ranges"] == [list(r) for r in rec.ranges]
+        assert sorted(w.state("color")["curves"]) == ["b", "g", "r", "rgb"]
         w.call("color.set_params", {"ranges": [[205, 50, 30, 15, 0.8, 0.85, 0.15]],
                                     "curves": {"rgb": [[0, 0], [64, 48], [255, 255]],
                                                "g": [[0, 0], [255, 255]]}})

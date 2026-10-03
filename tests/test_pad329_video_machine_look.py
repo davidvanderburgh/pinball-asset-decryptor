@@ -28,7 +28,7 @@ def _apply_step(step, rgb):
     RECOMMENDED,
     cp.Profile(gamma=(1.0, 1.0, 0.6), gain=(1.2, 0.8, 1.0), lift=(0.05, 0.05, 0.05)),
     cp.Profile(saturation=0.0),
-    dict(cp.SCREEN_PRESETS)["screen_recommended"],
+    RECOMMENDED.inverse(),          # the PAD-324 screen (PAD-341's has ranges)
 ])
 def test_the_filter_draws_the_profiles_own_curve(prof):
     rng = np.random.default_rng(3)

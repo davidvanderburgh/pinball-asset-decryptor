@@ -75,6 +75,11 @@ def main():
                 time.sleep(1)
                 api("color.set_params", extras)
                 time.sleep(2)
+                # the page takes the server's numbers on a new rev: away and back
+                api("color.set_mode", "screen")
+                time.sleep(1)
+                api("color.set_mode", mode)
+                time.sleep(2)
                 page.screenshot(path=os.path.join(out, "%s_color_%s.png" % (prefix, name)),
                                 full_page=True)
                 st = webui_shot.state(url).get("color") or {}

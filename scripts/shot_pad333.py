@@ -55,7 +55,7 @@ def main():
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1600, "height": 1300})
+            page = browser.new_page(viewport={"width": 1600, "height": 1900})
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.add_init_script(
@@ -71,6 +71,13 @@ def main():
             card.screenshot(path=os.path.join(out, prefix + "_color_adjust.png"))
             print("number boxes:", page.locator(".cp-controls input[type=number]").count(),
                   flush=True)
+            box = page.locator('.cp-controls input[aria-label="Contrast value"]')
+            if box.count():
+                box.fill("1.25")
+                box.press("Enter")
+                time.sleep(1.5)
+                st = webui_shot.state(url).get("color") or {}
+                print("typed contrast ->", st.get("contrast"), flush=True)
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

@@ -12,7 +12,9 @@ from pinball_decryptor.core import staged_changes
 
 PIL = pytest.importorskip("PIL.Image")
 
-RECOMMENDED = dict(cp.PRESETS)["recommended"]
+#: the individual files profile a project starts with: the Recommended screen,
+#: undone (PAD-346)
+RECOMMENDED = cp.undo_screen(cp.SCREEN_PRESETS[0][1])
 
 
 def _ramp():

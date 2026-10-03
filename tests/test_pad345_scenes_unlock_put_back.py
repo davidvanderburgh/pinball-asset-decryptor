@@ -116,7 +116,9 @@ def test_a_scenes_switch_stays_in_its_own_folder(tmp_path):
 
 # -- round two: the user's own pictures built earlier, pick gone ------------------------
 
-RECOMMENDED = dict(cp.PRESETS)["recommended"]
+#: the individual files profile a project starts with: the Recommended screen,
+#: undone (PAD-346)
+RECOMMENDED = cp.undo_screen(cp.SCREEN_PRESETS[0][1])
 BUILT = "images/scene_textures/mine.png"
 
 

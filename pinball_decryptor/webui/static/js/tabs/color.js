@@ -18,6 +18,12 @@
 // PAD-324: a third mode, "Machine screen", is not a correction but the
 // screen itself: what the machine does to what it is given.  Only the
 // preview (Scenes, the Video tab's players) draws through it; nothing is written.
+//
+// PAD-339: being preview only, the machine screen also has colour ranges
+// (hue, saturation and brightness of one band of hues, greys protected) and
+// curves (master, then red, green, blue, through points placed by hand),
+// applied after the other steps.  The maths mirrors core/colour_profile.py
+// (apply_ranges, curve_table); its comment there spells out every step.
 
 import { html, useState, useEffect, useRef, useCallback, PageHead, Card, Button, Field, Select, Seg, Note, Check,
          Icon, tip, call, cx, mediaUrl } from "../core/ui.js";
@@ -68,10 +74,12 @@ function matrix(s) {
   return m;
 }
 
-function correct(src, dst, p) {
+export function correct(src, dst, p) {
   const [tr, tg, tb] = tables(p);
   const m = matrix(p.saturation);
   const mix = p.saturation !== 1;
+  const live = (p.ranges || []).filter((r) => !rangeNeutral(r));
+  const ct = curveTables(p);
   const a = src.data, o = dst.data;
   for (let i = 0; i < a.length; i += 4) {
     let r = a[i], g = a[i + 1], b = a[i + 2];
@@ -83,8 +91,102 @@ function correct(src, dst, p) {
       g = Math.min(255, Math.max(0, Math.round(g2)));
       b = Math.min(255, Math.max(0, Math.round(b2)));
     }
-    o[i] = tr[r]; o[i + 1] = tg[g]; o[i + 2] = tb[b]; o[i + 3] = a[i + 3];
+    r = tr[r]; g = tg[g]; b = tb[b];
+    if (live.length) {
+      const px = rangePixel(r, g, b, live);
+      r = Math.min(255, Math.max(0, Math.floor(px[0] + 0.5)));
+      g = Math.min(255, Math.max(0, Math.floor(px[1] + 0.5)));
+      b = Math.min(255, Math.max(0, Math.floor(px[2] + 0.5)));
+    }
+    if (ct) { r = ct[0][r]; g = ct[1][g]; b = ct[2][b]; }
+    o[i] = r; o[i + 1] = g; o[i + 2] = b; o[i + 3] = a[i + 3];
   }
+}
+
+// ------------------------------------------- PAD-339: colour ranges, curves
+const IDENT = [[0, 0], [255, 255]];
+const RF = ["hue", "width", "soft", "shift", "saturation", "brightness", "protect"];
+const mod = (a, n) => ((a % n) + n) % n;
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+const rangeNeutral = (r) => r[3] === 0 && r[4] === 1 && r[5] === 1;
+const sameCurve = (pts) => pts.length === 2 && pts[0][0] === 0 && pts[0][1] === 0 && pts[1][0] === 255 && pts[1][1] === 255;
+
+function hasExtras(p) {
+  return (p.ranges || []).some((r) => !rangeNeutral(r))
+    || Object.values(p.curves || {}).some((pts) => !sameCurve(pts));
+}
+
+// core/colour_profile.py curve_table: Fritsch-Carlson monotone cubic
+export function curveTable(points) {
+  const xs = points.map((q) => Number(q[0])), ys = points.map((q) => Number(q[1]));
+  const n = xs.length, out = new Uint8Array(256);
+  if (n < 2) { for (let v = 0; v < 256; v++) out[v] = v; return out; }
+  const d = [];
+  for (let k = 0; k < n - 1; k++) d.push((ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k]));
+  const m = new Array(n).fill(0);
+  m[0] = d[0]; m[n - 1] = d[n - 2];
+  for (let k = 1; k < n - 1; k++) m[k] = d[k - 1] * d[k] > 0 ? (d[k - 1] + d[k]) / 2 : 0;
+  for (let k = 0; k < n - 1; k++) {
+    if (d[k] === 0) { m[k] = 0; m[k + 1] = 0; continue; }
+    const a = m[k] / d[k], b = m[k + 1] / d[k], r = a * a + b * b;
+    if (r > 9) { const t = 3 / Math.sqrt(r); m[k] = t * a * d[k]; m[k + 1] = t * b * d[k]; }
+  }
+  let k = 0;
+  for (let v = 0; v < 256; v++) {
+    let y;
+    if (v <= xs[0]) y = ys[0];
+    else if (v >= xs[n - 1]) y = ys[n - 1];
+    else {
+      while (xs[k + 1] < v) k++;
+      const h = xs[k + 1] - xs[k], t = (v - xs[k]) / h, t2 = t * t, t3 = t2 * t;
+      y = (2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * h * m[k]
+        + (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * h * m[k + 1];
+    }
+    out[v] = Math.floor(clamp(y + 0.5, 0, 255));
+  }
+  return out;
+}
+
+// the master curve, then each channel's own: [r, g, b] tables, or null
+function curveTables(p) {
+  const cv = p.curves || {};
+  const live = (ch) => cv[ch] && !sameCurve(cv[ch]);
+  if (!["rgb", "r", "g", "b"].some(live)) return null;
+  const master = live("rgb") ? curveTable(cv.rgb) : null;
+  return ["r", "g", "b"].map((ch) => {
+    const own = live(ch) ? curveTable(cv[ch]) : null;
+    const t = new Uint8Array(256);
+    for (let v = 0; v < 256; v++) { const x = master ? master[v] : v; t[v] = own ? own[x] : x; }
+    return t;
+  });
+}
+
+// how much of a range reaches the hue *h* (degrees), greys aside
+function hueWeight(range, h) {
+  const [hue, width, soft] = range;
+  const dist = Math.abs(mod(h - hue + 180, 360) - 180), half = width / 2;
+  if (width >= 360) return 1;
+  if (soft > 0) return smooth(1 - (dist - half) / soft);
+  return dist <= half ? 1 : 0;
+}
+
+// core/colour_profile.py apply_ranges, one pixel (floats 0..255)
+function rangePixel(r, g, b, ranges) {
+  for (const rg of ranges) {
+    const [, , , shift, sat, bright, protect] = rg;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), c = mx - mn;
+    if (c <= 0) continue;
+    const h = (mx === r ? mod((g - b) / c, 6) : mx === g ? (b - r) / c + 2 : (r - g) / c + 4) * 60;
+    const gw = protect > 0 ? smooth(c / 255 / protect) : 1;
+    const w = hueWeight(rg, h) * gw;
+    if (w <= 0) continue;
+    const h2 = mod(h + shift * w, 360), s2 = clamp((c / mx) * (1 + (sat - 1) * w), 0, 1);
+    const v2 = clamp(mx * (1 + (bright - 1) * w), 0, 255);
+    const f = (n) => { const k = mod(n + h2 / 60, 6); return v2 - v2 * s2 * clamp(Math.min(k, 4 - k), 0, 1); };
+    r = f(5); g = f(3); b = f(1);
+  }
+  return [r, g, b];
 }
 
 // ------------------------------------------------------------- the preview
@@ -183,7 +285,7 @@ function screenWords(p) {
   const sat = Number(p.saturation), lift = Number(p.lift || 0);
   if (sat === 0) return "The right side is how this screen shows the left: in black and white.";
   const same = sat === 1 && lift === 0 && Number(p.brightness ?? 1) === 1 && Number(p.contrast ?? 1) === 1
-    && [0, 1, 2].every((i) => Number(p.gamma[i]) === 1 && Number(p.gain[i]) === 1);
+    && [0, 1, 2].every((i) => Number(p.gamma[i]) === 1 && Number(p.gain[i]) === 1) && !hasExtras(p);
   if (same) return "No change: this screen shows colors exactly as your PC does.";
   return "The right side is how this screen shows the left.";
 }
@@ -191,6 +293,8 @@ function screenWords(p) {
 // -------------------------------------------------------------- the curves
 function Curves({ p, screen }) {
   const t = tables(p);
+  const ct = screen ? curveTables(p) : null;
+  if (ct) for (let c = 0; c < 3; c++) t[c] = t[c].map((v) => ct[c][v]);
   const W = 120;
   const path = (tab) => {
     let d = "";
@@ -349,6 +453,181 @@ function Controls({ s, p, update }) {
   <//>`;
 }
 
+// ---------------------------------------------- PAD-339: the colour ranges
+const RANGE_STARTS = [
+  { hue: 0, label: "Reds" }, { hue: 60, label: "Yellows" }, { hue: 120, label: "Greens" },
+  { hue: 180, label: "Cyans" }, { hue: 240, label: "Blues" }, { hue: 300, label: "Magentas" },
+];
+const hueLabel = (h) => {
+  const near = RANGE_STARTS.reduce((a, b) => (Math.abs(mod(h - b.hue + 180, 360) - 180)
+    < Math.abs(mod(h - a.hue + 180, 360) - 180) ? b : a));
+  return near.label;
+};
+const deg = (v) => `${Math.round(v)}°`;
+const signedDeg = (v) => (Math.abs(v) < 0.5 ? "unchanged" : `${v > 0 ? "+" : ""}${Math.round(v)}°`);
+
+// the hues a range reaches: the colour wheel, dimmed where it does not
+function RangeBand({ r }) {
+  const stops = [];
+  for (let h = 0; h <= 360; h += 6) stops.push(`rgba(20,22,26,${(0.7 * (1 - hueWeight(r, h))).toFixed(3)}) ${(h / 3.6).toFixed(2)}%`);
+  const hues = [0, 60, 120, 180, 240, 300, 360].map((h) => `hsl(${h} 90% 50%) ${(h / 3.6).toFixed(2)}%`);
+  return html`<div class="cp-band" aria-hidden="true"
+    style=${`background: linear-gradient(to right, ${stops.join(", ")}), linear-gradient(to right, ${hues.join(", ")})`}></div>`;
+}
+
+function Ranges({ s, p, update }) {
+  const lim = s.range_limits || {};
+  const nw = s.range_new || { width: 60, soft: 30, shift: 0, saturation: 1, brightness: 1, protect: 0.15 };
+  const ranges = p.ranges || [];
+  const full = ranges.length >= (s.max_ranges || 6);
+  const setR = (i, field, v) => {
+    const next = ranges.map((r) => r.slice());
+    next[i][RF.indexOf(field)] = v;
+    update({ ranges: next });
+  };
+  const add = (hue) => update({ ranges: [...ranges.map((r) => r.slice()),
+    [hue, nw.width, nw.soft, nw.shift, nw.saturation, nw.brightness, nw.protect]] });
+  const neutral = (i) => update({ ranges: ranges.map((r, j) => (j === i ? [r[0], r[1], r[2], 0, 1, 1, r[6]] : r.slice())) });
+  const drop = (i) => update({ ranges: ranges.filter((_r, j) => j !== i).map((r) => r.slice()) });
+  const L = (k, d) => lim[k] || d;
+  const extra = html`<${Button} size="sm" icon="undo" disabled=${!ranges.length} onClick=${() => update({ ranges: [] })}
+    title="Remove every color range">Reset all<//>`;
+  return html`<${Card} title="Color ranges" cls="cp-ranges" extra=${extra}>
+    <p class="small muted cp-note">Change one band of colors and leave the rest alone, e.g. a sea that comes out too teal. Greys and near-greys are protected, so portraits and metal keep their grey. Applied after the sliders under Adjust.</p>
+    <div class="row wrap cp-range-add">
+      <span class="small muted">Add a range:</span>
+      ${RANGE_STARTS.map((st) => html`<${Button} size="sm" icon="plus" disabled=${full} onClick=${() => add(st.hue)}
+        title=${`A range around ${st.label.toLowerCase()} (${st.hue}°). Move Hue to center it on the color you want.`}>${st.label}<//>`)}
+    </div>
+    ${ranges.map((r, i) => html`<div class="cp-group cp-range" key=${i}>
+      <div class="row cp-range-hd">
+        <span class="h3">${`Range ${i + 1}: ${hueLabel(r[0])}`}</span>
+        <span class="sp"></span>
+        <${Button} size="sm" icon="undo" disabled=${rangeNeutral(r)} onClick=${() => neutral(i)}
+          title="Hue shift, saturation and brightness back to unchanged; the range keeps its place">Reset<//>
+        <${Button} size="sm" icon="trash" onClick=${() => drop(i)} title="Remove this range">Remove<//>
+      </div>
+      <${RangeBand} r=${r} />
+      <${Slider} label="Hue" value=${r[0]} min=${L("hue", [0, 360])[0]} max=${L("hue", [0, 360])[1]} step="1" show=${deg}
+        onInput=${(v) => setR(i, "hue", v)} hint="The center of the range on the color wheel: 0 red, 60 yellow, 120 green, 180 cyan, 240 blue, 300 magenta." />
+      <${Slider} label="Width" value=${r[1]} min=${L("width", [0, 360])[0]} max=${L("width", [0, 360])[1]} step="1" show=${deg}
+        onInput=${(v) => setR(i, "width", v)} hint="How many degrees of hue are fully in the range." />
+      <${Slider} label="Soft edge" value=${r[2]} min=${L("soft", [0, 180])[0]} max=${L("soft", [0, 180])[1]} step="1" show=${deg}
+        onInput=${(v) => setR(i, "soft", v)} hint="How gently the range fades out on each side, so there is no hard edge between colors." />
+      <${Slider} label="Hue shift" value=${r[3]} min=${L("shift", [-180, 180])[0]} max=${L("shift", [-180, 180])[1]} step="1" show=${signedDeg}
+        onInput=${(v) => setR(i, "shift", v)} left="−180°" right="+180°"
+        hint="Turns the colors in the range around the color wheel. A teal sea moves toward blue with a positive shift." />
+      <${Slider} label="Saturation" value=${r[4]} min=${L("saturation", [0, 4])[0]} max=${L("saturation", [0, 4])[1]} step="0.01" show=${pct}
+        onInput=${(v) => setR(i, "saturation", v)} left="grey" right="vivid" hint="How strong the colors in the range are." />
+      <${Slider} label="Brightness" value=${r[5]} min=${L("brightness", [0, 4])[0]} max=${L("brightness", [0, 4])[1]} step="0.01" show=${pct}
+        onInput=${(v) => setR(i, "brightness", v)} left="darker" right="brighter" hint="How bright the colors in the range are." />
+      <${Slider} label="Protect greys" value=${r[6]} min=${L("protect", [0, 1])[0]} max=${L("protect", [0, 1])[1]} step="0.01" show=${pct}
+        onInput=${(v) => setR(i, "protect", v)} left="off" right="more"
+        hint="How much color a pixel needs before the range touches it fully. Greys and pixels with less color than this are left alone or only partly changed." />
+    </div>`)}
+    ${!ranges.length ? html`<p class="small muted cp-note">No range yet: everything is as the sliders under Adjust leave it.</p>` : null}
+  <//>`;
+}
+
+// ---------------------------------------------------- PAD-339: the curves
+const CURVE_CH = [
+  { value: "rgb", label: "RGB" }, { value: "r", label: "Red" }, { value: "g", label: "Green" }, { value: "b", label: "Blue" },
+];
+const CURVE_CLS = { rgb: "w", r: "r", g: "g", b: "b" };
+
+function CurveEditor({ s, p, update }) {
+  const [ch, setCh] = useState("rgb");
+  const svgRef = useRef(null);
+  const drag = useRef(-1);
+  const curves = p.curves || {};
+  const pts = (curves[ch] || IDENT).map((q) => q.slice());
+  const maxPts = s.max_points || 16;
+  const name = CURVE_CH.find((c) => c.value === ch).label;
+  const put = (next) => {
+    const c = {};
+    for (const k of Object.keys(curves)) c[k] = curves[k].map((q) => q.slice());
+    next = next.slice().sort((a, b) => a[0] - b[0]);
+    if (sameCurve(next)) delete c[ch]; else c[ch] = next;
+    update({ curves: c });
+  };
+  const setPt = (i, x, y) => {
+    const lo = i > 0 ? pts[i - 1][0] + 1 : 0, hi = i < pts.length - 1 ? pts[i + 1][0] - 1 : 255;
+    const next = pts.map((q) => q.slice());
+    next[i] = [Math.round(clamp(x, lo, hi)), Math.round(clamp(y, 0, 255))];
+    put(next);
+  };
+  const at = (e) => {
+    const box = svgRef.current.getBoundingClientRect();
+    return [clamp(((e.clientX - box.left) / box.width) * 255, 0, 255), clamp(255 - ((e.clientY - box.top) / box.height) * 255, 0, 255)];
+  };
+  const down = (e) => {
+    const [x, y] = at(e);
+    let i = pts.findIndex((q) => Math.abs(q[0] - x) < 8 && Math.abs(q[1] - y) < 8);
+    if (i < 0) {
+      if (pts.length >= maxPts || pts.some((q) => Math.round(q[0]) === Math.round(x))) return;
+      const next = [...pts, [Math.round(x), Math.round(y)]].sort((a, b) => a[0] - b[0]);
+      i = next.findIndex((q) => q[0] === Math.round(x));
+      put(next);
+    }
+    drag.current = i;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const move = (e) => { if (drag.current >= 0 && e.currentTarget.hasPointerCapture(e.pointerId)) { const [x, y] = at(e); setPt(drag.current, x, y); } };
+  const up = () => { drag.current = -1; };
+  const removeAt = (i) => { if (pts.length > 2) put(pts.filter((_q, j) => j !== i)); };
+  const addPoint = () => {
+    if (pts.length >= maxPts) return;
+    let best = 0;
+    for (let i = 1; i < pts.length - 1; i++) if (pts[i + 1][0] - pts[i][0] > pts[best + 1][0] - pts[best][0]) best = i;
+    const x = Math.round((pts[best][0] + pts[best + 1][0]) / 2);
+    if (x <= pts[best][0] || x >= pts[best + 1][0]) return;
+    put([...pts, [x, curveTable(pts)[x]]]);
+  };
+  const path = (tab) => {
+    let d = "";
+    for (let v = 0; v < 256; v += 3) d += (d ? "L" : "M") + v + " " + (255 - tab[v]);
+    return d + "L255 " + (255 - tab[255]);
+  };
+  const others = CURVE_CH.filter((c) => c.value !== ch && curves[c.value] && !sameCurve(curves[c.value]));
+  const anyCurve = Object.values(curves).some((q) => !sameCurve(q));
+  const extra = html`<${Button} size="sm" icon="undo" disabled=${!anyCurve} onClick=${() => update({ curves: {} })}
+    title="Every curve back to a straight line">Reset all<//>`;
+  return html`<${Card} title="Curves" cls="cp-curve-ed" extra=${extra}>
+    <p class="small muted cp-note">Bend the shades with points of your own: RGB moves all three colors, then Red, Green and Blue each move their own. Lower a point to darken those shades. Applied last, after the color ranges.</p>
+    <div class="row cp-curve-top">
+      <${Seg} value=${ch} options=${CURVE_CH} onChange=${setCh} />
+      <span class="sp"></span>
+      <${Button} size="sm" icon="plus" disabled=${pts.length >= maxPts} onClick=${addPoint}
+        title="A new point in the widest gap, on the curve as it is">Add point<//>
+      <${Button} size="sm" icon="undo" disabled=${sameCurve(pts)} onClick=${() => put(IDENT)}
+        title=${`The ${name} curve back to a straight line`}>${"Reset " + name}<//>
+    </div>
+    <div class="cp-curve-body">
+      <svg ref=${svgRef} class="cp-curve-box" viewBox="-4 -4 263 263" role="img"
+          aria-label=${`${name} curve: click to add a point, drag to move it, double-click to remove it`}
+          onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
+        <rect x="0" y="0" width="255" height="255" class="cp-grid" />
+        <path d="M64 0V255M128 0V255M191 0V255M0 64H255M0 128H255M0 191H255" class="cp-grid-line" />
+        <path d="M0 255L255 0" class="cp-diag" />
+        ${others.map((c) => html`<path d=${path(curveTable(curves[c.value]))} class=${"cp-curve faint " + CURVE_CLS[c.value]} />`)}
+        <path d=${path(curveTable(pts))} class=${"cp-curve " + CURVE_CLS[ch]} />
+        ${pts.map((q, i) => html`<circle cx=${q[0]} cy=${255 - q[1]} r="5" class=${"cp-pt " + CURVE_CLS[ch]}
+          onDblClick=${(e) => { e.stopPropagation(); removeAt(i); }} />`)}
+      </svg>
+      <div class="cp-pts">
+        <div class="cp-pts-hd small muted"><span></span><span>Input</span><span>Output</span><span></span></div>
+        ${pts.map((q, i) => html`<div class="cp-pts-row" key=${ch + i}>
+          <span class="small muted">${"Point " + (i + 1)}</span>
+          <${NumBox} value=${q[0]} min=${i > 0 ? pts[i - 1][0] + 1 : 0} max=${i < pts.length - 1 ? pts[i + 1][0] - 1 : 255} step="1"
+            onInput=${(v) => setPt(i, v, q[1])} label=${`Point ${i + 1} input`} />
+          <${NumBox} value=${q[1]} min="0" max="255" step="1" onInput=${(v) => setPt(i, q[0], v)} label=${`Point ${i + 1} output`} />
+          <${Button} size="sm" icon="x" disabled=${pts.length <= 2} onClick=${() => removeAt(i)} title="Remove this point" />
+        </div>`)}
+      </div>
+    </div>
+  <//>`;
+}
+
 const MODES = [
   { value: "display", label: "Adjust whole screen overlay", title: "One correction drawn over everything the game shows: its own art, videos, mode screens, text and your replacements. No file is changed." },
   { value: "assets", label: "Adjust individual files", title: "A correction baked into the replaced pictures and videos you switch on (and pictures added in Scenes). The game's own art is left as Stern made it." },
@@ -428,6 +707,8 @@ export default function ColorTab() {
     name: s.name || "", gamma: (s.gamma || [1, 1, 1]).slice(), gain: (s.gain || [1, 1, 1]).slice(),
     lift: Number(s.lift || 0), saturation: s.saturation == null ? 1 : Number(s.saturation),
     brightness: s.brightness == null ? 1 : Number(s.brightness), contrast: s.contrast == null ? 1 : Number(s.contrast),
+    ranges: (s.ranges || []).map((r) => r.slice()),
+    curves: Object.fromEntries(Object.entries(s.curves || {}).map(([k, v]) => [k, v.map((q) => q.slice())])),
   });
   const [p, setP] = useState(fromStore);
   const pending = useRef({});
@@ -492,6 +773,8 @@ export default function ColorTab() {
           </div>`}>
           <${Preview} s=${s} p=${p} screen=${screen} />
         <//>
+        ${screen ? html`<${Ranges} s=${s} p=${p} update=${update} />
+        <${CurveEditor} s=${s} p=${p} update=${update} />` : null}
         <${Explainer} s=${s} />
       </div>
       <div class="cp-side">

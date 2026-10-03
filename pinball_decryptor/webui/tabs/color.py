@@ -206,6 +206,8 @@ class ColorTab(TabService):
             name=p.name, gamma=list(p.gamma), gain=list(p.gain),
             lift=max(p.lift), saturation=p.saturation,
             brightness=p.brightness, contrast=p.contrast, rev=self._rev,
+            ranges=[list(r) for r in p.ranges],
+            curves={ch: [list(pt) for pt in pts] for ch, pts in p.curves},
             active=active, mode=self._mode if self._on_display else "display",
             per_file=self._on_display,
             display_active=self._prof is not None,
@@ -216,7 +218,10 @@ class ColorTab(TabService):
             **state,
             has_project=bool(assets and os.path.isdir(assets)),
             presets=presets,
-            limits={k: list(v) for k, v in LIMITS.items()})
+            limits={k: list(v) for k, v in LIMITS.items()},
+            range_limits={k: list(v) for k, v in cp.RANGE_LIMITS.items()},
+            range_new=dict(cp.RANGE_NEW), max_ranges=cp.MAX_RANGES,
+            max_points=cp.MAX_POINTS)
         if problems is not None:
             values["problems"] = list(problems)
         self.set(**values)
@@ -228,6 +233,10 @@ class ColorTab(TabService):
             self.toast("Choose a project folder on the Extract tab first.",
                        "error")
             return False
+        if prof is not None and not self._screen_mode():
+            # colour ranges and curves are the machine screen's alone
+            # (PAD-339): a build's profiles have no step for them
+            prof = prof.plain()
         if self._screen_mode():
             # the machine screen: preview only, nothing pending; None goes
             # back to the individual files profile, undone
@@ -363,11 +372,13 @@ class ColorTab(TabService):
     @rpc
     def set_params(self, params):
         """The page's sliders: any of name, gamma [r g b], gain [r g b],
-        lift (one number, all three), saturation, brightness, contrast."""
+        lift (one number, all three), saturation, brightness, contrast, and
+        on the machine screen (PAD-339) ranges [[7 numbers], ...] and
+        curves {channel: [[in, out], ...]}."""
         p = self._shown()
         kw = dict(name=p.name, gamma=p.gamma, gain=p.gain, lift=p.lift,
                   saturation=p.saturation, brightness=p.brightness,
-                  contrast=p.contrast)
+                  contrast=p.contrast, ranges=p.ranges, curves=p.curves)
         params = params or {}
         if "name" in params:
             kw["name"] = str(params["name"] or "").strip()[:60]
@@ -381,6 +392,11 @@ class ColorTab(TabService):
         for key in ("saturation", "brightness", "contrast"):
             if key in params:
                 kw[key] = round(_clamp(key, params[key]), 3)
+        if self._screen_mode() and ("ranges" in params or "curves" in params):
+            ranges, curves = cp.extras_from(
+                params.get("ranges", [list(r) for r in p.ranges]),
+                params.get("curves", {ch: pts for ch, pts in p.curves}))
+            kw["ranges"], kw["curves"] = ranges, curves
         if kw["name"] in ("", "No change"):
             kw["name"] = "My screen" if self._screen_mode() else "My profile"
         return self._store(cp.Profile(**kw))
@@ -433,7 +449,8 @@ class ColorTab(TabService):
                               gamma=prof.gamma, gain=prof.gain,
                               lift=prof.lift, saturation=prof.saturation,
                               brightness=prof.brightness,
-                              contrast=prof.contrast)
+                              contrast=prof.contrast, ranges=prof.ranges,
+                              curves=prof.curves)
         self._store(prof, rev=True)
         if problems:
             self.set(problems=list(problems))

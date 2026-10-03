@@ -141,6 +141,177 @@ LIMITS = {"gamma": (0.1, 5.0), "gain": (0.0, 4.0), "lift": (0.0, 0.9),
 #: and the machine draws what the preview did.
 CURVE_MAX = 9.999999
 
+# -- the machine screen's extra steps (PAD-339) --------------------------------
+#
+# The Machine screen (SCREEN_KEY) is preview only, so it is not held to the
+# shader's few fixed slots: on top of the steps every profile has it can carry
+# COLOUR RANGES (hue, saturation and brightness of one band of hues, e.g. the
+# sea's cyan-blue, with grey left alone) and CURVES (a master one for all
+# three channels, then one per channel, through points the user places).
+# They come after the profile's own steps, ranges first, all on the 8-bit
+# sRGB values as given (no linear light anywhere):
+#
+#   3. each range in turn: the pixel's HSV hue h, saturation s, value v and
+#      chroma c = (max - min) / 255.  Its weight w = hue_w * grey_w, where
+#      hue_w is 1 within width / 2 degrees of the range's hue, falls to 0 over
+#      ``soft`` more degrees (smoothstep), and grey_w = smoothstep(c /
+#      protect) keeps greys and near-greys (chroma under ``protect``) out.
+#      Then h += shift * w, s *= 1 + (saturation - 1) * w and v *= 1 +
+#      (brightness - 1) * w; s is clipped to 0..1, v to 0..255.
+#   4. the master curve on all three channels, then the red, green and blue
+#      curves, each a 256-entry table through its points (monotone cubic,
+#      flat past the first and last point, clipped to 0..255).
+#
+# A range with shift 0 and saturation and brightness 1, and a curve through
+# (0, 0) and (255, 255) alone, change nothing.
+
+#: a colour range's numbers, in the order a file and the page hold them
+RANGE_FIELDS = ("hue", "width", "soft", "shift", "saturation", "brightness",
+                "protect")
+RANGE_LIMITS = {"hue": (0.0, 360.0), "width": (0.0, 360.0),
+                "soft": (0.0, 180.0), "shift": (-180.0, 180.0),
+                "saturation": (0.0, 4.0), "brightness": (0.0, 4.0),
+                "protect": (0.0, 1.0)}
+#: a new range: 60 degrees wide with a 30 degree soft edge each side, greys
+#: (chroma under 15%) protected, changing nothing until a slider moves
+RANGE_NEW = {"width": 60.0, "soft": 30.0, "shift": 0.0, "saturation": 1.0,
+             "brightness": 1.0, "protect": 0.15}
+MAX_RANGES = 6
+#: the curves, in the order they are applied: master, then red, green, blue
+CURVE_CHANNELS = ("rgb", "r", "g", "b")
+CURVE_IDENTITY = ((0.0, 0.0), (255.0, 255.0))
+MAX_POINTS = 16
+
+
+def range_neutral(rng):
+    return rng[3] == 0.0 and rng[4] == 1.0 and rng[5] == 1.0
+
+
+def clean_range(vals):
+    """One colour range from any 7 numbers (or fewer: the rest from a new
+    range), each held to :data:`RANGE_LIMITS`.  Raises ValueError."""
+    vals = [float(v) for v in vals]
+    if not 1 <= len(vals) <= len(RANGE_FIELDS):
+        raise ValueError("a range needs 1 to %d numbers" % len(RANGE_FIELDS))
+    out = []
+    for i, name in enumerate(RANGE_FIELDS):
+        v = vals[i] if i < len(vals) else RANGE_NEW[name]
+        if v != v:                                      # NaN
+            raise ValueError("%s is not a number" % name)
+        lo, hi = RANGE_LIMITS[name]
+        if name == "hue":
+            v = v % 360.0
+        out.append(round(min(max(v, lo), hi), 3))
+    return tuple(out)
+
+
+def clean_points(points):
+    """A curve's points, as ``((x, y), ...)`` sorted by input, each 0..255,
+    one point per input (the later one wins), at most :data:`MAX_POINTS`.
+    Raises ValueError with fewer than two."""
+    seen = {}
+    for pt in points:
+        x, y = (float(v) for v in pt)
+        if x != x or y != y:
+            raise ValueError("a point is not a number")
+        x = round(min(max(x, 0.0), 255.0), 2)
+        seen[x] = round(min(max(y, 0.0), 255.0), 2)
+    if len(seen) < 2:
+        raise ValueError("a curve needs at least two points")
+    if len(seen) > MAX_POINTS:
+        raise ValueError("a curve holds at most %d points" % MAX_POINTS)
+    return tuple(sorted(seen.items()))
+
+
+def curve_table(points):
+    """256 output values (ints 0..255) for inputs 0..255 through *points*:
+    Fritsch-Carlson monotone cubic between them (no overshoot where the
+    points rise or fall), flat past the first and the last.
+    static/js/tabs/color.js ``curveTable`` mirrors it."""
+    xs = [float(p[0]) for p in points]
+    ys = [float(p[1]) for p in points]
+    n = len(xs)
+    if n < 2:
+        return list(range(256))
+    d = [(ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k]) for k in range(n - 1)]
+    m = [0.0] * n
+    m[0], m[n - 1] = d[0], d[n - 2]
+    for k in range(1, n - 1):
+        m[k] = (d[k - 1] + d[k]) / 2.0 if d[k - 1] * d[k] > 0 else 0.0
+    for k in range(n - 1):
+        if d[k] == 0.0:
+            m[k] = m[k + 1] = 0.0
+            continue
+        a, b = m[k] / d[k], m[k + 1] / d[k]
+        r = a * a + b * b
+        if r > 9.0:
+            t = 3.0 / r ** 0.5
+            m[k], m[k + 1] = t * a * d[k], t * b * d[k]
+    out = []
+    k = 0
+    for v in range(256):
+        if v <= xs[0]:
+            y = ys[0]
+        elif v >= xs[n - 1]:
+            y = ys[n - 1]
+        else:
+            while xs[k + 1] < v:
+                k += 1
+            h = xs[k + 1] - xs[k]
+            t = (v - xs[k]) / h
+            t2, t3 = t * t, t * t * t
+            y = ((2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * h * m[k]
+                 + (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * h * m[k + 1])
+        out.append(int(min(max(y + 0.5, 0.0), 255.0)))
+    return out
+
+
+def _smooth(t):
+    import numpy as np
+    t = np.clip(t, 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def apply_ranges(rgb, ranges):
+    """*rgb* (float ``(..., 3)``, 0..255) through each colour range in turn
+    (step 3 above); a pixel no range reaches comes back exactly as given."""
+    import numpy as np
+    out = np.asarray(rgb, np.float64)
+    for hue, width, soft, shift, sat, bright, protect in ranges:
+        if range_neutral((hue, width, soft, shift, sat, bright, protect)):
+            continue
+        r, g, b = out[..., 0], out[..., 1], out[..., 2]
+        mx = out.max(-1)
+        mn = out.min(-1)
+        c = mx - mn
+        safe = np.where(c > 0, c, 1.0)
+        h = np.where(mx == r, ((g - b) / safe) % 6.0,
+                     np.where(mx == g, (b - r) / safe + 2.0,
+                              (r - g) / safe + 4.0)) * 60.0
+        s = np.where(mx > 0, c / np.where(mx > 0, mx, 1.0), 0.0)
+        dist = np.abs((h - hue + 180.0) % 360.0 - 180.0)
+        half = width / 2.0
+        if width >= 360.0:
+            hw = np.ones_like(h)
+        elif soft > 0:
+            hw = _smooth(1.0 - (dist - half) / soft)
+        else:
+            hw = (dist <= half).astype(np.float64)
+        if protect > 0:
+            gw = _smooth(c / 255.0 / protect)
+        else:
+            gw = (c > 0).astype(np.float64)
+        w = np.where(c > 0, hw * gw, 0.0)
+        h2 = (h + shift * w) % 360.0
+        s2 = np.clip(s * (1.0 + (sat - 1.0) * w), 0.0, 1.0)
+        v2 = np.clip(mx * (1.0 + (bright - 1.0) * w), 0.0, 255.0)
+        chans = []
+        for n in (5.0, 3.0, 1.0):
+            k = (n + h2 / 60.0) % 6.0
+            chans.append(v2 - v2 * s2 * np.clip(np.minimum(k, 4.0 - k), 0, 1))
+        out = np.where((w > 0)[..., None], np.stack(chans, -1), out)
+    return out
+
 
 @dataclass(frozen=True)
 class Profile:
@@ -151,11 +322,58 @@ class Profile:
     saturation: float = 1.0
     brightness: float = 1.0
     contrast: float = 1.0
+    #: PAD-339, the machine screen only: colour ranges (:data:`RANGE_FIELDS`
+    #: tuples) and curves (``((channel, ((x, y), ...)), ...)``, channels from
+    #: :data:`CURVE_CHANNELS`); see the steps above :func:`curve_table`
+    ranges: tuple = ()
+    curves: tuple = ()
 
     def is_identity(self):
         return (self.gamma == (1.0, 1.0, 1.0) and self.gain == (1.0, 1.0, 1.0)
                 and self.lift == (0.0, 0.0, 0.0) and self.saturation == 1.0
-                and self.brightness == 1.0 and self.contrast == 1.0)
+                and self.brightness == 1.0 and self.contrast == 1.0
+                and not self.has_extras())
+
+    def has_extras(self):
+        """Does a colour range or a curve change anything (PAD-339)?"""
+        return (any(not range_neutral(r) for r in self.ranges)
+                or any(pts != CURVE_IDENTITY for _ch, pts in self.curves))
+
+    def plain(self):
+        """The profile without its colour ranges and curves: what a build's
+        profiles hold (the shaders, ffmpeg and Pillow have no such step)."""
+        if not (self.ranges or self.curves):
+            return self
+        import dataclasses
+        return dataclasses.replace(self, ranges=(), curves=())
+
+    def curve_tables(self):
+        """``[r, g, b]`` 256-entry tables of the master curve then each
+        channel's own, or ``None`` when no curve changes anything."""
+        cv = {ch: pts for ch, pts in self.curves if pts != CURVE_IDENTITY}
+        if not cv:
+            return None
+        master = curve_table(cv["rgb"]) if "rgb" in cv else list(range(256))
+        out = []
+        for ch in ("r", "g", "b"):
+            own = curve_table(cv[ch]) if ch in cv else None
+            out.append([own[v] if own else v for v in master])
+        return out
+
+    def extras_array(self, rgb):
+        """*rgb* (uint8 ``(h, w, 3)``) through the colour ranges, then the
+        curves (steps 3 and 4)."""
+        import numpy as np
+        out = np.asarray(rgb, np.uint8)
+        live = [r for r in self.ranges if not range_neutral(r)]
+        if live:
+            out = np.clip(apply_ranges(out, live) + 0.5, 0, 255).astype(
+                np.uint8)
+        tabs = self.curve_tables()
+        if tabs is not None:
+            luts = [np.asarray(t, np.uint8) for t in tabs]
+            out = np.stack([luts[c][out[..., c]] for c in range(3)], axis=-1)
+        return out
 
     def curve(self):
         """``(gamma, gain, lift)`` per channel with the brightness and
@@ -186,6 +404,8 @@ class Profile:
                                self.saturation)
         if self.brightness != 1.0 or self.contrast != 1.0:
             out += "|%s|%s" % (self.brightness, self.contrast)
+        if self.has_extras():
+            out += "|%s|%s" % (self.ranges, self.curves)
         return out
 
     def label(self):
@@ -245,7 +465,10 @@ class Profile:
             out = np.clip(out.astype(np.float32) @ m.T + 0.5, 0, 255).astype(
                 np.uint8)
         luts = [np.asarray(self.table(c), np.uint8) for c in range(3)]
-        return np.stack([luts[c][out[..., c]] for c in range(3)], axis=-1)
+        out = np.stack([luts[c][out[..., c]] for c in range(3)], axis=-1)
+        if self.has_extras():
+            out = self.extras_array(out)
+        return out
 
     def undo_table(self, channel):
         """The inverse of :meth:`table` on *channel*: what the machine's
@@ -299,7 +522,6 @@ class Profile:
     def apply_image(self, im):
         """*im* (any Pillow mode) corrected; alpha passes through untouched.
         Returns a new RGB or RGBA image."""
-        from PIL import Image
         alpha = None
         if im.mode in ("RGBA", "LA", "PA") or (
                 im.mode == "P" and "transparency" in im.info):
@@ -313,6 +535,10 @@ class Profile:
             rgb = rgb.convert("RGB", m[0] + (0.0,) + m[1] + (0.0,)
                               + m[2] + (0.0,))
         rgb = rgb.point(self.table(0) + self.table(1) + self.table(2))
+        if self.has_extras():
+            import numpy as np
+            from PIL import Image
+            rgb = Image.fromarray(self.extras_array(np.asarray(rgb)), "RGB")
         if alpha is not None:
             rgb.putalpha(alpha)
         return rgb if alpha is not None else rgb.convert("RGB")
@@ -347,6 +573,23 @@ def parse(text):
         if key == "name":
             fields["name"] = val
             continue
+        if key == "range" or key in _CURVE_KEYS:
+            try:
+                if key == "range":
+                    if len(fields.get("ranges", ())) >= MAX_RANGES:
+                        raise ValueError("at most %d ranges" % MAX_RANGES)
+                    vals = [float(t) for t in val.replace(",", " ").split()]
+                    fields["ranges"] = fields.get("ranges", ()) + (
+                        clean_range(vals),)
+                else:
+                    pts = clean_points(_points(val))
+                    ch = _CURVE_KEYS[key]
+                    fields["curves"] = tuple(
+                        c for c in fields.get("curves", ()) if c[0] != ch) + (
+                        (ch, pts),)
+            except ValueError as e:
+                problems.append("line %d: %s %s" % (n, key, e))
+            continue
         if key not in limits:
             problems.append("line %d: unknown setting '%s'" % (n, key))
             continue
@@ -361,7 +604,58 @@ def parse(text):
                             % (n, key, lo, hi))
             continue
         fields[key] = nums[0] if key in single else nums
+    if "curves" in fields:
+        fields["curves"] = _curve_order(fields["curves"])
     return Profile(**fields), problems
+
+
+#: a curve's line in a profile file, by channel
+CURVE_KEY_OF = {"rgb": "curve_rgb", "r": "curve_red", "g": "curve_green",
+                "b": "curve_blue"}
+_CURVE_KEYS = {v: k for k, v in CURVE_KEY_OF.items()}
+
+
+def _points(text):
+    """``x y, x y, ...`` -> pairs."""
+    out = []
+    for part in text.split(","):
+        nums = part.split()
+        if not nums:
+            continue
+        if len(nums) != 2:
+            raise ValueError("needs points as 'input output' pairs, "
+                             "comma separated")
+        out.append((float(nums[0]), float(nums[1])))
+    return out
+
+
+def _curve_order(curves):
+    """*curves* (``(channel, points)`` pairs) in :data:`CURVE_CHANNELS`
+    order, the ones that change nothing left out."""
+    have = dict(curves)
+    return tuple((ch, have[ch]) for ch in CURVE_CHANNELS
+                 if ch in have and have[ch] != CURVE_IDENTITY)
+
+
+def extras_from(ranges=None, curves=None):
+    """``(ranges, curves)`` as a Profile holds them, from the page's or a
+    stored file's lists: ``ranges`` ``[[7 numbers], ...]``, ``curves``
+    ``{channel: [[x, y], ...]}``.  A bad entry is skipped."""
+    rs = []
+    for r in list(ranges or ())[:MAX_RANGES]:
+        try:
+            rs.append(clean_range(r))
+        except (TypeError, ValueError):
+            continue
+    cv = []
+    for ch, pts in (curves.items() if isinstance(curves, dict) else ()):
+        if ch not in CURVE_CHANNELS:
+            continue
+        try:
+            cv.append((ch, clean_points(pts)))
+        except (TypeError, ValueError):
+            continue
+    return tuple(rs), _curve_order(cv)
 
 
 def _from_dict(d):
@@ -372,7 +666,9 @@ def _from_dict(d):
                        lift=tuple(float(v) for v in d["lift"])[:3],
                        saturation=float(d["saturation"]),
                        brightness=float(d.get("brightness", 1.0)),
-                       contrast=float(d.get("contrast", 1.0)))
+                       contrast=float(d.get("contrast", 1.0)),
+                       **dict(zip(("ranges", "curves"), extras_from(
+                           d.get("ranges"), d.get("curves")))))
     except (KeyError, TypeError, ValueError):
         return None
 
@@ -446,6 +742,10 @@ def _profile_dict(prof):
     if prof.brightness != 1.0 or prof.contrast != 1.0:
         out["brightness"] = prof.brightness
         out["contrast"] = prof.contrast
+    if prof.ranges:
+        out["ranges"] = [list(r) for r in prof.ranges]
+    if prof.curves:
+        out["curves"] = {ch: [list(p) for p in pts] for ch, pts in prof.curves}
     return out
 
 
@@ -684,7 +984,14 @@ def filter_step(prof):
         m += [0.0, 0.0, 0.0, 1.0, 0.0]
     f = [[round((1.0 - lo) * (k ** g), 5), round(g, 5), round(lo, 5)]
          for g, k, lo in zip(*prof.curve())]
-    return {"m": m, "f": f}
+    out = {"m": m, "f": f}
+    # PAD-339: a machine screen's curves as feFuncR/G/B type="table" (65
+    # values, straight between them); its colour ranges have no SVG form
+    tabs = prof.curve_tables()
+    if tabs is not None:
+        out["t"] = [[round(t[min(i * 4, 255)] / 255.0, 4) for i in range(65)]
+                    for t in tabs]
+    return out
 
 
 def video_look(assets_dir, switch, own_colours, overlay_on=True, files_on=True,
@@ -829,14 +1136,40 @@ def _fmt(nums):
     return " ".join("%.2f" % v for v in nums)
 
 
+def _num(v):
+    return ("%.3f" % v).rstrip("0").rstrip(".")
+
+
 def to_text(prof):
-    """The file text for *prof*: the explanatory header, then its values."""
+    """The file text for *prof*: the explanatory header, then its values
+    (a machine screen's colour ranges and curves after them, PAD-339)."""
     head = DEFAULT_TEXT.split("\nname =", 1)[0]
-    return ("%s\nname = %s\ngamma = %s\ngain = %s\nlift = %s\n"
-            "saturation = %.2f\nbrightness = %.2f\ncontrast = %.2f\n"
-            % (head, prof.name or "My profile", _fmt(prof.gamma),
-               _fmt(prof.gain), _fmt(prof.lift), prof.saturation,
-               prof.brightness, prof.contrast))
+    out = ("%s\nname = %s\ngamma = %s\ngain = %s\nlift = %s\n"
+           "saturation = %.2f\nbrightness = %.2f\ncontrast = %.2f\n"
+           % (head, prof.name or "My profile", _fmt(prof.gamma),
+              _fmt(prof.gain), _fmt(prof.lift), prof.saturation,
+              prof.brightness, prof.contrast))
+    if prof.ranges or prof.curves:
+        out += EXTRAS_HELP
+    for r in prof.ranges:
+        out += "range = %s\n" % " ".join(_num(v) for v in r)
+    for ch, pts in prof.curves:
+        out += "%s = %s\n" % (CURVE_KEY_OF[ch], ", ".join(
+            "%s %s" % (_num(x), _num(y)) for x, y in pts))
+    return out
+
+
+#: what a machine screen's extra lines mean, written above them
+EXTRAS_HELP = """
+# Machine screen only (the Scenes preview), applied after the lines above:
+#   range = hue width soft shift saturation brightness protect
+#           one band of hues (degrees: 0 red, 120 green, 240 blue), its
+#           width and soft edge, the hue shift, saturation and brightness
+#           (1 = unchanged) and how much colour a pixel needs before it is
+#           touched (0.15 = greys and near-greys left alone)
+#   curve_rgb / curve_red / curve_green / curve_blue = in out, in out, ...
+#           points 0..255; curve_rgb first, then each color's own
+"""
 
 
 def save(prof, path):

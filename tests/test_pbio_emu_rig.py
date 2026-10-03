@@ -398,7 +398,11 @@ def test_volume_scales_the_samples_and_mute_is_silence():
     assert audio.levels(pcm)[0] == 32768
 
 
-@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a FIFO (Linux)")
+# Linux only, not just "has a FIFO": the relay knows the game is alive by its
+# /proc entry, so on macOS it ends at once, nobody ever opens the FIFO to read,
+# and the write below blocks until the job's timeout.
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="the relay runs in the rig's Linux (/proc)")
 def test_the_relay_keeps_the_games_clock_without_pulseaudio_and_ends_with_it(tmp_path):
     """No PulseAudio: the FIFO is still drained at the real-time rate (the
     game never stalls, nor races ahead), and the relay ends with the game."""

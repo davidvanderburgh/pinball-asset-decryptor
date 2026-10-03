@@ -736,6 +736,19 @@ def picture_sizes(assets_dir):
     return out
 
 
+def own_size(size, want):
+    """Is a project-folder picture of *size* written at that size rather than fitted to the
+    card texture's *want*?  A Write takes the project's file as it is and regrows the scene
+    around any size that isn't the texture's padded block grid (engine._radium_image_writes),
+    whether or not a pick still asks for it: a picture built at its own size stays that size
+    after its pick is gone (DragonRR, PAD-337: picking one picture drew every earlier one
+    squeezed back to the stock size)."""
+    if not size or not want:
+        return False
+    pad = lambda x: ((int(x) + 3) // 4) * 4                         # noqa: E731
+    return (pad(size[0]), pad(size[1])) != (int(want[0]), int(want[1]))
+
+
 def pending_pictures(assets_dir, bake=True):
     """The Images tab's picks, as a scene render uses them: ``{picture rel: {"path":
     replacement file or None, "keep": keep its own size, "colour": the chosen-files profile
@@ -817,6 +830,8 @@ def _picture(assets_dir, rel, cache, pictures=None, sizes=None):
     img = _premultiplied(img, src or rel, cache)
     want = (sizes or {}).get(rel)
     if img is None or not want or pick.get("keep") or tuple(img.size) == tuple(want):
+        return img
+    if not src and own_size(img.size, want):
         return img
     key = ("fit", src or rel)
     got = cache.get(key)

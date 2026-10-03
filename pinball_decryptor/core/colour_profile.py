@@ -57,6 +57,12 @@ follows unless it has a switch of its own (:data:`IMAGE_SLOTS_KEY`,
 compose: the game then draws the baked file through the display-wide one.
 Where the display-wide profile corrects the files itself (not Spike 2) it
 wins, and the chosen-files switches are not offered.
+
+The game's own pictures are locked out of it, except on the Images tab's
+advanced "Unlock the game's own pictures" box (PAD-335,
+:data:`STOCK_IMAGES_KEY`): then a stock picture with its own switch on is
+staged from its pristine bytes with the profile baked in, the way a
+replacement is.  The tab-wide box never reaches a stock picture.
 """
 
 import contextlib
@@ -76,6 +82,8 @@ ALL_IMAGES_KEY = "color_all_images"
 ALL_VIDEOS_KEY = "color_all_videos"
 IMAGE_SLOTS_KEY = "image_color_slots"
 VIDEO_SLOTS_KEY = "video_color_slots"
+#: The Images tab's advanced box (PAD-335): the game's own pictures unlocked.
+STOCK_IMAGES_KEY = "image_color_unlocked"
 #: The Video tab's Advanced box (PAD-336): the game's own clips get a Color
 #: switch too, and one switched on is re-encoded from its own original with
 #: the individual files profile.  Off (absent), they stay locked.
@@ -569,6 +577,26 @@ def stock_video_rels(data):
                   if on and not picks.get(rel))
 
 
+def stock_images_unlocked(assets_dir):
+    """Is the Images tab's advanced "Unlock the game's own pictures" box
+    ticked (PAD-335)?"""
+    if not assets_dir:
+        return False
+    from . import staged_changes
+    return bool(staged_changes.load(assets_dir).get(STOCK_IMAGES_KEY))
+
+
+def stock_image_rels(assets_dir, assigned=()):
+    """The game's own pictures (not in *assigned*) switched on while the
+    Images tab's unlock box is ticked: staged from their pristine bytes with
+    the chosen-files profile baked in.  Only a picture's own switch counts."""
+    if not stock_images_unlocked(assets_dir):
+        return []
+    settings = asset_settings(assets_dir)
+    return sorted(rel for rel, on in settings["images"].items()
+                  if on and rel not in assigned)
+
+
 def added_picture_colour(assets_dir, op, settings=None, prof=None):
     """The profile a picture added in Scenes (*op*, an ``add_picture``
     edit) is written with, or ``None``: its own ``color`` key, else the
@@ -730,6 +758,9 @@ def asset_counts(assets_dir):
             out[kind] = sum(1 for rel, src in picks.items()
                             if src and asset_applies(settings, kind, rel))
     out["videos"] += len(stock_video_rels(data))
+    picks = data.get("image") if isinstance(data.get("image"), dict) else {}
+    out["images"] += len(stock_image_rels(
+        assets_dir, {r for r, src in picks.items() if src}))
     try:
         from ..plugins.stern import scene_edit
         for ops in scene_edit.load(assets_dir).values():
@@ -775,10 +806,11 @@ def asset_signature(assets_dir):
     if prof is None:
         return ""
     s = asset_settings(assets_dir)
-    return "%s|%s|%s|%s|%s" % (
+    return "%s|%s|%s|%s|%s%s" % (
         prof.key(),
         s["all_images"], s["all_videos"], sorted(s["images"].items()),
-        sorted(s["videos"].items()))
+        sorted(s["videos"].items()),
+        "|unlocked" if stock_images_unlocked(assets_dir) else "")
 
 
 def _fmt(nums):

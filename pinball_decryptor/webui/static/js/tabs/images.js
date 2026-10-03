@@ -27,7 +27,19 @@ const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for s
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
-const COLOR_TIP = "On: the Color profile tab's individual files profile is baked into this picture when you build, so it looks on the machine the way it looks on your PC. Off: it goes on the card in its own colors. The game's own pictures are never touched. A box you click is this picture's own setting; the Color profile tab's Every replaced picture box sets the rest.";
+const COLOR_TIP = "Green: the Color profile tab's individual files profile is baked into this picture when you build, so it looks on the machine the way it looks on your PC. Red: it goes on the card in its own colors. Blue lock: the game's own picture, never touched (tick Unlock the game's own pictures to give it a switch too). A switch you click is this picture's own setting; the Color profile tab's Every replaced picture box sets the rest.";
+// PAD-335: the same blue lock / red / green palette as the Video tab's Color column
+const colorTip = (r) => (r.cl
+  ? { head: "Color: the game's own picture", lines: [
+      "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
+      "Choose a replacement to correct a picture of your own, or tick Unlock the game's own pictures."] }
+  : { head: r.c ? "Color: corrected for the machine" : "Color: its own colors", lines: [
+      ["Click", r.c ? "keep its own colors" : "correct its colors for the machine"],
+      r.c ? "The Color profile tab's individual files profile is baked into this picture when you build."
+        : "It goes on the card in its own colors.",
+      r.cg ? "The game's own picture, unlocked: corrected from its original when you build."
+        : r.co ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture."] });
+const UNLOCK_TIP = "Advanced. Off: the game's own pictures are locked (blue lock), and only the pictures you replace can have the individual files color profile baked in. On: every picture on this tab gets a color switch, so a game picture can be corrected for the machine too. It is staged from its original when you build, so building again never corrects it twice. Only this tab: Scenes and Video keep their locks. Turning it off puts the game's pictures back in their own colors.";
 
 const TAG_CLS = { assigned: "img-picked", changed: "img-ondisk", foreign: "img-stray" };
 
@@ -336,15 +348,19 @@ export default function ImagesTab() {
     render: (e) => {
       if (typeof e !== "number") return "";
       const row = slotAt(s, e);
-      if (!row || row.c == null) return "";
-      return html`<input type="checkbox" class=${cx("img-keep img-color", row.co && "own")} checked=${!!row.c}
-        aria-label="Correct this picture's colors for the machine"
-        ...${tip(COLOR_TIP)} onClick=${(ev) => {
+      if (!row) return "";
+      // PAD-335: a blue lock on the game's own pictures, a red / green palette otherwise
+      if (row.cl) return html`<span class="img-color locked" aria-label="The game's own picture: no color switch"
+        ...${tip(colorTip(row))}><${Icon} name="lock" /></span>`;
+      if (row.c == null) return "";
+      return html`<button type="button" class=${cx("img-color", row.c ? "on" : "off", row.co && !row.cg && "own")}
+        aria-label="Correct this picture's colors for the machine" aria-pressed=${row.c ? "true" : "false"}
+        ...${tip(colorTip(row))} onClick=${(ev) => {
           ev.stopPropagation();
           if (ev.detail > 1) { ev.preventDefault(); return; }
           if (cur !== row.r) selectOnly(row.r);
           call("images.set_color", row.r, !row.c);
-        }} />`;
+        }}><${Icon} name="palette" /></button>`;
     },
   };
   // One picker per click: the second click of a double-click is ignored
@@ -451,6 +467,11 @@ export default function ImagesTab() {
         </span>
         <${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />
         <span class="sp"></span>
+        ${s.color_unlock && s.color_unlock.offered ? html`<span class="img-unlock">
+          <span class="eyebrow">Advanced</span>
+          <${Check} checked=${!!s.color_unlock.on} onChange=${(v) => call("images.set_color_unlocked", v)} disabled=${running}
+            label="Unlock the game's own pictures" title=${UNLOCK_TIP} />
+        </span>` : null}
       </div>
       <${Table} cls="img-tbl" columns=${columns} rows=${view} rowKey=${idOf} selected=${cur}
         onSelect=${onSelect} onActivate=${onActivate} onContext=${onContext} rowClass=${rowClass}
@@ -479,7 +500,7 @@ export default function ImagesTab() {
           ${p.color ? html`<div class="img-keeprow img-colorrow">
             <${Check} checked=${!!p.color.on} onChange=${(v) => call("images.set_color", prevRel, v)}
               label="Correct its colors for the machine" title=${COLOR_TIP} />
-            <span class="small muted">${p.color.own ? "Set for this picture" : p.color.all ? "Follows the Color profile tab (every replaced picture)" : "Follows the Color profile tab (no replaced picture)"}${p.color.on ? ` · “${p.color.name}” is baked in when you build.` : "."}</span>
+            <span class="small muted">${p.color.stock ? "The game's own picture (unlocked): corrected from its original" : p.color.own ? "Set for this picture" : p.color.all ? "Follows the Color profile tab (every replaced picture)" : "Follows the Color profile tab (no replaced picture)"}${p.color.on ? ` · “${p.color.name}” is baked in when you build.` : "."}</span>
           </div>` : null}
         </div>` : null}
         <${Thumb} cls="img-op" path=${p.orig} ver=${p.ver} label="Original" />

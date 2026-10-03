@@ -194,8 +194,8 @@ def test_scan_lists_every_slot_with_metadata(scanned):
     assert st["preview"]["rel"] == ALL[0]
     assert st["preview"]["orig"].endswith(os.path.basename(ALL[0]))
     assert st["preview"]["hdr"] == "Original"
-    # nothing picked: the Color column is not offered until a pick exists
-    assert st["cols"] == {"n": False, "keep": True, "color": False}
+    # nothing picked: the Color column still shows, a lock on every row (PAD-335)
+    assert st["cols"] == {"n": False, "keep": True, "color": True}
     log = " ".join(l["text"] for l in w.window._log["stern"])
     assert "Images scan started." in log and "Images scan finished" in log
 

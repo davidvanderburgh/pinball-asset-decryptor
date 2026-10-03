@@ -22,7 +22,8 @@ VERSION = 1
 #: lists are rels, anything else is one tab-wide option.
 SECTIONS = {
     "images": ("image", "image_keep_size", "image_group_tags",
-               "image_color_slots", "color_all_images"),
+               "image_color_slots", "color_all_images",
+               "image_color_unlocked"),
     "audio": ("audio", "audio_loop", "audio_keep", "audio_levels",
               "grow_keep_whole", "audio_trim"),
     "video": ("video", "video_asis_slots", "video_length_slots",

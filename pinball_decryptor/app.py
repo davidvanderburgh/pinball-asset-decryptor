@@ -4236,7 +4236,8 @@ class App:
         repacks them).  Runs on the write worker thread; logs via the queue.
         Returns ``(pending, staged, failures)`` — see _stage_pending_audio."""
         pend = (self.window.pending_image_assignments(assets_dir)
-                or self._sidecar_pending(assets_dir, "image"))
+                or self._sidecar_pending(assets_dir, "image")
+                or self._stock_colour_pending(assets_dir))
         if not pend:
             return (0, 0, [])
         slots_by_rel, assignments = pend[:2]
@@ -4263,12 +4264,37 @@ class App:
                                "image  applied %d of %d replacement(s) to "
                                "the project folder (build)"
                                % (staged, len(assignments)))
-            return (len(assignments), staged,
+            # game pictures corrected behind the unlock (PAD-335) count too
+            return (max(len(assignments), staged + len(failures)), staged,
                     [(f"image: {rel}", err) for rel, err in failures])
         except Exception as e:
             self.msg_queue.put(LogMsg(
                 f"Image replacement failed: {e}", "error"))
             return (len(assignments), 0, [("image replacements", str(e))])
+
+    def _stock_colour_pending(self, assets_dir):
+        """No replacement picked, but game pictures switched on behind the
+        Images tab's advanced unlock (PAD-335): the slots to stage them from,
+        with no assignment (stage_replacements adds them itself)."""
+        from .core import colour_profile
+        mfr = self._current_mfr
+        if (mfr is None or not getattr(mfr.capabilities, "replace_image",
+                                       False)
+                or not assets_dir or not os.path.isdir(assets_dir)
+                or not colour_profile.stock_image_rels(assets_dir)):
+            return None
+        from .core.image_slots import scan_image_slots
+        try:
+            roots = mfr.image_slot_dirs(assets_dir)
+        except Exception:                               # noqa: BLE001
+            roots = None
+        try:
+            exts = mfr.image_slot_exts(assets_dir)
+        except Exception:                               # noqa: BLE001
+            exts = None
+        slots = scan_image_slots(assets_dir, roots=roots, exts=exts,
+                                 probe=False)
+        return ({sl.rel_path: sl for sl in slots}, {}, frozenset())
 
     def _colour_assets_scope(self):
         """PAD-305: staging corrects the replacement files with the color

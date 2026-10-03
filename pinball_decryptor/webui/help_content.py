@@ -698,12 +698,17 @@ HELP_CONTENT = {
          "format (transparency is kept where the original has it). Keep "
          "the original resolution for best results."),
         ("Color column (Spike 2)",
-         "Each replaced picture has a Color box: ticked, the Color profile "
+         "Every row has a Color mark. A replaced picture shows a palette "
+         "(green on, red off): on, the Color profile "
          "tab's individual files profile is baked into it when you build, so it "
          "looks on the machine the way it looks here; unticked, it goes on "
          "the card in its own colors. The box under the preview is the "
          "same switch. The Color profile tab's 'Every replaced picture' "
-         "sets every picture that has no box of its own."),
+         "sets every picture that has no box of its own. The game's own "
+         "pictures show a blue lock and are never changed; tick 'Unlock the "
+         "game's own pictures' under Advanced to give each one its own "
+         "switch, and switching one off (or locking again) puts the "
+         "original back."),
         ("A bigger picture than the original",
          "Stern Spike 2: a picture inside a game scene (Source \"Radium\", "
          "not a font) can keep its OWN size instead, e.g. a longer name "

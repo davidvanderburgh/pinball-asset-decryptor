@@ -103,7 +103,7 @@ const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "F
 const COLOR_TIP = "Green: the Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Red: it goes on the card in its own colors. Blue lock: the game's own clip, never touched (tick Advanced to unlock it). A switch you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
 // PAD-336: the Advanced box unlocks the game's own clips on this tab only
 const ADV_TIP = { head: "Advanced: unlock the game's own clips", lines: [
-  "Gives the game's own clips a Color switch too, on this tab only. Pictures in Images and Scenes keep their locks.",
+  "Gives the game's own clips a Color switch too, on this tab only (the Images tab has its own box for pictures, and Scenes keeps its locks).",
   "A clip you switch on is re-encoded from its original with the Color profile tab's individual files profile when you build.",
   "Untick it to lock them again; any clip already built that way gets its original back."] };
 // PAD-334: the same blue lock / red / green palette as a picture's switch in Scenes

@@ -351,7 +351,8 @@ def test_images_tab_offers_a_color_box_per_replaced_picture(tmp_path):
         _set_folder(w, assets)
         w.call("images.scan")
         st = _wait(w, _settled)
-        assert st["cols"]["color"] is False          # nothing replaced yet
+        assert st["cols"]["color"] is True           # locks on the game's own (PAD-335)
+        assert _by_rel(st)[BANNER]["cl"] is True
         rep = os.path.join(reps, "SpaceGodzilla.png")
         w.answers = [rep]
         assert w.call("images.choose", BANNER) == BANNER
@@ -360,10 +361,11 @@ def test_images_tab_offers_a_color_box_per_replaced_picture(tmp_path):
         row = _by_rel(st)[BANNER]
         assert row["c"] is False and row["co"] is False
         assert _by_rel(st)[PLAIN]["c"] is None       # the game's own picture
+        assert _by_rel(st)[PLAIN]["cl"] is True and row["cl"] is False
         w.call("images.select", BANNER)
         p = w.state("images")["preview"]
         assert p["color"] == {"on": False, "own": False, "all": False,
-                              "name": "Recommended"}
+                              "name": "Recommended", "stock": False}
         assert w.call("images.set_color", BANNER, True)
         row = _by_rel(w.state("images"))[BANNER]
         assert row["c"] is True and row["co"] is True

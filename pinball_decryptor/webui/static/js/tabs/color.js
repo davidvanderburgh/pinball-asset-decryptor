@@ -690,7 +690,8 @@ function Explainer({ s }) {
     : assets ? html`<p>This profile corrects the files you choose, and only those. When you build, PAD shifts the colors of each switched-on picture or video the opposite way as it is staged, so the machine's screen shifts them back to what you made. The game's own art is left as Stern made it for this screen.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
-      <li><${Icon} name="check" />The whole screen overlay still applies on top, if you set one: the game draws these files through it like everything else.</li>
+      <li><${Icon} name="check" />Recommended undoes the Machine screen, so what you made shows on the machine as it does on your PC. It follows that screen: tune the Machine screen and this changes with it. Move a slider to take it from there.</li>
+      <li><${Icon} name="check" />The whole screen overlay still applies on top, if you set one: the game draws these files through it like everything else. While it is on Recommended, it already undoes the screen for these files, so Recommended here changes nothing.</li>
       <li><${Icon} name="check" />Color ranges and Curves below the preview are baked in too, after the sliders: fix one band of colors, or bend the shades point by point.</li>
       <li><${Icon} name="check" />The Scenes preview shows a switched-on picture the way it will be written, so you can judge it in place.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
@@ -698,6 +699,7 @@ function Explainer({ s }) {
     : s.on_display ? html`<p>A color profile corrects for that. When you build, PAD teaches the game to shift every color it draws the opposite way, so the machine's screen shifts them back to what you made. It covers everything on the screen: the game's own art, videos, mode screens, text, and your replacements.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />No picture or video file is changed, yours or the game's. The correction lives in the game program itself, so it can never be applied twice.</li>
+      <li><${Icon} name="check" />Recommended undoes the Machine screen, so what you made shows on the machine as it does on your PC. It follows that screen: tune the Machine screen and this changes with it. Move a slider to take it from there.</li>
       <li><${Icon} name="check" />Pick No change and build again for the game's own colors.</li>
       <li><${Icon} name="check" />Color ranges and Curves below the preview are drawn by the game too, after the sliders. The multi-boot menu's Color correction changes the sliders only; ranges and curves stay as you built them.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>

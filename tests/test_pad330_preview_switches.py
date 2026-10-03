@@ -20,6 +20,9 @@ BW = cp.Profile(name="Black and white", saturation=0.0)
 def _setup(d):
     cp.store(d, OVER)
     cp.store_screen_profile(d, BW)
+    # a black and white screen cannot be undone, so its Recommended files
+    # profile changes nothing (PAD-346): set the measured one
+    cp.store_asset_profile(d, dict(cp.PRESETS)["recommended"])
 
 
 def test_machine_view_leaves_out_only_the_switched_off_step(tmp_path):

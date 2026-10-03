@@ -14,6 +14,9 @@ PIL = pytest.importorskip("PIL.Image")
 np = pytest.importorskip("numpy")
 
 RECOMMENDED = dict(cp.PRESETS)["recommended"]
+#: the individual files profile a project starts with: the Recommended screen,
+#: undone (PAD-346)
+FILES = cp.undo_screen(cp.SCREEN_PRESETS[0][1])
 BW = dict(cp.PRESETS)["bw"]
 
 
@@ -43,9 +46,9 @@ def _image_slot(tmp_path, name):
 
 def test_the_chosen_files_profile_starts_from_recommended_and_nothing_is_on(tmp_path):
     d = str(tmp_path)
-    assert cp.asset_profile(d) == RECOMMENDED
+    assert cp.asset_profile(d) == FILES
     assert cp.asset_stored(d) is False
-    assert cp.asset_active(d) == RECOMMENDED
+    assert cp.asset_active(d) == FILES
     assert cp.asset_settings(d) == {"all_images": False, "all_videos": False,
                                     "images": {}, "videos": {}}
     assert cp.asset_map(d, "images", ["a.png"]) == {}
@@ -70,8 +73,8 @@ def test_switches_a_box_per_kind_and_a_files_own_switch_wins(tmp_path):
     assert not cp.asset_applies(st, "images", "b.png")      # its own switch
     assert cp.asset_applies(st, "videos", "v.mp4")
     assert not cp.asset_applies(st, "videos", "w.mp4")
-    assert cp.asset_map(d, "images", ["a.png", "b.png"]) == {"a.png": RECOMMENDED}
-    assert cp.asset_map(d, "videos", ["v.mp4", "w.mp4"]) == {"v.mp4": RECOMMENDED}
+    assert cp.asset_map(d, "images", ["a.png", "b.png"]) == {"a.png": FILES}
+    assert cp.asset_map(d, "videos", ["v.mp4", "w.mp4"]) == {"v.mp4": FILES}
     # back to the box
     cp.set_asset_slot(d, "images", "b.png", None)
     assert cp.asset_applies(cp.asset_settings(d), "images", "b.png")
@@ -120,10 +123,10 @@ def test_image_staging_bakes_the_profile_into_switched_on_pictures_only(tmp_path
     off_file, off_slot = _image_slot(proj, "off.png")
     rep = tmp_path / "mine.png"
     _ramp().save(rep)
-    cp.store(str(proj), RECOMMENDED)                   # display-wide, held off
+    cp.store(str(proj), FILES)                   # display-wide, held off
     cp.set_asset_all(str(proj), "images", True)
     cp.set_asset_slot(str(proj), "images", "off.png", False)
-    want = RECOMMENDED.apply_image(_ramp()).tobytes()
+    want = FILES.apply_image(_ramp()).tobytes()
     for _ in range(2):
         with cp.forced(False):
             n, fails = stage_replacements(
@@ -151,7 +154,7 @@ def test_where_the_display_profile_corrects_the_files_it_wins(tmp_path):
     rep = tmp_path / "mine.png"
     _ramp().save(rep)
     cp.store(str(proj), BW)
-    cp.store_asset_profile(str(proj), RECOMMENDED)
+    cp.store_asset_profile(str(proj), FILES)
     cp.set_asset_all(str(proj), "images", True)
     stage_replacements({"a.png": slot}, {"a.png": str(rep)}, assets_dir=str(proj))
     assert PIL.open(slot_file).convert("RGB").tobytes() == \
@@ -188,7 +191,7 @@ def test_video_staging_hands_the_profile_to_the_clips_that_are_on(tmp_path, monk
             slots, {"on.mp4": str(rep), "off.mp4": str(rep)},
             assets_dir=str(proj))
     assert n == 2 and not fails
-    assert seen == {"on.mp4": RECOMMENDED, "off.mp4": None}
+    assert seen == {"on.mp4": FILES, "off.mp4": None}
     # the converted-clip cache names the profile: a switch moving re-converts
     cache = video_slots.StagedCache(str(proj))
     r_on = cache.recipe(slots["on.mp4"], str(rep), None, colour="x")
@@ -201,16 +204,16 @@ def test_a_picture_added_in_scenes_is_baked_when_its_switch_is_on(tmp_path):
     p = tmp_path / "pic.png"
     _ramp("RGBA").save(p)
     plain = scene_edit._texture_from_png(str(p))
-    baked = scene_edit._texture_from_png(str(p), colour=RECOMMENDED)
+    baked = scene_edit._texture_from_png(str(p), colour=FILES)
     assert plain[:3] == baked[:3] and plain[3] != baked[3]
     d = str(tmp_path)
     op = {"op": "add_picture", "image": "scene_textures/added/pic_1.png"}
     assert cp.added_picture_colour(d, op) is None              # box off
     cp.set_asset_all(d, "images", True)
-    assert cp.added_picture_colour(d, op) == RECOMMENDED
+    assert cp.added_picture_colour(d, op) == FILES
     assert cp.added_picture_colour(d, dict(op, color=False)) is None
     cp.set_asset_all(d, "images", False)
-    assert cp.added_picture_colour(d, dict(op, color=True)) == RECOMMENDED
+    assert cp.added_picture_colour(d, dict(op, color=True)) == FILES
 
 
 def test_the_scene_preview_draws_a_switched_on_pick_the_way_it_is_written(tmp_path):
@@ -232,10 +235,10 @@ def test_the_scene_preview_draws_a_switched_on_pick_the_way_it_is_written(tmp_pa
     assert got.convert("RGB").tobytes() == opaque.convert("RGB").tobytes()
     cp.set_asset_all(str(proj), "images", True)
     pics = R.pending_pictures(str(proj))
-    assert pics[rel]["colour"] == RECOMMENDED
+    assert pics[rel]["colour"] == FILES
     got = R._picture(str(proj), rel, {}, pics, {})
     assert got.convert("RGB").tobytes() == \
-        RECOMMENDED.apply_image(opaque).convert("RGB").tobytes()
+        FILES.apply_image(opaque).convert("RGB").tobytes()
     # a picture added in Scenes, switched on by the box, is listed for its colour
     added = "scene_textures/added/x_1.png"
     opaque.save(str(proj / "images" / added))
@@ -244,10 +247,10 @@ def test_the_scene_preview_draws_a_switched_on_pick_the_way_it_is_written(tmp_pa
         "op": "add_picture", "parent": 1, "id": 900, "name": "PAD_x", "image": added,
         "w": 64, "h": 4, "x": 0, "y": 0})
     pics = R.pending_pictures(str(proj))
-    assert pics[added]["colour"] == RECOMMENDED and pics[added]["keep"] is True
+    assert pics[added]["colour"] == FILES and pics[added]["keep"] is True
     got = R._picture(str(proj), added, {}, pics, {})
     assert got.convert("RGB").tobytes() == \
-        RECOMMENDED.apply_image(opaque).convert("RGB").tobytes()
+        FILES.apply_image(opaque).convert("RGB").tobytes()
 
 
 # -- the Write tab ---------------------------------------------------------------
@@ -292,7 +295,9 @@ def test_color_tab_has_a_chosen_files_mode_with_its_own_profile_and_boxes(tmp_pa
         w.drain()
         s = w.state("color")
         assert s["mode"] == "assets" and s["rev"] > rev
-        assert s["name"] == "Recommended" and s["gamma"] == [1.1, 1.2, 1.35]
+        # PAD-346: the Machine screen undone, on the same sliders and curves
+        assert s["name"] == "Recommended" and s["gamma"] == [1.0, 1.0, 1.0]
+        assert s["curves"] and s["follows_screen"] is True
         assert s["asset_active"] is True and s["active"] is False
         assert s["asset_counts"] == {"images": 0, "videos": 0, "added": 0}
         assert w.call("color.set_all", "images", True)
@@ -305,6 +310,9 @@ def test_color_tab_has_a_chosen_files_mode_with_its_own_profile_and_boxes(tmp_pa
         w.call("color.set_params", {"gamma": [1.5, 1.0, 1.0]})
         w.drain()
         assert cp.asset_profile(str(proj)).gamma == (1.5, 1.0, 1.0)
+        # moved off Recommended: its own numbers, no longer following
+        assert cp.asset_profile(str(proj)).name == "My profile"
+        assert cp.asset_stored(str(proj))
         assert cp.for_project(str(proj)) is None
         w.call("color.preset", "none")
         w.drain()
@@ -578,7 +586,7 @@ def test_an_unlocked_stock_clip_is_re_encoded_from_its_own_original(tmp_path, mo
             {"stock.mp4": slot}, {"stock.mp4": video_slots.STOCK_SOURCE},
             assets_dir=str(proj), no_conversion=True)
     assert n == 1 and not fails
-    assert seen.pop("stock.mp4") == (b"stock", RECOMMENDED, False)
+    assert seen.pop("stock.mp4") == (b"stock", FILES, False)
     # the next build keeps it: never a second generation of the slot
     with cp.forced(False):
         n, fails = video_slots.stage_replacements(

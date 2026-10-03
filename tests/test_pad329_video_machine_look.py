@@ -51,8 +51,10 @@ def test_the_players_follow_the_switch_and_the_setting(tmp_path):
     over = cp.Profile(name="Less red", gain=(0.5, 1.0, 1.0))
     cp.store(d, over)
     cp.store_screen_profile(d, cp.Profile(name="Black and white", saturation=0.0))
+    # a black and white screen cannot be undone (PAD-346), so a set profile
+    cp.store_asset_profile(d, RECOMMENDED)
     o, s = cp.filter_step(over), cp.filter_step(cp.screen_profile(d))
-    files = cp.filter_step(cp.asset_profile(d))                  # Recommended
+    files = cp.filter_step(cp.asset_profile(d))
     look = cp.video_look(d, None, True)
     assert look["orig"] == [o, s] and look["rep"] == [o, s]      # no switch: like stock
     assert cp.video_look(d, True, True)["rep"] == [files, o, s]  # on: baked, then the rest

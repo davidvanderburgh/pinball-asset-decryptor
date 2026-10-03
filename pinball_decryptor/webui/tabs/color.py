@@ -27,6 +27,13 @@ card, the Write tab lists nothing, and Revert all leaves it (it describes
 the user's machine, not a change to the card).  Until one is stored the
 mode shows the individual files profile, undone, which is what Scenes uses.
 
+RECOMMENDED FOLLOWS THE SCREEN (PAD-346).  On Spike 2 the overlay's and the
+individual files' Recommended is the Machine screen on show, undone
+(core/colour_profile.py ``recommended``), worked out again whenever the
+screen changes and shown on the same sliders, ranges and curves, so moving
+one starts from exactly what it was.  Picking it stores "follow the screen"
+rather than numbers; moving a slider stores numbers again ("My profile").
+
 COLOR RANGES AND CURVES (PAD-339, PAD-343).  First the machine screen's
 alone, now every mode's: the files bake them (Pillow, ffmpeg .cube tables)
 and the Spike 2 overlay draws them in its shaders (shader_profile
@@ -166,8 +173,23 @@ class ColorTab(TabService):
         if self._screen_mode():
             return self._screen or cp.SCREEN_PRESETS[0][1]
         if self._assets_mode():
-            return self._asset or cp.PRESETS[0][1]
+            return self._asset or cp.recommended(self._project, files=True)
         return self._prof or cp.Profile(name="No change")
+
+    def _follows(self):
+        """Is the mode on show the Recommended one following the machine
+        screen (PAD-346)?"""
+        assets = self._project
+        if not (self._on_display and assets and os.path.isdir(assets)):
+            return False
+        try:
+            if self._assets_mode():
+                return not cp.asset_stored(assets)
+            if not self._screen_mode():
+                return cp.follows_screen(assets)
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile follows")
+        return False
 
     def _asset_state(self, assets):
         """The chosen-files mode's switches and counts for the page."""
@@ -204,8 +226,10 @@ class ColorTab(TabService):
                         "tip": cp.SCREEN_PRESET_TIPS.get(k, "")}
                        for k, v in cp.SCREEN_PRESETS]
         else:
-            presets = [{"key": k, "label": v.name,
-                        "tip": cp.PRESET_TIPS.get(k, "")}
+            tips = dict(cp.PRESET_TIPS)
+            if self._on_display:
+                tips.update(cp.PRESET_TIPS_SPIKE2)
+            presets = [{"key": k, "label": v.name, "tip": tips.get(k, "")}
                        for k, v in cp.PRESETS]
         values = dict(
             name=p.name, gamma=list(p.gamma), gain=list(p.gain),
@@ -217,7 +241,9 @@ class ColorTab(TabService):
             per_file=self._on_display,
             display_active=self._prof is not None,
             display_name=self._prof.label() if self._prof is not None else "",
-            asset_name=(self._asset or cp.PRESETS[0][1]).label(),
+            asset_name=(self._asset
+                        or cp.recommended(assets, files=True)).label(),
+            follows_screen=self._follows(),
             screen_stored=self._screen_stored,
             screen_follow=bool(self._screen_mode() and assets
                                and os.path.isdir(assets)
@@ -248,6 +274,10 @@ class ColorTab(TabService):
             try:
                 cp.store_screen_profile(assets, prof, follow=follow)
                 self._screen, self._screen_stored = cp.screen_shown(assets)
+                # a Recommended overlay or files profile follows the screen
+                # (PAD-346)
+                self._prof = cp.for_project(assets)
+                self._asset = cp.asset_profile(assets)
             except Exception as e:                      # noqa: BLE001
                 self.set(problems=["could not save the machine screen "
                                    "(%s)" % e])
@@ -255,7 +285,8 @@ class ColorTab(TabService):
             if rev:
                 self._rev += 1
             self._publish(problems=[])
-            self._tell_scenes()
+            self._changed()
+            self._tell_tabs()
             return True
         if self._assets_mode():
             # the chosen-files profile: No change is stored as itself, so
@@ -280,6 +311,8 @@ class ColorTab(TabService):
         self._prof = prof
         try:
             cp.store(assets, prof)
+            # the files' Recommended follows the overlay (PAD-346)
+            self._asset = cp.asset_profile(assets)
         except Exception as e:                          # noqa: BLE001
             self.set(problems=["could not save the project's profile (%s)"
                                % e])
@@ -404,6 +437,11 @@ class ColorTab(TabService):
             kw["ranges"], kw["curves"] = ranges, curves
         if kw["name"] in ("", "No change"):
             kw["name"] = "My screen" if self._screen_mode() else "My profile"
+        elif kw["name"] == cp.RECOMMENDED and "name" not in params \
+                and self._follows():
+            # moved off the Recommended one: from here it keeps its numbers
+            # and no longer follows the machine screen (PAD-346)
+            kw["name"] = "My profile"
         return self._store(cp.Profile(**kw))
 
     @rpc
@@ -413,10 +451,38 @@ class ColorTab(TabService):
                 if k == key:
                     return self._store(prof, rev=True, follow=k == "follow")
             return False
+        if key == "recommended" and self._on_display:
+            return self._store_recommended()
         for k, prof in cp.PRESETS:
             if k == key:
                 return self._store(None if k == "none" else prof, rev=True)
         return False
+
+    def _store_recommended(self):
+        """Spike 2's Recommended overlay or files profile: the machine
+        screen undone, following it from now on (PAD-346)."""
+        assets = self._project
+        if not (assets and os.path.isdir(assets)):
+            self.toast("Choose a project folder on the Extract tab first.",
+                       "error")
+            return False
+        try:
+            if self._assets_mode():
+                cp.store_asset_profile(assets, None)
+                self._asset = cp.asset_profile(assets)
+            else:
+                cp.store(assets, None, follow=True)
+                self._prof = cp.for_project(assets)
+                self._asset = cp.asset_profile(assets)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not save the project's profile (%s)"
+                               % e])
+            return False
+        self._rev += 1
+        self._publish(problems=[])
+        self._changed(display=not self._assets_mode())
+        self._tell_tabs()
+        return True
 
     def _save_name(self):
         """Save a copy's file name for the mode on show (PAD-341)."""

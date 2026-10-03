@@ -119,3 +119,33 @@ curve_blue = 0 0, 255 240
 
 `range` is `hue width soft shift saturation brightness protect`, one line per
 range. Files without `range` or `curve_` lines read exactly as before.
+
+## Recommended = the Machine screen, undone (Spike 2)
+
+On Spike 2 the whole screen overlay's and the individual files' Recommended
+is worked out from the Machine screen on show, so a file given to that
+screen comes back as made. It uses only the controls every profile has, so
+the sliders, Color ranges and Curves show it and moving one starts from
+exactly that:
+
+1. saturation = 1 / the screen's saturation;
+2. one curve per channel (or one RGB curve when all three match) that
+   undoes the screen's shades: its gamma, gain, lift, brightness, contrast
+   and curves, inverted per channel, then nudged so a grey comes back grey
+   through the whole screen, ranges included, and fitted with at most 16
+   points;
+3. each screen range turned round (shift, saturation and brightness
+   reversed, at the hue the screen draws that band at), then tuned one number
+   at a time against the round trip over a grid of colours.
+
+A profile's own steps run in a fixed order (saturation, shades, ranges,
+curves), the reverse of what undoing a screen needs, so it is close rather
+than exact: with the Recommended screen, the round trip lands within 4.3
+levels on average (nothing: 33; the old measured Recommended: 23), and greys
+within 4. Colours the screen cannot show at all stay out of reach.
+
+It follows the screen: choosing it stores "follow the screen", not numbers,
+and a slider move stores numbers again ("My profile"). While the overlay is
+the Recommended one, the files' Recommended changes nothing (the overlay
+already undoes the screen for them). With the Machine screen on "Same as
+individual files" it cannot follow back, so it is the measured profile.

@@ -352,8 +352,12 @@ def test_color_tab_stages_on_the_project(tmp_path):
         w.call("color.preset", "recommended")
         w.drain()
         s = w.state("color")
-        assert s["active"] and s["rev"] > rev and s["gamma"] == [1.1, 1.2, 1.35]
-        assert cp.for_project(str(proj)) == RECOMMENDED
+        assert s["active"] and s["rev"] > rev
+        # PAD-346: on Spike 2 it is the Machine screen undone, following it
+        undone = cp.undo_screen(cp.SCREEN_PRESETS[0][1])
+        assert s["gamma"] == [1.0, 1.0, 1.0] and s["curves"] and s["ranges"]
+        assert s["follows_screen"] is True
+        assert cp.for_project(str(proj)) == undone
 
         w.call("color.set_params", {"gamma": [1.5, 1.0, 9.0], "lift": 0.1})
         w.drain()

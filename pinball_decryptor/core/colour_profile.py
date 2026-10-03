@@ -238,11 +238,19 @@ def curve_table(points):
     Fritsch-Carlson monotone cubic between them (no overshoot where the
     points rise or fall), flat past the first and the last.
     static/js/tabs/color.js ``curveTable`` mirrors it."""
+    if len(points) < 2:
+        return list(range(256))
+    return [int(min(max(y + 0.5, 0.0), 255.0))
+            for y in curve_values(points, range(256))]
+
+
+def curve_values(points, inputs):
+    """The curve through *points* (two or more) at each of *inputs* (any
+    shades 0..255, fractions too), unrounded: :func:`curve_table`'s maths."""
+    import bisect
     xs = [float(p[0]) for p in points]
     ys = [float(p[1]) for p in points]
     n = len(xs)
-    if n < 2:
-        return list(range(256))
     d = [(ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k]) for k in range(n - 1)]
     m = [0.0] * n
     m[0], m[n - 1] = d[0], d[n - 2]
@@ -258,21 +266,19 @@ def curve_table(points):
             t = 3.0 / r ** 0.5
             m[k], m[k + 1] = t * a * d[k], t * b * d[k]
     out = []
-    k = 0
-    for v in range(256):
+    for v in inputs:
         if v <= xs[0]:
             y = ys[0]
         elif v >= xs[n - 1]:
             y = ys[n - 1]
         else:
-            while xs[k + 1] < v:
-                k += 1
+            k = bisect.bisect_left(xs, v) - 1
             h = xs[k + 1] - xs[k]
             t = (v - xs[k]) / h
             t2, t3 = t * t, t * t * t
             y = ((2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * h * m[k]
                  + (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * h * m[k + 1])
-        out.append(int(min(max(y + 0.5, 0.0), 255.0)))
+        out.append(y)
     return out
 
 
@@ -755,15 +761,27 @@ def for_project(assets_dir):
     """The profile staged for *assets_dir*, or ``None`` (none staged)."""
     from . import staged_changes
     d = staged_changes.load(assets_dir).get(KEY)
+    if isinstance(d, dict) and d.get(FOLLOW_SCREEN):
+        return recommended(assets_dir)
     return _from_dict(d) if isinstance(d, dict) else None
 
 
-def store(assets_dir, prof):
+def follows_screen(assets_dir):
+    """Is the overlay the Recommended one, following the machine screen?"""
+    from . import staged_changes
+    d = staged_changes.load(assets_dir).get(KEY)
+    return bool(isinstance(d, dict) and d.get(FOLLOW_SCREEN))
+
+
+def store(assets_dir, prof, follow=False):
     """Stage *prof* for *assets_dir*; ``None`` (or a profile that changes
-    nothing) takes it away."""
+    nothing) takes it away; *follow*: the Recommended one, following the
+    machine screen (PAD-346)."""
     from . import staged_changes
     data = staged_changes.load(assets_dir)
-    if prof is None or prof.is_identity():
+    if follow:
+        data[KEY] = {FOLLOW_SCREEN: True}
+    elif prof is None or prof.is_identity():
         data.pop(KEY, None)
     else:
         data[KEY] = _profile_dict(prof)
@@ -829,12 +847,12 @@ def _profile_dict(prof):
 
 def asset_profile(assets_dir):
     """The profile baked into the chosen files of *assets_dir*: the one
-    stored, else the Recommended starting point (a new project corrects the
-    files it is told to the way the test card said to)."""
+    stored, else the Recommended one, the machine screen undone (PAD-346:
+    it follows that screen)."""
     from . import staged_changes
     d = staged_changes.load(assets_dir).get(ASSET_KEY)
     prof = _from_dict(d) if isinstance(d, dict) else None
-    return prof if prof is not None else PRESETS[0][1]
+    return prof if prof is not None else recommended(assets_dir, files=True)
 
 
 def asset_stored(assets_dir):
@@ -1167,6 +1185,195 @@ def screen_shown(assets_dir):
                    saturation=inv.saturation), False
 
 
+# -- Recommended = the machine screen, undone (PAD-346) -----------------------
+#
+# The whole screen overlay's and the individual files' Recommended is worked
+# out from the Machine screen on show: a profile that, given to that screen,
+# comes back as the colours the user made.  It is built from the controls
+# every profile has, so the sliders, ranges and curves show it and a user can
+# nudge it from there without a jump:
+#
+#   - saturation 1 / the screen's;
+#   - per channel a curve that undoes the screen's shades (its gamma, gain,
+#     lift, brightness and contrast and its curves, all per channel), then
+#     corrected so a grey comes back grey through the whole screen, ranges
+#     included (the screen's ranges reach the slightly tinted greys a
+#     correction sends; the profile's own cannot see them);
+#   - each screen range, turned round (shift, saturation and brightness
+#     reversed, at the hue the screen moves that band to), then nudged one
+#     number at a time while the round trip over a grid of colours improves.
+#
+# Exact for greys up to the 8-bit steps; colours the screen cannot show at
+# all (past its brightest or most saturated) stay out of reach.  Worked out
+# once per screen (cached).
+
+RECOMMENDED = "Recommended"
+#: stored under KEY alone: the overlay is the Recommended one, following the
+#: machine screen (PAD-346)
+FOLLOW_SCREEN = "recommended"
+
+
+def _shades_forward(screen, c, xs):
+    """Channel *c* of *screen* at shades *xs*, without the colour mix or the
+    ranges, unrounded."""
+    gamma, gain, lift = screen.curve()
+    out = []
+    for v in xs:
+        x = min(max(v / 255.0 * gain[c], 0.0), 1.0)
+        out.append((lift[c] + (1.0 - lift[c]) * x ** gamma[c]) * 255.0)
+    cv = dict(screen.curves)
+    for ch in ("rgb", "rgb"[c]):
+        if ch in cv and cv[ch] != CURVE_IDENTITY:
+            out = curve_values(cv[ch], out)
+    return out
+
+
+def _fit_points(target, tol=1.0):
+    """At most :data:`MAX_POINTS` curve points whose curve follows *target*
+    (256 shades) within *tol*, where the points allow."""
+    import numpy as np
+    pts = {0.0: round(float(target[0]), 1),
+           255.0: round(float(target[255]), 1)}
+    while len(pts) < MAX_POINTS:
+        have = np.asarray(curve_values(sorted(pts.items()), range(256)))
+        miss = np.abs(have - target)
+        x = int(np.argmax(miss))
+        if miss[x] < tol or float(x) in pts:
+            break
+        pts[float(x)] = round(float(target[x]), 1)
+    return tuple(sorted(pts.items()))
+
+
+def _undo_shades(screen):
+    """``[r, g, b]`` 256-entry float tables that undo *screen*'s shades,
+    greys made to come back grey through all of it (see above)."""
+    import numpy as np
+    xs = np.linspace(0.0, 255.0, 4081)
+    inv = []
+    for c in range(3):
+        f = np.maximum.accumulate(np.asarray(_shades_forward(screen, c, xs)))
+        keep = np.concatenate([[True], np.diff(f) > 1e-9])
+        inv.append(np.interp(np.arange(256.0), f[keep], xs[keep]))
+    inv = np.stack(inv, -1)
+
+    def undo(y):
+        return np.stack([np.interp(y[:, c], np.arange(256.0), inv[:, c])
+                         for c in range(3)], -1)
+    grey = np.repeat(np.arange(256.0)[:, None], 3, 1)
+    x = inv.copy()
+    for _ in range(12):
+        # a grey passes the profile's own colour mix and ranges untouched
+        sent = np.uint8(np.clip(x + 0.5, 0, 255))[None]
+        shown = screen.apply_array(sent)[0].astype(np.float64)
+        x = np.maximum.accumulate(
+            np.clip(x + undo(grey) - undo(shown), 0.0, 255.0), 0)
+    # the grey fix-up follows the screen's 8-bit steps: smooth it, so the
+    # curves need few points and bend no more than the screen does
+    k = np.hanning(15)
+    k /= k.sum()
+    fix = np.stack([np.convolve(np.pad(x[:, c] - inv[:, c], 7, mode="edge"),
+                                k, mode="valid") for c in range(3)], -1)
+    x = np.maximum.accumulate(np.clip(inv + fix, 0.0, 255.0), 0)
+    return [x[:, c] for c in range(3)]
+
+
+def _round_trip(screen, prof, probe):
+    """How far (mean levels) *probe* comes back from *prof* then *screen*."""
+    import numpy as np
+    back = screen.apply_array(prof.apply_array(probe)).astype(np.float64)
+    return float(np.abs(back - probe).mean())
+
+
+def _probe(step=32):
+    import numpy as np
+    g = np.append(np.arange(0, 256, step), 255).astype(np.uint8)
+    return np.stack(np.meshgrid(g, g, g, indexing="ij"), -1).reshape(1, -1, 3)
+
+
+def _undo_ranges(screen, base):
+    """*screen*'s colour ranges turned round for a profile that already
+    undoes its shades (*base*), then tuned against the round trip."""
+    import colorsys
+    import dataclasses
+    import numpy as np
+    start = []
+    for rng in screen.ranges:
+        if range_neutral(rng):
+            continue
+        hue, width, soft, shift, sat, bright, protect = rng
+        # where the screen draws a colour of that band
+        rgb = np.array(colorsys.hsv_to_rgb(hue / 360.0, 0.6, 0.6)) * 255.0
+        shown = screen.apply_array(np.uint8(rgb + 0.5).reshape(1, 1, 3))
+        h = colorsys.rgb_to_hsv(*(shown[0, 0] / 255.0))[0] * 360.0
+        start.append(list(clean_range((
+            h, width, soft, -shift, 1.0 / sat if sat > 0 else 1.0,
+            1.0 / bright if bright > 0 else 1.0, protect))))
+    if not start:
+        return ()
+    probe = _probe()
+
+    def cost(rs):
+        return _round_trip(screen, dataclasses.replace(
+            base, ranges=tuple(tuple(r) for r in rs)), probe)
+    steps = [10.0, 10.0, 10.0, 4.0, 0.1, 0.1, 0.05]
+    rs = start
+    best = cost(rs)
+    for _ in range(6):
+        better = False
+        for i in range(len(rs)):
+            for f in range(len(RANGE_FIELDS)):
+                for sign in (1.0, -1.0):
+                    trial = [list(r) for r in rs]
+                    trial[i][f] += sign * steps[f]
+                    trial[i] = list(clean_range(trial[i]))
+                    c = cost(trial)
+                    if c < best - 1e-4:
+                        best, rs, better = c, trial, True
+        if not better:
+            steps = [v / 2.0 for v in steps]
+    return tuple(clean_range([round(v, 2) for v in r]) for r in rs)
+
+
+@functools.lru_cache(maxsize=16)
+def undo_screen(screen):
+    """The Recommended profile for *screen* (PAD-346): what, given to that
+    screen, shows as made.  Sliders, ranges and curves only (see above)."""
+    import numpy as np
+    if screen is None or screen.is_identity():
+        return Profile(name=RECOMMENDED)
+    lo, hi = LIMITS["saturation"]
+    sat = (round(min(max(1.0 / screen.saturation, lo), hi), 3)
+           if screen.saturation > 0 else 1.0)
+    tabs = _undo_shades(screen)
+    ident = np.arange(256.0)
+    curves = []
+    if all(np.abs(t - tabs[0]).max() < 0.5 for t in tabs):
+        if np.abs(tabs[0] - ident).max() >= 0.5:
+            curves.append(("rgb", _fit_points(tabs[0])))
+    else:
+        for ch, t in zip("rgb", tabs):
+            if np.abs(t - ident).max() >= 0.5:
+                curves.append((ch, _fit_points(t)))
+    base = Profile(name=RECOMMENDED, saturation=sat, curves=tuple(curves))
+    return Profile(name=RECOMMENDED, saturation=sat,
+                   ranges=_undo_ranges(screen, base), curves=base.curves)
+
+
+def recommended(assets_dir, files=False):
+    """The Recommended whole screen overlay (or, *files*, individual files
+    profile) of *assets_dir* (PAD-346): the Machine screen on show, undone,
+    so what the user made shows on the machine (and in Scenes' As on the
+    machine) as it does on their PC.  When the screen is "Same as individual
+    files" it cannot follow it in turn: then the measured Recommended.  The
+    files' one changes nothing while the overlay is the Recommended one: that
+    already undoes the screen for everything, files included."""
+    if not assets_dir or screen_follows(assets_dir):
+        return PRESETS[0][1]
+    if files and follows_screen(assets_dir):
+        return Profile(name=RECOMMENDED)
+    return undo_screen(screen_shown(assets_dir)[0])
+
+
 def filter_step(prof):
     """*prof* as one step of a browser colour filter (PAD-329): ``{"m"}`` the
     saturation mix as an SVG feColorMatrix's 20 values (None when it mixes
@@ -1461,4 +1668,19 @@ PRESET_TIPS = {
     "none": "Leaves every color as you made it.",
     "bw": ("Every picture and video in greys, for a black-and-white "
            "playfield edition. Nothing else is changed."),
+}
+
+#: Spike 2 (PAD-346): there the Recommended overlay and files profile is the
+#: Machine screen undone, so its tip says that instead.
+PRESET_TIPS_SPIKE2 = {
+    "recommended": (
+        "Undoes the Machine screen profile, so your files show on the "
+        "machine the way they look on your PC, and Scenes and the Video "
+        "tab's As on the machine preview them that way too. It follows the "
+        "Machine screen: tune that one to your machine and this one changes "
+        "with it. Built from the sliders, Color ranges and Curves below, so "
+        "you can nudge it from there; moving one keeps your numbers and it "
+        "stops following. While the whole screen overlay is on Recommended "
+        "it already undoes the screen for everything, so the individual "
+        "files' Recommended changes nothing."),
 }

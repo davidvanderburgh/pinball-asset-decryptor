@@ -678,6 +678,15 @@ HELP_CONTENT = {
          "back, on this card or another one. Slots the file doesn't set keep "
          "what they have, and slots this card doesn't have are skipped. The "
          "file only names your files, it doesn't hold them."),
+        ("Color column (Spike 2)",
+         "A replaced clip shows a Color switch (green on, red off): on, the "
+         "Color profile tab's individual files profile is baked into it when "
+         "you build (it is re-encoded for that); off, it goes on the card in "
+         "its own colors. The Color profile tab's 'Every replaced video' sets "
+         "every clip that has no switch of its own. The game's own clips show "
+         "a blue lock and are never changed; tick Advanced on the toolbar to "
+         "give each one its own switch, and switching one off (or unticking "
+         "Advanced) puts the original back."),
         ("Preview colors (Spike 2)",
          "The row above the players shows the clips the way the machine will, "
          "with a switch for each step: the Whole screen overlay, the "
@@ -1077,7 +1086,7 @@ HELP_CONTENT = {
          "'Every replaced picture' or 'Every replaced video' there, or one "
          "file at a time in the Color column of the Images and Video tabs "
          "and the palette in the Scenes layers. It starts from Recommended. "
-         "The game's own pictures have no switch (a blue lock in Scenes). "
+         "The game's own pictures have no switch (a blue lock) until Advanced unlocks them on the Images or Video tab. "
          "Both can be on at once: the overlay is drawn over the baked files "
          "like everything else."),
         ("Preview colors (Scenes)",

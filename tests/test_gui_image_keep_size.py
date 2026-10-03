@@ -154,7 +154,8 @@ def test_the_keep_size_column_shows_every_pick(window):
     w, svc, assets, rep = window
     from pinball_decryptor.webui.tabs import images as images_tab
     cols = [c for c, _t, _d in images_tab.SORT_CFG]
-    assert cols.index("keep") == len(cols) - 2 and cols[-1] == "rep"
+    # PAD-335: the Color column sits between Keep size and Replacement
+    assert cols[-3:] == ["keep", "color", "rep"]
     assert w.state("images")["cols"]["keep"] is True
     assert _keep_cells(w) == {BANNER: None, ATLAS: None, PLAIN: None}
 

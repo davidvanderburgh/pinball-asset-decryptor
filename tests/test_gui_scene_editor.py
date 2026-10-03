@@ -581,6 +581,44 @@ def test_a_kept_size_pick_whose_file_is_gone_boxes_the_picture_drawn(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_a_built_own_size_picture_with_no_pick_keeps_its_size(tmp_path):
+    """DragonRR (PAD-337): picking another picture saved the picks without the ones already
+    built at their own size, so they lost their keep marks and were drawn squeezed back to the
+    stock size.  A Write keeps a project file's own size with no pick at all, so the preview
+    does too: the box and the picture drawn are the file's size."""
+    import numpy as np
+    from PIL import Image
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.plugins.stern import scene_render
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    rel = next(o for o in man["objects"].values()
+               if o.get("kind") == "Bitmap" and o.get("image"))["image"]
+    stock = Image.open(str(folder / "images" / rel)).size
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
+        assert w.call("text_scenes.tree_select", art)
+        p = _tv(w)["props"]
+        w0, h0 = p["w"], p["h"]
+        grown = (stock[0] * 2, stock[1] * 2)
+        Image.new("RGBA", grown, (20, 220, 40, 255)).save(str(folder / "images" / rel))
+        staged_changes.save(str(folder), {"image": {}, "image_keep_size": []})
+        w.call("text_scenes.tree_moment", "f:%d" % _tv(w)["frame"])
+        p = _tv(w)["props"]
+        assert (p["pic"]["w"], p["pic"]["h"]) == grown
+        assert abs(p["w"] - w0 * 2) <= 1.5 and abs(p["h"] - h0 * 2) <= 1.5
+        w.call("text_scenes.close")
+    sizes = scene_render.picture_sizes(str(folder))
+    img = scene_render._picture(str(folder), rel, {}, {}, sizes)
+    assert img.size == grown
+    # a stock-sized file still fits the texture's padded grid as before
+    Image.fromarray(np.zeros((stock[1], stock[0], 4), np.uint8)).save(
+        str(folder / "images" / rel))
+    assert not scene_render.own_size(stock, sizes[rel])
+
+
 def test_a_pictures_own_size_and_scale_and_draw_it_1_to_1(tmp_path):
     """DragonRR (PAD-277): Stern ships Credits_Text at 1044 x 264 and lets the game shrink it,
     which leaves jagged edges.  The panel shows a picture's own size and the scale it is drawn

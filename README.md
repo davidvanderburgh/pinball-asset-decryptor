@@ -88,6 +88,7 @@ The **?** button in the app opens tips for whichever tab you are on.
 | [Using the app](docs/guide/using-the-app.md) | Every tab from Extract to Mod Pack, projects, history and the log |
 | [Emulate](docs/guide/emulate.md) | Playing a game on this PC: Stern Spike 2, Jersey Jack, Dutch Pinball |
 | [Multi-boot cards](docs/guide/multi-boot.md) | Several games on one card with a menu at power-up |
+| [Color profile maths](docs/guide/color-profile-maths.md) | Every step of the Color profile tab, in order, with its limits |
 | [Supported manufacturers](docs/guide/manufacturers.md) | Per-manufacturer detail, formats and quirks |
 | [Installing](docs/guide/install.md) | Install, prerequisites, troubleshooting, auto-update |
 | [Disclaimer](docs/guide/legal.md) | The full legal notes: DMCA, manufacturer EULAs, no warranty |

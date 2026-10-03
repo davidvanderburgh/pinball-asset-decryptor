@@ -178,8 +178,8 @@ function fitColumns(rows) {
 const zoomOf = () => parseFloat(document.documentElement.style.zoom) || 1;
 
 // PAD-329/330: the preview's colour switches.  The service hands each player its colour
-// steps (core/colour_profile.py filter_step: a saturation matrix and a gamma
-// curve per channel); they become one SVG filter the <video> is drawn
+// steps (core/colour_profile.py filter_step: a saturation matrix, a gamma
+// curve per channel, and a machine screen's curves as tables); they become one SVG filter the <video> is drawn
 // through, live on the GPU, in sRGB as the profile's maths is.
 function LookFilter({ id, steps }) {
   if (!steps || !steps.length) return null;
@@ -190,6 +190,12 @@ function LookFilter({ id, steps }) {
       <feFuncR type="gamma" amplitude=${st.f[0][0]} exponent=${st.f[0][1]} offset=${st.f[0][2]} />
       <feFuncG type="gamma" amplitude=${st.f[1][0]} exponent=${st.f[1][1]} offset=${st.f[1][2]} />
       <feFuncB type="gamma" amplitude=${st.f[2][0]} exponent=${st.f[2][1]} offset=${st.f[2][2]} />
+    </feComponentTransfer>`);
+    // PAD-339: a machine screen's curves, as tables
+    if (st.t) prims.push(html`<feComponentTransfer key=${"t" + i}>
+      <feFuncR type="table" tableValues=${st.t[0].join(" ")} />
+      <feFuncG type="table" tableValues=${st.t[1].join(" ")} />
+      <feFuncB type="table" tableValues=${st.t[2].join(" ")} />
     </feComponentTransfer>`);
   });
   return html`<svg class="vid-lookdefs" width="0" height="0" aria-hidden="true" focusable="false">

@@ -73,3 +73,28 @@ html.bp-1020 .cp-grid { grid-template-columns: minmax(0, 1fr); }
 .cp-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
 .cp-facts li { display: flex; gap: 9px; align-items: flex-start; color: var(--ink-2); line-height: 1.45; }
 .cp-facts .i { flex: 0 0 auto; margin-top: 2px; color: var(--ok); }
+
+/* PAD-339: the machine screen's colour ranges and curves */
+.cp-note { margin: 0; line-height: 1.45; }
+.cp-ranges .bd, .cp-curve-ed .bd { gap: 12px; }
+.cp-range-add { gap: 6px; align-items: center; }
+.cp-range-hd { gap: 6px; align-items: center; }
+.cp-band { height: 14px; border-radius: 6px; border: 1px solid var(--line); }
+.cp-curve-top { gap: 8px; align-items: center; flex-wrap: wrap; }
+.cp-curve-body { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+html.bp-1020 .cp-curve-body { grid-template-columns: minmax(0, 1fr); }
+.cp-curve-box { width: 100%; aspect-ratio: 1; overflow: visible; touch-action: none; cursor: crosshair; user-select: none; }
+.cp-curve-box .cp-grid { fill: var(--panel-2); stroke: var(--line-2); stroke-width: 1; }
+.cp-curve-box .cp-grid-line { stroke: var(--line); stroke-width: .8; fill: none; }
+.cp-curve-box .cp-diag { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 4 4; fill: none; }
+.cp-curve.w { stroke: var(--ink); }
+.cp-curve.faint { opacity: .35; stroke-width: 1.5; }
+.cp-pt { fill: var(--panel); stroke-width: 2; cursor: grab; }
+.cp-pt.w { stroke: var(--ink); }
+.cp-pt.r { stroke: #e5534b; }
+.cp-pt.g { stroke: #57ab5a; }
+.cp-pt.b { stroke: #539bf5; }
+.cp-pts { display: flex; flex-direction: column; gap: 6px; }
+.cp-pts-hd, .cp-pts-row { display: grid; grid-template-columns: 64px 80px 80px auto; gap: 8px; align-items: center; }
+.cp-range-hd .sp, .cp-curve-top .sp { flex: 1; }
+.cp-pts-row .btn { justify-self: start; }

@@ -226,9 +226,9 @@ class VideoTab(BestQualityMixin, TabService):
             switch = self._color_state(rel) if rel else None
             var = getattr(self.window, "scenes_own_colours_var", None)
             try:
-                own = True if var is None else bool(var.get())
+                own = False if var is None else bool(var.get())
             except Exception:                           # noqa: BLE001
-                own = True
+                own = False
             try:
                 from ...core import colour_profile
                 look.update(colour_profile.video_look(

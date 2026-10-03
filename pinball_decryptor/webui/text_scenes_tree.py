@@ -474,12 +474,13 @@ class TreeEditMixin:
         return True
 
     def _as_made(self):
-        """⚙ Scenes: switched-off files in their own colors (PAD-325, on by default)."""
+        """⚙ Scenes: switched-off files in their own colors (PAD-325).  Off by default
+        since PAD-339: the Machine screen reaches the whole frame, an added test card too."""
         var = getattr(self.window, "scenes_own_colours_var", None)
         try:
-            return True if var is None else bool(var.get())
+            return False if var is None else bool(var.get())
         except Exception:                            # noqa: BLE001
-            return True
+            return False
 
     @rpc
     def set_machine_look(self, on):

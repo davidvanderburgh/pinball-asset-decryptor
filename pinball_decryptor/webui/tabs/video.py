@@ -977,7 +977,8 @@ class VideoTab(BestQualityMixin, TabService):
                 "fmt": fmt, "fmt_bad": fmt.endswith("⚠"), "aud": aud,
                 "rep": rep_disp, "rep_cls": cls, "conv": conv,
                 "conv_cls": self._conv_cls(conv),
-                "col": self._color_state(rel), "col_own": rel in self._color}
+                "col": self._color_state(rel), "col_own": rel in self._color,
+                "col_lock": self._color_locked(rel)}
 
     # -- the chosen-files colour profile (PAD-312) ------------------------
     def _per_file_colour(self):
@@ -994,6 +995,12 @@ class VideoTab(BestQualityMixin, TabService):
             return None
         own = self._color.get(rel)
         return bool(self._color_all if own is None else own)
+
+    def _color_locked(self, rel):
+        """The game's own clip (PAD-334): no switch, shown as a lock, the
+        way Scenes shows a stock picture."""
+        return bool(rel and not self._assign.get(rel)
+                    and self._per_file_colour())
 
     def color_all_changed(self):
         """The Color profile tab moved its "every replaced video" box."""

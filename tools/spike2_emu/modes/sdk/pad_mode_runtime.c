@@ -3103,6 +3103,38 @@ const char *pm_stock_mode_what(unsigned kind)
     return kind ? "a stock mode" : "nothing";
 }
 
+/* PAD-347: the middle of the screen belongs to the game's mode. On David's Premium (2026-10-03) one of
+ * our modes' title and line sat word for word on JET FIGHTER ATTACK's: both are drawn where the game's
+ * own modes put theirs. Stern never shows two modes' words at once - one mode has the middle, the others
+ * keep to their badges at the edge - so while one of the game's modes runs for the player up, ours step
+ * aside. The game is asked at most every ASIDE_MS (up to three of its own queries), and the change is
+ * logged once. A port that cannot tell answers 0, said once: there our modes keep their places. */
+#define ASIDE_MS 200
+static struct { int kind, said_cannot; unsigned long at; } aside;
+
+int pm_aside(void)
+{
+    unsigned long now = pm_ms();
+    int k;
+    if (aside.at && now - aside.at < ASIDE_MS) return aside.kind;
+    aside.at = now ? now : 1;
+    k = pm_in_game() ? pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY) : 0;
+    if (k < 0) {
+        if (!aside.said_cannot) say("aside: this port cannot tell when the game's own modes run - our modes keep their places");
+        aside.said_cannot = 1;
+        k = 0;
+    }
+    if (k && !aside.kind)
+        say("aside: %s is running - the middle of the screen is the game's, our modes keep to the edges",
+            pm_stock_mode_what((unsigned)k));
+    else if (!k && aside.kind)
+        say("aside: the game's mode is over - our modes have the middle of the screen again");
+    else if (k != aside.kind)
+        say("aside: now %s", pm_stock_mode_what((unsigned)k));
+    aside.kind = k;
+    return k;
+}
+
 /* ---- a multiball of the mode's own (item 167) ---------------------------------------------------
  * Every build shares the framework's ball code, and its multiballs go through ONE call of it (The
  * Beatles 1.29 0x1fd310, Godzilla Pro 1.15 0x398660; found on every build by its code, `site

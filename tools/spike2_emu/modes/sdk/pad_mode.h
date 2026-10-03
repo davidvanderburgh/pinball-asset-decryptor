@@ -288,6 +288,14 @@ int pm_snprintf(char *out, unsigned long cap, const char *fmt, ...)
  * 0 = none of them; -1 = this port cannot tell (no stock queries for a kind asked) */
 int pm_stock_mode_running(unsigned kinds);
 const char *pm_stock_mode_what(unsigned kind);   /* "a battle", "a multiball", "a stock mode" */
+/* PAD-347: STACKING. Stern never shows two modes' words at once: one mode has the middle of the
+ * screen, the others keep to their badges at the edge. While one of the game's own modes runs for
+ * the player up, the middle is the game's: a mode that keeps running beside it moves its words out
+ * of the way (the title and instruction line, the counters along the top, a screen of its own) and
+ * keeps only what sits at the edges. pm_aside() says when: the kind running (PM_STOCK_BATTLE, then
+ * PM_STOCK_MULTIBALL, then PM_STOCK_ANY) or 0. Cheap to call every tick (the game is asked at most
+ * five times a second); 0 on a port that cannot tell, and outside a game. */
+int pm_aside(void);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

@@ -931,12 +931,58 @@ the next start shot started the `stack no` mode.
 **Not decoded yet.** Kind `0x10` (set on the double battles, the later multiballs and some
 timed modes) and `0x20` (set by no constructor, so a runtime flag); other titles' managers;
 a stock mode that starts while yours is already running (yours keeps running: the check is
-made only when yours starts). The game's mode mask (`data mode_mask`) is NOT a witness: it
+made only when yours starts; since PAD-347 its words step aside, below). The game's mode mask (`data mode_mask`) is NOT a witness: it
 stayed 0 through a battle and a multiball (it is `0x10` in attract, `0x4` at the end of a
 ball, `0x5` in the bonus). Only multiballs started on demand were measured: when a
 multiball the player lights turns active, compared with its intro scenes, is not measured
 (a battle turned active only at its select screen, so a `stack no` shot during a
 multiball's intro may still start).
+
+### Stepping aside (PAD-347)
+
+On a Godzilla Premium (2026-10-03) one of the example modes kept running when the game's own
+JET FIGHTER ATTACK started, and both wrote their title and instruction line in the same place:
+our HUD copies the game's battle layout, and the game's timed modes use it too. Stern never
+shows two modes' words at once. One mode has the middle of the screen, and the others keep to
+their badges at the edge (Godzilla's BATTLE, DOUBLE SCORING and TESLA timers down the left).
+
+`pm_aside()` says when the middle is the game's: the kind of the game's mode active for the
+player up (asked as `pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY)`),
+or 0. It asks the game at most five times a second, so a mode may call it every tick; it is 0
+outside a game, and 0 on a port that cannot tell (logged once). Each change is logged:
+
+```
+[pad] aside: a stock mode is running - the middle of the screen is the game's, our modes keep to the edges
+[pad] aside: the game's mode is over - our modes have the middle of the screen again
+```
+
+What steps aside, and how:
+
+- **A mode file's own screen** (`mode_file.c`): hidden while the game's mode runs, also while
+  the mode's total is still showing, and shown again when it ends. `aside keep` leaves it up
+  (a screen laid out clear of the game's words).
+- **The examples' HUDs** (`intricate_kit.h`, Godzilla's slide-outs scene): the way ANGUIRUS has
+  always stacked on a battle. The mode's title and instruction line move into the award line,
+  between the game's counters and its title (an award still takes that line for its moment);
+  the three counters along the top are hidden; the gauge on the right edge stays; and the timer
+  badge moves one slot down (y 376, `PadMode_<slug>_Hud_Timer2`, built beside the first) while
+  a battle's BATTLE badge has the top one. A card built before PAD-347 has no second slot, so
+  the badge is hidden during a battle rather than drawn over the game's.
+- **A mode of your own in C**: ask `pm_aside()` in your tick and keep your words out of the
+  game's places while it is not 0.
+
+The examples' single-ball modes also wait out a MULTIBALL now (David: "when I was in multi-ball
+and I did the outlane oxygen destroyer mode, it should not have triggered because I had multiple
+balls on the playfield"): KING GHIDORAH, OXYGEN DESTROYER and MASER BARRAGE do not start while
+the game's multiball is active or two balls or more are in play, and stay ready, so the
+qualifying shot after it starts them (`kit_wait_multiball`). FINAL WARS and MELTDOWN already
+waited. Beside the game's battles and timed modes they still stack, their words aside.
+
+**Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
+shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the
+balls in play plus the game's own mode flags, live records, running bytes or rule objects on 11
+(each route tells only the modes it names). The Beatles 1.29 and TMNT Pro 1.58 see only a
+multiball, by the balls in play: their timed modes do not move a mode's words aside.
 
 ### The game's own modes on every cmode title (item 164)
 

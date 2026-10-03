@@ -7,8 +7,10 @@
  *
  *   START      Make the game's SKILL SHOT (its own skill shot award, an EVENT the port names;
  *              MODE_SDK.md "Events"), or hit the Maser target 3 times in one ball. Once a
- *              ball per player. It runs beside anything the game is doing. A skill shot made
- *              while another of our modes runs is held for 15 s and starts when that one ends.
+ *              ball per player. It waits out a multiball (PAD-347: the game's, or two balls in
+ *              play): after three Maser hits the next one after it starts it. Beside the game's
+ *              battles and timed modes it runs, its words aside. A skill shot made while another
+ *              of our modes runs is held for 15 s and starts when that one ends.
  *   SEQUENCE   LEFT RAMP, then RIGHT RAMP, then the BUILDING. Only the next shot in the
  *              sequence counts. Each step pays 1,000,000 x the multiplier.
  *   WINDOW     After a step, the next must come within 7 s. Miss the window and the CHAIN
@@ -199,6 +201,9 @@ static int start(const char *why, int counted)
         pm_log("not started (%s): it already ran this ball", why);
         return 0;
     }
+    if (counted && kit_wait_multiball(MODE_NAME, why, hits[p] >= HITS_TO_START   /* PAD-347 */
+                                      ? "the next Maser target hit after it starts it"
+                                      : "a skill shot is not held through a multiball")) return 0;
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_MODE);                /* first: before the screen and the clip */
     run.on = 1;

@@ -24,7 +24,9 @@ name (:func:`hud_names`):
 * ``_C1`` .. ``_C3`` ``_Label`` / ``_Value`` / ``_Sub`` - the three counters;
 * ``_Award`` and ``_AwardSub`` - a big line for a moment (a jackpot, a head severed);
 * ``_Timer`` - the badge (``_Timer_Panel``, ``_Timer_Icon``) and its seconds (``_Timer_Num``), in the
-  stock BATTLE badge's slot (y 267), under the counters (the pack's modes wait for the game's battles);
+  stock BATTLE badge's slot (y 267), under the counters; ``_Timer2`` the same badge one slot down (y 376),
+  shown instead while one of the game's battles has its BATTLE badge up (PAD-347: a mode keeps running
+  beside the game's own, its words aside);
 * ``_Gauge`` - a label and N pips on the right edge, each an ``_On`` and an ``_Off`` picture
   (``_G1_On`` ...): ANGUIRUS's spikes, a meltdown's temperature.
 
@@ -55,6 +57,7 @@ FONT_CLASS = 3                       # 32e6ae28 registers Font as class 3
 GLASS_W, GLASS_H = 1360, 768
 COUNTER_X = (17.6, 573.6, 1123.6)
 TIMER_DY = 0.0                       # our badge sits in the stock BATTLE badge's slot, under the counters
+TIMER2_DY = 109.0                    # PAD-347: its second slot, the next one down (y 376), while a battle runs
 GAUGE_X = 1262.0                     # the pips' left edge on the right side of the glass
 
 
@@ -370,7 +373,8 @@ def hud_names(slug):
     """What a mode finds by name, keyed by role (the kit's struct kit_hud reads the same)."""
     g = "PadMode_%s_Hud" % slug
     names = {"group": g}
-    for role in ("Title", "Line", "Award", "AwardSub", "Timer", "Timer_Num", "Gauge", "Gauge_Label"):
+    for role in ("Title", "Line", "Award", "AwardSub", "Timer", "Timer_Num", "Timer2", "Timer2_Num", "Gauge",
+                 "Gauge_Label"):
         names[role] = "%s_%s" % (g, role)
     return names
 
@@ -455,6 +459,11 @@ def hud_group(p, ids, slug, spec, fonts, art, textures):
               _text_node(p, ids, names["Timer_Num"], "00", (p.font[0], p.font[1]), 68.6, 295.4,
                          (18.0, -2.0, 98.0, 67.2), tail=tuple(p.text_tail))]
         kids.append(_group_node(p, ids, names["Timer"], tk, 0.0, TIMER_DY))
+        tk2 = [_bitmap_node(p, ids, names["Timer2"] + "_Panel", panel, -21.0, 267.0, textures),
+               _bitmap_node(p, ids, names["Timer2"] + "_Icon", disc, 0.0, 281.8, textures),
+               _text_node(p, ids, names["Timer2_Num"], "00", (p.font[0], p.font[1]), 68.6, 295.4,
+                          (18.0, -2.0, 98.0, 67.2), tail=tuple(p.text_tail))]
+        kids.append(_group_node(p, ids, names["Timer2"], tk2, 0.0, TIMER2_DY))
     gauge = spec.get("gauge")
     if gauge:
         n = max(1, min(12, int(gauge.get("count") or 3)))

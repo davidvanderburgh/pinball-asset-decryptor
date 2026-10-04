@@ -1093,7 +1093,7 @@ export default function ModesTab() {
     <div class="modes-body">
       <${ModeList} s=${s} onNewCode=${() => setNewCode("code")} onNewBlocks=${() => setNewCode("blocks")} onAllNumbers=${() => setStock(true)} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`
-        : s.code && s.code.blocks ? html`<${BlocksPane} s=${s} />`
+        : s.code && s.code.blocks ? html`<${BlocksPane} s=${withClip} />`
         : s.code ? html`<${CodePane} s=${withClip} />`
         : s.open ? html`<${Editor} s=${s} showClip=${showClip} />`
         : hasProject && !(s.rows || []).length ? html`<${FirstMode} s=${s} onNewCode=${() => setNewCode("code")} onNewBlocks=${() => setNewCode("blocks")} />`

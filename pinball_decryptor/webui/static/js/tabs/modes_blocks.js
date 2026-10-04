@@ -8,15 +8,21 @@
 // the C the program makes (a code mode, so Try it and Write build it like any other) and says
 // what is wrong with it. This page edits its own copy of the program and sends the whole of it
 // after each change (modes.blocks_save), a moment after the person stops.
+//
+// PAD-374: a mode's OWN clips and sounds sit above its scripts (picked from files, copied into its
+// folder by modes.blocks_pick), each with the name its Play a clip / Play a sound blocks call it by.
 
 import { html, useEffect, useRef, useState, Button, Field, Select, Check, Note, tip, cx, call,
          openMenu } from "../core/ui.js";
+import { PlayButton } from "./modes_dialogs.js";
 
 const WHEN = [["any", "any time"], ["idle", "while it is not running"], ["running", "while it runs"]];
 const RESETS = [["ball", "each ball"], ["mode", "each time it starts"], ["game", "each game"]];
 const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"]];
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
+const CLIP_WHERE = [["full", "full screen"], ["behind", "behind the HUD, once"], ["loop", "behind the HUD, over and over"]];
+const PRIORITIES = [3, 4, 5, 6, 7].map((p) => [String(p), "priority " + p]);
 const SAVE_MS = 450;
 
 const TIP = {
@@ -31,6 +37,12 @@ const TIP = {
   scored: "How many times a Score block has paid since the mode started.",
   total: "The points the mode's Score blocks have paid since it started.",
   stock: "One of the game's own modes, battles or multiballs is running.",
+  own: "Clips and sounds of the mode's own, picked from your files and copied into its folder. Write and Try it carry them onto the card; a Play a clip or Play a sound block plays one by its name.",
+  where: "Full screen plays over everything, the HUD too, half a second after it is asked for (so the game's own clip for the same shot does not take its place). Behind the HUD, over and over, plays in the city's place under the score while the mode runs. Behind the HUD, once, plays in that loop's place and then the loop again.",
+  fallback: "What to say instead when the card could not carry this sound (a card with no spare sound for it): one of the game's own callouts, or nothing.",
+  priority: "Its priority on the voice bus: it fades the game's lower speech and waits for higher. 4 is a call's usual; 3 for one that repeats (a play while the last still sounds is skipped).",
+  music: "Its own music: it plays instead of the game's while the mode runs, and the game's comes back at the end.",
+  name: "The name its blocks call it by: lower-case letters, digits and _.",
 };
 
 // ------------------------------------------------------------------ the blocks there are
@@ -47,9 +59,11 @@ function hatTemplates(ch) {
   ];
 }
 
-function stmtTemplates(ch, vars) {
+function stmtTemplates(ch, vars, prog = {}) {
   const shot = (ch.shots || [])[0] || "";
   const v = (vars[0] || {}).name || "";
+  const clip = ((prog.clips || [])[0] || {}).name || "";
+  const sound = ((prog.sounds || [])[0] || {}).name || "";
   return [
     ["Mode", [{ op: "start_mode" }, { op: "end_mode" }, { op: "add_time", seconds: 5 },
       { op: "multiball", balls: 2, save: 10 }]],
@@ -59,6 +73,7 @@ function stmtTemplates(ch, vars) {
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
       { op: "light_shot", shot, color: "#ffd000", pattern: "blink" }, { op: "lights_off", shot: "*" },
       { op: "log", text: "" }]],
+    ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null }]],
   ];
 }
 
@@ -76,7 +91,8 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   stock: "a game mode of its own runs" };
 const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", multiball: "mode", score: "score",
-  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", log: "show" };
+  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", log: "show",
+  clip: "own", sound: "own" };
 
 // ------------------------------------------------------------------ the program, by path
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -195,6 +211,15 @@ function StmtBody({ b, path, ed }) {
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
       <span class="bk-w">balls, ball save</span><${Num} value=${b.save} width=${44} onChange=${(v) => set("save", v)} /><span class="bk-w">s</span>`;
     case "log": return html`<span class="bk-w">Write</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="a line" /><span class="bk-w">in the log</span>`;
+    case "clip": return html`<span class="bk-w">Play the clip</span><${Pick} value=${b.clip} options=${(ed.prog.clips || []).map((x) => x.name)} missing="(not one of its own)" onChange=${(v) => set("clip", v)} />
+      <${Pick} value=${b.where} options=${CLIP_WHERE} title=${TIP.where} onChange=${(v) => set("where", v)} />`;
+    case "sound": {
+      const opts = [["-", "nothing"], ...(ed.ch.callouts || []).map((c) => [c.role || String(c.id), c.label])];
+      const cur = b.fallback == null || b.fallback === "" ? "-" : String(b.fallback);
+      return html`<span class="bk-w">Play the sound</span><${Pick} value=${b.sound} options=${(ed.prog.sounds || []).map((x) => x.name)} missing="(not one of its own)" onChange=${(v) => set("sound", v)} />
+        <span class="bk-w" ...${tip(TIP.fallback)}>else say</span><${Pick} value=${cur} options=${opts} title=${TIP.fallback}
+          onChange=${(v) => set("fallback", v === "-" ? null : (/^[0-9]+$/.test(v) ? Number(v) : v))} />`;
+    }
     default: return html`<span class="bk-w">${b.op}</span>`;
   }
 }
@@ -246,7 +271,7 @@ function Stack({ list, path, ed }) {
 
 function addMenu(ed, path) {
   const out = [];
-  stmtTemplates(ed.ch, ed.vars).forEach(([group, items], gi) => {
+  stmtTemplates(ed.ch, ed.vars, ed.prog).forEach(([group, items], gi) => {
     if (gi) out.push({ sep: true });
     out.push({ header: group });
     items.forEach((t) => out.push({ label: stmtLabel(t), onClick: () => ed.insert(path, at(ed.prog, path).length, clone(t)) }));
@@ -295,6 +320,7 @@ function stmtLabel(b) {
   return { start_mode: "Start the mode", end_mode: "End the mode", add_time: "Add seconds", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", log: "Write in the log",
+    clip: "Play a clip", sound: "Play a sound",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 
@@ -307,7 +333,7 @@ function Palette({ ed }) {
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
     ${hatTemplates(ed.ch).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
-    ${stmtTemplates(ed.ch, ed.vars).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
+    ${stmtTemplates(ed.ch, ed.vars, ed.prog).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t))))}`)}
     <div class="bk-pal-h">Values</div>
     ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, "Drag into a value slot (the round holes)"))}
@@ -334,6 +360,49 @@ function Variables({ prog, ed }) {
       <${X} title="Take this variable out" onClick=${() => ed.edit((d) => { d.vars.splice(i, 1); })} />
     </span>`)}
     <${Button} size="sm" kind="ghost" icon="plus" onClick=${add}>Variable<//>
+  </div>`;
+}
+
+// PAD-374: the mode's own clips, sounds and music: each a file in its folder and a name.
+function OwnMedia({ prog, ed, s, folder }) {
+  const ch = ed.ch;
+  const clips = prog.clips || [];
+  const sounds = prog.sounds || [];
+  const sep = String(folder || "").includes("/") ? "/" : "\\";
+  const pathOf = (f) => (folder && f ? folder + sep + f : "");
+  const pick = async (what) => {
+    const got = await call("modes.blocks_pick", what, (what === "clip" ? clips : sounds).map((x) => x.name));
+    if (!got) return;
+    ed.edit((d) => {
+      if (what === "music") d.music = got.file;
+      else if (what === "clip") d.clips = [...(d.clips || []), { name: got.name, file: got.file }];
+      else d.sounds = [...(d.sounds || []), { name: got.name, file: got.file, priority: 4 }];
+    });
+  };
+  const name = (kind, i, x) => html`<${Field} sm mono width=${104} value=${x.name} maxLength=${15} title=${TIP.name}
+    onChange=${(t) => ed.renameMedia(kind, i, String(t).toLowerCase())} />`;
+  const file = (f) => html`<span class="small dim ellip bk-file" ...${tip(pathOf(f))}>${f}</span>`;
+  return html`<div class="bk-vars bk-media">
+    <span class="lbl" ...${tip(TIP.own)}>Its own clips and sounds</span>
+    ${clips.map((x, i) => html`<span class="bk-varbox bk-ownbox" key=${"c" + i}>
+      <span class="small muted">clip</span>${name("clips", i, x)}${file(x.file)}
+      ${s._showClip ? html`<${Button} size="xs" kind="ghost" icon="play" onClick=${() => s._showClip(pathOf(x.file), x.name)}>Play<//>` : null}
+      <${X} title="Take this clip out (its file stays in the folder)" onClick=${() => ed.edit((d) => { d.clips.splice(i, 1); })} />
+    </span>`)}
+    ${sounds.map((x, i) => html`<span class="bk-varbox bk-ownbox" key=${"s" + i}>
+      <span class="small muted">sound</span>${name("sounds", i, x)}${file(x.file)}
+      <${Select} sm value=${String(x.priority || 4)} options=${PRIORITIES.map(([value, label]) => ({ value, label }))} title=${TIP.priority}
+        onChange=${(v) => ed.set(["sounds", i, "priority"], Number(v))} />
+      <${PlayButton} path=${pathOf(x.file)} />
+      <${X} title="Take this sound out (its file stays in the folder)" onClick=${() => ed.edit((d) => { d.sounds.splice(i, 1); })} />
+    </span>`)}
+    ${prog.music ? html`<span class="bk-varbox bk-ownbox" ...${tip(TIP.music)}>
+      <span class="small muted">music</span>${file(prog.music)}<${PlayButton} path=${pathOf(prog.music)} />
+      <${X} title="No music of its own (the game's plays on)" onClick=${() => ed.set(["music"], "")} />
+    </span>` : null}
+    <${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_clip} title=${ch.why_clip || "Pick a video for the mode to play (it is copied into its folder)."} onClick=${() => pick("clip")}>Clip…<//>
+    <${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_sound} title=${ch.why_sound || "Pick a WAV for the mode to play (it is copied into its folder)."} onClick=${() => pick("sound")}>Sound…<//>
+    ${prog.music ? null : html`<${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_music} title=${ch.why_music || TIP.music} onClick=${() => pick("music")}>Music…<//>`}
   </div>`;
 }
 
@@ -389,6 +458,19 @@ export function BlocksEditor({ s, c }) {
       };
       walk(d.scripts);
     }),
+    // a clip or sound renamed: every block playing it follows it
+    renameMedia: (kind, i, name) => edit((d) => {
+      const old = (d[kind][i] || {}).name;
+      d[kind][i].name = name;
+      const op = kind === "clips" ? "clip" : "sound";
+      const walk = (o) => {
+        if (Array.isArray(o)) { o.forEach(walk); return; }
+        if (!o || typeof o !== "object") return;
+        if (o.op === op && o[op] === old) o[op] = name;
+        Object.values(o).forEach(walk);
+      };
+      walk(d.scripts);
+    }),
     dropAt: (path, i) => {
       const drag = dragging;
       dragging = null;
@@ -425,6 +507,7 @@ export function BlocksEditor({ s, c }) {
         <span class="small muted">${saving ? "Saving…" : "Saved · Try it builds it in"}</span>
       </div>
       <${Variables} prog=${prog} ed=${ed} />
+      <${OwnMedia} prog=${prog} ed=${ed} s=${s} folder=${c.folder} />
       ${(b.notes || []).map((t) => html`<${Note} key=${t}>${t}<//>`)}
       <div class="bk-scripts">
         ${scripts.map((sc, si) => html`<${Script} key=${si} s=${sc} si=${si} n=${scripts.length} ed=${ed} />`)}

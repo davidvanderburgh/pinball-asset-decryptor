@@ -239,13 +239,15 @@ def test_a_newer_or_broken_blocks_file_is_refused(tmp_path):
 
 
 # ---- the ARM build ---------------------------------------------------------------------------------
-def test_the_starter_builds_with_build_mode_sh(tmp_path):
+@pytest.mark.parametrize("which", ["starter", "own clips and sounds"])     # PAD-374: the second
+def test_the_starter_builds_with_build_mode_sh(tmp_path, which):
     if os.name == "nt":
         pytest.skip("build_mode.sh runs under bash with arm-linux-gnueabihf-gcc (WSL or Linux)")
     if not shutil.which("bash") or not shutil.which("arm-linux-gnueabihf-gcc"):
         pytest.skip("no arm-linux-gnueabihf-gcc here")
     src = tmp_path / "ramp_frenzy.c"
-    src.write_text(BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy"), encoding="utf-8")
+    program = BM.starter("RAMP FRENZY", SHOTS) if which == "starter" else _media_prog()
+    src.write_text(BM.to_c(program, "ramp_frenzy"), encoding="utf-8")
     out = tmp_path / "mode.so"
     r = subprocess.run(["bash", os.path.join(SDK, "build_mode.sh"), "-o", str(out), str(src),
                         os.path.join(SDK, "mode_file.c")], capture_output=True, text=True)
@@ -348,3 +350,195 @@ def test_the_tabs_start_and_end_triggers_reach_it(tmp_path, monkeypatch):
     out = play(tmp_path, p, "trigger", "blk.start", "secs", 1, "trigger", "blk.stop", "secs", 1)
     assert "START (trigger file)" in out and "END (trigger file)" in out
     assert scores(out) == [42]
+
+
+# ---- PAD-374: the mode's own clips and sounds ------------------------------------------------------
+def _media_prog(**kw):
+    """KING GHIDORAH's way with its own assets, in blocks: an intro full screen and a loop behind
+    the HUD when it starts, a clip behind the HUD and a call on a shot, a call (else the game's
+    Time is up) at the end."""
+    return prog([
+        {"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": [{"op": "clip", "clip": "intro", "where": "full"},
+                                               {"op": "clip", "clip": "loop", "where": "loop"}]},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [
+            {"op": "clip", "clip": "sever", "where": "behind"}, {"op": "sound", "sound": "sever"}]},
+        {"hat": {"kind": "mode_end"}, "do": [{"op": "sound", "sound": "lost", "fallback": "time_up"},
+                                             {"op": "clip", "clip": "won", "where": "full"}]},
+    ], seconds=10,
+        clips=[{"name": "intro", "file": "intro.mp4"}, {"name": "loop", "file": "loop.mp4"},
+               {"name": "sever", "file": "sever.mp4"}, {"name": "won", "file": "won.mp4"}],
+        sounds=[{"name": "sever", "file": "sever.wav", "priority": 4},
+                {"name": "lost", "file": "lost.wav", "priority": 3}],
+        music="music.wav", **kw)
+
+
+def _media_files(folder):
+    for f in ("intro.mp4", "loop.mp4", "sever.mp4", "won.mp4", "sever.wav", "lost.wav", "music.wav"):
+        with open(os.path.join(folder, f), "wb") as fh:
+            fh.write(b"x")
+
+
+def test_own_clips_and_sounds_ride_in_assets_json_as_a_code_modes(tmp_path):
+    project = _card(tmp_path)
+    slug, _path = BM.new_blocks_mode(project, "Heads", shots=SHOTS)
+    folder = MP.mode_folder(project, slug)
+    _media_files(folder)
+    BM.save(project, slug, _media_prog())
+    spec = CM.load(project, slug)
+    assert spec.clips == {"intro": "intro.mp4", "loop": "loop.mp4", "sever": "sever.mp4", "won": "won.mp4"}
+    assert spec.calls == {"sever": {"wav": "sever.wav", "priority": 4}, "lost": {"wav": "lost.wav", "priority": 3}}
+    assert spec.music == "music.wav" and spec.has_assets()
+    assert CM.validate(spec, folder) == []
+    # what Write asks the sound bank for, and the file it puts beside mode.so
+    wants = CM.sound_wants(project, [(slug, spec)])
+    assert [w["key"] for w in wants] == ["music", "call:sever", "call:lost"]
+    carried = [{"slug": slug, "key": "music", "request": 125, "sid": 618},
+               {"slug": slug, "key": "call:sever", "request": 1251, "ms": 1500}]
+    text = CM.runtime_text(slug, spec, GZ, own_sounds=carried, clip=True)
+    assert "clip   intro PadMode_heads_Intro" in text and "clip   won PadMode_heads_Won" in text
+    assert "music  125 618" in text and "call   sever 1251 1500 4" in text
+    assert "call   lost" not in text                     # not carried: the block says Time is up
+    # taken out of the blocks, taken out of the assets
+    p = BM.load(project, slug)
+    p["clips"], p["sounds"], p["music"] = [], [], ""
+    BM.save(project, slug, p)
+    spec = CM.load(project, slug)
+    assert spec.clips == {} and spec.calls == {} and spec.music == ""
+
+
+def test_own_clip_and_sound_problems_and_notes(tmp_path):
+    p = _media_prog()
+    assert BM.problems(p, SHOTS) == []
+    folder = str(tmp_path)
+    got = BM.problems(p, SHOTS, folder=folder)
+    assert "The clip intro's file intro.mp4 is not in the mode's folder: pick it again." in got
+    assert "Its music music.wav is not in the mode's folder: pick it again." in got
+    _media_files(folder)
+    assert BM.problems(p, SHOTS, folder=folder) == []
+    bad = _media_prog()
+    bad["clips"].append({"name": "Intro!", "file": "x.mp4"})
+    bad["sounds"].append({"name": "sever", "file": "", "priority": 9})
+    bad["scripts"][2]["do"] += [{"op": "clip", "clip": "roar", "where": "full"},
+                                {"op": "clip", "clip": "", "where": "up"},
+                                {"op": "sound", "sound": "nope", "fallback": "shout"}]
+    got = BM.problems(bad, SHOTS)
+    assert any(t.startswith("A clip's name 'Intro!' is not one") for t in got)
+    assert "Two sounds are called sever." in got
+    assert "The sound sever has no file: pick one." in got and "The sound sever's priority is 1 to 7." in got
+    assert ("Script 3 plays the clip roar, which the mode does not have: add it under Its own clips and "
+            "sounds.") in got
+    assert "Script 3 plays a clip with none chosen." in got and "Script 3 plays a clip with no where." in got
+    assert "Script 3 plays the sound nope, which the mode does not have: add it under Its own clips and sounds." in got
+    assert "Script 3 falls back on a callout that is not one." in got
+    many = _media_prog()
+    many["clips"] = [{"name": "c%d" % i, "file": "c.mp4"} for i in range(BM.MAX_CLIPS + 1)]
+    assert "13 clips of its own: 12 at most." in BM.problems(many, SHOTS)
+    # once behind the HUD needs a loop to play in
+    noloop = _media_prog()
+    noloop["scripts"][1]["do"] = noloop["scripts"][1]["do"][:1]
+    assert any(t.startswith("A clip behind the HUD, once, plays in the place of the mode's loop")
+               for t in BM.notes(noloop))
+    assert not any("behind the HUD" in t for t in BM.notes(_media_prog()))
+
+
+def test_media_names_come_from_the_files():
+    assert BM.media_name("King Ghidorah - Sever!") == "king_ghidorah_s"
+    assert BM.media_name("01 roar") == "s_01_roar"
+    assert BM.media_name("roar", taken=["roar", "ROAR_2"]) == "roar_3"
+    assert BM.media_name("") == "sound"
+    assert BM.media_name("a" * 20, taken=["a" * 15]) == "a" * 13 + "_2"
+    for n in ("king_ghidorah_s", "s_01_roar", "roar_3", "a" * 13 + "_2"):
+        assert BM.MEDIA_RE.match(n)
+
+
+def test_the_c_plays_its_own_through_the_sdk_header_and_only_when_it_has_some():
+    plain = BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    assert "pad_mode_assets.h" not in plain and "pa_" not in plain
+    src = BM.to_c(_media_prog(), "heads")
+    assert '#include "pad_mode_assets.h"' in src
+    assert 'static struct pa_assets own = { .folder = "heads" };' in src
+    assert src.count("pa_load(&own);") >= 2 and "own_tick();" in src and "pa_end(&own);" in src
+    assert "pa_start(" not in src                       # no name starts a clip on its own
+    assert 'clip_full("intro");' in src and 'clip_loop("loop");' in src and 'clip_behind("sever");' in src
+    assert 'if (!sound("lost")) pm_callout(pm_callout_id("time_up"));' in src
+    assert '    sound("sever");' in src
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    # a name that is not one never reaches the C
+    p = _media_prog()
+    p["scripts"][2]["do"].append({"op": "sound", "sound": 'x"); evil("'})
+    assert "evil" not in BM.to_c(p, "heads")
+
+
+def _assets(tmp_path, slug, program, carried):
+    """The <slug>.assets Write would put beside mode.so for this program, in a dump folder."""
+    project = _card(tmp_path / "proj")
+    os.makedirs(MP.mode_folder(project, slug))
+    _media_files(MP.mode_folder(project, slug))
+    BM.save(project, slug, program)
+    spec = CM.load(project, slug)
+    dump = tmp_path / "dump"
+    dump.mkdir()
+    own = [dict(u, slug=slug) for u in carried]
+    (dump / (slug + ".assets")).write_text(CM.runtime_text(slug, spec, GZ, own_sounds=own, clip=True))
+    return str(dump)
+
+
+def _at(out, pattern):
+    m = re.search(r"^\s*(\d+) " + pattern, out, re.M)
+    assert m, pattern
+    return int(m.group(1))
+
+
+def test_own_clips_and_sounds_play_where_the_blocks_say(tmp_path, monkeypatch):
+    _cc()
+    dump = _assets(tmp_path, "blk", _media_prog(), [
+        {"key": "music", "request": 125, "sid": 618}, {"key": "call:sever", "request": 1251, "ms": 1500}])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, _media_prog(), "shot", "Building", "secs", 1, "shot", "Left ramp", "secs", 12)
+    start = _at(out, r"\[TEST MODE\] START")
+    assert "own assets: /dump/blk.assets" in out
+    # its music: the game's (67) fades, the carrier plays its own bed
+    assert _at(out, "FADE 67 250") >= start and "SID 125 618" in out and _at(out, "SOUND 125") >= start
+    # the intro full screen half a second later, then the loop behind the HUD
+    intro = _at(out, "CLIP PadMode_blk_Intro")
+    assert 500 <= intro - start <= 600
+    assert _at(out, "BACKDROP PadMode_blk_Loop") >= intro
+    # the shot: a clip behind the HUD once, and its own call
+    ramp = _at(out, "BACKDROP ONCE PadMode_blk_Sever")
+    assert ramp > intro and _at(out, "SOUND 1251") >= ramp
+    # the end: no "lost" call was carried, so the game's Time is up; the won clip full screen;
+    # the loop off and the music faded
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert _at(out, "CALLOUT 1295") <= end
+    assert "own sound lost: the build carried none" in out
+    assert _at(out, "BACKDROP OFF") <= end + 20
+    assert _at(out, "FADE 125 400") <= end + 20
+    assert 500 <= _at(out, "CLIP PadMode_blk_Won") - end <= 600
+
+
+def test_without_its_file_the_blocks_still_play_the_games_own(tmp_path, monkeypatch):
+    _cc()
+    dump = tmp_path / "empty"
+    dump.mkdir()
+    monkeypatch.setenv("HARNESS_DUMP", str(dump))
+    out = play(tmp_path, _media_prog(), "shot", "Building", "secs", 1, "shot", "Left ramp", "secs", 12)
+    assert "no blk.assets" in out
+    assert "CLIP " not in out and "BACKDROP" not in out and "SOUND " not in out
+    assert "CALLOUT 1295" in out and "END (time ran out)" in out
+
+
+def test_a_loop_asked_for_while_idle_and_once_without_a_loop_say_why(tmp_path, monkeypatch):
+    _cc()
+    p = _media_prog()
+    p["scripts"][1]["do"] = [{"op": "clip", "clip": "sever", "where": "behind"}]
+    p["scripts"].append({"hat": {"kind": "any_shot", "when": "idle"}, "do": [
+        {"op": "clip", "clip": "loop", "where": "loop"}]})
+    dump = _assets(tmp_path, "blk", p, [])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Left ramp", "shot", "Building", "secs", 1)
+    assert "own clip loop: not looped behind the HUD - the mode is not running" in out
+    # the start's clip behind the HUD comes before the Building's idle script asks for the loop
+    once = _at(out, r"\[TEST MODE\] own clip sever: not played behind the HUD - no clip of its own loops there")
+    assert "BACKDROP ONCE" not in out and _at(out, "BACKDROP PadMode_blk_Loop") >= once

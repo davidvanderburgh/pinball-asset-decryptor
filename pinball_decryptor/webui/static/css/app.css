@@ -295,7 +295,9 @@ input[type=range] { accent-color: var(--accent); }
 .banner.info { background: var(--info-soft); }
 .banner.warn { background: var(--warn-soft); }
 .banner .body-text { flex: 1 1 300px; min-width: 0; }
-.tip { position: fixed; z-index: 80; background: var(--panel-3); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; padding: 7px 10px; font-size: 12.5px; max-width: 420px; white-space: pre-line; pointer-events: none; box-shadow: var(--shadow); }
+/* PAD-366 (Peanutsfr): a scene's path (one long word of hashes) has nowhere to break, so
+   it ran past the box; overflow-wrap lets it fold inside the width instead. */
+.tip { position: fixed; z-index: 80; background: var(--panel-3); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; padding: 7px 10px; font-size: 12.5px; max-width: 420px; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; box-shadow: var(--shadow); }
 /* tip({head, lines}): a heading, then a line each, a click or shortcut in its own column */
 .tip .tip-h { font-weight: 600; margin-bottom: 4px; }
 .tip .tip-l { color: var(--ink-2); margin-top: 2px; }

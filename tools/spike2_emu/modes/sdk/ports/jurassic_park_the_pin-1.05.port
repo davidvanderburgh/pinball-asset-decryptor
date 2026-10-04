@@ -441,3 +441,9 @@ value mode_flag_5           43
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x002f3e54 0xe92d41f0 0xe305e3ba
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x00068090 0xe92d4010 0xe1a04000
+text block_name_0       Restore Power

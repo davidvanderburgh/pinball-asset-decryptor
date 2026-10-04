@@ -833,7 +833,7 @@ def parse_port(text):
 #: PAD-363: the lines game_mode_blocks.py writes from a build's OWN program (each of its modes' start, object and
 #: name, the ones checked by default): never carried from a reference, and never part of what a recipe depends on
 _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block_name_\d+|text block_default|"
-                        r"value block_default)\b")
+                        r"value block_default|value block_ret_\d+)\b")
 
 
 def generated(key, rest):

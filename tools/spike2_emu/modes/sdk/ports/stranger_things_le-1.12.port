@@ -338,3 +338,63 @@ value mode_flag_7           109
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x004263d8 0xe92d41f0 0xe303e456
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x00035274 0xe92d4038 0xe300013f
+text block_name_0       Bullshit Scoring
+site block_start_1      0x000a6ca8 0xe30514e4 0xe300012e
+text block_name_1       It's a Trap
+site block_start_2      0x000abf64 0xe30b1c34 0xe3a00f4b
+text block_name_2       Junk Yard
+site block_start_3      0x0003da74 0xe92d4038 0xe30e5a5c
+text block_name_3       Bust Out
+site block_start_4      0x001902a0 0xe92d4038 0xe30e5a5c
+text block_name_4       What's That
+site block_start_5      0x00187da4 0xe92d40f8 0xe3051dd4
+text block_name_5       Upside Down Hurry-Up
+site block_start_6      0x0018bd88 0xe92d40f8 0xe3091db8
+text block_name_6       Upside Down 2 Hurry-Up
+site block_start_7      0x0007a8e8 0xe92d4008 0xe300013d
+text block_name_7       Double Scoring
+site block_start_8      0x0007a97c 0xe92d4038 0xe300013d
+text block_name_8       Double Scoring (lit award)
+site block_start_9      0x0018df7c 0xe92d4038 0xe30e5a5c
+text block_name_9       Victory Laps
+site block_start_10     0x000be0d8 0xe92d4070 0xe30e5a5c
+text block_name_10      Where's Barb
+site block_start_11     0x000c2110 0xe92d4070 0xe30e6a5c
+text block_name_11      Monster Hunting
+site block_start_12     0x000c5b54 0xe92d4070 0xe30e5a5c
+text block_name_12      Bullies
+site block_start_13     0x000c8538 0xe92d47f0 0xe30e5a5c
+text block_name_13      Get Me Out
+site block_start_14     0x000ced28 0xe92d40f8 0xe30e6a5c
+text block_name_14      Operation Mirkwood
+site block_start_15     0x000d1360 0xe92d4070 0xe30e5a5c
+text block_name_15      Follow the Compass
+site block_start_16     0x000d62f0 0xe92d41f0 0xe30e5a5c
+text block_name_16      Quarter Hunt
+site block_start_17     0x000e04d4 0xe92d4070 0xe30e6a5c
+text block_name_17      Save Will
+site block_start_18     0x000ea388 0xe92d43f8 0xe30e6a5c
+text block_name_18      What Mama Says
+site block_start_19     0x000f2924 0xe92d41f0 0xe30e6a5c
+text block_name_19      Morse Code
+site block_start_20     0x000e48e8 0xe92d43f8 0xe30e5a5c
+text block_name_20      Lure Dart
+site block_start_21     0x000f9b2c 0xe92d40f8 0xe30e7a5c
+text block_name_21      Turn Up the Heat
+value block_ret_10          0
+value block_ret_11          0
+value block_ret_12          0
+value block_ret_13          0
+value block_ret_14          0
+value block_ret_15          0
+value block_ret_16          0
+value block_ret_17          0
+value block_ret_18          0
+value block_ret_19          0
+value block_ret_20          0
+value block_ret_21          0

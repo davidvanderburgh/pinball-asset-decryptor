@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "..", "..")))
 from pinball_decryptor.plugins.stern import game_mode_blocks as G  # noqa: E402
 
-OLD = re.compile(r"^(site block_start_\d+|data block_obj_\d+|text block_name_\d+|value block_default|text block_default|"
+OLD = re.compile(r"^(site block_start_\d+|data block_obj_\d+|text block_name_\d+|value block_default|text block_default|value block_ret_\d+|"
                  r"data block_mode_table|value block_mode_count|value block_mode_ids|site stock_mode_start)\b")
 OLD_COMMENT = ("# PAD-347: a mode may keep the game's modes from starting", "# PAD-363: the game's own modes a mode")
 

@@ -359,3 +359,15 @@ text mode_records_name_3   Headphone Hurryup
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x003833f0 0xe92d41f0 0xe306e7e6
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x00103f4c 0xe92d4038 0xe3a000ea
+text block_name_0       Super Scoring
+site block_start_1      0x000662e8 0xe92d40d0 0xe3061010
+text block_name_1       Headphone Hurryup
+site block_start_2      0x0003d028 0xe92d4008 0xe3a000e8
+text block_name_2       Double Scoring
+site block_start_3      0x0003d490 0xe92d4038 0xe3a000e8
+text block_name_3       Double Scoring (2nd path)

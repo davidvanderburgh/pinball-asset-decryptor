@@ -1514,13 +1514,14 @@ def test_pad363_the_game_modes_lever_holds_off_the_ticked_modes(tmp_path, previe
 
 
 def test_pad363_a_title_with_no_block_lines_cannot_hold_its_modes_off(tmp_path, preview_on):
-    proj = _card_project(tmp_path / "bt", BEATLES_CARD)
+    # Star Wars ELG 1.10: its three shot modes start `push; bl`, which the veto cannot move (PAD-363's start finder)
+    proj = _card_project(tmp_path / "sw", "star_wars_elg-1_10_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
         w.call("modes.new")
         st = w.state("modes")
         assert st["profile"]["game_modes"] == [] and st["dis"]["block"]
-        assert "has not found where The Beatles 1.29 starts its own modes" in st["reasons"]["block"]
+        assert ("has not found where %s starts its own modes" % st["profile"]["label"]) in st["reasons"]["block"]
 
 
 def test_pad363_the_hand_written_godzilla_profile_offers_its_ports_modes():

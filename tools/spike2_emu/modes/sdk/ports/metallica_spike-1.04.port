@@ -550,3 +550,27 @@ text mode_records_name_5   a song mode
 # ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
 #   multiball_serve: located (strict)
 site multiball_serve  0x003e3008 0xe92d41f0 0xe300e012
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x00037190 0xe92d40f0 0xe3a00006
+text block_name_0       Battery
+site block_start_1      0x000c5718 0xe92d40f0 0xe3a0000b
+text block_name_1       Enter Sandman
+site block_start_2      0x000c7d4c 0xe92d40f0 0xe3a0000a
+text block_name_2       Fade to Black
+site block_start_3      0x000ca7cc 0xe92d40f0 0xe3a0000c
+text block_name_3       For Whom the Bell Tolls
+site block_start_4      0x000ce53c 0xe92d40f0 0xe24dd014
+text block_name_4       Fuel
+site block_start_5      0x00117170 0xe92d41f0 0xe3a000c8
+text block_name_5       One
+site block_start_6      0x0012b918 0xe92d40f0 0xe3a00002
+text block_name_6       Seventy Two Seasons
+site block_start_7      0x000f47b4 0xe92d4370 0xe3a00003
+text block_name_7       Hardwired
+site block_start_8      0x000ae9d8 0xe30e1080 0xe3a000d2
+text block_name_8       Combo Mode (and Combo Challenge)
+site block_start_9      0x000a8b20 0xe92d47f0 0xe24dd010
+text block_name_9       Coffin Hurry-Up

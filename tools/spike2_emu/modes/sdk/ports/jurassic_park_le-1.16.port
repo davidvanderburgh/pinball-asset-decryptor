@@ -523,3 +523,52 @@ site balls_in_play         0x00481ca4 0xe92d4010 0xe30840d0
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00481e20 0xe92d41f0 0xe30ce4ca
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# start slot 21 (the start finder; the scanner finds none)
+site block_start_4      0x001045c4 0xe92d4038 0xe1a04000
+data block_obj_4        0x00737b30
+text block_name_4       Chaos Hurry Up
+site block_start_6      0x00152a04 0xe92d4038 0xe1a04000
+data block_obj_6        0x00737dc8
+text block_name_6       Trex Feed Hurry Up
+site block_start_7      0x0014e020 0xe92d4070 0xe24dd008
+data block_obj_7        0x00737eec
+text block_name_7       Trex Chase
+site block_start_8      0x00150140 0xe92d4070 0xe1a04000
+data block_obj_8        0x0073804c
+text block_name_8       Trex Encounter
+site block_start_9      0x0015671c 0xe92d4070 0xe24dd008
+data block_obj_9        0x00738174
+text block_name_9       Trex Rampage
+site block_start_10     0x0011657c 0xe92d40f0 0xe24dd00c
+data block_obj_10       0x007382c0
+text block_name_10      Ctrl Room Virus Attack
+site block_start_11     0x0011171c 0xe92d4070 0xe24dd008
+data block_obj_11       0x00738404
+text block_name_11      Ctrl Room Restore Power
+site block_start_12     0x00113d14 0xe92d40f8 0xe1a04000
+data block_obj_12       0x00738540
+text block_name_12      Ctrl Room System Boot
+site block_start_14     0x0014325c 0xe92d4030 0xe24dd00c
+data block_obj_14       0x007387e4
+text block_name_14      Pteranodon Attack
+site block_start_15     0x00137ea4 0xe92d4030 0xe24dd014
+data block_obj_15       0x007388f8
+text block_name_15      Goat Mania
+site block_start_16     0x00159120 0xe92d4038 0xe1a04000
+data block_obj_16       0x007389f0
+text block_name_16      Visitor Center Hurry Up
+site block_start_20     0x0013ea78 0xe92d47f0 0xe24dd010
+data block_obj_20       0x00738e64
+text block_name_20      Museum Mayhem
+site block_start_21     0x0014a4d0 0xe92d47f0 0xe24dd010
+data block_obj_21       0x00739058
+text block_name_21      Secure Control Room
+site block_start_22     0x0011a724 0xe92d41f0 0xe1a04000
+data block_obj_22       0x007391dc
+text block_name_22      Escape Nublar
+site block_start_23     0x00118fbc 0xe92d4038 0xe1a04000
+data block_obj_23       0x007393b0
+text block_name_23      Escape Nublar Hurry Up

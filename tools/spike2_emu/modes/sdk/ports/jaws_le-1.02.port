@@ -364,7 +364,7 @@ site multiball_serve       0x0055ee7c 0xe92d41f0 0xe304ed0e
 
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
-# left out: 1 Jaws Multiball 1 (multiball), 2 Jaws Multiball 2 (multiball), 3 Jaws Multiball 3 (multiball), 4 Bounty Hunt Multiball (multiball), 5 Cast N Catch Super (multiball), 6 Celebration Multiball (multiball), 7 Night Search Multiball (multiball), 8 Victory Combos Multiball (multiball), 9 Rescue Multiball (multiball), 10 Search Multiball (multiball), 11 Great White Multiball (multiball), 26 Bounty Hunt (not vetoable), 33 Jaws the Revenge (multiball), 35 Broken Shark Victory (multiball), 1000 Jaws (not vetoable), 1001 Encounter (not vetoable)
+# left out: 1 Jaws Multiball 1 (multiball), 2 Jaws Multiball 2 (multiball), 3 Jaws Multiball 3 (multiball), 4 Bounty Hunt Multiball (multiball), 5 Cast N Catch Super (multiball), 6 Celebration Multiball (multiball), 7 Night Search Multiball (multiball), 8 Victory Combos Multiball (multiball), 9 Rescue Multiball (multiball), 10 Search Multiball (multiball), 11 Great White Multiball (multiball), 26 Bounty Hunt (not vetoable), 33 Jaws the Revenge (multiball), 35 Broken Shark Victory (multiball)
 site block_start_12     0x000acd94 0xe92d4ff0 0xe24dd014
 data block_obj_12       0x0086ae80
 text block_name_12      Cast N Catch 1
@@ -428,3 +428,9 @@ text block_name_32      Fourth of July
 site block_start_34     0x000a2ae8 0xe92d43f0 0xe24dd00c
 data block_obj_34       0x0086c4b0
 text block_name_34      Broken Shark
+site block_start_126    0x000c4a98 0xe92d4ff0 0xe300409c
+data block_obj_126      0x0086a130
+text block_name_126     Encounter
+site block_start_127    0x000844a8 0xe5902000 0xe30232f8
+data block_obj_127      0x0086a240
+text block_name_127     Jaws

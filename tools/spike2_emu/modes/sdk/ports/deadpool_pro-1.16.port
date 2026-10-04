@@ -286,7 +286,7 @@ site multiball_serve       0x003ed3e0 0xe92d41f0 0xe307ee96
 
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
-# left out: 8 Sauron Mball (multiball), 9 Mrsinister Clones (multiball), 11 Mrsinister Mechsuit (multiball), 12 Bashpool Mball (multiball), 16 Ninja Mball (multiball), 17 Disco Multiball (multiball), 18 Mechsuit Mball (multiball), 1000 Battle Juggernaut (not vetoable)
+# left out: 8 Sauron Mball (multiball), 9 Mrsinister Clones (multiball), 11 Mrsinister Mechsuit (multiball), 12 Bashpool Mball (multiball), 16 Ninja Mball (multiball), 17 Disco Multiball (multiball), 18 Mechsuit Mball (multiball)
 site block_start_1      0x000f0484 0xe92d40d0 0xe1a04000
 data block_obj_1        0x006b1d58
 text block_name_1       Battle Mystique
@@ -341,3 +341,6 @@ text block_name_24      Berserker Rage
 site block_start_25     0x0010df74 0xe92d4010 0xe1a04000
 data block_obj_25       0x006b2608
 text block_name_25      Trex Hurryup
+site block_start_127    0x000edd14 0xe92d40d0 0xe1a04000
+data block_obj_127      0x006b1bd8
+text block_name_127     Battle Juggernaut

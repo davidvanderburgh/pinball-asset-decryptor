@@ -86,7 +86,15 @@ def read_modes(elf):
         words = (_word(prog, start), _word(prog, start + 4)) if start else (None, None)
         out.append(GameMode(m.id, m.cls, m.name, m.obj or 0, m.vtable or 0, start or 0, words,
                             bool(S.derives(model, m.cls, "cmode_mball"))))
-    return out
+    # a mode outside the game's own table gets the scanner's stand-in id (1000 up: Deadpool's Battle
+    # Juggernaut, Jaws's Jaws and Encounter); in the port an id is only a label, so it takes the highest
+    # one free, in the stand-ins' order (the same on every run of the same program)
+    used = {m.id for m in out if 0 <= m.id < MAX_ID}
+    free = [i for i in range(MAX_ID - 1, -1, -1) if i not in used]
+    for m in sorted((m for m in out if m.id >= MAX_ID), key=lambda m: m.id):
+        if free:
+            m.id = free.pop(0)
+    return sorted(out, key=lambda m: m.id)
 
 
 def _word(prog, va):

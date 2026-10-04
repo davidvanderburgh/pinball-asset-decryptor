@@ -165,7 +165,8 @@ def test_the_premium_port_names_every_non_multiball_mode_and_checks_two():
 @pytest.mark.parametrize("name", ["deadpool_le-1.14.port", "deadpool_pro-1.16.port"])
 def test_the_deadpool_ports_name_their_modes_and_check_none(name):
     port, named, objs = _block_section(name)
-    assert len(named) == 18 and set(objs) == set(named)
+    assert len(named) == 19 and set(objs) == set(named)
+    assert 127 in named                                        # Battle Juggernaut: the scanner's 1000, a free id
     assert _default(name) == []                              # nothing checked on a machine yet
     assert not set(named) & {8, 9, 11, 12, 16, 17, 18}         # Deadpool's multiballs
 
@@ -283,7 +284,7 @@ def MP_game_modes_of_a_port_without_block_lines():
 def test_a_title_lists_the_modes_its_port_can_hold_off_and_which_are_checked():
     dp, gz = _title("deadpool_le-1.14.port"), _title("godzilla_le-1.16.port")
     rows = {i: (name, on) for i, name, on in dp.game_modes}
-    assert len(rows) == 18 and rows[21] == ("Chimichanga", False) and rows[24] == ("Berserker Rage", False)
+    assert len(rows) == 19 and rows[21] == ("Chimichanga", False) and rows[24] == ("Berserker Rage", False)
     assert rows[6] == rows[7] == ("Quest", False)                       # two of its modes share a name
     assert not set(rows) & {8, 9, 11, 12, 16, 17, 18}                    # never a multiball
     assert [i for i, _n, on in gz.game_modes if on] == [21, 23]          # the port's checked defaults

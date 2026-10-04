@@ -2245,8 +2245,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             roles = {getattr(p, "callout_ten_seconds", None), getattr(p, "callout_time_up", None)}
             callouts += [{"id": number, "label": "%s (%d)" % (label, number)}
                          for label, number in MP.callout_choices(p) if number and number not in roles]
+        # PAD-375: the HUD is built into Godzilla's slide-outs scene (code_modes' build); elsewhere a
+        # blocks mode with a HUD runs with nothing at the edges
+        hud = p is None or bool(p.can("screen") and (p.lcd("hud") or "").endswith(MA.HUD_SCENE))
         return {"shots": shots, "events": events, "callouts": callouts,
-                "title": p.label if p is not None else ""}
+                "title": p.label if p is not None else "", "hud": hud, "icons": list(BM.HUD_ICONS)}
 
     def _blocks_check(self, program):
         """``(problems, notes)`` of a program on the shown title (its shots and events)."""

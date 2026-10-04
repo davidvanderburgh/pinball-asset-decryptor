@@ -137,3 +137,36 @@ def test_the_scenes_switches_change_the_preview_only(tmp_path):
         assert w.state("text_scenes")["machine_look"] is False
         w.call("text_scenes.close")
     assert json.loads(open(side, encoding="utf-8").read()) == before
+
+
+def test_the_switches_come_back_as_they_were_left(tmp_path):
+    """PAD-348 (DragonRR): opening PAD switched every overlay back on; the
+    Scenes and Video switches are now remembered, each on their own."""
+    from tests.webui_harness import web_app
+    from tests.test_gui_scene_editor import _seed, _open
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    _setup(str(folder))
+    settings = tmp_path / "cfg" / "settings.json"
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.set_look_part", "overlay", False)
+        assert w.call("text_scenes.set_look_part", "screen", False)
+        assert w.call("video.set_look_part", "files", False)
+        w.call("text_scenes.close")
+    saved = json.loads(settings.read_text(encoding="utf-8"))["look_switches"]
+    with web_app(tmp_path, mfr="stern", settings={"look_switches": saved}) as w:
+        _open(w, folder)
+        assert w.state("text_scenes")["look"]["sw"] == {
+            "overlay": False, "files": True, "screen": False}
+        assert w.state("text_scenes")["machine_look"] is True
+        w.call("ui.select_tab", "video")
+        w.drain()
+        assert w.state("video")["look"]["sw"] == {
+            "overlay": True, "files": False, "screen": True}
+        assert w.call("text_scenes.set_machine_look", True)
+        w.call("text_scenes.close")
+    saved = json.loads(settings.read_text(encoding="utf-8"))["look_switches"]
+    assert all(saved["scenes"].values())
+    assert saved["video"]["files"] is False

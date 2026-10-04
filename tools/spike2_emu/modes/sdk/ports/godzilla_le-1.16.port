@@ -168,6 +168,15 @@ data stock_mode_manager       0x007b0ce4
 site block_battle_shots       0x00124b3c 0xe92d40f8 0xe1a06002
 value block_battle_lo         0x00300000
 value block_battle_hi         0x00000020
+# PAD-363 (David's Premium, 2026-10-04: "overlapping text for saucer mode feedback under Ghidorah"): the
+# Saucer Attack rule is no mode of the game's (nothing to refuse), and puts its own words up from its shot
+# handler, RuleSaucerAttack::v[25] (vtable 0x647528 + 8 + 100): the pop bumper (0x40) and hi 0x400 count
+# toward lighting it ("%d MORE TO LIGHT SAUCER ATTACK"), hi 0x100 (Mecha exit bottom) its other path. A
+# blocking mode hides those bits from it alone (the pops' own score is this rule's: none while it blocks).
+site block_rule_0             0x00174f9c 0xe92d47f0 0xe1a04002
+value block_rule_lo_0         0x00000040
+value block_rule_hi_0         0x00000500
+text block_rule_name_0        Saucer Attack rule
 
 # ---- events (item 147): MODE_SDK.md, Events ----------------------------------------------------
 # The ids are Pro 1.15's, and every function that dispatches them has the same shape here

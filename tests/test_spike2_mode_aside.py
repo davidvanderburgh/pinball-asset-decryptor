@@ -366,3 +366,23 @@ def test_venom_names_its_modes_past_31_and_never_a_multiball():
     assert not {59, 60, 64, 69, 72, 87} & set(rows)                         # its multiballs
     dd = {i: n for i, n, _on in _title("dungeons_and_dragons_le-1.00.port").game_modes}
     assert dd[43] == "Map Arabel" and 41 not in dd and 65 not in dd        # Finish State, Orange 2a: not movable
+
+
+# ---- PAD-363: Godzilla's Saucer Attack rule, and a start refused with 0 ------------------------------------------
+@pytest.mark.parametrize("name,handler", [("godzilla_le-1.16.port", 0x00174f9c), ("godzilla_pro-1.15.port", 0x001715c4),
+                                          ("godzilla_pro-1.16.port", 0x001715c4)])
+def test_every_godzilla_hides_the_pops_from_the_saucer_rule_while_a_mode_blocks(name, handler):
+    """David's Premium (2026-10-04): "overlapping text for saucer mode feedback under Ghidorah" - the pop bumper
+    lights Saucer Attack (a rule, no mode to refuse) and its words land on ours. RuleSaucerAttack::v[25] tests lo
+    0x40 (the pop bumper) and hi 0x400 / 0x100; the battle rule's lines are on every Godzilla now too."""
+    port = _port(name)
+    assert port[("site", "block_rule_0")] == [handler, 0xe92d47f0, 0xe1a04002]
+    assert port[("value", "block_rule_lo_0")] == [0x40] and port[("value", "block_rule_hi_0")] == [0x500]
+    assert ("site", "block_battle_shots") in port and port[("value", "block_battle_hi")] == [0x20]
+
+
+def test_the_runtime_hooks_other_rules_and_can_refuse_a_start_with_0():
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    assert "#define BLOCK_RULES 8" in src and "hook_n(fn(name), on_rule_shots, (unsigned)i)" in src
+    assert "t[7] = 0x13a00000u | refused;" in src                         # movne r0, #0 or #1
+    assert 'pm_snprintf(ret, sizeof ret, "block_ret_%u", id);' in src

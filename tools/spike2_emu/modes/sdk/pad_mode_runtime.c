@@ -573,12 +573,13 @@ static int hook_veto(unsigned addr, veto_fn logger)
 /* PAD-363: a veto whose logger is also told WHICH hook fired (r1 = n, 0-255): the spare nop at t[2] becomes
  * `mov r1, #n`, so one logger serves many starts that carry no object to tell them apart (a plain-C title's) */
 typedef int (*veto_n_fn)(unsigned *regs, unsigned n);
-static int hook_veto_n(unsigned addr, veto_n_fn logger, unsigned n)
+static int hook_veto_n(unsigned addr, veto_n_fn logger, unsigned n, unsigned refused)
 {
     unsigned *t;
-    if (n > 255 || !hook_veto(addr, (veto_fn)(void (*)(void))logger)) return 0;
+    if (n > 255 || refused > 1 || !hook_veto(addr, (veto_fn)(void (*)(void))logger)) return 0;
     t = tramp + (tramp_used - 1) * 16;
     t[2] = 0xe3a01000u | n;   /* mov r1, #n */
+    t[7] = 0x13a00000u | refused;   /* movne r0, #refused: what a refused call returns (1 unless the port says 0) */
     __builtin___clear_cache((char *)t, (char *)(t + 16));
     return 1;
 }
@@ -3071,6 +3072,50 @@ static void on_battle_shots(unsigned *r)
     r[3] &= ~hi;
 }
 
+/* PAD-363 (David's Premium, 2026-10-04: "overlapping text for saucer mode feedback under Ghidorah"): a rule of
+ * the game's that is not one of its modes - no start to refuse - puts its own words on the screen from its
+ * shot handler: Godzilla's Saucer Attack (RuleSaucerAttack::v[25]) counts the pop bumper toward lighting it
+ * ("%d MORE TO LIGHT SAUCER ATTACK"), then runs on its own timer. So a port may name up to BLOCK_RULES more
+ * shot handlers, `site block_rule_<n>` with `value block_rule_lo_<n>` / `block_rule_hi_<n>` (and `text
+ * block_rule_name_<n>`), each shown the shot without those bits while a mode of ours blocks - as the battle
+ * rule's is (above). The bits still reach every other rule (Godzilla's pops score through the saucer rule, so
+ * they score nothing while a mode blocks; emulator, 2026-10-04). */
+#define BLOCK_RULES 8
+static int block_rules_on;                   /* how many are hooked */
+static unsigned block_rule_said[BLOCK_RULES];
+
+static void on_rule_shots(unsigned *r, unsigned n)
+{
+    char key[28];
+    unsigned lo, hi;
+    const char *nm;
+    if (n >= BLOCK_RULES || !block_owner || running != block_owner || !pm_in_game()) return;
+    pm_snprintf(key, sizeof key, "block_rule_lo_%u", n);
+    lo = (unsigned)pm_port_value(key, 0);
+    pm_snprintf(key, sizeof key, "block_rule_hi_%u", n);
+    hi = (unsigned)pm_port_value(key, 0);
+    if (!(r[2] & lo) && !(r[3] & hi)) return;
+    if (block_rule_said[n]++ < 10) {
+        pm_snprintf(key, sizeof key, "block_rule_name_%u", n);
+        nm = pm_port_text(key);
+        say("block: the game's %s did not see shot 0x%08x_%08x - %s is running", nm ? nm : "rule", r[3], r[2], block_who);
+    }
+    r[2] &= ~lo;
+    r[3] &= ~hi;
+}
+
+/* a plain hook whose logger is told which (r1 = n), as hook_veto_n's */
+typedef void (*hook_n_fn)(unsigned *regs, unsigned n);
+static int hook_n(unsigned addr, hook_n_fn logger, unsigned n)
+{
+    unsigned *t;
+    if (n > 255 || !hook(addr, (hook_fn)(void (*)(void))logger)) return 0;
+    t = tramp + (tramp_used - 1) * 16;
+    t[2] = 0xe3a01000u | n;   /* mov r1, #n */
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    return 1;
+}
+
 /* every tick, from clip_tick: a block ends with the mode that asked for it */
 static void block_tick(void)
 {
@@ -3089,7 +3134,7 @@ static void block_arm(void)
         pm_snprintf(name, sizeof name, "block_start_%u", id);
         if (site(name)) any = 1;
     }
-    if (site("block_battle_shots")) any = 1;
+    if (site("block_battle_shots") || site("block_rule_0")) any = 1;
     if (!any) return;                            /* a port without them: silent */
     for (id = 0; id < BLOCK_IDS; id++) {
         pm_snprintf(name, sizeof name, "block_start_%u", id);
@@ -3098,7 +3143,12 @@ static void block_arm(void)
         pm_snprintf(name, sizeof name, "block_obj_%u", id);
         for (i = 0; i < block_n_hooked && block_hooked[i] != a; i++) ;
         if (i == block_n_hooked) {
-            if (block_n_hooked >= BLOCK_HOOKS || !hook_veto_n(a, on_block_start, (unsigned)block_n_hooked)) {
+            /* PAD-363: a plain-C title's start reached through a table whose caller goes on as if the mode began
+             * when it returns non-zero, and stops cleanly on 0 (The Beatles' songs), is refused with 0 */
+            char ret[24];
+            pm_snprintf(ret, sizeof ret, "block_ret_%u", id);
+            if (block_n_hooked >= BLOCK_HOOKS ||
+                !hook_veto_n(a, on_block_start, (unsigned)block_n_hooked, pm_port_value(ret, 1) == 0 ? 0u : 1u)) {
                 say("block: the start of the game's mode %u (0x%08x) could not be hooked", id, a);
                 continue;
             }
@@ -3113,7 +3163,16 @@ static void block_arm(void)
     }
     if (fn("block_battle_shots") && (pm_port_value("block_battle_lo", 0) | pm_port_value("block_battle_hi", 0)))
         block_battles = hook(fn("block_battle_shots"), on_battle_shots);
-    if (!bm_count(block_named) && !block_battles) {
+    for (i = 0; i < BLOCK_RULES; i++) {          /* PAD-363: other rules' shot handlers */
+        char lo[24], hi[24];
+        pm_snprintf(name, sizeof name, "block_rule_%d", i);
+        pm_snprintf(lo, sizeof lo, "block_rule_lo_%d", i);
+        pm_snprintf(hi, sizeof hi, "block_rule_hi_%d", i);
+        if (!fn(name) || !(pm_port_value(lo, 0) | pm_port_value(hi, 0))) continue;
+        if (hook_n(fn(name), on_rule_shots, (unsigned)i)) block_rules_on++;
+        else say("block: %s (0x%08x) could not be hooked", name, fn(name));
+    }
+    if (!bm_count(block_named) && !block_battles && !block_rules_on) {
         say("block: off - none of the named starts could be hooked");
         return;
     }
@@ -3122,8 +3181,10 @@ static void block_arm(void)
     block_defaults(d);
     bm_text(d, dflt, sizeof dflt);
     say("block: on - a mode may keep %d of the game's modes from starting: %s (%d start(s) hooked; checked "
-        "defaults %s)%s", bm_count(block_named), ids, block_n_hooked, dflt,
-        block_battles ? "; the battle rule's shot handler is hooked (no battle lit, no select screen while it blocks)" : "");
+        "defaults %s)%s; %d other rule(s) shown fewer shots while it blocks", bm_count(block_named), ids,
+        block_n_hooked, dflt,
+        block_battles ? "; the battle rule's shot handler is hooked (no battle lit, no select screen while it blocks)" : "",
+        block_rules_on);
 }
 
 /* ---- a multiball of the mode's own (item 167) ---------------------------------------------------

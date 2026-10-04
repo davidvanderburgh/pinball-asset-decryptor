@@ -95,9 +95,31 @@ def test_notes_do_not_stop_a_build():
     notes = " | ".join(BM.notes(p))
     assert "No block starts the mode yet" in notes
     assert "Nothing ends this mode" in notes
-    assert "seconds-left and add-time blocks do nothing" in notes
+    assert "seconds-left, add-time and set-the-clock blocks do nothing" in notes
     assert "tick Its own screen" in notes
     assert BM.problems(p) == []
+
+
+def test_the_clock_blocks_take_a_value_and_an_old_number_still_loads():
+    # PAD-372: Add seconds held a plain number before; it loads as a number value
+    old = BM.normalize(prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "if", "cond": {"k": "running"}, "then": [{"op": "add_time", "seconds": 5}]}]}]))
+    assert old["scripts"][0]["do"][0]["then"][0]["seconds"] == num(5)
+    assert BM.problems(old) == []
+    p = prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "add_time", "seconds": {"k": "op", "op": "*", "a": {"k": "var", "name": "n"}, "b": num(2)}},
+        {"op": "set_time", "seconds": {"k": "secs_left"}},
+        {"op": "set_time", "seconds": None},
+        {"op": "set_time", "seconds": num(-1)},
+        {"op": "add_time", "seconds": num(BM.SECONDS_MAX + 1)}]}], vars=[{"name": "n"}])
+    got = BM.problems(p)
+    assert "Script 1 has an empty number slot." in got
+    assert "Script 1 sets the clock: 0 to %d seconds." % BM.SECONDS_MAX in got
+    assert "Script 1 adds a time: %d to %d seconds." % (-BM.SECONDS_MAX, BM.SECONDS_MAX) in got
+    assert len(got) == 3
+    src = BM.to_c(p, "clk")
+    assert "add_time((V[0][P()] * (2LL)));" in src
+    assert "set_time((long long)secs_left());" in src
 
 
 def test_limits_on_size_and_depth():
@@ -338,6 +360,36 @@ def test_every_seconds_left_events_add_time_and_end_blocks(tmp_path):
     assert scores(out)[:2] == [8, 6]
     assert "CALLOUT 1295" in out
     assert "[TEST MODE] bye" in out and "END (time ran out)" in out   # End in When it ends: no loop
+
+
+def test_set_the_clock_puts_a_short_clock_back_up_and_add_takes_a_value(tmp_path):
+    # MASER BARRAGE's rule (PAD-371) in blocks: a Maser target with under 10 s left puts the clock
+    # back to 10 s, and the "ten seconds" call is not said again; Add seconds adds a variable's value
+    p = prog([
+        {"hat": {"kind": "event", "event": "skill_shot", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "shot", "shot": "Maser target", "when": "running"}, "do": [
+            {"op": "if", "cond": {"k": "cmp", "op": "<", "a": {"k": "secs_left"}, "b": num(10)},
+             "then": [{"op": "set_time", "seconds": num(10)}], "else": None}]},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [
+            {"op": "set", "var": "bonus", "value": num(3)},
+            {"op": "add_time", "seconds": {"k": "op", "op": "*", "a": {"k": "var", "name": "bonus"}, "b": num(2)}}]},
+        {"hat": {"kind": "seconds_left", "seconds": 10}, "do": [{"op": "callout", "role": "ten_seconds"}]},
+        {"hat": {"kind": "seconds_left", "seconds": 5}, "do": [{"op": "callout", "role": "time_up"}]},
+    ], vars=[{"name": "bonus"}], seconds=15)
+    # 15 s clock: at 6.5 s (8.5 left, the ten-second call said) the Maser target puts it to 10;
+    # at 7 s (9.5 left) the Left ramp adds 3 x 2 = 6 (15.5 left); it runs out 15.5 s later
+    out = play(tmp_path, p, "event", "skill_shot", "secs", 6.5, "shot", "Maser target",
+               "secs", 0.5, "shot", "Left ramp", "secs", 20)
+    assert out.count("CALLOUT 1291") == 2              # at 10 left, and counting down again; not at the put-back
+    assert out.count("CALLOUT 1295") == 1              # 5 left, once: only after the clock came down to it
+    end = int(re.search(r"^\s*(\d+) \[TEST MODE\] END \(time ran out\)", out, re.M).group(1))
+    start = int(re.search(r"^\s*(\d+) \[TEST MODE\] START", out, re.M).group(1))
+    assert 22400 <= end - start <= 22600               # 7 s + 15.5 s
+    # a Maser target with 10 s or more left leaves the clock alone
+    out = play(tmp_path, p, "event", "skill_shot", "secs", 1, "shot", "Maser target", "secs", 20)
+    end = int(re.search(r"^\s*(\d+) \[TEST MODE\] END \(time ran out\)", out, re.M).group(1))
+    start = int(re.search(r"^\s*(\d+) \[TEST MODE\] START", out, re.M).group(1))
+    assert 14900 <= end - start <= 15100
 
 
 def test_the_tabs_start_and_end_triggers_reach_it(tmp_path, monkeypatch):

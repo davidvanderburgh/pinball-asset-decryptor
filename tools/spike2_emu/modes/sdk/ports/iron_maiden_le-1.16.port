@@ -509,3 +509,31 @@ site balls_in_play         0x0022de0c 0xe92d4010 0xe3094660
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0022df88 0xe92d41f0 0xe301e992
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 4 Aces High (multiball), 6 Rime of the Ancient Mariner Multiball (multiball), 8 Can I Play With Madness (multiball), 9 Run to the Hills (multiball), 10 Trooper Mball (multiball), 11 Mummy Mball (multiball), 13 Cyborg Mball (multiball)
+site block_start_0      0x000983b4 0xe92d4010 0xe1a04000
+data block_obj_0        0x0057f010
+text block_name_0       Soul Shard Hurry Up
+site block_start_1      0x000746b4 0xe5903070 0xe92d40f0
+data block_obj_1        0x0057ebb8
+text block_name_1       Fear of the Dark
+site block_start_2      0x0007bf60 0xe30e3544 0xe3a01000
+data block_obj_2        0x0057ec98
+text block_name_2       Hallowed Be Thy Name
+site block_start_3      0x00078668 0xe30e3544 0xe3a02001
+data block_obj_3        0x0057ed60
+text block_name_3       Flight of Icarus
+site block_start_5      0x000902b4 0xe92d4010 0xe1a04000
+data block_obj_5        0x0057f448
+text block_name_5       Rime of the Ancient Mariner Hurry Up
+site block_start_7      0x00090128 0xe92d4070 0xe1a04000
+data block_obj_7        0x0057ef10
+text block_name_7       Rime of the Ancient Mariner
+site block_start_12     0x000a4594 0xe30e3544 0xe3a02000
+data block_obj_12       0x0057ef84
+text block_name_12      Two Minutes to Midnight
+site block_start_14     0x0008b644 0xe92d4030 0xe1a04000
+data block_obj_14       0x0057f3d8
+text block_name_14      Number of the Beast

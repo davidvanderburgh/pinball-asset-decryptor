@@ -1100,17 +1100,17 @@ def _lit_inserts(port):
 
 def _game_modes(port):
     """PAD-363: ``((id, name, held off by default), ...)``, in id order: the game's own modes the port lets
-    a mode keep from starting - a `site block_start_<id>` with its `data block_obj_<id>`, as
-    pad_mode_runtime.c's block_arm hooks them, named by `text block_name_<id>`; `value block_default`
-    is the ones a mode holds off when it lists none."""
-    data, text = port["data"], port["text"]
-    default = int(port["value"].get("block_default", 0) or 0)
+    a mode keep from starting - a `site block_start_<id>` (with its `data block_obj_<id>` on a C++ title; a
+    plain-C title's start is the mode's own), as pad_mode_runtime.c's block_arm hooks them, named by `text
+    block_name_<id>`; `text block_default <ids>` is the ones a mode holds off when it lists none."""
+    text = port["text"]
+    default = {int(w) for w in text.get("block_default", "").replace(",", " ").split() if w.isdigit()}
     out = []
     for site in port["site"]:
         tail = site[len("block_start_"):] if site.startswith("block_start_") else ""
-        if tail.isdigit() and int(tail) < 32 and data.get("block_obj_" + tail):
+        if tail.isdigit() and int(tail) < 128:
             i = int(tail)
-            out.append((i, text.get("block_name_" + tail, "").strip() or "mode %d" % i, bool(default >> i & 1)))
+            out.append((i, text.get("block_name_" + tail, "").strip() or "mode %d" % i, i in default))
     return tuple(sorted(out))
 
 
@@ -1133,6 +1133,14 @@ def _shots_with_switches(port):
 def port_path(p):
     """The port file behind a profile, or "" when it has none."""
     return os.path.join(PORTS_DIR, p.port) if p.port else ""
+
+
+#: PAD-363: the hand-written profile offers the game's modes its port lets a mode hold off, as a read port does
+try:
+    GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, game_modes=_game_modes(read_port(port_path(GODZILLA_PRO_1_15))))
+except OSError:
+    pass
+PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 
 _PROFILES_CACHE = {}
@@ -2361,7 +2369,7 @@ def game_modes_lines(spec):
     if spec.game_modes != "block":
         return []
     out = ["game_modes     block"]
-    ids = sorted({i for i in spec.block_modes or () if isinstance(i, int) and 0 <= i < 32})
+    ids = sorted({i for i in spec.block_modes or () if isinstance(i, int) and 0 <= i < 128})
     if ids:
         out.append("block_modes    " + " ".join(str(i) for i in ids))
     return out

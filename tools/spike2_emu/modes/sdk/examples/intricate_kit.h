@@ -705,17 +705,17 @@ static KIT_UNUSED int kit_game_began(void)
  * Fighter Attack and Tesla Strike, which shots start) for as long as it runs, unless its assets file says `game_modes
  * give_way`. A multiball or a battle of the game's is never refused: kit_game_began still ends ours for those.
  * 1 = blocking. Given back in kit_end / kit_end_after / kit_end_now (and by the runtime when the mode ends). */
-static KIT_UNUSED int kit_isolate_list(int give_way, unsigned list);
+static KIT_UNUSED int kit_isolate_list(int give_way, const unsigned char *ids, int n);
 static KIT_UNUSED int kit_isolate(int give_way)
 {
-    return kit_isolate_list(give_way, 0);
+    return kit_isolate_list(give_way, 0, 0);
 }
 
-/* PAD-363: with the mode's own list of the game's modes to hold off (its assets file's `block_modes`; 0 = the
+/* PAD-363: with the mode's own list of the game's modes to hold off (its assets file's `block_modes`; none = the
  * port's checked defaults) */
-static KIT_UNUSED int kit_isolate_list(int give_way, unsigned list)
+static KIT_UNUSED int kit_isolate_list(int give_way, const unsigned char *ids, int n)
 {
-    if (!give_way) pm_block_list(list);
+    if (!give_way) pm_block_list(ids, n);
     if (give_way) {
         pm_log("isolated: gives way - one of the game's modes starting ends it");
         return 0;

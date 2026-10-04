@@ -378,3 +378,67 @@ site balls_in_play         0x00354c60 0xe92d4010 0xe30b4894
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00354ddc 0xe92d41f0 0xe308e85a
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 17 You Have What I Want (multiball), 19 Dank Ferrick (multiball), 29 Razor Crest One (multiball), 30 Razor Crest Two (multiball), 31 Razor Crest Three (multiball), 32 Razor Crest Wizard (multiball), 50 Madness Mball (multiball), 57 Final Wizard (multiball)
+site block_start_10     0x001aa934 0xe92d40f8 0xe1a04000
+data block_obj_10       0x006af6b8
+text block_name_10      Super Skill Shot
+site block_start_11     0x001a4db0 0xe5903000 0xe92d40f0
+data block_obj_11       0x006af788
+text block_name_11      Skill Shot Sneaky
+site block_start_14     0x00059624 0xe92d4010 0xe1a04000
+data block_obj_14       0x006b0258
+text block_name_14      Battleground One
+site block_start_15     0x000604b8 0xe92d4010 0xe1a04000
+data block_obj_15       0x006b03b0
+text block_name_15      Battleground Two
+site block_start_16     0x00067378 0xe92d4010 0xe1a04000
+data block_obj_16       0x006b0508
+text block_name_16      Battleground Three
+site block_start_18     0x000682a4 0xe5903000 0xe92d4df0
+data block_obj_18       0x006b0828
+text block_name_18      Battleground Sneaky
+site block_start_21     0x00097624 0xe92d4030 0xe1a04000
+data block_obj_21       0x006b14d0
+text block_name_21      Chapter One
+site block_start_22     0x000a12d8 0xe92d4030 0xe1a05000
+data block_obj_22       0x006b1610
+text block_name_22      Chapter Two
+site block_start_23     0x000a71fc 0xe92d40f0 0xe1a04000
+data block_obj_23       0x006b1750
+text block_name_23      Chapter Three
+site block_start_33     0x00187f84 0xe92d40d0 0xe1a04000
+data block_obj_33       0x006b0ff8
+text block_name_33      Razor Crest Wizard Hurry Up
+site block_start_35     0x00189b64 0xe92d40f0 0xe1a04000
+data block_obj_35       0x006b10d8
+text block_name_35      Razor Crest Hurry Up
+site block_start_36     0x001b3140 0xe92d41f0 0xe1a04000
+data block_obj_36       0x006b2538
+text block_name_36      The Child Feature
+site block_start_40     0x00088eb4 0xe92d4010 0xe1a04000
+data block_obj_40       0x006b1e30
+text block_name_40      Bounty Mission Two
+site block_start_42     0x000276ec 0xe92d4010 0xe1a04000
+data block_obj_42       0x006b2310
+text block_name_42      Ambushed Hurry Up
+site block_start_43     0x00026e14 0xe92d4010 0xe1a04000
+data block_obj_43       0x006b2070
+text block_name_43      Ambushed One
+site block_start_44     0x00026ff8 0xe92d4010 0xe1a04000
+data block_obj_44       0x006b2150
+text block_name_44      Ambushed Two
+site block_start_45     0x000271dc 0xe92d4010 0xe1a04000
+data block_obj_45       0x006b2230
+text block_name_45      Ambushed Three
+site block_start_46     0x000282ac 0xe30e3080 0xe3a02000
+data block_obj_46       0x006b23e0
+text block_name_46      Ambushed R Mode
+site block_start_56     0x00193c88 0xe92d4038 0xe30e5080
+data block_obj_56       0x006afea0
+text block_name_56      Scope Feature
+site block_start_58     0x001b71a0 0xe92d4df0 0xe30e5080
+data block_obj_58       0x006b27f8
+text block_name_58      Titw Wizard Ready

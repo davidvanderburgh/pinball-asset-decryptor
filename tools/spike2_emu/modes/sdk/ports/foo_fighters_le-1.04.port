@@ -676,3 +676,40 @@ site balls_in_play         0x001712a4 0xe92d4010 0xe3094e3c
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00171420 0xe92d41f0 0xe309ef4a
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 12 Combo Multiball (multiball), 13 Foobot Multiball (multiball), 14 Final Battle (multiball), 15 Toy Time Multiball (multiball), 23 Austin Wizard (multiball), 24 Dc Wizard (multiball), 34 Overlord Multiball 1 (multiball), 35 Overlord Multiball 2 (multiball), 36 Overlord Multiball 3 (multiball), 37 Area 51 Multiball (multiball)
+site block_start_8      0x0012cb68 0xe92d40f8 0xe1a04000
+data block_obj_8        0x03bb6a58
+text block_name_8       Super Skill Shot
+site block_start_10     0x000f6800 0xe92d43f0 0xe1a06000
+data block_obj_10       0x03bb6b88
+text block_name_10      Radio
+site block_start_11     0x000ed970 0xe92d43f0 0xe24dd00c
+data block_obj_11       0x03bb6c68
+text block_name_11      Bot Frenzy
+site block_start_25     0x000faeac 0xe92d43f0 0xe1a06000
+data block_obj_25       0x03bb7520
+text block_name_25      Van Seattle
+site block_start_26     0x000fd888 0xe92d43f0 0xe1a06000
+data block_obj_26       0x03bb7650
+text block_name_26      Van Roswell
+site block_start_27     0x000fc228 0xe92d43f0 0xe1a04000
+data block_obj_27       0x03bb7798
+text block_name_27      Van Los Angeles
+site block_start_28     0x000fea28 0xe92d43f0 0xe1a04000
+data block_obj_28       0x03bb78c8
+text block_name_28      Van New Orleans
+site block_start_29     0x00100154 0xe92d43f0 0xe1a04000
+data block_obj_29       0x03bb79f8
+text block_name_29      Van Chicago
+site block_start_30     0x001018a4 0xe92d43f0 0xe1a04000
+data block_obj_30       0x03bb7b30
+text block_name_30      Van New York
+site block_start_32     0x000f7bfc 0xe92d41f0 0xe1a04000
+data block_obj_32       0x03bb7ee8
+text block_name_32      Lightning
+site block_start_39     0x000f87c4 0xe92d4010 0xe1a04000
+data block_obj_39       0x03bb8ab8
+text block_name_39      Super Modulator

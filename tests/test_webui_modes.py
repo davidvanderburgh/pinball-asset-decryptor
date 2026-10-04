@@ -1514,10 +1514,17 @@ def test_pad363_the_game_modes_lever_holds_off_the_ticked_modes(tmp_path, previe
 
 
 def test_pad363_a_title_with_no_block_lines_cannot_hold_its_modes_off(tmp_path, preview_on):
-    proj = _card_project(tmp_path / "gz", GODZILLA_CARD)
+    proj = _card_project(tmp_path / "bt", BEATLES_CARD)
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
         w.call("modes.new")
         st = w.state("modes")
         assert st["profile"]["game_modes"] == [] and st["dis"]["block"]
-        assert "has not found where Godzilla Pro 1.15 starts its own modes" in st["reasons"]["block"]
+        assert "has not found where The Beatles 1.29 starts its own modes" in st["reasons"]["block"]
+
+
+def test_pad363_the_hand_written_godzilla_profile_offers_its_ports_modes():
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    p = MP.profile("godzilla_pro_1_15")
+    assert dict((i, n) for i, n, _on in p.game_modes)[21] == "Jet Fighter Attack"
+    assert p.game_modes == MP.profile_from_port(MP.port_path(p)).game_modes

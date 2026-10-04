@@ -157,12 +157,12 @@ static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump
  * line a full table cannot take, is said in the boot log, never dropped silently. */
 #define PORT_MAX   131072
 #define PORT_CHUNK 4096
-#define N_SITES    128
-#define N_DATA     80
+#define N_SITES    256      /* PAD-363: a title's mode starts (Venom names 50) */
+#define N_DATA     224
 #define N_VALUES   128
 #define N_SHOTS    64
 #define N_ROLES    32
-#define N_TEXTS    32
+#define N_TEXTS    192      /* PAD-363: each mode a mode may hold off is named */
 #define N_SWITCHES 64       /* a build's playfield switches as shots (the switch drain): up to 64, one bit each */
 #define N_SWITCH_IDS 256      /* switch ids a `switch` line may name, and a switch_hit site may pass */
 
@@ -476,7 +476,7 @@ static int words_match(struct site *x)
 
 /* ---- the trampoline --------------------------------------------------------------------- */
 typedef void (*hook_fn)(unsigned *regs);      /* r0..r3, ip, lr, then stack arguments */
-#define TRAMP_WORDS 2048                /* PAD-363: 128 hooks (a title's mode starts take up to ~20) */
+#define TRAMP_WORDS 4096                /* PAD-363: 256 hooks (a title's mode starts take up to ~60) */
 static unsigned tramp[TRAMP_WORDS] __attribute__((aligned(4096)));
 static int tramp_used;
 
@@ -567,6 +567,19 @@ static int hook_veto(unsigned addr, veto_fn logger)
     p[0] = 0xe51ff004u;   /* ldr pc, [pc, #-4] */
     __builtin___clear_cache((char *)t, (char *)(t + 16));
     __builtin___clear_cache((char *)p, (char *)(p + 2));
+    return 1;
+}
+
+/* PAD-363: a veto whose logger is also told WHICH hook fired (r1 = n, 0-255): the spare nop at t[2] becomes
+ * `mov r1, #n`, so one logger serves many starts that carry no object to tell them apart (a plain-C title's) */
+typedef int (*veto_n_fn)(unsigned *regs, unsigned n);
+static int hook_veto_n(unsigned addr, veto_n_fn logger, unsigned n)
+{
+    unsigned *t;
+    if (n > 255 || !hook_veto(addr, (veto_fn)(void (*)(void))logger)) return 0;
+    t = tramp + (tramp_used - 1) * 16;
+    t[2] = 0xe3a01000u | n;   /* mov r1, #n */
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
     return 1;
 }
 
@@ -2917,40 +2930,81 @@ int pm_aside(void)
 /* ---- PAD-347 / PAD-363: a mode that keeps the game's own modes from starting ------------------------------
  * David (2026-10-04): "make isolated modes like our own custom ones that prevent the stock modes from
  * starting", then "extend this kind of thinking to other games ... the levers built in for the user". A rule of
- * the game's starts one of its modes by calling the mode's START, a virtual at the title's start slot (Godzilla 8,
- * Deadpool 13). The app reads every mode's start, static object and name out of the game program
- * (game_mode_blocks.py) into the port: `site block_start_<id>`, `data block_obj_<id>`, `text block_name_<id>`. The
- * runtime puts a veto on each named start (several modes may share one) and, while a mode of ours that asked
- * runs, refuses the start for the objects in that mode's list (`pm_block_list`, a mode file's `block_modes`) or,
- * when it gave none, the port's checked defaults (`value block_default`). A refused start never runs: the mode
- * never begins, and the rule that asked carries on. A multiball is never named (balls in a lock, a magnet:
- * PAD-353). Ids are 0-31. */
-#define BLOCK_IDS 32
-#define BLOCK_HOOKS 32
+ * the game's starts one of its modes by calling the mode's START: on a C++ rule title a virtual at the title's
+ * start slot (Godzilla 8, Deadpool 13), on a plain-C title the function that counts the mode's started audit.
+ * The app reads every mode's start (and on C++ titles its static object) and name out of the game program
+ * (game_mode_blocks.py) into the port: `site block_start_<id>`, `data block_obj_<id>` (C++ only), `text
+ * block_name_<id>`. The runtime puts a veto on each named start (several C++ modes may share one: the object
+ * tells them apart; a start with no object is one mode's own) and, while a mode of ours that asked runs, refuses
+ * the start for the ids in that mode's list (`pm_block_list`, a mode file's `block_modes`) or, when it gave none,
+ * the port's checked defaults (`text block_default <ids>`). A refused start never runs: the mode never begins,
+ * and the rule that asked carries on. A multiball is never named (balls in a lock, a magnet: PAD-353). Ids are
+ * 0-127 (D&D's map modes run to 70, Venom's to 91). */
+#define BLOCK_IDS 128
+#define BLOCK_WORDS (BLOCK_IDS / 32)
+#define BLOCK_HOOKS 128
 static const struct pm_mode *block_owner;
-static unsigned block_mask;              /* the ids the running block refuses */
-static unsigned block_list_mask;         /* the asking mode's own list, set before it blocks (0 = the defaults) */
+static unsigned block_mask[BLOCK_WORDS];      /* the ids the running block refuses */
+static unsigned block_list[BLOCK_WORDS];      /* the asking mode's own list, set before it blocks (none = the defaults) */
 static const struct pm_mode *block_list_by;
-static unsigned block_said;              /* the ids refused this hold, one bit each */
-static unsigned block_named;             /* the ids whose start is hooked, one bit each */
-static unsigned block_obj[BLOCK_IDS];    /* each id's object */
+static unsigned block_said[BLOCK_WORDS];      /* the ids refused this hold */
+static unsigned block_named[BLOCK_WORDS];     /* the ids whose start is hooked */
+static unsigned block_obj[BLOCK_IDS];         /* each id's object (0: its start is its own, a plain-C title's) */
+static unsigned char block_hook_of[BLOCK_IDS];/* each id's hook, + 1 */
 static unsigned block_hooked[BLOCK_HOOKS];
 static int block_n_hooked;
-static int block_battles;                /* the battle rule's shot handler is hooked (Godzilla) */
+static int block_battles;                     /* the battle rule's shot handler is hooked (Godzilla) */
 static unsigned block_battle_said;
-static char block_who[40];               /* the blocking mode's name, kept for the line when it has ended */
+static char block_who[40];                    /* the blocking mode's name, kept for the line when it has ended */
 
-static int on_block_start(unsigned *r)
+static int bm_has(const unsigned *m, unsigned id) { return id < BLOCK_IDS && (m[id >> 5] >> (id & 31) & 1u); }
+static void bm_set(unsigned *m, unsigned id) { if (id < BLOCK_IDS) m[id >> 5] |= 1u << (id & 31); }
+static int bm_count(const unsigned *m)
+{
+    int n = 0, i;
+    unsigned id;
+    for (i = 0; i < BLOCK_WORDS; i++)
+        for (id = m[i]; id; id &= id - 1) n++;
+    return n;
+}
+
+/* "21 23 70" (at most cap - 1 characters): the ids of m, for the log */
+static void bm_text(const unsigned *m, char *out, unsigned cap)
+{
+    unsigned id, n = 0;
+    out[0] = 0;
+    for (id = 0; id < BLOCK_IDS && n + 5 < cap; id++)
+        if (bm_has(m, id)) n += (unsigned)pm_snprintf(out + n, cap - n, n ? " %u" : "%u", id);
+    if (!n) pm_snprintf(out, cap, "none");
+}
+
+/* `text block_default 21 23`: the ids a mode that lists none holds off, kept to the named ones */
+static void block_defaults(unsigned *m)
+{
+    const char *s = pm_port_text("block_default");
+    int i;
+    for (i = 0; i < BLOCK_WORDS; i++) m[i] = 0;
+    while (s && *s) {
+        unsigned v = 0;
+        int digits = 0;
+        while (*s == ' ' || *s == ',' || *s == '\t') s++;
+        while (*s >= '0' && *s <= '9') v = v * 10 + (unsigned)(*s++ - '0'), digits++;
+        if (!digits) break;
+        if (bm_has(block_named, v)) bm_set(m, v);
+    }
+}
+
+static int on_block_start(unsigned *r, unsigned hook_n)
 {
     unsigned id;
-    if (!block_owner || running != block_owner || !pm_in_game() || !r[0]) return 0;
-    for (id = 0; id < BLOCK_IDS; id++)
-        if ((block_named & (1u << id)) && block_obj[id] == r[0]) break;
-    if (id >= BLOCK_IDS || !(block_mask & (1u << id))) return 0;   /* not one this mode holds off */
-    if (!(block_said & (1u << id))) {
+    if (!block_owner || running != block_owner || !pm_in_game()) return 0;
+    for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
+        if (block_hook_of[id] == hook_n + 1 && bm_has(block_named, id) && (!block_obj[id] || block_obj[id] == r[0])) break;
+    if (id >= BLOCK_IDS || !bm_has(block_mask, id)) return 0;   /* not one this mode holds off */
+    if (!bm_has(block_said, id)) {
         char key[24];
         const char *nm;
-        block_said |= 1u << id;
+        bm_set(block_said, id);
         pm_snprintf(key, sizeof key, "block_name_%u", id);
         nm = pm_port_text(key);
         say("block: the game's mode %u (%s) did not start - %s is running", id, nm ? nm : "?", block_who);
@@ -2958,16 +3012,21 @@ static int on_block_start(unsigned *r)
     return 1;                                  /* refused: the mode's start never runs */
 }
 
-int pm_block_list(unsigned mask)
+int pm_block_list(const unsigned char *ids, int n)
 {
+    int i;
     if (!(can & PM_CAN_BLOCK_GAME)) return 0;
-    block_list_mask = mask & block_named;
+    for (i = 0; i < BLOCK_WORDS; i++) block_list[i] = 0;
+    for (i = 0; ids && i < n; i++)
+        if (bm_has(block_named, ids[i])) bm_set(block_list, ids[i]);
     block_list_by = current;
     return 1;
 }
 
 int pm_block_game_modes(int on)
 {
+    char ids[200];
+    int i, own;
     if (!(can & PM_CAN_BLOCK_GAME)) return 0;
     if (!on) {
         if (block_owner && (!current || block_owner == current)) {
@@ -2978,14 +3037,15 @@ int pm_block_game_modes(int on)
     }
     if (!running || running != current) return 0;
     block_owner = current;
-    block_mask = (block_list_by == current && block_list_mask) ? block_list_mask
-               : ((unsigned)pm_port_value("block_default", 0) & block_named);
-    block_said = 0;
+    own = block_list_by == current && bm_count(block_list);
+    if (own) for (i = 0; i < BLOCK_WORDS; i++) block_mask[i] = block_list[i];
+    else block_defaults(block_mask);
+    for (i = 0; i < BLOCK_WORDS; i++) block_said[i] = 0;
     block_battle_said = 0;
     pm_snprintf(block_who, sizeof block_who, "%s", mode_name(current, "a mode"));
-    say("block: %s keeps the game's modes 0x%x (one bit each; %s) from starting while it runs%s",
-        block_who, block_mask,
-        block_list_by == current && block_list_mask ? "its own list" : "the port's checked defaults",
+    bm_text(block_mask, ids, sizeof ids);
+    say("block: %s keeps the game's modes %s (%s) from starting while it runs%s", block_who, ids,
+        own ? "its own list" : "the port's checked defaults",
         block_battles ? ", and the battle rule from lighting a battle or opening its select screen" : "");
     return 1;
 }
@@ -3022,10 +3082,10 @@ static void block_tick(void)
 /* from the constructor: a veto on each start the port names (once per distinct start), each id's object */
 static void block_arm(void)
 {
-    char name[24];
-    unsigned id, a;
+    char name[24], ids[200], dflt[200];
+    unsigned id, a, d[BLOCK_WORDS];
     int i, any = 0;
-    for (id = 0; id < BLOCK_IDS; id++) {
+    for (id = 0; id < BLOCK_IDS && !any; id++) {
         pm_snprintf(name, sizeof name, "block_start_%u", id);
         if (site(name)) any = 1;
     }
@@ -3036,28 +3096,33 @@ static void block_arm(void)
         a = fn(name);                            /* 0: not named, or its words do not match this build */
         if (!a) continue;
         pm_snprintf(name, sizeof name, "block_obj_%u", id);
-        if (!data(name)) { say("block: mode %u's start is named but not its object - left alone", id); continue; }
         for (i = 0; i < block_n_hooked && block_hooked[i] != a; i++) ;
         if (i == block_n_hooked) {
-            if (block_n_hooked >= BLOCK_HOOKS || !hook_veto(a, on_block_start)) {
+            if (block_n_hooked >= BLOCK_HOOKS || !hook_veto_n(a, on_block_start, (unsigned)block_n_hooked)) {
                 say("block: the start of the game's mode %u (0x%08x) could not be hooked", id, a);
                 continue;
             }
             block_hooked[block_n_hooked++] = a;
+        } else if (!data(name)) {                /* a shared start tells its modes apart by their objects */
+            say("block: mode %u shares a start but names no object - left alone", id);
+            continue;
         }
         block_obj[id] = data(name);
-        block_named |= 1u << id;
+        block_hook_of[id] = (unsigned char)(i + 1);
+        bm_set(block_named, id);
     }
     if (fn("block_battle_shots") && (pm_port_value("block_battle_lo", 0) | pm_port_value("block_battle_hi", 0)))
         block_battles = hook(fn("block_battle_shots"), on_battle_shots);
-    if (!block_named && !block_battles) {
+    if (!bm_count(block_named) && !block_battles) {
         say("block: off - none of the named starts could be hooked");
         return;
     }
     can |= PM_CAN_BLOCK_GAME;
-    say("block: on - a mode may keep these of the game's modes from starting: 0x%x (one bit each, %d start(s) "
-        "hooked; checked defaults 0x%x)%s", block_named, block_n_hooked,
-        (unsigned)pm_port_value("block_default", 0) & block_named,
+    bm_text(block_named, ids, sizeof ids);
+    block_defaults(d);
+    bm_text(d, dflt, sizeof dflt);
+    say("block: on - a mode may keep %d of the game's modes from starting: %s (%d start(s) hooked; checked "
+        "defaults %s)%s", bm_count(block_named), ids, block_n_hooked, dflt,
         block_battles ? "; the battle rule's shot handler is hooked (no battle lit, no select screen while it blocks)" : "");
 }
 

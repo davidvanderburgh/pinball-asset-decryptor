@@ -69,7 +69,7 @@ etc.? it would be good to have this generic logic (or at least the levers built 
   of the mode's object at the title's start slot (Godzilla 8, Deadpool 13; the vptr is the vtable + 8). The
   app's stock scanner already finds the slot and every mode's object, vtable and name, so
   `game_mode_blocks.py` (and `sdk/block_tool.py`) write one veto per mode into the port: `site
-  block_start_<id>`, `data block_obj_<id>`, `text block_name_<id>`, `value block_default`. Never a
+  block_start_<id>`, `data block_obj_<id>`, `text block_name_<id>`, `text block_default <ids>`. Never a
   multiball. Godzilla LE 1.16 and Deadpool LE 1.14 / Pro 1.16 carry the section so far.
 - **The lever.** A mode file's `game_modes stack|give_way|block` and `block_modes <ids>`; in the Modes tab,
   "The game's own modes > While it runs, the game's modes": may start (this one moves aside), may start and

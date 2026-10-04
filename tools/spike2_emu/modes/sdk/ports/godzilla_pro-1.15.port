@@ -498,3 +498,52 @@ switch 59   0x4000000000000000 Right flipper button
 # the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
 # a mode that lights its shots lights the button
 lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 1 Godzilla Multiball (multiball), 2 Mechagodzilla Multiball (multiball), 3 Bridge Attack Multiball (multiball), 4 Tank Attack Multiball (multiball), 5 Saucer Attack Multiball (multiball), 6 Battle vs Megalon and Gigan Multiball (multiball), 7 Planet X Multiball (multiball), 8 Monster Zero Victory Multiball (multiball), 9 Terror of Mechagodzilla (multiball), 10 King of the Monsters Multiball (multiball), 11 Monster Island Madness (multiball)
+site block_start_12     0x00083bc4 0xe92d47f0 0xe24dd010
+data block_obj_12       0x007a1fe0
+text block_name_12      Battle vs Ebirah
+site block_start_13     0x000a71f8 0xe92d4ff0 0xe1a05000
+data block_obj_13       0x007a20c0
+text block_name_13      Battle vs Titanosaurus
+site block_start_14     0x0008f5a0 0xe92d4ff0 0xe24dd014
+data block_obj_14       0x007a2178
+text block_name_14      Battle vs Gigan
+site block_start_15     0x0009bcfc 0xe92d4ff0 0xe24dd014
+data block_obj_15       0x007a22a8
+text block_name_15      Battle vs Megalon
+site block_start_16     0x00095a98 0xe92d47f0 0xe1a05000
+data block_obj_16       0x007a23c0
+text block_name_16      Battle vs King Ghidorah
+site block_start_17     0x00089d34 0xe92d43f0 0xe1a05000
+data block_obj_17       0x007a2470
+text block_name_17      Battle vs Ghidorah and Gigan
+site block_start_18     0x00101be4 0xe92d4ff0 0xe24dd014
+data block_obj_18       0x007a2528
+text block_name_18      Super Train
+site block_start_19     0x000ef42c 0xe92d43f0 0xe24dd014
+data block_obj_19       0x007a25e8
+text block_name_19      O2 Destroyer
+site block_start_20     0x000c4470 0xe92d43f0 0xe24dd00c
+data block_obj_20       0x007a2658
+text block_name_20      King of the Monsters
+site block_start_21     0x000b7f00 0xe92d4ff0 0xe1a05000
+data block_obj_21       0x007a2710
+text block_name_21      Jet Fighter Attack
+site block_start_22     0x000f2918 0xe92d40d0 0xe1a04000
+data block_obj_22       0x007a27f8
+text block_name_22      Planet X Hurry Up
+site block_start_23     0x0010c0e4 0xe92d4ff0 0xe24dd014
+data block_obj_23       0x007a2878
+text block_name_23      Tesla Strike
+site block_start_24     0x000e1a48 0xe92d4ff0 0xe24dd014
+data block_obj_24       0x007a2900
+text block_name_24      Monster Rampage
+site block_start_25     0x000b4d84 0xe92d43f0 0xe24dd014
+data block_obj_25       0x007a29e8
+text block_name_25      Hedorah
+site block_start_26     0x000e9d74 0xe92d43f0 0xe24dd014
+data block_obj_26       0x007a2a68
+text block_name_26      Monster Zero

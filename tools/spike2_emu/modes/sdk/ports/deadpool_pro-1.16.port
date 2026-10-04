@@ -341,4 +341,3 @@ text block_name_24      Berserker Rage
 site block_start_25     0x0010df74 0xe92d4010 0xe1a04000
 data block_obj_25       0x006b2608
 text block_name_25      Trex Hurryup
-value block_default         0x00000000

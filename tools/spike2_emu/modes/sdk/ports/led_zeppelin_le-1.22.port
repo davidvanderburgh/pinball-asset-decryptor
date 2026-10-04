@@ -610,3 +610,52 @@ site balls_in_play         0x00136fd8 0xe92d4010 0xe30146a4
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00137154 0xe92d41f0 0xe304e522
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 0 Mothership Multiball (multiball), 11 Uk 1971 Tour Multiball (multiball), 12 Earls Court Tour Multiball (multiball), 13 Us 1975 Tour Multiball (multiball), 14 Us 1977 Tour Multiball (multiball), 15 World Tour Multiball (multiball), 22 Top of the Charts Multiball (multiball), 23 Mystery Multiball (multiball), 27 Electric Magic Multiball (multiball), 28 Electric Magic Frenzy Multiball (multiball), 41 Zeppelin Multiball (multiball)
+site block_start_1      0x000ddbc8 0xe92d4038 0xe1a04000
+data block_obj_1        0x04259d34
+text block_name_1       Black Dog
+site block_start_2      0x000de41c 0xe92d4038 0xe1a04000
+data block_obj_2        0x04259e40
+text block_name_2       Communication Breakdown
+site block_start_3      0x000dec88 0xe92d4038 0xe1a04000
+data block_obj_3        0x04259f44
+text block_name_3       Good Times Bad Times
+site block_start_4      0x000df4f4 0xe92d4038 0xe1a04000
+data block_obj_4        0x0425a050
+text block_name_4       Immigrant Song
+site block_start_5      0x000e0638 0xe92d4038 0xe1a04000
+data block_obj_5        0x0425a154
+text block_name_5       Kashmir
+site block_start_6      0x000e1188 0xe92d4038 0xe1a04000
+data block_obj_6        0x0425a2ac
+text block_name_6       Ramble on
+site block_start_7      0x000e1a34 0xe92d4038 0xe1a04000
+data block_obj_7        0x0425a3d8
+text block_name_7       Rock and Roll
+site block_start_8      0x000e2030 0xe92d4038 0xe1a04000
+data block_obj_8        0x0425a4f0
+text block_name_8       The Song Remains the Same
+site block_start_9      0x000e295c 0xe92d4038 0xe1a04000
+data block_obj_9        0x0425a60c
+text block_name_9       Trampled Under Foot
+site block_start_10     0x000e3558 0xe92d4038 0xe1a04000
+data block_obj_10       0x0425a704
+text block_name_10      Whole Lotta Love
+site block_start_18     0x000ec60c 0xe5903000 0xe92d4070
+data block_obj_18       0x0425ad38
+text block_name_18      Tour Mode Usa 1975
+site block_start_19     0x000eb3e0 0xe5903000 0xe92d4070
+data block_obj_19       0x0425aebc
+text block_name_19      Tour Mode Usa 77
+site block_start_20     0x000e9fa4 0xe5903000 0xe92d4070
+data block_obj_20       0x0425b03c
+text block_name_20      Tour Mode Uk 1971
+site block_start_21     0x000e8f34 0xe5903000 0xe92d4070
+data block_obj_21       0x0425b1bc
+text block_name_21      Tour Mode Earls Court
+site block_start_26     0x000feda0 0xe30d17e4 0xe3a02b02
+data block_obj_26       0x0425b668
+text block_name_26      Electric Magic Pre Hurryup

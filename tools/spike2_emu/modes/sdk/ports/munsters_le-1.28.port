@@ -497,3 +497,28 @@ site balls_in_play         0x0037ec30 0xe92d4010 0xe3014eb0
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0037edac 0xe92d41f0 0xe302eb9e
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 7 Herman Multiball (multiball), 12 Raven Multiball (multiball), 14 Raven Restart (multiball), 21 Munster Madness Ready (multiball), 22 Munster Madness (multiball), 23 Munster Madness II (multiball), 24 Madness Hurry Up (not vetoable), 25 Midnight (multiball), 26 Couch Potato Multiball (multiball)
+site block_start_3      0x000949ec 0xe92d41f0 0xe1a04000
+data block_obj_3        0x005a33f8
+text block_name_3       Lily Mode
+site block_start_5      0x0007269c 0xe92d4038 0xe1a04000
+data block_obj_5        0x005a3500
+text block_name_5       Herman Hurry Up 1
+site block_start_6      0x00074b0c 0xe92d4010 0xe1a04000
+data block_obj_6        0x005a35a8
+text block_name_6       Herman Hurry Up 2
+site block_start_9      0x0006d1dc 0xe92d40f0 0xe1a04000
+data block_obj_9        0x005a37c4
+text block_name_9       Grandpa Multiball
+site block_start_10     0x0004d76c 0xe92d4370 0xe1a04000
+data block_obj_10       0x005a3850
+text block_name_10      Enlarge Ray
+site block_start_17     0x000dba10 0xe92d4ff0 0xe1a04000
+data block_obj_17       0x005a3bf8
+text block_name_17      Spot Mode
+site block_start_19     0x00047048 0xe92d40f0 0xe1a04000
+data block_obj_19       0x005a3d34
+text block_name_19      Eddie Mode

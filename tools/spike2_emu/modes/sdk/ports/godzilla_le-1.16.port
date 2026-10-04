@@ -582,4 +582,4 @@ text block_name_25      Hedorah
 site block_start_26     0x000ec400 0xe92d43f0 0xe24dd014
 data block_obj_26       0x007b5e78
 text block_name_26      Monster Zero
-value block_default         0x00a00000
+text block_default          21 23

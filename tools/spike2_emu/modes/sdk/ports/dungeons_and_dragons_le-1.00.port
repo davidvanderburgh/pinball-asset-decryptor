@@ -512,3 +512,94 @@ site balls_in_play         0x003b496c 0xe92d4010 0xe30c4f10
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x003b4ae8 0xe92d41f0 0xe30ce20a
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 13 Mimic Mania (multiball), 27 Dragon Mball (multiball), 29 Town Celebration (multiball), 30 Tavern Brawl (multiball), 35 Gel Cube Mball (multiball), 38 Final Ready (multiball), 41 Finish State (not vetoable), 52 Map Choosen Ritual (multiball), 65 Map Orange 2a (not vetoable), 66 Map Orange 2b (not vetoable), 68 Map Purple 1 Hurry Up (not vetoable)
+site block_start_12     0x001a63dc 0xe3a01000 0xe30c36e8
+data block_obj_12       0x007d8c40
+text block_name_12      Mimic Hurry Up
+site block_start_34     0x00092dbc 0xe92d4ff0 0xe1a04000
+data block_obj_34       0x007d6008
+text block_name_34      Dungeon Crawl
+site block_start_36     0x000e4100 0xe92d4010 0xe1a04000
+data block_obj_36       0x007d6ad8
+text block_name_36      Gel Cube Hurry Up
+site block_start_39     0x001eee0c 0xe92d4ff0 0xe1a05000
+data block_obj_39       0x007d91b0
+text block_name_39      Tinys Dice Game
+site block_start_42     0x00108764 0xe92d4010 0xe1a04000
+data block_obj_42       0x007d6b90
+text block_name_42      Map Arabel Hurry Up
+site block_start_43     0x00106794 0xe92d41f0 0xe1a04000
+data block_obj_43       0x007d6c68
+text block_name_43      Map Arabel
+site block_start_44     0x0010dbb4 0xe92d43f0 0xe1a05000
+data block_obj_44       0x007d6dd0
+text block_name_44      Map Kobold Town
+site block_start_45     0x00113e00 0xe92d43f0 0xe1a05000
+data block_obj_45       0x007d6f48
+text block_name_45      Map West Gate
+site block_start_46     0x0011b52c 0xe92d43f0 0xe1a05000
+data block_obj_46       0x007d7070
+text block_name_46      Map Greenest
+site block_start_47     0x001274b4 0xe92d43f8 0xe1a04000
+data block_obj_47       0x007d71f0
+text block_name_47      Map Dragonspear
+site block_start_48     0x00131588 0xe92d43f8 0xe1a04000
+data block_obj_48       0x007d7340
+text block_name_48      Map Gauntlgrym
+site block_start_49     0x001344f4 0xe92d43f0 0xe1a05000
+data block_obj_49       0x007d74b0
+text block_name_49      Map Dark Hold
+site block_start_50     0x0013eeb0 0xe92d43f0 0xe1a04000
+data block_obj_50       0x007d75b0
+text block_name_50      Map Undermountain
+site block_start_51     0x0014b900 0xe92d47f0 0xe1a04000
+data block_obj_51       0x007d7770
+text block_name_51      Map Rescue King
+site block_start_53     0x00159e54 0xe92d47f0 0xe1a04000
+data block_obj_53       0x007d79d8
+text block_name_53      Map Choosen Ritual Singleball
+site block_start_54     0x0015c974 0xe92d41f0 0xe1a06000
+data block_obj_54       0x007d7a90
+text block_name_54      Map Purple 1
+site block_start_55     0x00162f78 0xe92d43f0 0xe1a05000
+data block_obj_55       0x007d7b90
+text block_name_55      Map Purple 2
+site block_start_56     0x00169198 0xe92d43f0 0xe1a05000
+data block_obj_56       0x007d7cb0
+text block_name_56      Map Purple 3
+site block_start_57     0x0016ecc0 0xe92d4010 0xe1a04000
+data block_obj_57       0x007d7de0
+text block_name_57      Map White 1a
+site block_start_58     0x0016f2f0 0xe92d4010 0xe1a04000
+data block_obj_58       0x007d7ee0
+text block_name_58      Map White 1b
+site block_start_59     0x00172d74 0xe92d47f0 0xe1a04000
+data block_obj_59       0x007d7fe0
+text block_name_59      Map White 2
+site block_start_60     0x001776f0 0xe92d43f8 0xe1a04000
+data block_obj_60       0x007d8120
+text block_name_60      Map White 3
+site block_start_61     0x0017a4d4 0xe92d41f0 0xe1a04000
+data block_obj_61       0x007d8238
+text block_name_61      Map Blue 1
+site block_start_62     0x0017e890 0xe92d43f0 0xe1a05000
+data block_obj_62       0x007d8330
+text block_name_62      Map Blue 2
+site block_start_63     0x00183c50 0xe92d43f0 0xe1a05000
+data block_obj_63       0x007d8448
+text block_name_63      Map Blue 3
+site block_start_64     0x00187c50 0xe92d43f0 0xe1a05000
+data block_obj_64       0x007d8568
+text block_name_64      Map Orange 1
+site block_start_67     0x00194a20 0xe92d43f0 0xe1a05000
+data block_obj_67       0x007d8940
+text block_name_67      Map Orange 3
+site block_start_69     0x0014168c 0xe92d43f8 0xe1a05000
+data block_obj_69       0x007d8b78
+text block_name_69      Map Undermountain Hurry Up
+site block_start_70     0x001eab2c 0xe92d41f0 0xe1a04000
+data block_obj_70       0x007d8fb0
+text block_name_70      Traveling

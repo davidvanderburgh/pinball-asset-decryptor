@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "..", "..")))
 from pinball_decryptor.plugins.stern import game_mode_blocks as G  # noqa: E402
 
-OLD = re.compile(r"^(site block_start_\d+|data block_obj_\d+|text block_name_\d+|value block_default|"
+OLD = re.compile(r"^(site block_start_\d+|data block_obj_\d+|text block_name_\d+|value block_default|text block_default|"
                  r"data block_mode_table|value block_mode_count|value block_mode_ids|site stock_mode_start)\b")
 OLD_COMMENT = ("# PAD-347: a mode may keep the game's modes from starting", "# PAD-363: the game's own modes a mode")
 
@@ -45,6 +45,8 @@ def main(argv=None):
     raw = open(a.port, "rb").read().decode("utf-8")
     crlf = "\r\n" in raw
     lines = strip_old(raw.replace("\r\n", "\n").rstrip("\n").split("\n"))
+    while lines and not lines[-1].strip():
+        lines.pop()                              # the blank line before an earlier section
     names = {m.id: m.name for m in modes}
     left_out = ["%d %s (%s)" % (m.id, m.name, "multiball" if m.multiball else "not vetoable")
                 for m in modes if not m.blockable]

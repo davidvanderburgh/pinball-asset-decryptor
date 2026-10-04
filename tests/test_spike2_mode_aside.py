@@ -143,12 +143,22 @@ def _block_section(name):
     return port, named, objs
 
 
+def _default(name):
+    """The port's `text block_default <ids>`: the ids a mode that lists none holds off."""
+    for line in (SDK / "ports" / name).read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if parts[:2] == ["text", "block_default"]:
+            return [int(w) for w in parts[2:]]
+    return []
+
+
 def test_the_premium_port_names_every_non_multiball_mode_and_checks_two():
-    port, named, objs = _block_section("godzilla_le-1.16.port")
+    name = "godzilla_le-1.16.port"
+    port, named, objs = _block_section(name)
     assert set(named) == set(range(12, 27))                  # every mode but the multiballs 1-11
     assert named[21] == [0x000b98fc, 0xe92d4ff0, 0xe1a05000] and named[23] == [0x0010e91c, 0xe92d4ff0, 0xe24dd014]
     assert objs[21] == 0x007b5b20 and objs[23] == 0x007b5c88 and set(objs) == set(named)
-    assert port[("value", "block_default")] == [(1 << 21) | (1 << 23)]   # the two checked on a machine card
+    assert _default(name) == [21, 23]                        # the two checked on a machine card
     assert ("data", "block_mode_table") not in port and ("site", "stock_mode_start") not in port
 
 
@@ -156,7 +166,7 @@ def test_the_premium_port_names_every_non_multiball_mode_and_checks_two():
 def test_the_deadpool_ports_name_their_modes_and_check_none(name):
     port, named, objs = _block_section(name)
     assert len(named) == 18 and set(objs) == set(named)
-    assert port[("value", "block_default")] == [0]           # nothing checked on a machine yet
+    assert _default(name) == []                              # nothing checked on a machine yet
     assert not set(named) & {8, 9, 11, 12, 16, 17, 18}         # Deadpool's multiballs
 
 
@@ -205,7 +215,8 @@ def test_the_battle_rules_shot_handler_matches_the_game():
 BLOCK_STUBS = [(old, new) for old, new in SCREEN_STUBS] + [
     ("int pm_aside(void) { return in_game ? stock : 0; }",
      "int pm_aside(void) { return in_game ? stock : 0; }\n"
-     "int pm_block_list(unsigned m) { printf(\"BLOCKLIST 0x%x\\n\", m); return 1; }\n"
+     "int pm_block_list(const unsigned char *ids, int n) { int i; printf(\"BLOCKLIST\"); "
+     "for (i = 0; i < n; i++) printf(\" %u\", ids[i]); printf(\"%s\\n\", n ? \"\" : \" defaults\"); return 1; }\n"
      "int pm_block_game_modes(int on) { printf(\"BLOCK %d\\n\", on); return 1; }"),
 ]
 
@@ -220,7 +231,7 @@ def test_game_modes_block_lists_the_modes_and_holds_them_from_start_to_end(harne
                "tick", "30", "ball_end")
     assert "unknown key" not in out
     lines = out.splitlines()
-    i_list, i_on = lines.index("BLOCKLIST 0xa00000"), lines.index("BLOCK 1")
+    i_list, i_on = lines.index("BLOCKLIST 21 23"), lines.index("BLOCK 1")
     i_start = next(i for i, ln in enumerate(lines) if "RUSH START" in ln)
     i_end = next(i for i, ln in enumerate(lines) if "RUSH END" in ln)
     assert i_list < i_on < i_start and "BLOCK 0" in lines[i_start:i_end + 2]
@@ -264,6 +275,11 @@ def _title(name):
     return MP.profile_from_port(os.path.join(SDK, "ports", name))
 
 
+def MP_game_modes_of_a_port_without_block_lines():
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    return MP._game_modes(dict(site={"score_add": (1, 2, 3)}, data={}, value={}, text={}))
+
+
 def test_a_title_lists_the_modes_its_port_can_hold_off_and_which_are_checked():
     dp, gz = _title("deadpool_le-1.14.port"), _title("godzilla_le-1.16.port")
     rows = {i: (name, on) for i, name, on in dp.game_modes}
@@ -271,7 +287,7 @@ def test_a_title_lists_the_modes_its_port_can_hold_off_and_which_are_checked():
     assert rows[6] == rows[7] == ("Quest", False)                       # two of its modes share a name
     assert not set(rows) & {8, 9, 11, 12, 16, 17, 18}                    # never a multiball
     assert [i for i, _n, on in gz.game_modes if on] == [21, 23]          # the port's checked defaults
-    assert _title("godzilla_pro-1.15.port").game_modes == ()            # no block lines: nothing to offer
+    assert MP_game_modes_of_a_port_without_block_lines() == ()      # no block lines: nothing to offer
 
 
 def test_game_modes_validates_and_writes_only_what_differs_from_stack():
@@ -307,3 +323,45 @@ def test_a_mode_moved_to_another_title_keeps_the_modes_it_holds_off_by_name():
                        game_modes="block", block_modes=[21, 6, 24])
     out, _dropped = MP.retarget(spec, pro)
     assert out.block_modes == [3, 9, 11] and out.game_modes == "block"   # Berserker Rage is not on it
+
+
+# ---- PAD-363: every title - ids up to 127, plain-C starts, the words a veto can move ----------------------------
+def test_block_modes_takes_ids_up_to_127_and_refuses_past_it(harness_block, tmp_path):
+    out = _run(harness_block, tmp_path, RUSH + "game_modes block\nblock_modes 21 70 127 128\n", "shot", "0x08000000",
+               "tick", "5")
+    assert "BLOCKLIST 21 70 127" in out.splitlines()
+    assert "block_modes: 128 is not a mode id the runtime can hold off (0-127)" in out
+
+
+def test_a_block_with_no_list_asks_for_the_ports_defaults(harness_block, tmp_path):
+    out = _run(harness_block, tmp_path, RUSH + "game_modes block\n", "shot", "0x08000000", "tick", "5")
+    assert "BLOCKLIST defaults" in out.splitlines()
+
+
+def test_a_veto_moves_only_words_that_do_not_touch_the_pc():
+    from pinball_decryptor.plugins.stern.game_mode_blocks import movable
+    ok = [(0xe92d40f8, 0xe1a06002), (0xe3a01000, 0xe30c36e8), (0xe5902000, 0xe92d40f8), (0xe3a00000, 0xe12fff1e),
+          (0xe320f000, 0xe92d4010), (0xe30f3fff, 0xe92d4010)]
+    refused = [(0xea03df43, 0xe3a00000),      # D&D's Finish State: a branch
+               (0xe3a01000, 0xeaffffc8),      # D&D's Map Orange 2a: a tail call
+               (0xe59f3010, 0xe92d4010),      # a literal load
+               (0xe12fff1e, 0xe92d4010),      # returns at once: the second word is the next function's
+               (0xe28f0008, 0xe92d4010),      # an add from the pc
+               (0xe8bd8010, 0xe92d4010),      # a pop into the pc
+               (0xe12fff33, 0xe92d4010)]      # blx r3
+    assert all(movable(w) for w in ok) and not any(movable(w) for w in refused)
+
+
+def test_the_runtime_tells_a_plain_c_start_by_its_own_hook():
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    assert "t[2] = 0xe3a01000u | n;   /* mov r1, #n */" in src               # the hook's index reaches the logger
+    assert "(!block_obj[id] || block_obj[id] == r[0])" in src             # no object: the start is the mode's own
+    assert "#define BLOCK_IDS 128" in src
+
+
+def test_venom_names_its_modes_past_31_and_never_a_multiball():
+    rows = {i: n for i, n, _on in _title("venom_le-1.07.port").game_modes}
+    assert len(rows) == 55 and rows[90] == "Symbiote Mania" and rows[31] == "Mini Mode 13"
+    assert not {59, 60, 64, 69, 72, 87} & set(rows)                         # its multiballs
+    dd = {i: n for i, n, _on in _title("dungeons_and_dragons_le-1.00.port").game_modes}
+    assert dd[43] == "Map Arabel" and 41 not in dd and 65 not in dd        # Finish State, Orange 2a: not movable

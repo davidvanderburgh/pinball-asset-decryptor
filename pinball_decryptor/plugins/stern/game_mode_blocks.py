@@ -12,13 +12,43 @@ vtable. From that, each mode gets one veto site in the title's port:
 The runtime hooks each named start and refuses it, while a mode of ours that asked runs, for the objects
 that mode listed (`pm_block_list`, a mode file's `block_modes`) or the port's checked defaults (`value
 block_default`). A MULTIBALL is never written: balls sit in a lock or on a magnet while it starts (PAD-353),
-so a refused one could strand them. Ids from 32 up are left out (the runtime's masks are 32 bits).
+so a refused one could strand them. Ids from 128 up are left out (the runtime's masks are 128 bits), and so is a
+start whose first two words cannot be moved into the veto's trampoline (:func:`movable`).
 """
 
 from dataclasses import dataclass
 
-#: a start whose entry words load a literal cannot carry the runtime's veto (it moves the two words)
-_LITERAL = (0x0F7F0000, 0x051F0000)
+#: the game's mode ids the runtime can hold off (pad_mode_runtime.c BLOCK_IDS)
+MAX_ID = 128
+
+
+def movable(words):
+    """The veto moves a start's first two words into its trampoline and runs them there: neither may read or
+    write the pc (a branch, a literal load, an add from pc, a pop into pc), and the first may not end the
+    function (the second would be the next function's)."""
+    if len(words) != 2 or any(w is None for w in words):
+        return False
+    for i, w in enumerate(words):
+        cond, cls = w >> 28, (w >> 25) & 7
+        if cond == 0xF or cls == 5:                       # unconditional space; b / bl
+            return False
+        if w & 0x0FFFFFF0 == 0x012FFF10 or w & 0x0FFFFFF0 == 0x012FFF30:   # bx / blx register
+            if i == 0 or w & 0x20:
+                return False
+            continue                                      # a bx lr as the second word: a two-word function
+        if w & 0x0FFF0000 == 0x03200000:                  # nop and the other hints
+            continue
+        if cls in (0, 1, 2, 3):                           # data processing, load / store
+            rn, rd = (w >> 16) & 0xF, (w >> 12) & 0xF
+            if w & 0x0FB00000 == 0x03000000:              # movw / movt: bits 16-19 are the immediate's
+                rn = 0
+            if rn == 15 or rd == 15:
+                return False
+            if cls == 0 and (w & 0xF) == 15:
+                return False
+        if cls == 4 and ((w >> 16) & 0xF == 15 or (w & 0x00108000) == 0x00108000):   # ldm into pc / from pc
+            return False
+    return True
 
 
 @dataclass
@@ -34,8 +64,7 @@ class GameMode:
 
     @property
     def blockable(self):
-        return (not self.multiball and 0 <= self.id < 32 and self.start and self.words[0] is not None
-                and not any((w & _LITERAL[0]) == _LITERAL[1] for w in self.words))
+        return not self.multiball and 0 <= self.id < MAX_ID and bool(self.start) and movable(self.words)
 
 
 def read_modes(elf):
@@ -69,19 +98,21 @@ def _word(prog, va):
 
 def port_lines(modes, defaults=(), header=None):
     """The port's block section (lines) for *modes*; *defaults* = the ids a mode blocks when it lists none
-    (only modes checked on that title)."""
+    (only modes checked on that title), as `text block_default <ids>`."""
     out = ["# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the",
            "# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball."]
     if header:
         out += ["# " + h for h in header]
-    mask = 0
+    on = []
     for m in modes:
         if not m.blockable:
             continue
         out.append("site block_start_%-6d 0x%08x 0x%08x 0x%08x" % (m.id, m.start, m.words[0], m.words[1]))
-        out.append("data block_obj_%-8d 0x%08x" % (m.id, m.obj))
+        if m.obj:
+            out.append("data block_obj_%-8d 0x%08x" % (m.id, m.obj))
         out.append("text block_name_%-7d %s" % (m.id, m.name))
         if m.id in defaults:
-            mask |= 1 << m.id
-    out.append("value block_default         0x%08x" % mask)
+            on.append(m.id)
+    if on:
+        out.append("text block_default          %s" % " ".join(str(i) for i in on))
     return out

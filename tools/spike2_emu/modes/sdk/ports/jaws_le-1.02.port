@@ -361,3 +361,70 @@ site balls_in_play         0x0055ed00 0xe92d4010 0xe30d48c0
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0055ee7c 0xe92d41f0 0xe304ed0e
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 1 Jaws Multiball 1 (multiball), 2 Jaws Multiball 2 (multiball), 3 Jaws Multiball 3 (multiball), 4 Bounty Hunt Multiball (multiball), 5 Cast N Catch Super (multiball), 6 Celebration Multiball (multiball), 7 Night Search Multiball (multiball), 8 Victory Combos Multiball (multiball), 9 Rescue Multiball (multiball), 10 Search Multiball (multiball), 11 Great White Multiball (multiball), 26 Bounty Hunt (not vetoable), 33 Jaws the Revenge (multiball), 35 Broken Shark Victory (multiball), 1000 Jaws (not vetoable), 1001 Encounter (not vetoable)
+site block_start_12     0x000acd94 0xe92d4ff0 0xe24dd014
+data block_obj_12       0x0086ae80
+text block_name_12      Cast N Catch 1
+site block_start_13     0x000d5468 0xe590c0f4 0xe30733c0
+data block_obj_13       0x0086af28
+text block_name_13      Encounter Night Swim
+site block_start_14     0x000cb4b4 0xe5901090 0xe3a03000
+data block_obj_14       0x0086b048
+text block_name_14      Encounter Beach Panic
+site block_start_15     0x000f276c 0xe59010d4 0xe30a2120
+data block_obj_15       0x0086b110
+text block_name_15      Encounter Scars
+site block_start_16     0x000de950 0xe92d4ff0 0xe24dd014
+data block_obj_16       0x0086b228
+text block_name_16      Encounter Pond Attack
+site block_start_17     0x000e752c 0xe59030d4 0xe3a02001
+data block_obj_17       0x0086b300
+text block_name_17      Encounter Raft Attack
+site block_start_18     0x000f666c 0xe92d4ff0 0xe24dd024
+data block_obj_18       0x0086b3e8
+text block_name_18      Feeding Frenzy
+site block_start_19     0x001af1d0 0xe92d4ff0 0xe24dd014
+data block_obj_19       0x0086b4a0
+text block_name_19      Super Life Ring
+site block_start_20     0x001ba354 0xe92d4ff0 0xe24dd014
+data block_obj_20       0x0086b538
+text block_name_20      Shark Combos
+site block_start_21     0x001a61e4 0xe92d4ff0 0xe304b2b4
+data block_obj_21       0x0086b780
+text block_name_21      Say Ah
+site block_start_22     0x00195e70 0xe92d4ff0 0xe24dd01c
+data block_obj_22       0x0086b820
+text block_name_22      Smile You Sonofa
+site block_start_23     0x00167d04 0xe5901000 0xe30e21c0
+data block_obj_23       0x0086b8f8
+text block_name_23      Rescue Hurry Up
+site block_start_24     0x001255c4 0xe92d4038 0xe1a04000
+data block_obj_24       0x0086b9b0
+text block_name_24      Jaws Multiball 3 Hurry Up
+site block_start_25     0x0019ec38 0xe5901000 0xe3042240
+data block_obj_25       0x0086ba58
+text block_name_25      Smile You Sonofa Hurry Up
+site block_start_27     0x001646d8 0xe92d4ff0 0xe24dd014
+data block_obj_27       0x0086bd38
+text block_name_27      Quints Challenge
+site block_start_28     0x00181f80 0xe590c000 0xe30c26c0
+data block_obj_28       0x0086be18
+text block_name_28      Search Singleball
+site block_start_29     0x001a25b8 0xe92d4ff0 0xe24dd01c
+data block_obj_29       0x0086bec8
+text block_name_29      Super Buoys
+site block_start_30     0x001b3f1c 0xe92d4ff0 0xe3a03000
+data block_obj_30       0x0086bf60
+text block_name_30      Super Spinner
+site block_start_31     0x0018d744 0xe92d4ff0 0xe24dd01c
+data block_obj_31       0x0086c000
+text block_name_31      Shark Ramps
+site block_start_32     0x00101dcc 0xe92d4ff0 0xe24dd01c
+data block_obj_32       0x0086c090
+text block_name_32      Fourth of July
+site block_start_34     0x000a2ae8 0xe92d43f0 0xe24dd00c
+data block_obj_34       0x0086c4b0
+text block_name_34      Broken Shark

@@ -33,6 +33,7 @@ static const char *const MODE_DIRS[] = { "/usr/local/padmode/", "/dump/" };
 #define CALLOUT_AT_MAX  8
 #define POLL_TICKS      30          /* files and triggers, twice a second */
 #define SHOT_AWARD_MAX  16          /* shot_award lines a file may carry (item 141) */
+#define BLOCK_LIST_MAX  128         /* PAD-363: the game's mode ids a `block_modes` line may list */
 
 #define ALSO_MAX 3                  /* PAD-227: trigger_also lines a mode may have */
 #define SEQ_MAX 8                   /* PAD-314: trigger_seq lines a mode may have (shots in order) */
@@ -57,7 +58,8 @@ struct mode_cfg {
     int stack_no;                   /* item 140: `stack no` - never beside the game's battle or multiball */
     int aside_keep;                 /* PAD-347: `aside keep` - its screen stays up beside a game mode */
     int game_modes;                 /* PAD-363: GM_STACK (the default), GM_GIVE_WAY or GM_BLOCK */
-    unsigned block_mask;            /* PAD-363: `block_modes` - the game's mode ids it holds off (0 = the port's) */
+    unsigned char block_ids[BLOCK_LIST_MAX];   /* PAD-363: `block_modes` - the game's mode ids it holds off */
+    int block_n;                    /* ... how many (0 = the port's checked defaults) */
     /* item 141: what each shot pays, a shot that ends the mode, and the award ladder */
     uint64_t sa_bits[SHOT_AWARD_MAX], sa_points[SHOT_AWARD_MAX];
     unsigned n_sa;
@@ -279,14 +281,14 @@ static int block_modes_line(struct slot *M, const char *line)
     const char *a = key_is(line, "block_modes");
     unsigned v;
     if (!a) return 0;
-    cfg.block_mask = 0;
+    cfg.block_n = 0;
     while (*a) {
         while (*a == ' ' || *a == '\t' || *a == ',') a++;
         if (!*a) break;
-        if (*a < '0' || *a > '9') { pm_log("block_modes takes the game's mode ids, 0-31 - \"%.40s\" ignored", a); break; }
-        for (v = 0; *a >= '0' && *a <= '9'; a++) v = v * 10 + (unsigned)(*a - '0');
-        if (v < 32) cfg.block_mask |= 1u << v;
-        else pm_log("block_modes: %u is not a mode id the runtime can hold off (0-31)", v);
+        if (*a < '0' || *a > '9') { pm_log("block_modes takes the game's mode ids, 0-127 - \"%.40s\" ignored", a); break; }
+        for (v = 0; *a >= '0' && *a <= '9' && v < 100000; a++) v = v * 10 + (unsigned)(*a - '0');
+        if (v > 127) pm_log("block_modes: %u is not a mode id the runtime can hold off (0-127)", v);
+        else if (cfg.block_n < BLOCK_LIST_MAX) cfg.block_ids[cfg.block_n++] = (unsigned char)v;
     }
     return 1;
 }
@@ -1819,7 +1821,7 @@ static void mode_start(struct slot *M, const char *why)
     if (!pm_begin()) return;                 /* a mode written in C is running */
     pm_running_name(cfg.name);               /* PAD-363: the runtime's lines say this mode, not "mode" */
     if (cfg.game_modes == GM_BLOCK) {        /* PAD-363: the listed game's modes cannot start while it runs */
-        pm_block_list(cfg.block_mask);
+        pm_block_list(cfg.block_ids, cfg.block_n);
         if (!pm_block_game_modes(1)) pm_log("%s: this game's port cannot hold its modes off - it gives way to them", cfg.name);
     }
     run.mball_on = run.mball_wait = 0;

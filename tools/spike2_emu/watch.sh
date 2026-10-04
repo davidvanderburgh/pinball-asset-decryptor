@@ -451,10 +451,13 @@ export PAD_GAME="$GAME"
 # renderer is busy), and its frames change every other swap here too (eglshim.c, item 27's `0x60 1x60`).
 # At this rig's old 60 Hz swap the game built every frame and a mode's full-screen clip that lost whole
 # frames to the HUD on the machine looked clean here. So a Godzilla run swaps at the machine's cadence
-# (eglshim.c PAD_SWAP_VBLANKS). Other titles keep 60 Hz until a machine of theirs is measured; the
-# mode runtime logs a machine's rate once a minute ("frames: the game built ...").
+# (eglshim.c PAD_SWAP_VBLANKS). The mode runtime logs a machine's rate once a minute ("frames: the
+# game built ...").
+# PAD-357: EVERY Spike 2 title, not only Godzilla. At the 60 Hz swap a 30 fps video frame was held for
+# one swap, then two, alternately - visible judder on a user's slower PC (i5-3570K, WSL2) - and every
+# Spike 2 title plays its video at that rate on the same hardware. A caller who names a value still wins.
 if [ -z "${PAD_SWAP_VBLANKS:-}" ]; then
-    case "$GAME" in godzilla_*) export PAD_SWAP_VBLANKS=2 ;; esac
+    export PAD_SWAP_VBLANKS=2
 fi
 [ -n "${PAD_SWAP_VBLANKS:-}" ] && echo "[watch] a swap takes ${PAD_SWAP_VBLANKS} refresh(es) (the machine's frame cadence)"
 

@@ -2874,7 +2874,7 @@ hand-over's draw would then be refused as a second copy): the hand-over draws it
 
 **The emulator at the machine's cadence:** `PAD_SWAP_VBLANKS=2` makes a swap take two refreshes, and
 `PAD_REFRESH_HZ` sets the panel's own rate (a real panel is not locked to the game's 60 Hz timer); a
-Godzilla run defaults to 2 (watch.sh). Measured 2026-10-01 on Premium 1.16 at `PAD_SWAP_VBLANKS=2
+Spike 2 run defaults to 2 (watch.sh; Godzilla only until PAD-357). Measured 2026-10-01 on Premium 1.16 at `PAD_SWAP_VBLANKS=2
 PAD_REFRESH_HZ=58` (runs abA/abB, abAfg/abBfg3, abBc3 in C:\tmp\PAD-301): the old route built one frame
 per full-screen clip and that frame went out without the clip; the hand-over built 87-305 frames per
 clip, every one with it. With the Maser's award up when MASER BARRAGE started, the old runtime showed both

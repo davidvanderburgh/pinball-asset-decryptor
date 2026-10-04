@@ -15,6 +15,10 @@ THE PROGRAM (``blocks.json``)::
       "name": "RAMP FRENZY",
       "seconds": 30,              the mode's clock; 0 = no clock (it runs until a block ends it)
       "ends_on_drain": true,      the ball draining ends it
+      "game_modes": "stack",      PAD-373: while it runs, the game's own modes may start ("stack"), may start
+                                  and end it ("give_way": it also starts only while none runs), or cannot
+                                  start ("block": as give_way, and the ones in block_modes are held off)
+      "block_modes": [21, 23],    the title's mode ids it holds off ([] = the port's checked defaults)
       "vars": [{"name": "combo", "reset": "ball"}],   per player; reset "ball" | "mode" | "game"
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
@@ -31,6 +35,13 @@ the seconds left, a sum), a multiball, a line in the log. Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running.
+
+PAD-373: what it does about the game's own modes is the form's choice (PAD-363): they may start
+(``stack``), it gives way (``give_way``: it starts only while none of them runs - a Start the mode
+then waits, and the next one starts it - and one of them beginning ends it at once), or it holds
+them off (``block``: as give_way, and while it runs the ones in ``block_modes``, or the port's
+checked defaults, cannot start: ``pm_block_game_modes``), as the SDK's examples do with the kit's
+kit_wait_game / kit_isolate_list / kit_game_began.
 
 The C is the SDK's template (``sdk/template_mode.c``) in shape: static state, never blocking, a
 0 from the game is carried on past, ``pm_begin`` / ``pm_end`` around a run, and the folder's own
@@ -81,6 +92,9 @@ NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "pla
 BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock")
 OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
 CMPS = {"<": "<", "<=": "<=", "=": "==", "!=": "!=", ">=": ">=", ">": ">"}
+#: PAD-373: what the mode does about the game's own modes while it runs (the form's choice, PAD-363)
+GAME_MODES = {"stack": "may start", "give_way": "may start, and end this one", "block": "cannot start"}
+BLOCK_ID_MAX = 127
 VAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _]{0,23}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -125,6 +139,11 @@ def normalize(data):
         out["seconds"] = 30
     out["ends_on_drain"] = bool(out.get("ends_on_drain", True))
     out["screen"] = bool(out.get("screen", False))
+    if out.get("game_modes") not in GAME_MODES:          # PAD-373
+        out["game_modes"] = "stack"
+    ids = out.get("block_modes") if isinstance(out.get("block_modes"), list) else []
+    out["block_modes"] = sorted({i for i in ids if isinstance(i, int) and not isinstance(i, bool)
+                                 and 0 <= i <= BLOCK_ID_MAX})
     out["vars"] = [v for v in (out.get("vars") or []) if isinstance(v, dict)]
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
     for s in out["scripts"]:
@@ -583,7 +602,7 @@ class _Gen:
                 continue
             op = b.get("op")
             if op == "start_mode":
-                out.append(pad + 'start("a block");')
+                out.append(pad + 'start("a block", 1);')
             elif op == "end_mode":
                 out.append(pad + 'end("a block");')
             elif op == "score":
@@ -637,7 +656,8 @@ class _Gen:
                     save = max(0, min(60, int(b.get("save", 0))))
                 except (TypeError, ValueError):
                     balls, save = 2, 0
-                out.append(pad + "if (run.on) pm_multiball_start(%du, %du);" % (balls, save))
+                # PAD-373: its own multiball is not one of the game's modes beginning
+                out.append(pad + "if (run.on && pm_multiball_start(%du, %du)) run.own_mball = 1;" % (balls, save))
             elif op == "log":
                 out.append(pad + 'pm_log("%%s", %s);' % _c_str(str(b.get("text") or "")[:TEXT_MAX]))
         return out
@@ -722,6 +742,16 @@ def to_c(program, slug):
     L.append("#define CLOCK_MAX        %d         /* the most seconds the clock holds */" % SECONDS_MAX)
     L.append("#define UNUSED __attribute__((unused))   /* a helper the blocks may not call */")
     L.append("")
+    gm = program["game_modes"]                           # PAD-373: as a form mode's (PAD-363)
+    ids = program["block_modes"]
+    L.append("/* While it runs, the game's own modes %s. */" % GAME_MODES[gm])
+    L.append("#define GAME_MODES       %d          /* 0 = they may start, 1 = it starts only while none runs and one"
+             % {"stack": 0, "give_way": 1, "block": 2}[gm])
+    L.append("                                   * starting ends it, 2 = as 1, and the ones in BLOCK_IDS cannot start */")
+    L.append("UNUSED static const unsigned char BLOCK_IDS[%d] = {%s};   /* the game's mode ids; none = the port's defaults */"
+             % (max(1, len(ids)), ", ".join(str(i) for i in ids) or "0"))
+    L.append("#define BLOCK_N          %d" % len(ids))
+    L.append("")
     L.append("/* The screen a build added for this mode (its folder is \"%s\"). Not there = no screen. */" % slug)
     L.append('#define SCREEN_NODE  "PadMode_%s_Screen"' % slug)
     L.append('#define SCREEN_TEXT  "PadMode_%s_Screen.PadMode_%s_Screen_Words"' % (slug, slug))
@@ -746,6 +776,7 @@ def to_c(program, slug):
     L.append("")
     L.append("static struct {")
     L.append("    int on;")
+    L.append("    int own_mball;                    /* a Multiball block served balls: not the game's multiball */")
     L.append("    unsigned player, ticks_left, seconds_shown, elapsed, shots;")
     L.append("    uint64_t total;")
     L.append("} run;")
@@ -830,7 +861,17 @@ def to_c(program, slug):
     L.append("    clock_to(seconds * TICKS_PER_SECOND);")
     L.append("}")
     L.append("")
-    L.append("static void start(const char *why);")
+    L.append("/* What of the game's own is running (a battle, a multiball, one of its timed modes), or 0. A port that")
+    L.append(" * cannot tell answers none. */")
+    L.append("UNUSED static const char *game_busy(void)")
+    L.append("{")
+    L.append("    int k = pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY);")
+    L.append("    if (k > 0) return pm_stock_mode_what((unsigned)k);")
+    L.append("    if (pm_can(PM_CAN_MULTIBALL) && pm_balls_in_play() >= 2) return \"a multiball\";")
+    L.append("    return 0;")
+    L.append("}")
+    L.append("")
+    L.append("static void start(const char *why, int counted);")
     L.append("static void end(const char *why);")
     L.append("")
     L.append("static void on_mode_start(void)")
@@ -843,10 +884,33 @@ def to_c(program, slug):
     L.extend(scripts_of("mode_end") or ["    /* no script */"])
     L.append("}")
     L.append("")
-    L.append("static void start(const char *why)")
+    L.append("/* counted: a block asked (the tab's Start mode now does not wait for the game's modes) */")
+    L.append("static void start(const char *why, int counted)")
     L.append("{")
     L.append("    if (run.on || !pm_in_game()) return;")
+    L.append("    if (GAME_MODES && counted) {      /* it waits: the next Start the mode starts it */")
+    L.append("        static unsigned long said_at;")
+    L.append("        const char *what = game_busy();")
+    L.append("        if (what) {")
+    L.append("            if (!said_at || pm_ms() - said_at >= 10000)")
+    L.append('                pm_log("not started (%s): %s is running - still ready: the next Start the mode starts it", why, what);')
+    L.append("            said_at = pm_ms() ? pm_ms() : 1;")
+    L.append("            return;")
+    L.append("        }")
+    L.append("    }")
     L.append("    if (!pm_begin()) return;          /* another of our modes is running */")
+    L.append("    pm_running_name(MODE_NAME);")
+    L.append("    if (GAME_MODES == 2) {            /* the game's modes it holds off cannot start while it runs */")
+    L.append("        pm_block_list(BLOCK_IDS, BLOCK_N);")
+    L.append("        if (pm_block_game_modes(1))")
+    L.append("            pm_log(\"isolated: the game's modes it holds off cannot start while it runs (any other "
+             "starting ends it)\");")
+    L.append("        else")
+    L.append("            pm_log(\"isolated: this port cannot hold the game's modes off - it gives way to them\");")
+    L.append("    } else if (GAME_MODES == 1) {")
+    L.append("        pm_log(\"isolated: gives way - one of the game's modes starting ends it\");")
+    L.append("    }")
+    L.append("    run.own_mball = 0;")
     L.append("    run.on = 1;")
     L.append("    run.player = pm_player();")
     L.append("    run.ticks_left = RUN_SECONDS * TICKS_PER_SECOND;")
@@ -876,6 +940,7 @@ def to_c(program, slug):
     L.append('        words("TOTAL", (long long)run.total, 1);')
     L.append("        hide_ticks = 3 * TICKS_PER_SECOND;")
     L.append("    }")
+    L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
     L.append("    pm_end();")
     L.append('    pm_log("END (%s): %u scores, total %llu", why, run.shots, (unsigned long long)run.total);')
     L.append("}")
@@ -941,7 +1006,7 @@ def to_c(program, slug):
     L.append("    }")
     L.append("    was_in_game = in_game;")
     L.append("    if (++poll % 30 == 0) {            /* the tab's Start mode now / End mode */")
-    L.append('        if (pm_trigger("%s.start")) start("trigger file");' % slug)
+    L.append('        if (pm_trigger("%s.start")) start("trigger file", 0);' % slug)
     L.append('        if (pm_trigger("%s.stop")) end("trigger file");' % slug)
     L.append("    }")
     L.append("    if (hide_ticks && --hide_ticks == 0 && !run.on && screen) pm_show(screen, 0);")
@@ -949,6 +1014,13 @@ def to_c(program, slug):
     L.append("    if (!run.on) return;")
     L.append("    if (!in_game || pm_player() != run.player) {")
     L.append('        end("the game moved on");')
+    L.append("        return;")
+    L.append("    }")
+    L.append("    if (run.own_mball && pm_balls_in_play() < 2) run.own_mball = 0;   /* its multiball is over */")
+    L.append("    if (GAME_MODES && pm_aside() && !(run.own_mball && pm_aside() == (int)PM_STOCK_MULTIBALL)) {")
+    L.append("        end(\"the game's own mode began\");   /* its screen goes at once, as a tilt's */")
+    L.append("        hide_ticks = 0;")
+    L.append("        if (screen) pm_show(screen, 0);")
     L.append("        return;")
     L.append("    }")
     L.append("    run.elapsed++;")

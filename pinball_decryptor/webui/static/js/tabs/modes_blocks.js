@@ -33,6 +33,9 @@ const TIP = {
   stock: "One of the game's own modes, battles or multiballs is running.",
   addTime: "Adds this many seconds to the mode's clock (less than 0 takes some off). Any value: a number, a variable, a sum.",
   setTime: "Puts the mode's clock at this many seconds, up or down (0 = time is up). Put up, a When that many seconds are left does not run again.",
+  gameModes: "May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Cannot start: as End this one, and while it runs the modes ticked below cannot start at all. A multiball of the game's is never held off: it starts, and this mode ends. Its own Multiball block does not end it.",
+  blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
+  blockLast: "One at least: to let them all start, choose \"may start\" above.",
 };
 
 // ------------------------------------------------------------------ the blocks there are
@@ -341,6 +344,39 @@ function Variables({ prog, ed }) {
   </div>`;
 }
 
+// PAD-373: what the mode does about the game's own modes, as the form asks it (PAD-363). No ticks
+// saved = the title's usual ones, shown ticked; the last tick stays, so the list never goes back to
+// those by itself.
+function GameModes({ prog, ed }) {
+  const ch = ed.ch;
+  const gm = prog.game_modes || "stack";
+  const rows = ch.game_modes || [];
+  const on = new Set(prog.block_modes && prog.block_modes.length ? prog.block_modes : (ch.game_modes_default || []));
+  const opts = [{ value: "stack", label: "may start (this one carries on)" },
+    { value: "give_way", label: "may start, and end this one", disabled: !!ch.give_way_off && gm !== "give_way" },
+    { value: "block", label: "cannot start (the ones ticked)", disabled: !!ch.block_off && gm !== "block" }];
+  const tick = (id, v) => {
+    const next = new Set(on);
+    if (v) next.add(id); else next.delete(id);
+    ed.set(["block_modes"], [...next].sort((a, b) => a - b));
+  };
+  const why = gm === "give_way" ? ch.give_way_off : gm === "block" ? ch.block_off : "";
+  return html`<div class="bk-gamemodes">
+    <div class="row wrap">
+      <span class="lbl" ...${tip(TIP.gameModes)}>While it runs, the game's modes</span>
+      <${Select} sm value=${gm} options=${opts} width=${260} title=${TIP.gameModes} onChange=${(v) => ed.set(["game_modes"], v)} />
+    </div>
+    ${gm === "block" && rows.length ? html`<div class="modes-shots">
+      ${rows.map((m) => {
+        const last = on.size === 1 && on.has(m.id);
+        return html`<${Check} key=${"b" + m.id} label=${m.label} checked=${on.has(m.id)} disabled=${last}
+          title=${last ? TIP.blockLast : TIP.blockPick} onChange=${(v) => tick(m.id, v)} />`;
+      })}
+    </div>` : null}
+    ${why ? html`<div class="small muted">${why}</div>` : null}
+  </div>`;
+}
+
 export function BlocksEditor({ s, c }) {
   const b = c.blocks || {};
   const [prog, setProg] = useState(() => clone(b.program || {}));
@@ -428,6 +464,7 @@ export function BlocksEditor({ s, c }) {
         <span class="sp"></span>
         <span class="small muted">${saving ? "Saving…" : "Saved · Try it builds it in"}</span>
       </div>
+      <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />
       ${(b.notes || []).map((t) => html`<${Note} key=${t}>${t}<//>`)}
       <div class="bk-scripts">

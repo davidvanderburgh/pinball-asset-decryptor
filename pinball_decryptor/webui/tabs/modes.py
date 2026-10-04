@@ -2245,8 +2245,18 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             roles = {getattr(p, "callout_ten_seconds", None), getattr(p, "callout_time_up", None)}
             callouts += [{"id": number, "label": "%s (%d)" % (label, number)}
                          for label, number in MP.callout_choices(p) if number and number not in roles]
+        # PAD-373: the form's choice about the game's own modes, and the title's modes to tick
+        gms = self._game_mode_rows(p) if p is not None else []
+        stack_why = p.why_not("stack") if p is not None else ""
         return {"shots": shots, "events": events, "callouts": callouts,
-                "title": p.label if p is not None else ""}
+                "title": p.label if p is not None else "",
+                "game_modes": gms,
+                "game_modes_default": [i for i, _n, on in getattr(p, "game_modes", ()) if on] if p is not None else [],
+                "give_way_off": ("Not on this game: " + stack_why) if stack_why else "",
+                "block_off": ("" if gms or p is None else
+                              "Not on this game yet: the app has not found where %s starts its own modes, so a "
+                              "mode cannot keep them from starting; set to hold them off, it gives way to them "
+                              "instead." % p.label)}
 
     def _blocks_check(self, program):
         """``(problems, notes)`` of a program on the shown title (its shots and events)."""

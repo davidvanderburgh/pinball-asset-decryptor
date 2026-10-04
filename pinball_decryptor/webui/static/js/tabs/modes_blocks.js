@@ -8,18 +8,26 @@
 // the C the program makes (a code mode, so Try it and Write build it like any other) and says
 // what is wrong with it. This page edits its own copy of the program and sends the whole of it
 // after each change (modes.blocks_save), a moment after the person stops.
+//
+// PAD-374: a mode's OWN clips and sounds sit above its scripts (picked from files, copied into its
+// folder by modes.blocks_pick), each with the name its Play a clip / Play a sound blocks call it by.
 
 import { html, useEffect, useRef, useState, Button, Field, Select, Check, Note, tip, cx, call,
          openMenu } from "../core/ui.js";
+import { PlayButton } from "./modes_dialogs.js";
 
 const WHEN = [["any", "any time"], ["idle", "while it is not running"], ["running", "while it runs"]];
 const RESETS = [["ball", "each ball"], ["mode", "each time it starts"], ["game", "each game"]];
 const SHARED_RESETS = RESETS.filter(([r]) => r !== "mode");
 // MODE_SDK.md "Display priority": a mode's 180 lets jackpots, starts and the tilt warning through
-const PRIORITIES = [[0, "none"], [180, "a mode's (180)"], [190, "a wizard mode's (190)"]];
-const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"]];
+const DISPLAY_PRIORITIES = [[0, "none"], [180, "a mode's (180)"], [190, "a wizard mode's (190)"]];
+const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"],
+  ["hurry", "blinking faster"]];
+const PACED = ["blink", "pulse", "chase"];
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
+const CLIP_WHERE = [["full", "full screen"], ["behind", "behind the HUD, once"], ["loop", "behind the HUD, over and over"]];
+const PRIORITIES = [3, 4, 5, 6, 7].map((p) => [String(p), "priority " + p]);
 const SAVE_MS = 450;
 
 const TIP = {
@@ -42,7 +50,19 @@ const TIP = {
   timerLeft: "The milliseconds the timer has left; 0 when it is not running.",
   wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
-  priority: "While it runs, the game's lesser full-screen displays wait for it (the example modes use a mode's 180; FINAL WARS a wizard's 190). Kept for the total on its own screen, given back at once at a drain.",
+  displayPriority: "While it runs, the game's lesser full-screen displays wait for it (the example modes use a mode's 180; FINAL WARS a wizard's 190). Kept for the total on its own screen, given back at once at a drain.",
+  own: "Clips and sounds of the mode's own, picked from your files and copied into its folder. Write and Try it carry them onto the card; a Play a clip or Play a sound block plays one by its name.",
+  where: "Full screen plays over everything, the HUD too, half a second after it is asked for (so the game's own clip for the same shot does not take its place). Behind the HUD, over and over, plays in the city's place under the score while the mode runs. Behind the HUD, once, plays in that loop's place and then the loop again.",
+  fallback: "What to say instead when the card could not carry this sound (a card with no spare sound for it): one of the game's own callouts, or nothing.",
+  priority: "Its priority on the voice bus: it fades the game's lower speech and waits for higher. 4 is a call's usual; 3 for one that repeats (a play while the last still sounds is skipped).",
+  music: "Its own music: it plays instead of the game's while the mode runs, and the game's comes back at the end.",
+  name: "The name its blocks call it by: lower-case letters, digits and _.",
+  rate: "How fast it blinks, pulses or chases: one beat every this many ms (20 to 5000). Any value: a number, a variable, a sum. Empty = its usual pace.",
+  hurry: "Blinks slowly with most of the time left, faster as the clock runs down, and flickers in the last three seconds.",
+  show: "A light show over the playfield's inserts (the ones the game's port places), a few seconds long: the shots' own lights come back when it is over. A new show takes the place of one still running.",
+  ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colours, from a place on the playfield.",
+  stepRate: "The pattern's pace, ms (a strobe's flash, a beam's turn, a chase's step). 0 = its usual.",
+  gi: "The lights between the inserts (the general illumination) during this step: the game's, dark, or flashing white.",
 };
 
 // ------------------------------------------------------------------ the blocks there are
@@ -60,10 +80,12 @@ function hatTemplates(ch, timers) {
   ];
 }
 
-function stmtTemplates(ch, vars, timers) {
+function stmtTemplates(ch, vars, prog = {}) {
   const shot = (ch.shots || [])[0] || "";
   const v = (vars[0] || {}).name || "";
-  const t = (timers[0] || {}).name || "";
+  const t = ((prog.timers || [])[0] || {}).name || "";
+  const clip = ((prog.clips || [])[0] || {}).name || "";
+  const sound = ((prog.sounds || [])[0] || {}).name || "";
   return [
     ["Mode", [{ op: "start_mode" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
       { op: "set_time", seconds: num(10) },
@@ -73,8 +95,9 @@ function stmtTemplates(ch, vars, timers) {
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
     ["Control", [{ op: "if", cond: null, then: [], else: null }, { op: "if", cond: null, then: [], else: [] }]],
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
-      { op: "light_shot", shot, color: "#ffd000", pattern: "blink" }, { op: "lights_off", shot: "*" },
-      { op: "log", text: "" }]],
+      { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" },
+      { op: "show", show: "burst" }, { op: "log", text: "" }]],
+    ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null }]],
   ];
 }
 
@@ -93,8 +116,8 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", stock: "a game mode of its own runs" };
 const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
-  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", log: "show",
-  timer_start: "timer", timer_stop: "timer" };
+  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", log: "show",
+  clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer" };
 
 // ------------------------------------------------------------------ the program, by path
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -142,7 +165,7 @@ function slotMenu(e, kind, ed, path) {
   openMenu(e.currentTarget, items);
 }
 
-function Slot({ kind, value, path, ed, optional }) {
+function Slot({ kind, value, path, ed, optional, empty }) {
   const [over, setOver] = useState(false);
   const fits = () => dragging && dragging.tpl && (kind === "bool" ? dragging.tpl.k && condTemplates().some((t) => t.k === dragging.tpl.k)
     : dragging.tpl.k && valueTemplates(ed.ch, ed.vars, ed.timers).some((t) => t.k === dragging.tpl.k));
@@ -154,7 +177,7 @@ function Slot({ kind, value, path, ed, optional }) {
   if (!value) {
     return html`<button type="button" class=${cx("bk-slot", kind, over && "over")} ...${drop}
       onClick=${(e) => slotMenu(e, kind, ed, path)} ...${tip(kind === "bool" ? "A condition: drop one here, or press to pick" : "A value: drop one here, or press to pick")}>
-      ${kind === "bool" ? "condition" : optional ? "(no number)" : "value"}</button>`;
+      ${kind === "bool" ? "condition" : optional ? (empty || "(no number)") : "value"}</button>`;
   }
   return html`<span class=${cx("bk-rep", kind, over && "over")} ...${drop}>
     ${kind === "bool" ? html`<${Cond} e=${value} path=${path} ed=${ed} />` : html`<${Val} e=${value} path=${path} ed=${ed} />`}
@@ -212,7 +235,22 @@ function StmtBody({ b, path, ed }) {
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">on its screen</span>`;
     case "light_shot": return html`<span class="bk-w">Light</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
       <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The insert's colour")} />
-      <${Pick} value=${b.pattern} options=${PATTERNS} onChange=${(v) => set("pattern", v)} />`;
+      <${Pick} value=${b.pattern} options=${PATTERNS} title=${b.pattern === "hurry" ? TIP.hurry : undefined} onChange=${(v) => set("pattern", v)} />
+      ${PACED.includes(b.pattern) ? html`<span class="bk-w" ...${tip(TIP.rate)}>every</span><${Slot} kind="num" optional empty="its usual pace"
+        value=${b.rate} path=${[...path, "rate"]} ed=${ed} /><span class="bk-w">ms</span>` : null}`;
+    case "show": {
+      const shows = (ed.ch.light || {}).shows || [];
+      const pick = (v) => ed.edit((d) => {
+        const t = at(d, path);
+        if (v === "own") {
+          const from = shows.find((x) => x.key === t.show) || shows[0];
+          if (!(t.steps || []).length) t.steps = clone((from || {}).steps || []);
+        } else delete t.steps;
+        t.show = v;
+      });
+      return html`<span class="bk-w" ...${tip(TIP.show)}>Run the light show</span><${Pick} value=${b.show}
+        options=${[...shows.map((x) => [x.key, x.label]), ["own", "its own steps…"]]} onChange=${pick} />`;
+    }
     case "lights_off": return html`<span class="bk-w">Hand back the lights of</span><${Pick} value=${b.shot} options=${[["*", "every shot"], ...shots.map((n) => [n, n])]} onChange=${(v) => set("shot", v)} />`;
     case "add_time": return html`<span class="bk-w" ...${tip(TIP.addTime)}>Add</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "set_time": return html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
@@ -222,6 +260,15 @@ function StmtBody({ b, path, ed }) {
     case "timer_start": return html`<span class="bk-w" ...${tip(TIP.timerStart)}>Start timer</span><${TimerPick} value=${b.timer} ed=${ed} onChange=${(v) => set("timer", v)} />
       <span class="bk-w">at</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
     case "timer_stop": return html`<span class="bk-w">Stop timer</span><${TimerPick} value=${b.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
+    case "clip": return html`<span class="bk-w">Play the clip</span><${Pick} value=${b.clip} options=${(ed.prog.clips || []).map((x) => x.name)} missing="(not one of its own)" onChange=${(v) => set("clip", v)} />
+      <${Pick} value=${b.where} options=${CLIP_WHERE} title=${TIP.where} onChange=${(v) => set("where", v)} />`;
+    case "sound": {
+      const opts = [["-", "nothing"], ...(ed.ch.callouts || []).map((c) => [c.role || String(c.id), c.label])];
+      const cur = b.fallback == null || b.fallback === "" ? "-" : String(b.fallback);
+      return html`<span class="bk-w">Play the sound</span><${Pick} value=${b.sound} options=${(ed.prog.sounds || []).map((x) => x.name)} missing="(not one of its own)" onChange=${(v) => set("sound", v)} />
+        <span class="bk-w" ...${tip(TIP.fallback)}>else say</span><${Pick} value=${cur} options=${opts} title=${TIP.fallback}
+          onChange=${(v) => set("fallback", v === "-" ? null : (/^[0-9]+$/.test(v) ? Number(v) : v))} />`;
+    }
     default: return html`<span class="bk-w">${b.op}</span>`;
   }
 }
@@ -249,6 +296,38 @@ function Stmt({ b, path, ed }) {
   return html`<div class=${cx("bk", "bk-" + (STMT_CLASS[b.op] || "show"))}>
     <div class="bk-line">${grip}<${StmtBody} b=${b} path=${path} ed=${ed} />
       <span class="sp"></span><${X} onClick=${() => ed.remove(stack, i)} /></div>
+    ${b.op === "show" && b.show === "own" ? html`<${ShowSteps} steps=${b.steps || []} path=${[...path, "steps"]} ed=${ed} />` : null}
+  </div>`;
+}
+
+// A Light show block's own steps: one line each, in the order they run.
+const SHOW_STEPS = 10;
+function ShowSteps({ steps, path, ed }) {
+  const light = ed.ch.light || {};
+  const move = (i, dir) => ed.edit((d) => { const l = at(d, path); const [x] = l.splice(i, 1); l.splice(i + dir, 0, x); });
+  const add = () => ed.edit((d) => {
+    const l = at(d, path);
+    l.push(l.length ? clone(l[l.length - 1]) : { fx: "burst", ms: 800, a: "#ffffff", b: "#ffb000", at: "center", rate: 0, gi: "keep" });
+  });
+  return html`<div class="bk-steps" ...${tip(TIP.ownShow)}>
+    ${steps.map((st, i) => {
+      const p = [...path, i];
+      const set = (k, v) => ed.set([...p, k], v);
+      return html`<div class="bk-line bk-step" key=${i}>
+        <span class="bk-w">${i + 1}.</span>
+        <${Pick} value=${st.fx} options=${light.fx || []} width=${140} onChange=${(v) => set("fx", v)} />
+        <${Num} value=${st.ms} width=${52} title="How long this step lasts, ms" onChange=${(v) => set("ms", v)} /><span class="bk-w">ms</span>
+        <input type="color" class="bk-color" value=${st.a || "#ffffff"} onInput=${(e) => set("a", e.target.value)} ...${tip("Its first colour")} />
+        <input type="color" class="bk-color" value=${st.b || "#000000"} onInput=${(e) => set("b", e.target.value)} ...${tip("Its second colour")} />
+        <span class="bk-w">at</span><${Pick} value=${st.at || "center"} options=${light.places || []} width=${104} onChange=${(v) => set("at", v)} />
+        <span class="bk-w" ...${tip(TIP.stepRate)}>pace</span><${Num} value=${st.rate ?? 0} width=${44} title=${TIP.stepRate} onChange=${(v) => set("rate", v)} />
+        <${Pick} value=${st.gi || "keep"} options=${light.gi || []} width=${118} title=${TIP.gi} onChange=${(v) => set("gi", v)} />
+        <button type="button" class="bk-x" disabled=${i === 0} aria-label="Move this step up" ...${tip("Move this step up")} onClick=${() => move(i, -1)}>↑</button>
+        <button type="button" class="bk-x" disabled=${i === steps.length - 1} aria-label="Move this step down" ...${tip("Move this step down")} onClick=${() => move(i, 1)}>↓</button>
+        <${X} title="Take this step out" onClick=${() => ed.edit((d) => { at(d, path).splice(i, 1); })} />
+      </div>`;
+    })}
+    ${steps.length < SHOW_STEPS ? html`<button type="button" class="bk-add" onClick=${add} ...${tip("Add a step at the end of the show")}>+ step</button>` : null}
   </div>`;
 }
 
@@ -273,7 +352,7 @@ function Stack({ list, path, ed }) {
 
 function addMenu(ed, path) {
   const out = [];
-  stmtTemplates(ed.ch, ed.vars, ed.timers).forEach(([group, items], gi) => {
+  stmtTemplates(ed.ch, ed.vars, ed.prog).forEach(([group, items], gi) => {
     if (gi) out.push({ sep: true });
     out.push({ header: group });
     items.forEach((t) => out.push({ label: stmtLabel(t), onClick: () => ed.insert(path, at(ed.prog, path).length, clone(t)) }));
@@ -322,7 +401,8 @@ function hatLabel(h) {
 function stmtLabel(b) {
   return { start_mode: "Start the mode", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
-    words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", log: "Write in the log",
+    words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", log: "Write in the log",
+    clip: "Play a clip", sound: "Play a sound",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
@@ -336,7 +416,7 @@ function Palette({ ed }) {
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
     ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
-    ${stmtTemplates(ed.ch, ed.vars, ed.timers).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
+    ${stmtTemplates(ed.ch, ed.vars, ed.prog).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t))))}`)}
     <div class="bk-pal-h">Values</div>
     ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, "Drag into a value slot (the round holes)"))}
@@ -382,6 +462,49 @@ function Timers({ prog, ed }) {
       <${X} title="Take this timer out" onClick=${() => ed.edit((d) => { d.timers.splice(i, 1); })} />
     </span>`)}
     <${Button} size="sm" kind="ghost" icon="plus" onClick=${add}>Timer<//>
+  </div>`;
+}
+
+// PAD-374: the mode's own clips, sounds and music: each a file in its folder and a name.
+function OwnMedia({ prog, ed, s, folder }) {
+  const ch = ed.ch;
+  const clips = prog.clips || [];
+  const sounds = prog.sounds || [];
+  const sep = String(folder || "").includes("/") ? "/" : "\\";
+  const pathOf = (f) => (folder && f ? folder + sep + f : "");
+  const pick = async (what) => {
+    const got = await call("modes.blocks_pick", what, (what === "clip" ? clips : sounds).map((x) => x.name));
+    if (!got) return;
+    ed.edit((d) => {
+      if (what === "music") d.music = got.file;
+      else if (what === "clip") d.clips = [...(d.clips || []), { name: got.name, file: got.file }];
+      else d.sounds = [...(d.sounds || []), { name: got.name, file: got.file, priority: 4 }];
+    });
+  };
+  const name = (kind, i, x) => html`<${Field} sm mono width=${104} value=${x.name} maxLength=${15} title=${TIP.name}
+    onChange=${(t) => ed.renameMedia(kind, i, String(t).toLowerCase())} />`;
+  const file = (f) => html`<span class="small dim ellip bk-file" ...${tip(pathOf(f))}>${f}</span>`;
+  return html`<div class="bk-vars bk-media">
+    <span class="lbl" ...${tip(TIP.own)}>Its own clips and sounds</span>
+    ${clips.map((x, i) => html`<span class="bk-varbox bk-ownbox" key=${"c" + i}>
+      <span class="small muted">clip</span>${name("clips", i, x)}${file(x.file)}
+      ${s._showClip ? html`<${Button} size="xs" kind="ghost" icon="play" onClick=${() => s._showClip(pathOf(x.file), x.name)}>Play<//>` : null}
+      <${X} title="Take this clip out (its file stays in the folder)" onClick=${() => ed.edit((d) => { d.clips.splice(i, 1); })} />
+    </span>`)}
+    ${sounds.map((x, i) => html`<span class="bk-varbox bk-ownbox" key=${"s" + i}>
+      <span class="small muted">sound</span>${name("sounds", i, x)}${file(x.file)}
+      <${Select} sm value=${String(x.priority || 4)} options=${PRIORITIES.map(([value, label]) => ({ value, label }))} title=${TIP.priority}
+        onChange=${(v) => ed.set(["sounds", i, "priority"], Number(v))} />
+      <${PlayButton} path=${pathOf(x.file)} />
+      <${X} title="Take this sound out (its file stays in the folder)" onClick=${() => ed.edit((d) => { d.sounds.splice(i, 1); })} />
+    </span>`)}
+    ${prog.music ? html`<span class="bk-varbox bk-ownbox" ...${tip(TIP.music)}>
+      <span class="small muted">music</span>${file(prog.music)}<${PlayButton} path=${pathOf(prog.music)} />
+      <${X} title="No music of its own (the game's plays on)" onClick=${() => ed.set(["music"], "")} />
+    </span>` : null}
+    <${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_clip} title=${ch.why_clip || "Pick a video for the mode to play (it is copied into its folder)."} onClick=${() => pick("clip")}>Clip…<//>
+    <${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_sound} title=${ch.why_sound || "Pick a WAV for the mode to play (it is copied into its folder)."} onClick=${() => pick("sound")}>Sound…<//>
+    ${prog.music ? null : html`<${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_music} title=${ch.why_music || TIP.music} onClick=${() => pick("music")}>Music…<//>`}
   </div>`;
 }
 
@@ -449,6 +572,19 @@ export function BlocksEditor({ s, c }) {
       };
       walk(d.scripts);
     }),
+    // a clip or sound renamed: every block playing it follows it
+    renameMedia: (kind, i, name) => edit((d) => {
+      const old = (d[kind][i] || {}).name;
+      d[kind][i].name = name;
+      const op = kind === "clips" ? "clip" : "sound";
+      const walk = (o) => {
+        if (Array.isArray(o)) { o.forEach(walk); return; }
+        if (!o || typeof o !== "object") return;
+        if (o.op === op && o[op] === old) o[op] = name;
+        Object.values(o).forEach(walk);
+      };
+      walk(d.scripts);
+    }),
     dropAt: (path, i) => {
       const drag = dragging;
       dragging = null;
@@ -482,15 +618,16 @@ export function BlocksEditor({ s, c }) {
         <${Check} checked=${prog.ends_on_drain !== false} label="ends when the ball drains" title=${TIP.drain} onChange=${(v) => ed.set(["ends_on_drain"], v)} />
         <${Check} checked=${!!prog.screen} label="its own screen" title=${TIP.screen} onChange=${(v) => ed.set(["screen"], v)} />
         <${Check} checked=${!!prog.wait_multiball} label="waits out a multiball" title=${TIP.wait} onChange=${(v) => ed.set(["wait_multiball"], v)} />
-        <span class="lbl" ...${tip(TIP.priority)}>Display priority</span>
-        <${Select} sm value=${String(prog.priority || 0)} title=${TIP.priority} onChange=${(v) => ed.set(["priority"], Number(v))}
-          options=${[...PRIORITIES, ...(PRIORITIES.some(([n]) => n === (prog.priority || 0)) ? [] : [[prog.priority, String(prog.priority)]])]
+        <span class="lbl" ...${tip(TIP.displayPriority)}>Display priority</span>
+        <${Select} sm value=${String(prog.priority || 0)} title=${TIP.displayPriority} onChange=${(v) => ed.set(["priority"], Number(v))}
+          options=${[...DISPLAY_PRIORITIES, ...(DISPLAY_PRIORITIES.some(([n]) => n === (prog.priority || 0)) ? [] : [[prog.priority, String(prog.priority)]])]
             .map(([value, label]) => ({ value: String(value), label }))} />
         <span class="sp"></span>
         <span class="small muted">${saving ? "Saving…" : "Saved · Try it builds it in"}</span>
       </div>
       <${Variables} prog=${prog} ed=${ed} />
       <${Timers} prog=${prog} ed=${ed} />
+      <${OwnMedia} prog=${prog} ed=${ed} s=${s} folder=${c.folder} />
       ${(b.notes || []).map((t) => html`<${Note} key=${t}>${t}<//>`)}
       <div class="bk-scripts">
         ${scripts.map((sc, si) => html`<${Script} key=${si} s=${sc} si=${si} n=${scripts.length} ed=${ed} />`)}

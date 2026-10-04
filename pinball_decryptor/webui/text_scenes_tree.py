@@ -786,10 +786,9 @@ class TreeEditMixin:
             # PAD-293: the preview's eyes differ from the game's (Reset puts them back)
             "view_apart": view != self._tree_hidden(card) or bool(self._tforce.get(card)),
             "solo": (self._tsolo.get((self.assets_dir, card)) or (None,))[0],
-            # PAD-344: the Layers list's advanced box, the Images tab's unlock
-            "color_unlock": unlock if any(
-                (l["color"] or {}).get("locked") or (l["color"] or {}).get("stock")
-                for l in layers) else None,
+            # PAD-344: the advanced box, the Images tab's unlock; beside Preview colors on
+            # every scene since PAD-349 (it hid on a scene with no game picture)
+            "color_unlock": unlock if unlock["offered"] else None,
             "can_undo": bool(ops or (self._tree_hist(card) or {}).get("undo")),
             "can_redo": bool((self._tree_hist(card) or {}).get("redo")),
             "all_edits": scene_edit.count(self.assets_dir),

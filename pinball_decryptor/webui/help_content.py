@@ -714,8 +714,8 @@ HELP_CONTENT = {
          "the card in its own colors. The box under the preview is the "
          "same switch. The Color profile tab's 'Every replaced picture' "
          "sets every picture that has no box of its own. The game's own "
-         "pictures show a blue lock and are never changed; tick 'Unlock the "
-         "game's own pictures' under Advanced to give each one its own "
+         "pictures show a blue lock and are never changed; tick 'Unlock "
+         "extracted images' under Advanced to give each one its own "
          "switch, and switching one off (or locking again) puts the "
          "original back."),
         ("A bigger picture than the original",

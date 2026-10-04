@@ -40,6 +40,11 @@
 .scenes-stagebar { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-height: 32px; flex: 0 0 auto; }
 .scenes-stagebar .grow { flex: 1 1 140px; min-width: 0; }
 .scenes-stagebar .scenes-ctl { margin-top: 0; }
+/* PAD-349: Preview colors and, right of it, the advanced unlock in its own red box */
+.scenes-lookbar { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; flex: 0 0 auto; }
+.scenes-lookbar .look-row { flex: 1 1 420px; min-width: 0; }
+.scenes-unlock { display: flex; align-items: center; gap: 6px 12px; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--err); background: var(--err-soft); flex: 0 0 auto; }
 .tree-actions { gap: 2px; flex-wrap: wrap; }
 .tree-actions-sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 6px; }
 .scenes-inspector { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
@@ -194,4 +199,3 @@ html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
 .tree-layers .sc-head { display: flex; align-items: center; gap: 8px; }
 .tree-layers .sc-head { flex-wrap: wrap; row-gap: 2px; }
 .tree-layers .sc-head .eyebrow { white-space: nowrap; }
-.tree-layers .ly-unlock { font-size: 12px; }

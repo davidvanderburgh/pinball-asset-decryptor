@@ -90,3 +90,20 @@ def test_scenes_layers_unlock_the_game_pictures(tmp_path):
         data = staged_changes.load(str(folder))
         assert not data.get(cp.STOCK_IMAGES_KEY) and not data.get(cp.IMAGE_SLOTS_KEY)
         w.call("text_scenes.close")
+
+
+def test_scenes_unlock_is_offered_on_a_scene_with_no_pictures(tmp_path):
+    """PAD-349 (DragonRR): the box sits beside Preview colors now, on every scene, so
+    it no longer vanishes on a scene that draws no extracted image."""
+    from tests.webui_harness import web_app
+    from tests.test_gui_scene_editor import _seed, _open, _tv
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    for png in (folder / "images" / "scene_textures").glob("*.png"):
+        png.unlink()
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert not any(l["color"] for l in _tv(w)["layers"])
+        assert _tv(w)["color_unlock"] == {"offered": True, "on": False}
+        w.call("text_scenes.close")

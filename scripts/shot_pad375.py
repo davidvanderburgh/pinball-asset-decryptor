@@ -73,6 +73,13 @@ def main():
             out = os.path.join(out_dir, "%s_blocks_hud.png" % prefix)
             page.screenshot(path=out)
             print("shot", out, flush=True)
+            # the palette's last group and the scripts at the bottom: the HUD blocks
+            page.evaluate("""() => { for (const s of ['.bk-palette', '.bk-ws']) {
+                const el = document.querySelector(s); if (el) el.scrollTop = el.scrollHeight; } }""")
+            time.sleep(1)
+            out = os.path.join(out_dir, "%s_blocks_hud_scripts.png" % prefix)
+            page.screenshot(path=out)
+            print("shot", out, flush=True)
         S._shoot(url, blocks, height=1400)
     finally:
         proc.terminate()

@@ -218,7 +218,7 @@ function StmtBody({ b, path, ed }) {
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
       <span class="bk-w">balls, ball save</span><${Num} value=${b.save} width=${44} onChange=${(v) => set("save", v)} /><span class="bk-w">s</span>`;
     case "log": return html`<span class="bk-w">Write</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="a line" /><span class="bk-w">in the log</span>`;
-    case "hud_text": return html`<span class="bk-w">Show</span><${Text} value=${b.text} max=${40} onChange=${(v) => set("text", v)} placeholder="words" />
+    case "hud_text": return html`<span class="bk-w">Show</span><${Text} value=${b.text} max=${40} width=${220} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} />
       <span class="bk-w">as the HUD's</span><${Pick} value=${b.which} options=${WHICH} onChange=${(v) => set("which", v)} />`;
     case "hud_counter": return html`<span class="bk-w">Set the HUD's</span><${Pick} value=${b.counter} options=${COUNTERS}
@@ -364,7 +364,7 @@ function Hud({ prog, ed }) {
   return html`<div class="bk bk-hud bk-hudset">
     <div class="bk-line"><span class="bk-w b" ...${tip(TIP.hud)}>Its HUD</span>
       <span class="bk-w">${prog.name || "its name"}, and under it</span>
-      <${Text} value=${h.line} max=${40} width=${260} title=${TIP.hudLine} onChange=${(v) => ed.set(at_("line"), v)} placeholder="what to shoot" />
+      <${Text} value=${h.line} max=${40} width=${340} title=${TIP.hudLine} onChange=${(v) => ed.set(at_("line"), v)} placeholder="what to shoot" />
       ${can ? null : html`<span class="bk-w small" ...${tip(TIP.hudOff)}>(not on this card's game)</span>`}</div>
     ${counters.map((c, k) => html`<div class="bk-line" key=${k}>
       <span class="bk-w" ...${tip(TIP.counter)}>Counter ${k + 1}</span>

@@ -1541,6 +1541,7 @@ class ImagesTab(TabService):
         if not path:
             return None
         self._assignments[rel] = path
+        self._keep_grown([rel])
         self._save_staged_changes()
         self.log("Replace Images: %s ← %s" % (rel, os.path.basename(path)),
                  "info")
@@ -1549,6 +1550,39 @@ class ImagesTab(TabService):
             self._render_preview(rel)
         self._focus([rel], rel)
         return rel
+
+    def _keep_grown(self, rels):
+        """A new pick for a picture an earlier build kept at its own size
+        starts with Keep size ticked: the project's file is no longer the
+        size of its pristine .orig/ copy.  Unticked, the next build squeezed
+        the user's grown picture back to the game's size (DragonRR, PAD-351:
+        Battle Select's grid picked again went back to 444x740)."""
+        from ...core import staged_originals
+        from PIL import Image
+        kept = []
+        for rel in rels:
+            if rel in self._keep_size or not self._can_keep_size(rel):
+                continue
+            snap = staged_originals.snapshot_path(self._scan_dir or None, rel)
+            if not snap:
+                continue
+            try:
+                with Image.open(snap) as im:
+                    orig = im.size
+                with Image.open(self._by_rel[rel].abs_path) as im:
+                    now = im.size
+            except Exception:                            # noqa: BLE001
+                continue
+            if now != orig:
+                self._keep_size.add(rel)
+                kept.append(rel)
+        if kept:
+            self.log("Replace Images: %d picture(s) an earlier build kept at "
+                     "their own size keep their new pick's own size too "
+                     "(Keep size ticked): %s" % (len(kept), ", ".join(
+                         os.path.basename(r) for r in kept[:4])
+                         + (" ..." if len(kept) > 4 else "")), "info")
+        return kept
 
     @rpc
     def set_keep(self, rel, value):
@@ -1818,6 +1852,7 @@ class ImagesTab(TabService):
                 "Replace from folder", "\n\n".join(lines) + fingerprint_note):
             return 0
         assigns.update(pairs)
+        self._keep_grown(list(pairs))
         self._save_staged_changes()
         self.log(
             "%s: picked %d replacement(s) by name from %s%s."
@@ -2091,6 +2126,7 @@ class ImagesTab(TabService):
                 return 0
             for rel in rels:
                 self._assignments[rel] = rep_path
+            self._keep_grown(rels)
             self._save_staged_changes()
             self.log("Replace Images: assigned %s to %d slot(s) in group"
                      % (os.path.basename(rep_path), len(rels)), "info")

@@ -189,7 +189,8 @@ PARAMS_CACHE_DIRNAME = "pinball_spike2_params"
 PARAMS_REV_TAG = ".r2"
 # an art spec 'PATH@T' grabs a frame of these.  .webm and .flv (item 120): what PAD
 # extracts from a JJP game (GNR's clips are VP9 .webm); the tab's VIDEO_EXTS matches.
-VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv")
+# .ogv (PAD-342): a Barrels of Fun game's clips are Theora .ogv files in its pack.
+VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".ogv")
 SIDECAR_SUFFIX = ".src.json"                            # art<N>.png.src.json / anim<N>.gif.src.json
 STILL_SIGNATURES = ((b"\x89PNG\r\n\x1a\n", "PNG"), (b"\xff\xd8\xff", "JPEG"), (b"GIF87a", "GIF"),
                     (b"GIF89a", "GIF"), (b"BM", "BMP"), (b"II*\x00", "TIFF"), (b"MM\x00*", "TIFF"))
@@ -2752,12 +2753,15 @@ def render_group_frames(style, logos, size, colors=None):
 
 
 def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
-                   card, log=say, music=None, confirm=None, sources=None):
+                   card, log=say, music=None, confirm=None, sources=None, logo_files=None):
     """gart<g>.png / ganim<g>.gif for one RANDOM card, from its members' logos.
 
     Cached on the member CARDS' stamps and the style, so re-running with the
     same list and the same style costs nothing - the logos are pulled out of
-    the card images, which is the slow part."""
+    the card images, which is the slow part.  *logo_files* ({image: picture},
+    ``--logo``) names a member's logo outright, for an image that is not a
+    Stern card (a Barrels of Fun .fun, PAD-342)."""
+    logo_files = logo_files or {}
     names = {}
     if not members:
         raise Refused("group %d has no members to draw from" % g)
@@ -2771,10 +2775,18 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
     stamps = [source_stamp(images[m]) for m in members]
     stamp = stamps[0]
     sources = [[x["source"], x["mtime"], x["size"]] for x in stamps]
+    # a logo given by file is part of what the picture is made of: a new one misses too
+    for m in members:
+        if m in logo_files:
+            x = source_stamp(logo_files[m])
+            sources.append([x["source"], x["mtime"], x["size"]])
 
     def logos():
         out_logos = []
         for m in members:
+            if m in logo_files:
+                out_logos.append(panel_from_file(logo_files[m], size))
+                continue
             ci, part, title = card(images[m])
             data, _path = logo_bytes(ci, part, title)
             tmp = os.path.join(work, "glogo%d_%d.png" % (g, m))
@@ -2887,6 +2899,14 @@ def cmd_prepare(a):
                     | set(group_confirm)):
         if g not in group_members:
             raise Refused("--group-art/--group-anim %d: no --group-members %d=... to draw from" % (g, g))
+    logo_files = {}
+    for spec in getattr(a, "logo", None) or []:
+        idx, sep, path = str(spec).partition("=")
+        if not sep or not idx.strip().isdigit() or not 0 <= int(idx) < n:
+            raise Refused("--logo %r: expected N=PICTURE, where N is one of the %d images" % (spec, n))
+        if not os.path.isfile(path):
+            raise Refused("--logo %s: %s is not a file" % (idx, path))
+        logo_files[int(idx)] = path
     visual_only = bool(getattr(a, "visual_only", False))
     say("prepare: %d image%s, panel %dx%d, out %s%s"
         % (n, "" if n == 1 else "s", size[0], size[1], out, " (visual only)" if visual_only else ""))
@@ -2908,7 +2928,7 @@ def cmd_prepare(a):
         for g in sorted(group_members):
             groups_out[g] = _prepare_group(
                 g, group_members[g], group_art.get(g), group_anim.get(g),
-                images, size, out, work, card,
+                images, size, out, work, card, logo_files=logo_files,
                 music=None if visual_only else group_music.get(g),
                 confirm=None if visual_only else group_confirm.get(g),
                 sources=sources)
@@ -3063,6 +3083,9 @@ def main(argv=None):
     s.add_argument("--group-confirm", action="append", default=[], metavar="G=SPEC|none",
                    help="random card G's own confirm sound: auto (off its first member's "
                         "card), auto@IDX, synth, a WAV, or none for the menu's")
+    s.add_argument("--logo", action="append", default=[], metavar="N=PICTURE",
+                   help="image N's logo for a random card's styles, instead of reading it off "
+                        "the card - for an image that is not a Stern card (a BOF .fun)")
     s.add_argument("--visual-only", action="store_true",
                    help="art/anim (+music) only: no move/confirm sounds, none pulled off a card (the GUI preview)")
     s.add_argument("--volume", type=int, default=DEFAULT_VOLUME)

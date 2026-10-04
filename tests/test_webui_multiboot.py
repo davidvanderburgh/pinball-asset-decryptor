@@ -117,11 +117,11 @@ def test_bof_sound_random_card_and_four_builds(tmp_path):
         s = _st(w)
         assert len(s["rows"]) == 3 and s["rows"][2]["group"]
         rnd = _panel(w)._rows[2]
-        # a style is drawn from logos a .fun does not give up: it starts as its words
-        assert rnd.keep and mt.group_media_kind(rnd) == "none"
-        # a new build's card is its words with no music, and the menu's confirm
+        # a style is drawn from the builds' own stills, as on a Stern card
+        assert rnd.keep and mt.group_media_kind(rnd) == mt.GROUP_MEDIA_DEFAULT
+        # a new build's card is its own clip, moving, with no music and the menu's confirm
         row = _panel(w)._rows[1]
-        assert (row.art, row.anim, row.music, row.confirm) == ("none", "none", "none", "")
+        assert (row.art, row.anim, row.music, row.confirm) == ("auto", "auto", "none", "")
         # the random card is a card, not a build: two more builds fit, a fifth does not
         _add(w, funs[2])
         _add(w, funs[3])

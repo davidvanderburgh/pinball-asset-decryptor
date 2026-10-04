@@ -122,8 +122,8 @@ def test_media_args_carry_pictures_music_and_sounds():
     args = mt.prepare_args(form, r"D:\m")
     assert args[:2] == list(BOF.media_tool)
     assert args[args.index("--cards") + 1] == "2"
-    # the form's words go as they are: mkbofmulti maps what a .fun cannot give
-    # ('auto' art is a text card there, an 'auto' sound the synthetic click)
+    # the form's words go as they are: mkbofmulti resolves them ('auto' art is a
+    # still of the build's own attract clip, an 'auto' sound the synthetic click)
     assert _values(args, "--art") == ["0=auto", "1=" + wsl("D:/pics/sarah.png")]
     assert _values(args, "--anim") == ["0=none", "1=" + wsl("D:/clips/sarah.mp4")]
     assert _values(args, "--music") == ["0=none", "1=" + wsl("D:/snd/sarah.wav")]
@@ -142,7 +142,7 @@ def test_random_card_media_build_and_inject_args():
     media = mt.prepare_args(form, r"D:\m")
     assert media[media.index("--cards") + 1] == "3"
     assert _values(media, "--group-members") == ["0=0,1"]
-    # a style is drawn from logos a .fun does not give up: a new BOF card is its words
+    # a card made as its words stays its words
     assert _values(media, "--group-art") == ["0=none"] and _values(media, "--group-anim") == ["0=none"]
     # the builds keep their own cards: the random card adds no image
     assert _values(media, "--art") == ["0=auto", "1=auto"]
@@ -159,14 +159,16 @@ def test_random_card_media_build_and_inject_args():
     top.images.insert(0, random_row())
     assert _values(mt.build_args(top), "--group-over") == ["0-1@0|SURPRISE|"]
     assert _values(mt.build_args(top), "--primary") == [wsl(FUN0)]
-    # its own picture is its gart<G>.png; a style is nothing on BOF
+    # its own picture is its gart<G>.png, and so is a style: drawn from the builds' own stills
     pic = bof_form()
     pic.images.append(random_row(kind="picture", path="D:/pics/dice.png"))
     assert _values(mt.prepare_args(pic, r"D:\m"), "--group-art") == ["0=" + wsl("D:/pics/dice.png")]
     assert mt.card_media_names(pic)[2][0] == "gart0.png"
     styled = bof_form()
     styled.images.append(random_row(kind=mt.GROUP_MEDIA_DEFAULT))
-    assert mt.card_media_names(styled)[2][:2] == ("", "")
+    assert mt.card_media_names(styled)[2][:2] == ("gart0.png", "ganim0.gif")
+    assert _values(mt.prepare_args(styled, r"D:\m"), "--group-art") == ["0=stack"]
+    assert _values(mt.prepare_args(styled, r"D:\m"), "--group-anim") == ["0=cycling"]
 
 
 def test_sounds_are_compared_as_mkbofmulti_renders_them():
@@ -178,14 +180,6 @@ def test_sounds_are_compared_as_mkbofmulti_renders_them():
     for plat in ("stern", "jjp"):
         assert mt.sound_as_rendered(plat, "sound", "auto") == "auto"
         assert mt.sound_as_rendered(plat, "music", "auto") == "auto"
-
-
-def test_random_card_choices_on_bof():
-    assert mt.group_media_default("bof") == "none"
-    assert mt.group_media_default("stern") == mt.GROUP_MEDIA_DEFAULT
-    kinds = [k for k, _label in mt.ImageEditorDialog.group_kinds_for(BOF)]
-    assert sorted(kinds) == ["none", "picture"]      # its words, or a picture of its own
-    assert mt.ImageEditorDialog.group_kinds_for(STERN) == mt.ImageEditorDialog.GROUP_KINDS
 
 
 def test_build_commands_run_nothing_as_root():
@@ -212,13 +206,15 @@ def test_preview_conf_names_the_programs():
                                     platform="bof")
     assert args[0] == "/var/tmp/bofselect/bofselect" and "-L" not in args
     lines = mt.write_preview_conf(form).splitlines()
-    # 'auto' art is a text-only card on BOF, and a card's confirm is the menu's
-    assert "image=GDCraze.x86_64|LABYRINTH|Stock|||" in lines
-    assert "image=pad_image1.bin|SARAH CODE|Mod|||" in lines
+    # 'auto' art is the build's own still (art<N>.png), and a card's confirm is the menu's
+    assert "image=GDCraze.x86_64|LABYRINTH|Stock|art0.png||" in lines
+    assert "image=pad_image1.bin|SARAH CODE|Mod|art1.png||" in lines
     assert "font=" + BOF.conf_font in lines
-    assert mt.card_media_names(form) == [("", "", "", ""), ("", "", "", "")]
-    form.images[1].art = "D:/pics/sarah.png"
-    assert mt.card_media_names(form)[1][0] == "art1.png"
+    assert mt.card_media_names(form) == [("art0.png", "", "", ""), ("art1.png", "", "", "")]
+    form.images[1].anim = "auto"
+    assert mt.card_media_names(form)[1][:2] == ("art1.png", "anim1.gif")
+    form.images[1].art = "none"
+    assert mt.card_media_names(form)[1][0] == ""
     form.images[1].music = "D:/snd/sarah.wav"
     form.images[1].confirm = "D:/snd/yes.wav"
     assert mt.card_media_names(form)[1][2:] == ("music1.wav", "confirm1.wav")

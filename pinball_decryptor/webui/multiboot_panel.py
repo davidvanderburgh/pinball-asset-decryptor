@@ -341,7 +341,7 @@ class _WebImageDialog:
         self._group = mt.is_group(row)
         self.title = self._title(row)
         self.source = mt._cell_image(row)
-        self.kinds = list(mt.ImageEditorDialog.group_kinds_for(panel._backend) if self._group
+        self.kinds = list(mt.ImageEditorDialog.GROUP_KINDS if self._group
                           else mt.ImageEditorDialog.kinds_for(panel._backend))
         names = [val for what, val in mt.on_card_fields(row)
                  if what in ("art", "animation")]

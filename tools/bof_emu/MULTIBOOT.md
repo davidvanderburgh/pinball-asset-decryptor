@@ -94,11 +94,17 @@ names another ALSA device.
 the menu rolls a member and writes ITS image index to the choice file, so the hook needs
 nothing new. The tab offers the random card over builds already in the list - a BOF update
 is named for its title, so every build sits in its own folder and no file dialog picks a
-group of them. A random card's styles (fan, mosaic, reel ...) are drawn from the games'
-logos, which a `.fun` does not give up: on BOF it shows a picture file or its words.
+group of them. A random card's styles (cycling, fan, mosaic, reel ...) are drawn from its
+builds' own stills (below), handed to selectmedia as `--logo N=`.
 
-**What 'auto' means here.** A `.fun` keeps its pictures and music inside the packed program,
-where nothing reads them yet: an 'auto' picture, clip or music is none, and an 'auto' move or
+**What 'auto' means here.** A build's own attract clip, out of its own packed program, and a
+still of it: `mkbofmulti.py media` reads the pack's directory, copies one Theora `.ogv` out
+(md5-checked) into the cache beside that build's unpack (`<unpack>.media/`), takes the still
+with ffmpeg and hands selectmedia both. Which clip is the title's `attract_clips` list:
+image 0 takes the first (Labyrinth's gold title), every other build the first one it CHANGED
+from image 0 (the Sarah build's intro is film footage under the film's own teal title), else
+the first. `media.json` records 'auto', which is what the tab asked for. An 'auto' music bed
+is none (the game's sounds are imported samples nothing reads yet), and an 'auto' move or
 confirm sound is the built-in synthetic click and chime (as on JJP).
 
 ## Proven (2026-10-03, without a machine)

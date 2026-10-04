@@ -1628,6 +1628,53 @@ def test_a_random_cards_picture_is_rendered_cached_and_checked(sm, tmp_path, mon
 
 
 @pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
+def test_a_random_card_over_builds_that_are_not_stern_cards_draws_the_logos_given(sm, tmp_path, capsys):
+    """--logo (PAD-342): a Barrels of Fun .fun is no card to read a logo off, so its
+    builder hands each build's own still over; the style is drawn from those and no
+    card is ever opened.  A new logo misses the cache."""
+    images = []
+    for i in range(2):
+        p = tmp_path / ("b%d" % i) / "lab.fun"
+        p.parent.mkdir()
+        p.write_bytes(bytes(8 + i))
+        images.append(str(p))
+    logos = {}
+    for i, rgb in enumerate(((200, 150, 20), (20, 150, 200))):
+        logos[i] = str(tmp_path / ("still%d.png" % i))
+        with open(logos[i], "wb") as f:
+            f.write(_rgba_png(64, 36, rgb + (255,)))
+    out, work = str(tmp_path / "out"), str(tmp_path / "work")
+    os.makedirs(out)
+    os.makedirs(work)
+
+    def no_card(path):
+        raise AssertionError("a card was opened: %s" % path)
+    said = []
+    names = sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72), out, work,
+                              no_card, log=said.append, logo_files=logos)
+    assert names == {"art": "gart0.png", "anim": "ganim0.gif"}
+    back = sm.panel_from_file(os.path.join(out, "gart0.png"), (128, 72))
+    assert any(c[:3] == (200, 150, 20) and c[3] > 200 for c in back.colours())
+    said[:] = []
+    sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72), out, work,
+                      no_card, log=said.append, logo_files=logos)
+    assert all("cached" in line for line in said), said
+    with open(logos[1], "wb") as f:
+        f.write(_rgba_png(64, 36, (250, 250, 250, 255)))
+    os.utime(logos[1], (1, 1))
+    said[:] = []
+    sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72), out, work,
+                      no_card, log=said.append, logo_files=logos)
+    assert not any("cached" in line for line in said), said
+    # and through the command line: --logo names a picture for one of the images
+    capsys.readouterr()
+    assert sm.main(["prepare", "--primary", images[0], "--extra", images[1], "--out", out,
+                    "--logo", "2=" + logos[0], "--art", "0=none", "--art", "1=none"]) == 2
+    said = capsys.readouterr()
+    assert "--logo" in said.out + said.err
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
 def test_an_oversized_random_card_animation_is_refused_with_the_reason(sm, tmp_path,
                                                                       monkeypatch):
     images, card = _stub_group_card(sm, tmp_path, monkeypatch)

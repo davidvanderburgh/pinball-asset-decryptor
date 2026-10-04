@@ -114,6 +114,16 @@ TITLES = collections.OrderedDict([
         # LEFT FLIPPER 15, LOWER RIGHT FLIPPER 22, START 14 - and LAUNCH 20 as a second START
         "switches": collections.OrderedDict([("switch_left", "15"), ("switch_right", "22"),
                                              ("switch_start", "14,20")]),
+        # A BUILD'S OWN PICTURES ('auto', PAD-342): the attract clips in its pack, in the
+        # order 'auto' tries them, each with the moment its still is taken.  Image 0 takes
+        # the first, the game's title; every other build the first one it CHANGED - the
+        # Sarah build's intro is film footage under the film's own title - else the first.
+        "attract_clips": [("assets/videos/attract_main_title_no_sound.ogv", 4.0),
+                          ("assets/videos/attract/bof_logo_v9_PR422_48khz.ogv", 0.6),
+                          ("assets/videos/peach/attract_ballroom.ogv", 1.5),
+                          ("assets/videos/attract_background_view_of_castle.ogv", 2.0),
+                          ("assets/videos/attract_background_garden_view_of_castle.ogv", 2.0),
+                          ("assets/videos/attract_background_front_walls.ogv", 2.0)],
     }),
 ])
 #: titles a BOF .fun can be, and why they are not offered yet
@@ -131,6 +141,7 @@ USB_SIZES = collections.OrderedDict([("8G", 7_700_000_000), ("16G", 15_400_000_0
                                      ("32G", 30_900_000_000), ("64G", 61_800_000_000)])
 CACHE_DIR_DEFAULT = "/var/tmp/pad_bofmulti_cache"
 CACHE_KEEP = 4
+MEDIA_SUFFIX = ".media"                        # CACHE/<unpack>.media/: that build's own clips + stills
 CHUNK = 8 << 20
 SELECTOR_FILES = collections.OrderedDict([      # name in --selector-dir -> (mode, required)
     ("bofselect", (0o755, True)),
@@ -302,6 +313,7 @@ def prune_cache(cache_dir, keep):
     for d in done[CACHE_KEEP:]:
         if d != keep:
             shutil.rmtree(d, ignore_errors=True)
+            shutil.rmtree(d + MEDIA_SUFFIX, ignore_errors=True)     # its own pictures (own_media)
     for d in ds:
         if d.endswith(".part"):
             shutil.rmtree(d, ignore_errors=True)
@@ -1266,38 +1278,152 @@ def _bof_sound(spec):
     return "synth" if s.lower().startswith("auto") else s
 
 
-def _bof_group_picture(spec):
-    """A random card's picture or animation: a file of its own passes (selectmedia refuses a
-    missing one); a STYLE (fan, mosaic, reel ...) is drawn from the members' logos, which a
-    .fun does not give up, so it is none."""
+def _pack_files(program):
+    """(directory, {path: entry}) of a program's Godot pack (plugins/bof/pck_directory.py)."""
+    from pinball_decryptor.plugins.bof import pck_directory
+    d = pck_directory.read(program)
+    if d is None:
+        raise Refused("%s has no Godot pack directory" % os.path.basename(program))
+    return d, {e["praw"].rstrip(b"\0").decode("utf-8", "replace"): e for e in d.entries}
+
+
+def _copy_out(program, d, e, dest):
+    """One packed file to *dest*, md5-checked against the directory, written once."""
+    if os.path.isfile(dest) and os.path.getsize(dest) == e["size"]:
+        return
+    h = hashlib.md5()
+    with open(program, "rb") as src, open(dest + ".part", "wb") as out:
+        src.seek(d.pck_off + d.base + e["ofs"])
+        left = e["size"]
+        while left:
+            buf = src.read(min(CHUNK, left))
+            if not buf:
+                raise Refused("%s ends inside %s" % (os.path.basename(program), os.path.basename(dest)))
+            h.update(buf)
+            out.write(buf)
+            left -= len(buf)
+    if h.digest() != bytes(e["md5"]):
+        os.unlink(dest + ".part")
+        raise Refused("%s: %s does not match its md5 in the pack" % (os.path.basename(program), dest))
+    os.rename(dest + ".part", dest)
+
+
+def own_media(images, cache_dir, need):
+    """{image: (clip, still)} - each asked-for build's OWN attract clip and a still of it, out
+    of its own program (PAD-342: what 'auto' is on BOF, the way a Stern card's 'auto' is its
+    logo and attract clip).  Which clip is TITLES[..]['attract_clips']: image 0 the first there
+    is, every other build the first one it changed from image 0, else the first.  Written once
+    into CACHE/<unpack>.media/, so selectmedia's own cache keeps hitting.  A build whose pack
+    has none of them, or no readable directory, is left out, and says so: its card is words."""
+    if not need:
+        return {}
+    units = {}
+
+    def unit(i):
+        if i not in units:
+            units[i] = cached_unpack(images[i], cache_dir)
+        return units[i]
+
+    table = TITLES[unit(0).title].get("attract_clips") or []
+    try:
+        base = _pack_files(unit(0).program)[1]
+    except Exception as e:                                  # noqa: BLE001 - said, then text cards
+        say("note: %s's pack cannot be read (%s): 'auto' pictures are none" % (os.path.basename(images[0]), e))
+        return {}
     import selectmedia
-    s = (spec or "").strip()
-    styles = set(selectmedia.GROUP_ART_STYLES) | set(selectmedia.GROUP_ANIM_STYLES)
-    return "none" if not s or s.lower() in styles or s.lower().startswith("auto") else s
+    ff = selectmedia.find_ffmpeg()
+    out = {}
+    for i in sorted(need):
+        u = unit(i)
+        try:
+            d, files = _pack_files(u.program)
+        except Exception as e:                              # noqa: BLE001
+            say("note: image %d: its pack cannot be read (%s): its 'auto' picture is none" % (i, e))
+            continue
+        pick = pick_clip(table, base, files, i)
+        if pick is None:
+            say("note: image %d carries none of the attract clips 'auto' knows: its card is words" % i)
+            continue
+        path, at, changed = pick
+        mdir = u.root + MEDIA_SUFFIX
+        os.makedirs(mdir, exist_ok=True)
+        clip = os.path.join(mdir, os.path.basename(path))
+        _copy_out(u.program, d, files[path], clip)
+        still = os.path.join(mdir, "%s@%g.png" % (os.path.splitext(os.path.basename(path))[0], at))
+        if not os.path.isfile(still):
+            if not ff:
+                raise Refused("ffmpeg is required for a BOF build's own picture")
+            r = subprocess.run([ff, "-v", "error", "-y", "-ss", "%g" % at, "-i", clip, "-frames:v", "1",
+                                still + ".part.png"], capture_output=True, text=True)
+            if r.returncode or not os.path.isfile(still + ".part.png"):
+                raise Refused("could not take a still from %s: %s" % (clip, r.stderr.strip()[-300:]))
+            os.rename(still + ".part.png", still)
+        say("image %d: its own %s%s" % (i, path, " (changed from image 0)" if changed else ""))
+        out[i] = (clip, still)
+    return out
+
+
+def pick_clip(table, base, files, i):
+    """``(pack path, still at, changed)`` - which of *table*'s clips is image *i*'s own, out of
+    its pack's *files* and image 0's (*base*), both ``{path: entry}``: image 0 the first it
+    carries; any other the first it CHANGED from image 0 (or added), else the first it carries.
+    None when it carries none of them."""
+    have = [(p, t) for p, t in table if p in files]
+    if not have:
+        return None
+    if i:
+        for p, t in have:
+            if p not in base or bytes(base[p]["md5"]) != bytes(files[p]["md5"]):
+                return p, t, True
+    return have[0][0], have[0][1], False
+
+
+def _is_style(spec):
+    import selectmedia
+    return (spec or "").strip().lower() in set(selectmedia.GROUP_ART_STYLES) | set(selectmedia.GROUP_ANIM_STYLES)
 
 
 def cmd_media(a):
-    """The menu's pictures and sounds through selectmedia.py prepare.  A BOF .fun has no picture
-    or sound of its own the tools can reach yet (they sit inside the packed program), so 'auto'
-    art, animation and music are none and an 'auto' sound is the synthetic one; a random card's
-    picture is a file of its own or none.  The sounds play through the machine's own aplay
-    (padselect.sh pipes the menu's mix to it)."""
+    """The menu's pictures and sounds through selectmedia.py prepare.  'auto' art and animation
+    are the build's own attract clip and a still of it (:func:`own_media`), and those stills are
+    the logos a random card's styles are drawn from (``--logo``); media.json still records
+    'auto', which is what the tab asked for.  'auto' music is none (the game's sounds are
+    imported samples nothing reads yet) and an 'auto' sound is the synthetic one.  The sounds
+    play through the machine's own aplay (padselect.sh pipes the menu's mix to it)."""
     import selectmedia
     images = [os.path.abspath(a.primary)] + [os.path.abspath(e) for e in a.extra]
     n = len(images)
     arts = selectmedia.parse_index_spec(a.art, n, "none")
     anims = selectmedia.parse_index_spec(a.anim, n, "none")
     musics = selectmedia.parse_index_spec(a.music, n, "none")
+    members = {}
+    for spec in a.group_members:
+        g, _sep, val = spec.partition("=")
+        members[g.strip()] = [int(x) for x in val.split(",") if x.strip().isdigit()]
+    styled = [g for g, val in (s.partition("=")[::2] for s in a.group_art + a.group_anim) if _is_style(val)]
+    need = {i for i in range(n) if arts[i].startswith("auto") or anims[i].startswith("auto")}
+    need |= {m for g in styled for m in members.get(g.strip(), []) if 0 <= m < n}
+    own = own_media(images, a.cache_dir or CACHE_DIR_DEFAULT, need)
     argv = ["prepare", "--primary", images[0]]
     for e in images[1:]:
         argv += ["--extra", e]
     argv += ["--out", os.path.abspath(a.out)]
     if a.cards:
         argv += ["--cards", str(a.cards)]
+    resolved = {}                                  # (key, image) -> the spec the tab asked for
     for i, spec in enumerate(arts):
-        argv += ["--art", "%d=%s" % (i, "none" if spec.startswith("auto") else spec)]
+        if spec.startswith("auto"):
+            resolved[("art_source", i)] = spec
+            spec = own[i][1] if i in own else "none"
+        argv += ["--art", "%d=%s" % (i, spec)]
     for i, spec in enumerate(anims):
-        argv += ["--anim", "%d=%s" % (i, "none" if spec.startswith("auto") else spec)]
+        if spec.startswith("auto"):
+            resolved[("anim_source", i)] = spec
+            start = spec.partition("@")[2]
+            spec = (own[i][0] + ("@" + start if start else "")) if i in own else "none"
+        argv += ["--anim", "%d=%s" % (i, spec)]
+    for i in sorted(own):
+        argv += ["--logo", "%d=%s" % (i, own[i][1])]
     for i, spec in enumerate(musics):
         argv += ["--music", "%d=%s" % (i, "none" if spec.startswith("auto") else spec)]
     argv += ["--sound-move", _bof_sound(a.sound_move)]
@@ -1307,13 +1433,25 @@ def cmd_media(a):
                  else _bof_sound(spec)]
     for spec in a.group_members:
         argv += ["--group-members", spec]
-    for flag, specs, fix in (("--group-art", a.group_art, _bof_group_picture),
-                             ("--group-anim", a.group_anim, _bof_group_picture),
-                             ("--group-music", a.group_music, lambda s: "none" if s.lower().startswith("auto") else s),
-                             ("--group-confirm", a.group_confirm, _bof_sound)):
+
+    def picture(g, val):
+        # a style is drawn from the members' logos - their own stills - so it needs every one
+        s = (val or "").strip()
+        if s.lower().startswith("auto"):
+            return "none"
+        if _is_style(s) and not all(m in own for m in members.get(g.strip(), [None])):
+            say("note: random card %s: a %s is drawn from its builds' own pictures, and not every "
+                "one has one - it shows its words" % (g, s))
+            return "none"
+        return s
+    for flag, specs, fix in (("--group-art", a.group_art, picture),
+                             ("--group-anim", a.group_anim, picture),
+                             ("--group-music", a.group_music,
+                              lambda _g, s: "none" if s.lower().startswith("auto") else s),
+                             ("--group-confirm", a.group_confirm, lambda _g, s: _bof_sound(s))):
         for spec in specs:
             g, _sep, val = spec.partition("=")
-            argv += [flag, "%s=%s" % (g, fix(val))]
+            argv += [flag, "%s=%s" % (g, fix(g, val))]
     argv += ["--volume", str(VOLUME_DEFAULT if a.volume is None else a.volume)]
     if a.size:
         argv += ["--size", a.size]
@@ -1321,7 +1459,22 @@ def cmd_media(a):
         argv += ["--visual-only"]
     if a.work:
         argv += ["--work", a.work]
-    return selectmedia.main(argv)
+    rc = selectmedia.main(argv)
+    if rc == 0 and resolved:
+        # THE MANIFEST SAYS WHAT WAS ASKED FOR: 'auto', not the clip it came to in the cache -
+        # the tab offers a rendered picture only while its source is the row's own spec, and a
+        # load of the update reads the row back from it
+        man_path = os.path.join(os.path.abspath(a.out), "media.json")
+        with open(man_path) as f:
+            man = json.load(f)
+        for (key, i), spec in resolved.items():
+            rows = man.get("images") or []
+            if i < len(rows) and isinstance(rows[i], dict) and rows[i].get(key) not in (None, "none"):
+                rows[i][key] = spec
+        with open(man_path + ".part", "w") as f:
+            json.dump(man, f)
+        os.replace(man_path + ".part", man_path)
+    return rc
 
 
 # ============================================================================== main
@@ -1394,8 +1547,10 @@ def main(argv=None):
     s.add_argument("--primary", required=True)
     s.add_argument("--extra", action="append", default=[], metavar="FUN")
     s.add_argument("--out", required=True)
-    s.add_argument("--art", action="append", default=[], metavar="N=none|PATH|VIDEO@T")
-    s.add_argument("--anim", action="append", default=[], metavar="N=none|PATH[@START[:SECONDS[:FPS]]]")
+    s.add_argument("--art", action="append", default=[], metavar="N=auto|none|PATH|VIDEO@T",
+                   help="image N's picture ('auto' = a still of the build's own attract clip)")
+    s.add_argument("--anim", action="append", default=[], metavar="N=auto|none|PATH[@START[:SECONDS[:FPS]]]",
+                   help="image N's clip ('auto' = the build's own attract clip, out of its .fun)")
     s.add_argument("--music", action="append", default=[], metavar="N=none|PATH",
                    help="the bed that loops while image N is highlighted ('auto' = none on BOF)")
     s.add_argument("--sound-move", default="none", metavar="PATH|synth|none",
@@ -1405,9 +1560,9 @@ def main(argv=None):
     s.add_argument("--cards", type=int, default=0, metavar="N",
                    help="how many CARDS the menu draws (a random card stands for several images)")
     s.add_argument("--group-members", action="append", default=[], metavar="G=I,J,...")
-    s.add_argument("--group-art", action="append", default=[], metavar="G=PATH|none",
-                   help="random card G's picture (a style drawn from logos is none on BOF)")
-    s.add_argument("--group-anim", action="append", default=[], metavar="G=PATH|none")
+    s.add_argument("--group-art", action="append", default=[], metavar="G=STYLE|PATH|none",
+                   help="random card G's picture: a style drawn from its builds' own stills, or a file")
+    s.add_argument("--group-anim", action="append", default=[], metavar="G=STYLE|none")
     s.add_argument("--group-music", action="append", default=[], metavar="G=PATH|none")
     s.add_argument("--group-confirm", action="append", default=[], metavar="G=PATH|synth|none")
     s.add_argument("--volume", type=int)

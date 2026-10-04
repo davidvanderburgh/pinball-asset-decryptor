@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import types
 
 import pytest
 
@@ -150,30 +151,103 @@ def test_conf_random_cards_and_sounds_round_trip():
                        groups=[{"title": "R", "members": [0, 1], "keep": True}], default_card=3)
 
 
-def test_media_maps_what_a_fun_cannot_give(monkeypatch, tmp_path):
-    """'auto' pictures and music are none (they sit inside the packed program), an 'auto'
-    sound is the synthetic one, and a random card's STYLE (drawn from logos) is none - a
-    file of its own passes.  Sounds are prepared: no --visual-only unless asked."""
+def _fake_prepare(got, out):
+    """selectmedia.main's stand-in: records the argv and writes the manifest selectmedia
+    would, the sources being whatever it was handed."""
+    def main(argv):
+        got["argv"] = argv
+        pairs = list(zip(argv, argv[1:]))
+        rows = []
+        for i in range(2):
+            art = [v for k, v in pairs if k == "--art" and v.startswith("%d=" % i)][0][2:]
+            anim = [v for k, v in pairs if k == "--anim" and v.startswith("%d=" % i)][0][2:]
+            rows.append({"art": None if art == "none" else "art%d.png" % i,
+                         "anim": None if anim == "none" else "anim%d.gif" % i,
+                         "art_source": art, "anim_source": anim})
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, "media.json"), "w") as f:
+            json.dump({"images": rows, "groups": []}, f)
+        return 0
+    return main
+
+
+def test_media_takes_each_builds_own_clip_and_maps_the_rest(monkeypatch, tmp_path):
+    """'auto' art is a still of the build's own attract clip and 'auto' animation is the clip
+    (own_media); the stills are the logos a random card's STYLE is drawn from, so a style
+    needs every member's; media.json records 'auto' again.  'auto' music is none and an
+    'auto' sound is the synthetic one.  No --visual-only unless asked."""
     import selectmedia
-    got = {}
-    monkeypatch.setattr(selectmedia, "main", lambda argv: got.setdefault("argv", argv) and 0)
+    got, need = {}, {}
+    out = str(tmp_path / "m")
+    monkeypatch.setattr(selectmedia, "main", _fake_prepare(got, out))
+    own = {0: ("/c/title.ogv", "/c/title@4.png")}
+
+    def own_media(images, cache, n):
+        need["n"] = set(n)
+        return {i: v for i, v in own.items() if i in n}
+    monkeypatch.setattr(mb, "own_media", own_media)
     p0, p1 = str(tmp_path / "a" / "lab.fun"), str(tmp_path / "b" / "lab.fun")
-    assert mb.main(["media", "--primary", p0, "--extra", p1, "--out", str(tmp_path / "m"), "--cards", "3",
-                    "--art", "0=auto", "--anim", "1=auto", "--music", "0=auto", "--music", "1=/x/song.wav",
-                    "--sound-move", "auto", "--sound-confirm", "auto", "--sound-confirm", "1=auto",
-                    "--group-members", "0=0,1", "--group-art", "0=fan", "--group-anim", "0=/x/r.gif",
-                    "--group-music", "0=auto", "--group-confirm", "0=auto"]) == 0
-    argv = got["argv"]
-    pairs = list(zip(argv, argv[1:]))
-    for want in (("--cards", "3"), ("--art", "0=none"), ("--anim", "1=none"), ("--music", "0=none"),
+    args = ["media", "--primary", p0, "--extra", p1, "--out", out, "--cards", "3",
+            "--art", "0=auto", "--anim", "0=auto@2", "--anim", "1=auto", "--music", "0=auto",
+            "--music", "1=/x/song.wav", "--sound-move", "auto", "--sound-confirm", "auto",
+            "--sound-confirm", "1=auto", "--group-members", "0=0,1", "--group-art", "0=fan",
+            "--group-anim", "0=/x/r.gif", "--group-music", "0=auto", "--group-confirm", "0=auto"]
+    assert mb.main(args) == 0
+    assert need["n"] == {0, 1}                  # image 0's auto art + both members of a style
+    pairs = list(zip(got["argv"], got["argv"][1:]))
+    for want in (("--cards", "3"), ("--art", "0=/c/title@4.png"), ("--anim", "0=/c/title.ogv@2"),
+                 ("--anim", "1=none"), ("--logo", "0=/c/title@4.png"), ("--music", "0=none"),
                  ("--music", "1=/x/song.wav"), ("--sound-move", "synth"), ("--sound-confirm", "synth"),
-                 ("--sound-confirm", "1=synth"), ("--group-members", "0=0,1"), ("--group-art", "0=none"),
+                 ("--sound-confirm", "1=synth"), ("--group-members", "0=0,1"),
+                 # image 1 has no picture of its own, so the fan has nothing to fan: its words
+                 ("--group-art", "0=none"),
                  ("--group-anim", "0=/x/r.gif"), ("--group-music", "0=none"), ("--group-confirm", "0=synth")):
         assert want in pairs, want
-    assert "--visual-only" not in argv
+    assert "--visual-only" not in got["argv"]
+    man = json.load(open(os.path.join(out, "media.json")))
+    assert (man["images"][0]["art_source"], man["images"][0]["anim_source"]) == ("auto", "auto@2")
+    assert man["images"][1]["anim_source"] == "none"        # nothing came of it: not 'auto'
+    # every member with its own picture: the style is drawn from them
+    own[1] = ("/c/intro.ogv", "/c/intro@0.6.png")
+    need.clear()
+    assert mb.main(args) == 0
+    pairs = list(zip(got["argv"], got["argv"][1:]))
+    assert ("--group-art", "0=fan") in pairs and ("--logo", "1=/c/intro@0.6.png") in pairs
+    assert ("--anim", "1=/c/intro.ogv") in pairs
     got.clear()
-    assert mb.main(["media", "--primary", p0, "--extra", p1, "--out", str(tmp_path / "m"), "--visual-only"]) == 0
+    assert mb.main(["media", "--primary", p0, "--extra", p1, "--out", out, "--visual-only"]) == 0
     assert "--visual-only" in got["argv"] and ("--sound-move", "none") in zip(got["argv"], got["argv"][1:])
+
+
+def test_pick_clip_takes_a_mods_own():
+    e = lambda m: {"md5": m}                                           # noqa: E731
+    table = [("t.ogv", 4.0), ("intro.ogv", 0.6), ("ball.ogv", 1.5)]
+    base = {"t.ogv": e(b"1"), "intro.ogv": e(b"2"), "ball.ogv": e(b"3")}
+    assert mb.pick_clip(table, base, base, 0) == ("t.ogv", 4.0, False)
+    # the Sarah build: the title as stock, its own intro
+    mod = dict(base, **{"intro.ogv": e(b"X")})
+    assert mb.pick_clip(table, base, mod, 1) == ("intro.ogv", 0.6, True)
+    # a mod that changed none of them shows the title like the stock card
+    assert mb.pick_clip(table, base, base, 1) == ("t.ogv", 4.0, False)
+    # one it ADDED counts as its own; one missing is skipped
+    assert mb.pick_clip(table, {"t.ogv": e(b"1")}, {"t.ogv": e(b"1"), "ball.ogv": e(b"3")}, 2) == \
+        ("ball.ogv", 1.5, True)
+    assert mb.pick_clip(table, base, {"intro.ogv": e(b"2")}, 0) == ("intro.ogv", 0.6, False)
+    assert mb.pick_clip(table, base, {"other.ogv": e(b"9")}, 1) is None
+
+
+def test_copy_out_checks_the_md5(tmp_path):
+    prog = tmp_path / "prog"
+    prog.write_bytes(b"ENGINE" + b"PCKHDR" + b"hello clip" + b"tail")
+    d = types.SimpleNamespace(pck_off=6, base=6)
+    good = {"ofs": 0, "size": 10, "md5": hashlib.md5(b"hello clip").digest()}
+    out = tmp_path / "c.ogv"
+    mb._copy_out(str(prog), d, good, str(out))
+    assert out.read_bytes() == b"hello clip"
+    bad = dict(good, md5=hashlib.md5(b"other").digest())
+    with pytest.raises(Refused, match="does not match its md5"):
+        mb._copy_out(str(prog), d, bad, str(tmp_path / "d.ogv"))
+    assert not (tmp_path / "d.ogv").exists() and not (tmp_path / "d.ogv.part").exists()
 
 
 def test_titles_not_read_yet_are_refused_by_name(tmp_path):

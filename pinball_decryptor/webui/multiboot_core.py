@@ -385,7 +385,7 @@ _AUTO_IDX_RE = re.compile(r"(?i)^auto@\d+$")
 #: .webm and .flv (item 120): what PAD extracts from a JJP game - 629 of GNR's
 #: 648 clips are VP9 .webm - so a JJP image can play one of its own game's
 #: clips; ffmpeg reads both, and selectmedia.VIDEO_EXTS must match this.
-VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv")
+VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".ogv")
 
 #: What a loop plays at until its GIF is there to read - selectmedia.py's
 #: GIF_MAX_NATIVE_FPS, the most a source's own rate is rendered at.  The
@@ -791,8 +791,6 @@ def card_media_names(form):
                 "gmusic%d.wav" % gi if _media_value(row.music) != "none" else "")
             confirm = (row.confirm or "").strip() if row.confirm_on_card else (
                 "gconfirm%d.wav" % gi if confirm_spec(row) != "none" else "")
-            if bof and group_media_kind(row) not in BOF_GROUP_MEDIA:
-                art = anim = ""           # a style is drawn from logos a .fun does not give up
             if bof and not row.music_on_card and _media_value(row.music).lower().startswith("auto"):
                 music = ""
         else:
@@ -801,16 +799,11 @@ def card_media_names(form):
             anim = "anim%d.gif" % i if anim_spec(row) != "none" else ""
             music = "music%d.wav" % i if _media_value(row.music) != "none" else ""
             confirm = "confirm%d.wav" % i if confirm_spec(row) != "none" else ""
-            if bof:
-                # PAD-342: nothing reads a .fun's own pictures or music yet, so
-                # 'auto' there is a text-only card with no bed (mkbofmulti.py
-                # media prepares none); an 'auto' confirm is the synthetic chime
-                if art_spec(row).lower().startswith("auto"):
-                    art = ""
-                if anim_spec(row).lower().startswith("auto"):
-                    anim = ""
-                if _media_value(row.music).lower().startswith("auto"):
-                    music = ""
+            if bof and _media_value(row.music).lower().startswith("auto"):
+                # PAD-342: 'auto' art and clips are the build's own attract
+                # clip (mkbofmulti.py media), but nothing reads a .fun's music
+                # yet, so 'auto' music is no bed; an 'auto' confirm is the chime
+                music = ""
         out.append((art, anim, music, confirm))
     return out
 
@@ -5686,18 +5679,6 @@ GROUP_MEDIA_KINDS = (
 #: one question a random card leaves the player with.
 GROUP_MEDIA_DEFAULT = "cycling"
 GROUP_MEDIA_NAMES = tuple(k for k, _l, _a, _n in GROUP_MEDIA_KINDS)
-#: ...and what a Barrels of Fun random card can show (PAD-342): every style above
-#: is drawn from the games' logos, which a .fun does not give up, so a picture of
-#: its own or its words.  A new one starts as its words.
-BOF_GROUP_MEDIA = ("picture", "none", "card")
-
-
-def group_media_default(platform):
-    """The style a NEW random card starts on: :data:`GROUP_MEDIA_DEFAULT`, or
-    text only on Barrels of Fun (see :data:`BOF_GROUP_MEDIA`)."""
-    return "none" if backend_for(platform).key == "bof" else GROUP_MEDIA_DEFAULT
-
-
 def _group_kind(kind):
     for k, label, art, anim in GROUP_MEDIA_KINDS:
         if k == kind:
@@ -6350,14 +6331,6 @@ class ImageEditorDialog(_PageDialog):
     #: one of the five above survives the move: each of them names "the game",
     #: and this card is several of them.  See GROUP_MEDIA_KINDS.
     GROUP_KINDS = tuple((k, label) for k, label, _a, _n in GROUP_MEDIA_KINDS)
-
-    @classmethod
-    def group_kinds_for(cls, backend):
-        """A random card's choices on this platform: every style on a Stern or
-        JJP card; a picture of its own or text only on Barrels of Fun."""
-        if backend.key == "bof":
-            return tuple((k, label) for k, label in cls.GROUP_KINDS if k in BOF_GROUP_MEDIA)
-        return cls.GROUP_KINDS
 
     #: Under the two rules and the tick they share: what the machine keeps
     #: between power-ups, and why a shuffle answers the tick for you.
@@ -8434,10 +8407,10 @@ class MultibootPanel:
         title, subtitle = suggest_title(path, be.key)
         row = ImageRow(path=path, title=title, subtitle=subtitle)
         if be.key == "bof":
-            # PAD-342: nothing reads a .fun's own pictures or music yet - the
-            # card is its words until a picture is picked, with no bed until
-            # one is; the move / confirm sounds stay the menu-wide ones
-            row.art, row.anim, row.music, row.confirm = "none", "none", "none", ""
+            # PAD-342: the build's own title or attract clip, moving, as the
+            # card (mkbofmulti.py media pulls it out of the .fun); no bed until
+            # one is picked, and the menu-wide move / confirm sounds
+            row.art, row.anim, row.music, row.confirm = "auto", "auto", "none", ""
         self._rows.append(row)
         self._refresh_tree(select=len(self._rows) - 1)
         if len(self._rows) == 1:
@@ -8632,7 +8605,7 @@ class MultibootPanel:
         self._rows.append(set_group_media(
             ImageRow(path="", title=title or "RANDOM", subtitle=subtitle,
                      members=members, keep=keep, roll=ROLL_DEFAULT),
-            group_media_default(self._backend)))
+            GROUP_MEDIA_DEFAULT))
         self._refresh_tree(select=len(self._rows) - 1)
         # a group forces the compact build; show that in the tick straight away
         self._sync_compact_lock()
@@ -8667,7 +8640,7 @@ class MultibootPanel:
                    for r in plain]
         self._rows.append(set_group_media(
             ImageRow(path="", title=title, subtitle=subtitle, members=members,
-                     keep=True, roll=ROLL_DEFAULT), group_media_default(self._backend)))
+                     keep=True, roll=ROLL_DEFAULT), GROUP_MEDIA_DEFAULT))
         self._refresh_tree(select=len(self._rows) - 1)
         self._ok("")
 

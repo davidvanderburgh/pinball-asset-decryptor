@@ -227,6 +227,9 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk-rep .bk-x { width: 18px; height: 18px; line-height: 16px; border-radius: 999px; }
 .bk .field.sm { background: var(--panel); color: var(--ink); }
 .bk .chk { color: #fff; }
+/* a Light show block's own steps (PAD-376): one line each, under the block's own line */
+.bk-steps { display: flex; flex-direction: column; gap: 3px; margin: 2px 0 4px 18px; padding: 4px 6px; background: rgba(0,0,0,.16); border-radius: 6px; }
+.bk-steps .bk-step { padding: 0; gap: 4px; min-height: 30px; }
 .bk-color { width: 30px; height: 24px; padding: 0; border: 1px solid rgba(0,0,0,.3); border-radius: 4px; background: none; cursor: pointer; }
 .bk-c-src { margin: 0; padding: 12px 14px; background: var(--log-bg); color: var(--log-ink); border: 1px solid var(--line);
   border-radius: 8px; font-size: 12px; line-height: 1.45; overflow: auto; max-height: 100%; white-space: pre; }

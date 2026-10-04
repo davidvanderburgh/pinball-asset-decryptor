@@ -18,7 +18,9 @@ import { PlayButton } from "./modes_dialogs.js";
 
 const WHEN = [["any", "any time"], ["idle", "while it is not running"], ["running", "while it runs"]];
 const RESETS = [["ball", "each ball"], ["mode", "each time it starts"], ["game", "each game"]];
-const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"]];
+const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"],
+  ["hurry", "blinking faster"]];
+const PACED = ["blink", "pulse", "chase"];
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
 const CLIP_WHERE = [["full", "full screen"], ["behind", "behind the HUD, once"], ["loop", "behind the HUD, over and over"]];
@@ -45,6 +47,12 @@ const TIP = {
   priority: "Its priority on the voice bus: it fades the game's lower speech and waits for higher. 4 is a call's usual; 3 for one that repeats (a play while the last still sounds is skipped).",
   music: "Its own music: it plays instead of the game's while the mode runs, and the game's comes back at the end.",
   name: "The name its blocks call it by: lower-case letters, digits and _.",
+  rate: "How fast it blinks, pulses or chases: one beat every this many ms (20 to 5000). Any value: a number, a variable, a sum. Empty = its usual pace.",
+  hurry: "Blinks slowly with most of the time left, faster as the clock runs down, and flickers in the last three seconds.",
+  show: "A light show over the playfield's inserts (the ones the game's port places), a few seconds long: the shots' own lights come back when it is over. A new show takes the place of one still running.",
+  ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colours, from a place on the playfield.",
+  stepRate: "The pattern's pace, ms (a strobe's flash, a beam's turn, a chase's step). 0 = its usual.",
+  gi: "The lights between the inserts (the general illumination) during this step: the game's, dark, or flashing white.",
 };
 
 // ------------------------------------------------------------------ the blocks there are
@@ -74,8 +82,8 @@ function stmtTemplates(ch, vars, prog = {}) {
       { op: "change", var: v, by: num(1) }]],
     ["Control", [{ op: "if", cond: null, then: [], else: null }, { op: "if", cond: null, then: [], else: [] }]],
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
-      { op: "light_shot", shot, color: "#ffd000", pattern: "blink" }, { op: "lights_off", shot: "*" },
-      { op: "log", text: "" }]],
+      { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" },
+      { op: "show", show: "burst" }, { op: "log", text: "" }]],
     ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null }]],
   ];
 }
@@ -94,7 +102,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   stock: "a game mode of its own runs" };
 const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
-  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", log: "show",
+  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", log: "show",
   clip: "own", sound: "own" };
 
 // ------------------------------------------------------------------ the program, by path
@@ -139,7 +147,7 @@ function slotMenu(e, kind, ed, path) {
   openMenu(e.currentTarget, items);
 }
 
-function Slot({ kind, value, path, ed, optional }) {
+function Slot({ kind, value, path, ed, optional, empty }) {
   const [over, setOver] = useState(false);
   const fits = () => dragging && dragging.tpl && (kind === "bool" ? dragging.tpl.k && condTemplates().some((t) => t.k === dragging.tpl.k)
     : dragging.tpl.k && valueTemplates(ed.ch, ed.vars).some((t) => t.k === dragging.tpl.k));
@@ -151,7 +159,7 @@ function Slot({ kind, value, path, ed, optional }) {
   if (!value) {
     return html`<button type="button" class=${cx("bk-slot", kind, over && "over")} ...${drop}
       onClick=${(e) => slotMenu(e, kind, ed, path)} ...${tip(kind === "bool" ? "A condition: drop one here, or press to pick" : "A value: drop one here, or press to pick")}>
-      ${kind === "bool" ? "condition" : optional ? "(no number)" : "value"}</button>`;
+      ${kind === "bool" ? "condition" : optional ? (empty || "(no number)") : "value"}</button>`;
   }
   return html`<span class=${cx("bk-rep", kind, over && "over")} ...${drop}>
     ${kind === "bool" ? html`<${Cond} e=${value} path=${path} ed=${ed} />` : html`<${Val} e=${value} path=${path} ed=${ed} />`}
@@ -208,7 +216,22 @@ function StmtBody({ b, path, ed }) {
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">on its screen</span>`;
     case "light_shot": return html`<span class="bk-w">Light</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
       <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The insert's colour")} />
-      <${Pick} value=${b.pattern} options=${PATTERNS} onChange=${(v) => set("pattern", v)} />`;
+      <${Pick} value=${b.pattern} options=${PATTERNS} title=${b.pattern === "hurry" ? TIP.hurry : undefined} onChange=${(v) => set("pattern", v)} />
+      ${PACED.includes(b.pattern) ? html`<span class="bk-w" ...${tip(TIP.rate)}>every</span><${Slot} kind="num" optional empty="its usual pace"
+        value=${b.rate} path=${[...path, "rate"]} ed=${ed} /><span class="bk-w">ms</span>` : null}`;
+    case "show": {
+      const shows = (ed.ch.light || {}).shows || [];
+      const pick = (v) => ed.edit((d) => {
+        const t = at(d, path);
+        if (v === "own") {
+          const from = shows.find((x) => x.key === t.show) || shows[0];
+          if (!(t.steps || []).length) t.steps = clone((from || {}).steps || []);
+        } else delete t.steps;
+        t.show = v;
+      });
+      return html`<span class="bk-w" ...${tip(TIP.show)}>Run the light show</span><${Pick} value=${b.show}
+        options=${[...shows.map((x) => [x.key, x.label]), ["own", "its own steps…"]]} onChange=${pick} />`;
+    }
     case "lights_off": return html`<span class="bk-w">Hand back the lights of</span><${Pick} value=${b.shot} options=${[["*", "every shot"], ...shots.map((n) => [n, n])]} onChange=${(v) => set("shot", v)} />`;
     case "add_time": return html`<span class="bk-w" ...${tip(TIP.addTime)}>Add</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "set_time": return html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
@@ -251,6 +274,38 @@ function Stmt({ b, path, ed }) {
   return html`<div class=${cx("bk", "bk-" + (STMT_CLASS[b.op] || "show"))}>
     <div class="bk-line">${grip}<${StmtBody} b=${b} path=${path} ed=${ed} />
       <span class="sp"></span><${X} onClick=${() => ed.remove(stack, i)} /></div>
+    ${b.op === "show" && b.show === "own" ? html`<${ShowSteps} steps=${b.steps || []} path=${[...path, "steps"]} ed=${ed} />` : null}
+  </div>`;
+}
+
+// A Light show block's own steps: one line each, in the order they run.
+const SHOW_STEPS = 10;
+function ShowSteps({ steps, path, ed }) {
+  const light = ed.ch.light || {};
+  const move = (i, dir) => ed.edit((d) => { const l = at(d, path); const [x] = l.splice(i, 1); l.splice(i + dir, 0, x); });
+  const add = () => ed.edit((d) => {
+    const l = at(d, path);
+    l.push(l.length ? clone(l[l.length - 1]) : { fx: "burst", ms: 800, a: "#ffffff", b: "#ffb000", at: "center", rate: 0, gi: "keep" });
+  });
+  return html`<div class="bk-steps" ...${tip(TIP.ownShow)}>
+    ${steps.map((st, i) => {
+      const p = [...path, i];
+      const set = (k, v) => ed.set([...p, k], v);
+      return html`<div class="bk-line bk-step" key=${i}>
+        <span class="bk-w">${i + 1}.</span>
+        <${Pick} value=${st.fx} options=${light.fx || []} width=${140} onChange=${(v) => set("fx", v)} />
+        <${Num} value=${st.ms} width=${52} title="How long this step lasts, ms" onChange=${(v) => set("ms", v)} /><span class="bk-w">ms</span>
+        <input type="color" class="bk-color" value=${st.a || "#ffffff"} onInput=${(e) => set("a", e.target.value)} ...${tip("Its first colour")} />
+        <input type="color" class="bk-color" value=${st.b || "#000000"} onInput=${(e) => set("b", e.target.value)} ...${tip("Its second colour")} />
+        <span class="bk-w">at</span><${Pick} value=${st.at || "center"} options=${light.places || []} width=${104} onChange=${(v) => set("at", v)} />
+        <span class="bk-w" ...${tip(TIP.stepRate)}>pace</span><${Num} value=${st.rate ?? 0} width=${44} title=${TIP.stepRate} onChange=${(v) => set("rate", v)} />
+        <${Pick} value=${st.gi || "keep"} options=${light.gi || []} width=${118} title=${TIP.gi} onChange=${(v) => set("gi", v)} />
+        <button type="button" class="bk-x" disabled=${i === 0} aria-label="Move this step up" ...${tip("Move this step up")} onClick=${() => move(i, -1)}>↑</button>
+        <button type="button" class="bk-x" disabled=${i === steps.length - 1} aria-label="Move this step down" ...${tip("Move this step down")} onClick=${() => move(i, 1)}>↓</button>
+        <${X} title="Take this step out" onClick=${() => ed.edit((d) => { at(d, path).splice(i, 1); })} />
+      </div>`;
+    })}
+    ${steps.length < SHOW_STEPS ? html`<button type="button" class="bk-add" onClick=${add} ...${tip("Add a step at the end of the show")}>+ step</button>` : null}
   </div>`;
 }
 
@@ -323,7 +378,7 @@ function hatLabel(h) {
 function stmtLabel(b) {
   return { start_mode: "Start the mode", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
-    words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", log: "Write in the log",
+    words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }

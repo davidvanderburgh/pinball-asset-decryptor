@@ -2249,7 +2249,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         why_clip = (p.why_not("clip") or "") if p is not None else ""
         why_sound = (p.why_not("own_sound") or self._own_extra_why(p)) if p is not None else ""
         why_music = why_sound or self._own_music_why(p)
-        return {"shots": shots, "events": events, "callouts": callouts,
+        return {"shots": shots, "events": events, "callouts": callouts, "light": BM.show_choices(),
                 "title": p.label if p is not None else "",
                 "why_clip": why_clip, "why_sound": why_sound, "why_music": why_music}
 

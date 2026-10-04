@@ -360,7 +360,8 @@ function GameModes({ prog, ed }) {
     if (v) next.add(id); else next.delete(id);
     ed.set(["block_modes"], [...next].sort((a, b) => a - b));
   };
-  const why = gm === "give_way" ? ch.give_way_off : gm === "block" ? ch.block_off : "";
+  const why = gm === "give_way" ? ch.give_way_off : gm === "block" ? (ch.block_off
+    || (rows.length && !on.size ? "None ticked: none is held off, and one of them starting ends this mode." : "")) : "";
   return html`<div class="bk-gamemodes">
     <div class="row wrap">
       <span class="lbl" ...${tip(TIP.gameModes)}>While it runs, the game's modes</span>

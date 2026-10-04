@@ -31,6 +31,7 @@ def main():
     slug, _path = BM.new_blocks_mode(project, "MASER BARRAGE", example="ramps")
     p = BM.load(project, slug)
     p["game_modes"] = "block"
+    p["block_modes"] = [21, 23]                    # Jet Fighter Attack, Tesla Strike
     BM.save(project, slug, p)
     proc, url = S._serve(repo, scratch, project)
     try:

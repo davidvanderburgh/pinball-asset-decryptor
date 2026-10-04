@@ -13,8 +13,8 @@ export default function ScenesTab() {
   const p = useNs("scenes");
   const s = useNs("text_scenes");
   // PAD-350: the Color profiles bar on the right edge, open as it was left
-  const [colors, setColorsState] = useState(barOpenAtStart);
-  const setColors = (v) => { setColorsState(v); rememberBarOpen(v); };
+  const [colors, setColorsState] = useState(() => barOpenAtStart("scenes"));
+  const setColors = (v) => { setColorsState(v); rememberBarOpen(v, "scenes"); };
   // a name under Preview colors opens the bar on its profile
   const openColors = async (mode) => { await call("color.set_mode", mode); setColors(true); };
   const ready = !p.empty && s.alive;
@@ -31,5 +31,5 @@ export default function ScenesTab() {
   return html`<div class="cpd-shell"><div class="page scenes-page">
     <${PageHead} title="Scenes" sub=${INTRO}><${ScenesActions} /><//>
     ${body}
-  </div>${ready ? html`<${ColorBar} open=${colors} setOpen=${setColors} />` : null}</div>`;
+  </div>${ready ? html`<${ColorBar} host="scenes" open=${colors} setOpen=${setColors} />` : null}</div>`;
 }

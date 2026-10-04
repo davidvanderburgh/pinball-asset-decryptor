@@ -1,6 +1,7 @@
-/* The Scenes tab's Color profiles bar (PAD-350, js/tabs/color_pane.js) on the page's right
-   edge.  It reuses the Color profile tab's controls (color.css), made narrower here.
-   Design-system tokens and classes only (css/app.css). */
+/* The Color profiles bar (PAD-350, js/tabs/color_pane.js) on the right edge of the Scenes
+   tab, and since PAD-364 the Images and Video tabs too.  It reuses the Color profile tab's
+   controls (color.css), made narrower here.  Design-system tokens and classes only
+   (css/app.css). */
 
 /* the page and the bar side by side: opening the bar pushes the page aside (the scene list
    steps out of the way meanwhile), so the preview and Layers are never covered */

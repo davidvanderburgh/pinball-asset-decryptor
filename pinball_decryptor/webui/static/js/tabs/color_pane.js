@@ -11,6 +11,12 @@
 // PAD-354 (DragonRR): Undo / Redo (and Ctrl+Z) for the profile on show, a status note that
 // keeps its size as the starting points are clicked, and a divider on the bar's edge to
 // make it wider or narrower (kept across sessions, double-click puts it back).
+// PAD-364 (DragonRR): the same bar on the Images and Video tabs (host="images" / "video"),
+// so a profile is picked from the Saved profiles list and tuned with each file's own
+// color switch in view there too.  It is the one set of profiles wherever it is opened:
+// a change made here is the change made in Scenes or on the Color profile tab.  Each tab
+// remembers whether its bar was left open; the width is shared.  On Images and Video the
+// bar opens on Files the first time, the profile their Color column attaches.
 
 import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -82,13 +88,29 @@ function Grip({ barRef, width, setWidth }) {
     onDblClick=${reset} onKeyDown=${key}><span></span></div>`;
 }
 
-export function barOpenAtStart() {
-  try { return localStorage.getItem(OPEN_KEY) === "1"; } catch (e) { return false; }
+// each host keeps its own "left open" (Scenes keeps the key it had before PAD-364)
+const openKey = (host) => (host && host !== "scenes" ? OPEN_KEY + "." + host : OPEN_KEY);
+
+export function barOpenAtStart(host) {
+  try { return localStorage.getItem(openKey(host)) === "1"; } catch (e) { return false; }
 }
 
-export function rememberBarOpen(open) {
-  try { localStorage.setItem(OPEN_KEY, open ? "1" : "0"); } catch (e) { /* private mode */ }
+export function rememberBarOpen(open, host) {
+  try { localStorage.setItem(openKey(host), open ? "1" : "0"); } catch (e) { /* private mode */ }
 }
+
+// Where the bar hangs (PAD-364): which preview its "Show it in this preview" switch is, and
+// where the file switches are.  Images has no preview that draws through the profiles, so
+// the bar there has no such switch.
+const HOSTS = {
+  scenes: { lookNs: "text_scenes", files: "switch files on below or in Layers, or move a slider." },
+  video: { lookNs: "video", files: "switch clips on below or in the Color column, or move a slider." },
+  images: { lookNs: null, files: "" },
+};
+
+// the hosts whose bar has opened on its startMode this page load (once each, so a bar
+// left open and found open again as the tab is shown keeps the profile it was on)
+const STARTED = {};
 
 const SHORT = { display: "Overlay", assets: "Files", screen: "Machine screen" };
 
@@ -96,7 +118,7 @@ const SHORT = { display: "Overlay", assets: "Files", screen: "Machine screen" };
 const PART = { display: "overlay", assets: "files", screen: "screen" };
 const PART_OFF = {
   overlay: "No whole screen overlay is set yet: move a slider or pick a starting point and the preview draws through it.",
-  files: "No switched-on file is changed by it yet: switch files on below or in Layers, or move a slider.",
+  files: "No switched-on file is changed by it yet: ",
   screen: "This screen changes nothing: move a slider or pick a starting point.",
 };
 
@@ -111,18 +133,20 @@ function loadClip() {
   try { return JSON.parse(localStorage.getItem(CLIP_KEY) || "null"); } catch (e) { return null; }
 }
 
-// The scene shows the profile on show only while its Preview colors switch is on: the same
-// switch, here, so a change is never made blind.
-function ShowHere({ mode, look }) {
-  if (!look || !look.parts) return null;
+// The scene (or the Video tab's players) shows the profile on show only while its Preview
+// colors switch is on: the same switch, here, so a change is never made blind.
+function ShowHere({ mode, look, host }) {
+  const h = HOSTS[host] || HOSTS.scenes;
+  if (!h.lookNs || !look || !look.parts) return null;
   const k = PART[mode];
   const part = look.parts[k] || {};
   const on = !!(look.sw || {})[k];
+  const what = host === "video" ? "the players" : "the scene";
   return html`<${Check} cls="small" checked=${!!(part.set && on)} disabled=${!part.set}
     label="Show it in this preview"
-    title=${part.set ? "The same switch as under Preview colors: untick to see the scene without it. The card is not changed."
-      : PART_OFF[k]}
-    onChange=${(v) => call("text_scenes.set_look_part", k, v)} />`;
+    title=${part.set ? `The same switch as under Preview colors: untick to see ${what} without it. The card is not changed.`
+      : k === "files" ? PART_OFF.files + h.files : PART_OFF[k]}
+    onChange=${(v) => call(h.lookNs + ".set_look_part", k, v)} />`;
 }
 
 // Copy this profile's numbers; Paste them into the one on show (its name stays)
@@ -143,20 +167,35 @@ function CopyPaste({ p, update, mode, name }) {
   </div>`;
 }
 
-export function ColorBar({ open, setOpen }) {
+// host: "scenes" (the default), "images" or "video" (PAD-364).  startMode: the profile the
+// bar opens on the first time it is opened here (Images and Video: "assets", the one their
+// Color column attaches); after that it opens where it was left.
+export function ColorBar({ open, setOpen, host = "scenes", startMode = null }) {
   const s = useNs("color");
-  const look = useNs("text_scenes").look;
+  const h = HOSTS[host] || HOSTS.scenes;
+  const lookState = useNs(h.lookNs || "color");
+  const look = h.lookNs ? lookState.look : null;
   const [p, update, setMode, flush] = useProfile(s, SEND_MS);
   const [width, setWidth] = useState(loadWidth);
   const barRef = useRef(null);
   // what the bar shows is read again from the project as it opens
-  useEffect(() => { if (open) call("color.panel_open"); }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    if (startMode && !STARTED[host] && s.per_file) {
+      STARTED[host] = true;
+      call("color.set_mode", startMode).then(() => call("color.panel_open"));
+    } else call("color.panel_open");
+  }, [open]);
   const mode = s.per_file ? (s.mode || "display") : "display";
-  const parts = (look && look.parts) || {};
+  // the dots: the host's Preview colors row where it has one, else the profiles' own word
+  const parts = (look && look.parts) || s.parts || {};
   return html`<div class=${cx("cpd", open && "open")} ref=${barRef}
       style=${width ? `--cpd-w:${clampWidth(width)}px` : ""}>
     <button type="button" class="cpd-handle" aria-expanded=${open ? "true" : "false"} aria-controls="cpd-panel"
-        aria-label="Color profiles" onClick=${() => setOpen(!open)} ...${tip("Color profiles")}>
+        aria-label="Color profiles" onClick=${() => setOpen(!open)}
+        ...${tip({ head: "Color profiles", lines: [host === "scenes"
+          ? "The Color profile tab's controls beside the scene: tune a profile with the scene and its Layers in view."
+          : `The Color profile tab's controls beside the list: pick a saved profile and tune it with each ${host === "video" ? "clip's" : "picture's"} own color switch in view. The same profiles as the Scenes and Color profile tabs.`] })}>
       <span class="cpd-handle-ico"><${Icon} name="palette" /></span>
       <span class="cpd-handle-txt">Colors</span>
     </button>
@@ -185,7 +224,7 @@ export function ColorBar({ open, setOpen }) {
       <div class="cpd-body" role="tabpanel">
         <p class="small muted cpd-words">${s.per_file ? MODE_WORDS[mode] || MODE_WORDS.display
           : "Corrects your replaced pictures and videos when you build."}</p>
-        <div class="row cpd-show"><${ShowHere} mode=${mode} look=${look} /><span class="sp"></span>
+        <div class="row cpd-show"><${ShowHere} mode=${mode} look=${look} host=${host} /><span class="sp"></span>
           <${UndoRedo} s=${s} flush=${flush} size="xs" />
           <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div>
         <div class="cpd-status">${statusNote(s)}</div>

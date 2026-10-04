@@ -344,6 +344,7 @@ class ColorTab(TabService):
             presets=presets,
             preset_on=self._preset_on(p, assets),
             saved=saved, saved_on=saved_on,
+            parts=self._parts(assets),
             limits={k: list(v) for k, v in LIMITS.items()},
             range_limits={k: list(v) for k, v in cp.RANGE_LIMITS.items()},
             range_new=dict(cp.RANGE_NEW), max_ranges=cp.MAX_RANGES,
@@ -353,6 +354,17 @@ class ColorTab(TabService):
         if problems is not None:
             values["problems"] = list(problems)
         self.set(**values)
+
+    def _parts(self, assets):
+        """Which of the three profiles is in use (the Preview colors row's
+        words, cp.preview_parts): the dots on the Color profiles bar's tabs,
+        wherever it hangs (PAD-364: the Images tab has no preview row)."""
+        try:
+            return cp.preview_parts(assets if assets and os.path.isdir(assets)
+                                    else "")
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile parts")
+            return cp.preview_parts("")
 
     # -- Undo / Redo (PAD-354) ----------------------------------------------
     # Each profile (overlay, individual files, machine screen) keeps its own
@@ -538,8 +550,9 @@ class ColorTab(TabService):
 
     @rpc
     def panel_open(self):
-        """The Scenes tab's Color profiles bar opened (PAD-350): the
-        profiles are read again from the project, as the tab does on show."""
+        """The Color profiles bar opened on the Scenes tab (PAD-350), or on
+        the Images or Video tab (PAD-364): the profiles are read again from
+        the project, as the tab does on show."""
         self.set(try_note="")
         self._load()
         return True

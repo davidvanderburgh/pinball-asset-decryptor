@@ -8,6 +8,7 @@ import { html, useEffect, useMemo, useRef, useState, PageHead, Button, Field, Ch
   from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { LookRow } from "../core/look.js";
+import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 
 export const css = true;
 
@@ -526,6 +527,14 @@ export default function VideoTab() {
   const selectJob = useRef(null);
   const [spec, setSpec] = useState(null);
   const cardRef = useRef(null);
+  // PAD-364 (DragonRR): the Color profiles bar on the right edge, as on the Scenes tab,
+  // so a profile is picked from the Saved profiles list with each clip's Color switch in
+  // view; the players draw through it.  It opens on Files the first time: the profile
+  // that column attaches.  A name under Preview colors opens the bar on that profile.
+  const colorNs = useNs("color");
+  const [colors, setColorsState] = useState(() => barOpenAtStart("video"));
+  const setColors = (v) => { setColorsState(v); rememberBarOpen(v, "video"); };
+  const openColors = async (mode) => { await call("color.set_mode", mode); setColors(true); };
   // the first highlighted row in list order (Tk: tree.selection()[0])
   const firstOf = (set) => { const f = rows.find((x) => set.has(x.rel)); return f ? f.rel : null; };
   const firstSel = useMemo(() => firstOf(sel), [rows, sel]);
@@ -758,7 +767,7 @@ export default function VideoTab() {
   // ▶ on an empty pane: load the highlighted row and play that pane
   const emptyPlay = (side) => { if (currentRel) call("video.activate_pane", currentRel, side); };
 
-  return html`<div class="page vid-page">
+  return html`<div class="cpd-shell"><div class="page vid-page">
     <${PageHead} title="Video" sub=${html`${T.intro}<span class="vid-project small"><span class="lbl0">Project folder:</span>
         <button type="button" class=${cx("vid-link", !s.project && "none")} onClick=${() => call("video.open_project_folder")}
           ...${tip(T.project)}>${s.project_text}</button></span>`}>
@@ -812,7 +821,7 @@ export default function VideoTab() {
       </div>
       <div class="vid-preview">
         ${pv.note ? html`<${Note} kind=${pv.note.kind}><b>${pv.note.text.replace(/^[⚠✗]\s*/, "")}</b><//>` : null}
-        ${look.offered ? html`<${LookRow} look=${look} ns="video" />` : null}
+        ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
         <div class="vid-panes">
           <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />
           <span class="vid-vsep"></span>
@@ -823,5 +832,5 @@ export default function VideoTab() {
     ${spec ? html`<${SpecDialog} spec=${spec} onClose=${() => setSpec(null)} />` : null}
     ${q.open ? html`<${QualityWindow} q=${q} />` : null}
     ${best.open ? html`<${BestWindow} b=${best} />` : null}
-  </div>`;
+  </div>${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets" open=${colors} setOpen=${setColors} />` : null}</div>`;
 }

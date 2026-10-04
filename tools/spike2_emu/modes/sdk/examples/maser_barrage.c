@@ -1,16 +1,13 @@
-/* maser_barrage.c - MASER BARRAGE: a COMBO CHAIN with a timer between shots, started by the game's
- * own SKILL SHOT, for Godzilla (item 152).
+/* maser_barrage.c - MASER BARRAGE: a COMBO CHAIN with a timer between shots, started at the Maser
+ * target, for Godzilla (item 152; PAD-371).
  *
  * The Maser cannons fire in sequence (the Maser tanks of the Showa and Heisei films): make the
  * shots in order, each one quickly after the last, and the multiplier climbs. Wait too long and
  * the chain breaks.
  *
- *   START      Make the game's SKILL SHOT (its own skill shot award, an EVENT the port names;
- *              MODE_SDK.md "Events"), or hit the Maser target 3 times in one ball. Once a
- *              ball per player. It waits out a multiball (PAD-347: the game's, or two balls in
- *              play): after three Maser hits the next one after it starts it. Beside the game's
- *              battles and timed modes it runs, its words aside. A skill shot made while another
- *              of our modes runs is held for 15 s and starts when that one ends.
+ *   START      Hit the Maser target 3 times in one ball (PAD-371, David: not on the skill shot
+ *              any more). Once a ball per player. It waits out a multiball (PAD-347: the game's,
+ *              or two balls in play): after three Maser hits the next one after it starts it.
  *   SEQUENCE   LEFT RAMP, then RIGHT RAMP, then the BUILDING. Only the next shot in the
  *              sequence counts. Each step pays 1,000,000 x the multiplier.
  *   WINDOW     After a step, the next must come within 7 s. Miss the window and the CHAIN
@@ -19,7 +16,9 @@
  *   BARRAGE    The third step completes a barrage: a JACKPOT of 5,000,000 x the multiplier,
  *              then the multiplier goes up by 1 (up to x5), the clock gets 5 s more, the
  *              window gets 1 s shorter (down to 4 s), and the sequence starts again.
- *   CLOCK      40 s (plus 5 s a barrage).
+ *   CLOCK      40 s (plus 5 s a barrage). A step that counts with under 10 s left puts the clock
+ *              back to 10 s (PAD-371, David: "when you make one of the shots the timer if it is
+ *              currently less than 10 seconds it should reset back to 10 seconds").
  *   ENDS       When the clock runs out, or the ball drains, or the ball is tilted. It counts
  *              as WON with at least one barrage (for FINAL WARS). The screen shows the total.
  *   INSERTS    The NEXT shot's insert is bright Maser blue; the other two shots of the sequence
@@ -48,9 +47,9 @@
 #define FOLDER             "maser_barrage"
 #define ALT_START_SHOT     "Maser target"
 #define HITS_TO_START      3
-#define HELD_MS            15000          /* a skill shot made while another mode runs */
 #define RUN_SECONDS        40
 #define BARRAGE_ADDS_SECONDS 5
+#define TOP_UP_SECONDS     10             /* PAD-371: a step that counts puts a shorter clock back to this */
 #define WINDOW_MS          7000
 #define WINDOW_MIN_MS      4000
 #define WINDOW_SHRINK_MS   1000
@@ -69,9 +68,6 @@ static const struct { const char *shot, *says; } STEP[N_STEPS] = {
 /* ---- state ----------------------------------------------------------------------------------- */
 static uint64_t step_mask[N_STEPS], alt_mask;
 static unsigned hits[5], ran_ball[5];
-static unsigned long held_until;          /* a held skill shot start; 0 = none */
-static unsigned held_player;
-static int skill_event = -1;
 static struct kit_db db;
 static struct kit_game game;
 static struct kit_lamps lamps;
@@ -201,9 +197,7 @@ static int start(const char *why, int counted)
         pm_log("not started (%s): it already ran this ball", why);
         return 0;
     }
-    if (counted && kit_wait_game(MODE_NAME, why, hits[p] >= HITS_TO_START       /* PAD-347 */
-                                 ? "the next Maser target hit after it starts it"
-                                 : "a skill shot is not held through the game's mode")) return 0;
+    if (counted && kit_wait_game(MODE_NAME, why, "the next Maser target hit after it starts it")) return 0;   /* PAD-347 */
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_MODE);                /* first: before the screen and the clip */
     kit_isolate_list(own.give_way, own.block_ids, own.block_n);   /* PAD-347/363: the game's modes wait for it */
@@ -217,7 +211,6 @@ static int start(const char *why, int counted)
     run.total = 0;
     kit_timer_set(&run.clock, RUN_SECONDS, 1);
     hits[p] = 0;
-    held_until = 0;
     if (counted) ran_ball[p]++;
     kit_ledger_note(KIT_MASER, p, 0);
     kit_hud_begin(&hud, "MASER BARRAGE", "");
@@ -272,6 +265,8 @@ static void chain_shot(uint64_t shot)
         pm_log("step %u %s: +%llu (x%u), %lu ms after the last", i + 1, STEP[i].shot, (unsigned long long)got,
                run.mult, pm_ms() - run.step_at);
         run.step_at = pm_ms();
+        if (kit_timer_at_least(&run.clock, TOP_UP_SECONDS))                   /* PAD-371 */
+            pm_log("clock back to %d s", TOP_UP_SECONDS);
         if (++run.step < N_STEPS) {
             pm_snprintf(line, sizeof line, "%s X%u", STEP[i].says, run.mult);
             kit_hud_award(&hud, 1000, line, kit_num(n, sizeof n, got));
@@ -311,36 +306,16 @@ static void on_init(void)
         if (!step_mask[i]) pm_log("this port has no \"%s\": the sequence cannot be completed", STEP[i].shot);
     }
     alt_mask = pm_shot(ALT_START_SHOT);
-    skill_event = pm_event("skill_shot");
     pa_load(&own);
-    pm_log("ready on %s %s: starts on the skill shot (event %d%s) or %s x%d (0x%llx); sequence 0x%llx 0x%llx 0x%llx",
-           pm_game(), pm_version(), skill_event, skill_event < 0 ? ", NOT in this port" : "", ALT_START_SHOT,
-           HITS_TO_START, (unsigned long long)alt_mask, (unsigned long long)step_mask[0],
+    pm_log("ready on %s %s: starts on %s x%d (0x%llx), not the skill shot; sequence 0x%llx 0x%llx 0x%llx",
+           pm_game(), pm_version(), ALT_START_SHOT, HITS_TO_START, (unsigned long long)alt_mask,
+           (unsigned long long)step_mask[0],
            (unsigned long long)step_mask[1], (unsigned long long)step_mask[2]);
-}
-
-static void skill_shot(void)
-{
-    unsigned p = pm_player();
-    pm_log("the game's skill shot (player %u)", p);
-    if (run.on || p < 1 || p > 4) return;
-    if (ran_ball[p]) {
-        pm_log("skill shot: it already ran this ball");
-        return;
-    }
-    if (start("skill shot", 1)) return;
-    if (kit_running) {                      /* another of our modes: wait for it */
-        held_until = pm_ms() + HELD_MS;
-        held_player = p;
-        pm_log("skill shot held for %d s: %s is running", HELD_MS / 1000, kit_running);
-    }
 }
 
 static void on_event(unsigned id)
 {
-    if (skill_event >= 0 && (int)id == skill_event) skill_shot();
     if (kit_is_tilt(id)) {
-        held_until = 0;
         end("tilted");                             /* its lights go dark with the game's */
         kit_end_now();
     }
@@ -396,17 +371,7 @@ static void on_tick(void)
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) hits[p] = ran_ball[p] = 0;
-        held_until = 0;
         pm_log("new game: counts cleared");
-    }
-    if (held_until && !run.on) {            /* a held skill shot */
-        if (pm_ms() >= held_until || pm_player() != held_player || !pm_in_game()) {
-            held_until = 0;
-            pm_log("the held skill shot lapsed");
-        } else if (!kit_running) {
-            held_until = 0;
-            start("skill shot, held", 1);
-        }
     }
     if (!run.on) return;
     if (!pm_in_game() || pm_player() != run.player) {
@@ -440,7 +405,6 @@ static void on_ball_end(void)
     unsigned p;
     end("ball ended");
     kit_end_now();
-    held_until = 0;
     for (p = 0; p < 5; p++) hits[p] = ran_ball[p] = 0;
 }
 

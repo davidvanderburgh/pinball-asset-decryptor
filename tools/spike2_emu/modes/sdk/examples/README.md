@@ -7,7 +7,7 @@ Modes written in C against `pad_mode.h` (read `../MODE_SDK.md` first). Each file
 | `powerline_blitz.c` | POWERLINE BLITZ | each target pays once, completing ends it, a shield ends it early (item 134) |
 | `ghidorah_heads.c` | KING GHIDORAH | a boss battle with health, a lit target that moves, regrowth, a final blow |
 | `oxygen_destroyer.c` | OXYGEN DESTROYER | a hurry-up: a value that drains in real time, then a super jackpot worth double |
-| `maser_barrage.c` | MASER BARRAGE | a combo chain with a timer between shots and a growing multiplier; started by the game's skill shot EVENT |
+| `maser_barrage.c` | MASER BARRAGE | a combo chain with a timer between shots and a growing multiplier; started at the Maser target |
 | `final_wars.c` | FINAL WARS | a multi-phase wizard mode, lit by playing the other modes, with add-time shots |
 | `anguirus_assist.c` | ANGUIRUS | a mode that stacks with the game's own battle on purpose: it starts and ends with it |
 | `meltdown.c` | MELTDOWN | a MULTIBALL of our own: a core temperature that climbs, sets the jackpots' multiplier, and melts down at 100% (hud-layers) |
@@ -180,14 +180,15 @@ halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the to
 
 ### MASER BARRAGE (`maser_barrage.c`): a combo chain
 
-- **How to start it:** make the game's own skill shot (the `skill_shot` event), or hit the Maser
-  target 3 times in one ball.
+- **How to start it:** hit the Maser target 3 times in one ball (PAD-371: no longer on the game's
+  skill shot).
 - **What to do:** LEFT RAMP, then RIGHT RAMP, then the BUILDING, in that order. Each step pays
   1,000,000 times the multiplier. After a step the next one must come within 7 s.
 - **The chain:** the third step is a barrage: a jackpot of 5,000,000 times the multiplier, then the
   multiplier goes up (to x5 at most), the clock gains 5 s, the window shrinks by 1 s (to 4 s at
   least) and the sequence starts again. Miss a window and the CHAIN BREAKS: back to x1 and the Left ramp.
-- **How it ends:** the 40 s clock (plus 5 s a barrage), or a drain or a tilt.
+- **How it ends:** the 40 s clock (plus 5 s a barrage), or a drain or a tilt. A step that counts with
+  under 10 s on the clock puts it back to 10 s (PAD-371).
 - **Inserts:** the NEXT shot is bright Maser blue, the other two a dim blue: the whole chain is on the
   playfield. The next shot is solid until the first step, then blinks while its window runs, faster as
   it closes (500, 250, then 100 ms). Display priority 180.

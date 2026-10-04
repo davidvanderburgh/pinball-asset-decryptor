@@ -268,6 +268,8 @@ def _hid(out, slug):
 
 
 POWERLINES = ["shot", "Powerline left", "shot", "Powerline center", "shot", "Powerline right"]
+#: PAD-371: MASER BARRAGE starts on the Maser target x3 in one ball (no longer on the skill shot)
+MASER3 = ["shot", "Maser target", "ms", 300, "shot", "Maser target", "ms", 300, "shot", "Maser target"]
 SPINS = ["shot", "Left spinner"] * 25                # OXYGEN DESTROYER: 25 spins of the Left spinner
 GT = ["shot", "Godzilla target", "ms", 300]          # the captive ball, past the 250 ms debounce
 MELTDOWN_START = GT * 11                             # 10 make MELTDOWN ready, the 11th starts it
@@ -355,7 +357,7 @@ def test_a_target_hit_twelve_times_in_a_second_pays_at_most_four_times(harness):
     rapid = []
     for _ in range(12):
         rapid += ["raw", "0x1", "raw", "0x100000", "ms", 83]          # Left ramp, 12 times in 1 s
-    out = play(harness, "event", "skill_shot", "secs", 1, *rapid, "secs", 1)
+    out = play(harness, *MASER3, "secs", 1, *rapid, "secs", 1)
     steps = [ln for ln in lines(out, "MASER BARRAGE") if "step 1 Left ramp" in ln]
     assert len(steps) == 1                                            # counted once; the rest out of order
     assert len([ln for ln in lines(out, "MASER BARRAGE") if "counted once" in ln]) >= 8
@@ -427,13 +429,13 @@ def test_oxygen_destroyer_super_jackpot_missed_keeps_what_was_collected(harness)
     assert hud_said(out, s, "Title", "OXYGEN DESTROYER") and hud_said(out, s, "Award", commas(collected))
 
 
-def test_maser_barrage_starts_on_the_skill_shot_event_and_its_chain_breaks(harness):
-    out = play(harness, "event", "skill_shot", "secs", 1,
+def test_maser_barrage_starts_at_the_maser_target_and_its_chain_breaks(harness):
+    out = play(harness, *MASER3, "secs", 1,
                "shot", "Right ramp", "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Building",
                "secs", 1, "shot", "Left ramp", "secs", 7,
                "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Building", "secs", 50)
     b, s = "MASER BARRAGE", "maser_barrage"
-    assert has(out, b, "START (skill shot)")
+    assert has(out, b, "START (Maser target)")
     assert has(out, b, "Right ramp: out of order (next is Left ramp) - no effect")
     assert has(out, b, "BARRAGE 1: jackpot +5000000 (x1); multiplier -> x2")
     assert has(out, b, "step 1 Left ramp: +2000000 (x2)")
@@ -451,15 +453,28 @@ def test_maser_barrage_starts_on_the_skill_shot_event_and_its_chain_breaks(harne
     assert hud_said(out, s, "Award", commas(end_total(out, b)))
 
 
-def test_maser_barrage_holds_a_skill_shot_while_another_mode_runs_and_also_starts_on_the_maser(harness):
-    out = play(harness, *POWERLINES, "secs", 1, "event", "skill_shot", "secs", 2,
-               "trigger", "ghidorah_heads.stop", "secs", 1)
-    assert has(out, "MASER BARRAGE", "skill shot held for 15 s: KING GHIDORAH is running")
-    assert has(out, "MASER BARRAGE", "START (skill shot, held)")
+def test_maser_barrage_starts_on_the_maser_target_never_on_the_skill_shot(harness):
+    """PAD-371 (David): "I want the maser [barrage] not to start on skillshots"."""
+    out = play(harness, "event", "skill_shot", "secs", 2)
+    assert "[MASER BARRAGE] START" not in out and "skill shot held" not in out
     out = play(harness, "shot", "Maser target", "ms", 300, "shot", "Maser target", "ms", 300, "shot", "Maser target",
-               "secs", 1, "event", "skill_shot")
+               "secs", 1)
     assert has(out, "MASER BARRAGE", "START (Maser target)")
     assert hud_said(out, "maser_barrage", "Award", "MASER 1 OF 3") and hud_said(out, "maser_barrage", "Award", "MASER 2 OF 3")
+
+
+def test_a_step_that_counts_puts_a_short_clock_back_to_ten_seconds(harness):
+    """PAD-371 (David): "when you make one of the shots the timer if it is currently less than 10 seconds it should
+    reset back to 10 seconds" - a step in order does; an out-of-order shot does nothing, as before."""
+    out = play(harness, *MASER3, "secs", 33, "shot", "Right ramp", "secs", 1, "shot", "Left ramp", "secs", 12)
+    b = "MASER BARRAGE"
+    assert has(out, b, "Right ramp: out of order (next is Left ramp) - no effect")
+    assert has(out, b, "step 1 Left ramp") and has(out, b, "clock back to 10 s")
+    start, top, end = (out.index(t) for t in ("[MASER BARRAGE] START", "clock back to 10 s", "[MASER BARRAGE] END (time ran out)"))
+    assert start < top < end
+    # without the step the clock would have run out at 40 s; with it, the mode is still up at 40 s
+    assert "END (time ran out)" not in play(harness, *MASER3, "secs", 33, "shot", "Left ramp", "secs", 8)
+    assert "clock back" not in play(harness, *MASER3, "secs", 2, "shot", "Left ramp", "secs", 1)   # 38 s left: no change
 
 
 def test_final_wars_lights_from_the_other_three_and_is_played_phase_by_phase(harness):
@@ -467,7 +482,7 @@ def test_final_wars_lights_from_the_other_three_and_is_played_phase_by_phase(har
     out = play(harness, "shot", "Building", "secs", 1,
                *POWERLINES, "secs", 1, "trigger", "ghidorah_heads.stop", "secs", 1,
                "trigger", "oxygen_destroyer.start", "trigger", "oxygen_destroyer.stop", "secs", 1,
-               "event", "skill_shot", "secs", 1, "trigger", "maser_barrage.stop", "secs", 11,
+               *MASER3, "secs", 1, "trigger", "maser_barrage.stop", "secs", 11,
                "shot", "Building", "secs", 1,
                "shot", "Left ramp", "shot", "Shield target left", "secs", 1, "shot", "Right ramp", "shot", "Big loop",
                "secs", 1)
@@ -532,7 +547,7 @@ def test_final_wars_waits_for_the_games_multiball_and_a_phase_clock_ends_it(harn
 
 def test_final_wars_lights_when_two_are_won(harness):
     out = play(harness, *SPINS, "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 8,
-               "event", "skill_shot", "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1,
+               *MASER3, "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1,
                "shot", "Building", "secs", 1, "trigger", "maser_barrage.stop", "secs", 2)
     assert has(out, "OXYGEN DESTROYER", "END (super jackpot): WON")
     assert has(out, "MASER BARRAGE", "END (trigger file): 1 barrage(s)")
@@ -576,7 +591,7 @@ def test_one_pack_mode_at_a_time_and_a_new_hud_replaces_the_last_total(harness):
     assert not any(first_spin <= t < start for t, _w in hud(out, "oxygen_destroyer", "Award"))
 
 
-@pytest.mark.parametrize("start", [POWERLINES, ["event", "skill_shot"], ["trigger", "final_wars.light", "secs", 8,
+@pytest.mark.parametrize("start", [POWERLINES, [*MASER3], ["trigger", "final_wars.light", "secs", 8,
                                                                               "shot", "Building"], MELTDOWN_START])
 def test_a_drain_ends_the_mode_with_its_total(harness, start):
     out = play(harness, *start, "secs", 2, "ball_end", "secs", 1)
@@ -755,13 +770,13 @@ def test_oxygen_destroyer_collect_won_and_lost_calls(harness, dump):
 
 
 def test_maser_barrage_barrage_broken_and_end_calls(harness, dump):
-    out = play_own(harness, dump, "event", "skill_shot", "secs", 1,
+    out = play_own(harness, dump, *MASER3, "secs", 1,
                    "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Building",
                    "secs", 1, "shot", "Left ramp", "secs", 7, "secs", 40)
     assert "own sound: call barrage (1174) played" in out
     assert "own sound: call broken (1186) played" in out
     assert "own sound: call won (1192) played" in out and "call lost (1172)" not in out
-    out = play_own(harness, dump, "event", "skill_shot", "secs", 42)
+    out = play_own(harness, dump, *MASER3, "secs", 42)
     assert "own sound: call lost (1172) played" in out
 
 
@@ -838,7 +853,7 @@ CLIP_FLOWS = {
                                      "trigger", "ghidorah_heads.stop", "secs", 1], "KING GHIDORAH", "sever", "lost"),
     "oxygen_destroyer": (SPINS + ["secs", 1, "shot", "Left ramp", "secs", 1, "trigger", "oxygen_destroyer.stop",
                                   "secs", 1], "OXYGEN DESTROYER", "collect", "lost"),
-    "maser_barrage": (["event", "skill_shot", "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1,
+    "maser_barrage": ([*MASER3, "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1,
                        "shot", "Building", "secs", 1, "trigger", "maser_barrage.stop", "secs", 1],
                       "MASER BARRAGE", "barrage", "won"),
     "final_wars": (["trigger", "final_wars.light", "secs", 8, "shot", "Building", "secs", 1, "shot", "Left ramp",
@@ -1055,7 +1070,7 @@ def test_oxygen_destroyer_hold_off_insert_goes_out_when_none_are_left(harness):
 
 
 def test_maser_barrage_lights_the_next_shot_bright_the_rest_dim_and_the_window_by_blink_speed(harness):
-    out = play(harness, "event", "skill_shot", "secs", 1, "shot", "Left ramp", "secs", 7, "secs", 1)
+    out = play(harness, *MASER3, "secs", 1, "shot", "Left ramp", "secs", 7, "secs", 1)
     m = "MASER BARRAGE"
     start = _at(out, "[MASER BARRAGE] START")
     assert _at(out, "DISPLAY 180 MASER BARRAGE") <= start
@@ -1161,7 +1176,7 @@ def test_anguirus_total_gives_way_when_another_mode_of_ours_asks_to_start(harnes
 @pytest.mark.parametrize("start,mode,prio", [
     (POWERLINES, "KING GHIDORAH", 180),
     (SPINS, "OXYGEN DESTROYER", 180),
-    (["event", "skill_shot"], "MASER BARRAGE", 180),
+    ([*MASER3], "MASER BARRAGE", 180),
     (["trigger", "final_wars.light", "secs", 8, "shot", "Building"], "FINAL WARS", 190),
     (["battle", 1], "ANGUIRUS", 180),
     (MELTDOWN_START, "MELTDOWN", 190),
@@ -1379,7 +1394,7 @@ def test_every_text_a_mode_writes_on_its_hud_fits(harness):
         SPINS[:30] + ["secs", 2] + SPINS + ["secs", 5, *GT, *GT, *GT, *GT, "secs", 2, "shot", "Left ramp", "secs", 3,
                                             "shot", "Right ramp", "secs", 11],
         SPINS + ["secs", 27],
-        ["shot", "Maser target", "ms", 300, "shot", "Maser target", "secs", 3, "event", "skill_shot", "secs", 1]
+        ["shot", "Maser target", "ms", 300, "shot", "Maser target", "secs", 3, "shot", "Maser target", "secs", 1]
         + barrages + ["shot", "Left ramp", "secs", 8, "secs", 60],
         wizard,
         ["trigger", "final_wars.light", "secs", 8, "shot", "Building", "secs", 27, "secs", 11],
@@ -1426,7 +1441,7 @@ def test_every_text_a_mode_writes_on_its_hud_fits(harness):
 STACK_STARTS = [
     ("ghidorah_heads", POWERLINES),
     ("oxygen_destroyer", SPINS),
-    ("maser_barrage", ["event", "skill_shot"]),
+    ("maser_barrage", [*MASER3]),
     ("final_wars", ["trigger", "final_wars.light", "secs", 8, "shot", "Building"]),
     ("meltdown", MELTDOWN_START),
 ]
@@ -1491,7 +1506,7 @@ def test_a_modes_words_wait_while_a_display_of_the_games_has_the_screen(harness)
     displays now play as they come, so while one has the screen the mode's middle words are blank, its badge
     stays, and its words are back when the display is gone."""
     s = "maser_barrage"
-    out = play(harness, "event", "skill_shot", "secs", 4, "covered", 1, "secs", 1, "covered", 0, "secs", 1)
+    out = play(harness, *MASER3, "secs", 4, "covered", 1, "secs", 1, "covered", 0, "secs", 1)
     on, off = _at(out, ">> covered 1"), _at(out, ">> covered 0")
 
     def last(field, t):
@@ -1527,7 +1542,7 @@ def test_game_modes_give_way_in_its_assets_file_means_it_blocks_nothing(harness,
     d = tmp_path / "dump_gw"
     d.mkdir()
     (d / "maser_barrage.assets").write_text("name MASER BARRAGE\ngame_modes give_way\n")
-    out = play_own(harness, str(d), "event", "skill_shot", "secs", 2, "ball_end", "ms", 20)
+    out = play_own(harness, str(d), *MASER3, "secs", 2, "ball_end", "ms", 20)
     assert _at(out, "[MASER BARRAGE] START") is not None
     assert "BLOCK 1 MASER BARRAGE" not in out
     assert has(out, "MASER BARRAGE", "isolated: gives way - one of the game's modes starting ends it")

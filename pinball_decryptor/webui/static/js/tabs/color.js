@@ -814,6 +814,8 @@ export function statusNote(s) {
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`
+        // PAD-356: Recommended here changes nothing while the overlay is the Recommended one
+        : s.files_by_overlay ? html`<${Note} kind="info">The whole screen overlay is Recommended, and it already corrects your files along with everything else, so Recommended here leaves them as they are (correcting them twice would overdo it). To correct only your files, set the whole screen overlay to No change.<//>`
         : !s.asset_active ? html`<${Note} kind="info">No change on the individual files: they go onto the card as you made them. Pick a starting point or move a slider to correct them.<//>`
         : html`<${Note} kind="info">${"“" + (s.name || "My profile") + "” is ready, but no file is switched on yet: tick a box under Which files, or switch on pictures on the Images tab, videos on the Video tab, or layers in Scenes."}<//>`)
       : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is staged for this project: the next build "

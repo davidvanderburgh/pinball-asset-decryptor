@@ -1256,8 +1256,12 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  "input_hw.c", "input_padsw.c",
                  # the JJP build's own sources (items 114-120): the Stern SRCS
                  # took input_jjpio.c too, and buildselect.sh stages ONLY this list
-                 "input_jjpio.c", "egl_x11.c", "stubs_jjp.c", "audio_pulse.c",
-                 "jjp_glibc.h", "padselect.sh",
+                 "input_jjpio.c",
+                 # PAD-342: the Stern and JJP SRCS took the BOF build's FAST
+                 # Neuron reader too, and the Makefile installs the BOF hooks
+                 "input_fast.c",
+                 "egl_x11.c", "stubs_jjp.c", "audio_pulse.c",
+                 "jjp_glibc.h", "padselect.sh", "padselect_bof.sh", "pad_install_bof.sh",
                  "log.c", "log.h",
                  "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
                  "codec.c", "codec.h",

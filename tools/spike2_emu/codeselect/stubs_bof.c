@@ -6,10 +6,12 @@
  * `--input hw` (input_hw.c), and a sound sink (audio_alsa.c).  A BOF machine
  * is an x86 Arch Linux PC with a FAST Neuron on USB serial; the BOF build is
  * ONE STATIC BINARY so it runs on whatever glibc that PC carries, and a static
- * binary cannot load the machine's libasound.  So the menu is silent there
- * for now: `make PLATFORM=bof` links these no-ops in place of codec.c,
- * input_hw.c and audio_alsa.c, and the shared sources stay one copy - no
- * #ifdef in the menu (the JJP build's stubs_jjp.c is the same idea).
+ * binary cannot load the machine's libasound.  So there is no ALSA sink: the
+ * menu's sound goes through audio_fifo.c into a pipe the boot hook plays with
+ * the machine's own aplay (padselect_bof.sh).  `make PLATFORM=bof` links these
+ * no-ops in place of codec.c, input_hw.c and audio_alsa.c, and the shared
+ * sources stay one copy - no #ifdef in the menu (the JJP build's stubs_jjp.c
+ * is the same idea).
  *
  * Every stub answers the way the real code answers on a box without the
  * hardware: NULL / -1 / nothing, with one log line where the menu would
@@ -46,7 +48,8 @@ void input_hw_amp_mute(struct input *in, int mute) { (void)in; (void)mute; }
 
 struct audio_sink *audio_alsa_open(char *err, int errlen)
 {
-    snprintf(err, (size_t)errlen, "the Barrels of Fun menu has no sound (a static build cannot load libasound)");
+    snprintf(err, (size_t)errlen, "no ALSA sink on Barrels of Fun (a static build cannot load libasound): "
+             "the hook plays --audio fifo: through aplay");
     return NULL;
 }
 

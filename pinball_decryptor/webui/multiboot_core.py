@@ -791,6 +791,10 @@ def card_media_names(form):
                 "gmusic%d.wav" % gi if _media_value(row.music) != "none" else "")
             confirm = (row.confirm or "").strip() if row.confirm_on_card else (
                 "gconfirm%d.wav" % gi if confirm_spec(row) != "none" else "")
+            if bof and group_media_kind(row) not in BOF_GROUP_MEDIA:
+                art = anim = ""           # a style is drawn from logos a .fun does not give up
+            if bof and not row.music_on_card and _media_value(row.music).lower().startswith("auto"):
+                music = ""
         else:
             i = first.get(ri, 0)
             art = "art%d.png" % i if art_spec(row) != "none" else ""
@@ -798,13 +802,15 @@ def card_media_names(form):
             music = "music%d.wav" % i if _media_value(row.music) != "none" else ""
             confirm = "confirm%d.wav" % i if confirm_spec(row) != "none" else ""
             if bof:
-                # PAD-342: 'auto' is a text-only card there (nothing reads a
-                # .fun's own pictures yet) and the menu is silent
+                # PAD-342: nothing reads a .fun's own pictures or music yet, so
+                # 'auto' there is a text-only card with no bed (mkbofmulti.py
+                # media prepares none); an 'auto' confirm is the synthetic chime
                 if art_spec(row).lower().startswith("auto"):
                     art = ""
                 if anim_spec(row).lower().startswith("auto"):
                     anim = ""
-                music = confirm = ""
+                if _media_value(row.music).lower().startswith("auto"):
+                    music = ""
         out.append((art, anim, music, confirm))
     return out
 
@@ -1647,19 +1653,16 @@ def validate_form(form, sources=True):
         errs.append("There are no images.")
     if n > be.max_cards:
         errs.append("At most %d images fit one %s." % (be.max_cards, be.out_noun))
+    if be.max_games and len(form_trees(form)) > be.max_games:
+        errs.append("At most %d builds fit one %s." % (be.max_games, be.out_noun))
     ngroups = sum(1 for r in form.images if is_group(r))
     if ngroups > MAX_GROUPS:
         errs.append("At most %d random groups fit one card." % MAX_GROUPS)
     if ngroups and not be.groups:
         # A JJP install has two root slots and nothing to roll between (item
         # 118): image 0 is root A, image 1 is root B, and that is the card.
-        # A BOF update's menu picks one build of one title (PAD-342).
-        if be.key == "bof":
-            errs.append("Random groups are not available on a Barrels of Fun "
-                        "update: each row is one build the menu offers.")
-        else:
-            errs.append("Random groups are not available for a JJP install: it "
-                        "holds exactly two images, root A and root B.")
+        errs.append("Random groups are not available for a JJP install: it "
+                    "holds exactly two images, root A and root B.")
     ntrees = len(form_trees(form))
     if ntrees > MAX_TREES:
         errs.append("That is %d games in %d rows; at most %d fit one card."
@@ -2119,6 +2122,19 @@ def confirm_spec(row):
     return wsl(v)
 
 
+def sound_as_rendered(platform, kind, value):
+    """The spec the media tool RECORDS for a form's sound (*kind* 'sound') or
+    music bed (*kind* 'music') - the form's own word everywhere but Barrels
+    of Fun, where ``mkbofmulti.py media`` hands selectmedia what a .fun can
+    give (PAD-342): an 'auto' sound is the synthetic 'synth', 'auto' music is
+    none.  Compared without this, every BOF sound read as stale against its
+    manifest, so the strip said 'not rendered' for good and every highlight
+    change rendered the sounds again."""
+    if backend_for(platform).key != "bof" or not (value or "").strip().lower().startswith("auto"):
+        return value
+    return "synth" if kind == "sound" else "none"
+
+
 def split_confirm_source(spec):
     """A ``confirm_source`` from the card -> an :class:`ImageRow` value; the
     reverse of :func:`confirm_spec`, so a load followed by an apply writes
@@ -2394,18 +2410,30 @@ def _jjp_media_args(form, media_dir, visual_only=False):
 
 
 def _bof_media_args(form, media_dir, visual_only=False):
-    """``mkbofmulti.py media``: the pictures of a Barrels of Fun menu
-    (PAD-342).  No sounds at all - the BOF menu is silent - and 'auto' art or
-    animation is a text-only card (a .fun's own pictures sit inside its packed
-    program, which nothing here reads yet)."""
-    args = list(BOF.media_tool) + _media_image_args(form) + ["--out", wsl(media_dir)]
+    """``mkbofmulti.py media``: the pictures and sounds of a Barrels of Fun
+    menu (PAD-342), the shape of :func:`prepare_args` - the cards, the random
+    cards' own media, each game's art / anim / music, the move and confirm
+    sounds.  The tool maps what a .fun cannot give: 'auto' pictures and music
+    are none (they sit inside the packed program), an 'auto' sound is the
+    synthetic one, and a random card's style is none (it is drawn from logos)."""
+    args = list(BOF.media_tool) + _media_image_args(form) + [
+        "--out", wsl(media_dir), "--cards", str(max(1, len(form.images)))] + group_media_args(form)
     if visual_only:
         args.append("--visual-only")
-    for i, _path, ri, _mi in form_trees(form):
+    for i, _path, ri, mi in form_trees(form):
         row = form.images[ri]
-        art, anim = art_spec(row), anim_spec(row)
-        args += ["--art", "%d=%s" % (i, "none" if art.lower().startswith("auto") else art),
-                 "--anim", "%d=%s" % (i, "none" if anim.lower().startswith("auto") else anim)]
+        if mi is None:
+            args += ["--art", "%d=%s" % (i, art_spec(row)),
+                     "--anim", "%d=%s" % (i, anim_spec(row)),
+                     "--music", "%d=%s" % (i, _media_value(row.music))]
+        else:                             # a group's member: the card is the group's
+            args += ["--art", "%d=none" % i, "--anim", "%d=none" % i, "--music", "%d=none" % i]
+    if not visual_only:
+        args += ["--sound-move", _media_value(form.sound_move),
+                 "--sound-confirm", _media_value(form.sound_confirm)]
+        for i, _path, ri, mi in form_trees(form):
+            args += ["--sound-confirm", "%d=%s"
+                     % (i, confirm_spec(form.images[ri]) if mi is None else "none")]
     args += ["--volume", str(int(form.volume))]
     return args
 
@@ -2480,7 +2508,7 @@ def plan_args(form):
     pieces and which USB stick they fit.)"""
     be = backend_for(form)
     if be.key in ("jjp", "bof"):
-        args = [be.tool, "plan"] + _image_args(form)
+        args = [be.tool, "plan"] + _image_args(form) + group_roll_args(form)
         if form.media_dir:
             args += ["--media-dir", wsl(form.media_dir)]
         return args
@@ -2528,20 +2556,20 @@ def _bof_build_args(form):
     :func:`build_args`.  No layout, no bypass, no machine volume, no scores:
     none of those exist on a Barrels of Fun machine."""
     be = BOF
-    titles, subtitles = [], []
-    for _i, path, ri, _mi in form_trees(form):
-        row = form.images[ri]
-        titles.append((row.title or "").strip() or suggest_title(path, be.key)[0])
-        subtitles.append((row.subtitle or "").strip())
-    args = [be.tool, "build"] + _image_args(form) + [
+    titles, subtitles = game_titles(form, be.key)
+    # the random cards ride on _image_args (--group-over ...) as on a Stern
+    # card, and --default names an IMAGE: a row that is a random card is named
+    # by its first member, or by --default-card when its members keep cards
+    args = [be.tool, "build"] + _image_args(form) + group_roll_args(form) + [
         "--out", wsl(form.out.strip().strip('"')),
         "--selector-dir", platform_selector_dir(form.selector_dir, be),
         "--titles", ";".join(titles),
         "--timeout", str(int(form.timeout)),
-        "--default", str(int(form.default)),
+        "--default", str(row_first_image(form, int(form.default))),
         "--volume", str(int(form.volume)),
     ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
         + theme_args(form)
+    args += default_card_args(form)
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.media_dir:
@@ -2644,8 +2672,9 @@ def inject_args(form, card):
                 "--titles", ";".join(titles),
                 "--subtitles", ";".join(subtitles),
                 "--timeout", str(int(form.timeout)),
-                "--default", str(int(form.default)),
+                "--default", str(row_first_image(form, int(form.default))),
                 "--volume", str(int(form.volume))]
+        args += default_card_args(form)
         args += (heading_args(form) + text_size_args(form)
                  + menu_text_args(form) + theme_args(form))
         if form.media_dir:
@@ -5657,6 +5686,16 @@ GROUP_MEDIA_KINDS = (
 #: one question a random card leaves the player with.
 GROUP_MEDIA_DEFAULT = "cycling"
 GROUP_MEDIA_NAMES = tuple(k for k, _l, _a, _n in GROUP_MEDIA_KINDS)
+#: ...and what a Barrels of Fun random card can show (PAD-342): every style above
+#: is drawn from the games' logos, which a .fun does not give up, so a picture of
+#: its own or its words.  A new one starts as its words.
+BOF_GROUP_MEDIA = ("picture", "none", "card")
+
+
+def group_media_default(platform):
+    """The style a NEW random card starts on: :data:`GROUP_MEDIA_DEFAULT`, or
+    text only on Barrels of Fun (see :data:`BOF_GROUP_MEDIA`)."""
+    return "none" if backend_for(platform).key == "bof" else GROUP_MEDIA_DEFAULT
 
 
 def _group_kind(kind):
@@ -5998,8 +6037,9 @@ def menu_summary(form):
             "theme %s  ·  %s%s" % (
                 sound(form.sound_move), sound(form.sound_confirm),
                 int(form.volume),
-                " (the machine's own on the card)" if form.machine_volume
-                else "",
+                # a Stern card's alone: no JJP or BOF machine keeps one to follow
+                " (the machine's own on the card)"
+                if form.machine_volume and backend_for(form).machine_volume else "",
                 "wait for START" if int(form.timeout) == 0
                 else "%d s countdown" % int(form.timeout),
                 int(form.default),
@@ -6311,6 +6351,14 @@ class ImageEditorDialog(_PageDialog):
     #: and this card is several of them.  See GROUP_MEDIA_KINDS.
     GROUP_KINDS = tuple((k, label) for k, label, _a, _n in GROUP_MEDIA_KINDS)
 
+    @classmethod
+    def group_kinds_for(cls, backend):
+        """A random card's choices on this platform: every style on a Stern or
+        JJP card; a picture of its own or text only on Barrels of Fun."""
+        if backend.key == "bof":
+            return tuple((k, label) for k, label in cls.GROUP_KINDS if k in BOF_GROUP_MEDIA)
+        return cls.GROUP_KINDS
+
     #: Under the two rules and the tick they share: what the machine keeps
     #: between power-ups, and why a shuffle answers the tick for you.
     ROLL_NOTE = ("The machine remembers across power-ups: a shuffle deals "
@@ -6463,11 +6511,12 @@ class MultibootPanel:
                      "Installing any normal update later takes the menu away. The "
                      ".fun is made by the app's tools in its Linux; nothing here "
                      "touches the .fun files you pick.")
-    ADD_ROW_TEXT_BOF = "Add another build (.fun)…"
+    ADD_ROW_TEXT_BOF = "Add another build or random…"
     LIST_TIP_BOF = ("Each row carries its own icons: ✎ edits the image, − takes "
                     "it out of the update, ▲ / ▼ move it in the menu's order "
                     "(the outlined arrow means that row cannot go further). "
-                    "The last row adds another .fun of the same game. The first "
+                    "The last row adds another .fun of the same game, or a "
+                    "random card over the builds already in the list. The first "
                     "image is the PRIMARY: its .fun goes into the update as it "
                     "is and the machine falls back to it; every other one is "
                     "carried as its difference from the primary.")
@@ -8371,15 +8420,23 @@ class MultibootPanel:
         if not path:
             return
         be = self._backend
-        if len(self._rows) >= min(MAX_IMAGES, be.max_cards):
+        if be.max_games:
+            # THE BUILDS are the limit, not the rows: a random card over them is
+            # a row that adds none (backend.max_games)
+            games = sum(len(row_paths(r)) for r in self._rows if not (is_group(r) and r.keep))
+            if games >= be.max_games:
+                self._error("At most %d builds fit one %s." % (be.max_games, be.out_noun))
+                return
+        elif len(self._rows) >= min(MAX_IMAGES, be.max_cards):
             self._error("At most %d images fit one %s."
                         % (min(MAX_IMAGES, be.max_cards), be.out_noun))
             return
         title, subtitle = suggest_title(path, be.key)
         row = ImageRow(path=path, title=title, subtitle=subtitle)
-        if not be.sound:
-            # PAD-342: a BOF menu is silent, and nothing reads a .fun's own
-            # pictures yet - the card is its words until a picture is picked
+        if be.key == "bof":
+            # PAD-342: nothing reads a .fun's own pictures or music yet - the
+            # card is its words until a picture is picked, with no bed until
+            # one is; the move / confirm sounds stay the menu-wide ones
             row.art, row.anim, row.music, row.confirm = "none", "none", "none", ""
         self._rows.append(row)
         self._refresh_tree(select=len(self._rows) - 1)
@@ -8414,6 +8471,8 @@ class MultibootPanel:
         for label, attr in self.ADD_ROW_CHOICES:
             if attr != "_add_image" and not self._backend.groups:
                 continue                  # a JJP install has no random cards
+            if self._backend.add_choices is not None and attr not in self._backend.add_choices:
+                continue                  # e.g. no folders of builds on BOF (backend.add_choices)
             why = ""
             if attr == "_add_random_over_existing" and plain < 2:
                 why = "add two images first"
@@ -8573,7 +8632,7 @@ class MultibootPanel:
         self._rows.append(set_group_media(
             ImageRow(path="", title=title or "RANDOM", subtitle=subtitle,
                      members=members, keep=keep, roll=ROLL_DEFAULT),
-            GROUP_MEDIA_DEFAULT))
+            group_media_default(self._backend)))
         self._refresh_tree(select=len(self._rows) - 1)
         # a group forces the compact build; show that in the tick straight away
         self._sync_compact_lock()
@@ -8596,8 +8655,9 @@ class MultibootPanel:
             self._error("Add at least two images first: a random card chooses "
                         "between images that are already on the card.")
             return
-        if len(self._rows) >= MAX_CARDS:
-            self._error("At most %d images fit one card." % MAX_CARDS)
+        cap = min(MAX_CARDS, self._backend.max_cards)
+        if len(self._rows) >= cap:
+            self._error("At most %d images fit one %s." % (cap, self._backend.out_noun))
             return
         if sum(1 for r in self._rows if is_group(r)) >= MAX_GROUPS:
             self._error("At most %d random groups fit one card." % MAX_GROUPS)
@@ -8607,7 +8667,7 @@ class MultibootPanel:
                    for r in plain]
         self._rows.append(set_group_media(
             ImageRow(path="", title=title, subtitle=subtitle, members=members,
-                     keep=True, roll=ROLL_DEFAULT), GROUP_MEDIA_DEFAULT))
+                     keep=True, roll=ROLL_DEFAULT), group_media_default(self._backend)))
         self._refresh_tree(select=len(self._rows) - 1)
         self._ok("")
 
@@ -11707,11 +11767,12 @@ class MultibootPanel:
             return False
 
         missing = []
-        move_now = _media_value(self._move_var.get().strip() or "none")
+        plat = self._backend.key
+        move_now = sound_as_rendered(plat, "sound", _media_value(self._move_var.get().strip() or "none"))
         if gone(move_now != "none", manifest.get("sound_move"),
                 manifest.get("sound_move_source"), move_now):
             missing.append("the move sound")
-        confirm_now = _media_value(self._confirm_var.get().strip() or "none")
+        confirm_now = sound_as_rendered(plat, "sound", _media_value(self._confirm_var.get().strip() or "none"))
         if gone(self._menu_confirm() != "none", manifest.get("sound_confirm"),
                 manifest.get("sound_confirm_source"), confirm_now):
             missing.append("the confirm sound")
@@ -11736,11 +11797,11 @@ class MultibootPanel:
                 what = "image %d's" % (i + 1)
             entry = rows[key] if 0 <= key < len(rows) and isinstance(rows[key], dict) \
                 else {}
-            music_now = _media_value(row.music)
+            music_now = sound_as_rendered(plat, "music", _media_value(row.music))
             if gone(music_now not in ("", "none"), entry.get("music"),
                     entry.get("music_source"), music_now):
                 missing.append("%s music" % what)
-            confirm_now = confirm_spec(row)
+            confirm_now = sound_as_rendered(plat, "sound", confirm_spec(row))
             if gone(confirm_now != "none", entry.get("confirm"),
                     entry.get("confirm_source"), confirm_now):
                 missing.append("%s confirm sound" % what)

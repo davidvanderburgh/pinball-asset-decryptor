@@ -518,7 +518,11 @@ def check_update_dir(u):
 # ============================================================================== the conf
 def render_conf(programs, titles, subtitles, default, timeout, rows, sound_move, sound_confirm, volume,
                 switches, theme=None, colors=None, heading=None, text_size=None, counter=None,
-                countdown_word=None, footer=None, font=True, learn=False):
+                countdown_word=None, footer=None, font=True, learn=False, groups=None, default_card=None):
+    """images.conf text.  ``groups`` are RANDOM cards (mkmulticard's check_groups shape: title,
+    subtitle, media, members, keep, pos, roll), written as the Stern card writes them: a
+    ``group=`` line before the image it sits in front of.  The menu and the hook need nothing
+    more - the menu rolls a member and writes ITS image index to the choice file."""
     n = len(programs)
     titles = list(titles or [])
     subtitles = list(subtitles or [])
@@ -541,16 +545,38 @@ def render_conf(programs, titles, subtitles, default, timeout, rows, sound_move,
     colors = mkc.check_colors(colors or {})
     text_size = mkc.check_text_size(text_size)
     counter = mkc.check_counter(counter)
-    any_media = any(any(r) for r in rows)
-    width = 4 if any(r[3] for r in rows) else (3 if any_media else 0)
+    groups = mkc.check_groups(groups, n)
+    if default_card is not None:
+        ncards = n - sum(len(g["members"]) for g in groups if not g["keep"]) + len(groups)
+        if not 0 <= int(default_card) < ncards:
+            raise Refused("images.conf: default_card=%s is not a card index (0..%d)" % (default_card, ncards - 1))
+    any_media = any(any(r) for r in rows) or any(any(g["media"]) for g in groups)
+    width = 4 if (any(r[3] for r in rows) or any(g["media"][3] for g in groups)) else (3 if any_media else 0)
     out = ["# images.conf - the Barrels of Fun boot menu (bofselect + padselect.sh); written by mkbofmulti.py",
            "# image=<program>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]   index = order (0-based);",
            "# <program> = the file in %s that becomes craze/GDCraze.x86_64 when it is chosen;" % DECRYPT,
            "# default = highlight when there is no last choice; timeout = seconds before it boots by itself;",
            "# switch_* = the FAST switch numbers of the buttons the menu reads (a second after a comma)"]
-    for p, t, s, r in zip(programs, titles, subtitles, rows):
+    if groups:
+        out.append("# group=[+][not-last|any|shuffle:]<first>-<last>|<title>|<subtitle>[|media]   a RANDOM card:")
+        out.append("# it boots one of those images at every power-up ('+' = they keep cards of their own too)")
+
+    def group_line(g):
+        roll = "" if g["roll"] == mkc.ROLL_DEFAULT else g["roll"] + ":"
+        return ("group=%s%s%d-%d|%s|%s" % ("+" if g["keep"] else "", roll, g["members"][0],
+                                            g["members"][-1], g["title"], g["subtitle"])
+                + "".join("|" + x for x in g["media"][:width]))
+
+    at = {}
+    for g in groups:
+        at.setdefault(g["pos"], []).append(g)
+    for i, (p, t, s, r) in enumerate(zip(programs, titles, subtitles, rows)):
+        out.extend(group_line(g) for g in at.get(i, ()))     # a card sits where its line sits
         out.append("image=%s|%s|%s" % (p, t, s) + "".join("|" + x for x in r[:width]))
+    out.extend(group_line(g) for g in at.get(n, ()))
     out.append("default=%d" % int(default))
+    if default_card is not None:
+        out.append("default_card=%d" % int(default_card))
     out.append("timeout=%d" % int(timeout))
     if heading is not None:
         out.append("heading=%s" % mkc.conf_heading(heading))
@@ -588,11 +614,12 @@ def render_conf(programs, titles, subtitles, default, timeout, rows, sound_move,
 
 
 def parse_conf(text):
-    """images.conf -> {'images': [(program, title, subtitle)], 'media': [rows], 'default', ...}."""
-    out = {"images": [], "media": [], "default": None, "timeout": None, "heading": None,
-           "text_size": None, "counter": None, "countdown_word": None, "footer": None, "font": None,
-           "sound_move": None, "sound_confirm": None, "volume": None, "theme": None, "colors": {},
-           "switches": {}}
+    """images.conf -> {'images': [(program, title, subtitle)], 'media': [rows], 'groups': [random
+    cards, render_conf's shape], 'default', 'default_card', ...}."""
+    out = {"images": [], "media": [], "groups": [], "default": None, "default_card": None, "timeout": None,
+           "heading": None, "text_size": None, "counter": None, "countdown_word": None, "footer": None,
+           "font": None, "sound_move": None, "sound_confirm": None, "volume": None, "theme": None,
+           "colors": {}, "switches": {}, "media_dir": None}
     for line in text.splitlines():
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -602,7 +629,20 @@ def parse_conf(text):
             f += [""] * (7 - len(f))
             out["images"].append((f[0], f[1], f[2]))
             out["media"].append(tuple(f[3:7]))
-        elif key in ("default", "timeout", "volume"):
+        elif key == "group":
+            f = val.split("|")
+            f += [""] * (7 - len(f))
+            spec = f[0]
+            keep = spec.startswith("+")
+            roll, spec = mkc.split_roll_spec(spec[1:] if keep else spec)
+            out["groups"].append({"members": mkc.parse_member_spec(spec), "keep": keep, "roll": roll,
+                                  "pos": len(out["images"]), "title": f[1], "subtitle": f[2],
+                                  "media": tuple(f[3:7])})
+        elif key == "media":
+            # the DIRECTORY line - not 'media', which is the per-image rows above (a
+            # 'key in out' here once replaced those rows with this path)
+            out["media_dir"] = val
+        elif key in ("default", "default_card", "timeout", "volume"):
             try:
                 out[key] = int(val)
             except ValueError:
@@ -630,12 +670,20 @@ def conf_from_args(a, programs, media, default_titles):
         rows, move, confirm, volume = media["rows"], media["sound_move"], media["sound_confirm"], media["volume"]
     if a.volume is not None:
         volume = a.volume
+    # A RANDOM CARD'S OWN PICTURE AND SOUNDS are media.json's 'groups' rows, by group index;
+    # a card that already names its own (an inject carrying the update's conf) keeps them
+    groups = [dict(g) for g in (getattr(a, "groups", None) or [])]
+    group_rows = (media or {}).get("group_rows") or []
+    for gi, g in enumerate(groups):
+        if gi < len(group_rows) and not any(g.get("media") or ()):
+            g["media"] = group_rows[gi]
     footer = None if a.footer_own else a.footer
     return render_conf(programs, titles, subtitles, a.default or 0, 15 if a.timeout is None else a.timeout,
                        rows, move, confirm, volume, TITLES[a._title]["switches"], theme=a.theme,
                        colors=mkc.parse_color_flags(a.color), heading=a.heading, text_size=a.text_size,
                        counter=a.counter, countdown_word=a.countdown_word, footer=footer,
-                       learn=bool(getattr(a, "learn", False)))
+                       learn=bool(getattr(a, "learn", False)), groups=groups,
+                       default_card=getattr(a, "default_card", None))
 
 
 # ============================================================================== plan
@@ -649,6 +697,7 @@ def _inputs(a):
     for p in [primary] + extras:
         if not os.path.isfile(p):
             raise Refused("%s does not exist" % p)
+    mkc.check_groups(getattr(a, "groups", None), 1 + len(extras))    # before any unpacking
     return primary, extras
 
 
@@ -975,7 +1024,8 @@ def inspect_fun(fun, media_out=None):
             # Stern and JJP reports; 'none' is no source)
             ("art_source", m.get("art_source") if m.get("art_source") not in (None, "none") else None),
             ("anim_source", m.get("anim_source") if m.get("anim_source") not in (None, "none") else None),
-            ("music_source", None), ("confirm_source", None),
+            ("music_source", m.get("music_source") if m.get("music_source") not in (None, "none") else None),
+            ("confirm_source", m.get("confirm_source") if m.get("confirm_source") not in (None, "none") else None),
             ("source", src), ("source_exists", bool(src) and os.path.isfile(src)),
             ("name", b.get("source_program")), ("version", b.get("game_version")),
             ("game_version", b.get("game_version")),
@@ -988,6 +1038,14 @@ def inspect_fun(fun, media_out=None):
         ("tool", build.get("tool")), ("tool_version", build.get("version")), ("written", build.get("written")),
         ("hook", HOOK_MARK in profile), ("install_step", INSTALL_LINE in upd),
         ("images", images),
+        # the random cards, in the Stern card's inspect shape (the tab reads either)
+        ("groups", [collections.OrderedDict([
+            ("index", gi), ("title", g["title"]), ("subtitle", g["subtitle"]),
+            ("members", list(g["members"])), ("keep", bool(g["keep"])), ("pos", g["pos"]),
+            ("roll", g["roll"]), ("art", g["media"][0] or None), ("anim", g["media"][1] or None),
+            ("music", g["media"][2] or None), ("confirm", g["media"][3] or None)])
+            for gi, g in enumerate(conf["groups"])]),
+        ("default_card", conf.get("default_card")),
         ("timeout", conf["timeout"]), ("default", conf["default"]), ("heading", conf.get("heading")),
         ("text_size", conf.get("text_size")), ("counter", conf.get("counter")),
         ("countdown_word", conf.get("countdown_word")), ("footer", conf.get("footer")),
@@ -1014,6 +1072,12 @@ def print_inspect(rep):
     for im in rep["images"]:
         print("image %d %s '%s' '%s' art=%s version=%s source=%s"
               % (im["index"], im["device"], im["title"], im["subtitle"], im["art"], im["game_version"], im["source"]))
+    for g in rep["groups"]:
+        print("random card %d '%s' over images %s (%s, %s) before image %d"
+              % (g["index"], g["title"], ",".join(str(m) for m in g["members"]), g["roll"],
+                 "they keep their cards" if g["keep"] else "in their place", g["pos"]))
+    if rep["sound_move"] or rep["sound_confirm"] or any(im.get("music") for im in rep["images"]):
+        print("sound: move=%s confirm=%s volume=%s" % (rep["sound_move"], rep["sound_confirm"], rep["volume"]))
     print("timeout=%s default=%s theme=%s switches=%s" % (rep["timeout"], rep["default"], rep["theme"],
                                                           ",".join("%s=%s" % kv for kv in rep["switches"].items())))
     for w in rep["warnings"]:
@@ -1145,6 +1209,12 @@ def inject_fun(a):
             a.color = ["%s=%s" % kv for kv in old["colors"].items()]
         if a.subtitles is None:                 # '' is a choice: no subtitles
             a.subtitles = ";".join(s for _p, _t, s in old["images"])
+        # the random cards are the update's own (inject rewrites the menu, not which builds
+        # it holds); --default-card overrides, else the update's own
+        # (their pictures and sounds come from the media set, new or carried, like every card's)
+        a.groups = [dict(g, media=mkc.MEDIA_ROW) for g in old["groups"]]
+        if getattr(a, "default_card", None) is None:
+            a.default_card = old.get("default_card")
         a._title = title
         conf = conf_from_args(a, programs, media, [t for _p, t, _s in old["images"]])
         with open(os.path.join(pad, "images.conf"), "w", encoding="utf-8", newline="\n") as f:
@@ -1188,29 +1258,67 @@ def inject_fun(a):
 
 
 # ============================================================================== media
+def _bof_sound(spec):
+    """'auto' is a sound pulled off a STERN card (through the emulator); a .fun has no such
+    catalogue the tools can reach, so it is the built-in synthetic click / chime here - what
+    the JJP menu does too.  Everything else passes through."""
+    s = (spec or "").strip()
+    return "synth" if s.lower().startswith("auto") else s
+
+
+def _bof_group_picture(spec):
+    """A random card's picture or animation: a file of its own passes (selectmedia refuses a
+    missing one); a STYLE (fan, mosaic, reel ...) is drawn from the members' logos, which a
+    .fun does not give up, so it is none."""
+    import selectmedia
+    s = (spec or "").strip()
+    styles = set(selectmedia.GROUP_ART_STYLES) | set(selectmedia.GROUP_ANIM_STYLES)
+    return "none" if not s or s.lower() in styles or s.lower().startswith("auto") else s
+
+
 def cmd_media(a):
-    """The menu's pictures through selectmedia.py prepare.  A BOF .fun has no picture of its
-    own the tools can reach yet (its art sits inside the packed program), so 'auto' art is a
-    text-only card; and the BOF menu is silent (its static build cannot load the machine's
-    sound library), so no sound is prepared."""
+    """The menu's pictures and sounds through selectmedia.py prepare.  A BOF .fun has no picture
+    or sound of its own the tools can reach yet (they sit inside the packed program), so 'auto'
+    art, animation and music are none and an 'auto' sound is the synthetic one; a random card's
+    picture is a file of its own or none.  The sounds play through the machine's own aplay
+    (padselect.sh pipes the menu's mix to it)."""
     import selectmedia
     images = [os.path.abspath(a.primary)] + [os.path.abspath(e) for e in a.extra]
     n = len(images)
     arts = selectmedia.parse_index_spec(a.art, n, "none")
     anims = selectmedia.parse_index_spec(a.anim, n, "none")
+    musics = selectmedia.parse_index_spec(a.music, n, "none")
     argv = ["prepare", "--primary", images[0]]
     for e in images[1:]:
         argv += ["--extra", e]
     argv += ["--out", os.path.abspath(a.out)]
+    if a.cards:
+        argv += ["--cards", str(a.cards)]
     for i, spec in enumerate(arts):
         argv += ["--art", "%d=%s" % (i, "none" if spec.startswith("auto") else spec)]
     for i, spec in enumerate(anims):
         argv += ["--anim", "%d=%s" % (i, "none" if spec.startswith("auto") else spec)]
-    argv += ["--music", "none", "--sound-move", "none", "--sound-confirm", "none"]
+    for i, spec in enumerate(musics):
+        argv += ["--music", "%d=%s" % (i, "none" if spec.startswith("auto") else spec)]
+    argv += ["--sound-move", _bof_sound(a.sound_move)]
+    for spec in a.sound_confirm or ["none"]:
+        idx, sep, val = spec.partition("=")
+        argv += ["--sound-confirm", ("%s=%s" % (idx, _bof_sound(val))) if sep and idx.strip().isdigit()
+                 else _bof_sound(spec)]
+    for spec in a.group_members:
+        argv += ["--group-members", spec]
+    for flag, specs, fix in (("--group-art", a.group_art, _bof_group_picture),
+                             ("--group-anim", a.group_anim, _bof_group_picture),
+                             ("--group-music", a.group_music, lambda s: "none" if s.lower().startswith("auto") else s),
+                             ("--group-confirm", a.group_confirm, _bof_sound)):
+        for spec in specs:
+            g, _sep, val = spec.partition("=")
+            argv += [flag, "%s=%s" % (g, fix(val))]
     argv += ["--volume", str(VOLUME_DEFAULT if a.volume is None else a.volume)]
     if a.size:
         argv += ["--size", a.size]
-    argv += ["--visual-only"]
+    if a.visual_only:
+        argv += ["--visual-only"]
     if a.work:
         argv += ["--work", a.work]
     return selectmedia.main(argv)
@@ -1231,7 +1339,7 @@ def _add_conf_flags(s):
     s.add_argument("--countdown-word", metavar="TEXT")
     s.add_argument("--text-size", choices=list(mkc.TEXT_SIZES))
     s.add_argument("--default", type=int, help="images.conf default index (default 0)")
-    s.add_argument("--volume", type=int, help="images.conf volume 0-100 (the BOF menu is silent; kept for the form)")
+    s.add_argument("--volume", type=int, help="images.conf volume 0-100: the menu's sounds, mixed in software")
     s.add_argument("--theme", help="the menu's colours: one of codeselect/themes.json's names, or custom")
     s.add_argument("--color", action="append", metavar="ROLE=RRGGBB", help="one colour on top of the theme")
     s.add_argument("--conf", help="use this images.conf verbatim instead of generating one")
@@ -1244,12 +1352,17 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("plan", help="what the update costs and whether it fits a FAT32 stick; writes nothing")
     s.add_argument("--primary", required=True, help="image 0's .fun (installed by BOF's updater as it is)")
-    s.add_argument("--extra", action="append", default=[], metavar="FUN", help="another build of the same title")
+    # ORDERED against the random-card flags, exactly as mkmulticard reads them: a --member is
+    # an image (a delta like any --extra) and where its flag sits fixes its index
+    s.add_argument("--extra", action=mkc._OrderedImage, default=[], metavar="FUN",
+                   help="another build of the same title")
+    mkc._add_group_flags(s)
     s.add_argument("--media-dir")
     s.add_argument("--cache-dir", help="where the .fun files are unpacked (default %s)" % CACHE_DIR_DEFAULT)
     s = sub.add_parser("build", help="write the multi-boot .fun")
     s.add_argument("--primary", required=True)
-    s.add_argument("--extra", action="append", default=[], metavar="FUN")
+    s.add_argument("--extra", action=mkc._OrderedImage, default=[], metavar="FUN")
+    mkc._add_group_flags(s)
     s.add_argument("--out", required=True, help="the .fun to write")
     _add_conf_flags(s)
     s.add_argument("--force", action="store_true", help="overwrite an existing --out")
@@ -1259,6 +1372,9 @@ def main(argv=None):
     s = sub.add_parser("inject", help="a new menu for an existing multi-boot .fun, written over it")
     s.add_argument("--fun", required=True, help="the multi-boot .fun to rewrite IN PLACE")
     _add_conf_flags(s)
+    s.add_argument("--default-card", type=int, metavar="N",
+                   help="highlight CARD N (menu order) - a random card whose members keep their own "
+                        "(default: the update's own)")
     s.add_argument("--primary", help="(recorded for the tab; nothing is read from it)")
     s.add_argument("--extra", action="append", default=[], metavar="FUN")
     s.add_argument("--workdir")
@@ -1280,16 +1396,30 @@ def main(argv=None):
     s.add_argument("--out", required=True)
     s.add_argument("--art", action="append", default=[], metavar="N=none|PATH|VIDEO@T")
     s.add_argument("--anim", action="append", default=[], metavar="N=none|PATH[@START[:SECONDS[:FPS]]]")
-    s.add_argument("--music", action="append", default=[], help="ignored: the BOF menu is silent")
-    s.add_argument("--sound-move", default="none", help="ignored: the BOF menu is silent")
-    s.add_argument("--sound-confirm", action="append", default=[], help="ignored: the BOF menu is silent")
+    s.add_argument("--music", action="append", default=[], metavar="N=none|PATH",
+                   help="the bed that loops while image N is highlighted ('auto' = none on BOF)")
+    s.add_argument("--sound-move", default="none", metavar="PATH|synth|none",
+                   help="the click a flipper makes ('auto' = synth on BOF)")
+    s.add_argument("--sound-confirm", action="append", default=[], metavar="[N=]PATH|synth|none",
+                   help="the sound START makes: a bare value for every card, N= for image N's own")
+    s.add_argument("--cards", type=int, default=0, metavar="N",
+                   help="how many CARDS the menu draws (a random card stands for several images)")
+    s.add_argument("--group-members", action="append", default=[], metavar="G=I,J,...")
+    s.add_argument("--group-art", action="append", default=[], metavar="G=PATH|none",
+                   help="random card G's picture (a style drawn from logos is none on BOF)")
+    s.add_argument("--group-anim", action="append", default=[], metavar="G=PATH|none")
+    s.add_argument("--group-music", action="append", default=[], metavar="G=PATH|none")
+    s.add_argument("--group-confirm", action="append", default=[], metavar="G=PATH|synth|none")
     s.add_argument("--volume", type=int)
     s.add_argument("--size")
-    s.add_argument("--visual-only", action="store_true")
+    s.add_argument("--visual-only", action="store_true",
+                   help="the pictures only (the preview): no sound work")
     s.add_argument("--work")
     s.add_argument("--cache-dir")
     a = ap.parse_args(list(sys.argv[1:]) if argv is None else list(argv))
     try:
+        if a.cmd in ("plan", "build"):
+            mkc.resolve_image_args(a)           # a.extra (members included) + a.groups
         if a.cmd == "plan":
             print_plan(make_plan(a))
             return 0

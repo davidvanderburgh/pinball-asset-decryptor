@@ -80,8 +80,26 @@ level and the game applies each switch's `reversed` flag itself, so pressed = di
 from the first reading; a switch reading "pressed" for 3 s without a break is taken as its
 rest level (a button held at power-up would otherwise read backwards for good).
 
-**No sound.** `bofselect` is one static binary (the machine's Arch glibc is whatever its
-last image carried), and a static binary cannot load the machine's libasound.
+**Sound.** `bofselect` is one static binary (the machine's Arch glibc is whatever its last
+image carried), and a static binary cannot load the machine's libasound. So it mixes its
+own sounds (44100 Hz stereo s16) and streams them into a pipe (`--audio fifo:`), and
+`padselect.sh` plays the pipe with the machine's own `aplay` on the first USB sound card
+(Labyrinth's KT USB Audio) - started only when the conf names a sound, and stopped and
+WAITED FOR before the game starts, because the game's PulseAudio needs the card. No
+`aplay` or no card: the menu is silent and nothing else changes. `PADSELECT_AUDIO_DEV`
+names another ALSA device.
+
+**Random cards.** The same `group=` lines a Stern card carries (mkmulticard's
+`check_groups`; `--group-over` / `--group-roll` / `--default-card` on `mkbofmulti.py build`):
+the menu rolls a member and writes ITS image index to the choice file, so the hook needs
+nothing new. The tab offers the random card over builds already in the list - a BOF update
+is named for its title, so every build sits in its own folder and no file dialog picks a
+group of them. A random card's styles (fan, mosaic, reel ...) are drawn from the games'
+logos, which a `.fun` does not give up: on BOF it shows a picture file or its words.
+
+**What 'auto' means here.** A `.fun` keeps its pictures and music inside the packed program,
+where nothing reads them yet: an 'auto' picture, clip or music is none, and an 'auto' move or
+confirm sound is the built-in synthetic click and chime (as on JJP).
 
 ## Proven (2026-10-03, without a machine)
 

@@ -110,6 +110,72 @@ def test_conf_names_the_programs_and_the_switches():
         mb.render_conf(["a", "b"], [], [], 2, 10, [], None, None, None, sw)
 
 
+def test_conf_random_cards_and_sounds_round_trip():
+    """A random card over images that keep their own cards (at the top, shuffling), one that
+    stands in its members' place, the sounds - written as the Stern card writes them and read
+    back the same."""
+    sw = mb.TITLES["labyrinth"]["switches"]
+    rows = [("art0.png", "", "music0.wav", ""), ("", "", "", "confirm1.wav"), ("", "", "", ""), ("", "", "", "")]
+    groups = [{"title": "RANDOM", "subtitle": "any build", "members": [0, 1], "keep": True, "pos": 0,
+               "roll": "shuffle", "media": ("gart0.png", "", "gmusic0.wav", "")},
+              {"title": "MODS", "subtitle": "", "members": [2, 3], "keep": False, "pos": None}]
+    text = mb.render_conf(["GDCraze.x86_64", "pad_image1.bin", "pad_image2.bin", "pad_image3.bin"],
+                          ["STOCK", "SARAH", "OTHER", "FOURTH"], [], 0, 15, rows, "move.wav", "confirm.wav", 60,
+                          sw, groups=groups, default_card=0)
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    assert lines[:6] == ["group=+shuffle:0-1|RANDOM|any build|gart0.png||gmusic0.wav|",
+                         "image=GDCraze.x86_64|STOCK||art0.png||music0.wav|",
+                         "image=pad_image1.bin|SARAH|||||confirm1.wav",
+                         "group=2-3|MODS|||||",
+                         "image=pad_image2.bin|OTHER|||||",
+                         "image=pad_image3.bin|FOURTH|||||"]
+    for want in ("default_card=0", "sound_move=move.wav", "sound_confirm=confirm.wav", "volume=60",
+                 "media=%s" % mb.MEDIA_DIR):
+        assert want in lines, want
+    back = mb.parse_conf(text)
+    assert [(g["members"], g["keep"], g["roll"], g["pos"], g["title"]) for g in back["groups"]] == \
+        [([0, 1], True, "shuffle", 0, "RANDOM"), ([2, 3], False, "not-last", 2, "MODS")]
+    assert back["groups"][0]["media"][0] == "gart0.png" and back["default_card"] == 0
+    assert back["media"][1][3] == "confirm1.wav"
+    # what the menu cannot honour is refused here, not on the machine
+    two = ["GDCraze.x86_64", "pad_image1.bin"]
+    with pytest.raises(Refused, match="primary must keep"):
+        mb.render_conf(two, [], [], 0, 15, [], None, None, None, sw,
+                       groups=[{"title": "R", "members": [0, 1], "keep": False}])
+    with pytest.raises(Refused, match="at least 2"):
+        mb.render_conf(two, [], [], 0, 15, [], None, None, None, sw,
+                       groups=[{"title": "R", "members": [1], "keep": True}])
+    with pytest.raises(Refused, match="default_card"):
+        mb.render_conf(two, [], [], 0, 15, [], None, None, None, sw,
+                       groups=[{"title": "R", "members": [0, 1], "keep": True}], default_card=3)
+
+
+def test_media_maps_what_a_fun_cannot_give(monkeypatch, tmp_path):
+    """'auto' pictures and music are none (they sit inside the packed program), an 'auto'
+    sound is the synthetic one, and a random card's STYLE (drawn from logos) is none - a
+    file of its own passes.  Sounds are prepared: no --visual-only unless asked."""
+    import selectmedia
+    got = {}
+    monkeypatch.setattr(selectmedia, "main", lambda argv: got.setdefault("argv", argv) and 0)
+    p0, p1 = str(tmp_path / "a" / "lab.fun"), str(tmp_path / "b" / "lab.fun")
+    assert mb.main(["media", "--primary", p0, "--extra", p1, "--out", str(tmp_path / "m"), "--cards", "3",
+                    "--art", "0=auto", "--anim", "1=auto", "--music", "0=auto", "--music", "1=/x/song.wav",
+                    "--sound-move", "auto", "--sound-confirm", "auto", "--sound-confirm", "1=auto",
+                    "--group-members", "0=0,1", "--group-art", "0=fan", "--group-anim", "0=/x/r.gif",
+                    "--group-music", "0=auto", "--group-confirm", "0=auto"]) == 0
+    argv = got["argv"]
+    pairs = list(zip(argv, argv[1:]))
+    for want in (("--cards", "3"), ("--art", "0=none"), ("--anim", "1=none"), ("--music", "0=none"),
+                 ("--music", "1=/x/song.wav"), ("--sound-move", "synth"), ("--sound-confirm", "synth"),
+                 ("--sound-confirm", "1=synth"), ("--group-members", "0=0,1"), ("--group-art", "0=none"),
+                 ("--group-anim", "0=/x/r.gif"), ("--group-music", "0=none"), ("--group-confirm", "0=synth")):
+        assert want in pairs, want
+    assert "--visual-only" not in argv
+    got.clear()
+    assert mb.main(["media", "--primary", p0, "--extra", p1, "--out", str(tmp_path / "m"), "--visual-only"]) == 0
+    assert "--visual-only" in got["argv"] and ("--sound-move", "none") in zip(got["argv"], got["argv"][1:])
+
+
 def test_titles_not_read_yet_are_refused_by_name(tmp_path):
     for name, why in (("dune.fun", "Python script"), ("winchester.fun", "no startup scripts"),
                       ("bon-jovi_2026.10.01.fun", "signed disk image")):
@@ -204,3 +270,21 @@ def test_a_whole_build_from_two_synthetic_updates(tmp_path, capsys):
     assert mb.main(["inspect", "--fun", str(out), "--json"]) == 0
     rep = json.loads(capsys.readouterr().out)
     assert [i["title"] for i in rep["images"]] == ["ONE", "TWO"] and rep["timeout"] == 7
+    # a RANDOM CARD over both, at the top, as the tab sends it (--group-over ...@0): the
+    # conf carries it, inspect reports it, and an inject keeps it
+    assert mb.main(["build"] + common + ["--group-over", "0-1@0|SURPRISE|", "--group-roll", "0=any",
+                                         "--default-card", "0", "--out", str(out), "--force",
+                                         "--selector-dir", str(sel), "--titles", "STOCK;MOD"]) == 0
+    dec = subprocess.run(["gpg", "--batch", "--quiet", "--pinentry-mode", "loopback", "--passphrase", "funkey",
+                          "-d", str(out)], stdout=subprocess.PIPE, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(dec), mode="r:gz") as tf:
+        conf = tf.extractfile("padselect/images.conf").read().decode()
+    body = [ln for ln in conf.splitlines() if not ln.startswith("#")]
+    assert body[0] == "group=+any:0-1|SURPRISE|" and "default_card=0" in body
+    assert mb.main(["inject", "--fun", str(out), "--titles", "A;B", "--cache-dir", str(cache)]) == 0
+    capsys.readouterr()
+    assert mb.main(["inspect", "--fun", str(out), "--json"]) == 0
+    rep = json.loads(capsys.readouterr().out)
+    assert [(g["title"], g["members"], g["keep"], g["roll"]) for g in rep["groups"]] == \
+        [("SURPRISE", [0, 1], True, "any")] and rep["default_card"] == 0
+    assert [i["title"] for i in rep["images"]] == ["A", "B"]

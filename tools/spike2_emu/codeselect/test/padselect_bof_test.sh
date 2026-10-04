@@ -14,6 +14,12 @@
 #            5. a program that is not the recorded size: image 0
 #            6. no menu program: image 0, and the hook still returns 0
 #            7. one image in the conf: nothing happens, no menu
+#   sound    8. a conf naming a sound: the player (a stand-in for aplay) is started on
+#               the device, reads the menu's mix from the pipe, and is gone - the pipe
+#               removed - before the hook returns (the game's sound server needs the card)
+#            9. a conf with no sound: no player at all
+#   random  10. a random card over both images is the default card: the countdown lands on
+#               it, the menu rolls one and writes ITS image index, and that image is the game
 set -u
 BIN=$1; DELTA=$2; FONT=${3:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -95,6 +101,60 @@ rm -f "$P/bofselect.log"
 bash "$P/padselect.sh"
 [ ! -e "$P/bofselect.log" ] && grep -q "1 image(s)" "$P/padselect.log" \
     && ok "7 hook: one image -> no menu" || { bad "7 hook: one image"; cat "$P/padselect.log"; }
+
+# 8
+setup
+mkdir -p "$P/media"
+python3 - "$P/media/move.wav" <<'PY'
+import math, struct, sys, wave
+w = wave.open(sys.argv[1], "wb"); w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100)
+w.writeframes(b"".join(struct.pack("<hh", v, v) for v in
+                       (int(8000 * math.sin(i / 20.0)) for i in range(44100 // 5))))
+w.close()
+PY
+printf '#!/bin/bash\necho "$*" > %s/player.args\nexec cat "${@: -1}" > %s/played\n' "$T" "$T" > "$T/fakeplay"
+chmod +x "$T/fakeplay"
+printf 'sound_move=move.wav\nmedia=%s\n' "$P/media" >> "$P/images.conf"
+rm -f "$T/played" "$T/player.args"
+PADSELECT_AUDIO_PLAYER="$T/fakeplay" PADSELECT_AUDIO_DEV=plughw:7,0 bash "$P/padselect.sh"; rc=$?
+fifo_left=$(ls /tmp/padselect.audio.* 2>/dev/null | head -1)
+if [ "$rc" = 0 ] && grep -q "sound: fakeplay on plughw:7,0" "$P/padselect.log" && grep -q "player stopped" "$P/padselect.log" \
+    && grep -q -- "-t raw -f S16_LE -r 44100 -c 2 -D plughw:7,0" "$T/player.args" \
+    && [ "$(stat -c %s "$T/played" 2>/dev/null || echo 0)" -gt 4096 ] \
+    && ! pgrep -f "$T/fakeplay" >/dev/null && [ -z "$fifo_left" ] \
+    && grep -q "fifo" "$P/bofselect.log"; then
+    ok "8 sound: the player got $(stat -c %s "$T/played") bytes of the menu's mix and was gone before the game"
+else
+    bad "8 sound (played $(stat -c %s "$T/played" 2>/dev/null) bytes, fifo left '$fifo_left')"
+    cat "$P/padselect.log"; cat "$P/audio.log" 2>/dev/null; grep -i audio "$P/bofselect.log"
+fi
+# 9
+conf 0
+rm -f "$T/player.args"
+PADSELECT_AUDIO_PLAYER="$T/fakeplay" bash "$P/padselect.sh"
+[ ! -e "$T/player.args" ] && grep -q "sound: none in the conf" "$P/padselect.log" \
+    && ok "9 sound: a conf with no sound starts no player" || { bad "9 no sound"; cat "$P/padselect.log"; }
+# 10
+setup
+bash "$P/pad_install.sh"
+printf 'group=+0-1|RANDOM|\nimage=GDCraze.x86_64|STOCK|\nimage=pad_image1.bin|MOD|\ndefault=0\ndefault_card=0\ntimeout=1\n' \
+    > "$P/images.conf"
+rm -f "$P/last"
+seen=""
+for seed in 1 2 3 4 5 6; do
+    PADSELECT_MENU_ARGS="--seed $seed" bash "$P/padselect.sh"
+    c=$(sed -n "s/.*menu exit 0, choice '\([0-9]\)'.*/\1/p" "$P/padselect.log")
+    f=$([ "$c" = 1 ] && echo pad_image1.bin || echo GDCraze.x86_64)
+    if [ -z "$c" ] || [ "$(inode "$H/craze/GDCraze.x86_64")" != "$(inode "$D/$f")" ]; then
+        seen="BAD"; cat "$P/padselect.log"; break
+    fi
+    seen="$seen$c"
+done
+case "$seen" in
+    *BAD*) bad "10 random card: the rolled image is not the game" ;;
+    *0*1*|*1*0*) ok "10 random card: the countdown rolled $seen - each roll's image became the game" ;;
+    *) bad "10 random card: six rolls all landed on one image ($seen)" ;;
+esac
 
 # 2
 setup

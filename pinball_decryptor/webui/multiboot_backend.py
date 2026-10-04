@@ -98,11 +98,10 @@ class MultibootBackend:
     #: machine.  Only a Stern game can be adjusted (its colors are in its own
     #: drawing shaders), so only Stern offers the tick.
     settings_tile: bool = False
-    #: THE MENU'S SOUND (PAD-342).  A Barrels of Fun menu is one static binary
-    #: (the machine's glibc is whatever its Arch image carries), and a static
-    #: binary cannot load the machine's sound library - so its menu is silent,
-    #: and the tab offers no music, no move / confirm sounds and no volume for
-    #: it rather than settings that would do nothing.
+    #: THE MENU'S SOUND: music, move / confirm sounds and the volume.  Every
+    #: platform has it.  A Barrels of Fun menu is one static binary that cannot
+    #: load the machine's sound library, so it streams its mix into a pipe and
+    #: the machine's own aplay plays it (padselect_bof.sh, PAD-342).
     sound: bool = True
     #: the per-image high-score store (PAD-226) is a Spike 2 card's: the column
     #: is shown (blank) on JJP as it always was, and left off where it means
@@ -118,6 +117,16 @@ class MultibootBackend:
     #: the subtitle under the tab's heading
     tab_sub: str = ("Several game images on one SD card, with a boot menu the "
                     "machine shows on power-up.")
+    #: WHAT THE LIST'S ADD ROW OFFERS, by method name (None = every choice).  A
+    #: BOF update is named for its title (lab.fun), so every build sits in a
+    #: folder of its own: no folder holds a group's builds and no file dialog
+    #: picks several, so its random card is the one over builds already in the
+    #: list.  The edits folders are a Stern card's.
+    add_choices: frozenset = None
+    #: the BUILDS an output holds, when those and not the rows are the limit
+    #: (0 = the rows, max_cards).  A BOF update carries four builds in one FAT32
+    #: file, and a random card over them is a row that adds no build.
+    max_games: int = 0
 
     # ---- pure helpers -----------------------------------------------------
     def device(self, img):
@@ -315,16 +324,18 @@ BOF = MultibootBackend(
     total_re=re.compile(r"^fun-size\s+(\d+)"),
     status_checks=(("card", "Update"), ("images", "Images"),
                    ("built", "Built"), ("ready", "Ready for the stick")),
-    max_cards=4, groups=False, compact=False, machine_volume=False,
+    max_cards=6, groups=True, compact=False, machine_volume=False,
     volume_default=50, volume_max=100, attract_clip=False,
     update=False, bypass=False, extract=False, read_card=False,
     selector_default="/var/tmp/bofselect",
     selector_suffix="/bofselect", selector_binary="bofselect",
     preview_native=True, conf_font="/var/tmp/bofselect/font.ttf",
     root_steps=frozenset(),
-    sound=False, scores_column=False, emulate=False, flash=False,
+    sound=True, scores_column=False, emulate=False, flash=False,
     tab_sub=("Several builds of one game in one update file, with a boot menu "
-             "the machine shows on power-up."))
+             "the machine shows on power-up."),
+    add_choices=frozenset({"_add_image", "_add_random_over_existing"}),
+    max_games=4)
 
 BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF}
 

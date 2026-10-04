@@ -2863,10 +2863,16 @@ HELP_CONTENT = {
          "chosen last. Every build after the first is carried as its "
          "difference from the first, which is what keeps two builds under "
          "the 4 GB one FAT32 file can be; the size strip says when it does "
-         "not. All builds share the game's one set of settings and scores, "
-         "the menu has no sound, and installing any normal update afterwards "
-         "takes the menu away again. Labyrinth is supported; Dune and "
-         "Winchester update differently and are not yet."),
+         "not. The menu fills the backbox, and it can show a picture or a "
+         "video clip on each card, play music and the move and confirm "
+         "sounds, and offer a random card that boots one of the builds above "
+         "it (Add random over the images above). A card's 'auto' picture or "
+         "music is none on this machine (the game keeps its own inside the "
+         "update) and an 'auto' sound is the built-in click and chime. All "
+         "builds share the game's one set of settings and scores, and "
+         "installing any normal update afterwards takes the menu away again. "
+         "Labyrinth is supported; Dune and Winchester update differently and "
+         "are not yet."),
     ],
 }
 

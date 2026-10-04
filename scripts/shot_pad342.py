@@ -6,7 +6,8 @@ writes <out-dir>/<name>.png: the app on a BOF project with the Multi-boot tab
 asked for.  Before PAD-342 a BOF project has no Multi-boot tab, so the shot is
 the tab bar without one; after it, the tab holds the .fun files named on the
 command line (stock Labyrinth and a mod, say) and the menu preview.  The server
-runs from THIS tree against a scratch settings folder.
+runs from THIS tree against a scratch settings folder.  PAD342_RANDOM=1 also adds
+a random card over the builds, on a tree whose BOF backend has random cards.
 """
 
 import json
@@ -31,6 +32,10 @@ def on_shown(self, *a, **k):
         self._pad342_done = True
         for p in IMAGES:
             self.add_image(p)
+        # the random card over the builds, where the platform has one (the
+        # sound + random half of PAD-342; before it a BOF update had neither)
+        if %(random)r and self._backend.groups:
+            self.add_random_over_existing()
     return _orig(self, *a, **k)
 mp.WebMultibootPanel.on_shown = on_shown
 sys.exit(host.main(sys.argv[1:]))
@@ -44,7 +49,8 @@ def shoot(out_dir, name, images, wait):
         json.dump(images, f)
     host = os.path.join(scratch, "host.py")
     with open(host, "w", encoding="utf-8") as f:
-        f.write(HOST % {"repo": REPO, "spec": spec})
+        f.write(HOST % {"repo": REPO, "spec": spec,
+                        "random": os.environ.get("PAD342_RANDOM", "") == "1"})
     settings = os.path.join(scratch, "settings.json")
     with open(settings, "w", encoding="utf-8") as f:
         json.dump({"disclaimer_accepted": True, "last_manufacturer": "bof"}, f)

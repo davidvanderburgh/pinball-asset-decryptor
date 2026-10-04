@@ -32,8 +32,18 @@
 # around its own saves); when it is, it is made writable for the swap and put
 # back read-only after.
 #
+# SOUND.  The menu mixes its own sounds (44100 Hz stereo, 16 bit), but it is
+# one static program and cannot load the machine's sound library, so it
+# streams the mix into a pipe (--audio fifo:) and the machine's own aplay
+# plays it on the USB sound card the game uses.  The player starts only when
+# the conf names a sound, and it is stopped and WAITED FOR before the game
+# starts, so the game's sound server finds the card free.  No aplay, or no
+# card: the menu is silent and nothing else changes.
+#
 # PADSELECT_HOME moves /home/pinball (the tests); PADSELECT_NO_SUDO=1 runs the
-# menu without sudo.
+# menu without sudo; PADSELECT_AUDIO_PLAYER replaces aplay (the tests) and
+# PADSELECT_AUDIO_DEV names the ALSA device (default: the first USB sound card,
+# else card 0).
 H=${PADSELECT_HOME:-/home/pinball}
 D=$H/extracted/decrypt
 P=$D/padselect
@@ -103,14 +113,64 @@ put_back() {
 timeout_s=$(sed -n 's/^timeout=\([0-9][0-9]*\).*/\1/p' "$CONF" | tail -1)
 [ -n "$timeout_s" ] || timeout_s=10
 [ "$timeout_s" -gt 0 ] 2>/dev/null || timeout_s=600       # 0 = wait for ever: still bounded here
+
+# ---- sound (the header's SOUND) --------------------------------------------
+# does the conf name a sound: sound_move= / sound_confirm=, or a card's music or
+# confirm field (the 6th and 7th of an image= or group= line)
+has_sound() {
+    grep -qE '^sound_(move|confirm)=[^[:space:]]' "$CONF" && return 0
+    awk -F'|' '/^(image|group)=/ { for (i = 6; i <= 7; i++) if ($i != "" && $i != "none") f = 1 }
+               END { exit !f }' "$CONF"
+}
+AUDIO=none
+FIFO=""
+player=""
+start_player() {
+    local play=${PADSELECT_AUDIO_PLAYER:-aplay} dev=${PADSELECT_AUDIO_DEV:-} card
+    if ! command -v "${play%% *}" >/dev/null 2>&1; then
+        say "sound: no ${play%% *} on this machine: the menu is silent"; return 0
+    fi
+    if [ -z "$dev" ]; then
+        card=$(awk '/USB-Audio/ { print $1; exit }' /proc/asound/cards 2>/dev/null)
+        [ -n "$card" ] || card=$(awk '$1 ~ /^[0-9]+$/ { print $1; exit }' /proc/asound/cards 2>/dev/null)
+        dev="plughw:${card:-0},0"
+    fi
+    FIFO=$(mktemp -u /tmp/padselect.audio.XXXXXX) || return 0
+    if ! mkfifo -m 600 "$FIFO" 2>/dev/null; then
+        say "sound: cannot make the pipe $FIFO: the menu is silent"; FIFO=""; return 0
+    fi
+    # bounded like the menu; the player reads the pipe until the menu closes it
+    timeout -k 2 $((timeout_s + 70)) $SUDO $play -q -t raw -f S16_LE -r 44100 -c 2 -D "$dev" "$FIFO" \
+        </dev/null >/dev/null 2>>"$P/audio.log" &
+    player=$!
+    AUDIO="fifo:$FIFO"
+    say "sound: $(basename "${play%% *}") on $dev, pid $player"
+}
+stop_player() {
+    local i
+    if [ -n "$player" ]; then
+        # the menu closing the pipe ends the player by itself; this is for one that did not
+        for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$player" 2>/dev/null || break; sleep 0.2; done
+        kill "$player" 2>/dev/null
+        for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$player" 2>/dev/null || break; sleep 0.2; done
+        kill -9 "$player" 2>/dev/null
+        wait "$player" 2>/dev/null
+        say "sound: player stopped: the sound card is free for the game"
+    fi
+    [ -n "$FIFO" ] && rm -f "$FIFO"
+    player=""; FIFO=""
+}
+
 choice=""
 if [ -x "$P/bofselect" ]; then
     rm -f "$CHOICE"
+    if has_sound; then start_player; else say "sound: none in the conf"; fi
     say "menu: $n images, timeout ${timeout_s}s"
     timeout -k 5 $((timeout_s + 60)) $SUDO "$P/bofselect" --input fast --conf "$CONF" --out "$CHOICE" --last "$P/last" \
-        --log "$P/bofselect.log" --audio none --no-invert --font "$P/font.ttf" \
+        --log "$P/bofselect.log" --audio "$AUDIO" --no-invert --font "$P/font.ttf" \
         ${PADSELECT_MENU_ARGS:-} </dev/null >/dev/null 2>&1
     rc=$?
+    stop_player
     choice=$(head -c 16 "$CHOICE" 2>/dev/null | tr -dc '0-9')
     say "menu exit $rc, choice '${choice}'"
 else

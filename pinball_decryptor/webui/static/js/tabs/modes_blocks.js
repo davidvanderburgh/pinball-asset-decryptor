@@ -31,6 +31,8 @@ const TIP = {
   scored: "How many times a Score block has paid since the mode started.",
   total: "The points the mode's Score blocks have paid since it started.",
   stock: "One of the game's own modes, battles or multiballs is running.",
+  addTime: "Adds this many seconds to the mode's clock (less than 0 takes some off). Any value: a number, a variable, a sum.",
+  setTime: "Puts the mode's clock at this many seconds, up or down (0 = time is up). Put up, a When that many seconds are left does not run again.",
 };
 
 // ------------------------------------------------------------------ the blocks there are
@@ -51,7 +53,8 @@ function stmtTemplates(ch, vars) {
   const shot = (ch.shots || [])[0] || "";
   const v = (vars[0] || {}).name || "";
   return [
-    ["Mode", [{ op: "start_mode" }, { op: "end_mode" }, { op: "add_time", seconds: 5 },
+    ["Mode", [{ op: "start_mode" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
+      { op: "set_time", seconds: num(10) },
       { op: "multiball", balls: 2, save: 10 }]],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
       { op: "change", var: v, by: num(1) }]],
@@ -75,7 +78,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
   total: "points so far", secs_left: "seconds left", balls: "balls in play", player: "the player up", op: "a sum" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   stock: "a game mode of its own runs" };
-const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", multiball: "mode", score: "score",
+const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", log: "show" };
 
 // ------------------------------------------------------------------ the program, by path
@@ -191,7 +194,8 @@ function StmtBody({ b, path, ed }) {
       <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The insert's colour")} />
       <${Pick} value=${b.pattern} options=${PATTERNS} onChange=${(v) => set("pattern", v)} />`;
     case "lights_off": return html`<span class="bk-w">Hand back the lights of</span><${Pick} value=${b.shot} options=${[["*", "every shot"], ...shots.map((n) => [n, n])]} onChange=${(v) => set("shot", v)} />`;
-    case "add_time": return html`<span class="bk-w">Add</span><${Num} value=${b.seconds} onChange=${(v) => set("seconds", v)} /><span class="bk-w">seconds</span>`;
+    case "add_time": return html`<span class="bk-w" ...${tip(TIP.addTime)}>Add</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
+    case "set_time": return html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
       <span class="bk-w">balls, ball save</span><${Num} value=${b.save} width=${44} onChange=${(v) => set("save", v)} /><span class="bk-w">s</span>`;
     case "log": return html`<span class="bk-w">Write</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="a line" /><span class="bk-w">in the log</span>`;
@@ -292,7 +296,7 @@ function hatLabel(h) {
 }
 
 function stmtLabel(b) {
-  return { start_mode: "Start the mode", end_mode: "End the mode", add_time: "Add seconds", multiball: "Multiball",
+  return { start_mode: "Start the mode", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", log: "Write in the log",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;

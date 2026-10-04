@@ -26,7 +26,8 @@ A script is a HAT (what sets it off) and the blocks it runs, in order. Hats: the
 ends, a shot is made (any time, or only while the mode runs or does not), any shot, every N
 seconds while it runs, N seconds left, the ball drains, one of the game's events. Blocks: start
 or end the mode, score, set or change a variable, if / else, a callout, words on the mode's
-screen, light or free a shot's inserts, add time, a multiball, a line in the log. Values: a
+screen, light or free a shot's inserts, add time or set the clock (to any value: a variable,
+the seconds left, a sum), a multiball, a line in the log. Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running.
@@ -71,7 +72,7 @@ HATS = {
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
 RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game"}
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
-              "light_shot", "lights_off", "add_time", "multiball", "log")
+              "light_shot", "lights_off", "add_time", "set_time", "multiball", "log")
 PATTERNS = {"solid": ("PM_LAMP_SOLID", 0), "blink": ("PM_LAMP_BLINK", 500),
             "pulse": ("PM_LAMP_PULSE", 1600), "chase": ("PM_LAMP_CHASE", 150)}
 #: the game's own callouts a block can name by what they say (every port carries these roles)
@@ -126,6 +127,12 @@ def normalize(data):
     out["screen"] = bool(out.get("screen", False))
     out["vars"] = [v for v in (out.get("vars") or []) if isinstance(v, dict)]
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
+    for s in out["scripts"]:
+        for b in _walk(s.get("do")):
+            # PAD-372: Add seconds takes a value; one saved before held a plain number
+            secs = b.get("seconds")
+            if b.get("op") == "add_time" and isinstance(secs, (int, float)) and not isinstance(secs, bool):
+                b["seconds"] = {"k": "num", "v": b["seconds"]}
     return out
 
 
@@ -214,7 +221,7 @@ def starter(name, shots=()):
                 {"op": "change", "var": "combo", "by": num(1)}]},
             {"hat": {"kind": "shot", "shot": jack, "when": "running"}, "do": [
                 {"op": "score", "points": num(5000000)},
-                {"op": "add_time", "seconds": 5}]},
+                {"op": "add_time", "seconds": num(5)}]},
             {"hat": {"kind": "seconds_left", "seconds": 10}, "do": [
                 {"op": "callout", "role": "ten_seconds"}]},
             {"hat": {"kind": "mode_end"}, "do": [
@@ -287,8 +294,8 @@ def notes(program):
     if not program["seconds"] and "end_mode" not in ops and not program["ends_on_drain"]:
         out.append("Nothing ends this mode: it has no clock, the ball draining does not end it, "
                    "and no End the mode block.")
-    if not program["seconds"] and ({"seconds_left"} & kinds or "add_time" in ops):
-        out.append("The mode has no clock, so seconds-left and add-time blocks do nothing.")
+    if not program["seconds"] and ({"seconds_left"} & kinds or {"add_time", "set_time"} & ops):
+        out.append("The mode has no clock, so seconds-left, add-time and set-the-clock blocks do nothing.")
     if "words" in ops and not program["screen"]:
         out.append("Show words needs the mode's own screen: tick Its own screen.")
     return out
@@ -391,9 +398,15 @@ def _check_stack(stack, depth, where, ctx):
                     ctx["out"].append("%s lights a shot in no colour." % where)
                 if b.get("pattern") not in PATTERNS:
                     ctx["out"].append("%s lights a shot in no pattern." % where)
-        elif op == "add_time":
-            if not _int_ok(b.get("seconds"), -SECONDS_MAX, SECONDS_MAX):
-                ctx["out"].append("%s adds a time that is not a whole number of seconds." % where)
+        elif op in ("add_time", "set_time"):
+            secs = b.get("seconds")
+            _check_num(secs, where, ctx)
+            lo = -SECONDS_MAX if op == "add_time" else 0
+            if (isinstance(secs, dict) and secs.get("k") == "num"
+                    and _int_ok(secs.get("v"), -NUMBER_MAX, NUMBER_MAX)
+                    and not _int_ok(secs.get("v"), lo, SECONDS_MAX)):
+                ctx["out"].append("%s %s: %d to %d seconds." % (
+                    where, "adds a time" if op == "add_time" else "sets the clock", lo, SECONDS_MAX))
         elif op == "multiball":
             if not _int_ok(b.get("balls"), 2, 6):
                 ctx["out"].append("%s asks for a multiball of 2 to 6 balls." % where)
@@ -616,12 +629,8 @@ class _Gen:
                 else:
                     s = self.shot(b.get("shot"))
                     out.append(pad + "if (%s) pm_lamp_release_shot(%s);" % (s, s))
-            elif op == "add_time":
-                try:
-                    secs = max(-SECONDS_MAX, min(SECONDS_MAX, int(b.get("seconds"))))
-                except (TypeError, ValueError):
-                    secs = 0
-                out.append(pad + "add_time(%d);" % secs)
+            elif op in ("add_time", "set_time"):
+                out.append(pad + "%s(%s);" % (op, self.num(b.get("seconds"))))
             elif op == "multiball":
                 try:
                     balls = max(2, min(6, int(b.get("balls"))))
@@ -710,6 +719,7 @@ def to_c(program, slug):
     L.append("#define RUN_SECONDS      %d          /* 0 = no clock */" % program["seconds"])
     L.append("#define ENDS_ON_DRAIN    %d" % (1 if program["ends_on_drain"] else 0))
     L.append("#define TICKS_PER_SECOND 60")
+    L.append("#define CLOCK_MAX        %d         /* the most seconds the clock holds */" % SECONDS_MAX)
     L.append("#define UNUSED __attribute__((unused))   /* a helper the blocks may not call */")
     L.append("")
     L.append("/* The screen a build added for this mode (its folder is \"%s\"). Not there = no screen. */" % slug)
@@ -791,12 +801,33 @@ def to_c(program, slug):
     L.append("    run.shots++;")
     L.append("}")
     L.append("")
-    L.append("UNUSED static void add_time(int seconds)")
+    L.append("/* The clock to this many ticks. Put UP, the second it lands on is not \"left\" again: a When N")
+    L.append(" * seconds are left for it does not run (the kit's kit_timer_at_least); counting down past it")
+    L.append(" * later, they run as ever. */")
+    L.append("UNUSED static void clock_to(long long ticks)")
     L.append("{")
-    L.append("    long t;")
+    L.append("    unsigned before = run.ticks_left;")
+    L.append("    if (ticks < 0) ticks = 0;")
+    L.append("    if (ticks > CLOCK_MAX * TICKS_PER_SECOND) ticks = CLOCK_MAX * TICKS_PER_SECOND;")
+    L.append("    run.ticks_left = (unsigned)ticks;")
+    L.append("    if (run.ticks_left > before) run.seconds_shown = secs_left();")
+    L.append("}")
+    L.append("")
+    L.append("UNUSED static void add_time(long long seconds)   /* less than 0 takes time off; never to 0 */")
+    L.append("{")
+    L.append("    long long t;")
     L.append("    if (!run.on || !RUN_SECONDS) return;")
-    L.append("    t = (long)run.ticks_left + (long)seconds * TICKS_PER_SECOND;")
-    L.append("    run.ticks_left = t > 0 ? (unsigned)t : 1;")
+    L.append("    if (seconds > CLOCK_MAX) seconds = CLOCK_MAX;")
+    L.append("    if (seconds < -CLOCK_MAX) seconds = -CLOCK_MAX;")
+    L.append("    t = (long long)run.ticks_left + seconds * TICKS_PER_SECOND;")
+    L.append("    clock_to(t > 0 ? t : 1);")
+    L.append("}")
+    L.append("")
+    L.append("UNUSED static void set_time(long long seconds)   /* 0 = time is up */")
+    L.append("{")
+    L.append("    if (!run.on || !RUN_SECONDS) return;")
+    L.append("    if (seconds > CLOCK_MAX) seconds = CLOCK_MAX;")
+    L.append("    clock_to(seconds * TICKS_PER_SECOND);")
     L.append("}")
     L.append("")
     L.append("static void start(const char *why);")

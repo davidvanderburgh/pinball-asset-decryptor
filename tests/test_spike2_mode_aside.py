@@ -256,3 +256,54 @@ def test_the_generator_reads_godzillas_modes_as_the_port_has_them():
     assert modes[1].multiball and not modes[1].blockable                # Godzilla Multiball: never offered
     _port_now, named, _objs = _block_section(name)
     assert {i for i, m in modes.items() if m.blockable} == set(named)
+
+
+# ---- PAD-363: the Modes tab's lever - ModeSpec.game_modes / block_modes ------------------------------------------
+def _title(name):
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    return MP.profile_from_port(os.path.join(SDK, "ports", name))
+
+
+def test_a_title_lists_the_modes_its_port_can_hold_off_and_which_are_checked():
+    dp, gz = _title("deadpool_le-1.14.port"), _title("godzilla_le-1.16.port")
+    rows = {i: (name, on) for i, name, on in dp.game_modes}
+    assert len(rows) == 18 and rows[21] == ("Chimichanga", False) and rows[24] == ("Berserker Rage", False)
+    assert rows[6] == rows[7] == ("Quest", False)                       # two of its modes share a name
+    assert not set(rows) & {8, 9, 11, 12, 16, 17, 18}                    # never a multiball
+    assert [i for i, _n, on in gz.game_modes if on] == [21, 23]          # the port's checked defaults
+    assert _title("godzilla_pro-1.15.port").game_modes == ()            # no block lines: nothing to offer
+
+
+def test_game_modes_validates_and_writes_only_what_differs_from_stack():
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    dp, gz = _title("deadpool_le-1.14.port"), _title("godzilla_le-1.16.port")
+    spec = MP.ModeSpec()
+    assert MP.validate_game_modes(spec, dp) == [] and MP.game_modes_lines(spec) == []
+    spec.game_modes = "sideways"
+    assert MP.validate_game_modes(spec, dp) == ["What it does about the game's own modes is stack, give_way or block."]
+    spec.game_modes = "give_way"
+    assert MP.game_modes_lines(spec) == ["game_modes     give_way"]
+    spec.game_modes = "block"
+    assert MP.validate_game_modes(spec, dp) == ["Tick at least one of Deadpool LE 1.14's modes to hold off."]
+    assert MP.validate_game_modes(spec, gz) == [] and MP.held_off(spec, gz) == (21, 23)   # the defaults
+    assert MP.game_modes_lines(spec) == ["game_modes     block"]
+    spec.block_modes = [24, 21, 8]
+    assert MP.validate_game_modes(spec, dp) == ["Deadpool LE 1.14 has no mode the app can hold off numbered 8."]
+    spec.block_modes = [24, 21]
+    assert MP.validate_game_modes(spec, dp) == [] and MP.held_off(spec, dp) == (21, 24)
+    assert MP.game_modes_lines(spec) == ["game_modes     block", "block_modes    21 24"]
+    assert MP.validate_game_modes(spec, _title("godzilla_pro-1.15.port")) == []   # the runtime gives way there
+    text = MP.runtime_cfg(spec, "rush")
+    assert "\ngame_modes     block\n" in text and "\nblock_modes    21 24\n" in text
+
+
+def test_a_mode_moved_to_another_title_keeps_the_modes_it_holds_off_by_name():
+    import dataclasses
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    dp = _title("deadpool_le-1.14.port")
+    pro = dataclasses.replace(_title("deadpool_pro-1.16.port"),
+                              game_modes=((3, "Chimichanga", False), (9, "Quest", False), (11, "Quest", False)))
+    spec = MP.ModeSpec(title=dp.key, start_shot=dp.shots[0][0], scoring_shots=[dp.shots[0][0]],
+                       game_modes="block", block_modes=[21, 6, 24])
+    out, _dropped = MP.retarget(spec, pro)
+    assert out.block_modes == [3, 9, 11] and out.game_modes == "block"   # Berserker Rage is not on it

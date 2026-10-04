@@ -60,7 +60,33 @@ mode table on 21, the balls in play plus the game's own flags/records/bytes/obje
   before (main) and after (this branch) shots of the glass.
 - Machine: a card built by Write from this branch for David's Premium.
 
+## Any title: keeping the game's own modes out (PAD-363)
+
+David, 2026-10-04: "is there a way to extend this kind of thinking to other games? like beatles, deadpool,
+etc.? it would be good to have this generic logic (or at least the levers built in for the user to handle)".
+
+- **Where the game starts a mode.** On the C++ rule titles a rule starts one of its modes through a virtual
+  of the mode's object at the title's start slot (Godzilla 8, Deadpool 13; the vptr is the vtable + 8). The
+  app's stock scanner already finds the slot and every mode's object, vtable and name, so
+  `game_mode_blocks.py` (and `sdk/block_tool.py`) write one veto per mode into the port: `site
+  block_start_<id>`, `data block_obj_<id>`, `text block_name_<id>`, `value block_default`. Never a
+  multiball. Godzilla LE 1.16 and Deadpool LE 1.14 / Pro 1.16 carry the section so far.
+- **The lever.** A mode file's `game_modes stack|give_way|block` and `block_modes <ids>`; in the Modes tab,
+  "The game's own modes > While it runs, the game's modes": may start (this one moves aside), may start and
+  end this one, or cannot start, with a tick for each of the title's modes its port names (a mode moved to
+  another title keeps its ticks by name). A title with no block lines greys "cannot start" and says why.
+- **The log.** `pm_running_name` lets the runtime's own lines name a mode file's mode (`block: the game's
+  mode 21 (Chimichanga) did not start - BLOCKTEST is running`).
+- **Emulator (deadpool_le 1.14, muted, hidden, rig 2).** A mode file with `game_modes block` holds off
+  Chimichanga and Berserker Rage forced through the game's own start (`C:\tmp\PAD-363\stock_force_any.c`,
+  an instrument that never goes on a card); with it stopped, the same start runs Chimichanga (the game's
+  any-mode query 0 -> 4, its screen up). Ninja Mball's own start declines when forced cold (it wants its
+  locks), so the multiball pass-through stays proven on Godzilla only.
+
 ## Still to do
 
 - The Scenes editor's "Beside a game mode" view: a mode's screen laid out a second time for when a game
   mode runs (a second screen node the runtime shows instead of hiding).
+- Block sections for the other C++ rule titles (`block_tool.py <game> <port>`), each checked once in the
+  emulator; the plain-C titles need their own start finder.
+- Code modes: `block_modes` in the Assets control (`CodeAssets`), as the form modes have it.

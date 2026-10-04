@@ -1482,3 +1482,42 @@ def test_copy_to_puts_the_modes_in_another_cards_project(tmp_path, preview_on):
         w.answers.append(str(src))
         assert w.call("modes.copy_to") is None
         assert w.asked[-1]["title"] == "Copy modes" and "Duplicate" in w.asked[-1]["message"]
+
+
+def test_pad363_the_game_modes_lever_holds_off_the_ticked_modes(tmp_path, preview_on):
+    """PAD-363: "While it runs, the game's modes" may start / end this one / cannot start, with a tick for each
+    of the title's modes its port can hold off (never a multiball); the ticks are saved by id and come back."""
+    proj = _card_project(tmp_path / "dp", "deadpool_le-1_14_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        slug = w.call("modes.new")
+        st = w.state("modes")
+        assert st["form"]["game_modes"] == "stack" and st["block_on"] == []
+        rows = {r["id"]: r["label"] for r in st["profile"]["game_modes"]}
+        assert rows[21] == "Chimichanga" and (rows[6], rows[7]) == ("Quest (6)", "Quest (7)") and 8 not in rows
+        assert not st["dis"]["block"] and "block" not in st["reasons"]
+        path = proj / "modes" / slug / "mode.json"
+        w.call("ui.set", "modes", "f:game_modes", "block")
+        assert _wait(w, lambda: "Tick at least one of Deadpool LE 1.14's modes to hold off."
+                     in (w.state("modes")["status"] or ""))
+        assert w.state("modes")["fix_pages"] == ["mode"]
+        w.call("ui.set", "modes", "block:21", True)
+        w.call("ui.set", "modes", "block:24", True)
+        w.call("ui.set", "modes", "block:8", True)               # a multiball: not offered, nothing changes
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("block_modes") == [21, 24])
+        assert json.loads(path.read_text("utf-8"))["game_modes"] == "block"
+        assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")
+        w.call("modes.new")
+        w.call("modes.select", slug, "form")
+        st = w.state("modes")
+        assert st["form"]["game_modes"] == "block" and st["block_on"] == [21, 24]
+
+
+def test_pad363_a_title_with_no_block_lines_cannot_hold_its_modes_off(tmp_path, preview_on):
+    proj = _card_project(tmp_path / "gz", GODZILLA_CARD)
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new")
+        st = w.state("modes")
+        assert st["profile"]["game_modes"] == [] and st["dis"]["block"]
+        assert "has not found where Godzilla Pro 1.15 starts its own modes" in st["reasons"]["block"]

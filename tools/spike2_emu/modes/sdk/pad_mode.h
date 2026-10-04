@@ -102,6 +102,8 @@ const char *pm_shot_at(int i, uint64_t *mask);    /* the i-th named shot (0-base
 int pm_begin(void);        /* 1 = your mode is now the one running; 0 = another one is */
 void pm_end(void);         /* your mode stopped running */
 int pm_running(void);      /* your mode is the one running */
+void pm_running_name(const char *name);   /* PAD-363: after pm_begin, the name the runtime's own lines give
+                                             your mode while it runs (one object running several modes) */
 
 /* ---- scoring ------------------------------------------------------------------------
  * Through the game's own scoring, so its playfield multiplier and its rules about when a

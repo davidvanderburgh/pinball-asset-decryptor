@@ -1817,6 +1817,7 @@ static void mode_start(struct slot *M, const char *why)
         return;
     }
     if (!pm_begin()) return;                 /* a mode written in C is running */
+    pm_running_name(cfg.name);               /* PAD-363: the runtime's lines say this mode, not "mode" */
     if (cfg.game_modes == GM_BLOCK) {        /* PAD-363: the listed game's modes cannot start while it runs */
         pm_block_list(cfg.block_mask);
         if (!pm_block_game_modes(1)) pm_log("%s: this game's port cannot hold its modes off - it gives way to them", cfg.name);

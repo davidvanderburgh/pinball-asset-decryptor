@@ -62,7 +62,8 @@ _STR_FIELDS = (
     "also_shot_0", "also_count_0", "also_shot_1", "also_count_1", "after_mode", "after_when",  # PAD-227
     "start_save_s",  # PAD-225
     "seq_shot_0", "seq_shot_1", "seq_shot_2", "seq_shot_3",                           # PAD-314
-    "seq_shot_4", "seq_shot_5", "seq_shot_6", "seq_shot_7")
+    "seq_shot_4", "seq_shot_5", "seq_shot_6", "seq_shot_7",
+    "game_modes")                                                                     # PAD-363
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -79,6 +80,7 @@ _DEFAULTS = {
     "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
     "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
     "seq_reset_any": False,                                                        # PAD-314
+    "game_modes": "stack",                                                         # PAD-363
     **{"seq_shot_%d" % i: "(no more shots)" for i in range(8)},
 }
 
@@ -126,6 +128,7 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"^A mode (starts|ends) on|^Pick the event that|has no event ", "mode"),
     (r"other shots?\b|^A mode cannot wait for itself|starts only after|^The mode it starts after", "mode"),
     (r"in order|^Pick at least two shots", "mode"),                                # PAD-314
+    (r"game's own modes|modes to hold off|mode the app can hold off", "mode"),       # PAD-363
 ))
 
 
@@ -279,6 +282,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._shot_names = []              # the shown title's shots; none until a card says
         self._shots_on = set()
         self._end_shots = set()            # PAD-314: the ticked shots under Ends on > (these shots)
+        self._block_on = set()             # PAD-363: the game's modes ticked under "hold these off" (ids)
+        self._block_touched = False        # ... and whether a tick changed since the mode opened
         self._shot_awards = {n: "" for n in self._shot_names}
         self._slugs = []
         self._found = {}
@@ -465,6 +470,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._edit_shot(key[5:], bool(value))
         elif key.startswith("endshot:"):                 # PAD-314
             self._edit_end_shot(key[8:], bool(value))
+        elif key.startswith("block:"):                   # PAD-363
+            self._edit_block(key[6:], bool(value))
         elif key.startswith("award:"):
             self._edit_award(key[6:], "" if value is None else str(value))
         elif key == "try_on":
@@ -719,6 +726,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     def _publish_form(self):
         self.set(form=dict(self.f), shots_on=[n for n in self._shot_names if n in self._shots_on],
                  end_shots_on=[n for n in self._shot_names if n in self._end_shots],   # PAD-314
+                 block_on=sorted(self._block_on),                                       # PAD-363
                  awards=dict(self._shot_awards))
 
     def _open(self, slug, spec):
@@ -752,6 +760,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._open_own_sounds(spec)
             self._open_starts(spec)
             f["stack"] = bool(getattr(spec, "stack", True))
+            self._open_game_modes(spec)                     # PAD-363
             self._open_multiball(spec)
             self._open_advanced(spec)
             self._open_trigger(spec)
@@ -795,6 +804,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._collect_own_sounds(spec)
         spec.starts, spec.cooldown = self._form_starts()
         spec.stack = bool(self.f["stack"])
+        self._collect_game_modes(spec)                      # PAD-363
         self._collect_multiball(spec)
         self._collect_advanced(spec)
         self._collect_trigger(spec)
@@ -842,6 +852,45 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._end_shots.add(name)
         else:
             self._end_shots.discard(name)
+        self._publish_form()
+        self._changed()
+        return True
+
+    # -- PAD-363: the game's own modes while it runs --------------------------------------
+    def _title(self):
+        return self._shown or self._profile
+
+    def _open_game_modes(self, spec):
+        """"While it runs, the game's own modes": stack / give_way / block, and the ticks under block - its
+        own list, or the port's checked defaults when it has none (what the runtime would hold off)."""
+        gm = getattr(spec, "game_modes", "stack")
+        self.f["game_modes"] = gm if gm in MP.GAME_MODES else "stack"
+        p = self._title()
+        have = {i for i, _n, _on in getattr(p, "game_modes", ())} if p is not None else set()
+        ids = spec.block_modes if isinstance(spec.block_modes, list) else []
+        self._block_on = ({i for i in ids if i in have} if ids
+                          else {i for i, _n, on in getattr(p, "game_modes", ()) if on} if p is not None else set())
+        self._block_touched = False
+
+    def _collect_game_modes(self, spec):
+        spec.game_modes = self.f["game_modes"] if self.f["game_modes"] in MP.GAME_MODES else "stack"
+        if self._block_touched:                 # untouched: the file's own list (or the defaults) stays
+            spec.block_modes = sorted(self._block_on)
+
+    def _edit_block(self, key, on):
+        """A tick under "hold these off": one of the title's modes, by id."""
+        p = self._title()
+        try:
+            i = int(key)
+        except ValueError:
+            return False
+        if p is None or i not in {j for j, _n, _on in p.game_modes} or (i in self._block_on) == bool(on):
+            return False
+        if on:
+            self._block_on.add(i)
+        else:
+            self._block_on.discard(i)
+        self._block_touched = True
         self._publish_form()
         self._changed()
         return True
@@ -1280,6 +1329,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self.f["callout_id_%d" % i] = ""
         self._shots_on = set()
         self._end_shots = set()
+        self._block_on = set()                                                    # PAD-363
         self._shot_awards = {n: "" for n in self._shot_names}
         self._clip2_file = ""
         self._publish_form()
@@ -1305,7 +1355,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return {"key": "", "label": "", "port": "", "shots": [], "cols": 2,
                     "callouts": [], "callouts_none": "", "events": [],
                     "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
-                    "mb_on_shots": [self.MB_ON_START]}
+                    "mb_on_shots": [self.MB_ON_START], "game_modes": []}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
@@ -1317,7 +1367,18 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                   "(no callouts measured on %s: type an id)" % p.label),
                 "events": events, "end_shots": [self.PARAM_NEVER, MP.END_SHOT_OTHERS, self.END_PICK],  # PAD-314
                 "ball_shots": [self.BALL_NONE] + names,
-                "mb_on_shots": [self.MB_ON_START] + names}
+                "mb_on_shots": [self.MB_ON_START] + names,
+                "game_modes": self._game_mode_rows(p)}                           # PAD-363
+
+    @staticmethod
+    def _game_mode_rows(p):
+        """PAD-363: the title's modes a mode can hold off, for the ticks: a name the title gives two of its
+        modes (Deadpool's two Quests) carries its number."""
+        rows = list(getattr(p, "game_modes", ()))
+        seen = {}
+        for _i, name, _on in rows:
+            seen[name] = seen.get(name, 0) + 1
+        return [{"id": i, "label": name if seen[name] == 1 else "%s (%d)" % (name, i)} for i, name, _on in rows]
 
     #: the note on a port the app worked out itself and no Try it has run yet: Write leaves
     #: the modes off a card until one has (mode_write.card_refusal)
@@ -1520,6 +1581,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._shot_names = names
         self._shots_on = {n for n in self._shots_on if n in names}
         self._end_shots = {n for n in self._end_shots if n in names}             # PAD-314
+        self._block_on = {i for i in self._block_on if i in {j for j, _n, _on in p.game_modes}}   # PAD-363
         self._shot_awards = {n: self._shot_awards.get(n, "") for n in names}
         self._applied_key = p.key
         self._say(said or "modes here are for %s: %d shots, from %s" % (p.label, len(names), p.port))
@@ -1562,7 +1624,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             dis = {k: True for k in ("screen", "clip", "lights", "countdown", "own_sound",
                                      "end_game", "clip_both", "stack", "events", "film_clip",
                                      "film_still", "film_sound", "own_extra", "lit_shots",
-                                     "show_order", "multiball", "ball_save")}
+                                     "show_order", "multiball", "ball_save", "give_way", "block")}
             self.set(reasons={}, dis=dis, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
@@ -1620,6 +1682,14 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             reasons["stack"] = "Not on this game: " + why
         elif getattr(p, "stack_note", ""):
             reasons["stack"] = p.stack_note         # item 164: live, but multiballs only
+        # PAD-363: giving way needs what stack no needs (knowing a game's mode runs); holding them off needs
+        # the port's block lines (game_mode_blocks.py)
+        dis["give_way"] = dis["stack"]
+        dis["block"] = not getattr(p, "game_modes", ())
+        if dis["block"]:
+            reasons["block"] = ("Not on this game yet: the app has not found where %s starts its own modes, so "
+                                "a mode cannot keep them from starting; set to hold them off, it gives way to "
+                                "them instead." % p.label)
         off = []
         for take, part, words in self._FILM_PARTS:
             dis["film_" + take] = not p.can(part)

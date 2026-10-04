@@ -674,23 +674,40 @@ const char *pm_shot_at(int i, uint64_t *mask)
 
 /* ---- one mode at a time ---------------------------------------------------------------- */
 static const struct pm_mode *running;
+static char running_as[40];      /* PAD-363: pm_running_name - the running mode's own name ("" = its .name) */
 static void disp_linger_other_began(void);
+
+/* the name the runtime's lines give mode m: what pm_running_name said while it runs, else its .name */
+static const char *mode_name(const struct pm_mode *m, const char *none)
+{
+    if (m && m == running && running_as[0]) return running_as;
+    return m && m->name ? m->name : none;
+}
 
 int pm_begin(void)
 {
     if (running && running != current) {
-        pm_log("not started: %s is running", running->name ? running->name : "another mode");
+        pm_log("not started: %s is running", mode_name(running, "another mode"));
         return 0;
     }
+    if (running != current) running_as[0] = 0;
     running = current;
     disp_linger_other_began();
     return 1;
 }
 
+/* PAD-363: one mode object that runs several modes (mode_file.c: every mode file) names the one it began, so
+ * the runtime's own lines ("block: ... - BLOCKTEST is running") say which. Only while it runs; pm_end forgets. */
+void pm_running_name(const char *name)
+{
+    if (!running || running != current) return;
+    pm_snprintf(running_as, sizeof running_as, "%s", name ? name : "");
+}
+
 static void bd_reset(const char *why);
 void pm_end(void)
 {
-    if (running == current) running = 0;
+    if (running == current) running = 0, running_as[0] = 0;
     if (!running) bd_reset("the mode ended");
 }
 int pm_running(void) { return running && running == current; }
@@ -2921,6 +2938,7 @@ static unsigned block_hooked[BLOCK_HOOKS];
 static int block_n_hooked;
 static int block_battles;                /* the battle rule's shot handler is hooked (Godzilla) */
 static unsigned block_battle_said;
+static char block_who[40];               /* the blocking mode's name, kept for the line when it has ended */
 
 static int on_block_start(unsigned *r)
 {
@@ -2935,8 +2953,7 @@ static int on_block_start(unsigned *r)
         block_said |= 1u << id;
         pm_snprintf(key, sizeof key, "block_name_%u", id);
         nm = pm_port_text(key);
-        say("block: the game's mode %u (%s) did not start - %s is running", id, nm ? nm : "?",
-            block_owner->name ? block_owner->name : "a mode");
+        say("block: the game's mode %u (%s) did not start - %s is running", id, nm ? nm : "?", block_who);
     }
     return 1;                                  /* refused: the mode's start never runs */
 }
@@ -2954,7 +2971,7 @@ int pm_block_game_modes(int on)
     if (!(can & PM_CAN_BLOCK_GAME)) return 0;
     if (!on) {
         if (block_owner && (!current || block_owner == current)) {
-            say("block: %s lets the game's modes start again", block_owner->name ? block_owner->name : "a mode");
+            say("block: %s lets the game's modes start again", block_who);
             block_owner = 0;
         }
         return 1;
@@ -2965,8 +2982,9 @@ int pm_block_game_modes(int on)
                : ((unsigned)pm_port_value("block_default", 0) & block_named);
     block_said = 0;
     block_battle_said = 0;
+    pm_snprintf(block_who, sizeof block_who, "%s", mode_name(current, "a mode"));
     say("block: %s keeps the game's modes 0x%x (one bit each; %s) from starting while it runs%s",
-        current->name ? current->name : "a mode", block_mask,
+        block_who, block_mask,
         block_list_by == current && block_list_mask ? "its own list" : "the port's checked defaults",
         block_battles ? ", and the battle rule from lighting a battle or opening its select screen" : "");
     return 1;
@@ -2988,7 +3006,7 @@ static void on_battle_shots(unsigned *r)
     if (!(r[2] & lo) && !(r[3] & hi)) return;
     if (block_battle_said++ < 20)
         say("block: the battle rule did not see shot 0x%08x_%08x - %s is running (no battle lit, no select screen)",
-            r[3], r[2], block_owner->name ? block_owner->name : "a mode");
+            r[3], r[2], block_who);
     r[2] &= ~lo;
     r[3] &= ~hi;
 }
@@ -2997,7 +3015,7 @@ static void on_battle_shots(unsigned *r)
 static void block_tick(void)
 {
     if (!block_owner || running == block_owner) return;
-    say("block: %s ended - the game's modes may start again", block_owner->name ? block_owner->name : "a mode");
+    say("block: %s ended - the game's modes may start again", block_who);
     block_owner = 0;
 }
 

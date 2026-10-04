@@ -92,13 +92,22 @@ last image carried), and a static binary cannot load the machine's libasound.
 | the machine's own scripts | `machine_sim.sh`: Labyrinth's `updatecode.sh`, `update.sh` and `.bash_profile` run UNMODIFIED against a bind-mounted `/home/pinball`, the FAST board by `bofhw.py` | 18/18: stock install; multi-boot install (image 1 rebuilt in 11 s, md5 ok, craze a link); RIGHT+START boots Sarah; LEFT+START boots stock with Sarah untouched; the countdown boots the remembered one; a normal update removes everything and the stock profile is back |
 | the buttons | `codeselect/test/fast_test.py` against `bofhw.py`'s Labyrinth ports | NET found, Audio Controller skipped, flippers/START/LAUNCH, `CH:` fallback, a reversed button, a held button re-learnt, only `ID:`/`SA:` ever sent |
 | the screen | the fake framebuffer (`PAD_SELECT_FAKEFB`) | 1360x768 canvas 1:1 on 1366x768 with 3 px borders; the LOADING frame stays |
+| two screens | `codeselect/test/fb_bof_test.sh`: a fake fb with 1280x390 visible of a 1366x768 buffer | the whole buffer, 1:1 at 3,0 (backbox full screen); a buffer that is only taller keeps the visible area |
 
-**Not proven - the machine's to say:** that `/dev/fb0` is free and 1366x768 when the
-profile runs (the updater's own use of it says so); that `pinball` has passwordless
-`sudo` (the profile's own `sudo` calls say so; without it the menu runs as `pinball`);
-the machine's free disk space (the install peaks around 12 GB, as stock does with its own
-leftovers; afterwards it holds less than a stock install); and that a real Neuron answers
-`SA:` before the game has configured it (`CH:2000,01` is sent if it does not).
+## Proven on a machine (David's Labyrinth, 2026-10-04)
+
+The `.fun` from 55e9285c, on a FAT32 stick through BOF's own updater: it installed, the
+menu came up at power-up, the flippers chose and START booted. So `/dev/fb0` is free when
+the profile runs, `pinball`'s `sudo` works, and the Neuron's buttons reach the menu.
+
+**One thing the machine showed: two screens of different sizes.** The DRM console puts one
+buffer on both screens - the backbox 1366x768 and the 1280x390 strip over the playfield -
+and fb0 reports the SMALLER as its visible area (1280x390 of a 1366x768 buffer). The menu
+sized itself to that, so the backbox showed it at half size in its top left and the strip
+showed the whole small menu. `fb_linux.c` now draws the whole buffer whenever it is wider
+than the visible area: the backbox is full screen and the strip shows its top 1280x390
+(the title and the upper half of the cards). BOF's own update screens get the same by
+running `fbset -xres 1366 -yres 768` first.
 
 ## Running it
 

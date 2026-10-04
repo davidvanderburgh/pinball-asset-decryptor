@@ -25,6 +25,20 @@
  *   - anything else is scaled to fit with the aspect kept (nearest
  *     neighbour: no blur, no float in the copy loop), centred.
  *
+ * TWO SCREENS OF DIFFERENT SIZES.  The kernel's DRM console puts ONE buffer
+ * on every screen: the buffer is the biggest screen's size (xres_virtual x
+ * yres_virtual) and the visible area it reports (xres x yres) is the
+ * smallest, so console text fits on all of them.  A Labyrinth has the
+ * 1366x768 backbox and the 1280x390 strip over the playfield, so fb0 says
+ * "1280x390" of a 1366x768 buffer, and a menu sized to that drew at half
+ * size in the backbox's top left (David's photo, 2026-10-04).  Each screen
+ * shows the buffer from its own top left at its own size, so when the buffer
+ * is WIDER than the visible area the menu takes the whole buffer: the
+ * backbox gets it full screen, the strip its top 1280x390.  BOF's updater
+ * gets the same by running fbset -xres 1366 -yres 768 first; this changes no
+ * console setting.  A buffer that is only TALLER is panning room (double
+ * buffering) that no screen shows, and keeps the visible area.
+ *
  * THE PIXEL FORMAT is read, never assumed: 16, 24 and 32 bits per pixel,
  * each channel at the var info's offset and length (the updater's own
  * pixel_color() does the same), rows at the fixed info's line_length, and
@@ -35,9 +49,11 @@
  * second the way egl_x11.c's XPutImage path does.
  *
  * A FAKE FRAMEBUFFER for tests (no /dev/fb0 on a build host or in WSL):
- * PAD_SELECT_FAKEFB=<W>x<H>x<BPP>:<file> maps that regular file instead,
- * with the common little-endian layout for the depth (32: B G R X; 24: B G R;
- * 16: RGB565) and no ioctls.  The test reads the file back as the glass.
+ * PAD_SELECT_FAKEFB=<W>x<H>x<BPP>[,<VW>x<VH>]:<file> maps that regular file
+ * instead, with the common little-endian layout for the depth (32: B G R X;
+ * 24: B G R; 16: RGB565) and no ioctls.  <W>x<H> is the visible area and
+ * <VW>x<VH> the buffer (default the same): "1280x390x32,1366x768" is a
+ * Labyrinth's console.  The test reads the file back as the glass.
  * PAD_SELECT_FB names another device (default /dev/fb0).
  */
 #define _GNU_SOURCE
@@ -63,6 +79,7 @@ static struct {
     size_t map_len;
     unsigned char *page;      /* the visible page: map + yoffset rows + xoffset px */
     int fb_w, fb_h, bpp, stride;
+    int vw, vh, panned;       /* the buffer's size; panned = a non-zero x/yoffset */
     int r_off, r_len, g_off, g_len, b_off, b_len;
     int ox, oy, dw, dh;       /* where the canvas lands on the glass, and how big */
     int scaled;
@@ -88,19 +105,27 @@ static void put_px(unsigned char *d, unsigned v)
 
 static int fake_up(const char *spec)
 {
-    int w, h, bpp, n = 0;
+    int w, h, bpp, vw, vh, n = 0;
     const char *path;
-    if (sscanf(spec, "%dx%dx%d:%n", &w, &h, &bpp, &n) != 3 || !n || w <= 0 || h <= 0
-        || (bpp != 16 && bpp != 24 && bpp != 32)) {
-        sel_log("fb: PAD_SELECT_FAKEFB=%s is not <W>x<H>x<16|24|32>:<file>", spec);
+    if (sscanf(spec, "%dx%dx%d,%dx%d:%n", &w, &h, &bpp, &vw, &vh, &n) == 5 && n) {
+        if (vw < w || vh < h) n = 0;
+    } else if (sscanf(spec, "%dx%dx%d:%n", &w, &h, &bpp, &n) == 3 && n) {
+        vw = w; vh = h;
+    } else {
+        n = 0;
+    }
+    if (!n || w <= 0 || h <= 0 || (bpp != 16 && bpp != 24 && bpp != 32)) {
+        sel_log("fb: PAD_SELECT_FAKEFB=%s is not <W>x<H>x<16|24|32>[,<VW>x<VH>]:<file> "
+                "(the buffer at least the visible area)", spec);
         return -1;
     }
     path = spec + n;
     F.fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     if (F.fd < 0) { sel_log("fb: cannot open fake framebuffer %s: %s", path, strerror(errno)); return -1; }
     F.fb_w = w; F.fb_h = h; F.bpp = bpp;
-    F.stride = w * (bpp / 8);
-    F.map_len = (size_t)F.stride * h;
+    F.vw = vw; F.vh = vh; F.panned = 0;
+    F.stride = vw * (bpp / 8);
+    F.map_len = (size_t)F.stride * vh;
     if (ftruncate(F.fd, (off_t)F.map_len) < 0) {
         sel_log("fb: cannot size %s: %s", path, strerror(errno));
         close(F.fd); F.fd = -1;
@@ -109,7 +134,7 @@ static int fake_up(const char *spec)
     if (bpp == 16) { F.r_off = 11; F.r_len = 5; F.g_off = 5; F.g_len = 6; F.b_off = 0; F.b_len = 5; }
     else { F.r_off = 16; F.r_len = 8; F.g_off = 8; F.g_len = 8; F.b_off = 0; F.b_len = 8; }
     F.fake = 1;
-    sel_log("fb: fake framebuffer %s %dx%d %d bpp", path, w, h, bpp);
+    sel_log("fb: fake framebuffer %s %dx%d of a %dx%d buffer, %d bpp", path, w, h, vw, vh, bpp);
     return 0;
 }
 
@@ -135,6 +160,8 @@ static int fb_up(void)
         return -1;
     }
     F.fb_w = (int)v.xres; F.fb_h = (int)v.yres; F.bpp = (int)v.bits_per_pixel;
+    F.vw = (int)v.xres_virtual; F.vh = (int)v.yres_virtual;
+    F.panned = v.xoffset || v.yoffset;
     F.stride = (int)fx.line_length;
     F.r_off = (int)v.red.offset; F.r_len = (int)v.red.length;
     F.g_off = (int)v.green.offset; F.g_len = (int)v.green.length;
@@ -153,9 +180,25 @@ static int fb_up(void)
         return -1;
     }
     F.page = F.map + (size_t)v.yoffset * F.stride + (size_t)v.xoffset * (F.bpp / 8);
-    sel_log("fb: %s %dx%d %d bpp, stride %d, r %d/%d g %d/%d b %d/%d", dev, F.fb_w, F.fb_h, F.bpp,
+    sel_log("fb: %s %dx%d of a %dx%d buffer at %u,%u, %d bpp, stride %d, r %d/%d g %d/%d b %d/%d",
+            dev, F.fb_w, F.fb_h, F.vw, F.vh, v.xoffset, v.yoffset, F.bpp,
             F.stride, F.r_off, F.r_len, F.g_off, F.g_len, F.b_off, F.b_len);
     return 0;
+}
+
+/* Screens of different sizes (the header's TWO SCREENS): when the buffer is
+ * wider than the visible area, the glass is the whole buffer - as much of it
+ * as is mapped - from its top left. */
+static void whole_buffer(void)
+{
+    int rows = (int)(F.map_len / (size_t)F.stride), cols = F.stride / (F.bpp / 8);
+    int vw = F.vw < cols ? F.vw : cols, vh = F.vh < rows ? F.vh : rows;
+    if (F.panned || vw <= F.fb_w || vh < F.fb_h) return;
+    sel_log("fb: the console shows %dx%d of a %dx%d buffer (screens of different sizes): "
+            "the menu draws the whole buffer", F.fb_w, F.fb_h, vw, vh);
+    F.fb_w = vw;
+    F.fb_h = vh;
+    F.page = F.map;
 }
 
 static int map_fake(void)
@@ -281,6 +324,7 @@ int egl_stern_init(struct egl_stern *e, int retries, int retry_ms)
         sel_log("fb: giving up after %d attempts", retries);
         return -1;
     }
+    whole_buffer();
     if (place() < 0) {
         sel_log("fb: cannot place a %dx%d canvas on a %dx%d screen", CANVAS_W, CANVAS_H, F.fb_w, F.fb_h);
         egl_stern_close(e);

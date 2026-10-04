@@ -239,6 +239,7 @@ check: $(BIN) $(DELTA)
 > $(PYTHON) test/fast_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > $(PYTHON) test/paddelta_test.py "$(DELTA)" "$(BUILD)/t"
 > bash -n padselect_bof.sh && bash -n pad_install_bof.sh && bash test/padselect_bof_test.sh "$(BIN)" "$(DELTA)" "$(DEJAVU)"
+> bash test/fb_bof_test.sh "$(BIN)" "$(DEJAVU)"
 > @echo "check: OK (bof)"
 
 check-hw:

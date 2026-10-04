@@ -200,3 +200,17 @@ def test_a_failing_ui_job_is_reported_in_the_log(tmp_path):
         lines = [e["text"] for e in w.window._log["stern"]]
         hit = [t for t in lines if t.startswith("Internal error in ValueError")]
         assert hit and "the rename half happened" in hit[0], lines
+
+
+def test_the_tooltip_folds_a_long_path_inside_its_box():
+    """PAD-366 (Peanutsfr): a Scenes row's tooltip carries the scene's path, one
+    unbroken run of hashes; without a break opportunity it ran past the box's
+    max-width.  The shared .tip rule must let it wrap anywhere."""
+    import pathlib
+    import re
+    css = (pathlib.Path(__file__).resolve().parents[1] / "pinball_decryptor"
+           / "webui" / "static" / "css" / "app.css").read_text(encoding="utf-8")
+    rule = re.search(r"^\.tip \{([^}]*)\}", css, re.M)
+    assert rule, ".tip rule missing from app.css"
+    assert "max-width" in rule.group(1)
+    assert "overflow-wrap: anywhere" in rule.group(1)

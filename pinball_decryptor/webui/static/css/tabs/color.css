@@ -60,6 +60,10 @@ html.bp-1020 .cp-grid { grid-template-columns: minmax(0, 1fr); }
 .cp-sl-ends { display: flex; justify-content: space-between; font-size: 11px; margin-top: -2px; }
 
 .cp-file { gap: 8px; }
+/* PAD-360: the starting point and the saved profile in use */
+.cp-controls .cp-row .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+.field.cp-saved.on { border-color: var(--accent); }
+.field.cp-saved.on select { font-weight: 600; }
 
 /* PAD-312: the two modes, and the chosen-files boxes */
 .cp-modes { gap: 12px; align-items: center; flex-wrap: wrap; }

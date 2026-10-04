@@ -7,6 +7,10 @@ the controls show is saved in the project's ``.staged_changes.json``
 it as pending, the next build or Emulate Start applies it, and Revert all
 clears it.  "No change" is the off state; there is no separate switch.
 Save a copy / Load move a profile between projects (one per machine).
+SAVED PROFILES (PAD-360): the list beside them is the profile files in the
+folder they last used and in PAD's own Color profiles folder (Save a copy's
+first stop), by file name; picking one loads it.  The list, and the starting
+points, show which one is in use.
 "See it in the emulator" hands the Emulate tab a run of this project's edits
 with the profile, restarting a running game.  (Never "Try it": that is the
 preview-gated mode maker's word, and this tab is public.)
@@ -53,7 +57,7 @@ import time
 
 from .base import TabService, rpc
 from ...core import colour_profile as cp
-from ...core import staged_changes
+from ...core import config, staged_changes
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +70,16 @@ UNDO_GROUP_S = 1.5
 UNDO_MAX = 100
 
 _CARD_CACHE = []
+
+#: the browse key Save a copy and Load share, so the list follows them
+BROWSE_KEY = "colour_profile"
+
+
+def default_profiles_dir():
+    """PAD's own Color profiles folder: where Save a copy goes the first
+    time, and always listed (PAD-360)."""
+    return os.path.join(os.path.dirname(config.SETTINGS_FILE),
+                        "Color profiles")
 
 
 def test_card_png():
@@ -221,8 +235,71 @@ class ColorTab(TabService):
             log.exception("color profile switches")
         return out
 
+    # -- saved profiles (PAD-360) --------------------------------------------
+    def _profile_folders(self):
+        """The folders the Saved profiles list is read from: the one Save a
+        copy / Load last used, then PAD's own."""
+        out = []
+        try:
+            last = self.window.last_browse_dir(BROWSE_KEY)
+        except Exception:                               # noqa: BLE001
+            last = ""
+        for d in (last, default_profiles_dir()):
+            if d and os.path.isdir(d) and not any(
+                    os.path.normcase(os.path.abspath(d))
+                    == os.path.normcase(os.path.abspath(o)) for o in out):
+                out.append(d)
+        return out
+
+    def _preset_on(self, p, assets):
+        """The starting point the profile on show is, or ""."""
+        ok = bool(assets and os.path.isdir(assets))
+        try:
+            if self._screen_mode():
+                if ok and cp.screen_follows(assets):
+                    return "follow"
+                if not self._screen_stored:
+                    return "screen_recommended"
+                table = cp.SCREEN_PRESETS
+            else:
+                if self._assets_mode():
+                    if ok and not cp.asset_stored(assets):
+                        return "recommended"
+                elif self._prof is None:
+                    return "none"
+                elif self._on_display and ok and cp.follows_screen(assets):
+                    return "recommended"
+                table = cp.PRESETS
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile starting point")
+            return ""
+        for k, prof in table:
+            if prof is None or (k == "recommended" and self._on_display):
+                continue
+            if (prof.is_identity() and p.is_identity()) or (
+                    prof.name == p.name and cp.same_numbers(prof, p)):
+                return k
+        return ""
+
+    def _saved_state(self, p):
+        """The Saved profiles list and the one in use: the file whose
+        numbers the profile on show has, its own name first."""
+        try:
+            saved = cp.saved_profiles(self._profile_folders())
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile saved list")
+            saved = []
+        same = [(n, path, prof) for n, path, prof in saved
+                if cp.same_numbers(prof, p)]
+        pick = next((path for n, path, prof in same
+                     if p.name in (prof.name, n)), "")
+        if not pick and same and p.name not in ("", "No change"):
+            pick = same[0][1]
+        return [{"value": path, "label": n} for n, path, _p in saved], pick
+
     def _publish(self, problems=None):
         p = self._shown()
+        saved, saved_on = self._saved_state(p)
         assets = self._project
         state = self._asset_state(assets)
         if self._screen_mode():
@@ -265,6 +342,8 @@ class ColorTab(TabService):
             **state,
             has_project=bool(assets and os.path.isdir(assets)),
             presets=presets,
+            preset_on=self._preset_on(p, assets),
+            saved=saved, saved_on=saved_on,
             limits={k: list(v) for k, v in LIMITS.items()},
             range_limits={k: list(v) for k, v in cp.RANGE_LIMITS.items()},
             range_new=dict(cp.RANGE_NEW), max_ranges=cp.MAX_RANGES,
@@ -605,9 +684,10 @@ class ColorTab(TabService):
     def save_copy(self):
         p = self._shown()
         path = self.window.ask_save(
-            "colour_profile", "Save a copy of this color profile",
+            BROWSE_KEY, "Save a copy of this color profile",
             initialfile=self._save_name(), defaultextension=".txt",
-            filetypes=[("Color profile", "*.txt"), ("All files", "*.*")])
+            filetypes=[("Color profile", "*.txt"), ("All files", "*.*")],
+            initialdir=self._save_dir())
         if not path:
             return False
         try:
@@ -616,22 +696,56 @@ class ColorTab(TabService):
             self.toast("Could not save the profile: %s" % e, "error")
             return False
         self.toast("Saved %s" % os.path.basename(path), "success")
+        self._publish()
         return True
+
+    def _save_dir(self):
+        """Save a copy's first folder: the one it last used, else PAD's own
+        Color profiles folder (made here), so the list has it."""
+        try:
+            last = self.window.last_browse_dir(BROWSE_KEY)
+        except Exception:                               # noqa: BLE001
+            last = ""
+        if last:
+            return last
+        d = default_profiles_dir()
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            return None
+        return d
 
     @rpc
     def load_file(self):
         path = self.window.ask_open(
-            "colour_profile", "Load a color profile",
-            filetypes=[("Color profile", "*.txt"), ("All files", "*.*")])
+            BROWSE_KEY, "Load a color profile",
+            filetypes=[("Color profile", "*.txt"), ("All files", "*.*")],
+            initialdir=self._save_dir())
         if not path:
             return False
+        return self._load_path(path)
+
+    @rpc
+    def use_saved(self, path):
+        """The Saved profiles list: load the file picked (PAD-360)."""
+        known = {os.path.normcase(os.path.abspath(o))
+                 for _n, o, _p in cp.saved_profiles(self._profile_folders())}
+        if not path or os.path.normcase(os.path.abspath(path)) not in known:
+            self._publish()
+            return False
+        return self._load_path(path)
+
+    def _load_path(self, path):
         try:
             prof, problems = cp.read_file(path)
         except OSError as e:
             self.toast("Could not read the profile: %s" % e, "error")
             return False
-        if not prof.name:
-            prof = cp.Profile(name=os.path.splitext(os.path.basename(path))[0],
+        if prof.name in ("", "My profile", "My screen"):
+            # a copy saved without a name of its own goes by its file's
+            # (PAD-360), so the tab and the list say which one is in use
+            stem = os.path.splitext(os.path.basename(path))[0]
+            prof = cp.Profile(name=stem[:60],
                               gamma=prof.gamma, gain=prof.gain,
                               lift=prof.lift, saturation=prof.saturation,
                               brightness=prof.brightness,

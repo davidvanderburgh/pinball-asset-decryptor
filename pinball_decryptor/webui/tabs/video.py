@@ -235,7 +235,7 @@ class VideoTab(BestQualityMixin, TabService):
                 from ...core import colour_profile
                 look.update(colour_profile.video_look(
                     folder, switch, own, overlay_on=sw["overlay"],
-                    files_on=sw["files"], screen_on=sw["screen"]))
+                    files_on=sw["files"], screen_on=sw["screen"], rel=rel))
             except Exception:                           # noqa: BLE001
                 log.exception("video machine look")
         if look != self.get("look"):

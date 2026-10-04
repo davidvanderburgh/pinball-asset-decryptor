@@ -4183,7 +4183,7 @@ class App:
         try:
             per_file = bool(mfr is not None
                             and mfr.colour_profile_on_display()
-                            and colour_profile.asset_active(assets_dir))
+                            and colour_profile.any_asset_active(assets_dir))
         except Exception:                               # noqa: BLE001
             per_file = False
         for rel in (colour_profile.stock_video_rels(

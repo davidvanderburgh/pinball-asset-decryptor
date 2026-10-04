@@ -2080,7 +2080,7 @@ def _colour_switch(n, kind, pics, picks, settings, added_op, unlocked=False, bui
         own = added_op.get("color")
         return {"on": _cp.asset_applies(settings, "images", added_op.get("image") or "",
                                         own=own),
-                "own": own is not None, "added": True}
+                "own": own is not None, "added": True, "rel": added_op.get("image") or ""}
     if len(pics) != 1:
         return None
     rel = pics[0]

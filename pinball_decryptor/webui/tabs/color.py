@@ -31,6 +31,15 @@ card, the Write tab lists nothing, and Revert all leaves it (it describes
 the user's machine, not a change to the card).  Until one is stored the
 mode shows the individual files profile, undone, which is what Scenes uses.
 
+ONE PROFILE PER FILE (PAD-368, DragonRR).  With a file clicked on the Images
+or Video tab or a layer in Scenes while the Color profiles bar is open there,
+the bar's Files mode is THAT file's profile (``set_file``): what it shows is
+the profile baked into it now, and a change gives the file a profile of its
+own (core/colour_profile.py ``store_own_profile``), attaching it if its
+switch was off.  "Same as the other files" drops it again.  With no file
+picked, and always on the Color profile tab itself, Files is the project's
+individual files profile, which every file without its own gets.
+
 RECOMMENDED FOLLOWS THE SCREEN (PAD-346).  On Spike 2 the overlay's and the
 individual files' Recommended is the Machine screen on show, undone
 (core/colour_profile.py ``recommended``), worked out again whenever the
@@ -152,12 +161,14 @@ class ColorTab(TabService):
         self._undo = {}              # PAD-354: {stored key: [what it was, ...]}
         self._redo = {}
         self._last_move = {}         # {stored key: (slider, time)}: one drag = one step
+        self._file = None            # PAD-368: {kind, rel, label, attach} the bar is on
         self.set(sample="card", sample_url="", sample_path="", samples=[],
                  problems=[], rev=0, active=False, project="",
                  has_project=False, try_note="", mode="display",
                  per_file=False, all_images=False, all_videos=False,
                  asset_counts={"images": 0, "videos": 0, "added": 0},
-                 asset_active=False)
+                 asset_active=False, file=None,
+                 own_names={"images": {}, "videos": {}})
 
     # -- the project ---------------------------------------------------------
     def _assets(self):
@@ -196,10 +207,33 @@ class ColorTab(TabService):
     def _screen_mode(self):
         return self._mode == "screen" and self._on_display
 
+    def _file_mode(self):
+        """Files mode on one file (PAD-368): ``(kind, rel)`` or ``None``."""
+        f = self._file
+        if not (f and self._assets_mode() and self._project
+                and os.path.isdir(self._project)):
+            return None
+        return f["kind"], f["rel"]
+
+    def _own(self):
+        """The file on show's own profile, or ``None`` (it gets the
+        project's)."""
+        fm = self._file_mode()
+        if fm is None:
+            return None
+        try:
+            return cp.own_profile(self._project, *fm)
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile own")
+            return None
+
     def _shown(self):
         if self._screen_mode():
             return self._screen or cp.SCREEN_PRESETS[0][1]
         if self._assets_mode():
+            own = self._own()
+            if own is not None:
+                return own
             return self._asset or cp.recommended(self._project, files=True)
         return self._prof or cp.Profile(name="No change")
 
@@ -210,6 +244,9 @@ class ColorTab(TabService):
         if not (self._on_display and assets and os.path.isdir(assets)):
             return False
         try:
+            fm = self._file_mode()
+            if fm is not None and self._own() is not None:
+                return cp.own_follows_screen(assets, *fm)
             if self._assets_mode():
                 return not cp.asset_stored(assets)
             if not self._screen_mode():
@@ -263,7 +300,7 @@ class ColorTab(TabService):
                 table = cp.SCREEN_PRESETS
             else:
                 if self._assets_mode():
-                    if ok and not cp.asset_stored(assets):
+                    if self._follows():
                         return "recommended"
                 elif self._prof is None:
                     return "none"
@@ -297,13 +334,30 @@ class ColorTab(TabService):
             pick = same[0][1]
         return [{"value": path, "label": n} for n, path, _p in saved], pick
 
+    def _file_state(self):
+        """The file the bar's Files mode is on (PAD-368), for the page."""
+        f = self._file
+        if not f or self._file_mode() is None:
+            return None
+        return {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
+                "on": f.get("on"), "own": self._own() is not None}
+
     def _publish(self, problems=None):
         p = self._shown()
         saved, saved_on = self._saved_state(p)
         assets = self._project
         state = self._asset_state(assets)
+        fstate = self._file_state()
+        try:
+            own_names = cp.own_profile_names(
+                assets if assets and os.path.isdir(assets) else "")
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile own names")
+            own_names = {"images": {}, "videos": {}}
         if self._screen_mode():
             active = self._screen_stored
+        elif fstate is not None:
+            active = bool(fstate["on"] and not p.is_identity())
         elif self._assets_mode():
             active = bool(state["asset_active"]
                           and sum(state["asset_counts"].values()))
@@ -338,7 +392,7 @@ class ColorTab(TabService):
             screen_follow=bool(self._screen_mode() and assets
                                and os.path.isdir(assets)
                                and cp.screen_follows(assets)),
-            project=assets,
+            project=assets, file=fstate, own_names=own_names,
             **state,
             has_project=bool(assets and os.path.isdir(assets)),
             presets=presets,
@@ -375,10 +429,41 @@ class ColorTab(TabService):
     def _mode_key(self):
         if self._screen_mode():
             return cp.SCREEN_KEY
+        fm = self._file_mode()
+        if fm is not None:
+            return "file\n%s\n%s" % fm            # PAD-368: one file's own
         return cp.ASSET_KEY if self._assets_mode() else cp.KEY
 
+    @staticmethod
+    def _raw(data, key):
+        if key.startswith("file\n"):
+            _f, kind, rel = key.split("\n", 2)
+            m = data.get(cp.FILE_PROFILES_KEY[kind])
+            return m.get(rel) if isinstance(m, dict) else None
+        return data.get(key)
+
+    @staticmethod
+    def _put_raw(data, key, value):
+        if key.startswith("file\n"):
+            _f, kind, rel = key.split("\n", 2)
+            k = cp.FILE_PROFILES_KEY[kind]
+            m = dict(data.get(k) or {}) if isinstance(data.get(k), dict) \
+                else {}
+            if value is None:
+                m.pop(rel, None)
+            else:
+                m[rel] = value
+            if m:
+                data[k] = m
+            else:
+                data.pop(k, None)
+        elif value is None:
+            data.pop(key, None)
+        else:
+            data[key] = value
+
     def _stored_raw(self, key):
-        d = staged_changes.load(self._project).get(key)
+        d = self._raw(staged_changes.load(self._project), key)
         return json.dumps(d, sort_keys=True) if d is not None else None
 
     def _remember(self, key, before, group=None):
@@ -416,16 +501,13 @@ class ColorTab(TabService):
         self._last_move.pop(key, None)
         try:
             data = staged_changes.load(assets)
-            if back is None:
-                data.pop(key, None)
-            else:
-                data[key] = json.loads(back)
+            self._put_raw(data, key, None if back is None else json.loads(back))
             staged_changes.save(assets, data)
         except Exception as e:                          # noqa: BLE001
             self.set(problems=["could not undo (%s)" % e])
             return False
         self._load()
-        self._changed(display=key != cp.ASSET_KEY)
+        self._changed(display=key in (cp.KEY, cp.SCREEN_KEY))
         self._tell_tabs()
         return True
 
@@ -473,6 +555,9 @@ class ColorTab(TabService):
             # the switches keep their places while the files go on as made
             if prof is None:
                 prof = cp.Profile(name="No change")
+            fm = self._file_mode()
+            if fm is not None:
+                return self._store_own(prof, rev)
             self._asset = prof
             try:
                 cp.store_asset_profile(assets, prof)
@@ -501,6 +586,89 @@ class ColorTab(TabService):
             self._rev += 1
         self._publish(problems=[])
         self._changed()
+        self._tell_tabs()
+        return True
+
+    def _store_own(self, prof, rev, follow=False):
+        """PAD-368: the file on show gets a profile of its own (*follow*: the
+        Recommended one), and the profile is attached to it."""
+        kind, rel = self._file_mode()
+        try:
+            cp.store_own_profile(self._project, kind, rel, prof, follow=follow)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not save the file's profile (%s)" % e])
+            return False
+        self._attach()
+        if rev:
+            self._rev += 1
+        self._publish(problems=[])
+        self._changed(display=False)
+        self._tell_tabs()
+        return True
+
+    def _attach(self):
+        """A profile picked for one file is meant for it: a file whose
+        switch is off gets it switched on, where it has a switch."""
+        f = self._file
+        if not f or f.get("on") is not False:
+            return
+        how = f.get("attach") or {}
+        try:
+            if how.get("ns") in ("images", "video"):
+                done = self.window.service(how["ns"]).set_color(f["rel"], True)
+            elif how.get("ns") == "scenes" and how.get("node") is not None:
+                done = self.window.service("text").scenes.tree_color(
+                    how["node"], True)
+            else:
+                return
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile attach")
+            return
+        if done:
+            f["on"] = True
+
+    @rpc
+    def set_file(self, kind=None, rel=None, label="", on=None, attach=None):
+        """The Color profiles bar is open beside a clicked file (PAD-368):
+        its Files mode shows and changes that file's profile.  No *rel*:
+        back to the project's individual files profile."""
+        if kind not in ("images", "videos") or not rel or not self._on_display:
+            if self._file is not None:
+                self._file = None
+                self._rev += 1
+                self._publish()
+            return False
+        f = {"kind": kind, "rel": str(rel), "label": str(label or "")[:120]
+             or os.path.basename(str(rel)), "on": on,
+             "attach": attach if isinstance(attach, dict) else None}
+        same = (self._file is not None and self._file["kind"] == kind
+                and self._file["rel"] == f["rel"])
+        self._file = f
+        if not same or self._mode != "assets":
+            self._mode = "assets"
+            self._rev += 1
+        self._publish(problems=[] if not same else None)
+        return True
+
+    @rpc
+    def file_shared(self):
+        """"Same as the other files": the file on show drops its own profile
+        and gets the project's individual files profile again (PAD-368)."""
+        fm = self._file_mode()
+        if fm is None:
+            return False
+        key = self._mode_key()
+        before = self._stored_raw(key)
+        try:
+            cp.store_own_profile(self._project, fm[0], fm[1], None)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not save the file's profile (%s)" % e])
+            return False
+        self._remember(key, before)
+        self._rev += 1
+        self._publish(problems=[])
+        self._publish_undo()
+        self._changed(display=False)
         self._tell_tabs()
         return True
 
@@ -667,6 +835,8 @@ class ColorTab(TabService):
 
     def _store_recommended_mode(self):
         assets = self._project
+        if self._file_mode() is not None:
+            return self._store_own(None, True, follow=True)
         try:
             if self._assets_mode():
                 cp.store_asset_profile(assets, None)
@@ -793,6 +963,9 @@ class ColorTab(TabService):
             cp.store_asset_profile(assets_dir, None)
             cp.set_asset_all(assets_dir, "images", False)
             cp.set_asset_all(assets_dir, "videos", False)
+            for kind in cp.FILE_PROFILES_KEY:
+                for rel in list(cp.own_profile_names(assets_dir)[kind]):
+                    cp.store_own_profile(assets_dir, kind, rel, None)
         except Exception:                               # noqa: BLE001
             log.exception("color profile revert")
         same = (os.path.normcase(os.path.abspath(assets_dir or ""))
@@ -857,10 +1030,13 @@ class ColorTab(TabService):
 
     def on_show(self):
         self.set(try_note="")
+        # the tab itself is the project's profiles, never one file's
+        self._file = None
         self._load()
         self._publish_sample()
 
     def on_project(self, folder):
+        self._file = None
         self._load()
 
     def on_manufacturer(self, mfr):

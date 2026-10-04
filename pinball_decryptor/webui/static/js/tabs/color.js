@@ -822,6 +822,11 @@ export function statusNote(s) {
         : s.screen_follow
           ? html`<${Note} kind="info">${"Scenes uses the individual files profile, undone (“" + (s.name || "") + "”). Move a slider or pick a starting point to set this machine's own screen."}<//>`
           : html`<${Note} kind="info">${"Scenes uses the Recommended screen, tuned on a real Spike 2. Move a slider or pick a starting point to set this machine's own screen."}<//>`)
+    : assets && s.file
+      ? (s.file.on === false
+          ? html`<${Note} kind="info">${"No color profile is attached to this file. Pick a starting point or a saved profile, or move a slider, and it is attached."}<//>`
+          : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into this file when you build; the other files keep their own."}<//>`
+          : html`<${Note} kind="info">${"“" + (s.name || "No change") + "” changes nothing: this file goes onto the card as you made it."}<//>`)
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`

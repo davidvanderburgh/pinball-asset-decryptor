@@ -313,9 +313,11 @@ def chosen_files_rows(mfr, assets_path):
     try:
         if not mfr.colour_profile_on_display():
             return []
-        prof = colour_profile.asset_active(assets_path)
-        if prof is None:
+        if not colour_profile.any_asset_active(assets_path):
             return []
+        prof = colour_profile.asset_profile(assets_path)
+        own = colour_profile.own_profile_names(assets_path)
+        n_own = len(own["images"]) + len(own["videos"])
         n = colour_profile.asset_counts(assets_path)
     except Exception:                                   # noqa: BLE001
         return []
@@ -331,8 +333,11 @@ def chosen_files_rows(mfr, assets_path):
                      % (n["added"], "" if n["added"] == 1 else "s"))
     if not parts:
         return []
+    # PAD-368: files with a profile of their own say so
+    name = prof.label() + ("" if not n_own else " (%d file%s with %s own)" % (
+        n_own, "" if n_own == 1 else "s", "its" if n_own == 1 else "their"))
     return [("color profile on individual files  —  %s, baked into %s"
-             % (prof.label(), ", ".join(parts)),
+             % (name, ", ".join(parts)),
              "color", "Pending (color profile)", "pending")]
 
 

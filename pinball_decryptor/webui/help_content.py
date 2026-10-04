@@ -1145,6 +1145,18 @@ HELP_CONTENT = {
          "'Show it in this preview' (the same switch as under Preview colors) "
          "is ticked; the Images tab's preview does not draw through the "
          "profiles, so its bar has no such switch."),
+        ("One profile per file",
+         "Each picture, clip or picture added in Scenes can have a color "
+         "profile of its own. Click it (a row on Images or Video, a layer in "
+         "Scenes) with the Colors bar open, or open the bar with it clicked, "
+         "and Files shows that file's profile: the one baked into it now. "
+         "Pick a starting point or a saved profile, or move a slider, and "
+         "that file gets it as its own (its color profile is attached if it "
+         "was not). Same as the other files drops it again. A file with no "
+         "profile of its own gets the individual files profile, which the "
+         "bar shows with no file clicked and the Color profile tab always "
+         "shows. Hover over a file, or a layer in Scenes, to see its Color "
+         "profile, or None."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

@@ -92,6 +92,11 @@ STOCK_IMAGES_KEY = "image_color_unlocked"
 #: switch too, and one switched on is re-encoded from its own original with
 #: the individual files profile.  Off (absent), they stay locked.
 STOCK_VIDEOS_KEY = "video_color_stock"
+#: PAD-368 (DragonRR): a file's own individual files profile, ``{rel: profile
+#: dict}`` per kind.  A file with none gets the project's one (ASSET_KEY).
+#: ``{"recommended": True}`` is the Recommended one, following the screen.
+FILE_PROFILES_KEY = {"images": "image_color_profiles",
+                     "videos": "video_color_profiles"}
 
 #: Rec.601 luma weights: the grey a pixel is desaturated toward.
 _LUMA = (0.299, 0.587, 0.114)
@@ -880,6 +885,141 @@ def asset_active(assets_dir):
     return None if prof.is_identity() else prof
 
 
+# -- a file's own profile (PAD-368) --------------------------------------------
+
+def _own_dicts(data, kind):
+    m = data.get(FILE_PROFILES_KEY[kind]) if isinstance(data, dict) else None
+    return m if isinstance(m, dict) else {}
+
+
+def _own_from(stored, assets_dir, rec=None):
+    """A stored own profile as a Profile (``None`` when unreadable)."""
+    if not isinstance(stored, dict):
+        return None
+    if stored.get("recommended"):
+        return rec() if rec is not None else recommended(assets_dir,
+                                                         files=True)
+    return _from_dict(stored)
+
+
+def own_profile(assets_dir, kind, rel):
+    """File *rel*'s own profile (*kind* "images" / "videos"), or ``None``
+    when it has none and gets the project's individual files profile."""
+    _kind_keys(kind)
+    if not assets_dir or not rel:
+        return None
+    from . import staged_changes
+    return _own_from(_own_dicts(staged_changes.load(assets_dir), kind).get(rel),
+                     assets_dir)
+
+
+def own_follows_screen(assets_dir, kind, rel):
+    """Is *rel*'s own profile the Recommended one, following the screen?"""
+    if not assets_dir or not rel:
+        return False
+    from . import staged_changes
+    d = _own_dicts(staged_changes.load(assets_dir), kind).get(rel)
+    return bool(isinstance(d, dict) and d.get("recommended"))
+
+
+def store_own_profile(assets_dir, kind, rel, prof, follow=False):
+    """Give file *rel* a profile of its own: *prof*, or with *follow* the
+    Recommended one following the screen; neither puts it back on the
+    project's individual files profile."""
+    _kind_keys(kind)
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    key = FILE_PROFILES_KEY[kind]
+    m = dict(_own_dicts(data, kind))
+    if follow:
+        m[rel] = {"recommended": True}
+    elif prof is None:
+        m.pop(rel, None)
+    else:
+        m[rel] = _profile_dict(prof)
+    if m:
+        data[key] = m
+    else:
+        data.pop(key, None)
+    staged_changes.save(assets_dir, data)
+
+
+def file_profile(assets_dir, kind, rel):
+    """The profile baked into file *rel* when its switch is on: its own, else
+    the project's individual files profile."""
+    own = own_profile(assets_dir, kind, rel)
+    return own if own is not None else asset_profile(assets_dir)
+
+
+def asset_resolver(assets_dir, data=None):
+    """``fn(kind, rel) -> Profile or None``: what is baked into file *rel*
+    with its switch on (its own profile, else the project's), ``None`` where
+    that changes nothing.  The sidecar is read once."""
+    if not assets_dir:
+        return lambda kind, rel: None
+    from . import staged_changes
+    if data is None:
+        data = staged_changes.load(assets_dir)
+    shared, recs = [], []
+
+    def _shared():
+        if not shared:
+            shared.append(asset_active(assets_dir))
+        return shared[0]
+
+    def _rec():
+        if not recs:
+            recs.append(recommended(assets_dir, files=True))
+        return recs[0]
+
+    owns = {kind: _own_dicts(data, kind) for kind in FILE_PROFILES_KEY}
+
+    def resolve(kind, rel):
+        prof = _own_from(owns.get(kind, {}).get(rel), assets_dir, _rec)
+        if prof is None:
+            return _shared()
+        return None if prof.is_identity() else prof
+    return resolve
+
+
+def any_asset_active(assets_dir):
+    """Does the project's individual files profile, or any file's own one,
+    change something?"""
+    if not assets_dir:
+        return False
+    if asset_active(assets_dir) is not None:
+        return True
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    if not any(_own_dicts(data, k) for k in FILE_PROFILES_KEY):
+        return False
+    resolve = asset_resolver(assets_dir, data)
+    return any(resolve(k, rel) is not None
+               for k in FILE_PROFILES_KEY for rel in _own_dicts(data, k))
+
+
+def own_profile_names(assets_dir):
+    """``{"images": {rel: label}, "videos": {rel: label}}``: the files with a
+    profile of their own, by the name their tooltips show."""
+    out = {"images": {}, "videos": {}}
+    if not assets_dir:
+        return out
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    recs = []
+
+    def _rec():
+        if not recs:
+            recs.append(recommended(assets_dir, files=True))
+        return recs[0]
+    for kind in FILE_PROFILES_KEY:
+        for rel, stored in _own_dicts(data, kind).items():
+            prof = _own_from(stored, assets_dir, _rec)
+            if prof is not None:
+                out[kind][str(rel)] = prof.label()
+    return out
+
+
 _KIND = {"images": (ALL_IMAGES_KEY, IMAGE_SLOTS_KEY),
          "videos": (ALL_VIDEOS_KEY, VIDEO_SLOTS_KEY)}
 
@@ -951,16 +1091,20 @@ def asset_applies(settings, kind, rel, own=None):
 
 
 def asset_map(assets_dir, kind, rels):
-    """``{rel: Profile}`` for the files among *rels* that get the
-    chosen-files profile baked in as they are staged; empty when the
-    profile changes nothing or no file is switched on."""
+    """``{rel: Profile}`` for the files among *rels* that get a profile
+    baked in as they are staged: each its own (PAD-368), else the
+    chosen-files one; a file whose profile changes nothing is left out."""
     if not assets_dir:
         return {}
-    prof = asset_active(assets_dir)
-    if prof is None:
-        return {}
+    resolve = asset_resolver(assets_dir)
     settings = asset_settings(assets_dir)
-    return {rel: prof for rel in rels if asset_applies(settings, kind, rel)}
+    out = {}
+    for rel in rels:
+        if asset_applies(settings, kind, rel):
+            prof = resolve(kind, rel)
+            if prof is not None:
+                out[rel] = prof
+    return out
 
 
 def stock_videos_unlocked(data):
@@ -1117,15 +1261,16 @@ def added_picture_colour(assets_dir, op, settings=None, prof=None):
     pictures box."""
     if not assets_dir:
         return None
-    if prof is None:
-        prof = asset_active(assets_dir)
-    if prof is None:
-        return None
     if settings is None:
         settings = asset_settings(assets_dir)
     on = asset_applies(settings, "images", op.get("image") or "",
                        own=op.get("color"))
-    return prof if on else None
+    if not on:
+        return None
+    if prof is None:
+        # its own profile (PAD-368), else the project's
+        prof = asset_resolver(assets_dir)("images", op.get("image") or "")
+    return prof
 
 
 def _screen_stored(assets_dir):
@@ -1401,7 +1546,7 @@ def filter_step(prof):
 
 
 def video_look(assets_dir, switch, own_colours, overlay_on=True, files_on=True,
-               screen_on=True):
+               screen_on=True, rel=None):
     """The colour steps the Video tab's players draw through with As on the
     machine ticked (PAD-329), as :func:`filter_step` dicts: ``{"orig",
     "rep"}``.  The original: the whole screen overlay, then the machine
@@ -1413,12 +1558,14 @@ def video_look(assets_dir, switch, own_colours, overlay_on=True, files_on=True,
     else the individual files profile undone (:func:`screen_shown`).
 
     *overlay_on* / *files_on* / *screen_on* are the preview's three switches
-    (PAD-330): each leaves its own step out, and nothing else."""
+    (PAD-330): each leaves its own step out, and nothing else.  *rel*: the
+    clip shown, which may have a profile of its own (PAD-368)."""
     overlay = active(assets_dir) if overlay_on else None
     screen = screen_shown(assets_dir)[0] if screen_on else None
     if screen is not None and screen.is_identity():
         screen = None
-    files = asset_active(assets_dir) if files_on else None
+    files = ((asset_resolver(assets_dir)("videos", rel) if rel
+              else asset_active(assets_dir)) if files_on else None)
     orig = [filter_step(p) for p in (overlay, screen)]
     rep = []
     if switch and files is not None:
@@ -1519,8 +1666,10 @@ def preview_parts(assets_dir):
         out["overlay"] = {"name": over.label(), "set": True}
     files = asset_profile(assets_dir)
     n = sum(asset_counts(assets_dir).values())
+    # a file with a profile of its own (PAD-368) counts too
     out["files"] = {"name": files.label(), "count": n,
-                    "set": bool(n and not files.is_identity())}
+                    "set": bool(n and (not files.is_identity()
+                                       or any_asset_active(assets_dir)))}
     shown, stored = screen_shown(assets_dir)
     out["screen"] = {"name": shown.label(), "stored": stored,
                      "set": not shown.is_identity()}
@@ -1530,12 +1679,16 @@ def preview_parts(assets_dir):
 def asset_signature(assets_dir):
     """A short text that changes whenever what the chosen-files profile
     would bake into which file changes ("" when nothing)."""
-    prof = asset_active(assets_dir)
-    if prof is None:
+    if not any_asset_active(assets_dir):
         return ""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    resolve = asset_resolver(assets_dir, data)
+    own = sorted((k, rel, (resolve(k, rel) or Profile(name="")).key())
+                 for k in FILE_PROFILES_KEY for rel in _own_dicts(data, k))
     s = asset_settings(assets_dir)
-    return "%s|%s|%s|%s|%s%s" % (
-        prof.key(),
+    return "%s|%s|%s|%s|%s|%s%s" % (
+        asset_profile(assets_dir).key(), own,
         s["all_images"], s["all_videos"], sorted(s["images"].items()),
         sorted(s["videos"].items()),
         "|unlocked" if stock_images_unlocked(assets_dir) else "")

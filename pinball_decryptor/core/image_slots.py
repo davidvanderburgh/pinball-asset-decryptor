@@ -189,8 +189,8 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     for rel, _r in items:
         colour_profile.discard_uncorrected(assets_dir, rel)
     stock = set()
-    if colour is None and assets_dir and colour_profile.asset_active(
-            assets_dir) is not None:
+    if colour is None and assets_dir and colour_profile.any_asset_active(
+            assets_dir):
         stock = {rel for rel in colour_profile.stock_image_rels(
             assets_dir, {rel for rel, _r in items}) if rel in slots_by_rel}
         if stock:
@@ -200,9 +200,13 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
         # The user's own pictures an earlier build put here, pick gone
         # (PAD-345): corrected from their kept uncorrected copy, never from
         # .orig/ (Stern's picture), so a second build never corrects twice.
-        prof = colour_profile.asset_active(assets_dir)
+        resolve = colour_profile.asset_resolver(assets_dir)
         for rel in colour_profile.built_image_on(assets_dir):
             if rel not in slots_by_rel or rel in dict(items):
+                continue
+            # its own profile (PAD-368), else the project's
+            prof = resolve("images", rel)
+            if prof is None:
                 continue
             kept = colour_profile.keep_uncorrected(assets_dir, rel)
             if kept:

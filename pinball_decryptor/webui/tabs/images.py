@@ -1047,7 +1047,9 @@ class ImagesTab(TabService):
             return None
         from ...core import colour_profile as cp
         try:
-            name = cp.asset_profile(self._assets_dir() or "").label()
+            # its own profile (PAD-368), else the project's
+            name = cp.file_profile(self._assets_dir() or "", "images",
+                                   rel).label()
         except Exception:                               # noqa: BLE001
             name = "colour profile"
         row = {"on": on, "own": rel in self._color, "all": self._color_all,

@@ -447,11 +447,14 @@ def test_scene_layers_carry_a_colour_switch_for_pictures(tmp_path):
         assert w.call("text_scenes.tree_add_picture")
         assert _wait(w, lambda: any(l["added"] for l in _tv(w)["layers"]))
         added = next(l for l in _tv(w)["layers"] if l["added"])
-        assert added["color"] == {"on": False, "own": False, "added": True}
+        # PAD-368: with the key its own profile is stored under
+        key = added["color"]["rel"]
+        assert key.startswith("scene_textures/added/")
+        assert added["color"] == {"on": False, "own": False, "added": True, "rel": key}
         assert w.call("text_scenes.tree_color", added["id"], True)
         assert _wait(w, lambda: next((l for l in _tv(w)["layers"] if l["added"]),
                                      {}).get("color") == {"on": True, "own": True,
-                                                          "added": True})
+                                                          "added": True, "rel": key})
         op = next(o for o in scene_edit.ops_for(str(folder), CARD)
                   if o["op"] == "add_picture")
         assert op["color"] is True

@@ -428,3 +428,5 @@ site block_start_19     0x0010f38c 0xe92d4038 0xe1a05000
 text block_name_19      Mad Hatter (episodes 69-70)
 site block_start_20     0x00148d3c 0xe92d4038 0xe1a05000
 text block_name_20      Mr. Freeze (episodes 53-54)
+site block_start_21     0x00034ba8 0xe92d40f8 0xebffffde
+text block_name_21      Batturn Mania

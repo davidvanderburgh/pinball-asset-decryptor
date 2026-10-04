@@ -573,14 +573,62 @@ static int hook_veto(unsigned addr, veto_fn logger)
 /* PAD-363: a veto whose logger is also told WHICH hook fired (r1 = n, 0-255): the spare nop at t[2] becomes
  * `mov r1, #n`, so one logger serves many starts that carry no object to tell them apart (a plain-C title's) */
 typedef int (*veto_n_fn)(unsigned *regs, unsigned n);
+static int hook_veto_bl(unsigned addr, veto_n_fn logger, unsigned n, unsigned refused);
 static int hook_veto_n(unsigned addr, veto_n_fn logger, unsigned n, unsigned refused)
 {
     unsigned *t;
-    if (n > 255 || refused > 1 || !hook_veto(addr, (veto_fn)(void (*)(void))logger)) return 0;
+    if (n > 255 || refused > 1) return 0;
+    if ((((unsigned *)(unsigned long)addr)[1] & 0xFF000000u) == 0xEB000000u)   /* `push {.., lr}; bl check` */
+        return hook_veto_bl(addr, logger, n, refused);
+    if (!hook_veto(addr, (veto_fn)(void (*)(void))logger)) return 0;
     t = tramp + (tramp_used - 1) * 16;
     t[2] = 0xe3a01000u | n;   /* mov r1, #n */
     t[7] = 0x13a00000u | refused;   /* movne r0, #refused: what a refused call returns (1 unless the port says 0) */
     __builtin___clear_cache((char *)t, (char *)(t + 16));
+    return 1;
+}
+
+/* PAD-363: the commonest start a plain veto cannot take opens `push {.., lr}; bl <check>` (Star Wars ELG's shot
+ * modes, Jurassic Park The Pin's dinosaurs): the bl reaches only 32 MB, so it cannot run from the trampoline
+ * as it is. This one, two slots long, calls the bl's target itself and comes back:
+ *   0 push {r0-r3,ip,lr}  1 mov r0,sp  2 mov r1,#n  3 ldr ip,[pc,#64] -> t[21]  4 blx ip  5 cmp r0,#0
+ *   6 pop {r0-r3,ip,lr}  7 movne r0,#refused  8 bxne lr  9 the push (the first word)
+ *   10 add lr,pc,#0 (lr = t[12])  11 ldr pc,[pc,#28] -> t[20] (the bl's target)  12 ldr pc,[pc,#32] -> t[22] (addr+8)
+ *   20 the target  21 the logger  22 addr + 8
+ * The first word must save lr (the function returns through what it pushed); anything else is refused. */
+static int hook_veto_bl(unsigned addr, veto_n_fn logger, unsigned n, unsigned refused)
+{
+    unsigned *p = (unsigned *)(unsigned long)addr, *t, w1, target;
+    int i;
+    if (!addr || (tramp_used + 2) * 16 > TRAMP_WORDS) return 0;
+    if ((p[0] & 0xFFFF4000u) != 0xE92D4000u) return 0;                 /* push {.., lr} */
+    w1 = p[1];
+    target = addr + 4 + 8 + (unsigned)(((int)(w1 << 8)) >> 6);         /* the bl's own offset, from its pc */
+    t = tramp + tramp_used * 16;
+    tramp_used += 2;
+    for (i = 0; i < 32; i++) t[i] = 0;
+    t[0] = 0xe92d500fu;                       /* push {r0,r1,r2,r3,ip,lr} */
+    t[1] = 0xe1a0000du;                       /* mov r0, sp */
+    t[2] = 0xe3a01000u | n;                   /* mov r1, #n */
+    t[3] = 0xe59fc040u;                       /* ldr ip, [pc, #64] -> t[21] */
+    t[4] = 0xe12fff3cu;                       /* blx ip */
+    t[5] = 0xe3500000u;                       /* cmp r0, #0 */
+    t[6] = 0xe8bd500fu;                       /* pop {r0,r1,r2,r3,ip,lr} */
+    t[7] = 0x13a00000u | refused;             /* movne r0, #refused */
+    t[8] = 0x112fff1eu;                       /* bxne lr */
+    t[9] = p[0];                              /* the push, as it was */
+    t[10] = 0xe28fe000u;                      /* add lr, pc, #0: lr = t[12] */
+    t[11] = 0xe59ff01cu;                      /* ldr pc, [pc, #28] -> t[20]: the bl's target */
+    t[12] = 0xe59ff020u;                      /* ldr pc, [pc, #32] -> t[22]: the function's third word */
+    t[20] = target;
+    t[21] = (unsigned)(unsigned long)logger;
+    t[22] = addr + 8u;
+    mprotect(tramp, sizeof tramp, 7);
+    mprotect((void *)(unsigned long)(addr & ~0xfffu), 0x2000, 7);
+    p[1] = (unsigned)(unsigned long)t;
+    p[0] = 0xe51ff004u;                       /* ldr pc, [pc, #-4] */
+    __builtin___clear_cache((char *)t, (char *)(t + 32));
+    __builtin___clear_cache((char *)p, (char *)(p + 2));
     return 1;
 }
 

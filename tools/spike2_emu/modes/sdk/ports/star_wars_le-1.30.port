@@ -648,7 +648,7 @@ site multiball_serve       0x002d3c5c 0xe92d41f0 0xe30fe7da
 
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
-# left out: 5 Hoth Mini (multiball), 6 Deathstar I (not vetoable), 10 Deathstar Mini (multiball), 14 Endor Mini (multiball), 18 Tatooine Mini (multiball), 19 Victory Multiball (multiball), 20 Victory Multiball (multiball), 27 Hspace Mball (multiball), 31 Tie Mball (multiball), 36 Jedi Wizard Mball (multiball)
+# left out: 5 Hoth Mini (multiball), 10 Deathstar Mini (multiball), 14 Endor Mini (multiball), 18 Tatooine Mini (multiball), 19 Victory Multiball (multiball), 20 Victory Multiball (multiball), 27 Hspace Mball (multiball), 31 Tie Mball (multiball), 36 Jedi Wizard Mball (multiball)
 site block_start_0      0x000b71c4 0xe92d4070 0xe1a04000
 data block_obj_0        0x005f9a70
 text block_name_0       Hoth I
@@ -664,6 +664,9 @@ text block_name_3       Hoth III a
 site block_start_4      0x0009ac94 0xe5902000 0xe92d4038
 data block_obj_4        0x005f9dc0
 text block_name_4       Hoth III B
+site block_start_6      0x000a96a0 0xe92d4038 0xebffc57a
+data block_obj_6        0x005f9f5c
+text block_name_6       Deathstar I
 site block_start_7      0x000aa23c 0xe92d4010 0xe1a04000
 data block_obj_7        0x005fa008
 text block_name_7       Deathstar II a

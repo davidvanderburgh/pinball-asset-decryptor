@@ -447,3 +447,13 @@ site multiball_serve       0x002f3e54 0xe92d41f0 0xe305e3ba
 # plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
 site block_start_0      0x00068090 0xe92d4010 0xe1a04000
 text block_name_0       Restore Power
+site block_start_1      0x00090860 0xe92d4038 0xeb000a8b
+text block_name_1       Stegosaurus
+site block_start_2      0x00092760 0xe92d4038 0xeb0002cb
+text block_name_2       Triceratops
+site block_start_3      0x00079a34 0xe92d4070 0xeb006616
+text block_name_3       Pteranodon
+site block_start_4      0x00078f1c 0xe92d4038 0xeb0068dc
+text block_name_4       Gallimimus
+site block_start_5      0x00072bdc 0xe92d4038 0xeb0081ac
+text block_name_5       Brachiosaurus

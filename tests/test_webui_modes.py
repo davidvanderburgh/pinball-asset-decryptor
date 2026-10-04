@@ -1513,8 +1513,11 @@ def test_pad363_the_game_modes_lever_holds_off_the_ticked_modes(tmp_path, previe
         assert st["form"]["game_modes"] == "block" and st["block_on"] == [21, 24]
 
 
-def test_pad363_a_title_with_no_block_lines_cannot_hold_its_modes_off(tmp_path, preview_on):
-    # Star Wars ELG 1.10: its three shot modes start `push; bl`, which the veto cannot move (PAD-363's start finder)
+def test_pad363_a_title_with_no_block_lines_cannot_hold_its_modes_off(tmp_path, preview_on, monkeypatch):
+    # every shipped port names some since PAD-363, so this port is read as if it named none
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    monkeypatch.setattr(MP, "_game_modes", lambda port: ())
+    monkeypatch.setattr(MP, "_PROFILES_CACHE", {})
     proj = _card_project(tmp_path / "sw", "star_wars_elg-1_10_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)

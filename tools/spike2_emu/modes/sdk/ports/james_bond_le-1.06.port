@@ -536,33 +536,36 @@ site block_start_14     0x00047ff4 0xe92d43f8 0xe3041d2c
 text block_name_14      Bath-O-Sub Hurry-Up
 site block_start_15     0x0008cb88 0xe92d4008 0xe30001ab
 text block_name_15      Double Scoring
-site block_start_16     0x00111928 0xe92d41f0 0xe3a00003
-text block_name_16      Dr No's Lair
-site block_start_17     0x0011b8f8 0xe92d40f8 0xe1a05001
-text block_name_17      Orient Express
-site block_start_18     0x00116fc0 0xe92d41f0 0xe3a00003
-text block_name_18      Oddjob Battles Bond
-site block_start_19     0x0012d4dc 0xe92d41f0 0xe3a00003
-text block_name_19      Cut Bond in Half
-site block_start_20     0x00123f84 0xe92d41f0 0xe3a00003
-text block_name_20      Mr Osato
-site block_start_21     0x001277f4 0xe92d41f0 0xe3a00003
-text block_name_21      Professor Dent
-site block_start_22     0x00119368 0xe92d40f8 0xe1a05001
-text block_name_22      Mr Wint & Mr Kidd
-site block_start_23     0x00114810 0xe92d41f0 0xe3a00003
-text block_name_23      Feeding Frenzy
-site block_start_24     0x0011ef9c 0xe92d41f0 0xe3a00003
-text block_name_24      Fiona Volpe
-site block_start_25     0x0012f8f0 0xe92d40f8 0xe3a00003
-text block_name_25      Under Water Fight
-site block_start_26     0x0012aa04 0xe92d40f8 0xe3a00003
-text block_name_26      Training Grounds
-site block_start_27     0x00132194 0xe92d40f8 0xe3a00003
-text block_name_27      Diamond Death Ray
-value block_ret_16          0
-value block_ret_17          0
-value block_ret_18          0
+site block_start_16     0x000620bc 0xe92d40d0 0xebffffc0
+text block_name_16      Bust Out
+site block_start_17     0x001ceb40 0xe92d40d0 0xebffffc6
+text block_name_17      Whats That
+site block_start_18     0x001cbc2c 0xe92d4010 0xebffffdb
+text block_name_18      Victory Laps
+site block_start_19     0x00111928 0xe92d41f0 0xe3a00003
+text block_name_19      Dr No's Lair
+site block_start_20     0x0011b8f8 0xe92d40f8 0xe1a05001
+text block_name_20      Orient Express
+site block_start_21     0x00116fc0 0xe92d41f0 0xe3a00003
+text block_name_21      Oddjob Battles Bond
+site block_start_22     0x0012d4dc 0xe92d41f0 0xe3a00003
+text block_name_22      Cut Bond in Half
+site block_start_23     0x00123f84 0xe92d41f0 0xe3a00003
+text block_name_23      Mr Osato
+site block_start_24     0x001277f4 0xe92d41f0 0xe3a00003
+text block_name_24      Professor Dent
+site block_start_25     0x00119368 0xe92d40f8 0xe1a05001
+text block_name_25      Mr Wint & Mr Kidd
+site block_start_26     0x00114810 0xe92d41f0 0xe3a00003
+text block_name_26      Feeding Frenzy
+site block_start_27     0x0011ef9c 0xe92d41f0 0xe3a00003
+text block_name_27      Fiona Volpe
+site block_start_28     0x0012f8f0 0xe92d40f8 0xe3a00003
+text block_name_28      Under Water Fight
+site block_start_29     0x0012aa04 0xe92d40f8 0xe3a00003
+text block_name_29      Training Grounds
+site block_start_30     0x00132194 0xe92d40f8 0xe3a00003
+text block_name_30      Diamond Death Ray
 value block_ret_19          0
 value block_ret_20          0
 value block_ret_21          0
@@ -572,3 +575,6 @@ value block_ret_24          0
 value block_ret_25          0
 value block_ret_26          0
 value block_ret_27          0
+value block_ret_28          0
+value block_ret_29          0
+value block_ret_30          0

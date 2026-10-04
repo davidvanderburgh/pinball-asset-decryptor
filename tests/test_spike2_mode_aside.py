@@ -386,3 +386,25 @@ def test_the_runtime_hooks_other_rules_and_can_refuse_a_start_with_0():
     assert "#define BLOCK_RULES 8" in src and "hook_n(fn(name), on_rule_shots, (unsigned)i)" in src
     assert "t[7] = 0x13a00000u | refused;" in src                         # movne r0, #0 or #1
     assert 'pm_snprintf(ret, sizeof ret, "block_ret_%u", id);' in src
+
+
+def test_a_push_then_bl_start_is_taken_and_its_trampoline_reaches_its_words():
+    """PAD-363: `push {.., lr}; bl check` (Star Wars ELG's shot modes, JP The Pin's dinosaurs) - the runtime's
+    hook_veto_bl calls the bl's target itself. Only after a push that saves lr."""
+    import re
+    from pinball_decryptor.plugins.stern.game_mode_blocks import movable
+    assert movable((0xe92d4038, 0xebfff7ce)) and movable((0xe92d40f8, 0xebffff93))
+    assert not movable((0xe3a01000, 0xeb000010)) and not movable((0xe92d0038, 0xeb000010))   # no push of lr
+    assert not movable((0xeb000010, 0xe92d4038))                                             # a bl first
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    body = src[src.index("static int hook_veto_bl(unsigned addr, veto_n_fn logger, unsigned n, unsigned refused)\n{"):]
+    body = body[:body.index("\n}\n")]
+    words = {int(m.group(1)): int(m.group(2), 16) for m in re.finditer(r"t\[(\d+)\] = 0x([0-9a-f]+)u;", body)}
+
+    def ldr_target(i):
+        w = words[i]
+        assert (w & 0x0F7F0000) == 0x051F0000
+        return i + 2 + (w & 0xFFF) // 4
+    assert ldr_target(3) == 21 and ldr_target(11) == 20 and ldr_target(12) == 22    # logger, target, addr + 8
+    assert words[10] == 0xE28FE000                                                   # add lr, pc, #0: lr = t[12]
+    assert "t[20] = target;" in body and "t[21] = (unsigned)(unsigned long)logger;" in body and "t[22] = addr + 8u;" in body

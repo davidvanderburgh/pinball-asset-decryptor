@@ -30,6 +30,8 @@ def movable(words):
         return False
     for i, w in enumerate(words):
         cond, cls = w >> 28, (w >> 25) & 7
+        if i == 1 and w & 0xFF000000 == 0xEB000000 and words[0] & 0xFFFF4000 == 0xE92D4000:
+            continue                                      # `push {.., lr}; bl check`: the runtime calls it (hook_veto_bl)
         if cond == 0xF or cls == 5:                       # unconditional space; b / bl
             return False
         if w & 0x0FFFFFF0 == 0x012FFF10 or w & 0x0FFFFFF0 == 0x012FFF30:   # bx / blx register

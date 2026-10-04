@@ -6,7 +6,7 @@ import { html, PageHead, Empty, Spinner } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { ScenesPage, ScenesActions } from "./text_scenes.js";
 
-const INTRO = "Each scene of the card, drawn the way the machine draws it. Click a picture or a line of text to move, resize, recolour, hide or re-layer it, or add your own; Write puts it on the card.";
+const INTRO = "Each scene of the card, drawn the way the machine draws it. Click a picture or a line of text to move, resize, recolour, hide or re-layer it, or add your own; Write puts it on the card. Preview colors change only the preview: the card is not changed.";
 
 export default function ScenesTab() {
   const p = useNs("scenes");

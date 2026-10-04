@@ -23,7 +23,9 @@ async function openColor(mode) {
   call("ui.select_tab", "color");
 }
 
-export function LookRow({ look, ns }) {
+// note=false leaves out the "Preview only" line: the Scenes tab says it in its page head
+// (PAD-349) to make room for its advanced box beside the row
+export function LookRow({ look, ns, note = true }) {
   if (!look || !look.parts) return null;
   const sw = look.sw || {};
   const p = look.parts;
@@ -45,6 +47,6 @@ export function LookRow({ look, ns }) {
       <button type="button" class="look-name" title="Open it on the Color profile tab"
         onClick=${() => openColor(it.mode)}>${it.name}</button>
     </span>`)}
-    <span class="look-note">Preview only: the card is not changed.</span>
+    ${note ? html`<span class="look-note">Preview only: the card is not changed.</span>` : null}
   </div>`;
 }

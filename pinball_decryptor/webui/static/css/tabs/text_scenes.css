@@ -25,8 +25,8 @@
 .sc-list-tab .i { width: 16px; height: 16px; flex: 0 0 auto; color: var(--accent); }
 .sc-list-tab-txt { writing-mode: vertical-rl; font-family: var(--cond); font-weight: 600; font-size: 13.5px; letter-spacing: .06em; }
 .sc-list-hide { flex: 0 0 auto; }
-/* PAD-369 (DragonRR): the caret was easy to miss; it is the same accent as the tab that brings
-   the list back, with a word beside a heavier arrow */
+/* PAD-369 (DragonRR): the caret under the preview (and the one by the search) was easy to miss;
+   both are the accent of the tab that brings the list back, a word beside a heavier arrow */
 .btn.sc-list-hide { gap: 4px; padding: 0 9px 0 6px; background: var(--accent-soft); border-color: var(--accent-line);
   color: var(--ink); font-weight: 600; }
 .btn.sc-list-hide:hover { background: var(--accent-soft); border-color: var(--accent); filter: brightness(1.12); }

@@ -375,8 +375,9 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
             : editor ? html`<${TreeCanvas} s=${s} />` : html`<${Preview} s=${s} tip=${tips.preview} />`}
         </div>
         <div class="scenes-stagebar">
-          <${Button} size="sm" kind="ghost" icon=${wide ? "right" : "left"} label=${wide ? "Show the scene list" : "Hide the scene list"}
-            title=${wide ? "Show the scene list" : "Hide the scene list: more room for the preview"} onClick=${() => setWide(!wide)} />
+          <${Button} size="sm" cls="sc-list-hide" icon=${wide ? "right" : "left"} label=${wide ? "Show the scene list" : "Hide the scene list"}
+            title=${wide ? "Show the scene list" : "Hide the scene list: more room for the preview"}
+            onClick=${() => setWide(!wide)}>${wide ? "Show list" : "Hide list"}<//>
           <${ZoomControls} z=${zoom} />
           ${s.preparing ? html`<span class="grow"></span>`
             : editor ? html`<${TreeActions} t=${s.tree_view} /><span class="grow"></span>

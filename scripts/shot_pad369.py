@@ -13,7 +13,9 @@ under the same names before and after:
                             preview's Individual files switch turned off, then "Black
                             playfield" picked for it from the Colors bar's Saved profiles
 - scenes_layer_tooltip.png  the portrait's layer hovered
-- scenes_hide.png           the scene list's search row and its hide button
+- scenes_hide.png           the caret under the preview that hides the scene list, the
+                            Colors bar open (DragonRR's screenshot)
+- scenes_hide_search.png    the scene list's search row and its hide button
 - scenes_save_menu.png      the Save / load edits menu open
 
 Needs Playwright (the user site-packages one) and the installed Edge.
@@ -136,6 +138,13 @@ def main():
             print("scenes look switches:", look.get("sw"), flush=True)
             page.mouse.move(5, 990)
             page.screenshot(path=out("scenes_files_switch.png"))
+            # the caret under the preview (DragonRR's screenshot), the bar open as there
+            bar = page.query_selector(".scenes-stagebar")
+            if bar:
+                b = bar.bounding_box()
+                page.screenshot(path=out("scenes_hide.png"), clip={
+                    "x": max(0, b["x"] - 60), "y": max(0, b["y"] - 50),
+                    "width": 520, "height": b["height"] + 110})
             page.click(".cpd-handle")
             time.sleep(1.5)
             if lay:
@@ -145,11 +154,9 @@ def main():
             box = page.query_selector(".scenes-search")
             if box:
                 b = box.bounding_box()
-                page.screenshot(path=out("scenes_hide.png"), clip={
+                page.screenshot(path=out("scenes_hide_search.png"), clip={
                     "x": max(0, b["x"] - 20), "y": max(0, b["y"] - 60),
                     "width": b["width"] + 240, "height": b["height"] + 160})
-            else:
-                page.screenshot(path=out("scenes_hide.png"))
             page.click("button:has-text('Save / load edits')")
             time.sleep(1)
             page.screenshot(path=out("scenes_save_menu.png"))

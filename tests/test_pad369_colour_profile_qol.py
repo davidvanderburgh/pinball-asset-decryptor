@@ -115,6 +115,10 @@ def test_the_scene_list_hide_button_is_bolder():
     ts = _src("js", "tabs", "text_scenes.js")
     btn = ts[ts.index('cls="sc-list-hide"'):]
     assert ">Hide<//>" in btn[:400]
+    # the caret under the preview, beside the zoom (the one in DragonRR's screenshot)
+    bar = ts[ts.index('<div class="scenes-stagebar">'):]
+    assert 'cls="sc-list-hide"' in bar[:500] and '"Hide list"' in bar[:500]
+    assert 'kind="ghost" icon=${wide' not in ts
     css = _src("css", "tabs", "text_scenes.css")
     assert ".btn.sc-list-hide {" in css and "var(--accent-soft)" in css
 

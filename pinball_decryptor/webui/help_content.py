@@ -1076,7 +1076,9 @@ HELP_CONTENT = {
         ("Part of the project",
          "The profile is a staged change of this project: Write lists it as "
          "pending, Revert all clears it, and Save a copy / Load move it "
-         "between projects."),
+         "between projects. Saved profiles lists the copies saved in that "
+         "folder by file name: pick one to use it. The one in use is shown "
+         "there, and the starting point in use is highlighted."),
         ("Individual files (Spike 2)",
          "The whole screen overlay reaches the game's own art too, which "
          "Stern already made for that screen. Adjust individual files for "

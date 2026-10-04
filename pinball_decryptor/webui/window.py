@@ -792,9 +792,9 @@ class WebWindow:
         return path
 
     def ask_save(self, key, title, initialfile="", filetypes=None,
-                 defaultextension=""):
+                 defaultextension="", initialdir=None):
         path = compat.filedialog.asksaveasfilename(
-            title=title, initialdir=self.last_browse_dir(key),
+            title=title, initialdir=initialdir or self.last_browse_dir(key),
             initialfile=initialfile, filetypes=filetypes or [],
             defaultextension=defaultextension)
         if path:

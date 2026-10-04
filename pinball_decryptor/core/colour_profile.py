@@ -1598,6 +1598,82 @@ def read_file(path):
         return parse(f.read())
 
 
+#: the settings a profile file has, at least one of them (PAD-360: a text
+#: file in the saved profiles folder that has none is not listed)
+_FILE_KEYS = ("gamma", "gain", "lift", "saturation", "brightness", "contrast",
+              "range", "curve_rgb", "curve_red", "curve_green", "curve_blue")
+
+_SAVED_CACHE = {}
+
+
+def saved_profiles(folders):
+    """``[(name, path, Profile)]`` of the profile files (``*.txt``) in
+    *folders*, by file name (PAD-360: the Saved profiles list).  A text file
+    that sets none of a profile's numbers is left out."""
+    import os
+    out, seen = [], set()
+    for folder in folders:
+        try:
+            names = sorted(os.listdir(folder), key=str.lower)
+        except OSError:
+            continue
+        for n in names:
+            path = os.path.join(folder, n)
+            key = os.path.normcase(os.path.abspath(path))
+            if not n.lower().endswith(".txt") or key in seen:
+                continue
+            try:
+                stamp = os.stat(path)
+            except OSError:
+                continue
+            if not os.path.isfile(path):
+                continue
+            seen.add(key)
+            hit = _SAVED_CACHE.get(key)
+            if hit is None or hit[0] != (stamp.st_mtime, stamp.st_size):
+                prof = None
+                try:
+                    with open(path, encoding="utf-8-sig") as f:
+                        text = f.read(65536)
+                    keys = {ln.split("#", 1)[0].partition("=")[0].strip()
+                            .lower() for ln in text.splitlines()}
+                    if keys & set(_FILE_KEYS):
+                        prof = parse(text)[0]
+                except (OSError, UnicodeDecodeError, ValueError, TypeError):
+                    prof = None
+                hit = _SAVED_CACHE[key] = ((stamp.st_mtime, stamp.st_size),
+                                           prof)
+            if hit[1] is not None:
+                out.append((os.path.splitext(n)[0], path, hit[1]))
+    return out
+
+
+def _numbers_of(prof):
+    nums = list(prof.gamma) + list(prof.gain) + list(prof.lift) + [
+        prof.saturation, prof.brightness, prof.contrast]
+    return nums, [tuple(r) for r in prof.ranges if not range_neutral(r)], [
+        (ch, tuple(tuple(p) for p in pts)) for ch, pts in prof.curves
+        if pts != CURVE_IDENTITY]
+
+
+def same_numbers(a, b, tol=0.006):
+    """Do profiles *a* and *b* change colours the same way, whatever their
+    names (PAD-360)?  A file keeps two decimals of a slider's three, so
+    numbers within *tol* are the same."""
+    if a is None or b is None:
+        return False
+    na, ra, ca = _numbers_of(a)
+    nb, rb, cb = _numbers_of(b)
+    if len(ra) != len(rb) or [c[0] for c in ca] != [c[0] for c in cb]:
+        return False
+    flat = lambda nums, rs, cs: list(nums) + [v for r in rs for v in r] + [  # noqa: E731
+        v for _ch, pts in cs for p in pts for v in p]
+    fa, fb = flat(na, ra, ca), flat(nb, rb, cb)
+    if len(fa) != len(fb):
+        return False
+    return all(abs(x - y) <= max(tol, tol * abs(y)) for x, y in zip(fa, fb))
+
+
 #: Starting points the Color profile tab offers.  The first is the default
 #: profile, named "Recommended" in the tab (it was measured on a Godzilla,
 #: but nothing in it is Godzilla's own: it is the display that it corrects).

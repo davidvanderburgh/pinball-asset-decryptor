@@ -417,12 +417,23 @@ export function Controls({ s, p, update }) {
       title="Use a profile saved earlier">Load...<//>
   </div>`;
   const footer = html`<span class="small muted">Saved with this project as you go, like your other changes. Save a copy keeps it for another table.</span>`;
+  // PAD-360: the profile files saved earlier, by file name; the one in use is shown picked
+  const saved = s.saved || [];
+  const savedOpts = [{ value: "", label: saved.length ? (s.saved_on ? "Pick a saved profile..." : "None of these in use") : "None saved yet", disabled: true },
+    ...saved];
   return html`<${Card} title="Adjust" cls="cp-controls" extra=${extra} footer=${footer}>
     <div class="cp-row">
       <span class="lbl">Start from</span>
       <div class="row wrap">
-        ${presets.map((pr) => html`<${Button} size="sm" title=${pr.tip} onClick=${() => call("color.preset", pr.key)}>${pr.label}<//>`)}
+        ${presets.map((pr) => html`<${Button} size="sm" cls=${pr.key === s.preset_on ? "on" : ""}
+          title=${pr.tip + (pr.key === s.preset_on ? " (In use now.)" : "")} onClick=${() => call("color.preset", pr.key)}>${pr.label}<//>`)}
       </div>
+    </div>
+    <div class="cp-row">
+      <label class="lbl" for="cp-saved">Saved profiles</label>
+      <${Select} id="cp-saved" sm value=${s.saved_on || ""} options=${savedOpts} disabled=${!saved.length}
+        cls=${s.saved_on ? "cp-saved on" : "cp-saved"} onChange=${(v) => v && call("color.use_saved", v)}
+        title=${saved.length ? "Use a profile saved earlier with Save a copy. The one in use is shown here." : "Profiles you keep with Save a copy are listed here by file name."} />
     </div>
     <div class="cp-row">
       <label class="lbl" for="cp-name">Profile name</label>

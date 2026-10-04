@@ -37,6 +37,7 @@
  * The playfield's inserts (item 157) print as "LAMP <name> <rrggbb> <pattern> <ms> <mode>" when held,
  * "LAMP OFF <name> <mode>" when handed back and "LAMP PRIORITY <p> <mode>"; the display priority as
  * "DISPLAY <p> <mode>" ("DISPLAY 0" given up, "DISPLAY released" when its mode ended without it).
+ * A light show's paints (pm_lamp_paint, with HARNESS_PLACES=1) print nothing; "END paints <n>" counts them.
  * The last line says how many inserts are still held and the display priority still held.
  */
 #define _GNU_SOURCE
@@ -389,13 +390,19 @@ const char *pm_event_name(unsigned id)
 }
 
 /* ---- the fake inserts (item 157): the Premium 1.16 port's lamp lines the modes can reach ---------- */
-static const struct { const char *name; uint64_t shot; } LAMPS[] = {    /* godzilla_le-1.16.port `lamp` */
-    { "LEFT RAMP", 0x100000ull }, { "RIGHT RAMP", 0x200000ull }, { "BUILDING", 0xc00000ull },
-    { "MAGNA GRAB", 0x80000ull }, { "MASER", 0x8000000ull }, { "MASER READY", 0 },
-    { "POWERLINE LEFT", 0x10000000ull }, { "POWERLINE CENTER", 0x20000000ull }, { "POWERLINE RIGHT", 0x40000000ull },
-    { "SHIELD LEFT", 0x80000000ull }, { "SHIELD CENTER", 0x100000000ull }, { "SHIELD RIGHT", 0x200000000ull },
-    { "SKILL SHOT", 0x400000000ull }, { "BIG LOOP", 0x1000000000ull }, { "TOP SPINNER", 0x1800ull },
-    { "POP BUMPER", 0x40ull }, { "TANK 2", 0 }, { "HEAT RAY", 0 },
+/* (x, y): each insert's place on the playfield picture (the port's "at X,Y"), given out only with
+ * HARNESS_PLACES=1 (PAD-376: a light show paints them); the GI strings are not placed */
+static const struct { const char *name; uint64_t shot; int x, y; } LAMPS[] = {    /* godzilla_le-1.16.port `lamp` */
+    { "LEFT RAMP", 0x100000ull, 69, 272 }, { "RIGHT RAMP", 0x200000ull, 199, 189 }, { "BUILDING", 0xc00000ull, 123, 202 },
+    { "MAGNA GRAB", 0x80000ull, 89, 260 }, { "MASER", 0x8000000ull, 51, 417 }, { "MASER READY", 0, 67, 425 },
+    { "POWERLINE LEFT", 0x10000000ull, 104, 219 }, { "POWERLINE CENTER", 0x20000000ull, 144, 216 },
+    { "POWERLINE RIGHT", 0x40000000ull, 212, 204 },
+    { "SHIELD LEFT", 0x80000000ull, 189, 335 }, { "SHIELD CENTER", 0x100000000ull, 199, 346 },
+    { "SHIELD RIGHT", 0x200000000ull, 215, 356 },
+    { "SKILL SHOT", 0x400000000ull, 49, 284 }, { "BIG LOOP", 0x1000000000ull, 195, 251 },
+    { "TOP SPINNER", 0x1800ull, 165, 207 },
+    { "POP BUMPER", 0x40ull, 251, 413 }, { "TANK 2", 0, 76, 287 }, { "HEAT RAY", 0, 180, 144 },
+    { "LOWER PLAYFIELD GI-WHT(X9)", 0, 0, 0 }, { "UPPER PLAYFIELD GI-WHT(X12)", 0, 0, 0 },
 };
 #define N_LAMPS (int)(sizeof LAMPS / sizeof LAMPS[0])
 static const char *const PATTERN[] = { "solid", "blink", "pulse", "chase" };
@@ -486,9 +493,35 @@ int pm_lamp_release_all(void)
         if (held[k].owner && held[k].owner == current) { lamp_off(k); n++; }
     return n;
 }
-/* hud-layers: the desk has no playfield picture, so no insert is placed and a light show paints none */
-int pm_lamp_xy(int i, int *x, int *y) { (void)i; (void)x; (void)y; return 0; }
-int pm_lamp_paint(int i, unsigned rgb) { (void)i; (void)rgb; return 0; }
+/* hud-layers: the inserts are placed only with HARNESS_PLACES=1 (PAD-376), so the examples' shows
+ * paint none unless a test asks. A paint holds the insert solid, quietly: no LAMP line, but every
+ * change of colour is counted ("END paints <n>") and "lamps" lists the painted inserts as HELD. */
+static unsigned long paints;
+static int places(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("HARNESS_PLACES"); on = e && e[0] == '1'; }
+    return on;
+}
+int pm_lamp_xy(int i, int *x, int *y)
+{
+    if (!places() || i < 0 || i >= N_LAMPS || !(LAMPS[i].x || LAMPS[i].y)) return 0;
+    *x = LAMPS[i].x;
+    *y = LAMPS[i].y;
+    return 1;
+}
+int pm_lamp_paint(int i, unsigned rgb)
+{
+    if (!places() || i < 0 || i >= N_LAMPS) return 0;
+    rgb &= 0xffffffu;
+    if (held[i].owner == current && held[i].pattern == PM_LAMP_SOLID && held[i].rgb == rgb) return 1;
+    held[i].owner = current;
+    held[i].rgb = rgb;
+    held[i].pattern = PM_LAMP_SOLID;
+    held[i].ms = 0;
+    paints++;
+    return 1;
+}
 int pm_lamp_priority(unsigned p)
 {
     printf("%6lu LAMP PRIORITY %u %s\n", now_ms, p, mode_name(current));
@@ -641,5 +674,6 @@ int main(int argc, char **argv)
     }
     printf("%6lu END score player 1 %llu\n", now_ms, (unsigned long long)score[1]);
     printf("%6lu END lamps held %d, display priority %u\n", now_ms, lamps_held(), disp_prio);
+    if (places()) printf("%6lu END paints %lu\n", now_ms, paints);
     return 0;
 }

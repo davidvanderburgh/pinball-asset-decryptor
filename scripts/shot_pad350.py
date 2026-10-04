@@ -1,13 +1,14 @@
-"""PAD-350 proof shots: the Scenes inspector's Colors view.
+"""PAD-350 proof shots: the Scenes tab's Colors (the inspector's third view in v1.88.0,
+the rainbow pop-out bar on the right edge after DragonRR's replies).
 
     python scripts/shot_pad350.py <repo> <out_dir> <prefix>
 
 Serves <repo> on a settings copy whose Stern project is a scratch copy of the Godzilla
 project (shot_pad312's), opens the Scenes tab on Battle Select and photographs the page
-twice: <prefix>_scenes_tab.png as it opens (Layers / Contents / Colors over the inspector),
-then <prefix>_scenes_panel.png after a click on Colors (on Machine screen, with a slider
-moved so the scene is drawn through it).  Before the change there is no Colors: both shots
-are the plain page.
+twice: <prefix>_scenes_tab.png as it opens, then <prefix>_scenes_panel.png after a click
+on Colors (the inspector's Seg in v1.88.0, the rainbow tab after), on Files, the profile
+that goes on each picture switched on in Layers, with a slider moved so the scene is drawn
+through it.
 
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
@@ -57,20 +58,24 @@ def main():
                 "text_scenes.select", base.BATTLE)
             time.sleep(8)
             page.screenshot(path=os.path.join(out_dir, prefix + "_scenes_tab.png"))
-            handle = page.query_selector(".sc-views button:has-text('Colors')")
-            print("colors view:", bool(handle), flush=True)
+            bar = page.query_selector(".cpd-handle")
+            handle = bar or page.query_selector(".sc-views button:has-text('Colors')")
+            print("colors:", "bar" if bar else bool(handle), flush=True)
             if handle:
                 handle.click()
                 time.sleep(1)
-                page.click(".cpane-hd button:has-text('Machine screen')")
+                root = ".cpd-panel" if bar else ".cpane"
+                tabs = ".cpd-tabs" if bar else ".cpane-hd"
+                page.click(tabs + " button:has-text('Files')")
                 time.sleep(1.5)
                 # move Blue's middle shades so the scene is drawn again through it
-                box = page.query_selector(".cpane .cp-slider.b input[type=number]")
+                box = page.query_selector(root + " .cp-slider.b input[type=number]")
                 if box:
                     box.fill("1.6")
                     box.press("Enter")
                 time.sleep(8)
-                page.eval_on_selector(".cpane", "el => { el.scrollTop = 0; }")
+                page.eval_on_selector(".cpd-body" if bar else ".cpane",
+                                      "el => { el.scrollTop = 0; }")
                 page.mouse.move(400, 990)          # no tip left over the shot
                 time.sleep(0.5)
                 ts = (state().get("text_scenes") or {})

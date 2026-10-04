@@ -360,6 +360,12 @@ int pm_block_game_modes(int on)
     printf("%6lu BLOCK %d %s\n", now_ms, on ? 1 : 0, current && current->name ? current->name : "?");
     return 1;
 }
+/* PAD-363: "BLOCKLIST 0x<mask> <mode>" - the game's mode ids a mode holds off (0 = the port's defaults) */
+int pm_block_list(unsigned mask)
+{
+    printf("%6lu BLOCKLIST 0x%x %s\n", now_ms, mask, current && current->name ? current->name : "?");
+    return 1;
+}
 const char *pm_stock_mode_what(unsigned kind)
 {
     return kind & PM_STOCK_BATTLE ? "a battle" : kind & PM_STOCK_MULTIBALL ? "a multiball" : "a stock mode";

@@ -36,13 +36,17 @@ SCREEN_STUBS = [
 
 @pytest.fixture(scope="module")
 def harness(tmp_path_factory):
+    return _build(tmp_path_factory, SCREEN_STUBS, "aside")
+
+
+def _build(tmp_path_factory, stubs, tag):
     cc = _cc()
-    d = tmp_path_factory.mktemp("aside")
+    d = tmp_path_factory.mktemp(tag)
     src = HARNESS
     # pm_show prints the clock: the harness's own definition of now_ms comes after the screen stubs
     src = src.replace("static unsigned long now_ms;\n", "")
     src = src.replace("#include <fcntl.h>\n", "#include <fcntl.h>\nstatic unsigned long now_ms;\n", 1)
-    for old, new in SCREEN_STUBS:
+    for old, new in stubs:
         assert src.count(old) == 1, old
         src = src.replace(old, new)
     (d / "harness.c").write_text(src)
@@ -132,35 +136,45 @@ def test_the_screen_is_not_shown_again_after_its_total_is_gone(harness, tmp_path
 
 
 # ---- PAD-347: blocking the game's modes on Godzilla Premium 1.16 ----------------------------------------------
-def test_the_premium_port_names_only_shot_started_modes_to_refuse():
-    port = _port("godzilla_le-1.16.port")
+def _block_section(name):
+    port = _port(name)
     named = {int(k[1].rsplit("_", 1)[1]): v for k, v in port.items() if k[0] == "site" and k[1].startswith("block_start_")}
-    assert named == {21: [0x000b98fc, 0xe92d4ff0, 0xe1a05000], 23: [0x0010e91c, 0xe92d4ff0, 0xe24dd014]}
-    assert not set(named) & set(range(1, 18))                # never a multiball (1-11) or a battle (12-17)
-    assert port[("data", "block_mode_table")] == [0x007b4aa8]
-    assert port[("value", "block_mode_count")] == [27]
+    objs = {int(k[1].rsplit("_", 1)[1]): v[0] for k, v in port.items() if k[0] == "data" and k[1].startswith("block_obj_")}
+    return port, named, objs
 
 
-def test_the_premium_starts_and_table_match_the_game():
-    """Each named start is that mode's own v[8] (vptr + 0x20; the object's vptr is its vtable + 8: an
-    earlier reading at vtable + 0x20 picked v[6] and hooked nothing a rule calls) and starts as the port says."""
+def test_the_premium_port_names_every_non_multiball_mode_and_checks_two():
+    port, named, objs = _block_section("godzilla_le-1.16.port")
+    assert set(named) == set(range(12, 27))                  # every mode but the multiballs 1-11
+    assert named[21] == [0x000b98fc, 0xe92d4ff0, 0xe1a05000] and named[23] == [0x0010e91c, 0xe92d4ff0, 0xe24dd014]
+    assert objs[21] == 0x007b5b20 and objs[23] == 0x007b5c88 and set(objs) == set(named)
+    assert port[("value", "block_default")] == [(1 << 21) | (1 << 23)]   # the two checked on a machine card
+    assert ("data", "block_mode_table") not in port and ("site", "stock_mode_start") not in port
+
+
+@pytest.mark.parametrize("name", ["deadpool_le-1.14.port", "deadpool_pro-1.16.port"])
+def test_the_deadpool_ports_name_their_modes_and_check_none(name):
+    port, named, objs = _block_section(name)
+    assert len(named) == 18 and set(objs) == set(named)
+    assert port[("value", "block_default")] == [0]           # nothing checked on a machine yet
+    assert not set(named) & {8, 9, 11, 12, 16, 17, 18}         # Deadpool's multiballs
+
+
+def test_the_premium_starts_match_the_game():
+    """Each named start is that mode's own start (vptr + 0x20 on Godzilla, the vptr being the vtable + 8) and
+    starts as the port says."""
     name = "godzilla_le-1.16.port"
     path = next((p for p in ELVES[name] if p and os.path.isfile(p)), None)
     if not path:
         pytest.skip("game program not present for %s" % name)
-    e, port = _Elf(path), _port(name)
+    e, (port, named, objs) = _Elf(path), _block_section(name)
     vtables = {21: 0x63af40, 23: 0x640ed8}                    # cmode_jet_fighter_attack, cmode_tesla_strike
     for mid, vt in vtables.items():
-        site = port[("site", "block_start_%d" % mid)]
-        assert e.u32(vt + 8 + 0x20) == site[0], mid
+        assert e.u32(vt + 8 + 0x20) == named[mid][0], mid
+    for mid, site in named.items():
         assert (e.u32(site[0]), e.u32(site[0] + 4)) == (site[1], site[2]), mid
-    # RuleJetFighters::v[25] starts 21 so: movw/movt r0 = the manager, mov r1,#21, bl get, ldr [r0], ldr [r3,#0x20]
+    # RuleJetFighters::v[25] starts 21 so: mov r1,#21, bl get, ldr [r0], ldr [r3,#0x20]
     assert e.u32(0x1592b8) == 0xe3a01015 and e.u32(0x1592c4) == 0xe5903000 and e.u32(0x1592c8) == 0xe5933020
-    # the manager's get (0xd3fa0): cmp r1,#26 ... movw/movt r3 = the table ... ldr r0,[r3,r1,lsl#2]
-    assert e.u32(0xd3fa0) == 0xe351001a and e.u32(0xd3fb4) == 0xe7930101
-    lo, hi = e.u32(0xd3fac), e.u32(0xd3fb0)
-    imm = lambda w: ((w >> 4) & 0xf000) | (w & 0xfff)        # noqa: E731
-    assert (imm(hi) << 16) | imm(lo) == port[("data", "block_mode_table")][0]
 
 
 def test_the_premium_port_hides_only_the_battle_shots_from_the_battle_rule():
@@ -184,3 +198,61 @@ def test_the_battle_rules_shot_handler_matches_the_game():
     assert e.u32(0x124b58) == 0xe2062601 and e.u32(0x124b68) == 0xe2062602   # and r2, r6, #0x100000 / #0x200000
     assert e.u32(0x124b78) == 0xe2073020                                      # and r3, r7, #0x20
     assert e.u32(0x124d40) == 0xe3a02084 and e.u32(0x124d48) == 0xe58020a0   # mov r2,#132; str r2,[r0,#0xa0]
+
+
+
+# ---- PAD-363: a mode file's game_modes / block_modes ------------------------------------------------------------
+BLOCK_STUBS = [(old, new) for old, new in SCREEN_STUBS] + [
+    ("int pm_aside(void) { return in_game ? stock : 0; }",
+     "int pm_aside(void) { return in_game ? stock : 0; }\n"
+     "int pm_block_list(unsigned m) { printf(\"BLOCKLIST 0x%x\\n\", m); return 1; }\n"
+     "int pm_block_game_modes(int on) { printf(\"BLOCK %d\\n\", on); return 1; }"),
+]
+
+
+@pytest.fixture(scope="module")
+def harness_block(tmp_path_factory):
+    return _build(tmp_path_factory, BLOCK_STUBS, "block")
+
+
+def test_game_modes_block_lists_the_modes_and_holds_them_from_start_to_end(harness_block, tmp_path):
+    out = _run(harness_block, tmp_path, RUSH + "game_modes block\nblock_modes 21, 23\n", "shot", "0x08000000",
+               "tick", "30", "ball_end")
+    assert "unknown key" not in out
+    lines = out.splitlines()
+    i_list, i_on = lines.index("BLOCKLIST 0xa00000"), lines.index("BLOCK 1")
+    i_start = next(i for i, ln in enumerate(lines) if "RUSH START" in ln)
+    i_end = next(i for i, ln in enumerate(lines) if "RUSH END" in ln)
+    assert i_list < i_on < i_start and "BLOCK 0" in lines[i_start:i_end + 2]
+
+
+def test_game_modes_give_way_waits_for_the_games_mode_and_ends_when_one_begins(harness_block, tmp_path):
+    out = _run(harness_block, tmp_path, RUSH + "game_modes give_way\n", "stock", "1", "shot", "0x08000000",
+               "tick", "10", "stock", "0", "shot", "0x08000000", "tick", "10", "stock", "1", "tick", "10")
+    assert "one of the game's modes is running - its trigger count is kept" in out
+    assert out.index("STOCK 0") < out.index("RUSH START") < out.index("RUSH END (the game's own mode began)")
+    assert "BLOCK 1" not in out
+
+
+def test_game_modes_stack_is_what_a_mode_file_without_the_key_does(harness_block, tmp_path):
+    out = _run(harness_block, tmp_path, RUSH, "stock", "1", "shot", "0x08000000", "tick", "10")
+    assert "RUSH START" in out and "BLOCK" not in out and "game's own mode began" not in out
+
+
+@pytest.mark.parametrize("value", ["sideways", ""])
+def test_a_game_modes_that_is_not_known_is_stack(harness_block, tmp_path, value):
+    out = _run(harness_block, tmp_path, RUSH + "game_modes %s\n" % value, "shot", "0x08000000", "tick", "5")
+    assert "game_modes needs stack, give_way or block" in out and "RUSH START" in out
+
+
+def test_the_generator_reads_godzillas_modes_as_the_port_has_them():
+    name = "godzilla_le-1.16.port"
+    path = next((p for p in ELVES[name] if p and os.path.isfile(p)), None)
+    if not path:
+        pytest.skip("game program not present for %s" % name)
+    from pinball_decryptor.plugins.stern import game_mode_blocks as G
+    modes = {m.id: m for m in G.read_modes(open(path, "rb").read())}
+    assert modes[21].name == "Jet Fighter Attack" and modes[21].start == 0x000b98fc and modes[21].blockable
+    assert modes[1].multiball and not modes[1].blockable                # Godzilla Multiball: never offered
+    _port_now, named, _objs = _block_section(name)
+    assert {i for i, m in modes.items() if m.blockable} == set(named)

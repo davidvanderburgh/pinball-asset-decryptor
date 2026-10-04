@@ -297,7 +297,7 @@ static int start(const char *why)
         return 0;
     }
     kit_display(KIT_DISPLAY_WIZARD);
-    kit_isolate(own.give_way);                    /* PAD-347: the game's modes wait for it */
+    kit_isolate_list(own.give_way, own.block_mask);   /* PAD-347/363: the game's modes wait for it */
     run.on = 1;
     run.player = p;
     run.phase = PHASE_BURN;

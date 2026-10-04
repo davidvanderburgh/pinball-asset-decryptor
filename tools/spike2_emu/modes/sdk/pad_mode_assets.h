@@ -103,6 +103,7 @@ struct pa_assets {
     struct { unsigned request; unsigned char keys[16]; char tag[PA_SWAP_TAG]; } swaps[PA_SWAPS_MAX];   /* item 163 */
     unsigned n_swaps;
     int give_way;                         /* PAD-347: `game_modes give_way` - it does not block the game's modes */
+    unsigned block_mask;                  /* PAD-363: `block_modes <id> ...` - which of the game's modes it holds off */
     /* what is under way */
     int running;                          /* between pa_start and pa_end */
     unsigned long clip_due;               /* pm_ms() the start clip plays at; 0 = none */
@@ -209,6 +210,12 @@ static PA_UNUSED void pa_parse_line(struct pa_assets *a, const char *s)
         pa_rest(s, a->name, sizeof a->name);
     } else if (pa_is(key, "game_modes")) {                          /* PAD-347: block (the default) or give_way */
         a->give_way = pa_word(&s, w, sizeof w) && pa_is(w, "give_way");
+    } else if (pa_is(key, "block_modes")) {                         /* PAD-363: the game's mode ids, 0-31 */
+        a->block_mask = 0;
+        while (pa_word(&s, w, sizeof w)) {
+            unsigned id = pa_num(w);
+            if (id < 32) a->block_mask |= 1u << id;
+        }
     } else if (pa_is(key, "clip")) {
         pa_word(&s, w, sizeof w);                                    /* its cue: start, intro, loop, ... */
         if (a->n_clips < PA_CLIPS_MAX && w[0]) {

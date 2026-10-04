@@ -56,6 +56,8 @@ struct mode_cfg {
     unsigned starts_game, starts_ball, cooldown_s;   /* item 139: 0 = no limit */
     int stack_no;                   /* item 140: `stack no` - never beside the game's battle or multiball */
     int aside_keep;                 /* PAD-347: `aside keep` - its screen stays up beside a game mode */
+    int game_modes;                 /* PAD-363: GM_STACK (the default), GM_GIVE_WAY or GM_BLOCK */
+    unsigned block_mask;            /* PAD-363: `block_modes` - the game's mode ids it holds off (0 = the port's) */
     /* item 141: what each shot pays, a shot that ends the mode, and the award ladder */
     uint64_t sa_bits[SHOT_AWARD_MAX], sa_points[SHOT_AWARD_MAX];
     unsigned n_sa;
@@ -239,6 +241,53 @@ static int stack_line(struct slot *M, const char *line)
     if (a[0] == 'n' || a[0] == 'N' || a[0] == '0') cfg.stack_no = 1;
     else if (a[0] == 'y' || a[0] == 'Y' || a[0] == '1') cfg.stack_no = 0;
     else pm_log("stack needs yes or no - \"%.40s\" read as yes", a);
+    return 1;
+}
+
+/* PAD-363: `game_modes stack` (the default: it runs beside the game's modes, its screen stepping aside),
+ * `game_modes give_way` (it starts only while none of the game's modes runs, the trigger count kept, and one of
+ * them beginning ends it) or `game_modes block` (as give_way, and while it runs the game's modes in
+ * `block_modes <id> ...` - or the port's checked defaults - cannot start: pm_block_game_modes). */
+#define GM_STACK    0
+#define GM_GIVE_WAY 1
+#define GM_BLOCK    2
+/* 1 when the line's value is exactly `w` (any case), followed by nothing but spaces or a comment */
+static int value_is(const char *a, const char *w)
+{
+    for (; *w; a++, w++)
+        if ((*a | 0x20) != (*w | 0x20)) return 0;
+    while (*a == ' ' || *a == '\t') a++;
+    return !*a || *a == '#';
+}
+
+static int game_modes_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "game_modes");
+    if (!a) return 0;
+    if (value_is(a, "block")) cfg.game_modes = GM_BLOCK;
+    else if (value_is(a, "give_way")) cfg.game_modes = GM_GIVE_WAY;
+    else if (value_is(a, "stack")) cfg.game_modes = GM_STACK;
+    else {
+        cfg.game_modes = GM_STACK;
+        pm_log("game_modes needs stack, give_way or block - \"%.40s\" read as stack", a);
+    }
+    return 1;
+}
+
+static int block_modes_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "block_modes");
+    unsigned v;
+    if (!a) return 0;
+    cfg.block_mask = 0;
+    while (*a) {
+        while (*a == ' ' || *a == '\t' || *a == ',') a++;
+        if (!*a) break;
+        if (*a < '0' || *a > '9') { pm_log("block_modes takes the game's mode ids, 0-31 - \"%.40s\" ignored", a); break; }
+        for (v = 0; *a >= '0' && *a <= '9'; a++) v = v * 10 + (unsigned)(*a - '0');
+        if (v < 32) cfg.block_mask |= 1u << v;
+        else pm_log("block_modes: %u is not a mode id the runtime can hold off (0-31)", v);
+    }
     return 1;
 }
 
@@ -1597,6 +1646,8 @@ static void cfg_line(struct slot *M, const char *line)
     if (starts_line(M, line)) return;
     if (stack_line(M, line)) return;
     if (aside_line(M, line)) return;         /* PAD-347 */
+    if (game_modes_line(M, line)) return;    /* PAD-363 */
+    if (block_modes_line(M, line)) return;   /* PAD-363 */
     if (multiball_line(M, line)) return;     /* item 167 */
     if (ball_save_line(M, line)) return;     /* PAD-225 */
     if (params_line(M, line)) return;
@@ -1761,7 +1812,15 @@ static void mode_start(struct slot *M, const char *why)
     }
     if (!starts_allowed(M, why)) return;     /* item 139: how often it can start */
     if (!stack_allows(M, why)) return;       /* item 140: the game's own modes */
+    if (cfg.game_modes != GM_STACK && pm_stock_mode_running(PM_STOCK_ANY) > 0) {   /* PAD-363 */
+        pm_log("%s not started (%s): one of the game's modes is running - its trigger count is kept", cfg.name, why);
+        return;
+    }
     if (!pm_begin()) return;                 /* a mode written in C is running */
+    if (cfg.game_modes == GM_BLOCK) {        /* PAD-363: the listed game's modes cannot start while it runs */
+        pm_block_list(cfg.block_mask);
+        if (!pm_block_game_modes(1)) pm_log("%s: this game's port cannot hold its modes off - it gives way to them", cfg.name);
+    }
     run.mball_on = run.mball_wait = 0;
     if (cfg.mball_balls && cfg.mball_on_bits) {
         run.mball_wait = 1;                  /* PAD-228: served on its shot, while the mode runs */
@@ -1829,6 +1888,7 @@ static void mode_end(const char *why)
     uint64_t net;
     if (!run.active || !M) return;
     run.active = 0;
+    pm_block_game_modes(0);                  /* PAD-363: the game's modes may start again */
     starts_ended(M);
     end_pending = 0;
     clip_later_drop("the mode ended");       /* a start clip still waiting never plays after the end */
@@ -2296,6 +2356,10 @@ static void on_tick(void)
     if (!run.active || !(M = run.slot)) return;
     if (!pm_in_game() || pm_player() != run.player) {
         mode_end("left the game, or the player changed");
+        return;
+    }
+    if (cfg.game_modes != GM_STACK && pm_aside()) {   /* PAD-363: one of the game's modes began anyway */
+        mode_end("the game's own mode began");
         return;
     }
     if (end_pending == M) {                        /* item 141: its end shot was hit */

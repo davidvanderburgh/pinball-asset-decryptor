@@ -132,32 +132,32 @@ def test_the_screen_is_not_shown_again_after_its_total_is_gone(harness, tmp_path
 
 
 # ---- PAD-347: blocking the game's modes on Godzilla Premium 1.16 ----------------------------------------------
-def test_the_premium_port_names_the_game_mode_start_and_only_safe_modes_to_refuse():
+def test_the_premium_port_names_only_shot_started_modes_to_refuse():
     port = _port("godzilla_le-1.16.port")
-    assert port[("site", "stock_mode_start")] == [0x0007eac0, 0xe92d4010, 0xe1a04000]
+    named = {int(k[1].rsplit("_", 1)[1]): v for k, v in port.items() if k[0] == "site" and k[1].startswith("block_start_")}
+    assert named == {21: [0x000b98fc, 0xe92d4ff0, 0xe1a05000], 23: [0x0010e91c, 0xe92d4ff0, 0xe24dd014]}
+    assert not set(named) & set(range(1, 18))                # never a multiball (1-11) or a battle (12-17)
     assert port[("data", "block_mode_table")] == [0x007b4aa8]
     assert port[("value", "block_mode_count")] == [27]
-    ids = port[("value", "block_mode_ids")][0]
-    assert not ids & 0xffe                                  # never a multiball (1-11): locks, the magnets
-    assert not ids & (0x3f << 12)                           # never a battle (12-17): the scoop, its select screen
-    assert ids == sum(1 << i for i in (18, 19, 21, 22, 23, 24, 25))
 
 
-def test_the_premium_start_and_table_match_the_game():
+def test_the_premium_starts_and_table_match_the_game():
+    """Each named start is that mode's own v[8] (vptr + 0x20; the object's vptr is its vtable + 8: an
+    earlier reading at vtable + 0x20 picked v[6] and hooked nothing a rule calls) and starts as the port says."""
     name = "godzilla_le-1.16.port"
     path = next((p for p in ELVES[name] if p and os.path.isfile(p)), None)
     if not path:
         pytest.skip("game program not present for %s" % name)
     e, port = _Elf(path), _port(name)
-    site = port[("site", "stock_mode_start")]
-    assert (e.u32(site[0]), e.u32(site[0] + 4)) == (site[1], site[2])
+    vtables = {21: 0x63af40, 23: 0x640ed8}                    # cmode_jet_fighter_attack, cmode_tesla_strike
+    for mid, vt in vtables.items():
+        site = port[("site", "block_start_%d" % mid)]
+        assert e.u32(vt + 8 + 0x20) == site[0], mid
+        assert (e.u32(site[0]), e.u32(site[0] + 4)) == (site[1], site[2]), mid
+    # RuleJetFighters::v[25] starts 21 so: movw/movt r0 = the manager, mov r1,#21, bl get, ldr [r0], ldr [r3,#0x20]
+    assert e.u32(0x1592b8) == 0xe3a01015 and e.u32(0x1592c4) == 0xe5903000 and e.u32(0x1592c8) == 0xe5933020
     # the manager's get (0xd3fa0): cmp r1,#26 ... movw/movt r3 = the table ... ldr r0,[r3,r1,lsl#2]
     assert e.u32(0xd3fa0) == 0xe351001a and e.u32(0xd3fb4) == 0xe7930101
     lo, hi = e.u32(0xd3fac), e.u32(0xd3fb0)
     imm = lambda w: ((w >> 4) & 0xf000) | (w & 0xfff)        # noqa: E731
     assert (imm(hi) << 16) | imm(lo) == port[("data", "block_mode_table")][0]
-    # the hurry-ups' start is a branch to it
-    w = e.u32(0xb8dac)
-    off = w & 0xffffff
-    off = off - (1 << 24) if off & 0x800000 else off
-    assert (w >> 24) == 0xea and 0xb8dac + 8 + 4 * off == site[0]

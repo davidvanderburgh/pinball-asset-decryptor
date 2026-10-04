@@ -162,16 +162,16 @@ site stock_battle_running 0x000d43d0 0xe92d4070 0xe30f66a0
 # v[22]: an active mode with (kind & 0x21) == 1 (every multiball)
 site stock_multiball_running 0x000d45a8 0xe92d40f8 0xe30f66a0
 data stock_mode_manager       0x007b0ce4
-# PAD-347: a mode may keep the game's modes from starting (pm_block_game_modes). Every mode starts through
-# the cmode base start (all 27 vtables' v[8] are 0x7eac0, or 0xb8dac = `b 0x7eac0` for the hurry-ups); the
-# manager's get (0xd3fa0) reads the 27 mode objects from the table below. Refused (a veto at the start's
-# entry, the base start's own "cannot start" path) only: 18 super train, 19 o2 destroyer, 21 jet fighter
-# attack, 22 planet X hurry-up, 23 tesla strike, 24 monster rampage, 25 hedorah - the timed modes and
-# hurry-ups a shot starts. Never the multiballs 1-11 (locks, magnets) or the battles 12-17 (the scoop).
-site stock_mode_start         0x0007eac0 0xe92d4010 0xe1a04000
+# PAD-347: a mode may keep the game's modes from starting (pm_block_game_modes). A rule starts a mode by
+# calling its START, v[8] at the object's vptr + 0x20 (the vptr is the vtable + 8); the manager's get
+# (0xd3fa0) reads the 27 mode objects from block_mode_table. Each mode has its own start; one veto site
+# per mode that may be refused, its entry words checked: only modes a rule's shot handler starts -
+# 21 jet fighter attack (RuleJetFighters::v[25], call 0x1592c0) and 23 tesla strike (RulePowerlines).
+# Never a multiball 1-11 (locks, the magnets) or a battle 12-17 (the scoop): those are not named.
+site block_start_21           0x000b98fc 0xe92d4ff0 0xe1a05000
+site block_start_23           0x0010e91c 0xe92d4ff0 0xe24dd014
 data block_mode_table         0x007b4aa8
 value block_mode_count        27
-value block_mode_ids          0x03ec0000
 
 # ---- events (item 147): MODE_SDK.md, Events ----------------------------------------------------
 # The ids are Pro 1.15's, and every function that dispatches them has the same shape here

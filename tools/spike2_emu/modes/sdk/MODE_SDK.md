@@ -986,17 +986,18 @@ starting". The examples now keep to themselves:
 - They start only while none of the game's modes runs and fewer than two balls are in play, and stay
   ready (`kit_wait_game`).
 - While one runs it BLOCKS the game's modes it may refuse (`pm_block_game_modes`, from `kit_isolate`
-  right after `kit_begin`). On Godzilla every one of the 27 modes starts through the cmode base start
-  (`site stock_mode_start`, 0x7eac0 on Premium 1.16: all 27 vtables' `v[8]` are it, or a branch to
-  it), which only sets the mode's start flag for the player up and returns at once, starting nothing,
-  when the mode's own "cannot start" byte is set. The runtime refuses the start at its entry with a
-  veto hook - that same path - so the rule that asked carries on. Only the ids in `value
-  block_mode_ids` are refused: the timed modes and hurry-ups a shot starts (18 Super Train, 19
-  Oxygen Destroyer, 21 Jet Fighter Attack, 22 Planet X Hurry-Up, 23 Tesla Strike, 24 Monster
-  Rampage, 25 Hedorah). The multiballs (balls in a lock; the Godzilla and Mechagodzilla magnets) and
-  the battles (the scoop, the select screen) are never refused until each is proven safe: one of
-  those starting still ends ours (`kit_game_began`), as a mode whose assets file says `game_modes
-  give_way` does for every game mode.
+  right after `kit_begin`). A rule starts one of the game's modes by calling the mode's START, its
+  `v[8]` at the object's vptr + 0x20 (the vptr is the vtable + 8), on the object the manager's get hands
+  it. Each mode has its own start, so the port names one veto site per mode a mode of ours may refuse
+  (`site block_start_<id>`), and the runtime refuses that start at its entry while the asking mode runs:
+  the mode never begins, and the rule that asked carries on. Only modes a rule's shot handler starts
+  are named - on Premium 1.16, 21 Jet Fighter Attack (RuleJetFighters) and 23 Tesla Strike
+  (RulePowerlines). The multiballs (balls in a lock; the Godzilla and Mechagodzilla magnets), the
+  battles (the scoop, the select screen) and the timed modes whose starter is not yet traced are not
+  named: one of those starting still ends ours (`kit_game_began`), as a mode whose assets file says
+  `game_modes give_way` does for every game mode. (A first reading took each vtable's word at +0x20,
+  which is `v[6]`, a base routine every mode shares, and hooked nothing a rule calls: caught in the
+  emulator, where a forced Jet Fighter Attack still started.)
 
 **Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
 shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the

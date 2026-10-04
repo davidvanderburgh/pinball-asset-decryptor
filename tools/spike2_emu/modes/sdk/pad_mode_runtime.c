@@ -2898,39 +2898,42 @@ int pm_aside(void)
 
 /* ---- PAD-347: a mode that keeps the game's own modes from starting -----------------------------------
  * David (2026-10-04): "make isolated modes like our own custom ones that prevent the stock modes from
- * starting." Every one of Godzilla's 27 modes starts through ONE function (`site stock_mode_start`, 0x7eac0
- * on Premium 1.16; the hurry-ups' own start is a branch to it): the cmode base start, which sets the mode's
- * start flag for the player up - and returns at once, starting nothing, when the mode's own "cannot start"
- * byte is set. A start refused here is that same path: the rule that asked carries on, as it does for a mode
- * the game will not start. Only the modes the port names as safe to refuse are refused (`value
- * block_mode_ids`, a mask over the mode table `data block_mode_table` of `value block_mode_count`
- * entries): the timed modes and hurry-ups a shot starts. A multiball (balls in a lock, a magnet: PAD-353)
- * or a battle (the scoop, its select screen) is never refused; a mode that blocks gives way to those. */
+ * starting." A rule of the game's starts one of its modes by calling the mode's START (its v[8], at the
+ * object's vptr + 0x20; the manager's get hands the rule the object). Every mode has its own start, so the
+ * port names one site per mode a mode of ours may refuse (`site block_start_<id>`, the start's entry), and
+ * a veto there - while the asking mode runs - keeps that mode from starting at all: the rule that asked
+ * carries on as after any call. The refused object is checked against the game's mode table (`data
+ * block_mode_table`, `value block_mode_count` entries) at the site's id. Only modes a rule's SHOT HANDLER
+ * starts are named (on Godzilla Premium 1.16: 21 Jet Fighter Attack from RuleJetFighters, 23 Tesla
+ * Strike from RulePowerlines); a multiball (balls in a lock, the two magnets: PAD-353) or a battle (the
+ * scoop, its select screen) never is, and a mode that blocks still gives way to those. */
+#define BLOCK_IDS 32
 static const struct pm_mode *block_owner;
 static unsigned block_said;              /* the ids refused this hold, one bit each */
+static unsigned block_named;             /* the ids whose start is hooked, one bit each */
 
 static int block_id(unsigned obj)
 {
     unsigned t = data("block_mode_table");
     long n = pm_port_value("block_mode_count", 0), i;
     if (!t || !obj) return -1;
-    for (i = 0; i < n && i < 32; i++)
+    for (i = 0; i < n && i < BLOCK_IDS; i++)
         if (((const unsigned *)(unsigned long)t)[i] == obj) return (int)i;
     return -1;
 }
 
-static int on_stock_mode_start(unsigned *r)
+static int on_block_start(unsigned *r)
 {
     int id;
     if (!block_owner || running != block_owner || !pm_in_game()) return 0;
     id = block_id(r[0]);
-    if (id < 0 || !(((unsigned long)pm_port_value("block_mode_ids", 0) >> id) & 1u)) return 0;
+    if (id < 0 || !(block_named & (1u << id))) return 0;          /* not a mode the port lets us refuse */
     if (!(block_said & (1u << id))) {
         block_said |= 1u << id;
         say("block: the game's mode %d did not start - %s is running", id,
             block_owner->name ? block_owner->name : "a mode");
     }
-    return 1;                                  /* refused: the base start's own "cannot start" path */
+    return 1;                                  /* refused: the mode's start never runs */
 }
 
 int pm_block_game_modes(int on)
@@ -2946,8 +2949,8 @@ int pm_block_game_modes(int on)
     if (!running || running != current) return 0;
     block_owner = current;
     block_said = 0;
-    say("block: %s keeps the game's timed modes and hurry-ups from starting while it runs (mask 0x%lx)",
-        current->name ? current->name : "a mode", (unsigned long)pm_port_value("block_mode_ids", 0));
+    say("block: %s keeps the game's modes 0x%x (one bit each) from starting while it runs",
+        current->name ? current->name : "a mode", block_named);
     return 1;
 }
 
@@ -2959,22 +2962,33 @@ static void block_tick(void)
     block_owner = 0;
 }
 
-/* from the constructor: the veto on the game's mode start, when the port names it and its table */
+/* from the constructor: a veto on each start the port names, when it names the mode table too */
 static void block_arm(void)
 {
-    if (!site("stock_mode_start")) return;      /* a port without it: silent */
-    if (!data("block_mode_table") || pm_port_value("block_mode_count", 0) <= 0 || !pm_port_value("block_mode_ids", 0)) {
-        say("block: off - the port names the game's mode start but not its table or the modes that may be refused");
+    char name[24];
+    unsigned id;
+    int any = 0;
+    for (id = 0; id < BLOCK_IDS; id++) {
+        pm_snprintf(name, sizeof name, "block_start_%u", id);
+        if (site(name)) any = 1;
+    }
+    if (!any) return;                            /* a port without them: silent */
+    if (!data("block_mode_table") || pm_port_value("block_mode_count", 0) <= 0) {
+        say("block: off - the port names mode starts to refuse but not the game's mode table");
         return;
     }
-    if (!hook_veto(fn("stock_mode_start"), on_stock_mode_start)) {
-        say("block: off - the game's mode start 0x%08x could not be hooked", fn("stock_mode_start"));
+    for (id = 0; id < BLOCK_IDS; id++) {
+        pm_snprintf(name, sizeof name, "block_start_%u", id);
+        if (!fn(name)) continue;                 /* not named, or its words do not match this build */
+        if (hook_veto(fn(name), on_block_start)) block_named |= 1u << id;
+        else say("block: the start of the game's mode %u (0x%08x) could not be hooked", id, fn(name));
+    }
+    if (!block_named) {
+        say("block: off - none of the named starts could be hooked");
         return;
     }
     can |= PM_CAN_BLOCK_GAME;
-    say("block: on - the game's mode start 0x%08x is hooked; a mode may keep these of the game's %ld modes "
-        "from starting: mask 0x%lx", fn("stock_mode_start"), pm_port_value("block_mode_count", 0),
-        (unsigned long)pm_port_value("block_mode_ids", 0));
+    say("block: on - a mode may keep these of the game's modes from starting: 0x%x (one bit each)", block_named);
 }
 
 /* ---- a multiball of the mode's own (item 167) ---------------------------------------------------

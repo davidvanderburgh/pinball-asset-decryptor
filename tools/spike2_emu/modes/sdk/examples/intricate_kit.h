@@ -701,8 +701,8 @@ static KIT_UNUSED int kit_game_began(void)
 }
 
 /* PAD-347 (David, 2026-10-04: "isolated modes like our own custom ones that prevent the stock modes from
- * starting"): right after kit_begin, a mode BLOCKS the game's modes the port lets it refuse (on Godzilla the
- * timed modes and hurry-ups a shot starts) for as long as it runs, unless its assets file says `game_modes
+ * starting"): right after kit_begin, a mode BLOCKS the game's modes the port lets it refuse (on Godzilla Jet
+ * Fighter Attack and Tesla Strike, which shots start) for as long as it runs, unless its assets file says `game_modes
  * give_way`. A multiball or a battle of the game's is never refused: kit_game_began still ends ours for those.
  * 1 = blocking. Given back in kit_end / kit_end_after / kit_end_now (and by the runtime when the mode ends). */
 static KIT_UNUSED int kit_isolate(int give_way)
@@ -712,8 +712,8 @@ static KIT_UNUSED int kit_isolate(int give_way)
         return 0;
     }
     if (pm_block_game_modes(1)) {
-        pm_log("isolated: blocks the game's timed modes and hurry-ups while it runs (a multiball or a battle of "
-               "the game's still ends it)");
+        pm_log("isolated: blocks the game's modes the port lets it refuse while it runs (any other mode of the "
+               "game's starting still ends it)");
         return 1;
     }
     pm_log("isolated: this port cannot block the game's modes - it gives way to them");

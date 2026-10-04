@@ -1517,7 +1517,7 @@ def test_an_isolated_mode_blocks_the_games_modes_from_its_start_to_its_end(harne
     begun = _at(out, "[%s] START" % mode)
     on = _at(out, "BLOCK 1 %s" % mode)
     assert on is not None and on <= begun, out[-2000:]                       # before anything of its own
-    assert has(out, mode, "isolated: blocks the game's timed modes and hurry-ups while it runs")
+    assert has(out, mode, "isolated: blocks the game's modes the port lets it refuse while it runs")
     ended = _at(out, "[%s] END (ball ended)" % mode)
     off = _at(out, "BLOCK 0 %s" % mode)
     assert ended is not None and off is not None and off <= ended + 20, out[-2000:]

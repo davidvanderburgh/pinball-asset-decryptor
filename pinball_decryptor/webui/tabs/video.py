@@ -1091,13 +1091,13 @@ class VideoTab(BestQualityMixin, TabService):
         if value is None:
             self._color.pop(rel, None)
             self.log("Replace Video: %s follows the Color profile tab's box "
-                     "again (%s)." % (rel, "corrected" if self._color_all
-                                      else "not corrected"), "info")
+                     "again (%s)." % (rel, "color profile attached" if self._color_all
+                                      else "no color profile attached"), "info")
         else:
             self._color[rel] = bool(value)
             self.log("Replace Video: %s %s." % (
-                rel, "gets the chosen-files color profile" if value
-                else "goes on the card in its own colors"), "info")
+                rel, "has the color profile attached" if value
+                else "has no color profile attached"), "info")
         self._save_staged()
         self._refresh_list()
         self._color_changed()

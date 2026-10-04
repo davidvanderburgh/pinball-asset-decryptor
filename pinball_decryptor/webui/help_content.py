@@ -679,23 +679,23 @@ HELP_CONTENT = {
          "what they have, and slots this card doesn't have are skipped. The "
          "file only names your files, it doesn't hold them."),
         ("Color column (Spike 2)",
-         "A replaced clip shows a Color switch (green on, red off): on, the "
-         "Color profile tab's individual files profile is baked into it when "
-         "you build (it is re-encoded for that); off, it goes on the card in "
-         "its own colors. The Color profile tab's 'Every replaced video' sets "
+         "A replaced clip shows a Color palette: green, a color profile is "
+         "attached to it, so the Color profile tab's individual files profile is "
+         "baked into it when you build (it is re-encoded for that); red, no "
+         "color profile is attached and it goes on the card as it is. The Color profile tab's 'Every replaced video' sets "
          "every clip that has no switch of its own. The game's own clips show "
          "a blue lock and are never changed; tick Advanced on the toolbar to "
-         "give each one its own switch, and switching one off (or unticking "
+         "give each one its own palette, and detaching one (or unticking "
          "Advanced) puts the original back."),
         ("Preview colors (Spike 2)",
          "The row above the players shows the clips the way the machine will, "
          "with a switch for each step: the Whole screen overlay, the "
-         "Individual files correction (a replacement with its Color switch "
-         "on) and the Machine screen. Turn them on and off to see what each "
+         "Individual files correction (a replacement with the color profile "
+         "attached) and the Machine screen. Turn them on and off to see what each "
          "one does; all three off is your PC's own colors. Every clip goes "
-         "through the Machine screen; tick the gear menu's 'Switched-off "
-         "files in their own colors' to let a replacement with its Color "
-         "switch off skip it (it still gets the overlay). Click a name to open it on the Color profile "
+         "through the Machine screen; tick the gear menu's 'Files with no "
+         "color profile attached skip the Machine screen' to let a replacement "
+         "with no color profile attached skip it (it still gets the overlay). Click a name to open it on the Color profile "
          "tab. Only the preview changes: the card is not, and no clip is "
          "re-encoded for it."),
     ],
@@ -707,16 +707,15 @@ HELP_CONTENT = {
          "format (transparency is kept where the original has it). Keep "
          "the original resolution for best results."),
         ("Color column (Spike 2)",
-         "Every row has a Color mark. A replaced picture shows a palette "
-         "(green on, red off): on, the Color profile "
-         "tab's individual files profile is baked into it when you build, so it "
-         "looks on the machine the way it looks here; unticked, it goes on "
-         "the card in its own colors. The box under the preview is the "
-         "same switch. The Color profile tab's 'Every replaced picture' "
+         "Every row has a Color mark. A replaced picture shows a palette: "
+         "green, a color profile is attached to it, so the Color profile "
+         "tab's individual files profile is baked into it when you build; red, "
+         "no color profile is attached and it goes on the card as it is. The "
+         "box under the preview does the same. The Color profile tab's 'Every replaced picture' "
          "sets every picture that has no box of its own. The game's own "
          "pictures show a blue lock and are never changed; tick 'Unlock "
          "extracted images' under Advanced to give each one its own "
-         "switch, and switching one off (or locking again) puts the "
+         "palette, and detaching one (or locking again) puts the "
          "original back."),
         ("A bigger picture than the original",
          "Stern Spike 2: a picture inside a game scene (Source \"Radium\", "
@@ -1082,7 +1081,7 @@ HELP_CONTENT = {
          "The whole screen overlay reaches the game's own art too, which "
          "Stern already made for that screen. Adjust individual files for "
          "a second profile that is baked into only the replaced pictures "
-         "and videos (and pictures added in Scenes) you switch on: tick "
+         "and videos (and pictures added in Scenes) it is attached to: tick "
          "'Every replaced picture' or 'Every replaced video' there, or one "
          "file at a time in the Color column of the Images and Video tabs "
          "and the palette in the Scenes layers. It starts from Recommended. "
@@ -1103,15 +1102,15 @@ HELP_CONTENT = {
         ("Preview colors (Scenes)",
          "The row under the Scenes preview draws the scene the way the "
          "machine will, with a switch for each step: the Whole screen "
-         "overlay, the Individual files correction (the files you switch on) "
+         "overlay, the Individual files correction (the files it is attached to) "
          "and the Machine screen (set on the Color profile tab; until you "
          "set one, the Recommended screen). Turn them on and "
          "off to see what each one does; all three off is your PC's own "
          "colors. The Machine screen reaches the pictures and videos, a test "
          "card you added included, but not lines of text: they keep their "
-         "own color and get only the overlay. Tick the gear menu's 'Switched-off files in "
-         "their own colors' to let a file whose color switch is off (red in "
-         "Layers) skip it, to see it against the game's own art; it still "
+         "own color and get only the overlay. Tick the gear menu's 'Files with no color "
+         "profile attached skip the Machine screen' to let a file with no color "
+         "profile attached (a red palette in Layers) skip it, to see it against the game's own art; it still "
          "gets the overlay. Click a name to open it on the "
          "Color profile tab. Only the preview changes: the card is not."),
         ("Color profiles bar (Scenes)",

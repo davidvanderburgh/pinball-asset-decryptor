@@ -100,11 +100,11 @@ const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 5
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
                 aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert" };
 // PAD-312: the chosen-files color profile, baked into this clip as it is converted
-const COLOR_TIP = "Green: the Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that), so it looks on the machine the way it looks on your PC. Red: it goes on the card in its own colors. Blue lock: the game's own clip, never touched (tick Advanced to unlock it). A switch you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
+const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build (it is re-encoded for that). Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own clip, never touched (tick Advanced to unlock it). A palette you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
 // PAD-336: the Advanced box unlocks the game's own clips on this tab only
 const ADV_TIP = { head: "Advanced: unlock the game's own clips", lines: [
-  "Gives the game's own clips a Color switch too, on this tab only (the Images tab has its own box for pictures, and Scenes keeps its locks).",
-  "A clip you switch on is re-encoded from its original with the Color profile tab's individual files profile when you build.",
+  "Gives the game's own clips a Color palette too, on this tab only (the Images tab has its own box for pictures, and Scenes keeps its locks).",
+  "A clip you attach the color profile to is re-encoded from its original with the Color profile tab's individual files profile when you build.",
   "Untick it to lock them again; any clip already built that way gets its original back."] };
 // PAD-334: the same blue lock / red / green palette as a picture's switch in Scenes
 const colorTip = (r) => (r.col_lock
@@ -112,15 +112,15 @@ const colorTip = (r) => (r.col_lock
       "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
       "Choose a replacement to correct a clip of your own, or tick Advanced to unlock it."] }
   : r.col_stock
-  ? { head: r.col ? "Color: the game's own clip, corrected" : "Color: the game's own clip, as shipped", lines: [
-      ["Click", r.col ? "leave it as the game shipped it" : "correct its colors for the machine"],
+  ? { head: r.col ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+      ["Click", r.col ? "detach the color profile" : "attach the color profile"],
       r.col ? "It is re-encoded from its original with the individual files profile when you build."
         : "Unlocked by Advanced. It stays as the game shipped it.",
       "Set for this clip only: the Every replaced video box never reaches the game's own clips."] }
-  : { head: r.col ? "Color: corrected for the machine" : "Color: its own colors", lines: [
-      ["Click", r.col ? "keep its own colors" : "correct its colors for the machine"],
+  : { head: r.col ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+      ["Click", r.col ? "detach the color profile" : "attach the color profile"],
       r.col ? "The Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that)."
-        : "It goes on the card in its own colors.",
+        : "It goes on the card as it is.",
       r.col_own ? "Set for this clip." : "Follows the Color profile tab's box for every replaced video."] });
 // The long-named columns share the width that is left over (more or less
 // of it); the others keep the width that fits them, so a narrow window
@@ -620,8 +620,8 @@ export default function VideoTab() {
       ] },
       info.color && { label: "This clip's colors", submenu: [
         { label: `Follow the Color profile tab's box (${info.color_follow})`, checked: info.color === "box", onClick: () => call("video.set_color", rel, null) },
-        { label: "Correct its colors for the machine", checked: info.color === "on", onClick: () => call("video.set_color", rel, true) },
-        { label: "Keep its own colors", checked: info.color === "off", onClick: () => call("video.set_color", rel, false) },
+        { label: "Attach the color profile", checked: info.color === "on", onClick: () => call("video.set_color", rel, true) },
+        { label: "No color profile attached", checked: info.color === "off", onClick: () => call("video.set_color", rel, false) },
       ] },
       { label: "This clip's length", submenu: [
         { label: `Follow the Trim / pad box (${info.length_follow})`, checked: info.length === "box", onClick: () => call("video.set_length", rel, null) },
@@ -705,7 +705,7 @@ export default function VideoTab() {
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>` },
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
       render: (r) => (r.col_lock
-        ? html`<span class="vid-color locked" aria-label="The game's own clip: no color switch" ...${tip(colorTip(r))}><${Icon} name="lock" /></span>`
+        ? html`<span class="vid-color locked" aria-label="The game's own clip: no color profile can be attached" ...${tip(colorTip(r))}><${Icon} name="lock" /></span>`
         : r.col == null ? "" : html`<button type="button" class=${cx("vid-color", r.col ? "on" : "off", r.col_own && "own")}
         aria-label=${r.col_stock ? "Correct the game's own clip's colors for the machine" : "Correct this clip's colors for the machine"} aria-pressed=${r.col ? "true" : "false"} ...${tip(colorTip(r))}
         onClick=${(e) => { e.stopPropagation(); if (e.detail > 1) { e.preventDefault(); return; } call("video.set_color", r.rel, !r.col); }}>

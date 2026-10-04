@@ -1099,7 +1099,7 @@ class ImagesTab(TabService):
             self._color.pop(rel, None)
             back = (not self._is_running()
                     and cp.put_back_uncorrected(self._scan_dir, rel))
-            self.log("Replace Images: %s keeps its own colors%s." % (
+            self.log("Replace Images: %s has no color profile attached%s." % (
                 rel, " (its uncorrected copy is back in the project folder)"
                 if back else ""), "info")
         elif stock and not value:
@@ -1116,13 +1116,13 @@ class ImagesTab(TabService):
             self._color.pop(rel, None)
             self.log("Replace Images: %s follows the Color profile tab's "
                      "box again (%s)." % (
-                         rel, "corrected" if self._color_all
-                         else "not corrected"), "info")
+                         rel, "color profile attached" if self._color_all
+                         else "no color profile attached"), "info")
         else:
             self._color[rel] = bool(value)
             self.log("Replace Images: %s %s." % (
-                rel, "gets the chosen-files color profile" if value
-                else "goes on the card in its own colors"), "info")
+                rel, "has the color profile attached" if value
+                else "has no color profile attached"), "info")
         self._save_staged_changes()
         i = self._idx.get(rel)
         if i is not None:
@@ -2010,8 +2010,8 @@ class ImagesTab(TabService):
         state = self._color_state(iid)
         if state is not None:
             items.append({"sep": True})
-            items.append({"label": "Correct its colors for the machine"
-                          if not state else "Keep its own colors",
+            items.append({"label": "Attach the color profile"
+                          if not state else "Detach the color profile",
                           "act": "color_off" if state else "color_on"})
             if iid in self._color and self._assignments.get(iid):
                 items.append({"label": "Colors: follow the Color profile "

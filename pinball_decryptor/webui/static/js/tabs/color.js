@@ -660,13 +660,13 @@ export function CurveEditor({ s, p, update }) {
 
 export const MODES = [
   { value: "display", label: "Adjust whole screen overlay", title: "One correction drawn over everything the game shows: its own art, videos, mode screens, text and your replacements. No file is changed." },
-  { value: "assets", label: "Adjust individual files", title: "A correction baked into the replaced pictures and videos you switch on (and pictures added in Scenes). The game's own art is left as Stern made it." },
+  { value: "assets", label: "Adjust individual files", title: "A correction baked into the replaced pictures and videos you attach it to (and pictures added in Scenes). The game's own art is left as Stern made it." },
   { value: "screen", label: "Machine screen (preview only)", title: "Not a correction: how the machine's screen changes what it is given. Only the preview uses it (Scenes and the Video tab's players), when its Machine screen switch is on. Nothing is written to the card." },
 ];
 
 export const MODE_WORDS = {
   display: "Drawn over everything the game shows, its own art included; no file is changed.",
-  assets: "Baked into the replaced files you switch on; the game's own art is left alone.",
+  assets: "Baked into the replaced files it is attached to; the game's own art is left alone.",
   screen: "How the machine's screen changes what it is given. Only the Scenes preview uses it; nothing is written to the card.",
 };
 
@@ -689,7 +689,7 @@ export function WhichFiles({ s }) {
     <${Check} checked=${!!s.all_videos} label="Every replaced video"
       title="Every clip picked on the Video tab gets this profile baked in when you build (each is re-encoded for it), unless its own box there says otherwise."
       onChange=${(v) => call("color.set_all", "videos", v)} />
-    <p class="small muted cp-which-now">${words ? `Now: ${words}.` : "No file is switched on yet."} One file at a time: its box in the Color column of the Images or Video tab, or its palette in the Scenes layers. The game's own pictures and clips have no box: Stern made them for this screen.</p>
+    <p class="small muted cp-which-now">${words ? `Now: ${words}.` : "It is not attached to any file yet."} One file at a time: its box in the Color column of the Images or Video tab, or its palette in the Scenes layers. The game's own pictures and clips have no box: Stern made them for this screen.</p>
   <//>`;
 }
 
@@ -856,7 +856,7 @@ export default function ColorTab() {
     ${screen ? html`<${Note} kind="info" cls="cp-both"><b>Preview only.</b> Scenes draws the game's own art and your files through this, after the whole screen overlay. The two corrections are not changed by it.<//>`
     : html`<${Note} kind="info" cls="cp-both"><b>Both can be on at once.</b> ${assets
       ? (s.display_active ? `The whole screen overlay “${s.display_name}” is on too: the game draws these files through it like everything else.`
-        : "No whole screen overlay is set: only the files you switch on here are corrected.")
+        : "No whole screen overlay is set: only the files this profile is attached to are corrected.")
       : (nFiles ? `The individual files profile “${s.asset_name}” is on too, baked into ${countWords(s.asset_counts || {})}; the overlay is drawn over those as well.`
         : "No individual file is switched on; switch files on under Adjust individual files to correct only your own art.")}<//>`}` : null}
     ${note}

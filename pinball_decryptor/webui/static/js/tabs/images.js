@@ -27,19 +27,19 @@ const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for s
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
-const COLOR_TIP = "Green: the Color profile tab's individual files profile is baked into this picture when you build, so it looks on the machine the way it looks on your PC. Red: it goes on the card in its own colors. Blue lock: the game's own picture, never touched (tick Unlock extracted images to give it a switch too). A switch you click is this picture's own setting; the Color profile tab's Every replaced picture box sets the rest.";
+const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build. Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own picture, never touched (tick Unlock extracted images to give it a palette too). A palette you click is this picture's own setting; the Color profile tab's Every replaced picture box sets the rest.";
 // PAD-335: the same blue lock / red / green palette as the Video tab's Color column
 const colorTip = (r) => (r.cl
   ? { head: "Color: the game's own picture", lines: [
       "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
       "Choose a replacement to correct a picture of your own, or tick Unlock extracted images."] }
-  : { head: r.c ? "Color: corrected for the machine" : "Color: its own colors", lines: [
-      ["Click", r.c ? "keep its own colors" : "correct its colors for the machine"],
+  : { head: r.c ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+      ["Click", r.c ? "detach the color profile" : "attach the color profile"],
       r.c ? "The Color profile tab's individual files profile is baked into this picture when you build."
-        : "It goes on the card in its own colors.",
+        : "It goes on the card as it is.",
       r.cg ? "The game's own picture, unlocked: corrected from its original when you build."
         : r.co ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture."] });
-const UNLOCK_TIP = "Advanced. Off: the original extracted images are locked (blue lock), and only the pictures you replace can have the individual files color profile baked in. On: every picture on this tab gets a color switch, so an extracted image can be corrected for the machine too, whatever is drawn in it now. It is staged from its original extracted copy when you build, so building again never corrects it twice. The same box as the Scenes tab's Advanced box beside Preview colors; Video has its own. Turning it off puts the extracted images back in their own colors.";
+const UNLOCK_TIP = "Advanced. Off: the original extracted images are locked (blue lock), and only the pictures you replace can have the individual files color profile baked in. On: every picture on this tab gets a palette, so a color profile can be attached to an extracted image too, whatever is drawn in it now. It is staged from its original extracted copy when you build, so building again never corrects it twice. The same box as the Scenes tab's Advanced box beside Preview colors; Video has its own. Turning it off puts the extracted images back as they were.";
 
 const TAG_CLS = { assigned: "img-picked", changed: "img-ondisk", foreign: "img-stray" };
 
@@ -350,7 +350,7 @@ export default function ImagesTab() {
       const row = slotAt(s, e);
       if (!row) return "";
       // PAD-335: a blue lock on the game's own pictures, a red / green palette otherwise
-      if (row.cl) return html`<span class="img-color locked" aria-label="The game's own picture: no color switch"
+      if (row.cl) return html`<span class="img-color locked" aria-label="The game's own picture: no color profile can be attached"
         ...${tip(colorTip(row))}><${Icon} name="lock" /></span>`;
       if (row.c == null) return "";
       return html`<button type="button" class=${cx("img-color", row.c ? "on" : "off", row.co && !row.cg && "own")}

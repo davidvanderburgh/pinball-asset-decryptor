@@ -10,7 +10,7 @@ import { html, Check, call, cx } from "./ui.js";
 
 const TIPS = {
   overlay: "The whole screen overlay: one correction the game draws over everything on the screen, your files included. Untick to see the preview without it. The card still gets it.",
-  files: "The individual files correction, baked into the files you switch on. Untick to see those files without it. The card still gets it.",
+  files: "The individual files correction, baked into the files it is attached to. Untick to see those files without it. The card still gets it.",
   by_overlay: "Recommended leaves your files as they are while the whole screen overlay is Recommended: the overlay already corrects them. Pick No change on the overlay to correct only your files.",
   screen: "The machine's screen: how it changes what it is given. Untick to see what is sent to the screen instead of what it shows.",
 };
@@ -36,7 +36,7 @@ export function LookRow({ look, ns, note = true, onOpen }) {
       name: p.overlay.set ? p.overlay.name : "none set", set: p.overlay.set },
     { k: "files", mode: "assets", label: "Individual files",
       name: p.files.set ? `${p.files.name}, on ${plural(p.files.count, "file")}`
-        : !p.files.count ? "no file switched on"
+        : !p.files.count ? "attached to no file"
         : p.files.by_overlay ? "Done by the overlay" : "No change",
       set: p.files.set, tip: p.files.by_overlay && !p.files.set ? TIPS.by_overlay : "" },
     { k: "screen", mode: "screen", label: "Machine screen",

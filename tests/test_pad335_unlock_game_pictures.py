@@ -106,7 +106,7 @@ def test_images_tab_locks_game_pictures_and_the_advanced_box_unlocks_them(tmp_pa
         w.call("images.select", PLAIN)
         assert w.state("images")["preview"]["color"]["stock"] is True
         labels = [i.get("label") for i in w.call("images.menu", PLAIN, [PLAIN])]
-        assert "Keep its own colors" in labels
+        assert "Detach the color profile" in labels
         assert "Colors: follow the Color profile tab's box again" not in labels
         # a build stages it from its original
         slots = {s.rel_path: s for s in scan_image_slots(assets)}

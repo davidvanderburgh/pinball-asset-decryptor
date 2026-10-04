@@ -39,7 +39,7 @@ and is left alone). That is the screen the correction was measured for.
 by coverage; before the backdrop is laid under it, each pixel's straight
 colour is taken (`rgb / alpha`), put through the screen, and multiplied back,
 so a soft edge keeps its edge. Every layer gets it: the game's own art, your
-replacements, the pictures you add. "Export picture…" writes what the preview
+replacements, the pictures you add. "Export picture…" and "Export video…" write what the preview
 shows, so turn the Machine screen switch off under Preview colors to export
 without it. The card build never includes it.
 

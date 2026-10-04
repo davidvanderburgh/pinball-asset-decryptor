@@ -1022,7 +1022,14 @@ which hook fired. A mode file says `game_modes block|give_way|stack` and `block_
 tab offers both under "The game's own modes", with a tick per mode by name; a code mode's assets file
 takes `block_modes` too. The library check (each named mode forced through the game's own start while a
 blocking mode runs, then one forced again with it stopped, to see the start found is the start) is in
-the ticket's notes.
+the ticket's notes. On a plain-C title a mode's start is the function that counts its STARTED audit; one
+reached through a table whose caller goes on when it returns non-zero (The Beatles' song select, the story
+chapters of Stranger Things and James Bond) is refused with 0 instead (`value block_ret_<id> 0`). A rule
+of the game's that is not one of its modes has no start to refuse, but may put its words on the screen
+from its shot handler: Godzilla's Saucer Attack counts the pop bumper toward lighting it ("SAUCER VALUE / n
+MORE TO LIGHT SAUCER ATTACK", over KING GHIDORAH's words on David's Premium). A port names up to eight such
+handlers (`site block_rule_<n>`, `value block_rule_lo_<n>` / `block_rule_hi_<n>`, `text
+block_rule_name_<n>`), each shown the shot without those bits while a mode blocks, as the battle rule's is.
 
 **Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
 shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the

@@ -21,17 +21,17 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-grip > span { width: 3px; height: 100%; background: transparent; transition: background .12s; }
 .cpd-grip:hover > span, .cpd-grip:focus-visible > span, .cpd.sizing .cpd-grip > span { background: var(--accent); }
 
-/* the tab that sticks out of the edge: a rainbow, so it is seen */
+/* the tab that sticks out of the edge: a rainbow, so it is seen; dark words on it (PAD-370) */
 .cpd-handle { position: absolute; top: 34%; left: -30px; width: 30px; height: 150px; padding: 10px 0;
   display: flex; flex-direction: column; align-items: center; gap: 8px; border: 0; cursor: pointer;
-  border-radius: 10px 0 0 10px; color: #fff;
+  border-radius: 10px 0 0 10px; color: #15171a;
   background: linear-gradient(to bottom, #e5484d, #f08c2a, #f5d33b, #4cc26b, #3d9df2, #6e5ce6, #b45ad6);
   box-shadow: -2px 2px 8px rgba(0, 0, 0, .35); transition: filter .12s; }
 .cpd-handle:hover { filter: brightness(1.12) saturate(1.1); }
 .cpd-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.cpd-handle .i { width: 18px; height: 18px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .55)); }
-.cpd-handle-txt { writing-mode: vertical-rl; transform: rotate(180deg); font-family: var(--cond); font-weight: 600;
-  font-size: 13.5px; letter-spacing: .06em; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+.cpd-handle .i { width: 18px; height: 18px; stroke-width: 2.2; }
+.cpd-handle-txt { writing-mode: vertical-rl; transform: rotate(180deg); font-family: var(--cond); font-weight: 700;
+  font-size: 13.5px; letter-spacing: .06em; text-shadow: 0 0 3px rgba(255, 255, 255, .45); }
 
 /* the bar: anchored to the edge it hangs from, so it slides out with it */
 .cpd-clip { position: absolute; inset: 0; overflow: hidden; }

@@ -1117,23 +1117,31 @@ HELP_CONTENT = {
          "profile attached (a red palette in Layers) skip it, to see it against the game's own art; it still "
          "gets the overlay. Click a name to open it on the "
          "Color profile tab. Only the preview changes: the card is not."),
-        ("Color profiles bar (Scenes)",
-         "The rainbow Colors tab on the Scenes tab's right edge slides out "
-         "the Color profile tab's controls beside the page, so you tune a "
-         "profile with the scene and its Layers in view: each picture's "
-         "color switch stays at hand. The scene list steps aside while it is "
-         "open: the Scenes tab down the left edge brings it back, the arrow "
-         "at the end of its search row hides it again. Drag the bar's left "
-         "edge to make it wider or narrower (double-click puts it back). "
+        ("Color profiles bar (Scenes, Images, Video)",
+         "The rainbow Colors tab on the right edge of the Scenes, Images and "
+         "Video tabs slides out the Color profile tab's controls beside the "
+         "page, so you tune a profile with the scene and its Layers, or the "
+         "list and its Color column, in view: each file's color switch stays "
+         "at hand. It is one set of profiles wherever it is opened: a saved "
+         "profile picked from the list on the Images tab is the one Scenes "
+         "and the Video tab use too, and the other way round. On Images and "
+         "Video the bar opens on Files the first time, the profile their "
+         "Color column attaches to a file. On Scenes the scene list steps "
+         "aside while it is open: the Scenes tab down the left edge brings "
+         "it back, the arrow at the end of its search row hides it again. "
+         "Each tab remembers whether its bar was left open. Drag the bar's "
+         "left edge to make it wider or narrower (double-click puts it back). "
          "Undo and Redo (Ctrl+Z, Ctrl+Y) step back through the changes to "
          "the profile on show; each profile keeps its own. Clicking a name "
          "under Preview colors opens it on that profile. Overlay, Files and "
          "Machine screen pick the profile, with a dot on those in use; Copy "
          "and Paste carry one profile's numbers (ranges and curves too) to "
          "another. The same starting points, sliders, number boxes, Color "
-         "ranges, Curves, Save a copy and Load are there. The scene is drawn "
-         "again a moment after each move, while 'Show it in this preview' "
-         "(the same switch as under Preview colors) is ticked."),
+         "ranges, Curves, Save a copy and Load are there. The scene, or the "
+         "Video tab's players, is drawn again a moment after each move, while "
+         "'Show it in this preview' (the same switch as under Preview colors) "
+         "is ticked; the Images tab's preview does not draw through the "
+         "profiles, so its bar has no such switch."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

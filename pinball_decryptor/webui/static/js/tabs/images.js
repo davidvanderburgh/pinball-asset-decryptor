@@ -7,6 +7,7 @@ import { html, useEffect, useLayoutEffect, useMemo, useRef, useState, PageHead, 
          Check, Chip, Note, Table, Empty, Modal, openMenu, Icon, Spinner, tip, call, mediaUrl, cx }
   from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 
 export const css = true;
 
@@ -148,6 +149,12 @@ function RenameModal({ spec, onClose }) {
 export default function ImagesTab() {
   const s = useNs("images");
   const shell = useNs("shell");
+  // PAD-364 (DragonRR): the Color profiles bar on the right edge, as on the Scenes tab,
+  // so a profile is picked from the Saved profiles list with each picture's Color switch
+  // in view.  It opens on Files the first time: the profile that column attaches.
+  const colorNs = useNs("color");
+  const [colors, setColorsState] = useState(() => barOpenAtStart("images"));
+  const setColors = (v) => { setColorsState(v); rememberBarOpen(v, "images"); };
   const view = s.view || [];
   const p = s.preview || {};
   const grouped = !!(s.cols && s.cols.n);
@@ -432,7 +439,7 @@ export default function ImagesTab() {
     : html`<${Empty} icon="search">No image matches the search and filters.<//>`;
 
   const prevRel = p.rel;
-  return html`<div class="page img-page">
+  return html`<div class="cpd-shell"><div class="page img-page">
     <${PageHead} title="Images" sub=${INTRO}>
       ${status ? html`<${Chip} kind=${s.changed ? "acc" : ""}>${status.trim()}<//>` : null}
       ${s.scanning
@@ -510,5 +517,5 @@ export default function ImagesTab() {
 
     ${s.note ? html`<p class="small muted img-note">${s.note}</p>` : null}
     ${rename ? html`<${RenameModal} spec=${rename} onClose=${() => setRename(null)} />` : null}
-  </div>`;
+  </div>${colorNs.has_project ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors} />` : null}</div>`;
 }

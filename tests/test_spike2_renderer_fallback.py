@@ -303,6 +303,26 @@ def test_d3d12_is_forced_on_wsl_and_only_on_wsl():
     assert "${GALLIUM_DRIVER:-d3d12}" in text
 
 
+def test_an_old_cpu_renderer_gets_the_vector_memcpy():
+    """PAD-357: on an i5-3570K glibc's `rep movsb` into d3d12's GPU-mapped
+    upload buffer took ~190 ms a frame (5 fps); raising the thresholds gave
+    35-41 fps.  Only the renderer, only WSL, only x86 without AVX2, and a
+    caller's own GLIBC_TUNABLES wins."""
+    text = src("watch.sh")
+    i = text.index("GL_TUNABLES=${GLIBC_TUNABLES:-}")
+    block = text[i:text.index("\nfi\n", i)]
+    assert '[ "$IS_WSL" = 1 ]' in block
+    assert "\\bsse2\\b" in block and "! grep -q '^flags.*\\bavx2\\b'" in block
+    assert "glibc.cpu.x86_rep_movsb_threshold=0x40000000" in block
+    assert "glibc.cpu.x86_rep_stosb_threshold=0x40000000" in block
+    # Passed to padglhost's launch only, never exported to the guest.
+    assert "export GLIBC_TUNABLES" not in text
+    body = text[text.index("pad_gl_try() {"):]
+    body = body[:body.index("\n}\n")]
+    assert line_of(body, "${GL_TUNABLES:+GLIBC_TUNABLES=$GL_TUNABLES}") < \
+        line_of(body, '"$PAD_GLHOST_BIN"')
+
+
 def test_the_gpu_driver_is_recorded_rather_than_assumed():
     """Because "put d3d12 back" is only right where d3d12 was ever set.
 

@@ -1860,6 +1860,23 @@ pad_gl_stop() {
     HOSTPG=""
 }
 
+# PAD-357: AN OLDER CPU'S memcpy INTO THE GPU'S UPLOAD BUFFER. Every video
+# frame goes up through glTexImage2D, and Mesa d3d12 copies it row by row into
+# an upload buffer in GPU-mapped memory. On an i5-3570K (no AVX2) glibc picks
+# `rep movsb` for that copy, which crawls on such memory: ~190 ms a frame, one
+# core pinned, the renderer at 5 fps (a user's gdb backtraces were all inside
+# that memcpy). Raising the rep movsb/stosb thresholds out of reach makes glibc
+# use its vector copy instead: 35-41 fps on the same box. Only the renderer gets
+# it, only on WSL's d3d12 path where it was measured, only on an x86 CPU without
+# AVX2; a caller who exported GLIBC_TUNABLES keeps theirs.
+GL_TUNABLES=${GLIBC_TUNABLES:-}
+if [ -z "$GL_TUNABLES" ] && [ "$IS_WSL" = 1 ] \
+        && grep -q '^flags.*\bsse2\b' /proc/cpuinfo 2>/dev/null \
+        && ! grep -q '^flags.*\bavx2\b' /proc/cpuinfo 2>/dev/null; then
+    GL_TUNABLES=glibc.cpu.x86_rep_movsb_threshold=0x40000000:glibc.cpu.x86_rep_stosb_threshold=0x40000000
+    echo "[watch] cfg renderer GLIBC_TUNABLES=$GL_TUNABLES (no AVX2: vector memcpy for the upload buffer)"
+fi
+
 # ONE ATTEMPT. The ring is removed first so the wait below times THIS launch
 # rather than finding the dead attempt's file and returning immediately.
 pad_gl_try() {
@@ -1871,6 +1888,7 @@ pad_gl_try() {
     setsid_as_user env PAD_GL_WINDOW=1 PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
                PAD_SW_SHM="$SW_HOST" PAD_GL_LEGEND="${PAD_GL_LEGEND:-}" \
                PAD_VID_SHM="${VID_FOR_GL:-}" PAD_PAUSE_KEEPER="$PAUSE_KEEPER" \
+               ${GL_TUNABLES:+GLIBC_TUNABLES=$GL_TUNABLES} \
                "$PAD_GLHOST_BIN" "$RING_HOST" > "$HOSTLOG" 2>&1 &
     # PADGL_DEBUG / PADGL_SEQ_* are NOT listed here on purpose: `env A=B cmd`
     # keeps the rest of the environment, so exporting them before watch.sh

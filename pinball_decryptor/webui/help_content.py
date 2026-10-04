@@ -714,8 +714,8 @@ HELP_CONTENT = {
          "the card in its own colors. The box under the preview is the "
          "same switch. The Color profile tab's 'Every replaced picture' "
          "sets every picture that has no box of its own. The game's own "
-         "pictures show a blue lock and are never changed; tick 'Unlock the "
-         "game's own pictures' under Advanced to give each one its own "
+         "pictures show a blue lock and are never changed; tick 'Unlock "
+         "extracted images' under Advanced to give each one its own "
          "switch, and switching one off (or locking again) puts the "
          "original back."),
         ("A bigger picture than the original",
@@ -1107,12 +1107,23 @@ HELP_CONTENT = {
          "and the Machine screen (set on the Color profile tab; until you "
          "set one, the Recommended screen). Turn them on and "
          "off to see what each one does; all three off is your PC's own "
-         "colors. The Machine screen reaches the whole picture, a test card "
-         "you added included. Tick the gear menu's 'Switched-off files in "
+         "colors. The Machine screen reaches the pictures and videos, a test "
+         "card you added included, but not lines of text: they keep their "
+         "own color and get only the overlay. Tick the gear menu's 'Switched-off files in "
          "their own colors' to let a file whose color switch is off (red in "
          "Layers) skip it, to see it against the game's own art; it still "
          "gets the overlay. Click a name to open it on the "
          "Color profile tab. Only the preview changes: the card is not."),
+        ("Colors (Scenes)",
+         "Colors, next to Layers and Contents on the right, has the Color "
+         "profile tab's controls, so you tune a profile with the scene in "
+         "view; clicking a name under Preview colors opens it on that "
+         "profile. Overlay, Files and Machine screen pick the profile; the "
+         "same starting points, sliders, number boxes, Color ranges, Curves, "
+         "Save a copy and Load are there. The scene is drawn again a moment "
+         "after each move, while 'Show it in this preview' (the same switch "
+         "as under Preview colors) is ticked. Drag the inspector's edge to "
+         "make it wider."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

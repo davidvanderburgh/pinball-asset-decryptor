@@ -424,6 +424,8 @@ class App:
             on_show_log_history_change=self._on_show_log_history_change,
             initial_scenes_own_colours=bool(s.get("scenes_own_colours", False)),
             on_scenes_own_colours_change=self._on_scenes_own_colours_change,
+            initial_look_switches=s.get("look_switches") or {},
+            on_look_switches_change=self._on_look_switches_change,
             initial_compare_row_limit=s.get("compare_row_limit"),
             on_compare_row_limit_change=self._on_compare_row_limit_change,
             on_stage_pending=self.stage_pending_replacements,
@@ -5907,6 +5909,12 @@ class App:
     def _on_scenes_own_colours_change(self, on):
         """Persist the ⚙ "Scenes: switched-off files in their own colors" toggle (PAD-325)."""
         self._settings["scenes_own_colours"] = bool(on)
+        self._save_settings()
+
+    def _on_look_switches_change(self, switches):
+        """Persist the Scenes and Video previews' overlay / files / screen switches
+        (PAD-348: they came back all on at every launch)."""
+        self._settings["look_switches"] = dict(switches)
         self._save_settings()
 
     def _on_compare_row_limit_change(self, choice):

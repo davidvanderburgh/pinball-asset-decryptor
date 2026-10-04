@@ -337,6 +337,15 @@ def viewed(canvas, view):
     return out
 
 
+def _overlaid(img, overlay):
+    """A straight-alpha RGBA ``PIL.Image`` with its colour through *overlay*."""
+    import numpy as np
+    from PIL import Image
+    arr = np.asarray(img.convert("RGBA")).copy()
+    arr[..., :3] = overlay(arr[..., :3])
+    return Image.fromarray(arr, "RGBA")
+
+
 def _over_background(canvas, spec):
     """Lay the accumulated frame over *spec* and return an RGB ``PIL.Image``.
 
@@ -541,6 +550,12 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
         drew = True
 
     texts = _pick(layout.get("texts") or (), state, group)
+    # text passes the machine screen by (PAD-352): the art is viewed now,
+    # before the text goes over it, and each line gets the overlay alone
+    overlay = getattr(view, "overlay", None)
+    if texts and view is not None:
+        canvas = viewed(canvas, view)
+        view = None
     if texts:
         if fonts is None:
             try:
@@ -583,6 +598,8 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
                 rgba = [c / 255.0 for c in pick[:3]] + [
                     rgba[3] if len(rgba) > 3 else 1.0]
             ink = _tint(ink, rgba)
+            if overlay is not None:
+                ink = _overlaid(ink, overlay)
             rect = list(tx.get("rect") or (0, 0, w, h)) + [0, 0, 0, 0]
             # The keyframe's rect is LEFT, TOP, RIGHT, BOTTOM — not x/y/w/h.
             # Reading it as a width put the box in the wrong place: as edges,
@@ -980,8 +997,8 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
 
     *view* (core.colour_profile ``machine_view``) shows the frame as the machine's screen
     will: applied to the finished frame before the backdrop, and to each layer (PAD-312).
-    With *as_made*, a picture whose colour switch is off (*pictures*' ``"skip"``) passes the
-    screen by and shows its own colours (PAD-325): its share of each pixel is kept apart as
+    Text passes the screen by (PAD-352), and so, with *as_made*, does a picture whose colour
+    switch is off (*pictures*' ``"skip"``), showing its own colours (PAD-325): its share of each pixel is kept apart as
     it is drawn and added back after the rest is viewed, so what covers it still covers it.
     The whole screen overlay still reaches it (*view*'s ``overlay``, PAD-328): the game
     draws that over everything, the user's own files included."""
@@ -1009,8 +1026,11 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
         return (d["kind"] in ("bitmap", "flip")
                 and bool(((pictures or {}).get(d.get("image")) or {}).get("skip")))
 
+    # text passes the machine screen by too (PAD-352): the screen is for the
+    # game's pictures and videos; the whole screen overlay still reaches it
     skips = None
-    if view is not None and as_made and any(_skipped(d) for d in draws):
+    if view is not None and ((as_made and any(_skipped(d) for d in draws))
+                             or any(d["kind"] == "text" for d in draws)):
         skips = [np.zeros_like(c) for c in layers]
     skip = skips[0] if skips else None
     by_key = None
@@ -1085,7 +1105,7 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                     _composite(canvas, got[0], got[1], got[2], mul, d["add"],
                                premultiplied=False, additive=(fr.font_fmt(font) == 4))
                     if skip is not None:
-                        _composite_skip(skip, got[0], got[1], got[2], mul, d["add"], False,
+                        _composite_skip(skip, got[0], got[1], got[2], mul, d["add"], True,
                                         premultiplied=False,
                                         additive=(fr.font_fmt(font) == 4))
         elif d["kind"] in ("video", "spine"):

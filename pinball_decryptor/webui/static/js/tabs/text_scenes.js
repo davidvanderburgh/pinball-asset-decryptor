@@ -6,6 +6,7 @@ import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Sele
          Icon, Progress, Spinner, tip, call, mediaUrl, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { LookRow } from "../core/look.js";
+import { ColorPane } from "./color_pane.js";
 
 // Load its own sheet once.
 const CSS_HREF = "/static/css/tabs/text_scenes.css";
@@ -218,6 +219,8 @@ export function ScenesPage() {
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
   const [wide, setWide] = useState(false);      // the scene editor without the scene list
+  // the inspector's view: Layers, Contents or Colors (PAD-350, the Color profile controls)
+  const [view, setView] = useState("layers");
   const [playFrame, setPlayFrame] = useState(0); // the frame a playback is on
   useEffect(() => { if (!s.tree_play) setPlayFrame(0); }, [s.tree_play]);
   const [split, setSplit] = useState(loadSplit);
@@ -305,6 +308,8 @@ export function ScenesPage() {
   };
   const editor = !!(s.tree && s.tree_view);
   const stage = editor ? s.tree_view.stage : [1360, 768];
+  // PAD-349 (DragonRR): the advanced unlock sits beside Preview colors, not in the Layers head
+  const unlock = editor ? s.tree_view.color_unlock : null;
   // The page is one screen tall: the scene list, the preview (as big as the room lets it be,
   // width AND height) and the inspector side by side, each scrolling on its own.
   return html`<section class="card scenes-card">
@@ -377,7 +382,14 @@ export function ScenesPage() {
             <${InfoBadge} text=${tips.behind} />
           </div>
         </div>
-        <${LookRow} look=${s.look} ns="text_scenes" />
+        <div class="scenes-lookbar">
+          <${LookRow} look=${s.look} ns="text_scenes" note=${false}
+            onOpen=${(mode) => { call("color.set_mode", mode); setView("colors"); }} />
+          ${unlock && unlock.offered ? html`<div class=${cx("scenes-unlock", unlock.on && "on")} ...${tip(UNLOCK_TIP)}>
+            <span class="look-head">Advanced</span>
+            <${Check} checked=${!!unlock.on} onChange=${(v) => call("text_scenes.tree_color_unlocked", v)}
+              label="Unlock extracted images" cls="small" /></div>` : null}
+        </div>
         ${layout ? html`<${LayoutEditor} key=${layout.kind + "\u0000" + layout.text} d=${layout} />` : null}
         ${editor || s.preparing ? null : html`<div class="row scenes-bottom">
           <div class="thumb scenes-thumb">${s.thumb ? html`<img src=${mediaUrl(s.thumb)} alt="" />` : null}</div>
@@ -386,11 +398,11 @@ export function ScenesPage() {
       </div>
       <${Divider} k="right" measure=${measureRight} dir=${-1} label="Inspector width" ...${splitProps} />
       <div class="scenes-inspector" ref=${inspRef}>
-        ${editor ? html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
+        ${editor ? html`${view === "colors" ? null : html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
             style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
             <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} /></div>
-          <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
-          <${TreeTop} s=${s} onMenu=${itemMenu} />`
+          <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />`}
+          <${TreeTop} s=${s} onMenu=${itemMenu} view=${view} setView=${setView} />`
           : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
       </div>
     </div>
@@ -536,15 +548,20 @@ function inPoly(pts, x, y) {
   return inside;
 }
 
-function TreeTop({ s, onMenu }) {
-  const [view, setView] = useState("layers");
+// PAD-350 (DragonRR): Colors is the Color profile tab's controls, beside the scene they change
+function TreeTop({ s, onMenu, view, setView }) {
+  const colors = !!(s.look && s.look.parts);
+  const shown = view === "colors" && !colors ? "layers" : view;
   return html`<div class="scenes-top">
-    <div class="sc-views"><${Seg} value=${view} onChange=${setView} options=${[
+    <div class="sc-views"><${Seg} value=${shown} onChange=${setView} options=${[
       { value: "layers", label: html`<${Icon} name="scenes" />Layers`,
         title: "Every part of the scene, in the order it is drawn: pick, hide or edit them" },
       { value: "contents", label: html`<${Icon} name="list" />Contents`,
-        title: "The pictures, fonts and text this scene uses: double-click one to find it on its own tab" }]} /></div>
-    ${view === "layers" ? html`<${TreeLayers} t=${s.tree_view} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
+        title: "The pictures, fonts and text this scene uses: double-click one to find it on its own tab" },
+      ...(colors ? [{ value: "colors", label: html`<${Icon} name="palette" />Colors`,
+        title: "The color profiles, changed here with the scene in view: the same as the Color profile tab" }] : [])]} /></div>
+    ${shown === "layers" ? html`<${TreeLayers} t=${s.tree_view} />`
+      : shown === "colors" ? html`<${ColorPane} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
   </div>`;
 }
 
@@ -594,12 +611,12 @@ const gameTip = (l) => ({
   ] });
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
 // own colours (red), or the game's own picture, which has no switch (blue lock) until the
-// Layers list's advanced box unlocks it (PAD-344)
+// advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
 const colorTip = (l) => {
   const c = l.color || {};
   if (c.locked) return { head: "Color: the game's own picture", lines: [
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
-    "Replace it on the Images tab to correct a picture of your own, or tick Unlock the game's own pictures above the layers." ] };
+    "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images (Advanced, beside Preview colors)." ] };
   return { head: c.on ? "Color: corrected for the machine" : "Color: its own colors", lines: [
     ["Click", c.on ? "keep its own colors" : "correct its colors for the machine"],
     c.on ? "The Color profile tab's individual files profile is baked into this picture when you build; the preview shows it."
@@ -607,9 +624,9 @@ const colorTip = (l) => {
     c.stock ? "The game's own picture, unlocked: corrected from its original when you build, so never twice."
       : c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
 };
-const UNLOCK_TIP = { head: "Advanced: unlock the game's own pictures", lines: [
-  "Off: the game's own pictures are locked (blue lock), so the individual files profile is never applied to them twice by accident.",
-  "On: each one gets a red / green color switch too. A green one is corrected from its original when you build.",
+const UNLOCK_TIP = { head: "Advanced: unlock extracted images", lines: [
+  "Off: the original extracted images are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added are not locked.",
+  "On: each extracted image gets a red / green color switch too, whatever is drawn in it now. A green one is corrected from its original extracted copy when you build.",
   "The same box as on the Images tab. Turning it off locks them again in their own colors." ] };
 const rowTip = (l) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
@@ -687,10 +704,7 @@ function TreeLayers({ t }) {
     <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span>
       ${t.solo != null ? html`<button type="button" class="ly-solo small"
         ...${tip({ head: "One layer is shown alone", lines: [["Click", "bring the other layers back"], ["Alt+click", "its eye does the same"]] })}
-        onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}
-      ${t.color_unlock && t.color_unlock.offered ? html`<span class="ly-unlock" ...${tip(UNLOCK_TIP)}>
-        <${Check} checked=${!!t.color_unlock.on} onChange=${(v) => call("text_scenes.tree_color_unlocked", v)}
-          label="Unlock the game's own pictures" /></span>` : null}</div>
+        onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
         class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game")}
         style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l))}

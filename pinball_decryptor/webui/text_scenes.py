@@ -333,7 +333,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                  screens=[], screen=_ALL_SCREENS, animated=False,
                  fps_choice=_FPS_FROM_FILE, fps_choices=list(_FPS_CHOICES),
                  bg=self._bg, bgs=self._bg_names(), bg_rgb=self._bg_rgb(),
-                 machine_look=any((getattr(self, "_lsw", None) or {"a": True}).values()),
+                 machine_look=any(self._look_sw().values()),
                  exporting=False, bulk=False, rebuilding=False,
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,

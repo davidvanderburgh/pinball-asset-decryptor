@@ -1,11 +1,10 @@
-"""PAD-301: a mode's full-screen clip drawn at the game's frame hand-over, and a hold keeping the game's
-foreground words off the glass.
+"""PAD-301: a mode's full-screen clip drawn at the game's frame hand-over.
 
 - frame_sites.py follows the main loop from the tick to frame end and the kick: proven on a built program
   (runs everywhere), and against the Godzilla programs the ports were made from when they are present.
 - The runtime: with the hand-over hooked, the tick neither draws nor advances the player (both are what
   kept the game from building its frames); a port needs both lines.
-- fg_words_off, lifted verbatim and run on the host: which scene_show calls it empties.
+- PAD-353: the game's foreground words are never hidden (PAD-301's fg_words_off is gone).
 """
 import os
 import pathlib
@@ -127,69 +126,20 @@ def test_the_hand_over_needs_both_lines_and_advances_before_it_draws():
     assert kick.index("player_advance") < kick.index("display_draw")
 
 
-FG = r"""
-#include <stdio.h>
-#include <string.h>
-#include <sys/mman.h>
-static unsigned hides = 1;
-static long pm_port_value(const char *k, long d)
-{
-    if (!strcmp(k, "layered_fg_at")) return 0x58;
-    if (!strcmp(k, "layered_fg_elem_at")) return 0x68;
-    if (!strcmp(k, "backdrop_scene_at")) return 0x18;
-    if (!strcmp(k, "hold_hides_fg_words")) return hides;
-    return d;
-}
-static void say(const char *f, ...) { (void)f; }
-static unsigned disp_prio;
-static unsigned char *disp_layered_mgr;
-static unsigned fg_said[8];
-%s
-int main(void)
-{
-    unsigned char *low = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
-    unsigned char mgr[0x100] = { 0 };
-    unsigned fg = (unsigned)(unsigned long)low, scene = 0x5000, r[2];
-    *(unsigned *)low = 0x632000;                         /* the element's vtable */
-    *(unsigned *)(low + 0x18) = scene;
-#define TRY(what) do { r[0] = what; r[1] = 3; int k = fg_words_off(r); printf("%%d %%x\n", k, r[0]); } while (0)
-    TRY(scene);                                          /* 1: no manager seen yet */
-    disp_layered_mgr = mgr;
-    TRY(scene);                                          /* 2: no hold */
-    disp_prio = 180;
-    TRY(scene);                                          /* 3: no foreground */
-    *(unsigned *)(mgr + 0x58) = 37; mgr[0x5c] = 120;     /* the foreground's display id and priority */
-    *(unsigned *)(mgr + 0x68) = 0x25;
-    TRY(scene);                                          /* 4: +0x68 is no element: left alone */
-    *(unsigned *)(mgr + 0x68) = fg;
-    TRY(scene);                                          /* 5: hidden */
-    TRY(0x6000);                                         /* 6: another scene */
-    mgr[0x5c] = 196;
-    TRY(scene);                                          /* 7: the foreground beats the hold */
-    mgr[0x5c] = 180;
-    TRY(scene);                                          /* 8: equal: hidden */
-    hides = 0;
-    TRY(scene);                                          /* 9: the port turned it off */
-    return 0;
-}
-"""
+def test_the_games_foreground_words_are_never_hidden():
+    """PAD-353: PAD-301 emptied a weaker layered foreground's scene_show under a mode's hold; the game's
+    screens now play as the game made them, and a mode keeps its own words off them instead."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    assert "fg_words_off" not in src and "hold_hides_fg_words" not in src
 
 
-def test_a_hold_keeps_only_a_weaker_foregrounds_words_off(tmp_path):
-    if not sys.platform.startswith("linux"):
-        pytest.skip("the element must sit below 4 GB (MAP_32BIT)")
-    fn = _lift(RUNTIME.read_text(encoding="utf-8"), "static int fg_words_off(unsigned *r)")
-    out = _host_run(tmp_path, FG % fn).split("\n")
-    assert out[:9] == ["0 5000", "0 5000", "0 5000", "0 5000", "1 0", "0 6000", "0 5000", "1 0", "0 5000"]
-
-
-def test_scene_show_settles_our_player_and_the_foreground_before_the_backdrop():
+def test_scene_show_settles_our_player_before_the_backdrop():
     """While our full-screen clip plays, nothing of the game's puts the player in the frame first (the
-    hand-over draws it last); then a weaker foreground's words; only then the backdrop's own business."""
+    hand-over draws it last); only then the backdrop's own business."""
     body = _lift(RUNTIME.read_text(encoding="utf-8"), "static void on_scene_show(unsigned *r)")
     ours = body.index('fn("video_player"))()) {')
-    assert body.index("frame_draws && clip.on") < ours < body.index("if (fg_words_off(r)) return;") < body.index("if (!e ||")
-    assert "r[0] = 0;" in body[ours:body.index("if (fg_words_off(r)) return;")]
+    assert body.index("frame_draws && clip.on") < ours < body.index("if (!e ||")
+    assert "r[0] = 0;" in body[ours:body.index("if (!e ||")]
 
 
 def test_a_godzilla_run_swaps_at_the_machines_cadence_unless_told_otherwise():

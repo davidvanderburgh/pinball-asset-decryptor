@@ -2111,43 +2111,12 @@ static void bd_play(unsigned e)
         say("backdrop: \"%s\" %s behind the HUD, in the city 0x%08x's place", was, once ? "once" : "looped", e);
 }
 
-/* PAD-301: A HOLD KEEPS THE GAME'S FOREGROUND WORDS OFF THE GLASS. A layered foreground of the game's
- * (a shot award, a multiball's start screen) is an element like the backgrounds: its draw shows its clip
- * when it has one, then its own scene (+backdrop_scene_at) - the award's words, set where the battle
- * layout puts a title and an instruction line, which is where a mode's own HUD puts its own. The hold
- * keeps a NEW foreground that does not beat it from starting (display priority, below), but one already
- * up when the mode starts (traced on a Premium 1.16 at MELTDOWN's start, 2026-10-01: the multiball's
- * own screen, two instruction lines on top of each other) plays on. So while a hold is up, the scene
- * of the foreground now is not shown - scene_show returns at once for a null scene - unless the
- * foreground's priority (+layered_fg_at + 4) beats the hold, as the Maser's award and the battle select
- * do. Its clip, and everything else of the game's, is untouched. The layered manager keeps the
- * foreground's DISPLAY ID at +layered_fg_at (37 for the Maser's award: a first build here read it as the
- * element and the game took a SEGV on 0x3d) and the ELEMENT at +layered_fg_elem_at (0x68 on Premium 1.16:
- * the manager's own methods call its virtuals there, and its clear zeroes it with the id). */
+/* PAD-353: the game's foreground words are never hidden. PAD-301 emptied the scene_show of a layered
+ * foreground of the game's that did not beat a mode's hold (its words sat where a mode's title does); a
+ * mode keeps its own words off a game display instead (pm_display_covered), and the game's screens play
+ * as the game made them. */
 static unsigned disp_prio;
 static unsigned char *disp_layered_mgr;
-static unsigned fg_said[8];               /* the foregrounds' vtables said, so each is said once */
-
-static int fg_words_off(unsigned *r)
-{
-    unsigned char *m = disp_layered_mgr;
-    unsigned fg, vt, i;
-    long at = pm_port_value("layered_fg_at", -1), el = pm_port_value("layered_fg_elem_at", -1);
-    if (!disp_prio || !m || !r[0] || at < 0 || el < 0 || !pm_port_value("hold_hides_fg_words", 1)) return 0;
-    if (!*(unsigned *)(m + at) || m[at + 4] > disp_prio) return 0;      /* no foreground, or it beats the hold */
-    fg = *(unsigned *)(m + el);
-    if (fg < 0x10000 || (fg & 3)) return 0;   /* not an element: never read through it */
-    if (r[0] != *(unsigned *)(unsigned long)(fg + (unsigned)pm_port_value("backdrop_scene_at", 0x18))) return 0;
-    r[0] = 0;
-    vt = *(unsigned *)(unsigned long)fg;
-    for (i = 0; i < 8 && fg_said[i] && fg_said[i] != vt; i++) ;
-    if (i < 8 && !fg_said[i]) {
-        fg_said[i] = vt;
-        say("display: the game's layered foreground (vtable 0x%08x, priority %u) keeps its words off the glass "
-            "under the hold at %u", vt, m[at + 4], disp_prio);
-    }
-    return 1;
-}
 
 /* scene_show(scene, layer): the city's own scene is where the backdrop goes */
 static void on_scene_show(unsigned *r)
@@ -2162,7 +2131,6 @@ static void on_scene_show(unsigned *r)
         r[0] = 0;
         return;
     }
-    if (fg_words_off(r)) return;
     if (!e || r[0] != *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18))) return;
     if (!bd.on || *(unsigned *)(unsigned long)e != data("backdrop_city_vtable")) {
         if (bd.obj) bd_release(!bd.on ? "the mode ended it" : "another background");
@@ -2285,22 +2253,18 @@ static void backdrop_arm(void)
  *  drawn over a clip played in the "ScoreFrame" crop (the framed layered displays, and effects that
  *  use that crop) and is covered by one played full screen ("Normal" or no crop: LOOPS, BATTLE IS
  *  LIT, a jackpot, the tilt warning); a clip the runtime draws on layer 0 is over everything.
- * A HOLD (pm_display_priority) rides on both: while the layered-display effect is current its
- * priority is raised to the mode's (the game's own comparison then refuses, queues or keeps
- * waiting whatever does not beat it), and a layered waiter whose display must wait is told the
- * layered priority is 255. A display that beats the hold covers the screen for its length and
- * the screen is in view again after it; the hold is raised again when the layered display
- * returns. Released at the mode's end: the layered display's own priority back, its queue run. */
+ * PAD-353: A MODE NEVER MAKES THE GAME'S DISPLAYS WAIT. Item 154/157's HOLD raised the layered display's
+ * effect priority to a mode's, so the game's own comparison refused or queued what did not beat it, kept
+ * its waiters waiting, dropped full-screen layered displays at their waiter and hid a foreground's words.
+ * On a Godzilla Premium (2026-10-04) that held the MAGNA-GRAB MAGNET ON: the game keeps the ball on the
+ * magnet until its screen (effect 71, priority 180) has played, and that screen waited for KING
+ * GHIDORAH's hold at 180 until the machine was switched off. Any rule that waits on a display can stall
+ * the same way. So pm_display_priority only notes the mode's priority now, and the runtime WATCHES the
+ * game's displays: pm_display_covered says when one has the screen, for the mode to keep its words off it. */
 static const struct pm_mode *disp_owner;
 static unsigned disp_prio;                /* 0: no hold */
 static unsigned long disp_linger_until;   /* pm_end_holding: the hold outlives its mode until then */
-static int disp_covered_now, disp_said_wait;
-static unsigned disp_said_layered[8];     /* the layered displays a hold has said wait, one bit each */
-static unsigned disp_said_dropped[8];     /* item 157: the layered displays a hold has dropped, one bit each */
-static unsigned disp_said_effect[8];      /* the effects waiting to start a hold has said about, one bit each */
-static unsigned char *disp_layered_mgr;   /* as the layered_priority calls pass it */
-static unsigned char disp_fake_layered[0x100];
-
+static int disp_covered_now;
 static unsigned char *disp_manager(void)
 {
     unsigned a = data("display_effects"), t = data("award_screen_arg");
@@ -2310,51 +2274,24 @@ static unsigned char *disp_manager(void)
     return m && *(unsigned *)(m + 4) == t ? m : 0;           /* the manager of THIS effect table */
 }
 
-static unsigned disp_effect(unsigned id, int flags)          /* an effect's table priority (or flags) */
-{
-    unsigned t = data("award_screen_arg"), recs, n;
-    if (!t) return 0;
-    recs = *(unsigned *)(unsigned long)t;
-    n = *(unsigned *)(unsigned long)(t + 4);
-    if (!id || id >= n) return 0;
-    return flags ? *(unsigned short *)(unsigned long)(recs + 8 * id + 4) : *(unsigned char *)(unsigned long)(recs + 8 * id + 6);
-}
-
 static unsigned disp_host(void) { return (unsigned)pm_port_value("display_host", 0); }
 static unsigned disp_now(unsigned char *m) { return *(unsigned short *)(m + pm_port_value("display_now_at", 0xc)); }
-static unsigned char *disp_level(unsigned char *m) { return m + pm_port_value("display_priority_at", 0xe); }
-
-/* raise the layered display's effect priority to the hold's; 1 if it was raised */
-static int disp_raise(unsigned char *m)
-{
-    unsigned char *p;
-    if (!disp_prio || !m || disp_now(m) != disp_host()) return 0;
-    p = disp_level(m);
-    if (*p >= disp_prio) return 0;
-    *p = (unsigned char)disp_prio;
-    return 1;
-}
+static unsigned disp_level_now(unsigned char *m) { return *(m + pm_port_value("display_priority_at", 0xe)); }
 
 static void disp_release(const char *why)
 {
-    unsigned char *m = disp_manager();
-    unsigned p = disp_prio, next = fn("display_effect_next");
+    unsigned p = disp_prio;
     if (!p) return;
     disp_prio = 0;
     disp_owner = 0;
     disp_linger_until = 0;
     disp_covered_now = 0;
-    if (m && disp_now(m) == disp_host() && *disp_level(m) == p) {
-        *disp_level(m) = (unsigned char)disp_effect(disp_host(), 0);
-        if (next) ((void (*)(void))(unsigned long)next)();        /* what the end of an effect does */
-    }
-    say("display: priority %u released (%s) - the game's own display order again", p, why);
+    say("display: priority %u given up (%s)", p, why);
 }
 
 int pm_display_priority(unsigned priority)
 {
     unsigned char *m;
-    unsigned now;
     if (!(can & PM_CAN_DISPLAY_PRIORITY)) return 0;
     if (!priority) {
         if (disp_prio && (!current || disp_owner == current)) disp_release("the mode gave it up");
@@ -2364,21 +2301,16 @@ int pm_display_priority(unsigned priority)
     if (priority > 255) priority = 255;
     disp_owner = current;
     disp_prio = priority;
-    disp_said_wait = 0;
-    for (now = 0; now < 8; now++) disp_said_layered[now] = disp_said_effect[now] = disp_said_dropped[now] = 0;
     m = disp_manager();
-    /* A display effect of the game's already on the screen plays to its end (whatever its priority):
-     * the hold applies from the layered display's next turn. Ending it from here was tried (run 4, a
-     * forced start of the layered display from the tick) and changed nothing, so it is not done. */
-    disp_raise(m);
-    say("display: %s holds display priority %u - the game's displays that do not beat it wait (effect now %u, priority %u)",
-        current && current->name ? current->name : "a mode", priority, m ? disp_now(m) : 0, m ? *disp_level(m) : 0);
+    say("display: %s asks for display priority %u - noted only: the game's displays are never made to wait "
+        "(effect now %u, priority %u)", current && current->name ? current->name : "a mode", priority,
+        m ? disp_now(m) : 0, m ? disp_level_now(m) : 0);
     return 1;
 }
 
 int pm_display_covered(void) { return disp_prio && disp_covered_now; }
 
-/* a hold kept for an ending (pm_end_holding) is not the new mode's */
+/* an ending kept by pm_end_holding is not the new mode's */
 static void disp_linger_other_began(void)
 {
     if (disp_linger_until && disp_owner != current) disp_release("another mode began");
@@ -2390,15 +2322,14 @@ int pm_end_holding(unsigned ms)
     if (disp_prio && disp_owner == current && ms) {
         disp_linger_until = pm_ms() + ms;
         if (!disp_linger_until) disp_linger_until = 1;
-        say("display: %s ended - its hold at %u stays %u ms for its ending",
-            current->name ? current->name : "a mode", disp_prio, ms);
+        say("display: %s ended - its screen is watched %u ms more for its ending", current->name ? current->name : "a mode", ms);
     }
     pm_end();
     return 1;
 }
 
-/* every tick, from clip_tick: the hold follows its mode, is raised again when the layered display
- * comes back, and says when a display that beat it covers the screen and when it is gone */
+/* every tick, from clip_tick: follows the mode that asked, and says when a display of the game's has the
+ * screen - an effect over the layered display, or a layered foreground - and when it is gone */
 static void display_tick(void)
 {
     unsigned char *m;
@@ -2406,7 +2337,7 @@ static void display_tick(void)
     int covered;
     if (!disp_prio) return;
     if (!disp_owner || running != disp_owner) {
-        if (!disp_linger_until) { disp_release("the mode that held it ended"); return; }
+        if (!disp_linger_until) { disp_release("the mode that asked ended"); return; }
         if (running) { disp_release("another mode began"); return; }
         if (pm_ms() >= disp_linger_until) { disp_release("its ending is over"); return; }
     }
@@ -2414,176 +2345,32 @@ static void display_tick(void)
     m = disp_manager();
     if (!m) return;
     now = disp_now(m);
-    if (disp_raise(m) && disp_covered_now)
-        say("display: the layered display is back - held at %u again", disp_prio);
-    covered = now && now != disp_host() && *disp_level(m) > disp_prio;
+    covered = now && now != disp_host();
     if (!covered && disp_layered_mgr && now == disp_host() &&
-        *(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58)) &&
-        (*(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_flags_at", 0x60)) & 0x10))
+        *(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58)))
         covered = 2;
     if (!covered != !disp_covered_now) {
-        if (covered == 1) say("display: covered by the game's effect %u (priority %u beats %u)", now, *disp_level(m), disp_prio);
-        else if (covered) say("display: covered by a full-screen layered display of the game's that beats %u", disp_prio);
+        if (covered == 1) say("display: the game's effect %u (priority %u) has the screen", now, disp_level_now(m));
+        else if (covered) say("display: a layered display of the game's has the screen");
         else say("display: in view again");
     }
     disp_covered_now = covered;
 }
 
-/* The effect priority now, as the game's effect WAITERS read it every frame (site
- * display_priority_now, a two-instruction leaf): a hold is raised first, so a waiter polling in the
- * moment after the layered display started again (the end of an effect that beat the hold) sees it,
- * and keeps waiting. Run 2 (Premium 1.16) caught effect 126 slipping through in that moment.
- * A waiter asks at ITS OWN priority (176 for the game's awards), but the effect it waits for has a
- * priority of its own (the battle select screen 132: 196, BATTLE IS LIT 128: 177). When the call is a
- * waiter's (it returns to effect_waiter_call) and the effect it waits for (at +layered_wait_for_at of
- * the waiting process, as for a layered waiter) beats the hold, the waiter is shown the priority the
- * layered display has without the hold, so it goes on to start the effect, which then beats the hold
- * in the start's own comparison. Run 4 (Premium 1.16): without this the battle select screen waited
- * out a mode at 180, so no battle could start while it ran. */
-static unsigned char disp_fake_effects[0x40];
-
-static void on_display_priority_now(unsigned *r)
-{
-    unsigned char *m = (unsigned char *)(unsigned long)r[0], *proc;
-    unsigned id, prio;
-    long at = pm_port_value("display_priority_at", 0xe);
-    if (!disp_prio || m != disp_manager()) return;
-    disp_raise(m);
-    if (!r[5] || r[5] != (unsigned)pm_port_value("effect_waiter_call", 0) || at < 0 || at >= (long)sizeof disp_fake_effects)
-        return;
-    proc = *(unsigned char **)(unsigned long)data("event_current");
-    if (!proc) return;
-    id = *(unsigned short *)(proc + pm_port_value("layered_wait_for_at", 0xa0));
-    prio = disp_effect(id, 0);
-    if (id < 256 && !(disp_said_effect[id / 32] & (1u << (id % 32)))) {
-        disp_said_effect[id / 32] |= 1u << (id % 32);
-        say("display: the game's effect %u (priority %u) is waiting to start - %s %u", id, prio,
-            prio > disp_prio ? "it beats the hold at" : "it waits for the hold at", disp_prio);
-    }
-    if (prio <= disp_prio) return;
-    /* only OUR raise is lifted: while an effect of the game's runs the waiter sees its priority, and
-     * waits for it as the game would (run 6: lifted over effect 126, the select screen's start was
-     * refused behind it and its waiter gave up) */
-    if (disp_now(m) != disp_host()) return;
-    disp_fake_effects[at] = (unsigned char)disp_effect(disp_host(), 0);
-    r[0] = (unsigned)(unsigned long)disp_fake_effects;
-}
-
-/* The effect start, before it runs: a hold is raised first (the layered display may have started
- * again since the last tick), so the game's comparison sees it. Never changes the request. */
-static void on_display_effect_start(unsigned *r)
-{
-    unsigned char *m = (unsigned char *)(unsigned long)r[0];
-    if (!disp_prio || m != disp_manager()) return;
-    disp_raise(m);
-    if (!r[3] && r[1] != disp_host() && disp_effect(r[1], 0) <= disp_prio && disp_said_wait < 40) {
-        disp_said_wait++;
-        say("display: the game's effect %u (priority %u) does not beat %u - refused or queued, as behind an effect of the game's",
-            r[1], disp_effect(r[1], 0), disp_prio);
-    }
-}
-
-/* Must a layered display of these flags wait for a hold? (tests lift it verbatim) A background never
- * does; a mode start (0x40) or total (0x04) counts as one of the game's mode displays (mode_level) and
- * comes through when that beats the hold; any other display counts as its layered-display effect
- * (priority 1). Of those, a full-screen one (0x10) waits; a framed one plays under the mode's screen,
- * as the game layers it, except while the mode's own clip plays (it would take the one surface) or its
- * backdrop is up (hud-layers: the game's framed award would take the backdrop's place, and its words
- * sit where the mode's title does - measured, run t1: the Maser's "2 MORE TO LIGHT MASER CANNON" over
- * KING GHIDORAH's title; the game's own battles keep the glass the same way). */
-static int disp_layered_must_wait(unsigned flags, unsigned hold, unsigned mode_level, int our_clip)
-{
-    unsigned level;
-    if (!hold || (flags & 0x02)) return 0;
-    level = (flags & 0x44) ? mode_level : 1;
-    if (level > hold) return 0;
-    return (flags & 0x10) || our_clip;
-}
-
-/* The layered priority, as a WAITER asks it (its call returns to layered_waiter_call): the display
- * it waits for is read off the waiting process, and when it must wait for the hold the waiter is
- * handed a layered manager whose foreground priority is 255. Any other caller, and any display that
- * beats the hold, gets the game's own answer. */
+/* The layered priority, as the game asks it: only its manager is noted (display_tick reads the foreground
+ * there). The answer is the game's own, always. */
 static void on_layered_priority(unsigned *r)
 {
-    unsigned char *proc, *rec;
-    unsigned t, id, n, flags;
     if (r[0]) disp_layered_mgr = (unsigned char *)(unsigned long)r[0];
-    if (!disp_prio || r[5] != (unsigned)pm_port_value("layered_waiter_call", 0)) return;
-    proc = *(unsigned char **)(unsigned long)data("event_current");
-    t = data("layered_displays");
-    if (!proc || !t) return;
-    id = *(unsigned *)(proc + pm_port_value("layered_wait_for_at", 0xa0));
-    n = *(unsigned *)(unsigned long)(t + 4);
-    if (!id || id >= n) return;
-    rec = (unsigned char *)(unsigned long)(*(unsigned *)(unsigned long)t + id * (unsigned)pm_port_value("layered_record_size", 16));
-    flags = *(unsigned *)rec;
-    if (!disp_layered_must_wait(flags, disp_prio, (unsigned)pm_port_value("display_mode_level", 184),
-                                (clip.on && !disp_clip_lost) || bd.on)) return;
-    *(unsigned *)(disp_fake_layered + pm_port_value("layered_fg_at", 0x58)) = 1;
-    disp_fake_layered[pm_port_value("layered_fg_at", 0x58) + 4] = 255;   /* the foreground's priority, read by the waiter */
-    r[0] = (unsigned)(unsigned long)disp_fake_layered;
-    if (id < 256 && !(disp_said_layered[id / 32] & (1u << (id % 32)))) {
-        disp_said_layered[id / 32] |= 1u << (id % 32);
-        say("display: the game's layered display %u (priority %u, flags 0x%x) waits for the hold at %u", id,
-            rec[pm_port_value("layered_priority_at", 12)], flags, disp_prio);
-    }
 }
 
-/* item 157: A LAYERED DISPLAY THAT MUST WAIT IS DROPPED, NOT KEPT WAITING. While a layered waiter
- * waits, the game presents NO frames: measured on Premium 1.16 (the eglshim frame count stops) in the
- * showcase run, 3.8 to 8.1 s each time a full-screen layered display (LOOPS 40, POWERLINE ATTACK 59,
- * 110) waited under a hold with the layered display on the glass, ending the moment the hold was
- * released; the integration branch's run 1 froze 8.3 s the same way at 180. So the waiter's own entry
- * (site layered_waiter: the process body the layered display's start tail-calls with r0 = the display,
- * r1 = the frames it may wait, r2 = its priority) is hooked, and a display the hold would keep waiting
- * gets r1 = 0: it returns at once, as when its time runs out, and is not shown. The game's rules that
- * asked for it (a loop counted, an award paid) are untouched. A port without the site keeps the wait
- * (on_layered_priority above), freeze and all. */
-static void on_layered_waiter(unsigned *r)
-{
-    unsigned t, n, id = r[0], flags;
-    unsigned char *rec;
-    if (!disp_prio || !r[1]) return;
-    t = data("layered_displays");
-    if (!t) return;
-    n = *(unsigned *)(unsigned long)(t + 4);
-    if (!id || id >= n) return;
-    rec = (unsigned char *)(unsigned long)(*(unsigned *)(unsigned long)t + id * (unsigned)pm_port_value("layered_record_size", 16));
-    flags = *(unsigned *)rec;
-    if (!disp_layered_must_wait(flags, disp_prio, (unsigned)pm_port_value("display_mode_level", 184),
-                                (clip.on && !disp_clip_lost) || bd.on)) return;
-    r[1] = 0;
-    if (id < 256 && !(disp_said_dropped[id / 32] & (1u << (id % 32)))) {
-        disp_said_dropped[id / 32] |= 1u << (id % 32);
-        say("display: the game's layered display %u (priority %u, flags 0x%x) is dropped for the hold at %u "
-            "(a waiting one would stop the game's drawing)", id, rec[pm_port_value("layered_priority_at", 12)], flags,
-            disp_prio);
-    }
-}
-
-/* clip_play from anyone but us while our clip draws: the one surface is the game's now. While a hold
- * is up and the layered display runs its BACKGROUND (no effect over it, no layered foreground), the
- * background's clip is asked for as ours instead, as a foreground would keep the surface from it. */
+/* clip_play from anyone but us while our clip draws: the one surface is the game's now */
 static void on_clip_play(unsigned *r)
 {
-    unsigned char *m;
     const char *name = (const char *)(unsigned long)r[0];
     unsigned i;
     if (!disp_clip_ours) bd_clip_lost();      /* hud-layers: the backdrop is played again after it */
     if (disp_clip_ours || !clip.on) return;
-    m = disp_manager();
-    if (disp_prio && m && disp_now(m) == disp_host() && disp_layered_mgr &&
-        !*(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58)) && disp_clip_name[0] &&
-        ((int (*)(void *))(unsigned long)fn("surface_state"))(((void *(*)(void))(unsigned long)fn("video_surface"))())
-            == pm_port_value("surface_playing", 2)) {       /* ours still plays: asked again, it is not restarted */
-        say("clip: the layered background asked for \"%.40s\" while ours plays under a hold - ours is asked for again",
-            name ? name : "");
-        r[0] = (unsigned)(unsigned long)disp_clip_name;
-        r[1] = 0;
-        r[2] = 0;
-        return;
-    }
     for (i = 0; name && name[i] && i + 1 < sizeof disp_lost_name; i++) disp_lost_name[i] = name[i];
     disp_lost_name[i] = 0;
     disp_clip_lost = 1;
@@ -2593,55 +2380,27 @@ static int have_sites(const char *const *names);
 static int have_data(const char *const *names);
 static int have_values(const char *const *names);
 
-/* from the constructor: the clip_play hook always (a clip of ours stops drawing when the game takes
- * the surface), the rest when the port names the display arbitration */
+/* from the constructor: the clip_play hook always (a clip of ours stops drawing when the game takes the
+ * surface); the display lines when the port names them, to WATCH the game's displays (pm_display_covered),
+ * never to change them (PAD-353) */
 static void display_arm(void)
 {
-    static const char *const s[] = { "display_effect_start", "layered_priority", 0 };
-    static const char *const d[] = { "display_effects", "layered_displays", "award_screen_arg", "event_current", 0 };
-    static const char *const v[] = { "display_host", "display_mode_level", "display_now_at", "display_priority_at",
-                                     "layered_record_size", "layered_priority_at", "layered_wait_for_at",
-                                     "layered_waiter_call", "layered_fg_at", "layered_fg_flags_at", 0 };
-    /* The effect half alone: a title whose game has no layered displays (The Beatles 1.29 has the
-     * framework's effect start, next and priority-now, and nothing of Godzilla's layered-display
-     * library). The hold then rides on the display effects only: an effect of the game's comes
-     * through when its priority beats the hold's. */
-    static const char *const es[] = { "display_effect_start", 0 };
-    static const char *const ed[] = { "display_effects", "award_screen_arg", "event_current", 0 };
-    static const char *const ev[] = { "display_host", "display_mode_level", "display_now_at", "display_priority_at", 0 };
+    static const char *const d[] = { "display_effects", "award_screen_arg", 0 };
+    static const char *const v[] = { "display_host", "display_now_at", "display_priority_at", 0 };
     if ((can & PM_CAN_CLIPS) && !clip_v2 && !clip_layer) hook(fn("clip_play"), on_clip_play);
     if (!site("display_effect_start") && !site("layered_priority")) return;      /* a port without them: silent */
-    if (!site("layered_priority")) {
-        if (!have_sites(es) || !have_data(ed) || !have_values(ev)) {
-            say("display priority: off - the port's display lines are incomplete or do not match this build");
-            return;
-        }
-        if (!hook(fn("display_effect_start"), on_display_effect_start)) return;
-        can |= PM_CAN_DISPLAY_PRIORITY;
-        if (fn("display_priority_now")) hook(fn("display_priority_now"), on_display_priority_now);
-        else say("display priority: the port has no display_priority_now - a waiter can slip through in the frame after an effect ends");
-        say("display priority: on, display effects only (the port has no layered display) - the effect start 0x%08x is hooked "
-            "(host effect %u)", fn("display_effect_start"), disp_host());
-        return;
-    }
-    if (!have_sites(s) || !have_data(d) || !have_values(v)) {
+    if (!have_data(d) || !have_values(v)) {
         say("display priority: off - the port's display lines are incomplete or do not match this build");
         return;
     }
-    if (hook(fn("display_effect_start"), on_display_effect_start) && hook(fn("layered_priority"), on_layered_priority)) {
-        can |= PM_CAN_DISPLAY_PRIORITY;
-        if (fn("display_priority_now")) hook(fn("display_priority_now"), on_display_priority_now);
-        else say("display priority: the port has no display_priority_now - a waiter can slip through in the frame after an effect ends");
-        if (fn("layered_waiter") && hook(fn("layered_waiter"), on_layered_waiter))
-            say("display priority: a layered display the hold would keep waiting is dropped at its waiter 0x%08x "
-                "(a waiting one stops the game's drawing)", fn("layered_waiter"));
-        else
-            say("display priority: the port has no layered_waiter - a layered display waits for a hold, and the game "
-                "draws no frames while it does");
-        say("display priority: on - the effect start 0x%08x and the layered priority 0x%08x are hooked (layered display effect %u, the game's mode level %ld)",
-            fn("display_effect_start"), fn("layered_priority"), disp_host(), pm_port_value("display_mode_level", 184));
-    }
+    can |= PM_CAN_DISPLAY_PRIORITY;
+    if (site("layered_priority") && fn("layered_priority") && pm_port_value("layered_fg_at", -1) >= 0)
+        hook(fn("layered_priority"), on_layered_priority);
+    say("display priority: watched only - a mode is told when a display of the game's has the screen; none of "
+        "the game's displays is ever made to wait, refused, dropped or hidden (PAD-353: Godzilla's Magna-Grab "
+        "kept its magnet on while its screen waited for a mode)");
 }
+
 
 /* ---- the game's own message screens (optional) ----------------------------------------------- */
 #define N_BORROW 8

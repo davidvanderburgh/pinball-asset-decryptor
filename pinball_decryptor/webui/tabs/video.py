@@ -36,6 +36,7 @@ import time
 
 from .. import compat
 from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
+from .. import look_switches
 from .. import video_helpers as vh
 from ..video_best import BEST_TIP, BestQualityMixin
 from .base import TabService, rpc
@@ -92,8 +93,9 @@ class VideoTab(BestQualityMixin, TabService):
         # and these are the ones switched on
         self._color_stock = False
         self._stock_on = set()
-        # the preview's three switches on the players (PAD-329, PAD-330)
-        self._lsw = {"overlay": True, "files": True, "screen": True}
+        # the preview's three switches on the players (PAD-329, PAD-330), as
+        # they were left last time (PAD-348)
+        self._lsw = look_switches.initial(window, "video")
         self._color_all = False          # the Color profile tab's "every replaced video"
         self._scan_id = 0
         self._scan_dir = ""
@@ -246,6 +248,7 @@ class VideoTab(BestQualityMixin, TabService):
         if part not in self._lsw:
             return False
         self._lsw[part] = bool(on)
+        look_switches.save(self.window, "video", self._lsw)
         self.publish_look()
         return True
 
@@ -255,6 +258,7 @@ class VideoTab(BestQualityMixin, TabService):
         colours."""
         for k in self._lsw:
             self._lsw[k] = bool(on)
+        look_switches.save(self.window, "video", self._lsw)
         self.publish_look()
         return True
 

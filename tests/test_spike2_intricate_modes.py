@@ -1483,3 +1483,27 @@ def test_a_single_ball_mode_waits_out_the_games_modes_still_ready(harness, busy,
     assert has(out, mode, "is running - still ready")
     begun = _at(out, "[%s] START" % mode)
     assert begun is not None and begun > _at(out, over), out[-2000:]   # the shot after it
+
+
+# ---- PAD-353: a display of the game's is never held back; the HUD keeps its words off it --------------------
+def test_a_modes_words_wait_while_a_display_of_the_games_has_the_screen(harness):
+    """The Magna-Grab's screen waited for a mode's hold and Godzilla kept its magnet on (PAD-353): the game's
+    displays now play as they come, so while one has the screen the mode's middle words are blank, its badge
+    stays, and its words are back when the display is gone."""
+    s = "maser_barrage"
+    out = play(harness, "event", "skill_shot", "secs", 4, "covered", 1, "secs", 1, "covered", 0, "secs", 1)
+    on, off = _at(out, ">> covered 1"), _at(out, ">> covered 0")
+
+    def last(field, t):
+        said = [w for ms, w in hud(out, s, field) if ms <= t]
+        return said[-1] if said else None
+
+    assert last("Title", on) == "MASER BARRAGE" and last("C1_Value", on) not in (None, " ")
+    assert has(out, "MASER BARRAGE", "hud maser_barrage: its words wait while a display of the game's has the screen")
+    for field in ("Title", "Line", "Award", "AwardSub", "C1_Label", "C1_Value", "C2_Value", "C3_Value"):
+        assert last(field, off) == " ", field
+    timer = re.findall(r"^\s*(\d+) SHOW PadMode_%s_Hud\.PadMode_%s_Hud_Timer 0$" % (s, s), out, re.M)
+    assert not [t for t in timer if on <= int(t) <= off]                     # the badge at the edge stays
+    assert any(on <= ms <= off for ms, _w in hud(out, s, "Timer_Num"))       # and keeps counting
+    assert has(out, "MASER BARRAGE", "hud maser_barrage: its words are back")
+    assert hud_next(out, s, "Title", off) == "MASER BARRAGE"

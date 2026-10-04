@@ -37,7 +37,7 @@ export function LookRow({ look, ns, note = true, onOpen }) {
     { k: "files", mode: "assets", label: "Individual files",
       name: p.files.set ? `${p.files.name}, on ${plural(p.files.count, "file")}`
         : !p.files.count ? "no file switched on"
-        : p.files.by_overlay ? "Recommended, done by the overlay" : "No change",
+        : p.files.by_overlay ? "Done by the overlay" : "No change",
       set: p.files.set, tip: p.files.by_overlay && !p.files.set ? TIPS.by_overlay : "" },
     { k: "screen", mode: "screen", label: "Machine screen",
       name: p.screen.name || "No change", set: p.screen.set },

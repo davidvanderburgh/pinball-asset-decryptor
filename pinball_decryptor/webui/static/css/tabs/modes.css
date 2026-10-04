@@ -195,6 +195,8 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk-mode { background: #8b5bd6; }
 .bk-score { background: #2f9a5b; }
 .bk.bk-var, .bk-pal.bk-var { background: #c8553a; color: #fff; }
+.bk.bk-timer, .bk-pal.bk-timer { background: #b0457e; color: #fff; }
+.bk-varbox.timer { background: #b0457e22; border-color: #b0457e66; }
 .bk-flow { background: #d77a21; }
 .bk-show { background: #3a78c9; }
 .bk-num { background: #4aa36b; }

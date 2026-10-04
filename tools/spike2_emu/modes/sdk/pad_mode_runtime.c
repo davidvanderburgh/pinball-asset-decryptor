@@ -1824,6 +1824,7 @@ static void *clip2_surface(void)
 static volatile int disp_clip_ours, disp_clip_lost;
 static char disp_clip_name[96], disp_lost_name[64];
 static void display_tick(void);           /* the display priority section, below */
+static void block_tick(void);             /* PAD-347: a mode that keeps the game's modes from starting */
 
 int pm_clip(const char *name)
 {
@@ -1904,6 +1905,7 @@ static void clip_tick(void)
     unsigned long now;
     long playing = pm_port_value("surface_playing", 2);
     display_tick();                           /* item 154 display: the hold, the covered state */
+    block_tick();                             /* PAD-347: a block ends with its mode */
     if (!clip.on && clip_v2 && !clip2_hidden && pm_ms() - clip2_tried > 1000) {
         clip2_tried = pm_ms();                /* a grafted surface out of sight, once its scene is up */
         clip2_show(0);
@@ -2892,6 +2894,87 @@ int pm_aside(void)
         say("aside: now %s", pm_stock_mode_what((unsigned)k));
     aside.kind = k;
     return k;
+}
+
+/* ---- PAD-347: a mode that keeps the game's own modes from starting -----------------------------------
+ * David (2026-10-04): "make isolated modes like our own custom ones that prevent the stock modes from
+ * starting." Every one of Godzilla's 27 modes starts through ONE function (`site stock_mode_start`, 0x7eac0
+ * on Premium 1.16; the hurry-ups' own start is a branch to it): the cmode base start, which sets the mode's
+ * start flag for the player up - and returns at once, starting nothing, when the mode's own "cannot start"
+ * byte is set. A start refused here is that same path: the rule that asked carries on, as it does for a mode
+ * the game will not start. Only the modes the port names as safe to refuse are refused (`value
+ * block_mode_ids`, a mask over the mode table `data block_mode_table` of `value block_mode_count`
+ * entries): the timed modes and hurry-ups a shot starts. A multiball (balls in a lock, a magnet: PAD-353)
+ * or a battle (the scoop, its select screen) is never refused; a mode that blocks gives way to those. */
+static const struct pm_mode *block_owner;
+static unsigned block_said;              /* the ids refused this hold, one bit each */
+
+static int block_id(unsigned obj)
+{
+    unsigned t = data("block_mode_table");
+    long n = pm_port_value("block_mode_count", 0), i;
+    if (!t || !obj) return -1;
+    for (i = 0; i < n && i < 32; i++)
+        if (((const unsigned *)(unsigned long)t)[i] == obj) return (int)i;
+    return -1;
+}
+
+static int on_stock_mode_start(unsigned *r)
+{
+    int id;
+    if (!block_owner || running != block_owner || !pm_in_game()) return 0;
+    id = block_id(r[0]);
+    if (id < 0 || !(((unsigned long)pm_port_value("block_mode_ids", 0) >> id) & 1u)) return 0;
+    if (!(block_said & (1u << id))) {
+        block_said |= 1u << id;
+        say("block: the game's mode %d did not start - %s is running", id,
+            block_owner->name ? block_owner->name : "a mode");
+    }
+    return 1;                                  /* refused: the base start's own "cannot start" path */
+}
+
+int pm_block_game_modes(int on)
+{
+    if (!(can & PM_CAN_BLOCK_GAME)) return 0;
+    if (!on) {
+        if (block_owner && (!current || block_owner == current)) {
+            say("block: %s lets the game's modes start again", block_owner->name ? block_owner->name : "a mode");
+            block_owner = 0;
+        }
+        return 1;
+    }
+    if (!running || running != current) return 0;
+    block_owner = current;
+    block_said = 0;
+    say("block: %s keeps the game's timed modes and hurry-ups from starting while it runs (mask 0x%lx)",
+        current->name ? current->name : "a mode", (unsigned long)pm_port_value("block_mode_ids", 0));
+    return 1;
+}
+
+/* every tick, from clip_tick: a block ends with the mode that asked for it */
+static void block_tick(void)
+{
+    if (!block_owner || running == block_owner) return;
+    say("block: %s ended - the game's modes may start again", block_owner->name ? block_owner->name : "a mode");
+    block_owner = 0;
+}
+
+/* from the constructor: the veto on the game's mode start, when the port names it and its table */
+static void block_arm(void)
+{
+    if (!site("stock_mode_start")) return;      /* a port without it: silent */
+    if (!data("block_mode_table") || pm_port_value("block_mode_count", 0) <= 0 || !pm_port_value("block_mode_ids", 0)) {
+        say("block: off - the port names the game's mode start but not its table or the modes that may be refused");
+        return;
+    }
+    if (!hook_veto(fn("stock_mode_start"), on_stock_mode_start)) {
+        say("block: off - the game's mode start 0x%08x could not be hooked", fn("stock_mode_start"));
+        return;
+    }
+    can |= PM_CAN_BLOCK_GAME;
+    say("block: on - the game's mode start 0x%08x is hooked; a mode may keep these of the game's %ld modes "
+        "from starting: mask 0x%lx", fn("stock_mode_start"), pm_port_value("block_mode_count", 0),
+        (unsigned long)pm_port_value("block_mode_ids", 0));
 }
 
 /* ---- a multiball of the mode's own (item 167) ---------------------------------------------------
@@ -5008,6 +5091,7 @@ static void pad_mode_start(void)
             (unsigned)ball_end_event);
     }
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
+    block_arm();                              /* PAD-347: a mode may keep the game's modes from starting */
     backdrop_arm();                           /* hud-layers: a clip behind the HUD */
     frame_arm();                              /* PAD-301: a full-screen clip drawn at the frame hand-over */
     if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);

@@ -206,6 +206,7 @@ static int start(const char *why, int counted)
                                  : "a skill shot is not held through the game's mode")) return 0;
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_MODE);                /* first: before the screen and the clip */
+    kit_isolate(own.give_way);                    /* PAD-347: the game's modes wait for it */
     run.on = 1;
     run.player = p;
     run.step = 0;

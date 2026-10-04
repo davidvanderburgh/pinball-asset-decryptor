@@ -613,6 +613,7 @@ static KIT_UNUSED int kit_display(unsigned priority)
 
 static KIT_UNUSED void kit_end(void)
 {
+    pm_block_game_modes(0);                /* PAD-347: the game's modes may start again */
     pm_display_priority(0);                /* given up before pm_end (MODE_SDK.md) */
     pm_end();
     kit_running = 0;
@@ -626,6 +627,7 @@ static KIT_UNUSED void kit_end(void)
  * those hand the display back at the same tick. */
 static KIT_UNUSED void kit_end_after(unsigned long ms)
 {
+    pm_block_game_modes(0);                /* PAD-347: its ending blocks nothing */
     if (!ms || !pm_end_holding((unsigned)ms)) {
         kit_end();
         return;
@@ -696,6 +698,26 @@ static KIT_UNUSED int kit_wait_game(const char *who, const char *why, const char
 static KIT_UNUSED int kit_game_began(void)
 {
     return pm_aside() != 0;
+}
+
+/* PAD-347 (David, 2026-10-04: "isolated modes like our own custom ones that prevent the stock modes from
+ * starting"): right after kit_begin, a mode BLOCKS the game's modes the port lets it refuse (on Godzilla the
+ * timed modes and hurry-ups a shot starts) for as long as it runs, unless its assets file says `game_modes
+ * give_way`. A multiball or a battle of the game's is never refused: kit_game_began still ends ours for those.
+ * 1 = blocking. Given back in kit_end / kit_end_after / kit_end_now (and by the runtime when the mode ends). */
+static KIT_UNUSED int kit_isolate(int give_way)
+{
+    if (give_way) {
+        pm_log("isolated: gives way - one of the game's modes starting ends it");
+        return 0;
+    }
+    if (pm_block_game_modes(1)) {
+        pm_log("isolated: blocks the game's timed modes and hurry-ups while it runs (a multiball or a battle of "
+               "the game's still ends it)");
+        return 1;
+    }
+    pm_log("isolated: this port cannot block the game's modes - it gives way to them");
+    return 0;
 }
 
 /* ---- the mode's HUD at the glass's EDGES (hud-layers) ----------------------------------------------

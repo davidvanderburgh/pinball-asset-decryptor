@@ -8,11 +8,12 @@ calls (skips without an ELF C compiler).
 """
 import os
 import subprocess
+import struct
 
 import pytest
 
 from tests.test_spike2_mode_roster import HARNESS, _cc, weak_stubs
-from tests.test_spike2_mode_display import SDK
+from tests.test_spike2_mode_display import ELVES, SDK, _Elf, _port
 
 # the roster harness, with a screen the mode finds, its shows printed, and the game's mode switched by `stock <k>`
 SCREEN_STUBS = [
@@ -128,3 +129,35 @@ def test_the_screen_is_not_shown_again_after_its_total_is_gone(harness, tmp_path
     off = next(i for i, ln in enumerate(lines) if ln.startswith("STOCK 0"))
     assert end < off
     assert [ln for ln in lines[off:] if ln.startswith("SHOW 1")] == []
+
+
+# ---- PAD-347: blocking the game's modes on Godzilla Premium 1.16 ----------------------------------------------
+def test_the_premium_port_names_the_game_mode_start_and_only_safe_modes_to_refuse():
+    port = _port("godzilla_le-1.16.port")
+    assert port[("site", "stock_mode_start")] == [0x0007eac0, 0xe92d4010, 0xe1a04000]
+    assert port[("data", "block_mode_table")] == [0x007b4aa8]
+    assert port[("value", "block_mode_count")] == [27]
+    ids = port[("value", "block_mode_ids")][0]
+    assert not ids & 0xffe                                  # never a multiball (1-11): locks, the magnets
+    assert not ids & (0x3f << 12)                           # never a battle (12-17): the scoop, its select screen
+    assert ids == sum(1 << i for i in (18, 19, 21, 22, 23, 24, 25))
+
+
+def test_the_premium_start_and_table_match_the_game():
+    name = "godzilla_le-1.16.port"
+    path = next((p for p in ELVES[name] if p and os.path.isfile(p)), None)
+    if not path:
+        pytest.skip("game program not present for %s" % name)
+    e, port = _Elf(path), _port(name)
+    site = port[("site", "stock_mode_start")]
+    assert (e.u32(site[0]), e.u32(site[0] + 4)) == (site[1], site[2])
+    # the manager's get (0xd3fa0): cmp r1,#26 ... movw/movt r3 = the table ... ldr r0,[r3,r1,lsl#2]
+    assert e.u32(0xd3fa0) == 0xe351001a and e.u32(0xd3fb4) == 0xe7930101
+    lo, hi = e.u32(0xd3fac), e.u32(0xd3fb0)
+    imm = lambda w: ((w >> 4) & 0xf000) | (w & 0xfff)        # noqa: E731
+    assert (imm(hi) << 16) | imm(lo) == port[("data", "block_mode_table")][0]
+    # the hurry-ups' start is a branch to it
+    w = e.u32(0xb8dac)
+    off = w & 0xffffff
+    off = off - (1 << 24) if off & 0x800000 else off
+    assert (w >> 24) == 0xea and 0xb8dac + 8 + 4 * off == site[0]

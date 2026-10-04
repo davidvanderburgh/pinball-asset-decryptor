@@ -354,6 +354,12 @@ int pm_aside(void)
 {
     return in_game ? pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY) : 0;
 }
+/* PAD-347: "BLOCK 1 <mode>" when a mode keeps the game's modes from starting, "BLOCK 0 <mode>" when it lets go */
+int pm_block_game_modes(int on)
+{
+    printf("%6lu BLOCK %d %s\n", now_ms, on ? 1 : 0, current && current->name ? current->name : "?");
+    return 1;
+}
 const char *pm_stock_mode_what(unsigned kind)
 {
     return kind & PM_STOCK_BATTLE ? "a battle" : kind & PM_STOCK_MULTIBALL ? "a multiball" : "a stock mode";

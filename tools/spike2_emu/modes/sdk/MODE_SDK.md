@@ -978,6 +978,26 @@ the game's multiball is active or two balls or more are in play, and stay ready,
 qualifying shot after it starts them (`kit_wait_multiball`). FINAL WARS and MELTDOWN already
 waited. Beside the game's battles and timed modes they still stack, their words aside.
 
+**Isolation: blocking the game's modes (PAD-347).** After a machine run with the modes stacked,
+David (2026-10-04): "there is still a bit too much overlap with other modes. i'd prefer to try them
+isolated", and "make isolated modes like our own custom ones that prevent the stock modes from
+starting". The examples now keep to themselves:
+
+- They start only while none of the game's modes runs and fewer than two balls are in play, and stay
+  ready (`kit_wait_game`).
+- While one runs it BLOCKS the game's modes it may refuse (`pm_block_game_modes`, from `kit_isolate`
+  right after `kit_begin`). On Godzilla every one of the 27 modes starts through the cmode base start
+  (`site stock_mode_start`, 0x7eac0 on Premium 1.16: all 27 vtables' `v[8]` are it, or a branch to
+  it), which only sets the mode's start flag for the player up and returns at once, starting nothing,
+  when the mode's own "cannot start" byte is set. The runtime refuses the start at its entry with a
+  veto hook - that same path - so the rule that asked carries on. Only the ids in `value
+  block_mode_ids` are refused: the timed modes and hurry-ups a shot starts (18 Super Train, 19
+  Oxygen Destroyer, 21 Jet Fighter Attack, 22 Planet X Hurry-Up, 23 Tesla Strike, 24 Monster
+  Rampage, 25 Hedorah). The multiballs (balls in a lock; the Godzilla and Mechagodzilla magnets) and
+  the battles (the scoop, the select screen) are never refused until each is proven safe: one of
+  those starting still ends ours (`kit_game_began`), as a mode whose assets file says `game_modes
+  give_way` does for every game mode.
+
 **Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
 shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the
 balls in play plus the game's own mode flags, live records, running bytes or rule objects on 11

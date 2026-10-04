@@ -310,6 +310,7 @@ static int start(const char *why)
     }
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_WIZARD);              /* first: before the screen and the clip */
+    kit_isolate(own.give_way);                    /* PAD-347: the game's modes wait for it */
     run.on = 1;
     run.player = p;
     run.total = 0;

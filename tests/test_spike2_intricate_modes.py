@@ -1507,3 +1507,27 @@ def test_a_modes_words_wait_while_a_display_of_the_games_has_the_screen(harness)
     assert any(on <= ms <= off for ms, _w in hud(out, s, "Timer_Num"))       # and keeps counting
     assert has(out, "MASER BARRAGE", "hud maser_barrage: its words are back")
     assert hud_next(out, s, "Title", off) == "MASER BARRAGE"
+
+
+# ---- PAD-347: an isolated mode BLOCKS the game's modes while it runs, unless its assets file says give_way ------
+@pytest.mark.parametrize("slug,start", STACK_STARTS, ids=[s for s, _ in STACK_STARTS])
+def test_an_isolated_mode_blocks_the_games_modes_from_its_start_to_its_end(harness, slug, start):
+    mode = NAMES[slug]
+    out = play(harness, *start, "secs", 2, "ball_end", "ms", 20)
+    begun = _at(out, "[%s] START" % mode)
+    on = _at(out, "BLOCK 1 %s" % mode)
+    assert on is not None and on <= begun, out[-2000:]                       # before anything of its own
+    assert has(out, mode, "isolated: blocks the game's timed modes and hurry-ups while it runs")
+    ended = _at(out, "[%s] END (ball ended)" % mode)
+    off = _at(out, "BLOCK 0 %s" % mode)
+    assert ended is not None and off is not None and off <= ended + 20, out[-2000:]
+
+
+def test_game_modes_give_way_in_its_assets_file_means_it_blocks_nothing(harness, tmp_path):
+    d = tmp_path / "dump_gw"
+    d.mkdir()
+    (d / "maser_barrage.assets").write_text("name MASER BARRAGE\ngame_modes give_way\n")
+    out = play_own(harness, str(d), "event", "skill_shot", "secs", 2, "ball_end", "ms", 20)
+    assert _at(out, "[MASER BARRAGE] START") is not None
+    assert "BLOCK 1 MASER BARRAGE" not in out
+    assert has(out, "MASER BARRAGE", "isolated: gives way - one of the game's modes starting ends it")

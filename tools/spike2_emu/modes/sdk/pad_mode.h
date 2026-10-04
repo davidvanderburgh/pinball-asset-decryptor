@@ -296,6 +296,15 @@ const char *pm_stock_mode_what(unsigned kind);   /* "a battle", "a multiball", "
  * PM_STOCK_MULTIBALL, then PM_STOCK_ANY) or 0. Cheap to call every tick (the game is asked at most
  * five times a second); 0 on a port that cannot tell, and outside a game. */
 int pm_aside(void);
+/* PAD-347: ISOLATION. A mode may keep the game's own modes from STARTING while it runs: the game's
+ * mode start is refused the way the game refuses a mode it will not start (its own "cannot start"
+ * path), so the rule that asked carries on. Only the modes the port names as safe to refuse are
+ * refused - on Godzilla the timed modes and hurry-ups a shot starts (Jet Fighter Attack, Oxygen
+ * Destroyer, Tesla Strike...); a multiball (balls in a lock, a magnet) or a battle (the scoop) never
+ * is, so a mode that blocks still gives way to those. 1 = blocking (0 to stop); ends by itself with
+ * the mode. 0 when the port cannot. */
+#define PM_CAN_BLOCK_GAME   0x40000u  /* pm_block_game_modes */
+int pm_block_game_modes(int on);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

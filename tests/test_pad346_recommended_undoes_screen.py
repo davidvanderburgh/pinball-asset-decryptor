@@ -74,13 +74,13 @@ def test_it_follows_the_machine_screen(tmp_path):
     assert cp.asset_profile(d) == MEASURED
 
 
-def test_the_overlay_follows_too_and_the_files_then_change_nothing(tmp_path):
+def test_the_overlay_follows_too_and_the_files_still_get_theirs(tmp_path):
     d = str(tmp_path)
     cp.store(d, None, follow=True)
     assert cp.follows_screen(d)
     assert cp.for_project(d) == cp.active(d) == cp.undo_screen(SCREEN)
-    # the overlay already undoes the screen for the files
-    assert cp.asset_profile(d).is_identity() and cp.asset_active(d) is None
+    # PAD-356: the files' Recommended stacks with the overlay's, the user's call
+    assert cp.asset_profile(d) == cp.asset_active(d) == cp.undo_screen(SCREEN)
     mine = cp.Profile(name="Mine", gamma=(0.8, 0.8, 0.7))
     cp.store_screen_profile(d, mine)
     assert cp.for_project(d) == cp.undo_screen(mine)

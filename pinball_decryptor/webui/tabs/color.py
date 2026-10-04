@@ -143,7 +143,7 @@ class ColorTab(TabService):
                  has_project=False, try_note="", mode="display",
                  per_file=False, all_images=False, all_videos=False,
                  asset_counts={"images": 0, "videos": 0, "added": 0},
-                 asset_active=False, files_by_overlay=False)
+                 asset_active=False)
 
     # -- the project ---------------------------------------------------------
     def _assets(self):
@@ -208,11 +208,10 @@ class ColorTab(TabService):
         """The chosen-files mode's switches and counts for the page."""
         out = {"all_images": False, "all_videos": False,
                "asset_counts": {"images": 0, "videos": 0, "added": 0},
-               "asset_active": False, "files_by_overlay": False}
+               "asset_active": False}
         if not (assets and os.path.isdir(assets)):
             return out
         try:
-            out["files_by_overlay"] = cp.files_by_overlay(assets)
             st = cp.asset_settings(assets)
             out["all_images"] = st["all_images"]
             out["all_videos"] = st["all_videos"]

@@ -201,9 +201,9 @@ static int start(const char *why, int counted)
         pm_log("not started (%s): it already ran this ball", why);
         return 0;
     }
-    if (counted && kit_wait_multiball(MODE_NAME, why, hits[p] >= HITS_TO_START   /* PAD-347 */
-                                      ? "the next Maser target hit after it starts it"
-                                      : "a skill shot is not held through a multiball")) return 0;
+    if (counted && kit_wait_game(MODE_NAME, why, hits[p] >= HITS_TO_START       /* PAD-347 */
+                                 ? "the next Maser target hit after it starts it"
+                                 : "a skill shot is not held through the game's mode")) return 0;
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_MODE);                /* first: before the screen and the clip */
     run.on = 1;
@@ -410,6 +410,11 @@ static void on_tick(void)
     if (!run.on) return;
     if (!pm_in_game() || pm_player() != run.player) {
         end("the game moved on");
+        return;
+    }
+    if (kit_game_began()) {                        /* PAD-347: isolated - the game began one of its own */
+        end("the game's own mode began");
+        kit_end_now();
         return;
     }
     if (kit_timer_tick(&run.clock)) {

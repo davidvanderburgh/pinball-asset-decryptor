@@ -1418,10 +1418,11 @@ def test_every_text_a_mode_writes_on_its_hud_fits(harness):
     assert not too_long, too_long
     assert known == set(KNOWN_TOO_LONG), set(KNOWN_TOO_LONG) - known     # fixed: take it off the list
 
-# ---- PAD-347: stacking - our modes step aside for the game's own ------------------------------------------------
-# David's Premium, 2026-10-03: during the game's JET FIGHTER ATTACK one of ours wrote its title and line in the very
-# places the game's mode writes its own ("impossible to read either set of text"), and OXYGEN DESTROYER started
-# during the game's multiball. `timed 1` is one of the game's modes that is neither a battle nor a multiball.
+# ---- PAD-347: isolated - our modes keep to themselves --------------------------------------------------------
+# David's Premium, 2026-10-03: during the game's JET FIGHTER ATTACK one of ours wrote its words in the very places
+# the game's mode writes its own, and OXYGEN DESTROYER started during the game's multiball. Stacked with their words
+# aside it was better, but (2026-10-04) "still a bit too much overlap with other modes. i'd prefer to try them
+# isolated from other ones." `timed 1` is one of the game's modes that is neither a battle nor a multiball.
 STACK_STARTS = [
     ("ghidorah_heads", POWERLINES),
     ("oxygen_destroyer", SPINS),
@@ -1431,79 +1432,25 @@ STACK_STARTS = [
 ]
 
 
-def _last(out, slug, field, t):
-    """the words the HUD text last showed at or before `t`, or None"""
-    said = [w for ms, w in hud(out, slug, field) if ms <= t]
-    return said[-1] if said else None
+@pytest.mark.parametrize("busy", ["timed", "battle", "multiball"])
+@pytest.mark.parametrize("slug,start", STACK_STARTS, ids=[s for s, _ in STACK_STARTS])
+def test_a_mode_ends_the_moment_one_of_the_games_modes_begins(harness, slug, start, busy):
+    out = play(harness, *start, "secs", 4, busy, 1, "secs", 1)
+    began = _at(out, ">> %s 1" % busy)
+    mode = NAMES[slug]
+    assert _at(out, "[%s] START" % mode) < began, out[-2000:]
+    t = _at(out, "[%s] END (the game's own mode began)" % mode)
+    assert t is not None and began <= t <= began + 40, out[-2000:]
+    assert t in _hid(out, slug)                                              # its words go in the same tick
+    assert _at(out, "[%s] lights: all handed back to the game" % mode) == t
+    if busy != "battle":                                  # ANGUIRUS joins a battle of the game's and lights the shields
+        assert "END lamps held 0" in out
 
 
 @pytest.mark.parametrize("slug,start", STACK_STARTS, ids=[s for s, _ in STACK_STARTS])
-def test_a_mode_steps_aside_while_one_of_the_games_modes_runs(harness, slug, start):
-    out = play(harness, *start, "secs", 4, "timed", 1, "secs", 1, "timed", 0, "secs", 1)
-    on, off = _at(out, ">> timed 1"), _at(out, ">> timed 0")
-    title, line = _last(out, slug, "Title", on), _last(out, slug, "Line", on)
-    assert title and title.strip(), out[-2000:]
-    assert has(out, NAMES[slug], "hud %s: aside for a stock mode - its lines in the award line, its counters hidden" % slug)
-    # the game's title and line have their places: ours are blank there, and say the same in the award line
-    assert _last(out, slug, "Title", off) == " " and _last(out, slug, "Line", off) == " "
-    assert _last(out, slug, "Award", off) == title
-    if line and line.strip():
-        assert (_last(out, slug, "AwardSub", off) or " ").strip()
-    for k in (1, 2, 3):                                   # the counters along the top are the game's too
-        for part in ("Label", "Value", "Sub"):
-            was = _last(out, slug, "C%d_%s" % (k, part), on)
-            if was and was.strip():
-                assert _last(out, slug, "C%d_%s" % (k, part), off) == " ", (k, part)
-    # back in its places when the game's mode is over
-    assert has(out, NAMES[slug], "hud %s: back in its places - the game's mode is over" % slug)
-    assert hud_next(out, slug, "Title", off) == title
-    assert hud_next(out, slug, "Award", off) == " "
-
-
-def test_an_award_still_takes_the_award_line_while_aside(harness):
-    s = "maser_barrage"
-    out = play(harness, "event", "skill_shot", "secs", 4, "timed", 1, "secs", 1, "shot", "Left ramp", "secs", 2)
-    shot = _at(out, ">> shot Left ramp")
-    after = [(ms, w) for ms, w in hud(out, s, "Award") if ms >= shot]
-    assert after and after[0][1] not in ("MASER BARRAGE", " "), after     # the step's award, for its moment
-    assert after[-1][1] == "MASER BARRAGE" and after[-1][0] >= shot + 1000   # then the mode's own title again
-    assert _last(out, s, "Title", after[-1][0]) == " "                       # still aside: not in its own place
-
-
-def test_the_badge_moves_one_slot_down_while_a_battle_has_the_battle_badge(harness):
-    s = "maser_barrage"
-    out = play(harness, "event", "skill_shot", "secs", 2, "battle", 1, "secs", 1, "battle", 0, "secs", 1)
-    on, off = _at(out, ">> battle 1"), _at(out, ">> battle 0")
-    show = [(int(t), n, int(v)) for t, n, v in
-            re.findall(r"^\s*(\d+) SHOW PadMode_%s_Hud\.PadMode_%s_Hud_(Timer2?) ([01])$" % (s, s), out, re.M)]
-    assert (show[0][1], show[0][2]) == ("Timer", 1)                          # its own slot at the start
-    during = [(n, v) for t, n, v in show if on <= t <= on + 40]
-    assert ("Timer", 0) in during and ("Timer2", 1) in during
-    assert any(on <= ms <= on + 40 for ms, _w in hud(out, s, "Timer2_Num"))
-    back = [(n, v) for t, n, v in show if off <= t <= off + 40]
-    assert ("Timer", 1) in back and ("Timer2", 0) in back
-    assert has(out, "MASER BARRAGE", "aside for a battle - its lines in the award line, its counters hidden, "
-                                     "its badge one slot down")
-
-
-MASER_X3 = ["shot", "Maser target", "ms", 300] * 3
-
-
-@pytest.mark.parametrize("busy", [("multiball", 1, 0, ">> multiball 0"), ("balls", 2, 1, ">> balls in play 1")],
-                         ids=["games_multiball", "two_balls"])
-@pytest.mark.parametrize("mode,qualify,again", [
-    ("KING GHIDORAH", POWERLINES, ["shot", "Powerline left"]),
-    ("OXYGEN DESTROYER", SPINS, ["shot", "Left spinner"]),
-    ("MASER BARRAGE", MASER_X3, ["shot", "Maser target"]),
-], ids=["ghidorah", "oxygen", "maser"])
-def test_a_single_ball_mode_waits_out_a_multiball_still_ready(harness, busy, mode, qualify, again):
-    cmd, on, off, over = busy
-    out = play(harness, cmd, on, *qualify, cmd, off, "secs", 1, *again, "secs", 1)
-    waited = _at(out, "[%s] not started" % mode)
-    assert waited is not None, out[-2000:]
-    assert has(out, mode, "a multiball is running") and has(out, mode, "still ready")
-    begun = _at(out, "[%s] START" % mode)
-    assert begun is not None and begun > _at(out, over), out[-2000:]   # the shot after it
+def test_a_mode_runs_to_its_own_end_when_the_game_starts_nothing(harness, slug, start):
+    out = play(harness, *start, "secs", 4)
+    assert not has(out, NAMES[slug], "the game's own mode began")
 
 
 def test_the_huds_second_badge_slot_is_named_as_the_kit_finds_it():
@@ -1514,3 +1461,25 @@ def test_the_huds_second_badge_slot_is_named_as_the_kit_finds_it():
     kit = (EX / "intricate_kit.h").read_text(encoding="utf-8")
     assert '".PadMode_%s_Hud_Timer2"' in kit and '".PadMode_%s_Hud_Timer2.PadMode_%s_Hud_Timer2_Num"' in kit
     assert mode_hud.TIMER2_DY - mode_hud.TIMER_DY == 109.0                   # the stock badges' slot pitch
+
+
+MASER_X3 = ["shot", "Maser target", "ms", 300] * 3
+
+
+@pytest.mark.parametrize("busy", [("multiball", 1, 0, ">> multiball 0"), ("balls", 2, 1, ">> balls in play 1"),
+                                  ("battle", 1, 0, ">> battle 0"), ("timed", 1, 0, ">> timed 0")],
+                         ids=["games_multiball", "two_balls", "games_battle", "games_timed_mode"])
+@pytest.mark.parametrize("mode,qualify,again", [
+    ("KING GHIDORAH", POWERLINES, ["shot", "Powerline left"]),
+    ("OXYGEN DESTROYER", SPINS, ["shot", "Left spinner"]),
+    ("MASER BARRAGE", MASER_X3, ["shot", "Maser target"]),
+], ids=["ghidorah", "oxygen", "maser"])
+def test_a_single_ball_mode_waits_out_the_games_modes_still_ready(harness, busy, mode, qualify, again):
+    cmd, on, off, over = busy
+    # two qualifying shots after it: after a battle ANGUIRUS shows its total, which gives way to the first
+    out = play(harness, cmd, on, *qualify, cmd, off, "secs", 1, *again, "secs", 1, *again, "secs", 1)
+    waited = _at(out, "[%s] not started" % mode)
+    assert waited is not None, out[-2000:]
+    assert has(out, mode, "is running - still ready")
+    begun = _at(out, "[%s] START" % mode)
+    assert begun is not None and begun > _at(out, over), out[-2000:]   # the shot after it

@@ -664,22 +664,40 @@ static KIT_UNUSED int kit_stock_busy(unsigned kinds, const char *who, const char
     return k > 0;
 }
 
-/* PAD-347: a single-ball mode of ours waits out a MULTIBALL - the game's own (its mode manager says so),
- * or simply two balls or more in play (David's Premium, 2026-10-03: "when I was in multi-ball and I did
- * the outlane oxygen destroyer mode, it should not have triggered because I had multiple balls on the
- * playfield"). It stays ready: the mode's qualifying shot after the multiball starts it. 1 = wait; a
- * spinner asks on every spin, so the wait is logged at most every 10 s (`then` says what starts it). */
-static KIT_UNUSED int kit_wait_multiball(const char *who, const char *why, const char *then)
+/* PAD-347: ISOLATED. After a machine run with the modes stacked on the game's own (their words aside), David
+ * (2026-10-04): "there is still a bit too much overlap with other modes. i'd prefer to try them isolated from
+ * other ones." So the pack's modes (ANGUIRUS apart: it exists to join the game's battles) keep to themselves:
+ * - one starts only while none of the game's own modes runs (a battle, a multiball, a timed mode such as JET
+ *   FIGHTER ATTACK) and fewer than two balls are in play; a refused start stays ready, so its qualifying shot
+ *   after the game's mode starts it (kit_wait_game);
+ * - one of the game's modes beginning while ours runs ends ours at once, its words, lights and display given
+ *   back in the same tick, as a tilt does (kit_game_began). */
+static KIT_UNUSED int kit_game_busy(const char *who, const char **what)
+{
+    int n = pm_can(PM_CAN_MULTIBALL) ? pm_balls_in_play() : -1;
+    if (kit_stock_busy(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY, who, what)) return 1;
+    if (n < 2) return 0;
+    if (what) *what = "a multiball";                         /* two balls in play, none of the game's */
+    return 1;
+}
+
+/* 1 = wait: logged at most every 10 s (a spinner asks on every spin); `then` says what starts it after */
+static KIT_UNUSED int kit_wait_game(const char *who, const char *why, const char *then)
 {
     static unsigned long said_at;
     const char *what = 0;
-    int n = pm_can(PM_CAN_MULTIBALL) ? pm_balls_in_play() : -1;
-    if (!kit_stock_busy(PM_STOCK_MULTIBALL, who, &what) && n < 2) return 0;
-    if (!what || !what[0]) what = "a multiball";             /* two balls in play, none of the game's */
+    if (!kit_game_busy(who, &what)) return 0;
+    if (!what || !what[0]) what = "one of the game's modes";
     if (!said_at || pm_ms() - said_at >= 10000)
-        pm_log("not started (%s): %s is running (%d ball(s) in play) - still ready, %s", why, what, n, then);
+        pm_log("not started (%s): %s is running - still ready, %s", why, what, then);
     said_at = pm_ms() ? pm_ms() : 1;
     return 1;
+}
+
+/* 1 = one of the game's own modes is running now (asked by a mode of ours that is running) */
+static KIT_UNUSED int kit_game_began(void)
+{
+    return pm_aside() != 0;
 }
 
 /* ---- the mode's HUD at the glass's EDGES (hud-layers) ----------------------------------------------

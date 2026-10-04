@@ -241,11 +241,8 @@ static int start(const char *why, int counted)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (counted && kit_stock_busy(PM_STOCK_BATTLE, MODE_NAME, &what)) {
-        pm_log("not started (%s): %s is running - it starts on the next powerline hit after it", why, what);
-        return 0;
-    }
-    if (counted && kit_wait_multiball(MODE_NAME, why, "the next powerline hit after it starts it")) return 0;   /* PAD-347 */
+    (void)what;
+    if (counted && kit_wait_game(MODE_NAME, why, "the next powerline hit after it starts it")) return 0;   /* PAD-347 */
     if (!kit_begin(MODE_NAME)) return 0;          /* another of our modes: pm_begin logged it */
     kit_display(KIT_DISPLAY_MODE);                /* first: before the screen and the clip */
     run.on = 1;
@@ -522,6 +519,11 @@ static void on_tick(void)
     if (!run.on) return;
     if (!pm_in_game() || pm_player() != run.player) {
         end("the game moved on", 0);
+        return;
+    }
+    if (kit_game_began()) {                        /* PAD-347: isolated - the game began one of its own */
+        end("the game's own mode began", 0);
+        kit_end_now();
         return;
     }
     battle_tick();

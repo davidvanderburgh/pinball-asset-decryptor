@@ -96,3 +96,5 @@ html.bph-760 .vid-tbl { min-height: 150px; }
 /* PAD-329: As on the machine above the players; the filter defs take no room */
 .vid-look { margin: 0 0 6px; }
 .vid-lookdefs { position: absolute; width: 0; height: 0; overflow: hidden; }
+/* PAD-369: the Original Video name carries its own tooltip (the clip and its color profile) */
+.vid-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

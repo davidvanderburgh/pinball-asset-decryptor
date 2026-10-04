@@ -119,6 +119,15 @@ function tipBox(text, rich) {
     };
     if (spec.head) add("tip-h", spec.head);
     for (const ln of spec.lines || []) {
+      if (ln == null || ln === "") continue;
+      if (typeof ln === "object" && !Array.isArray(ln)) {
+        // PAD-369 (DragonRR): a file's color profile, in one color of its own in every tooltip
+        const row = add("tip-l tip-cp");
+        const v = document.createElement("b");
+        v.textContent = ln.profile;
+        row.append("Color profile: ", v);
+        continue;
+      }
       if (!Array.isArray(ln)) { add("tip-l", ln); continue; }
       const row = add("tip-row");
       const k = document.createElement("span");
@@ -217,7 +226,8 @@ export function tip(text) {
   let rich = null;
   if (typeof text === "object") {
     rich = JSON.stringify(text);
-    text = [text.head, ...(text.lines || []).map((l) => (Array.isArray(l) ? l.join(": ") : l))]
+    text = [text.head, ...(text.lines || []).map((l) => (Array.isArray(l) ? l.join(": ")
+      : l && typeof l === "object" ? "Color profile: " + l.profile : l))]
       .filter(Boolean).join("\n");
   }
   return {

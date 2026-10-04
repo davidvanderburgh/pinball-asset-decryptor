@@ -567,6 +567,7 @@ class ColorTab(TabService):
                 return False
             if rev:
                 self._rev += 1
+                self._files_preview_on()
             self._publish(problems=[])
             self._changed(display=False)
             self._tell_tabs()
@@ -601,6 +602,7 @@ class ColorTab(TabService):
         self._attach()
         if rev:
             self._rev += 1
+            self._files_preview_on()
         self._publish(problems=[])
         self._changed(display=False)
         self._tell_tabs()
@@ -626,6 +628,36 @@ class ColorTab(TabService):
             return
         if done:
             f["on"] = True
+
+    def _files_preview_on(self):
+        """PAD-369 (DragonRR): an individual files profile picked (a starting
+        point, a saved one or a Load) is meant to be seen, so the Preview
+        colors switch for individual files goes on in Scenes and on the Video
+        players where it was off.  It stays on until it is turned off again.
+        Nothing is drawn here: the redraw that follows the pick does it."""
+        from .. import look_switches
+        try:
+            scenes = getattr(self.window.service("text"), "scenes", None)
+        except Exception:                               # noqa: BLE001
+            scenes = None
+        for where, svc in (("scenes", scenes),
+                           ("video", self.window.service("video"))):
+            try:
+                if where == "scenes":
+                    sw = svc._look_sw() if svc is not None else None
+                else:
+                    sw = getattr(svc, "_lsw", None)
+                if sw is None:
+                    sw = look_switches.initial(self.window, where)
+                if sw.get("files", True):
+                    continue
+                sw["files"] = True
+                look_switches.save(self.window, where, sw)
+                if where == "scenes" and svc is not None and getattr(
+                        svc, "_alive", False):
+                    svc._publish_look()
+            except Exception:                           # noqa: BLE001
+                log.exception("color profile preview switch %s", where)
 
     @rpc
     def set_file(self, kind=None, rel=None, label="", on=None, attach=None):
@@ -850,6 +882,8 @@ class ColorTab(TabService):
                                % e])
             return False
         self._rev += 1
+        if self._assets_mode():
+            self._files_preview_on()
         self._publish(problems=[])
         self._changed(display=not self._assets_mode())
         self._tell_tabs()

@@ -107,9 +107,10 @@ const ADV_TIP = { head: "Advanced: unlock the game's own clips", lines: [
   "Gives the game's own clips a Color palette too, on this tab only (the Images tab has its own box for pictures, and Scenes keeps its locks).",
   "A clip you attach the color profile to is re-encoded from its original with the Color profile tab's individual files profile when you build.",
   "Untick it to lock them again; any clip already built that way gets its original back."] };
-// PAD-368: the profile a clip has, for its tooltips ("" where the Color column is not offered)
-const profileLine = (r, cs) => (r.col_lock ? "Color profile: None" : r.col == null ? ""
-  : `Color profile: ${r.col ? ((cs.own_names || {}).videos || {})[r.rel] || cs.asset_name || "Recommended" : "None"}`);
+// PAD-368: the profile a clip has, for its tooltips (null where the Color column is not offered);
+// PAD-369: a {profile} line, drawn in the one color every tooltip gives it (core/ui.js)
+const profileLine = (r, cs) => (r.col_lock ? { profile: "None" } : r.col == null ? null
+  : { profile: r.col ? ((cs.own_names || {}).videos || {})[r.rel] || cs.asset_name || "Recommended" : "None" });
 // PAD-334: the same blue lock / red / green palette as a picture's switch in Scenes
 const colorTip = (r, cs) => (r.col_lock
   ? { head: "Color: the game's own clip", lines: [
@@ -713,15 +714,17 @@ export default function VideoTab() {
       render: (r) => html`<button type="button" class="btn sm ghost vid-rowplay" aria-label=${"Play " + r.rel}
         onClick=${(e) => { e.stopPropagation(); playRow(r.rel, "orig"); }}><${Icon} name="play" /></button>` },
     { key: "rel", label: "Original Video", width: width("rel"), sort: "#0",
-      titleOf: (r) => [r.rel, profileLine(r, colorNs)].filter(Boolean).join("\n"),
-      render: (r) => html`${r.dir ? html`<span class="mono muted">${r.dir}</span>` : null}${r.name}` },
+      render: (r) => html`<span class="vid-name" ...${tip({ head: r.rel, lines: [profileLine(r, colorNs)] })}>${r.dir
+        ? html`<span class="mono muted">${r.dir}</span>` : null}${r.name}</span>` },
     { key: "len", label: "Length", width: width("len"), num: true, sort: "len" },
     { key: "res", label: "Resolution", width: width("res"), sort: "res" },
     { key: "fmt", label: "Format", width: width("fmt"), sort: "fmt", titleOf: (r) => r.fmt,
       render: (r) => html`<span class=${r.fmt_bad ? "err-ink" : "dim"}>${r.fmt}</span>` },
     { key: "aud", label: "Audio", width: width("aud"), sort: "aud", render: (r) => html`<span class="dim">${r.aud}</span>` },
-    { key: "rep", label: "Replacement", width: width("rep"), sort: "rep", titleOf: (r) => r.rep,
+    // PAD-369 (DragonRR): the chosen file's name tells its color profile too
+    { key: "rep", label: "Replacement", width: width("rep"), sort: "rep",
       render: (r) => html`<button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}
+        ...${tip(r.rep_cls && profileLine(r, colorNs) ? { head: r.rep, lines: [profileLine(r, colorNs)] } : r.rep)}
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>` },
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
       render: (r) => (r.col_lock
@@ -764,9 +767,13 @@ export default function VideoTab() {
     return () => ro.disconnect();
   }, []);
 
+  // PAD-369: the replacement's name over its player tells its color profile too
+  const curRow = currentRel ? rows.find((x) => x.rel === currentRel) : null;
+  const repLine = curRow ? profileLine(curRow, colorNs) : null;
   const repHead = html`<div class="row vid-panehead">
     <span class="eyebrow">${rep.title || "Replacement"}</span>
-    ${rep.path ? html`<span class="mono small nw ellip acc-ink" title=${rep.path}>— ${rep.label}</span>` : null}
+    ${rep.path ? html`<span class="mono small nw ellip acc-ink" ...${tip(repLine
+      ? { head: rep.path, lines: [repLine] } : rep.path)}>— ${rep.label}</span>` : null}
     <span class="grow"></span>
     <${Button} size="sm" onClick=${() => currentRel && choose(currentRel)} disabled=${!currentRel}>Choose…<//>
     ${pv.can_clear ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("video.clear", [pv.rel])}>Clear replacement<//>` : null}

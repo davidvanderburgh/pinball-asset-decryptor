@@ -13,6 +13,18 @@
   gap: 0; flex: 1 1 auto; min-height: 0; }
 .scenes-body.wide { grid-template-columns: minmax(0, 1fr) 14px var(--sc-right, 304px); }
 .scenes-body.wide .scenes-left, .scenes-body.wide .sc-split-left { display: none; }
+/* PAD-354 (DragonRR): with the list hidden, a tab down the left edge brings it back; with it
+   shown, the caret at the end of its search row hides it */
+.scenes-body { position: relative; }
+.scenes-body.wide { padding-left: 36px; }
+.sc-list-tab { position: absolute; left: 0; top: 0; bottom: 0; width: 28px; padding: 10px 0; display: flex;
+  flex-direction: column; align-items: center; gap: 8px; cursor: pointer; border: 1px solid var(--line-2);
+  border-radius: 8px; background: var(--panel-2); color: var(--ink-2); transition: background .12s, color .12s, border-color .12s; }
+.sc-list-tab:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+.sc-list-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sc-list-tab .i { width: 16px; height: 16px; flex: 0 0 auto; color: var(--accent); }
+.sc-list-tab-txt { writing-mode: vertical-rl; font-family: var(--cond); font-weight: 600; font-size: 13.5px; letter-spacing: .06em; }
+.sc-list-hide { flex: 0 0 auto; }
 /* the dividers: a thin line that lights up under the pointer */
 .sc-split { position: relative; display: flex; align-items: center; justify-content: center; touch-action: none; outline: none; }
 .sc-split.v { cursor: col-resize; }

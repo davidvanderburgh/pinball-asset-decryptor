@@ -8,10 +8,14 @@
 // sliders, number boxes, ranges, curves, Save a copy and Load as the Color profile tab,
 // which they share (ns "color", webui/tabs/color.py).  Each move is saved a moment after
 // it is made and the Scenes editor draws its scene again through it.
+// PAD-354 (DragonRR): Undo / Redo (and Ctrl+Z) for the profile on show, a status note that
+// keeps its size as the starting points are clicked, and a divider on the bar's edge to
+// make it wider or narrower (kept across sessions, double-click puts it back).
 
-import { html, useEffect, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
+import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { Controls, Ranges, CurveEditor, WhichFiles, MODES, MODE_WORDS, useProfile, statusNote } from "./color.js";
+import { Controls, Ranges, CurveEditor, WhichFiles, MODES, MODE_WORDS, useProfile, statusNote,
+  UndoRedo, undoKey } from "./color.js";
 
 for (const href of ["/static/css/tabs/color.css", "/static/css/tabs/color_pane.css"]) {
   if (typeof document !== "undefined" && !document.querySelector(`link[href="${href}"]`)) {
@@ -24,6 +28,59 @@ for (const href of ["/static/css/tabs/color.css", "/static/css/tabs/color_pane.c
 
 const OPEN_KEY = "pad.colorbar.open";
 const CLIP_KEY = "pad.colorbar.clip";
+const WIDTH_KEY = "pad.colorbar.width";
+const WIDTH_MIN = 300, WIDTH_MAX = 900;
+
+function loadWidth() {
+  try { const w = Number(localStorage.getItem(WIDTH_KEY)); return w > 0 ? w : null; } catch (e) { return null; }
+}
+
+function saveWidth(w) {
+  try { if (w) localStorage.setItem(WIDTH_KEY, String(w)); else localStorage.removeItem(WIDTH_KEY); } catch (e) { /* private mode */ }
+}
+
+// the most the bar may take: the page keeps room for the preview beside it
+const widthLimit = () => Math.max(WIDTH_MIN, Math.min(WIDTH_MAX,
+  (typeof window !== "undefined" ? window.innerWidth : 1600) - 620));
+const clampWidth = (w) => Math.round(Math.max(WIDTH_MIN, Math.min(widthLimit(), w)));
+
+// The divider on the bar's left edge: drag it (or the arrow keys) for a wider or narrower bar.
+function Grip({ barRef, width, setWidth }) {
+  const drag = useRef(false);
+  const down = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    barRef.current && barRef.current.classList.add("sizing");
+  };
+  const move = (e) => {
+    const el = barRef.current;
+    if (!drag.current || !el) return;
+    const r = el.getBoundingClientRect();
+    const k = r.width ? el.offsetWidth / r.width : 1;     // the app can be zoomed
+    setWidth(clampWidth((r.right - e.clientX) * k));
+  };
+  const up = () => {
+    if (!drag.current) return;
+    drag.current = false;
+    barRef.current && barRef.current.classList.remove("sizing");
+    setWidth((w) => { saveWidth(w); return w; });
+  };
+  const key = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const cur = width || (barRef.current ? barRef.current.offsetWidth : 380);
+    const w = clampWidth(cur + (e.key === "ArrowLeft" ? 1 : -1) * (e.shiftKey ? 64 : 16));
+    setWidth(w);
+    saveWidth(w);
+  };
+  const reset = () => { setWidth(null); saveWidth(null); };
+  return html`<div class="cpd-grip" role="separator" tabIndex="0" aria-orientation="vertical"
+    aria-label="Color profiles width" title="Color profiles width: drag to resize, double-click to put it back"
+    onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}
+    onDblClick=${reset} onKeyDown=${key}><span></span></div>`;
+}
 
 export function barOpenAtStart() {
   try { return localStorage.getItem(OPEN_KEY) === "1"; } catch (e) { return false; }
@@ -89,19 +146,24 @@ function CopyPaste({ p, update, mode, name }) {
 export function ColorBar({ open, setOpen }) {
   const s = useNs("color");
   const look = useNs("text_scenes").look;
-  const [p, update, setMode] = useProfile(s, SEND_MS);
+  const [p, update, setMode, flush] = useProfile(s, SEND_MS);
+  const [width, setWidth] = useState(loadWidth);
+  const barRef = useRef(null);
   // what the bar shows is read again from the project as it opens
   useEffect(() => { if (open) call("color.panel_open"); }, [open]);
   const mode = s.per_file ? (s.mode || "display") : "display";
   const parts = (look && look.parts) || {};
-  return html`<div class=${cx("cpd", open && "open")}>
+  return html`<div class=${cx("cpd", open && "open")} ref=${barRef}
+      style=${width ? `--cpd-w:${clampWidth(width)}px` : ""}>
     <button type="button" class="cpd-handle" aria-expanded=${open ? "true" : "false"} aria-controls="cpd-panel"
         aria-label="Color profiles" onClick=${() => setOpen(!open)} ...${tip("Color profiles")}>
       <span class="cpd-handle-ico"><${Icon} name="palette" /></span>
       <span class="cpd-handle-txt">Colors</span>
     </button>
     <div class="cpd-clip"><aside class="cpd-panel" id="cpd-panel" aria-label="Color profiles"
-        aria-hidden=${open ? "false" : "true"} inert=${open ? undefined : ""}>
+        aria-hidden=${open ? "false" : "true"} inert=${open ? undefined : ""}
+        onKeyDown=${(e) => undoKey(e, flush)}>
+      ${open ? html`<${Grip} barRef=${barRef} width=${width} setWidth=${setWidth} />` : null}
       <div class="cpd-hd">
         <span class="cpd-title">Color profiles</span>
         <span class="sp"></span>
@@ -124,8 +186,9 @@ export function ColorBar({ open, setOpen }) {
         <p class="small muted cpd-words">${s.per_file ? MODE_WORDS[mode] || MODE_WORDS.display
           : "Corrects your replaced pictures and videos when you build."}</p>
         <div class="row cpd-show"><${ShowHere} mode=${mode} look=${look} /><span class="sp"></span>
+          <${UndoRedo} s=${s} flush=${flush} size="xs" />
           <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div>
-        ${statusNote(s)}
+        <div class="cpd-status">${statusNote(s)}</div>
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
         ${s.per_file && mode === "assets" ? html`<${WhichFiles} s=${s} />` : null}
         <${Controls} s=${s} p=${p} update=${update} />

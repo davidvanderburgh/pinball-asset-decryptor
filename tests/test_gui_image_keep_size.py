@@ -234,7 +234,10 @@ def test_a_cleared_pick_takes_its_flag_out_of_the_sidecar(window):
 def test_the_original_size_is_the_snapshots_once_a_pick_is_applied(window):
     # PAD-179: after a run applied a pick kept at its own size, the slot's
     # file IS that pick. The note called it the original ("Same size as the
-    # original (90×22)") while the build fits to the real one.
+    # original (90×22)") while the build fits to the real one.  Since
+    # PAD-351 a new pick on such a grown picture starts with Keep size
+    # ticked, so the note is the kept one; the original it names is still
+    # the snapshot's 40×20, never the slot file's 90×22.
     from pinball_decryptor.core import staged_originals
     w, svc, assets, rep = window
     assert staged_originals.snapshot(assets, BANNER, None)
@@ -244,5 +247,13 @@ def test_the_original_size_is_the_snapshots_once_a_pick_is_applied(window):
     w.call("images.select", BANNER)
     keep = _keep(w)
     assert keep is not None
+    assert keep["on"] is True
+    assert keep["text"] == (
+        "Kept at 90×22 (the original is 40×20): the scene grows to fit it.")
+    # unticked, the build squeezes the pick to the snapshot's size, not the
+    # slot file's
+    w.call("images.set_keep", BANNER, False)
+    keep = _keep(w)
+    assert keep["on"] is False
     assert "the original 40×20" in keep["text"]
     assert "squeezed" in keep["text"]

@@ -42,7 +42,7 @@
 .scenes-stagebar .scenes-ctl { margin-top: 0; }
 /* PAD-349: Preview colors and, right of it, the advanced unlock in its own red box */
 .scenes-lookbar { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; flex: 0 0 auto; }
-.scenes-lookbar .look-row { flex: 1 1 420px; min-width: 0; }
+.scenes-lookbar .look-row { flex: 1 1 300px; min-width: 0; }
 .scenes-unlock { display: flex; align-items: center; gap: 6px 12px; padding: 8px 12px; border-radius: 8px;
   border: 1px solid var(--err); background: var(--err-soft); flex: 0 0 auto; }
 .tree-actions { gap: 2px; flex-wrap: wrap; }

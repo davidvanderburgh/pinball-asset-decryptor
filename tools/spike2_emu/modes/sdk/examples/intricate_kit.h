@@ -508,6 +508,16 @@ static KIT_UNUSED void kit_timer_add(struct kit_timer *t, unsigned seconds)
     t->ticks += seconds * KIT_TICKS;
 }
 
+/* PAD-371: at least this many seconds left - a clock under it goes back up to it (the "ten seconds" call is not
+ * said again; the 5..1 count is, when it gets there). 1 = it was put back up. */
+static KIT_UNUSED int kit_timer_at_least(struct kit_timer *t, unsigned seconds)
+{
+    if (!t->ticks || t->ticks >= seconds * KIT_TICKS) return 0;
+    t->ticks = seconds * KIT_TICKS;
+    t->shown = seconds;
+    return 1;
+}
+
 static KIT_UNUSED unsigned kit_timer_seconds(const struct kit_timer *t)
 {
     return (t->ticks + KIT_TICKS - 1) / KIT_TICKS;

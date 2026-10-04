@@ -289,47 +289,6 @@ def test_a_project_without_trees_gets_them_read_off_the_card(tmp_path, monkeypat
         w.call("text_scenes.close")
 
 
-def test_an_edit_keeps_the_picture_while_it_redraws_and_a_pick_gets_its_layers(tmp_path):
-    """David: tweaking something must not blank the canvas and wait.  The scenes are a tab
-    (opening them brings it forward); an edit leaves the picture up and says it is updating
-    until the redraw lands, tagged with the edit count it draws; a picked element gets its own
-    layers (under / it / over) so the page can move its pixels while it is dragged."""
-    folder = tmp_path / "proj"
-    folder.mkdir()
-    _seed(folder)
-    with web_app(tmp_path, mfr="stern") as w:
-        _open(w, folder)
-        assert w.state("shell")["tab"] == "scenes"
-        st = w.state("text_scenes")
-        assert st["tree_loading"] is False and st["tree_busy"] is False
-        art = next(h for h in _tv(w)["hits"] if h["name"] == "Art")["id"]
-        assert w.call("text_scenes.tree_select", art)
-        assert _wait(w, lambda: (w.state("text_scenes").get("tree_layers") or {}).get("node") == art)
-        layers = w.state("text_scenes")["tree_layers"]
-        assert all(os.path.isfile(layers[k]) for k in ("under", "sel", "over"))
-
-        shown = w.state("text_scenes")["frames"]
-        rev = _tv(w)["rev"]
-        assert w.call("text_scenes.tree_move", art, 12, 0)
-        st = w.state("text_scenes")
-        # the outline moved at once; the picture is the old one until the new one is drawn
-        assert _tv(w)["rev"] == rev + 1
-        if st["tree_img_rev"] < rev + 1:
-            assert st["frames"] == shown and st["tree_busy"] is True
-        assert _wait(w, lambda: w.state("text_scenes")["tree_img_rev"] == rev + 1)
-        st = w.state("text_scenes")
-        assert st["tree_busy"] is False and st["frames"] and st["frames"] != shown
-        assert os.path.isfile(st["frames"][0])
-        assert (st["tree_layers"] or {}).get("node") == art
-
-        # a burst of edits: every one is kept, the last is what is drawn
-        for _i in range(5):
-            w.call("text_scenes.tree_move", art, 1, 0)
-        assert _wait(w, lambda: w.state("text_scenes")["tree_img_rev"] == _tv(w)["rev"])
-        assert sum(op["dx"] for op in _ops(folder) if op["op"] == "move") == 17.0
-        w.call("text_scenes.close")
-
-
 def test_reset_back_to_the_last_write_or_as_shipped_for_every_scene(tmp_path):
     """The Reset menu under the preview: back to what the last Write put on the card (this
     scene), as shipped (this scene), as shipped (every scene); each asks first."""

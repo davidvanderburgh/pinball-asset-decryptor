@@ -594,13 +594,11 @@ static KIT_UNUSED int kit_begin(const char *name)
     return 1;
 }
 
-/* The mode's display priority (item 157; MODE_SDK.md "Display priority"): taken right after
- * kit_begin, before the screen and the clip, so the game's displays that do not beat it wait while
- * the mode runs. 180 is a mode's value: BATTLE IS LIT waits and plays at the end, and the game's
- * full-screen shot awards (LOOPS, POWERLINE ATTACK) are not shown while it runs (a waiting one
- * froze the game's drawing: the runtime drops them, item 157); its jackpots, battle and multiball
- * starts, the battle select screen and the tilt warning still come through, and the screen is in
- * view again when they end. */
+/* The mode's display priority (item 157; MODE_SDK.md "Display priority"), asked for right after
+ * kit_begin. PAD-353: it no longer makes any display of the game's wait. On a Godzilla Premium the
+ * Magna-Grab's screen waited for KING GHIDORAH's 180 and the game kept its magnet ON the whole time (it
+ * holds the ball until that screen has played). Now the runtime only WATCHES: pm_display_covered() says
+ * when a display of the game's has the screen, and the HUD keeps its middle words off it until it is gone. */
 #define KIT_DISPLAY_MODE    180
 #define KIT_DISPLAY_WIZARD  190     /* also jackpots wait; multiball and battle start screens are not shown */
 
@@ -608,13 +606,14 @@ static KIT_UNUSED int kit_display(unsigned priority)
 {
     int held = pm_display_priority(priority);
     if (priority)
-        pm_log("display priority %u %s", priority, held ? "held: the game's displays that do not beat it wait"
-                                                           : "NOT held (this port has no display arbitration)");
+        pm_log("display priority %u %s", priority, held ? "noted: the game's displays still play as they come"
+                                                           : "not watched (this port has no display lines)");
     return held;
 }
 
 static KIT_UNUSED void kit_end(void)
 {
+    pm_block_game_modes(0);                /* PAD-347: the game's modes may start again */
     pm_display_priority(0);                /* given up before pm_end (MODE_SDK.md) */
     pm_end();
     kit_running = 0;
@@ -628,6 +627,7 @@ static KIT_UNUSED void kit_end(void)
  * those hand the display back at the same tick. */
 static KIT_UNUSED void kit_end_after(unsigned long ms)
 {
+    pm_block_game_modes(0);                /* PAD-347: its ending blocks nothing */
     if (!ms || !pm_end_holding((unsigned)ms)) {
         kit_end();
         return;
@@ -664,6 +664,71 @@ static KIT_UNUSED int kit_stock_busy(unsigned kinds, const char *who, const char
     return k > 0;
 }
 
+/* PAD-347: ISOLATED. After a machine run with the modes stacked on the game's own (their words aside), David
+ * (2026-10-04): "there is still a bit too much overlap with other modes. i'd prefer to try them isolated from
+ * other ones." So the pack's modes (ANGUIRUS apart: it exists to join the game's battles) keep to themselves:
+ * - one starts only while none of the game's own modes runs (a battle, a multiball, a timed mode such as JET
+ *   FIGHTER ATTACK) and fewer than two balls are in play; a refused start stays ready, so its qualifying shot
+ *   after the game's mode starts it (kit_wait_game);
+ * - one of the game's modes beginning while ours runs ends ours at once, its words, lights and display given
+ *   back in the same tick, as a tilt does (kit_game_began). */
+static KIT_UNUSED int kit_game_busy(const char *who, const char **what)
+{
+    int n = pm_can(PM_CAN_MULTIBALL) ? pm_balls_in_play() : -1;
+    if (kit_stock_busy(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY, who, what)) return 1;
+    if (n < 2) return 0;
+    if (what) *what = "a multiball";                         /* two balls in play, none of the game's */
+    return 1;
+}
+
+/* 1 = wait: logged at most every 10 s (a spinner asks on every spin); `then` says what starts it after */
+static KIT_UNUSED int kit_wait_game(const char *who, const char *why, const char *then)
+{
+    static unsigned long said_at;
+    const char *what = 0;
+    if (!kit_game_busy(who, &what)) return 0;
+    if (!what || !what[0]) what = "one of the game's modes";
+    if (!said_at || pm_ms() - said_at >= 10000)
+        pm_log("not started (%s): %s is running - still ready, %s", why, what, then);
+    said_at = pm_ms() ? pm_ms() : 1;
+    return 1;
+}
+
+/* 1 = one of the game's own modes is running now (asked by a mode of ours that is running) */
+static KIT_UNUSED int kit_game_began(void)
+{
+    return pm_aside() != 0;
+}
+
+/* PAD-347 (David, 2026-10-04: "isolated modes like our own custom ones that prevent the stock modes from
+ * starting"): right after kit_begin, a mode BLOCKS the game's modes the port lets it refuse (on Godzilla Jet
+ * Fighter Attack and Tesla Strike, which shots start) for as long as it runs, unless its assets file says `game_modes
+ * give_way`. A multiball or a battle of the game's is never refused: kit_game_began still ends ours for those.
+ * 1 = blocking. Given back in kit_end / kit_end_after / kit_end_now (and by the runtime when the mode ends). */
+static KIT_UNUSED int kit_isolate_list(int give_way, const unsigned char *ids, int n);
+static KIT_UNUSED int kit_isolate(int give_way)
+{
+    return kit_isolate_list(give_way, 0, 0);
+}
+
+/* PAD-363: with the mode's own list of the game's modes to hold off (its assets file's `block_modes`; none = the
+ * port's checked defaults) */
+static KIT_UNUSED int kit_isolate_list(int give_way, const unsigned char *ids, int n)
+{
+    if (!give_way) pm_block_list(ids, n);
+    if (give_way) {
+        pm_log("isolated: gives way - one of the game's modes starting ends it");
+        return 0;
+    }
+    if (pm_block_game_modes(1)) {
+        pm_log("isolated: blocks the game's modes the port lets it refuse while it runs (any other mode of the "
+               "game's starting still ends it)");
+        return 1;
+    }
+    pm_log("isolated: this port cannot block the game's modes - it gives way to them");
+    return 0;
+}
+
 /* ---- the mode's HUD at the glass's EDGES (hud-layers) ----------------------------------------------
  * The card build puts ONE Sprite group per mode in the HUD scene (pinball_decryptor/plugins/stern/
  * mode_hud.py), laid out as the game's own battles are: the title and an instruction line above the
@@ -679,12 +744,13 @@ static KIT_UNUSED int kit_stock_busy(unsigned kinds, const char *who, const char
 
 struct kit_hud {
     const char *slug;                      /* the mode's folder */
-    void *group, *timer, *gauge, *pip_on[KIT_HUD_PIPS], *pip_off[KIT_HUD_PIPS];
-    void *t_title, *t_line, *t_award, *t_awardsub, *t_timer, *t_glabel, *t_c[3][3];
+    void *group, *timer, *timer2, *gauge, *pip_on[KIT_HUD_PIPS], *pip_off[KIT_HUD_PIPS];
+    void *t_title, *t_line, *t_award, *t_awardsub, *t_timer, *t_timer2, *t_glabel, *t_c[3][3];
     unsigned tries;
-    int found, up, timer_up, gauge_up, n_pips, pip_lit[KIT_HUD_PIPS];
+    int found, up, timer_up, timer2_up, gauge_up, n_pips, pip_lit[KIT_HUD_PIPS];
+    int aside;                             /* PAD-347: the kind of the game's mode it stepped aside for, 0 = none */
     char w_title[KIT_HUD_WORDS], w_line[KIT_HUD_WORDS], w_award[KIT_HUD_WORDS], w_awardsub[KIT_HUD_WORDS];
-    char w_timer[8], w_glabel[24], w_c[3][3][24];
+    char w_timer[8], w_timer2[8], w_glabel[24], w_c[3][3][24];
     /* what is wanted (written to the glass when found and up) */
     char want_title[KIT_HUD_WORDS], want_line[KIT_HUD_WORDS], want_award[KIT_HUD_WORDS], want_awardsub[KIT_HUD_WORDS];
     char want_c[3][3][24], want_glabel[24];
@@ -692,6 +758,7 @@ struct kit_hud {
     int pips;                              /* pips in use: 0 = all the build made (kit_hud_pips) */
     unsigned long award_until, hide_at;
     int noting;                            /* up only for a qualification note */
+    int off;                               /* PAD-353: its words wait for a display of the game's */
 };
 
 /* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
@@ -736,6 +803,12 @@ static KIT_UNUSED void kit_hud_find(struct kit_hud *h)
         pm_snprintf(p, sizeof p, ".PadMode_%s_Hud_Timer.PadMode_%s_Hud_Timer_Num", h->slug, h->slug);
         h->t_timer = kit_hud_find1(h, p, 1, 0);
     }
+    h->timer2 = kit_hud_find1(h, ".PadMode_%s_Hud_Timer2", 0, 0);      /* PAD-347: a card built before has none */
+    if (h->timer2) {
+        char p[96];
+        pm_snprintf(p, sizeof p, ".PadMode_%s_Hud_Timer2.PadMode_%s_Hud_Timer2_Num", h->slug, h->slug);
+        h->t_timer2 = kit_hud_find1(h, p, 1, 0);
+    }
     for (k = 0; k < 3; k++)
         for (j = 0; j < 3; j++) {
             pm_snprintf(f, sizeof f, ".PadMode_%%s_Hud_C%%d_%s", cl[j]);
@@ -756,14 +829,15 @@ static KIT_UNUSED void kit_hud_find(struct kit_hud *h)
         }
         h->n_pips = k;
     }
-    h->w_title[0] = h->w_line[0] = h->w_award[0] = h->w_awardsub[0] = h->w_timer[0] = h->w_glabel[0] = 0;
+    h->w_title[0] = h->w_line[0] = h->w_award[0] = h->w_awardsub[0] = h->w_timer[0] = h->w_timer2[0] = h->w_glabel[0] = 0;
     for (k = 0; k < 3; k++) for (j = 0; j < 3; j++) h->w_c[k][j][0] = 0;
-    h->timer_up = h->gauge_up = -1;
+    h->timer_up = h->timer2_up = h->gauge_up = -1;
     pm_show(h->group, h->up);
-    pm_log("hud %s found: title %s, line %s, award %s, timer %s, counters %s, gauge %s (%d pips) - %s",
+    pm_log("hud %s found: title %s, line %s, award %s, timer %s%s, counters %s, gauge %s (%d pips) - %s",
            h->slug, h->t_title ? "yes" : "NO", h->t_line ? "yes" : "NO", h->t_award ? "yes" : "NO",
-           h->timer ? (h->t_timer ? "yes" : "no number") : "none", h->t_c[0][1] ? "yes" : "none",
-           h->gauge ? "yes" : "none", h->n_pips, h->up ? "shown, the mode is using it" : "hidden until the mode uses it");
+           h->timer ? (h->t_timer ? "yes" : "no number") : "none", h->timer2 ? " (and its second slot)" : "",
+           h->t_c[0][1] ? "yes" : "none", h->gauge ? "yes" : "none", h->n_pips,
+           h->up ? "shown, the mode is using it" : "hidden until the mode uses it");
 }
 
 static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
@@ -783,6 +857,7 @@ static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
         h->want_award[0] = h->want_awardsub[0] = 0;
         h->award_until = 0;
         h->noting = 0;
+        h->aside = 0;                      /* PAD-347: said again the next time it is up beside a game mode */
     }
     if (h->group) pm_show(h->group, on);
 }
@@ -860,10 +935,30 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
     return 1;
 }
 
+/* PAD-347: STACKING (pm_aside). While one of the game's own modes runs, its title, instruction line and
+ * counters have the places ours copy (David's Premium, 2026-10-03: ours sat word for word on JET FIGHTER
+ * ATTACK's). Ours step aside the way ANGUIRUS has always stacked on a battle: the mode's two lines move
+ * into the award line between the game's counters and its title (an award still takes that line for its
+ * moment), the counters along the top are hidden, the gauge on the right edge stays, and the timer badge
+ * moves one slot down while a battle's BATTLE badge has the top one (a card built before PAD-347 has no
+ * second slot: the badge is hidden then rather than drawn over the game's). */
+static KIT_UNUSED void kit_hud_aside_note(struct kit_hud *h, int aside)
+{
+    if (aside == h->aside) return;
+    if (aside && !h->aside)
+        pm_log("hud %s: aside for %s - its lines in the award line, its counters hidden%s", h->slug,
+               pm_stock_mode_what((unsigned)aside), aside != (int)PM_STOCK_BATTLE ? ""
+               : h->timer2 ? ", its badge one slot down" : ", its badge hidden (no second slot on this card)");
+    else if (!aside)
+        pm_log("hud %s: back in its places - the game's mode is over", h->slug);
+    h->aside = aside;
+}
+
 /* every tick: find, expire the award, and send the glass what changed */
 static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
 {
-    int k, j;
+    int k, j, aside, low, off;
+    const char *title, *line, *award, *awardsub;
     kit_hud_find(h);
     if (h->hide_at && pm_ms() >= h->hide_at) {
         kit_hud_show(h, 0);
@@ -874,20 +969,53 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
         h->want_award[0] = h->want_awardsub[0] = 0;
     }
     if (!h->found || !h->up) return;
-    kit_hud_text(h->t_title, h->w_title, sizeof h->w_title, h->want_title);
-    kit_hud_text(h->t_line, h->w_line, sizeof h->w_line, h->want_line);
-    kit_hud_text(h->t_award, h->w_award, sizeof h->w_award, h->want_award);
-    kit_hud_text(h->t_awardsub, h->w_awardsub, sizeof h->w_awardsub, h->want_awardsub);
+    /* PAD-353: a display of the game's has the screen (an award, a mode's start screen): its words are where
+     * ours are, so ours are blank until it is gone; the badge and the gauge at the edges stay */
+    off = pm_display_covered();
+    if (off != h->off) {
+        pm_log("hud %s: %s", h->slug, off ? "its words wait while a display of the game's has the screen"
+                                          : "its words are back");
+        h->off = off;
+    }
+    aside = h->noting ? 0 : pm_aside();          /* a qualification note is in the award line already */
+    kit_hud_aside_note(h, aside);
+    title = h->want_title;
+    line = h->want_line;
+    award = h->want_award;
+    awardsub = h->want_awardsub;
+    if (off) {
+        title = line = award = awardsub = "";
+    } else if (aside) {
+        if (!award[0] && !awardsub[0]) {
+            award = title;
+            awardsub = line;
+        }
+        title = line = "";
+    }
+    kit_hud_text(h->t_title, h->w_title, sizeof h->w_title, title);
+    kit_hud_text(h->t_line, h->w_line, sizeof h->w_line, line);
+    kit_hud_text(h->t_award, h->w_award, sizeof h->w_award, award);
+    kit_hud_text(h->t_awardsub, h->w_awardsub, sizeof h->w_awardsub, awardsub);
     for (k = 0; k < 3; k++)
         for (j = 0; j < 3; j++)
-            kit_hud_text(h->t_c[k][j], h->w_c[k][j], sizeof h->w_c[k][j], h->want_c[k][j]);
+            kit_hud_text(h->t_c[k][j], h->w_c[k][j], sizeof h->w_c[k][j], aside || off ? "" : h->want_c[k][j]);
+    low = aside == (int)PM_STOCK_BATTLE;          /* the game's BATTLE badge has the top slot */
     if (h->timer) {
-        int up = h->want_timer >= 0;
+        int up = h->want_timer >= 0 && !low;
         if (up != h->timer_up) { pm_show(h->timer, up); h->timer_up = up; }
         if (up) {
             char b[8];
             pm_snprintf(b, sizeof b, "%02d", h->want_timer > 99 ? 99 : h->want_timer);
             kit_hud_text(h->t_timer, h->w_timer, sizeof h->w_timer, b);
+        }
+    }
+    if (h->timer2) {
+        int up = h->want_timer >= 0 && low;
+        if (up != h->timer2_up) { pm_show(h->timer2, up); h->timer2_up = up; }
+        if (up) {
+            char b[8];
+            pm_snprintf(b, sizeof b, "%02d", h->want_timer > 99 ? 99 : h->want_timer);
+            kit_hud_text(h->t_timer2, h->w_timer2, sizeof h->w_timer2, b);
         }
     }
     if (h->gauge) {

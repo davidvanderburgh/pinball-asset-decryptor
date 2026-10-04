@@ -604,3 +604,49 @@ site balls_in_play         0x00129810 0xe92d4010 0xe30e4824
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0012998c 0xe92d41f0 0xe308e226
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 0 Mothership Multiball (multiball), 11 Uk 1971 Tour Multiball (multiball), 12 Earls Court Tour Multiball (multiball), 13 Us 1975 Tour Multiball (multiball), 14 Us 1977 Tour Multiball (multiball), 15 World Tour Multiball (multiball), 22 Top of the Charts Multiball (multiball), 23 Mystery Multiball (multiball), 38 Zeppelin Multiball (multiball)
+site block_start_1      0x000dad4c 0xe92d4038 0xe1a04000
+data block_obj_1        0x0424aeec
+text block_name_1       Black Dog
+site block_start_2      0x000db568 0xe92d4038 0xe1a04000
+data block_obj_2        0x0424aff8
+text block_name_2       Communication Breakdown
+site block_start_3      0x000dbda0 0xe92d4038 0xe1a04000
+data block_obj_3        0x0424b0fc
+text block_name_3       Good Times Bad Times
+site block_start_4      0x000dc5d4 0xe92d4038 0xe1a04000
+data block_obj_4        0x0424b208
+text block_name_4       Immigrant Song
+site block_start_5      0x000dd6e0 0xe92d4038 0xe1a04000
+data block_obj_5        0x0424b30c
+text block_name_5       Kashmir
+site block_start_6      0x000de1f8 0xe92d4038 0xe1a04000
+data block_obj_6        0x0424b464
+text block_name_6       Ramble on
+site block_start_7      0x000dea6c 0xe92d4038 0xe1a04000
+data block_obj_7        0x0424b590
+text block_name_7       Rock and Roll
+site block_start_8      0x000df034 0xe92d4038 0xe1a04000
+data block_obj_8        0x0424b6a8
+text block_name_8       The Song Remains the Same
+site block_start_9      0x000df924 0xe92d4038 0xe1a04000
+data block_obj_9        0x0424b7c4
+text block_name_9       Trampled Under Foot
+site block_start_10     0x000e04e8 0xe92d4038 0xe1a04000
+data block_obj_10       0x0424b8bc
+text block_name_10      Whole Lotta Love
+site block_start_18     0x000e90a8 0xe5903000 0xe92d4070
+data block_obj_18       0x0424bef0
+text block_name_18      Tour Mode Usa 1975
+site block_start_19     0x000e7e7c 0xe5903000 0xe92d4070
+data block_obj_19       0x0424c074
+text block_name_19      Tour Mode Usa 77
+site block_start_20     0x000e6a40 0xe5903000 0xe92d4070
+data block_obj_20       0x0424c1f4
+text block_name_20      Tour Mode Uk 1971
+site block_start_21     0x000e59d0 0xe5903000 0xe92d4070
+data block_obj_21       0x0424c374
+text block_name_21      Tour Mode Earls Court

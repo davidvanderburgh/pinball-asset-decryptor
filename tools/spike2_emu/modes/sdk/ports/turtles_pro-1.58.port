@@ -120,3 +120,82 @@ site balls_in_play         0x00186978 0xe92d4010 0xe30449d0
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00186af4 0xe92d41f0 0xe306e5c2
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 22 Team Up (multiball), 24 Final Battle (multiball), 39 Turtle Power (multiball), 42 Ninja Pizza (multiball), 45 Cowabunga (multiball), 49 Pizza Eating Contest Ready (not vetoable)
+site block_start_0      0x00150100 0xe92d4010 0xe1a04000
+data block_obj_0        0x0060ec38
+text block_name_0       Training Level Two
+site block_start_1      0x00153ab0 0xe92d4070 0xe1a05000
+data block_obj_1        0x0060ecd4
+text block_name_1       Training Level Three
+site block_start_2      0x00158368 0xe92d4070 0xe1a05000
+data block_obj_2        0x0060ed70
+text block_name_2       Training Level Four
+site block_start_18     0x0001e45c 0xe92d40d0 0xe1a04000
+data block_obj_18       0x0060eac8
+text block_name_18      April Hurry Up
+site block_start_21     0x001432c8 0xe92d4038 0xe1a05000
+data block_obj_21       0x0060f348
+text block_name_21      Team Up Hurry Up
+site block_start_23     0x0010eed0 0xe92d40f8 0xe3015288
+data block_obj_23       0x0060f4c4
+text block_name_23      Team Up Ready
+site block_start_25     0x000f1d80 0xe92d41f0 0xe3015288
+data block_obj_25       0x0060f968
+text block_name_25      Final Battle Ready
+site block_start_26     0x0008bed8 0xe92d4010 0xe1a04000
+data block_obj_26       0x0060f9e8
+text block_name_26      Final Battle Bebop Hurry Up
+site block_start_27     0x0008c58c 0xe92d4010 0xe1a04000
+data block_obj_27       0x0060faa0
+text block_name_27      Final Battle Rocksteady Hurry Up
+site block_start_28     0x00064e5c 0xe92d4070 0xe1a04000
+data block_obj_28       0x00610010
+text block_name_28      Episode One
+site block_start_29     0x00068b64 0xe92d41f0 0xe1a04000
+data block_obj_29       0x006100f0
+text block_name_29      Episode Two
+site block_start_30     0x0006c4a0 0xe92d41f0 0xe1a04000
+data block_obj_30       0x006101d8
+text block_name_30      Episode Three
+site block_start_31     0x00070770 0xe92d47f0 0xe1a06000
+data block_obj_31       0x006102b8
+text block_name_31      Episode Four
+site block_start_32     0x0007459c 0xe92d41f0 0xe1a04000
+data block_obj_32       0x00610428
+text block_name_32      Episode Five
+site block_start_33     0x0007aef0 0xe92d41f0 0xe1a04000
+data block_obj_33       0x00610520
+text block_name_33      Episode Six
+site block_start_34     0x00080c9c 0xe92d41f0 0xe1a04000
+data block_obj_34       0x00610648
+text block_name_34      Episode Seven
+site block_start_35     0x000852dc 0xe92d41f0 0xe1a04000
+data block_obj_35       0x00610730
+text block_name_35      Episode Eight
+site block_start_36     0x000f22f0 0xe92d4010 0xe1a04000
+data block_obj_36       0x00610830
+text block_name_36      Episode Seven Hurry Up
+site block_start_38     0x0015e5d4 0xe92d40f8 0xe1a04000
+data block_obj_38       0x0060e9a8
+text block_name_38      Weapon Hurry Up
+site block_start_44     0x000cf554 0xe92d4010 0xe1a04000
+data block_obj_44       0x0060f220
+text block_name_44      All Turtle Challenge
+site block_start_46     0x000ddf4c 0xe92d4038 0xe3015288
+data block_obj_46       0x0060fcd8
+text block_name_46      Cowabunga Ready
+site block_start_47     0x000dce6c 0xe92d4010 0xe1a04000
+data block_obj_47       0x0060fd58
+text block_name_47      Cowabunga Hurry Up
+site block_start_48     0x00100e00 0xe92d47f0 0xe3015288
+data block_obj_48       0x0060fdf8
+text block_name_48      Pizza Eating Contest
+site block_start_51     0x00120b5c 0xe92d47f0 0xe24dd010
+data block_obj_51       0x0060ee68
+text block_name_51      Neutrinos
+site block_start_53     0x00110450 0xe92d4010 0xe1a04000
+data block_obj_53       0x0060ff78
+text block_name_53      Test

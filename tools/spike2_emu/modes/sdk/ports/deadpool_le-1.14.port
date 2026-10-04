@@ -366,3 +366,64 @@ site balls_in_play         0x001941b4 0xe92d4010 0xe3074ea4
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00194330 0xe92d41f0 0xe30de78a
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 8 Sauron Mball (multiball), 9 Mrsinister Clones (multiball), 11 Mrsinister Mechsuit (multiball), 12 Bashpool Mball (multiball), 16 Ninja Mball (multiball), 17 Disco Multiball (multiball), 18 Mechsuit Mball (multiball)
+site block_start_1      0x000ef7bc 0xe92d40d0 0xe1a04000
+data block_obj_1        0x0062d698
+text block_name_1       Battle Mystique
+site block_start_2      0x000f20ec 0xe92d4010 0xe1a04000
+data block_obj_2        0x0062d820
+text block_name_2       Battle Sabretooth
+site block_start_3      0x000eca48 0xe92d40f0 0xe1a04000
+data block_obj_3        0x0062d980
+text block_name_3       Battle Juggernaut Sauron
+site block_start_4      0x000ef7bc 0xe92d40d0 0xe1a04000
+data block_obj_4        0x0062db00
+text block_name_4       Battle Mystique Sauron
+site block_start_5      0x000f20ec 0xe92d4010 0xe1a04000
+data block_obj_5        0x0062dc88
+text block_name_5       Battle Sabretooth Sauron
+site block_start_6      0x00108ebc 0xe92d4010 0xe1a04000
+data block_obj_6        0x0062dde8
+text block_name_6       Quest
+site block_start_7      0x00108ebc 0xe92d4010 0xe1a04000
+data block_obj_7        0x0062de98
+text block_name_7       Quest
+site block_start_10     0x00103a68 0xe92d4010 0xe1a04000
+data block_obj_10       0x0062e9d8
+text block_name_10      Mrsinister Rex
+site block_start_13     0x000e6430 0xe92d4038 0xe3004d50
+data block_obj_13       0x0062e0f0
+text block_name_13      Bashpool Hurry Up
+site block_start_14     0x000e5a54 0xe3003d50 0xe5901000
+data block_obj_14       0x0062e168
+text block_name_14      Bashpool Frenzy
+site block_start_15     0x000e9340 0xe92d4038 0xe3003d50
+data block_obj_15       0x0062e1d8
+text block_name_15      Bashpool Trampoline
+site block_start_19     0x000f67ec 0xe92d47f0 0xe1a04000
+data block_obj_19       0x0062dfc8
+text block_name_19      Disco Loops
+site block_start_20     0x000f6958 0xe92d4010 0xe1a04000
+data block_obj_20       0x0062e070
+text block_name_20      Disco Loops Hurry Up
+site block_start_21     0x000f5024 0xe92d4038 0xe3005d50
+data block_obj_21       0x0062e348
+text block_name_21      Chimichanga
+site block_start_22     0x001086ac 0xe92d4070 0xe1a06000
+data block_obj_22       0x0062e260
+text block_name_22      Ninja Pops
+site block_start_23     0x000f808c 0xe92d4ff0 0xe24dd00c
+data block_obj_23       0x0062e418
+text block_name_23      Katanarama Time
+site block_start_24     0x000f3d0c 0xe92d40d0 0xe1a04000
+data block_obj_24       0x0062eca0
+text block_name_24      Berserker Rage
+site block_start_25     0x0010d254 0xe92d4010 0xe1a04000
+data block_obj_25       0x0062df48
+text block_name_25      Trex Hurryup
+site block_start_127    0x000eca48 0xe92d40f0 0xe1a04000
+data block_obj_127      0x0062d518
+text block_name_127     Battle Juggernaut

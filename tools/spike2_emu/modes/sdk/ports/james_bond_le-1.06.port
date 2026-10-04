@@ -500,3 +500,75 @@ value mode_flag_6           139
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x003f59ec 0xe92d41f0 0xe305e11e
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x0005be50 0xe92d4010 0xe30001ad
+text block_name_0       Bullshit Scoring
+site block_start_1      0x000b1b90 0xe3011648 0xe300019f
+text block_name_1       Geiger Counter
+site block_start_2      0x00033cb8 0xe30316b4 0xe30001a1
+text block_name_2       Attache Case
+site block_start_3      0x0002a860 0xe92d40f8 0xe30a1268
+text block_name_3       Aston Martin
+site block_start_4      0x001c2818 0xe30211e8 0xe30001a5
+text block_name_4       Under Water Powerpack
+site block_start_5      0x000ffbb8 0xe30f14c4 0xe30001a7
+text block_name_5       Little Nellie
+site block_start_6      0x00020530 0xe92d40f0 0xe24dd00c
+text block_name_6       Ahoy Mr Bond Wizard Mode
+site block_start_7      0x001c7df0 0xe92d40f8 0xe3061ddc
+text block_name_7       Upside Down Hurry-Up
+site block_start_8      0x001c9f60 0xe92d40f8 0xe3081ec8
+text block_name_8       Upside Down 2 Hurry-Up
+site block_start_9      0x001b2638 0xe92d40f8 0xe3001650
+text block_name_9       Tarantula Hurry-Up
+site block_start_10     0x000f2ef0 0xe92d40f8 0xe3021014
+text block_name_10      Knife Shoe Hurry-Up
+site block_start_11     0x00145340 0xe92d40f8 0xe30412c8
+text block_name_11      Oddjob Hat Hurry-Up
+site block_start_12     0x0018c4dc 0xe92d43f8 0xe30e4938
+text block_name_12      Shark Hurry-Up
+site block_start_13     0x000496d8 0xe92d40f8 0xe3081eb4
+text block_name_13      Bird One Hurry-Up
+site block_start_14     0x00047ff4 0xe92d43f8 0xe3041d2c
+text block_name_14      Bath-O-Sub Hurry-Up
+site block_start_15     0x0008cb88 0xe92d4008 0xe30001ab
+text block_name_15      Double Scoring
+site block_start_16     0x00111928 0xe92d41f0 0xe3a00003
+text block_name_16      Dr No's Lair
+site block_start_17     0x0011b8f8 0xe92d40f8 0xe1a05001
+text block_name_17      Orient Express
+site block_start_18     0x00116fc0 0xe92d41f0 0xe3a00003
+text block_name_18      Oddjob Battles Bond
+site block_start_19     0x0012d4dc 0xe92d41f0 0xe3a00003
+text block_name_19      Cut Bond in Half
+site block_start_20     0x00123f84 0xe92d41f0 0xe3a00003
+text block_name_20      Mr Osato
+site block_start_21     0x001277f4 0xe92d41f0 0xe3a00003
+text block_name_21      Professor Dent
+site block_start_22     0x00119368 0xe92d40f8 0xe1a05001
+text block_name_22      Mr Wint & Mr Kidd
+site block_start_23     0x00114810 0xe92d41f0 0xe3a00003
+text block_name_23      Feeding Frenzy
+site block_start_24     0x0011ef9c 0xe92d41f0 0xe3a00003
+text block_name_24      Fiona Volpe
+site block_start_25     0x0012f8f0 0xe92d40f8 0xe3a00003
+text block_name_25      Under Water Fight
+site block_start_26     0x0012aa04 0xe92d40f8 0xe3a00003
+text block_name_26      Training Grounds
+site block_start_27     0x00132194 0xe92d40f8 0xe3a00003
+text block_name_27      Diamond Death Ray
+value block_ret_16          0
+value block_ret_17          0
+value block_ret_18          0
+value block_ret_19          0
+value block_ret_20          0
+value block_ret_21          0
+value block_ret_22          0
+value block_ret_23          0
+value block_ret_24          0
+value block_ret_25          0
+value block_ret_26          0
+value block_ret_27          0

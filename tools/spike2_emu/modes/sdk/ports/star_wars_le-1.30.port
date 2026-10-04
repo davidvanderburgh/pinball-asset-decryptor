@@ -645,3 +645,91 @@ site balls_in_play         0x002d3ae0 0xe92d4010 0xe3064e40
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x002d3c5c 0xe92d41f0 0xe30fe7da
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 5 Hoth Mini (multiball), 10 Deathstar Mini (multiball), 14 Endor Mini (multiball), 18 Tatooine Mini (multiball), 19 Victory Multiball (multiball), 20 Victory Multiball (multiball), 27 Hspace Mball (multiball), 31 Tie Mball (multiball), 36 Jedi Wizard Mball (multiball)
+site block_start_0      0x000b71c4 0xe92d4070 0xe1a04000
+data block_obj_0        0x005f9a70
+text block_name_0       Hoth I
+site block_start_1      0x000b7c48 0xe30335ac 0xe3a02000
+data block_obj_1        0x005f9b1c
+text block_name_1       Hoth II a
+site block_start_2      0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_2        0x005f9bfc
+text block_name_2       Hoth II B
+site block_start_3      0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_3        0x005f9cfc
+text block_name_3       Hoth III a
+site block_start_4      0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_4        0x005f9dc0
+text block_name_4       Hoth III B
+site block_start_6      0x000a96a0 0xe92d4038 0xebffc57a
+data block_obj_6        0x005f9f5c
+text block_name_6       Deathstar I
+site block_start_7      0x000aa23c 0xe92d4010 0xe1a04000
+data block_obj_7        0x005fa008
+text block_name_7       Deathstar II a
+site block_start_8      0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_8        0x005fa0ec
+text block_name_8       Deathstar II B
+site block_start_9      0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_9        0x005fa1b4
+text block_name_9       Deathstar III
+site block_start_11     0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_11       0x005fa36c
+text block_name_11      Endor I
+site block_start_12     0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_12       0x005fa454
+text block_name_12      Endor II
+site block_start_13     0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_13       0x005fa54c
+text block_name_13      Endor III
+site block_start_15     0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_15       0x005fa734
+text block_name_15      Tatooine I
+site block_start_16     0x000bf5b4 0xe92d4010 0xe1a04000
+data block_obj_16       0x005fa7f8
+text block_name_16      Tatooine II
+site block_start_17     0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_17       0x005fa8e0
+text block_name_17      Tatooine III
+site block_start_21     0x0009c528 0xe92d4010 0xe1a04000
+data block_obj_21       0x005faae0
+text block_name_21      Rescue Leia Hurry Up
+site block_start_22     0x0009c528 0xe92d4010 0xe1a04000
+data block_obj_22       0x005faba8
+text block_name_22      Rescue Leia Hurry Up
+site block_start_23     0x0009c528 0xe92d4010 0xe1a04000
+data block_obj_23       0x005fac70
+text block_name_23      Rescue Leia Hurry Up
+site block_start_24     0x0009c528 0xe92d4010 0xe1a04000
+data block_obj_24       0x005fad38
+text block_name_24      Rescue Leia Hurry Up
+site block_start_25     0x000be7c0 0xe92d4010 0xe1a04000
+data block_obj_25       0x005fae00
+text block_name_25      Rescue Luke Hurry Up
+site block_start_26     0x000b7018 0xe92d4010 0xe1a04000
+data block_obj_26       0x005faed0
+text block_name_26      Hoth Hyperspace Hurry Up
+site block_start_28     0x000c9020 0xe92d4010 0xe1a04000
+data block_obj_28       0x005fb0a0
+text block_name_28      Hspace Hurry Up
+site block_start_29     0x000d8684 0xe5903000 0xe92d41f0
+data block_obj_29       0x005fb170
+text block_name_29      Shooting Gallery
+site block_start_30     0x000ecd58 0xe92d4010 0xe1a04000
+data block_obj_30       0x005fb220
+text block_name_30      Tie Hurry Up
+site block_start_32     0x0004aa70 0xe92d40f8 0xe1a04000
+data block_obj_32       0x005fb408
+text block_name_32      Escape Boba Fett
+site block_start_33     0x00090390 0xe92d47f0 0xe30355ac
+data block_obj_33       0x005fb568
+text block_name_33      Lightsaber Duel
+site block_start_34     0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_34       0x005fb6e4
+text block_name_34      Lightsaber Duel Ready
+site block_start_35     0x0009ac94 0xe5902000 0xe92d4038
+data block_obj_35       0x005fb8f4
+text block_name_35      Jedi Wizard Mball Ready

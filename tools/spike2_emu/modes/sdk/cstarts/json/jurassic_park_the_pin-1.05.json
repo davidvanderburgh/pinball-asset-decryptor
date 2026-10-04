@@ -1,0 +1,108 @@
+{
+ "key": "jurassic_park_the_pin-1.05",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Stegosaurus",
+   "start": "0x90860",
+   "words": [
+    "0xe92d4038",
+    "0xeb000a8b"
+   ],
+   "how": "counts AUD_STEGOSAURUS_STARTED (id 174) at 0x908c0; sets game flag 40; reached by bl 0x90e4c (fn 0x9090c); bl 0x93b70 (fn 0x93a20)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Triceratops",
+   "start": "0x92760",
+   "words": [
+    "0xe92d4038",
+    "0xeb0002cb"
+   ],
+   "how": "counts AUD_TRICERATOPS_STARTED (id 176) at 0x927c0; sets game flag 41; reached by bl 0x92c74 (fn 0x9280c); bl 0x93b7c (fn 0x93a20)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Pteranodon",
+   "start": "0x79a34",
+   "words": [
+    "0xe92d4070",
+    "0xeb006616"
+   ],
+   "how": "counts AUD_PTERANODON_STARTED (id 178) at 0x79a94; sets game flag 42; reached by bl 0x7a014 (fn 0x79af0); bl 0x93b88 (fn 0x93a20)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "Gallimimus",
+   "start": "0x78f1c",
+   "words": [
+    "0xe92d4038",
+    "0xeb0068dc"
+   ],
+   "how": "counts AUD_GALLIMIMUS_STARTED (id 180) at 0x78f7c; sets game flag 43; reached by bl 0x7949c (fn 0x78fc8); bl 0x93b64 (fn 0x93a20)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 4,
+   "name": "Brachiosaurus",
+   "start": "0x72bdc",
+   "words": [
+    "0xe92d4038",
+    "0xeb0081ac"
+   ],
+   "how": "counts AUD_BRACHIOSAURUS_STARTED (id 182) at 0x72c3c; sets game flag 39; reached by bl 0x7315c (fn 0x72c88); bl 0x93b94 (fn 0x93a20)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 5,
+   "name": "Restore Power",
+   "start": "0x68090",
+   "words": [
+    "0xe92d4010",
+    "0xe1a04000"
+   ],
+   "how": "counts AUD_RESTORE_POWER_START (id 184) at 0x68178; creates record(s) 139 (body 0x692c0); reached by tail b 0x71e9c (fn 0x71e2c); reached only by a tail branch from the Restore Power rule's shot handler (0x71e9c, its lit-scoop branch), whose caller gets the result",
+   "confidence": "medium",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Raptor Multiball",
+   "start": "0x5b8c0",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_RAPTOR_MB_STARTED; serves balls via 0x5b8c0 -> 0x2f3e54 (count 3)"
+  },
+  {
+   "name": "Trex Multiball",
+   "start": "0xa635c",
+   "words": [
+    "0xe92d4030",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_TREX_MULTIBALL; serves balls via 0xa635c -> 0x2f3e54 (count 2)"
+  },
+  {
+   "name": "Escape Nublar",
+   "start": "0x35270",
+   "words": [
+    "0xe92d4070",
+    "0xe1a04000"
+   ],
+   "why": "multiball: serves balls via 0x35270 -> 0x2f3e54 (count 4)"
+  }
+ ],
+ "notes": "engine: audit_add 0x35875c, flag set 0x152d60, create-process 0x186c54, multiball_serve 0x2f3e54. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). The five dinosaur modes' starts (the port's flag witnesses 39-43) all begin `push; bl 0x93298` (a shared can-start check), so they can't be vetoed as they are; their callers are the shared mode select 0x93a20 and each dinosaur's completion handler. Escape Nublar serves 4 balls (a wizard multiball)."
+}

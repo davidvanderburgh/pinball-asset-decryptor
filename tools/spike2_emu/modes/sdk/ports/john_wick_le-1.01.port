@@ -628,3 +628,58 @@ site balls_in_play         0x003350cc 0xe92d4010 0xe3014080
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00335248 0xe92d41f0 0xe30ee27a
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 2 The Staircase (multiball), 3 The Duel (multiball), 4 Special Assignment (multiball), 5 Dance Club Multiball (multiball), 13 Deconsecrated Multiball (multiball), 14 Excommunicado Multiball (multiball), 15 Car Chase Multiball 1 (multiball), 16 Car Chase Multiball 2 (multiball), 17 Car Chase Multiball 3 (multiball), 18 Car Chase Multiball 4 (multiball)
+site block_start_0      0x000b6844 0xe92d40f0 0xe24dd014
+data block_obj_0        0x0068a0c0
+text block_name_0       Lights Out
+site block_start_1      0x000cc1b8 0xe92d43f0 0xe1a05000
+data block_obj_1        0x0068a180
+text block_name_1       Tick Tock
+site block_start_6      0x000b23c8 0xe92d40d0 0xe1a04000
+data block_obj_6        0x00688ad0
+text block_name_6       Job Assassination
+site block_start_7      0x000b2ca8 0xe92d4ff8 0xe1a04000
+data block_obj_7        0x00688c40
+text block_name_7       Job Escort the Vip
+site block_start_8      0x000b3488 0xe92d43d0 0xe1a04000
+data block_obj_8        0x00688d60
+text block_name_8       Job Gather Intel
+site block_start_9      0x000b400c 0xe92d43f8 0xe1a04000
+data block_obj_9        0x00688e80
+text block_name_9       Job Heist
+site block_start_10     0x000b4908 0xe92d43d0 0xe1a04000
+data block_obj_10       0x00688f98
+text block_name_10      Job Night Watch
+site block_start_11     0x000b4eb8 0xe92d43f8 0xe1a04000
+data block_obj_11       0x006890b0
+text block_name_11      Job Security Detail
+site block_start_12     0x000b5954 0xe92d40f8 0xe1a04000
+data block_obj_12       0x006891c0
+text block_name_12      Job Task a Crew
+site block_start_19     0x0008a4cc 0xe92d43f0 0xe1a05000
+data block_obj_19       0x00689af0
+text block_name_19      Ares Battle
+site block_start_20     0x0008cfb4 0xe92d43f0 0xe1a05000
+data block_obj_20       0x00689c08
+text block_name_20      Cassian Battle
+site block_start_21     0x0008f65c 0xe92d43f0 0xe1a05000
+data block_obj_21       0x00689d38
+text block_name_21      Kirill Battle
+site block_start_22     0x0009208c 0xe92d43f0 0xe1a05000
+data block_obj_22       0x00689e80
+text block_name_22      Viggo Battle
+site block_start_23     0x00094c38 0xe92d43f0 0xe1a05000
+data block_obj_23       0x00689fd0
+text block_name_23      Zero Battle
+site block_start_24     0x000b7240 0xe92d4010 0xe1a04000
+data block_obj_24       0x0068a300
+text block_name_24      Location Abandoned Building Paris
+site block_start_25     0x000b7bd8 0xe92d4010 0xe1a04000
+data block_obj_25       0x0068a3b8
+text block_name_25      Location Catacombs
+site block_start_26     0x000b8570 0xe92d4010 0xe1a04000
+data block_obj_26       0x0068a470
+text block_name_26      Location John Wicks House

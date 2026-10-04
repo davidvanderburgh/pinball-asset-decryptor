@@ -830,12 +830,24 @@ def parse_port(text):
     return entries
 
 
+#: PAD-363: the lines game_mode_blocks.py writes from a build's OWN program (each of its modes' start, object and
+#: name, the ones checked by default): never carried from a reference, and never part of what a recipe depends on
+_GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block_name_\d+|text block_default|"
+                        r"value block_default|value block_ret_\d+)\b")
+
+
+def generated(key, rest):
+    """A port line game_mode_blocks.py makes for each build itself (PAD-363)."""
+    return bool(_GENERATED.match("%s %s" % (key, rest.strip())))
+
+
 def entries_sha1(text):
     """A port's entries (every line but comments and blanks, spaces normalised), hashed: what a
-    recipe and a derived port depend on. A comment edit does not change it."""
+    recipe and a derived port depend on. A comment edit does not change it, nor do the lines
+    generated per build (:func:`generated`)."""
     h = hashlib.sha1()
     for key, rest in parse_port(text):
-        if key != "#":
+        if key != "#" and not generated(key, rest):
             h.update((" ".join([key] + rest.split("#", 1)[0].split()) + "\n").encode("utf-8"))
     return h.hexdigest()
 
@@ -921,7 +933,7 @@ def compile_recipe(ref_elf, port_text, port_name, progress=None):
     c = _Compiler(ref)
     sites, data, scenes = {}, {}, {}
     entries = parse_port(port_text)
-    body = [(k, r) for k, r in entries if k in ("site", "data", "scene")]
+    body = [(k, r) for k, r in entries if k in ("site", "data", "scene") and not generated(k, r)]
     for n, (key, rest) in enumerate(body):
         if progress is not None:
             progress(n / max(1, len(body)), "%s %s" % (key, rest.split()[0] if rest.split() else ""))
@@ -1298,6 +1310,8 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
         done += 1
         if cancel is not None and cancel():
             raise Stopped()
+        if generated(key, rest):
+            continue                         # PAD-363: written for the target below, from its own program
         if progress is not None and done % 8 == 0:
             progress(done / total, "")
         started = True
@@ -1478,9 +1492,23 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
         else:
             out.append("%s %s" % (key, rest))
     _score_pair(out, placed, tgt, hows)
+    out += block_section(tgt)
     sites = {n for k, n in placed if k == "site"}
     data = {n for k, n in placed if k == "data"}
     return Draft(out, report, core_missing(sites, data), placed, hows)
+
+
+def block_section(tgt):
+    """PAD-363: the game's own modes a mode may keep from starting, read from THIS build's program
+    (game_mode_blocks.py): [] when it has no C++ rule manager, or its modes cannot be read."""
+    try:
+        from . import game_mode_blocks as B
+        modes = B.read_modes(tgt.b)
+    except Exception:                                        # noqa: BLE001 - a plain-C title, an odd build
+        return []
+    if not any(m.blockable for m in modes):
+        return []
+    return [""] + B.port_lines(modes)
 
 
 def _score_pair(out, placed, tgt, hows):

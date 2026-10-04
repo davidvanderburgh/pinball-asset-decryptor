@@ -69,6 +69,8 @@ class TitleProfile:
     switch_shots: tuple = ()     # names in ``shots`` that come from the port's `switch` lines
     switch_shots_note: str = ""  # why those are not proven yet; "" when they are (or there are none)
     stack_note: str = ""         # item 164: what ``stack no`` waits for when it is less than every mode
+    game_modes: tuple = ()       # PAD-363: ((id, name, held off by default), ...) the game's own modes a
+    #                              mode can keep from starting (the port's block_start_<id> lines)
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
     light_route: str = ""        # item 164: how a mode's Lights run - "language" (the game's own light
@@ -1033,6 +1035,7 @@ def profile_from_port(path):
         switch_shots=switch_shots,
         switch_shots_note=switch_note,
         stack_note=stack_note,
+        game_modes=_game_modes(port),
         lamps=_lit_inserts(port) if key in LAMPS_PROVEN else 0,
         light_route=light_route,
         bank_tree=measured.get("bank_tree", "auto_loaded"),
@@ -1095,6 +1098,22 @@ def _lit_inserts(port):
     return sum(1 for _name, _ids, mask in port.get("lamp", ()) if mask)
 
 
+def _game_modes(port):
+    """PAD-363: ``((id, name, held off by default), ...)``, in id order: the game's own modes the port lets
+    a mode keep from starting - a `site block_start_<id>` (with its `data block_obj_<id>` on a C++ title; a
+    plain-C title's start is the mode's own), as pad_mode_runtime.c's block_arm hooks them, named by `text
+    block_name_<id>`; `text block_default <ids>` is the ones a mode holds off when it lists none."""
+    text = port["text"]
+    default = {int(w) for w in text.get("block_default", "").replace(",", " ").split() if w.isdigit()}
+    out = []
+    for site in port["site"]:
+        tail = site[len("block_start_"):] if site.startswith("block_start_") else ""
+        if tail.isdigit() and int(tail) < 128:
+            i = int(tail)
+            out.append((i, text.get("block_name_" + tail, "").strip() or "mode %d" % i, i in default))
+    return tuple(sorted(out))
+
+
 def _shots_with_switches(port):
     """``(shots, switch_shot_names)``: the port's `shot` lines, then each `switch` line's name that
     is not a shot already, as the runtime's port reader adds them. Switch lines count only when the
@@ -1114,6 +1133,14 @@ def _shots_with_switches(port):
 def port_path(p):
     """The port file behind a profile, or "" when it has none."""
     return os.path.join(PORTS_DIR, p.port) if p.port else ""
+
+
+#: PAD-363: the hand-written profile offers the game's modes its port lets a mode hold off, as a read port does
+try:
+    GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, game_modes=_game_modes(read_port(port_path(GODZILLA_PRO_1_15))))
+except OSError:
+    pass
+PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 
 _PROFILES_CACHE = {}
@@ -1508,6 +1535,12 @@ class ModeSpec:
     art_crop: str = ""                   # letterbox | fill: how the picture was cut
     # stacking (item 140): may it start while the game's own battle or multiball runs?
     stack: bool = True
+    # PAD-363: what it does about the game's own modes. "stack": runs beside them (its screen steps aside);
+    # "give_way": starts only while none runs, and one beginning ends it; "block": as give_way, and while it
+    # runs the game's modes in block_modes (the title's game_modes ids; [] = the port's checked defaults)
+    # cannot start. Never a multiball (game_mode_blocks.py)
+    game_modes: str = "stack"
+    block_modes: list = field(default_factory=list)
     # item 141, the Advanced section: every other parameter the runtime has
     award_ladder: str = "rising"         # rising: the Nth shot pays N x; fixed: every shot x 1
     shot_award: list = field(default_factory=list)   # [[shot name, points]]: pays instead of award
@@ -1861,6 +1894,16 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         if out.multiball_on_shot not in dropped:            # PAD-228
             dropped.append(out.multiball_on_shot)
         out.multiball_on_shot = ""
+    if old_key != p.key and isinstance(out.block_modes, list) and out.block_modes:
+        # PAD-363: an id is a number in THAT game's mode table, so the list is matched by name
+        try:
+            was = {i: name for i, name, _on in profile(old_key).game_modes}
+        except ModeProjectError:
+            was = {}
+        now = {}
+        for i, name, _on in getattr(p, "game_modes", ()):
+            now.setdefault(name, []).append(i)
+        out.block_modes = sorted({j for i in out.block_modes if isinstance(i, int) for j in now.get(was.get(i), ())})
     if old_key == p.key or not isinstance(out.callout_at, list):
         return
     try:
@@ -2284,6 +2327,51 @@ def validate(spec, folder=None):
     out += validate_multiball(spec, p)
     out += validate_ball_save(spec, p)
     out += validate_more_to_start(spec, p)
+    out += validate_game_modes(spec, p)
+    return out
+
+
+# ---- PAD-363: the game's own modes while it runs -----------------------------------------
+GAME_MODES = ("stack", "give_way", "block")
+
+
+def held_off(spec, p):
+    """The ids of *p*'s modes *spec* keeps from starting: its own list, else the port's checked defaults
+    (what pad_mode_runtime.c does with an empty `block_modes`); () unless it blocks."""
+    if spec.game_modes != "block":
+        return ()
+    if spec.block_modes:
+        return tuple(sorted({int(i) for i in spec.block_modes if isinstance(i, int)}))
+    return tuple(i for i, _name, on in getattr(p, "game_modes", ()) if on)
+
+
+def validate_game_modes(spec, p):
+    if spec.game_modes not in GAME_MODES:
+        return ["What it does about the game's own modes is stack, give_way or block."]
+    if spec.game_modes != "block":
+        return []
+    have = {i: name for i, name, _on in getattr(p, "game_modes", ())}
+    if not have:
+        return []         # the tab says why; the runtime gives way on a port that cannot hold them off
+    out = []
+    for i in spec.block_modes or ():
+        if not isinstance(i, int) or isinstance(i, bool) or i not in have:
+            out.append("%s has no mode the app can hold off numbered %r." % (p.label, i))
+    if not out and not held_off(spec, p):
+        out.append("Tick at least one of %s's modes to hold off." % p.label)
+    return out
+
+
+def game_modes_lines(spec):
+    """The mode file's lines: nothing at "stack", so older files are unchanged."""
+    if spec.game_modes == "give_way":
+        return ["game_modes     give_way"]
+    if spec.game_modes != "block":
+        return []
+    out = ["game_modes     block"]
+    ids = sorted({i for i in spec.block_modes or () if isinstance(i, int) and 0 <= i < 128})
+    if ids:
+        out.append("block_modes    " + " ".join(str(i) for i in ids))
     return out
 
 
@@ -2555,6 +2643,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += own_sound_lines(spec, own_sounds, own_sound_ms)
     if not spec.stack:                      # item 140: only when off, so older files are unchanged
         lines.append("stack          no")
+    lines += game_modes_lines(spec)          # PAD-363: nothing unless it gives way or blocks
     lines += parameter_lines(spec, slug, p)
     lines += display_light_lines(spec)
     lines += more_to_start_lines(spec, p)    # PAD-227: nothing unless the mode has them

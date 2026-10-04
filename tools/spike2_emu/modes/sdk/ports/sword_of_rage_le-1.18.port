@@ -450,3 +450,43 @@ site balls_in_play         0x001195a8 0xe92d4010 0xe30e46f4
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00119724 0xe92d41f0 0xe305e0a2
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 6 Castle Mball (multiball), 7 Triple Knights Mball (multiball), 21 Original Mball (multiball), 22 Bk2k Mball (multiball), 23 Super Mball (multiball), 24 Rage Mball (multiball)
+site block_start_0      0x00086544 0xe92d4ff0 0xe1a04000
+data block_obj_0        0x005f8068
+text block_name_0       Sand Worm
+site block_start_1      0x00075438 0xe92d4ff0 0xe1a04000
+data block_obj_1        0x005f81f0
+text block_name_1       Hydra
+site block_start_2      0x0006a8b0 0xe92d4ff0 0xe1a04000
+data block_obj_2        0x005f8398
+text block_name_2       Fire Elemental
+site block_start_3      0x0006fe14 0xe92d4ff0 0xe1a04000
+data block_obj_3        0x005f8500
+text block_name_3       Handholder
+site block_start_4      0x0007ad44 0xe92d4ff0 0xe1a04000
+data block_obj_4        0x005f8660
+text block_name_4       Lich
+site block_start_5      0x0005a244 0xe92d4ff0 0xe1a04000
+data block_obj_5        0x005f8830
+text block_name_5       Black Castle
+site block_start_8      0x00070ce8 0xe92d4010 0xe1a04000
+data block_obj_8        0x005f9340
+text block_name_8       Knight Hurryup
+site block_start_9      0x00070ce8 0xe92d4010 0xe1a04000
+data block_obj_9        0x005f9098
+text block_name_9       Flail Hurryup
+site block_start_10     0x0008c66c 0xe92d4010 0xe1a04000
+data block_obj_10       0x005f9180
+text block_name_10      Target Hurryup
+site block_start_11     0x00070ce8 0xe92d4010 0xe1a04000
+data block_obj_11       0x005f9260
+text block_name_11      Shield Hurryup
+site block_start_12     0x0009524c 0xe92d4370 0xe30251e8
+data block_obj_12       0x005f8f60
+text block_name_12      War Hurryups
+site block_start_25     0x000c405c 0xe92d4ff0 0xe1a04000
+data block_obj_25       0x005f8e18
+text block_name_25      Last Chance

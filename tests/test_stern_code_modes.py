@@ -108,6 +108,17 @@ def test_what_is_wrong_with_a_code_modes_assets_is_said(tmp_path):
         assert needle in probs, needle
 
 
+def test_a_code_mode_lists_the_games_modes_it_holds_off(tmp_path):
+    """PAD-363: `block_modes` in its assets file reaches the runtime file (ids 0-127); give_way writes none."""
+    spec = CM.CodeAssets(name="X", block_modes=[70, 21, 21])
+    assert not [p for p in CM.validate(spec, str(tmp_path)) if "block_modes" in p]
+    assert "block_modes 21 70" in CM.runtime_text("x", spec, GZ).splitlines()
+    spec.game_modes = "give_way"
+    assert not any(ln.startswith("block_modes") for ln in CM.runtime_text("x", spec, GZ).splitlines())
+    spec.block_modes = [128]
+    assert any("block_modes is a list of the game's mode ids, 0 to 127" in p for p in CM.validate(spec, str(tmp_path)))
+
+
 def test_a_broken_assets_json_stops_the_list_with_its_name(tmp_path):
     project = _code_project(tmp_path)
     with open(os.path.join(MP.mode_folder(project, "ghidorah_heads"), CM.ASSETS_FILE), "w") as f:

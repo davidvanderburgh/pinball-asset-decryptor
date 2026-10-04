@@ -18,6 +18,8 @@
  *   event <name>        the game fires a named event (skill_shot, ball_start ...)
  *   battle <0|1>        the game's own kaiju battle is active or not
  *   multiball <0|1>     the game's own multiball is active or not
+ *   timed <0|1>         one of the game's other modes is active (Jet Fighter Attack: PAD-347)
+ *   balls <n>           the balls in play
  *   ball_end            the ball drained
  *   player <n>          the player up
  *   game_over           pm_in_game() falls
@@ -68,7 +70,7 @@ static const struct { const char *name; int id; } EVENTS[] = {
 
 static unsigned long now_ms, ticks;
 static unsigned player = 1;
-static int in_game = 1, battle, multiball;
+static int in_game = 1, battle, multiball, timed;
 static uint64_t score[5];
 static const struct pm_mode *current, *running;
 static char trigger_file[64], trigger_text[128];
@@ -345,8 +347,27 @@ int pm_stock_mode_running(unsigned kinds)
 {
     if ((kinds & PM_STOCK_BATTLE) && battle) return PM_STOCK_BATTLE;
     if ((kinds & PM_STOCK_MULTIBALL) && multiball) return PM_STOCK_MULTIBALL;
-    if ((kinds & PM_STOCK_ANY) && (battle || multiball)) return PM_STOCK_ANY;
+    if ((kinds & PM_STOCK_ANY) && (battle || multiball || timed)) return PM_STOCK_ANY;
     return 0;
+}
+int pm_aside(void)
+{
+    return in_game ? pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY) : 0;
+}
+/* PAD-347: "BLOCK 1 <mode>" when a mode keeps the game's modes from starting, "BLOCK 0 <mode>" when it lets go */
+int pm_block_game_modes(int on)
+{
+    printf("%6lu BLOCK %d %s\n", now_ms, on ? 1 : 0, current && current->name ? current->name : "?");
+    return 1;
+}
+/* PAD-363: "BLOCKLIST <ids> <mode>" - the game's mode ids a mode holds off ("defaults": the port's) */
+int pm_block_list(const unsigned char *ids, int n)
+{
+    int i;
+    printf("%6lu BLOCKLIST", now_ms);
+    for (i = 0; i < n; i++) printf(" %u", ids[i]);
+    printf("%s %s\n", n ? "" : " defaults", current && current->name ? current->name : "?");
+    return 1;
 }
 const char *pm_stock_mode_what(unsigned kind)
 {
@@ -581,6 +602,7 @@ int main(int argc, char **argv)
             current = 0;
         } else if (!strcmp(c, "battle")) { battle = atoi(argv[++k]); printf("%6lu >> battle %d\n", now_ms, battle); }
         else if (!strcmp(c, "multiball")) { multiball = atoi(argv[++k]); printf("%6lu >> multiball %d\n", now_ms, multiball); }
+        else if (!strcmp(c, "timed")) { timed = atoi(argv[++k]); printf("%6lu >> timed %d\n", now_ms, timed); }
         else if (!strcmp(c, "balls")) { balls_in_play = atoi(argv[++k]); printf("%6lu >> balls in play %d\n", now_ms, balls_in_play); }
         else if (!strcmp(c, "ball_end")) {
             printf("%6lu >> ball_end\n", now_ms);

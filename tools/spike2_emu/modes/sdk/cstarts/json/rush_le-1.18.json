@@ -1,0 +1,168 @@
+{
+ "key": "rush_le-1.18",
+ "family": "crule",
+ "start_slot": 40,
+ "start_slot_how": "cmode::v[40] 0xf2d84 sets the running byte (strb of 1 at 0xf2e48) and bumps the starts count (0xf2e7c). Why stock_scan_cpp.read gives no start_slot: computed: 17 of 17 mode objects have a constant id; mode getter 0x119d48 (called with a constant MODE id at 0 of its 520 call sites); award add 0x38f00; class_model gives cmode 2 slots. find_mode_getter picks get_rule 0x119d48 (manager v[24]; 520 call sites, nearly all with a constant RULE id) over get_mode 0x119fa0 (manager v[25]), the accessor the modes are fetched by; no get_rule call passes a mode id, so starter_slots has no (mode id, slot) votes. (After get_mode with a constant id the slots called are 4 x125, 44 x57, 14 x30, then 40 x10: even on the right getter the most-called slot is not the start.) Also cmode's vtable begins with pure virtuals whose words are 0 in the file (relocated to __cxa_pure_virtual), so class_model cuts cmode at 2 slots and own_slots counts every slot of every mode class as an override.",
+ "modes": [
+  {
+   "id": 2,
+   "name": "La Villa Strangiato",
+   "start": "0xb04b0",
+   "words": [
+    "0xe92d47f0",
+    "0xe1a04000"
+   ],
+   "how": "cmode_la_villa_strangiato's v[40] (vtable 0x502580 + 8 + 4*40) on object 0xb6149c8; calls its base's start 0xf2d84 (super::start); reached by data 0x502628",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0xb6149c8"
+  },
+  {
+   "id": 3,
+   "name": "Tom Sawyer",
+   "start": "0xb6e2c",
+   "words": [
+    "0xe92d4ff0",
+    "0xe1a04000"
+   ],
+   "how": "cmode_tom_sawyer's v[40] (vtable 0x502d30 + 8 + 4*40) on object 0xb614a98; calls its base's start 0xf2d84 (super::start); reached by data 0x502dd8",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0xb614a98"
+  },
+  {
+   "id": 4,
+   "name": "Working Man",
+   "start": "0xb9748",
+   "words": [
+    "0xe92d43f0",
+    "0xe1a04000"
+   ],
+   "how": "cmode_working_man's v[40] (vtable 0x502f38 + 8 + 4*40) on object 0xb614b50; calls its base's start 0xf2d84 (super::start); reached by data 0x502fe0",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0xb614b50"
+  },
+  {
+   "id": 5,
+   "name": "The Big Money",
+   "start": "0xb4384",
+   "words": [
+    "0xe92d4ff0",
+    "0xe1a04000"
+   ],
+   "how": "cmode_the_big_money's v[40] (vtable 0x502980 + 8 + 4*40) on object 0xb614c40; calls its base's start 0xf2d84 (super::start); reached by data 0x502a28",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0xb614c40"
+  },
+  {
+   "id": 6,
+   "name": "The Spirit of Radio",
+   "start": "0xb5918",
+   "words": [
+    "0xe92d43f0",
+    "0xe1a04000"
+   ],
+   "how": "cmode_the_spirit_of_radio's v[40] (vtable 0x502b38 + 8 + 4*40) on object 0xb614d20; calls its base's start 0xf2d84 (super::start); reached by data 0x502be0",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0xb614d20"
+  },
+  {
+   "id": 7,
+   "name": "Limelight",
+   "start": "0xb268c",
+   "words": [
+    "0xe92d4ff0",
+    "0xe1a04000"
+   ],
+   "how": "cmode_limelight's v[40] (vtable 0x5027a8 + 8 + 4*40) on object 0xb614de8; calls its base's start 0xf2d84 (super::start); reached by data 0x502850",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0xb614de8"
+  },
+  {
+   "id": 15,
+   "name": "Bastille Day Hurry Up",
+   "start": "0xf68c4",
+   "words": [
+    "0xe92d43f0",
+    "0xe1a05000"
+   ],
+   "how": "cmode_bastille_day_hurry_up's v[40] (vtable 0x508090 + 8 + 4*40) on object 0xb6152c0; calls its base's start 0x10afc0 (super::start); reached by data 0x508138",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0xb6152c0"
+  },
+  {
+   "id": 16,
+   "name": "Topper Frenzy",
+   "start": "0x10b868",
+   "words": [
+    "0xe92d4030",
+    "0xe1a04000"
+   ],
+   "how": "cmode_topper_frenzy's v[40] (vtable 0x509fd8 + 8 + 4*40) on object 0xb615378; calls its base's start 0x10afc0 (super::start); reached by data 0x50a080",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0xb615378"
+  },
+  {
+   "id": 35,
+   "name": "2112 Wizard",
+   "start": "0xf5254",
+   "words": [
+    "0xe92d4ff0",
+    "0xe1a04000"
+   ],
+   "how": "cmode_2112_wizard's v[40] (vtable 0x507e50 + 8 + 4*40) on object 0xb616108; calls its base's start 0xf2d84 (super::start); reached by code 0x4567e0 (fn 0x455d08); data 0x507ef8; a wizard mode (cmode, not cmode_mball): check on a machine that it serves no ball",
+   "confidence": "medium",
+   "risky": "",
+   "obj": "0xb616108"
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Red Barchetta Multiball",
+   "start": "0x109278",
+   "why": "multiball (cmode_red_barchetta_multiball derives cmode_mball)"
+  },
+  {
+   "name": "Subdivisions Multiball",
+   "start": "0x10ab30",
+   "why": "multiball (cmode_subdivisions_multiball derives cmode_mball)"
+  },
+  {
+   "name": "Fly By Night Multiball",
+   "start": "0x103ddc",
+   "why": "multiball (cmode_fly_by_night_multiball derives cmode_mball)"
+  },
+  {
+   "name": "Far Cry Multiball",
+   "start": "0x102208",
+   "why": "multiball (cmode_far_cry_multiball derives cmode_mball)"
+  },
+  {
+   "name": "Headlong Flight Multiball",
+   "start": "0x1065e0",
+   "why": "multiball (cmode_headlong_flight_multiball derives cmode_mball)"
+  },
+  {
+   "name": "Freewill Multiball",
+   "start": "0x1053d0",
+   "why": "multiball (cmode_freewill_multiball derives cmode_mball)"
+  },
+  {
+   "name": "Cygnus Book 1 Multiball",
+   "start": "0xfae40",
+   "why": "multiball (cmode_cygnus_book_1_multiball derives cmode_mball)"
+  },
+  {
+   "name": "Cygnus Book 2 Multiball",
+   "start": "0xfea98",
+   "why": "multiball (cmode_cygnus_book_2_multiball derives cmode_mball)"
+  }
+ ],
+ "notes": "Objects: the scanner's static-initialiser objects (constructor ids). The same slot rule agrees with stock_scan_cpp on all 22 C++ programs that have a slot (Godzilla 8, Deadpool 13, Venom 47, TMNT 39, Munsters 33, Mandalorian 38, Jaws 12, King Kong 11, Avengers 11, John Wick 47, Sword of Rage 31, Iron Maiden 8, Star Wars 8, D&D 50, Foo Fighters 41, Led Zeppelin 33). ids here are the game's own mode ids."
+}

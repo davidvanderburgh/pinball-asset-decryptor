@@ -931,12 +931,111 @@ the next start shot started the `stack no` mode.
 **Not decoded yet.** Kind `0x10` (set on the double battles, the later multiballs and some
 timed modes) and `0x20` (set by no constructor, so a runtime flag); other titles' managers;
 a stock mode that starts while yours is already running (yours keeps running: the check is
-made only when yours starts). The game's mode mask (`data mode_mask`) is NOT a witness: it
+made only when yours starts; since PAD-347 its words step aside, below). The game's mode mask (`data mode_mask`) is NOT a witness: it
 stayed 0 through a battle and a multiball (it is `0x10` in attract, `0x4` at the end of a
 ball, `0x5` in the bonus). Only multiballs started on demand were measured: when a
 multiball the player lights turns active, compared with its intro scenes, is not measured
 (a battle turned active only at its select screen, so a `stack no` shot during a
 multiball's intro may still start).
+
+### Stepping aside (PAD-347)
+
+On a Godzilla Premium (2026-10-03) one of the example modes kept running when the game's own
+JET FIGHTER ATTACK started, and both wrote their title and instruction line in the same place:
+our HUD copies the game's battle layout, and the game's timed modes use it too. Stern never
+shows two modes' words at once. One mode has the middle of the screen, and the others keep to
+their badges at the edge (Godzilla's BATTLE, DOUBLE SCORING and TESLA timers down the left).
+
+`pm_aside()` says when the middle is the game's: the kind of the game's mode active for the
+player up (asked as `pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY)`),
+or 0. It asks the game at most five times a second, so a mode may call it every tick; it is 0
+outside a game, and 0 on a port that cannot tell (logged once). Each change is logged:
+
+```
+[pad] aside: a stock mode is running - the middle of the screen is the game's, our modes keep to the edges
+[pad] aside: the game's mode is over - our modes have the middle of the screen again
+```
+
+What steps aside, and how:
+
+- **A mode file's own screen** (`mode_file.c`): hidden while the game's mode runs, also while
+  the mode's total is still showing, and shown again when it ends. `aside keep` leaves it up
+  (a screen laid out clear of the game's words).
+- **The examples' HUDs** (`intricate_kit.h`, Godzilla's slide-outs scene): the way ANGUIRUS has
+  always stacked on a battle. The mode's title and instruction line move into the award line,
+  between the game's counters and its title (an award still takes that line for its moment);
+  the three counters along the top are hidden; the gauge on the right edge stays; and the timer
+  badge moves one slot down (y 376, `PadMode_<slug>_Hud_Timer2`, built beside the first) while
+  a battle's BATTLE badge has the top one. A card built before PAD-347 has no second slot, so
+  the badge is hidden during a battle rather than drawn over the game's.
+- **A mode of your own in C**: ask `pm_aside()` in your tick and keep your words out of the
+  game's places while it is not 0.
+
+The examples' single-ball modes also wait out a MULTIBALL now (David: "when I was in multi-ball
+and I did the outlane oxygen destroyer mode, it should not have triggered because I had multiple
+balls on the playfield"): KING GHIDORAH, OXYGEN DESTROYER and MASER BARRAGE do not start while
+the game's multiball is active or two balls or more are in play, and stay ready, so the
+qualifying shot after it starts them (`kit_wait_multiball`). FINAL WARS and MELTDOWN already
+waited. Beside the game's battles and timed modes they still stack, their words aside.
+
+**Isolation: blocking the game's modes (PAD-347).** After a machine run with the modes stacked,
+David (2026-10-04): "there is still a bit too much overlap with other modes. i'd prefer to try them
+isolated", and "make isolated modes like our own custom ones that prevent the stock modes from
+starting". The examples now keep to themselves:
+
+- They start only while none of the game's modes runs and fewer than two balls are in play, and stay
+  ready (`kit_wait_game`).
+- While one runs it BLOCKS the game's modes it may refuse (`pm_block_game_modes`, from `kit_isolate`
+  right after `kit_begin`). A rule starts one of the game's modes by calling the mode's START, its
+  `v[8]` at the object's vptr + 0x20 (the vptr is the vtable + 8), on the object the manager's get hands
+  it. Each mode has its own start, so the port names one veto site per mode a mode of ours may refuse
+  (`site block_start_<id>`), and the runtime refuses that start at its entry while the asking mode runs:
+  the mode never begins, and the rule that asked carries on. Every mode but the multiballs is named
+  (PAD-363, below); a mode that lists none holds off the port's checked defaults (`text block_default`:
+  on Premium 1.16, 21 Jet Fighter Attack and 23 Tesla Strike). The multiballs (balls in a lock; the
+  Godzilla and Mechagodzilla magnets) are never named: one of those starting still ends ours
+  (`kit_game_began`), as a mode whose assets file says `game_modes give_way` does for every game mode.
+  Battles are kept out at the source: the battle
+  rule's shot handler (`site block_battle_shots`, RuleBattle::v[25], shot mask in r2:r3) is where a lit
+  ramp counts toward a battle and a lit scoop opens the BATTLE SELECTION screen (it creates the process
+  that waits for effect 132), and while a mode blocks it is shown the shot without those bits (`value
+  block_battle_lo` / `block_battle_hi`: the Left and Right ramp, the scoop) - the path of an unlit ramp
+  and of a scoop with no battle lit, so the scoop kicks the ball out as usual. Emulator (Premium 1.16):
+  with MASER BARRAGE blocking, both ramps twice and a held scoop lit nothing and opened nothing; after it
+  stopped, the same shots lit a battle and the KAIJU BATTLE SELECT screen opened. (David: "what about
+  when a ball goes in the scoop to select a mode? we should prevent that from happening while in our
+  own multiball modes".) (A first reading took each vtable's word at +0x20,
+  which is `v[6]`, a base routine every mode shares, and hooked nothing a rule calls: caught in the
+  emulator, where a forced Jet Fighter Attack still started.)
+
+**Every title (PAD-363).** David (2026-10-04): "is there a way to extend this kind of thinking to other
+games? ... it would be good to have this generic logic (or at least the levers built in for the user)".
+`game_mode_blocks.py` (`sdk/block_tool.py <game program> <port>`) writes the section from a build's own
+program: on a C++ rule title each mode's start is the word at its vtable + 8 + 4 * the title's start
+slot (Godzilla 8, Deadpool 13, Venom 47; the app's stock scanner finds the slot), with its object
+(`data block_obj_<id>`) and name (`text block_name_<id>`). The ids run to 127 (`pm_block_list(ids, n)`,
+a mode file's `block_modes`). A start whose first two words could not run in the veto's trampoline (a
+branch, a literal load, a read of the pc, a return as its first word) is left out. A port derived for
+another build never copies these lines from its reference: a draft gets a section read from its own
+program. A start that carries no object (a plain-C title's) is the mode's own: the runtime tells it by
+which hook fired. A mode file says `game_modes block|give_way|stack` and `block_modes <ids>`; the Modes
+tab offers both under "The game's own modes", with a tick per mode by name; a code mode's assets file
+takes `block_modes` too. The library check (each named mode forced through the game's own start while a
+blocking mode runs, then one forced again with it stopped, to see the start found is the start) is in
+the ticket's notes. On a plain-C title a mode's start is the function that counts its STARTED audit; one
+reached through a table whose caller goes on when it returns non-zero (The Beatles' song select, the story
+chapters of Stranger Things and James Bond) is refused with 0 instead (`value block_ret_<id> 0`). A rule
+of the game's that is not one of its modes has no start to refuse, but may put its words on the screen
+from its shot handler: Godzilla's Saucer Attack counts the pop bumper toward lighting it ("SAUCER VALUE / n
+MORE TO LIGHT SAUCER ATTACK", over KING GHIDORAH's words on David's Premium). A port names up to eight such
+handlers (`site block_rule_<n>`, `value block_rule_lo_<n>` / `block_rule_hi_<n>`, `text
+block_rule_name_<n>`), each shown the shot without those bits while a mode blocks, as the battle rule's is.
+
+**Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
+shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the
+balls in play plus the game's own mode flags, live records, running bytes or rule objects on 11
+(each route tells only the modes it names). The Beatles 1.29 and TMNT Pro 1.58 see only a
+multiball, by the balls in play: their timed modes do not move a mode's words aside.
 
 ### The game's own modes on every cmode title (item 164)
 
@@ -2442,6 +2541,17 @@ BLOW!"). They are program text, which `progtext.py` can rename within each strin
 - A mode is not resumed after a drain the way the game resumes its own battles (above).
 
 ## Display priority: a mode layered on the game's display (item 154 display)
+
+> **PAD-353 (2026-10-04): the hold is WITHDRAWN.** On a Godzilla Premium, KING GHIDORAH held 180 and
+> the Magna-Grab's screen (effect 71, priority 180) waited for it; the game keeps the ball on the
+> magnet until that screen has played, so the magnet stayed ON until the machine was switched off.
+> Any rule of the game's that waits on a display can stall the same way. `pm_display_priority` now
+> only notes a mode's priority: the runtime never raises the game's display priority, never fakes
+> it to a waiter, never cuts a waiter short and never hides a display's words. It WATCHES instead:
+> `pm_display_covered()` is 1 while a display of the game's has the screen (an effect over the
+> layered display, or any layered foreground), and the examples' HUD keeps its middle words blank
+> until it is gone. What follows is how the game layers its display (still true, and what the
+> watching reads) and the history of the hold.
 
 A mode's screen and clip share the glass with everything the game shows. Without a priority, the
 game's own shot awards cover them: the Big loop's full-screen LOOPS, BATTLE IS LIT after the ramps,

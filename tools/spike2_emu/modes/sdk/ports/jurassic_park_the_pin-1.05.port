@@ -441,3 +441,19 @@ value mode_flag_5           43
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x002f3e54 0xe92d41f0 0xe305e3ba
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x00090860 0xe92d4038 0xeb000a8b
+text block_name_0       Stegosaurus
+site block_start_1      0x00092760 0xe92d4038 0xeb0002cb
+text block_name_1       Triceratops
+site block_start_2      0x00079a34 0xe92d4070 0xeb006616
+text block_name_2       Pteranodon
+site block_start_3      0x00078f1c 0xe92d4038 0xeb0068dc
+text block_name_3       Gallimimus
+site block_start_4      0x00072bdc 0xe92d4038 0xeb0081ac
+text block_name_4       Brachiosaurus
+site block_start_5      0x00068090 0xe92d4010 0xe1a04000
+text block_name_5       Restore Power

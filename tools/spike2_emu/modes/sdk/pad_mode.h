@@ -102,6 +102,8 @@ const char *pm_shot_at(int i, uint64_t *mask);    /* the i-th named shot (0-base
 int pm_begin(void);        /* 1 = your mode is now the one running; 0 = another one is */
 void pm_end(void);         /* your mode stopped running */
 int pm_running(void);      /* your mode is the one running */
+void pm_running_name(const char *name);   /* PAD-363: after pm_begin, the name the runtime's own lines give
+                                             your mode while it runs (one object running several modes) */
 
 /* ---- scoring ------------------------------------------------------------------------
  * Through the game's own scoring, so its playfield multiplier and its rules about when a
@@ -288,6 +290,25 @@ int pm_snprintf(char *out, unsigned long cap, const char *fmt, ...)
  * 0 = none of them; -1 = this port cannot tell (no stock queries for a kind asked) */
 int pm_stock_mode_running(unsigned kinds);
 const char *pm_stock_mode_what(unsigned kind);   /* "a battle", "a multiball", "a stock mode" */
+/* PAD-347: STACKING. Stern never shows two modes' words at once: one mode has the middle of the
+ * screen, the others keep to their badges at the edge. While one of the game's own modes runs for
+ * the player up, the middle is the game's: a mode that keeps running beside it moves its words out
+ * of the way (the title and instruction line, the counters along the top, a screen of its own) and
+ * keeps only what sits at the edges. pm_aside() says when: the kind running (PM_STOCK_BATTLE, then
+ * PM_STOCK_MULTIBALL, then PM_STOCK_ANY) or 0. Cheap to call every tick (the game is asked at most
+ * five times a second); 0 on a port that cannot tell, and outside a game. */
+int pm_aside(void);
+/* PAD-347 / PAD-363: ISOLATION. A mode may keep the game's own modes from STARTING while it runs: the
+ * start of each mode the port names (generated from the game program; never a multiball) is refused at its
+ * entry, so that mode never begins and the rule that asked carries on. Which ones: the mode's own list
+ * (pm_block_list: n of the game's mode ids, 0-127 - the port's `text block_name_<id>` names them), or the
+ * port's checked defaults (`text block_default <ids>`). On Godzilla a blocking mode also keeps a battle from
+ * being lit or its select screen from opening at the scoop. 1 = blocking (0 to stop); ends by itself with the
+ * mode; 0 when the port cannot. pm_block_list is called before pm_block_game_modes; n = 0: the defaults again.
+ * An id the port does not name is left out. */
+#define PM_CAN_BLOCK_GAME   0x40000u  /* pm_block_game_modes, pm_block_list */
+int pm_block_game_modes(int on);
+int pm_block_list(const unsigned char *ids, int n);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

@@ -603,3 +603,73 @@ site balls_in_play         0x00599fa0 0xe92d4010 0xe3014f98
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0059a11c 0xe92d41f0 0xe308e7fe
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 1 Kong Multiball (multiball), 2 The Pit Multiball Giant Spider (multiball), 3 The Pit Multiball Octopus Insect (multiball), 4 The Pit Multiball Two Legged Lizard (multiball), 10 Island Lock Victory Challenge (multiball), 11 Trex Battle (multiball), 12 Trex Boss Battle (multiball), 13 Spider Queen (multiball), 14 Lost Temple Multiball (multiball), 15 Eighth Wonder (multiball), 33 Golden Gary (multiball)
+site block_start_5      0x00103a90 0xe92d4ff0 0xe24dd014
+data block_obj_5        0x008a6ff0
+text block_name_5       Island Scene Escape the Swamp
+site block_start_6      0x0010dda0 0xe92d4ff0 0xe24dd00c
+data block_obj_6        0x008a70d0
+text block_name_6       Island Scene Save Ann
+site block_start_7      0x000fa34c 0xe92d4ff0 0xe24dd014
+data block_obj_7        0x008a7190
+text block_name_7       Island Scene Cross the Chasm
+site block_start_8      0x00115778 0xe92d4ff0 0xe24dd01c
+data block_obj_8        0x008a7260
+text block_name_8       Island Scene Pterodactyl Attack
+site block_start_9      0x0011dd2c 0xe92d4ff0 0xe24dd014
+data block_obj_9        0x008a7350
+text block_name_9       Island Scene Stegosaurus Encounter
+site block_start_16     0x0010732c 0xe5901000 0xe3a02ce1
+data block_obj_16       0x008a7428
+text block_name_16      Island Scene Save Ann Hurry Up
+site block_start_17     0x000c2e60 0xe5901000 0xe3a02000
+data block_obj_17       0x008a74d8
+text block_name_17      Crash the Gate Hurry Up
+site block_start_18     0x000b9a2c 0xe92d4ff0 0xe24dd01c
+data block_obj_18       0x008a79f8
+text block_name_18      Biplane Attack
+site block_start_19     0x000d1a70 0xe92d4ff0 0xe24dd01c
+data block_obj_19       0x008a7af0
+text block_name_19      Deadeye
+site block_start_20     0x00147bc4 0xe5903000 0xe3a01000
+data block_obj_20       0x008a7bd0
+text block_name_20      Nyc Event Manhattan Rampage
+site block_start_21     0x00147bc4 0xe5903000 0xe3a01000
+data block_obj_21       0x008a7d38
+text block_name_21      Nyc Event Stage Fright
+site block_start_22     0x00147bc4 0xe5903000 0xe3a01000
+data block_obj_22       0x008a7e18
+text block_name_22      Nyc Event Window Shopping
+site block_start_23     0x0016b030 0xe92d4ff0 0xe24dd01c
+data block_obj_23       0x008a7f20
+text block_name_23      Rapids
+site block_start_24     0x0017a990 0xe92d4ff0 0xe24dd014
+data block_obj_24       0x008a7ff0
+text block_name_24      Super Cave Target
+site block_start_25     0x000c797c 0xe92d4ff0 0xe24dd01c
+data block_obj_25       0x008a8080
+text block_name_25      Crash the Gate
+site block_start_26     0x000bf608 0xe92d4ff0 0xe24dd014
+data block_obj_26       0x008a8120
+text block_name_26      Cliffhanger
+site block_start_27     0x00127aec 0xe92d4ff0 0xe24dd01c
+data block_obj_27       0x008a81c8
+text block_name_27      King Kombos
+site block_start_28     0x00180a50 0xe92d4ff0 0xe24dd01c
+data block_obj_28       0x008a83f0
+text block_name_28      Super Kombos
+site block_start_29     0x001892dc 0xe92d4ff0 0xe24dd014
+data block_obj_29       0x008a8618
+text block_name_29      Super Rapids
+site block_start_30     0x0019081c 0xe92d4ff0 0xe24dd014
+data block_obj_30       0x008a86c8
+text block_name_30      Super Spinners
+site block_start_31     0x001bf4a8 0xe92d4ff0 0xe24dd014
+data block_obj_31       0x008a8768
+text block_name_31      Treasure Hunt
+site block_start_32     0x00198578 0xe92d4ff0 0xe24dd014
+data block_obj_32       0x008a8840
+text block_name_32      Terror on the Tower

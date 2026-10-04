@@ -1,0 +1,93 @@
+{
+ "key": "guardians_le-1.14",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Super Scoring",
+   "start": "0x103f4c",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000ea"
+   ],
+   "how": "counts AUD_SUPER_SCORING_STARTED (id 185) at 0x10406c; creates record(s) 234 (body 0x103d04),171 (body 0x103b7c); reached by bl 0xb4c6c (fn 0xb4a38); tail b 0x1040bc (fn 0x1040a8); also reached by a tail branch from 0x1040a8, whose caller gets the result",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Headphone Hurryup",
+   "start": "0x662e8",
+   "words": [
+    "0xe92d40d0",
+    "0xe3061010"
+   ],
+   "how": "counts AUD_HEADPHONE_HURRYUP_STARTED (id 221) at 0x66370; creates record(s) 230 (body 0x66010),170 (body 0x65fe8); reached by bl 0xa0d14 (fn 0xa0b1c)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Double Scoring",
+   "start": "0x3d028",
+   "words": [
+    "0xe92d4008",
+    "0xe3a000e8"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 223) at 0x3d078; creates record(s) 232 (body 0x3c8d8); reached by bl 0xddfb0 (fn 0xddfac)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "Double Scoring (2nd path)",
+   "start": "0x3d490",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000e8"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 223) at 0x3d500; creates record(s) 232 (body 0x3c8d8); reached by bl 0xde134 (fn 0xde05c); bl 0xde150 (fn 0xde05c); a second start of Double Scoring (callers 0xde05c): block both ids to keep it off",
+   "confidence": "medium",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Groot Multiball",
+   "start": "0x584dc",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_GROOT_MULTIBALL_STARTED; serves balls via 0x584dc -> 0x3833f0 (count None)"
+  },
+  {
+   "name": "Cherry Bomb Multiball",
+   "start": "0x2f558",
+   "words": [
+    "0xe92d47f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_CHERRY_BOMB_MULTIBALL_STARTED; serves balls via 0x2f558 -> 0x3833f0 (count 6)"
+  },
+  {
+   "name": "Orb Multiball",
+   "start": "0xc8aa4",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_ORB_MULTIBALL_STARTED; serves balls via 0xc8aa4 -> 0x3833f0 (count 2)"
+  },
+  {
+   "name": "Wizard Mode Multiball",
+   "start": "0x115a60",
+   "words": [
+    "0xe92d4370",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_WIZARD_MODE_MULTIBALL_STARTED; serves balls via 0x115a60 -> 0x3833f0 (count 4)"
+  }
+ ],
+ "notes": "engine: audit_add 0x34986c, create-process 0x186ba0, live_records 0x186f08, multiball_serve 0x3833f0. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). Same framework as Aerosmith (live records). The audit descriptor table is the SECOND {table, 271, 16} record (0x57b9c8); stock_scan_c.audit_ids takes the first, whose +0x0a halfwords are not ids, so its audit_add search finds nothing on this build."
+}

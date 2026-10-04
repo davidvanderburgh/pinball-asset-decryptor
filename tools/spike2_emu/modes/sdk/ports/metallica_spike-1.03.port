@@ -607,3 +607,27 @@ text mode_records_name_5   a song mode
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0036ac04 0xe92d41f0 0xe306e956
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x00036eec 0xe92d40f0 0xe3a00006
+text block_name_0       Battery
+site block_start_1      0x000c5248 0xe92d40f0 0xe3a0000b
+text block_name_1       Enter Sandman
+site block_start_2      0x000c7834 0xe92d40f0 0xe3a0000a
+text block_name_2       Fade to Black
+site block_start_3      0x000ca26c 0xe92d40f0 0xe3a0000c
+text block_name_3       For Whom the Bell Tolls
+site block_start_4      0x000cdf70 0xe92d4030 0xe24dd014
+text block_name_4       Fuel
+site block_start_5      0x00116950 0xe92d4070 0xe3a000c8
+text block_name_5       One
+site block_start_6      0x0012afd4 0xe92d4030 0xe3a00002
+text block_name_6       Seventy Two Seasons
+site block_start_7      0x000f4084 0xe92d4070 0xe3a00003
+text block_name_7       Hardwired
+site block_start_8      0x000ae5e8 0xe30d1c9c 0xe3a000d2
+text block_name_8       Combo Mode (and Combo Challenge)
+site block_start_9      0x000a87f8 0xe92d43f0 0xe24dd014
+text block_name_9       Coffin Hurry-Up

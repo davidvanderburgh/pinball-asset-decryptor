@@ -528,3 +528,34 @@ site balls_in_play         0x001b6cc0 0xe92d4010 0xe30b4344
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x001b6e3c 0xe92d41f0 0xe30ae322
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# start slot 40 (the start finder; the scanner finds none)
+site block_start_2      0x000b04b0 0xe92d47f0 0xe1a04000
+data block_obj_2        0x0b6149c8
+text block_name_2       La Villa Strangiato
+site block_start_3      0x000b6e2c 0xe92d4ff0 0xe1a04000
+data block_obj_3        0x0b614a98
+text block_name_3       Tom Sawyer
+site block_start_4      0x000b9748 0xe92d43f0 0xe1a04000
+data block_obj_4        0x0b614b50
+text block_name_4       Working Man
+site block_start_5      0x000b4384 0xe92d4ff0 0xe1a04000
+data block_obj_5        0x0b614c40
+text block_name_5       The Big Money
+site block_start_6      0x000b5918 0xe92d43f0 0xe1a04000
+data block_obj_6        0x0b614d20
+text block_name_6       The Spirit of Radio
+site block_start_7      0x000b268c 0xe92d4ff0 0xe1a04000
+data block_obj_7        0x0b614de8
+text block_name_7       Limelight
+site block_start_15     0x000f68c4 0xe92d43f0 0xe1a05000
+data block_obj_15       0x0b6152c0
+text block_name_15      Bastille Day Hurry Up
+site block_start_16     0x0010b868 0xe92d4030 0xe1a04000
+data block_obj_16       0x0b615378
+text block_name_16      Topper Frenzy
+site block_start_35     0x000f5254 0xe92d4ff0 0xe1a04000
+data block_obj_35       0x0b616108
+text block_name_35      2112 Wizard

@@ -92,9 +92,12 @@ def test_another_title_gets_candidates_not_copies(tmp_path):
                       "--version", "1.02"]) == 1                      # shot_dispatch is placed by hand
     text = out.read_text(encoding="utf-8")
     entries = _entries(out)
-    assert not any(k[0] in ("shot", "callout", "text") for k in entries)
+    # PAD-363: the game's modes a mode may hold off are read from JAWS's own program, not copied
+    assert not any(k[0] in ("shot", "callout", "text") and not k[1].startswith("block_") for k in entries)
     assert not [l for l in text.splitlines() if l.startswith(("shot ", "callout ", "text ",
-                                                              "value light_owner", "value award_screen_type"))]
+                                                              "value light_owner", "value award_screen_type"))
+                and not l.startswith("text block_")]
+    assert "\ntext block_name_12 " in text and ("site", "block_start_12") in entries
     assert "value event_next" in text                                  # a framework offset is still copied
     assert ("scene", "hud") not in entries
     assert "candidate: 9d57875196c613785a1eee010c55223a0f1aa821" in text

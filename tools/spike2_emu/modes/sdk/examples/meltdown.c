@@ -266,7 +266,7 @@ static void ready_light(void)
 {
     unsigned p = pm_player();
     int want = !run.on && !show_fx.on && !kit_running && light_mask && pm_in_game() && p >= 1 && p <= 4 &&
-               ready[p] && !kit_stock_busy(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL, MODE_NAME, 0);
+               ready[p] && !kit_game_busy(MODE_NAME, 0);
     kit_lamps_begin(&ready_lamps);
     if (want) kit_lamps_shot(&ready_lamps, light_mask, MD_RED, PM_LAMP_PULSE, 700);
     kit_lamps_commit(&ready_lamps);
@@ -282,7 +282,7 @@ static int start(const char *why)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (kit_stock_busy(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL, MODE_NAME, &what)) {
+    if (kit_game_busy(MODE_NAME, &what)) {
         pm_log("not started (%s): %s is running - still ready, the next captive ball hit after it starts it", why, what);
         return 0;
     }
@@ -297,6 +297,7 @@ static int start(const char *why)
         return 0;
     }
     kit_display(KIT_DISPLAY_WIZARD);
+    kit_isolate_list(own.give_way, own.block_ids, own.block_n);   /* PAD-347/363: the game's modes wait for it */
     run.on = 1;
     run.player = p;
     run.phase = PHASE_BURN;
@@ -545,6 +546,11 @@ static void on_tick(void)
     if (!run.on) return;
     if (!pm_in_game() || pm_player() != run.player) {
         end("the game moved on");
+        return;
+    }
+    if (kit_game_began()) {                        /* PAD-347: isolated - the game began one of its own */
+        end("the game's own mode began");
+        kit_end_now();
         return;
     }
     balls = pm_balls_in_play();

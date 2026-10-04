@@ -539,3 +539,40 @@ site balls_in_play         0x0018f798 0xe92d4010 0xe30c4758
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0018f914 0xe92d41f0 0xe301ecfe
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 1 Thor Multiball (multiball), 2 Iron Man Multiball (multiball), 3 Quest Mind (multiball), 4 Quest Power (multiball), 5 Quest Space (multiball), 6 Quest Time (multiball), 7 Quest Reality (multiball), 9 Black Order Multiball (multiball), 12 Battle Thanos (multiball), 14 Computer Frenzy Multiball (multiball), 15 Gem Mania (multiball), 17 Super Victory Laps Multiball (multiball)
+site block_start_8      0x000c5da8 0xe92d4ff8 0xe3034388
+data block_obj_8        0x00677798
+text block_name_8       Soul Gem
+site block_start_10     0x0007319c 0xe92d4ff0 0xe3035388
+data block_obj_10       0x006778b8
+text block_name_10      Battle Royale
+site block_start_11     0x000d18d0 0xe92d4ff0 0xe3037388
+data block_obj_11       0x00677978
+text block_name_11      Thanos Attacks
+site block_start_16     0x000e3160 0xe92d40f8 0xe3035388
+data block_obj_16       0x00677cf0
+text block_name_16      Victory Laps
+site block_start_18     0x000abb78 0xe92d4038 0xe1a04000
+data block_obj_18       0x00677dd0
+text block_name_18      Marvel Hurry Up
+site block_start_19     0x000cebb8 0xe92d4370 0xe3034388
+data block_obj_19       0x00677e48
+text block_name_19      Super Reactor
+site block_start_20     0x000cc14c 0xe92d43f8 0xe3034388
+data block_obj_20       0x00677ec8
+text block_name_20      Super Combos
+site block_start_21     0x000cd178 0xe92d47f0 0xe3034388
+data block_obj_21       0x00677f38
+text block_name_21      Super Disc
+site block_start_22     0x000a0854 0xe92d47f0 0xe3034388
+data block_obj_22       0x00677fc8
+text block_name_22      Hulk Rampage
+site block_start_23     0x000cde04 0xe92d47f0 0xe3034388
+data block_obj_23       0x00678048
+text block_name_23      Super Gauntlet
+site block_start_24     0x000cf8d4 0xe92d43f8 0xe3034388
+data block_obj_24       0x006780b8
+text block_name_24      Super Targets

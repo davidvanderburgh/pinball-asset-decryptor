@@ -478,3 +478,22 @@ scene hud                  9d57875196c613785a1eee010c55223a0f1aa821/68f53edf22ed
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x001fd310 0xe92d41f0 0xe304e5de
 # EMU 2026-09-26 (mb_e2e.sh): served 3 on a mode file's start, add-a-ball to 4, drains to 1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x0004b220 0xe92d41f0 0xe24dd020
+text block_name_0       All My Loving
+site block_start_1      0x0004da44 0xe92d4038 0xe3a000c0
+text block_name_1       Drive My Car
+site block_start_2      0x00050558 0xe92d40f8 0xe3a000c2
+text block_name_2       Should Have Known Better
+site block_start_3      0x00052cdc 0xe92d4038 0xe3a000c4
+text block_name_3       Ticket to Ride
+site block_start_4      0x0005567c 0xe92d4038 0xe3a000c6
+text block_name_4       It Won't Be Long
+value block_ret_0           0
+value block_ret_1           0
+value block_ret_2           0
+value block_ret_3           0
+value block_ret_4           0

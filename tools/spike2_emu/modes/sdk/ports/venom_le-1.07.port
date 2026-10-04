@@ -593,3 +593,172 @@ site balls_in_play         0x0028a568 0xe92d4010 0xe3044dd0
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x0028a6e4 0xe92d41f0 0xe301e452
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# left out: 59 Mayhem Multiball (multiball), 60 Mayhem Sharpshooter (multiball), 64 Carnage Mball (multiball), 69 Quick Doppel (multiball), 72 Toxin Teamup (multiball), 87 Klyntar Multiball Mode (multiball)
+site block_start_12     0x0006a860 0xe5902000 0xe92d40f8
+data block_obj_12       0x00738040
+text block_name_12      Riot Mode
+site block_start_13     0x000732d8 0xe5902000 0xe30b323c
+data block_obj_13       0x00738280
+text block_name_13      Agony Mode
+site block_start_14     0x0007bc84 0xe5902000 0xe3033f4c
+data block_obj_14       0x00738430
+text block_name_14      Phage Mode
+site block_start_15     0x00084c24 0xe5902000 0xe30c3c0c
+data block_obj_15       0x00738608
+text block_name_15      Lasher Mode
+site block_start_16     0x0008c134 0xe5902000 0xe92d40f8
+data block_obj_16       0x007387d8
+text block_name_16      Grendel Mode
+site block_start_17     0x000958e0 0xe5902000 0xe30d3a14
+data block_obj_17       0x00738a00
+text block_name_17      Knull Mode
+site block_start_19     0x00152cec 0xe92d40d0 0xe1a04000
+data block_obj_19       0x0073aa48
+text block_name_19      Mini Mode 01
+site block_start_20     0x001531b8 0xe92d40d0 0xe1a04000
+data block_obj_20       0x0073ab48
+text block_name_20      Mini Mode 02
+site block_start_21     0x00153684 0xe92d40d0 0xe1a04000
+data block_obj_21       0x0073ac48
+text block_name_21      Mini Mode 03
+site block_start_22     0x00153b64 0xe92d40d0 0xe1a04000
+data block_obj_22       0x0073ad48
+text block_name_22      Mini Mode 04
+site block_start_23     0x00154044 0xe92d40d0 0xe1a04000
+data block_obj_23       0x0073ae48
+text block_name_23      Mini Mode 05
+site block_start_24     0x00154510 0xe92d40d0 0xe1a04000
+data block_obj_24       0x0073af48
+text block_name_24      Mini Mode 06
+site block_start_25     0x001549dc 0xe92d40d0 0xe1a04000
+data block_obj_25       0x0073b048
+text block_name_25      Mini Mode 07
+site block_start_26     0x00154ea8 0xe92d40d0 0xe1a04000
+data block_obj_26       0x0073b148
+text block_name_26      Mini Mode 08
+site block_start_27     0x00155374 0xe92d40d0 0xe1a04000
+data block_obj_27       0x0073b248
+text block_name_27      Mini Mode 09
+site block_start_28     0x00155840 0xe92d40d0 0xe1a04000
+data block_obj_28       0x0073b348
+text block_name_28      Mini Mode 10
+site block_start_29     0x00155d0c 0xe92d40d0 0xe1a04000
+data block_obj_29       0x0073b448
+text block_name_29      Mini Mode 11
+site block_start_30     0x001561d8 0xe92d40d0 0xe1a04000
+data block_obj_30       0x0073b548
+text block_name_30      Mini Mode 12
+site block_start_31     0x001566a4 0xe92d40d0 0xe1a04000
+data block_obj_31       0x0073b648
+text block_name_31      Mini Mode 13
+site block_start_32     0x00156b70 0xe92d40d0 0xe1a04000
+data block_obj_32       0x0073b748
+text block_name_32      Mini Mode 14
+site block_start_33     0x0015703c 0xe92d40d0 0xe1a04000
+data block_obj_33       0x0073b848
+text block_name_33      Mini Mode 15
+site block_start_34     0x00157508 0xe92d40d0 0xe1a04000
+data block_obj_34       0x0073b948
+text block_name_34      Mini Mode 16
+site block_start_35     0x001579d4 0xe92d40d0 0xe1a04000
+data block_obj_35       0x0073ba48
+text block_name_35      Mini Mode 17
+site block_start_36     0x00157ea0 0xe92d40d0 0xe1a04000
+data block_obj_36       0x0073bb48
+text block_name_36      Mini Mode 18
+site block_start_37     0x0015836c 0xe92d40d0 0xe1a04000
+data block_obj_37       0x0073bc48
+text block_name_37      Mini Mode 19
+site block_start_38     0x00158838 0xe92d40d0 0xe1a04000
+data block_obj_38       0x0073bd48
+text block_name_38      Mini Mode 20
+site block_start_39     0x00158d04 0xe92d40d0 0xe1a04000
+data block_obj_39       0x0073be48
+text block_name_39      Mini Mode 21
+site block_start_40     0x001591d0 0xe92d40d0 0xe1a04000
+data block_obj_40       0x0073bf48
+text block_name_40      Mini Mode 22
+site block_start_41     0x0015969c 0xe92d40d0 0xe1a04000
+data block_obj_41       0x0073c048
+text block_name_41      Mini Mode 23
+site block_start_42     0x00159b68 0xe92d40d0 0xe1a04000
+data block_obj_42       0x0073c148
+text block_name_42      Mini Mode 24
+site block_start_43     0x0015a034 0xe92d40d0 0xe1a04000
+data block_obj_43       0x0073c248
+text block_name_43      Mini Mode 25
+site block_start_44     0x0015a500 0xe92d40d0 0xe1a04000
+data block_obj_44       0x0073c348
+text block_name_44      Mini Mode 26
+site block_start_45     0x0015a9cc 0xe92d40d0 0xe1a04000
+data block_obj_45       0x0073c448
+text block_name_45      Mini Mode 27
+site block_start_46     0x0015ae98 0xe92d40d0 0xe1a04000
+data block_obj_46       0x0073c548
+text block_name_46      Mini Mode 28
+site block_start_47     0x0015b364 0xe92d40d0 0xe1a04000
+data block_obj_47       0x0073c648
+text block_name_47      Mini Mode 29
+site block_start_48     0x0015b830 0xe92d40d0 0xe1a04000
+data block_obj_48       0x0073c748
+text block_name_48      Mini Mode 30
+site block_start_50     0x000a0438 0xe92d40f0 0xe24dd014
+data block_obj_50       0x00739668
+text block_name_50      Bell Tower Frenzy
+site block_start_56     0x0010d890 0xe92d4370 0xe3a02000
+data block_obj_56       0x007390a8
+text block_name_56      Host Hurry Up
+site block_start_61     0x0014ea28 0xe92d40f8 0xe1a04000
+data block_obj_61       0x00739ec8
+text block_name_61      Mayhem Villain
+site block_start_62     0x000a8bf8 0xe92d43f0 0xe1a05000
+data block_obj_62       0x0073a6e0
+text block_name_62      Blood Lust
+site block_start_63     0x000c50e8 0xe92d40f0 0xe1a04000
+data block_obj_63       0x0073a130
+text block_name_63      Carnage Hurry Up
+site block_start_66     0x001964f4 0xe92d43f8 0xe1a05000
+data block_obj_66       0x0073a2a0
+text block_name_66      Scream
+site block_start_68     0x00175cf8 0xe92d43f0 0xe24dd00c
+data block_obj_68       0x0073a5d8
+text block_name_68      Rampage
+site block_start_70     0x00170934 0xe92d4010 0xe1a04000
+data block_obj_70       0x0073a8d8
+text block_name_70      Quick Hurry Up
+site block_start_75     0x000cfb94 0xe92d4010 0xe1a04000
+data block_obj_75       0x00739418
+text block_name_75      Doppel Pro
+site block_start_76     0x000cea5c 0xe92d4010 0xe1a04000
+data block_obj_76       0x00739508
+text block_name_76      Doppleganger Mode
+site block_start_79     0x001a1120 0xe92d40d0 0xe1a04000
+data block_obj_79       0x00739288
+text block_name_79      Spider Sense
+site block_start_81     0x001519bc 0xe92d43f0 0xe1a07000
+data block_obj_81       0x0073cb88
+text block_name_81      Million Plus Pops
+site block_start_83     0x001358e8 0xe92d4010 0xe3a02000
+data block_obj_83       0x0073cce0
+text block_name_83      Klyntar Ul Hurry Up
+site block_start_84     0x0012c5b4 0xe92d4010 0xe3a02000
+data block_obj_84       0x0073cdc0
+text block_name_84      Klyntar Ll Hurry Up
+site block_start_85     0x00135a58 0xe92d4010 0xe3a02000
+data block_obj_85       0x0073cea0
+text block_name_85      Klyntar Ur Hurry Up
+site block_start_86     0x0012c724 0xe92d4010 0xe3a02000
+data block_obj_86       0x0073cf80
+text block_name_86      Klyntar Lr Hurry Up
+site block_start_88     0x0012e24c 0xe92d4010 0xe1a04000
+data block_obj_88       0x0073d0f8
+text block_name_88      Klyntar Multiball Ready
+site block_start_90     0x001a83b8 0xe92d43f0 0xe1a05000
+data block_obj_90       0x0073d3f8
+text block_name_90      Symbiote Mania
+site block_start_91     0x001a8f78 0xe92d4010 0xe1a04000
+data block_obj_91       0x0073d340
+text block_name_91      Symbiote Mania Ready

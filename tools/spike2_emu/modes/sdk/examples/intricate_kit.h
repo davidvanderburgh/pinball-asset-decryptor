@@ -594,13 +594,11 @@ static KIT_UNUSED int kit_begin(const char *name)
     return 1;
 }
 
-/* The mode's display priority (item 157; MODE_SDK.md "Display priority"): taken right after
- * kit_begin, before the screen and the clip, so the game's displays that do not beat it wait while
- * the mode runs. 180 is a mode's value: BATTLE IS LIT waits and plays at the end, and the game's
- * full-screen shot awards (LOOPS, POWERLINE ATTACK) are not shown while it runs (a waiting one
- * froze the game's drawing: the runtime drops them, item 157); its jackpots, battle and multiball
- * starts, the battle select screen and the tilt warning still come through, and the screen is in
- * view again when they end. */
+/* The mode's display priority (item 157; MODE_SDK.md "Display priority"), asked for right after
+ * kit_begin. PAD-353: it no longer makes any display of the game's wait. On a Godzilla Premium the
+ * Magna-Grab's screen waited for KING GHIDORAH's 180 and the game kept its magnet ON the whole time (it
+ * holds the ball until that screen has played). Now the runtime only WATCHES: pm_display_covered() says
+ * when a display of the game's has the screen, and the HUD keeps its middle words off it until it is gone. */
 #define KIT_DISPLAY_MODE    180
 #define KIT_DISPLAY_WIZARD  190     /* also jackpots wait; multiball and battle start screens are not shown */
 
@@ -608,8 +606,8 @@ static KIT_UNUSED int kit_display(unsigned priority)
 {
     int held = pm_display_priority(priority);
     if (priority)
-        pm_log("display priority %u %s", priority, held ? "held: the game's displays that do not beat it wait"
-                                                           : "NOT held (this port has no display arbitration)");
+        pm_log("display priority %u %s", priority, held ? "noted: the game's displays still play as they come"
+                                                           : "not watched (this port has no display lines)");
     return held;
 }
 
@@ -692,6 +690,7 @@ struct kit_hud {
     int pips;                              /* pips in use: 0 = all the build made (kit_hud_pips) */
     unsigned long award_until, hide_at;
     int noting;                            /* up only for a qualification note */
+    int off;                               /* PAD-353: its words wait for a display of the game's */
 };
 
 /* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
@@ -863,7 +862,7 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
 /* every tick: find, expire the award, and send the glass what changed */
 static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
 {
-    int k, j;
+    int k, j, off;
     kit_hud_find(h);
     if (h->hide_at && pm_ms() >= h->hide_at) {
         kit_hud_show(h, 0);
@@ -874,13 +873,21 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
         h->want_award[0] = h->want_awardsub[0] = 0;
     }
     if (!h->found || !h->up) return;
-    kit_hud_text(h->t_title, h->w_title, sizeof h->w_title, h->want_title);
-    kit_hud_text(h->t_line, h->w_line, sizeof h->w_line, h->want_line);
-    kit_hud_text(h->t_award, h->w_award, sizeof h->w_award, h->want_award);
-    kit_hud_text(h->t_awardsub, h->w_awardsub, sizeof h->w_awardsub, h->want_awardsub);
+    /* PAD-353: a display of the game's has the screen (an award, a mode's start screen): its words are where
+     * ours are, so ours are blank until it is gone; the badge and the gauge at the edges stay */
+    off = pm_display_covered();
+    if (off != h->off) {
+        pm_log("hud %s: %s", h->slug, off ? "its words wait while a display of the game's has the screen"
+                                          : "its words are back");
+        h->off = off;
+    }
+    kit_hud_text(h->t_title, h->w_title, sizeof h->w_title, off ? "" : h->want_title);
+    kit_hud_text(h->t_line, h->w_line, sizeof h->w_line, off ? "" : h->want_line);
+    kit_hud_text(h->t_award, h->w_award, sizeof h->w_award, off ? "" : h->want_award);
+    kit_hud_text(h->t_awardsub, h->w_awardsub, sizeof h->w_awardsub, off ? "" : h->want_awardsub);
     for (k = 0; k < 3; k++)
         for (j = 0; j < 3; j++)
-            kit_hud_text(h->t_c[k][j], h->w_c[k][j], sizeof h->w_c[k][j], h->want_c[k][j]);
+            kit_hud_text(h->t_c[k][j], h->w_c[k][j], sizeof h->w_c[k][j], off ? "" : h->want_c[k][j]);
     if (h->timer) {
         int up = h->want_timer >= 0;
         if (up != h->timer_up) { pm_show(h->timer, up); h->timer_up = up; }

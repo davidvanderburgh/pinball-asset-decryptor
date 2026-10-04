@@ -3,8 +3,8 @@
 - ``priority <n>`` in a mode file (tools/spike2_emu/modes/sdk/mode_file.c): parsed, held with
   ``pm_display_priority`` at the start (before the screen and the clip) and given up at every end.
   mode_file.c is compiled for the HOST against stubs of the SDK calls (skips without an ELF C compiler).
-- The runtime's decisions, lifted verbatim from pad_mode_runtime.c: which of the game's layered displays
-  wait for a hold, and pm_set_text sending only a CHANGE (a mode may write its words every tick).
+- PAD-353: the runtime never makes a display of the game's wait, refuses, drops or hides one (a held
+  Magna-Grab screen kept Godzilla's magnet on); pm_set_text sends only a CHANGE.
 - Both Godzilla ports' display lines, checked against the game programs when they are present (skips
   otherwise): the effect table, the layered-display table, the waiter's call of the layered priority.
 - Every port fits the buffer the runtime reads a port into (the display lines grew the Godzilla ports).
@@ -113,31 +113,36 @@ LAYERED = {
 }
 
 
-def test_which_layered_displays_wait_for_a_hold(tmp_path):
-    fn = _lift(RUNTIME.read_text(encoding="utf-8"), "static int disp_layered_must_wait(")
-    rows = []
-    for name, flags in LAYERED.items():
-        for hold in (0, 180, 184, 230):
-            for clip in (0, 1):
-                rows.append('printf("%s %d %d %%d\\n", disp_layered_must_wait(%d, %d, 184, %d));'
-                            % (name, hold, clip, flags, hold, clip))
-    out = _host_run(tmp_path, "#include <stdio.h>\n" + fn + "\nint main(void) {\n" + "\n".join(rows) + "\nreturn 0; }\n")
-    got = {tuple(line.split()[:3]): line.split()[3] for line in out.strip().splitlines()}
+def test_the_runtime_never_holds_back_a_display_of_the_games():
+    """PAD-353 (Godzilla Premium, 2026-10-04): the Magna-Grab's screen (effect 71) waited for KING GHIDORAH's
+    hold at 180, and the game kept its magnet ON until the machine was switched off - it holds the ball until
+    that screen has played. Nothing in the runtime may raise the game's display priority, fake it to a
+    waiter, cut a waiter short or empty a display's scene."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    for gone in ("disp_raise", "disp_fake_layered", "disp_fake_effects", "on_display_priority_now",
+                 "on_display_effect_start", "on_layered_waiter", "disp_layered_must_wait", "fg_words_off"):
+        assert gone not in src, gone
+    arm = _lift(src, "static void display_arm(void)")
+    for hooked in ("display_effect_start", "display_priority_now", "layered_waiter"):
+        assert 'hook(fn("%s")' % hooked not in arm, hooked
+    assert 'hook(fn("layered_priority"), on_layered_priority)' in arm
+    lp = _lift(src, "static void on_layered_priority(unsigned *r)")
+    assert "r[0] = " not in lp and "disp_layered_mgr = " in lp           # noted, never answered for the game
+    for head in ("int pm_display_priority(unsigned priority)", "static void disp_release(const char *why)",
+                 "static void display_tick(void)\n{"):
+        body = _lift(src, head)
+        assert "display_effect_next" not in body and "*disp_level" not in body, head
 
-    def waits(name, hold, clip):
-        return got[(name, str(hold), str(clip))] == "1"
 
-    for name in LAYERED:                                     # no hold: the game's own order, untouched
-        assert not waits(name, 0, 0) and not waits(name, 0, 1)
-    assert waits("big_loop_40", 180, 0)                      # full screen: waits for any hold
-    assert not waits("maser_37", 180, 0) and waits("maser_37", 180, 1)   # framed: only while our clip plays
-    assert not waits("building_101", 180, 0) and waits("building_101", 180, 1)
-    assert not waits("mb_start_56", 180, 0) and not waits("mb_start_56", 180, 1)  # a mode start beats 180
-    assert not waits("battle_start_63", 180, 1) and not waits("total_77", 180, 1)
-    assert waits("mb_start_56", 184, 0) and waits("battle_start_63", 230, 0)       # ... and waits at 184 and up
-    assert waits("total_84", 230, 0)
-    assert not waits("main_bg_2", 230, 1)                    # a background never waits
-    assert not waits("rampage_44", 230, 0) and waits("rampage_44", 230, 1)
+def test_a_hold_is_only_noted_and_the_game_is_watched():
+    """pm_display_covered still says when a display of the game's has the screen: an effect over the layered
+    display, or any layered foreground (framed ones put their words where a mode's title is)."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    tick = _lift(src, "static void display_tick(void)\n{")
+    assert "covered = now && now != disp_host();" in tick
+    assert '*(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58))' in tick
+    assert "0x10" not in tick                                               # any foreground, full screen or framed
+    assert "noted only: the game's displays are never made to wait" in _lift(src, "int pm_display_priority(unsigned priority)")
 
 
 def test_set_text_sends_only_a_change(tmp_path):
@@ -175,11 +180,10 @@ int main(void)
     assert rows["evicted"] == "47"                  # 40 new nodes, then node 0 again (evicted): written
 
 
-def test_the_runtime_hooks_display_only_with_every_port_line():
+def test_the_runtime_watches_the_display_only_with_its_port_lines():
     src = RUNTIME.read_text(encoding="utf-8")
     body = _lift(src, "static void display_arm(void)")
-    for name in ("display_effect_start", "layered_priority", "display_effects", "layered_displays",
-                 "award_screen_arg", "event_current", "display_host", "display_mode_level", "layered_waiter_call"):
+    for name in ("display_effects", "award_screen_arg", "display_host", "display_now_at", "display_priority_at"):
         assert '"%s"' % name in body, name
     assert "can |= PM_CAN_DISPLAY_PRIORITY" in body
     assert "display_arm();" in _lift(src, "static void pad_mode_start(void)")
@@ -315,11 +319,3 @@ def test_the_layered_waiter_line_matches_the_game_and_zero_frames_returns_at_onc
     tail = e.u32(w + 0x1BC)                                                 # the layered display's start tail-calls it
     toff = tail & 0xFFFFFF
     assert (tail & 0xFF000000) == 0xEA000000 and w + 0x1BC + 8 + 4 * (toff - 0x1000000 if toff & 0x800000 else toff) == w
-
-
-def test_the_runtime_drops_at_the_waiter_only_what_the_hold_would_keep_waiting():
-    src = RUNTIME.read_text(encoding="utf-8")
-    body = _lift(src, "static void on_layered_waiter(unsigned *r)")
-    assert "if (!disp_prio || !r[1]) return;" in body                       # no hold: the game's own wait
-    assert body.index("disp_layered_must_wait(") < body.index("r[1] = 0;")  # the same rule as the wait it replaces
-    assert '"layered_waiter"' in _lift(src, "static void display_arm(void)")

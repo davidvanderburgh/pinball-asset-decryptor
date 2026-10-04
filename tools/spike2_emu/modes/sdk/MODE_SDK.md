@@ -2443,6 +2443,17 @@ BLOW!"). They are program text, which `progtext.py` can rename within each strin
 
 ## Display priority: a mode layered on the game's display (item 154 display)
 
+> **PAD-353 (2026-10-04): the hold is WITHDRAWN.** On a Godzilla Premium, KING GHIDORAH held 180 and
+> the Magna-Grab's screen (effect 71, priority 180) waited for it; the game keeps the ball on the
+> magnet until that screen has played, so the magnet stayed ON until the machine was switched off.
+> Any rule of the game's that waits on a display can stall the same way. `pm_display_priority` now
+> only notes a mode's priority: the runtime never raises the game's display priority, never fakes
+> it to a waiter, never cuts a waiter short and never hides a display's words. It WATCHES instead:
+> `pm_display_covered()` is 1 while a display of the game's has the screen (an effect over the
+> layered display, or any layered foreground), and the examples' HUD keeps its middle words blank
+> until it is gone. What follows is how the game layers its display (still true, and what the
+> watching reads) and the history of the hold.
+
 A mode's screen and clip share the glass with everything the game shows. Without a priority, the
 game's own shot awards cover them: the Big loop's full-screen LOOPS, BATTLE IS LIT after the ramps,
 a clip a shot starts taking the one video surface from a mode's start clip. A mode that holds a

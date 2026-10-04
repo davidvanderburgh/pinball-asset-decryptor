@@ -134,3 +134,64 @@ def test_the_game_modes_choice_reaches_the_blocks_page_and_its_c(tmp_path, previ
         b = w.state("modes")["code"]["blocks"]
         assert b["program"]["game_modes"] == "block" and b["program"]["block_modes"] == [ids[0]]
         assert "#define GAME_MODES       2" in b["c"] and "BLOCK_IDS[1] = {%d};" % ids[0] in b["c"]
+
+
+def test_own_clips_and_sounds_are_picked_into_the_folder_and_carried(tmp_path, preview_on):  # noqa: F811
+    """PAD-374: "+ Clip…" / "+ Sound…" / "Music…" copy the file into the mode's folder and name it;
+    the saved program puts it in assets.json, and the problems look for it in the folder."""
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    proj = tmp_path / "proj"
+    src = tmp_path / "films"
+    src.mkdir()
+    for f in ("King Sever.mp4", "roar.wav", "bed.wav", "notes.txt"):
+        (src / f).write_bytes(b"x")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new_blocks_mode", "Heads")
+        ch = w.state("modes")["code"]["blocks"]["choices"]
+        assert ch["why_clip"] == "" and ch["why_sound"] == "" and ch["why_music"] == ""
+        folder = proj / "modes" / "heads"
+        w.answers.append(str(src / "King Sever.mp4"))
+        got = w.call("modes.blocks_pick", "clip", [])
+        assert got == {"name": "king_sever", "file": "king_sever.mp4", "path": str(folder / "king_sever.mp4")}
+        w.answers.append(str(src / "roar.wav"))
+        assert w.call("modes.blocks_pick", "sound", [])["file"] == "roar.wav"
+        w.answers.append(str(src / "roar.wav"))                 # again: a name of its own, a copy of its own
+        again = w.call("modes.blocks_pick", "sound", ["roar"])
+        assert again["name"] == "roar_2" and again["file"] == "roar_2.wav"
+        w.answers.append(str(src / "bed.wav"))
+        assert w.call("modes.blocks_pick", "music", [])["file"] == "music.wav"
+        w.answers.append(str(src / "notes.txt"))
+        assert w.call("modes.blocks_pick", "sound", []) is None  # not a WAV
+        w.answers.append("")
+        assert w.call("modes.blocks_pick", "clip", []) is None   # nothing picked
+        assert w.call("modes.blocks_pick", "picture", []) is None
+        assert sorted(os.listdir(folder)) == ["assets.json", "blocks.json", "heads.c", "king_sever.mp4",
+                                              "music.wav", "roar.wav", "roar_2.wav"]
+
+        prog = w.state("modes")["code"]["blocks"]["program"]
+        prog["clips"] = [{"name": "king_sever", "file": "king_sever.mp4"}, {"name": "gone", "file": "gone.mp4"}]
+        prog["sounds"] = [{"name": "roar", "file": "roar.wav", "priority": 3}]
+        prog["music"] = "music.wav"
+        prog["scripts"][1]["do"].append({"op": "clip", "clip": "king_sever", "where": "full"})
+        prog["scripts"][1]["do"].append({"op": "sound", "sound": "roar", "fallback": None})
+        got = w.call("modes.blocks_save", "heads", prog)
+        assert got["problems"] == ["The clip gone's file gone.mp4 is not in the mode's folder: pick it again."]
+        spec = CM.load(str(proj), "heads")
+        assert spec.clips == {"king_sever": "king_sever.mp4", "gone": "gone.mp4"}
+        assert spec.calls == {"roar": {"wav": "roar.wav", "priority": 3}} and spec.music == "music.wav"
+        c = w.state("modes")["code"]
+        assert 'clip_full("king_sever");' in c["blocks"]["c"] and 'sound("roar");' in c["blocks"]["c"]
+        assert c["folder"] == str(folder)
+
+
+def test_own_sounds_cannot_be_picked_where_the_card_cannot_carry_them(tmp_path, preview_on, monkeypatch):  # noqa: F811
+    from pinball_decryptor.plugins.stern import mode_sounds as MS
+    monkeypatch.setattr(MS, "carriers", lambda *a, **k: None)
+    proj = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new_blocks_mode", "Heads")
+        ch = w.state("modes")["code"]["blocks"]["choices"]
+        assert ch["why_sound"].startswith("the app has not found spare sounds on") and ch["why_music"]
+        assert w.call("modes.blocks_pick", "sound", []) is None and not w.answers

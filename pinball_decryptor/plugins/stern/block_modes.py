@@ -20,6 +20,9 @@ THE PROGRAM (``blocks.json``)::
                                   start ("block": as give_way, and the ones in block_modes are held off)
       "block_modes": [21, 23],    the title's mode ids it holds off ([] = the port's checked defaults)
       "vars": [{"name": "combo", "reset": "ball"}],   per player; reset "ball" | "mode" | "game"
+      "clips": [{"name": "sever", "file": "sever.mp4"}],      PAD-374: its own clips and sounds,
+      "sounds": [{"name": "roar", "file": "roar.wav", "priority": 4}],   files in its folder
+      "music": "music.wav",       its own music bed while it runs ("" = the game's music)
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
          "do": [{"op": "if", "cond": {...}, "then": [...], "else": [...]}, ...]}
@@ -31,7 +34,9 @@ ends, a shot is made (any time, or only while the mode runs or does not), any sh
 seconds while it runs, N seconds left, the ball drains, one of the game's events. Blocks: start
 or end the mode, score, set or change a variable, if / else, a callout, words on the mode's
 screen, light or free a shot's inserts, add time or set the clock (to any value: a variable,
-the seconds left, a sum), a multiball, a line in the log. Values: a
+the seconds left, a sum), a multiball, a line in the log, and (PAD-374) play one of the mode's
+own clips (full screen, behind the HUD once, or behind the HUD over and over while it runs) or
+one of its own sounds (with a callout of the game's when the card could not carry it). Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running.
@@ -48,6 +53,13 @@ The C is the SDK's template (``sdk/template_mode.c``) in shape: static state, ne
 test triggers (``/dump/<slug>.start`` / ``.stop``) so the tab's Start mode now and End mode reach
 it. Its names follow ``mode_tryit.code_mode_text`` (``PadMode_<slug>_Screen``, ``<ident>_mode``)
 so a rename rewrites it the way it rewrites any code mode.
+
+ITS OWN CLIPS AND SOUNDS (PAD-374) are a code mode's: every save puts them in the mode's
+``assets.json`` (``clips``, ``calls``, ``music``; :func:`_sync_assets`), so Write and Try it carry
+them as they carry an example's, and the C plays them by name through ``pad_mode_assets.h``. A
+clip's or sound's name is its cue there. The C starts the mode's own assets itself rather than
+with ``pa_start``, so no name is special: a clip called "intro" or "loop" plays when a block
+says, never on its own.
 """
 from __future__ import annotations
 
@@ -83,7 +95,7 @@ HATS = {
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
 RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game"}
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
-              "light_shot", "lights_off", "add_time", "set_time", "multiball", "log")
+              "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound")
 PATTERNS = {"solid": ("PM_LAMP_SOLID", 0), "blink": ("PM_LAMP_BLINK", 500),
             "pulse": ("PM_LAMP_PULSE", 1600), "chase": ("PM_LAMP_CHASE", 150)}
 #: the game's own callouts a block can name by what they say (every port carries these roles)
@@ -95,6 +107,14 @@ CMPS = {"<": "<", "<=": "<=", "=": "==", "!=": "!=", ">=": ">=", ">": ">"}
 #: PAD-373: what the mode does about the game's own modes while it runs (the form's choice, PAD-363)
 GAME_MODES = {"stack": "may start", "give_way": "may start, and end this one", "block": "cannot start"}
 BLOCK_ID_MAX = 127
+#: PAD-374: where a clip block plays the mode's own clip
+CLIP_WHERE = {"full": "full screen", "behind": "behind the HUD, once",
+              "loop": "behind the HUD, over and over"}
+#: a clip's or sound's name: its cue in assets.json and <slug>.assets (code_modes.CUE_RE)
+MEDIA_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
+MAX_CLIPS = 12                   # pad_mode_assets.h PA_CLIPS_MAX
+MAX_SOUNDS = 16                  # pad_mode_assets.h PA_CALLS_MAX
+VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
 VAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _]{0,23}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -145,6 +165,9 @@ def normalize(data):
     out["block_modes"] = sorted({i for i in ids if isinstance(i, int) and not isinstance(i, bool)
                                  and 0 <= i <= BLOCK_ID_MAX})
     out["vars"] = [v for v in (out.get("vars") or []) if isinstance(v, dict)]
+    out["clips"] = [c for c in (out.get("clips") or []) if isinstance(c, dict)]
+    out["sounds"] = [c for c in (out.get("sounds") or []) if isinstance(c, dict)]
+    out["music"] = str(out.get("music") or "")
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
     for s in out["scripts"]:
         for b in _walk(s.get("do")):
@@ -177,19 +200,65 @@ def _write(path, text):
 
 def _sync_assets(project, slug, program):
     """The mode's assets.json says its name, its clock and whether it has a screen of its own
-    (the build makes the screen: a panel with its name, and a line of words the blocks write)."""
+    (the build makes the screen: a panel with its name, and a line of words the blocks write),
+    and (PAD-374) its own clips, sounds and music, so Write carries them as a code mode's."""
     from . import code_modes as CM
     try:
         spec = CM.load(project, slug)
     except (OSError, ValueError):
         spec = CM.CodeAssets(screen=False)
+    clips, calls = media_assets(program)
     changed = (spec.name != (program["name"] or slug.upper()) or bool(spec.screen) != program["screen"]
-               or spec.seconds != max(1, program["seconds"] or 60))
+               or spec.seconds != max(1, program["seconds"] or 60)
+               or (spec.clips or {}) != clips or (spec.calls or {}) != calls
+               or (spec.music or "") != program["music"])
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
         spec.screen = program["screen"]
         spec.seconds = max(1, program["seconds"] or 60)
+        spec.clips = clips
+        spec.calls = calls
+        spec.music = program["music"]
         CM.save(project, slug, spec)
+
+
+def media_assets(program):
+    """``(clips, calls)`` as assets.json holds them: ``{name: file}`` and ``{name: {"wav",
+    "priority"}}``, every well-named entry with a file (the first of a name wins)."""
+    clips, calls = {}, {}
+    for c in program.get("clips") or []:
+        name, f = str(c.get("name") or ""), str(c.get("file") or "")
+        if MEDIA_RE.match(name) and f and name not in clips and len(clips) < MAX_CLIPS:
+            clips[name] = f
+    for c in program.get("sounds") or []:
+        name, f = str(c.get("name") or ""), str(c.get("file") or "")
+        if MEDIA_RE.match(name) and f and name not in calls and len(calls) < MAX_SOUNDS:
+            calls[name] = {"wav": f, "priority": _priority(c.get("priority"))}
+    return clips, calls
+
+
+def _priority(v):
+    try:
+        p = int(v)
+    except (TypeError, ValueError):
+        return 4
+    return p if 1 <= p <= 7 else 4
+
+
+def media_name(stem, taken=()):
+    """A clip's or sound's name from its file's name: lower-case letters, digits and _, starting
+    with a letter, 15 at most, and not one of ``taken``."""
+    base = re.sub(r"[^a-z0-9_]+", "_", str(stem or "").lower()).strip("_")
+    if not base or not base[0].isalpha():
+        base = "s_" + base if base else "sound"
+    base = base[:15].rstrip("_") or "sound"
+    taken = {str(t).lower() for t in taken or ()}
+    name, n = base, 2
+    while name in taken:
+        tail = "_%d" % n
+        name = base[:15 - len(tail)] + tail
+        n += 1
+    return name
 
 
 def regenerate(project, slug, name=None):
@@ -265,11 +334,12 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
-def problems(program, shots=None, events=None):
+def problems(program, shots=None, events=None, folder=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
-    have is named here. The C is written anyway (a missing shot is 0 to the game, which never
-    matches), so a half-made program always saves."""
+    have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
+    must be. The C is written anyway (a missing shot is 0 to the game, which never matches),
+    so a half-made program always saves."""
     program = normalize(program)
     out = []
     names = [str(v.get("name") or "") for v in program["vars"]]
@@ -285,9 +355,13 @@ def problems(program, shots=None, events=None):
         out.append("%d variables: %d at most." % (len(names), MAX_VARS))
     if len(program["scripts"]) > MAX_SCRIPTS:
         out.append("%d scripts: %d at most." % (len(program["scripts"]), MAX_SCRIPTS))
+    clips = _check_media(program["clips"], "clip", MAX_CLIPS, folder, out)
+    sounds = _check_media(program["sounds"], "sound", MAX_SOUNDS, folder, out)
+    if program["music"] and folder is not None and not os.path.isfile(os.path.join(folder, program["music"])):
+        out.append("Its music %s is not in the mode's folder: pick it again." % program["music"])
     ctx = {"vars": set(n.lower() for n in names), "shots": set(shots) if shots is not None else None,
            "events": set(events) if events is not None else None, "count": 0, "out": out,
-           "seconds": program["seconds"]}
+           "seconds": program["seconds"], "clips": clips, "sounds": sounds}
     for i, s in enumerate(program["scripts"]):
         _check_hat(s.get("hat") or {}, i + 1, ctx)
         _check_stack(s.get("do") or [], 1, "Script %d" % (i + 1), ctx)
@@ -296,16 +370,41 @@ def problems(program, shots=None, events=None):
     return _unique(out)
 
 
+def _check_media(items, what, most, folder, out):
+    """The names of the mode's own clips (or sounds), saying what is wrong with the list."""
+    names = set()
+    if len(items) > most:
+        out.append("%d %ss of its own: %d at most." % (len(items), what, most))
+    for c in items:
+        name, f = str(c.get("name") or ""), str(c.get("file") or "")
+        if not MEDIA_RE.match(name):
+            out.append("A %s's name %r is not one: start with a lower-case letter, then lower-case "
+                       "letters, digits or _ (15 at most)." % (what, name))
+        elif name in names:
+            out.append("Two %ss are called %s." % (what, name))
+        names.add(name)
+        if not f:
+            out.append("The %s %s has no file: pick one." % (what, name))
+        elif folder is not None and not os.path.isfile(os.path.join(folder, f)):
+            out.append("The %s %s's file %s is not in the mode's folder: pick it again." % (what, name, f))
+        if what == "sound" and not _int_ok(c.get("priority", 4), 1, 7):
+            out.append("The sound %s's priority is 1 to 7." % name)
+    return names
+
+
 def notes(program):
     """What is worth knowing but does not stop a build: nothing starts the mode, a timer block
-    with no clock, words with no screen."""
+    with no clock, words with no screen, a clip behind the HUD with no loop to play it in."""
     program = normalize(program)
     ops = set()
     kinds = set()
+    wheres = set()
     for s in program["scripts"]:
         kinds.add((s.get("hat") or {}).get("kind"))
         for b in _walk(s.get("do") or []):
             ops.add(b.get("op"))
+            if b.get("op") == "clip":
+                wheres.add(b.get("where"))
     out = []
     if "start_mode" not in ops:
         out.append("No block starts the mode yet: put Start the mode in a script (Start mode now "
@@ -317,6 +416,9 @@ def notes(program):
         out.append("The mode has no clock, so seconds-left, add-time and set-the-clock blocks do nothing.")
     if "words" in ops and not program["screen"]:
         out.append("Show words needs the mode's own screen: tick Its own screen.")
+    if "behind" in wheres and "loop" not in wheres:
+        out.append("A clip behind the HUD, once, plays in the place of the mode's loop: start a "
+                   "clip over and over behind the HUD first (When the mode starts is the place).")
     return out
 
 
@@ -434,6 +536,23 @@ def _check_stack(stack, depth, where, ctx):
         elif op == "log":
             if len(str(b.get("text") or "")) > TEXT_MAX:
                 ctx["out"].append("%s logs more than %d letters." % (where, TEXT_MAX))
+        elif op == "clip":
+            if not b.get("clip"):
+                ctx["out"].append("%s plays a clip with none chosen." % where)
+            elif b.get("clip") not in ctx["clips"]:
+                ctx["out"].append("%s plays the clip %s, which the mode does not have: add it under "
+                                  "Its own clips and sounds." % (where, b.get("clip")))
+            if b.get("where") not in CLIP_WHERE:
+                ctx["out"].append("%s plays a clip with no where." % where)
+        elif op == "sound":
+            if not b.get("sound"):
+                ctx["out"].append("%s plays a sound with none chosen." % where)
+            elif b.get("sound") not in ctx["sounds"]:
+                ctx["out"].append("%s plays the sound %s, which the mode does not have: add it under "
+                                  "Its own clips and sounds." % (where, b.get("sound")))
+            fb = b.get("fallback")
+            if fb not in (None, "") and fb not in CALLOUT_ROLES and not _int_ok(fb, 1, 65535):
+                ctx["out"].append("%s falls back on a callout that is not one." % where)
 
 
 def _check_num(e, where, ctx, depth=0):
@@ -623,14 +742,9 @@ class _Gen:
                     out.extend(self.stack(b.get("else"), ind + 1))
                 out.append(pad + "}")
             elif op == "callout":
-                role = b.get("role")
-                if role in CALLOUT_ROLES:
-                    out.append(pad + "pm_callout(pm_callout_id(%s));" % _c_str(role))
-                else:
-                    try:
-                        out.append(pad + "pm_callout(%du);" % max(1, min(65535, int(b.get("id")))))
-                    except (TypeError, ValueError):
-                        pass
+                said = self.callout(b.get("role") if b.get("role") in CALLOUT_ROLES else b.get("id"))
+                if said:
+                    out.append(pad + said + ";")
             elif op == "words":
                 value = b.get("value")
                 out.append(pad + "words(%s, %s, %d);" % (
@@ -660,7 +774,33 @@ class _Gen:
                 out.append(pad + "if (run.on && pm_multiball_start(%du, %du)) run.own_mball = 1;" % (balls, save))
             elif op == "log":
                 out.append(pad + 'pm_log("%%s", %s);' % _c_str(str(b.get("text") or "")[:TEXT_MAX]))
+            elif op == "clip":
+                name = str(b.get("clip") or "")
+                if MEDIA_RE.match(name):
+                    fn = {"full": "clip_full", "behind": "clip_behind", "loop": "clip_loop"}.get(
+                        b.get("where"), "clip_full")
+                    out.append(pad + "%s(%s);" % (fn, _c_str(name)))
+            elif op == "sound":
+                name = str(b.get("sound") or "")
+                if MEDIA_RE.match(name):
+                    fb = self.callout(b.get("fallback"))
+                    if fb:
+                        out.append(pad + "if (!sound(%s)) %s;" % (_c_str(name), fb))
+                    else:
+                        out.append(pad + "sound(%s);" % _c_str(name))
         return out
+
+    @staticmethod
+    def callout(v):
+        """The C that says a game's callout (a role's name or a number), or "" for none."""
+        if v in CALLOUT_ROLES:
+            return "pm_callout(pm_callout_id(%s))" % _c_str(v)
+        if v in (None, ""):
+            return ""
+        try:
+            return "pm_callout(%du)" % max(1, min(65535, int(v)))
+        except (TypeError, ValueError):
+            return ""
 
 
 def c_ident(slug):
@@ -676,6 +816,7 @@ def to_c(program, slug):
     from . import mode_tryit as MT
     title = MT._c_title(name, slug)
     ident = c_ident(slug)
+    media = uses_media(program)
 
     # every script's body first: that is when the tables fill
     bodies = {k: [] for k in HATS}
@@ -734,6 +875,8 @@ def to_c(program, slug):
     L.append(" * " + _comment(summary(program)) + ".")
     L.append(" */")
     L.append('#include "pad_mode.h"')
+    if media:
+        L.append('#include "pad_mode_assets.h"     /* its own clips and sounds, as Write carried them */')
     L.append("")
     L.append('#define MODE_NAME        %s' % _c_str(title))
     L.append("#define RUN_SECONDS      %d          /* 0 = no clock */" % program["seconds"])
@@ -861,6 +1004,8 @@ def to_c(program, slug):
     L.append("    clock_to(seconds * TICKS_PER_SECOND);")
     L.append("}")
     L.append("")
+    if media:
+        L.extend((_MEDIA_C % {"slug": slug}).split("\n"))
     L.append("/* What of the game's own is running (a battle, a multiball, one of its timed modes), or 0. A port that")
     L.append(" * cannot tell answers none. */")
     L.append("UNUSED static const char *game_busy(void)")
@@ -924,6 +1069,13 @@ def to_c(program, slug):
     L.append("        words(MODE_NAME, 0, 0);")
     L.append("        pm_show(screen, 1);")
     L.append("    }")
+    if media:
+        L.append("    pa_load(&own);                    /* its own sounds' priorities, and its music */")
+        L.append("    own.running = 1;")
+        L.append("    if (own.loaded) {")
+        L.append("        pa_priorities(&own);")
+        L.append("        pa_music_begin(&own);")
+        L.append("    }")
     L.append('    pm_log("START (%s): player %u", why, run.player);')
     L.append("    on_mode_start();")
     L.append("}")
@@ -935,6 +1087,13 @@ def to_c(program, slug):
     L.append("    on_mode_end();")
     L.append("    ending = 0;")
     L.append("    run.on = 0;")
+    if media:
+        L.append("    loop_waiting = 0;")
+        L.append("    if (looping) {                    /* the city behind the HUD again */")
+        L.append("        pm_backdrop(0);")
+        L.append("        looping = 0;")
+        L.append("    }")
+        L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
     L.append("    pm_lamp_release_all();")
     L.append("    if (screen) {")
     L.append('        words("TOTAL", (long long)run.total, 1);')
@@ -958,6 +1117,8 @@ def to_c(program, slug):
     L.append("        named |= mask;")
     L.append('    pm_log("ready on %%s %%s: %%d shot(s) named by the blocks", pm_game(), pm_version(), %d);'
              % len(g.shots))
+    if media:
+        L.append("    pa_load(&own);")
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
     L.append("")
@@ -996,6 +1157,8 @@ def to_c(program, slug):
     L.append("    unsigned seconds = 0;")
     L.append("    int in_game = pm_in_game();")
     L.append("    find_screen();")
+    if media:
+        L.append("    own_tick();                       /* every tick: an end call outlives the mode */")
     L.append("    if (in_game && !was_in_game) {    /* a new game: every player's \"each game\" values */")
     L.append("        unsigned p, v;")
     L.append("        for (p = 0; p < 5; p++) {")
@@ -1042,6 +1205,8 @@ def to_c(program, slug):
     L.append("{")
     L.extend(scripts_of("ball_end"))
     L.append("    if (ENDS_ON_DRAIN) end(\"ball ended\");")
+    if media:
+        L.append("    looping = 0;                      /* no backdrop outlives the ball */")
     L.append("    {")
     L.append("        unsigned p = P(), v;")
     L.append("        for (v = 0; v < %d; v++) H[v][p] = 0;" % nhits)
@@ -1059,6 +1224,92 @@ def to_c(program, slug):
     L.append("};")
     L.append("PM_REGISTER(%s_mode);" % ident)
     return "\n".join(L) + "\n"
+
+
+def uses_media(program):
+    """1 when the mode has clips, sounds or music of its own, or a block that plays one."""
+    if program.get("clips") or program.get("sounds") or program.get("music"):
+        return True
+    return any(b.get("op") in ("clip", "sound") for s in program.get("scripts") or []
+               for b in _walk(s.get("do") or []))
+
+
+#: the C of a mode with its own clips and sounds (pad_mode_assets.h); %(slug)s is its folder
+_MEDIA_C = """/* ---- its own clips and sounds (PAD-374): what Write carried, named in %(slug)s.assets ---- */
+static struct pa_assets own = { .folder = "%(slug)s" };
+static const char *clip_waiting, *loop_waiting;   /* MODE_SDK.md "Clips race the game's own" */
+static unsigned long clip_due;
+static int looping;                     /* a clip of its own loops behind the HUD */
+
+static int own_clip(const char *cue)
+{
+    pa_load(&own);
+    if (pa_clip_name(&own, cue)) return 1;
+    pm_log("own clip %%s: the build carried none", cue);
+    return 0;
+}
+
+/* full screen, over everything: half a second from now, so the game's own clip for the shot
+ * that asked does not take the one video surface; the newest asked for wins */
+UNUSED static void clip_full(const char *cue)
+{
+    if (!own_clip(cue)) return;
+    if (clip_waiting && clip_waiting != cue)
+        pm_log("own clip %%s dropped before it played: %%s was asked for after it", clip_waiting, cue);
+    clip_waiting = cue;
+    clip_due = pm_ms() + PA_CLIP_AFTER_MS;
+}
+
+/* behind the HUD over and over while the mode runs (after a full-screen clip still waiting) */
+UNUSED static void clip_loop(const char *cue)
+{
+    const char *n;
+    if (!own_clip(cue)) return;
+    if (!run.on) {
+        pm_log("own clip %%s: not looped behind the HUD - the mode is not running", cue);
+        return;
+    }
+    if (clip_waiting) {
+        loop_waiting = cue;
+        return;
+    }
+    n = pa_clip_name(&own, cue);
+    looping = pm_backdrop(n);
+    pm_log("own clip %%s (%%s) behind the HUD, over and over: %%s", cue, n,
+           looping ? "asked" : "this port has no backdrop");
+}
+
+/* behind the HUD once, in the loop's place, then the loop again */
+UNUSED static void clip_behind(const char *cue)
+{
+    if (!own_clip(cue)) return;
+    if (!run.on || !looping || !pa_clip_event(&own, cue))
+        pm_log("own clip %%s: not played behind the HUD - %%s", cue,
+               !run.on ? "the mode is not running" : "no clip of its own loops there");
+}
+
+/* 1 = the build carried it (played now, or waiting for the voice bus); 0 = it did not */
+UNUSED static int sound(const char *cue)
+{
+    if (pa_call(&own, cue)) return 1;
+    pm_log("own sound %%s: the build carried none", cue);
+    return 0;
+}
+
+static void own_tick(void)
+{
+    pa_tick(&own);
+    if (!clip_waiting || pm_ms() < clip_due) return;
+    pa_clip_full(&own, clip_waiting);
+    clip_waiting = 0;
+    if (loop_waiting && run.on) {
+        const char *cue = loop_waiting;
+        loop_waiting = 0;
+        clip_loop(cue);
+    }
+}
+
+"""
 
 
 def _hat_words(hat):

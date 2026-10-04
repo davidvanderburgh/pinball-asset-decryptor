@@ -874,6 +874,15 @@ def store_asset_profile(assets_dir, prof):
     staged_changes.save(assets_dir, data)
 
 
+def files_by_overlay(assets_dir):
+    """Is the individual files profile the Recommended one, left to the
+    Recommended overlay (PAD-356)?  Then it changes nothing itself: the
+    overlay already undoes the screen for the files too."""
+    return bool(assets_dir and not asset_stored(assets_dir)
+                and follows_screen(assets_dir)
+                and not screen_follows(assets_dir))
+
+
 def asset_active(assets_dir):
     """The chosen-files profile when it changes something, else ``None``."""
     prof = asset_profile(assets_dir)
@@ -1522,7 +1531,8 @@ def preview_parts(assets_dir):
     files = asset_profile(assets_dir)
     n = sum(asset_counts(assets_dir).values())
     out["files"] = {"name": files.label(), "count": n,
-                    "set": bool(n and not files.is_identity())}
+                    "set": bool(n and not files.is_identity()),
+                    "by_overlay": files_by_overlay(assets_dir)}
     shown, stored = screen_shown(assets_dir)
     out["screen"] = {"name": shown.label(), "stored": stored,
                      "set": not shown.is_identity()}

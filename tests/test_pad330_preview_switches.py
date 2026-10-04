@@ -79,7 +79,8 @@ def test_preview_parts_name_what_each_switch_does(tmp_path):
     cp.set_asset_all(d, "images", True)
     p = cp.preview_parts(d)
     assert p["overlay"] == {"name": "Less red", "set": True}
-    assert p["files"] == {"name": "Recommended", "set": True, "count": 1}
+    assert p["files"] == {"name": "Recommended", "set": True, "count": 1,
+                          "by_overlay": False}
     assert p["screen"]["name"] == "Black and white" and p["screen"]["stored"] is True
 
 

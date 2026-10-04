@@ -375,7 +375,7 @@ const darker = (g) => (Math.abs(g - 1) < 0.005 ? "unchanged"
   : g > 1 ? `${Math.round((g - 1) * 100)}% darker` : `${Math.round((1 - g) * 100)}% brighter`);
 const pct = (v) => `${Math.round(v * 100)}%`;
 
-function Controls({ s, p, update }) {
+export function Controls({ s, p, update }) {
   const screen = s.per_file && s.mode === "screen";
   const lim = s.limits || {};
   const [glo, ghi] = lim.gamma || [0.1, 5];
@@ -477,7 +477,7 @@ function RangeBand({ r }) {
     style=${`background: linear-gradient(to right, ${stops.join(", ")}), linear-gradient(to right, ${hues.join(", ")})`}></div>`;
 }
 
-function Ranges({ s, p, update }) {
+export function Ranges({ s, p, update }) {
   const lim = s.range_limits || {};
   const nw = s.range_new || { width: 60, soft: 30, shift: 0, saturation: 1, brightness: 1, protect: 0.15 };
   const ranges = p.ranges || [];
@@ -537,7 +537,7 @@ const CURVE_CH = [
 ];
 const CURVE_CLS = { rgb: "w", r: "r", g: "g", b: "b" };
 
-function CurveEditor({ s, p, update }) {
+export function CurveEditor({ s, p, update }) {
   const [ch, setCh] = useState("rgb");
   const svgRef = useRef(null);
   const drag = useRef(-1);
@@ -639,13 +639,13 @@ function CurveEditor({ s, p, update }) {
   <//>`;
 }
 
-const MODES = [
+export const MODES = [
   { value: "display", label: "Adjust whole screen overlay", title: "One correction drawn over everything the game shows: its own art, videos, mode screens, text and your replacements. No file is changed." },
   { value: "assets", label: "Adjust individual files", title: "A correction baked into the replaced pictures and videos you switch on (and pictures added in Scenes). The game's own art is left as Stern made it." },
   { value: "screen", label: "Machine screen (preview only)", title: "Not a correction: how the machine's screen changes what it is given. Only the preview uses it (Scenes and the Video tab's players), when its Machine screen switch is on. Nothing is written to the card." },
 ];
 
-const MODE_WORDS = {
+export const MODE_WORDS = {
   display: "Drawn over everything the game shows, its own art included; no file is changed.",
   assets: "Baked into the replaced files you switch on; the game's own art is left alone.",
   screen: "How the machine's screen changes what it is given. Only the Scenes preview uses it; nothing is written to the card.",
@@ -660,7 +660,7 @@ function countWords(n) {
 }
 
 // PAD-312: which files the chosen-files profile reaches
-function WhichFiles({ s }) {
+export function WhichFiles({ s }) {
   const n = s.asset_counts || {};
   const words = countWords(n);
   return html`<${Card} title="Which files" cls="cp-which">
@@ -718,8 +718,11 @@ function Explainer({ s }) {
   <//>`;
 }
 
-export default function ColorTab() {
-  const s = useNs("color");
+// The sliders' profile and the call that saves it: the numbers move at once (the preview is
+// drawn from them), Python is told *delay* ms after the last move.  A preset, a Load or a
+// re-read file bumps rev and the sliders take its numbers.  PAD-350: the Scenes tab's pop-out
+// bar uses it too, with a shorter delay, so the scene is drawn again sooner.
+export function useProfile(s, delay = 250) {
   const fromStore = () => ({
     name: s.name || "", gamma: (s.gamma || [1, 1, 1]).slice(), gain: (s.gain || [1, 1, 1]).slice(),
     lift: Number(s.lift || 0), saturation: s.saturation == null ? 1 : Number(s.saturation),
@@ -730,25 +733,31 @@ export default function ColorTab() {
   const [p, setP] = useState(fromStore);
   const pending = useRef({});
   const timer = useRef(0);
-  // a preset, a Load or a re-read file bumps rev: the sliders take its numbers
   useEffect(() => { setP(fromStore()); }, [s.rev]);
 
+  const send = () => {
+    clearTimeout(timer.current);
+    const change = pending.current;
+    pending.current = {};
+    return Object.keys(change).length ? call("color.set_params", change) : Promise.resolve(true);
+  };
   const update = (change) => {
     setP((cur) => ({ ...cur, ...change }));
     Object.assign(pending.current, change);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      const send = pending.current;
-      pending.current = {};
-      call("color.set_params", send);
-    }, 250);
+    timer.current = setTimeout(send, delay);
   };
+  // a move still waiting is saved before the mode changes, so it lands on the profile it was
+  // made on
+  const setMode = async (mode) => { await send(); return call("color.set_mode", mode); };
+  return [p, update, setMode];
+}
 
-  const samples = [...(s.samples || []), { value: "browse", label: "Another picture..." }];
+// The line under the modes: what the profile on show does to this project now.
+export function statusNote(s) {
   const assets = s.per_file && s.mode === "assets";
   const screen = s.per_file && s.mode === "screen";
-  const nFiles = Object.values(s.asset_counts || {}).reduce((a, b) => a + (b || 0), 0);
-  const note = !s.has_project
+  return !s.has_project
     ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
     : screen
       ? (s.screen_stored ? html`<${Note} kind="ok">${"The preview draws every picture through “" + (s.name || "My screen") + "” when its Machine screen switch is on. Nothing is written to the card."}<//>`
@@ -766,6 +775,17 @@ export default function ColorTab() {
       : html`<${Note} kind="info">${s.on_display
           ? "No whole screen overlay on this project: the game draws in its own colors. Pick a starting point or move a slider to stage one."
           : "No color profile on this project: your pictures and videos go onto the card as they are. Pick a starting point or move a slider to stage one."}<//>`;
+}
+
+export default function ColorTab() {
+  const s = useNs("color");
+  const [p, update, setMode] = useProfile(s);
+
+  const samples = [...(s.samples || []), { value: "browse", label: "Another picture..." }];
+  const assets = s.per_file && s.mode === "assets";
+  const screen = s.per_file && s.mode === "screen";
+  const nFiles = Object.values(s.asset_counts || {}).reduce((a, b) => a + (b || 0), 0);
+  const note = statusNote(s);
   return html`<div class="page cp-page">
     <${PageHead} title="Color profile" sub=${INTRO}>
       <${Button} kind="primary" icon="emulate" onClick=${() => call("color.try_emulator")}
@@ -773,7 +793,7 @@ export default function ColorTab() {
         title="Run this project in the emulator with this profile (a running game restarts, since the colors are set when the game starts)">See it in the emulator<//>
     <//>
     ${s.per_file ? html`<div class="row cp-modes">
-      <${Seg} value=${s.mode || "display"} options=${MODES} onChange=${(v) => call("color.set_mode", v)} />
+      <${Seg} value=${s.mode || "display"} options=${MODES} onChange=${setMode} />
       <span class="small muted">${MODE_WORDS[s.mode] || MODE_WORDS.display}</span>
     </div>
     ${screen ? html`<${Note} kind="info" cls="cp-both"><b>Preview only.</b> Scenes draws the game's own art and your files through this, after the whole screen overlay. The two corrections are not changed by it.<//>`

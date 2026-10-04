@@ -1,0 +1,32 @@
+/* The Scenes inspector's Colors view (PAD-350, js/tabs/color_pane.js): the Color profile
+   tab's controls (color.css) made narrow enough for the inspector.  Design-system tokens and
+   classes only (css/app.css). */
+
+.scenes-contents.cpane { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+.cpane > * { flex-shrink: 0; }
+.cpane-hd { display: flex; flex-direction: column; gap: 6px; }
+.cpane-hd > .seg { display: flex; }
+.cpane-hd > .seg button { flex: 1 1 auto; padding: 5px 8px; }
+.cpane-words { margin: 0; line-height: 1.4; }
+.cpane .h3 { font-family: var(--cond); font-weight: 600; font-size: 14px; color: var(--ink); }
+.cpane-ft { gap: 4px; }
+
+/* the Color profile tab's cards, narrower: shorter sliders, smaller number boxes */
+.cpane .card > .hd { padding: 7px 10px; min-height: 38px; gap: 6px; }
+.cpane .card > .bd { padding: 9px 10px; gap: 9px; }
+.cpane .card > .ft { padding: 7px 10px; }
+.cpane .cp-controls .bd { gap: 10px; }
+.cpane .cp-group { gap: 7px; padding-top: 9px; }
+.cpane .cp-slider { gap: 1px; }
+.cpane .cp-sl-hd { gap: 6px; align-items: center; }
+.cpane .cp-sl-name { font-size: 12.5px; }
+.cpane .cp-sl-val { font-size: 11px; }
+.cpane .cp-sl-num { flex: 0 0 72px; width: 72px; }
+.cpane .cp-sl-num input { padding-top: 2px; padding-bottom: 2px; min-height: 0; height: 26px; }
+.cpane .cp-sl-ends { font-size: 10.5px; margin-top: -3px; }
+.cpane .cp-curves { grid-template-columns: 76px minmax(0, 1fr); gap: 10px; }
+.cpane .cp-curves svg { width: 76px; height: 76px; }
+.cpane .cp-curve-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.cpane .cp-curve-box { max-width: 230px; justify-self: center; }
+.cpane .cp-pts-hd, .cpane .cp-pts-row { grid-template-columns: 50px 70px 70px auto; gap: 6px; }
+.cpane .btn.sm { padding: 0 8px; }

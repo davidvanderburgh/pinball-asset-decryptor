@@ -369,6 +369,14 @@ class ColorTab(TabService):
         return self._mode
 
     @rpc
+    def panel_open(self):
+        """The Scenes tab's Color profiles bar opened (PAD-350): the
+        profiles are read again from the project, as the tab does on show."""
+        self.set(try_note="")
+        self._load()
+        return True
+
+    @rpc
     def set_all(self, kind, on):
         """The chosen-files mode's tab-wide boxes: every replaced picture
         ("images") or video ("videos") without a switch of its own."""

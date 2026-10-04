@@ -24,8 +24,9 @@ async function openColor(mode) {
 }
 
 // note=false leaves out the "Preview only" line: the Scenes tab says it in its page head
-// (PAD-349) to make room for its advanced box beside the row
-export function LookRow({ look, ns, note = true }) {
+// (PAD-349) to make room for its advanced box beside the row.  onOpen(mode): a name opens its
+// profile there instead (Scenes' Colors view, PAD-350)
+export function LookRow({ look, ns, note = true, onOpen }) {
   if (!look || !look.parts) return null;
   const sw = look.sw || {};
   const p = look.parts;
@@ -44,8 +45,8 @@ export function LookRow({ look, ns, note = true }) {
     ${items.map((it) => html`<span key=${it.k} class=${cx("look-item", !it.set && "unset")}>
       <${Check} checked=${!!(it.set && sw[it.k])} disabled=${!it.set} label=${it.label} cls="small"
         title=${TIPS[it.k]} onChange=${(v) => call(ns + ".set_look_part", it.k, v)} />
-      <button type="button" class="look-name" title="Open it on the Color profile tab"
-        onClick=${() => openColor(it.mode)}>${it.name}</button>
+      <button type="button" class="look-name" title=${onOpen ? "Change it in Colors, beside the scene" : "Open it on the Color profile tab"}
+        onClick=${() => (onOpen ? onOpen(it.mode) : openColor(it.mode))}>${it.name}</button>
     </span>`)}
     ${note ? html`<span class="look-note">Preview only: the card is not changed.</span>` : null}
   </div>`;

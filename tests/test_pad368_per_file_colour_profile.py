@@ -245,7 +245,8 @@ def test_the_bar_and_the_tooltips_are_wired_in_the_pages():
         assert "file=${" in bar[:400], name
     for name in ("images.js", "video.js"):
         src = _src(name)
-        assert "Color profile: ${" in src and '"Color profile: None"' in src, name
+        # PAD-369: a {profile} line, drawn in its own color by core/ui.js
+        assert "{ profile: " in src and '{ profile: "None" }' in src, name
     ts = _src("text_scenes.js")
     tip = ts[ts.index("const rowTip"):]
     assert tip.index("layerProfile(l, cs)") < tip.index('["Click"'), \

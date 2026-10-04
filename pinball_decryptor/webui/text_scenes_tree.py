@@ -1852,13 +1852,17 @@ class TreeEditMixin:
         return True
 
     @rpc
-    def edits_save(self, which="this"):
+    def edits_save(self, which="this", everything=False):
         """Save edits to a file... (PAD-281): this scene's edits (``which`` "this") or every
         edited scene's ("all"), with the pictures they add, in a zip to keep or to share.
+        *everything* (PAD-369): the pictures replaced on the Images tab that those scenes
+        draw, and the color profiles, come too (plugins/stern/scene_share.py).
         Returns the zip's path, or None."""
         from ..plugins.stern import scene_edit
         if not self.assets_dir:
             return None
+        if everything:
+            return self._save_everything(which)
         cards = None
         stem = os.path.basename(os.path.normpath(self.assets_dir)) + " scene edits"
         if which == "this":
@@ -1886,6 +1890,50 @@ class TreeEditMixin:
                           % (n, "" if n == 1 else "s", os.path.basename(path)))
         return path
 
+    def _flush_images(self):
+        """The Images tab keeps its picks in memory and writes them over the sidecar: write
+        them first, so what is saved or loaded here is what it shows."""
+        svc = self.window.service("images")
+        fn = getattr(svc, "_save_staged_changes", None)
+        if fn is not None:
+            try:
+                fn()
+            except Exception:                        # noqa: BLE001
+                log.exception("images flush")
+        return svc
+
+    def _save_everything(self, which):
+        """Save this scene, or every scene, with its pictures and color profiles (PAD-369)."""
+        from ..plugins.stern import scene_edit, scene_share
+        trees = self._load_trees()
+        cards = None
+        stem = os.path.basename(os.path.normpath(self.assets_dir)) + " scenes"
+        if which == "this":
+            card, _man = self._tree_card()
+            if card is None:
+                return None
+            cards = [card]
+            stem = self._scenes.get(self._sel, {}).get("label") or "scene"
+        self._flush_images()
+        stem = re.sub(r'[\\/:*?"<>|·]+', "_", stem).strip() or "scenes"
+        path = self.window.ask_save(
+            "scene_edits_file", "Save %s with pictures and color profiles" % (
+                "this scene" if which == "this" else "every scene"),
+            initialfile=stem + " with pictures.zip", filetypes=[("PAD scene edits", "*.zip")],
+            defaultextension=".zip")
+        if not path:
+            return None
+        try:
+            n, pics = scene_share.export_all(self.assets_dir, path, cards, trees)
+        except (scene_edit.SceneEditError, OSError) as e:
+            compat.messagebox.showerror("Save scenes", str(e))
+            return None
+        self._set_caption("Saved the edits of %d scene%s and %d replaced picture%s, with their "
+                          "color profiles, to %s" % (n, "" if n == 1 else "s", pics,
+                                                     "" if pics == 1 else "s",
+                                                     os.path.basename(path)))
+        return path
+
     @rpc
     def edits_load(self, path=None):
         """Load edits from a file... (PAD-281): each scene in a file Save edits to a file...
@@ -1900,41 +1948,98 @@ class TreeEditMixin:
                 filetypes=[("PAD scene edits", "*.zip"), ("All files", "*.*")])
         if not path:
             return None
+        from ..plugins.stern import scene_share
+        images = self._flush_images()
+        pics, gone, more = [], [], False
         try:
             scenes = scene_edit.read_share(path)
+            extras = scene_share.read_extras(path)
             got, missing = scene_edit.match_cards(scenes, self._load_trees().keys())
             mine = scene_edit.load(self.assets_dir)
             over = [c for c in got if mine.get(c)]
-            if not got:
+            more = scene_share.has_extras(extras)
+            if not got and not more:
                 compat.messagebox.showinfo(
                     "Load scene edits", "None of the %d scene%s in %s %s on this card, so "
                     "nothing was loaded." % (len(scenes), "" if len(scenes) == 1 else "s",
                                              os.path.basename(path),
                                              "is" if len(scenes) == 1 else "are"))
                 return None
-            if over and not compat.messagebox.askyesno(
-                    "Load scene edits", "%d of the scenes in this file %s edits here already. "
-                    "Loading puts the file's edits in their place. Go ahead?"
-                    % (len(over), "has" if len(over) == 1 else "have")):
-                return None
-            got, missing = scene_edit.import_edits(self.assets_dir, path,
-                                                   self._load_trees().keys())
+            # PAD-369 (DragonRR): what of the user's own it changes is asked about first,
+            # and nothing on this PC is deleted
+            clash = scene_share.clashes(self.assets_dir, extras)
+            mine_words = []
+            if over:
+                mine_words.append("%d scene%s you edited" % (len(over),
+                                                              "" if len(over) == 1 else "s"))
+            if clash["pictures"]:
+                k = len(clash["pictures"])
+                mine_words.append("%d picture%s you replaced" % (k, "" if k == 1 else "s"))
+            if clash["overlay"]:
+                mine_words.append("your whole screen overlay")
+            if mine_words:
+                what = (", ".join(mine_words[:-1]) + " and " + mine_words[-1]
+                        if len(mine_words) > 1 else mine_words[0])
+                if not compat.messagebox.askyesno(
+                        "Load scene edits", "This file changes %s. Loading puts the file's "
+                        "in their place. No file on this PC is deleted or overwritten: the "
+                        "file's pictures are copied into the project's \"%s\" folder. Go ahead?"
+                        % (what, scene_share.SHARED_DIR)):
+                    return None
+            renamed = {}
+            if got:
+                got, missing = scene_edit.import_edits(self.assets_dir, path,
+                                                       self._load_trees().keys(),
+                                                       renamed=renamed)
+            if more:
+                pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
+                                                       renamed=renamed)
         except (scene_edit.SceneEditError, OSError) as e:
             compat.messagebox.showerror("Load scene edits", str(e))
             return None
+        if more:
+            self._shared_loaded(images)
         self._tsel = None
         self._tree_refresh()
         words = "Loaded the edits of %d scene%s from %s." % (
             len(got), "" if len(got) == 1 else "s", os.path.basename(path))
+        if pics:
+            words = words[:-1] + " and %d replaced picture%s with %s color profile%s." % (
+                len(pics), "" if len(pics) == 1 else "s",
+                "its" if len(pics) == 1 else "their", "" if len(pics) == 1 else "s")
+        if gone:
+            words += (" %d picture%s in the file %s not in this project and %s left out."
+                      % (len(gone), "" if len(gone) == 1 else "s",
+                         "is" if len(gone) == 1 else "are",
+                         "was" if len(gone) == 1 else "were"))
         if missing:
             words += (" %d scene%s in the file %s not on this card and %s left out."
                       % (len(missing), "" if len(missing) == 1 else "s",
                          "is" if len(missing) == 1 else "are",
                          "was" if len(missing) == 1 else "were"))
         self._set_caption(words)
-        if missing:
+        if missing or gone:
             compat.messagebox.showinfo("Load scene edits", words)
         return sorted(got)
+
+    def _shared_loaded(self, images):
+        """A file loaded with pictures and color profiles (PAD-369) wrote picks into the
+        sidecar: the Images tab reads them back, and the Color profiles bar, the Video players
+        and this preview follow the profiles."""
+        cb = (getattr(self.window, "cb", None) or {}).get("on_folder_state_written")
+        if cb is not None:
+            cb(self.assets_dir)
+        fn = getattr(images, "reload_assets_tabs", None)
+        if fn is not None:
+            fn()
+        for ns, name in (("color", "panel_open"), ("video", "publish_look")):
+            fn = getattr(self.window.service(ns), name, None)
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:                    # noqa: BLE001
+                    log.exception("%s.%s", ns, name)
+        self._publish_look()
 
     @rpc
     def tree_clear(self):

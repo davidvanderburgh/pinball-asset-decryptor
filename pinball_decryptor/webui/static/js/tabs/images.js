@@ -29,9 +29,10 @@ const KEEP_TIP = "Off: the replacement is scaled to the original picture's size,
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
 const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build. Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own picture, never touched (tick Unlock extracted images to give it a palette too). A palette you click is this picture's own setting; the Color profile tab's Every replaced picture box sets the rest.";
-// PAD-368: the profile a file has, for its tooltips ("" where the Color column is not offered)
-const profileLine = (r, cs) => (r.cl ? "Color profile: None" : r.c == null ? ""
-  : `Color profile: ${r.c ? ((cs.own_names || {}).images || {})[r.r] || cs.asset_name || "Recommended" : "None"}`);
+// PAD-368: the profile a file has, for its tooltips (null where the Color column is not offered);
+// PAD-369: a {profile} line, drawn in the one color every tooltip gives it (core/ui.js)
+const profileLine = (r, cs) => (r.cl ? { profile: "None" } : r.c == null ? null
+  : { profile: r.c ? ((cs.own_names || {}).images || {})[r.r] || cs.asset_name || "Recommended" : "None" });
 // PAD-335: the same blue lock / red / green palette as the Video tab's Color column
 const colorTip = (r, cs) => (r.cl
   ? { head: "Color: the game's own picture", lines: [
@@ -321,9 +322,9 @@ export default function ImagesTab() {
       if (typeof e !== "number") return html`<span class="img-grp ellip" title=${e.l}>${e.l}</span>`;
       const row = slotAt(s, e);
       if (!row) return null;
-      const ttl = [row.r, profileLine(row, colorNs)].filter(Boolean).join("\n");
-      if (grouped) return html`<span class=${cx("img-name img-child", row.t === "foreign" && "img-stray")} title=${ttl}><span class="img-base">${base(row.r)}</span></span>`;
-      return html`<span class=${cx("img-name", row.t === "foreign" && "img-stray")} title=${ttl}><span class="img-dir">${dirOf(row.r)}</span><span class="img-base">${base(row.r)}</span></span>`;
+      const ttl = tip({ head: row.r, lines: [profileLine(row, colorNs)] });
+      if (grouped) return html`<span class=${cx("img-name img-child", row.t === "foreign" && "img-stray")} ...${ttl}><span class="img-base">${base(row.r)}</span></span>`;
+      return html`<span class=${cx("img-name", row.t === "foreign" && "img-stray")} ...${ttl}><span class="img-dir">${dirOf(row.r)}</span><span class="img-base">${base(row.r)}</span></span>`;
     },
   };
   const countCol = {
@@ -385,7 +386,10 @@ export default function ImagesTab() {
       if (typeof e !== "number") return "";
       const row = slotAt(s, e);
       if (!row) return "";
-      return html`<button type="button" class=${cx("img-rep ellip", TAG_CLS[row.t] || "muted")} title=${row.p === "Choose…" ? REP_TIP : row.p}
+      // PAD-369 (DragonRR): the chosen file's name tells its color profile too
+      const pl = row.p === "Choose…" ? null : profileLine(row, colorNs);
+      return html`<button type="button" class=${cx("img-rep ellip", TAG_CLS[row.t] || "muted")}
+        ...${tip(pl ? { head: row.p, lines: [pl] } : row.p === "Choose…" ? REP_TIP : row.p)}
         onDblClick=${(ev) => ev.stopPropagation()}
         onClick=${(ev) => {
           ev.stopPropagation();
@@ -498,7 +502,8 @@ export default function ImagesTab() {
         <span class="vsep img-vsep"></span>
         <div class="row img-panehd img-rh">
           <span class="eyebrow nw">Replacement</span>
-          ${p.rep_name ? html`<span class="mono small ellip img-repname" title=${p.rep}>— ${p.rep_name}</span>` : null}
+          ${p.rep_name ? html`<span class="mono small ellip img-repname" ...${tip(p.color
+            ? { head: p.rep, lines: [{ profile: p.color.on ? p.color.name : "None" }] } : p.rep)}>— ${p.rep_name}</span>` : null}
           <span class="grow"></span>
           ${prevRel ? html`<${Button} size="sm" onClick=${() => call("images.choose", prevRel)}>Choose…<//>` : null}
           ${prevRel && p.clearable ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("images.clear_one", prevRel)}>Clear replacement<//>` : null}

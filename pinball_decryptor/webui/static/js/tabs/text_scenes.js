@@ -212,9 +212,16 @@ export function ScenesActions() {
         { label: "Save every scene's edits to a file…", icon: "download", disabled: !(s.tree_view || {}).all_edits,
           title: "The edits of every scene you changed in this project, in one .zip file",
           onClick: () => call("text_scenes.edits_save", "all") },
+        // PAD-369 (DragonRR): everything, to hand to someone else
+        { label: "Save this scene with pictures and color profiles…", icon: "download", disabled: !s.tree_view,
+          title: "Its edits, plus each picture in it you replaced on the Images tab (the file itself, its size tick, its color switch and color profile), the pictures you added, and the whole screen overlay, in one .zip file",
+          onClick: () => call("text_scenes.edits_save", "this", true) },
+        { label: "Save every scene with pictures and color profiles…", icon: "download",
+          title: "Every scene's edits, plus every picture the scenes draw that you replaced on the Images tab, with its size tick, color switch and color profile, and the whole screen overlay, in one .zip file",
+          onClick: () => call("text_scenes.edits_save", "all", true) },
         { sep: true },
         { label: "Load scene edits from a file…", icon: "upload",
-          title: "Put the edits in a file saved here or by someone else onto the same scenes of this card. A scene this card does not have is left out.",
+          title: "Put the edits in a file saved here or by someone else onto the same scenes of this card. A scene this card does not have is left out. A file saved with pictures and color profiles brings those too: its pictures are copied into the project's Shared pictures folder, and nothing on this PC is deleted. Anything of yours it would change is asked about first.",
           onClick: () => call("text_scenes.edits_load") },
       ])}>Save / load edits<//>
     <${Button} kind="ghost" icon=${s.rebuilding ? "x" : "refresh"} title=${tips.rebuild}
@@ -333,7 +340,7 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
           <${InfoBadge} text=${s.hint} />
           <${Button} size="sm" icon="left" cls="sc-list-hide" label="Hide the scene list"
             title="Hide the scene list: more room for the preview (the Scenes tab on the left brings it back)"
-            onClick=${() => setWide(true)} />
+            onClick=${() => setWide(true)}>Hide<//>
         </div>
         ${(s.scenes || []).length ? null : html`<p class="small muted" style="margin:0">${s.hint}</p>`}
         ${(s.scenes || []).length ? html`<div class="row small muted sc-legend">
@@ -638,12 +645,13 @@ const UNLOCK_TIP = { head: "Advanced: unlock extracted images", lines: [
   "Off: the original extracted images are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added are not locked.",
   "On: each extracted image gets a red / green palette too, whatever is drawn in it now. A green one has the color profile attached: it is corrected from its original extracted copy when you build.",
   "The same box as on the Images tab. Turning it off locks them again as they were." ] };
-// PAD-368: the profile a layer's picture has ("" for a layer with no colour switch)
+// PAD-368: the profile a layer's picture has (null for a layer with no colour switch);
+// PAD-369: a {profile} line, drawn in the one color every tooltip gives it (core/ui.js)
 export const layerProfile = (l, cs) => {
   const c = l.color;
-  if (!c) return "";
-  if (c.locked || !c.on) return "Color profile: None";
-  return `Color profile: ${((cs.own_names || {}).images || {})[c.rel] || cs.asset_name || "Recommended"}`;
+  if (!c) return null;
+  if (c.locked || !c.on) return { profile: "None" };
+  return { profile: ((cs.own_names || {}).images || {})[c.rel] || cs.asset_name || "Recommended" };
 };
 const rowTip = (l, cs) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
@@ -652,7 +660,7 @@ const rowTip = (l, cs) => ({
     l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Its eye turns it on here."
       : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on."
       : !l.drawn && !l.view_off ? "Not on the screen at this moment." : null,
-    layerProfile(l, cs) || null,
+    layerProfile(l, cs),
     ["Click", "select it (shown on top while selected)"],
     ["Ctrl+click", "add it to the selection or take it out"],
     ["Shift+click", "select a run of layers"],

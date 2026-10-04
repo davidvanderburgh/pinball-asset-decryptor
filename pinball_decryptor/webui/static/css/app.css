@@ -23,6 +23,7 @@
   --sans: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
   --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
   --rail-w: 208px;
+  --cp-ink: #d18cff;
 }
 :root.light {
   color-scheme: light;
@@ -33,6 +34,7 @@
   --err: #b3261e; --err-soft: #f9e2e0; --info: #2f5f8f; --info-soft: #e3ecf5;
   --sel: #fbead2; --shadow: 0 1px 0 rgba(0,0,0,.06), 0 12px 32px rgba(0,0,0,.12);
   --log-bg: #fbfbf9; --log-ink: #2a2e31; --scrim: rgba(20,20,19,.35);
+  --cp-ink: #7a2fb0;
 }
 
 * { box-sizing: border-box; }
@@ -302,6 +304,9 @@ input[type=range] { accent-color: var(--accent); }
 .tip .tip-h { font-weight: 600; margin-bottom: 4px; }
 .tip .tip-l { color: var(--ink-2); margin-top: 2px; }
 .tip .tip-row { display: grid; grid-template-columns: max-content 1fr; gap: 10px; margin-top: 3px; }
+/* PAD-369: "Color profile: <name>" stands out the same way in every tooltip that has it */
+.tip .tip-cp { color: var(--cp-ink); }
+.tip .tip-cp b { font-weight: 600; }
 .tip .tip-k { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--accent); padding-top: 1px; }
 .badge-i { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; font-family: var(--cond); color: var(--info); background: var(--info-soft); border: 0; cursor: help; flex: 0 0 18px; }
 

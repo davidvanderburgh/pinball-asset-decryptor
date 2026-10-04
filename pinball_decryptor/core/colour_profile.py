@@ -334,6 +334,25 @@ def apply_ranges(rgb, ranges):
     return out
 
 
+def _ranges_uint8(rgb, live):
+    """uint8 *rgb* through the colour ranges *live*, rounded back to uint8.
+    PAD-369 (DragonRR, ~3 s a change in Scenes): the ranges are per-pixel
+    float maths, so a whole frame is worked out once per distinct colour
+    (a frame has far fewer colours than pixels) and spread back: the same
+    numbers, several times faster."""
+    import numpy as np
+    src = np.asarray(rgb, np.uint8)
+    if src.size < 3 * 4096:
+        return np.clip(apply_ranges(src, live) + 0.5, 0, 255).astype(np.uint8)
+    flat = src.reshape(-1, 3)
+    key = ((flat[:, 0].astype(np.uint32) << 16)
+           | (flat[:, 1].astype(np.uint32) << 8) | flat[:, 2])
+    u, inv = np.unique(key, return_inverse=True)
+    cols = np.stack([u >> 16, (u >> 8) & 255, u & 255], -1).astype(np.uint8)
+    done = np.clip(apply_ranges(cols, live) + 0.5, 0, 255).astype(np.uint8)
+    return done[inv.reshape(-1)].reshape(src.shape)
+
+
 @dataclass(frozen=True)
 class Profile:
     name: str = ""
@@ -387,8 +406,7 @@ class Profile:
         out = np.asarray(rgb, np.uint8)
         live = [r for r in self.ranges if not range_neutral(r)]
         if live:
-            out = np.clip(apply_ranges(out, live) + 0.5, 0, 255).astype(
-                np.uint8)
+            out = _ranges_uint8(out, live)
         tabs = self.curve_tables()
         if tabs is not None:
             luts = [np.asarray(t, np.uint8) for t in tabs]

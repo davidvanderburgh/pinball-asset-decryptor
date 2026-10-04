@@ -497,7 +497,14 @@ HELP_CONTENT = {
          "file from the LE loads on the Pro; a scene this card lacks is left out "
          "and named, and an added picture whose name is taken by a different one "
          "is renamed. The file holds the scene editor's edits only, not Text-tab "
-         "colours or text layout."),
+         "colours or text layout. \"Save ... with pictures and color profiles\" "
+         "also puts in each picture those scenes draw that you replaced on the "
+         "Images tab (the file, its Keep size tick, its color switch and the color "
+         "profile baked into it), the color profiles of the pictures you added, and "
+         "the whole screen overlay; the machine screen stays each PC's own. Loading "
+         "it copies the pictures into the project's \"Shared pictures\" folder and "
+         "never deletes or overwrites a file; when it would change a picture you "
+         "replaced, a scene you edited or your overlay, it asks first."),
         ("Size limits",
          "On most games patching is size-neutral: a same-or-smaller "
          "replacement fits as-is, a larger one is re-encoded down to the "

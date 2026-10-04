@@ -196,7 +196,8 @@ def test_a_godzilla_run_swaps_at_the_machines_cadence_unless_told_otherwise():
     """The machine built ~29 frames a second; at the rig's old 60 Hz swap the clip bug could not show."""
     watch = (SDK.parents[1] / "watch.sh").read_text(encoding="utf-8")
     block = re.search(r'if \[ -z "\$\{PAD_SWAP_VBLANKS:-\}" \]; then\n(.*?)\nfi\n', watch, re.S)
-    assert block and 'godzilla_*) export PAD_SWAP_VBLANKS=2' in block.group(1)
+    # PAD-357: every Spike 2 title, not only godzilla_* (30 fps video judders at a 60 Hz swap).
+    assert block and block.group(1).strip() == 'export PAD_SWAP_VBLANKS=2'
     assert watch.index("export PAD_GAME=") < block.start() < watch.index('bash "$RIG/run_game.sh"')
     egl = (SDK.parents[1] / "eglshim.c").read_text(encoding="utf-8")
     assert 'getenv("PAD_SWAP_VBLANKS")' in egl and 'getenv("PAD_REFRESH_HZ")' in egl

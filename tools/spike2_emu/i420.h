@@ -66,4 +66,47 @@ static const unsigned char *i420_to_rgba(const unsigned char *src, unsigned w, u
     return rgba_buf;
 }
 
+/* PAD-358: THE SAME CONVERSION AS A FRAGMENT SHADER, so padglhost can upload
+ * the three planes as they are (1.5 bytes a pixel instead of 4) and convert on
+ * the GPU. It is here, beside i420_to_rgba, because it must stay the same
+ * arithmetic: the texels are turned back into the exact bytes, the math is
+ * the integer math above term for term (GLSL ES 3.00 sign-extends >> on a
+ * signed int, as gcc does), and an RGBA8 target stores n/255.0 as n. So the
+ * output is BIT-IDENTICAL to the CPU converter, not merely close, and
+ * PAD_VID_GPUCHECK measures exactly that on a live run.
+ *
+ * Drawn into an FBO the size of the frame: gl_FragCoord row 0 is texture row
+ * 0, the same row the CPU path's glTexImage2D put the frame's first line in.
+ * Chroma is fetched at (x/2, y/2), the CPU's own indexing, so odd frame sizes
+ * (whose chroma planes are truncated) stay on the CPU. */
+static const char I420_GPU_VS[] __attribute__((unused)) =
+    "#version 300 es\n"
+    "void main(){\n"
+    "  float x = float(gl_VertexID & 1);\n"
+    "  float y = float((gl_VertexID >> 1) & 1);\n"
+    "  gl_Position = vec4(x * 2.0 - 1.0, y * 2.0 - 1.0, 0.0, 1.0);\n"
+    "}\n";
+static const char I420_GPU_FS[] __attribute__((unused)) =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "precision highp int;\n"
+    "uniform highp sampler2D u_y;\n"
+    "uniform highp sampler2D u_u;\n"
+    "uniform highp sampler2D u_v;\n"
+    "out vec4 o_col;\n"
+    "int b8(highp sampler2D s, ivec2 p){\n"
+    "  return int(texelFetch(s, p, 0).r * 255.0 + 0.5);\n"
+    "}\n"
+    "void main(){\n"
+    "  ivec2 p = ivec2(gl_FragCoord.xy);\n"
+    "  int c = (298 * (b8(u_y, p) - 16) + 128) >> 8;\n"
+    "  int u = b8(u_u, p / 2) - 128;\n"
+    "  int v = b8(u_v, p / 2) - 128;\n"
+    "  int rd = (409 * v + 128) >> 8;\n"
+    "  int gd = -((100 * u + 208 * v + 128) >> 8);\n"
+    "  int bd = (516 * u + 128) >> 8;\n"
+    "  ivec3 o = clamp(ivec3(c + rd, c + gd, c + bd), 0, 255);\n"
+    "  o_col = vec4(vec3(o) / 255.0, 1.0);\n"
+    "}\n";
+
 #endif

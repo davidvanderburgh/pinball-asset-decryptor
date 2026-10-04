@@ -6,7 +6,6 @@ import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Sele
          Icon, Progress, Spinner, tip, call, mediaUrl, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { LookRow } from "../core/look.js";
-import { ColorPane } from "./color_pane.js";
 
 // Load its own sheet once.
 const CSS_HREF = "/static/css/tabs/text_scenes.css";
@@ -215,20 +214,15 @@ export function ScenesActions() {
       onClick=${() => call("text_scenes.rebuild")}>${s.rebuilding ? "Cancel" : "Re-read from card…"}<//>`;
 }
 
-// PAD-350: what the left column shows, kept across sessions
-const LEFT_KEY = "pad.scenes.left";
-function loadLeft() {
-  try { return localStorage.getItem(LEFT_KEY) === "colors" ? "colors" : "scenes"; } catch (e) { return "scenes"; }
-}
-
-export function ScenesPage() {
+// colorsOpen / openColors(mode): the Color profiles bar on the page's edge (PAD-350,
+// scenes.js); while it is open the scene list steps aside unless shown again
+export function ScenesPage({ colorsOpen = false, openColors } = {}) {
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
-  const [wide, setWide] = useState(false);      // the scene editor without the scene list
-  // the left column: the scene list or Colors, the Color profile controls (PAD-350,
-  // DragonRR: beside Layers, so each picture's color switch is in view while tuning)
-  const [left, setLeftState] = useState(loadLeft);
-  const setLeft = (v) => { setLeftState(v); try { localStorage.setItem(LEFT_KEY, v); } catch (e) {} };
+  const [wideOwn, setWideOwn] = useState(false); // the scene editor without the scene list
+  const [listWithColors, setListWithColors] = useState(false);
+  const wide = colorsOpen ? !listWithColors : wideOwn;
+  const setWide = (v) => (colorsOpen ? setListWithColors(!v) : setWideOwn(v));
   const [playFrame, setPlayFrame] = useState(0); // the frame a playback is on
   useEffect(() => { if (!s.tree_play) setPlayFrame(0); }, [s.tree_play]);
   const [split, setSplit] = useState(loadSplit);
@@ -246,7 +240,7 @@ export function ScenesPage() {
     const ro = new ResizeObserver(() => setListW(el.offsetWidth));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [left]);              // the list comes back when the left column leaves Colors
+  }, []);
   const topRef = useRef(null);
   // pointer -> unzoomed px against the element (the app can be zoomed: rect px / offset px)
   const scaleOf = (el, r) => (r.width ? el.offsetWidth / r.width : 1) || 1;
@@ -323,11 +317,6 @@ export function ScenesPage() {
   return html`<section class="card scenes-card">
     <div class=${cx("scenes-body", wide && "wide")} ref=${bodyRef} style=${bodyStyle}>
       <div class="scenes-left">
-        ${s.look && s.look.parts ? html`<div class="sc-views"><${Seg} value=${left} onChange=${setLeft} options=${[
-          { value: "scenes", label: html`<${Icon} name="list" />Scenes`, title: "Every scene of the card: pick one to see and edit it" },
-          { value: "colors", label: html`<${Icon} name="palette" />Colors`,
-            title: "The color profiles, changed here with the scene and its Layers in view: the same as the Color profile tab" }]} /></div>` : null}
-        ${left === "colors" && s.look && s.look.parts ? html`<${ColorPane} />` : html`
         <div class="row scenes-search">
           <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
             delay=${200} prefix=${html`<${Icon} name="search" />`} />
@@ -346,7 +335,7 @@ export function ScenesPage() {
             sort=${{ key: (s.sort || {}).col, desc: (s.sort || {}).rev }}
             onSort=${(k) => call("text_scenes.sort_by", k)}
             resizable widths=${sceneWidths} onResize=${(w) => { sceneWidths = w; }} />
-        </div>`}
+        </div>
       </div>
       <${Divider} k="left" measure=${measureLeft} label="Scene list width" ...${splitProps} />
       <div class="scenes-center" onPointerDown=${editor ? (e) => deselectOnBlank(s.tree_view, e) : null}>
@@ -396,8 +385,7 @@ export function ScenesPage() {
           </div>
         </div>
         <div class="scenes-lookbar">
-          <${LookRow} look=${s.look} ns="text_scenes" note=${false}
-            onOpen=${(mode) => { call("color.set_mode", mode); setLeft("colors"); setWide(false); }} />
+          <${LookRow} look=${s.look} ns="text_scenes" note=${false} onOpen=${openColors} />
           ${unlock && unlock.offered ? html`<div class=${cx("scenes-unlock", unlock.on && "on")} ...${tip(UNLOCK_TIP)}>
             <span class="look-head">Advanced</span>
             <${Check} checked=${!!unlock.on} onChange=${(v) => call("text_scenes.tree_color_unlocked", v)}

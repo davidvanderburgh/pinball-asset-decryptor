@@ -1,32 +1,74 @@
-/* The Scenes tab's Colors (PAD-350, js/tabs/color_pane.js), in the scene list's column: the
-   Color profile tab's controls (color.css) made narrow enough for it.  Design-system tokens and
-   classes only (css/app.css). */
+/* The Scenes tab's Color profiles bar (PAD-350, js/tabs/color_pane.js) on the page's right
+   edge.  It reuses the Color profile tab's controls (color.css), made narrower here.
+   Design-system tokens and classes only (css/app.css). */
 
-.scenes-contents.cpane { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
-.cpane > * { flex-shrink: 0; }
-.cpane-hd { display: flex; flex-direction: column; gap: 6px; }
-.cpane-hd > .seg { display: flex; }
-.cpane-hd > .seg button { flex: 1 1 auto; padding: 5px 8px; }
-.cpane-words { margin: 0; line-height: 1.4; }
-.cpane .h3 { font-family: var(--cond); font-weight: 600; font-size: 14px; color: var(--ink); }
-.cpane-ft { gap: 4px; }
+/* the page and the bar side by side: opening the bar pushes the page aside (the scene list
+   steps out of the way meanwhile), so the preview and Layers are never covered */
+.cpd-shell { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; }
+.cpd-shell > .page { flex: 1 1 auto; min-width: 0; padding-right: 40px; }
+
+.cpd { --cpd-w: 380px; position: relative; flex: 0 0 auto; width: 0; z-index: 3;
+  transition: width .28s cubic-bezier(.2, .8, .2, 1); }
+.cpd.open { width: var(--cpd-w); }
+html.bp-1180 .cpd { --cpd-w: 340px; }
+@media (prefers-reduced-motion: reduce) { .cpd { transition: none; } }
+
+/* the tab that sticks out of the edge: a rainbow, so it is seen */
+.cpd-handle { position: absolute; top: 34%; left: -30px; width: 30px; height: 150px; padding: 10px 0;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; border: 0; cursor: pointer;
+  border-radius: 10px 0 0 10px; color: #fff;
+  background: linear-gradient(to bottom, #e5484d, #f08c2a, #f5d33b, #4cc26b, #3d9df2, #6e5ce6, #b45ad6);
+  box-shadow: -2px 2px 8px rgba(0, 0, 0, .35); transition: filter .12s; }
+.cpd-handle:hover { filter: brightness(1.12) saturate(1.1); }
+.cpd-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cpd-handle .i { width: 18px; height: 18px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .55)); }
+.cpd-handle-txt { writing-mode: vertical-rl; transform: rotate(180deg); font-family: var(--cond); font-weight: 600;
+  font-size: 13.5px; letter-spacing: .06em; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+
+/* the bar: anchored to the edge it hangs from, so it slides out with it */
+.cpd-clip { position: absolute; inset: 0; overflow: hidden; }
+.cpd-panel { position: absolute; top: 0; bottom: 0; left: 0; width: var(--cpd-w); display: flex; flex-direction: column;
+  background: var(--bg-2); border-left: 1px solid var(--line-2); }
+.cpd-panel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(to bottom, #e5484d, #f08c2a, #f5d33b, #4cc26b, #3d9df2, #6e5ce6, #b45ad6); }
+.cpd-hd { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; padding: 10px 10px 8px 16px; }
+.cpd-hd .sp, .cpd-show .sp { flex: 1 1 auto; }
+.cpd-title { font-family: var(--cond); font-weight: 600; font-size: 16px; color: var(--ink); }
+
+/* one tab per profile; a dot on those in use */
+.cpd-tabs { flex: 0 0 auto; display: flex; gap: 2px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); }
+.cpd-tabs button { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-family: var(--cond); font-size: 14px; font-weight: 500; color: var(--ink-3);
+  padding: 8px 6px; border: 0; background: transparent; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  cursor: pointer; white-space: nowrap; }
+.cpd-tabs button:hover { color: var(--ink); }
+.cpd-tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+.cpd-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: 0 0 auto; }
+
+.cpd-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 10px 16px 14px; display: flex;
+  flex-direction: column; gap: 10px; }
+.cpd-body > * { flex-shrink: 0; }
+.cpd-words { margin: 0; line-height: 1.4; }
+.cpd-show { gap: 6px; align-items: center; flex-wrap: wrap; }
+.cpd-clipbtns { gap: 4px; }
+.cpd-body .h3 { font-family: var(--cond); font-weight: 600; font-size: 14px; color: var(--ink); }
 
 /* the Color profile tab's cards, narrower: shorter sliders, smaller number boxes */
-.cpane .card > .hd { padding: 7px 10px; min-height: 38px; gap: 6px; }
-.cpane .card > .bd { padding: 9px 10px; gap: 9px; }
-.cpane .card > .ft { padding: 7px 10px; }
-.cpane .cp-controls .bd { gap: 10px; }
-.cpane .cp-group { gap: 7px; padding-top: 9px; }
-.cpane .cp-slider { gap: 1px; }
-.cpane .cp-sl-hd { gap: 6px; align-items: center; }
-.cpane .cp-sl-name { font-size: 12.5px; }
-.cpane .cp-sl-val { font-size: 11px; }
-.cpane .cp-sl-num { flex: 0 0 72px; width: 72px; }
-.cpane .cp-sl-num input { padding-top: 2px; padding-bottom: 2px; min-height: 0; height: 26px; }
-.cpane .cp-sl-ends { font-size: 10.5px; margin-top: -3px; }
-.cpane .cp-curves { grid-template-columns: 76px minmax(0, 1fr); gap: 10px; }
-.cpane .cp-curves svg { width: 76px; height: 76px; }
-.cpane .cp-curve-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-.cpane .cp-curve-box { max-width: 230px; justify-self: center; }
-.cpane .cp-pts-hd, .cpane .cp-pts-row { grid-template-columns: 50px 70px 70px auto; gap: 6px; }
-.cpane .btn.sm { padding: 0 8px; }
+.cpd-body .card > .hd { padding: 7px 10px; min-height: 38px; gap: 6px; }
+.cpd-body .card > .bd { padding: 9px 10px; gap: 9px; }
+.cpd-body .card > .ft { padding: 7px 10px; }
+.cpd-body .cp-controls .bd { gap: 10px; }
+.cpd-body .cp-group { gap: 7px; padding-top: 9px; }
+.cpd-body .cp-slider { gap: 1px; }
+.cpd-body .cp-sl-hd { gap: 6px; align-items: center; }
+.cpd-body .cp-sl-name { font-size: 12.5px; }
+.cpd-body .cp-sl-val { font-size: 11px; }
+.cpd-body .cp-sl-num { flex: 0 0 72px; width: 72px; }
+.cpd-body .cp-sl-num input { padding-top: 2px; padding-bottom: 2px; min-height: 0; height: 26px; }
+.cpd-body .cp-sl-ends { font-size: 10.5px; margin-top: -3px; }
+.cpd-body .cp-curves { grid-template-columns: 76px minmax(0, 1fr); gap: 10px; }
+.cpd-body .cp-curves svg { width: 76px; height: 76px; }
+.cpd-body .cp-curve-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.cpd-body .cp-curve-box { max-width: 240px; justify-self: center; }
+.cpd-body .cp-pts-hd, .cpd-body .cp-pts-row { grid-template-columns: 50px 70px 70px auto; gap: 6px; }
+.cpd-body .btn.sm { padding: 0 8px; }

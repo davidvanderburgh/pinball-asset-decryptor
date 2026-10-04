@@ -75,7 +75,9 @@ const P = {
   film: "M4 4h16v16H4zM8 4v16M16 4v16M4 8h4M4 12h4M4 16h4M16 8h4M16 12h4M16 16h4",
   save: "M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM7 3v5h8V3M7 21v-7h10v7",
   flag: "M5 21V4M5 4h12l-2 4 2 4H5",
-  palette: "M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8zM7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01M17 11h.01",
+  // PAD-370: the board and its paint dots apart, so a colored palette can be filled in
+  palette: ["M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z",
+    "M7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01M17 11h.01"],
   scenes: "M12 3l9 4.5-9 4.5-9-4.5zM3 12l9 4.5 9-4.5M3 16.5L12 21l9-4.5",
   more: "M5 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM19 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2z",
   eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
@@ -84,7 +86,9 @@ const P = {
 
 export function Icon({ name, cls = "", title }) {
   const d = P[name] || P.info;
-  return html`<svg class=${cx("i", cls)} viewBox="0 0 24 24" aria-hidden=${title ? "false" : "true"}>${title ? html`<title>${title}</title>` : null}<path d=${d} /></svg>`;
+  // two paths (palette): an outline that can be filled (.i-body) and the marks on it (.i-dots)
+  const paths = Array.isArray(d) ? html`<path class="i-body" d=${d[0]} /><path class="i-dots" d=${d[1]} />` : html`<path d=${d} />`;
+  return html`<svg class=${cx("i", cls)} viewBox="0 0 24 24" aria-hidden=${title ? "false" : "true"}>${title ? html`<title>${title}</title>` : null}${paths}</svg>`;
 }
 
 // --------------------------------------------------------------- tooltip

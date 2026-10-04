@@ -100,6 +100,10 @@ a:hover { filter: brightness(1.12); }
 svg.i { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
 svg.i.lg { width: 18px; height: 18px; }
 svg.i.xl { width: 28px; height: 28px; stroke-width: 1.5; }
+/* PAD-370: a color palette switch (Images / Video Color column, Scenes layers) is filled in
+   with its green or red, the paint dots dark on it */
+.img-color .i-body, .vid-color .i-body, .ly-color .i-body { fill: currentColor; }
+.img-color .i-dots, .vid-color .i-dots, .ly-color .i-dots { stroke: #15171a; stroke-width: 2.6; }
 
 /* status bar and log */
 .statusbar { flex: 0 0 auto; min-height: 40px; background: var(--bg-2); display: flex; align-items: center; gap: 12px; padding: 6px 16px; font-size: 13px; flex-wrap: wrap; }

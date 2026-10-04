@@ -1022,14 +1022,16 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
     layers = [np.zeros((h, w, 4), np.float32) for _i in range(3 if split else 1)]
     canvas = layers[0]
 
+    # without *as_made* no picture passes the screen by, even now text keeps the pass-by
+    # layer in use (DragonRR, PAD-355: switched-off pictures came out unviewed)
     def _skipped(d):
-        return (d["kind"] in ("bitmap", "flip")
+        return (as_made and d["kind"] in ("bitmap", "flip")
                 and bool(((pictures or {}).get(d.get("image")) or {}).get("skip")))
 
     # text passes the machine screen by too (PAD-352): the screen is for the
     # game's pictures and videos; the whole screen overlay still reaches it
     skips = None
-    if view is not None and ((as_made and any(_skipped(d) for d in draws))
+    if view is not None and (any(_skipped(d) for d in draws)
                              or any(d["kind"] == "text" for d in draws)):
         skips = [np.zeros_like(c) for c in layers]
     skip = skips[0] if skips else None

@@ -46,16 +46,24 @@ says which picture: a test card PAD draws, or one of the user's own.
 
 import base64
 import io
+import json
 import logging
 import os
+import time
 
 from .base import TabService, rpc
 from ...core import colour_profile as cp
+from ...core import staged_changes
 
 log = logging.getLogger(__name__)
 
 #: limits of the page's controls: the whole range a file accepts (PAD-338)
 LIMITS = cp.LIMITS
+
+#: Undo (PAD-354): moves of one slider closer together than this are one step
+UNDO_GROUP_S = 1.5
+#: and no more steps than this are kept per profile
+UNDO_MAX = 100
 
 _CARD_CACHE = []
 
@@ -127,6 +135,9 @@ class ColorTab(TabService):
         self._rev = 0
         self._sample = "card"
         self._project = ""
+        self._undo = {}              # PAD-354: {stored key: [what it was, ...]}
+        self._redo = {}
+        self._last_move = {}         # {stored key: (slider, time)}: one drag = one step
         self.set(sample="card", sample_url="", sample_path="", samples=[],
                  problems=[], rev=0, active=False, project="",
                  has_project=False, try_note="", mode="display",
@@ -145,6 +156,8 @@ class ColorTab(TabService):
     def _load(self):
         """Read the project's staged profile into the controls."""
         assets = self._assets()
+        if assets != self._project:
+            self._undo, self._redo, self._last_move = {}, {}, {}
         self._project = assets
         prof = None
         asset = None
@@ -255,19 +268,95 @@ class ColorTab(TabService):
             limits={k: list(v) for k, v in LIMITS.items()},
             range_limits={k: list(v) for k, v in cp.RANGE_LIMITS.items()},
             range_new=dict(cp.RANGE_NEW), max_ranges=cp.MAX_RANGES,
-            max_points=cp.MAX_POINTS)
+            max_points=cp.MAX_POINTS,
+            can_undo=bool(self._undo.get(self._mode_key())),
+            can_redo=bool(self._redo.get(self._mode_key())))
         if problems is not None:
             values["problems"] = list(problems)
         self.set(**values)
 
-    def _store(self, prof, rev=False, follow=False):
+    # -- Undo / Redo (PAD-354) ----------------------------------------------
+    # Each profile (overlay, individual files, machine screen) keeps its own
+    # steps: what it was stored as in .staged_changes.json before each change,
+    # so Undo puts back exactly that (No change, Recommended following the
+    # screen, or numbers).  One slider dragged is one step; a starting point,
+    # a Load or a Paste is one step each.
+    def _mode_key(self):
+        if self._screen_mode():
+            return cp.SCREEN_KEY
+        return cp.ASSET_KEY if self._assets_mode() else cp.KEY
+
+    def _stored_raw(self, key):
+        d = staged_changes.load(self._project).get(key)
+        return json.dumps(d, sort_keys=True) if d is not None else None
+
+    def _remember(self, key, before, group=None):
+        """After a change to the profile stored under *key*: *before* (what
+        it was) becomes an Undo step, unless nothing changed or *group* (a
+        slider's name) is still being moved."""
+        if self._stored_raw(key) == before:
+            return
+        self._redo.pop(key, None)
+        now = time.monotonic()
+        last = self._last_move.get(key)
+        self._last_move[key] = (group, now)
+        if group and last and last[0] == group                 and now - last[1] < UNDO_GROUP_S and self._undo.get(key):
+            return
+        steps = self._undo.setdefault(key, [])
+        steps.append(before)
+        del steps[:-UNDO_MAX]
+
+    def _publish_undo(self):
+        key = self._mode_key()
+        self.set(can_undo=bool(self._undo.get(key)),
+                 can_redo=bool(self._redo.get(key)))
+
+    @rpc
+    def undo(self, redo=False):
+        """Undo (or Redo) the last change to the profile on show."""
+        assets = self._project
+        key = self._mode_key()
+        steps = (self._redo if redo else self._undo).get(key)
+        if not (steps and assets and os.path.isdir(assets)):
+            return False
+        back = steps.pop()
+        (self._undo if redo else self._redo).setdefault(key, []).append(
+            self._stored_raw(key))
+        self._last_move.pop(key, None)
+        try:
+            data = staged_changes.load(assets)
+            if back is None:
+                data.pop(key, None)
+            else:
+                data[key] = json.loads(back)
+            staged_changes.save(assets, data)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not undo (%s)" % e])
+            return False
+        self._load()
+        self._changed(display=key != cp.ASSET_KEY)
+        self._tell_tabs()
+        return True
+
+    def _store(self, prof, rev=False, follow=False, group=None):
         """Stage *prof* for the project (``None`` or no change = none;
-        *follow*: the machine screen follows the individual files one)."""
+        *follow*: the machine screen follows the individual files one;
+        *group*: the slider moved, so one drag is one Undo step)."""
         assets = self._project
         if not (assets and os.path.isdir(assets)):
             self.toast("Choose a project folder on the Extract tab first.",
                        "error")
             return False
+        key = self._mode_key()
+        before = self._stored_raw(key)
+        done = self._store_mode(prof, rev, follow)
+        if done:
+            self._remember(key, before, group)
+            self._publish_undo()
+        return done
+
+    def _store_mode(self, prof, rev, follow):
+        assets = self._project
         if self._screen_mode():
             # the machine screen: preview only, nothing pending; None goes
             # back to the Recommended screen
@@ -450,7 +539,9 @@ class ColorTab(TabService):
             # moved off the Recommended one: from here it keeps its numbers
             # and no longer follows the machine screen (PAD-346)
             kw["name"] = "My profile"
-        return self._store(cp.Profile(**kw))
+        # one slider dragged (one key moved) is one Undo step
+        group = next(iter(params)) if len(params) == 1 else None
+        return self._store(cp.Profile(**kw), group=group)
 
     @rpc
     def preset(self, key):
@@ -474,6 +565,16 @@ class ColorTab(TabService):
             self.toast("Choose a project folder on the Extract tab first.",
                        "error")
             return False
+        key = self._mode_key()
+        before = self._stored_raw(key)
+        done = self._store_recommended_mode()
+        if done:
+            self._remember(key, before)
+            self._publish_undo()
+        return done
+
+    def _store_recommended_mode(self):
+        assets = self._project
         try:
             if self._assets_mode():
                 cp.store_asset_profile(assets, None)

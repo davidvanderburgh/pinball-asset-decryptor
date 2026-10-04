@@ -326,11 +326,20 @@ function Curves({ p, screen }) {
 // out-of-range one at the nearest end, Escape puts back the number it had.
 // PAD-338: Middle shades show the file's gamma upside down (1 / gamma), so
 // on every slider a bigger number and the right end mean more.
+// PAD-354: what is typed shows only while the box has the focus, and a move made
+// elsewhere (the slider, a starting point, Undo) drops it, so the box always says what
+// the slider does even when the focus left it without a blur (DragonRR saw 2.81 stay).
 function NumBox({ value, min, max, step, onInput, label }) {
   const places = String(step).includes(".") ? String(step).split(".")[1].length : 0;
   const fmt = (v) => Number(v).toFixed(places);
   const [draft, setDraft] = useState(null);
   const undo = useRef(false), start = useRef(value);
+  const box = useRef(null), was = useRef(value);
+  useEffect(() => {
+    if (value !== was.current && draft != null && Number(draft) !== value) setDraft(null);
+    was.current = value;
+  }, [value]);
+  const typing = draft != null && typeof document !== "undefined" && box.current === document.activeElement;
   const commit = (txt) => {
     const v = Number(txt);
     if (undo.current) { undo.current = false; setDraft(null); if (start.current !== value) onInput(start.current); return; }
@@ -341,7 +350,7 @@ function NumBox({ value, min, max, step, onInput, label }) {
     setDraft(null);
   };
   return html`<span class="field sm cp-sl-num"><input type="number" min=${min} max=${max} step=${step}
-    value=${draft ?? fmt(value)} aria-label=${label + " value"}
+    ref=${box} value=${typing ? draft : fmt(value)} aria-label=${label + " value"}
     onFocus=${(e) => { start.current = value; setDraft(fmt(value)); e.target.select(); }}
     onInput=${(e) => {
       const txt = e.target.value, v = Number(txt);
@@ -357,8 +366,18 @@ function NumBox({ value, min, max, step, onInput, label }) {
 
 // PAD-338: `scale` puts the track on another footing than the number (pos /
 // val: number to track position and back, with the track's own min, max, step).
+// PAD-354: on such a track the arrow keys step the number itself (a track step can round
+// back to the same number, and the key did nothing).
 function Slider({ label, value, min, max, step, show, onInput, hint, cls, left, right, scale }) {
   const sc = scale || { pos: (v) => v, val: (x) => x, min, max, step };
+  const places = String(step).includes(".") ? String(step).split(".")[1].length : 0;
+  const arrow = (e) => {
+    const d = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+    if (!scale || !d) return;
+    e.preventDefault();
+    const v = Number(value) + d * Number(step) * (e.shiftKey ? 10 : 1);
+    onInput(Number(Math.min(Math.max(v, Number(min)), Number(max)).toFixed(places)));
+  };
   return html`<div class=${cx("cp-slider", cls)}>
     <div class="cp-sl-hd">
       <span class="cp-sl-name" ...${tip(hint)}>${label}</span>
@@ -366,7 +385,7 @@ function Slider({ label, value, min, max, step, show, onInput, hint, cls, left, 
       <${NumBox} value=${value} min=${min} max=${max} step=${step} onInput=${onInput} label=${label} />
     </div>
     <input type="range" min=${sc.min} max=${sc.max} step=${sc.step} value=${sc.pos(value)} aria-label=${label}
-      onInput=${(e) => onInput(sc.val(Number(e.target.value)))} />
+      onInput=${(e) => onInput(sc.val(Number(e.target.value)))} onKeyDown=${arrow} />
     ${left || right ? html`<div class="cp-sl-ends small muted"><span>${left}</span><span>${right}</span></div>` : null}
   </div>`;
 }
@@ -750,7 +769,35 @@ export function useProfile(s, delay = 250) {
   // a move still waiting is saved before the mode changes, so it lands on the profile it was
   // made on
   const setMode = async (mode) => { await send(); return call("color.set_mode", mode); };
-  return [p, update, setMode];
+  return [p, update, setMode, send];
+}
+
+// PAD-354: Undo / Redo the last changes to the profile on show (each profile keeps its own;
+// one slider dragged is one step).  *flush* saves a move still waiting first.
+export function undoColor(flush, redo = false) {
+  return Promise.resolve(flush && flush()).then(() => call("color.undo", redo));
+}
+
+export function UndoRedo({ s, flush, size = "sm" }) {
+  return html`<${Button} size=${size} kind="ghost" icon="undo" disabled=${!s.can_undo} onClick=${() => undoColor(flush)}
+      title="Undo the last change to this profile (Ctrl+Z)">Undo<//>
+    <${Button} size=${size} kind="ghost" icon="redo" disabled=${!s.can_redo} onClick=${() => undoColor(flush, true)}
+      title="Redo the change just undone (Ctrl+Y or Ctrl+Shift+Z)">Redo<//>`;
+}
+
+// Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z for the profile: a number or name box keeps its own undo.
+export function undoKey(e, flush) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
+  const k = (e.key || "").toLowerCase();
+  const redo = k === "y" || (k === "z" && e.shiftKey);
+  if (k !== "z" && !redo) return false;
+  const el = e.target;
+  if (el && (el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "SELECT"
+      || (el.tagName === "INPUT" && !/^(range|checkbox|radio|button)$/.test(el.type)))) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  undoColor(flush, redo);
+  return true;
 }
 
 // The line under the modes: what the profile on show does to this project now.
@@ -779,7 +826,14 @@ export function statusNote(s) {
 
 export default function ColorTab() {
   const s = useNs("color");
-  const [p, update, setMode] = useProfile(s);
+  const [p, update, setMode, flush] = useProfile(s);
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  useEffect(() => {
+    const onKey = (e) => { if (!document.querySelector(".scrim")) undoKey(e, flushRef.current); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const samples = [...(s.samples || []), { value: "browse", label: "Another picture..." }];
   const assets = s.per_file && s.mode === "assets";
@@ -788,6 +842,7 @@ export default function ColorTab() {
   const note = statusNote(s);
   return html`<div class="page cp-page">
     <${PageHead} title="Color profile" sub=${INTRO}>
+      <${UndoRedo} s=${s} flush=${flush} />
       <${Button} kind="primary" icon="emulate" onClick=${() => call("color.try_emulator")}
         disabled=${!s.has_project}
         title="Run this project in the emulator with this profile (a running game restarts, since the colors are set when the game starts)">See it in the emulator<//>

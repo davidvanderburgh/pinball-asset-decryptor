@@ -316,11 +316,17 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
   // width AND height) and the inspector side by side, each scrolling on its own.
   return html`<section class="card scenes-card">
     <div class=${cx("scenes-body", wide && "wide")} ref=${bodyRef} style=${bodyStyle}>
+      ${wide ? html`<button type="button" class="sc-list-tab" onClick=${() => setWide(false)}
+          aria-label="Show the scene list" ...${tip("Show the scene list")}>
+        <${Icon} name="right" /><span class="sc-list-tab-txt">Scenes</span><${Icon} name="right" /></button>` : null}
       <div class="scenes-left">
         <div class="row scenes-search">
           <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
             delay=${200} prefix=${html`<${Icon} name="search" />`} />
           <${InfoBadge} text=${s.hint} />
+          <${Button} size="sm" icon="left" cls="sc-list-hide" label="Hide the scene list"
+            title="Hide the scene list: more room for the preview (the Scenes tab on the left brings it back)"
+            onClick=${() => setWide(true)} />
         </div>
         ${(s.scenes || []).length ? null : html`<p class="small muted" style="margin:0">${s.hint}</p>`}
         ${(s.scenes || []).length ? html`<div class="row small muted sc-legend">

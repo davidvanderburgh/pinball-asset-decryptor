@@ -20,6 +20,7 @@ import re
 import threading
 
 from . import compat
+from . import look_switches
 from .rpc import rpc
 
 log = logging.getLogger(__name__)
@@ -426,10 +427,11 @@ class TreeEditMixin:
 
     def _look_sw(self):
         """The preview's three switches (PAD-330): the whole screen overlay, the
-        individual files correction and the machine screen, each on or off."""
+        individual files correction and the machine screen, each on or off, as they were
+        left last time (PAD-348)."""
         sw = getattr(self, "_lsw", None)
         if sw is None:
-            sw = self._lsw = {"overlay": True, "files": True, "screen": True}
+            sw = self._lsw = look_switches.initial(self.window, "scenes")
         return sw
 
     def _machine_view(self):
@@ -470,6 +472,7 @@ class TreeEditMixin:
         if part not in ("overlay", "files", "screen"):
             return False
         self._look_sw()[part] = bool(on)
+        look_switches.save(self.window, "scenes", self._look_sw())
         self._look_changed()
         return True
 
@@ -489,6 +492,7 @@ class TreeEditMixin:
         sw = self._look_sw()
         for k in sw:
             sw[k] = bool(on)
+        look_switches.save(self.window, "scenes", sw)
         self._look_changed()
         return True
 

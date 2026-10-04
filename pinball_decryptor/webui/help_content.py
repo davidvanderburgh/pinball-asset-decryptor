@@ -1113,6 +1113,15 @@ HELP_CONTENT = {
          "Layers) skip it, to see it against the game's own art; it still "
          "gets the overlay. Click a name to open it on the "
          "Color profile tab. Only the preview changes: the card is not."),
+        ("Color profiles bar (Scenes)",
+         "The rainbow tab on the Scenes tab's right edge slides out the "
+         "Color profile tab's controls over the inspector, so you tune a "
+         "profile with the scene in view. One tab each for the Overlay, the "
+         "individual Files and the Machine screen; the same starting points, "
+         "sliders, number boxes, Color ranges, Curves, Save a copy and Load. "
+         "The scene is drawn again a moment after each move, while 'Show it "
+         "in the Scenes preview' (the same switch as under Preview colors) "
+         "is ticked. Click the tab again, or the X, to put it away."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

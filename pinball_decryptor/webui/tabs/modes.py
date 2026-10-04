@@ -857,6 +857,21 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return True
 
     # -- PAD-363: the game's own modes while it runs --------------------------------------
+    def _code_game_modes(self, spec):
+        """A code mode's assets file, in words: what it does about the game's own modes."""
+        if getattr(spec, "game_modes", "block") == "give_way":
+            return "they may start, and one starting ends this one"
+        p = self._title()
+        names = {i: n for i, n, _on in getattr(p, "game_modes", ())} if p is not None else {}
+        if not names:
+            return "they wait while it runs where the game lets them (this game: none can be held off yet)"
+        ids = [i for i in (spec.block_modes or []) if i in names] if isinstance(spec.block_modes, list) else []
+        ids = ids or [i for i, _n, on in p.game_modes if on]
+        if not ids:
+            return "none is held off: list them in its assets file's block_modes (the ids: %s)" % ", ".join(
+                "%d %s" % (i, n) for i, n in sorted(names.items())[:40])
+        return "these cannot start while it runs: " + ", ".join(names[i] for i in sorted(ids))
+
     def _title(self):
         return self._shown or self._profile
 
@@ -2202,6 +2217,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 laid_out=bool(MA.clean_layout(spec.screen_layout)),
                 music=spec.music, calls=calls, clips=clips, hud=dict(spec.hud or {}), files=files, describe=words,
                 summary=self._code_words_one(spec),
+                game_modes=self._code_game_modes(spec),                       # PAD-363
                 recipe=CM.recipe_lines(film.get("recipe")),
                 needs_films=needs, needs_files=needs_files,
                 status=("Cannot be built for this card yet: " + self._refusal()

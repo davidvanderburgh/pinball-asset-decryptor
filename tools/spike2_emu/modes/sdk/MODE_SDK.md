@@ -990,12 +990,12 @@ starting". The examples now keep to themselves:
   `v[8]` at the object's vptr + 0x20 (the vptr is the vtable + 8), on the object the manager's get hands
   it. Each mode has its own start, so the port names one veto site per mode a mode of ours may refuse
   (`site block_start_<id>`), and the runtime refuses that start at its entry while the asking mode runs:
-  the mode never begins, and the rule that asked carries on. Only modes a rule's shot handler starts
-  are named - on Premium 1.16, 21 Jet Fighter Attack (RuleJetFighters) and 23 Tesla Strike
-  (RulePowerlines). The multiballs (balls in a lock; the Godzilla and Mechagodzilla magnets), the
-  battles (the scoop, the select screen) and the timed modes whose starter is not yet traced are not
-  named: one of those starting still ends ours (`kit_game_began`), as a mode whose assets file says
-  `game_modes give_way` does for every game mode. Battles are kept out at the source: the battle
+  the mode never begins, and the rule that asked carries on. Every mode but the multiballs is named
+  (PAD-363, below); a mode that lists none holds off the port's checked defaults (`text block_default`:
+  on Premium 1.16, 21 Jet Fighter Attack and 23 Tesla Strike). The multiballs (balls in a lock; the
+  Godzilla and Mechagodzilla magnets) are never named: one of those starting still ends ours
+  (`kit_game_began`), as a mode whose assets file says `game_modes give_way` does for every game mode.
+  Battles are kept out at the source: the battle
   rule's shot handler (`site block_battle_shots`, RuleBattle::v[25], shot mask in r2:r3) is where a lit
   ramp counts toward a battle and a lit scoop opens the BATTLE SELECTION screen (it creates the process
   that waits for effect 132), and while a mode blocks it is shown the shot without those bits (`value
@@ -1007,6 +1007,22 @@ starting". The examples now keep to themselves:
   own multiball modes".) (A first reading took each vtable's word at +0x20,
   which is `v[6]`, a base routine every mode shares, and hooked nothing a rule calls: caught in the
   emulator, where a forced Jet Fighter Attack still started.)
+
+**Every title (PAD-363).** David (2026-10-04): "is there a way to extend this kind of thinking to other
+games? ... it would be good to have this generic logic (or at least the levers built in for the user)".
+`game_mode_blocks.py` (`sdk/block_tool.py <game program> <port>`) writes the section from a build's own
+program: on a C++ rule title each mode's start is the word at its vtable + 8 + 4 * the title's start
+slot (Godzilla 8, Deadpool 13, Venom 47; the app's stock scanner finds the slot), with its object
+(`data block_obj_<id>`) and name (`text block_name_<id>`). The ids run to 127 (`pm_block_list(ids, n)`,
+a mode file's `block_modes`). A start whose first two words could not run in the veto's trampoline (a
+branch, a literal load, a read of the pc, a return as its first word) is left out. A port derived for
+another build never copies these lines from its reference: a draft gets a section read from its own
+program. A start that carries no object (a plain-C title's) is the mode's own: the runtime tells it by
+which hook fired. A mode file says `game_modes block|give_way|stack` and `block_modes <ids>`; the Modes
+tab offers both under "The game's own modes", with a tick per mode by name; a code mode's assets file
+takes `block_modes` too. The library check (each named mode forced through the game's own start while a
+blocking mode runs, then one forced again with it stopped, to see the start found is the start) is in
+the ticket's notes.
 
 **Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
 shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the

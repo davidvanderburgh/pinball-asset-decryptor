@@ -780,6 +780,7 @@ function CodePane({ s }) {
             ${c.screen && !c.screen_art ? html` <span class="swatch" style=${`background:${c.panel_color};width:14px;height:14px;vertical-align:-2px`}></span> <span class="swatch" style=${`background:${c.title_color};width:14px;height:14px;vertical-align:-2px`}></span>` : null}</span>
           <span class="k">Clip</span><span class="row">${c.clip || "none"}${c.files && c.files.clip ? html`<${Button} size="xs" kind="ghost" icon="play" onClick=${() => s._showClip(c.files.clip, c.name)}>Play<//>` : null}</span>
           <span class="k">Music</span><span class="row">${c.music || "none"}<${PlayButton} path=${c.files && c.files.music} /></span>
+          ${c.game_modes ? html`<span class="k">The game's modes</span><span class="small wrap">${c.game_modes}</span>` : null}
           <span class="k">Film recipe</span><span class="stack small" style="gap:2px">${(c.recipe || []).length
             ? c.recipe.map((line) => html`<span class="wrap" key=${line}>${line}</span>`) : "none"}</span>
         </div>

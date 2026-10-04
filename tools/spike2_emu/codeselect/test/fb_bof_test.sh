@@ -9,6 +9,8 @@
 #      1280x390 and the backbox showed it at half size, top left)
 #   3. a buffer that is only TALLER (1366x768 of 1366x1536, panning room): the visible area
 #      stays the glass, nothing is drawn below row 768
+#   4. the driver is told after every frame (a write of the first pixel through the device),
+#      so Intel's compressed scan-out on the backbox shows each one
 set -u
 BIN=$1; FONT=${2:-}
 T=$(mktemp -d /tmp/fb_bof_test.XXXXXX)
@@ -66,6 +68,18 @@ if [ "$(stat -c %s "$T/tall.fb")" = $((1366 * 1536 * 4)) ] && ! grep -q "whole b
     ok "3 a taller buffer (panning room): the visible area stays the glass"
 else
     bad "3 taller buffer"; cat "$T/tall.log"
+fi
+
+# 4: the driver hears of every frame (David's video: the backbox, on Intel's compressed
+#    scan-out, showed the clips 5 times a second) - a write through the device for the
+#    cleared glass, the menu and each countdown step (this conf animates nothing, so a frame
+#    is drawn only when something changes), and the pixel written back is the one drawn
+told=$(sed -n 's/.*the driver told \([0-9]*\) times by a write.*/\1/p' "$T/two.log")
+if grep -q "after every frame the driver is told" "$T/two.log" && [ -n "$told" ] && [ "$told" -ge 3 ] \
+    && ! drawn 1366 0 0 3 "$T/two.fb" && ! grep -q "refused" "$T/two.log"; then
+    ok "4 the driver is told after every frame: $told writes, the first pixel unchanged"
+else
+    bad "4 the driver is told (told='$told')"; cat "$T/two.log"
 fi
 
 if [ "$FAILS" = 0 ]; then echo "fb_bof_test: OK"; else echo "fb_bof_test: $FAILS FAILED"; exit 1; fi

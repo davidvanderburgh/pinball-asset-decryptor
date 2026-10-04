@@ -48,6 +48,21 @@
  * framebuffer write returns at once, so this paces itself to 60 frames a
  * second the way egl_x11.c's XPutImage path does.
  *
+ * THE DRIVER IS TOLD AFTER EVERY FRAME.  Intel's first display pipe scans out
+ * a COMPRESSED copy of the buffer (FBC), refreshed only when the driver hears
+ * the buffer changed, and writes through the mmap say nothing.  On a
+ * Labyrinth the backbox is that pipe: David's video (2026-10-04) showed its
+ * clips updating 5 times a second, about 170 ms behind the strip, which is on
+ * the second pipe and scans the buffer itself.  The 5 Hz was the console's
+ * cursor blink (HZ/5), whose drawing is the one thing that told the driver.
+ * The menu does what that drawing does: write(2) through the device, which
+ * Linux 6.4's drm_fb_helper_cfb_write turns into the driver's dirty flush
+ * (i915: intelfb_dirty -> frontbuffer flush -> the compressed copy redone).
+ * It writes the buffer's first pixel back over itself, inside the reported
+ * visible rows (a damage clip below them comes out empty and flushes
+ * nothing).  If write(2) is refused, FBIOPAN_DISPLAY to the same offsets is
+ * the fallback: i915 invalidates the frontbuffer on a pan too.
+ *
  * A FAKE FRAMEBUFFER for tests (no /dev/fb0 on a build host or in WSL):
  * PAD_SELECT_FAKEFB=<W>x<H>x<BPP>[,<VW>x<VH>]:<file> maps that regular file
  * instead, with the common little-endian layout for the depth (32: B G R X;
@@ -85,6 +100,9 @@ static struct {
     int scaled;
     int *xmap, *ymap;         /* scaled: glass column/row -> canvas column/row */
     int fake;
+    struct fb_var_screeninfo var;   /* as read: the pan fallback hands it back unchanged */
+    int tell;                 /* how the driver hears of a frame: 0 write(2), 1 pan, -1 not at all */
+    long long told;
 } F = { .fd = -1 };
 
 static unsigned pixel_of(unsigned char r, unsigned char g, unsigned char b)
@@ -159,6 +177,7 @@ static int fb_up(void)
         close(F.fd); F.fd = -1;
         return -1;
     }
+    F.var = v;
     F.fb_w = (int)v.xres; F.fb_h = (int)v.yres; F.bpp = (int)v.bits_per_pixel;
     F.vw = (int)v.xres_virtual; F.vh = (int)v.yres_virtual;
     F.panned = v.xoffset || v.yoffset;
@@ -291,6 +310,28 @@ static void blit(const unsigned char *src, int pitch, int x, int y, int w, int h
     }
 }
 
+/* After a frame: tell the driver the buffer changed (the header's THE DRIVER
+ * IS TOLD) - the first pixel of the buffer written back over itself through
+ * the device, or, if that is refused, a pan to the same offsets. */
+static void tell_driver(void)
+{
+    unsigned char px[4];
+    size_t n = (size_t)(F.bpp / 8);
+    if (F.tell == 0) {
+        memcpy(px, F.map, n);
+        if (pwrite(F.fd, px, n, 0) == (ssize_t)n) { F.told++; return; }
+        sel_log("fb: a write through the device was refused (%s): telling the driver with a pan instead",
+                strerror(errno));
+        F.tell = F.fake ? -1 : 1;
+    }
+    if (F.tell == 1) {
+        if (ioctl(F.fd, FBIOPAN_DISPLAY, &F.var) == 0) { F.told++; return; }
+        sel_log("fb: FBIOPAN_DISPLAY was refused too (%s): the driver is not told of new frames, "
+                "and a compressed scan-out shows them late", strerror(errno));
+        F.tell = -1;
+    }
+}
+
 /* The console's text cursor would blink over the menu: off, the way BOF's
  * updater turns it off (\033[?17;0;0c, the Linux console's soft-cursor
  * sequence) plus the standard hide.  Only on a terminal, and never on the
@@ -332,6 +373,11 @@ int egl_stern_init(struct egl_stern *e, int retries, int retry_ms)
     }
     cursor_off();
     clear_glass();
+    F.tell = 0;
+    F.told = 0;
+    tell_driver();
+    sel_log("fb: after every frame the driver is told the buffer changed (a write of its first pixel): "
+            "a compressed scan-out shows only what it is told");
     e->up = 1;
     sel_log("fb: canvas %dx%d %s at %d,%d on the %dx%d screen", CANVAS_W, CANVAS_H,
             F.scaled ? "scaled" : "1:1", F.ox, F.oy, F.fb_w, F.fb_h);
@@ -347,6 +393,7 @@ int egl_stern_texture(struct egl_stern *e, int w, int h, const unsigned char *px
     if (w > CANVAS_W) w = CANVAS_W;
     if (h > CANVAS_H) h = CANVAS_H;
     blit(px, e->tex_w, 0, 0, w, h);
+    tell_driver();
     return 0;
 }
 
@@ -362,6 +409,7 @@ void egl_stern_frame(struct egl_stern *e, const unsigned char *packed, int x, in
         if (w > 0 && h > 0) {
             blit(packed, pitch, x, y, w, h);
             e->uploaded += (long long)w * h * 4;
+            tell_driver();
         }
         if (F.fake) msync(F.map, F.map_len, MS_ASYNC);
     }
@@ -376,8 +424,9 @@ void egl_stern_frame(struct egl_stern *e, const unsigned char *packed, int x, in
 void egl_stern_close(struct egl_stern *e)
 {
     if (e->up)
-        sel_log("fb: %d frames, %lld KB drawn, closing (the LOADING frame stays up until the game draws)",
-                e->frames, e->uploaded / 1024);
+        sel_log("fb: %d frames, %lld KB drawn, the driver told %lld times by %s, closing "
+                "(the LOADING frame stays up until the game draws)", e->frames, e->uploaded / 1024, F.told,
+                F.tell == 0 ? "a write" : F.tell == 1 ? "a pan" : "nothing");
     /* THE PICTURE STAYS: nothing is cleared.  The LOADING frame is what the
      * player sees until the game's own first frame replaces it. */
     if (F.map) {

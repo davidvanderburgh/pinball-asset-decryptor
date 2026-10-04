@@ -679,7 +679,7 @@ function Explainer({ s }) {
   const screen = s.per_file && s.mode === "screen";
   return html`<${Card} title="What this does" cls="cp-explain">
     <p>A pinball machine's screen doesn't show colors the way your PC monitor does. On a Stern Godzilla, for example, middle greys come out too bright and too blue, and the darkest shades all sink into the same black.</p>
-    ${screen ? html`<p>This profile is that screen. With the Machine screen switched on under Preview colors, Scenes and the Video tab's players draw everything through it, after the whole screen overlay: the game's own art, your replaced files and the pictures you add. It is not a correction, and nothing is written to the card.</p>
+    ${screen ? html`<p>This profile is that screen. With the Machine screen switched on under Preview colors, Scenes and the Video tab's players draw pictures and videos through it, after the whole screen overlay: the game's own art, your replaced files and the pictures you add. Lines of text in Scenes pass it by and get only the overlay. It is not a correction, and nothing is written to the card.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Until you set one, it is the Recommended screen, tuned on a real Spike 2. Same as individual files uses that profile, undone, instead.</li>
       <li><${Icon} name="check" />Scenes looks bluer than your PC, but not blue enough for your machine? Turn the middle shades brighter here, most of all blue.</li>

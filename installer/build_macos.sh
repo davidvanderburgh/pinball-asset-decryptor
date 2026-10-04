@@ -178,6 +178,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.stock_scan" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_scan_c" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_scan_cpp" \
+    --hidden-import "pinball_decryptor.plugins.stern.game_mode_blocks" \
     --hidden-import "pinball_decryptor.plugins.stern.portswitch" \
     --hidden-import "pinball_decryptor.plugins.stern.title_reader" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_remap" \

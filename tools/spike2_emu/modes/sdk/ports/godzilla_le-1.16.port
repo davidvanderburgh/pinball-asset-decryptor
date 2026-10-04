@@ -162,21 +162,6 @@ site stock_battle_running 0x000d43d0 0xe92d4070 0xe30f66a0
 # v[22]: an active mode with (kind & 0x21) == 1 (every multiball)
 site stock_multiball_running 0x000d45a8 0xe92d40f8 0xe30f66a0
 data stock_mode_manager       0x007b0ce4
-# The battle rule's shot handler, RuleBattle::v[25] (vtable 0x642690 + 8 + 100; shot mask in r2:r3): a lit
-# ramp counts toward a battle (0x100000 Left ramp, 0x200000 Right ramp), a lit scoop (hi 0x20) opens the
-# BATTLE SELECTION screen (the process it creates waits for effect 132). A blocking mode hides those bits.
-site block_battle_shots       0x00124b3c 0xe92d40f8 0xe1a06002
-value block_battle_lo         0x00300000
-value block_battle_hi         0x00000020
-# PAD-363 (David's Premium, 2026-10-04: "overlapping text for saucer mode feedback under Ghidorah"): the
-# Saucer Attack rule is no mode of the game's (nothing to refuse), and puts its own words up from its shot
-# handler, RuleSaucerAttack::v[25] (vtable 0x647528 + 8 + 100): the pop bumper (0x40) and hi 0x400 count
-# toward lighting it ("%d MORE TO LIGHT SAUCER ATTACK"), hi 0x100 (Mecha exit bottom) its other path. A
-# blocking mode hides those bits from it alone (the pops' own score is this rule's: none while it blocks).
-site block_rule_0             0x00174f9c 0xe92d47f0 0xe1a04002
-value block_rule_lo_0         0x00000040
-value block_rule_hi_0         0x00000500
-text block_rule_name_0        Saucer Attack rule
 
 # ---- events (item 147): MODE_SDK.md, Events ----------------------------------------------------
 # The ids are Pro 1.15's, and every function that dispatches them has the same shape here
@@ -542,6 +527,22 @@ switch 59   0x4000000000000000 Right flipper button
 # the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
 # a mode that lights its shots lights the button
 lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front
+
+# The battle rule's shot handler, RuleBattle::v[25] (vtable 0x642690 + 8 + 100; shot mask in r2:r3): a lit
+# ramp counts toward a battle (0x100000 Left ramp, 0x200000 Right ramp), a lit scoop (hi 0x20) opens the
+# BATTLE SELECTION screen (the process it creates waits for effect 132). A blocking mode hides those bits.
+site block_battle_shots       0x00124b3c 0xe92d40f8 0xe1a06002
+value block_battle_lo         0x00300000
+value block_battle_hi         0x00000020
+# PAD-363 (David's Premium, 2026-10-04: "overlapping text for saucer mode feedback under Ghidorah"): the
+# Saucer Attack rule is no mode of the game's (nothing to refuse), and puts its own words up from its shot
+# handler, RuleSaucerAttack::v[25] (vtable 0x647528 + 8 + 100): the pop bumper (0x40) and hi 0x400 count
+# toward lighting it ("%d MORE TO LIGHT SAUCER ATTACK"), hi 0x100 (Mecha exit bottom) its other path. A
+# blocking mode hides those bits from it alone (the pops' own score is this rule's: none while it blocks).
+site block_rule_0             0x00174f9c 0xe92d47f0 0xe1a04002
+value block_rule_lo_0         0x00000040
+value block_rule_hi_0         0x00000500
+text block_rule_name_0        Saucer Attack rule
 
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.

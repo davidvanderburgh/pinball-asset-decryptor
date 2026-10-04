@@ -309,11 +309,11 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
              "label": "Show previous sessions in the log",
              "checked": bool(self.show_log_history_var.get())}]})
         items.append({"id": "toggle_scenes_own_colours",
-                      "label": "Switched-off files in their own colors",
+                      "label": "Files with no color profile attached skip the Machine screen",
                       "checked": bool(self.scenes_own_colours_var.get()),
-                      "title": ("With the Machine screen switched on under Preview "
+                      "title": ("With the Machine screen ticked under Preview "
                                 "colors, in Scenes and on the Video tab's players, a "
-                                "file whose color switch is off "
+                                "file with no color profile attached (red palette) "
                                 "shows as you made it instead of through the machine's "
                                 "screen (the whole screen overlay still applies). Off "
                                 "(the default) draws every file through the screen, "

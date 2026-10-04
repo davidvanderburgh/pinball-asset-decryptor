@@ -380,7 +380,7 @@ def test_images_tab_offers_a_color_box_per_replaced_picture(tmp_path):
         assert w.state("images")["preview"]["color"]["on"] is True
         assert staged_changes.load(assets)["image_color_slots"] == {BANNER: True}
         labels = [i.get("label") for i in w.call("images.menu", BANNER, [BANNER])]
-        assert "Keep its own colors" in labels
+        assert "Detach the color profile" in labels
         assert "Colors: follow the Color profile tab's box again" in labels
         # the Color profile tab counts it
         w.call("ui.select_tab", "color")

@@ -619,17 +619,17 @@ const colorTip = (l) => {
   if (c.locked) return { head: "Color: the game's own picture", lines: [
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
     "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images (Advanced, beside Preview colors)." ] };
-  return { head: c.on ? "Color: corrected for the machine" : "Color: its own colors", lines: [
-    ["Click", c.on ? "keep its own colors" : "correct its colors for the machine"],
+  return { head: c.on ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+    ["Click", c.on ? "detach the color profile" : "attach the color profile"],
     c.on ? "The Color profile tab's individual files profile is baked into this picture when you build; the preview shows it."
-      : "It goes on the card in its own colors.",
+      : "It goes on the card as it is.",
     c.stock ? "The game's own picture, unlocked: corrected from its original when you build, so never twice."
       : c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
 };
 const UNLOCK_TIP = { head: "Advanced: unlock extracted images", lines: [
   "Off: the original extracted images are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added are not locked.",
-  "On: each extracted image gets a red / green color switch too, whatever is drawn in it now. A green one is corrected from its original extracted copy when you build.",
-  "The same box as on the Images tab. Turning it off locks them again in their own colors." ] };
+  "On: each extracted image gets a red / green palette too, whatever is drawn in it now. A green one has the color profile attached: it is corrected from its original extracted copy when you build.",
+  "The same box as on the Images tab. Turning it off locks them again as they were." ] };
 const rowTip = (l) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
   lines: [

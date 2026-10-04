@@ -109,3 +109,20 @@ def test_layout_scenes_too(tmp_path, fonts):
     img = R.render_layout(_project(tmp_path), layout, fonts=fonts, view=_view(_blue))
     a = np.asarray(img).astype(int)
     assert len(np.argwhere((a[..., 0] == 0) & (np.abs(a[..., 1] - 150) < 3))) >= 12
+
+
+def test_a_switched_off_pick_is_viewed_without_the_gear_setting(tmp_path, fonts):
+    """PAD-355: text keeps the pass-by layer in use, but a picture whose colour switch is off
+    passes the screen by only with as_made (the gear's own-colours setting)."""
+    from pinball_decryptor.plugins.stern import scene_render as R
+    proj = _project(tmp_path)
+    pics = {"scene_textures/stock.png": {"path": None, "keep": True, "colour": None,
+                                         "skip": True}}
+    g = int(_grey(np.asarray([[[40, 200, 40]]], np.uint8))[0, 0, 0])
+    img = R.render_tree(proj, {"stage": [16, 16, 30]}, draws=_draws(), fonts=fonts,
+                        pictures=pics, sizes={}, view=_view())
+    assert tuple(np.asarray(img)[14, 14][:3]) == (g, g, g)
+    assert len(_ink_px(img)[1]) >= 12
+    img = R.render_tree(proj, {"stage": [16, 16, 30]}, draws=_draws(), fonts=fonts,
+                        pictures=pics, sizes={}, view=_view(), as_made=True)
+    assert tuple(np.asarray(img)[14, 14][:3]) == (40, 200, 40)

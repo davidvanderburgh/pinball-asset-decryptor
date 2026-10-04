@@ -74,7 +74,9 @@ def main():
     scratch = tempfile.mkdtemp(prefix="pad377-")
     project = S._project(scratch, "GZ 1.15 Pro Extract")
     slug, _path = BM.new_blocks_mode(project, "MASER BARRAGE", example="ramps")
-    BM.save(project, slug, maser_program())
+    p = maser_program()
+    p["scripts"] = p["scripts"][2:] + p["scripts"][:2]     # the timer's scripts first, so they are on screen
+    BM.save(project, slug, p)
     proc, url = S._serve(repo, scratch, project)
     try:
         def blocks(page):

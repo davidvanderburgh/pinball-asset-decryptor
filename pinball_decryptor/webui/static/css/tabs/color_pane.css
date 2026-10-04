@@ -63,6 +63,11 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
    controls under it stay put (room for the longest of its messages at the bar's width) */
 .cpd-status { display: flex; min-height: 104px; }
 .cpd-status > .note { flex: 1 1 auto; }
+/* PAD-368: the file clicked, whose own profile the Files mode is on */
+.cpd-file { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--panel-2, transparent); }
+.cpd-file-hd, .cpd-file-own { gap: 6px; align-items: center; min-width: 0; }
+.cpd-file-own .grow { flex: 1 1 auto; }
 .cpd-body .h3 { font-family: var(--cond); font-weight: 600; font-size: 14px; color: var(--ink); }
 
 /* the Color profile tab's cards, narrower: shorter sliders, smaller number boxes */

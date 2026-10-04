@@ -783,12 +783,16 @@ def pending_pictures(assets_dir, bake=True):
         return {}
     keep = set(data.get("image_keep_size") or ())
     try:
-        prof = colour_profile.asset_active(assets_dir)
+        # each picture's own profile (PAD-368), else the project's
+        resolve = colour_profile.asset_resolver(assets_dir, data)
         settings = colour_profile.asset_settings(assets_dir)
     except Exception:
-        prof, settings = None, None
+        resolve, settings = None, None
     if not bake:
-        prof = None
+        resolve = None
+
+    def prof_of(rel):
+        return resolve("images", rel) if resolve is not None else None
     out = {}
     for rel, src in (data.get("image") or {}).items():
         if not isinstance(rel, str) or not rel.startswith("images/"):
@@ -798,7 +802,7 @@ def pending_pictures(assets_dir, bake=True):
                       and colour_profile.asset_applies(settings, "images", rel))
         out[rel[len("images/"):]] = {
             "path": path, "keep": rel in keep,
-            "colour": prof if (prof and switch) else None,
+            "colour": prof_of(rel) if switch else None,
             "skip": bool(path and settings is not None and not switch)}
     if settings is not None:
         # the game's own pictures switched on behind the advanced unlock (PAD-335 /
@@ -810,7 +814,7 @@ def pending_pictures(assets_dir, bake=True):
             for rel in colour_profile.stock_image_rels(assets_dir, set(data.get("image") or ())):
                 out[rel[len("images/"):]] = {
                     "path": staged_originals.snapshot_path(assets_dir, rel),
-                    "keep": False, "colour": prof, "skip": False, "stock": True}
+                    "keep": False, "colour": prof_of(rel), "skip": False, "stock": True}
         except Exception:
             pass
         # the user's own pictures built earlier, pick gone (PAD-345): drawn from their
@@ -820,7 +824,7 @@ def pending_pictures(assets_dir, bake=True):
                 path = (colour_profile.uncorrected_path(assets_dir, rel)
                         or os.path.join(assets_dir, *rel.split("/")))
                 out[rel[len("images/"):]] = {
-                    "path": path, "keep": True, "colour": prof, "skip": False,
+                    "path": path, "keep": True, "colour": prof_of(rel), "skip": False,
                     "built": True}
         except Exception:
             pass
@@ -836,7 +840,8 @@ def pending_pictures(assets_dir, bake=True):
                         continue
                     on = colour_profile.asset_applies(settings, "images", rel,
                                                       own=op.get("color"))
-                    if on and prof is not None:
+                    prof = prof_of(rel) if on else None
+                    if prof is not None:
                         path = os.path.join(assets_dir, "images", *rel.split("/"))
                         if os.path.isfile(path):
                             out[rel] = {"path": path, "keep": True, "colour": prof,

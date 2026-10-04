@@ -107,20 +107,26 @@ const ADV_TIP = { head: "Advanced: unlock the game's own clips", lines: [
   "Gives the game's own clips a Color palette too, on this tab only (the Images tab has its own box for pictures, and Scenes keeps its locks).",
   "A clip you attach the color profile to is re-encoded from its original with the Color profile tab's individual files profile when you build.",
   "Untick it to lock them again; any clip already built that way gets its original back."] };
+// PAD-368: the profile a clip has, for its tooltips ("" where the Color column is not offered)
+const profileLine = (r, cs) => (r.col_lock ? "Color profile: None" : r.col == null ? ""
+  : `Color profile: ${r.col ? ((cs.own_names || {}).videos || {})[r.rel] || cs.asset_name || "Recommended" : "None"}`);
 // PAD-334: the same blue lock / red / green palette as a picture's switch in Scenes
-const colorTip = (r) => (r.col_lock
+const colorTip = (r, cs) => (r.col_lock
   ? { head: "Color: the game's own clip", lines: [
+      profileLine(r, cs),
       "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
       "Choose a replacement to correct a clip of your own, or tick Advanced to unlock it."] }
   : r.col_stock
   ? { head: r.col ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+      profileLine(r, cs),
       ["Click", r.col ? "detach the color profile" : "attach the color profile"],
-      r.col ? "It is re-encoded from its original with the individual files profile when you build."
+      r.col ? "It is re-encoded from its original with its color profile when you build."
         : "Unlocked by Advanced. It stays as the game shipped it.",
       "Set for this clip only: the Every replaced video box never reaches the game's own clips."] }
   : { head: r.col ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+      profileLine(r, cs),
       ["Click", r.col ? "detach the color profile" : "attach the color profile"],
-      r.col ? "The Color profile tab's individual files profile is baked into this clip when you build (it is re-encoded for that)."
+      r.col ? "Its color profile is baked into this clip when you build (it is re-encoded for that). Open Colors with it selected to give it one of its own."
         : "It goes on the card as it is.",
       r.col_own ? "Set for this clip." : "Follows the Color profile tab's box for every replaced video."] });
 // The long-named columns share the width that is left over (more or less
@@ -538,6 +544,10 @@ export default function VideoTab() {
   // the first highlighted row in list order (Tk: tree.selection()[0])
   const firstOf = (set) => { const f = rows.find((x) => set.has(x.rel)); return f ? f.rel : null; };
   const firstSel = useMemo(() => firstOf(sel), [rows, sel]);
+  // PAD-368: the clip clicked, whose own profile the Color profiles bar shows
+  const selRow = firstSel ? rows.find((x) => x.rel === firstSel) : null;
+  const colorFile = selRow && selRow.col != null
+    ? { kind: "videos", rel: selRow.rel, label: selRow.name, on: !!selRow.col, attach: { ns: "video" } } : null;
 
   const loadRow = (rel, delay = 200) => {
     clearTimeout(selectJob.current);
@@ -702,7 +712,8 @@ export default function VideoTab() {
     { key: "play", label: "", width: "30px", cls: "playc",
       render: (r) => html`<button type="button" class="btn sm ghost vid-rowplay" aria-label=${"Play " + r.rel}
         onClick=${(e) => { e.stopPropagation(); playRow(r.rel, "orig"); }}><${Icon} name="play" /></button>` },
-    { key: "rel", label: "Original Video", width: width("rel"), sort: "#0", titleOf: (r) => r.rel,
+    { key: "rel", label: "Original Video", width: width("rel"), sort: "#0",
+      titleOf: (r) => [r.rel, profileLine(r, colorNs)].filter(Boolean).join("\n"),
       render: (r) => html`${r.dir ? html`<span class="mono muted">${r.dir}</span>` : null}${r.name}` },
     { key: "len", label: "Length", width: width("len"), num: true, sort: "len" },
     { key: "res", label: "Resolution", width: width("res"), sort: "res" },
@@ -714,9 +725,9 @@ export default function VideoTab() {
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>` },
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
       render: (r) => (r.col_lock
-        ? html`<span class="vid-color locked" aria-label="The game's own clip: no color profile can be attached" ...${tip(colorTip(r))}><${Icon} name="lock" /></span>`
+        ? html`<span class="vid-color locked" aria-label="The game's own clip: no color profile can be attached" ...${tip(colorTip(r, colorNs))}><${Icon} name="lock" /></span>`
         : r.col == null ? "" : html`<button type="button" class=${cx("vid-color", r.col ? "on" : "off", r.col_own && "own")}
-        aria-label=${r.col_stock ? "Correct the game's own clip's colors for the machine" : "Correct this clip's colors for the machine"} aria-pressed=${r.col ? "true" : "false"} ...${tip(colorTip(r))}
+        aria-label=${r.col_stock ? "Correct the game's own clip's colors for the machine" : "Correct this clip's colors for the machine"} aria-pressed=${r.col ? "true" : "false"} ...${tip(colorTip(r, colorNs))}
         onClick=${(e) => { e.stopPropagation(); if (e.detail > 1) { e.preventDefault(); return; } call("video.set_color", r.rel, !r.col); }}>
         <${Icon} name="palette" /></button>`) },
     { key: "conv", label: "Convert", width: convWidth, sort: "conv", titleOf: (r) => r.conv,
@@ -832,5 +843,6 @@ export default function VideoTab() {
     ${spec ? html`<${SpecDialog} spec=${spec} onClose=${() => setSpec(null)} />` : null}
     ${q.open ? html`<${QualityWindow} q=${q} />` : null}
     ${best.open ? html`<${BestWindow} b=${best} />` : null}
-  </div>${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets" open=${colors} setOpen=${setColors} />` : null}</div>`;
+  </div>${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets" open=${colors} setOpen=${setColors}
+    file=${colorFile} />` : null}</div>`;
 }

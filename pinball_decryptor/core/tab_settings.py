@@ -23,12 +23,13 @@ VERSION = 1
 SECTIONS = {
     "images": ("image", "image_keep_size", "image_group_tags",
                "image_color_slots", "color_all_images",
-               "image_color_unlocked"),
+               "image_color_unlocked", "image_color_profiles"),
     "audio": ("audio", "audio_loop", "audio_keep", "audio_levels",
               "grow_keep_whole", "audio_trim"),
     "video": ("video", "video_asis_slots", "video_length_slots",
               "video_trim", "video_no_conversion", "video_best_quality",
-              "video_color_slots", "color_all_videos", "video_color_stock"),
+              "video_color_slots", "color_all_videos", "video_color_stock",
+              "video_color_profiles"),
 }
 #: The section holding each media tab's replacement picks.
 PICKS = {"images": "image", "audio": "audio", "video": "video"}

@@ -29,14 +29,19 @@ const KEEP_TIP = "Off: the replacement is scaled to the original picture's size,
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
 const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build. Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own picture, never touched (tick Unlock extracted images to give it a palette too). A palette you click is this picture's own setting; the Color profile tab's Every replaced picture box sets the rest.";
+// PAD-368: the profile a file has, for its tooltips ("" where the Color column is not offered)
+const profileLine = (r, cs) => (r.cl ? "Color profile: None" : r.c == null ? ""
+  : `Color profile: ${r.c ? ((cs.own_names || {}).images || {})[r.r] || cs.asset_name || "Recommended" : "None"}`);
 // PAD-335: the same blue lock / red / green palette as the Video tab's Color column
-const colorTip = (r) => (r.cl
+const colorTip = (r, cs) => (r.cl
   ? { head: "Color: the game's own picture", lines: [
+      profileLine(r, cs),
       "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
       "Choose a replacement to correct a picture of your own, or tick Unlock extracted images."] }
   : { head: r.c ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+      profileLine(r, cs),
       ["Click", r.c ? "detach the color profile" : "attach the color profile"],
-      r.c ? "The Color profile tab's individual files profile is baked into this picture when you build."
+      r.c ? "Its color profile is baked into this picture when you build. Open Colors with it selected to give it one of its own."
         : "It goes on the card as it is.",
       r.cg ? "The game's own picture, unlocked: corrected from its original when you build."
         : r.co ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture."] });
@@ -316,8 +321,9 @@ export default function ImagesTab() {
       if (typeof e !== "number") return html`<span class="img-grp ellip" title=${e.l}>${e.l}</span>`;
       const row = slotAt(s, e);
       if (!row) return null;
-      if (grouped) return html`<span class=${cx("img-name img-child", row.t === "foreign" && "img-stray")} title=${row.r}><span class="img-base">${base(row.r)}</span></span>`;
-      return html`<span class=${cx("img-name", row.t === "foreign" && "img-stray")} title=${row.r}><span class="img-dir">${dirOf(row.r)}</span><span class="img-base">${base(row.r)}</span></span>`;
+      const ttl = [row.r, profileLine(row, colorNs)].filter(Boolean).join("\n");
+      if (grouped) return html`<span class=${cx("img-name img-child", row.t === "foreign" && "img-stray")} title=${ttl}><span class="img-base">${base(row.r)}</span></span>`;
+      return html`<span class=${cx("img-name", row.t === "foreign" && "img-stray")} title=${ttl}><span class="img-dir">${dirOf(row.r)}</span><span class="img-base">${base(row.r)}</span></span>`;
     },
   };
   const countCol = {
@@ -358,11 +364,11 @@ export default function ImagesTab() {
       if (!row) return "";
       // PAD-335: a blue lock on the game's own pictures, a red / green palette otherwise
       if (row.cl) return html`<span class="img-color locked" aria-label="The game's own picture: no color profile can be attached"
-        ...${tip(colorTip(row))}><${Icon} name="lock" /></span>`;
+        ...${tip(colorTip(row, colorNs))}><${Icon} name="lock" /></span>`;
       if (row.c == null) return "";
       return html`<button type="button" class=${cx("img-color", row.c ? "on" : "off", row.co && !row.cg && "own")}
         aria-label="Correct this picture's colors for the machine" aria-pressed=${row.c ? "true" : "false"}
-        ...${tip(colorTip(row))} onClick=${(ev) => {
+        ...${tip(colorTip(row, colorNs))} onClick=${(ev) => {
           ev.stopPropagation();
           if (ev.detail > 1) { ev.preventDefault(); return; }
           if (cur !== row.r) selectOnly(row.r);
@@ -517,5 +523,7 @@ export default function ImagesTab() {
 
     ${s.note ? html`<p class="small muted img-note">${s.note}</p>` : null}
     ${rename ? html`<${RenameModal} spec=${rename} onClose=${() => setRename(null)} />` : null}
-  </div>${colorNs.has_project ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors} />` : null}</div>`;
+  </div>${colorNs.has_project ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors}
+    file=${prevRel && p.color ? { kind: "images", rel: prevRel, label: p.rep_name || base(prevRel), on: !!p.color.on,
+      attach: { ns: "images" } } : null} />` : null}</div>`;
 }

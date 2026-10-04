@@ -621,14 +621,15 @@ const gameTip = (l) => ({
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
 // own colours (red), or the game's own picture, which has no switch (blue lock) until the
 // advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
-const colorTip = (l) => {
+const colorTip = (l, cs) => {
   const c = l.color || {};
   if (c.locked) return { head: "Color: the game's own picture", lines: [
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
     "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images (Advanced, beside Preview colors)." ] };
   return { head: c.on ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+    layerProfile(l, cs),
     ["Click", c.on ? "detach the color profile" : "attach the color profile"],
-    c.on ? "The Color profile tab's individual files profile is baked into this picture when you build; the preview shows it."
+    c.on ? "Its color profile is baked into this picture when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
       : "It goes on the card as it is.",
     c.stock ? "The game's own picture, unlocked: corrected from its original when you build, so never twice."
       : c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
@@ -637,13 +638,21 @@ const UNLOCK_TIP = { head: "Advanced: unlock extracted images", lines: [
   "Off: the original extracted images are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added are not locked.",
   "On: each extracted image gets a red / green palette too, whatever is drawn in it now. A green one has the color profile attached: it is corrected from its original extracted copy when you build.",
   "The same box as on the Images tab. Turning it off locks them again as they were." ] };
-const rowTip = (l) => ({
+// PAD-368: the profile a layer's picture has ("" for a layer with no colour switch)
+export const layerProfile = (l, cs) => {
+  const c = l.color;
+  if (!c) return "";
+  if (c.locked || !c.on) return "Color profile: None";
+  return `Color profile: ${((cs.own_names || {}).images || {})[c.rel] || cs.asset_name || "Recommended"}`;
+};
+const rowTip = (l, cs) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
   lines: [
     l.edits || l.kind,
     l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Its eye turns it on here."
       : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on."
       : !l.drawn && !l.view_off ? "Not on the screen at this moment." : null,
+    layerProfile(l, cs) || null,
     ["Click", "select it (shown on top while selected)"],
     ["Ctrl+click", "add it to the selection or take it out"],
     ["Shift+click", "select a run of layers"],
@@ -682,6 +691,7 @@ function layerMenu(t, l, e) {
 }
 
 function TreeLayers({ t }) {
+  const cs = useNs("color");
   const listRef = useRef(null);
   const sels = t.sels || [];
   useEffect(() => {
@@ -716,7 +726,7 @@ function TreeLayers({ t }) {
         onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
         class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game")}
-        style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l))}
+        style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l, cs))}
         onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
         onContextMenu=${(e) => layerMenu(t, l, e)}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
@@ -730,7 +740,7 @@ function TreeLayers({ t }) {
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
         <${Icon} name="sd" /></button>
       ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off")}
-        aria-label="Color profile on this picture" aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l))}
+        aria-label="Color profile on this picture" aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
         onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on); }}>
         <${Icon} name=${l.color.locked ? "lock" : "palette"} /></button>` : html`<span></span>`}
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"

@@ -17,6 +17,10 @@
 // a change made here is the change made in Scenes or on the Color profile tab.  Each tab
 // remembers whether its bar was left open; the width is shared.  On Images and Video the
 // bar opens on Files the first time, the profile their Color column attaches.
+// PAD-368 (DragonRR): one profile per file.  A file clicked (a picture, a clip, a layer) with
+// the bar open, or the bar opened with one clicked, turns the bar to Files on THAT file: it
+// shows the profile baked into it now, and a change gives it a profile of its own.  "Same as
+// the other files" puts it back on the project's individual files profile.
 
 import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -167,10 +171,26 @@ function CopyPaste({ p, update, mode, name }) {
   </div>`;
 }
 
+// The file the bar is on (PAD-368): its name, and whether it has a profile of its own.
+function FileLine({ s }) {
+  const f = s.file;
+  if (!f) return null;
+  return html`<div class="cpd-file">
+    <div class="row cpd-file-hd"><span class="eyebrow nw">This file</span>
+      <span class="mono small ellip" title=${f.rel}>${f.label}</span></div>
+    <div class="row cpd-file-own">${f.own
+      ? html`<span class="small muted grow">It has a color profile of its own.</span>
+        <${Button} size="xs" onClick=${() => call("color.file_shared")}
+          title=${`Drop this file's own profile: it gets the individual files profile every other file gets (“${s.asset_name || "Recommended"}”)`}>Same as the other files<//>`
+      : html`<span class="small muted">${`Same as the other files (“${s.asset_name || "Recommended"}”). A change here gives it a profile of its own.`}</span>`}</div>
+  </div>`;
+}
+
 // host: "scenes" (the default), "images" or "video" (PAD-364).  startMode: the profile the
 // bar opens on the first time it is opened here (Images and Video: "assets", the one their
-// Color column attaches); after that it opens where it was left.
-export function ColorBar({ open, setOpen, host = "scenes", startMode = null }) {
+// Color column attaches); after that it opens where it was left.  file (PAD-368): the file
+// clicked on the host, {kind, rel, label, on, attach}, or null.
+export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null }) {
   const s = useNs("color");
   const h = HOSTS[host] || HOSTS.scenes;
   const lookState = useNs(h.lookNs || "color");
@@ -186,6 +206,14 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null }) {
       call("color.set_mode", startMode).then(() => call("color.panel_open"));
     } else call("color.panel_open");
   }, [open]);
+  // the file clicked: the bar's Files mode is its profile while the bar is open here
+  const fileKey = file ? `${file.kind}\n${file.rel}\n${file.on}` : "";
+  useEffect(() => {
+    if (!open || !s.per_file) return;
+    if (file) call("color.set_file", file.kind, file.rel, file.label || "", file.on, file.attach || null);
+    else call("color.set_file");
+  }, [open, fileKey, s.per_file]);
+  useEffect(() => () => { call("color.set_file"); }, []);
   const mode = s.per_file ? (s.mode || "display") : "display";
   // the dots: the host's Preview colors row where it has one, else the profiles' own word
   const parts = (look && look.parts) || s.parts || {};
@@ -227,9 +255,10 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null }) {
         <div class="row cpd-show"><${ShowHere} mode=${mode} look=${look} host=${host} /><span class="sp"></span>
           <${UndoRedo} s=${s} flush=${flush} size="xs" />
           <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div>
+        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} />` : null}
         <div class="cpd-status">${statusNote(s)}</div>
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
-        ${s.per_file && mode === "assets" ? html`<${WhichFiles} s=${s} />` : null}
+        ${s.per_file && mode === "assets" && !s.file ? html`<${WhichFiles} s=${s} />` : null}
         <${Controls} s=${s} p=${p} update=${update} />
         <${Ranges} s=${s} p=${p} update=${update} />
         <${CurveEditor} s=${s} p=${p} update=${update} />

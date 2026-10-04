@@ -159,8 +159,8 @@ halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the to
 - **Inserts:** the lit head's ramp (or the Building) and its powerline are GOLD: solid at full health,
   blinking at 2, blinking fast at 1. A wounded head that is not lit PULSES GREEN (it is growing back).
   The final blow: MASER and MASER READY flash white. Display priority 180.
-- **How often:** once a ball, twice a game. It waits while the game's own kaiju battle runs: the next
-  powerline after it starts it.
+- **How often:** once a ball, twice a game. It waits while the game's own kaiju battle or a multiball
+  runs (the game's, or two balls in play): the next powerline after it starts it.
 
 ### OXYGEN DESTROYER (`oxygen_destroyer.c`): a hurry-up
 
@@ -174,7 +174,9 @@ halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the to
 - **Inserts:** the LEFT RAMP blinks green, yellow, then red as the value falls, faster each time; the
   Godzilla target's insert (MAGNA GRAB) pulses while a hold-off is left; collected, the RIGHT RAMP
   flashes white for the super jackpot. Display priority 180.
-- **How often:** three times a game, 15 s apart at least. It runs beside anything the game does.
+- **How often:** three times a game, 15 s apart at least. It waits out a multiball (the game's, or two
+  balls in play), still ready: the next spin after it starts it. Beside the game's battles and timed
+  modes it runs, its words aside.
 
 ### MASER BARRAGE (`maser_barrage.c`): a combo chain
 
@@ -189,7 +191,9 @@ halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the to
 - **Inserts:** the NEXT shot is bright Maser blue, the other two a dim blue: the whole chain is on the
   playfield. The next shot is solid until the first step, then blinks while its window runs, faster as
   it closes (500, 250, then 100 ms). Display priority 180.
-- **How often:** once a ball. A skill shot made while another pack mode runs waits 15 s for it.
+- **How often:** once a ball. A skill shot made while another pack mode runs waits 15 s for it. It waits
+  out a multiball (the game's, or two balls in play): after three Maser hits the next Maser hit after it
+  starts it; a skill shot during a multiball is not held.
 
 ### FINAL WARS (`final_wars.c`): the wizard mode
 
@@ -228,3 +232,11 @@ halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the to
 - **How often:** once per game battle.
 
 Only one pack mode runs at a time, whatever starts it.
+
+**Beside the game's own modes (PAD-347).** Stern never shows two modes' words at once: one mode has the
+middle of the screen, the others keep to their badges at the edge. While one of the game's modes runs
+(a battle, a multiball, a timed mode such as JET FIGHTER ATTACK), a pack mode that keeps running steps
+aside as ANGUIRUS always has: its title and instruction line move into the award line between the
+game's counters and its title, its counters along the top are hidden, its gauge stays on the right
+edge, and its timer badge drops one slot while a battle's BATTLE badge has the top one. When the
+game's mode ends everything goes back (MODE_SDK.md "Stepping aside").

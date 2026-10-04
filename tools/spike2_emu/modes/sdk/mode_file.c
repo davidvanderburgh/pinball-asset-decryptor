@@ -55,6 +55,7 @@ struct mode_cfg {
     char clip_start[96], clip_end[96];
     unsigned starts_game, starts_ball, cooldown_s;   /* item 139: 0 = no limit */
     int stack_no;                   /* item 140: `stack no` - never beside the game's battle or multiball */
+    int aside_keep;                 /* PAD-347: `aside keep` - its screen stays up beside a game mode */
     /* item 141: what each shot pays, a shot that ends the mode, and the award ladder */
     uint64_t sa_bits[SHOT_AWARD_MAX], sa_points[SHOT_AWARD_MAX];
     unsigned n_sa;
@@ -97,6 +98,7 @@ struct slot {
     unsigned trig[5];
     void *node, *text;
     unsigned hide_ticks;
+    int aside;                            /* PAD-347: its screen is stepped aside for a game mode */
     unsigned ev_trig[5], ev_pending;      /* item 147: event start counts; a start waiting for pm_in_game */
     unsigned also[ALSO_MAX][5];           /* PAD-227: each trigger_also line's count, per player */
     int after_said;                       /* PAD-227: its `after` mode is missing, said once */
@@ -237,6 +239,19 @@ static int stack_line(struct slot *M, const char *line)
     if (a[0] == 'n' || a[0] == 'N' || a[0] == '0') cfg.stack_no = 1;
     else if (a[0] == 'y' || a[0] == 'Y' || a[0] == '1') cfg.stack_no = 0;
     else pm_log("stack needs yes or no - \"%.40s\" read as yes", a);
+    return 1;
+}
+
+/* PAD-347: `aside hide` (the default) / `aside keep` - while one of the game's own modes runs, the middle
+ * of the screen is the game's (pm_aside) and the mode's screen is hidden, back when the game's mode ends;
+ * `keep` leaves it up (a screen laid out clear of the game's words). */
+static int aside_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "aside");
+    if (!a) return 0;
+    if (a[0] == 'k' || a[0] == 'K') cfg.aside_keep = 1;
+    else if (a[0] == 'h' || a[0] == 'H') cfg.aside_keep = 0;
+    else pm_log("aside needs keep or hide - \"%.40s\" read as hide", a);
     return 1;
 }
 
@@ -1581,6 +1596,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (own_sounds_key(M, line)) return;
     if (starts_line(M, line)) return;
     if (stack_line(M, line)) return;
+    if (aside_line(M, line)) return;         /* PAD-347 */
     if (multiball_line(M, line)) return;     /* item 167 */
     if (ball_save_line(M, line)) return;     /* PAD-225 */
     if (params_line(M, line)) return;
@@ -1780,6 +1796,7 @@ static void mode_start(struct slot *M, const char *why)
         if (M->node) {
             words(M, "", cfg.award, " A SHOT");
             pm_show(M->node, 1);
+            M->aside = 0;                    /* PAD-347: on_tick steps it aside if a game mode runs */
             M->hide_ticks = 0;
         } else {
             pm_log("own screen not found - nothing shown, and no message id borrowed");
@@ -2211,6 +2228,24 @@ static void poll_bound(void)
     poll_n = n < MODES_MAX ? n + 1 : MODES_MAX;
 }
 
+/* PAD-347: while its screen is up (the mode running, or its total showing) and one of the game's own modes
+ * runs, the screen steps aside: hidden, and shown again when the game's mode ends (`aside keep`: never). */
+static void screen_aside_tick(struct slot *M)
+{
+    int a;
+    if (!own_screen(M) || !M->node || cfg.aside_keep) return;
+    if (!running(M) && !M->hide_ticks) {     /* down anyway: nothing to put back */
+        M->aside = 0;
+        return;
+    }
+    a = pm_aside();
+    if (!a == !M->aside) return;
+    M->aside = a != 0;
+    pm_show(M->node, !M->aside);
+    if (M->aside) pm_log("%s: its screen steps aside - %s has the middle of the screen", cfg.name, pm_stock_mode_what((unsigned)a));
+    else pm_log("%s: its screen is back - the game's mode is over", cfg.name);
+}
+
 static void on_tick(void)
 {
     static unsigned ticks;
@@ -2235,8 +2270,10 @@ static void on_tick(void)
         }
         if (M->hide_ticks && --M->hide_ticks == 0 && !running(M) && M->node) {
             pm_show(M->node, 0);
+            M->aside = 0;
             pm_log("own screen hidden");
         }
+        screen_aside_tick(M);                /* PAD-347 */
     }
     if (ticks % POLL_TICKS == 0) {
         poll_bound();

@@ -8,7 +8,8 @@
  *   START      Hit all three powerline targets (left, center, right, any order) in one ball.
  *              The third one starts the battle. Once a ball, twice a game per player. It
  *              waits while one of the game's own kaiju battles runs (two battles at once make
- *              no sense): the next powerline hit after that battle starts it.
+ *              no sense) or a multiball does (PAD-347: the game's, or two balls in play): the next
+ *              powerline hit after it starts it.
  *   HEADS      LEFT HEAD   = Left ramp (2 damage) or Powerline left (1 damage)
  *              MIDDLE HEAD = Building (2 damage) or Powerline center (1 damage)
  *              RIGHT HEAD  = Right ramp (2 damage) or Powerline right (1 damage)
@@ -240,12 +241,11 @@ static int start(const char *why, int counted)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (counted && kit_stock_busy(PM_STOCK_BATTLE, MODE_NAME, &what)) {
-        pm_log("not started (%s): %s is running - it starts on the next powerline hit after it", why, what);
-        return 0;
-    }
+    (void)what;
+    if (counted && kit_wait_game(MODE_NAME, why, "the next powerline hit after it starts it")) return 0;   /* PAD-347 */
     if (!kit_begin(MODE_NAME)) return 0;          /* another of our modes: pm_begin logged it */
     kit_display(KIT_DISPLAY_MODE);                /* first: before the screen and the clip */
+    kit_isolate(own.give_way);                    /* PAD-347: the game's modes wait for it */
     run.on = 1;
     run.counted = counted;
     run.player = p;
@@ -520,6 +520,11 @@ static void on_tick(void)
     if (!run.on) return;
     if (!pm_in_game() || pm_player() != run.player) {
         end("the game moved on", 0);
+        return;
+    }
+    if (kit_game_began()) {                        /* PAD-347: isolated - the game began one of its own */
+        end("the game's own mode began", 0);
+        kit_end_now();
         return;
     }
     battle_tick();

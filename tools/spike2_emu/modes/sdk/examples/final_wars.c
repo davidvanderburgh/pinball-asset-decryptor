@@ -304,12 +304,13 @@ static int start(const char *why)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (kit_stock_busy(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL, MODE_NAME, &what)) {
+    if (kit_game_busy(MODE_NAME, &what)) {          /* PAD-347: any of the game's modes, or two balls */
         pm_log("not started (%s): %s is running - still lit, the next %s after it starts it", why, what, START_SHOT);
         return 0;
     }
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_WIZARD);              /* first: before the screen and the clip */
+    kit_isolate(own.give_way);                    /* PAD-347: the game's modes wait for it */
     run.on = 1;
     run.player = p;
     run.total = 0;
@@ -509,6 +510,11 @@ static void on_tick(void)
     }
     if (!pm_in_game() || pm_player() != run.player) {
         end("the game moved on", 0);
+        return;
+    }
+    if (kit_game_began()) {                        /* PAD-347: isolated - the game began one of its own */
+        end("the game's own mode began", 0);
+        kit_end_now();
         return;
     }
     if (kit_timer_tick(&run.clock)) {

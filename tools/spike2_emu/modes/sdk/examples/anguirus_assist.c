@@ -197,7 +197,7 @@ static void say(unsigned long ms)
 {
     if (!run.holding) {
         run.holding = pm_display_priority(KIT_DISPLAY_MODE);
-        if (run.holding) pm_log("display priority %d held for a moment: the panel speaks", KIT_DISPLAY_MODE);
+        if (run.holding) pm_log("display priority %d asked for a moment: the panel speaks", KIT_DISPLAY_MODE);
     }
     if (!hud.up) kit_hud_show(&hud, 1);
     if (run.say_left < ms) run.say_left = ms;

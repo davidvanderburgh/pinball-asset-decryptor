@@ -6,7 +6,9 @@
  *   START      Spin the LEFT SPINNER 25 times in one ball (hud-layers: it used to be the Godzilla
  *              target 3 times, which MELTDOWN's ten captive-ball hits would always set off first).
  *              Up to 3 times a game per player, and not again for 15 s after it ends (25 fresh spins
- *              every time). It runs beside anything the game is doing (a hurry-up only adds points).
+ *              every time). It waits out a multiball (the game's, or two balls in play) and stays
+ *              ready: the next spin after it starts it (PAD-347). Beside the game's battles and timed
+ *              modes it runs, its words aside (a hurry-up only adds points).
  *   HURRY-UP   The value starts at 20,000,000 and falls 800,000 every second, down to 0 at
  *              25 s. The LEFT RAMP collects it. The Godzilla target holds it off: each hit
  *              puts 2 seconds (1,600,000) back, up to 20,000,000, three times at most.
@@ -192,8 +194,10 @@ static int start(const char *why, int counted)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
+    if (counted && kit_wait_game(MODE_NAME, why, "the next spin after it starts it")) return 0;   /* PAD-347 */
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_MODE);                /* first: before the screen and the clip */
+    kit_isolate(own.give_way);                    /* PAD-347: the game's modes wait for it */
     run.on = 1;
     run.player = p;
     run.phase = PHASE_HURRY;
@@ -370,6 +374,11 @@ static void on_tick(void)
     if (!run.on) return;
     if (!pm_in_game() || pm_player() != run.player) {
         end("the game moved on", 0);
+        return;
+    }
+    if (kit_game_began()) {                        /* PAD-347: isolated - the game began one of its own */
+        end("the game's own mode began", 0);
+        kit_end_now();
         return;
     }
     if (run.phase == PHASE_SUPER) {

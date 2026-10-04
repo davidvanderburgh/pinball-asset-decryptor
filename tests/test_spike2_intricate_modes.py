@@ -1417,3 +1417,117 @@ def test_every_text_a_mode_writes_on_its_hud_fits(harness):
                 too_long.append((slug, field, words, len(words), cap))
     assert not too_long, too_long
     assert known == set(KNOWN_TOO_LONG), set(KNOWN_TOO_LONG) - known     # fixed: take it off the list
+
+# ---- PAD-347: isolated - our modes keep to themselves --------------------------------------------------------
+# David's Premium, 2026-10-03: during the game's JET FIGHTER ATTACK one of ours wrote its words in the very places
+# the game's mode writes its own, and OXYGEN DESTROYER started during the game's multiball. Stacked with their words
+# aside it was better, but (2026-10-04) "still a bit too much overlap with other modes. i'd prefer to try them
+# isolated from other ones." `timed 1` is one of the game's modes that is neither a battle nor a multiball.
+STACK_STARTS = [
+    ("ghidorah_heads", POWERLINES),
+    ("oxygen_destroyer", SPINS),
+    ("maser_barrage", ["event", "skill_shot"]),
+    ("final_wars", ["trigger", "final_wars.light", "secs", 8, "shot", "Building"]),
+    ("meltdown", MELTDOWN_START),
+]
+
+
+@pytest.mark.parametrize("busy", ["timed", "battle", "multiball"])
+@pytest.mark.parametrize("slug,start", STACK_STARTS, ids=[s for s, _ in STACK_STARTS])
+def test_a_mode_ends_the_moment_one_of_the_games_modes_begins(harness, slug, start, busy):
+    out = play(harness, *start, "secs", 4, busy, 1, "secs", 1)
+    began = _at(out, ">> %s 1" % busy)
+    mode = NAMES[slug]
+    assert _at(out, "[%s] START" % mode) < began, out[-2000:]
+    t = _at(out, "[%s] END (the game's own mode began)" % mode)
+    assert t is not None and began <= t <= began + 40, out[-2000:]
+    assert t in _hid(out, slug)                                              # its words go in the same tick
+    assert _at(out, "[%s] lights: all handed back to the game" % mode) == t
+    if busy != "battle":                                  # ANGUIRUS joins a battle of the game's and lights the shields
+        assert "END lamps held 0" in out
+
+
+@pytest.mark.parametrize("slug,start", STACK_STARTS, ids=[s for s, _ in STACK_STARTS])
+def test_a_mode_runs_to_its_own_end_when_the_game_starts_nothing(harness, slug, start):
+    out = play(harness, *start, "secs", 4)
+    assert not has(out, NAMES[slug], "the game's own mode began")
+
+
+def test_the_huds_second_badge_slot_is_named_as_the_kit_finds_it():
+    from pinball_decryptor.plugins.stern import mode_hud
+    names = mode_hud.hud_names("maser_barrage")
+    assert names["Timer2"] == "PadMode_maser_barrage_Hud_Timer2"
+    assert names["Timer2_Num"] == "PadMode_maser_barrage_Hud_Timer2_Num"
+    kit = (EX / "intricate_kit.h").read_text(encoding="utf-8")
+    assert '".PadMode_%s_Hud_Timer2"' in kit and '".PadMode_%s_Hud_Timer2.PadMode_%s_Hud_Timer2_Num"' in kit
+    assert mode_hud.TIMER2_DY - mode_hud.TIMER_DY == 109.0                   # the stock badges' slot pitch
+
+
+MASER_X3 = ["shot", "Maser target", "ms", 300] * 3
+
+
+@pytest.mark.parametrize("busy", [("multiball", 1, 0, ">> multiball 0"), ("balls", 2, 1, ">> balls in play 1"),
+                                  ("battle", 1, 0, ">> battle 0"), ("timed", 1, 0, ">> timed 0")],
+                         ids=["games_multiball", "two_balls", "games_battle", "games_timed_mode"])
+@pytest.mark.parametrize("mode,qualify,again", [
+    ("KING GHIDORAH", POWERLINES, ["shot", "Powerline left"]),
+    ("OXYGEN DESTROYER", SPINS, ["shot", "Left spinner"]),
+    ("MASER BARRAGE", MASER_X3, ["shot", "Maser target"]),
+], ids=["ghidorah", "oxygen", "maser"])
+def test_a_single_ball_mode_waits_out_the_games_modes_still_ready(harness, busy, mode, qualify, again):
+    cmd, on, off, over = busy
+    # two qualifying shots after it: after a battle ANGUIRUS shows its total, which gives way to the first
+    out = play(harness, cmd, on, *qualify, cmd, off, "secs", 1, *again, "secs", 1, *again, "secs", 1)
+    waited = _at(out, "[%s] not started" % mode)
+    assert waited is not None, out[-2000:]
+    assert has(out, mode, "is running - still ready")
+    begun = _at(out, "[%s] START" % mode)
+    assert begun is not None and begun > _at(out, over), out[-2000:]   # the shot after it
+
+
+# ---- PAD-353: a display of the game's is never held back; the HUD keeps its words off it --------------------
+def test_a_modes_words_wait_while_a_display_of_the_games_has_the_screen(harness):
+    """The Magna-Grab's screen waited for a mode's hold and Godzilla kept its magnet on (PAD-353): the game's
+    displays now play as they come, so while one has the screen the mode's middle words are blank, its badge
+    stays, and its words are back when the display is gone."""
+    s = "maser_barrage"
+    out = play(harness, "event", "skill_shot", "secs", 4, "covered", 1, "secs", 1, "covered", 0, "secs", 1)
+    on, off = _at(out, ">> covered 1"), _at(out, ">> covered 0")
+
+    def last(field, t):
+        said = [w for ms, w in hud(out, s, field) if ms <= t]
+        return said[-1] if said else None
+
+    assert last("Title", on) == "MASER BARRAGE" and last("C1_Value", on) not in (None, " ")
+    assert has(out, "MASER BARRAGE", "hud maser_barrage: its words wait while a display of the game's has the screen")
+    for field in ("Title", "Line", "Award", "AwardSub", "C1_Label", "C1_Value", "C2_Value", "C3_Value"):
+        assert last(field, off) == " ", field
+    timer = re.findall(r"^\s*(\d+) SHOW PadMode_%s_Hud\.PadMode_%s_Hud_Timer 0$" % (s, s), out, re.M)
+    assert not [t for t in timer if on <= int(t) <= off]                     # the badge at the edge stays
+    assert any(on <= ms <= off for ms, _w in hud(out, s, "Timer_Num"))       # and keeps counting
+    assert has(out, "MASER BARRAGE", "hud maser_barrage: its words are back")
+    assert hud_next(out, s, "Title", off) == "MASER BARRAGE"
+
+
+# ---- PAD-347: an isolated mode BLOCKS the game's modes while it runs, unless its assets file says give_way ------
+@pytest.mark.parametrize("slug,start", STACK_STARTS, ids=[s for s, _ in STACK_STARTS])
+def test_an_isolated_mode_blocks_the_games_modes_from_its_start_to_its_end(harness, slug, start):
+    mode = NAMES[slug]
+    out = play(harness, *start, "secs", 2, "ball_end", "ms", 20)
+    begun = _at(out, "[%s] START" % mode)
+    on = _at(out, "BLOCK 1 %s" % mode)
+    assert on is not None and on <= begun, out[-2000:]                       # before anything of its own
+    assert has(out, mode, "isolated: blocks the game's modes the port lets it refuse while it runs")
+    ended = _at(out, "[%s] END (ball ended)" % mode)
+    off = _at(out, "BLOCK 0 %s" % mode)
+    assert ended is not None and off is not None and off <= ended + 20, out[-2000:]
+
+
+def test_game_modes_give_way_in_its_assets_file_means_it_blocks_nothing(harness, tmp_path):
+    d = tmp_path / "dump_gw"
+    d.mkdir()
+    (d / "maser_barrage.assets").write_text("name MASER BARRAGE\ngame_modes give_way\n")
+    out = play_own(harness, str(d), "event", "skill_shot", "secs", 2, "ball_end", "ms", 20)
+    assert _at(out, "[MASER BARRAGE] START") is not None
+    assert "BLOCK 1 MASER BARRAGE" not in out
+    assert has(out, "MASER BARRAGE", "isolated: gives way - one of the game's modes starting ends it")

@@ -220,6 +220,8 @@ static long vid_uploads, vid_distinct;
 static unsigned vid_last_off = 0xffffffffu;
 /* item 11: where padglhost's per-frame time goes. */
 static double conv_us, swap_us;
+/* PAD-359: CPU time spent inside the video frame's GL upload call. */
+static double upl_us;
 static long vid_last_frame, vid_swaphist[6];
 /* ★ ITEM 27, the star_wars black flicker: WHAT EACH SWAP ACTUALLY CARRIED.
  * The Windows-side capture measured 32.8% BLACK frames (236 runs, median 2
@@ -370,6 +372,26 @@ static int vid_geom_n;
  * build, on one run, instead of against a rebuild - this rig has been fooled
  * by comparing two runs before. */
 static int vid_nomipfix;
+
+/* PAD-359: RE-SPECIFY ONLY WHEN THE SHAPE CHANGES. Every video frame used to
+ * go up through glTexImage2D, which redefines the texture's level 0 each
+ * time - on Mesa's d3d12 driver (WSLg) that can mean a fresh resource per
+ * frame. A frame the same size as the last one on the same texture object
+ * only needs its pixels replaced, which is glTexSubImage2D.
+ *
+ * Tracked per guest texture name: the HOST object the last direct upload
+ * defined level 0 on, and that level's size (the format is always RGBA
+ * UNSIGNED_BYTE here, so size is the whole shape). texd_obj 0 = unknown,
+ * re-specify. Anything else that can redefine the name's level 0 - a
+ * TEXIMAGE or compressed upload at level 0, the FBO storage heal, GENTEX,
+ * a world reset - clears it.
+ *
+ * PAD_VID_TEXFULL=1 puts back glTexImage2D on every frame, so the two can
+ * be compared on one build ("upload ms/f" on the fps line). */
+static unsigned texd_obj[MAXNAME];
+static unsigned short texd_w[MAXNAME], texd_h[MAXNAME];
+static int vid_texfull;
+static long vid_texsub;
 
 /* Frames still owed to the "a new video size just appeared" burst.
  *
@@ -4062,6 +4084,7 @@ static void jgl_reset_world(void)
      * has storage until the replay re-defines it - stale flags here would
      * skip the FBOTEX storage heal on the replayed stream. */
     memset(tex_stored, 0, sizeof tex_stored);
+    memset(texd_obj, 0, sizeof texd_obj);                     /* PAD-359 */
     memset(vao_on, 0, sizeof vao_on);
     memset(vao_backed, 0, sizeof vao_backed);
     memset(vao_elem, 0, sizeof vao_elem);
@@ -4927,7 +4950,10 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     case PADGL_BLENDEQ:         p_glBlendEquation(u[0]); break;
     case PADGL_BLENDEQSEP:      p_glBlendEquationSeparate(u[0],u[1]); break;
 
-    case PADGL_GENTEX:          if (u[0] < MAXNAME) p_glGenTextures(1, &map_tex[u[0]]); break;
+    case PADGL_GENTEX:
+        if (u[0] < MAXNAME) { p_glGenTextures(1, &map_tex[u[0]]);
+                              texd_obj[u[0]] = 0; }          /* PAD-359 */
+        break;
     case PADGL_DELTEX:          /* deferred, name kept - see the graveyards */
         if (u[0] < MAXNAME && map_tex[u[0]]) {
             unsigned on = grave_tex_name[tgrave_head], oo = grave_tex_obj[tgrave_head];
@@ -4977,8 +5003,10 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             d2_upload_note(u[6] ? "teximage" : "teximage(storage only)",
                            u[2], u[3], 0, 0, u[4]);
         }
-        if (u[0] == 0)                       /* level 0 defines storage */
+        if (u[0] == 0) {                     /* level 0 defines storage */
             tex_stored[cur_tex_unit_binding & (MAXNAME-1)] = 1;
+            texd_obj[cur_tex_unit_binding & (MAXNAME-1)] = 0;   /* PAD-359 */
+        }
         /* GLES samples BLACK from a texture that has only level 0 while
          * MIN_FILTER is still its default NEAREST_MIPMAP_LINEAR - the texture
          * is "incomplete". The Vivante driver on the machine is laxer, and the
@@ -5099,8 +5127,30 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                         w, h, src, n ? lit * 400 / n : 0);
             }
         }
-        p_glTexImage2D(0x0DE1, 0, 0x1908 /*RGBA*/, (int)w, (int)h, 0,
-                       0x1908, 0x1401 /*UNSIGNED_BYTE*/, rgba);
+        {   /* PAD-359: replace the pixels when the shape is unchanged.
+             * The object is checked against what GL actually has bound, so
+             * a binding this process mis-tracked (another texture unit, a
+             * name past MAXNAME) re-specifies instead of writing a
+             * sub-image into the wrong texture. */
+            unsigned b = cur_tex_unit_binding & (MAXNAME - 1);
+            unsigned obj = cur_tex_unit_binding < MAXNAME
+                         ? map_tex[cur_tex_unit_binding] : 0;
+            int bound = 0;
+            double t = now_s();
+            if (obj) p_glGetIntegerv(0x8069 /*TEXTURE_BINDING_2D*/, &bound);
+            if (!vid_texfull && obj && (unsigned)bound == obj
+                    && texd_obj[b] == obj && texd_w[b] == w && texd_h[b] == h) {
+                p_glTexSubImage2D(0x0DE1, 0, 0, 0, (int)w, (int)h,
+                                  0x1908, 0x1401, rgba);
+                vid_texsub++;
+            } else {
+                p_glTexImage2D(0x0DE1, 0, 0x1908 /*RGBA*/, (int)w, (int)h, 0,
+                               0x1908, 0x1401 /*UNSIGNED_BYTE*/, rgba);
+                texd_obj[b] = (obj && (unsigned)bound == obj) ? obj : 0;
+                texd_w[b] = (unsigned short)w; texd_h[b] = (unsigned short)h;
+            }
+            upl_us += (now_s() - t) * 1e6;
+        }
         /* Same completeness trap as PADGL_TEXIMAGE, and worse here, in TWO
          * ways that both end in the same place: a texture that only ever gets
          * level 0 while the sampler wants a mip chain.
@@ -5159,6 +5209,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         d2_upload_note("texsubimage", u[3], u[4], u[1], u[2], u[5]);
         break;
     case PADGL_TEXCOMPRESSED:
+        if (u[0] == 0) texd_obj[cur_tex_unit_binding & (MAXNAME-1)] = 0;
         p_glCompressedTexImage2D(0x0DE1,(int)u[0],u[1],(int)u[2],(int)u[3],0,
                                  (int)u[4], u[4] ? pl + 20 : 0);
         break;
@@ -5409,6 +5460,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             p_glTexParameteri(0x0DE1, 0x2800, 0x2601);
             p_glBindTexture(0x0DE1, (unsigned)prevtex);
             tex_stored[g] = 1;
+            texd_obj[g] = 0;                                  /* PAD-359 */
             fprintf(stderr, "[padglhost] fbo attachment: guest tex %u had no "
                     "storage (VIV-mapped?); allocated %dx%d RGBA so the FBO "
                     "is complete\n", g, fb_w, fb_h);
@@ -5576,6 +5628,10 @@ int main(int argc, char **argv)
         if (getenv("PAD_VID_SNAP_MAX")) vid_snap_max = atoi(getenv("PAD_VID_SNAP_MAX"));
     }
     vid_nomipfix = getenv("PAD_VID_NOMIPFIX") ? atoi(getenv("PAD_VID_NOMIPFIX")) : 0;
+    vid_texfull = getenv("PAD_VID_TEXFULL") ? atoi(getenv("PAD_VID_TEXFULL")) : 0;
+    if (vid_texfull)
+        fprintf(stderr, "[padglhost] PAD_VID_TEXFULL: every video frame "
+                "re-specifies its texture (glTexImage2D)\n");
     if (vid_nomipfix)
         fprintf(stderr, "[padglhost] PAD_VID_NOMIPFIX: a mipmap MIN_FILTER on a "
                 "video texture will be left as the game asked\n");
@@ -5834,14 +5890,16 @@ int main(int argc, char **argv)
                 long nf = frames_done - last_frames;
                 fprintf(stderr, "[padglhost] %.1f fps (%ld frames total)"
                         "  vid %.1f uploads/s %.1f NEW/s"
-                        "  conv %.2f ms/f  swap %.2f ms/f\n",
+                        "  conv %.2f ms/f  swap %.2f ms/f"
+                        "  upload %.3f ms/f (%ld sub)\n",
                         nf / dt, frames_done,
                         (vid_uploads - last_up) / dt,
                         (vid_distinct - last_dist) / dt,
                         nf ? conv_us / nf / 1000.0 : 0.0,
-                        nf ? swap_us / nf / 1000.0 : 0.0);
+                        nf ? swap_us / nf / 1000.0 : 0.0,
+                        nf ? upl_us / nf / 1000.0 : 0.0, vid_texsub);
                 last_up = vid_uploads; last_dist = vid_distinct;
-                conv_us = swap_us = 0;
+                conv_us = swap_us = upl_us = 0;
                 if (vid_swaphist[1] + vid_swaphist[2] + vid_swaphist[3] +
                     vid_swaphist[4] + vid_swaphist[5]) {
                     long h = vid_swaphist[3] + vid_swaphist[4] + vid_swaphist[5];

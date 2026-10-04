@@ -786,12 +786,18 @@ function cssTf(ops, W, H) {
 // Each frame is loaded the moment it is drawn and painted on a canvas only once it has loaded:
 // swapping an <img>'s src at 30 fps showed the old picture while the new one loaded, so a
 // slower machine saw about one frame in five (PAD-261, DragonRR: "plays 22 of the 120").
+// The first loop waits until enough frames are ready that, at the speed they are being drawn,
+// the rest are done before it gets to them (a fifth of the scene at least), and waits again the
+// same way if it ever catches up: run frame by frame as they came, it froze every few frames
+// wherever drawing was slower than the scene (PAD-361, a scene of over 100 pictures).
+const PLAY_AHEAD = 0.2;
 function TreePlayer({ s, onFrame }) {
   const play = s.tree_play;
   const t = s.tree_view;
   const W = t.stage[0], H = t.stage[1];
   const [f, setF] = useState(0);
   const [shown, setShown] = useState(false);
+  const [filling, setFilling] = useState(true);    // holding until frames are ready ahead
   const cvRef = useRef(null);
   const imgs = useRef(new Map());                    // frame file -> its Image, loading
   const playRef = useRef(play);
@@ -807,17 +813,20 @@ function TreePlayer({ s, onFrame }) {
   }, [play.srcs]);
   useEffect(() => {
     let i = 0;
-    const ms = Math.max(15, Math.round(1000 / (play.fps || 30)));
-    const timer = setInterval(() => {
-      const p = playRef.current;
-      const want = (p.map || [])[i];
-      if (want == null) {                           // not drawn yet: hold
-        if (p.done) i = 0;                          // (a play cut short loops what it has)
-        return;
-      }
+    let fill = true;                                // start (and after a stall) on a full buffer
+    const t0 = performance.now();
+    const fps = play.fps || 30;
+    const ms = Math.max(15, Math.round(1000 / fps));
+    const ready = (p, k) => {                       // frame k drawn and loaded (or failed)
+      const want = (p.map || [])[k];
+      if (want == null) return false;
       const src = (p.srcs || [])[want] || "";
       const im = src ? imgs.current.get(src) : null;
-      if (src && !(im && im.complete && im.naturalWidth > 0)) return;  // still loading: hold
+      return !src || !!(im && im.complete && im.naturalWidth > 0);
+    };
+    const paint = (p, k) => {                       // frame k on the canvas
+      const src = (p.srcs || [])[p.map[k]] || "";
+      const im = src ? imgs.current.get(src) : null;
       const cv = cvRef.current;
       if (im && cv) {                               // (a frame that failed to draw: skipped)
         if (cv.width !== im.naturalWidth || cv.height !== im.naturalHeight) {
@@ -828,6 +837,34 @@ function TreePlayer({ s, onFrame }) {
         cv.setAttribute("data-src", src);
         setShown(true);
       }
+    };
+    let still = false;                              // the opening frame shown while waiting
+    const timer = setInterval(() => {
+      const p = playRef.current;
+      if ((p.map || [])[i] == null && p.done) i = 0; // (a play cut short loops what it has)
+      if (fill) {
+        if (!still && i === 0 && ready(p, 0)) {
+          still = true;
+          paint(p, 0);
+        }
+        const ahead = Math.min(Math.max(1, Math.ceil(p.frames * PLAY_AHEAD)), p.frames - i);
+        let k = 0;
+        while (k < ahead && ready(p, i + k)) k++;
+        if (k < ahead && !(p.done && k > 0 && (p.map || [])[i + k] == null)) return;
+        if (!p.done) {                              // and the drawing will stay ahead
+          const drawn = (p.map || []).length;
+          const rate = drawn / Math.max(0.001, (performance.now() - t0) / 1000);
+          if ((p.frames - drawn) / rate > (drawn - i) / fps) return;
+        }
+        fill = false;
+        setFilling(false);
+      }
+      if (!ready(p, i)) {                           // caught up with the drawing: refill
+        fill = true;
+        setFilling(true);
+        return;
+      }
+      paint(p, i);
       setF(i);
       onFrame(i + 1);
       i = (i + 1) % p.frames;
@@ -837,7 +874,9 @@ function TreePlayer({ s, onFrame }) {
   return html`<div class="scenes-canvas tree-canvas" style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}>
     <canvas class="tree-frame" ref=${cvRef} style=${shown ? "" : "visibility:hidden"}></canvas>
     ${shown ? null : html`<${Drawing} label="Drawing the frames…" />`}
-    <div class="tree-playing small">Frame ${f + 1} of ${play.frames}</div>
+    <div class="tree-playing small">${filling && !play.done
+      ? `Getting frames ready… ${(play.map || []).length} of ${play.frames}`
+      : `Frame ${f + 1} of ${play.frames}`}</div>
   </div>`;
 }
 

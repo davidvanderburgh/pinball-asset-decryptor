@@ -325,7 +325,8 @@ BOF = MultibootBackend(
     status_checks=(("card", "Update"), ("images", "Images"),
                    ("built", "Built"), ("ready", "Ready for the stick")),
     max_cards=6, groups=True, compact=False, machine_volume=False,
-    volume_default=50, volume_max=100, attract_clip=False,
+    # the attract clip is the build's own, out of its .fun (mkbofmulti.py media)
+    volume_default=50, volume_max=100, attract_clip=True,
     update=False, bypass=False, extract=False, read_card=False,
     selector_default="/var/tmp/bofselect",
     selector_suffix="/bofselect", selector_binary="bofselect",

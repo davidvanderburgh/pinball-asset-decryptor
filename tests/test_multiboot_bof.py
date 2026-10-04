@@ -52,6 +52,11 @@ def test_backend_lookup_and_what_bof_has():
     assert BOF.max_games == 4 and BOF.max_cards == 6
     # a .fun is named for its title, so no folder of builds makes a group
     assert BOF.add_choices == frozenset({"_add_image", "_add_random_over_existing"})
+    # each build's own attract clip comes out of its .fun: the dialog offers it, the form takes it
+    assert BOF.attract_clip and "attract" in dict(mt.ImageEditorDialog.kinds_for(BOF))
+    clip = bof_form()
+    clip.images[0].anim = "auto"
+    assert not [e for e in mt.validate_form(clip, sources=False) if "attract" in e]
     assert BOF.root_steps == frozenset() and BOF.preview_native
     # the program FILE each image becomes on the machine
     assert BOF.device(0) == "GDCraze.x86_64" and BOF.device(1) == "pad_image1.bin"

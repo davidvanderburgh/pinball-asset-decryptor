@@ -184,18 +184,25 @@ function Divider({ k, horizontal, measure, split, setSplit, save, dir = 1, label
     onDblClick=${reset} onKeyDown=${key}><span></span></div>`;
 }
 
-// The page head's buttons (Export picture…, Export all pictures…, Re-read from card…): none of
-// them is needed to keep an edit (edits are kept as they are made; Write puts them on the card).
+// The page head's buttons (Export picture… / Export video…, Export all pictures…, Export all
+// videos…, Re-read from card…): none of them is needed to keep an edit (edits are kept as they
+// are made; Write puts them on the card).  PAD-365: a scene that moves exports as a video, and
+// "Export all videos…" writes one MP4 per listed scene; the message beside the buttons follows
+// an export along and says what it wrote.
 export function ScenesActions() {
   const s = useNs("text_scenes");
   if (!s.alive) return null;
   const tips = s.tips || {};
+  const any = !!(s.scenes || []).length;
   return html`
     ${s.rebuild_msg ? html`<span class="small muted scenes-msg-head">${s.rebuild_msg}</span>` : null}
-    <${Button} kind="ghost" icon="download" disabled=${!s.can_save && !s.exporting} title=${tips.save}
-      onClick=${() => call("text_scenes.save_preview")}>${s.exporting ? "Cancel" : "Export picture…"}<//>
-    <${Button} kind="ghost" title=${tips.save_all} disabled=${!(s.scenes || []).length && !s.bulk}
+    ${!s.rebuild_msg && s.export_msg ? html`<span class="small muted scenes-msg-head" title=${s.export_msg}>${s.export_msg}</span>` : null}
+    <${Button} kind="ghost" icon=${s.can_video ? "video" : "download"} disabled=${!s.can_save && !s.exporting}
+      title=${tips.save} onClick=${() => call("text_scenes.save_preview")}>${s.exporting ? "Cancel" : s.can_video ? "Export video…" : "Export picture…"}<//>
+    <${Button} kind="ghost" title=${tips.save_all} disabled=${(!any && !s.bulk) || s.bulk_video}
       onClick=${() => call("text_scenes.save_all")}>${s.bulk ? "Cancel" : "Export all pictures…"}<//>
+    <${Button} kind="ghost" icon="video" title=${tips.save_all_video} disabled=${(!any && !s.bulk_video) || s.bulk}
+      onClick=${() => call("text_scenes.save_all_videos")}>${s.bulk_video ? "Cancel" : "Export all videos…"}<//>
     <${Button} kind="ghost" iconRight="down" disabled=${!(s.scenes || []).length}
       title="Save your scene edits to a file, to keep as a backup or send to someone, and load a file of scene edits into this project"
       onClick=${(e) => openMenu(e.currentTarget, [

@@ -59,14 +59,20 @@ TIPS = {
     "save": "A picture of this scene for you to keep or share (not needed for your "
             "edits: they are kept as you make them, and Write puts them on the card).\n\n"
             "The scene is written out full size, a 1360x768 frame. A still scene saves as a PNG. One that "
-            "moves offers MP4 or GIF: the MP4 is the whole scene at its own "
-            "frame rate, re-rendered for the export, and needs ffmpeg "
-            "installed. The GIF is what is playing in the preview.",
+            "moves offers an MP4 video: the whole scene, every frame at its own "
+            "frame rate, drawn as it shows here (your edits, the preview eyes, the "
+            "backdrop and the Machine screen included). It needs ffmpeg installed. "
+            "The frame on the preview can be saved as a PNG instead.",
     "save_all": "Pictures of the scenes for you to keep or share (not needed for your "
                 "edits). One PNG per scene into a folder you pick — every "
                 "scene the list is showing, so a Search narrows the batch."
-                "\n\nAn animated scene is saved as its first frame; use "
-                "\"Export picture…\" on that scene for the whole thing as MP4.",
+                "\n\nAn animated scene is saved as its resting frame; "
+                "\"Export all videos…\" writes the whole of each one as an MP4.",
+    "save_all_video": "A video of every scene the list is showing (a Search narrows the "
+                      "batch), in one go: one MP4 per scene that moves, every frame at the "
+                      "scene's own frame rate, into a folder you pick. A scene that does "
+                      "not move is saved as a PNG. Needs ffmpeg installed; the button "
+                      "becomes Cancel while it runs.",
     "rebuild": "Re-read the scenes from the card image on the Extract "
                "tab, so an improved preview reaches this project folder. Your scene edits are "
                "kept: this is not a reset (Reset, under the preview, is)."
@@ -106,13 +112,19 @@ def _safe_stem(label):
                    for c in (label or "scene")) or "scene"
 
 
-def _unique_png(label, used):
+def _unique_name(label, used, ext="png"):
+    """``<label>.<ext>``, suffixed ``_2``, ``_3``… while the stem is already in *used* (two
+    scenes that sanitise alike must not overwrite each other)."""
     stem = _safe_stem(label)
     name, n = stem, 2
     while name.lower() in used:
         name, n = "%s_%d" % (stem, n), n + 1
     used.add(name.lower())
-    return name + ".png"
+    return "%s.%s" % (name, ext)
+
+
+def _unique_png(label, used):
+    return _unique_name(label, used, "png")
 
 
 def collect_scenes(assets_dir):
@@ -305,6 +317,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._live_job = None
         self._export = None
         self._bulk = None
+        self._vbulk = None            # "Export all videos…" running (PAD-365)
         self._rebuild = None
         self._tmp = None
         self._raise_n = 0
@@ -335,6 +348,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                  bg=self._bg, bgs=self._bg_names(), bg_rgb=self._bg_rgb(),
                  machine_look=any(self._look_sw().values()),
                  exporting=False, bulk=False, rebuilding=False,
+                 can_video=False, bulk_video=False, export_msg="",
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
                  tree_loading=False, tree_img_rev=0, preparing=None, tree_live=None,
@@ -418,6 +432,10 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         layout dialog is dropped, the preview frames are deleted."""
         if self._bulk is not None:
             self._bulk["cancel"] = True
+        if self._vbulk is not None:
+            self._vbulk["cancel"] = True
+        if self._export is not None:
+            self._export["cancel"] = True
         self._live_layout = None
         self._cancel_live_job()
         self._mlay = None
@@ -658,7 +676,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             self._frames_full = []
             self.set(sel=None, contents=None, item=None, thumb="",
                      detail="", frames=[], canvas_msg="", can_save=False,
-                     caption="", caption_full="", screens=[],
+                     can_video=False, caption="", caption_full="", screens=[],
                      animated=False)
             return
         sc = self._scenes[sel]
@@ -1293,13 +1311,13 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                    " This project was extracted before previews existed"
                    " — re-extract with Images enabled to get them."))
             self.set(frames=[], canvas_msg="no preview for this scene",
-                     can_save=False, screens=[], animated=False)
+                     can_save=False, can_video=False, screens=[], animated=False)
             return
         self._set_caption("Drawing…")
         # Tk cleared the canvas and wrote "drawing…" on it: a near-black
         # leftover from the previous scene reads as the wrong scene.  A new
         # scene also drops the previous one's screen list.
-        self.set(canvas_msg="drawing…", can_save=False, frames=[],
+        self.set(canvas_msg="drawing…", can_save=False, can_video=False, frames=[],
                  animated=False)
         if new_scene:
             self.set(screens=[], screen=_ALL_SCREENS)
@@ -1367,7 +1385,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                 "This scene's layout is known but it could not be drawn "
                 "(a missing image or font in this project folder).")
             self.set(frames=[], canvas_msg="nothing could be drawn",
-                     can_save=False)
+                     can_save=False, can_video=False)
             return
         self._preview_full = frames[0]
         self._frames_full = frames
@@ -1377,7 +1395,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                      " all %d to MP4." % (len(frames), n_all))
         self._set_caption(note, lead=lead)
         self.set(frames=paths, canvas_msg="" if paths else
-                 "nothing could be drawn", can_save=True,
+                 "nothing could be drawn", can_save=True, can_video=animated,
                  fps=self._effective_fps(layout))
 
     def _prune_tmp(self, keep_token):
@@ -1439,11 +1457,20 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
     # ------------------------------------------------------------------
     # Export picture… / Export all pictures… / Re-read from card…
     # ------------------------------------------------------------------
+    def _tree_showing(self):
+        """The scene on the canvas is drawn from its tree (the editor), not a layout."""
+        if not self._sel or self._tman is None or self._tshown_card is None:
+            return False
+        return self._tree_available(self._sel)
+
     @rpc
     def save_preview(self):
         """Write the full-size render out: PNG for a still scene; MP4 (the
         whole scene, re-rendered) or GIF (what is playing) for one that
-        moves.  While an MP4 is written the button cancels it."""
+        moves.  While an MP4 is written the button cancels it.
+
+        PAD-365: a scene drawn from its tree (the editor) exports its whole timeline as an
+        MP4 too, drawn as Play shows it, full size."""
         from ..plugins.stern import scene_render
         img = self._preview_full
         if img is None:
@@ -1451,32 +1478,39 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         if self._export is not None:
             self._export["cancel"] = True
             self._set_caption("Stopping the export…")
+            self.set(export_msg="Stopping…")
             return True
         frames = [f for f in (self._frames_full or ()) if f is not None]
-        layout = self._current_layout()
-        group = self._screen_index(layout)
-        n_all = scene_render.frame_count(layout, 0, group)
-        animated = len(frames) > 1
+        tree = self._tree_showing()
+        layout = None if tree else self._current_layout()
+        group = None if tree else self._screen_index(layout)
+        n_all = self._tree_frame_count(self._tman) if tree else \
+            scene_render.frame_count(layout, 0, group)
+        animated = (n_all > 1) if tree else (len(frames) > 1)
         base = (self._scenes.get(self._sel, {}).get("label")
                 if self._sel else "") or "scene"
         safe = _safe_stem(base)
         types = [("PNG image", "*.png")]
         if animated:
-            types.insert(0, ("Animated GIF", "*.gif"))
+            if not tree:
+                types.insert(0, ("Animated GIF", "*.gif"))
             types.insert(0, ("MP4 video", "*.mp4"))
         ext = "mp4" if animated else "png"
         path = self.window.ask_save(
-            "scene_preview", "Save scene preview",
+            "scene_preview", "Save scene as a video" if animated else "Save scene preview",
             initialfile="%s.%s" % (safe, ext), filetypes=types,
             defaultextension="." + ext)
         if not path:
             return False
-        fps = self._effective_fps(layout)
         if animated and path.lower().endswith(".mp4"):
-            self._export_mp4(path, layout, group, n_all, fps)
+            if tree:
+                self._export_tree_mp4(path)
+            else:
+                self._export_mp4(path, layout, group, n_all, self._effective_fps(layout))
             return True
         try:
-            if animated and path.lower().endswith(".gif"):
+            if animated and not tree and path.lower().endswith(".gif"):
+                fps = self._effective_fps(layout)
                 frames[0].save(
                     path, save_all=True, append_images=frames[1:], loop=0,
                     duration=max(20, int(round(1000.0 / max(1.0, fps)))))
@@ -1486,7 +1520,21 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             compat.messagebox.showerror("Save failed", str(e))
             return False
         self._set_caption("Saved %s" % os.path.basename(path))
+        self.set(export_msg="Saved %s" % os.path.basename(path))
         return True
+
+    def _export_start(self, path, n_all):
+        state = self._export = {"cancel": False}
+        self.set(exporting=True)
+        msg = "Writing %s — frame 1 of %d…" % (os.path.basename(path), n_all)
+        self._set_caption(msg)
+        self.set(export_msg=msg)
+
+        def progress(cur):
+            if state is not self._export or (cur % 10 and cur != n_all):
+                return
+            self.ctx.loop.post(self._export_tick, state, path, cur, n_all)
+        return state, progress
 
     def _export_mp4(self, path, layout, group, n_all, fps):
         from ..core import video
@@ -1497,15 +1545,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         colors = self._pending_colors(card)
         layout_edits = self._pending_layouts(card)
         text_edits = self._pending_texts(card, lay)
-        state = self._export = {"cancel": False}
-        self.set(exporting=True)
-        self._set_caption("Writing %s — frame 1 of %d…"
-                          % (os.path.basename(path), n_all))
-
-        def progress(cur):
-            if state is not self._export or (cur % 10 and cur != n_all):
-                return
-            self.ctx.loop.post(self._export_tick, state, cur, n_all)
+        state, progress = self._export_start(path, n_all)
 
         def work():
             def render():
@@ -1527,10 +1567,29 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         threading.Thread(target=work, daemon=True,
                          name="scene-mp4").start()
 
-    def _export_tick(self, state, cur, total):
+    def _export_tree_mp4(self, path):
+        """PAD-365: the scene on the canvas (drawn from its tree), every frame of its timeline,
+        full size, as an MP4 at the scene's own rate."""
+        from ..core import video
+        job = self._tree_video_job(self._tshown_card, self._tman)
+        state, progress = self._export_start(path, job["frames"])
+
+        def work():
+            try:
+                n = video.encode_frames_to_mp4(self._tree_frames(job, state), path,
+                                               fps=job["fps"], progress=progress)
+                err = None
+            except Exception as e:                   # noqa: BLE001
+                n, err = 0, e
+            self.ctx.loop.post(self._export_done, state, path, n, job["fps"], err)
+
+        threading.Thread(target=work, daemon=True, name="scene-mp4").start()
+
+    def _export_tick(self, state, path, cur, total):
         if state is self._export:
-            self._set_caption("Writing the MP4 — frame %d of %d…"
-                              % (cur, total))
+            msg = "Writing %s — frame %d of %d…" % (os.path.basename(path), cur, total)
+            self._set_caption(msg)
+            self.set(export_msg=msg)
 
     def _export_done(self, state, path, n, fps, err):
         if state is not self._export:
@@ -1542,17 +1601,20 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                 os.remove(path)
             except OSError:
                 pass
-            self._set_caption("Stopped — %s not written."
-                              % os.path.basename(path))
+            msg = "Stopped — %s not written." % os.path.basename(path)
+            self._set_caption(msg)
+            self.set(export_msg=msg)
             return
         if err is not None or not n:
             self._set_caption("Could not write %s" % os.path.basename(path))
+            self.set(export_msg="Could not write %s" % os.path.basename(path))
             compat.messagebox.showerror(
                 "Save failed", str(err or "") or "Nothing could be rendered.")
             return
-        self._set_caption("Saved %s — %d frame%s at %g fps"
-                          % (os.path.basename(path), n,
-                             "" if n == 1 else "s", fps))
+        msg = "Saved %s — %d frame%s at %g fps" % (
+            os.path.basename(path), n, "" if n == 1 else "s", fps)
+        self._set_caption(msg)
+        self.set(export_msg=msg)
 
     @rpc
     def save_all(self):
@@ -1672,6 +1734,196 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             "Saved %d preview%s to %s (first frame of each).%s"
             % (written, "" if written == 1 else "s",
                os.path.basename(out.rstrip("/\\")) or out, tail))
+
+    # ------------------------------------------------------------------
+    # Export all videos… (PAD-365: "export all the scenes as videos, in one click")
+    # ------------------------------------------------------------------
+    @rpc
+    def save_all_videos(self):
+        """One MP4 per listed scene that moves (every frame, at the scene's own rate) and a
+        PNG of each still one, into a folder the user picks; while it runs the button
+        cancels.  Drawn as the Scenes tab draws them: the edits, the preview eyes, the
+        backdrop and the Machine screen included."""
+        from ..core import video
+        from ..plugins.stern import scene_render
+        if self._vbulk is not None:
+            self._vbulk["cancel"] = True
+            self._set_caption("Stopping…")
+            self.set(export_msg="Stopping…")
+            return True
+        dirs = [d for d in self._listed if d in self._scenes]
+        if not dirs:
+            compat.messagebox.showinfo("Export all videos",
+                                       "No scenes are listed to save.")
+            return False
+        if not video.find_ffmpeg():
+            compat.messagebox.showerror(
+                "Export all videos",
+                "ffmpeg is needed to write an MP4 and it isn't installed here. "
+                "Install ffmpeg and try again.")
+            return False
+        out = self.window.ask_folder(
+            "scene_videos", "Save a video of every listed scene into…")
+        if not out:
+            return False
+        # gathered here, on the UI thread: the worker never reads the editor's state
+        jobs = []
+        for d in dirs:
+            label = self._scenes[d].get("label") or d
+            tcard, tman = self._tree_card(d)
+            if tman is not None:
+                jobs.append({"dir": d, "label": label, "tree": True, "card": tcard,
+                             "stock": tman, "hidden": set(self._tree_view_hidden(tcard)),
+                             "unveil": set(self._tree_hidden(tcard)),
+                             "pins": dict(self._tpins.get(tcard) or {}),
+                             "text_edits": self._pending_texts(tcard, None),
+                             "colors": self._pending_colors(tcard)})
+                continue
+            card, layout = scene_render.layout_for_scene_dir(self._layouts, d)
+            jobs.append({"dir": d, "label": label, "tree": False, "card": card,
+                         "layout": layout,
+                         "colors": self._pending_colors(card) if layout else None,
+                         "layout_edits": self._pending_layouts(card) if layout else None,
+                         "text_edits": self._pending_texts(card, layout) if layout else None})
+        state = self._vbulk = {
+            "cancel": False, "out": out, "jobs": jobs, "bg": self._bg,
+            "view": self._machine_view(), "as_made": self._as_made(),
+            "pictures": self._tree_pictures(), "sizes": self._tree_sizes()}
+        self.set(bulk_video=True)
+        msg = "Writing videos — scene 1 of %d…" % len(jobs)
+        self._set_caption(msg)
+        self.set(export_msg=msg)
+
+        def work():
+            videos, stills, skipped, err = self._save_all_videos_work(state)
+            self.ctx.loop.post(self._save_all_videos_done, state, out, videos, stills,
+                               skipped, err)
+
+        threading.Thread(target=work, daemon=True, name="scene-save-videos").start()
+        return True
+
+    def _save_all_videos_work(self, state):
+        """Worker body: ``(videos, stills, skipped, error)``."""
+        from ..core import video
+        from ..plugins.stern import scene_edit, scene_render
+        jobs, out, bg = state["jobs"], state["out"], state["bg"]
+        videos, stills, skipped, used, err = 0, 0, 0, set(), None
+        total = len(jobs)
+        try:
+            if self._fonts is None:
+                from ..plugins.stern import fontrender as fr
+                self._fonts = fr.load_fonts(self.assets_dir)
+            for i, j in enumerate(jobs):
+                if state["cancel"]:
+                    break
+                cur = i + 1
+                self.ctx.loop.post(self._vbulk_tick, state, cur, total, 0, 0)
+
+                def tick(f, n, _cur=cur):
+                    if f % 10 == 0 or f == n:
+                        self.ctx.loop.post(self._vbulk_tick, state, _cur, total, f, n)
+                frames, n_all, fps = None, 0, 30.0
+                try:
+                    if j["tree"]:
+                        man, _notes = scene_edit.apply_manifest(
+                            j["stock"], scene_edit.ops_for(self.assets_dir, j["card"]))
+                        tj = {"man": man, "pins": j["pins"],
+                              "frames": self._tree_frame_count(man),
+                              "fps": self._tree_fps(man), "bg": bg,
+                              "unveil": j["unveil"], "hidden": j["hidden"],
+                              "text_edits": j["text_edits"], "colors": j["colors"],
+                              "pictures": state["pictures"], "sizes": state["sizes"],
+                              "view": state["view"], "as_made": state["as_made"],
+                              "assets": self.assets_dir, "cache": self._tcache}
+                        n_all, fps = tj["frames"], tj["fps"]
+                        frames = self._tree_frames(tj, state, lambda f, _n=n_all: tick(f, _n))
+                    elif j["layout"] is not None:
+                        layout = j["layout"]
+                        n_all = scene_render.frame_count(layout, 0, None)
+                        fps = scene_render.frame_rate(layout)
+
+                        def render(_j=j, _layout=layout, _n=n_all):
+                            for f in range(_n):
+                                if state["cancel"]:
+                                    return
+                                tick(f + 1, _n)
+                                yield self._render_layout(
+                                    _layout, fonts=self._fonts, frame=f, background=bg,
+                                    colors=_j["colors"], group=None,
+                                    layout_edits=_j["layout_edits"],
+                                    text_edits=_j["text_edits"])
+                        frames = render()
+                except Exception:                    # noqa: BLE001
+                    log.exception("scene video job")
+                    frames = None
+                if frames is None:
+                    skipped += 1
+                    continue
+                try:
+                    if n_all > 1:
+                        path = os.path.join(out, _unique_name(j["label"], used, "mp4"))
+                        n = video.encode_frames_to_mp4(frames, path, fps=fps)
+                        if state["cancel"]:
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
+                            break
+                        if n:
+                            videos += 1
+                        else:
+                            skipped += 1
+                    else:
+                        img = next(iter(frames), None)
+                        if img is None:
+                            skipped += 1
+                        else:
+                            img.save(os.path.join(out, _unique_name(j["label"], used, "png")))
+                            stills += 1
+                except Exception as e:               # noqa: BLE001
+                    if state["cancel"]:
+                        break
+                    if isinstance(e, RuntimeError) and "ffmpeg" in str(e).lower():
+                        raise
+                    log.exception("scene video")
+                    skipped += 1
+        except Exception as e:                       # noqa: BLE001
+            err = e
+        return videos, stills, skipped, err
+
+    def _vbulk_tick(self, state, cur, total, frame, frames):
+        if state is not self._vbulk:
+            return
+        msg = "Writing videos — scene %d of %d" % (cur, total)
+        if frame and frames:
+            msg += ", frame %d of %d" % (frame, frames)
+        msg += "…"
+        self._set_caption(msg)
+        self.set(export_msg=msg)
+
+    def _save_all_videos_done(self, state, out, videos, stills, skipped, err):
+        if state is not self._vbulk:
+            return
+        self._vbulk = None
+        self.set(bulk_video=False)
+        if err is not None:
+            self._set_caption("Could not save the videos.")
+            self.set(export_msg="Could not save the videos.")
+            compat.messagebox.showerror("Export all videos", str(err))
+            return
+        tail = ("" if not skipped
+                else "  %d scene%s could not be drawn." % (
+                    skipped, "" if skipped == 1 else "s"))
+        count = "%d video%s" % (videos, "" if videos == 1 else "s")
+        if stills:
+            count += " and %d still%s (PNG)" % (stills, "" if stills == 1 else "s")
+        if state["cancel"]:
+            msg = "Stopped — %s written.%s" % (count, tail)
+        else:
+            msg = "Saved %s to %s.%s" % (
+                count, os.path.basename(out.rstrip("/\\")) or out, tail)
+        self._set_caption(msg)
+        self.set(export_msg=msg)
 
     def card_image_path(self):
         """The Extract tab's Input: the card this project came from."""

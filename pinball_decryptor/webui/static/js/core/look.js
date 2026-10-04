@@ -11,7 +11,6 @@ import { html, Check, call, cx } from "./ui.js";
 const TIPS = {
   overlay: "The whole screen overlay: one correction the game draws over everything on the screen, your files included. Untick to see the preview without it. The card still gets it.",
   files: "The individual files correction, baked into the files it is attached to. Untick to see those files without it. The card still gets it.",
-  by_overlay: "Recommended leaves your files as they are while the whole screen overlay is Recommended: the overlay already corrects them. Pick No change on the overlay to correct only your files.",
   screen: "The machine's screen: how it changes what it is given. Untick to see what is sent to the screen instead of what it shows.",
 };
 
@@ -37,8 +36,7 @@ export function LookRow({ look, ns, note = true, onOpen }) {
     { k: "files", mode: "assets", label: "Individual files",
       name: p.files.set ? `${p.files.name}, on ${plural(p.files.count, "file")}`
         : !p.files.count ? "attached to no file"
-        : p.files.by_overlay ? "Done by the overlay" : "No change",
-      set: p.files.set, tip: p.files.by_overlay && !p.files.set ? TIPS.by_overlay : "" },
+        : "No change", set: p.files.set },
     { k: "screen", mode: "screen", label: "Machine screen",
       name: p.screen.name || "No change", set: p.screen.set },
   ];
@@ -47,7 +45,7 @@ export function LookRow({ look, ns, note = true, onOpen }) {
     <span class="look-head">Preview colors</span>
     ${items.map((it) => html`<span key=${it.k} class=${cx("look-item", !it.set && "unset")}>
       <${Check} checked=${!!(it.set && sw[it.k])} disabled=${!it.set} label=${it.label} cls="small"
-        title=${it.tip || TIPS[it.k]} onChange=${(v) => call(ns + ".set_look_part", it.k, v)} />
+        title=${TIPS[it.k]} onChange=${(v) => call(ns + ".set_look_part", it.k, v)} />
       <button type="button" class="look-name" title=${onOpen ? "Change it in the Color profiles bar, beside the scene" : "Open it on the Color profile tab"}
         onClick=${() => (onOpen ? onOpen(it.mode) : openColor(it.mode))}>${it.name}</button>
     </span>`)}

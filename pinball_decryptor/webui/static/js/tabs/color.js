@@ -710,7 +710,7 @@ function Explainer({ s }) {
     <ul class="cp-facts">
       <li><${Icon} name="check" />Your own files are never changed. The correction is made fresh from them every time you build, so it can never be applied twice.</li>
       <li><${Icon} name="check" />Recommended undoes the Machine screen, so what you made shows on the machine as it does on your PC. It follows that screen: tune the Machine screen and this changes with it. Move a slider to take it from there.</li>
-      <li><${Icon} name="check" />The whole screen overlay still applies on top, if you set one: the game draws these files through it like everything else. While it is on Recommended, it already undoes the screen for these files, so Recommended here changes nothing.</li>
+      <li><${Icon} name="check" />The whole screen overlay still applies on top, if you set one: the game draws these files through it like everything else. Both on Recommended means both apply to these files.</li>
       <li><${Icon} name="check" />Color ranges and Curves below the preview are baked in too, after the sliders: fix one band of colors, or bend the shades point by point.</li>
       <li><${Icon} name="check" />The Scenes preview shows a switched-on picture the way it will be written, so you can judge it in place.</li>
       <li><${Icon} name="check" />Different machines need different profiles. Save a copy for each one and load the one you're building for.</li>
@@ -814,8 +814,6 @@ export function statusNote(s) {
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`
-        // PAD-356: Recommended here changes nothing while the overlay is the Recommended one
-        : s.files_by_overlay ? html`<${Note} kind="info">The whole screen overlay is Recommended, and it already corrects your files along with everything else, so Recommended here leaves them as they are (correcting them twice would overdo it). To correct only your files, set the whole screen overlay to No change.<//>`
         : !s.asset_active ? html`<${Note} kind="info">No change on the individual files: they go onto the card as you made them. Pick a starting point or move a slider to correct them.<//>`
         : html`<${Note} kind="info">${"“" + (s.name || "My profile") + "” is ready, but no file is switched on yet: tick a box under Which files, or switch on pictures on the Images tab, videos on the Video tab, or layers in Scenes."}<//>`)
       : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is staged for this project: the next build "

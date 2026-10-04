@@ -874,15 +874,6 @@ def store_asset_profile(assets_dir, prof):
     staged_changes.save(assets_dir, data)
 
 
-def files_by_overlay(assets_dir):
-    """Is the individual files profile the Recommended one, left to the
-    Recommended overlay (PAD-356)?  Then it changes nothing itself: the
-    overlay already undoes the screen for the files too."""
-    return bool(assets_dir and not asset_stored(assets_dir)
-                and follows_screen(assets_dir)
-                and not screen_follows(assets_dir))
-
-
 def asset_active(assets_dir):
     """The chosen-files profile when it changes something, else ``None``."""
     prof = asset_profile(assets_dir)
@@ -1374,12 +1365,10 @@ def recommended(assets_dir, files=False):
     so what the user made shows on the machine (and in Scenes' As on the
     machine) as it does on their PC.  When the screen is "Same as individual
     files" it cannot follow it in turn: then the measured Recommended.  The
-    files' one changes nothing while the overlay is the Recommended one: that
-    already undoes the screen for everything, files included."""
+    files' one is the same with the overlay on Recommended too: the two stack,
+    the user's choice (PAD-356)."""
     if not assets_dir or screen_follows(assets_dir):
         return PRESETS[0][1]
-    if files and follows_screen(assets_dir):
-        return Profile(name=RECOMMENDED)
     return undo_screen(screen_shown(assets_dir)[0])
 
 
@@ -1531,8 +1520,7 @@ def preview_parts(assets_dir):
     files = asset_profile(assets_dir)
     n = sum(asset_counts(assets_dir).values())
     out["files"] = {"name": files.label(), "count": n,
-                    "set": bool(n and not files.is_identity()),
-                    "by_overlay": files_by_overlay(assets_dir)}
+                    "set": bool(n and not files.is_identity())}
     shown, stored = screen_shown(assets_dir)
     out["screen"] = {"name": shown.label(), "stored": stored,
                      "set": not shown.is_identity()}
@@ -1690,7 +1678,6 @@ PRESET_TIPS_SPIKE2 = {
         "Machine screen: tune that one to your machine and this one changes "
         "with it. Built from the sliders, Color ranges and Curves below, so "
         "you can nudge it from there; moving one keeps your numbers and it "
-        "stops following. While the whole screen overlay is on Recommended "
-        "it already undoes the screen for everything, so the individual "
-        "files' Recommended changes nothing."),
+        "stops following. With the whole screen overlay on Recommended too, "
+        "your files get both."),
 }

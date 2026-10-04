@@ -107,6 +107,10 @@ static void (*p_glFinish)(void);
 static unsigned (*p_glGetError)(void);
 static void (*p_glGetIntegerv)(unsigned,int*);
 static void (*p_glGetVertexAttribiv)(unsigned,unsigned,int*);
+/* PAD-358's GPU video conversion pass. */
+static void (*p_glPixelStorei)(unsigned,int);
+static void (*p_glColorMask)(unsigned char,unsigned char,unsigned char,unsigned char);
+static void (*p_glBindSampler)(unsigned,unsigned);
 /* Only the GL world journal's reset uses these four - live dispatch never
  * deletes shaders/programs/VAOs/FBOs (and defers buffer/texture deletes). */
 static void (*p_glDeleteShader)(unsigned);
@@ -142,6 +146,7 @@ static void load_gl(void)
     LOAD(glGetVertexAttribiv); LOAD(glGetAttribLocation);
     LOAD(glDeleteShader); LOAD(glDeleteProgram);
     LOAD(glDeleteVertexArrays); LOAD(glDeleteFramebuffers);
+    LOAD(glPixelStorei); LOAD(glColorMask); LOAD(glBindSampler);
 #undef LOAD
 }
 
@@ -220,8 +225,11 @@ static long vid_uploads, vid_distinct;
 static unsigned vid_last_off = 0xffffffffu;
 /* item 11: where padglhost's per-frame time goes. */
 static double conv_us, swap_us;
-/* PAD-359: CPU time spent inside the video frame's GL upload call. */
-static double upl_us;
+/* PAD-358: the time spent HANDING a video frame to GL - glTexImage2D of the
+ * RGBA frame on the CPU path, the three plane uploads and the conversion
+ * draw on the GPU path. This is where PAD-357's 190 ms memcpy hid, and the
+ * one number the two paths can be compared on (conv is ~0 on the GPU). */
+static double up_us;
 static long vid_last_frame, vid_swaphist[6];
 /* ★ ITEM 27, the star_wars black flicker: WHAT EACH SWAP ACTUALLY CARRIED.
  * The Windows-side capture measured 32.8% BLACK frames (236 runs, median 2
@@ -294,6 +302,17 @@ static unsigned short min_filter_val[MAXNAME];
 static const unsigned char *vid_ring;
 static const struct padvid_shm *vid_hdr;
 static long vid_texdirect, vid_dropped;
+/* PAD-358's GPU conversion pass - see yuv_to_bound_tex(). */
+static int vid_cpuconv;              /* PAD_VID_CPUCONV=1                  */
+static int vid_gpucheck;             /* PAD_VID_GPUCHECK=<frames>          */
+static int yuv_state;                /* 0 not built, 1 ready, -1 failed    */
+static unsigned yuv_prog, yuv_vao, yuv_fbo, yuv_tex[3], yuv_tw[3], yuv_th[3];
+/* The size the GPU pass last allocated on each guest texture: a frame of the
+ * same size renders into the storage already there, a new size (or a texture
+ * something else re-specified - see yuv_forget) allocates first. */
+static unsigned short yuv_alloc_w[MAXNAME], yuv_alloc_h[MAXNAME];
+
+static void yuv_forget(unsigned g) { g &= MAXNAME - 1; yuv_alloc_w[g] = yuv_alloc_h[g] = 0; }
 
 /* ---- WHOSE FRAME DID WE JUST UPLOAD? -------------------------------------
  *
@@ -4085,6 +4104,9 @@ static void jgl_reset_world(void)
      * skip the FBOTEX storage heal on the replayed stream. */
     memset(tex_stored, 0, sizeof tex_stored);
     memset(texd_obj, 0, sizeof texd_obj);                     /* PAD-359 */
+    /* PAD-358: and none holds GPU-converted video storage either. */
+    memset(yuv_alloc_w, 0, sizeof yuv_alloc_w);
+    memset(yuv_alloc_h, 0, sizeof yuv_alloc_h);
     memset(vao_on, 0, sizeof vao_on);
     memset(vao_backed, 0, sizeof vao_backed);
     memset(vao_elem, 0, sizeof vao_elem);
@@ -4747,6 +4769,233 @@ static void draw_say(unsigned count, unsigned first,
     }
 }
 
+/* ---- PAD-358: I420 -> RGBA ON THE GPU ------------------------------------
+ *
+ * Merlin1896's point 3 on PAD-357: the CPU path converts every 1360x768 video
+ * frame to RGBA (i420_to_rgba, ~5 ms on an i5-3570K) and then uploads 4.2 MB,
+ * which on Mesa d3d12 is a memcpy into a GPU-mapped upload buffer - the cost
+ * PAD-357 measured at ~190 ms a frame before its GLIBC_TUNABLES fix. Uploading
+ * the three planes as they are is 1.6 MB, and the conversion becomes one
+ * full-frame draw.
+ *
+ * The game samples the direct texture through ITS OWN shaders, which expect
+ * RGBA, so the planes are not what the game binds: they go into three private
+ * R8 textures and a private FBO renders I420_GPU_FS INTO the game's texture.
+ * The game's texture ends up holding exactly the bytes the CPU path would have
+ * uploaded (see i420.h), with no shader of the game's touched.
+ *
+ * Everything the pass changes is the GUEST's state, mid-stream, so it is all
+ * read back first and put back after - the win_present() discipline, plus the
+ * things a conversion pass can trip over that a present cannot: the
+ * pixel-unpack state (alignment 1 for a 260-wide chroma row), a sampler object
+ * on the units borrowed for the planes, and the colour write mask.
+ *
+ * The CPU path stays, and is used when:
+ *   - PAD_VID_CPUCONV=1 (the A/B switch, same convention as every guard here);
+ *   - a debug tap needs the RGBA bytes on the CPU (PAD_VID_TESTPAT,
+ *     PAD_VID_SNAP, PADGL_DEBUG's lit count) - they read the converted frame;
+ *   - the frame has an odd width or height (truncated chroma planes);
+ *   - the pass failed to build or its FBO is incomplete - said once, and the
+ *     run carries on converting on the CPU.
+ * Jaws LE's plain GL_RGBA direct surfaces never come here at all. */
+static int yuv_build(void)
+{
+    int ok = 0, i, prev_tex = 0, prev_prog = 0;
+    if (yuv_state) return yuv_state > 0;
+    yuv_state = -1;
+    yuv_prog = p_glCreateProgram();
+    p_glAttachShader(yuv_prog, blit_shader(0x8B31, I420_GPU_VS));
+    p_glAttachShader(yuv_prog, blit_shader(0x8B30, I420_GPU_FS));
+    p_glLinkProgram(yuv_prog);
+    p_glGetProgramiv(yuv_prog, 0x8B82, &ok);                 /* LINK_STATUS */
+    if (!ok) {
+        fprintf(stderr, "[padglhost] GPU video conversion: program link "
+                "FAILED - converting on the CPU\n");
+        return 0;
+    }
+    p_glGetIntegerv(0x8B8D, &prev_prog);
+    p_glUseProgram(yuv_prog);
+    p_glUniform1i(p_glGetUniformLocation(yuv_prog, "u_y"), 0);
+    p_glUniform1i(p_glGetUniformLocation(yuv_prog, "u_u"), 1);
+    p_glUniform1i(p_glGetUniformLocation(yuv_prog, "u_v"), 2);
+    p_glUseProgram((unsigned)prev_prog);
+    p_glGenVertexArrays(1, &yuv_vao);
+    p_glGenFramebuffers(1, &yuv_fbo);
+    p_glGenTextures(3, yuv_tex);
+    p_glGetIntegerv(0x8069, &prev_tex);                       /* TEXTURE_BINDING_2D */
+    for (i = 0; i < 3; i++) {
+        p_glBindTexture(0x0DE1, yuv_tex[i]);
+        /* texelFetch ignores filtering but NOT completeness: a texture whose
+         * MIN_FILTER still wants mipmaps fetches zero. */
+        p_glTexParameteri(0x0DE1, 0x2801, 0x2600);           /* MIN NEAREST */
+        p_glTexParameteri(0x0DE1, 0x2800, 0x2600);           /* MAG NEAREST */
+        p_glTexParameteri(0x0DE1, 0x2802, 0x812F);
+        p_glTexParameteri(0x0DE1, 0x2803, 0x812F);
+    }
+    p_glBindTexture(0x0DE1, (unsigned)prev_tex);
+    yuv_state = 1;
+    fprintf(stderr, "[padglhost] GPU video conversion ready: I420 frames "
+            "upload as three planes and convert in a shader "
+            "(PAD_VID_CPUCONV=1 converts on the CPU instead)\n");
+    return 1;
+}
+
+/* Converts the I420 frame at `yuv` into the texture bound on the ACTIVE unit
+ * (the guest's direct texture, guest name g). Returns 1 when the texture holds
+ * the frame; 0 leaves the guest's state as it was and the caller converts on
+ * the CPU. */
+static int yuv_to_bound_tex(const unsigned char *yuv, unsigned w, unsigned h, unsigned g)
+{
+    int act = 0, target = 0, prog = 0, dfbo = 0, rfbo = 0, vao = 0;
+    int vp[4] = {0, 0, 0, 0}, cmask[4] = {1, 1, 1, 1};
+    int blend = 0, depth = 0, scis = 0, cull = 0, stencil = 0, discard = 0;
+    int align = 4, rowlen = 0, skipr = 0, skipp = 0, pbo = 0;
+    int unit_tex[3], unit_smp[3], i;
+    unsigned pw[3], ph[3], st;
+    const unsigned char *plane[3];
+
+    if (!yuv_build()) return 0;
+    p_glGetIntegerv(0x84E0, &act);                    /* ACTIVE_TEXTURE      */
+    p_glGetIntegerv(0x8069, &target);                 /* its TEXTURE_2D      */
+    if (!target) return 0;
+
+    pw[0] = w; ph[0] = h; pw[1] = pw[2] = w / 2; ph[1] = ph[2] = h / 2;
+    plane[0] = yuv;
+    plane[1] = yuv + (unsigned long)w * h;
+    plane[2] = plane[1] + (unsigned long)(w / 2) * (h / 2);
+
+    /* -- save -- */
+    p_glGetIntegerv(0x8B8D, &prog);                   /* CURRENT_PROGRAM     */
+    p_glGetIntegerv(0x8CA6, &dfbo);                   /* DRAW_FRAMEBUFFER    */
+    p_glGetIntegerv(0x8CAA, &rfbo);                   /* READ_FRAMEBUFFER    */
+    p_glGetIntegerv(0x85B5, &vao);                    /* VERTEX_ARRAY        */
+    p_glGetIntegerv(0x0BA2, vp);                      /* VIEWPORT            */
+    p_glGetIntegerv(0x0BE2, &blend);
+    p_glGetIntegerv(0x0B71, &depth);
+    p_glGetIntegerv(0x0C11, &scis);
+    p_glGetIntegerv(0x0B44, &cull);
+    p_glGetIntegerv(0x0B90, &stencil);
+    p_glGetIntegerv(0x8C89, &discard);                /* RASTERIZER_DISCARD  */
+    p_glGetIntegerv(0x0C23, cmask);                   /* COLOR_WRITEMASK     */
+    p_glGetIntegerv(0x0CF5, &align);                  /* UNPACK_ALIGNMENT    */
+    p_glGetIntegerv(0x0CF2, &rowlen);                 /* UNPACK_ROW_LENGTH   */
+    p_glGetIntegerv(0x0CF3, &skipr);                  /* UNPACK_SKIP_ROWS    */
+    p_glGetIntegerv(0x0CF4, &skipp);                  /* UNPACK_SKIP_PIXELS  */
+    p_glGetIntegerv(0x88EF, &pbo);                    /* PIXEL_UNPACK_BUFFER */
+    for (i = 0; i < 3; i++) {
+        p_glActiveTexture(0x84C0 + i);
+        unit_tex[i] = unit_smp[i] = 0;
+        p_glGetIntegerv(0x8069, &unit_tex[i]);
+        p_glGetIntegerv(0x8919, &unit_smp[i]);        /* SAMPLER_BINDING     */
+    }
+
+    /* -- the target's storage, only when its size is new -- */
+    p_glActiveTexture((unsigned)act);
+    if (yuv_alloc_w[g & (MAXNAME-1)] != w || yuv_alloc_h[g & (MAXNAME-1)] != h) {
+        p_glTexImage2D(0x0DE1, 0, 0x1908, (int)w, (int)h, 0, 0x1908, 0x1401, 0);
+        yuv_alloc_w[g & (MAXNAME-1)] = (unsigned short)w;
+        yuv_alloc_h[g & (MAXNAME-1)] = (unsigned short)h;
+    }
+
+    /* -- the planes -- */
+    if (pbo) p_glBindBuffer(0x88EF, 0);
+    p_glPixelStorei(0x0CF5, 1);
+    if (rowlen) p_glPixelStorei(0x0CF2, 0);
+    if (skipr)  p_glPixelStorei(0x0CF3, 0);
+    if (skipp)  p_glPixelStorei(0x0CF4, 0);
+    for (i = 0; i < 3; i++) {
+        p_glActiveTexture(0x84C0 + i);
+        p_glBindTexture(0x0DE1, yuv_tex[i]);
+        if (unit_smp[i]) p_glBindSampler((unsigned)i, 0);
+        if (yuv_tw[i] != pw[i] || yuv_th[i] != ph[i]) {
+            p_glTexImage2D(0x0DE1, 0, 0x8229 /*R8*/, (int)pw[i], (int)ph[i], 0,
+                           0x1903 /*RED*/, 0x1401, plane[i]);
+            yuv_tw[i] = pw[i]; yuv_th[i] = ph[i];
+        } else {
+            p_glTexSubImage2D(0x0DE1, 0, 0, 0, (int)pw[i], (int)ph[i],
+                              0x1903, 0x1401, plane[i]);
+        }
+    }
+
+    /* -- the draw -- */
+    p_glBindFramebuffer(0x8D40, yuv_fbo);
+    p_glFramebufferTexture2D(0x8D40, 0x8CE0, 0x0DE1, (unsigned)target, 0);
+    st = p_glCheckFramebufferStatus(0x8D40);
+    if (st == 0x8CD5) {                               /* COMPLETE            */
+        p_glDisable(0x0BE2); p_glDisable(0x0B71); p_glDisable(0x0C11);
+        p_glDisable(0x0B44); p_glDisable(0x0B90); p_glDisable(0x8C89);
+        p_glColorMask(1, 1, 1, 1);
+        p_glViewport(0, 0, (int)w, (int)h);
+        p_glUseProgram(yuv_prog);
+        p_glBindVertexArray(yuv_vao);
+        p_glDrawArrays(0x0005, 0, 4);                 /* TRIANGLE_STRIP      */
+        /* PAD_VID_GPUCHECK=<n>: the proof, on the real path. Read the first
+         * n converted frames back and compare them byte for byte with what
+         * the CPU converter makes of the same planes. Debug only: it stalls
+         * the pipeline and runs the CPU converter it exists to replace. */
+        if (vid_gpucheck > 0) {
+            static unsigned char *rb;
+            static unsigned long rb_cap;
+            unsigned long n = (unsigned long)w * h * 4, k, diff = 0;
+            const unsigned char *ref = i420_to_rgba(yuv, w, h);
+            int maxd = 0;
+            if (n > rb_cap) { free(rb); rb = malloc(n); rb_cap = rb ? n : 0; }
+            if (rb && ref) {
+                int pack = 4;
+                p_glGetIntegerv(0x0D05, &pack);       /* PACK_ALIGNMENT      */
+                p_glPixelStorei(0x0D05, 4);           /* rows are w*4 bytes  */
+                p_glReadPixels(0, 0, (int)w, (int)h, 0x1908, 0x1401, rb);
+                p_glPixelStorei(0x0D05, pack);
+                for (k = 0; k < n; k++)
+                    if (rb[k] != ref[k]) {
+                        int d = rb[k] > ref[k] ? rb[k] - ref[k] : ref[k] - rb[k];
+                        diff++;
+                        if (d > maxd) maxd = d;
+                    }
+                fprintf(stderr, "[padglhost] GPU video check %ux%u: %lu of %lu "
+                        "bytes differ from the CPU converter (max delta %d)%s\n",
+                        w, h, diff, n, maxd, diff ? "" : " - identical");
+            }
+            vid_gpucheck--;
+        }
+    } else {
+        fprintf(stderr, "[padglhost] GPU video conversion: framebuffer on the "
+                "video texture is incomplete (0x%x) - converting on the CPU "
+                "from now on\n", st);
+        yuv_state = -1;
+    }
+    p_glFramebufferTexture2D(0x8D40, 0x8CE0, 0x0DE1, 0, 0);
+
+    /* -- restore -- */
+    p_glBindFramebuffer(0x8CA9, (unsigned)dfbo);
+    p_glBindFramebuffer(0x8CA8, (unsigned)rfbo);
+    p_glUseProgram((unsigned)prog);
+    p_glBindVertexArray((unsigned)vao);
+    p_glViewport(vp[0], vp[1], vp[2], vp[3]);
+    if (blend)   p_glEnable(0x0BE2);
+    if (depth)   p_glEnable(0x0B71);
+    if (scis)    p_glEnable(0x0C11);
+    if (cull)    p_glEnable(0x0B44);
+    if (stencil) p_glEnable(0x0B90);
+    if (discard) p_glEnable(0x8C89);
+    p_glColorMask((unsigned char)cmask[0], (unsigned char)cmask[1],
+                  (unsigned char)cmask[2], (unsigned char)cmask[3]);
+    p_glPixelStorei(0x0CF5, align);
+    if (rowlen) p_glPixelStorei(0x0CF2, rowlen);
+    if (skipr)  p_glPixelStorei(0x0CF3, skipr);
+    if (skipp)  p_glPixelStorei(0x0CF4, skipp);
+    if (pbo) p_glBindBuffer(0x88EF, (unsigned)pbo);
+    for (i = 0; i < 3; i++) {
+        p_glActiveTexture(0x84C0 + i);
+        p_glBindTexture(0x0DE1, (unsigned)unit_tex[i]);
+        if (unit_smp[i]) p_glBindSampler((unsigned)i, (unsigned)unit_smp[i]);
+    }
+    p_glActiveTexture((unsigned)act);
+    p_glBindTexture(0x0DE1, (unsigned)target);
+    if (yuv_state < 0) { yuv_forget(g); return 0; }
+    return 1;
+}
+
 static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
 {
     const unsigned *u = (const unsigned *)pl;
@@ -4952,7 +5201,8 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
 
     case PADGL_GENTEX:
         if (u[0] < MAXNAME) { p_glGenTextures(1, &map_tex[u[0]]);
-                              texd_obj[u[0]] = 0; }          /* PAD-359 */
+                              texd_obj[u[0]] = 0;            /* PAD-359 */
+                              yuv_forget(u[0]); }
         break;
     case PADGL_DELTEX:          /* deferred, name kept - see the graveyards */
         if (u[0] < MAXNAME && map_tex[u[0]]) {
@@ -4995,6 +5245,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
         p_glTexImage2D(0x0DE1,(int)u[0],(int)u[1],(int)u[2],(int)u[3],0,u[4],u[5],
                        u[6] ? pl + 28 : 0);
+        if (u[0] == 0) yuv_forget(cur_tex_unit_binding);   /* PAD-358 */
         {   /* item 67 */
             unsigned b = cur_tex_unit_binding & (MAXNAME - 1);
             if (u[0] == 0) { d2t_w[b] = (unsigned short)u[2];
@@ -5099,6 +5350,25 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
          * all - they are already in the layout the texture wants. */
         if (fmt == 0x1908u) {                        /* GL_RGBA */
             rgba = yuv;
+        } else if (fmt == PADGL_VIV_I420 && !vid_cpuconv && yuv_state >= 0 &&
+                   !(w & 1) && !(h & 1) && !vid_pat_all && !vid_pat_w &&
+                   !vid_snap_all && !vid_snap_w && !dbg) {
+            /* PAD-358: convert on the GPU, straight into the bound texture.
+             * Same bookkeeping as the CPU path below, minus the upload. */
+            double t = now_s();
+            /* PAD-359: the pass may re-specify level 0 at a new size (even
+             * when it then gives up), so the CPU path's record of this
+             * texture's shape is stale - its next frame here re-specifies. */
+            texd_obj[cur_tex_unit_binding & (MAXNAME-1)] = 0;
+            if (yuv_to_bound_tex(yuv, w, h, cur_tex_unit_binding)) {
+                up_us += (now_s() - t) * 1e6;
+                vid_texdirect++;
+                vid_geom_note(w, h, fmt, min_filter_val[cur_tex_unit_binding & (MAXNAME-1)]);
+                goto direct_filters;
+            }
+            {   double t2 = now_s();               /* the pass gave up: CPU */
+                rgba = i420_to_rgba(yuv, w, h);
+                conv_us += (now_s() - t2) * 1e6; }
         } else if (fmt == PADGL_VIV_I420) {
             {   double t = now_s();
                 rgba = i420_to_rgba(yuv, w, h);
@@ -5149,8 +5419,10 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                 texd_obj[b] = (obj && (unsigned)bound == obj) ? obj : 0;
                 texd_w[b] = (unsigned short)w; texd_h[b] = (unsigned short)h;
             }
-            upl_us += (now_s() - t) * 1e6;
+            up_us += (now_s() - t) * 1e6;
         }
+        yuv_forget(cur_tex_unit_binding);
+    direct_filters:
         /* Same completeness trap as PADGL_TEXIMAGE, and worse here, in TWO
          * ways that both end in the same place: a texture that only ever gets
          * level 0 while the sampler wants a mip chain.
@@ -5212,6 +5484,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         if (u[0] == 0) texd_obj[cur_tex_unit_binding & (MAXNAME-1)] = 0;
         p_glCompressedTexImage2D(0x0DE1,(int)u[0],u[1],(int)u[2],(int)u[3],0,
                                  (int)u[4], u[4] ? pl + 20 : 0);
+        if (u[0] == 0) yuv_forget(cur_tex_unit_binding);   /* PAD-358 */
         break;
     case PADGL_TEXCOMPRESSEDSUB:
         if (u[6])
@@ -5461,6 +5734,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             p_glBindTexture(0x0DE1, (unsigned)prevtex);
             tex_stored[g] = 1;
             texd_obj[g] = 0;                                  /* PAD-359 */
+            yuv_forget(g);                                 /* PAD-358 */
             fprintf(stderr, "[padglhost] fbo attachment: guest tex %u had no "
                     "storage (VIV-mapped?); allocated %dx%d RGBA so the FBO "
                     "is complete\n", g, fb_w, fb_h);
@@ -5632,6 +5906,11 @@ int main(int argc, char **argv)
     if (vid_texfull)
         fprintf(stderr, "[padglhost] PAD_VID_TEXFULL: every video frame "
                 "re-specifies its texture (glTexImage2D)\n");
+    vid_cpuconv = getenv("PAD_VID_CPUCONV") ? atoi(getenv("PAD_VID_CPUCONV")) : 0;
+    if (vid_cpuconv)
+        fprintf(stderr, "[padglhost] PAD_VID_CPUCONV: I420 video converts on "
+                "the CPU and uploads as RGBA (the pre-PAD-358 path)\n");
+    vid_gpucheck = getenv("PAD_VID_GPUCHECK") ? atoi(getenv("PAD_VID_GPUCHECK")) : 0;
     if (vid_nomipfix)
         fprintf(stderr, "[padglhost] PAD_VID_NOMIPFIX: a mipmap MIN_FILTER on a "
                 "video texture will be left as the game asked\n");
@@ -5890,16 +6169,16 @@ int main(int argc, char **argv)
                 long nf = frames_done - last_frames;
                 fprintf(stderr, "[padglhost] %.1f fps (%ld frames total)"
                         "  vid %.1f uploads/s %.1f NEW/s"
-                        "  conv %.2f ms/f  swap %.2f ms/f"
-                        "  upload %.3f ms/f (%ld sub)\n",
+                        "  conv %.2f ms/f  upload %.2f ms/f  swap %.2f ms/f"
+                        "  (%ld sub)\n",
                         nf / dt, frames_done,
                         (vid_uploads - last_up) / dt,
                         (vid_distinct - last_dist) / dt,
                         nf ? conv_us / nf / 1000.0 : 0.0,
-                        nf ? swap_us / nf / 1000.0 : 0.0,
-                        nf ? upl_us / nf / 1000.0 : 0.0, vid_texsub);
+                        nf ? up_us / nf / 1000.0 : 0.0,
+                        nf ? swap_us / nf / 1000.0 : 0.0, vid_texsub);
                 last_up = vid_uploads; last_dist = vid_distinct;
-                conv_us = swap_us = upl_us = 0;
+                conv_us = up_us = swap_us = 0;
                 if (vid_swaphist[1] + vid_swaphist[2] + vid_swaphist[3] +
                     vid_swaphist[4] + vid_swaphist[5]) {
                     long h = vid_swaphist[3] + vid_swaphist[4] + vid_swaphist[5];

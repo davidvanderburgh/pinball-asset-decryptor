@@ -68,4 +68,20 @@ def test_world_reset_forgets_every_shape():
 def test_full_respec_knob_and_upload_timing_are_reported():
     src = _src()
     assert 'getenv("PAD_VID_TEXFULL")' in src
-    assert '"  upload %.3f ms/f (%ld sub)\\n"' in src
+    assert '"  conv %.2f ms/f  upload %.2f ms/f  swap %.2f ms/f"' in src
+    assert '"  (%ld sub)\\n"' in src
+
+
+def test_the_gpu_conversion_pass_forgets_the_shape_first():
+    # PAD-358's pass re-specifies level 0 when ITS size record changes, and
+    # can do that and then give up to the CPU path - so the CPU path's record
+    # is cleared before the pass runs, not only when it succeeds.
+    body = _case(_src(), "PADGL_TEXDIRECT")
+    i = body.index("if (yuv_to_bound_tex(")
+    assert "texd_obj[cur_tex_unit_binding & (MAXNAME-1)] = 0;" in body[i - 400:i]
+
+
+def test_the_cpu_upload_still_tells_the_gpu_pass_to_reallocate():
+    body = _case(_src(), "PADGL_TEXDIRECT")
+    assert body.index("vid_texsub++;") < body.index(
+        "yuv_forget(cur_tex_unit_binding);\n    direct_filters:")

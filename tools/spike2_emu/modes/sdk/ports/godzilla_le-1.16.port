@@ -170,6 +170,12 @@ data stock_mode_manager       0x007b0ce4
 # Never a multiball 1-11 (locks, the magnets) or a battle 12-17 (the scoop): those are not named.
 site block_start_21           0x000b98fc 0xe92d4ff0 0xe1a05000
 site block_start_23           0x0010e91c 0xe92d4ff0 0xe24dd014
+# The battle rule's shot handler, RuleBattle::v[25] (vtable 0x642690 + 8 + 100; shot mask in r2:r3): a lit
+# ramp counts toward a battle (0x100000 Left ramp, 0x200000 Right ramp), a lit scoop (hi 0x20) opens the
+# BATTLE SELECTION screen (the process it creates waits for effect 132). A blocking mode hides those bits.
+site block_battle_shots       0x00124b3c 0xe92d40f8 0xe1a06002
+value block_battle_lo         0x00300000
+value block_battle_hi         0x00000020
 data block_mode_table         0x007b4aa8
 value block_mode_count        27
 

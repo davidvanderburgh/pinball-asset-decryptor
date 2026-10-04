@@ -2911,6 +2911,8 @@ int pm_aside(void)
 static const struct pm_mode *block_owner;
 static unsigned block_said;              /* the ids refused this hold, one bit each */
 static unsigned block_named;             /* the ids whose start is hooked, one bit each */
+static int block_battles;                /* the battle rule's shot handler is hooked */
+static unsigned block_battle_said;
 
 static int block_id(unsigned obj)
 {
@@ -2949,9 +2951,32 @@ int pm_block_game_modes(int on)
     if (!running || running != current) return 0;
     block_owner = current;
     block_said = 0;
-    say("block: %s keeps the game's modes 0x%x (one bit each) from starting while it runs",
-        current->name ? current->name : "a mode", block_named);
+    block_battle_said = 0;
+    say("block: %s keeps the game's modes 0x%x (one bit each) from starting while it runs%s",
+        current->name ? current->name : "a mode", block_named,
+        block_battles ? ", and the battle rule from lighting a battle or opening its select screen" : "");
     return 1;
+}
+
+/* PAD-347 (David: "what about when a ball goes in the scoop to select a mode? we should prevent that from
+ * happening while in our own multiball modes"): the battle rule's SHOT HANDLER (`site block_battle_shots`,
+ * RuleBattle::v[25], called with the shot mask in r2:r3) is where a lit ramp counts toward a battle and a
+ * lit scoop opens the BATTLE SELECTION screen (it creates the process that waits for display effect 132).
+ * While a mode of ours blocks, the handler is shown the shot without those bits (`value
+ * block_battle_lo` / `block_battle_hi`: the Left and Right ramp, the scoop): the same path as a ramp
+ * that is not lit and a scoop with no battle lit, so the scoop kicks the ball out as it always does
+ * then. Nothing of the handler is skipped and nothing else it sees changes; a battle lit before the mode
+ * stays lit for after it. */
+static void on_battle_shots(unsigned *r)
+{
+    unsigned lo = (unsigned)pm_port_value("block_battle_lo", 0), hi = (unsigned)pm_port_value("block_battle_hi", 0);
+    if (!block_owner || running != block_owner || !pm_in_game()) return;
+    if (!(r[2] & lo) && !(r[3] & hi)) return;
+    if (block_battle_said++ < 20)
+        say("block: the battle rule did not see shot 0x%08x_%08x - %s is running (no battle lit, no select screen)",
+            r[3], r[2], block_owner->name ? block_owner->name : "a mode");
+    r[2] &= ~lo;
+    r[3] &= ~hi;
 }
 
 /* every tick, from clip_tick: a block ends with the mode that asked for it */
@@ -2972,6 +2997,7 @@ static void block_arm(void)
         pm_snprintf(name, sizeof name, "block_start_%u", id);
         if (site(name)) any = 1;
     }
+    if (site("block_battle_shots")) any = 1;
     if (!any) return;                            /* a port without them: silent */
     if (!data("block_mode_table") || pm_port_value("block_mode_count", 0) <= 0) {
         say("block: off - the port names mode starts to refuse but not the game's mode table");
@@ -2983,12 +3009,15 @@ static void block_arm(void)
         if (hook_veto(fn(name), on_block_start)) block_named |= 1u << id;
         else say("block: the start of the game's mode %u (0x%08x) could not be hooked", id, fn(name));
     }
-    if (!block_named) {
+    if (fn("block_battle_shots") && pm_port_value("block_battle_lo", 0) | pm_port_value("block_battle_hi", 0))
+        block_battles = hook(fn("block_battle_shots"), on_battle_shots);
+    if (!block_named && !block_battles) {
         say("block: off - none of the named starts could be hooked");
         return;
     }
     can |= PM_CAN_BLOCK_GAME;
-    say("block: on - a mode may keep these of the game's modes from starting: 0x%x (one bit each)", block_named);
+    say("block: on - a mode may keep these of the game's modes from starting: 0x%x (one bit each)%s", block_named,
+        block_battles ? "; the battle rule's shot handler is hooked (no battle lit, no select screen while it blocks)" : "");
 }
 
 /* ---- a multiball of the mode's own (item 167) ---------------------------------------------------

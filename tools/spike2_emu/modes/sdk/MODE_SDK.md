@@ -995,7 +995,16 @@ starting". The examples now keep to themselves:
   (RulePowerlines). The multiballs (balls in a lock; the Godzilla and Mechagodzilla magnets), the
   battles (the scoop, the select screen) and the timed modes whose starter is not yet traced are not
   named: one of those starting still ends ours (`kit_game_began`), as a mode whose assets file says
-  `game_modes give_way` does for every game mode. (A first reading took each vtable's word at +0x20,
+  `game_modes give_way` does for every game mode. Battles are kept out at the source: the battle
+  rule's shot handler (`site block_battle_shots`, RuleBattle::v[25], shot mask in r2:r3) is where a lit
+  ramp counts toward a battle and a lit scoop opens the BATTLE SELECTION screen (it creates the process
+  that waits for effect 132), and while a mode blocks it is shown the shot without those bits (`value
+  block_battle_lo` / `block_battle_hi`: the Left and Right ramp, the scoop) - the path of an unlit ramp
+  and of a scoop with no battle lit, so the scoop kicks the ball out as usual. Emulator (Premium 1.16):
+  with MASER BARRAGE blocking, both ramps twice and a held scoop lit nothing and opened nothing; after it
+  stopped, the same shots lit a battle and the KAIJU BATTLE SELECT screen opened. (David: "what about
+  when a ball goes in the scoop to select a mode? we should prevent that from happening while in our
+  own multiball modes".) (A first reading took each vtable's word at +0x20,
   which is `v[6]`, a base routine every mode shares, and hooked nothing a rule calls: caught in the
   emulator, where a forced Jet Fighter Attack still started.)
 

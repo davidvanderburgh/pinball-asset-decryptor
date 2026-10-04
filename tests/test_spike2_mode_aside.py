@@ -161,3 +161,26 @@ def test_the_premium_starts_and_table_match_the_game():
     lo, hi = e.u32(0xd3fac), e.u32(0xd3fb0)
     imm = lambda w: ((w >> 4) & 0xf000) | (w & 0xfff)        # noqa: E731
     assert (imm(hi) << 16) | imm(lo) == port[("data", "block_mode_table")][0]
+
+
+def test_the_premium_port_hides_only_the_battle_shots_from_the_battle_rule():
+    port = _port("godzilla_le-1.16.port")
+    assert port[("site", "block_battle_shots")] == [0x00124b3c, 0xe92d40f8, 0xe1a06002]
+    assert port[("value", "block_battle_lo")] == [0x00300000]          # the Left and Right ramp
+    assert port[("value", "block_battle_hi")] == [0x00000020]          # the scoop
+
+
+def test_the_battle_rules_shot_handler_matches_the_game():
+    """RuleBattle::v[25] (vtable 0x642690 + 8 + 25 * 4): it tests r2 for the two ramps and r3 for the scoop,
+    and the scoop's path creates the process that waits for effect 132, the BATTLE SELECTION screen."""
+    name = "godzilla_le-1.16.port"
+    path = next((p for p in ELVES[name] if p and os.path.isfile(p)), None)
+    if not path:
+        pytest.skip("game program not present for %s" % name)
+    e, port = _Elf(path), _port(name)
+    site = port[("site", "block_battle_shots")]
+    assert e.u32(0x642690) == 0 and e.u32(0x642690 + 8 + 25 * 4) == site[0]
+    assert (e.u32(site[0]), e.u32(site[0] + 4)) == (site[1], site[2])
+    assert e.u32(0x124b58) == 0xe2062601 and e.u32(0x124b68) == 0xe2062602   # and r2, r6, #0x100000 / #0x200000
+    assert e.u32(0x124b78) == 0xe2073020                                      # and r3, r7, #0x20
+    assert e.u32(0x124d40) == 0xe3a02084 and e.u32(0x124d48) == 0xe58020a0   # mov r2,#132; str r2,[r0,#0xa0]

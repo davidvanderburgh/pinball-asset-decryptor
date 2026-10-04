@@ -299,8 +299,10 @@ int pm_aside(void);
 /* PAD-347: ISOLATION. A mode may keep the game's own modes from STARTING while it runs: the start of
  * each mode the port names is refused at its entry, so that mode never begins and the rule that asked
  * carries on. Only modes a rule's shot handler starts are named - on Godzilla Premium 1.16 Jet Fighter
- * Attack and Tesla Strike; a multiball (balls in a lock, a magnet) or a battle (the scoop) never is, so a
- * mode that blocks still gives way to those. 1 = blocking (0 to stop); ends by itself with the mode.
+ * Attack and Tesla Strike. Where the port names the battle rule's shot handler, a blocking mode also
+ * keeps a battle from being lit or its select screen from opening at the scoop (Godzilla). A multiball
+ * (balls in a lock, a magnet) is never refused, so a mode that blocks still gives way to one; a battle
+ * already running or started some other way too. 1 = blocking (0 to stop); ends by itself with the mode.
  * 0 when the port cannot. */
 #define PM_CAN_BLOCK_GAME   0x40000u  /* pm_block_game_modes */
 int pm_block_game_modes(int on);

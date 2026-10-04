@@ -1,5 +1,5 @@
-"""PAD-350 (DragonRR): the Scenes inspector's Colors view.  It is the Color profile tab's
-controls (ns "color") beside the scene, next to Layers and Contents: it reads the profiles
+"""PAD-350 (DragonRR): the Scenes tab's Colors.  It is the Color profile tab's controls (ns
+"color") in the scene list's column, so Layers stays in view on the right: it reads the profiles
 again as it opens, a move made in it is staged like one made on the tab and the Scenes
 editor draws its scene again, and its module loads with every name it imports."""
 
@@ -65,9 +65,9 @@ console.log(JSON.stringify(Object.keys(pane).sort()));
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
-def test_the_colors_view_loads_and_sits_in_the_inspector(tmp_path):
+def test_the_colors_view_loads_and_sits_beside_the_layers(tmp_path):
     """Every name color_pane.js takes from color.js is exported there (ui.js / store.js
-    stubbed), and the Scenes inspector offers it beside Layers and Contents."""
+    stubbed), and the scene list's column offers it, leaving Layers / Contents alone."""
     (tmp_path / "tabs").mkdir()
     (tmp_path / "core").mkdir()
     stubs = {}
@@ -90,3 +90,7 @@ def test_the_colors_view_loads_and_sits_in_the_inspector(tmp_path):
     src = open(os.path.join(_TABS, "text_scenes.js"), encoding="utf-8").read()
     assert 'import { ColorPane } from "./color_pane.js";' in src
     assert 'value: "colors"' in src and "<${ColorPane} />" in src
+    left = src[src.index('<div class="scenes-left">'):src.index('<div class="scenes-center"')]
+    assert "<${ColorPane} />" in left and 'value: "scenes"' in left
+    top = src[src.index("function TreeTop("):src.index("function TreeTop(") + 1200]
+    assert "ColorPane" not in top and 'value: "colors"' not in top

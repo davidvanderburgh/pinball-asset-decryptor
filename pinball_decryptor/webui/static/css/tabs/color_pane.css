@@ -1,5 +1,5 @@
-/* The Scenes inspector's Colors view (PAD-350, js/tabs/color_pane.js): the Color profile
-   tab's controls (color.css) made narrow enough for the inspector.  Design-system tokens and
+/* The Scenes tab's Colors (PAD-350, js/tabs/color_pane.js), in the scene list's column: the
+   Color profile tab's controls (color.css) made narrow enough for it.  Design-system tokens and
    classes only (css/app.css). */
 
 .scenes-contents.cpane { display: flex; flex-direction: column; gap: 10px; padding: 10px; }

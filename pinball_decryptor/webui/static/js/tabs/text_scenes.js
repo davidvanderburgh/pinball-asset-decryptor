@@ -215,12 +215,20 @@ export function ScenesActions() {
       onClick=${() => call("text_scenes.rebuild")}>${s.rebuilding ? "Cancel" : "Re-read from card…"}<//>`;
 }
 
+// PAD-350: what the left column shows, kept across sessions
+const LEFT_KEY = "pad.scenes.left";
+function loadLeft() {
+  try { return localStorage.getItem(LEFT_KEY) === "colors" ? "colors" : "scenes"; } catch (e) { return "scenes"; }
+}
+
 export function ScenesPage() {
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
   const [wide, setWide] = useState(false);      // the scene editor without the scene list
-  // the inspector's view: Layers, Contents or Colors (PAD-350, the Color profile controls)
-  const [view, setView] = useState("layers");
+  // the left column: the scene list or Colors, the Color profile controls (PAD-350,
+  // DragonRR: beside Layers, so each picture's color switch is in view while tuning)
+  const [left, setLeftState] = useState(loadLeft);
+  const setLeft = (v) => { setLeftState(v); try { localStorage.setItem(LEFT_KEY, v); } catch (e) {} };
   const [playFrame, setPlayFrame] = useState(0); // the frame a playback is on
   useEffect(() => { if (!s.tree_play) setPlayFrame(0); }, [s.tree_play]);
   const [split, setSplit] = useState(loadSplit);
@@ -238,7 +246,7 @@ export function ScenesPage() {
     const ro = new ResizeObserver(() => setListW(el.offsetWidth));
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [left]);              // the list comes back when the left column leaves Colors
   const topRef = useRef(null);
   // pointer -> unzoomed px against the element (the app can be zoomed: rect px / offset px)
   const scaleOf = (el, r) => (r.width ? el.offsetWidth / r.width : 1) || 1;
@@ -315,6 +323,11 @@ export function ScenesPage() {
   return html`<section class="card scenes-card">
     <div class=${cx("scenes-body", wide && "wide")} ref=${bodyRef} style=${bodyStyle}>
       <div class="scenes-left">
+        ${s.look && s.look.parts ? html`<div class="sc-views"><${Seg} value=${left} onChange=${setLeft} options=${[
+          { value: "scenes", label: html`<${Icon} name="list" />Scenes`, title: "Every scene of the card: pick one to see and edit it" },
+          { value: "colors", label: html`<${Icon} name="palette" />Colors`,
+            title: "The color profiles, changed here with the scene and its Layers in view: the same as the Color profile tab" }]} /></div>` : null}
+        ${left === "colors" && s.look && s.look.parts ? html`<${ColorPane} />` : html`
         <div class="row scenes-search">
           <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
             delay=${200} prefix=${html`<${Icon} name="search" />`} />
@@ -333,7 +346,7 @@ export function ScenesPage() {
             sort=${{ key: (s.sort || {}).col, desc: (s.sort || {}).rev }}
             onSort=${(k) => call("text_scenes.sort_by", k)}
             resizable widths=${sceneWidths} onResize=${(w) => { sceneWidths = w; }} />
-        </div>
+        </div>`}
       </div>
       <${Divider} k="left" measure=${measureLeft} label="Scene list width" ...${splitProps} />
       <div class="scenes-center" onPointerDown=${editor ? (e) => deselectOnBlank(s.tree_view, e) : null}>
@@ -384,7 +397,7 @@ export function ScenesPage() {
         </div>
         <div class="scenes-lookbar">
           <${LookRow} look=${s.look} ns="text_scenes" note=${false}
-            onOpen=${(mode) => { call("color.set_mode", mode); setView("colors"); }} />
+            onOpen=${(mode) => { call("color.set_mode", mode); setLeft("colors"); setWide(false); }} />
           ${unlock && unlock.offered ? html`<div class=${cx("scenes-unlock", unlock.on && "on")} ...${tip(UNLOCK_TIP)}>
             <span class="look-head">Advanced</span>
             <${Check} checked=${!!unlock.on} onChange=${(v) => call("text_scenes.tree_color_unlocked", v)}
@@ -398,11 +411,11 @@ export function ScenesPage() {
       </div>
       <${Divider} k="right" measure=${measureRight} dir=${-1} label="Inspector width" ...${splitProps} />
       <div class="scenes-inspector" ref=${inspRef}>
-        ${editor ? html`${view === "colors" ? null : html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
+        ${editor ? html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
             style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
             <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} /></div>
-          <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />`}
-          <${TreeTop} s=${s} onMenu=${itemMenu} view=${view} setView=${setView} />`
+          <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
+          <${TreeTop} s=${s} onMenu=${itemMenu} />`
           : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
       </div>
     </div>
@@ -548,20 +561,15 @@ function inPoly(pts, x, y) {
   return inside;
 }
 
-// PAD-350 (DragonRR): Colors is the Color profile tab's controls, beside the scene they change
-function TreeTop({ s, onMenu, view, setView }) {
-  const colors = !!(s.look && s.look.parts);
-  const shown = view === "colors" && !colors ? "layers" : view;
+function TreeTop({ s, onMenu }) {
+  const [view, setView] = useState("layers");
   return html`<div class="scenes-top">
-    <div class="sc-views"><${Seg} value=${shown} onChange=${setView} options=${[
+    <div class="sc-views"><${Seg} value=${view} onChange=${setView} options=${[
       { value: "layers", label: html`<${Icon} name="scenes" />Layers`,
         title: "Every part of the scene, in the order it is drawn: pick, hide or edit them" },
       { value: "contents", label: html`<${Icon} name="list" />Contents`,
-        title: "The pictures, fonts and text this scene uses: double-click one to find it on its own tab" },
-      ...(colors ? [{ value: "colors", label: html`<${Icon} name="palette" />Colors`,
-        title: "The color profiles, changed here with the scene in view: the same as the Color profile tab" }] : [])]} /></div>
-    ${shown === "layers" ? html`<${TreeLayers} t=${s.tree_view} />`
-      : shown === "colors" ? html`<${ColorPane} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
+        title: "The pictures, fonts and text this scene uses: double-click one to find it on its own tab" }]} /></div>
+    ${view === "layers" ? html`<${TreeLayers} t=${s.tree_view} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
   </div>`;
 }
 

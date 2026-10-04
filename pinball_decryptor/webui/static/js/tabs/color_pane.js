@@ -1,7 +1,8 @@
-// The Scenes inspector's Colors view (PAD-350, DragonRR): the Color profile tab's controls
-// beside the scene, so a slider is moved with the scene in view instead of remembering how
-// it looked on another tab.  A third view next to Layers and Contents (text_scenes.js
-// TreeTop); the Preview colors names under the scene open it on their profile.  The same
+// The Scenes tab's Colors (PAD-350, DragonRR): the Color profile tab's controls beside the
+// scene, so a slider is moved with the scene in view instead of remembering how it looked on
+// another tab.  It takes the scene list's place in the left column (text_scenes.js
+// ScenesPage, Scenes / Colors), so Layers, with each picture's color switch, stays in view
+// on the right; the Preview colors names under the scene open it on their profile.  The same
 // profiles, presets, sliders, number boxes, ranges, curves, Save a copy and Load as the Color
 // profile tab, which they share (ns "color", webui/tabs/color.py), made narrower.  Each move
 // is saved a moment after it is made and the Scenes editor draws its scene again through it.

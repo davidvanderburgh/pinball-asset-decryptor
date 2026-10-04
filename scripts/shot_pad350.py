@@ -1,13 +1,13 @@
-"""PAD-350 proof shots: the Scenes inspector's Colors view.
+"""PAD-350 proof shots: the Scenes tab's Colors (the inspector's third view in v1.88.0,
+the scene list's column after DragonRR's reply).
 
     python scripts/shot_pad350.py <repo> <out_dir> <prefix>
 
 Serves <repo> on a settings copy whose Stern project is a scratch copy of the Godzilla
 project (shot_pad312's), opens the Scenes tab on Battle Select and photographs the page
-twice: <prefix>_scenes_tab.png as it opens (Layers / Contents / Colors over the inspector),
-then <prefix>_scenes_panel.png after a click on Colors (on Machine screen, with a slider
-moved so the scene is drawn through it).  Before the change there is no Colors: both shots
-are the plain page.
+twice: <prefix>_scenes_tab.png as it opens, then <prefix>_scenes_panel.png after a click
+on Colors (whichever Seg holds it), on Machine screen, with a slider moved so the scene is
+drawn through it.
 
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
@@ -57,6 +57,7 @@ def main():
                 "text_scenes.select", base.BATTLE)
             time.sleep(8)
             page.screenshot(path=os.path.join(out_dir, prefix + "_scenes_tab.png"))
+            page.evaluate("() => { try { localStorage.removeItem('pad.scenes.left'); } catch (e) {} }")
             handle = page.query_selector(".sc-views button:has-text('Colors')")
             print("colors view:", bool(handle), flush=True)
             if handle:

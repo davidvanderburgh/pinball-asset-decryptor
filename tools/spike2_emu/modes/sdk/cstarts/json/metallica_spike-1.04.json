@@ -1,0 +1,250 @@
+{
+ "key": "metallica_spike-1.04",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Battery",
+   "start": "0x37190",
+   "words": [
+    "0xe92d40f0",
+    "0xe3a00006"
+   ],
+   "how": "counts AUD_BATTERY_MODE_STARTED (id 274) at 0x37350; creates record(s) 177 (body 0x3322c); reached by table word 0x5a0ba8; ball calls: add(0) (no ball served); a song mode's start from the song table (a data word only); it calls the relative add-balls wrapper with 0 (a ball save, no ball); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Enter Sandman",
+   "start": "0xc5718",
+   "words": [
+    "0xe92d40f0",
+    "0xe3a0000b"
+   ],
+   "how": "counts AUD_ENTER_SANDMAN_MODE_STARTED (id 284) at 0xc58ec; creates record(s) 182 (body 0xc17a8); reached by table word 0x5a0c34; ball calls: add(0) (no ball served); a song mode's start from the song table (a data word only); it calls the relative add-balls wrapper with 0 (a ball save, no ball); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Fade to Black",
+   "start": "0xc7d4c",
+   "words": [
+    "0xe92d40f0",
+    "0xe3a0000a"
+   ],
+   "how": "counts AUD_FADE_TO_BLACK_MODE_STARTED (id 294) at 0xc7ee0; creates record(s) 187 (body 0xc5e7c); reached by table word 0x5a0b1c; ball calls: add(0) (no ball served); a song mode's start from the song table (a data word only); it calls the relative add-balls wrapper with 0 (a ball save, no ball); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "For Whom the Bell Tolls",
+   "start": "0xca7cc",
+   "words": [
+    "0xe92d40f0",
+    "0xe3a0000c"
+   ],
+   "how": "counts AUD_FOR_WHOM_THE_BELL_TOLLS_MODE_STARTED (id 303) at 0xca980; creates record(s) 192 (body 0xc89b4); reached by table word 0x5a0a90; ball calls: add(0) (no ball served); a song mode's start from the song table (a data word only); it calls the relative add-balls wrapper with 0 (a ball save, no ball); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 4,
+   "name": "Fuel",
+   "start": "0xce53c",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd014"
+   ],
+   "how": "counts AUD_FUEL_MODE_STARTED (id 313) at 0xce6b4; creates record(s) 197 (body 0xcd6cc); reached by bl 0x13be10 (fn 0x13bdb8); bl 0x13be7c (fn 0x13be24); its two callers test the result",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 5,
+   "name": "One",
+   "start": "0x117170",
+   "words": [
+    "0xe92d41f0",
+    "0xe3a000c8"
+   ],
+   "how": "counts AUD_ONE_MODE_STARTED (id 316) at 0x117288; creates record(s) 200 (body 0x115cc8); reached by bl 0x10cacc (fn 0x10c790)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 6,
+   "name": "Seventy Two Seasons",
+   "start": "0x12b918",
+   "words": [
+    "0xe92d40f0",
+    "0xe3a00002"
+   ],
+   "how": "counts AUD_SEVENTY_TWO_SEASONS_MODE_STARTED (id 324) at 0x12ba14; creates record(s) 203 (body 0x12ab84); reached by tail b 0x12baec (fn 0x12ba8c); reached by a tail branch only",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 7,
+   "name": "Hardwired",
+   "start": "0xf47b4",
+   "words": [
+    "0xe92d4370",
+    "0xe3a00003"
+   ],
+   "how": "counts AUD_HARDWIRED_MODE_STARTED (id 325) at 0xf4884; creates record(s) 206 (body 0xf36f4); reached by tail b 0xf490c (fn 0xf48f8); reached by a tail branch only",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 8,
+   "name": "Combo Mode (and Combo Challenge)",
+   "start": "0xae9d8",
+   "words": [
+    "0xe30e1080",
+    "0xe3a000d2"
+   ],
+   "how": "counts AUD_COMBO_MODE_STARTED (id 326) at 0xaeab4; counts AUD_COMBO_CHALLENGE_MODE_STARTED (id 327) at 0xaeb44; creates record(s) 210 (body 0xae080); reached by bl 0xd11e0 (fn 0xd0fc4); tail b 0xaebb8 (fn 0xaeba4); ball calls: serve(0) (no ball served); one start for Combo and Combo Challenge (it counts either STARTED audit); it calls multiball_serve with 0 (no ball)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 9,
+   "name": "Coffin Hurry-Up",
+   "start": "0xa8b20",
+   "words": [
+    "0xe92d47f0",
+    "0xe24dd010"
+   ],
+   "how": "counts AUD_COFFIN_HURRY_UP_STARTED (id 354) at 0xa8cc0; creates record(s) 231 (body 0xa83c0); reached by bl 0x12c9a8 (fn 0x12c73c); tail b 0x1143c4 (fn 0x11439c); a caller tests the result",
+   "confidence": "medium",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Battery Mode Collect Select",
+   "why": "no function counts AUD_BATTERY_MODE_COLLECT_SELECT_STARTED (id 280) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Enter Sandman Mode Collect Select",
+   "why": "no function counts AUD_ENTER_SANDMAN_MODE_COLLECT_SELECT_STARTED (id 290) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Fade to Black Mode Collect Select",
+   "why": "no function counts AUD_FADE_TO_BLACK_MODE_COLLECT_SELECT_STARTED (id 299) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "For Whom the Bell Tolls Mode Collect Select",
+   "why": "no function counts AUD_FOR_WHOM_THE_BELL_TOLLS_MODE_COLLECT_SELECT_STARTED (id 309) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "The End of the Line Mode Collect Select",
+   "why": "no function counts AUD_THE_END_OF_THE_LINE_MODE_COLLECT_SELECT_STARTED (id 336) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Blackened Mode",
+   "why": "no function counts AUD_BLACKENED_MODE_STARTED (id 340) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Bonus Lit",
+   "why": "AUD_MODE_BONUS_LIT is an award audit, not a mode's start"
+  },
+  {
+   "name": "Bonus Shot Awards",
+   "why": "AUD_MODE_BONUS_SHOT_AWARDS is an award audit, not a mode's start"
+  },
+  {
+   "name": "Bonus Collect Lit",
+   "why": "AUD_MODE_BONUS_COLLECT_LIT is an award audit, not a mode's start"
+  },
+  {
+   "name": "Bonus Collect Awards",
+   "why": "AUD_MODE_BONUS_COLLECT_AWARDS is an award audit, not a mode's start"
+  },
+  {
+   "name": "And Justice for All Multiball",
+   "start": "0x1eac0",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd014"
+   ],
+   "why": "multiball: named AUD_AND_JUSTICE_FOR_ALL_MULTIBALL_STARTED; serves balls via 0x1eac0 -> 0x3e3008 (count 3)"
+  },
+  {
+   "name": "Frantic Multiball",
+   "start": "0xcbdf4",
+   "words": [
+    "0xe92d47f0",
+    "0xe24dd020"
+   ],
+   "why": "multiball: named AUD_FRANTIC_MULTIBALL_STARTED; serves balls via 0xcbdf4 -> 0x3e3008 (count 4)"
+  },
+  {
+   "name": "Blackened Multiball",
+   "start": "0xa2010",
+   "words": [
+    "0xe92d43f0",
+    "0xe30b4498"
+   ],
+   "why": "multiball: named AUD_BLACKENED_MULTIBALL_STARTED; serves balls via 0xa2010 -> 0x3e3008 (count None)"
+  },
+  {
+   "name": "The End of the Line Mode",
+   "start": "0x140fe4",
+   "words": [
+    "0xe30c1d84",
+    "0xe3a000df"
+   ],
+   "why": "multiball: adds balls via 0x140fe4 -> 0x13d5d8 -> 0x3e3148 (count 1)"
+  },
+  {
+   "name": "The Unforgiven Mode / The Unforgiven Challenge Mode",
+   "start": "0x145a84",
+   "words": [
+    "0xe92d47f0",
+    "0xe24dd078"
+   ],
+   "why": "multiball: serves balls via 0x145a84 -> 0x3e3008 (count None)"
+  },
+  {
+   "name": "Coffin Multiball",
+   "start": "0xaa088",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd014"
+   ],
+   "why": "multiball: named AUD_COFFIN_MULTIBALL_STARTED; serves balls via 0xaa088 -> 0x3e3008 (count 4)"
+  },
+  {
+   "name": "Cross Multiball",
+   "start": "0xb1960",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd014"
+   ],
+   "why": "multiball: named AUD_CROSS_MULTIBALL_STARTED; serves balls via 0xb1960 -> 0x3e3008 (count 2)"
+  },
+  {
+   "name": "Electric Chair Multiball",
+   "start": "0xc0a08",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd014"
+   ],
+   "why": "multiball: named AUD_ELECTRIC_CHAIR_MULTIBALL_STARTED; serves balls via 0xc0a08 -> 0x3e3008 (count 3)"
+  },
+  {
+   "name": "Snake Multiball",
+   "start": "0x130e64",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd010"
+   ],
+   "why": "multiball: named AUD_SNAKE_MULTIBALL_STARTED; serves balls via 0x130e64 -> 0x3e3008 (count 2)"
+  }
+ ],
+ "notes": "engine: audit_add 0x2415ec, create-process 0x1fd8cc, live_records 0x1fdc34, multiball_serve 0x3e3008. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). Live-records title (the port's records name each song 'a song mode'). stock_scan_c.audit_ids reads this build's audit ids wrongly: it takes a junk {table, count, 8} record and falls back to the names' places, so its labels don't follow the ids (the port's 'labels do not follow the ids'); the real descriptor table gives ids that agree with the records each start creates (Enter Sandman 0xc5248 on 1.03, 0xc5718 on 1.04, creates 182, the port's first song record). The Mode Bonus audits are awards, not modes. The End of the Line adds a ball; The Unforgiven serves a computed count."
+}

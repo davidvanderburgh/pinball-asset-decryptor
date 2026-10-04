@@ -344,26 +344,26 @@ site multiball_serve       0x004263d8 0xe92d41f0 0xe303e456
 # plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
 site block_start_0      0x00035274 0xe92d4038 0xe300013f
 text block_name_0       Bullshit Scoring
-site block_start_1      0x000a6ca8 0xe30514e4 0xe300012e
-text block_name_1       It's a Trap
-site block_start_2      0x000abf64 0xe30b1c34 0xe3a00f4b
-text block_name_2       Junk Yard
-site block_start_3      0x0003da74 0xe92d4038 0xe30e5a5c
-text block_name_3       Bust Out
-site block_start_4      0x001902a0 0xe92d4038 0xe30e5a5c
-text block_name_4       What's That
-site block_start_5      0x00187da4 0xe92d40f8 0xe3051dd4
-text block_name_5       Upside Down Hurry-Up
-site block_start_6      0x0018bd88 0xe92d40f8 0xe3091db8
-text block_name_6       Upside Down 2 Hurry-Up
-site block_start_7      0x0007a8e8 0xe92d4008 0xe300013d
-text block_name_7       Double Scoring
-site block_start_8      0x0007a97c 0xe92d4038 0xe300013d
-text block_name_8       Double Scoring (lit award)
-site block_start_9      0x0018df7c 0xe92d4038 0xe30e5a5c
-text block_name_9       Victory Laps
-site block_start_10     0x00031c00 0xe92d40f8 0xebffff93
-text block_name_10      Break Out
+site block_start_1      0x00031c00 0xe92d40f8 0xebffff93
+text block_name_1       Break Out
+site block_start_2      0x000a6ca8 0xe30514e4 0xe300012e
+text block_name_2       It's a Trap
+site block_start_3      0x000abf64 0xe30b1c34 0xe3a00f4b
+text block_name_3       Junk Yard
+site block_start_4      0x0003da74 0xe92d4038 0xe30e5a5c
+text block_name_4       Bust Out
+site block_start_5      0x001902a0 0xe92d4038 0xe30e5a5c
+text block_name_5       What's That
+site block_start_6      0x00187da4 0xe92d40f8 0xe3051dd4
+text block_name_6       Upside Down Hurry-Up
+site block_start_7      0x0018bd88 0xe92d40f8 0xe3091db8
+text block_name_7       Upside Down 2 Hurry-Up
+site block_start_8      0x0007a8e8 0xe92d4008 0xe300013d
+text block_name_8       Double Scoring
+site block_start_9      0x0007a97c 0xe92d4038 0xe300013d
+text block_name_9       Double Scoring (lit award)
+site block_start_10     0x0018df7c 0xe92d4038 0xe30e5a5c
+text block_name_10      Victory Laps
 site block_start_11     0x000be0d8 0xe92d4070 0xe30e5a5c
 text block_name_11      Where's Barb
 site block_start_12     0x000c2110 0xe92d4070 0xe30e6a5c

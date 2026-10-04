@@ -1,0 +1,89 @@
+{
+ "key": "star_wars_elg-1.10",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Inner Loop",
+   "start": "0x6bcc0",
+   "words": [
+    "0xe92d4038",
+    "0xebfff7ce"
+   ],
+   "how": "counts AUD_INNER_LOOP_STARTED (id 169) at 0x6bd04; sets game flag 86; reached by bl 0x6a1e4 (fn 0x6a100)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Orbits",
+   "start": "0x6ad3c",
+   "words": [
+    "0xe92d4038",
+    "0xebfffbaf"
+   ],
+   "how": "counts AUD_ORBITS_STARTED (id 171) at 0x6ad80; sets game flag 88; reached by bl 0x6a230 (fn 0x6a100)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Ramps",
+   "start": "0x5eff0",
+   "words": [
+    "0xe92d4010",
+    "0xeb002b02"
+   ],
+   "how": "counts AUD_RAMPS_STARTED (id 173) at 0x5f028; sets game flag 87; reached by bl 0x6a198 (fn 0x6a100)",
+   "confidence": "high",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Boba Fett",
+   "why": "no function counts AUD_MODE_BOBA_FETT (id 180) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Mystery R2d2 Multiball",
+   "why": "multiball (AUD_MYSTERY_R2D2_MULTIBALL); its count is not a constant anywhere"
+  },
+  {
+   "name": "Main Multiball Multiball",
+   "start": "0x5ada0",
+   "words": [
+    "0xe92d4030",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_MAIN_MULTIBALL_MULTIBALL; serves balls via 0x5ada0 -> 0x105d48 (count 3)"
+  },
+  {
+   "name": "Tie Fighter Multiball Multiball",
+   "start": "0x914b8",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_TIE_FIGHTER_MULTIBALL_MULTIBALL; serves balls via 0x914b8 -> 0x105d48 (count 3)"
+  },
+  {
+   "name": "Captive Multiball",
+   "start": "0x5fb28",
+   "words": [
+    "0xe92d4070",
+    "0xe3a0003e"
+   ],
+   "why": "multiball: named AUD_CAPTIVE_MULTIBALL"
+  },
+  {
+   "name": "Final Multiball",
+   "start": "0x2e908",
+   "words": [
+    "0xe59f3454",
+    "0xe3a01003"
+   ],
+   "why": "multiball: named AUD_FINAL_MULTIBALL_START; serves balls via 0x2e908 -> 0x105d48 (count None)"
+  }
+ ],
+ "notes": "engine: audit_add 0x13c70c, flag set 0x28a27c, create-process 0x15c294, multiball_serve 0x105d48. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). The three shot modes (Inner Loop, Orbits, Ramps: the port's flag witnesses 86-88) begin `push; bl 0x69c04` and are only called by the shared mode select 0x6a100: no usable entry. Boba Fett has no counting function; Super Pops / Double Spinner / Super Ramps are awards, not modes."
+}

@@ -1,0 +1,67 @@
+{
+ "key": "beatles-1.29",
+ "family": "c",
+ "modes": [],
+ "rejected": [
+  {
+   "name": "Main Multiball",
+   "start": "0x39270",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_MAIN_MULTIBALL_STARTED; serves balls via 0x39270 -> 0x1fd310 (count 3)"
+  },
+  {
+   "name": "All My Loving",
+   "start": "0x4b220",
+   "covers": "ALL_MY_LOVING",
+   "why": "return-checked: the song select 0x3ddc4 calls the song descriptor's start (table 0x4b60e0, 0x38 per song, start at +0xc) and on a non-zero result marks the song played, starts the song's display effect and counts it - a refused start (r0 = 1) leaves the song half-started. It also serves balls (a ball-added song). Usable only by a veto that returns 0",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd020"
+   ]
+  },
+  {
+   "name": "Drive My Car",
+   "start": "0x4da44",
+   "covers": "DRIVE_MY_CAR",
+   "why": "return-checked (see All My Loving): usable only by a veto that returns 0 (the song select aborts cleanly on 0)",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000c0"
+   ]
+  },
+  {
+   "name": "Should Have Known Better",
+   "start": "0x50558",
+   "covers": "SHOULD_HAVE",
+   "why": "return-checked (see All My Loving): usable only by a veto that returns 0",
+   "words": [
+    "0xe92d40f8",
+    "0xe3a000c2"
+   ]
+  },
+  {
+   "name": "Ticket to Ride",
+   "start": "0x52cdc",
+   "covers": "TICKET_TO_RIDE",
+   "why": "return-checked (see All My Loving): usable only by a veto that returns 0",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000c4"
+   ]
+  },
+  {
+   "name": "It Won't Be Long",
+   "start": "0x5567c",
+   "covers": "IT_WONT_BE_LONG",
+   "why": "return-checked (see All My Loving): usable only by a veto that returns 0",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000c6"
+   ]
+  }
+ ],
+ "notes": "engine: audit_add 0xbee50, create-process 0x1aba68, multiball_serve 0x1fd310. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). The five song modes' STARTED audits are counted from the song descriptor, never as a constant; the descriptor table (0x4b60e0, 0x38 bytes per song, the STARTED audit id as a u16 at +0x10) was found from that id sequence (213, 217, 221, ...). Each song's start is the descriptor's +0xc function, called by the song select 0x3ddc4 (and 0x3d8e8) through the descriptor and its result checked."
+}

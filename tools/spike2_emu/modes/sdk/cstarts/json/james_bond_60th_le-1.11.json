@@ -1,0 +1,31 @@
+{
+ "key": "james_bond_60th_le-1.11",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Villain Mode",
+   "start": "0x9bb10",
+   "words": [
+    "0xe5903038",
+    "0xe92d4070"
+   ],
+   "how": "VillainMode::start (the port's start, on the VillainMode object 0x5f20e0): bumps the villain level (+0x34 = [+0x38] + 1), counts the player's villain modes, calls 0x11d83c(0x83, 0x9c774, 0) (the create-a-process shape: id, body, 0) and starts game timer 2, whose records 137..138 are the port's mode_records_1; only caller 0xa16b4 in the VillainMode shot handler 0xa0918 (result unused)",
+   "confidence": "medium",
+   "risky": "",
+   "obj": "0x5f20e0"
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Villain Multiballs / Bond Multiballs / Gadget Multiballs / Mission Multiballs Played / 007 Multiballs",
+   "start": "0x8f94c",
+   "words": [
+    "0xe92d4038",
+    "0xe1a04001"
+   ],
+   "why": "multiball: named AUD_VILLAIN_MULTIBALLS; serves balls via 0x8f94c -> 0x8f6ac -> 0x8712c -> 0x16bbe8 (count 2)"
+  }
+ ],
+ "notes": "engine: audit_add 0x39e3ac, create-process 0x15cbc, live_records 0x11dba4, multiball_serve 0x16bbe8. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). No mode STARTED audits besides the multiball families (Villain / Bond / Gadget / Mission / 007 multiballs, all serve balls). The one non-multiball mode the port names is the Villain Mode."
+}

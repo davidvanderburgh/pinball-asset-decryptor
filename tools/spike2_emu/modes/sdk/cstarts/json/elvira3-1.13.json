@@ -1,0 +1,60 @@
+{
+ "key": "elvira3-1.13",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Houses (whichever House is selected)",
+   "start": "0xdd12c",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "how": "counts AUD_HOUSE_STARTS (id 283) at 0xdd280; reached by bl 0x4a2bc (fn 0x4a114); bl 0x4ba2c (fn 0x4b8e8); bl 0xf37f8 (fn 0xf3488); bl 0x158f38 (fn 0x158d10); the House manager's start: one start for every House (it finds the selected house, calls its start and on success marks it played and counts AUD_HOUSE_STARTS), so a veto here keeps every House off and marks none played; two callers (0x4a114, 0x4b8e8: the scoop's action chain) take a non-zero result as 'a House started' (action 7)",
+   "confidence": "medium",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Trunk Multiball",
+   "why": "multiball (AUD_TRUNK_MULTIBALL_STARTS); its count is not a constant anywhere"
+  },
+  {
+   "name": "Gappa Angry Multiball",
+   "why": "multiball (AUD_GAPPA_ANGRY_MULTIBALL_STARTS); its count is not a constant anywhere"
+  },
+  {
+   "name": "Wild Women Multiball",
+   "why": "multiball (AUD_WILD_WOMEN_MULTIBALL_STARTS); its count is not a constant anywhere"
+  },
+  {
+   "name": "Add a Zombie Multiball",
+   "why": "multiball (AUD_ADD_A_ZOMBIE_MULTIBALL_STARTS); its count is not a constant anywhere"
+  },
+  {
+   "name": "Attic Attack Multiball",
+   "why": "multiball (AUD_ATTIC_ATTACK_MULTIBALL_STARTS); its count is not a constant anywhere"
+  },
+  {
+   "name": "Junk Ray Gun Used Garage Multiball / Junk Ray Gun Used Trunk Multiball / Junk Ray Gun Used Gappa Angry Multiball",
+   "start": "0xe2df4",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a07000"
+   ],
+   "why": "multiball: named AUD_JUNK_RAY_GUN_USED_GARAGE_MULTIBALL"
+  },
+  {
+   "name": "Houses (15 House rules)",
+   "covers": "^AUD_(ABOB|AOTGL|EEGAH|MTHOF|NOTLD|SCCTM|TBTWD|TFOS|TGGM|TKS|TM|TSROD|TWOW|TWW|THEY_CAME_FROM_SPACE)_STARTS$",
+   "why": "return-checked: the House manager's start 0xdd12c finds the house in its map and calls the house's start (the House object's secondary-vtable slot 22, a thunk `sub r0, r0, #4; b <start>`: ABOB 0x33558, NOTLD 0x1064cc, ...) and on a non-zero result marks the house played, counts AUD_HOUSE_STARTS and calls the manager's v[14] - a refused start (r0 = 1) leaves the house marked played without running. Usable only by a veto that returns 0 (the manager aborts on 0)"
+  },
+  {
+   "name": "Transient rules (Dance Fever, Make Out Mayhem, Run for Your Life, Scream Test, They Came from Space) and the other modes",
+   "covers": "_STARTS$",
+   "why": "not located: their STARTS audits are counted from rule data, never as a constant, and the rules walk 0xf489c starts them through C++ virtuals of hand-rolled rule classes (FreakFryerRule / TransientRule) whose start slot was not established in this pass"
+  }
+ ],
+ "notes": "engine: audit_add 0x2c3898, create-process 0x42e148, multiball_serve 0x3ccdc8. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). Elvira 3 runs its modes as C++ rule objects (House rules under a House manager, TransientRules in a vector) without the cmode framework; the audit witness finds only AUD_HOUSE_STARTS (in the manager) and the Junk Ray Gun multiballs."
+}

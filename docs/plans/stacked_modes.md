@@ -70,7 +70,18 @@ etc.? it would be good to have this generic logic (or at least the levers built 
   app's stock scanner already finds the slot and every mode's object, vtable and name, so
   `game_mode_blocks.py` (and `sdk/block_tool.py`) write one veto per mode into the port: `site
   block_start_<id>`, `data block_obj_<id>`, `text block_name_<id>`, `text block_default <ids>`. Never a
-  multiball. Godzilla LE 1.16 and Deadpool LE 1.14 / Pro 1.16 carry the section so far.
+  multiball. Mode ids run to 127 (D&D's map modes, Venom's minis); a mode outside the game's table takes a
+  free id. A start whose first two words cannot run in the trampoline is left out, except `push {.., lr}; bl`,
+  which the runtime relocates (hook_veto_bl).
+- **Plain-C titles** (and Jurassic Park LE / Rush, whose start slot the scanner misses): `sdk/cstarts/` -
+  `find_c_starts.py` finds each mode's start as the function that counts its STARTED audit (at its true
+  entry; never a multiball; never one that counts another mode's), `c_port_tool.py` writes the section. A start
+  whose caller goes on when it returns non-zero (The Beatles' song select, the story chapters of Stranger
+  Things and James Bond) is refused with 0 (`value block_ret_<id> 0`); a start with no object is told apart by
+  which hook fired.
+- **Rules that are not modes.** Godzilla's Saucer Attack (David's Premium, 2026-10-04: "overlapping text for
+  saucer mode feedback under Ghidorah") is fed by the pop bumper and puts its words over ours: `site
+  block_rule_<n>` + masks hide those shots from that rule alone while a mode blocks, as the battle rule's.
 - **The lever.** A mode file's `game_modes stack|give_way|block` and `block_modes <ids>`; in the Modes tab,
   "The game's own modes > While it runs, the game's modes": may start (this one moves aside), may start and
   end this one, or cannot start, with a tick for each of the title's modes its port names (a mode moved to
@@ -83,10 +94,39 @@ etc.? it would be good to have this generic logic (or at least the levers built 
   any-mode query 0 -> 4, its screen up). Ninja Mball's own start declines when forced cold (it wants its
   locks), so the multiball pass-through stays proven on Godzilla only.
 
+## The library check (emulator, 2026-10-04)
+
+Every shipped build, muted and hidden, through `rigbatch.sh` (job `C:\tmp\PAD-363\blockcheck*.sh`): a mode
+file with `game_modes block` listing every mode the port names runs; each named mode is started through the
+game's own start (`stock_force_any.c`, an instrument that never goes on a card) and must be refused; then the
+blocking mode stops and the game's modes are started again until one RUNS (the control: the start found is the
+start, and an unblocked start still works through the hook).
+
+| Builds | Named | Result |
+|---|---|---|
+| Godzilla LE 1.16, Pro 1.15, Pro 1.16 | 15, 15, 14 | pass (control Planet X Hurry Up) |
+| Deadpool LE 1.14 / Pro 1.16 | 19 each | pass (Bashpool Hurry Up) |
+| Venom 1.07 | 55 | pass (Host Hurry Up, id 56) |
+| D&D 1.00 | 29 | pass on its dragon-less settings (Mimic Hurry Up) |
+| Avengers, Foo Fighters, Iron Maiden, Jaws, King Kong, Led Zeppelin LE / Pro, Munsters, Star Wars LE, Mandalorian, Sword of Rage, John Wick, TMNT LE 1.59 / Pro 1.59 | 8-28 | pass |
+| TMNT Pro 1.58 | 25 | refused 25/25; control by screenshot (its query sees multiballs only) |
+| Jurassic Park LE 1.16, Rush 1.18 | 15, 9 | pass (start slots 21, 40) |
+| The Beatles 1.29 | 5 | pass (refused with 0; All My Loving ran unblocked) |
+| Aerosmith, Guardians, Bond 60th, Bond 1.06, Metallica 1.03 / 1.04, Stranger Things | 1-28 | pass |
+| Batman 1.13 | 22 | refused 22/22; control by screenshot (a hurry-up with its clock) |
+| X-Men 0.98 | 14 | refused 14/14; control with the mode objects (Future Hurry Up) |
+| Jurassic Park The Pin 1.05 | 6 | refused 6/6; control Stegosaurus (through the relocated bl) |
+| Star Wars ELG 1.10 | 3 | pass (Inner Loop, through the relocated bl) |
+| Elvira 3 1.13 | 1 (every House) | refused 1/1 in the one run that reached a game; the rig crashes Elvira before a game 5 runs in 6, with or without modes (a task of its own) |
+
+Not named anywhere: multiballs (by design), and a few starts the veto cannot take or that nothing calls
+(D&D's Finish State / Map Orange 2a / 2b / Purple 1 Hurry Up, Munsters' Madness Hurry Up, TMNT's Pizza
+Eating Contest Ready; the plain-C rejects in `sdk/cstarts/json`). A refused start may use up what lit it on
+some titles (Stranger Things' award table counts the award before it calls the mode).
+
 ## Still to do
 
 - The Scenes editor's "Beside a game mode" view: a mode's screen laid out a second time for when a game
   mode runs (a second screen node the runtime shows instead of hiding).
-- Block sections for the other C++ rule titles (`block_tool.py <game> <port>`), each checked once in the
-  emulator; the plain-C titles need their own start finder.
-- Code modes: `block_modes` in the Assets control (`CodeAssets`), as the form modes have it.
+- Elvira 3's Houses one by one (the House manager's start holds off every House at once today).
+- The tab names a C++ mode by its class (Avengers' "Marvel Hurry Up" shows on the glass as "Binary Hurry Up").

@@ -1,0 +1,251 @@
+{
+ "key": "jurassic_park_le-1.16",
+ "family": "cmode",
+ "start_slot": 21,
+ "start_slot_how": "cmode::v[21] 0x10250c sets the running byte (strb of 1 at 0x102574) and bumps the starts count (0x1025d8). Why stock_scan_cpp.read gives no start_slot: computed: 0 of 11 mode objects have a constant id; mode getter not found; award add not found; class_model gives cmode 56 slots. Each mode constructor takes no arguments and hands its base constructor a descriptor filled at run time, so init_objects reads no ids (and finds 11 of the 24 objects; the cmode_manager constructor 0x13ad90 builds all 24 as function-local statics and stores them in the table 0x737350); find_mode_getter needs constant ids to vote and finds no getter - besides, the get-by-id accessor (cmode_manager::v[2] 0x13a2a4) is never called with a bl (callers inline it behind a vptr compare) - and find_award_add finds no award add, which the start-slot rule also requires.",
+ "modes": [
+  {
+   "id": 4,
+   "name": "Chaos Hurry Up",
+   "start": "0x1045c4",
+   "words": [
+    "0xe92d4038",
+    "0xe1a04000"
+   ],
+   "how": "cmode_chaos_hurry_up's v[21] (vtable 0x61a448 + 8 + 4*21) on object 0x737b30; calls its base's start 0x138d20 (super::start); reached by data 0x61a4a4",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x737b30"
+  },
+  {
+   "id": 6,
+   "name": "Trex Feed Hurry Up",
+   "start": "0x152a04",
+   "words": [
+    "0xe92d4038",
+    "0xe1a04000"
+   ],
+   "how": "cmode_trex_feed_hurry_up's v[21] (vtable 0x61ee58 + 8 + 4*21) on object 0x737dc8; calls its base's start 0x138d20 (super::start); reached by data 0x61eeb4",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x737dc8"
+  },
+  {
+   "id": 7,
+   "name": "Trex Chase",
+   "start": "0x14e020",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "how": "cmode_trex_chase's v[21] (vtable 0x61e728 + 8 + 4*21) on object 0x737eec; calls its base's start 0x14d1fc (super::start); reached by data 0x61e784",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x737eec"
+  },
+  {
+   "id": 8,
+   "name": "Trex Encounter",
+   "start": "0x150140",
+   "words": [
+    "0xe92d4070",
+    "0xe1a04000"
+   ],
+   "how": "cmode_trex_encounter's v[21] (vtable 0x61eb40 + 8 + 4*21) on object 0x73804c; calls its base's start 0x14d1fc (super::start); reached by data 0x61eb9c",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x73804c"
+  },
+  {
+   "id": 9,
+   "name": "Trex Rampage",
+   "start": "0x15671c",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "how": "cmode_trex_rampage's v[21] (vtable 0x61f350 + 8 + 4*21) on object 0x738174; calls its base's start 0x14d1fc (super::start); reached by data 0x61f3ac",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x738174"
+  },
+  {
+   "id": 10,
+   "name": "Ctrl Room Virus Attack",
+   "start": "0x11657c",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "how": "cmode_ctrl_room_virus_attack's v[21] (vtable 0x61b4a0 + 8 + 4*21) on object 0x7382c0; calls its base's start 0x14d1fc (super::start); reached by data 0x61b4fc",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x7382c0"
+  },
+  {
+   "id": 11,
+   "name": "Ctrl Room Restore Power",
+   "start": "0x11171c",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "how": "cmode_ctrl_room_restore_power's v[21] (vtable 0x61ac90 + 8 + 4*21) on object 0x738404; calls its base's start 0x14d1fc (super::start); reached by data 0x61acec",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x738404"
+  },
+  {
+   "id": 12,
+   "name": "Ctrl Room System Boot",
+   "start": "0x113d14",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a04000"
+   ],
+   "how": "cmode_ctrl_room_system_boot's v[21] (vtable 0x61b150 + 8 + 4*21) on object 0x738540; calls its base's start 0x14d1fc (super::start); reached by data 0x61b1ac",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x738540"
+  },
+  {
+   "id": 14,
+   "name": "Pteranodon Attack",
+   "start": "0x14325c",
+   "words": [
+    "0xe92d4030",
+    "0xe24dd00c"
+   ],
+   "how": "cmode_pteranodon_attack's v[21] (vtable 0x61dca0 + 8 + 4*21) on object 0x7387e4; calls its base's start 0x14d1fc (super::start); reached by data 0x61dcfc",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x7387e4"
+  },
+  {
+   "id": 15,
+   "name": "Goat Mania",
+   "start": "0x137ea4",
+   "words": [
+    "0xe92d4030",
+    "0xe24dd014"
+   ],
+   "how": "cmode_goat_mania's v[21] (vtable 0x61ca08 + 8 + 4*21) on object 0x7388f8; calls its base's start 0x10250c (super::start); reached by data 0x61ca64",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x7388f8"
+  },
+  {
+   "id": 16,
+   "name": "Visitor Center Hurry Up",
+   "start": "0x159120",
+   "words": [
+    "0xe92d4038",
+    "0xe1a04000"
+   ],
+   "how": "cmode_visitor_center_hurry_up's v[21] (vtable 0x61f780 + 8 + 4*21) on object 0x7389f0; calls its base's start 0x138d20 (super::start); reached by data 0x61f7dc",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x7389f0"
+  },
+  {
+   "id": 20,
+   "name": "Museum Mayhem",
+   "start": "0x13ea78",
+   "words": [
+    "0xe92d47f0",
+    "0xe24dd010"
+   ],
+   "how": "cmode_museum_mayhem's v[21] (vtable 0x61d858 + 8 + 4*21) on object 0x738e64; calls its base's start 0x10250c (super::start); reached by data 0x61d8b4",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x738e64"
+  },
+  {
+   "id": 21,
+   "name": "Secure Control Room",
+   "start": "0x14a4d0",
+   "words": [
+    "0xe92d47f0",
+    "0xe24dd010"
+   ],
+   "how": "cmode_secure_control_room's v[21] (vtable 0x61e0f8 + 8 + 4*21) on object 0x739058; calls its base's start 0x138d20 (super::start); reached by data 0x61e154",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x739058"
+  },
+  {
+   "id": 22,
+   "name": "Escape Nublar",
+   "start": "0x11a724",
+   "words": [
+    "0xe92d41f0",
+    "0xe1a04000"
+   ],
+   "how": "cmode_escape_nublar's v[21] (vtable 0x61b7a8 + 8 + 4*21) on object 0x7391dc; calls its base's start 0x10250c (super::start); reached by data 0x61b804; a wizard mode (cmode, not cmode_mball): check on a machine that it serves no ball",
+   "confidence": "medium",
+   "risky": "",
+   "obj": "0x7391dc"
+  },
+  {
+   "id": 23,
+   "name": "Escape Nublar Hurry Up",
+   "start": "0x118fbc",
+   "words": [
+    "0xe92d4038",
+    "0xe1a04000"
+   ],
+   "how": "cmode_escape_nublar_hurry_up's v[21] (vtable 0x61b9b8 + 8 + 4*21) on object 0x7393b0; calls its base's start 0x138d20 (super::start); reached by data 0x61ba14",
+   "confidence": "high",
+   "risky": "",
+   "obj": "0x7393b0"
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Trex Multiball",
+   "start": "0x1541bc",
+   "why": "multiball (cmode_trex_multiball derives cmode_mball)"
+  },
+  {
+   "name": "Raptor Triball",
+   "start": "0x14615c",
+   "why": "multiball (cmode_raptor_triball derives cmode_mball)"
+  },
+  {
+   "name": "Chaos Multiball",
+   "start": "0x1071f8",
+   "why": "multiball (cmode_chaos_multiball derives cmode_mball)"
+  },
+  {
+   "name": "King of the Island",
+   "start": "0x1394bc",
+   "why": "multiball (cmode_king_of_the_island derives cmode_mball)"
+  },
+  {
+   "name": "Ctrl Room Invalid Frenzy",
+   "start": "0x10e414",
+   "why": "multiball (cmode_ctrl_room_invalid_frenzy derives cmode_mball)"
+  },
+  {
+   "name": "Visitor Center",
+   "start": "0x15d9c0",
+   "why": "multiball (cmode_visitor_center derives cmode_mball)"
+  },
+  {
+   "name": "Visitor Center Victory Multiball",
+   "start": "0x1598cc",
+   "why": "multiball (cmode_visitor_center_victory_mb derives cmode_mball)"
+  },
+  {
+   "name": "Museum Mayhem Victory Laps",
+   "start": "0x13dd78",
+   "why": "multiball (cmode_museum_mayhem_victory_laps derives cmode_mball)"
+  },
+  {
+   "name": "When Dinos Ruled the Earth",
+   "start": "0x15ec24",
+   "why": "multiball (cmode_when_dinos_ruled_the_earth derives cmode_mball)"
+  }
+ ],
+ "notes": "Objects: the mode table 0x737350 (the port's stock_mode_table, 25 ids) as its filler 0x13ad90 (the cmode_manager constructor) stores it: id = table index. The same slot rule agrees with stock_scan_cpp on all 22 C++ programs that have a slot (Godzilla 8, Deadpool 13, Venom 47, TMNT 39, Munsters 33, Mandalorian 38, Jaws 12, King Kong 11, Avengers 11, John Wick 47, Sword of Rage 31, Iron Maiden 8, Star Wars 8, D&D 50, Foo Fighters 41, Led Zeppelin 33). ids here are the game's own mode ids."
+}

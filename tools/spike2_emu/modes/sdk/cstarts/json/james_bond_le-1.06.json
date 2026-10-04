@@ -1,0 +1,332 @@
+{
+ "key": "james_bond_le-1.06",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Bullshit Scoring",
+   "start": "0x5be50",
+   "words": [
+    "0xe92d4010",
+    "0xe30001ad"
+   ],
+   "how": "counts AUD_BULLSHIT_SCORING_STARTED (id 208) at 0x5bf68; sets game flag 141,175; creates record(s) 429 (body 0x5ae50); reached by tail b 0x5bfc0 (fn 0x5bfac); reached only by a tail branch from 0x5bfac, whose caller gets the result",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Geiger Counter",
+   "start": "0xb1b90",
+   "words": [
+    "0xe3011648",
+    "0xe300019f"
+   ],
+   "how": "counts AUD_GEIGER_COUNTER_STARTED (id 209) at 0xb1ce8; creates record(s) 415 (body 0xb1648),239 (body 0xb1620); reached by table word 0x62f16c; a gadget mode's start from the gadget table 0x62f168 (0x34 per gadget, start at +4), called by the next-gadget start 0x15f928 (result unused), which then clears flag 28, moves the gadget's bit into the player's done mask and carries on: a refused gadget counts as played",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Attache Case",
+   "start": "0x33cb8",
+   "words": [
+    "0xe30316b4",
+    "0xe30001a1"
+   ],
+   "how": "counts AUD_ATTACHE_CASE_STARTED (id 210) at 0x33d94; creates record(s) 417 (body 0x336b4),240 (body 0x3368c); reached by table word 0x62f1a0; a gadget mode's start from the gadget table 0x62f168 (0x34 per gadget, start at +4), called by the next-gadget start 0x15f928 (result unused), which then clears flag 28, moves the gadget's bit into the player's done mask and carries on: a refused gadget counts as played",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "Aston Martin",
+   "start": "0x2a860",
+   "words": [
+    "0xe92d40f8",
+    "0xe30a1268"
+   ],
+   "how": "counts AUD_ASTON_MARTIN_STARTED (id 211) at 0x2a944; creates record(s) 419 (body 0x2a268),242 (body 0x2a240); reached by table word 0x62f1d4; a gadget mode's start from the gadget table 0x62f168 (0x34 per gadget, start at +4), called by the next-gadget start 0x15f928 (result unused), which then clears flag 28, moves the gadget's bit into the player's done mask and carries on: a refused gadget counts as played",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 4,
+   "name": "Under Water Powerpack",
+   "start": "0x1c2818",
+   "words": [
+    "0xe30211e8",
+    "0xe30001a5"
+   ],
+   "how": "counts AUD_UNDER_WATER_POWERPACK_STARTED (id 212) at 0x1c28e8; creates record(s) 421 (body 0x1c21e8),244 (body 0x1c21c0); reached by table word 0x62f208; a gadget mode's start from the gadget table 0x62f168 (0x34 per gadget, start at +4), called by the next-gadget start 0x15f928 (result unused), which then clears flag 28, moves the gadget's bit into the player's done mask and carries on: a refused gadget counts as played",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 5,
+   "name": "Little Nellie",
+   "start": "0xffbb8",
+   "words": [
+    "0xe30f14c4",
+    "0xe30001a7"
+   ],
+   "how": "counts AUD_LITTLE_NELLIE_STARTED (id 213) at 0xffc94; creates record(s) 423 (body 0xff4c4),246 (body 0xff49c); reached by table word 0x62f23c; a gadget mode's start from the gadget table 0x62f168 (0x34 per gadget, start at +4), called by the next-gadget start 0x15f928 (result unused), which then clears flag 28, moves the gadget's bit into the player's done mask and carries on: a refused gadget counts as played",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 6,
+   "name": "Ahoy Mr Bond Wizard Mode",
+   "start": "0x20530",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "how": "counts AUD_AHOY_MR_BOND_WIZARD_MODE_STARTED (id 276) at 0x20740; sets game flag 85,86; creates record(s) 211 (body 0x1cd54),378 (body 0x1cc50),381 (body 0x1cbcc); reached by bl 0x2081c (fn 0x207f0); table word 0x625dcc; ball calls: serve(1) (no ball served); a wizard mode: it calls multiball_serve with 1 (serve until ONE ball is in play, i.e. no new ball), so it is kept as a mode; check on a machine",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 7,
+   "name": "Upside Down Hurry-Up",
+   "start": "0x1c7df0",
+   "words": [
+    "0xe92d40f8",
+    "0xe3061ddc"
+   ],
+   "how": "counts AUD_UPSIDE_DOWN_HURRYUP_STARTED (id 290) at 0x1c7eb4; sets game flag 42; creates record(s) 398 (body 0x1c6ddc),230 (body 0x1c6d08); reached by table word 0x63f8e0; called through the pair table 0x63f8e0 by 0x1c6b80",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 8,
+   "name": "Upside Down 2 Hurry-Up",
+   "start": "0x1c9f60",
+   "words": [
+    "0xe92d40f8",
+    "0xe3081ec8"
+   ],
+   "how": "counts AUD_UPSIDE_DOWN_2_HURRYUP_STARTED (id 292) at 0x1ca024; sets game flag 42; creates record(s) 400 (body 0x1c8ec8),231 (body 0x1c8dec); reached by table word 0x63f8e8; called through the pair table 0x63f8e0 by 0x1c6b80",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 9,
+   "name": "Tarantula Hurry-Up",
+   "start": "0x1b2638",
+   "words": [
+    "0xe92d40f8",
+    "0xe3001650"
+   ],
+   "how": "counts AUD_TARANTULA_HURRYUP_STARTED (id 294) at 0x1b26d0; creates record(s) 402 (body 0x1b0650),232 (body 0x1b04c4); reached by table word 0x63d2e0; a hurry-up's start from the hurry-up table 0x63d2e0 (0x34 per entry, start at +0); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 10,
+   "name": "Knife Shoe Hurry-Up",
+   "start": "0xf2ef0",
+   "words": [
+    "0xe92d40f8",
+    "0xe3021014"
+   ],
+   "how": "counts AUD_KNIFE_SHOE_HURRYUP_STARTED (id 296) at 0xf2f90; creates record(s) 405 (body 0xf2014),233 (body 0xf1e88); reached by table word 0x63d314; a hurry-up's start from the hurry-up table 0x63d2e0 (0x34 per entry, start at +0); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 11,
+   "name": "Oddjob Hat Hurry-Up",
+   "start": "0x145340",
+   "words": [
+    "0xe92d40f8",
+    "0xe30412c8"
+   ],
+   "how": "counts AUD_ODDJOB_HAT_HURRYUP_STARTED (id 298) at 0x1453d4; creates record(s) 407 (body 0x1442c8),234 (body 0x14413c); reached by table word 0x63d348; a hurry-up's start from the hurry-up table 0x63d2e0 (0x34 per entry, start at +0); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 12,
+   "name": "Shark Hurry-Up",
+   "start": "0x18c4dc",
+   "words": [
+    "0xe92d43f8",
+    "0xe30e4938"
+   ],
+   "how": "counts AUD_SHARK_HURRYUP_STARTED (id 300) at 0x18c5c4; creates record(s) 409 (body 0x18bfac),235 (body 0x188088); reached by table word 0x63d37c; a hurry-up's start from the hurry-up table 0x63d2e0 (0x34 per entry, start at +0); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 13,
+   "name": "Bird One Hurry-Up",
+   "start": "0x496d8",
+   "words": [
+    "0xe92d40f8",
+    "0xe3081eb4"
+   ],
+   "how": "counts AUD_BIRD_ONE_HURRYUP_STARTED (id 302) at 0x49770; creates record(s) 411 (body 0x48eb4),236 (body 0x48bb8); reached by table word 0x63d3b0; a hurry-up's start from the hurry-up table 0x63d2e0 (0x34 per entry, start at +0); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 14,
+   "name": "Bath-O-Sub Hurry-Up",
+   "start": "0x47ff4",
+   "words": [
+    "0xe92d43f8",
+    "0xe3041d2c"
+   ],
+   "how": "counts AUD_BATH_O_SUB_HURRYUP_STARTED (id 304) at 0x480c8; creates record(s) 413 (body 0x44d2c),237 (body 0x44ba0); reached by table word 0x63d3e4; a hurry-up's start from the hurry-up table 0x63d2e0 (0x34 per entry, start at +0); the dispatch site was not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 15,
+   "name": "Double Scoring",
+   "start": "0x8cb88",
+   "words": [
+    "0xe92d4008",
+    "0xe30001ab"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 310) at 0x8cbd8; sets game flag 175; creates record(s) 427 (body 0x8c58c); reached by bl 0x5e754 (fn 0x5e750); bl 0x65268 (fn 0x65264); bl 0x6abd4 (fn 0x6abd0); bl 0xc6534 (fn 0xc6530); bl 0x156494 (fn 0x156490); five callers (award paths of other features); each starts Double Scoring",
+   "confidence": "medium",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Bust Out",
+   "start": "0x620bc",
+   "words": [
+    "0xe92d40d0",
+    "0xebffffc0"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Whats That",
+   "start": "0x1ceb40",
+   "words": [
+    "0xe92d40d0",
+    "0xebffffc6"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Dr No Multiball",
+   "start": "0x92bd8",
+   "words": [
+    "0xe92d47f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_DR_NO_MULTIBALL_STARTED; serves balls via 0x92bd8 -> 0x3f59ec (count 3)"
+  },
+  {
+   "name": "Story Mode",
+   "start": "0x136714",
+   "words": [
+    "0xe3500001",
+    "0xe59fc154"
+   ],
+   "why": "entry not movable (words 0xe3500001 0xe59fc154: a branch or a pc-relative load)"
+  },
+  {
+   "name": "Little Nellie Multiball",
+   "start": "0x10377c",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_LITTLE_NELLIE_MULTIBALL_STARTED; serves balls via 0x10377c -> 0x3f59ec (count 2)"
+  },
+  {
+   "name": "Hunted By Helicopter Multiball",
+   "start": "0xc9de0",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_HUNTED_BY_HELICOPTER_MULTIBALL_STARTED; serves balls via 0xc9de0 -> 0x3f59ec (count 2)"
+  },
+  {
+   "name": "Powerpack Multiball",
+   "start": "0x159918",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_POWERPACK_MULTIBALL_STARTED; serves balls via 0x159918 -> 0x3f59ec (count 2)"
+  },
+  {
+   "name": "Aston Martin Multiball",
+   "start": "0x2e050",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_ASTON_MARTIN_MULTIBALL_STARTED; serves balls via 0x2e050 -> 0x3f59ec (count 2)"
+  },
+  {
+   "name": "James Bond Multiball",
+   "start": "0xdda38",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_JAMES_BOND_MULTIBALL_STARTED; serves balls via 0xdda38 -> 0x3f59ec (count 2)"
+  },
+  {
+   "name": "Victory Laps",
+   "start": "0x1cbc2c",
+   "words": [
+    "0xe92d4010",
+    "0xebffffdb"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Rocket Multiball",
+   "start": "0x165f50",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_ROCKET_MULTIBALL_STARTED; serves balls via 0x165f50 -> 0x3f59ec (count None)"
+  },
+  {
+   "name": "Double Scoring",
+   "start": "0x8d4d0",
+   "words": [
+    "0xe92d4070",
+    "0xe30001ab"
+   ],
+   "why": "a second Double Scoring start that also adds a ball (calls the add-balls wrapper 0x3f5b2c with a computed count)"
+  },
+  {
+   "name": "Jetpack Multiball",
+   "start": "0xe650c",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_JETPACK_MULTIBALL_STARTED; serves balls via 0xe650c -> 0x3f59ec (count 2)"
+  },
+  {
+   "name": "Wizard Mode Multiball",
+   "start": "0x1d97e0",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_WIZARD_MODE_MULTIBALL_STARTED; serves balls via 0x1d97e0 -> 0x3f59ec (count None)"
+  },
+  {
+   "name": "Villain / henchman modes (Mystery Villain / Henchman, Dr No's Lair, Orient Express, Oddjob Battles Bond, Cut Bond in Half, Mr Osato, Professor Dent, Mr Wint & Mr Kidd, Feeding Frenzy, Fiona Volpe, Under Water Fight, Training Grounds, Diamond Death Ray)",
+   "covers": "^AUD_(MYSTERY_VILLAIN_MODE|MYSTERY_HENCHMAN_MODE|DR_NOS_LAIR|ORIENT_EXPRESS|ODDJOB_BATTLES_BOND|CUT_BOND_IN_HALF|MR_OSATO|PROFESSOR_DENT|MR_WINT_MR_KIDD|FEEDING_FRENZY|FIONA_VOLPE|UNDER_WATER_FIGHT|TRAINING_GROUNDS|DIAMOND_DEATH_RAY)_START",
+   "why": "return-checked: the story start 0x136714 (entry not movable: a literal load) calls the chapter's start from the chapter table 0x62d080 (0x68 per chapter, start at +0xc) and on a non-zero result carries on (state, music, audits) - a refused chapter start leaves the story half-started. Usable only by a veto that returns 0"
+  }
+ ],
+ "notes": "engine: audit_add 0x245ea0, flag set 0x321510, create-process 0x2fc60c, multiball_serve 0x3f59ec. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). Same framework as Stranger Things (the audit names are shared). Bust Out, What's That and Victory Laps start with push + bl and nothing refers to their entries."
+}

@@ -1,0 +1,213 @@
+{
+ "key": "stranger_things_le-1.12",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Bullshit Scoring",
+   "start": "0x35274",
+   "words": [
+    "0xe92d4038",
+    "0xe300013f"
+   ],
+   "how": "counts AUD_BULLSHIT_SCORING_STARTED (id 188) at 0x35394; sets game flag 111,131; creates record(s) 319 (body 0x342d8),196 (body 0x3425c); reached by tail b 0x35460 (fn 0x3544c); tail b 0x109698 (fn 0x10965c); reached only by tail branches (0x3544c, 0x10965c)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Break Out",
+   "start": "0x31c00",
+   "words": [
+    "0xe92d40f8",
+    "0xebffff93"
+   ],
+   "how": "counts AUD_BREAK_OUT_STARTED (id 189) at 0x31cf4; creates record(s) 297 (body 0x2ee44),197 (body 0x2ee10); reached by table word 0x54ea84",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "It's a Trap",
+   "start": "0xa6ca8",
+   "words": [
+    "0xe30514e4",
+    "0xe300012e"
+   ],
+   "how": "counts AUD_ITS_A_TRAP_STARTED (id 190) at 0xa6dbc; creates record(s) 302 (body 0xa54e4),198 (body 0xa54b0); reached by table word 0x54eab4; from the award table 0x54ea80 (0x18 per award, start at +4), called by 0x5a5f4 (result unused), which then counts the award and clears flags 44 and 23",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "Junk Yard",
+   "start": "0xabf64",
+   "words": [
+    "0xe30b1c34",
+    "0xe3a00f4b"
+   ],
+   "how": "counts AUD_JUNK_YARD_STARTED (id 191) at 0xac030; creates record(s) 300 (body 0xabc34),199 (body 0xabc00); reached by table word 0x54ea9c; from the award table 0x54ea80, called by 0x5a5f4 (result unused); see It's a Trap",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 4,
+   "name": "Bust Out",
+   "start": "0x3da74",
+   "words": [
+    "0xe92d4038",
+    "0xe30e5a5c"
+   ],
+   "how": "counts AUD_BUST_OUT_STARTED (id 192) at 0x3db88; sets game flag 78,42; creates record(s) 200 (body 0x3d570),305 (body 0x3d84c),306 (body 0x3d5a4); reached by table word 0x54f694; from the mode table 0x54f690 ({id, start, stop}); dispatch site not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 5,
+   "name": "What's That",
+   "start": "0x1902a0",
+   "words": [
+    "0xe92d4038",
+    "0xe30e5a5c"
+   ],
+   "how": "counts AUD_WHATS_THAT_STARTED (id 196) at 0x1903bc; sets game flag 80; creates record(s) 201 (body 0x18fd94),309 (body 0x190064),310 (body 0x18fdc8); reached by table word 0x54f6ac; from the mode table 0x54f690; dispatch site not located statically",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 6,
+   "name": "Upside Down Hurry-Up",
+   "start": "0x187da4",
+   "words": [
+    "0xe92d40f8",
+    "0xe3051dd4"
+   ],
+   "how": "counts AUD_UPSIDE_DOWN_HURRYUP_STARTED (id 250) at 0x187e70; sets game flag 32; creates record(s) 293 (body 0x185dd4),194 (body 0x185d00); reached by table word 0x563ac0",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 7,
+   "name": "Upside Down 2 Hurry-Up",
+   "start": "0x18bd88",
+   "words": [
+    "0xe92d40f8",
+    "0xe3091db8"
+   ],
+   "how": "counts AUD_UPSIDE_DOWN_2_HURRYUP_STARTED (id 252) at 0x18be54; sets game flag 32; creates record(s) 295 (body 0x189db8),195 (body 0x189cdc); reached by table word 0x563ac8",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 8,
+   "name": "Double Scoring",
+   "start": "0x7a8e8",
+   "words": [
+    "0xe92d4008",
+    "0xe300013d"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 255) at 0x7a938; sets game flag 131; creates record(s) 317 (body 0x7a520); reached by bl 0x3930c (fn 0x39308); bl 0x504c0 (fn 0x504bc)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 9,
+   "name": "Double Scoring (lit award)",
+   "start": "0x7a97c",
+   "words": [
+    "0xe92d4038",
+    "0xe300013d"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 255) at 0x7aa00; sets game flag 131; creates record(s) 317 (body 0x7a520); reached by bl 0x7aa60 (fn 0x7aa48); a second Double Scoring start; its caller 0x7aa48 clears flag 112 on a non-zero result",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 10,
+   "name": "Victory Laps",
+   "start": "0x18df7c",
+   "words": [
+    "0xe92d4038",
+    "0xe30e5a5c"
+   ],
+   "how": "counts AUD_VICTORY_LAPS_STARTED (id 359) at 0x18e044; sets game flag 109; creates record(s) 225 (body 0x18d20c); reached by bl 0x198868 (fn 0x198858)",
+   "confidence": "high",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Mystery Multiball",
+   "why": "multiball (AUD_MYSTERY_MULTIBALL); its count is not a constant anywhere"
+  },
+  {
+   "name": "Demogorgon Multiball",
+   "why": "multiball (AUD_DEMOGORGON_MULTIBALL_STARTED); its count is not a constant anywhere"
+  },
+  {
+   "name": "Run Will Multiball",
+   "why": "multiball (AUD_RUN_WILL_MULTIBALL_STARTED); its count is not a constant anywhere"
+  },
+  {
+   "name": "Cant Stop This Multiball",
+   "why": "multiball (AUD_CANT_STOP_THIS_MULTIBALL_STARTED); its count is not a constant anywhere"
+  },
+  {
+   "name": "Telekinesis Multiball",
+   "start": "0x15fdd8",
+   "words": [
+    "0xe92d4ff0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_TELEKINESIS_MULTIBALL_STARTED; serves balls via 0x15fdd8 -> 0x4263d8 (count None)"
+  },
+  {
+   "name": "Story Mode",
+   "start": "0xfe4c4",
+   "words": [
+    "0xe3500001",
+    "0xe59fc170"
+   ],
+   "why": "entry not movable (words 0xe3500001 0xe59fc170: a branch or a pc-relative load)"
+  },
+  {
+   "name": "Wizard Mode Multiball",
+   "start": "0x1984f0",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_WIZARD_MODE_MULTIBALL_STARTED; serves balls via 0x1984f0 -> 0x4263d8 (count None)"
+  },
+  {
+   "name": "Story chapters (Where's Barb, Monster Hunting, Bullies, Get Me Out, Operation Mirkwood, Follow the Compass, Quarter Hunt, Save Will, What Mama Says, Morse Code, Lure Dart, Turn Up the Heat; and the Mystery Mode start)",
+   "covers": "^AUD_(WHERES_BARB|MONSTER_HUNTING|BULLIES|GET_ME_OUT|OPERATION_MIRKWOOD|FOLLOW_THE_COMPASS|QUARTER_HUNT|SAVE_WILL|WHAT_MAMA_SAYS|MORSE_CODE|LURE_DART|TURN_UP_THE_HEAT|MYSTERY_MODE)_START",
+   "starts": [
+    "0xbe0d8",
+    "0xc2110",
+    "0xc5b54",
+    "0xc8538",
+    "0xced28",
+    "0xd1360",
+    "0xd62f0",
+    "0xe04d4",
+    "0xea388",
+    "0xf2924",
+    "0xe48e8",
+    "0xf9b2c"
+   ],
+   "why": "return-checked: the story start 0xfe4c4 (entry not movable: a literal load) calls the chapter's start from the chapter table 0x5564c8 (100 bytes per chapter, start at +0xc) and on a non-zero result carries on (clears flag 23, sets the chapter state, starts its music, counts its STARTED audit) - a refused chapter start (r0 = 1) leaves the story half-started. The chapter starts are movable: usable by a veto that returns 0 (the story start aborts cleanly on 0)"
+  },
+  {
+   "name": "Demogorgon Challenge",
+   "start": "0x5ef8c",
+   "covers": "DEMOGORGON_CHALLENGE",
+   "why": "multiball: it serves 3 balls (multiball_serve(3) at 0x5f000); the port's flag witness 99 is set here, and its STARTED audit is counted with a computed id",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd008"
+   ]
+  }
+ ],
+ "notes": "engine: audit_add 0x3ad298, flag set 0x436eb4, create-process 0x3784ac, multiball_serve 0x4263d8. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). Break Out (0x31c00) begins push + bl."
+}

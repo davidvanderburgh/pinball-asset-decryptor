@@ -212,7 +212,7 @@ class TreeEditMixin:
         state = {"tree": True, "animated": False, "screens": []}
         if new_scene:
             state.update(frames=[], tree_layers=None, tree_loading=True, tree_busy=False,
-                         can_save=False, canvas_msg="")
+                         can_save=False, can_video=False, canvas_msg="")
         elif not quiet:
             state.update(tree_busy=True)
         self.set(**state)
@@ -615,6 +615,58 @@ class TreeEditMixin:
         cur.update(map=index, srcs=srcs, done=done)
         self.set(tree_play=cur)
 
+    # ------------------------------------------------------------------
+    # the scene as a video (PAD-365: "save a scene as a video, and all of them in one click")
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _tree_frame_count(man):
+        return max(1, int((man or {}).get("root", {}).get("frames") or 1))
+
+    @staticmethod
+    def _tree_fps(man):
+        return float(((man or {}).get("stage") or [0, 0, 30])[2] or 30)
+
+    def _tree_video_job(self, card, man):
+        """What drawing every frame of *card*'s scene *man* needs, gathered on the UI thread
+        so the worker never touches the editor's state: the same picture Play shows, at full
+        size (the preview eyes, the seeks, the backdrop, the Machine screen)."""
+        return {"man": man, "pins": dict(self._tpins.get(card) or {}),
+                "frames": self._tree_frame_count(man), "fps": self._tree_fps(man),
+                "bg": self._bg, "unveil": set(self._tree_hidden(card)),
+                "hidden": set(self._tree_view_hidden(card)),
+                "text_edits": self._pending_texts(card, None),
+                "colors": self._pending_colors(card),
+                "pictures": self._tree_pictures(), "sizes": self._tree_sizes(),
+                "view": self._machine_view(), "as_made": self._as_made(),
+                "assets": self.assets_dir, "cache": self._tcache}
+
+    def _tree_frames(self, job, state, progress=None):
+        """Every frame of the scene's timeline, full size, one ``PIL.Image`` at a time (a
+        held stretch is drawn once and given again).  Worker-side; stops when
+        ``state["cancel"]``.  *progress(frame)* is called as each frame is handed over."""
+        from ..plugins.stern import scene_eval, scene_render
+        if self._fonts is None:
+            from ..plugins.stern import fontrender as fr
+            self._fonts = fr.load_fonts(job["assets"])
+        inks = {}
+        img, prev = None, None
+        for f in range(1, job["frames"] + 1):
+            if state.get("cancel"):
+                return
+            draws = scene_eval.draw_list(job["man"], f, pins=job["pins"], play=True,
+                                         unveil=job["unveil"], hidden=job["hidden"])
+            if prev is None or not scene_eval._same(draws, prev):
+                prev = draws
+                img = scene_render.render_tree(
+                    job["assets"], job["man"], draws=draws, fonts=self._fonts,
+                    background=job["bg"], colors=job["colors"],
+                    text_edits=job["text_edits"], cache=job["cache"],
+                    pictures=job["pictures"], sizes=job["sizes"], inks=inks,
+                    view=job.get("view"), as_made=job.get("as_made", False))
+            if progress is not None:
+                progress(f)
+            yield img
+
     def _tree_split(self, draws, nids):
         """The indices of *draws* the nodes *nids* draw (themselves and what is inside them):
         they run together in draw order, or the canvas gets no layers for them."""
@@ -691,6 +743,8 @@ class TreeEditMixin:
                       "over": paths["over"]}
         self.set(frames=[full] if full else [], tree_layers=layers, tree_busy=False,
                  tree_loading=False, tree_img_rev=job["rev"], can_save=img is not None,
+                 # PAD-365: a scene that moves exports as a video
+                 can_video=img is not None and self._tree_frame_count(job["man"]) > 1,
                  canvas_msg="" if full else "nothing could be drawn")
         keep = {os.path.basename(p) for p in paths.values()}
         tmp = self._tmpdir()

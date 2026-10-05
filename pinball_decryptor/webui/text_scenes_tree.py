@@ -1976,7 +1976,10 @@ class TreeEditMixin:
         pics, gone, more = [], [], False
         try:
             scenes = scene_edit.read_share(path)
-            extras = scene_share.read_extras(path)
+            # PAD-385: a picture named otherwise here (a project of another card) is found by
+            # the scene nodes that draw it
+            extras = scene_share.localise(self.assets_dir, scene_share.read_extras(path),
+                                          self._load_trees())
             got, missing = scene_edit.match_cards(scenes, self._load_trees().keys())
             mine = scene_edit.load(self.assets_dir)
             over = [c for c in got if mine.get(c)]

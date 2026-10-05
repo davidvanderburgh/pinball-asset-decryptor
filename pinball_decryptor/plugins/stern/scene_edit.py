@@ -275,24 +275,34 @@ def read_share(zip_path):
             for c, v in scenes.items() if isinstance(v, list) and v}
 
 
-def match_cards(scenes, cards_here):
-    """``({card here: ops}, [card of the file with no scene here])``: a card path matches the
-    same path here, else the one path here that differs only in the game folder (``/godzilla_le/``
-    and ``/godzilla_pro/`` share a scene the scene id names)."""
-    if cards_here is None:
-        return dict(scenes), []
+def card_finder(cards_here):
+    """A function naming the card here that a card path of a file stands for, or None: the
+    same path here, else the one path here that differs only in the game folder
+    (``/godzilla_le/`` and ``/godzilla_pro/`` share a scene the scene id names)."""
     here = set(cards_here)
     by_rest = {}
     for c in here:
         by_rest.setdefault(c.lstrip("/").split("/", 1)[-1], []).append(c)
+
+    def find(card):
+        if card in here:
+            return card
+        same = by_rest.get(card.lstrip("/").split("/", 1)[-1], [])
+        return same[0] if len(same) == 1 else None
+    return find
+
+
+def match_cards(scenes, cards_here):
+    """``({card here: ops}, [card of the file with no scene here])``, each card matched by
+    :func:`card_finder`."""
+    if cards_here is None:
+        return dict(scenes), []
+    find = card_finder(cards_here)
     got, missing = {}, []
     for card, ops in scenes.items():
-        if card in here:
-            got[card] = ops
-            continue
-        same = by_rest.get(card.lstrip("/").split("/", 1)[-1], [])
-        if len(same) == 1:
-            got[same[0]] = ops
+        mine = find(card)
+        if mine is not None:
+            got[mine] = ops
         else:
             missing.append(card)
     return got, missing

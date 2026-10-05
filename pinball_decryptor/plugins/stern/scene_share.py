@@ -19,6 +19,12 @@ one), and each replaced picture's pick points at its copy.  What it changes in t
 
 The extras sit beside ``scenes`` in the same manifest, so a PAD from before reads the edits
 of such a file as it always did and leaves the rest.
+
+A scene picture's extracted name ends in a hash of its bytes on the card it came from, so a
+project extracted from a card built with changes names a replaced picture differently from a
+project extracted from the stock card.  Each saved picture therefore also says which nodes of
+its scenes draw it (``drawn``, PAD-385), and :func:`localise` finds the picture those nodes draw
+in the project it is loaded into.
 """
 from __future__ import annotations
 
@@ -34,21 +40,50 @@ from . import scene_edit
 SHARED_DIR = "Shared pictures"
 
 
-def manifest_pictures(man):
-    """Every picture (rel under ``images/``) the stock scene *man* (a preview manifest) can
-    draw: its bitmaps, shape fills and flipbook frames."""
-    out = set()
-    for o in ((man or {}).get("objects") or {}).values():
+def manifest_drawers(man):
+    """``{picture: [[node], [node, frame], ...]}``: every picture (rel under ``images/``) the
+    stock scene *man* (a preview manifest) can draw, and the nodes drawing it - a bitmap or a
+    shape fill's bitmap by its id, a flipbook frame by the flipbook's id and the frame's index.
+    Node ids are the same on every copy of a scene, whatever pictures the card was built with."""
+    objs = (man or {}).get("objects") or {}
+    out = {}
+
+    def note(img, where):
+        if isinstance(img, str) and img and where not in out.setdefault(img, []):
+            out[img].append(where)
+    for key, o in objs.items():
         if not isinstance(o, dict):
             continue
         k = o.get("kind")
         if k == "Bitmap":
-            out.add(o.get("image"))
+            note(o.get("image"), [str(key)])
         elif k == "Shape" and o.get("fill") is not None:
-            out.add((man["objects"].get(str(o["fill"])) or {}).get("image"))
+            note((objs.get(str(o["fill"])) or {}).get("image"), [str(o["fill"])])
         elif k == "StreamingFlipbook":
-            out.update(fr.get("image") for fr in o.get("seq") or () if isinstance(fr, dict))
-    return {r for r in out if isinstance(r, str) and r}
+            for i, fr in enumerate(o.get("seq") or ()):
+                if isinstance(fr, dict):
+                    note(fr.get("image"), [str(key), i])
+    return out
+
+
+def manifest_pictures(man):
+    """Every picture (rel under ``images/``) the stock scene *man* can draw: its bitmaps,
+    shape fills and flipbook frames."""
+    return set(manifest_drawers(man))
+
+
+def _drawn_image(man, node, frame=None):
+    """The picture node *node* (a flipbook's: its frame *frame*) of scene *man* draws, or None."""
+    o = ((man or {}).get("objects") or {}).get(str(node))
+    if not isinstance(o, dict):
+        return None
+    if frame is not None:
+        seq = o.get("seq") or ()
+        o = seq[frame] if isinstance(frame, int) and 0 <= frame < len(seq) else None
+        if not isinstance(o, dict):
+            return None
+    img = o.get("image")
+    return img if isinstance(img, str) and img else None
 
 
 def _profile_raw(data, rel):
@@ -89,15 +124,20 @@ def gather(assets_dir, cards, trees):
     built = cp.built_image_rels(assets_dir, data)
     settings = cp.asset_settings(assets_dir)
     keep = set(data.get("image_keep_size") or ())
+    drawn = {}
+    for c in want:
+        for pic, nodes in manifest_drawers(trees[c]).items():
+            drawn.setdefault(pic, []).extend([c] + n for n in nodes)
     pictures = {}
-    for pic in sorted(set().union(*(manifest_pictures(trees[c]) for c in want)) if want else ()):
+    for pic in sorted(drawn):
         rel = "images/" + pic
         src = _source(assets_dir, data, rel, built)
         if src is None:
             continue
         on = cp.asset_applies(settings, "images", rel)
         pictures[rel] = {"src": src, "name": os.path.basename(src), "keep": rel in keep,
-                         "color": on, "profile": _profile_raw(data, rel) if on else None}
+                         "color": on, "profile": _profile_raw(data, rel) if on else None,
+                         "drawn": drawn[pic]}
     added = {}
     for ops in edits.values():
         for op in ops:
@@ -173,6 +213,46 @@ def has_extras(extras):
 def _here(assets_dir, rel):
     """Does this project have picture *rel* (``images/...``)?"""
     return os.path.isfile(os.path.join(assets_dir, *rel.split("/")))
+
+
+def localise(assets_dir, extras, trees):
+    """*extras* (:func:`read_extras`) with its replaced pictures named as this project names
+    them (PAD-385).  A picture this project has under the file's name keeps it.  One it does
+    not is looked up by the nodes that draw it in the file's scenes (*trees*: this project's
+    ``{card: stock manifest}``) and takes the name of what they draw here - every such picture,
+    when they draw more than one.  A picture here that two of the file's pictures lead to, or
+    that the file names itself, goes to neither by lookup.  A picture with nothing found (a
+    file saved before PAD-385, a scene this card does not have) keeps the file's name and is
+    left out at load, as before."""
+    pics = extras.get("pictures") or {}
+    if not pics or not trees:
+        return extras
+    find = scene_edit.card_finder(trees.keys())
+    found = {}
+    for rel, p in pics.items():
+        if _here(assets_dir, rel):
+            continue
+        heres = set()
+        for d in p.get("drawn") or ():
+            if not (isinstance(d, list) and len(d) in (2, 3) and isinstance(d[0], str)):
+                continue
+            card = find(d[0])
+            img = _drawn_image(trees.get(card), *d[1:]) if card else None
+            here = scene_edit._safe_rel("images/" + img) if img else None
+            if here and _here(assets_dir, here):
+                heres.add(here)
+        if heres:
+            found[rel] = heres
+    claims = {}
+    for rel, heres in found.items():
+        for here in heres:
+            claims.setdefault(here, []).append(rel)
+    out = {}
+    for rel, p in sorted(pics.items()):
+        mine = [h for h in sorted(found.get(rel, ())) if claims[h] == [rel] and h not in pics]
+        for here in mine or [rel]:
+            out[here] = p
+    return dict(extras, pictures=out)
 
 
 def clashes(assets_dir, extras):

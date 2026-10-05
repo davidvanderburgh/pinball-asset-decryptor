@@ -81,6 +81,19 @@ def test_a_pending_replacement_is_what_the_box_is_fitted_to(tmp_path, fonts):
                           _draw(tmp_path, d, fonts, edits))
 
 
+def test_a_replaced_title_with_line_breaks_is_fitted_to_the_replacement(tmp_path, fonts):
+    """DragonRR, round 2: Godzilla's three-line title ("GODZILLA AND JET JAGUAR / VS. /
+    MEGALON AND GIGAN") replaced with "GODZILLA VS. GIGAN" kept a three-line-tall box: the
+    Text tab keys a line with breaks flat (spaces), and the fit looked it up as drawn."""
+    d = _text("GODZILLA AND JET JAGUAR\nVS.\nMEGALON AND GIGAN", (-2, -2, 340, 60), 1,
+              flags=(1, 0))
+    edits = {"GODZILLA AND JET JAGUAR VS. MEGALON AND GIGAN": "GODZILLA VS. GIGAN"}
+    rect = R.text_fit_rect(d, fonts[0], edits)
+    assert rect[3] - rect[1] < 12 + R.FIT_MARGIN + 2       # one line tall, not three
+    assert np.array_equal(_draw(tmp_path, dict(d, rect=rect), fonts, edits),
+                          _draw(tmp_path, d, fonts, edits))
+
+
 def test_a_wrapping_line_breaks_where_it_did(tmp_path, fonts):
     d = _text("SHOOT THE SWITCHES TO LIGHT THE JACKPOT", (-2, -2, 150, 80), 1, flags=(1, 0))
     before = _draw(tmp_path, d, fonts)

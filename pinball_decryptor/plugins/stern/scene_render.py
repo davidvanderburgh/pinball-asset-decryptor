@@ -995,7 +995,8 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
         return None
     if ink_of is None:
         ink_of = lambda s: fr.render_text(font, s)[0]           # noqa: E731
-    shown = (text_edits or {}).get(d["text"]) or d["text"]
+    # matched the way render_tree matches it (PAD-382: a line with breaks is keyed flat)
+    shown = text_manifest.edit_for(text_edits, d["text"]) or d["text"]
     L, T, R, B = (list(d.get("rect") or (0, 0, 0, 0)) + [0, 0, 0, 0])[:4]
     align = d.get("align", 1)
     asc = float(d.get("ascent") or font.get("ascent", 0))

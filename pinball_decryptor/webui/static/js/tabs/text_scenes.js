@@ -624,7 +624,7 @@ const gameTip = (l) => ({
     ["Click", "put it back in the game"],
   ] : [
     ["Click", "hide it in the game (Write leaves it out of the card)"],
-    ["Delete", "hide it in the game and the preview (with the preview focused)"],
+    ["Delete", "hide it in the game and the preview, after asking"],
     `The preview is not changed; the eye hides it here.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
@@ -666,7 +666,10 @@ const rowTip = (l, cs) => ({
     ["Click", "select it (shown on top while selected)"],
     ["Ctrl+click", "add it to the selection or take it out"],
     ["Shift+click", "select a run of layers"],
-    ["Right-click", "hide, show alone, hide in the game"],
+    ["Drag", l.added ? "draw it over or under other layers, or drop it on a group to put it in there"
+      : "draw it over or under the other layers in its group"],
+    ["Delete", l.added ? "delete it, after asking" : "hide it in the game and the preview, after asking"],
+    ["Right-click", "hide, show alone, hide in the game, delete"],
   ].filter(Boolean) });
 
 function eyeClick(l, e) {
@@ -697,13 +700,80 @@ function layerMenu(t, l, e) {
     { label: allGone ? "Put back in the game" : "Hide in the game", icon: "sd",
       title: allGone ? `Write puts ${what} on the card again` : `Write leaves ${what} out of the card; the preview is not changed`,
       onClick: () => call("text_scenes.tree_visible_many", ids, allGone) },
+    { sep: true },
+    { label: "Delete…", icon: "trash", kbd: "Delete",
+      title: `Asks first. A layer you added is taken out; the game's own is hidden in the game and the preview`,
+      onClick: () => call("text_scenes.tree_delete", ids) },
   ].filter(Boolean));
+}
+
+// PAD-391 (DragonRR): a row dragged up or down the list is drawn over or under the others
+// there; dropped on the middle of a group's row it goes into that group.  Only a layer the
+// user added can change group: the game finds its own by the group they sit in, so those
+// show a red mark and the drop says why.  Near the list's top or bottom edge it scrolls.
+const DROP_EDGE = 36;
+function dropWhere(l, e) {
+  const r = e.currentTarget.getBoundingClientRect();
+  const f = (e.clientY - r.top) / (r.height || 1);
+  if (l.group) return f < 0.35 ? "before" : "into";
+  return f < 0.5 ? "before" : "after";
+}
+function useDragScroll(listRef) {
+  const at = useRef(null);
+  const raf = useRef(0);
+  const step = () => {
+    const el = listRef.current;
+    const p = at.current;
+    if (el && p) {
+      const r = el.getBoundingClientRect();
+      if (p.x >= r.left && p.x <= r.right) {
+        const up = r.top + DROP_EDGE - p.y;
+        const down = p.y - (r.bottom - DROP_EDGE);
+        if (up > 0 && p.y > r.top - 60) el.scrollTop -= Math.min(24, 2 + up / 3);
+        else if (down > 0 && p.y < r.bottom + 60) el.scrollTop += Math.min(24, 2 + down / 3);
+      }
+    }
+    raf.current = requestAnimationFrame(step);
+  };
+  const onOver = (e) => { at.current = { x: e.clientX, y: e.clientY }; };
+  const start = () => {
+    document.addEventListener("dragover", onOver);
+    cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(step);
+  };
+  const stop = () => {
+    document.removeEventListener("dragover", onOver);
+    cancelAnimationFrame(raf.current);
+    at.current = null;
+  };
+  useEffect(() => stop, []);
+  return { start, stop };
 }
 
 function TreeLayers({ t }) {
   const cs = useNs("color");
   const listRef = useRef(null);
   const sels = t.sels || [];
+  const [drag, setDrag] = useState(null);           // the row being dragged
+  const [over, setOver] = useState(null);           // { id, where, ok } of the drop
+  const scroll = useDragScroll(listRef);
+  const endDrag = () => { scroll.stop(); setDrag(null); setOver(null); };
+  const dropOk = (l, where) => drag.added || (where === "into" ? l.id : l.parent) === drag.parent;
+  const onRowOver = (l, e) => {
+    if (!drag || drag.id === l.id) { if (over) setOver(null); return; }
+    e.preventDefault();
+    const where = dropWhere(l, e);
+    const ok = dropOk(l, where);
+    e.dataTransfer.dropEffect = "move";
+    if (!over || over.id !== l.id || over.where !== where || over.ok !== ok) setOver({ id: l.id, where, ok });
+  };
+  const onRowDrop = (l, e) => {
+    e.preventDefault();
+    const d = drag;
+    const where = dropWhere(l, e);
+    endDrag();
+    if (d && d.id !== l.id) call("text_scenes.tree_drop", d.id, l.id, where);
+  };
   useEffect(() => {
     if (t.sel == null || !listRef.current) return;
     const el = listRef.current.querySelector(`[data-node="${t.sel}"]`);
@@ -714,7 +784,10 @@ function TreeLayers({ t }) {
   tRef.current = t;
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key.toLowerCase() !== "h" || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      // PAD-391: Delete too (asks first); the preview handles its own when it has the focus
+      const del = e.key === "Delete";
+      if ((e.key.toLowerCase() !== "h" && !del) || e.ctrlKey || e.metaKey || e.altKey || e.repeat
+          || e.defaultPrevented) return;
       const el = e.target;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
       const cur = tRef.current;
@@ -722,6 +795,7 @@ function TreeLayers({ t }) {
       if (!ids.length || !listRef.current || !listRef.current.getClientRects().length
           || document.querySelector(".scrim")) return;
       e.preventDefault();
+      if (del) { call("text_scenes.tree_delete", ids); return; }
       const off = ids.every((id) => ((cur.layers || []).find((x) => x.id === id) || {}).view_off);
       call("text_scenes.tree_view_many", ids, off);
     };
@@ -735,8 +809,14 @@ function TreeLayers({ t }) {
         ...${tip({ head: "One layer is shown alone", lines: [["Click", "bring the other layers back"], ["Alt+click", "its eye does the same"]] })}
         onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
-        class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game")}
+        class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game",
+          drag && drag.id === l.id && "ly-dragging", over && over.id === l.id && `ly-drop-${over.where}`, over && over.id === l.id && !over.ok && "ly-drop-no")}
         style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l, cs))}
+        draggable="true"
+        onDragStart=${(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", l.name); setDrag(l); scroll.start(); }}
+        onDragEnd=${endDrag}
+        onDragOver=${(e) => onRowOver(l, e)}
+        onDrop=${(e) => onRowDrop(l, e)}
         onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
         onContextMenu=${(e) => layerMenu(t, l, e)}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
@@ -1076,7 +1156,7 @@ function TreeCanvas({ s }) {
     if (moves[e.key]) { e.preventDefault(); nudge(sels, ...moves[e.key]); }
     else if (e.key === "Delete") {
       e.preventDefault(); flushNudge();
-      if (multi) call("text_scenes.tree_remove_many", sels); else call("text_scenes.tree_remove", p.id);
+      call("text_scenes.tree_delete", multi ? sels : [p.id]);
     }
   };
   // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere on the page, not only with the preview focused

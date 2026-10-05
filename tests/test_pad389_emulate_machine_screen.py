@@ -55,23 +55,39 @@ def test_the_engine_hands_the_shader_the_overlay_then_the_screen(tmp_path):
     assert isinstance(got, sp.Shown) and got.prof is None
 
 
-def test_the_overlay_alone_builds_the_shader_it_always_did():
+def test_the_overlay_alone_keeps_the_slots_the_menu_rewrites():
     fs = sp.patch_source(ES1, OVERLAY)
-    assert "pad_sx" not in fs
     # one set of tunable slots: what the multi-boot menu rewrites on a card
     assert len(sp._FUNC_RE.findall(fs.encode())) == 1
     assert sp.tunable_in(fs.encode())[0].gain == OVERLAY.folded().gain
 
 
-def test_both_profiles_share_one_range_function():
+def test_both_profiles_share_one_extras_function():
     fs = sp.patch_source(ES1, sp.Shown(OVERLAY, TUNED))
-    assert fs.count("vec3 pad_cr(") == 1
-    assert "vec3 pad_cx(" in fs and "vec3 pad_sx(" in fs
-    body = fs[fs.index("vec4 pad_cp("):]
-    assert body.index("c=pad_cx(c);") < body.index("c=pad_sx(c);")
-    # no overlay: identity terms, then the screen
+    assert fs.count("vec3 pad_cr(") == 1 and fs.count("vec3 pad_cx(") == 1
+    # the overlay's ranges, then the screen's
+    cx = fs[fs.index("vec3 pad_cx("):fs.index("vec4 pad_cp(")]
+    assert cx.index("c=pad_cr(c,200.0,") < cx.index("c=pad_cr(c,195.0,")
+    # no overlay: the screen alone, no slots to rewrite
     fs = sp.patch_source(ES3, sp.Shown(None, TUNED))
-    assert fs.count("vec3 pad_cr(") == 1 and "pad_cx" not in fs
+    assert fs.count("vec3 pad_cr(") == 1 and "mix(vec3(dot" not in fs
+
+
+ROOM_28K = 28660 - 12          # the smaller gap some titles have, its header
+
+
+def test_overlay_and_screen_fit_the_smallest_room_of_any_title():
+    """The game program has 32 KB, or 28 KB on about half the titles, for the
+    nine corrected shaders; their texts are the same on every title (the
+    measured sum of the nine below).  Evenly spaced curve knots left the
+    screen out of every run (DragonRR: "doesn't do anything")."""
+    nine = 4284 - 57             # every fragment shader but the debug fill
+    shader = ES1                 # one wrapper per shader, as patch_source adds
+    scr = cp.SCREEN_PRESETS[0][1]
+    rec = cp.undo_screen(scr)
+    for prof in (rec, sp.Shown(None, scr), sp.Shown(rec, scr)):
+        grow = len(sp.patch_source(shader, prof)) - len(shader)
+        assert nine + 9 * (grow + 4) <= ROOM_28K, (prof, grow)
 
 
 def test_the_shader_draws_the_overlay_then_the_screen():

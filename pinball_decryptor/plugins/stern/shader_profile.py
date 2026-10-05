@@ -172,19 +172,19 @@ def correction_glsl(prof, premultiplied, qualified=False):
                     % (q, q))
     else:
         body.append("%sfloat a=f.a;%svec3 c=clamp(f.rgb,0.0,1.0);" % (q, q))
-    body.append(tunable_terms(prof))
-    extras = extras_glsl(prof, qualified)
+    if screen is None:
+        body.append(tunable_terms(prof))
+        extras = extras_glsl(prof, qualified)
+    else:
+        # An Emulate run's profile, then the machine's screen (PAD-389): no
+        # menu rewrites this program, so only the terms that change something
+        # are written, and both profiles' ranges and curves share one
+        # function, the screen's sliders between them: the game program has
+        # 32 KB (28 KB on some titles) for all nine shaders.
+        body.append(plain_terms(prof))
+        extras = extras_glsl(prof, qualified, then=screen)
     if extras:
         body.append("c=%s(c);" % _EXTRAS)
-    if screen is not None:
-        # the machine's screen after it, in the same shapes; its ranges and
-        # curves under names of their own (the range function is shared)
-        body.append(tunable_terms(screen))
-        s_extras = extras_glsl(screen, qualified, name=_SCREEN_EXTRAS,
-                               with_range=_RANGE not in extras)
-        if s_extras:
-            extras += s_extras
-            body.append("c=%s(c);" % _SCREEN_EXTRAS)
     body.append("return vec4(c*a,a);" if premultiplied
                 else "return vec4(c,a);")
     return extras + "%svec4 %s(%svec4 f){%s}" % (q, _FUNC, q, "".join(body))
@@ -195,12 +195,79 @@ def correction_glsl(prof, premultiplied, qualified=False):
 #: ``pad_cp``'s body is read back as one brace-free run (:data:`_FUNC_RE`).
 _EXTRAS = "pad_cx"
 _RANGE = "pad_cr"
-#: the machine screen's ranges and curves in an Emulate run (PAD-389)
-_SCREEN_EXTRAS = "pad_sx"
 
-#: Where the curves are sampled: every 8th level and the last, straight
-#: between them (within a level or two of the 256-entry tables)
-_KNOTS = tuple(range(0, 256, 8)) + (255,)
+#: How far (in levels of 0..255) the straight stretches the curves are drawn
+#: with may stray from the 256-entry tables.  The knots are placed where the
+#: curves bend, as few as that allows (PAD-389: the game program has 32 KB
+#: for its nine corrected shaders, and evenly spaced knots every 8th level
+#: filled it with one profile's curves).
+_CURVE_TOL = 0.5
+
+
+def _n(v):
+    """*v* as a short GLSL float literal: at most four decimals, at least
+    one digit each side of the point (``0.75``, ``8.0``, ``-1.125``)."""
+    t = ("%.4f" % float(v)).rstrip("0")
+    if t.endswith("."):
+        t += "0"
+    return "0.0" if t in ("-0.0", "0.0") else t
+
+
+def plain_terms(prof):
+    """*prof*'s saturation, gain/gamma and lift as GLSL statements on ``c``,
+    the maths of :data:`TUNABLE_TEMPLATE` without the terms that change
+    nothing and without fixed-width slots: for a profile no machine menu
+    rewrites (the Machine screen of an Emulate run, PAD-389)."""
+    prof = prof.folded()
+    out = []
+    if prof.saturation != 1.0:
+        out.append("c=mix(vec3(dot(c,vec3(0.299,0.587,0.114))),c,%s);"
+                   % _n(prof.saturation))
+    if prof.gain != (1.0, 1.0, 1.0) or prof.gamma != (1.0, 1.0, 1.0):
+        out.append("c=pow(clamp(c*vec3(%s),0.0,1.0),vec3(%s));" % (
+            ",".join(_n(v) for v in prof.gain),
+            ",".join(_n(v) for v in prof.gamma)))
+    elif out:
+        out.append("c=clamp(c,0.0,1.0);")
+    if prof.lift != (0.0, 0.0, 0.0):
+        lift = ",".join(_n(v) for v in prof.lift)
+        out.append("c=vec3(%s)+(vec3(1.0)-vec3(%s))*c;" % (lift, lift))
+    return "".join(out)
+
+
+def _curve_floats(prof):
+    """``[r, g, b]`` 256 unrounded levels of *prof*'s master curve then each
+    channel's own (:meth:`Profile.curve_tables` before its rounding, which
+    would otherwise cost a knot at every half-level step), or ``None``."""
+    from ...core.colour_profile import CURVE_IDENTITY, curve_values
+    cv = {ch: pts for ch, pts in prof.curves if pts != CURVE_IDENTITY}
+    if not cv:
+        return None
+
+    def through(pts, xs):
+        if len(pts) < 2:
+            return list(xs)
+        return [min(max(y, 0.0), 255.0) for y in curve_values(pts, xs)]
+    master = through(cv["rgb"], range(256)) if "rgb" in cv         else [float(v) for v in range(256)]
+    return [through(cv[ch], master) if ch in cv else master
+            for ch in ("r", "g", "b")]
+
+
+def _curve_knots(tables, tol=_CURVE_TOL):
+    """The levels the curves are drawn straight between: 0, 255, and as few
+    in between as keep every channel of *tables* within *tol*."""
+    knots, x0 = [0], 0
+    while x0 < 255:
+        x1 = x0 + 1
+        while x1 < 255:
+            nxt = x1 + 1
+            if any(abs(t[x0] + (t[nxt] - t[x0]) * (x - x0) / (nxt - x0) - t[x])
+                   > tol for t in tables for x in range(x0 + 1, nxt)):
+                break
+            x1 = nxt
+        knots.append(x1)
+        x0 = x1
+    return knots
 
 
 def _range_glsl(q):
@@ -208,73 +275,84 @@ def _range_glsl(q):
     core/colour_profile.py ``apply_ranges`` with the 0..255 values as
     0..1."""
     f, v = q + "float", q + "vec3"
+    # short names and one declaration per type: it is in every shader, and
+    # the game program has 32 KB for all nine (PAD-389)
     return (
-        "%(v)s %(n)s(%(v)s c,%(f)s hu,%(f)s wd,%(f)s sf,%(f)s sh,%(f)s sa,"
-        "%(f)s br,%(f)s pr){"
-        "%(f)s mx=max(c.r,max(c.g,c.b));%(f)s ch=mx-min(c.r,min(c.g,c.b));"
-        "if(ch<=0.0)return c;"
-        "%(f)s h;"
-        "if(mx==c.r)h=mod((c.g-c.b)/ch,6.0);"
-        "else if(mx==c.g)h=(c.b-c.r)/ch+2.0;"
-        "else h=(c.r-c.g)/ch+4.0;"
-        "h*=60.0;"
-        "%(f)s d=abs(mod(h-hu+180.0,360.0)-180.0);"
-        "%(f)s w;"
-        "if(wd>=360.0)w=1.0;"
-        "else if(sf>0.0)w=smoothstep(0.0,1.0,1.0-(d-wd*0.5)/sf);"
-        "else w=d<=wd*0.5?1.0:0.0;"
-        "if(pr>0.0)w*=smoothstep(0.0,1.0,ch/pr);"
+        "%(v)s %(n)s(%(v)s c,%(f)s u,%(f)s W,%(f)s S,%(f)s T,%(f)s A,"
+        "%(f)s B,%(f)s P){"
+        "%(f)s m=max(c.r,max(c.g,c.b)),n=m-min(c.r,min(c.g,c.b));"
+        "if(n<=0.0)return c;"
+        "%(f)s h=60.0*(m==c.r?mod((c.g-c.b)/n,6.0):m==c.g?(c.b-c.r)/n+2.0"
+        ":(c.r-c.g)/n+4.0),"
+        "d=abs(mod(h-u+180.0,360.0)-180.0),"
+        "w=W>=360.0?1.0:S>0.0?smoothstep(0.0,1.0,1.0-(d-W*0.5)/S)"
+        ":d<=W*0.5?1.0:0.0;"
+        "if(P>0.0)w*=smoothstep(0.0,1.0,n/P);"
         "if(w<=0.0)return c;"
-        "%(f)s h2=mod(h+sh*w,360.0);"
-        "%(f)s s2=clamp(ch/mx*(1.0+(sa-1.0)*w),0.0,1.0);"
-        "%(f)s v2=clamp(mx*(1.0+(br-1.0)*w),0.0,1.0);"
-        "%(v)s k=mod(vec3(5.0,3.0,1.0)+h2/60.0,6.0);"
-        "return v2-v2*s2*clamp(min(k,4.0-k),0.0,1.0);}"
+        "h=mod(h+T*w,360.0);"
+        "%(f)s s=clamp(n/m*(1.0+(A-1.0)*w),0.0,1.0),"
+        "v=clamp(m*(1.0+(B-1.0)*w),0.0,1.0);"
+        "%(v)s k=mod(vec3(5.0,3.0,1.0)+h/60.0,6.0);"
+        "return v-v*s*clamp(min(k,4.0-k),0.0,1.0);}"
         % {"f": f, "v": v, "n": _RANGE})
 
 
-def _curve_glsl(tables):
+def _curve_glsl(tables, decl="vec3 "):
     """Statements taking ``c`` through the ``[r, g, b]`` 256-entry curve
-    *tables*: a sum of ramps, one per stretch between knots (stretches of
-    one slope merged)."""
-    pts = [(k / 255.0, tuple(t[k] / 255.0 for t in tables)) for k in _KNOTS]
-    segs = []
-    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-        slope = tuple((b - a) / (x1 - x0) for a, b in zip(y0, y1))
-        if segs and all(abs(a - b) < 1e-9 for a, b in zip(segs[-1][2], slope)):
-            segs[-1][1] = x1
-        else:
-            segs.append([x0, x1, slope])
-    out = ["c=vec3(%.6f,%.6f,%.6f)" % pts[0][1]]
-    for x0, x1, slope in segs:
-        if any(slope):
-            out.append("+vec3(%.6f,%.6f,%.6f)*clamp(c-%.6f,0.0,%.6f)"
-                       % (slope + (x0, x1 - x0)))
-    return "".join(out) + ";"
+    *tables*: in levels (``d``, 0..255, declared with *decl*), the straight
+    stretches between :func:`_curve_knots` as a sum of hinges, each the
+    change of slope at its knot times ``max(d - knot, 0)``, then back to
+    0..1.  Nothing is drawn past 255, so no hinge needs an upper end."""
+    knots = _curve_knots(tables)
+    out = ["%sd=c*255.0;c=(vec3(%s)" % (
+        decl, ",".join(_n(t[0]) for t in tables))]
+    was = (0.0, 0.0, 0.0)
+    for x0, x1 in zip(knots, knots[1:]):
+        slope = tuple((t[x1] - t[x0]) / float(x1 - x0) for t in tables)
+        step = tuple(a - b for a, b in zip(slope, was))
+        if any(abs(v) >= 0.00005 for v in step):
+            out.append("+vec3(%s)*%s" % (
+                ",".join(_n(v) for v in step),
+                "max(d-%s,0.0)" % _n(x0) if x0 else "d"))
+            was = slope
+    return "".join(out) + ")/255.0;"
 
 
-def extras_glsl(prof, qualified=False, name=_EXTRAS, with_range=True):
+def _extras_body(prof, q, declared):
+    """*prof*'s colour ranges and curve as statements on ``c``; *declared*
+    True when ``d`` already is (a second profile in the same function)."""
+    from ...core.colour_profile import range_neutral
+    body = []
+    for hue, width, soft, shift, sat, bright, protect in (
+            r for r in prof.ranges if not range_neutral(r)):
+        body.append("c=%s(c,%s);" % (_RANGE, ",".join(
+            _n(v) for v in (hue, width, soft, shift, sat, bright, protect))))
+    tabs = _curve_floats(prof)
+    if tabs is not None:
+        body.append(_curve_glsl(tabs, "" if declared else q + "vec3 "))
+    return body
+
+
+def extras_glsl(prof, qualified=False, then=None):
     """The GLSL of *prof*'s colour ranges and curves (PAD-343), ``pad_cx``
     (and ``pad_cr`` for the ranges), or ``""`` when it has none that change
     anything, so a profile without them builds exactly the shader it did.
-    *name* names the function; *with_range* False leaves ``pad_cr`` out,
-    for a second profile whose ranges use the first one's (PAD-389)."""
-    if not prof.has_extras():
+    *then*: a second profile drawn after it in the same function, all of it
+    (an Emulate run's Machine screen, PAD-389)."""
+    if not prof.has_extras() and then is None:
         return ""
-    from ...core.colour_profile import range_neutral
     q = "highp " if qualified else ""
-    live = [r for r in prof.ranges if not range_neutral(r)]
-    head = _range_glsl(q) if live and with_range else ""
-    body = []
-    for hue, width, soft, shift, sat, bright, protect in live:
-        body.append("c=%s(c,%s);" % (_RANGE, ",".join(
-            "%.6f" % v for v in (hue, width, soft, shift, sat, bright,
-                                 protect))))
-    tabs = prof.curve_tables()
-    if tabs is not None:
-        body.append(_curve_glsl(tabs))
+    body = _extras_body(prof, q, False)
+    if then is not None:
+        terms = plain_terms(then)
+        if terms:
+            body.append(terms)
+        body += _extras_body(then, q, any("d=c*255.0" in b for b in body))
+    if not body:
+        return ""
+    head = _range_glsl(q) if any(_RANGE + "(" in b for b in body) else ""
     body.append("return clamp(c,0.0,1.0);")
-    return head + "%svec3 %s(%svec3 c){%s}" % (q, name, q, "".join(body))
+    return head + "%svec3 %s(%svec3 c){%s}" % (q, _EXTRAS, q, "".join(body))
 
 
 def _premultiplied(text):

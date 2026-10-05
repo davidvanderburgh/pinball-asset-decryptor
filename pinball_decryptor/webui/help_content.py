@@ -500,6 +500,9 @@ HELP_CONTENT = {
             "- Click it in the preview or under **Layers**. Ctrl-click (Cmd on a Mac) "
             "adds or removes; Shift-click in Layers takes a range.\n"
             "- Drag to move, drag a corner to resize, arrows to nudge (Shift: 10 px).\n"
+            "- Drag a row in **Layers** above or below another to re-order it; drop an "
+            "added layer on a group's row to move it into that group. The game's own "
+            "layers stay in their group.\n"
             "- **Ctrl+Z** undo, **Ctrl+Y** or **Ctrl+Shift+Z** redo.",
             "### The panel\n"
             "- Position, size (**W px / H px**), **Turn °** (clockwise; 90° buttons), "
@@ -525,7 +528,9 @@ HELP_CONTENT = {
                  "text": "The card mark at a row's end (or right-click). Write leaves it "
                          "off the card; the row is struck through."},
                 {"icon": "trash", "tone": "err", "title": "Delete",
-                 "text": "Hides the selection in both."}]},
+                 "text": "**Delete** (or right-click) asks first. A layer you added is "
+                         "taken out; the game's own are hidden in both. **Undo** brings "
+                         "it back."}]},
             "- A new scene opens with eyes shut on layers hidden in the game; **Reset** "
             "puts eyes back.\n"
             "- Selecting shows a layer even with its eye shut; it never changes an eye.\n"

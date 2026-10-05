@@ -2417,6 +2417,16 @@ _CONTENT_EXTRAS = {
 for _tab, _extra in _CONTENT_EXTRAS.items():
     HELP_CONTENT[_tab] = list(HELP_CONTENT[_tab]) + list(_extra)
 
+# The Scenes tab's own tips (PAD-388: its ? window was empty): the scene sections
+# the Replace tabs and Color Profile already carry, in the order the tab is used.
+HELP_CONTENT["Scenes"] = [
+    sec for _tab, _title in (("Replace Images", "Scenes tab"),
+                             ("Replace Video", "Scene editor"),
+                             ("Replace Images", "Text in a scene"),
+                             ("Color Profile", "Preview colors (Scenes)"),
+                             ("Replace Video", "Save and load scene edits"))
+    for sec in HELP_CONTENT[_tab] if sec[0] == _title]
+
 # Tips only a copy of the app with a PREVIEW FEATURE switched on shows
 # (core/preview.py): {feature id: {tab: [(title, body), ...]}}.  Without a
 # code none of this is rendered, so the "?" window of a copy without one

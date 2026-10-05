@@ -460,12 +460,14 @@ def test_every_rail_tab_has_tips_under_its_own_key():
     from pinball_decryptor.webui.help_content import HELP_CONTENT, sections_for
     from pinball_decryptor.webui.tabs import TABS
     keys = [key for _m, _ns, key, _label, _group, _icon in TABS if key]
-    # Scenes has no entry of its own yet: its tips are Replace Images' "Scenes
-    # tab" and "Text in a scene" sections
-    missing = [k for k in keys if k not in HELP_CONTENT and k != "Scenes"]
+    missing = [k for k in keys if not HELP_CONTENT.get(k) and k != "Modes"]
     assert not missing, missing
     assert not [k for k in HELP_CONTENT if k not in keys], "a key no tab has"
     assert sections_for("Color Profile")
+    # Scenes borrows the scene sections of the Replace tabs and Color Profile
+    assert [t for t, _b in sections_for("Scenes")] == [
+        "Scenes tab", "Scene editor", "Text in a scene", "Preview colors (Scenes)",
+        "Save and load scene edits"]
 
 
 def test_tips_light_markdown_draws_as_blocks():

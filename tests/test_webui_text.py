@@ -852,3 +852,7 @@ def test_reveal_text_string_prefers_the_scenes_own_row(tmp_path):
         assert w.run(svc.reveal_text_string, "EBIRAH", "/g/cccccccccccccccccccc")
         assert svc._current == _row_index(w, "EBIRAH", "aaaa")
         assert not w.run(svc.reveal_text_string, "NOT THERE", "/g/bbbbbbbbbbbbbbbbbbbb")
+        # a scene's line breaks are spaces in the rows and in the search (DragonRR)
+        assert w.run(svc.reveal_text_string, "GODZILLA VS\nEBIRAH", "/g/aaaaaaaaaaaaaaaaaaaa")
+        assert svc._current == _row_index(w, "GODZILLA VS EBIRAH")
+        assert w.state("text")["search"] == "GODZILLA VS EBIRAH"

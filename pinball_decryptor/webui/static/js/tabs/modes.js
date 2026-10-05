@@ -454,22 +454,27 @@ function ModePage({ s, f, off, dis, rs }) {
         ${f.multiball && !dis.ball_save ? html`<div class="small muted">A multiball has its own ball save, below.</div>` : null}
       <//>
       <${Sec} title="Magnet" reason=${rs.magnet}>
-        <div class="row wrap">
-          <${Check} label=${`Hold the ball on the magnet when ${prof.magnet_shot ? `the ${prof.magnet_shot}` : "its shot"} is hit, for`} checked=${f.magnet} disabled=${magOff} title=${T.magnet} ns="modes" k="f:magnet" />
+        <${Check} label=${`Hold the ball on the magnet when ${prof.magnet_shot ? `the ${prof.magnet_shot}` : "its shot"} is hit`} checked=${f.magnet} disabled=${magOff} title=${T.magnet} ns="modes" k="f:magnet" />
+        <div class="row wrap" style="padding-left:26px">
+          <span class="dim nw">for</span>
           <${Num} k="magnet_s" value=${f.magnet_s} disabled=${magOff || !f.magnet} width=${64} title=${T.magnet} /><span class="dim">seconds (up to 5)</span>
         </div>
       <//>
       <${Sec} title="Scoop" reason=${rs.scoop}>
-        <div class="row wrap">
-          <${Check} label="Hold a ball that lands in the scoop for" checked=${f.scoop} disabled=${scoopOff} title=${T.scoop} ns="modes" k="f:scoop" />
+        <${Check} label="Hold a ball that lands in the scoop" checked=${f.scoop} disabled=${scoopOff} title=${T.scoop} ns="modes" k="f:scoop" />
+        <div class="row wrap" style="padding-left:26px">
+          <span class="dim nw">for</span>
           <${Num} k="scoop_s" value=${f.scoop_s} disabled=${scoopOff || !f.scoop} width=${64} title=${T.scoop} /><span class="dim">seconds (up to 10), then the game kicks it out</span>
         </div>
       <//>
       <${Sec} title="Other mechanisms" reason=${rs.coils}>
-        ${(prof.held_coils || []).length ? (prof.held_coils || []).map((c, i) => html`<div class="row wrap">
-          <${Check} label=${`Hold the ${c.label} for`} checked=${f["coil_on_" + i]} disabled=${coilsOff} title=${T.coils} ns="modes" k=${"f:coil_on_" + i} />
-          <${Num} k=${"coil_s_" + i} value=${f["coil_s_" + i]} disabled=${coilsOff || !f["coil_on_" + i]} width=${64} title=${T.coils} /><span class="dim">seconds,</span>
-          <${Select} value=${f["coil_when_" + i]} options=${withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x === "(when it starts)" ? x : "on " + x })), f["coil_when_" + i])} ns="modes" k=${"f:coil_when_" + i} disabled=${coilsOff || !f["coil_on_" + i]} width=${180} title=${T.coils} />
+        ${(prof.held_coils || []).length ? (prof.held_coils || []).map((c, i) => html`<div key=${c.name || i}>
+          <${Check} label=${`Hold the ${c.label}`} checked=${f["coil_on_" + i]} disabled=${coilsOff} title=${T.coils} ns="modes" k=${"f:coil_on_" + i} />
+          <div class="row wrap" style="padding-left:26px">
+            <span class="dim nw">for</span>
+            <${Num} k=${"coil_s_" + i} value=${f["coil_s_" + i]} disabled=${coilsOff || !f["coil_on_" + i]} width=${64} title=${T.coils} /><span class="dim nw">seconds,</span>
+            <${Select} value=${f["coil_when_" + i]} options=${withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x === "(when it starts)" ? x : "on " + x })), f["coil_when_" + i])} ns="modes" k=${"f:coil_when_" + i} disabled=${coilsOff || !f["coil_on_" + i]} width=${180} title=${T.coils} />
+          </div>
         </div>`) : html`<div class="small muted">This game has no other mechanism a mode can hold.</div>`}
       <//>
       <${Sec} title="Multiball" reason=${rs.multiball}>

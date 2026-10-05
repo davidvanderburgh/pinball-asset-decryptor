@@ -768,6 +768,7 @@ struct kit_hud {
     int pips;                              /* pips in use: 0 = all the build made (kit_hud_pips) */
     unsigned long award_until, hide_at;
     int noting;                            /* up only for a qualification note */
+    int metering;                          /* PAD-379: up only for a meter (kit_hud_meter) */
     int off;                               /* PAD-353: its words wait for a display of the game's */
 };
 
@@ -857,6 +858,7 @@ static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
         o->up = 0;
         o->hide_at = 0;
         o->noting = 0;
+        o->metering = 0;
         if (o->group) pm_show(o->group, 0);
     }
     if (on) kit_hud_up = h;
@@ -867,6 +869,7 @@ static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
         h->want_award[0] = h->want_awardsub[0] = 0;
         h->award_until = 0;
         h->noting = 0;
+        h->metering = 0;
         h->aside = 0;                      /* PAD-347: said again the next time it is up beside a game mode */
     }
     if (h->group) pm_show(h->group, on);
@@ -929,20 +932,58 @@ static KIT_UNUSED void kit_hud_award(struct kit_hud *h, unsigned ms, const char 
 
 /* A QUALIFICATION note on a HUD the mode is not using ("POWERLINES 2 OF 3"): the award line alone for
  * `ms`, then hidden. Polite: while another of the pack's HUDs is up (a mode running, or the total of
- * one that just ended) nothing is shown. 1 = shown. */
+ * one that just ended) nothing is shown - a METER of another mode (kit_hud_meter) gives way to it. On a HUD
+ * showing its own meter the note goes in the award line and the meter stays. 1 = shown. */
 static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *big, const char *sub)
 {
     int k;
-    if (kit_hud_up && kit_hud_up != h) return 0;
+    if (kit_hud_up && kit_hud_up != h && !kit_hud_up->metering) return 0;
     if (h->up && !h->noting) return 0;
     h->want_title[0] = h->want_line[0] = 0;
     for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
-    h->want_timer = h->want_gauge = -1;
+    h->want_timer = -1;
+    if (!h->metering) h->want_gauge = -1;
     kit_hud_award(h, ms, big, sub);
     if (!h->up) kit_hud_show(h, 1);
     h->noting = 1;
-    h->hide_at = pm_ms() + ms;
+    h->hide_at = h->metering ? 0 : pm_ms() + ms;
     return 1;
+}
+
+/* PAD-379: a METER on a HUD the mode is not using - qualification progress that STAYS on the glass (David: "a
+ * switch hit counter on the UI and feedback that it's progressing towards the mode"): the gauge on the right
+ * edge, `level` pips lit, and its label, nothing in the middle. Call it every tick while it should show, and
+ * with level -1 to take it down. It is the politest thing on the glass: it waits while another pack HUD is up (a
+ * mode, a total, a note), a note or a mode of the pack takes its place at once, and it comes back by itself once
+ * they are gone. A note of its own (kit_hud_note) goes in the award line above it and the meter stays. */
+static KIT_UNUSED void kit_hud_meter(struct kit_hud *h, int level, const char *label)
+{
+    int k;
+    if (level < 0) {
+        if (!h->metering) return;
+        h->metering = 0;
+        if (h->up && h->noting) {
+            if (h->award_until) h->hide_at = h->award_until;     /* its own note finishes first */
+            else kit_hud_show(h, 0);
+        }
+        return;
+    }
+    if (h->up && !h->noting) return;                 /* the mode itself has its HUD */
+    if (kit_hud_up && kit_hud_up != h) return;       /* another pack HUD is up: wait for it */
+    h->want_gauge = level;
+    if (label) kit_copy(h->want_glabel, sizeof h->want_glabel, label);
+    if (h->up && h->metering) return;
+    h->want_title[0] = h->want_line[0] = 0;
+    for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
+    h->want_timer = -1;
+    if (!h->up) {
+        h->want_award[0] = h->want_awardsub[0] = 0;
+        h->award_until = 0;
+        kit_hud_show(h, 1);
+    }
+    h->noting = 1;
+    h->metering = 1;
+    h->hide_at = 0;
 }
 
 /* PAD-347: STACKING (pm_aside). While one of the game's own modes runs, its title, instruction line and
@@ -1050,6 +1091,7 @@ static KIT_UNUSED void kit_hud_begin(struct kit_hud *h, const char *title, const
 {
     int k;
     h->noting = 0;
+    h->metering = 0;
     h->hide_at = 0;
     h->want_award[0] = h->want_awardsub[0] = 0;
     h->award_until = 0;

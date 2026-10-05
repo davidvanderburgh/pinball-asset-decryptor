@@ -24,6 +24,11 @@ THE PROGRAM (``blocks.json``)::
       "timers": [{"name": "window"}],  counts down in milliseconds (PAD-377)
       "wait_multiball": true,     a Start the mode while a multiball runs waits for the next one
       "priority": 180,            its display priority while it runs (0 = none)
+      "hud": {"on": true, "line": "SHOOT THE RAMPS",    PAD-375: the mode's HUD at the glass's edges
+              "counters": [{"label": "COMBO", "sub": "", "value": {...}}, ...],   three across the top
+              "timer": {"on": true, "label": "RAMPS", "icon": "maser"},         the badge counting its clock
+              "gauge": {"on": false, "label": "", "kind": "diamond", "count": 3, "color": "#ff7800",
+                        "value": {...}}},                                       pips on the right edge
       "clips": [{"name": "sever", "file": "sever.mp4"}],      PAD-374: its own clips and sounds,
       "sounds": [{"name": "roar", "file": "roar.wav", "priority": 4}],   files in its folder
       "music": "music.wav",       its own music bed while it runs ("" = the game's music)
@@ -62,6 +67,20 @@ What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 g
   next block that starts it afterwards does. "the mode could start now" asks the same.
 - A DISPLAY PRIORITY (``priority``): held while the mode runs (``kit_display``), kept for the
   total its own screen shows at the end, given back at once at a drain.
+
+THE HUD (PAD-375). Ticked on, the mode has what the examples have at the glass's edges, built by the
+card build like theirs (:mod:`.mode_hud`, from the ``hud`` this module writes into assets.json): the
+mode's name and an instruction line above the score panel, up to three counters across the top (each
+can follow a value by itself), a timer badge counting the mode's clock, a gauge of pips on the right
+edge, and an award line for a moment. Blocks write it: the title or instruction line, a counter, the
+gauge, an award (on a mode that is not running, the award is a note: shown alone for its moment, when
+no other HUD is up). The C drives it with the examples' own kit (``intricate_kit.h``'s ``struct
+kit_hud``, copied into the folder at every save), so it steps aside exactly as theirs do: under a
+display of the game's (``pm_display_covered``) its words are blank and the edges stay; while one of
+the game's own modes runs (``pm_aside``) its lines go into the award line, the counters hide, and the
+badge moves one slot down for a battle. The mode's own screen, when it has one, is hidden then too.
+At the end the HUD shows the mode's TOTAL for three seconds (a drain or the game moving on takes it
+down at once).
 
 PAD-373: what it does about the game's own modes is the form's choice (PAD-363): they may start
 (``stack``), it gives way (``give_way``: it starts only while none of them runs - a Start the mode
@@ -132,7 +151,19 @@ RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "eac
 SHARED_RESETS = ("ball", "game")
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
-              "show", "timer_start", "timer_stop")
+              "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award")
+#: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
+HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus")
+GAUGE_KINDS = ("diamond", "segment", "spike")
+GAUGE_MAX = 12                   # intricate_kit.h's KIT_HUD_PIPS
+HUD_TEXT_MAX = 40                # a title or line (the kit's KIT_HUD_WORDS is 48, with its number)
+COUNTER_MAX = 16                 # a counter's label or sub-label (the kit holds 23)
+BADGE_MAX = 12                   # the badge's label, lettered on the stock BATTLE panel
+AWARD_SECONDS_MAX = 10
+KIT_FILE = "intricate_kit.h"
+HUD_PRIORITY = 180               # a HUD mode with no priority of its own takes the kit's KIT_DISPLAY_MODE:
+                                 # pm_display_covered watches for it
+TOTAL_MS = 3000                  # the HUD's TOTAL stays up this long after the end
 #: a lit shot's pattern: the SDK's, and its pace (ms) when the block gives none. "hurry" is a
 #: blink that quickens as the clock runs down (PAD-376, the kit's kit_hurry_ms)
 PATTERNS = {"solid": ("PM_LAMP_SOLID", 0), "blink": ("PM_LAMP_BLINK", 500),
@@ -281,12 +312,66 @@ def normalize(data):
     out["sounds"] = [c for c in (out.get("sounds") or []) if isinstance(c, dict)]
     out["music"] = str(out.get("music") or "")
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
+    out["hud"] = _norm_hud(out.get("hud"))
     for s in out["scripts"]:
         for b in _walk(s.get("do")):
             # PAD-372: Add seconds takes a value; one saved before held a plain number
             secs = b.get("seconds")
             if b.get("op") == "add_time" and isinstance(secs, (int, float)) and not isinstance(secs, bool):
                 b["seconds"] = {"k": "num", "v": b["seconds"]}
+    return out
+
+
+def _norm_hud(h):
+    """The HUD's settings with every key there: off, three empty counters, a timer badge and no
+    gauge unless said. A value a counter or the gauge follows is kept as it is (problems names a
+    bad one)."""
+    h = h if isinstance(h, dict) else {}
+    text = lambda v, n: str(v or "").strip()[:n]                     # noqa: E731
+    value = lambda v: v if isinstance(v, dict) else None             # noqa: E731
+    given = list(h.get("counters") or [])[:3]
+    counters = []
+    for i in range(3):
+        c = given[i] if i < len(given) and isinstance(given[i], dict) else {}
+        counters.append({"label": text(c.get("label"), COUNTER_MAX), "sub": text(c.get("sub"), COUNTER_MAX),
+                         "value": value(c.get("value"))})
+    t = h.get("timer") if isinstance(h.get("timer"), dict) else {}
+    g = h.get("gauge") if isinstance(h.get("gauge"), dict) else {}
+    try:
+        count = max(1, min(GAUGE_MAX, int(g.get("count", 3))))
+    except (TypeError, ValueError):
+        count = 3
+    return {"on": bool(h.get("on", False)), "line": text(h.get("line"), HUD_TEXT_MAX),
+            "counters": counters,
+            "timer": {"on": bool(t.get("on", True)), "label": text(t.get("label"), BADGE_MAX),
+                      "icon": t.get("icon") if t.get("icon") in HUD_ICONS else HUD_ICONS[0]},
+            "gauge": {"on": bool(g.get("on", False)), "label": text(g.get("label"), COUNTER_MAX),
+                      "kind": g.get("kind") if g.get("kind") in GAUGE_KINDS else GAUGE_KINDS[0],
+                      "count": count,
+                      "color": g.get("color") if COLOR_RE.match(str(g.get("color") or "")) else "#ff7800",
+                      "value": value(g.get("value"))}}
+
+
+def hud_spec(program, slug=""):
+    """The ``hud`` of the mode's assets.json: what the card build draws (:func:`.mode_hud.hud_group`),
+    or {} with the HUD off. A counter with no label is left empty; the badge says the mode's name
+    when it has no label of its own."""
+    program = normalize(program)
+    h = program["hud"]
+    if not h["on"]:
+        return {}
+    title = program["name"] or slug.upper()
+    counters = [[c["label"], "0", c["sub"] or " "] if c["label"] else [] for c in h["counters"]]
+    while counters and not counters[-1]:
+        counters.pop()
+    out = {"title": title, "line": h["line"] or " ", "counters": counters}
+    if h["timer"]["on"]:
+        out["timer"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
+    if h["gauge"]["on"]:
+        rgb = int(h["gauge"]["color"][1:], 16)
+        out["gauge"] = {"label": h["gauge"]["label"] or " ", "kind": h["gauge"]["kind"],
+                        "count": h["gauge"]["count"],
+                        "colours": [[rgb >> 16 & 255, rgb >> 8 & 255, rgb & 255]]}
     return out
 
 
@@ -297,6 +382,8 @@ def save(project, slug, program):
     folder = MP.mode_folder(project, slug)
     os.makedirs(folder, exist_ok=True)
     src = os.path.join(folder, slug + ".c")
+    if program["hud"]["on"]:
+        _copy_kit(folder)
     _write(src, to_c(program, slug))
     text = json.dumps(program, indent=2) + "\n"
     _write(blocks_path(project, slug), text)
@@ -310,6 +397,22 @@ def _write(path, text):
     os.replace(path + ".tmp", path)
 
 
+def _copy_kit(folder):
+    """The examples' kit beside the C (its HUD is the kit's): the SDK's copy at every save, so a
+    blocks mode always builds against the kit of the app that saved it."""
+    from . import code_modes as CM
+    with open(os.path.join(CM.examples_dir(), KIT_FILE), "r", encoding="utf-8") as f:
+        text = f.read()
+    dst = os.path.join(folder, KIT_FILE)
+    try:
+        with open(dst, "r", encoding="utf-8") as f:
+            if f.read() == text:
+                return
+    except OSError:
+        pass
+    _write(dst, text)
+
+
 def _sync_assets(project, slug, program):
     """The mode's assets.json says its name, its clock and whether it has a screen of its own
     (the build makes the screen: a panel with its name, and a line of words the blocks write),
@@ -319,15 +422,17 @@ def _sync_assets(project, slug, program):
         spec = CM.load(project, slug)
     except (OSError, ValueError):
         spec = CM.CodeAssets(screen=False)
+    hud = hud_spec(program, slug)
     clips, calls = media_assets(program)
     changed = (spec.name != (program["name"] or slug.upper()) or bool(spec.screen) != program["screen"]
                or spec.seconds != max(1, program["seconds"] or 60)
                or (spec.clips or {}) != clips or (spec.calls or {}) != calls
-               or (spec.music or "") != program["music"])
+               or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud)
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
         spec.screen = program["screen"]
         spec.seconds = max(1, program["seconds"] or 60)
+        spec.hud = hud
         spec.clips = clips
         spec.calls = calls
         spec.music = program["music"]
@@ -492,6 +597,13 @@ def problems(program, shots=None, events=None, folder=None):
            "shots": set(shots) if shots is not None else None,
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds}
+    hud = program["hud"]
+    if hud["on"]:
+        for k, c in enumerate(hud["counters"]):
+            if c["value"] is not None:
+                _check_num(c["value"], "The HUD's counter %d" % (k + 1), ctx)
+        if hud["gauge"]["on"] and hud["gauge"]["value"] is not None:
+            _check_num(hud["gauge"]["value"], "The HUD's gauge", ctx)
     for i, s in enumerate(program["scripts"]):
         _check_hat(s.get("hat") or {}, i + 1, ctx)
         _check_stack(s.get("do") or [], 1, "Script %d" % (i + 1), ctx)
@@ -551,6 +663,23 @@ def notes(program):
                    "an even pace.")
     if "words" in ops and not program["screen"]:
         out.append("Show words needs the mode's own screen: tick Its own screen.")
+    hud = program["hud"]
+    if not hud["on"] and {"hud_text", "hud_counter", "hud_gauge", "hud_award"} & ops:
+        out.append("The HUD blocks need the HUD: tick Its HUD.")
+    if hud["on"]:
+        named = set()
+        for s in program["scripts"]:
+            for b in _walk(s.get("do") or []):
+                if b.get("op") == "hud_counter" and _int_ok(b.get("counter"), 1, 3):
+                    named.add(int(b["counter"]))
+        for k in sorted(named):
+            if not hud["counters"][k - 1]["label"]:
+                out.append("A block sets HUD counter %d, which has no label, so it is not shown: "
+                           "give it one under Its HUD." % k)
+        if "hud_gauge" in ops and not hud["gauge"]["on"]:
+            out.append("A block fills the HUD's gauge, which is switched off: tick Gauge under Its HUD.")
+        if hud["timer"]["on"] and not program["seconds"]:
+            out.append("The HUD's timer badge counts the mode's clock, and it has none: it is not shown.")
     if "timer_done" in kinds and "timer_start" not in ops:
         out.append("No block starts a timer, so When a timer runs out never runs.")
     if "behind" in wheres and "loop" not in wheres:
@@ -691,6 +820,29 @@ def _check_stack(stack, depth, where, ctx):
         elif op == "log":
             if len(str(b.get("text") or "")) > TEXT_MAX:
                 ctx["out"].append("%s logs more than %d letters." % (where, TEXT_MAX))
+        elif op == "hud_text":
+            if b.get("which") not in ("title", "line"):
+                ctx["out"].append("%s writes the HUD's title or line: choose which." % where)
+            if len(str(b.get("text") or "")) > HUD_TEXT_MAX:
+                ctx["out"].append("%s puts more than %d letters on the HUD." % (where, HUD_TEXT_MAX))
+            if b.get("value") is not None:
+                _check_num(b.get("value"), where, ctx)
+        elif op == "hud_counter":
+            if not _int_ok(b.get("counter"), 1, 3):
+                ctx["out"].append("%s sets a HUD counter: 1, 2 or 3." % where)
+            _check_num(b.get("value"), where, ctx)
+            if len(str(b.get("sub") or "")) > COUNTER_MAX:
+                ctx["out"].append("%s has a counter's words of more than %d letters." % (where, COUNTER_MAX))
+        elif op == "hud_gauge":
+            _check_num(b.get("value"), where, ctx)
+        elif op == "hud_award":
+            for key in ("text", "sub"):
+                if len(str(b.get(key) or "")) > HUD_TEXT_MAX:
+                    ctx["out"].append("%s puts more than %d letters on the HUD." % (where, HUD_TEXT_MAX))
+            if b.get("value") is not None:
+                _check_num(b.get("value"), where, ctx)
+            if not _int_ok(b.get("seconds"), 1, AWARD_SECONDS_MAX):
+                ctx["out"].append("%s shows an award for 1 to %d seconds." % (where, AWARD_SECONDS_MAX))
         elif op in ("timer_start", "timer_stop"):
             _check_timer(b.get("timer"), where + "'s timer", ctx)
             if op == "timer_start":
@@ -1035,6 +1187,34 @@ class _Gen:
                 out.append(pad + "if (run.on && pm_multiball_start(%du, %du)) run.own_mball = 1;" % (balls, save))
             elif op == "log":
                 out.append(pad + 'pm_log("%%s", %s);' % _c_str(str(b.get("text") or "")[:TEXT_MAX]))
+            elif op.startswith("hud_") and not self.p["hud"]["on"]:
+                out.append(pad + "/* %s: the mode has no HUD */" % op)
+            elif op == "hud_text":
+                value = b.get("value")
+                out.append(pad + "hud_words(%d, %s, %s, %d);" % (
+                    1 if b.get("which") == "line" else 0, _c_str(str(b.get("text") or "")[:HUD_TEXT_MAX]),
+                    self.num(value) if value is not None else "0LL", 0 if value is None else 1))
+            elif op == "hud_counter":
+                try:
+                    k = max(1, min(3, int(b.get("counter"))))
+                except (TypeError, ValueError):
+                    k = 1
+                sub = b.get("sub")
+                out.append(pad + "hud_counter(%d, %s, %s);" % (
+                    k - 1, self.num(b.get("value")),
+                    "0" if sub is None else _c_str(str(sub)[:COUNTER_MAX])))
+            elif op == "hud_gauge":
+                out.append(pad + "hud_level = %s;" % self.num(b.get("value")))
+            elif op == "hud_award":
+                value = b.get("value")
+                try:
+                    secs = max(1, min(AWARD_SECONDS_MAX, int(b.get("seconds"))))
+                except (TypeError, ValueError):
+                    secs = 2
+                out.append(pad + "hud_award(%s, %s, %d, %s, %du);" % (
+                    _c_str(str(b.get("text") or "")[:HUD_TEXT_MAX]),
+                    self.num(value) if value is not None else "0LL", 0 if value is None else 1,
+                    _c_str(str(b.get("sub") or "")[:HUD_TEXT_MAX]), secs * 1000))
             elif op == "clip":
                 name = str(b.get("clip") or "")
                 if MEDIA_RE.match(name):
@@ -1131,6 +1311,20 @@ def to_c(program, slug):
             else:
                 hat_code[kind].append((n, "\n".join([head, "    if %s {" % test] + body + ["    }"])))
 
+    hud = program["hud"]
+    has_hud = hud["on"]
+    # PAD-375: a mode with a HUD or a screen of its own watches the game's displays (the kit's
+    # kit_display): its words step aside under one, so it holds a display priority while it runs
+    watch = has_hud or program["screen"]
+    live = []                           # (counter 0-2, C of its value): counters that follow a value
+    gauge_live = None
+    if has_hud:
+        for k, c in enumerate(hud["counters"]):
+            if c["label"] and c["value"] is not None:
+                live.append((k, g.num(c["value"])))
+        if hud["gauge"]["on"] and hud["gauge"]["value"] is not None:
+            gauge_live = g.num(hud["gauge"]["value"])
+
     def scripts_of(*kinds):
         """The scripts of these hats, in the order the page shows them: top to bottom."""
         return [code for _n, code in sorted(x for k in kinds for x in hat_code[k])]
@@ -1145,6 +1339,8 @@ def to_c(program, slug):
     L.append(" * " + _comment(summary(program)) + ".")
     L.append(" */")
     L.append('#include "pad_mode.h"')
+    if has_hud:
+        L.append('#include "%s"   /* the examples\' kit: the HUD (copied here at every save) */' % KIT_FILE)
     if media:
         L.append('#include "pad_mode_assets.h"     /* its own clips and sounds, as Write carried them */')
     L.append("")
@@ -1156,7 +1352,7 @@ def to_c(program, slug):
     L.append("#define WAITS_OUT_MULTIBALL %d       /* 1 = a start while a multiball runs waits for the next */"
              % (1 if program["wait_multiball"] else 0))
     L.append("#define DISPLAY_PRIORITY %d          /* held while it runs; 0 = none (MODE_SDK.md) */"
-             % program["priority"])
+             % (program["priority"] or (HUD_PRIORITY if has_hud else 0)))
     L.append("#define TIMER_MAX_MS     %dL" % TIMER_MAX_MS)
     L.append("#define ENDING_MS        3000        /* the total its own screen shows at the end */")
     L.append("#define UNUSED __attribute__((unused))   /* a helper the blocks may not call */")
@@ -1214,6 +1410,26 @@ def to_c(program, slug):
     L.append("static int sec_changed, was_in_game, ending;")
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
+    if watch:
+        L.append("static int screen_away;                /* its screen hidden: a game display or mode has the middle */")
+    if has_hud:
+        L.append("")
+        L.append("/* ---- the HUD at the glass's edges (PAD-375): the build's PadMode_%s_Hud group, driven by" % slug)
+        L.append(" * the kit's struct kit_hud as the examples drive theirs - blank under a display of the game's,")
+        L.append(" * aside while one of the game's modes runs. No HUD on the card: nothing shows, the mode runs. */")
+        L.append('static struct kit_hud hud = { .slug = "%s" };' % slug)
+        L.append("#define HUD_LINE   %s" % _c_str(hud["line"]))
+        L.append("#define HUD_TIMER  %d          /* the badge counts the clock */" % (
+            1 if hud["timer"]["on"] and program["seconds"] else 0))
+        L.append("#define HUD_GAUGE  %d          /* pips of the gauge; 0 = no gauge */" % (
+            hud["gauge"]["count"] if hud["gauge"]["on"] else 0))
+        L.append("#define HUD_GAUGE_LABEL %s" % _c_str(hud["gauge"]["label"]))
+        L.append("UNUSED static const char *const HUD_LABEL[3] = {%s};" % ", ".join(
+            _c_str(c["label"]) for c in hud["counters"]))
+        L.append("UNUSED static const char *const HUD_SUB[3] = {%s};" % ", ".join(
+            _c_str(c["sub"]) for c in hud["counters"]))
+        L.append("static char hud_val[3][24], hud_sub[3][24];   /* each counter's value and sub-label now */")
+        L.append("UNUSED static long long hud_level;          /* the gauge's pips lit */")
     L.append("")
     L.append("static unsigned P(void)")
     L.append("{")
@@ -1310,6 +1526,62 @@ def to_c(program, slug):
     L.append("    clock_to(seconds * TICKS_PER_SECOND);")
     L.append("}")
     L.append("")
+    if has_hud:
+        L.append("/* a counter (0-2) to a value, short enough for its 200 px (950,000 / 4.25M); sub 0 = as it is */")
+        L.append("UNUSED static void hud_counter(int k, long long value, const char *sub)")
+        L.append("{")
+        L.append("    if (k < 0 || k > 2 || !HUD_LABEL[k][0]) return;      /* a counter with no label is not shown */")
+        L.append("    kit_short(hud_val[k], sizeof hud_val[k], value < 0 ? 0 : (uint64_t)value);")
+        L.append("    if (sub) kit_copy(hud_sub[k], sizeof hud_sub[k], sub);")
+        L.append("}")
+        L.append("")
+        L.append("static void hud_line(char *line, unsigned cap, const char *text, long long value, int with_value)")
+        L.append("{")
+        L.append("    char number[32];")
+        L.append("    if (!with_value) {")
+        L.append("        kit_copy(line, cap, text);")
+        L.append("        return;")
+        L.append("    }")
+        L.append("    pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);")
+        L.append('    pm_snprintf(line, cap, "%s%s%s", text, text[0] ? " " : "", number);')
+        L.append("}")
+        L.append("")
+        L.append("/* the title (0) or the instruction line (1); kept until the mode starts again */")
+        L.append("UNUSED static void hud_words(int which, const char *text, long long value, int with_value)")
+        L.append("{")
+        L.append("    char line[KIT_HUD_WORDS];")
+        L.append("    hud_line(line, sizeof line, text, value, with_value);")
+        L.append("    if (which) kit_hud_title(&hud, 0, line);")
+        L.append("    else kit_hud_title(&hud, line, 0);")
+        L.append("}")
+        L.append("")
+        L.append("/* the award line for a moment; on a mode not running, a note shown alone (kit_hud_note: not over")
+        L.append(" * another mode's HUD) */")
+        L.append("UNUSED static void hud_award(const char *text, long long value, int with_value, const char *sub,")
+        L.append("                             unsigned ms)")
+        L.append("{")
+        L.append("    char line[KIT_HUD_WORDS];")
+        L.append("    hud_line(line, sizeof line, text, value, with_value);")
+        L.append("    if (run.on) kit_hud_award(&hud, ms, line, sub);")
+        L.append("    else kit_hud_note(&hud, ms, line, sub[0] ? sub : MODE_NAME);")
+        L.append("}")
+        L.append("")
+        L.append("/* every tick while it runs: the counters that follow a value, the badge, the gauge */")
+        L.append("static void hud_show(void)")
+        L.append("{")
+        L.append("    int k;")
+        for k, expr in live:
+            L.append("    hud_counter(%d, %s, 0);" % (k, expr))
+        if gauge_live is not None:
+            L.append("    hud_level = %s;" % gauge_live)
+        L.append("    for (k = 0; k < 3; k++)")
+        L.append("        if (HUD_LABEL[k][0]) kit_hud_counter(&hud, k, HUD_LABEL[k], hud_val[k], hud_sub[k]);")
+        L.append("    kit_hud_timer(&hud, HUD_TIMER ? (int)secs_left() : -1);")
+        L.append("    if (HUD_GAUGE)")
+        L.append("        kit_hud_gauge(&hud, hud_level < 0 ? 0 : hud_level > HUD_GAUGE ? HUD_GAUGE : (int)hud_level,")
+        L.append("                      HUD_GAUGE_LABEL);")
+        L.append("}")
+        L.append("")
     if g.shows:
         L.extend(_show_decls(g.shows))
     else:
@@ -1386,10 +1658,23 @@ def to_c(program, slug):
     L.append("    run.total = 0;")
     L.append("    hide_ticks = 0;")
     L.append('    reset_mode();')
+    if watch:
+        L.append("    screen_away = 0;")
     L.append("    if (screen) {")
     L.append("        words(MODE_NAME, 0, 0);")
     L.append("        pm_show(screen, 1);")
     L.append("    }")
+    if has_hud:
+        L.append("    {")
+        L.append("        int k;")
+        L.append("        for (k = 0; k < 3; k++) {")
+        L.append('            kit_copy(hud_val[k], sizeof hud_val[k], "0");')
+        L.append("            kit_copy(hud_sub[k], sizeof hud_sub[k], HUD_SUB[k]);")
+        L.append("        }")
+        L.append("    }")
+        L.append("    hud_level = 0;")
+        L.append("    kit_hud_pips(&hud, HUD_GAUGE);      /* the build's count: any more are hidden */")
+        L.append("    kit_hud_begin(&hud, MODE_NAME, HUD_LINE);")
     if media:
         L.append("    pa_load(&own);                    /* its own sounds' priorities, and its music */")
         L.append("    own.running = 1;")
@@ -1399,6 +1684,8 @@ def to_c(program, slug):
         L.append("    }")
     L.append('    pm_log("START (%s): player %u", why, run.player);')
     L.append("    on_mode_start();")
+    if has_hud:
+        L.append("    if (run.on) hud_show();            /* what the start's blocks set, on the first frame */")
     L.append("}")
     L.append("")
     L.append("static void end(const char *why)")
@@ -1418,22 +1705,43 @@ def to_c(program, slug):
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
     L.append("    if (screen) {")
     L.append('        words("TOTAL", (long long)run.total, 1);')
-    L.append("        hide_ticks = 3 * TICKS_PER_SECOND;")
+    L.append("        hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
+    if watch:
+        L.append("        if (screen_away) pm_show(screen, 1);")
+        L.append("        screen_away = 0;")
     L.append("    }")
+    if has_hud:
+        L.append("    {                                 /* the TOTAL, as the examples end */")
+        L.append("        char n[32];")
+        L.append("        int k;")
+        L.append('        kit_hud_title(&hud, MODE_NAME " TOTAL", "");')
+        L.append("        for (k = 0; k < 3; k++) kit_hud_counter(&hud, k, 0, 0, 0);")
+        L.append("        kit_hud_timer(&hud, -1);")
+        L.append("        kit_hud_gauge(&hud, -1, 0);")
+        L.append('        kit_hud_award(&hud, %du, kit_num(n, sizeof n, run.total), " ");' % TOTAL_MS)
+        L.append("        kit_hud_hide_in(&hud, %du);" % TOTAL_MS)
+        L.append("    }")
     L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
-    L.append("    /* a priority is kept for the total on its own screen (pm_end_holding); a drain hands it")
-    L.append("     * back at once (end_now) */")
-    L.append("    if (!(DISPLAY_PRIORITY && screen && pm_end_holding(ENDING_MS))) {")
+    L.append("    /* the total keeps the display watched for its moment on its HUD or its own screen (the kit's")
+    L.append("     * kit_end_after, pm_end_holding); a drain or the game hands it back at once (end_now) */")
+    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_MS))) {" % ("1" if has_hud else "screen"))
     L.append("        pm_display_priority(0);")
     L.append("        pm_end();")
     L.append("    }")
     L.append('    pm_log("END (%s): %u scores, total %llu", why, run.shots, (unsigned long long)run.total);')
     L.append("}")
     L.append("")
-    L.append("static void end_now(const char *why)   /* ended by the game: its display back at once */")
+    L.append("/* ended by a drain, a tilt's drain, the game moving on or one of its modes beginning: the game's own")
+    L.append(" * screen comes at once, so its display is handed back and its total does not stay over it (the")
+    L.append(" * kit's kit_end_now) */")
+    L.append("static void end_now(const char *why)")
     L.append("{")
     L.append("    end(why);")
+    L.append("    hide_ticks = 0;")
+    L.append("    if (screen) pm_show(screen, 0);")
     L.append("    if (DISPLAY_PRIORITY) pm_display_priority(0);")
+    if has_hud:
+        L.append("    kit_hud_drop_now();")
     L.append("}")
     L.append("")
     L.append("/* ---- the callbacks ---- */")
@@ -1489,6 +1797,8 @@ def to_c(program, slug):
     L.append("    unsigned seconds = 0;")
     L.append("    int in_game = pm_in_game();")
     L.append("    find_screen();")
+    if has_hud:
+        L.append("    kit_hud_tick(&hud);                /* finds it, expires an award, writes what changed */")
     if media:
         L.append("    own_tick();                       /* every tick: an end call outlives the mode */")
     if g.shows:
@@ -1530,9 +1840,7 @@ def to_c(program, slug):
     L.append("    }")
     L.append("    if (run.own_mball && pm_balls_in_play() < 2) run.own_mball = 0;   /* its multiball is over */")
     L.append("    if (GAME_MODES && pm_aside() && !(run.own_mball && pm_aside() == (int)PM_STOCK_MULTIBALL)) {")
-    L.append("        end(\"the game's own mode began\");   /* its screen goes at once, as a tilt's */")
-    L.append("        hide_ticks = 0;")
-    L.append("        if (screen) pm_show(screen, 0);")
+    L.append("        end_now(\"the game's own mode began\");   /* its screen and HUD go at once, as a tilt's */")
     L.append("        return;")
     L.append("    }")
     L.append("    run.elapsed++;")
@@ -1549,6 +1857,16 @@ def to_c(program, slug):
     L.extend(scripts_of("every", "seconds_left"))
     L.append("    if (run.on && RUN_SECONDS && run.ticks_left == 0)")
     L.append('        end("time ran out");')
+    if watch:
+        L.append("    if (run.on && screen) {           /* its screen out of the way of the game's (PAD-375) */")
+        L.append("        int away = pm_display_covered() || pm_aside();")
+        L.append("        if (away != screen_away) {")
+        L.append("            pm_show(screen, !away);")
+        L.append("            screen_away = away;")
+        L.append("        }")
+        L.append("    }")
+    if has_hud:
+        L.append("    if (run.on) hud_show();")
     L.append("}")
     L.append("")
     L.append("static void on_ball_end(void)")

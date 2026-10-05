@@ -575,6 +575,21 @@ value shield_target_at     48
 value shield_away          86
 value shield_toward        87
 
+# ---- PAD-393: the building (Premium/LE only) -----------------------------------------------------------------------
+# BuildingStepper (vtable 0x64ff88, a StepperMotor the node board runs: node 10 motor 0, BUILDING UP 92 / DOWN 93), one
+# object at 0x7bbe64 (its getter 0x1d7754 returns it). The game moves it by FLOOR: building_move (0x1d79fc: object,
+# floor 0..3) stores the target at +48 with the speed adjustments 355-357, and the motor's update sends the board the
+# steps between +44 (the floor it is at; 4 = not homed yet) and the target - the game's own table, 0/2500/5000/7500
+# steps from home (floor 0, where it rests) less the BUILDING STEPPER BIAS. building_busy (0x1d7948) is the game's "not now": configuring, not
+# homed, moving, or its building processes 322/323 run. pm_building / pm_building_floor.
+site building_move         0x001d79fc 0xe92d40f8 0xe1a04000
+site building_busy         0x001d7948 0xe5d03025 0xe3530000
+data building_stepper      0x007bbe64
+value building_vptr        0x64ff90
+value building_at          44
+value building_target_at   48
+value building_floors      4
+
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------
 # The Action button (the game's LOCKDOWN BUTTON) and the flipper buttons have no handler of their own
 # (descriptor flags 0), so the rules never send them as a shot and no switch_hit broadcasts them. The

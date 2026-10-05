@@ -1306,3 +1306,31 @@ def test_a_layer_dragged_in_layers_is_re_ordered_or_goes_into_a_group(tmp_path):
         assert w.call("text_scenes.tree_undo")
         assert next(l for l in _tv(w)["layers"] if l["id"] == new)["parent"] == ids["Tile_1"]
         w.call("text_scenes.close")
+
+
+def test_delete_asks_first_then_removes_or_hides(tmp_path):
+    """PAD-391 round 2 (DragonRR): Delete on a layer, with a confirmation.  No keeps it; yes
+    takes an added layer out and hides the game's own (its code still looks for it)."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ids = {l["name"]: l["id"] for l in _tv(w)["layers"]}
+        assert w.call("text_scenes.tree_add_text", "HELLO", ids["Title"])
+        new = _tv(w)["props"]["id"]
+        n_ops = len(_ops(folder))
+        w.answers.append("no")
+        assert not w.call("text_scenes.tree_delete", [new, ids["Title"]])
+        assert "Delete these 2 layers?" in w.asked[-1]["message"]
+        assert len(_ops(folder)) == n_ops
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_delete", [new, ids["Title"]])
+        msg = w.asked[-1]["message"]
+        assert "PAD_Text" in msg and "Title" in msg and "hidden in the game" in msg
+        lay = {l["id"]: l for l in _tv(w)["layers"]}
+        assert new not in lay and lay[ids["Title"]]["hidden"] and lay[ids["Title"]]["view_off"]
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_delete", [ids["Art"]])
+        assert w.asked[-1]["title"] == "Delete layer" and '"Art"' in w.asked[-1]["message"]
+        w.call("text_scenes.close")

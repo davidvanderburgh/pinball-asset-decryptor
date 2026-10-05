@@ -1,4 +1,4 @@
-"""PAD-391 proof shot: a layer dragged into another group in Scenes > Layers.
+"""PAD-391 proof shot (--delete: round 2, the Delete key in Layers asks first): a layer dragged into another group in Scenes > Layers.
 
     python scripts/shot_pad391.py <repo> <godzilla project> <out_png> [--drag]
 
@@ -27,6 +27,7 @@ GROUP = "T1_1_Art"
 def main():
     repo, source, out = sys.argv[1:4]
     drag = "--drag" in sys.argv[4:]
+    delete = "--delete" in sys.argv[4:]          # round 2: Delete pressed in Layers
     print("repo:", repo, flush=True)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="pad391-")
@@ -81,6 +82,19 @@ def main():
             time.sleep(1)
             src = page.locator('.tree-layers [data-node="%s"]' % added)
             src.scroll_into_view_if_needed()
+            if delete:
+                src.evaluate("el => el.scrollIntoView({block: 'end'})")
+                src.click()
+                time.sleep(1.5)
+                rig._wait(lambda: not state().get("tree_busy"), 60)
+                page.mouse.move(5, 995)
+                page.keyboard.press("Delete")
+                time.sleep(3)
+                page.screenshot(path=out)
+                print("layers left:", [l["name"] for l in state()["tree_view"]["layers"]
+                                       if l["added"]], flush=True)
+                browser.close()
+                return
             if drag:
                 dst = page.locator('.tree-layers [data-node="%s"]' % group)
                 sb, db = src.bounding_box(), dst.bounding_box()

@@ -8,7 +8,12 @@ also carries, for the pictures those scenes draw:
   color switch and the color profile baked into it (its own, else the project's individual
   files profile, so it looks the same in a project with another one);
 * the color switch and profile of each picture added in Scenes;
-* the project's whole screen overlay.
+* the project's whole screen overlay;
+* the Text tab's edits of those scenes' words (PAD-387).
+
+Every scene saved this way also carries every other picture replaced on the Images tab (the
+boot screen, the game's splash, any picture no scene draws) and every Text tab edit, the game
+program's words too: the project's whole look in one file, sounds, videos and modes aside.
 
 The machine screen is not carried: it describes the screen of the PC or machine it was set on.
 
@@ -24,7 +29,10 @@ A scene picture's extracted name ends in a hash of its bytes on the card it came
 project extracted from a card built with changes names a replaced picture differently from a
 project extracted from the stock card.  Each saved picture therefore also says which nodes of
 its scenes draw it (``drawn``, PAD-385), and :func:`localise` finds the picture those nodes draw
-in the project it is loaded into.
+in the project it is loaded into.  A text edit is keyed by its scene and original words, as the
+Text tab's own file of edits is (PAD-300); it also says which Text nodes show those words
+(``nodes``, a scene's) and the words of the lines either side of it (``near``), so
+:func:`match_text` finds the line on a card whose words were built differently.
 """
 from __future__ import annotations
 
@@ -115,7 +123,8 @@ def _source(assets_dir, data, rel, built):
 
 def gather(assets_dir, cards, trees):
     """``(edits, extras)`` to save for *cards* (None: every scene of *trees*, ``{card: stock
-    manifest}``): their edits, and the pictures, profiles and overlay described above."""
+    manifest}``, and then every replaced picture and text edit of the project): their edits,
+    and the pictures, profiles, overlay and text described above."""
     from ...core import colour_profile as cp, staged_changes
     edits = scene_edit.load(assets_dir)
     want = list(trees) if cards is None else [c for c in cards if c in trees]
@@ -128,16 +137,21 @@ def gather(assets_dir, cards, trees):
     for c in want:
         for pic, nodes in manifest_drawers(trees[c]).items():
             drawn.setdefault(pic, []).extend([c] + n for n in nodes)
+    rels = {"images/" + pic for pic in drawn}
+    if cards is None:
+        # the whole project: the pictures no scene draws too (PAD-387)
+        rels.update(r for r in set(data.get("image") or ()) | built
+                    if isinstance(r, str) and r.startswith("images/") and scene_edit._safe_rel(r))
     pictures = {}
-    for pic in sorted(drawn):
-        rel = "images/" + pic
+    for rel in sorted(rels):
         src = _source(assets_dir, data, rel, built)
         if src is None:
             continue
         on = cp.asset_applies(settings, "images", rel)
         pictures[rel] = {"src": src, "name": os.path.basename(src), "keep": rel in keep,
-                         "color": on, "profile": _profile_raw(data, rel) if on else None,
-                         "drawn": drawn[pic]}
+                         "color": on, "profile": _profile_raw(data, rel) if on else None}
+        if drawn.get(rel[len("images/"):]):
+            pictures[rel]["drawn"] = drawn[rel[len("images/"):]]
     added = {}
     for ops in edits.values():
         for op in ops:
@@ -148,18 +162,20 @@ def gather(assets_dir, cards, trees):
             added[img] = {"color": on, "profile": _profile_raw(data, img) if on else None}
     overlay = data.get(cp.KEY)
     extras = {"pictures": pictures, "added": added,
-              "overlay": dict(overlay) if isinstance(overlay, dict) else None}
+              "overlay": dict(overlay) if isinstance(overlay, dict) else None,
+              "text": text_to_save(assets_dir, cards, trees)}
     return edits, extras
 
 
 def export_all(assets_dir, zip_path, cards, trees):
-    """Save *cards* (None: every scene) with their pictures and color profiles to
-    *zip_path*.  Returns ``(scenes with edits, pictures)`` written; raises
-    :class:`scene_edit.SceneEditError` when there is nothing to save."""
+    """Save *cards* (None: every scene, and the whole project's look) with their pictures,
+    color profiles and text to *zip_path*.  Returns ``(scenes with edits, pictures, text
+    edits)`` written; raises :class:`scene_edit.SceneEditError` when there is nothing to
+    save."""
     edits, extras = gather(assets_dir, cards, trees)
-    if not edits and not extras["pictures"]:
+    if not edits and not extras["pictures"] and not extras["text"]:
         raise scene_edit.SceneEditError(
-            "there are no scene edits or replaced pictures to save")
+            "there are no scene edits, replaced pictures or text edits to save")
     added_files = sorted({op["image"] for ops in edits.values() for op in ops
                           if op["op"] == "add_picture" and scene_edit._safe_rel(op.get("image"))})
     pictures = {}
@@ -177,13 +193,15 @@ def export_all(assets_dir, zip_path, cards, trees):
                "pictures": pictures, "added": extras["added"]}
         if extras["overlay"] is not None:
             doc["overlay"] = extras["overlay"]
+        if extras["text"]:
+            doc["text"] = extras["text"]
         z.writestr(scene_edit.SHARE_MANIFEST, json.dumps(doc, indent=1, sort_keys=True))
-    return len(edits), len(pictures)
+    return len(edits), len(pictures), len(extras["text"])
 
 
 def read_extras(zip_path):
-    """``{"pictures", "added", "overlay"}`` of a file :func:`export_all` wrote (empty for a
-    file of edits alone)."""
+    """``{"pictures", "added", "overlay", "text"}`` of a file :func:`export_all` wrote (empty
+    for a file of edits alone)."""
     try:
         with zipfile.ZipFile(zip_path) as z:
             doc = json.loads(z.read(scene_edit.SHARE_MANIFEST).decode("utf-8"))
@@ -203,7 +221,18 @@ def read_extras(zip_path):
              if isinstance(r, str) and isinstance(a, dict)} if isinstance(
                  doc.get("added"), dict) else {}
     overlay = doc.get("overlay") if isinstance(doc.get("overlay"), dict) else None
-    return {"pictures": pictures, "added": added, "overlay": overlay}
+    text = []
+    for e in doc.get("text") if isinstance(doc.get("text"), list) else ():
+        if (isinstance(e, dict) and all(isinstance(e.get(k), str) for k in
+                                        ("path", "original", "new")) and e["new"]):
+            nodes = e.get("nodes") if isinstance(e.get("nodes"), list) else []
+            near = e.get("near")
+            near = ([w if isinstance(w, str) else None for w in near]
+                    if isinstance(near, list) and len(near) == 2 else None)
+            text.append({"path": e["path"], "original": e["original"], "new": e["new"],
+                         "nodes": [str(n) for n in nodes if isinstance(n, (str, int))],
+                         "near": near})
+    return {"pictures": pictures, "added": added, "overlay": overlay, "text": text}
 
 
 def has_extras(extras):
@@ -344,3 +373,111 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True):
         data[cp.KEY] = dict(extras["overlay"])
     staged_changes.save(assets_dir, data)
     return loaded, missing
+
+
+# ---------------------------------------------------------------------------------------------
+# the Text tab's edits (PAD-387)
+# ---------------------------------------------------------------------------------------------
+def _text_nodes(man, original):
+    """Ids of the Text nodes of scene *man* showing *original* (in the manifest's flattened
+    form of a line with breaks)."""
+    from ...core import text_manifest
+    objs = (man or {}).get("objects") or {}
+    return sorted((str(k) for k, o in objs.items()
+                   if isinstance(o, dict) and o.get("kind") == "Text"
+                   and text_manifest.escape_cell(o.get("text") or "") == original),
+                  key=lambda k: (len(k), k))
+
+
+def _neighbours(rows):
+    """``{id(row): [original of the row before it, of the row after it]}`` among the rows of
+    its own scene or program, in manifest order (None past either end)."""
+    by_path = {}
+    for r in rows:
+        by_path.setdefault(r["path"], []).append(r)
+    out = {}
+    for same in by_path.values():
+        for i, r in enumerate(same):
+            out[id(r)] = [same[i - 1]["original"] if i else None,
+                          same[i + 1]["original"] if i + 1 < len(same) else None]
+    return out
+
+
+def text_to_save(assets_dir, cards, trees):
+    """The Text tab's edits to save for *cards* (None: every edit of the project, the game
+    program's words too), ``[{"path", "original", "new", "near", "nodes"?}]``: *near* the
+    original words of the rows on either side of it, *nodes* the Text nodes showing it."""
+    from ...core import text_manifest
+    want = None if cards is None else set(cards)
+    rows = text_manifest.load(assets_dir)
+    near = _neighbours(rows)
+    out = []
+    for r in rows:
+        new = r.get("replacement") or ""
+        if not new or new == r["original"] or (want is not None and r["path"] not in want):
+            continue
+        e = {"path": r["path"], "original": r["original"], "new": new, "near": near[id(r)]}
+        nodes = _text_nodes((trees or {}).get(r["path"]), r["original"])
+        if nodes:
+            e["nodes"] = nodes
+        out.append(e)
+    return out
+
+
+def match_text(saved, rows, trees):
+    """Pair each saved text edit with a row of this project's manifest *rows*
+    (:func:`text_manifest.load`) of the same scene or program (le/pro folders matched):
+
+    1. the row with the same original words, the n-th copy for the n-th edit;
+    2. else, for a scene line, the row of the words the same Text nodes show here;
+    3. else the one row here between rows of the same words as the saved one's neighbours.
+
+    2 and 3 find a line on a card that was built with other words there (the file saved from
+    a project extracted from a card built with changes).  Returns ``(pairs, missing)``:
+    ``[(row, new)]`` and the saved edits with no row here."""
+    from ...core import text_manifest
+    find = scene_edit.card_finder({r["path"] for r in rows})
+    near = _neighbours(rows)
+    free, between = {}, {}
+    for r in rows:
+        free.setdefault((r["path"], r["original"]), []).append(r)
+        between.setdefault((r["path"],) + tuple(near[id(r)]), []).append(r)
+    taken = set()
+
+    def first(cands):
+        left = [r for r in cands or () if id(r) not in taken]
+        return left[0] if left else None
+    pairs, missing = [], []
+    for e in saved:
+        path = find(e["path"])
+        got = first(free.get((path, e["original"]))) if path else None
+        if got is None and path and e.get("nodes"):
+            man = (trees or {}).get(path)
+            words = {text_manifest.escape_cell(_text_of(man, n)) for n in e["nodes"]} - {""}
+            if len(words) == 1:
+                got = first(free.get((path, words.pop())))
+        nb = e.get("near")
+        if (got is None and path and isinstance(nb, list) and len(nb) == 2
+                and any(isinstance(w, str) for w in nb)):
+            cands = [r for r in between.get((path,) + tuple(nb)) or () if id(r) not in taken]
+            got = cands[0] if len(cands) == 1 else None
+        if got is not None:
+            taken.add(id(got))
+            pairs.append((got, e["new"]))
+        else:
+            missing.append(e)
+    return pairs, missing
+
+
+def _text_of(man, node):
+    o = ((man or {}).get("objects") or {}).get(str(node))
+    return (o.get("text") or "") if isinstance(o, dict) and o.get("kind") == "Text" else ""
+
+
+def import_text(assets_dir, rows, pairs):
+    """Put *pairs* (:func:`match_text`) into this project's manifest *rows* and write it."""
+    from ...core import text_manifest
+    for r, new in pairs:
+        r["replacement"] = "" if new == r["original"] else new
+    if pairs:
+        text_manifest.save(assets_dir, rows)

@@ -1940,22 +1940,34 @@ class TreeEditMixin:
         self._flush_images()
         stem = re.sub(r'[\\/:*?"<>|·]+', "_", stem).strip() or "scenes"
         path = self.window.ask_save(
-            "scene_edits_file", "Save %s with pictures and color profiles" % (
+            "scene_edits_file", "Save %s with pictures, text and color profiles" % (
                 "this scene" if which == "this" else "every scene"),
             initialfile=stem + " with pictures.zip", filetypes=[("PAD scene edits", "*.zip")],
             defaultextension=".zip")
         if not path:
             return None
         try:
-            n, pics = scene_share.export_all(self.assets_dir, path, cards, trees)
+            n, pics, texts = scene_share.export_all(self.assets_dir, path, cards, trees)
         except (scene_edit.SceneEditError, OSError) as e:
             compat.messagebox.showerror("Save scenes", str(e))
             return None
-        self._set_caption("Saved the edits of %d scene%s and %d replaced picture%s, with their "
-                          "color profiles, to %s" % (n, "" if n == 1 else "s", pics,
-                                                     "" if pics == 1 else "s",
-                                                     os.path.basename(path)))
+        self._set_caption("Saved the edits of %d scene%s, %d replaced picture%s with their "
+                          "color profiles and %d text edit%s to %s"
+                          % (n, "" if n == 1 else "s", pics, "" if pics == 1 else "s",
+                             texts, "" if texts == 1 else "s", os.path.basename(path)))
         return path
+
+    def _text_rows_here(self):
+        """``(Text tab, its rows)`` when the Text tab holds this project's rows, so a load goes
+        through it (its list, history and Scenes stay in step); else ``(None, the manifest's
+        rows)`` (PAD-387)."""
+        from ..core import text_manifest
+        from .tabs.text import _same_folder
+        svc = self.window.service("text")
+        rows = getattr(svc, "_text_rows", None)
+        if rows and _same_folder(getattr(svc, "_text_scan_dir", ""), self.assets_dir):
+            return svc, rows
+        return None, text_manifest.load(self.assets_dir)
 
     @rpc
     def edits_load(self, path=None):
@@ -1972,8 +1984,10 @@ class TreeEditMixin:
         if not path:
             return None
         from ..plugins.stern import scene_share
+        from . import text_rules as R
         images = self._flush_images()
         pics, gone, more = [], [], False
+        tfits, tmissing, tlong = [], [], 0
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -1984,7 +1998,14 @@ class TreeEditMixin:
             mine = scene_edit.load(self.assets_dir)
             over = [c for c in got if mine.get(c)]
             more = scene_share.has_extras(extras)
-            if not got and not more:
+            # PAD-387: the Text tab's edits it carries, on this card's lines, when they fit
+            text_tab, rows = (self._text_rows_here() if extras["text"] else (None, []))
+            tpairs, tmissing = (scene_share.match_text(extras["text"], rows, self._load_trees())
+                                if extras["text"] else ([], []))
+            tfits = [(r, new) for r, new in tpairs if R.row_len(r, new) <= R.row_budget(r)]
+            tlong = len(tpairs) - len(tfits)
+            tclash = [r for r, new in tfits if R.is_edited(r) and r["replacement"] != new]
+            if not got and not more and not tfits:
                 compat.messagebox.showinfo(
                     "Load scene edits", "None of the %d scene%s in %s %s on this card, so "
                     "nothing was loaded." % (len(scenes), "" if len(scenes) == 1 else "s",
@@ -2003,6 +2024,9 @@ class TreeEditMixin:
                 mine_words.append("%d picture%s you replaced" % (k, "" if k == 1 else "s"))
             if clash["overlay"]:
                 mine_words.append("your whole screen overlay")
+            if tclash:
+                mine_words.append("%d line%s of text you changed"
+                                  % (len(tclash), "" if len(tclash) == 1 else "s"))
             if mine_words:
                 what = (", ".join(mine_words[:-1]) + " and " + mine_words[-1]
                         if len(mine_words) > 1 else mine_words[0])
@@ -2020,6 +2044,13 @@ class TreeEditMixin:
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
                                                        renamed=renamed)
+            if tfits:
+                if text_tab is not None:
+                    text_tab._set_replacements(
+                        [(r, "" if new == r["original"] else new) for r, new in tfits])
+                else:
+                    scene_share.import_text(self.assets_dir, rows, tfits)
+                    self.text_edits_changed()
         except (scene_edit.SceneEditError, OSError) as e:
             compat.messagebox.showerror("Load scene edits", str(e))
             return None
@@ -2033,6 +2064,18 @@ class TreeEditMixin:
             words = words[:-1] + " and %d replaced picture%s with %s color profile%s." % (
                 len(pics), "" if len(pics) == 1 else "s",
                 "its" if len(pics) == 1 else "their", "" if len(pics) == 1 else "s")
+        if tfits:
+            words = words[:-1] + " and %d text edit%s." % (len(tfits),
+                                                           "" if len(tfits) == 1 else "s")
+        if tmissing:
+            words += (" %d text edit%s in the file %s for words not on this card and %s "
+                      "left out." % (len(tmissing), "" if len(tmissing) == 1 else "s",
+                                     "is" if len(tmissing) == 1 else "are",
+                                     "was" if len(tmissing) == 1 else "were"))
+        if tlong:
+            words += (" %d text edit%s %s too long for this card's line and %s left out."
+                      % (tlong, "" if tlong == 1 else "s", "is" if tlong == 1 else "are",
+                         "was" if tlong == 1 else "were"))
         if gone:
             words += (" %d picture%s in the file %s not in this project and %s left out."
                       % (len(gone), "" if len(gone) == 1 else "s",
@@ -2044,7 +2087,7 @@ class TreeEditMixin:
                          "is" if len(missing) == 1 else "are",
                          "was" if len(missing) == 1 else "were"))
         self._set_caption(words)
-        if missing or gone:
+        if missing or gone or tmissing or tlong:
             compat.messagebox.showinfo("Load scene edits", words)
         return sorted(got)
 

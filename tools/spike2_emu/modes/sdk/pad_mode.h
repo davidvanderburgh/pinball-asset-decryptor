@@ -461,7 +461,7 @@ int pm_ball_save(unsigned seconds);
  *     that process (a drain, a tilt), the magnet goes off the game's own way.
  * pm_magnet_grab: 1 = grabbing; 0 = refused (the reason is in mode.log). Godzilla only (the port's
  * `site coil_fire` and `value magnet_dev`); PM_CAN_COILS says whether this game has it. */
-#define PM_CAN_COILS        0x80000u  /* pm_magnet_grab / pm_magnet_release / pm_magnet_holding */
+#define PM_CAN_COILS        0x200000u /* pm_magnet_grab / pm_magnet_release / pm_magnet_holding */
 int pm_magnet_grab(unsigned ms);
 void pm_magnet_release(void);
 int pm_magnet_holding(void);
@@ -490,5 +490,24 @@ int pm_coil_known(const char *name);
 int pm_scoop_hold(unsigned ms);
 void pm_scoop_release(void);
 int pm_scoop_holding(void);
+
+/* ---- the shield platform (PAD-379) ---------------------------------------------------------------
+ * Godzilla Premium/LE carries its three shield targets on a platform a motor turns. AWAY: the spinner
+ * side faces the player and the shields cannot be reached from the flippers - the game's home, and
+ * where most of its battles play. TOWARD: the shield targets face the flippers (parts of the game's
+ * Mechagodzilla multiball). pm_shield asks the game's own motor to turn the platform: 1 = turning (it
+ * takes about a second to get there) or already there; 0 = refused (an operator switched the motor off
+ * in the adjustments) or not on this machine (a Pro: its shield targets are fixed and always face the
+ * player; or the port has no shield lines). pm_shield_position says where it
+ * is now: PM_SHIELD_AWAY or PM_SHIELD_TOWARD once it has stopped there, 0 while it turns (or before
+ * the game has found it), -1 when there is no platform. A mode that turns it toward the player turns
+ * it back AWAY when it ends - unless the game's own mode began, which then has the platform
+ * (intricate_kit.h: kit_shields_in / kit_shields_out). An operator who switched the motor off in the
+ * adjustments keeps it AWAY: pm_shield says 0 and the position stays AWAY. */
+#define PM_CAN_SHIELD       0x80000u  /* pm_shield / pm_shield_position */
+#define PM_SHIELD_AWAY      1
+#define PM_SHIELD_TOWARD    2
+int pm_shield(int where);
+int pm_shield_position(void);
 
 #endif

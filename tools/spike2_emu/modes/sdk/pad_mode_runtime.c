@@ -159,7 +159,7 @@ static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump
 #define PORT_CHUNK 4096
 #define N_SITES    256      /* PAD-363: a title's mode starts (Venom names 50) */
 #define N_DATA     224
-#define N_VALUES   128
+#define N_VALUES   192      /* PAD-381: Godzilla Premium/LE names 129 (held coils, scoop and PAD-379's shield) */
 #define N_SHOTS    64
 #define N_ROLES    32
 #define N_TEXTS    192      /* PAD-363: each mode a mode may hold off is named */
@@ -3807,6 +3807,70 @@ static void scoop_arm(void)
     say("scoop: a mode may hold a ball there, up to %u ms; the kick-out stays the game's", SCOOP_MAX_MS);
 }
 
+/* ---- the shield platform (PAD-379) --------------------------------------------------------------
+ * Godzilla Premium's ShieldMotor (the port's shield lines): one object, a SingleDirectionCoilMotor that
+ * runs its coil one way until the position switch it was sent to closes. shield_move(motor, position
+ * switch) is the motor's own go-to: 0 when the operator switched the motor off, 1 when it is there or a
+ * move process has started (the target at +shield_target_at, +shield_pos_at the switch on arrival, 0
+ * before the motor has found itself). The motor is asked only while the object carries the port's
+ * vtable word: a build whose object is elsewhere, or not built yet, is refused rather than called. */
+static unsigned shield_obj(void)
+{
+    unsigned obj = data("shield_motor");
+    if (!(can & PM_CAN_SHIELD) || !obj) return 0;
+    if (*(const unsigned *)(unsigned long)obj != (unsigned)pm_port_value("shield_motor_vptr", 0)) return 0;
+    return obj;
+}
+
+static unsigned shield_switch(int where)
+{
+    return (unsigned)pm_port_value(where == PM_SHIELD_TOWARD ? "shield_toward" : "shield_away", 0);
+}
+
+static unsigned shield_field(unsigned obj, const char *at, long fallback)
+{
+    return *(const unsigned short *)(unsigned long)(obj + (unsigned)pm_port_value(at, fallback));
+}
+
+int pm_shield(int where)
+{
+    unsigned obj = shield_obj(), sw, was, r;
+    if (!obj || (where != PM_SHIELD_AWAY && where != PM_SHIELD_TOWARD)) return 0;
+    sw = shield_switch(where);
+    was = shield_field(obj, "shield_pos_at", 44);
+    r = ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("shield_move"))(obj, sw) & 0xffu;
+    say("shield: %s (switch %u) from switch %u: %s", where == PM_SHIELD_TOWARD ? "TOWARD the player" : "AWAY", sw,
+        was, !r ? "the motor REFUSED (switched off in the adjustments?)" : was == sw ? "already there" : "turning");
+    return r ? 1 : 0;
+}
+
+int pm_shield_position(void)
+{
+    unsigned obj = shield_obj(), at, to;
+    if (!obj) return -1;
+    at = shield_field(obj, "shield_pos_at", 44);
+    to = shield_field(obj, "shield_target_at", 48);
+    if (to && at != to) return 0;                       /* on its way somewhere else (or its move failed) */
+    return at == shield_switch(PM_SHIELD_TOWARD) ? PM_SHIELD_TOWARD :
+           at == shield_switch(PM_SHIELD_AWAY) ? PM_SHIELD_AWAY : 0;
+}
+
+static void shield_arm(void)
+{
+    static const char *const s[] = { "shield_move", 0 };
+    static const char *const d[] = { "shield_motor", 0 };
+    static const char *const v[] = { "shield_motor_vptr", "shield_pos_at", "shield_target_at", "shield_away",
+                                     "shield_toward", 0 };
+    if (!site("shield_move")) return;                    /* a port without a platform (a Pro): silent */
+    if (!have_sites(s) || !have_data(d) || !have_values(v)) {
+        say("shield: off - the port's shield lines are incomplete or do not match this build");
+        return;
+    }
+    can |= PM_CAN_SHIELD;
+    say("shield: a mode may turn the shield platform (motor 0x%08x, move 0x%08x; away = switch %ld, toward = %ld)",
+        data("shield_motor"), fn("shield_move"), pm_port_value("shield_away", 0), pm_port_value("shield_toward", 0));
+}
+
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
  * A rule the game shipped with (a battle, a multiball) is a compiled object with a vtable, and
  * its SHOT HANDLER (one vtable slot) tests the RAW shot mask against fixed bits: Godzilla's
@@ -5883,6 +5947,7 @@ static void pad_mode_start(void)
     multiball_arm();                                /* item 167: a multiball of the mode's own */
     coils_arm();                                    /* PAD-381: a magnet grab of the mode's own */
     scoop_arm();                                    /* PAD-381: a ball held in the scoop */
+    shield_arm();                                   /* PAD-379: the Premium's shield platform */
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
@@ -5891,13 +5956,13 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
         can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
-        can & PM_CAN_SCOOP ? " scoop" : "");
+        can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

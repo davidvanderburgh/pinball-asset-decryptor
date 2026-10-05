@@ -592,6 +592,10 @@ __attribute__((weak, visibility("hidden"))) const char *kit_running;
 /* A pack mode that asked to start while another of ours ran (item 157): a mode that is only
  * showing its total (ANGUIRUS after the game's battle) gives way at once when it sees this. */
 __attribute__((weak, visibility("hidden"))) const char *kit_asked;
+/* PAD-379: pm_ms() when one of ours last ended (0 = never). A shot that ends a mode (BIOLLANTE's final blow at the
+ * Building) must not also START another one lit on the same shot (GODZILLA ANGRY's Building, emulator run fullA):
+ * a mode started by a shot asks kit_just_ended() first. Weak and shared, like the ledger. */
+__attribute__((weak, visibility("hidden"))) unsigned long kit_ended_ms;
 
 static KIT_UNUSED int kit_begin(const char *name)
 {
@@ -627,6 +631,13 @@ static KIT_UNUSED void kit_end(void)
     pm_display_priority(0);                /* given up before pm_end (MODE_SDK.md) */
     pm_end();
     kit_running = 0;
+    kit_ended_ms = pm_ms() ? pm_ms() : 1;
+}
+
+/* PAD-379: 1 = one of ours ended less than `ms` ago (the shot that ended it is not a start for the next) */
+static KIT_UNUSED int kit_just_ended(unsigned long ms)
+{
+    return kit_ended_ms && pm_ms() - kit_ended_ms < ms;
 }
 
 /* The mode is over but its ENDING is still to play: the full-screen clip, then the total (hud-layers,
@@ -643,6 +654,7 @@ static KIT_UNUSED void kit_end_after(unsigned long ms)
         return;
     }
     kit_running = 0;
+    kit_ended_ms = pm_ms() ? pm_ms() : 1;
     pm_log("the ending keeps the screen for %lu s", ms / 1000);
 }
 
@@ -702,6 +714,84 @@ static KIT_UNUSED int kit_wait_game(const char *who, const char *why, const char
         pm_log("not started (%s): %s is running - still ready, %s", why, what, then);
     said_at = pm_ms() ? pm_ms() : 1;
     return 1;
+}
+
+/* PAD-379: 1 = the mode ended by itself (won, lost on its clock, its multiball over, a stop) - its ending call
+ * plays; 0 = a drain, a tilt, the game moving on or one of the game's own modes beginning took it away, when the
+ * game's own sounds (the bonus, the tilt, that mode's start) have the speakers. */
+static KIT_UNUSED int kit_natural_end(const char *why)
+{
+    return !(kit_same(why, "ball ended") || kit_same(why, "tilted") || kit_same(why, "the game moved on") ||
+             kit_same(why, "the game's own mode began"));
+}
+
+/* ---- PAD-379: the shield platform ------------------------------------------------------------------------------
+ * Godzilla Premium/LE carries its shield targets on a platform a motor turns (pm_shield): AWAY, the game's home,
+ * where the spinner side faces the player and the shields cannot be hit; or TOWARD the flippers. A mode that plays
+ * the shield targets turns them in KIT_SHIELD_DELAY_MS after it starts (the ball that started it is clear of the
+ * platform first) and back AWAY when it ends - unless the game's own mode began, which has the platform now. A
+ * Pro's shield targets are fixed and face the player: nothing turns. kit_shields_reachable() says whether a shield
+ * can be hit now: a mode puts nothing it NEEDS on the shields while it says 0 (still turning, or an operator
+ * switched the motor off).
+ * The GAME turns the platform away by itself when a shield target is hit while it faces the player (its own
+ * Mechagodzilla shield reaction: emulator run shield2, 30 ms after each hit), and its ball search pulses it: the kit
+ * turns it back KIT_SHIELD_BACK_MS after it was left facing away, for as long as the mode runs. */
+#define KIT_SHIELD_DELAY_MS 1500
+#define KIT_SHIELD_BACK_MS  1500           /* knocked away under the mode: toward the player again after this */
+struct kit_shields { int asked; unsigned again; unsigned long due, away_since; };
+
+static KIT_UNUSED void kit_shields_in(struct kit_shields *s)
+{
+    s->asked = 0;
+    s->due = 0;
+    if (pm_shield_position() < 0) return;                  /* fixed shields (a Pro) */
+    s->due = pm_ms() + KIT_SHIELD_DELAY_MS;
+}
+
+static KIT_UNUSED void kit_shields_tick(struct kit_shields *s)
+{
+    if (s->asked) {
+        if (pm_shield_position() != PM_SHIELD_AWAY) s->away_since = 0;
+        else if (!s->away_since) s->away_since = pm_ms() ? pm_ms() : 1;
+        else if (pm_ms() - s->away_since >= KIT_SHIELD_BACK_MS) {
+            s->away_since = 0;
+            s->again++;
+            if (s->again <= 3 || s->again % 10 == 0)
+                pm_log("the shields were turned away under the mode (a shield hit, the ball search): toward the "
+                       "player again (%u)", s->again);
+            pm_shield(PM_SHIELD_TOWARD);
+        }
+    }
+    if (!s->due || pm_ms() < s->due) return;
+    s->due = 0;
+    if (pm_shield_position() == PM_SHIELD_TOWARD) {
+        pm_log("the shields already face the player");
+        return;
+    }
+    s->asked = pm_shield(PM_SHIELD_TOWARD);
+    s->again = 0;
+    s->away_since = 0;
+    pm_log(s->asked ? "the shields turn toward the player" : "the shields stay away: the motor refused (switched off?)");
+}
+
+static KIT_UNUSED void kit_shields_out(struct kit_shields *s, const char *why)
+{
+    int asked = s->asked;
+    s->asked = 0;
+    s->due = 0;
+    if (!asked) return;
+    if (kit_same(why, "the game's own mode began")) {
+        pm_log("the shields stay where they are: the game's own mode has the platform now");
+        return;
+    }
+    if (pm_shield(PM_SHIELD_AWAY)) pm_log("the shields turn away again (%s)", why);
+}
+
+/* 1 = a shield target can be hit now: fixed shields, or the platform stopped facing the player */
+static KIT_UNUSED int kit_shields_reachable(void)
+{
+    int at = pm_shield_position();
+    return at < 0 || at == PM_SHIELD_TOWARD;
 }
 
 /* 1 = one of the game's own modes is running now (asked by a mode of ours that is running) */
@@ -768,6 +858,7 @@ struct kit_hud {
     int pips;                              /* pips in use: 0 = all the build made (kit_hud_pips) */
     unsigned long award_until, hide_at;
     int noting;                            /* up only for a qualification note */
+    int metering;                          /* PAD-379: up only for a meter (kit_hud_meter) */
     int off;                               /* PAD-353: its words wait for a display of the game's */
 };
 
@@ -857,6 +948,7 @@ static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
         o->up = 0;
         o->hide_at = 0;
         o->noting = 0;
+        o->metering = 0;
         if (o->group) pm_show(o->group, 0);
     }
     if (on) kit_hud_up = h;
@@ -867,6 +959,7 @@ static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
         h->want_award[0] = h->want_awardsub[0] = 0;
         h->award_until = 0;
         h->noting = 0;
+        h->metering = 0;
         h->aside = 0;                      /* PAD-347: said again the next time it is up beside a game mode */
     }
     if (h->group) pm_show(h->group, on);
@@ -929,20 +1022,58 @@ static KIT_UNUSED void kit_hud_award(struct kit_hud *h, unsigned ms, const char 
 
 /* A QUALIFICATION note on a HUD the mode is not using ("POWERLINES 2 OF 3"): the award line alone for
  * `ms`, then hidden. Polite: while another of the pack's HUDs is up (a mode running, or the total of
- * one that just ended) nothing is shown. 1 = shown. */
+ * one that just ended) nothing is shown - a METER of another mode (kit_hud_meter) gives way to it. On a HUD
+ * showing its own meter the note goes in the award line and the meter stays. 1 = shown. */
 static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *big, const char *sub)
 {
     int k;
-    if (kit_hud_up && kit_hud_up != h) return 0;
+    if (kit_hud_up && kit_hud_up != h && !kit_hud_up->metering) return 0;
     if (h->up && !h->noting) return 0;
     h->want_title[0] = h->want_line[0] = 0;
     for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
-    h->want_timer = h->want_gauge = -1;
+    h->want_timer = -1;
+    if (!h->metering) h->want_gauge = -1;
     kit_hud_award(h, ms, big, sub);
     if (!h->up) kit_hud_show(h, 1);
     h->noting = 1;
-    h->hide_at = pm_ms() + ms;
+    h->hide_at = h->metering ? 0 : pm_ms() + ms;
     return 1;
+}
+
+/* PAD-379: a METER on a HUD the mode is not using - qualification progress that STAYS on the glass (David: "a
+ * switch hit counter on the UI and feedback that it's progressing towards the mode"): the gauge on the right
+ * edge, `level` pips lit, and its label, nothing in the middle. Call it every tick while it should show, and
+ * with level -1 to take it down. It is the politest thing on the glass: it waits while another pack HUD is up (a
+ * mode, a total, a note), a note or a mode of the pack takes its place at once, and it comes back by itself once
+ * they are gone. A note of its own (kit_hud_note) goes in the award line above it and the meter stays. */
+static KIT_UNUSED void kit_hud_meter(struct kit_hud *h, int level, const char *label)
+{
+    int k;
+    if (level < 0) {
+        if (!h->metering) return;
+        h->metering = 0;
+        if (h->up && h->noting) {
+            if (h->award_until) h->hide_at = h->award_until;     /* its own note finishes first */
+            else kit_hud_show(h, 0);
+        }
+        return;
+    }
+    if (h->up && !h->noting) return;                 /* the mode itself has its HUD */
+    if (kit_hud_up && kit_hud_up != h) return;       /* another pack HUD is up: wait for it */
+    h->want_gauge = level;
+    if (label) kit_copy(h->want_glabel, sizeof h->want_glabel, label);
+    if (h->up && h->metering) return;
+    h->want_title[0] = h->want_line[0] = 0;
+    for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
+    h->want_timer = -1;
+    if (!h->up) {
+        h->want_award[0] = h->want_awardsub[0] = 0;
+        h->award_until = 0;
+        kit_hud_show(h, 1);
+    }
+    h->noting = 1;
+    h->metering = 1;
+    h->hide_at = 0;
 }
 
 /* PAD-347: STACKING (pm_aside). While one of the game's own modes runs, its title, instruction line and
@@ -1050,6 +1181,7 @@ static KIT_UNUSED void kit_hud_begin(struct kit_hud *h, const char *title, const
 {
     int k;
     h->noting = 0;
+    h->metering = 0;
     h->hide_at = 0;
     h->want_award[0] = h->want_awardsub[0] = 0;
     h->award_until = 0;

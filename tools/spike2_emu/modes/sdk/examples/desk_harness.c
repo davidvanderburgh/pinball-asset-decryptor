@@ -26,6 +26,8 @@
  *   new_game            a new game: player 1, every score 0, pm_in_game() 1
  *   trigger <file>      /dump/<file> appears (a mode's test trigger), with optional text: trigger f=text
  *   covered <0|1>       a display of the game's that beats the held display priority has the screen
+ *   rescene             the game makes its HUD scene again (PAD-390): every node found so far is an old copy,
+ *                       renamed "STALE:<name>", and the next lookups find fresh ones
  *   lamps               print every insert held now: "HELD <name> <rrggbb> <pattern> <ms> <mode>"
  *
  * Every line a mode logs is printed as "<ms> [<mode>] <text>", every score as "SCORE +<n>",
@@ -656,6 +658,14 @@ int main(int argc, char **argv)
             snprintf(trigger_file, sizeof trigger_file, "%.*s", (int)n, argv[k]);
             snprintf(trigger_text, sizeof trigger_text, "%s", eq ? eq + 1 : "");
             ticks_for_ms(600);                 /* the modes look twice a second */
+        } else if (!strcmp(c, "rescene")) {
+            for (int i = 0; i < n_nodes; i++)
+                if (strncmp(nodes[i].name, "STALE:", 6)) {
+                    char was[160];
+                    snprintf(was, sizeof was, "%s", nodes[i].name);
+                    snprintf(nodes[i].name, sizeof nodes[i].name, "STALE:%.150s", was);
+                }
+            printf("%6lu >> rescene\n", now_ms);
         } else if (!strcmp(c, "covered")) {
             covered = atoi(argv[++k]);
             printf("%6lu >> covered %d\n", now_ms, covered);

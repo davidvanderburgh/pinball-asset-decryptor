@@ -1546,3 +1546,48 @@ def test_game_modes_give_way_in_its_assets_file_means_it_blocks_nothing(harness,
     assert _at(out, "[MASER BARRAGE] START") is not None
     assert "BLOCK 1 MASER BARRAGE" not in out
     assert has(out, "MASER BARRAGE", "isolated: gives way - one of the game's modes starting ends it")
+
+
+# ---- PAD-390: the game's HUD scene back in its authored state --------------------------------------------------
+# David's Premium, 2026-10-05, ball 2: every mode's HUD on the glass at once with the words the card build gave it
+# (CORE 20% TEMPERATURE, HURRY-UP 20,000,000, MULTIPLIER, both badge slots "00"), word on word. A HUD is authored
+# visible and was hidden once, when its mode found it. `rescene` is the game making the scene again: every node
+# found so far is an old copy (renamed STALE:) and a lookup finds a fresh, visible one.
+HUD_SLUGS = [s for s in MODES]
+
+
+def _stale_touched(out, after):
+    return [ln for ln in out.splitlines()
+            if re.match(r"^\s*(\d+) (SHOW|WORDS) STALE:", ln) and int(ln.split()[0]) > after]
+
+
+def test_a_hud_scene_made_again_is_hidden_again_while_no_mode_runs(harness):
+    out = play(harness, "secs", 3, "rescene", "secs", 3)
+    t = _at(out, ">> rescene")
+    for slug in HUD_SLUGS:
+        assert has(out, NAMES[slug], "hud %s: the game made its HUD scene again - found afresh" % slug), slug
+        assert any(t < h <= t + 2600 for h in _hid(out, slug)), slug       # the fresh copy hidden within 2.5 s
+    assert not _stale_touched(out, t)                                       # the old copy is never touched
+
+
+def test_a_running_modes_hud_is_found_afresh_and_written_whole(harness):
+    s = "maser_barrage"
+    out = play(harness, *MASER3, "secs", 2, "rescene", "secs", 3)
+    t = _at(out, ">> rescene")
+    assert _at(out, "[MASER BARRAGE] START") < t
+    shown = re.findall(r"^\s*(\d+) SHOW PadMode_%s_Hud 1$" % s, out, re.M)
+    assert any(t < int(ms) <= t + 2600 for ms in shown)                     # the fresh copy shown
+    assert any(t < ms <= t + 2600 and w == "MASER BARRAGE" for ms, w in hud(out, s, "Title"))  # its words again
+    for slug in HUD_SLUGS:                                                  # every other HUD hidden
+        if slug != s:
+            assert any(t < h <= t + 2600 for h in _hid(out, slug)), slug
+    assert not _stale_touched(out, t)
+
+
+def test_the_same_scene_shown_again_is_hidden_again_every_two_seconds(harness):
+    """the scene's own copy with its nodes shown again by the game: a HUD not in use is hidden again every 2 s"""
+    out = play(harness, "secs", 7)
+    for slug in HUD_SLUGS:
+        hid = _hid(out, slug)
+        assert len(hid) >= 3, slug
+        assert all(b - a <= 2100 for a, b in zip(hid, hid[1:])), (slug, hid)

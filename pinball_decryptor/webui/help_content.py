@@ -1908,399 +1908,299 @@ HELP_CONTENT = {
          "as a machine does."),
     ],
     "Emulate": [
-        ("What it does",
-         "Runs the real Stern Spike 2 game binary on this PC — in its own "
-         "window, at 60 fps on the graphics card, with sound and keyboard "
-         "input. Start it, and the game boots exactly as the machine does: "
-         "splash, then its own boot sequence, then attract mode or the "
-         "operator menu. On macOS the window is Screen Sharing — the picture "
-         "renders inside the container, and the app opens the viewer by "
-         "itself once the game is up (the VNC password is pinball). All of "
-         "the emulator's windows live inside that one Screen Sharing desktop: "
-         "click a window once to give it the keyboard, and drag windows by "
-         "their title bars to arrange them. Stop kills every part of it and "
-         "then verifies nothing survived — and if leftovers are stuck where "
-         "nothing inside WSL can clear them, Stop says so and offers the "
-         "WSL restart that does."),
-        ("Which card",
-         "The line under the card says how that card relates to the project. "
-         "Green means it is the card the project was extracted from, or a "
-         "card PAD built from it. Amber means it is a build of another "
-         "project or an unrelated card: the line names the project's own card. "
-         "Picking such a card with Browse unticks Apply, so it runs exactly "
-         "as it is; tick Apply again to put the project's edits on top of it. "
-         "Use the extracted card and Use the last "
-         "build switch the field to the project's own cards; the last build "
-         "is the newest card in the project's build folder that PAD built "
-         "from this project."),
-        ("Topper",
-         "Some machines have a second screen above the backbox — a "
-         "Mandalorian's hologram, a Venom's, a Stranger Things projector — and "
-         "the emulator opens a window for it, at the size that title's own "
-         "panel really is. Untick this to run the machine WITHOUT one, which "
-         "is a real configuration: the topper is an accessory on most of these "
-         "titles, and a cabinet that has not got it also loses the modes that "
-         "need it. The game is not lied to either way; unticked, the window "
-         "simply never opens."),
-        ("Country and Power",
-         "The row under the card is the cabinet that card is fitted to. "
-         "Country (DIP switches) is the country the machine is set to: the "
-         "CPU board's eight country DIP switches are set to match, and so is "
-         "the country stored in the machine, which is the one the boot screen "
-         "shows and the coin settings go with. A game whose country has just "
-         "changed opens its own Guided Setup so the operator can confirm it, "
-         "as a real machine does. As set in the game, the default, leaves "
-         "both alone — though a country picked earlier stays stored in the "
-         "machine. Power is the mains. 60 Hz is how the emulator has always "
-         "run. European machine is a 50 Hz board on 50 Hz mains, which runs "
-         "normally. US machine is a 60 Hz board on 50 Hz mains, which some "
-         "games refuse to run and some do not; with a card picked, the line "
-         "under Power says which this game does. A refusal is left up rather "
-         "than pressed past. Both are remembered for every project, not per "
-         "project, and take effect at the next Start."),
-        ("Reset windows",
-         "Puts the emulator's windows back where they started. The rig "
-         "remembers where you last dragged each one and restores it on the "
-         "next run with no check that the spot is still on screen — so a "
-         "window moved to a second monitor that is later unplugged comes back "
-         "somewhere you cannot reach it, and there is nothing to drag. This is "
-         "the way back. It works on every platform and whether or not a game "
-         "is running."),
-        ("The game window should come up in front",
-         "It comes out over this app by itself, along with the virtual "
-         "playfield window — you should not have to go looking for "
-         "it. It can take a few seconds after the window first appears, "
-         "because Windows will not let a program put a window in front of the "
-         "one you just clicked, and the rig has to keep asking until it is "
-         "allowed. If it ever stays behind, Reset windows above is the "
-         "shortcut back to it."),
-        ("It runs the card you pick here, not the Input box",
-         "This is the one tab that ignores the Input box: point it at a card "
-         "image of its own. That image is mounted READ ONLY and run in place — "
-         "nothing is extracted and nothing can write to it — so a stock card "
-         "and your own build both work. The path is remembered per project, so "
-         "it comes back on the next launch without another Browse. Replacing "
-         "an asset on the Replace tabs still does not change that card — but "
-         "you no longer have to build a new one to hear it, which is what the "
-         "tick box under the path is for."),
-        ("Apply my replaced assets on top, without rebuilding the card",
-         "Tick it and a run plays the card you picked PLUS the edits sitting "
-         "in your assets folder, with no card built and nothing written to the "
-         "card image. The app patches copies of just the card files those "
-         "edits live in — image.bin and its .sidx record, for a replaced "
-         "sound — and the emulator reads those over the same read-only "
-         "mount. Start prepares them before it launches, which takes as long "
-         "as your edits need to be re-encoded; a set that is already current "
-         "is reused where it stands, and one that has only partly changed is "
-         "patched where it changed, so a second run costs only what you have "
-         "edited since. A replacement you picked on a Replace tab counts as "
-         "an edit here even if you have never built a card with it: Start "
-         "applies it to your project folder first, exactly as a build applies "
-         "it, and then prepares the card files it lands in. The folder beside "
-         "the box is the Write tab's Assets "
-         "Folder, shown here read only — the project has one extract folder "
-         "and one place to set it. On a card with a boot menu the edits are "
-         "prepared from ONE image on it — the first game image on the card, "
-         "the one every extract and write on this card uses — and applied "
-         "over whichever image you pick at the menu; to edit another image, "
-         "build that image on "
-         "its own and rebuild the multi-boot card from it. Picked a card the "
-         "app built from this project? The edits are prepared from the card "
-         "the project was extracted from, when that card is still there and "
-         "holds the same game version, and run over the one you picked: a "
-         "built card has already moved things inside its scenes, so edits "
-         "prepared from it would miss. The log names the card they came "
-         "from. And if the edits "
-         "cannot be delivered (no "
-         "assets folder, no baseline to compare them against, or an edit that "
-         "cannot be traced back to a file on the card) the run says so and "
-         "does not start, rather than quietly playing the stock card."),
-        ("First boots copy the card — and Cache… shows where that space went",
-         "The first boot of a card copies it to a local cache so every "
-         "later boot starts in seconds instead of minutes. That copy is "
-         "narrated in the status line (\"Copying card: …\") and starts in "
-         "the background the moment you pick a card, so it is often already "
-         "done by the time you press Start. Cached copies add up — the "
-         "Cache… button beside Browse lists every cached card with its real "
-         "size on disk and when it last booted, and lets you delete any of "
-         "them. The same cards also appear in Manage disk space (⚙ settings "
-         "menu), beside the other things the app keeps on disk, if you are "
-         "hunting for space rather than managing this one card. Deleting is "
-         "always safe: the card just re-copies on its "
-         "next boot. When disk space runs low, the cache also cleans "
-         "itself, dropping the cards you have not booted for the longest."),
-        ("Tech Alerts handles itself",
-         "The game boots through its Tech Alerts screen — the machine's "
-         "operator readout — and the emulator steps past it automatically, "
-         "so a normal boot goes straight on to attract. While that is "
-         "happening the status line says \"Passing Tech Alerts…\". "
-         "\"Stuck at Tech Alerts\" is the one that needs you: the helper "
-         "pressed several times and the screen never changed, and its hint "
-         "says what to try. Once up, the status reads \"Game running\" — "
-         "the rig deliberately does not guess between the attract loop, the "
-         "operator menu, and a game you are playing."),
-        ("Volume and Mute",
-         "The game's audio always plays out to your PC speakers — through WSL "
-         "on Windows, and on macOS over a local stream played by ffplay — and "
-         "this slider is the one control over it. It sets the level of the "
-         "emulator's OWN sound, not the in-game volume the coin door's -/+ "
-         "buttons adjust, which is a per-title setting on the machine itself "
-         "and is left alone. Both work live on a run that is already going, "
-         "with no restart needed, and the level you leave them at is "
-         "remembered for next time. Silence after the boot chime usually "
-         "means the game is still waiting at Tech Alerts — it only makes "
-         "sound while it is actually running."),
-        ("Video",
-         "Clips play. The game's own decoder is an i.MX6 hardware block this "
-         "PC does not have and the card carries no software fallback, so the "
-         "host decodes each clip with ffmpeg and publishes the frames into a "
-         "shared ring the game draws from. Scenes, text, lamps, switches and "
-         "sound all work too. That ffmpeg lives on the Linux side, and is a "
-         "different copy from the one this app puts on your PATH — if it is "
-         "missing there, everything else still works and the picture and the "
-         "sound are simply not there. The run checks before it starts and "
-         "names the package rather than letting a black window explain "
-         "itself."),
-        ("What it costs",
-         "About 15% of one CPU core while waiting and roughly a third of a "
-         "core once it is running, plus 1–2 GB of memory. The status line "
-         "shows both live. There is a two-hour cap: it stops by itself so a "
-         "forgotten window cannot run all night."),
-        ("The first run on a machine takes a few minutes",
-         "Nothing is set up in advance. The first time you press Start on a "
-         "machine, the emulator builds the guest filesystem the game runs "
-         "inside out of the card image you picked, and compiles the two "
-         "pieces that talk to the hardware and the screen. That is several "
-         "minutes with no game window, and the log says what it is doing "
-         "throughout. It happens once: later runs start in seconds, and only "
-         "rebuild a piece when an app update has changed it."),
-        ("The virtual playfield",
-         "A second window opens beside the game showing the machine's own "
-         "playfield drawing, with every insert lit live from the wire and "
-         "every switch clickable — click one and the game reacts as if the "
-         "ball had rolled over it. Down its right side is the control "
-         "panel: the full keyboard reference (a row lights the moment the "
-         "game sees that switch close), the coin-door service buttons drawn "
-         "as on the real door — click and hold BACK, -, + or SELECT to work "
-         "the operator menu — an open/close coin door button (open cuts 48V "
-         "exactly like the real interlock), and the ball trough with each "
-         "position clickable. The keyboard works with this window focused "
-         "too, not just the game window. It builds itself from the title "
-         "you are running, so any Spike 2 game gets one. The switches are "
-         "the one part that needs the game to be up: it publishes its "
-         "switch list a minute or so into a run, and they appear on the "
-         "playfield as soon as it does, without restarting anything."),
-        ("Pause",
-         "Press Pause (or F9) in the game window or the playfield window, "
-         "or click Pause on the playfield's bottom bar, and the whole game "
-         "freezes on the current frame, video and sound included, for as "
-         "long as you like. Press it again (the button reads Resume) and "
-         "it carries on from exactly that frame. The same bar has a volume "
-         "slider and Mute, the same ones as on this tab."),
-        ("Save states",
-         "The playfield window carries a slot picker with Save state and "
-         "Load state buttons (Windows); the ⓘ beside the section title on "
-         "this tab spells out what a save costs. A save checkpoints the "
-         "ENTIRE running game into the "
-         "slot you picked — you can name it — and a load brings that exact "
-         "moment straight back, mid-game included, even in a later session "
-         "or after you have replaced assets on the card (streamed video and "
-         "audio play the new versions; artwork already on screen at the "
-         "save keeps its saved look until the game redraws that scene). "
-         "It is not free: each slot holds roughly 50–150 MB on the WSL "
-         "disk (snapshots compress about twentyfold; a save briefly needs "
-         "~1.5 GB free while it packs), and each save freezes the game and "
-         "its sound for a few seconds while the snapshot is written. "
-         "A slot can only be loaded on the build it was saved on — the "
-         "emulator's own libraries are part of the snapshot, so a slot "
-         "from before an update is refused with a note rather than a "
-         "failure. "
-         "Every game has its own ten slots — a save from one game can "
-         "never load into, overwrite or even appear among another's. The "
-         "list on the tab shows the slots for the card you have picked; "
-         "other games' slots are counted under the list rather than shown "
-         "(pick that game's card and they appear; no card picked shows "
-         "everything). Each slot carries its name, game, size and date, and "
-         "the list keeps itself current as saves happen; Rename and Delete "
-         "manage them, and the line under the list totals what every slot "
-         "on the disk holds against its free space. Launch starts the "
-         "emulator and drops straight into the selected slot — or, with a "
-         "run already up, loads it into that run. Slots only ever load "
-         "into the same game and firmware version they were saved from. "
-         "They also need two things inside WSL that nothing else here "
-         "does. busybox-static: the only boot shape that can be frozen has "
-         "to let go of your own filesystem once it has swapped in the "
-         "game's, and that takes a native static program. And criu, which "
-         "is the program that does the freezing and thawing — no Ubuntu "
-         "publishes it at all, so PAD builds it from source, once, which "
-         "takes a few minutes. Without either one every "
-         "title still starts and runs exactly as before — only the slots do "
-         "nothing — so the tab says that in its own line before you press "
-         "Start, and “Set up emulator…” gets both."),
-        ("Start Docker / Get Docker… (macOS only)",
-         "The emulator is a Linux program, and a container is how a Mac runs "
-         "one — so Docker is to macOS what WSL is to Windows here. This "
-         "button appears only when Docker is not ready and there is nothing "
-         "to install: it starts the engine you already have (Docker Desktop, "
-         "OrbStack, Rancher Desktop or Colima), or, on a Mac with no package "
-         "manager for “Set up emulator…” to use, opens the Docker Desktop "
-         "download page. Installing is the other button's job. The app looks "
-         "for docker in Homebrew's, MacPorts' and Docker Desktop's own "
-         "locations as well as on PATH, because a Mac app launched from "
-         "Finder inherits almost no PATH at all; PAD_DOCKER overrides if "
-         "yours lives somewhere else. It disappears once Docker is ready. "
-         "Windows and Linux never see it and never need Docker to emulate."),
+        ("What it does", [
+            "Runs the real Stern Spike 2 game on this PC, in its own window, at 60 fps "
+            "on the graphics card, with sound and keyboard.",
+            {"flow": [
+                {"icon": "sd", "title": "Pick a card",
+                 "text": "**Browse…** to a card image"},
+                {"icon": "play", "title": "Start",
+                 "text": "**Start emulator**"},
+                {"icon": "emulate", "title": "It boots",
+                 "text": "splash, boot, then attract or the operator menu, as a machine does"},
+                {"icon": "stop", "title": "Stop",
+                 "text": "kills every part of it, then checks nothing survived"}]},
+            "- If leftovers are stuck where nothing inside WSL can clear them, Stop says "
+            "so and offers a WSL restart.\n"
+            "- **On a Mac** the window is Screen Sharing: the picture renders inside the "
+            "container and the app opens the viewer once the game is up (the VNC "
+            "password is `pinball`). All the emulator's windows live in that one "
+            "desktop: click a window once to give it the keyboard, drag title bars to "
+            "arrange them.",
+        ]),
+        ("Getting set up", [
+            "The tab checks this PC before you press anything. A ready PC shows "
+            "nothing; one that is not gets an amber notice naming each missing piece "
+            "and what it is for.",
+            {"flow": [
+                {"icon": "search", "title": "Check setup…",
+                 "text": "looks only, writes the full answer to the log"},
+                {"icon": "download", "title": "Set up emulator…",
+                 "text": "lists every change first, then installs"},
+                {"icon": "play", "title": "First Start",
+                 "text": "a few minutes, once"},
+                {"icon": "check", "title": "Later runs",
+                 "text": "start in seconds"}]},
+            {"cards": [
+                {"icon": "gear", "tone": "info", "title": "Windows",
+                 "text": "Runs in WSL. **Set up emulator…** installs what is missing. "
+                         "No password, nothing on the Windows side changes."},
+                {"icon": "gear", "tone": "info", "title": "macOS",
+                 "text": "Runs in a Docker container that already carries every package. "
+                         "The button gets Docker (Colima) if it is missing."},
+                {"icon": "gear", "tone": "info", "title": "Linux",
+                 "text": "A notice but **no button**: the work needs sudo, so it prints "
+                         "the command to run."}]},
+            "The first Start builds the game's Linux from your card and compiles two "
+            "small programs: several minutes with no game window, the log saying what "
+            "it does. Later runs only rebuild what an app update changed.",
+        ]),
+        ("Set up emulator…",
+         "Installs what the amber notice names. It lists every package and file it "
+         "will change first, and **No** leaves the machine exactly as it was.\n\n"
+         "### On Windows\n"
+         "- Installs the packages inside WSL, registers the kernel's handler for "
+         "32-bit ARM programs (which is what the game is), and turns on systemd in "
+         "`/etc/wsl.conf` so that handler survives a WSL restart.\n"
+         "- Two compilers, not interchangeable: the ARM one builds the hardware shim; "
+         "plain gcc (with libc6-dev, which gcc does not always bring) builds the "
+         "renderer that draws the picture.\n"
+         "- If Ubuntu's \"universe\" component is off (apt says \"has no installation "
+         "candidate\"), turning it on is the first step. Packages go on one at a time, "
+         "so one apt cannot get never blocks the rest.\n"
+         "- On Ubuntu 25.10 and 26.04, qemu-user-static is just another name for "
+         "qemu-user-binfmt, so that is the one installed. If your Ubuntu does not "
+         "publish qemu-user-static at all, the button fetches Ubuntu 24.04's copy, "
+         "checks it, and installs the file without changing your package sources.\n"
+         "- Anything no fetch can supply: the button goes away, and the notice names "
+         "your release and gives the two wsl commands to switch to one that has it.\n\n"
+         "### Feature-only pieces\n"
+         "Some missing pieces cost a feature, not the emulator, and are listed under "
+         "the feature's name:\n\n"
+         "- **Save states need:** busybox-static and criu. Without them every title "
+         "still runs; only save slots do nothing (\"The emulator runs on this PC. "
+         "Save states do not yet.\"). No Ubuntu publishes criu, so the button builds "
+         "it from source and says how long first. If only these cannot be had, your "
+         "Linux is left alone and save states stay off. Linux desktops are never "
+         "asked for them.\n"
+         "- **Multi-boot cards need:** make, which builds a multi-boot card's boot "
+         "menu. Every desktop is asked for it.\n\n"
+         "### On Linux and macOS\n"
+         "- **Linux:** the notice prints the command, for apt or (on Arch and its "
+         "spins) pacman, with the AUR-only ARM cross compiler on its own line.\n"
+         "- **macOS:** `docker` is only a client, so a Homebrew or MacPorts docker has "
+         "nothing to run a container with. The button installs Colima (and the docker "
+         "client if missing) with whichever of Homebrew or MacPorts you have, then "
+         "starts it, every line in the log. You never type a command; macOS asks for "
+         "a password in its own dialog when one is needed."),
+        ("Check setup…", [
+            "Always there, on every platform. It **changes nothing**, so it is safe to "
+            "press any time, even while a game runs.",
+            "- The log gets the whole answer, even when nothing is wrong: which "
+            "packages are there, whether the 32-bit ARM handler is registered and "
+            "survives a WSL restart, who the distro logs in as, whether it can start "
+            "Windows programs, the sound path and the Windows Python it found, the "
+            "display, and a last line saying whether this PC can run the emulator.\n"
+            "- On a Mac it reports Docker instead (the container carries the packages).\n"
+            "- The amber notice only speaks when something is broken; this button tells "
+            "\"all fine\" apart from \"never asked\".",
+            {"note": "When a run goes wrong, this log is the thing to send.",
+             "kind": "tip"},
+        ]),
         ("Update emulator Linux… (Windows)",
-         "This appears only when the Linux this app installs is from an older "
-         "version of it. The app will not run in a runtime it does not "
-         "recognise, so until you press this the emulator runs in whatever "
-         "distro your PC calls default — which does not carry the emulator's "
-         "toolchain, so things here may not work. Nothing has been lost when "
-         "that happens: your cards, extractions and save states are still in "
-         "the old one, and the button moves you to the current runtime. "
-         "It asks first if there is one to replace, and says what is inside "
-         "it before it does, because replacing means removing the old one. "
-         "A machine that has never had the runtime is not asked at all and "
-         "keeps using its own distro, exactly as before."),
-        ("Set up emulator… (Windows and macOS)",
-         "The tab asks this PC what the emulator still needs before you press "
-         "anything, so a run does not stop on a missing tool a minute after "
-         "Start. A machine that is ready shows nothing at all. One that is not "
-         "gets an amber notice naming the fault and each missing package with "
-         "what it is for. Two of those are compilers and they are not "
-         "interchangeable: the ARM one builds the hardware shim, and plain "
-         "gcc (with libc6-dev, which gcc does not always bring along) builds "
-         "the renderer that draws the picture on this PC. "
-         "Anything whose absence costs a FEATURE rather than the emulator is "
-         "listed apart from those, under a heading naming the feature. "
-         "Two of them are “Save states need:”: "
-         "without busybox-static and criu every title still starts and runs "
-         "and only the save "
-         "slots do nothing, so that machine is told “The emulator runs on "
-         "this PC. Save states do not yet.” instead of being accused of not "
-         "running an emulator it runs perfectly well. The button gets both, "
-         "and a Linux desktop is never asked for them at "
-         "all, since the freezable boot shape is a Windows one. The third is "
-         "“Multi-boot cards need: make” — the boot menu a card with several "
-         "games starts up into is a program, and that is what builds it. "
-         "Every desktop is asked for that one, because a card is built the "
-         "same way on all of them. criu is the "
-         "one thing here that is not an install: no Ubuntu publishes it, so "
-         "the button builds it from source — it says so, and how long it "
-         "takes, before it starts. "
-         "The button fixes it: it installs those "
-         "packages inside WSL, registers the kernel's handler for 32-bit ARM "
-         "programs — which is what the game is — and turns on systemd in "
-         "/etc/wsl.conf so that registration is still there after WSL "
-         "restarts. It lists every package and file it will change before it "
-         "touches one, and a No leaves the machine exactly as it was. No "
-         "password is needed and nothing on the Windows side is altered. "
-         "A package being missing is not the same as apt being able to get "
-         "it, and the notice tells you which: Ubuntu keeps qemu-user-static "
-         "in its “universe” component, and a WSL distro with universe "
-         "switched off answers “has no installation candidate”. Turning it "
-         "back on is then the first line of the confirmation dialog and the "
-         "first thing the button does, and the packages go on one at a time "
-         "so one apt cannot get never blocks the rest. Both of those readings "
-         "come from apt's downloaded package lists, so neither is claimed "
-         "until there is an index to read — a distro that has never run "
-         "apt-get update is not one whose sources are missing anything. "
-         "On Ubuntu 25.10 and 26.04 qemu-user-static is only another name "
-         "for qemu-user-binfmt, which carries the same interpreter, so the "
-         "notice, the dialog and the printed command all name that package "
-         "and apt installs it directly. If "
-         "your Ubuntu really does not publish qemu-user-static, the button "
-         "fetches that one from Ubuntu 24.04's archive instead and installs "
-         "the file: it depends on nothing, the download is checked for that "
-         "before it goes on, and your package sources are not changed. The "
-         "dialog lists it as its own step, since it is not an apt install. "
-         "For anything left that no fetch can supply the button disappears "
-         "rather than inviting another press, and the notice names the "
-         "release you are on and gives you the two wsl commands to switch to "
-         "one that carries the package — unless the only package it cannot "
-         "get is the save-state one, where swapping your Linux out is a "
-         "wildly out-of-proportion answer to a feature being off: there the "
-         "notice says save states stay off, that titles start and run exactly "
-         "as they do now, and leaves the working machine alone. "
-         "Linux sees the notice but no button, because there the same work "
-         "needs a sudo password this app has nowhere to ask for — the notice "
-         "prints the command for that machine instead, spelled for apt or, "
-         "on Arch and its spins, for pacman, with the one package only the "
-         "AUR has (the ARM cross compiler) on a line of its own. "
-         "macOS is asked a different question by the same button. Its "
-         "container already carries all six packages, so what a Mac can be "
-         "missing is Docker itself — and, more often, the Linux machine "
-         "behind it: on macOS `docker` is only a client, so a docker "
-         "installed from Homebrew or MacPorts has nothing to run a container "
-         "with. Press the button there and this app installs Colima (and the "
-         "docker client, if that is missing too) with whichever of Homebrew "
-         "or MacPorts you already have, then starts it — in this window, "
-         "with every line in the log pane. You never type a command: the "
-         "password, where one is needed, is asked for by macOS in its own "
-         "dialog, exactly as an installer would. As on Windows it lists what "
-         "it will do first, a No changes nothing, and the button disappears "
-         "when there is nothing left to install."),
-        ("Check setup…",
-         "Always here, on every platform, and it changes nothing — the probe "
-         "only looks, so there is no confirmation to give and no password to "
-         "type. Press it and the log pane gets the whole answer, including "
-         "when the answer is that nothing is wrong: which packages are "
-         "present, whether the 32-bit ARM handler is registered and whether "
-         "it survives a WSL restart, who this distro logs in as, whether it "
-         "can start Windows programs, whether the good sound path is "
-         "available and which Windows Python it found for it, which "
-         "display it has, and a last line saying whether "
-         "this PC can run the emulator. That is the paste to send when a run "
-         "goes wrong. On a Mac it answers the question a Mac has instead — "
-         "there are no packages to install there and the container carries "
-         "them all, so what it reports is Docker. The amber notice above "
-         "only speaks when something is "
-         "broken, so its silence used to mean both \"asked, all fine\" and "
-         "\"nobody ever asked\" — this button is the difference. It is "
-         "deliberately not the same button as \"Set up emulator…\": that one "
-         "installs packages and edits /etc/wsl.conf, and this one is safe to "
-         "press at any time, including while a game is running."),
-        ("The game window opens and stays black",
-         "The commonest cause on Windows is a WSL that logs in as root: the "
-         "renderer then cannot attach to the WSLg X server's shared memory "
-         "and draws into nothing, while the sound, the switches and the "
-         "virtual playfield all work perfectly — which is why it looks like "
-         "the app is fine and the picture is missing. Check setup… names it, "
-         "and the cure is on the WSL side: give the distro an ordinary user "
-         "account, make it the default, and restart WSL. The rig will not do "
-         "that for you, because guessing a user is easy to get wrong in a way "
-         "that trades a black window for a renderer that cannot start. "
-         "Whatever the cause, the renderer now says whether there is a "
-         "picture at all — a few \"picture:\" lines in the log, only when the "
-         "answer changes. \"STILL BLACK\" while video frames are going in "
-         "means the black is being drawn and the window is innocent, so "
-         "Restart WSL… is not the cure; a picture that appears and then goes "
-         "is the opposite case. Set PAD_GL_PICCHECK to change the seconds "
-         "between readings, or to 0 to switch it off."),
-        ("Restart WSL…",
-         "For the two faults that are not the emulator's to fix: a game "
-         "window left on screen that will not close (its X does nothing "
-         "because nothing is behind it any more), and crackly or stuttery "
-         "sound after a long session. Both live in WSL rather than in the "
-         "game, and restarting WSL is the cure for each. It closes "
-         "everything running in WSL, not just the emulator, so it asks "
-         "first and stays greyed out while a run is up — stop the game, "
-         "then use it. Nothing on disk is lost. (A stop that cannot finish "
-         "cleanly offers this same restart by itself, so you rarely need "
-         "to come here for that.) When the restart is done the tab checks "
-         "this PC again, because the kernel's 32-bit ARM registration only "
-         "survives a restart on a distro that boots systemd — so a machine "
-         "that came back unable to run the emulator says so here, with "
-         "“Set up emulator…” beside it, instead of leaving it to the next "
-         "Start to fail. The log says it is checking before it checks, "
-         "since that check is what boots WSL back up. A machine that came "
-         "back intact is told nothing. There is a third fault it cures: "
-         "WSL takes its graphics libraries from the Windows side, and a "
-         "session left running across a driver or WSL update can end up "
-         "with a stale set that Linux refuses to load. The run no longer "
-         "stops for that — it carries on with software rendering, which "
-         "costs a few percent here — but it says so in the log, and this "
-         "is the button that puts the graphics card back."),
+         "Shows only when the Linux this app installed is from an older version of it.\n\n"
+         "- Until you press it, the emulator runs in your PC's default distro, which "
+         "lacks the emulator's tools, so things may not work.\n"
+         "- Nothing is lost: your cards, extractions and save states are still in the "
+         "old one. The button moves you to the current runtime.\n"
+         "- Replacing removes the old one, so it asks first and says what is inside.\n"
+         "- A PC that never had the runtime is not asked and keeps its own distro."),
+        ("Start Docker / Get Docker… (macOS)",
+         "A Mac runs the emulator (a Linux program) in a container, so Docker is to "
+         "macOS what WSL is to Windows.\n\n"
+         "- **Start Docker** starts the engine you have: Docker Desktop, OrbStack, "
+         "Rancher Desktop or Colima.\n"
+         "- **Get Docker…** opens the Docker Desktop download page, on a Mac with no "
+         "package manager for Set up emulator… to use.\n"
+         "- It shows only when Docker is not ready and there is nothing to install, "
+         "and goes away once Docker is ready.\n"
+         "- The app looks for docker in Homebrew's, MacPorts' and Docker Desktop's "
+         "places as well as PATH; `PAD_DOCKER` points it elsewhere.\n"
+         "- Windows and Linux never need Docker to emulate."),
+        ("The card it runs", [
+            "This tab ignores the Input box: it runs the card image you pick here.",
+            "- The card is mounted **read only** and run in place: nothing is extracted, "
+            "nothing writes to it. A stock card and your own build both work.\n"
+            "- The path is remembered per project.\n"
+            "- **Boot selector** ticks itself when the card carries a boot menu (a "
+            "multi-image card); pick the build with the flipper buttons, as on the machine.",
+            {"cards": [
+                {"icon": "check", "tone": "ok", "title": "Green line",
+                 "text": "The card the project was extracted from, or one PAD built from it."},
+                {"icon": "warn", "tone": "warn", "title": "Amber line",
+                 "text": "Another project's build or an unrelated card. **Browse…** to one "
+                         "unticks Apply, so it runs as it is."}]},
+            "**Use the extracted card** and **Use the last build** switch back to the "
+            "project's own cards. The last build is the newest card in the project's "
+            "build folder that PAD built from this project.",
+        ]),
+        ("Run my edits without a build", [
+            "Tick **Apply my replaced assets on top, without rebuilding the card** and a "
+            "run plays the card you picked plus your edits. No card is built and "
+            "nothing is written to the card image.",
+            {"flow": [
+                {"icon": "edit", "title": "Pick",
+                 "text": "replacements on the Replace tabs"},
+                {"icon": "save", "title": "Apply",
+                 "text": "Start puts them in the project folder, as a build would"},
+                {"icon": "copy", "title": "Patch",
+                 "text": "copies of just the card files they land in (e.g. image.bin + .sidx)"},
+                {"icon": "play", "title": "Run",
+                 "text": "the game reads those over the read-only card"}]},
+            "- Start takes as long as your edits need to re-encode; after that only "
+            "what changed since is redone.\n"
+            "- **Assets folder** beside it is the Write tab's, shown read only.\n"
+            "- **Include my Scenes tab edits** and **Stock colors: leave out my color "
+            "profile** appear under it when they apply; hover them for what they do.\n"
+            "- **Boot-menu card:** edits are prepared from the first game image on it "
+            "and applied over whichever image you pick at the menu. To edit another "
+            "image, build it on its own and rebuild the multi-boot card.\n"
+            "- **A card PAD built:** edits are prepared from the card the project was "
+            "extracted from (if it is still there, same game version) and run over the "
+            "built one. The log names that card.",
+            {"note": "If the edits cannot be delivered (no assets folder, nothing to "
+                     "compare them with, or an edit that traces back to no file on the "
+                     "card), the run says so and does not start, rather than quietly "
+                     "playing the stock card.", "kind": "warn"},
+        ]),
+        ("Card cache",
+         "The first boot of a card copies it to a local cache, so later boots start in "
+         "seconds instead of minutes.\n\n"
+         "- The copy starts the moment you pick a card (\"Copying card: …\" in the "
+         "status line), so it is often done before you press Start.\n"
+         "- **Cache…** beside Browse lists every cached card with its size and last "
+         "boot, and deletes any of them. The same cards are in **Manage disk space** "
+         "(⚙ settings menu).\n"
+         "- Deleting is always safe: the card re-copies on its next boot. When disk "
+         "space runs low the cache drops the longest-unbooted cards by itself."),
+        ("Country, Power and Topper", [
+            "The row under the card is the cabinet it is fitted to. Both choices are "
+            "remembered for every project and take effect at the next Start.",
+            "- **Country (DIP switches):** sets the CPU board's eight country DIP "
+            "switches and the country stored in the machine (the one the boot screen "
+            "shows, with its coin settings). A changed country opens the game's Guided "
+            "Setup to confirm it, as a real machine does. **As set in the game** leaves "
+            "both alone, but a country picked earlier stays stored.",
+            {"cards": [
+                {"icon": "check", "tone": "ok", "title": "60 Hz mains",
+                 "text": "How the emulator has always run."},
+                {"icon": "check", "tone": "ok", "title": "European machine",
+                 "text": "A 50 Hz board on 50 Hz mains. Runs normally."},
+                {"icon": "warn", "tone": "warn", "title": "US machine",
+                 "text": "A 60 Hz board on 50 Hz mains. Some games refuse; the line under "
+                         "Power says which. A refusal stays on screen."}]},
+            "- **Topper:** some machines have a second screen above the backbox "
+            "(Mandalorian's hologram, Venom's, Stranger Things' projector); the emulator "
+            "opens a window for it at that panel's real size. Untick to run without "
+            "one, as a cabinet without the accessory does (losing what needs it).",
+        ]),
+        ("Starting up",
+         "The game window and the virtual playfield come out over this app by "
+         "themselves. It can take a few seconds: Windows will not put a window in "
+         "front of the one you just clicked, so the rig keeps asking.\n\n"
+         "| Status line | Means |\n"
+         "|---|---|\n"
+         "| Passing Tech Alerts… | The boot's operator readout; the emulator steps past it |\n"
+         "| Stuck at Tech Alerts | It pressed several times and nothing changed: read its hint |\n"
+         "| Game running | Up. It does not guess between attract, the menu and a game |\n\n"
+         "- **What it costs:** about 15% of one CPU core waiting, about a third of a "
+         "core running, plus 1–2 GB of memory, shown live in the status line.\n"
+         "- **Two-hour cap:** it stops by itself, so a forgotten window cannot run all "
+         "night."),
+        ("Sound and video",
+         "- **Volume** and **Mute** set the emulator's own sound, live, and are "
+         "remembered. They are not the game's volume (the coin door's -/+), which "
+         "stays as the machine has it.\n"
+         "- The sound plays on your PC speakers: through WSL on Windows, through "
+         "ffplay on a Mac.\n"
+         "- Silence after the boot chime usually means it is still at Tech Alerts.\n"
+         "- **Clips play:** the machine's video decoder is a chip this PC lacks, so "
+         "ffmpeg on the Linux side decodes each clip for the game. Scenes, text, "
+         "lamps, switches and sound all work.\n"
+         "- That Linux ffmpeg is not the one this app puts on your PATH. Missing, "
+         "everything else works but clips do not; the run checks first and names "
+         "the package."),
+        ("The virtual playfield", [
+            "A second window beside the game draws the machine's playfield, every "
+            "insert lit live and every switch clickable: click one and the game reacts "
+            "as if the ball rolled over it.",
+            "- **Down the right:** the keyboard reference (a row lights when the game "
+            "sees that switch), the coin-door buttons (click and hold **BACK**, **-**, "
+            "**+**, **SELECT** for the operator menu), a coin door open/close button "
+            "(open cuts 48V, like the real interlock) and the ball trough, each "
+            "position clickable.\n"
+            "- The keyboard works with this window focused too.\n"
+            "- It builds itself from the title, so every Spike 2 game gets one. The "
+            "switches appear a minute or so into a run, once the game lists them.\n"
+            "- **Pause** (or F9), in either window or on the bottom bar, freezes the "
+            "whole game, video and sound too. **Resume** carries on from that frame. "
+            "The bar also has Volume and Mute.",
+        ]),
+        ("Save states", [
+            "**Save state** on the playfield window (Windows) checkpoints the whole "
+            "running game into a slot; **Load state** brings that exact moment back, "
+            "mid-game too, even in a later session.",
+            "- Every game has its own **ten slots**; one game's saves never load into, "
+            "overwrite or show among another's. The tab lists the picked card's slots "
+            "(other games' are counted under the list; no card picked shows all).\n"
+            "- **Rename** and **Delete** manage them; the line under the list totals "
+            "them against free space.\n"
+            "- **Launch** starts the emulator straight into the selected slot, or loads "
+            "it into the run that is up.\n"
+            "- A load after you replaced assets plays the new video and audio; art "
+            "already on screen keeps its saved look until the game redraws it.\n"
+            "- They need busybox-static and criu in WSL. Without them every title runs; "
+            "only slots do nothing, and the tab says so before Start. **Set up "
+            "emulator…** gets both.",
+            {"note": "Each slot takes about 50–150 MB of the WSL disk, and a save briefly "
+                     "needs about 1.5 GB free. Saving freezes the game and its sound for "
+                     "a few seconds. A slot only loads on the same app build, game and "
+                     "firmware it was saved on: after an update older slots are refused "
+                     "with a note. The ⓘ beside the section spells out the cost.",
+             "kind": "warn"},
+        ]),
+        ("Reset windows",
+         "Puts the emulator's windows back at their default place and size.\n\n"
+         "- The rig reopens each window where you last dragged it, without checking "
+         "that spot is still on screen. A window left on an unplugged second monitor "
+         "comes back out of reach.\n"
+         "- Works on every platform, with or without a game running."),
+        ("Black game window",
+         "On Windows the usual cause is a WSL that logs in as **root**: the renderer "
+         "cannot reach WSLg's shared memory and draws nothing, while sound, switches "
+         "and the playfield all work.\n\n"
+         "- **Check setup…** names it. The cure is on the WSL side: give the distro an "
+         "ordinary user, make it the default, restart WSL. The rig will not guess a "
+         "user for you.\n"
+         "- The log's \"picture:\" lines say whether there is a picture (only when "
+         "that changes). \"STILL BLACK\" while video frames go in means the game is "
+         "drawing black, so **Restart WSL…** is not the cure.\n"
+         "- `PAD_GL_PICCHECK` sets the seconds between checks, or 0 to switch them off."),
+        ("Restart WSL…", [
+            "The cure for faults that live in WSL, not the game:",
+            "- a game window that will not close (its X does nothing);\n"
+            "- crackly or stuttery sound after a long session;\n"
+            "- stale graphics libraries after a driver or WSL update: the run carries "
+            "on in software (a few percent slower) and says so in the log, and this "
+            "puts the graphics card back.",
+            {"note": "It closes **everything** running in WSL, not just the emulator, so "
+                     "it asks first and is greyed out while a run is up: stop the game "
+                     "first. Nothing on disk is lost.", "kind": "warn"},
+            "- A Stop that cannot finish offers the same restart by itself.\n"
+            "- Afterwards the tab checks the PC again (the ARM handler only survives on "
+            "a distro that boots systemd). If it came back unable to run the emulator, "
+            "it says so with **Set up emulator…** beside it.",
+        ]),
     ],
     "Compare": [
         ("What it does",

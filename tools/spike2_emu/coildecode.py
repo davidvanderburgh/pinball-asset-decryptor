@@ -5,16 +5,23 @@ Point it at a run captured with PAD_COIL_PROBE=1 (see hwshim.c). It needs no
 PAD_NB_LOG: the probe writes one line per CHANGED frame on nodes 8 and 9, which
 is a few thousand lines for a whole run instead of a few million.
 
-THE FRAME
+THE FRAME (every field named from the game's serialiser in PAD-381 - see
+coil_drive_note() in hwshim.c for the addresses)
 
-    88 0b 40 <IDX> <PWR> 00 00 <B7> 00 00 00 00 <cksum> 00
+    88 0b 40 <IDX> <PULSE PWR> <PULSE T lo hi> <HOLD PWR> <HOLD T lo hi> <X lo hi> <cksum> 00
 
 `cmd 0x40` addresses ONE COIL BY INDEX and the index is the device table's own.
 Node 8 carries 0..8 and node 9 carries 6 - exactly the ten playfield coils the
-table lists under groups 6 and 7, in the same order. Byte 4 is drive strength:
-the AUTO PLUNGER goes out at 0x96 where everything else is 0xff, and the service
-menu's "Trough Eject Power 225 (88%)" is the same 0..255 scale. The checksum is
-the two's complement of the sum of the preceding bytes.
+table lists under groups 6 and 7, in the same order. The two powers are 0..255:
+the AUTO PLUNGER pulses at 0x96 where everything else is 0xff, and the service
+menu's "Trough Eject Power 225 (88%)" is the same scale. The two times are in
+BOARD TICKS, ms * tps / 1000, tps being what the board claims at [8..9] of its
+0xfe identity (the rig: NB_HWID_DEFAULT, 100, or PAD_NB_HWID). X is sent as
+pulse power * 256 / X ticks; its use is not established. The checksum is the
+two's complement of the sum of the preceding bytes.
+
+OFF is a different frame, `8n 03 4d <IDX> <cksum> 00`, and `8n 03 40 <IDX>
+<cksum> 00` (the short 40) fires a coil by its cmd 41 rule.
 
 HOW IT WAS PINNED DOWN, and this is the part worth keeping.
 
@@ -39,16 +46,12 @@ Indices 2, 3, 4, 7, 8 are exactly the coils a ball search fires, and exactly not
 the three flippers (0, 5, 6) or the trough eject (1). Five hits and three
 correct absences, against a table derived from the binary months earlier.
 
-WHAT IS NOT DECODED, and it is a real gap, not a rounding error: BYTE 7. It is
-0xff for the slingshots and the pop bumper and 0x00 for the auto plunger and the
-scoop. On/off, hold power, and "this board may self-fire the coil from its own
-switch input" all fit what has been seen and nothing so far separates them. The
-sensible next experiment is the same one that worked here - drive ONE coil a
-known way and diff - now that the interlock is understood.
-
-So what this reports, and what the playfield window shows, is a coil being
-ADDRESSED. Not "energised for 30 ms". The difference matters the moment someone
-tries to measure a pulse width with it.
+BYTE 7 IS THE HOLD POWER. It was read for months as "undecoded - on/off, hold
+power or board self-fire", because those captures were all this tool had. The
+serialiser settled it (PAD-381): 0xff on the slingshots and pop bumper is a full
+second phase, 0 on the plunger and scoop is none. Every time in these captures
+reads 0 because the rig then claimed a tick rate of 1 (NB_HWID_DEFAULT before
+2026-08-26), and ms * 1 / 1000 is 0 for anything under a second.
 """
 import collections
 import re
@@ -67,6 +70,41 @@ GROUP_NODE = coilmap.GROUP_NODE
 
 COIL_CMD = 0x40
 COIL_LEN = 14
+OFF_CMD = 0x4d
+#: the rig's boards claim this tick rate unless PAD_NB_HWID says otherwise
+RIG_TPS = 100
+
+
+def checksum_ok(frame):
+    """Every byte up to and including the checksum sums to 0 mod 256."""
+    return len(frame) >= 3 and sum(frame[:-1]) & 0xFF == 0
+
+
+def decode(frame, tps=RIG_TPS):
+    """One coil command as a dict, or None - the twin of coil_drive_decode()
+    in hwshim.c. kind is "fire", "off" or "rule"; times are given in ticks
+    and in ms at `tps` ticks per second."""
+    b = bytes(frame)
+    if len(b) < 6 or not b[0] & 0x80 or len(b) != b[1] + 3 or not checksum_ok(b):
+        return None
+    d = {"node": b[0] & 0x3F, "index": b[3]}
+    if b[2] == COIL_CMD and b[1] == 0x0B:
+        pt = b[5] | b[6] << 8
+        ht = b[8] | b[9] << 8
+        d.update(kind="fire", pulse_pwr=b[4], pulse_t=pt, hold_pwr=b[7], hold_t=ht,
+                 x=b[10] | b[11] << 8,
+                 pulse_ms=pt * 1000 // tps if tps else 0,
+                 hold_ms=ht * 1000 // tps if tps else 0)
+        if not b[4] and not b[7]:
+            d["kind"] = "off"
+        return d
+    if b[2] == COIL_CMD and b[1] == 0x03:
+        d["kind"] = "rule"
+        return d
+    if b[2] == OFF_CMD and b[1] == 0x03:
+        d["kind"] = "off"
+        return d
+    return None
 
 
 def read(path):
@@ -147,7 +185,7 @@ def main():
             first[key] = t                       # the boot configuration record
             continue
         fires[key] += 1
-        events.append((t, key, b[4], b[7]))
+        events.append((t, key, decode(b)))
 
     print("%-8s %-6s %-18s %8s %8s" % ("node", "index", "name", "config@", "events"))
     for key in sorted(set(first) | set(fires)):
@@ -157,11 +195,15 @@ def main():
                  first.get(key, -1), fires[key]))
 
     if events:
-        print("\nfirst 20 events, with drive strength and the undecoded byte 7:")
-        for t, (node, idx), pwr, b7 in events[:20]:
-            print("  %8.3f  node %d index %-2d %-18s pwr %3d (%d%%)  b7=%02x"
-                  % (t, node, idx, names.get((node, idx), "?"), pwr,
-                     100 * pwr // 255, b7))
+        print("\nfirst 20 events (times at the rig's %d ticks/s):" % RIG_TPS)
+        for t, (node, idx), d in events[:20]:
+            if d is None:
+                print("  %8.3f  node %d index %-2d %-18s (bad checksum)"
+                      % (t, node, idx, names.get((node, idx), "?")))
+                continue
+            print("  %8.3f  node %d index %-2d %-18s pulse %3d for %4d ms, hold %3d for %5d ms"
+                  % (t, node, idx, names.get((node, idx), "?"), d["pulse_pwr"],
+                     d["pulse_ms"], d["hold_pwr"], d["hold_ms"]))
     return 0
 
 

@@ -10774,6 +10774,13 @@ struct padled_shm {
      * meaning; keep the two in step. */
     unsigned char seen[16][96];
     unsigned wide_decoded, wide_skipped;
+    /* Version 5 (PAD-381), what a coil is DRIVEN to - the twin of padled.h,
+     * which carries the meaning; keep the two in step. */
+    unsigned drive_t0, drive_tps;
+    unsigned drive_until[16][16];
+    unsigned short drive_pulse_t[16][16], drive_hold_t[16][16];
+    unsigned char drive_pulse_pwr[16][16], drive_hold_pwr[16][16];
+    unsigned drive_fires, drive_offs, drive_rule_fires;
 };
 #define PADLED_MAGIC 0x44454c50u
 
@@ -10857,9 +10864,10 @@ static void led_map(void)
     if (!m || m == (void *)-1) return;
     led_shm = (struct padled_shm *)m;
     led_shm->magic = PADLED_MAGIC;
-    /* 4 adds the addressed plane; see padled.h. A reader tells the two apart
-     * by this number, so it must not claim 4 over a one-page mapping. */
-    led_shm->version = (led_shm_len >= 8192) ? 4 : 3;
+    /* 4 adds the addressed plane, 5 the coil drive block (PAD-381); see
+     * padled.h. A reader tells them apart by this number, so it must not claim
+     * either over a one-page mapping. Both fit in the second page. */
+    led_shm->version = (led_shm_len >= 8192) ? 5 : 3;
 }
 
 /* One bit of the version-4 roster. Silently a no-op on a short mapping, which
@@ -10981,11 +10989,11 @@ static int led_moved_recently(unsigned long now)
  * search fires, and precisely NOT the three flippers or the trough eject. The
  * game labelled its own experiment.
  *
- * WHAT IS NOT DECODED: byte 7, which is 0xff for the slingshots and the pop
- * bumper and 0x00 for the auto plunger and the scoop. On/off, hold power and
- * "the board may self-fire this one from its own switch" all fit what has been
- * seen and nothing distinguishes them yet. So this counts a coil being
- * ADDRESSED, and the window says "addressed", not "energised for 30 ms".
+ * Byte 7 is the HOLD POWER and bytes 5-6 / 8-9 the pulse and hold times in
+ * board ticks - named from the game's serialiser in PAD-381, see
+ * coil_drive_note(), which publishes how long each command drives its coil.
+ * THIS function still counts a coil being ADDRESSED, and the window still says
+ * "addressed": a counter cannot say how long anything was on.
  *
  * The FIRST 0x40 for a given coil is its boot configuration - nine arrive back
  * to back on node 8 at startup, one on node 9 - so it seeds the record and does
@@ -12672,6 +12680,153 @@ static void coil_probe(const unsigned char *p, int n)
     logmsg(line);
 }
 
+/* ---- WHAT A COIL IS DRIVEN TO, AND FOR HOW LONG (PAD-381) ---------------
+ *
+ * coil_publish() counts a coil being ADDRESSED. This reads what the command
+ * asked for, because "is the magnet still on?" is a question about TIME, and
+ * nothing may hold a coil from a mode until the rig can answer it.
+ *
+ * NAMED FROM THE BUILDER (godzilla Pro 1.16, armxref.py), not from a capture -
+ * the old reading of byte 7 as "undecoded, maybe on/off" came from captures:
+ *
+ *   ControlCoil::v[56] (0x4fe3c) fires through 0x402ff4 -> 0x4029cc(coil,
+ *   pulse power, pulse ms, hold power, hold ms, x ms); its own v[29]..v[32]
+ *   supply the first four and x is 0. 0x4029cc stores them on the coil's
+ *   record (+41 +42 +44 +46 +48), the coil service (0x403f88) copies the
+ *   record into a 9-byte request, and 0x5a995c serialises it:
+ *
+ *     8n 0b 40 <coil> <pulse pwr> <pulse t lo> <hi> <hold pwr> <hold t lo> <hi>
+ *        <x lo> <hi> <cksum> 00
+ *
+ *   every time in BOARD TICKS, ms * tps / 1000, where tps is the u16 the board
+ *   claimed at [8..9] of its 0xfe identity reply (0x5a9164 reads it back; this
+ *   rig answers NB_HWID_DEFAULT or PAD_NB_HWID). x goes out as pulse power *
+ *   256 / x ticks, a per-tick power step whose use is not established.
+ *
+ *   So BYTE 7 IS THE HOLD POWER: 0xff on the slingshots and pop bumper (both
+ *   phases full), 0 on the plunger and scoop (no hold), 0x32 on the magnet.
+ *   The old captures read every time as 0 because the rig then claimed a tick
+ *   rate of 1, and ms * 1 / 1000 is 0 for anything under a second.
+ *
+ *   The game counts the coil busy for pulse + hold and no longer (0x403fa0), so
+ *   a hold is BOUNDED by the command: holding longer means sending again.
+ *   ControlCoil::v[57], a hold with no pulse, sends at least 5500 ms (0x4ff70).
+ *
+ *   OFF IS NOT THIS FRAME. 0x4029cc flags an all-zero request (ControlCoil::
+ *   v[58]) and the service sends cmd 4d instead (0x5a5be8):
+ *     8n 03 4d <coil> <cksum> 00
+ *   The SHORT 40, `8n 03 40 <coil> <cksum> 00` (0x5a5b90), fires a coil by its
+ *   cmd 41 rule; that rule's times are not decoded here.
+ *
+ * MPF's Spike platform (missionpinball/mpf, CoilFireRelease) lays the 14-byte
+ * frame out the same way, [index, power1, duration1, power2, duration2] -
+ * agreement, not the evidence; the evidence is the serialiser above.
+ *
+ * What a BOARD does once pulse + hold have run out is the GAME's reading, not a
+ * measurement: nothing in this rig has ever watched a real board. */
+#define COIL_DRIVE_FIRE 1
+#define COIL_DRIVE_OFF  2
+#define COIL_DRIVE_RULE 3
+
+struct coil_drive {
+    unsigned node, idx;
+    unsigned pulse_pwr, pulse_t, hold_pwr, hold_t, x;  /* times in ticks */
+};
+
+/* COIL_DRIVE_* for a coil command, 0 for anything else. The shape AND the
+ * checksum must hold (two's complement of every byte before it, header and
+ * length included): a stray frame must never turn a coil on in the published
+ * state. */
+static int coil_drive_decode(const unsigned char *p, int n, struct coil_drive *d)
+{
+    unsigned s = 0;
+    int i;
+    if (n < 6 || !(p[0] & 0x80) || n != (int)p[1] + 3) return 0;
+    for (i = 0; i < n - 1; i++) s += p[i];
+    if (s & 0xff) return 0;
+    d->node = (unsigned)p[0] & 0x3f;
+    d->idx = p[3];
+    d->pulse_pwr = d->pulse_t = d->hold_pwr = d->hold_t = d->x = 0;
+    if (p[2] == 0x40 && p[1] == 0x0b) {
+        d->pulse_pwr = p[4];
+        d->pulse_t = (unsigned)p[5] | (unsigned)p[6] << 8;
+        d->hold_pwr = p[7];
+        d->hold_t = (unsigned)p[8] | (unsigned)p[9] << 8;
+        d->x = (unsigned)p[10] | (unsigned)p[11] << 8;
+        return COIL_DRIVE_FIRE;
+    }
+    if (p[2] == 0x40 && p[1] == 0x03) return COIL_DRIVE_RULE;
+    if (p[2] == 0x4d && p[1] == 0x03) return COIL_DRIVE_OFF;
+    return 0;
+}
+
+static unsigned coil_drive_tps(void)
+{
+    static unsigned v;
+    if (!v) v = nb_env_hex("PAD_NB_HWID", NB_HWID_DEFAULT);
+    return v;
+}
+
+static unsigned coil_ticks_ms(unsigned t, unsigned tps)
+{
+    return tps ? t * 1000u / tps : 0;          /* t <= 0xffff: no overflow */
+}
+
+/* Publish one coil command into padled v5 and, under PAD_COIL_PROBE, say what
+ * it asked for in milliseconds. An OFF that lands while the last command still
+ * had time left says how much - that is a release, as against a timeout. */
+static void coil_drive_note(const unsigned char *p, int n)
+{
+    static int budget = 20000;
+    struct coil_drive d;
+    unsigned tps, now, until = 0, was = 0, pms = 0, hms = 0;
+    char line[192];
+    int k = coil_drive_decode(p, n, &d);
+
+    if (!k || d.node >= 16 || d.idx >= 16) return;
+    tps = coil_drive_tps();
+    now = (unsigned)pad_ms();
+    if (k == COIL_DRIVE_FIRE) {
+        pms = coil_ticks_ms(d.pulse_t, tps);
+        hms = coil_ticks_ms(d.hold_t, tps);
+        if (d.pulse_pwr || d.hold_pwr) {
+            until = now + pms + hms;
+            if (!until) until = 1;             /* 0 means off */
+        }
+    }
+    led_map();
+    if (led_shm && led_shm_len >= 8192) {
+        led_shm->drive_t0 = (unsigned)pad_ms_base;
+        led_shm->drive_tps = tps;
+        was = led_shm->drive_until[d.node][d.idx];
+        if (k == COIL_DRIVE_RULE) {
+            led_shm->drive_rule_fires++;
+        } else {
+            led_shm->drive_until[d.node][d.idx] = until;
+            led_shm->drive_pulse_t[d.node][d.idx] = (unsigned short)d.pulse_t;
+            led_shm->drive_hold_t[d.node][d.idx] = (unsigned short)d.hold_t;
+            led_shm->drive_pulse_pwr[d.node][d.idx] = (unsigned char)d.pulse_pwr;
+            led_shm->drive_hold_pwr[d.node][d.idx] = (unsigned char)d.hold_pwr;
+            if (k == COIL_DRIVE_FIRE) led_shm->drive_fires++;
+            else led_shm->drive_offs++;
+        }
+    }
+    if (!coil_probe_on() || budget-- <= 0) return;
+    if (k == COIL_DRIVE_FIRE)
+        snprintf(line, sizeof line, "[coildrive] %u ms node %u coil %u: pulse "
+                 "%u/255 for %u ms, hold %u/255 for %u ms (%u+%u ticks at %u/s)"
+                 "%s\n", now, d.node, d.idx, d.pulse_pwr, pms, d.hold_pwr, hms,
+                 d.pulse_t, d.hold_t, tps, until ? "" : " - OFF");
+    else if (k == COIL_DRIVE_OFF)
+        snprintf(line, sizeof line, "[coildrive] %u ms node %u coil %u: OFF "
+                 "(cmd 4d), %u ms of its last command left\n", now, d.node,
+                 d.idx, was > now ? was - now : 0u);
+    else
+        snprintf(line, sizeof line, "[coildrive] %u ms node %u coil %u: fired "
+                 "by its rule (short cmd 40)\n", now, d.node, d.idx);
+    logmsg(line);
+}
+
 static void nb_log(const char *dir, const unsigned char *p, int n, unsigned long want)
 {
     char line[HEXBUF + 128], h[HEXBUF];
@@ -13783,6 +13938,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         sw_find_maybe();
         led_publish(nb_req, nb_req_len);
         coil_publish(nb_req, nb_req_len);
+        coil_drive_note(nb_req, nb_req_len);    /* PAD-381 */
         motor_note(nb_req, nb_req_len);
         coil_motor_note(nb_req, nb_req_len);    /* PAD-256 */
         lcd_publish(nb_req, nb_req_len);        /* item 83: VILLAIN VISION */

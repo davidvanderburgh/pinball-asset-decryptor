@@ -27,6 +27,8 @@ log = logging.getLogger(__name__)
 
 _TREE_DISPLAY = (1360, 768)          # the canvas image is drawn full size: it is edited on
 _ORDER = ("up", "down", "front", "back")
+_DROP = ("before", "after", "into")
+_GROUP_KINDS = ("Sprite", "StreamingFlipbook")
 
 
 #: a sprite state that is on its way in or out (tree_show tries these last)
@@ -798,7 +800,7 @@ class TreeEditMixin:
         picks = self._tree_pictures()
         added_ops = {int(op["id"]): op for op in ops
                      if op.get("op") == "add_picture" and op.get("id") is not None}
-        for n, _parent, depth in _walk_man(man):
+        for n, parent, depth in _walk_man(man):
             kind = _kind_of(man, n)
             pics = []
             for rel in _pics_of(man, n, memo):
@@ -808,6 +810,8 @@ class TreeEditMixin:
                 if have[rel]:
                     pics.append(rel)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
+                           "parent": parent["id"] if parent is not None else None,
+                           "group": kind in _GROUP_KINDS,
                            "pics": ["images/" + rel for rel in pics],
                            "text": _text_of(man, n, kind),
                            "color": _colour_switch(n, kind, pics, picks, settings,
@@ -1805,6 +1809,60 @@ class TreeEditMixin:
         if to == cur:
             return False
         return self._tree_add({"op": "order", "node": node, "index": to})
+
+    @rpc
+    def tree_drop(self, node, target, where):
+        """A row dragged in Layers (PAD-391) and dropped *where* (before, after or into)
+        the row *target*.  Inside its own group it is re-ordered; an ADDED layer can go into
+        another group too, and stays where it was on the screen.  The game's own layers stay
+        in their group: its code finds them by the group they sit in."""
+        from ..plugins.stern import scene_edit, scene_eval
+        if where not in _DROP or node is None or target is None:
+            return False
+        node, target = int(node), int(target)
+        man = self._tman
+        index = scene_edit._man_index(man)
+        if node == target or node not in index or target not in index:
+            return False
+        n, sibs = index[node]
+        parents = {m["id"]: p["id"] if p is not None else None for m, p, _d in _walk_man(man)}
+        if where == "into":
+            if _kind_of(man, index[target][0]) not in _GROUP_KINDS:
+                return False
+            parent = target
+            kids = scene_edit._man_kids_of(man, index, parent)
+            to = len(kids)
+        else:
+            parent = parents.get(target)
+            kids = index[target][1]
+            to = kids.index(index[target][0]) + (where == "after")
+        p = parent
+        while p is not None:                         # never into itself or its own kids
+            if p == node:
+                return False
+            p = parents.get(p)
+        if kids is sibs:
+            cur = sibs.index(n)
+            if to > cur:
+                to -= 1
+            if to == cur:
+                return False
+            return self._tree_add({"op": "order", "node": node, "index": to})
+        if not n.get("added"):
+            compat.messagebox.showinfo(
+                "Layers", "%s is one of the game's own layers. The game finds it by the "
+                "group it sits in, so it stays in that group: drag it up or down inside it to "
+                "change what it is drawn over. A picture or a line of text you added can go "
+                "into any group." % n["name"])
+            return False
+        # its tracks are in its group's units: the old group's drawing then the new one's
+        # undone keeps it where it is (either group off the screen now: kept as it is)
+        old = (self._tworlds.get(node) or (None,))[0]
+        new = scene_eval.IDENTITY if parent is None else             (self._tworlds.get(parent) or (None, None))[1]
+        inv = scene_eval.invert(new) if new is not None else None
+        m = scene_eval.compose(inv, old) if inv is not None and old is not None             else scene_eval.IDENTITY
+        return self._tree_add({"op": "parent", "node": node, "parent": parent, "index": to,
+                               "m": [round(v, 6) for v in m]})
 
     @rpc
     def tree_reset(self, node):

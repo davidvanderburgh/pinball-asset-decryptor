@@ -220,7 +220,8 @@ def test_stern_does_not_get_the_jjp_tab():
 def test_help_has_an_entry_for_the_new_tab():
     """A tab with no HELP_CONTENT entry opens an empty '?' window."""
     from pinball_decryptor.webui.help_content import HELP_CONTENT
-    body = " ".join(t + " " + b for t, b in HELP_CONTENT["Emulate JJP"])
+    from pinball_decryptor.webui.tips_render import plain, render
+    body = " ".join(t + " " + plain(render(b)) for t, b in HELP_CONTENT["Emulate JJP"])
     assert "security key" in body.lower()
     assert "read only" in body.lower()
 

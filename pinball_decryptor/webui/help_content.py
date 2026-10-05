@@ -1497,415 +1497,453 @@ HELP_CONTENT = {
         ]),
     ],
     "Emulate Spike1": [
-        ("What it does",
-         "Runs a Stern Spike 1 game on this PC — the 2015-2016 dot-matrix "
-         "generation (WrestleMania, KISS, Game of Thrones, Ghostbusters, and "
-         "more), and the earlier 2012 home models (Transformers The Pin), which "
-         "have no dot matrix at all but two 8-digit 16-segment alphanumeric "
-         "displays. The game is a static ARM program, so it runs "
-         "under a patched emulator with a software model of the machine's "
-         "boards — no CPU it can run natively, unlike JJP. Pick a Spike 1 card "
-         "image, press Start, and it boots the way the machine does, straight "
-         "to its own attract on its own kind of display, with sound."),
-        ("It needs WSL and runs as root there",
-         "The board model needs a privileged host setup, so this tab is "
-         "Windows-only and runs the emulator inside WSL with root (which on "
-         "Windows needs no password). The first Start installs the emulator: "
-         "the ARM emulator and the board model are binaries built and checked "
-         "as part of this app, downloaded once and verified against the exact "
-         "version this app expects, so nothing is compiled on your machine and "
-         "no packages are needed. Later starts are quick, and switching to a "
-         "different card you've already picked before reuses its extraction. "
-         "It can also bring its own Linux: pressing Fix setup installs a "
-         "private WSL distro called PAD-Runtime with the emulator already in "
-         "it, so your own distro is not touched and a PC with WSL enabled but "
-         "no distro installed at all can still run a game. That is a one-time "
-         "download of about 414 MB, and Start never does it for you — Fix "
-         "setup here, or “Update emulator Linux…” on the Stern Spike 2 "
-         "Emulate tab, which appears there when the installed one is from an "
-         "older version of this app. "
-         "Everything the app sends to Linux now goes to that runtime once it "
-         "is installed, not only the emulators: the extract and write "
-         "pipelines, the disk tools and the card builder run there too, which "
-         "is why the prerequisite list finally describes the same machine the "
-         "work happens on. "
-         "Set PAD_RUNTIME=0 if you would rather everything used the machine's "
-         "default distro."),
-        ("Fix setup, if anything is missing",
-         "Fix setup installs whatever the emulator is missing and then says "
-         "what, if anything, is left — no terminal, either way. If your "
-         "network blocks the download (a firewall, or a proxy that allows "
-         "github.com but not its download host), it offers a file picker "
-         "instead: fetch the file on any other machine and it is checked "
-         "against the same checksum before it is installed. Start does the "
-         "same install by itself, so pressing this first is only needed when "
-         "something has gone wrong. Right-click it to give space back "
-         "instead: \"Delete the emulator's data\" (the extracted games, "
-         "card caches and save states), \"Delete downloaded files\" (the "
-         "emulator binaries and the runtime image, all re-downloadable), and "
-         "\"Remove the app's Linux\" (the PAD-Runtime distro itself). Each "
-         "says what it will destroy before it does it, refuses while a game "
-         "is running, and reports how much it freed. The emulator's work "
-         "lives on a disk of its own, so removing the runtime does not take "
-         "your save states with it."),
-        ("Play a game",
-         "A display window shows what the machine is showing — the dot matrix, "
-         "or, on a 2012 home model, its two 16-segment displays side by side "
-         "with the text they spell out underneath. A switch/LED window opens "
-         "beside it listing every switch by name and position, not a bare grid; "
-         "a title with no built-in map is no longer stuck on the nameless grid, "
-         "because the names are read out of the running game itself, which is "
-         "also why those switches now actually do something. "
-         "Play with the keyboard (works in the display window) — arrow keys are "
-         "the flippers, 1 starts, 5 coins up, T tilts, and there's a full legend "
-         "in the window — or click a switch to pulse it briefly, the way a ball "
-         "rolling over it would (right-click to hold one closed). The coin door "
-         "and service buttons are drawn as on the real door, and the trough "
-         "shows each ball position; coining up and pressing Start actually "
-         "serves a ball, so you can play a full game start to finish."),
-        ("The 2012 home models have no coin door",
-         "Transformers The Pin and its siblings have no coin door, no service "
-         "buttons and no operator menu, so on those titles the service cluster "
-         "and the coin-door bar are drawn dead and the bar says what to do "
-         "instead: test mode is both flippers held for three seconds. Their "
-         "sound also runs at the rate the game's own DAC asks for rather than "
-         "CD rate, so the speaker no longer starves into silence."),
-        ("Volume and Default Settings",
-         "The Volume slider and Mute checkbox are this tab's own speaker "
-         "control (not the game's in-game volume, which is on the coin door "
-         "like the real machine) and take effect immediately on a running game. "
-         "Default Settings — the operator adjustments baked into the card — is "
-         "a separate tab from Emulate and works without the emulator running at "
-         "all."),
-        ("Save states",
-         "Save now snapshots the running game — mid-ball, mid-mode — into a "
-         "named slot (the game freezes for a second or two while it writes, "
-         "then keeps playing). Load swaps the running game for the selected "
-         "slot, even in a later session after a full stop and restart: the "
-         "game resumes right where it was, display, switches and sound live. "
-         "Slots are per title (a slot loads only into the title it was saved "
-         "from), take roughly 15-50 MB each on the WSL disk, survive emulator "
-         "rebuilds, and stay until deleted — Rename and Delete manage them "
-         "from the same list."),
-        ("If it gets stuck",
-         "\"Restart WSL…\" force-restarts WSL to clear a wedged emulator — a "
-         "frozen window or a game that will not stop. It closes all WSL sessions "
-         "and takes about 15 seconds; your card and settings are untouched."),
+        ("What it runs", [
+            "Runs a Stern Spike 1 card image on this PC. Pick the card, press **Start**, "
+            "and the game boots to its own attract on its own display, with sound.",
+            {"cards": [
+                {"icon": "image", "tone": "info", "title": "2015-2016 dot-matrix games",
+                 "text": "WrestleMania, KISS, Game of Thrones, Ghostbusters and more."},
+                {"icon": "text", "tone": "info", "title": "2012 home models",
+                 "text": "Transformers The Pin and its siblings: no dot matrix, two "
+                         "8-digit 16-segment displays."}]},
+            "The game is an ARM program, so an emulator runs it with a software model "
+            "of the machine's boards.",
+        ]),
+        ("Getting started", [
+            "This tab is Windows only: the emulator runs inside WSL as root (no "
+            "password needed on Windows).",
+            {"flow": [
+                {"icon": "sd", "title": "Pick", "text": "a Spike 1 card image"},
+                {"icon": "download", "title": "Start",
+                 "text": "the first time downloads the emulator, checked against this app"},
+                {"icon": "play", "title": "Play",
+                 "text": "later starts are quick; a card picked before is reused"}]},
+            "- Nothing is compiled on your PC and no packages are needed.\n"
+            "- **Fix setup** installs whatever is missing and says what is left. Start "
+            "does the same by itself, so you only need it when something went wrong.\n"
+            "- Network blocks the download? Fix setup offers a file picker: fetch the "
+            "file on another machine; it is checked against the same checksum.",
+        ]),
+        ("The app's own Linux",
+         "**Fix setup** can install a private WSL distro, **PAD-Runtime**, with the "
+         "emulator already in it. Your own distro is not touched, and a PC with WSL "
+         "but no distro can still run a game.\n"
+         "- A one-time download of about 414 MB. Start never does it: use **Fix "
+         "setup**, or **Update emulator Linux…** on the Stern Spike 2 Emulate tab "
+         "(shown there when the installed one is older than this app).\n"
+         "- Once installed, everything the app sends to Linux runs there: the "
+         "emulators, extract and write, the disk tools and the card builder.\n"
+         "- Set `PAD_RUNTIME=0` to use the PC's default distro instead."),
+        ("Freeing space",
+         "Right-click **Fix setup** to give space back. Each choice says what it will "
+         "delete first, refuses while a game runs, and reports what it freed.\n\n"
+         "| Choice | Deletes |\n"
+         "|---|---|\n"
+         "| Delete the emulator's data | the extracted games, card caches and save states |\n"
+         "| Delete downloaded files | the emulator and the runtime image (re-downloadable) |\n"
+         "| Remove the app's Linux | the PAD-Runtime distro itself |\n\n"
+         "The emulator's work lives on a disk of its own, so removing the runtime "
+         "keeps your save states."),
+        ("Playing",
+         "The display window shows the machine's screen; on a 2012 home model, its two "
+         "16-segment displays with the words they spell underneath. A switch/LED "
+         "window beside it lists every switch by name and position, read from the "
+         "running game.\n\n"
+         "| Key | Does |\n"
+         "|---|---|\n"
+         "| Arrow keys | flippers |\n"
+         "| 1 | Start |\n"
+         "| 5 | coin |\n"
+         "| T | tilt |\n\n"
+         "- Keys work in the display window; the full legend is in the window.\n"
+         "- Click a switch to pulse it, as a rolling ball would. Right-click to hold "
+         "it closed.\n"
+         "- The coin door and service buttons are drawn as on the real door, and the "
+         "trough shows each ball. Coin up and press Start to serve a ball and play a "
+         "full game."),
+        ("2012 home models",
+         "Transformers The Pin and its siblings have no coin door, no service buttons "
+         "and no operator menu, so those are drawn dead.\n"
+         "- **Test mode:** hold both flippers for three seconds.\n"
+         "- Their sound runs at the rate the game's own DAC asks for, not CD rate."),
+        ("Save states", [
+            "Snapshot a running game, mid-ball, and come back to it later.",
+            {"flow": [
+                {"icon": "save", "title": "Save now",
+                 "text": "into a named slot; the game freezes a second or two"},
+                {"icon": "refresh", "title": "Load",
+                 "text": "swaps the running game for the slot, even after a restart"},
+                {"icon": "play", "title": "Resume",
+                 "text": "right where it was: display, switches and sound live"}]},
+            "- A slot loads only into the title it was saved from.\n"
+            "- Each takes about 15-50 MB on the WSL disk, survives emulator rebuilds "
+            "and stays until deleted. **Rename** and **Delete** are on the same list.",
+        ]),
+        ("Good to know",
+         "- **Volume** and **Mute** are this tab's speaker, live on a running game. The "
+         "game's own volume is on the coin door, as on the machine.\n"
+         "- The operator adjustments baked into the card are on the **Default "
+         "Settings** tab, which works without the emulator.\n"
+         "- **Restart WSL…** clears a wedged emulator (a frozen window, a game that "
+         "will not stop). It closes **all** WSL sessions and takes about 15 seconds; "
+         "your card and settings are untouched."),
     ],
     "Emulate JJP": [
-        ("What it does",
-         "Runs the real Jersey Jack game on this PC — in its own resizable "
-         "window, with sound. The game is a native x86-64 Linux program, so "
-         "unlike the Stern emulator there is no CPU emulation involved: it "
-         "simply runs. Pick a JJP game ISO, press Start, and it boots the way "
-         "the machine does — through its own startup into attract mode."),
-        ("You need the purple USB key",
-         "The JJP security key is not optional and cannot be worked around. "
-         "The game's program code is ENCRYPTED, and the key holds the "
-         "decryption key — so without it the game stops immediately with "
-         "\"Sentinel key not found\", exactly as a real machine does with the "
-         "key unplugged. The key is also per-game: the key from one JJP title "
-         "will not start another. Plug it into this PC before pressing Start; "
-         "the app hands it through to the emulator for you."),
-        ("Your game image is never modified",
-         "The ISO is mounted READ ONLY and the game runs against a temporary "
-         "overlay held in memory. Everything it writes while running — its "
-         "settings, its high scores, the manual pages it renders on first "
-         "boot — is discarded when you stop. You can always start again from a "
-         "known state, and a crashed run cannot corrupt the image."),
-        ("Switch matrix",
-         "Once the game is running, \"Switch matrix…\" opens the playfield "
-         "with every switch and light on it, drawn on the game's own playfield "
-         "photograph. Left-click a switch to trigger it the way a ball rolling "
-         "over would (a brief pulse); right-click to hold it closed, which is "
-         "what you want for balls sitting in the trough or the coin door. The "
-         "game reacts exactly as it would on the machine."),
-        ("First start is slow",
-         "The first Start on a given ISO restores the game filesystem out of "
-         "it, which is several GB and takes a few minutes. That result is "
-         "cached, so every later Start on the same ISO is quick."),
-        ("If there is no sound",
-         "WSL has no sound card, so the emulator routes audio through "
-         "Windows. If music sounds wrong, judge it by ear rather than by a "
-         "test tone — the audio path is known to pass a plain tone cleanly "
-         "while distorting music."),
+        ("What it runs",
+         "Runs the real Jersey Jack game on this PC, in its own resizable window, with "
+         "sound. The game is a native Linux program, so it simply runs: no CPU "
+         "emulation. It boots through its own startup into attract."),
+        ("The purple USB key", [
+            {"note": "The purple JJP security key is required and cannot be worked "
+                     "around: the game's code is encrypted, and the key holds the "
+                     "decryption key.", "kind": "warn"},
+            "- Without it the game stops at once with \"Sentinel key not found\", as a "
+            "real machine does.\n"
+            "- A key is per title: one game's key will not start another.\n"
+            "- Plug it into this PC before **Start**; the app hands it to the emulator.",
+        ]),
+        ("Getting started", [
+            {"flow": [
+                {"icon": "lock", "title": "Plug in", "text": "the game's purple key"},
+                {"icon": "folder", "title": "Pick", "text": "a JJP game ISO"},
+                {"icon": "play", "title": "Start",
+                 "text": "the first time restores several GB, a few minutes; later quick"}]},
+            "The ISO is mounted **read only** and the game runs on a temporary overlay "
+            "in memory.\n"
+            "- What it writes (settings, high scores, the manual pages it renders on "
+            "first boot) is thrown away on Stop.\n"
+            "- Every start begins from a known state, and a crash cannot harm the image.",
+        ]),
+        ("Playing",
+         "The switch matrix opens with the game: every switch and light drawn on the "
+         "game's own playfield photograph, and the switches listed by name.\n"
+         "- Click a switch to pulse it, as a rolling ball would.\n"
+         "- Right-click to hold it closed: balls in the trough, the coin door.\n"
+         "- The game reacts exactly as on the machine."),
+        ("Good to know",
+         "- **Volume** is this PC's level for the game and its boot menu, not the "
+         "machine's own setting. It changes a running game at once.\n"
+         "- WSL has no sound card, so sound goes through Windows. If music sounds "
+         "wrong, judge by ear: a plain test tone passes cleanly even when music is "
+         "distorted.\n"
+         "- **Fix stuck state** restarts WSL to clear a wedged emulator (a frozen "
+         "window, a game that will not stop). It closes **all** WSL sessions and takes "
+         "about 15 seconds; your ISO and settings are untouched."),
     ],
     "Emulate DP": [
-        ("What it does",
-         "Runs the real Dutch Pinball game on this PC - The Big Lebowski or "
-         "Alice's Adventures in Wonderland - in its own window (Alice opens "
-         "two: the main screen and the round one). The emulator stands in "
-         "for the machine's controller board and gives the game what the "
-         "machine's disk gave it, a window, sound, and a way to press every "
-         "switch, and it boots into attract mode."),
-        ("Which files to pick",
-         "The machine's disk image (.img; for Alice, the full_image "
-         "installer) - it is the only place most of the "
-         "game's pictures and sounds exist; the update zips carry only what "
-         "changed. The first Start copies the game out of the image (several "
-         "GB, a few minutes); the next is quick. Optionally add an update "
-         "(.zip, The Big Lebowski only): the official one, or one the Write "
-         "tab built from your "
-         "edits. It is laid over the version on the image the way the "
-         "machine installs it, so you can play a mod before it goes on a USB "
-         "stick. Both files are only read."),
+        ("What it runs",
+         "Runs the real Dutch Pinball game on this PC, with sound, into attract. The "
+         "emulator stands in for the machine's controller board and gives you every "
+         "switch.\n\n"
+         "| | The Big Lebowski | Alice's Adventures in Wonderland |\n"
+         "|---|---|---|\n"
+         "| Windows | one | two: the main screen and the round one |\n"
+         "| Disk image | the machine's `.img` | the `full_image` installer |\n"
+         "| Update zip on top | Yes | No |"),
+        ("Getting started", [
+            {"flow": [
+                {"icon": "disk", "title": "Pick", "text": "the machine's disk image"},
+                {"icon": "plus", "title": "Add",
+                 "text": "an update zip, if you like (The Big Lebowski)"},
+                {"icon": "play", "title": "Start",
+                 "text": "the first time copies the game out: several GB, a few minutes"}]},
+            "- The disk image is the only place most of the game's pictures and sounds "
+            "are; update zips carry only what changed.\n"
+            "- The update can be the official zip or one the Write tab built. It is laid "
+            "over the image's version the way the machine installs it, so you can play "
+            "a mod before it goes on a USB stick.\n"
+            "- Both files are only read. Later starts are quick.\n"
+            "- While a game is starting, **Start** is **Cancel**: it stops the copy and "
+            "throws the half-copied game away.",
+        ]),
         ("Playing",
-         "When the game is up its switch window opens beside it: the game's "
-         "own drawing of the machine with every switch on it (for Alice, a "
-         "list), and a list of them all by name. Hold a switch with the "
-         "mouse (a flipper, a ball resting in the scoop); right-click to "
-         "latch it until you right-click again. With that window focused "
-         "the game's own keys work: for The Big Lebowski N and M are the "
-         "flippers, 1 is Start, 3 a coin and 7, 8, 9, 0 the service buttons; "
-         "for Alice the Shift keys are the flippers, 1 is Start and 7, 0, 8, "
-         "9 are Escape, Enter and the volume. Closed it? "
-         "\"Switches window\" on this tab brings it back."),
-        ("Cancel",
-         "While a game is starting the Start button is Cancel: it stops the "
-         "copy off the image and throws away the half-copied game."),
+         "The switch window opens beside the game: its own drawing of the machine "
+         "with every switch on it (for Alice, a list), and all the switches by name.\n"
+         "- Hold a switch with the mouse (a flipper, a ball in the scoop). "
+         "Right-click to latch it until you right-click again.\n"
+         "- Closed it? **Switches window** brings it back.\n\n"
+         "### Keys (switch window focused)\n"
+         "| Key | The Big Lebowski | Alice |\n"
+         "|---|---|---|\n"
+         "| Flippers | N and M | the Shift keys |\n"
+         "| Start | 1 | 1 |\n"
+         "| Coin | 3 | |\n"
+         "| Service | 7, 8, 9, 0 | 7 Escape, 0 Enter, 8 and 9 volume |"),
     ],
     "Emulate BoF": [
-        ("What it does",
-         "Runs the real Barrels of Fun game on this PC - Dune, Winchester "
-         "Mystery House or Labyrinth - in its own window. The game is a "
-         "native Linux program, so nothing is emulated but the machine's "
-         "boards: the emulator answers the game the way the FAST controller, "
-         "its lighting boards and (on Dune and Winchester) BoF's own mechanism "
-         "board would, so it boots through its hardware check into attract "
-         "mode. Bon Jovi can't be emulated yet: its .fun is a signed disk "
-         "image and the emulator has no board profile for it; Image Info "
-         "says how an owner can help."),
-        ("Which file to pick",
-         "The .fun update file - the one the machine installs from a USB "
-         "stick. That can be the official file, or one the Write tab built "
-         "from your edits: emulating it first is the quick way to check a mod "
-         "before it goes on a stick. The file is only read."),
+        ("What it runs",
+         "Runs the real Barrels of Fun game on this PC, in its own window, through its "
+         "hardware check into attract. The game is a native Linux program; the "
+         "emulator answers it as the FAST controller, its lighting boards and (Dune, "
+         "Winchester) BoF's mechanism board would.\n\n"
+         "| Game | Runs here |\n"
+         "|---|---|\n"
+         "| Dune | Yes |\n"
+         "| Winchester Mystery House | Yes |\n"
+         "| Labyrinth | Yes |\n"
+         "| Bon Jovi | not yet: its .fun is a signed disk image with no board profile. "
+         "Image Info says how an owner can help. |"),
+        ("Getting started", [
+            {"flow": [
+                {"icon": "file", "title": "Pick",
+                 "text": "the `.fun` update file, or one the Write tab built"},
+                {"icon": "play", "title": "Start",
+                 "text": "the first time unpacks 2-4 GB, a minute or two"},
+                {"icon": "emulate", "title": "Play",
+                 "text": "and check a mod before it goes on a USB stick"}]},
+            "- The file is only read.\n"
+            "- The last two builds are kept, so the same file starts quickly again; a "
+            "rebuilt mod is unpacked fresh.\n"
+            "- While a game is starting, **Start** is **Cancel**: it stops the unpack "
+            "(slow on a slow or busy drive) and throws the half copy away.",
+        ]),
         ("Playing",
-         "When the game is ready its switch window opens beside it: the "
-         "game's own playfield drawing with every switch on it, and a list "
-         "of them all by name. Hold a switch with the mouse (a flipper, a "
-         "ball resting in a scoop); right-click to latch it until you "
-         "right-click again. Plunge puts the ball in the shooter lane into "
-         "play, Drain sends one back to the trough, and Coin door opens or "
-         "closes it. With that window or the game's own window focused, Z "
-         "and / (or the Shift keys) are the flippers, 1 is Start, 5 a coin, Space Launch, P Plunge and "
-         "D Drain. Closed it? \"Switches window\" on this tab brings it "
-         "back. The game's own window can be moved and resized like any "
-         "other; the picture scales to fit."),
-        ("Cancel",
-         "While a game is starting the Start button is Cancel. A build on a "
-         "slow or busy drive can take a long time to unpack; Cancel stops "
-         "it and throws the half-unpacked copy away."),
-        ("First start is slower",
-         "The first Start on a file unpacks it (2-4 GB) inside the app's "
-         "Linux, which takes a minute or two. The last two builds are kept, "
-         "so starting the same file again is quick; a rebuilt mod is "
-         "unpacked fresh."),
-        ("Settings and high scores",
-         "Each game keeps its own settings, audits and high scores between "
-         "runs, as a machine does. Sound follows Mute; the game's own volume "
-         "is in its service menu."),
+         "The switch window opens beside the game: its own playfield drawing with "
+         "every switch on it, and all the switches by name.\n"
+         "- Hold a switch with the mouse (a flipper, a ball in a scoop). Right-click "
+         "to latch it until you right-click again.\n"
+         "- **Plunge** puts the shooter-lane ball into play, **Drain** sends one back "
+         "to the trough, **Coin door** opens or shuts it.\n"
+         "- The game's window moves and resizes like any other; the picture scales.\n"
+         "- Closed the switch window? **Switches window** brings it back.\n\n"
+         "### Keys (switch or game window focused)\n"
+         "| Key | Does |\n"
+         "|---|---|\n"
+         "| Z and / (or Shift) | flippers |\n"
+         "| 1 | Start |\n"
+         "| 5 | coin |\n"
+         "| Space | Launch |\n"
+         "| P | Plunge |\n"
+         "| D | Drain |"),
+        ("Good to know",
+         "- Each game keeps its settings, audits and high scores between runs, as a "
+         "machine does.\n"
+         "- Sound follows **Mute**; the game's own volume is in its service menu."),
     ],
     "Emulate AP": [
-        ("What it does",
-         "Runs the real American Pinball game on this PC - Houdini, "
-         "Oktoberfest, Hot Wheels, Legends of Valhalla or Galactic Tank Force "
-         "- in its own window, with its sound. The game carries its own "
-         "stand-in for the machine's controller board; the emulator gives it "
-         "what the machine's computer did (the Python it runs on, a full "
-         "trough, the coin door shut) and a way to press every switch, and "
-         "it boots into attract mode."),
-        ("Which file to pick",
-         "The game-code file (.pkg) - the one the machine installs from a "
-         "USB stick. That can be American Pinball's own, or one the Write "
-         "tab built from your edits: emulating it first is the quick way to "
-         "check a mod before it goes on a stick. The file is only read."),
-        ("Playing",
-         "When the game is up its virtual playfield opens beside it - the "
-         "same window as the Stern Emulate tab's. Where the game has a "
-         "playfield picture (Legends of Valhalla, Houdini, Galactic Tank "
-         "Force) its switches and lights are drawn on it, the lights lit in "
-         "the game's colours; otherwise its lights show as a grid and its "
-         "switches as a list. A green dot is a switch the game sees made. "
-         "Hold a switch with the mouse; hold the right button on one to rip "
-         "it (a spinner spinning), as on Stern. There is no ball physics: Start "
-         "serves a ball to the shooter lane, Plunge puts it into play, you "
-         "press the switches it would hit, and Drain sends it back to the "
-         "trough, ending the ball - unless the game's ball save is still "
-         "running (the first seconds after the ball reaches the playfield, "
-         "12 on Legends of Valhalla), when it serves the ball again, as the "
-         "machine would. With that window or one of the game's own windows "
-         "focused, the arrow keys are the "
-         "flippers, 1 is Start, 5 a coin (two or four make a credit), Space "
-         "the Action button, T tilt, the letters beside the playfield "
-         "switches press them, F plunges, D drains, C opens and shuts the coin "
-         "door, Backspace, -, = and Enter are the service buttons, and Pause "
-         "or F9 (in the playfield window) freezes the game. Closed it, or "
-         "lost it behind the game? The \"Playfield window\" button beside "
-         "Stop brings it back to the front."),
-        ("First start is slower",
-         "The very first Start sets the emulator up inside the app's Linux: "
-         "it downloads the Python the games run on (about 1 GB, a few "
-         "minutes, once). Until that is done the tab says so, with a \"Set "
-         "up emulator…\" button that does it now; the same button installs "
-         "the app's own Linux when this PC does not have it yet (the game "
-         "would otherwise run in this PC's own WSL distro, which this "
-         "emulator is not built for). Each new .pkg is then unpacked once (under a "
-         "minute) and kept, so starting it again is quick; a rebuilt mod is "
-         "unpacked fresh. While a game is starting the Start button is "
-         "Cancel."),
-        ("One at a time",
-         "Hot Wheels and Galactic Tank Force play their pictures and sound "
-         "through American Pinball's own player, which only one game at a "
-         "time can use. Barry-O's BBQ Challenge does not run here yet. "
-         "Volume and Mute change the game's sound while it plays; the game's "
-         "own volume is in its service menu."),
-        ("Stopping",
-         "Stop ends the game and closes its switch window. So does closing "
-         "any of the game's own windows with its X."),
+        ("What it runs",
+         "Runs the real American Pinball game on this PC, in its own window, with "
+         "sound, into attract. The game carries its own stand-in for the controller "
+         "board; the emulator gives it the Python it runs on, a full trough, the coin "
+         "door shut, and every switch.\n\n"
+         "| Game | Runs here | Playfield picture |\n"
+         "|---|---|---|\n"
+         "| Houdini | Yes | Yes |\n"
+         "| Oktoberfest | Yes | No: lights as a grid, switches as a list |\n"
+         "| Hot Wheels | Yes | No: lights as a grid, switches as a list |\n"
+         "| Legends of Valhalla | Yes | Yes |\n"
+         "| Galactic Tank Force | Yes | Yes |\n"
+         "| Barry-O's BBQ Challenge | not yet | |"),
+        ("Getting started", [
+            {"flow": [
+                {"icon": "gear", "title": "Set up",
+                 "text": "once: downloads the games' Python, about 1 GB"},
+                {"icon": "file", "title": "Pick",
+                 "text": "the `.pkg` game-code file, or one the Write tab built"},
+                {"icon": "play", "title": "Start",
+                 "text": "a new .pkg is unpacked once, under a minute"}]},
+            "- Until set-up is done the tab says so, with **Set up emulator…** to do it "
+            "now. The same button installs the app's own Linux when this PC lacks it "
+            "(this emulator is not built for the PC's own WSL distro).\n"
+            "- The file is only read. A rebuilt mod is unpacked fresh.\n"
+            "- **Cache…** shows what is kept and deletes it.\n"
+            "- While a game is starting, **Start** is **Cancel**.",
+        ]),
+        ("Playing", [
+            "The virtual playfield opens beside the game, as on the Stern Emulate tab: "
+            "switches and lights on the playfield picture where there is one, lit in "
+            "the game's colours. A green dot is a switch the game sees made.",
+            {"flow": [
+                {"icon": "play", "title": "Start", "text": "serves a ball to the shooter lane"},
+                {"icon": "up", "title": "Plunge", "text": "puts it into play"},
+                {"icon": "grip", "title": "Hit", "text": "press the switches it would hit"},
+                {"icon": "down", "title": "Drain",
+                 "text": "ends the ball, or re-serves it during ball save"}]},
+            "There is no ball physics. Ball save is the first seconds after the ball "
+            "reaches the playfield (12 on Legends of Valhalla).\n"
+            "- Hold a switch with the mouse; hold the right button on one to rip it "
+            "(a spinner spinning).\n"
+            "- Closed the playfield, or lost it behind the game? **Playfield window** "
+            "beside Stop brings it to the front.\n\n"
+            "### Keys (playfield or game window focused)\n"
+            "| Key | Does |\n"
+            "|---|---|\n"
+            "| Arrow keys | flippers |\n"
+            "| 1 | Start |\n"
+            "| 5 | coin (two or four make a credit) |\n"
+            "| Space | Action button |\n"
+            "| T | tilt |\n"
+            "| Letters beside switches | press them |\n"
+            "| F / D | plunge / drain |\n"
+            "| C | open or shut the coin door |\n"
+            "| Backspace, -, =, Enter | service buttons |\n"
+            "| Pause or F9 | freeze the game (playfield window) |",
+        ]),
+        ("Good to know",
+         "- Hot Wheels and Galactic Tank Force play through American Pinball's own "
+         "player, which only one game at a time can use.\n"
+         "- **Volume** and **Mute** change the sound while it plays; the game's own "
+         "volume is in its service menu.\n"
+         "- **Stop** ends the game and closes the switch window. So does closing any "
+         "of the game's windows with its X."),
     ],
     "Emulate Spooky": [
-        ("What it does",
-         "Runs the real Spooky Pinball game on this PC, in its own window, "
-         "with its sound. Supported: Beetlejuice, Scooby-Doo, Texas "
-         "Chainsaw Massacre, Evil Dead, Looney Tunes, Halloween, Ultraman, "
-         "Rick and Morty and Alice Cooper's Nightmare Castle. "
-         "The DMD games Jetsons, Domino's and Rob Zombie run from their "
-         "update zip (Jetsons_Code.zip, DOM_v6.zip, rzupdate_V26.zip) in a "
-         "window of their own - the display, every switch, the balls and "
-         "the sound - without the app's Linux. "
-         "Not yet: Total Nuclear Annihilation, whose update cannot be opened "
-         "yet, and America's Most Haunted, whose update carries no game "
-         "program. "
-         "These games run on this PC as they are, so nothing is emulated but "
-         "the machine's controller board: the emulator answers the game the "
-         "way that board would, with a full trough, and gives you a way to "
-         "press every switch. The first Start of Rick and Morty or Alice "
-         "Cooper also downloads the Python those two are written in (once, "
-         "a few minutes)."),
-        ("Which file to pick",
-         "The game's update file - the one the machine installs from a USB "
-         "stick, named as the machine wants it: v….beetlejuice, v….scooby, "
-         "….ed, ….looney, tcm-….pkg (Texas Chainsaw), code_H78.pkg "
-         "(Halloween), code_UM.pkg (Ultraman), rm-gamecode-….pkg (Rick and "
-         "Morty) or ac-gamecode.pkg (Alice Cooper). The emulator tells the "
-         "games apart by that name. It can be the official file, or one the "
-         "Write tab "
-         "built from your edits: emulating it first is the quick way to check "
-         "a mod before it goes on a stick. The file is only read."),
-        ("Playing",
-         "When the game reaches attract mode its virtual playfield opens "
-         "beside it - the same window as the American Pinball and Stern "
-         "Emulate tabs'. The Spooky games ship no playfield picture, so "
-         "their switches are a list; a green dot is a switch the game sees made. "
-         "Hold a switch with the mouse; hold the right button on one to rip "
-         "it (a spinner spinning). There is no ball physics: Start serves a "
-         "ball to the shooter lane, Plunge presses the Launch button and the "
-         "game fires the ball into play, "
-         "you press the switches it would hit, and Drain sends it back to "
-         "the trough, ending the ball - unless the game's ball save is still "
-         "running, when it serves the ball again, as the machine would. With "
-         "that window focused, the arrow keys are the flippers, 1 is Start, "
-         "5 a coin, Space the Launch button, Down the Action button, T tilt, "
-         "the letters beside the playfield switches press them, F plunges, D "
-         "drains, Backspace, -, = and Enter are the service buttons, and "
-         "Pause or F9 freezes the game. The same keys work in the game's own "
-         "window, except the ones the game uses there itself (Beetlejuice: "
-         "Enter starts, Space launches, the arrows flip). Closed the "
-         "playfield? \"Playfield window\" beside Stop brings it back."),
-        ("Volume",
-         "Volume and Mute on this tab (and the VOL bar in the playfield "
-         "window) set Predator's sound live, as on every Emulate tab. The "
-         "game's own volume is in its service menu. Alien and ABBA have no "
-         "sound in the emulator yet."),
-        ("Cancel and Stop",
-         "While a game is starting the Start button is Cancel; it stops the "
-         "start and throws a half-unpacked copy away. Stop ends the game and "
-         "closes its playfield window; so does closing the game's window."),
-        ("Starting takes a while",
-         "The first Start on a file unpacks it (Predator about 5 GB, Alien's "
-         "restore image about 3.5 GB, a full Alien or ABBA update about "
-         "2.5 GB) inside the app's Linux, which takes a few minutes; the "
-         "result is kept, so starting "
-         "the same file again skips that. Cache... beside Browse... shows "
-         "what is kept and deletes it. Loading the game itself then takes a "
-         "minute or two, as it does on the machine. It draws on this PC's "
-         "graphics card (through WSL); on a PC where WSL has no graphics "
-         "card it draws on the processor, and the picture is much slower."),
-        ("Settings and high scores",
-         "The game keeps its settings, audits and high scores between runs, "
-         "as a machine does."),
+        ("What it runs",
+         "Runs the real Spooky Pinball game on this PC, in its own window, with sound. "
+         "The emulator answers the game as its controller board would, with a full "
+         "trough, and gives you every switch. Pick the update file named as the "
+         "machine wants it: the emulator tells the games apart by that name.\n\n"
+         "| Game | Update file | Runs here |\n"
+         "|---|---|---|\n"
+         "| Beetlejuice | `v….beetlejuice` | Yes |\n"
+         "| Scooby-Doo | `v….scooby` | Yes |\n"
+         "| Texas Chainsaw Massacre | `tcm-….pkg` | Yes |\n"
+         "| Evil Dead | `….ed` | Yes |\n"
+         "| Looney Tunes | `….looney` | Yes |\n"
+         "| Halloween | `code_H78.pkg` | Yes |\n"
+         "| Ultraman | `code_UM.pkg` | Yes |\n"
+         "| Rick and Morty | `rm-gamecode-….pkg` | Yes |\n"
+         "| Alice Cooper's Nightmare Castle | `ac-gamecode.pkg` | Yes |\n"
+         "| Jetsons | `Jetsons_Code.zip` | Yes, DMD in a window of its own |\n"
+         "| Domino's | `DOM_v6.zip` | Yes, DMD in a window of its own |\n"
+         "| Rob Zombie | `rzupdate_V26.zip` | Yes, DMD in a window of its own |\n"
+         "| Total Nuclear Annihilation | | not yet: its update cannot be opened |\n"
+         "| America's Most Haunted | | not yet: its update has no game program |\n\n"
+         "The DMD games' window has the display, every switch, the balls and the "
+         "sound, and needs no app Linux."),
+        ("Getting started", [
+            {"flow": [
+                {"icon": "file", "title": "Pick",
+                 "text": "the update file, or one the Write tab built"},
+                {"icon": "play", "title": "Start",
+                 "text": "the first time unpacks it in the app's Linux, a few minutes"},
+                {"icon": "refresh", "title": "Load",
+                 "text": "the game takes a minute or two, as on the machine"}]},
+            "- The file is only read; the unpacked copy is kept, so the next start skips "
+            "that. **Cache…** beside Browse… shows what is kept and deletes it.\n"
+            "- The first Start of Rick and Morty or Alice Cooper also downloads the "
+            "Python those two run on (once, a few minutes).\n"
+            "- The game draws on this PC's graphics card through WSL. Where WSL has no "
+            "graphics card it draws on the processor, much slower.\n"
+            "- While a game is starting, **Start** is **Cancel**: it throws a "
+            "half-unpacked copy away.",
+        ]),
+        ("Playing", [
+            "The virtual playfield opens beside the game once it reaches attract, as on "
+            "the American Pinball and Stern Emulate tabs. Spooky ships no playfield "
+            "picture, so the switches are a list; a green dot is a switch the game sees "
+            "made.",
+            {"flow": [
+                {"icon": "play", "title": "Start", "text": "serves a ball to the shooter lane"},
+                {"icon": "up", "title": "Plunge",
+                 "text": "presses Launch; the game fires the ball"},
+                {"icon": "grip", "title": "Hit", "text": "press the switches it would hit"},
+                {"icon": "down", "title": "Drain",
+                 "text": "ends the ball, or re-serves it during ball save"}]},
+            "- There is no ball physics. Hold a switch with the mouse; hold the right "
+            "button on one to rip it (a spinner spinning).\n"
+            "- Closed the playfield? **Playfield window** beside Stop brings it back.\n\n"
+            "### Keys (playfield window focused)\n"
+            "| Key | Does |\n"
+            "|---|---|\n"
+            "| Arrow keys | flippers |\n"
+            "| 1 | Start |\n"
+            "| 5 | coin |\n"
+            "| Space / Down | Launch / Action button |\n"
+            "| T | tilt |\n"
+            "| Letters beside switches | press them |\n"
+            "| F / D | plunge / drain |\n"
+            "| Backspace, -, =, Enter | service buttons |\n"
+            "| Pause or F9 | freeze the game |\n\n"
+            "The same keys work in the game's own window, except the ones the game uses "
+            "there itself (Beetlejuice: Enter starts, Space launches, the arrows flip).",
+        ]),
+        ("Good to know",
+         "- **Volume** and **Mute** (and the VOL bar in the playfield window) set the "
+         "game's sound live. The game's own volume is in its service menu.\n"
+         "- **Stop** ends the game and closes the playfield; so does closing the "
+         "game's window.\n"
+         "- The game keeps its settings, audits and high scores between runs, as a "
+         "machine does."),
     ],
     "Emulate PB": [
-        ("What it does",
-         "Runs the real Pinball Brothers game on this PC, in its own window. "
-         "Supported: Predator, Alien, ABBA and Queen. Each game is two "
-         "native Linux programs (the rules and the screen), so nothing is "
-         "emulated but the machine's controller boards - Predator's FAST "
-         "boards, or the I/O boards Alien, ABBA and Queen share: the "
-         "emulator answers the game the way those boards would, with six "
-         "balls in the trough, and gives you a way to press every switch. "
-         "ABBA's screens stay dark: its update files carry the program and "
-         "the sound, not the pictures and videos the factory installed."),
-        ("Which file to pick",
-         "The .upd update file for the version you want to play - the one "
-         "the machine installs from a USB stick. Pinball Brothers ships one "
-         "full update (pbpp_predator_game_1_0.upd) and then smaller "
-         "follow-ups that carry only what changed "
-         "(pbpp_predator_game_1_0_1.upd). Pick the follow-up to play that "
-         "version; the full update must be in the same folder, and the "
-         "emulator uses both. Alien and ABBA work the same way (pbap411.upd "
-         "then pbap412.upd for Alien, pbap141.upd then pbap145.upd for "
-         "ABBA), and also need Alien's restore image "
-         "(clonezilla-live-alien40.iso) in that folder the first time: it "
-         "is the machine's own Linux, which both games run on. Queen's "
-         "updates (pbq0210G.upd) carry only what changed, so Queen needs "
-         "its own restore image (clonezilla-live-queen20d.iso, about "
-         "10 GB) beside them: it holds Queen's pictures, videos and sound. "
-         "Pick a restore image itself to play the game as it left the "
-         "factory. The files are only read."),
-        ("Setting up",
-         "The first time, the emulator downloads the libraries Predator "
-         "needs for its sound and video (about 700 MB) into the app's "
-         "Linux; Alien and ABBA need none. \"Set up emulator...\" does that ahead of time; otherwise "
-         "the first Start does it."),
-        ("Playing",
-         "When the game reaches attract mode its virtual playfield opens "
-         "beside it - the same window as the American Pinball and Stern "
-         "Emulate tabs'. These games ship no playfield picture, so their "
-         "switches are a list; a green dot is a switch the game sees made, "
-         "and the lights are the LEDs the game has lit. Hold a switch with "
-         "the mouse; hold the right button on one to rip it (a spinner "
-         "spinning). There is no ball physics: Start serves a ball to the "
-         "shooter lane, the Launch button (Space) fires it into play, you "
-         "press the switches it would hit, and Drain sends it back to the "
-         "trough. Queen has no Launch button: both flippers launch, and "
-         "also start the song picked on the song select each ball begins "
-         "with (F does both). With that window or the game's own window "
-         "focused, the "
-         "arrow keys are the flippers, 1 is Start, 5 a coin, Space the Launch button, T tilt, "
-         "the letters beside the playfield switches press them, F plunges, "
-         "D drains, Backspace, -, = and Enter are the coin door's buttons, "
-         "and Pause or F9 freezes the game. Closed the playfield? "
-         "\"Playfield window\" on this tab brings it back."),
-        ("Volume",
-         "Volume and Mute on this tab (and the VOL bar in the playfield "
-         "window) set the game's sound live, as on every Emulate tab. The "
-         "game's own volume is in its service menu."),
-        ("Cancel and Stop",
-         "While a game is starting the Start button is Cancel; it stops the "
-         "start and throws a half-unpacked copy away. Stop ends the game and "
-         "closes its playfield window."),
-        ("Starting takes a while",
-         "The first Start on a file unpacks it (Predator about 5 GB, Alien's "
-         "restore image about 3.5 GB, a full Alien or ABBA update about "
-         "2.5 GB) inside the app's Linux, which takes a few minutes; the "
-         "result is kept, so starting "
-         "the same file again skips that. Cache... beside Browse... shows "
-         "what is kept and deletes it."),
-        ("Settings and high scores",
-         "The game keeps its settings, audits and high scores between runs, "
-         "as a machine does."),
+        ("What it runs",
+         "Runs the real Pinball Brothers game on this PC, in its own window. Each game "
+         "is two Linux programs (the rules and the screen); the emulator stands in "
+         "for the controller boards (Predator's FAST boards, or the I/O boards the "
+         "others share), with six balls in the trough.\n\n"
+         "| Game | Runs here |\n"
+         "|---|---|\n"
+         "| Predator | Yes |\n"
+         "| Alien | Yes |\n"
+         "| ABBA | Yes, but the screens stay dark: its updates carry no pictures or "
+         "videos |\n"
+         "| Queen | Yes |"),
+        ("Getting started", [
+            "Pick the `.upd` update for the version you want. Pinball Brothers ships a "
+            "full update, then follow-ups with only what changed: pick the follow-up, "
+            "with the rest in the same folder, and the emulator uses them all.\n\n"
+            "| Game | Pick | Also in the folder |\n"
+            "|---|---|---|\n"
+            "| Predator | `pbpp_predator_game_1_0_1.upd` | the full "
+            "`pbpp_predator_game_1_0.upd` |\n"
+            "| Alien | `pbap412.upd` | `pbap411.upd`, and the first time "
+            "`clonezilla-live-alien40.iso` |\n"
+            "| ABBA | `pbap145.upd` | `pbap141.upd`, and the first time "
+            "`clonezilla-live-alien40.iso` |\n"
+            "| Queen | `pbq0210G.upd` | `clonezilla-live-queen20d.iso` (about 10 GB) |\n\n"
+            "- Alien's restore image is the machine's own Linux, which Alien and ABBA "
+            "both run on. Queen's holds its pictures, videos and sound.\n"
+            "- Pick a restore image itself to play the game as it left the factory. The "
+            "files are only read.",
+            {"flow": [
+                {"icon": "gear", "title": "Set up",
+                 "text": "Predator only: about 700 MB of sound and video libraries, once"},
+                {"icon": "file", "title": "Pick", "text": "the update, as above"},
+                {"icon": "play", "title": "Start",
+                 "text": "the first time unpacks it, a few minutes"}]},
+            "- **Set up emulator…** does the set-up ahead of time; otherwise the first "
+            "Start does it. Alien and ABBA need none.\n"
+            "- First-start unpack: Predator about 5 GB, Alien's restore image about "
+            "3.5 GB, a full Alien or ABBA update about 2.5 GB. It is kept, so the same "
+            "file starts quickly again; **Cache…** beside Browse… shows and deletes it.\n"
+            "- While a game is starting, **Start** is **Cancel**: it throws a "
+            "half-unpacked copy away.",
+        ]),
+        ("Playing", [
+            "The virtual playfield opens beside the game once it reaches attract, as on "
+            "the American Pinball and Stern Emulate tabs. These games ship no playfield "
+            "picture, so the switches are a list; a green dot is a switch the game sees "
+            "made, and the lights are the LEDs the game has lit.",
+            {"flow": [
+                {"icon": "play", "title": "Start", "text": "serves a ball to the shooter lane"},
+                {"icon": "up", "title": "Launch", "text": "Space fires it into play"},
+                {"icon": "grip", "title": "Hit", "text": "press the switches it would hit"},
+                {"icon": "down", "title": "Drain", "text": "sends it back to the trough"}]},
+            "- There is no ball physics. Hold a switch with the mouse; hold the right "
+            "button on one to rip it (a spinner spinning).\n"
+            "- **Queen** has no Launch button: both flippers launch, and also start the "
+            "song picked on the song select each ball begins with (F does both).\n"
+            "- Closed the playfield? **Playfield window** brings it back.\n\n"
+            "### Keys (playfield or game window focused)\n"
+            "| Key | Does |\n"
+            "|---|---|\n"
+            "| Arrow keys | flippers |\n"
+            "| 1 | Start |\n"
+            "| 5 | coin |\n"
+            "| Space | Launch button |\n"
+            "| T | tilt |\n"
+            "| Letters beside switches | press them |\n"
+            "| F / D | plunge / drain |\n"
+            "| Backspace, -, =, Enter | the coin door's buttons |\n"
+            "| Pause or F9 | freeze the game |",
+        ]),
+        ("Good to know",
+         "- **Volume** and **Mute** (and the VOL bar in the playfield window) set the "
+         "game's sound live. The game's own volume is in its service menu.\n"
+         "- **Stop** ends the game and closes the playfield.\n"
+         "- The game keeps its settings, audits and high scores between runs, as a "
+         "machine does."),
     ],
     "Emulate": [
         ("What it does", [

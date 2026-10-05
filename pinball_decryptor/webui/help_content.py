@@ -2992,41 +2992,67 @@ for _tab, _extra in _CONTENT_EXTRAS.items():
 # lists what the app has right now (the ports) is never a release behind.
 
 
-def _and_list(words):
-    """``a, b and c`` for the person."""
-    words = list(words)
-    if len(words) <= 1:
-        return "".join(words)
-    return ", ".join(words[:-1]) + " and " + words[-1]
+#: The "Which games" table's columns (PAD-380): what differs from one build to the next.
+MODES_GAMES_HEAD = ("Game", "Screen, clip, sounds", "Countdown", "Ball save", "Lights", "Also")
+
+
+def modes_games_rows(ports=None):
+    """One row per port, in MODES_GAMES_HEAD's order: the "?" window's "Which games" table, and
+    the one in MODE_LIMITS.md (a test keeps them equal)."""
+    from ..plugins.stern import mode_assets as MA
+    from ..plugins.stern import mode_project as MP
+    if ports is None:
+        ports = MP.profiles().values()
+    rows = []
+    for p in sorted(ports, key=lambda p: p.label):
+        yes = "✓"
+        media = yes if all(p.can(k) for k in ("screen", "clip", "own_sound")) else "no"
+        if not p.can("lights"):
+            lights = "no"
+        else:
+            lights = "all" if p.lamps == 0 else "shots"
+        also = []
+        if p.can("screen") and (p.lcd("hud") or "").endswith(MA.HUD_SCENE):
+            also.append("HUD")
+        if any("button" in n.lower() for n, _m in p.shots):
+            also.append("buttons")
+        if p.stack_note and p.can("stack"):
+            also.append("waits for multiballs only")
+        if not p.can("stack"):
+            also.append("never waits")
+        if not p.can("events"):
+            also.append("no events")
+        if not p.proven:
+            also.append("never run")
+        rows.append((p.label, media, yes if p.can("countdown") else "no",
+                     yes if p.can("ball_save") else "not yet", lights, ", ".join(also)))
+    return rows
 
 
 def _modes_which_games():
     """The Modes tab's "Which games" tip, read off the ports when the window
-    renders: every profile the mode maker has, the ones drafted and never run
-    named as such, and what a card with no port shows.  Never raises (the "?"
-    window is not the place for a traceback)."""
+    renders: a line, then a table of every port (PAD-380: the list was a wall of
+    names).  Never raises (the "?" window is not the place for a traceback)."""
     try:
-        from ..plugins.stern import mode_project as MP
-        ports = sorted(MP.profiles().values(), key=lambda p: p.label)
+        rows = modes_games_rows()
     except Exception:                                   # noqa: BLE001
-        ports = []
-    lead = ("A mode hooks the game's own program, and those hooks are recorded "
-            "in a port for one game build. ")
-    if not ports:
-        return (lead + "No port could be read in this copy of the app, so the "
-                "tab says which game it can make modes for.")
-    text = lead + "Ports so far: %s." % _and_list(p.label for p in ports)
-    drafted = [p.label for p in ports if not p.proven]
-    if drafted:
-        one = len(drafted) == 1
-        text += (" %s %s drafted and never run in the emulator, so a mode made "
-                 "for %s may not work." % (_and_list(drafted), "was" if one else "were",
-                                          "it" if one else "them"))
-    text += (" The tab reads which game the project's card is and shows that "
-             "title's shots. A card whose game has no port says so on the tab and "
-             "points at MODE_SDK.md, \"Making a port for another game or version\", "
-             "which says how to make one; a new port file shows up by itself.")
-    return text
+        rows = []
+    if not rows:
+        return ("No game list could be read in this copy of the app. The tab "
+                "says whether it can make modes for your card.")
+    lead = ("Every build below has played modes in the emulator. "
+            if all("never run" not in r[-1] for r in rows) else
+            "Every build below but those marked \"never run\" has played modes in the emulator. ")
+    return {"text": lead + "Shots, scoring, timers, multiball and holding off the game's "
+                           "modes work on all of them; the columns are what differs.",
+            "table": {"head": list(MODES_GAMES_HEAD), "rows": [list(r) for r in rows]},
+            "after": "Lights: shots = just the scoring shots' inserts; all = every insert in "
+                     "the mode's colour. HUD = counters, a timer and a gauge at the screen's "
+                     "edges. Buttons = the flipper and Action buttons count as shots. Never "
+                     "waits = a mode can't be set to wait for the game's modes.\n\n"
+                     "A build not listed gets its hooks worked out when you pick its card: "
+                     "press Check this game before trusting them. MODE_SDK.md, \"Making a "
+                     "port for another game or version\", covers the rest."}
 
 
 PREVIEW_HELP = {
@@ -3040,18 +3066,15 @@ PREVIEW_HELP = {
              "it scores through the game's own scoring and plays through its own "
              "light and sound calls."),
             ("What it can't do",
-             "The game's own modes are compiled code in the game program, and the "
-             "app does not rewrite that code. So a mode of your own is wide open "
-             "(its own start, shots, scoring, screen, clips, sounds, music and "
-             "lights); the game's own modes change only where the game keeps a "
-             "timer or an award as one number; and the game's progression, "
-             "operator settings, coils and magnets, high score table and Insider "
-             "Connected reports are not something a mode changes. One example: "
-             "Godzilla's BATTLE SELECTION screen has seven slots fixed in its "
-             "code, so a new monster cannot be added, but a mode can take one "
-             "slot's place. 'What a mode can and can't do', on the first mode's "
-             "page and under New, opens the whole list with worked examples "
-             "(MODE_LIMITS.md, beside MODE_SDK.md)."),
+             "Stern's own modes are compiled into the game program, and the app "
+             "doesn't rewrite that code. So your modes are wide open (start, shots, "
+             "scoring, screen, clips, sounds, music, lights); the game's modes change "
+             "only where a timer or award is one number; and progression, settings, "
+             "coils, high scores and Insider Connected are off limits. Example: "
+             "Godzilla's battle selection has seven slots fixed in its code, so you "
+             "can't add a monster, but a mode can take over a slot. 'What a mode can "
+             "and can't do', on the first mode's page and under New, has the full "
+             "list (MODE_LIMITS.md)."),
             ("Which games", _modes_which_games),
             ("Making a mode",
              "New, over the list, makes a blank mode or one from an example (KAIJU "

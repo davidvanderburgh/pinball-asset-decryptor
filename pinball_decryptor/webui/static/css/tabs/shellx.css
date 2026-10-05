@@ -50,6 +50,12 @@ html.bp-700 .sx-row > .lbl { padding-top: 4px; }
 .sx-tips-text section { padding: 8px 0 4px; }
 .sx-tips-text h3 { font-family: var(--cond); font-size: 15.5px; font-weight: 600; margin: 6px 0 4px; color: var(--ink); }
 .sx-tips-text p { margin: 0; color: var(--ink-2); line-height: 1.55; font-size: 13.5px; white-space: pre-line; }
+.sx-tips-text p + p, .sx-tips-tablewrap + p { margin-top: 8px; }
+.sx-tips-tablewrap { overflow-x: auto; margin: 8px 0 0; }
+.sx-tips-table { border-collapse: collapse; font-size: 12.5px; color: var(--ink-2); width: 100%; }
+.sx-tips-table th { text-align: left; font-weight: 600; color: var(--ink); padding: 4px 6px; border-bottom: 1px solid var(--line-2); vertical-align: bottom; }
+.sx-tips-table td { padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.sx-tips-table td:first-child { color: var(--ink); }
 .sx-rule { margin: 18px 0 2px; padding-top: 12px; border-top: 1px solid var(--line); }
 /* was @media (max-width: 900px) */
 html.bp-900 .sx-tips { left: 72px; width: auto; }

@@ -113,6 +113,19 @@ function ErrorNote({ text }) {
 }
 
 // -------------------------------------------------------------- Tips
+// A section's body is its words, or (PAD-380) {text, table: {head, rows}, after}.
+function TipBody({ b }) {
+  if (typeof b === "string") return html`<p>${b}</p>`;
+  const t = b.table;
+  return html`
+    ${b.text ? html`<p>${b.text}</p>` : null}
+    ${t ? html`<div class="sx-tips-tablewrap"><table class="sx-tips-table">
+      <thead><tr>${t.head.map((h) => html`<th>${h}</th>`)}</tr></thead>
+      <tbody>${t.rows.map((r) => html`<tr>${r.map((c) => html`<td>${c}</td>`)}</tr>`)}</tbody>
+    </table></div>` : null}
+    ${b.after ? html`<p>${b.after}</p>` : null}`;
+}
+
 // The green ? window (help_dialog.TabHelpWindow): the tab's own sections,
 // then "General".  Not modal, like Tk's: it floats beside the page and
 // follows the tab that is showing.
@@ -167,7 +180,7 @@ function TipsPanel({ close }) {
       <div class="sx-tips-text" ref=${body}>
         ${!data ? html`<div class="row"><${Spinner} /><span class="muted">Loading…</span></div>` : null}
         ${data && !sections.length ? html`<p class="muted">No tips for this tab yet: the general ones are below.</p>` : null}
-        ${sections.map(([t, b], i) => html`<section id=${"tip-" + i}><h3>${t}</h3><p>${b}</p></section>`)}
+        ${sections.map(([t, b], i) => html`<section id=${"tip-" + i}><h3>${t}</h3><${TipBody} b=${b} /></section>`)}
         ${data ? html`<div class="sx-rule eyebrow">General</div>` : null}
         ${general.map(([t, b], i) => html`<section id=${"gen-" + i}><h3>${t}</h3><p>${b}</p></section>`)}
       </div>

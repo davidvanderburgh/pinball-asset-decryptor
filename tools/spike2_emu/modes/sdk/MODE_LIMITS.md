@@ -1,178 +1,221 @@
 # What a mode can and can't do
 
-The Modes tab lets you add modes to a Stern Spike 2 game and change some of the game's own. This page says where that stops, with the things people ask for most as worked examples. If what you want isn't here, find its nearest neighbour in the table below: the reason it's a yes or a no usually carries over.
+Where the Modes tab's reach ends, with the things people ask for most as examples.
 
-## The one idea behind every limit
+## The short version
 
-A Stern game's own modes are not files. They are compiled code inside the game program, and the app does not rewrite that code. Your mode is a small program of its own that the card loads next to the game. It runs inside the game, so it scores through the game's own scoring and plays through the game's own display, speakers and lights, but it reaches the game only through a fixed set of hooks the app knows for that game and version.
+Stern's own modes are compiled into the game program, and the app doesn't rewrite that code. Your mode runs next to it and talks to the game through hooks the app knows for each build. That gives three zones:
 
-So there are three zones, and almost every question lands in one of them:
-
-1. **Your own modes: wide open.** Within the sizes at the end of this page, a mode of yours starts on what you choose, scores what you choose, and brings its own screen, clips, sounds, music and lights.
-2. **The game's own modes: numbers yes, structure no.** A timer or an award the game keeps as a single number can be changed. What a mode is, when it starts, how it ends and what it leads to are code, and stay as Stern wrote them.
-3. **The rest of the game: hands off.** Its progression, its operator menu, its coils and magnets, its high score table and its link to Insider Connected are not something a mode changes.
+- **Your modes:** wide open. Your own start, shots, scoring, screen, clips, sounds, music and lights.
+- **The game's modes:** you can change their numbers (timers, awards), not how they work.
+- **Everything else:** progression, settings, coils, high scores and Insider Connected are off limits.
 
 ## Quick answers
 
-| I want to... | Can I? | What you can do instead |
-|---|---|---|
-| Add an eighth monster to Godzilla's BATTLE SELECTION screen | **No** | Take over one of the seven slots, so picking that monster starts your mode instead of the game's battle. [Example 1](#example-1-a-new-monster-in-godzillas-battle-selection) |
-| Make a brand new mode with its own name, screen, clip, music and callouts | **Yes** | [Example 2](#example-2-a-mode-of-your-own) |
-| Start my mode from shots, a timer, or something the game does (a ball starts, the skill shot, a multiball starts...) | **Yes** | The events on offer are the ones this game reports; the tab lists them. |
-| Start my mode from a flipper or Action button | **On Godzilla** | Godzilla reports its buttons as shots. Jaws and Uncanny X-Men report one button each; other games report none. |
-| Start my mode after another of my modes | **Yes** | "Only after" holds a mode until another one has run this ball or this game. |
-| Start my mode when the player beats one of the game's battles | **No** | No game reports "battle won". Start it from your own shots, or after another mode of yours. |
-| Change a timer or an award in one of the game's own modes | **Usually** | Where the game keeps it as one number. [Example 3](#example-3-changing-the-games-own-modes) |
-| Change which shots one of the game's own modes needs | **Godzilla only, a few modes** | [Example 3](#example-3-changing-the-games-own-modes) |
-| Rewrite one of the game's own modes, start to finish | **No** | Build your own mode that plays the way you want, and keep the game's out of the way while it runs. [Example 4](#example-4-rework-a-stock-mode-to-my-hearts-content) |
-| Rename one of the game's modes, or a monster | **Yes** | On the Text tab, not the Modes tab. Its Max column says how long the new text can be. |
-| Give one of the game's modes different music | **Not for one mode** | Replacing a sound on the Audio tab changes it everywhere the game plays it. Your own modes can have any music you like. |
-| Add new sounds to the game | **Only for your modes** | Each sound of yours rides on a sound the game has but never plays. The card has a fixed number of those (21 on Godzilla), shared by every mode on it. |
-| Fire a coil, a magnet, a kickback, a ball lock or a diverter | **No** | A mode has no way to drive the machine's hardware. Its own multiball serves balls through the game's own call. |
-| Add a switch or a shot the game doesn't already have | **No** | A mode sees the shots the game reports. |
-| Keep the game's modes from starting while mine runs | **Yes, except multiballs** | [Example 5](#example-5-sharing-the-game-with-its-own-modes) |
-| Run my mode at the same time as one of the game's battles | **Yes** | Your words step aside so the two never print over each other. [Example 5](#example-5-sharing-the-game-with-its-own-modes) |
-| Run two of my own modes at the same time | **No** | One of yours runs at a time. A start while another runs waits for it, or does nothing, depending on the mode. |
-| Make the game's screens wait until my mode is done | **No** | Removed on purpose. [Why](#why-your-mode-always-gives-way) |
-| Change how the game progresses (Godzilla's cities, the second tier of battles, King of the Monsters, what qualifies a wizard mode) | **No** | That's the game's code. A mode in a battle slot counts toward its city (Example 1), and your own modes can build their own progression with shared variables. |
-| Change an operator setting, an audit or the high score table from a mode | **No** | Settings are on the Defaults tab. A mode only adds points to the player's score. |
-| Take points away from a player | **Form modes only** | A minus number under Points per shot. A Score points block only adds. |
-| Send scores from a card with modes to Insider Connected | **No** | Players still log in, but the machine sends no game, score, high score or achievement report. |
-| Put modes on a card from a Mac, or write straight to the SD card | **No** | Write an image file on Windows or Linux, then flash it. |
-| Make modes for a Spike 1, Spike 3 or non-Stern game | **No** | Stern Spike 2 only. |
+### Your modes
 
-## Example 1: a new monster in Godzilla's battle selection
+| I want to... | Answer |
+|---|---|
+| Make a new mode with its own name, screen, clip, music and callouts | Yes. [Example 2](#2-a-mothra-mode-of-my-own) |
+| Start it on shots, a timer or a game event (ball start, skill shot, multiball...) | Yes. Events vary by game. |
+| Start it on a flipper or Action button | Godzilla only |
+| Start it after another of my modes | Yes, with "Only after" |
+| Start it when the player beats one of the game's battles | No. No game reports a win. |
+| Run two of mine at once | No. One at a time. |
+| Take points away | Form modes only (a minus number under Points per shot) |
+| Give it sounds of its own | Yes, up to 16. Each rides on a game sound that never plays; the card has a fixed number of those (21 on Godzilla), shared by every mode on it. |
 
-**The ask:** "Add Mothra to the battle selection, next to Ebirah and the rest."
+### The game's modes
 
-**The answer: the list can't grow, but a place in it can be taken.**
+| I want to... | Answer |
+|---|---|
+| Change a timer or an award | Usually. [Example 3](#3-make-ebirah-30-seconds-and-pay-more) |
+| Change which shots it needs | A few modes, Godzilla only |
+| Rewrite how it plays | No. Build your own instead. [Example 4](#4-rework-gigans-battle-into-a-three-phase-boss-fight) |
+| Rename it | Yes, on the Text tab |
+| Give it different music | Not for one mode. A swap on the Audio tab changes it everywhere. |
+| Add a monster to Godzilla's battle selection | No, but you can take over a slot. [Example 1](#1-add-mothra-to-godzillas-battle-selection) |
+| Keep them from starting while mine runs | Yes, except multiballs. [Example 5](#5-running-alongside-the-games-modes) |
+| Make their screens wait for mine | No. [Why](#why-your-mode-always-gives-way) |
+| Change progression (Godzilla's cities, tier 2 battles, King of the Monsters, wizard modes) | No |
 
-Godzilla's BATTLE SELECTION screen has seven slots: Ebirah, Titanosaurus, Gigan, Megalon, King Ghidorah, Megalon & Gigan, and King Ghidorah & Gigan. Seven is not a setting. It is built into the game program in more than a dozen places: the list of battles is exactly seven entries long, the screen and the battle rule check the slot number against 6 and 7 throughout, and the screen's artwork has exactly seven pictures, tiles and names. An eighth monster would mean rewriting all of that code, so the app doesn't offer it.
+### The machine
 
-What does work is taking over a slot. Say you take Ebirah's:
+| I want to... | Answer |
+|---|---|
+| Fire a coil, magnet, kickback, lock or diverter | No |
+| Add a switch or a shot | No. A mode sees the shots the game reports. |
+| Change settings, audits or high scores from a mode | No. Settings are on the Defaults tab. |
+| Send scores to Insider Connected | No. Players can log in, but a card with modes sends no scores. |
+| Write modes from a Mac, or straight to an SD card | No. Write an image file on Windows or Linux. |
+| Make modes for Spike 1, Spike 3 or another maker | No. Spike 2 only. |
 
-- Picking Ebirah on the screen starts **your** mode, three seconds after the pick so your start screen is seen once the selection screen has closed. The game's Ebirah battle never starts.
-- While your mode runs, the ramps stay dark and no other battle can be lit, just as during one of the game's battles. When your mode ends, the ramps light again.
-- It counts toward completing the player's current city, as the game's battle would.
-- The slot's picture and name can be replaced with yours, so the screen shows MOTHRA. The new name can't be longer than the one it replaces (EBIRAH has six letters). The old monster's spoken name is silenced, and you can give the slot a callout of your own.
+## Examples
 
-Where it stops:
+### 1. "Add Mothra to Godzilla's battle selection"
 
-- **The Modes tab has no control for this yet.** Taking a slot is one line in a mode file (`roster_slot 0`) or one call in a mode written in C, and the picture and name are swapped by a separate tool (`roster_entry.py`). If you want it in the tab, say so in the preview channel.
-- The slot keeps Ebirah's progress text (0/4) and never shows "Completed", because the game reads both from the Ebirah battle, which never runs.
-- Because Ebirah's battle never completes, anything the game unlocks by completing it may stay locked. Once every other open slot is completed, the screen picks your slot by itself every time.
-- King of the Monsters starts the first four battles itself, without the screen, so inside King of the Monsters it is still Ebirah.
-- When the ball drains during one of its battles, the game resumes that battle at the next lit scoop. Your mode ends on the drain instead, and the next lit scoop opens the selection screen again.
-- The operator menu, the audits and the champion entry still say Ebirah. Those are program text: rename them on the Text tab.
-- Godzilla only, run in the emulator on Pro 1.15 and Premium/LE 1.16. No other game has a selection screen the app knows how to take over.
+**No.** The screen has seven slots: Ebirah, Titanosaurus, Gigan, Megalon, King Ghidorah, Megalon & Gigan, King Ghidorah & Gigan. Seven is baked into the game's code in more than a dozen places, and the artwork has exactly seven pictures.
 
-## Example 2: a mode of your own
+**You can take over a slot instead.** Take Ebirah's, and:
 
-**The ask:** "A Mothra mode: it starts when I make the left ramp three times, runs for 45 seconds, every orbit pays 2,000,000, it has a title card and its own music, and the orbit inserts blink while it runs."
+- picking Ebirah starts your mode, 3 seconds later so the screen has closed. Ebirah's battle never runs.
+- the ramps stay dark until your mode ends, as in a real battle.
+- it counts toward the player's city, as the battle would.
+- the slot can show your picture and name (no longer than EBIRAH). The old callout is silenced, or replaced with yours.
 
-**The answer: yes, all of it.** This is what the tab is for. Start from an example (New, From an example; KAIJU RUSH is the one that has run on a real machine), from a blank form, or build it from blocks when you need more than the form offers. A mode of your own can:
+The catches:
 
-- **start** on a shot made a number of times, on several shots in one ball (in any order or in order), after another of your modes has run, on one of the game's events, or from a block of your own (a timer, a variable, a condition);
-- **score** any shot the game reports, using numbers, variables, conditions and timers, so it can be a hurry-up, a combo chain, a boss with health, or a mode in phases;
-- **end** on its clock, on a pick of shots, on a block, on a drain if you tick it, and always when the game ends or the next player comes up;
-- **show** a screen of its own (a panel in your colours, or your own picture), its own clips full screen, and a countdown. On Godzilla it can also have a HUD at the screen's edges and play clips behind the score display, like the game's own battles;
-- **play** sounds and callouts of its own, and music of its own in place of the game's while it runs;
-- **light** the inserts of its scoring shots (solid, blinking, pulsing, chasing, or a blink that speeds up as time runs out) and run light shows;
-- **start a multiball** of 2 to 6 balls, with its own ball save.
+- **Not in the Modes tab yet.** It takes `roster_slot 0` in a mode file or one call in C, and `roster_entry.py` for the picture and name.
+- The slot still shows Ebirah's 0/4 and never says Completed. Anything unlocked by finishing Ebirah may stay locked.
+- King of the Monsters still runs the real Ebirah.
+- A drain ends your mode. The game would have resumed its battle.
+- The operator menu, audits and champion still say Ebirah. Rename them on the Text tab.
+- Godzilla only.
 
-What it can't do is anything that outlasts its own run: the game's rules are the same after your mode ends as before it started. And beyond lights and sound, it can't touch the machine's hardware.
+### 2. "A Mothra mode of my own"
 
-## Example 3: changing the game's own modes
+*Three left ramps start it, it runs 45 seconds, orbits pay 2,000,000, it has a title card and its own music, and the orbit inserts blink.*
 
-**The ask:** "Make Ebirah's battle 30 seconds instead of 60, and give it a bigger start award."
+**Yes, all of it.** That's what the tab is for. Start from an example, the form, or blocks when the form runs out.
 
-**The answer: yes.** The game's own modes are listed in the Modes tab under yours. Each shows the timers, awards and shots the app can change on this game. A timer or award qualifies when the game keeps it as one number: the app changes that number on the card and nothing else. A timer that is really an operator setting is the same number the Defaults tab shows.
+| | What a mode of yours can do |
+|---|---|
+| Start | a shot made N times, several shots in one ball (any order or in order), after another mode, a game event, a block |
+| Score | any shot, with variables, conditions and timers for hurry-ups, combos, boss health or phases |
+| End | its clock, chosen shots, a block, a drain if ticked; always at game over or the next player |
+| Show | its own screen (a panel or your picture), full-screen clips, a countdown. On Godzilla, a HUD and clips behind the score. |
+| Sound | its own sounds and callouts, and its own music in place of the game's |
+| Light | its scoring shots' inserts (solid, blink, pulse, chase, a blink that speeds up) and light shows |
+| Multiball | 2 to 6 balls, with a ball save |
 
-Where it stops, and the tab says which applies on each row:
+It can't leave anything changed after it ends, or touch the hardware beyond lights and sound.
 
-- **Worked out as the game plays.** Many awards are computed during play (a base times a multiplier, a value that grows), not stored as one number. Those rows say the game works it out as it plays, so it can't be changed here.
-- **Shared.** Some numbers are one value several modes use. Changing it for one changes it for all of them.
-- **Screens.** Several of the game's modes share one start screen, so the app can't give one of them a different screen.
-- **Which shots a mode needs.** On Godzilla, a few modes can have their shots changed: the tank attack's path, Ebirah's spinner counts, and "counts as" rows that let another shot count as one of the mode's own. On every other game, the shots of the game's modes are fixed.
-- **Operator settings the machine already has.** A machine keeps the settings it has stored. A new default for a timer that is an operator setting shows on a machine still on the old default, or after a factory reset.
+### 3. "Make Ebirah 30 seconds and pay more"
 
-## Example 4: "rework a stock mode to my heart's content"
+**Yes.** Pick Ebirah under the game's own modes in the list and type new numbers. That works for any timer or award the game stores as a single number. Rows the app can't change say why:
 
-**The ask:** "Make Gigan's battle a three-phase fight with a boss health bar, new shots and a final blow on the scoop."
+- **Computed in play**, like a base times a multiplier.
+- **Shared** with other modes. Change it for one and it changes for all.
+- **An operator setting.** It's also on the Defaults tab, and a machine that already stored a value keeps it until a factory reset.
 
-**The answer: not by editing Gigan's battle.** Beyond its numbers, one of the game's modes is code, and the app doesn't rewrite the game's code. This gets you most of the way:
+Shots: on Godzilla you can change the tank attack's path, Ebirah's spinner counts, and let another shot "count as" one of the mode's. On other games the shots are fixed.
 
-1. **Build the fight as your own mode.** Blocks can do phases, health, timers, its own screen, a HUD, music and calls. Several of the example modes are exactly this.
-2. **Keep the game's battle out of the way** while yours runs: set "While it runs, the game's modes" to "cannot start", and tick the battles.
-3. **On Godzilla, take the battle's slot** (Example 1), so picking Gigan starts your fight. Not in the tab yet.
-4. **Rename** what's left on the Text tab.
+Screens: many of the game's modes share one start screen, so one can't get its own.
 
-There is one narrower route for programmers: a mode written in C can replace what a shot does inside one of the game's battles, while the battle's start, clock, screens and ending stay the game's. Today only Ebirah has a template for it, on Godzilla Pro 1.15 and Premium/LE 1.16, and the battle's own words on the screen still describe the old shots.
+### 4. "Rework Gigan's battle into a three-phase boss fight"
 
-## Example 5: sharing the game with its own modes
+**Not by editing Gigan.** Its logic is Stern's code. Instead:
 
-Each mode chooses what happens to the game's modes while it runs:
+1. Build the fight as your own mode. Blocks handle phases, health, timers, a HUD and music.
+2. Set the game's modes to "cannot start" and tick the battles.
+3. On Godzilla, take Gigan's slot ([Example 1](#1-add-mothra-to-godzillas-battle-selection)) so picking Gigan starts yours.
+4. Rename what's left on the Text tab.
 
-- **may start (this one carries on).** Both run. Your words step aside while one of the game's modes shows its own (Stern never shows two modes' words at once), and your screen hides while one of the game's displays has the screen.
-- **may start, and end this one.** Your mode starts only when none of the game's modes runs, and one of theirs starting ends yours.
-- **cannot start.** As above, and the game's modes you tick are held off while yours runs. A shot that would have started one does what it does when that mode isn't lit.
+For C programmers: a C mode can replace what a shot does inside Ebirah's battle (Godzilla Pro 1.15 and Premium/LE 1.16), but the battle's own screen text still describes the old shots.
 
-Limits:
+### 5. Running alongside the game's modes
 
-- **The game's multiballs are never held off.** Balls may be sitting in a lock or on a magnet, and holding the multiball back would leave them there. The game's multiball starts and your mode ends. Your own Multiball block doesn't end your mode.
-- On some games the app can't tell which of the game's modes are running, or can't hold them off; there the option is greyed out, or the mode gives way instead.
-- On some games, a start that is held off may use up whatever lit it.
-- **There is one video screen and one voice.** If your clip starts on the same shot as one of the game's clips, one replaces the other. A full-screen clip of yours starts half a second after it's asked for, so the game's own clip for that shot doesn't take its place.
+Each mode picks one:
+
+| Setting | While yours runs |
+|---|---|
+| may start (this one carries on) | Both run. Your words step aside while theirs are on screen. |
+| may start, and end this one | Yours starts only when none of theirs is running, and one of theirs starting ends yours. |
+| cannot start | The same, and the ones you tick are held off. |
+
+The catches:
+
+- **Multiballs are never held off.** Balls may be sitting in a lock or on a magnet. Theirs starts and yours ends.
+- **One screen, one voice.** A clip of yours and one of the game's on the same shot replace each other. Your full-screen clips start half a second late so the game's doesn't win.
+- Some games can't tell which of their modes are running. There the option is greyed out, or your mode just gives way.
+- On some games a held-off start uses up whatever lit it.
 
 ## Why your mode always gives way
 
-Early versions let a mode hold the screen, so the game's lesser displays waited for it. On a real Godzilla Premium that held back the Magna-Grab's screen, and the game keeps the ball on the magnet until that screen has played: the magnet stayed on until the machine was switched off. Any rule of the game's that waits on a display could stall the same way. So a mode now never makes the game wait for anything. The Display priority setting is kept for modes made before the change, but it no longer holds the game's displays back.
+Modes used to be able to hold the screen so the game's lesser displays waited. On a real Godzilla Premium that held up the Magna-Grab screen, and the game keeps the ball on the magnet until that screen plays. The magnet stayed on until the machine was switched off.
 
-The same thinking is behind the other hard limits: no coils or magnets, the game's multiballs always win, and a mode ends cleanly whenever the game moves on.
+So a mode never makes the game wait for anything now. The Display priority setting is still there for older modes, but it doesn't hold anything back. Same thinking behind the other hard limits: no coils, multiballs always win, and a mode ends cleanly whenever the game moves on.
 
 ## Which games
 
-The app has hooks for 37 Spike 2 game builds, and every one of them has played modes in the app's emulator. Godzilla Premium/LE 1.16 is the one that has run modes on a real machine. The "?" on the Modes tab lists the builds, and a build the app hasn't seen before gets its hooks worked out on the spot: press Check this game (about two minutes in the emulator) before you rely on it.
+Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16 has run them on a real machine. Shots, scoring, timers, multiball and holding off the game's modes work on all of them; the columns are what differs.
 
-Everything in Example 2 works on every build except:
+| Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
+|---|---|---|---|---|---|
+| Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
+| Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
+| Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
+| Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
+| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | all |  |
+| Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
+| Elvira 1.13 | ✓ | no | not yet | all |  |
+| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | all |  |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons |
+| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons |
+| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons |
+| Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
+| Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
+| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all |  |
+| James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | all |  |
+| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots |  |
+| John Wick LE 1.01 | ✓ | no | ✓ | all |  |
+| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | all |  |
+| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | all |  |
+| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots |  |
+| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | all |  |
+| Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | all |  |
+| Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
+| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots |  |
+| Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
+| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | all |  |
+| Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
+| Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
+| Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
+| TMNT LE 1.59 | ✓ | ✓ | not yet | all |  |
+| TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
+| TMNT Pro 1.59 | ✓ | ✓ | ✓ | all |  |
+| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
+| The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
+| The Munsters LE 1.28 | ✓ | ✓ | ✓ | all |  |
+| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | all |  |
+| Venom LE 1.07 | ✓ | ✓ | not yet | all |  |
 
-| | Builds |
-|---|---|
-| **Godzilla extras:** buttons as shots, the HUD at the screen's edges, clips behind the score display, the battle slots (Example 1), changing shots of the game's own modes, and the examples written in C | Godzilla only |
-| **Lighting just the scoring shots' inserts.** Elsewhere a mode's lights hold every insert in its colour. | Godzilla, The Beatles 1.29, Jaws LE 1.02, King Kong LE 0.97, Metallica Remastered 1.04 |
-| **No countdown** (the game's voice never says a number on its own) | Aerosmith LE 1.15, Elvira 1.13, John Wick LE 1.01 |
-| **No ball save from the form yet** (found, not yet seen working in the emulator) | Deadpool LE 1.14, Elvira 1.13, Godzilla Premium/LE 1.16, Iron Maiden LE 1.16, TMNT LE 1.59, Venom LE 1.07 |
-| **Waits only for the game's multiballs** (one of its songs is always running) | The Beatles 1.29 |
-| **Shots, scoring, multiball, ball save and holding off the game's modes only:** no screen, clip, own sound, countdown, light show or events yet. TMNT Pro 1.59 has all of them. | TMNT Pro 1.58 |
+- **Countdown no:** the game's voice never says a number on its own.
+- **Ball save not yet:** found in the game, not yet seen working.
+- **Lights:** *shots* lights just the scoring shots' inserts; *all* holds every insert in the mode's colour.
+- **HUD:** counters, a timer and a gauge at the screen's edges, like Godzilla's own battles.
+- **Buttons:** the flipper and Action buttons count as shots.
+- **Never waits:** a mode can't be set to wait for the game's modes.
+- **Not listed?** Pick the card anyway. The app works out its hooks; press Check this game (about two minutes) before trusting them.
 
 ## Sizes
 
 | | Limit |
 |---|---|
-| Modes from the form | 64 per project (blocks and C modes are counted apart) |
-| Your modes running at once | 1 |
-| A mode's clock | up to 600 seconds (0 = no clock) |
-| A blocks mode | 48 scripts, 400 blocks, nested at most 10 deep |
+| Form modes | 64 per project (blocks and C modes not counted) |
+| Running at once | 1 |
+| Clock | up to 600 seconds (0 = no clock) |
+| Blocks mode | 48 scripts, 400 blocks, nested at most 10 deep |
 | Variables | 24 per mode, names up to 24 characters |
 | Timers | 8 per mode, up to 600 seconds each |
-| Numbers | whole numbers only |
+| Numbers | whole numbers |
 | Mode name | 40 characters |
-| Words on its screen, a log line | 60 characters |
-| HUD (Godzilla) | title, line or award 40 characters; 3 counters, labels 16; badge 12; gauge up to 12 pips |
-| Light show | up to 10 steps |
+| Screen words, log lines | 60 characters |
+| HUD (Godzilla) | title, line or award 40 characters; 3 counters with 16-character labels; badge 12; gauge up to 12 pips |
+| Light show | 10 steps |
 | Multiball | 2 to 6 balls, ball save up to 60 seconds |
-| Clips | a form mode: one at its start, one at its end. A blocks or C mode: 12. Each up to 30 seconds, any common video file, converted to 30 fps with no sound |
-| Pictures | up to 1360 x 768 (larger is scaled down) |
-| Sounds | a form mode: start, scoring shot, end and music. A blocks or C mode: 16. WAV files; music at least half a second |
-| A form mode's end sound | one per card: the first mode that has one |
-| Music | past 150 seconds it loops |
+| Clips | form mode: one at the start, one at the end. Blocks or C: 12. Up to 30 seconds each, any common video format, silent. |
+| Pictures | up to 1360 x 768 (bigger is scaled down) |
+| Sounds | form mode: start, scoring shot, end and music. Blocks or C: 16. WAV only. |
+| Form end sound | one per card, from the first mode that has one |
+| Music | loops after 150 seconds |
 
-## Before you put it on a real machine
+## Before you flash a real machine
 
-- The mode maker is a preview. Treat any card with modes on it as a test card, and keep your stock image.
-- A card with modes on it never reports scores to Insider Connected.
-- Every mode on one card is for that card's game and version. Another build needs its own Write, and so does a Stern code update: until the card is written again for the new version, its modes don't run and the game plays as stock.
+- It's a preview. Treat a card with modes as a test card and keep your stock image.
+- A card with modes never sends scores to Insider Connected.
+- Modes are built for one game version. After a Stern update, Write the card again: until then the modes don't run and the game plays stock.
 
 ## Asking for more
 
-If you hit a wall that isn't on this page, or one that is and you think it shouldn't be, post in the preview channel with the game and version, what you wanted the mode to do, and what the tab did instead. Some of the noes above are "not yet" (the battle slot isn't in the tab, for one). The ones that come from the game's compiled code are much harder to move.
+Hit a wall that isn't here, or think one shouldn't be? Post in the preview channel with the game and version, what you wanted, and what happened. Some of these noes are "not yet" (the battle slot in the tab, for one). The ones that come from Stern's compiled code are much harder to move.

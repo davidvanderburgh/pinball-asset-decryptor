@@ -456,6 +456,9 @@ int pm_ball_save(unsigned seconds);
  *   - the runtime lets go at the grab's end, when you call pm_magnet_release, when your mode ends,
  *     when the ball ends, and when the game ends or tilts. If the game starts a magnet sequence of
  *     its own while you hold, yours steps aside and the game drives the magnet.
+ *   - the grab runs as a game process of the runtime's that takes control of the magnet, as the
+ *     game's own grabs do (without it the game switches the magnet off at once); if the game ends
+ *     that process (a drain, a tilt), the magnet goes off the game's own way.
  * pm_magnet_grab: 1 = grabbing; 0 = refused (the reason is in mode.log). Godzilla only (the port's
  * `site coil_fire` and `value magnet_dev`); PM_CAN_COILS says whether this game has it. */
 #define PM_CAN_COILS        0x80000u  /* pm_magnet_grab / pm_magnet_release / pm_magnet_holding */

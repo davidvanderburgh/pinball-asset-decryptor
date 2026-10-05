@@ -77,6 +77,7 @@ class TitleProfile:
     #                              commands: Godzilla), "inserts" (every insert held in the mode's colour), ""
     bank_tree: str = "auto_loaded"   # item 164: the lcd tree the video bank is in (JP LE, Avengers,
     hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
+    magnet_shot: str = ""            # PAD-381: the shot whose hit is the ball over the magnet; "" = no magnet
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -250,7 +251,8 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
-PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save")
+PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
+         "magnet")
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -395,10 +397,50 @@ def _ball_save_cannot(key, label, sites=None):
                           "yours give a ball save in the emulator, so it cannot here yet." % label),)
 
 
+#: PAD-381: holding the ball on the playfield magnet. What pad_mode_runtime.c's coils_arm needs from a port
+#: before it arms pm_magnet_grab - (sites, values, texts) - with ``value magnet_shot``, the shot whose hit is the
+#: ball over the magnet, which mode_file.c's ``magnet`` line grabs on. A mode only asks for a time: the runtime
+#: clamps it to MAGNET_MIN_MS..MAGNET_MAX_MS, takes the powers from the operator's magnet settings, and holds
+#: its own limits (MODE_SDK.md "The magnet").
+MAGNET_NEEDS = (("coil_fire", "adjustment", "proc_exists", "magnet_get"), ("magnet_dev", "magnet_shot"),
+                ("magnet_procs",))
+MAGNET_MIN_MS = 100                    # pad_mode_runtime.c MAGNET_MIN_MS / MAGNET_MAX_MS (a test holds them equal)
+MAGNET_MAX_MS = 5000
+#: The builds where a mode file's ``magnet`` line was seen hold the ball in the emulator: the Godzilla target's
+#: hit while the mode ran gave ONE magnet command of the operator's powers ([coildrive] on the magnet), and it
+#: ended at its time. Until a build is here the tab greys Magnet.
+MAGNET_PROVEN = frozenset({
+    "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: the starting hit grabbed 2000 ms (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, held to its end), a hit mid-grab refused with no OFF from the game, a grab 6 s later held to its end, a mode stop let go 565 ms early, a drain mid-grab: the game ended the grab's process and the magnet went off 798 ms early, no abort
+    "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: the same (held 2000 to its end, mode stop 584 ms early, drain 782 ms early, no abort); and the first hit started a magnet process of the game's, which the grab stood aside for
+})
+
+
+def _magnet_shot_name(port):
+    """The name of the port's shot the magnet sits at (``value magnet_shot``), or "" when it has none."""
+    mask = port["value"].get("magnet_shot", 0) if port else 0
+    return next((name for name, m in port["shot"] if m == mask), "") if mask else ""
+
+
+def _magnet_cannot(key, label, port=None):
+    """The ``cannot`` entry for holding the ball on the magnet on build ``key``, or () when it can: the port
+    names the magnet's calls, its device, its processes and its shot, and the build is proven."""
+    sites, values, texts = MAGNET_NEEDS
+    if not port or not (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
+                        and all(port["text"].get(n) for n in texts) and _magnet_shot_name(port)):
+        return (("magnet", "The app has not found how %s drives its magnet, so a mode of yours cannot "
+                           "hold the ball on it." % label),)
+    if key in MAGNET_PROVEN:
+        return ()
+    return (("magnet", "The app has found how %s drives its magnet but has not yet seen a mode of yours "
+                       "hold the ball on it in the emulator, so it cannot here yet." % label),)
+
+
 #: item 167: the hand-written profile carries the same verdict as its port (its port names the
-#: framework's serve call; the tab offers Multiball once the build is in MULTIBALL_PROVEN)
+#: framework's serve call; the tab offers Multiball once the build is in MULTIBALL_PROVEN). PAD-381: its
+#: port names no magnet calls (only the 1.16 ports do), so Magnet stays greyed on it.
 GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
-                            + _ball_save_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
+                            + _ball_save_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _magnet_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
@@ -993,6 +1035,7 @@ def profile_from_port(path):
                     "them.")
     cannot += list(_multiball_cannot(key, label, sites))     # item 167
     cannot += list(_ball_save_cannot(key, label, sites))     # PAD-225
+    cannot += list(_magnet_cannot(key, label, port))         # PAD-381
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1040,6 +1083,7 @@ def profile_from_port(path):
         light_route=light_route,
         bank_tree=measured.get("bank_tree", "auto_loaded"),
         hud_tree=measured.get("hud_tree", "auto_loaded"),
+        magnet_shot=_magnet_shot_name(port),                 # PAD-381
     )
 
 
@@ -1590,6 +1634,10 @@ class ModeSpec:
     # over; sequence_reset_any makes every other playfield shot do so too (`trigger_seq_reset`)
     start_sequence: list = field(default_factory=list)
     sequence_reset_any: bool = False
+    # PAD-381: while it runs, every hit of the shot the magnet sits at (the profile's magnet_shot: on Godzilla
+    # the Godzilla target), the one that starts it included, holds the ball on the magnet this many ms
+    # (MAGNET_MIN_MS..MAGNET_MAX_MS; the runtime's own limits still apply); 0 = never
+    magnet_ms: int = 0
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1747,6 +1795,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.multiball = False
     if not p.can("ball_save"):
         spec.start_ball_save = 0
+    if not p.can("magnet"):
+        spec.magnet_ms = 0
     return spec
 
 
@@ -2326,6 +2376,7 @@ def validate(spec, folder=None):
     out += validate_display_lights(spec)
     out += validate_multiball(spec, p)
     out += validate_ball_save(spec, p)
+    out += validate_magnet(spec, p)                    # PAD-381
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
     return out
@@ -2440,6 +2491,29 @@ def ball_save_lines(spec, p):
     if spec.multiball or not p.can("ball_save") or not _int_or_none(spec.start_ball_save):
         return []
     return ["ball_save      %d" % int(spec.start_ball_save)]
+
+
+# ---- PAD-381: holding the ball on the magnet --------------------------------------------
+def validate_magnet(spec, p):
+    """Every reason the magnet part cannot be built; nothing when the mode has none."""
+    ms = _int_or_none(spec.magnet_ms)
+    if ms == 0:
+        return []
+    out = []
+    if ms is None or not MAGNET_MIN_MS <= ms <= MAGNET_MAX_MS:
+        out.append("The magnet holds the ball %g to %g seconds." % (MAGNET_MIN_MS / 1000, MAGNET_MAX_MS / 1000))
+    if not p.can("magnet"):
+        out.append("Holding the ball on the magnet is not on %s yet (Mode says why)." % p.label)
+    return out
+
+
+def magnet_lines(spec, p):
+    """The runtime line of the magnet: nothing without one or where the title cannot. The shot is written
+    out (the profile's magnet_shot), so the line does not lean on the port at run time."""
+    ms = _int_or_none(spec.magnet_ms)
+    if not ms or not p.can("magnet") or not p.magnet_shot:
+        return []
+    return ["magnet         %d 0x%08x" % (ms, p.mask([p.magnet_shot]))]
 
 
 # ---- item 142: cuts from a film ------------------------------------------------------
@@ -2613,6 +2687,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     ]
     lines += multiball_lines(spec, p)       # item 167: nothing unless the mode is a multiball
     lines += ball_save_lines(spec, p)       # PAD-225: nothing unless it has a ball save (and no multiball)
+    lines += magnet_lines(spec, p)          # PAD-381: nothing unless it holds the ball on the magnet
     if spec.screen and p.can("screen"):
         lines += [
             "screen_scene   %s" % p.hud_scene,

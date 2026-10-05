@@ -515,7 +515,21 @@ site adjustment            0x002b3614 0xe92d40f0 0xe2504000
 site proc_exists           0x003f3700 0xe3062278 0xe340207d
 site magnet_get            0x0005131c 0xe92d40f0 0xe3014bf4
 value magnet_dev           13
+value magnet_shot          0x00080000  # the Godzilla target: the magnet sits 6 px from its switch on the
+#                                        playfield picture (devicexy), so its hit is the ball over the magnet;
+#                                        a mode file's `magnet <ms>` grabs on it
 text magnet_procs          360 362 363 364 365 366
+# A grab is a GAME PROCESS of ours (2026-10-05): the game's coil update switches off any coil no process
+# controls, 1 ms after a grab fired from the tick. proc_create = create a process if its id is free (id,
+# entry, flags 0); proc_sleep = the running process sleeps n ticks; coil_take = the running process takes
+# control of a coil (coil, wait ticks), with an exit hook that gives it back; coil_give = give it back
+# (coil, 1), after which the coil's own update switches it off. magnet_proc = our process's id, one the
+# game never uses (no create, exists or kill call names it). LE 1.16's four found from Pro 1.16 by code.
+site proc_create           0x003f30d0 0xe306c278 0xe340c07d
+site proc_sleep            0x003f3200 0xe3063278 0xe340307d
+site coil_take             0x000508ec 0xe92d40f8 0xe306727c
+site coil_give             0x000509b0 0xe3510000 0xe92d4038
+value magnet_proc          13185
 # EMU 2026-09-26 (mb_e2e.sh): served 3 on a mode file's start, add-a-ball to 4, drains to 1, END (one ball left). PROVEN.
 
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------

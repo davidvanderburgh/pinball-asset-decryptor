@@ -47,6 +47,7 @@ SAVE_DELAY_MS = 500
 #: the form's fields (the Tk tab's ``self.v`` keys) and their kind
 _BOOL_FIELDS = ("screen", "countdown", "lights", "advanced", "stack", "light_shots_on", "multiball",
                 "start_save",                                                      # PAD-225
+                "magnet",                                                          # PAD-381
                 "seq_reset_any")                                                   # PAD-314
 _STR_FIELDS = (
     "name", "start_shot", "start_count", "seconds", "award", "screen_title", "panel_color",
@@ -61,6 +62,7 @@ _STR_FIELDS = (
     "balls", "ball_save", "add_ball_shot", "add_ball_max", "mb_on_shot",       # item 167, PAD-228
     "also_shot_0", "also_count_0", "also_shot_1", "also_count_1", "after_mode", "after_when",  # PAD-227
     "start_save_s",  # PAD-225
+    "magnet_s",      # PAD-381
     "seq_shot_0", "seq_shot_1", "seq_shot_2", "seq_shot_3",                           # PAD-314
     "seq_shot_4", "seq_shot_5", "seq_shot_6", "seq_shot_7",
     "game_modes")                                                                     # PAD-363
@@ -76,6 +78,7 @@ _DEFAULTS = {
     "clip_both": "none", "clip_both_seconds": "4", "restore_after": "6",
     "multiball": False, "balls": "3", "ball_save": "10", "add_ball_shot": "(none)", "add_ball_max": "1",
     "start_save": False, "start_save_s": "10",
+    "magnet": False, "magnet_s": "2",                                          # PAD-381
     "mb_on_shot": "(when it starts)",
     "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
     "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
@@ -103,6 +106,7 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     # Mode: the multiball part (item 167), before the scoring shot sentences it shares words with
     (r"(?i)multiball|to add a ball\.$|adds a ball", "mode"),
     (r"(?i)ball save", "mode"),                                                # PAD-225
+    (r"(?i)magnet", "mode"),                                                   # PAD-381
     # Scoring: the first shot's points, the ladder, a shot's own points, the early end
     (r"^The first shot has to be worth something", "scoring"),
     (r"^The award ladder", "scoring"),
@@ -237,7 +241,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                    ("music", "music_mode", "Music underneath", "music"))
     _LIGHT_PATTERN_WORDS = (("solid", "Solid"), ("blink", "Blink"), ("pulse", "Pulse"),
                             ("chase", "Chase"))
-    _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save")
+    _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save", "magnet")
     _TWO_COLUMN_SHOTS = 18
     _PROBE_TRIES = 240
     _FILM_PARTS = (("clip", "clip", "a clip"), ("still", "screen", "a picture for the screen"),
@@ -273,6 +277,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "balls": list(MP.MULTIBALL_BALLS), "ball_save": [0, MP.BALL_SAVE_MAX],   # item 167
         "add_ball_max": [1, MP.ADD_BALL_MAX],
         "start_save_s": [1, MP.BALL_SAVE_MAX],                                  # PAD-225
+        "magnet_s": [MP.MAGNET_MIN_MS / 1000, MP.MAGNET_MAX_MS / 1000, "any"],  # PAD-381
         "also_count": [1, 20],                                                  # PAD-227
     }
 
@@ -1125,6 +1130,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         f["start_save_s"] = str(save) if save else str(getattr(spec, "start_ball_save", "") or "10")
         shot = getattr(spec, "multiball_on_shot", "") or ""        # PAD-228
         f["mb_on_shot"] = shot if shot else self.MB_ON_START
+        # PAD-381: the magnet, in seconds on the form (ms in the mode); the seconds stay shown (2) while off
+        ms = MP._int_or_none(getattr(spec, "magnet_ms", 0))
+        f["magnet"] = bool(ms)
+        f["magnet_s"] = "%g" % (ms / 1000.0) if ms else "2"
 
     def _collect_multiball(self, spec):
         def number(text):
@@ -1143,6 +1152,17 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.start_ball_save = number(self.f["start_save_s"]) if self.f["start_save"] else 0   # PAD-225
         shot = str(self.f["mb_on_shot"]).strip()                  # PAD-228
         spec.multiball_on_shot = "" if shot == self.MB_ON_START else shot
+        spec.magnet_ms = self._magnet_ms(self.f["magnet_s"]) if self.f["magnet"] else 0   # PAD-381
+
+    @staticmethod
+    def _magnet_ms(text):
+        """PAD-381: the form's seconds (2, 1.5) as the mode's whole ms; what does not read as a number is
+        kept as typed, so validate_magnet names it."""
+        t = str(text).replace(",", "").strip()
+        try:
+            return int(round(float(t) * 1000))
+        except ValueError:
+            return t
 
     def _open_display_lights(self, spec):
         colour = spec.light_shots if isinstance(spec.light_shots, str) else ""
@@ -1337,7 +1357,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         """No mode open: the greyed form shows no values of the mode that was open before."""
         for key in ("name", "start_shot", "start_count", "seconds", "award", "screen_title",
                     "clip_title", "clip_seconds", "light_on_raw", "light_off_raw",
-                    "clip_both_title", "balls", "ball_save", "add_ball_max", "start_save_s"):
+                    "clip_both_title", "balls", "ball_save", "add_ball_max", "start_save_s",
+                    "magnet_s"):
             self.f[key] = ""
         for i in range(self.PARAM_CALLOUT_ROWS):
             self.f["callout_secs_%d" % i] = ""
@@ -1370,7 +1391,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return {"key": "", "label": "", "port": "", "shots": [], "cols": 2,
                     "callouts": [], "callouts_none": "", "events": [],
                     "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
-                    "mb_on_shots": [self.MB_ON_START], "game_modes": []}
+                    "mb_on_shots": [self.MB_ON_START], "game_modes": [], "magnet_shot": ""}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
@@ -1383,7 +1404,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "events": events, "end_shots": [self.PARAM_NEVER, MP.END_SHOT_OTHERS, self.END_PICK],  # PAD-314
                 "ball_shots": [self.BALL_NONE] + names,
                 "mb_on_shots": [self.MB_ON_START] + names,
-                "game_modes": self._game_mode_rows(p)}                           # PAD-363
+                "game_modes": self._game_mode_rows(p),                           # PAD-363
+                "magnet_shot": getattr(p, "magnet_shot", "")}                    # PAD-381
 
     @staticmethod
     def _game_mode_rows(p):
@@ -1639,7 +1661,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             dis = {k: True for k in ("screen", "clip", "lights", "countdown", "own_sound",
                                      "end_game", "clip_both", "stack", "events", "film_clip",
                                      "film_still", "film_sound", "own_extra", "lit_shots",
-                                     "show_order", "multiball", "ball_save", "give_way", "block")}
+                                     "show_order", "multiball", "ball_save", "give_way", "block",
+                                     "magnet")}
             self.set(reasons={}, dis=dis, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return

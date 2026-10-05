@@ -3336,10 +3336,27 @@ static void multiball_arm(void)
  *      within MAGNET_COOL_MS of the last grab ending, at most MAGNET_PER_MIN grabs a minute.
  *   3. Let go on: the deadline (every tick), pm_magnet_release, the mode ending, the ball ending, the
  *      game ending or tilting.
- *   4. The game wins. A magnet process of the game's starting while ours holds makes ours stand aside
- *      WITHOUT an OFF: the game drives the magnet now, and an OFF would drop its ball.
+ *   4. The game wins. A magnet process of the game's starting while ours holds makes ours give the
+ *      magnet back at once; the game's own coil update then drives it (its grab, or off).
  * The device is the port's (`value magnet_dev`: 11 on Pro 1.16, 13 on LE 1.16) and must equal the
- * game's own magnet object's (`site magnet_get`, its device at +4), or nothing is armed. */
+ * game's own magnet object's (`site magnet_get`, its device at +4), or nothing is armed.
+ *
+ * A GRAB IS A GAME PROCESS THAT CONTROLS THE MAGNET (2026-10-05). The first version fired from the
+ * tick, and the emulator showed the game switching the magnet off 1 ms later, every time: ControlCoil
+ * ::v[38] (0x4ffc8), the coil's update, which the game runs on events (a Godzilla target hit among
+ * them), turns a coil OFF (v[54] -> v[58] -> cmd 4d) unless a game process CONTROLS it (the object's
+ * +44 is that process's id) or an on-time was asked for through v[36]. The game's own grabs take
+ * control from a process: `site coil_take` (0x5079c: coil, wait ticks; only inside a process) records
+ * the running process at +44 and registers an exit hook that gives control back; `site coil_give`
+ * (0x50860: coil, 1) clears it and runs v[38], which switches the coil off. So a grab here is a
+ * process of ours, `value magnet_proc` (an id the game never uses), started with `site proc_create`
+ * (create-if-absent: id, entry, flags 0): it takes control, sends the ONE bounded command, sleeps a
+ * tick at a time (`site proc_sleep`) until its time is up or the runtime asks it to let go, and gives
+ * control back - the game's own update then switches the magnet off. If the game KILLS it (a tilt or
+ * the end of a ball kills every process without a protecting flag, and ours has none), the exit hook
+ * gives control back and the magnet goes off the same way; the tick notices the process is gone. The
+ * on-time path (v[36]) is NOT used: v[55] re-fires the operator's pulse and hold for as long as an
+ * on-time is set, which is "held until told", not one bounded command. */
 #define MAGNET_MAX_MS  5000u   /* the longest grab a mode may ask for, pulse included */
 #define MAGNET_MIN_MS   100u
 #define MAGNET_COOL_MS 3000u   /* from one grab's end to the next one's start */
@@ -3392,12 +3409,23 @@ static struct {
     unsigned long started, ended;
     unsigned long starts[MAGNET_PER_MIN];
     unsigned next;
+    struct magnet_cmd cmd;                  /* what the process sends */
+    unsigned obj;                           /* the game's magnet object, for take/give */
+    unsigned id;                            /* our process's id (`value magnet_proc`) */
+    int proc;                               /* our process holds control of the magnet */
+    int release;                            /* the runtime asked it to let go */
+    const char *why;                        /* ... and why */
 } mag;
 
 static unsigned magnet_adj(const char *name, unsigned fallback)
 {
     return ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(
         (unsigned)pm_port_value(name, fallback));
+}
+
+static int proc_alive(unsigned id)
+{
+    return (((unsigned (*)(unsigned))(unsigned long)fn("proc_exists"))(id) & 0xffu) != 0;
 }
 
 static int magnet_game_busy(void)
@@ -3407,7 +3435,7 @@ static int magnet_game_busy(void)
     while (t && *t) {
         while (*t == ' ') t++;
         for (id = 0; *t >= '0' && *t <= '9'; t++) id = id * 10 + (unsigned)(*t - '0');
-        if (id && (((unsigned (*)(unsigned))(unsigned long)fn("proc_exists"))(id) & 0xffu)) return 1;
+        if (id && proc_alive(id)) return 1;
         while (*t && *t != ' ') t++;
     }
     return 0;
@@ -3419,19 +3447,53 @@ static void magnet_send(unsigned p1, unsigned t1, unsigned p2, unsigned t2)
         (mag.dev, p1, t1, p2, t2, 0);
 }
 
+static void magnet_done(void)
+{
+    mag.proc = 0;
+    mag.release = 0;
+    mag.until = 0;
+    mag.ended = pm_ms();
+}
+
+/* THE GRAB, as a game process (the game's scheduler runs it on its own stack, like the game's own
+ * magnet processes; it ends by returning). It takes control, sends the ONE bounded command, waits a
+ * tick at a time, and gives control back: the game's coil update then switches the magnet off. */
+static void magnet_proc(void)
+{
+    unsigned long sent;
+    unsigned total = mag.cmd.draw_ms + mag.cmd.hold_ms;
+    if (!mag.until || mag.release) {
+        say("magnet: let go before the grab began (%s)", mag.why ? mag.why : "asked to");
+        magnet_done();
+        return;
+    }
+    if (!(((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_take"))(mag.obj, 0) & 0xffu)) {
+        say("magnet: no grab - a process of the game's controls the magnet");
+        magnet_done();
+        return;
+    }
+    mag.proc = 1;
+    magnet_send(mag.cmd.draw_pwr, mag.cmd.draw_ms, mag.cmd.hold_pwr, mag.cmd.hold_ms);
+    sent = pm_ms();
+    mag.until = sent + total;               /* the deadline counts from the command itself */
+    say("magnet: holding - process %u controls the magnet; ONE command: draw %u/255 for %u ms, then hold "
+        "%u/255 for %u ms, which the board ends by itself", mag.id, mag.cmd.draw_pwr, mag.cmd.draw_ms,
+        mag.cmd.hold_pwr, mag.cmd.hold_ms);
+    while (!mag.release && pm_ms() < mag.until)
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_give"))(mag.obj, 1);
+    say("magnet: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
+        "game's coil update switches it off", mag.release && mag.why ? mag.why : "its time ran out",
+        pm_ms() - sent, (long)(mag.until - pm_ms()));
+    magnet_done();
+}
+
+/* Ask the grab to let go: the process gives control back on its next wake, within a tick. */
 static void magnet_let_go(const char *why)
 {
-    unsigned long now = pm_ms();
-    if (!mag.until) return;
-    if (magnet_game_busy()) {
-        say("magnet: the game's own magnet took over (%s) - no OFF sent, the game drives it now", why);
-    } else {
-        magnet_send(0, 0, 0, 0);
-        say("magnet: OFF - %s, after %lu ms (%ld ms before the command's own end)", why, now - mag.started,
-            (long)(mag.until - now));
-    }
-    mag.until = 0;
-    mag.ended = now;
+    if (!mag.until || mag.release) return;
+    mag.release = 1;
+    mag.why = why;
 }
 
 static int magnet_device_ok(void);
@@ -3443,6 +3505,7 @@ int pm_magnet_grab(unsigned ms)
     if (!(can & PM_CAN_COILS) || !magnet_device_ok()) return 0;
     why = magnet_refusal(pm_running(), pm_in_game(), magnet_adj("magnet_adj_disabled", 343) != 0,
                          magnet_game_busy(), mag.until, mag.ended, now, mag.starts);
+    if (!why && proc_alive(mag.id)) why = "the last grab's process is still ending";
     if (!why)
         magnet_plan(ms, magnet_adj("magnet_adj_draw_power", 363), magnet_adj("magnet_adj_draw_time", 364),
                     magnet_adj("magnet_adj_hold_power", 365), &c, &why);
@@ -3450,13 +3513,20 @@ int pm_magnet_grab(unsigned ms)
         say("magnet: no grab - %s", why);
         return 0;
     }
-    magnet_send(c.draw_pwr, c.draw_ms, c.hold_pwr, c.hold_ms);
+    mag.cmd = c;
+    mag.release = 0;
+    mag.why = 0;
     mag.started = now;
     mag.until = now + c.draw_ms + c.hold_ms;
+    if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
+            mag.id, magnet_proc, 0)) {
+        mag.until = 0;
+        say("magnet: no grab - the game would not start its process %u", mag.id);
+        return 0;
+    }
     mag.starts[mag.next++ % MAGNET_PER_MIN] = now;
-    say("magnet: GRAB for %u ms (asked %u) - draw %u/255 for %u ms, then hold %u/255 for %u ms, as ONE "
-        "command: the board lets go by itself at its end", c.draw_ms + c.hold_ms, ms, c.draw_pwr,
-        c.draw_ms, c.hold_pwr, c.hold_ms);
+    say("magnet: GRAB for %u ms (asked %u) - process %u takes control of the magnet and sends ONE command",
+        c.draw_ms + c.hold_ms, ms, mag.id);
     return 1;
 }
 
@@ -3467,10 +3537,20 @@ void pm_magnet_release(void)
 
 int pm_magnet_holding(void) { return mag.until != 0; }
 
-/* Every tick: the deadline, and the game taking over or ending. */
+/* Every tick: the game taking over, ending or killing the grab, and the deadline (the process checks
+ * that too). A grab whose process is gone was ended by the game (a tilt or the end of a ball kills
+ * it): its exit hook gave control back, which switched the magnet off. */
 static void magnet_tick(void)
 {
     if (!mag.until) return;
+    if (!proc_alive(mag.id)) {
+        if (mag.proc || pm_ms() - mag.started > 1000ul) {
+            say("magnet: the grab's process is gone (the game ended it) - its exit gave control back");
+            magnet_done();
+        }
+        return;
+    }
+    if (mag.release) return;                /* the process is letting go */
     if (magnet_game_busy()) magnet_let_go("a magnet process of the game's started");
     else if (pm_ms() >= mag.until) magnet_let_go("its time ran out");
     else if (!pm_in_game()) magnet_let_go("the game ended or tilted");
@@ -3487,6 +3567,7 @@ static int magnet_device_ok(void)
     if (checked) return checked > 0;
     obj = ((unsigned (*)(void))(unsigned long)fn("magnet_get"))();
     dev = obj && maps_has(obj + 4, 2, MAP_R) ? *(const unsigned short *)(unsigned long)(obj + 4) : 0xffffu;
+    mag.obj = obj;
     if (dev != mag.dev) {
         checked = -1;
         can &= ~PM_CAN_COILS;
@@ -3502,13 +3583,16 @@ static int magnet_device_ok(void)
 static int have_values(const char *const *names);   /* the gate section, below */
 static void coils_arm(void)
 {
-    static const char *const s[] = { "coil_fire", "adjustment", "proc_exists", "magnet_get", 0 };
-    static const char *const v[] = { "magnet_dev", 0 };
+    static const char *const s[] = { "coil_fire", "adjustment", "proc_exists", "magnet_get", "proc_create",
+                                     "proc_sleep", "coil_take", "coil_give", 0 };
+    static const char *const v[] = { "magnet_dev", "magnet_proc", 0 };
     if (!have_sites(s) || !have_values(v) || !pm_port_text("magnet_procs")) return;
     mag.dev = (unsigned)pm_port_value("magnet_dev", 0);
+    mag.id = (unsigned)pm_port_value("magnet_proc", 0) & 0xffffu;
     can |= PM_CAN_COILS;
-    say("magnet: a mode's own grab, device %u through 0x%08x; at most %u ms as one command, %u s between "
-        "grabs, %u a minute", mag.dev, fn("coil_fire"), MAGNET_MAX_MS, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
+    say("magnet: a mode's own grab, device %u through 0x%08x by process %u; at most %u ms as one command, %u s "
+        "between grabs, %u a minute", mag.dev, fn("coil_fire"), mag.id, MAGNET_MAX_MS, MAGNET_COOL_MS / 1000,
+        MAGNET_PER_MIN);
 }
 
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN

@@ -1402,8 +1402,24 @@ pm_magnet_release();                                    /* or let go sooner */
 **What the runtime sends.** One coil command, through the game's own coil call (ControlCoil's, `site
 coil_fire`): the operator's GODZILLA MAGNET LO DRAW POWER for its DRAW TIME, then its LO HOLD POWER for
 the rest of the grab. The board drives that and stops by itself when it runs out; the runtime never
-re-sends it. So if the mode wedges, the runtime's tick stops or the game dies, the magnet still lets go
-when that command ends. The OFF the runtime sends at the deadline only makes it sooner.
+re-sends it. So if the mode wedges, the runtime stops or the game dies, the magnet still lets go when that
+command ends. Letting go sooner is the game's own OFF (below).
+
+**A grab is a game process that controls the magnet.** The game keeps every coil OFF that no process of
+its own controls: ControlCoil::v[38], the coil's update, runs on the game's events (a Godzilla target
+hit among them) and switches an uncontrolled coil off unless an on-time was asked for. The first version
+of the grab fired from the runtime's tick, and the emulator showed the game's OFF 1 ms after every grab
+(the runtime's own log said "held 2000 ms"; `[coildrive]` said 1 ms). So `pm_magnet_grab` starts a game
+process of ours (`value magnet_proc`, an id the game never uses; `site proc_create`). The process takes
+control of the magnet (`site coil_take`, the call the game's own grabs use), sends the one command, sleeps
+a tick at a time (`site proc_sleep`) until its time is up or the runtime asks it to let go, and gives
+control back (`site coil_give`): the game's coil update then switches the magnet off. While it controls the
+magnet, the game's update leaves it alone. The game ends a process at a drain or a tilt by unwinding its
+stack, and taking control registered an exit hook that gives control back - so a grab the game ends goes
+off the game's own way. (That unwind needs unwind tables in every frame on the stack: `build_mode.sh`
+compiles with `-funwind-tables`, and without it the emulator's drain test aborted the game.) The on-time
+route (`v[36]`) is not used: the game re-fires the operator's pulse and hold for as long as an on-time is
+set, which is "held until told", not one bounded command.
 
 **The limits, none of them the mode's to change:** a grab is 100 to 5000 ms, the draw included (asking
 for more gets 5000); only the running mode, only in a game (not attract, not tilted); never with GODZILLA
@@ -1412,8 +1428,9 @@ grab at a time; 3 s from the end of one grab to the start of the next; at most 6
 A refused grab returns 0 and says why in mode.log (`[pad] magnet: no grab - ...`).
 
 **It lets go:** at the grab's end; on `pm_magnet_release`; when the mode ends; when the ball ends; when
-the game ends or tilts. If a magnet sequence of the game's starts while a mode holds, the mode's grab
-steps aside WITHOUT an OFF: the game is driving the magnet then, and an OFF would drop its ball.
+the game ends or tilts; and when the game ends the grab's process itself. If a magnet sequence of the
+game's starts while a mode holds (or before its grab began), the mode's grab gives the magnet back at
+once and the game's own update drives it.
 
 **Where the numbers come from** (Godzilla Pro 1.16, docs/plans/mode_coils.md has every address): the coil
 frame and the tick conversion from the game's serialiser; the adjustment ids from the game's adjustment
@@ -1422,7 +1439,17 @@ same on LE 1.16); the magnet's device from its object (11 on Pro 1.16, 13 on LE 
 checked against the game's own magnet object on the first grab). The game's own grabs are processes
 (363, 362 the Magna-Grab, 360 a timed pulse) that hold until the game's conditions clear, a display still
 playing among them: that is how PAD-353's magnet stayed on, and why a mode's grab is a single bounded
-command instead.
+command instead. The process calls: create-if-absent (id, entry, flags 0) `0x3ab0fc`, sleep `0x3ab22c`,
+take control `0x5079c` (coil, wait ticks), give control back `0x50860` (coil, 1); the coil's update
+`0x4ffc8`, its controller at +44.
+
+**From a mode file, and the Modes tab.** `magnet <ms> [mask]`: while the mode runs, every hit of the shot the
+magnet sits at holds the ball there for `<ms>`, the hit that starts the mode included, through `pm_magnet_grab`
+with all of the limits above (a refused hit is logged as `magnet shot ... - no grab` and the mode carries on).
+The port names that shot, `value magnet_shot`: on Godzilla the Godzilla target, whose switch is the device
+nearest the magnet on the playfield picture (6 px; the next is 29 px away), so its hit is the ball over the
+magnet. Mode > Magnet on the tab writes the line, in seconds (0.1 to 5); it is greyed on a build until a mode
+file's grab was seen there in the emulator (`mode_project.MAGNET_PROVEN`).
 
 **The port lines** (Pro and LE 1.16 only):
 
@@ -1432,23 +1459,35 @@ site adjustment            0x00286e00 0xe92d40f0 0xe2504000
 site proc_exists           0x003ab72c 0xe30d2158 0xe340207d
 site magnet_get            0x000511cc 0xe92d40f0 0xe30545bc
 value magnet_dev           11
+value magnet_shot          0x00080000
 text magnet_procs          360 362 363 364
+site proc_create           0x003ab0fc 0xe30dc158 0xe340c07d
+site proc_sleep            0x003ab22c 0xe30d3158 0xe340307d
+site coil_take             0x0005079c 0xe92d40f8 0xe30d715c
+site coil_give             0x00050860 0xe3510000 0xe92d4038
+value magnet_proc          13185
 ```
 
-**Emulator-proven** (Godzilla Pro 1.16 card, muted, `sdk/magnet_test_mode.c`, 2026-10-05), every line
-below from the runtime's mode.log and hwshim's `[coildrive]` lines for node 9 coil 6, the magnet:
-- a 2000 ms grab: one command, draw 255 for 350 ms then hold 50 for 1650 ms, OFF at its end;
-- 60000 ms asked: 5000 sent (350 + 4650); the mode ended 1.5 s in and the OFF came with 3500 ms left;
-- `pm_magnet_release` 0.5 s in: OFF with 1000 ms of the command left;
-- a mode that WEDGED after a 3000 ms grab (no release, no end, nothing): the runtime's deadline OFF at 3000 ms;
-- refusals: no game (attract), a grab already holding, the 3 s cool-down, the seventh grab in a minute;
-- a ball drained mid-grab: the game itself switched the magnet off about 2.9 s after the drain, then the
-  deadline OFF; the runtime's own ball-end release comes after the game's end of ball, so it was not the
-  one that fired here.
+**Emulator-proven** (2026-10-05, rig 1, muted, the stock Pro 1.16 and Premium/LE 1.16 cards; a mode file
+`magnet 2000` started on the Godzilla target), every line from the runtime's mode.log and hwshim's
+`[coildrive]` lines for node 9 coil 6, the magnet on both builds:
+- the starting hit: one command, draw 255 for 350 ms then hold 50 for 1650 ms, HELD TO ITS END - the next
+  magnet frame is the game's OFF at +2000 ms, after control went back;
+- a hit 1 s into the grab: refused ("a grab is already holding") and NO OFF from the game - it was cut
+  1 ms in before the grab took control;
+- a hit 6 s later: a second grab, held to its end; a mode stop 1.4-1.6 s into a third: OFF with 565 ms
+  (Pro) / 584 ms (LE) of the command left;
+- a ball drained 1.2 s into a grab: the game ended the grab's process, its exit gave control back and the
+  magnet went OFF with 798 ms (Pro) / 782 ms (LE) left; the game played on (no abort);
+- on the LE the first hit also started a magnet process of the game's: the grab stood aside before it
+  began, and the next hit was refused ("the game's own magnet is working").
+The first proof of this section (magnet_test_mode.c, the same day) read the runtime's log alone: every
+grab in it was switched off by the game 1 ms after it was sent, which the `[coildrive]` lines showed and
+nobody read. Its clamp and refusal lines stand (they are decisions, not drive); its "held" lines did not.
 
-Not measured: a machine (nothing has been flashed); a game magnet sequence starting while a mode holds
-(the rig does not raise the Magna-Grab, PAD-353); LE 1.16 in the emulator (its port lines are found from
-Pro 1.16's code and checked against its program by `tests/test_spike2_mode_magnet.py`).
+Not measured: a machine (nothing has been flashed); a tilt mid-grab (it ends processes the way a drain
+does); a magnet sequence of the game's starting while a grab already holds (the rig raised one only as the
+first hit landed, on the LE).
 
 ## Ports: why your mode runs on any game
 

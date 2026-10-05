@@ -10,9 +10,16 @@ worth failing on:
   * THE REFUSALS, in their order: only the running mode, only in a game, never with the magnet
     disabled, never while the game's own magnet works, never twice at once, 3 s between grabs, six
     a minute.
-  * ONE COMMAND PER GRAB: the only callers of the coil call are the grab and the let-go.
-  * THE PORTS: Pro and LE 1.16 name the call, the device the game's magnet object holds, and the
-    game's own magnet processes; the site words match the game programs when they are here.
+  * ONE COMMAND PER GRAB: the only caller of the coil call is the grab's process, once.
+  * A GRAB IS A GAME PROCESS THAT CONTROLS THE MAGNET (2026-10-05): fired from the tick, the game's
+    coil update switched the magnet off 1 ms later, every time. The process takes control, sends
+    the one command, sleeps a tick at a time and gives control back; letting go is a request it acts
+    on, never a second command. The game ends it (a drain, a tilt) by unwinding its stack, so the
+    runtime is built with unwind tables: without them that unwind aborted the game (emulator, Pro
+    1.16, "terminate called after throwing ... do_stack_unwind_exception_t").
+  * THE PORTS: Pro and LE 1.16 name the calls, the device the game's magnet object holds, the
+    game's own magnet processes and our process's id; the site words match the game programs when
+    they are here.
 
 The decisions are lifted verbatim from the runtime and compiled for the host (the roster test's
 way); emulator-proven separately (docs/plans/mode_coils.md).
@@ -35,6 +42,11 @@ PORTS = {"godzilla_pro-1.16": (SDK / "ports" / "godzilla_pro-1.16.port", 11,
          "godzilla_le-1.16": (SDK / "ports" / "godzilla_le-1.16.port", 13,
                               [os.environ.get("PAD_GODZILLA_LE_116_GAME", ""), r"C:\tmp\gzle116_stock.elf",
                                "/mnt/c/tmp/gzle116_stock.elf"])}
+
+
+#: every call the grab makes into the game (pad_mode_runtime.c coils_arm)
+SITES = ("coil_fire", "adjustment", "proc_exists", "magnet_get", "proc_create", "proc_sleep", "coil_take",
+         "coil_give")
 
 
 def _src():
@@ -151,14 +163,30 @@ int main(void)
 def test_one_command_per_grab_and_it_is_never_resent():
     src = _src()
     calls = [m.start() for m in re.finditer(r"\bmagnet_send\(", src)]
-    assert len(calls) == 3, "magnet_send: its definition, the grab and the let-go - nothing else may send"
+    assert len(calls) == 2, "magnet_send: its definition and the grab's process - nothing else may send"
+    proc = _lift(src, "static void magnet_proc(void)")
     grab = _lift(src, "int pm_magnet_grab(")
     let_go = _lift(src, "static void magnet_let_go(")
     tick = _lift(src, "static void magnet_tick(")
-    assert grab.count("magnet_send(") == 1
-    assert "magnet_send(0, 0, 0, 0)" in let_go
-    assert "magnet_send" not in tick                       # the tick only ever lets go
+    assert proc.count("magnet_send(") == 1
+    # the one send comes after control is taken, and the process gives control back on its way out
+    assert proc.index('fn("coil_take")') < proc.index("magnet_send(") < proc.index('fn("coil_give")')
+    assert 'fn("proc_sleep"))(1)' in proc                  # a tick at a time, never a busy wait
+    assert "magnet_send" not in grab and 'fn("proc_create")' in grab and "magnet_proc, 0)" in grab
+    assert "magnet_send" not in let_go and "mag.release = 1;" in let_go   # a request, not a command
+    assert "magnet_send" not in tick                       # the tick only ever asks
     assert re.search(r"#define MAGNET_MAX_MS\s+5000u", src)
+
+
+def test_the_game_can_end_the_grab_without_aborting():
+    """The game ends a process by throwing through its stack: the runtime carries unwind tables."""
+    build = (SDK / "build_mode.sh").read_text(encoding="utf-8")
+    compile_line = build[build.index('"$CC" -std=gnu17'):build.index("-lgcc")]
+    assert "-funwind-tables" in compile_line
+    so = (SDK / "prebuilt" / "mode.so").read_bytes()
+    phoff, phentsize, phnum = struct.unpack_from("<I", so, 0x1c)[0], *struct.unpack_from("<HH", so, 0x2a)
+    types = [struct.unpack_from("<I", so, phoff + i * phentsize)[0] for i in range(phnum)]
+    assert 0x70000001 in types, "the pinned mode.so has no PT_ARM_EXIDX: the game's unwind would abort"
 
 
 def test_the_runtime_lets_go_on_every_end():
@@ -168,7 +196,7 @@ def test_the_runtime_lets_go_on_every_end():
     assert "magnet_tick();" in _lift(src, "static void on_tick(")
     tick = _lift(src, "static void magnet_tick(")
     for why in ("a magnet process of the game's started", "its time ran out", "the game ended or tilted",
-                "no mode is running"):
+                "no mode is running", "the grab's process is gone"):
         assert why in tick
 
 
@@ -176,9 +204,10 @@ def test_the_runtime_lets_go_on_every_end():
 def test_the_port_names_the_magnet(key):
     port, dev, _ = PORTS[key]
     text = port.read_text(encoding="utf-8")
-    for site in ("coil_fire", "adjustment", "proc_exists", "magnet_get"):
+    for site in SITES:
         assert re.search(r"^site %s\s+0x[0-9a-f]{8} 0x[0-9a-f]{8} 0x[0-9a-f]{8}\s*$" % site, text, re.M), site
     assert re.search(r"^value magnet_dev\s+%d\s*$" % dev, text, re.M)
+    assert re.search(r"^value magnet_proc\s+13185\s*$", text, re.M)
     procs = re.search(r"^text magnet_procs\s+(.*)$", text, re.M).group(1).split()
     assert {"360", "362", "363"} <= set(procs)
 
@@ -206,7 +235,7 @@ def test_the_sites_match_the_game_program(key):
     if b is None:
         pytest.skip("no %s game program here" % key)
     text = port.read_text(encoding="utf-8")
-    for site in ("coil_fire", "adjustment", "proc_exists", "magnet_get"):
+    for site in SITES:
         a, w0, w1 = (int(x, 16) for x in
                      re.search(r"^site %s\s+(\S+) (\S+) (\S+)" % site, text, re.M).groups())
         assert (_word(b, a), _word(b, a + 4)) == (w0, w1), site

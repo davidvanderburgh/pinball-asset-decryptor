@@ -129,9 +129,33 @@ test). This is a last line of defence, not a guardrail of ours.
   Emulator-proven on the Pro 1.16 card (MODE_SDK.md "The magnet" has every line); desk tests in
   `tests/test_spike2_mode_magnet.py`.
 
+- **Step 3 (2026-10-05): the mode file, the tab, and a grab that actually holds.**
+  - `magnet <ms> [mask]` in a mode file: while the mode runs, every hit of the port's `value magnet_shot`
+    (the Godzilla target: the device nearest the magnet on the playfield picture, 6 px) holds the ball for
+    `<ms>`, the starting hit included, through `pm_magnet_grab`. Mode > Magnet on the Modes tab (seconds,
+    0.1-5), greyed per build until `MAGNET_PROVEN`; `magnet_ms` in the mode's JSON. The tab sits behind the
+    preview code with the rest of the Modes tab.
+  - **The first grab never held.** Proving the mode file in the emulator, `[coildrive]` showed the game's
+    OFF 1 ms after every grab (step 2's proof had read only the runtime's log). A call probe with return
+    addresses named it: ControlCoil::v[38] (`0x4ffc8`, the coil's update, run on events such as a target
+    hit) switches a coil off (v[54] -> v[58] -> cmd 4d) unless a game PROCESS controls it (+44) or an
+    on-time was asked for (+36, `v[36]`). The game's own grabs take control from a process.
+  - So the grab is now a game process of ours (`value magnet_proc` 13185, used by no create/exists/kill
+    call in either program): create-if-absent `0x3ab0fc`, take control `0x5079c`, one bounded command,
+    sleep `0x3ab22c` a tick at a time, give control back `0x50860` (the game's update then switches the
+    magnet off). The on-time route was rejected: `v[55]` re-fires the operator's pulse and hold while an
+    on-time is set ("held until told").
+  - **The game ends a process by throwing through its stack** (`do_stack_unwind_exception_t`, at a drain
+    or a tilt; kill-all masks 0x100/0x200/0x400/0x80/0x1000). Our frame had no unwind tables and the first
+    drain test ABORTED the game. `build_mode.sh` now compiles with `-funwind-tables` (an EXIDX segment);
+    the same drain then ended the grab's process cleanly and the exit hook switched the magnet off.
+  - Emulator-proven on the stock Pro 1.16 and Premium/LE 1.16 cards (MODE_SDK.md "The magnet"): held to
+    its end, a mid-grab hit refused with no game OFF, a mode stop and a drain mid-grab let go early, no
+    abort; on the LE a game magnet process started by the first hit made the grab stand aside.
+
 ## Next
 
-1. The mode-file key (`magnet <ms>` on a shot) and the Modes tab control, behind the preview code.
-2. The scoop: its eject is a ball device of the framework's, not a ControlCoil; find the eject and the
+1. The scoop: its eject is a ball device of the framework's, not a ControlCoil; find the eject and the
    hold-in-scoop flag (FG_KING_OF_THE_MONSTERS_BOUNTY_COLLECT_HOLD_BALL_IN_SCOOP shows the game has one).
-3. A supervised machine test, short grab first.
+2. A supervised machine test on David's Premium, a short grab first (Mode > Magnet, 1 s), with a hand on
+   the power switch: the ball held on the Godzilla target hit, let go at 1 s, and a drain mid-grab.

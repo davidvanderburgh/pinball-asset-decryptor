@@ -81,6 +81,8 @@ struct mode_cfg {
     uint64_t add_ball_bits;
     unsigned ball_save_s;             /* `ball_save <s>`: a ball save when it starts, no multiball; 0 = none */
     uint64_t mball_on_bits;           /* PAD-228 `multiball_on <mask>`: the balls come on that shot, not at the start */
+    unsigned magnet_ms;               /* PAD-381 `magnet <ms> [mask]`: a grab on each hit of that shot; 0 = none */
+    uint64_t magnet_bits;
     /* PAD-227: more than one thing to meet before it starts (their own functions below) */
     uint64_t also_bits[ALSO_MAX];
     unsigned also_count[ALSO_MAX], n_also;
@@ -234,6 +236,30 @@ static int ball_save_line(struct slot *M, const char *line)
     cfg.ball_save_s = (unsigned)num(&a);
     if (cfg.ball_save_s > 120) cfg.ball_save_s = 120;
     return 1;
+}
+
+/* PAD-381: the playfield magnet (MODE_SDK.md "The magnet")
+ *   magnet <ms> [mask]    while the mode runs, every hit of the shot the magnet sits at - the port's
+ *                         `value magnet_shot` (Godzilla: the Godzilla target), or <mask> - holds the
+ *                         ball on the magnet for <ms>, the hit that starts the mode included. The time
+ *                         is only asked for: pm_magnet_grab clamps it to 100-5000 ms, picks the powers
+ *                         from the operator's magnet settings and refuses inside its own limits (a
+ *                         refused hit is logged and the mode carries on). 0 = none. */
+static int magnet_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "magnet");
+    if (!a) return 0;
+    cfg.magnet_ms = (unsigned)num(&a);
+    cfg.magnet_bits = (*a >= '0' && *a <= '9') ? num(&a) : (uint64_t)(unsigned long)pm_port_value("magnet_shot", 0);
+    return 1;
+}
+
+/* A shot of the running mode's: the magnet, when it is the magnet's shot */
+static void magnet_shot(struct slot *M, uint64_t mask)
+{
+    if (!cfg.magnet_ms || !(mask & cfg.magnet_bits)) return;
+    pm_log("%s: magnet shot %08x_%08x - %s", cfg.name, (unsigned)(mask >> 32), (unsigned)mask,
+           pm_magnet_grab(cfg.magnet_ms) ? "holding the ball" : "no grab (the runtime's line says why)");
 }
 
 static int stack_line(struct slot *M, const char *line)
@@ -1652,6 +1678,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (block_modes_line(M, line)) return;   /* PAD-363 */
     if (multiball_line(M, line)) return;     /* item 167 */
     if (ball_save_line(M, line)) return;     /* PAD-225 */
+    if (magnet_line(M, line)) return;        /* PAD-381 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -1704,6 +1731,11 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.mball_on_bits)
         pm_log("\"%s\": the multiball comes on %08x_%08x%s", cfg.name, (unsigned)(cfg.mball_on_bits >> 32),
                (unsigned)cfg.mball_on_bits, cfg.mball_balls ? "" : " - but there is no multiball line: ignored");
+    if (cfg.magnet_ms)                       /* PAD-381 */
+        pm_log("\"%s\": the magnet holds the ball %u ms on %08x_%08x%s", cfg.name, cfg.magnet_ms,
+               (unsigned)(cfg.magnet_bits >> 32), (unsigned)cfg.magnet_bits,
+               !cfg.magnet_bits ? " - but no shot is the magnet's (the port has no magnet_shot): ignored"
+               : pm_can(PM_CAN_COILS) ? "" : " - this game's port cannot drive the magnet: no grab");
     params_loaded(M);
     more_loaded(M);                          /* PAD-227 */
 }
@@ -2136,6 +2168,8 @@ static void on_shot(uint64_t mask)
     if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_on) multiball_shot(M, mask);
     else if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_wait && end_pending != M)
         multiball_on_shot(M, mask);          /* PAD-228 */
+    if (run.active && (M = run.slot) != 0 && p == run.player && end_pending != M)
+        magnet_shot(M, mask);                /* PAD-381 */
     end_shot_seen(mask, p);
     if (p < 1 || p > 4) return;
     for (k = 0; k < MODES_MAX; k++) {
@@ -2160,6 +2194,7 @@ static void on_shot(uint64_t mask)
             if (!hit || !M->seq_done[p]) continue;
             if (also_met(M, p)) mode_start(M, "shot sequence");
             else pm_log("%s: its sequence is met - waiting for its other shots (player %u)", cfg.name, p);
+            if (running(M)) magnet_shot(M, mask);   /* PAD-381: the hit that starts it counts */
             continue;
         }
         if (mask & cfg.trigger_bits) {
@@ -2170,6 +2205,7 @@ static void on_shot(uint64_t mask)
         if (!hit || !cfg.trigger_bits || M->trig[p] < cfg.trigger_count) continue;
         if (also_met(M, p)) mode_start(M, "trigger shot");
         else pm_log("%s: its trigger is met - waiting for its other shots (player %u)", cfg.name, p);
+        if (running(M)) magnet_shot(M, mask);       /* PAD-381: the hit that starts it counts */
     }
 }
 

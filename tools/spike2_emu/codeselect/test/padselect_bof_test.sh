@@ -119,11 +119,13 @@ rm -f "$T/played" "$T/player.args"
 PADSELECT_AUDIO_PLAYER="$T/fakeplay" PADSELECT_AUDIO_DEV=plughw:7,0 bash "$P/padselect.sh"; rc=$?
 fifo_left=$(ls /tmp/padselect.audio.* 2>/dev/null | head -1)
 if [ "$rc" = 0 ] && grep -q "sound: fakeplay on plughw:7,0" "$P/padselect.log" && grep -q "player stopped" "$P/padselect.log" \
-    && grep -q -- "-t raw -f S16_LE -r 44100 -c 2 -D plughw:7,0" "$T/player.args" \
+    && grep -q -- "-t raw -f S16_LE -r 44100 -c 2 -B 80000 -F 20000 -D plughw:7,0" "$T/player.args" \
     && [ "$(stat -c %s "$T/played" 2>/dev/null || echo 0)" -gt 4096 ] \
     && ! pgrep -f "$T/fakeplay" >/dev/null && [ -z "$fifo_left" ] \
-    && grep -q "fifo" "$P/bofselect.log"; then
-    ok "8 sound: the player got $(stat -c %s "$T/played") bytes of the menu's mix and was gone before the game"
+    && grep -q "audio: sink fifo, lead 40 ms" "$P/bofselect.log"; then
+    # the lag between a flipper and its click: aplay's 80 ms buffer and a 40 ms lead,
+    # where it was aplay's default half second and 200 ms (a second on the machine)
+    ok "8 sound: the player got $(stat -c %s "$T/played") bytes of the menu's mix (80 ms buffer, 40 ms lead) and was gone before the game"
 else
     bad "8 sound (played $(stat -c %s "$T/played" 2>/dev/null) bytes, fifo left '$fifo_left')"
     cat "$P/padselect.log"; cat "$P/audio.log" 2>/dev/null; grep -i audio "$P/bofselect.log"

@@ -158,15 +158,19 @@ def _fake_prepare(got, out):
         got["argv"] = argv
         pairs = list(zip(argv, argv[1:]))
         rows = []
+
+        def val(flag, i):
+            return ([v for k, v in pairs if k == flag and v.startswith("%d=" % i)] or ["%d=none" % i])[0][2:]
         for i in range(2):
-            art = [v for k, v in pairs if k == "--art" and v.startswith("%d=" % i)][0][2:]
-            anim = [v for k, v in pairs if k == "--anim" and v.startswith("%d=" % i)][0][2:]
+            art, anim, music = val("--art", i), val("--anim", i), val("--music", i)
             rows.append({"art": None if art == "none" else "art%d.png" % i,
                          "anim": None if anim == "none" else "anim%d.gif" % i,
-                         "art_source": art, "anim_source": anim})
+                         "music": None if music == "none" else "music%d.wav" % i,
+                         "art_source": art, "anim_source": anim, "music_source": music})
+        move = dict(pairs).get("--sound-move", "none")
         os.makedirs(out, exist_ok=True)
         with open(os.path.join(out, "media.json"), "w") as f:
-            json.dump({"images": rows, "groups": []}, f)
+            json.dump({"images": rows, "groups": [], "sound_move": "move.wav", "sound_move_source": move}, f)
         return 0
     return main
 
@@ -174,8 +178,9 @@ def _fake_prepare(got, out):
 def test_media_takes_each_builds_own_clip_and_maps_the_rest(monkeypatch, tmp_path):
     """'auto' art is a still of the build's own attract clip and 'auto' animation is the clip
     (own_media); the stills are the logos a random card's STYLE is drawn from, so a style
-    needs every member's; media.json records 'auto' again.  'auto' music is none and an
-    'auto' sound is the synthetic one.  No --visual-only unless asked."""
+    needs every member's; media.json records 'auto' again.  'auto' music and sounds are the
+    game's own (own_audio), and where it has none, no bed and the synthetic sound.  No
+    --visual-only unless asked."""
     import selectmedia
     got, need = {}, {}
     out = str(tmp_path / "m")
@@ -186,6 +191,14 @@ def test_media_takes_each_builds_own_clip_and_maps_the_rest(monkeypatch, tmp_pat
         need["n"] = set(n)
         return {i: v for i, v in own.items() if i in n}
     monkeypatch.setattr(mb, "own_media", own_media)
+    aud = {"music": {}, "move": None, "confirm": None}
+    asked = {}
+
+    def own_audio(images, cache, music_need, sounds):
+        asked.update(music=set(music_need), sounds=sounds)
+        return {"music": {i: f for i, f in aud["music"].items() if i in music_need},
+                "move": aud["move"] if sounds else None, "confirm": aud["confirm"] if sounds else None}
+    monkeypatch.setattr(mb, "own_audio", own_audio)
     p0, p1 = str(tmp_path / "a" / "lab.fun"), str(tmp_path / "b" / "lab.fun")
     args = ["media", "--primary", p0, "--extra", p1, "--out", out, "--cards", "3",
             "--art", "0=auto", "--anim", "0=auto@2", "--anim", "1=auto", "--music", "0=auto",
@@ -194,6 +207,7 @@ def test_media_takes_each_builds_own_clip_and_maps_the_rest(monkeypatch, tmp_pat
             "--group-anim", "0=/x/r.gif", "--group-music", "0=auto", "--group-confirm", "0=auto"]
     assert mb.main(args) == 0
     assert need["n"] == {0, 1}                  # image 0's auto art + both members of a style
+    assert asked == {"music": {0}, "sounds": True}
     pairs = list(zip(got["argv"], got["argv"][1:]))
     for want in (("--cards", "3"), ("--art", "0=/c/title@4.png"), ("--anim", "0=/c/title.ogv@2"),
                  ("--anim", "1=none"), ("--logo", "0=/c/title@4.png"), ("--music", "0=none"),
@@ -207,16 +221,26 @@ def test_media_takes_each_builds_own_clip_and_maps_the_rest(monkeypatch, tmp_pat
     man = json.load(open(os.path.join(out, "media.json")))
     assert (man["images"][0]["art_source"], man["images"][0]["anim_source"]) == ("auto", "auto@2")
     assert man["images"][1]["anim_source"] == "none"        # nothing came of it: not 'auto'
-    # every member with its own picture: the style is drawn from them
+    assert man["images"][0]["music_source"] == "none" and man["sound_move_source"] == "synth"
+    # every member with its own picture: the style is drawn from them; and the game's own sound
     own[1] = ("/c/intro.ogv", "/c/intro@0.6.png")
+    aud.update(music={0: "/c/theme.wav"}, move="/c/menu_down.wav", confirm="/c/clock_bell.wav")
     need.clear()
     assert mb.main(args) == 0
     pairs = list(zip(got["argv"], got["argv"][1:]))
     assert ("--group-art", "0=fan") in pairs and ("--logo", "1=/c/intro@0.6.png") in pairs
     assert ("--anim", "1=/c/intro.ogv") in pairs
+    for want in (("--music", "0=/c/theme.wav"), ("--music", "1=/x/song.wav"),
+                 ("--sound-move", "/c/menu_down.wav"), ("--sound-confirm", "/c/clock_bell.wav"),
+                 ("--sound-confirm", "1=/c/clock_bell.wav"), ("--group-confirm", "0=/c/clock_bell.wav")):
+        assert want in pairs, want
+    man = json.load(open(os.path.join(out, "media.json")))
+    assert man["images"][0]["music_source"] == "auto" and man["sound_move_source"] == "auto"
+    assert man["images"][1]["music_source"] == "/x/song.wav"      # a file stays the file
     got.clear()
     assert mb.main(["media", "--primary", p0, "--extra", p1, "--out", out, "--visual-only"]) == 0
     assert "--visual-only" in got["argv"] and ("--sound-move", "none") in zip(got["argv"], got["argv"][1:])
+    assert asked["sounds"] is False            # the preview's half asks the game for no sounds
 
 
 def test_pick_clip_takes_a_mods_own():

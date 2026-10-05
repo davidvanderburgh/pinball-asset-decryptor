@@ -6,7 +6,7 @@
  *      60 s on that file and only then opens the read end through the relay)
  *   2. open(O_WRONLY|O_NONBLOCK): ENXIO until a reader exists, so retry
  *      every ~100 ms from the loop; F_SETPIPE_SZ 1 MB once open
- *   3. pace to the wall clock, 200 ms ahead; writes in PIPE_BUF-sized
+ *   3. pace to the wall clock, FIFO_LEAD_MS ahead; writes in PIPE_BUF-sized
  *      chunks (atomic: all or EAGAIN, so the stereo frames never desync);
  *      EAGAIN = drop and count; EPIPE = the reader went away, reopen;
  *      and NEVER LATE (PAD-141): past PIPE_MAX_MS unread in the pipe, or
@@ -51,7 +51,19 @@
 #define FIONREAD 0x541B
 #endif
 
-#define LEAD_MS      200
+/* How far ahead of the wall clock the mix runs, and how much may sit unread in
+ * the pipe.  200/400 for the emulator rig's relay to a Windows player; a
+ * Barrels of Fun machine plays the pipe with its own aplay on a small buffer,
+ * and there the lead IS the lag between a flipper and its click (PAD-342: a
+ * second on the machine with 200 here and aplay's default half second), so
+ * its build sets these short (Makefile, PLATFORM=bof). */
+#ifndef FIFO_LEAD_MS
+#define FIFO_LEAD_MS 200
+#endif
+#ifndef FIFO_PIPE_MAX_MS
+#define FIFO_PIPE_MAX_MS 400
+#endif
+#define LEAD_MS      FIFO_LEAD_MS
 #define OPEN_RETRY_MS 100
 #define MISSING_RETRY_MS 1000
 #define FMT_CHECK_MS 1000           /* no reader: is the fmt file still there? */
@@ -59,7 +71,7 @@
 #define CHUNK_FRAMES 1024           /* 4096 bytes = PIPE_BUF: atomic non-blocking writes */
 #define PIPE_BYTES   (1 << 20)
 #define SKIP_MS      400            /* a loop away longer than this is not caught up */
-#define PIPE_MAX_MS  400            /* more than this unread in the pipe: feed it nothing */
+#define PIPE_MAX_MS  FIFO_PIPE_MAX_MS   /* more than this unread in the pipe: feed it nothing */
 
 struct fifo {
     struct audio_sink base;

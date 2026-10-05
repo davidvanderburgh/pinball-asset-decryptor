@@ -103,9 +103,20 @@ still of it: `mkbofmulti.py media` reads the pack's directory, copies one Theora
 with ffmpeg and hands selectmedia both. Which clip is the title's `attract_clips` list:
 image 0 takes the first (Labyrinth's gold title), every other build the first one it CHANGED
 from image 0 (the Sarah build's intro is film footage under the film's own teal title), else
-the first. `media.json` records 'auto', which is what the tab asked for. An 'auto' music bed
-is none (the game's sounds are imported samples nothing reads yet), and an 'auto' move or
-confirm sound is the built-in synthetic click and chime (as on JJP).
+the first. `media.json` records 'auto', which is what the tab asked for.
+
+The SOUND is the game's own the same way (`own_audio`): its imported samples (a `.import` names
+the `.sample` each source became), decoded by `plugins/bof/source_converter.py` (raw PCM or QOA
+to WAV). A build's music bed follows the clip rule over the title's `music` list - stock gets
+the "Into the Labyrinth" loop (its title clip is silent), the Sarah build the soundtrack of
+its own intro clip (`logo_video_v9_audio`, which it changed). The flipper's click is the game's
+service-menu sound and START the clock's bell, off image 0. What is not there falls back to
+no bed and the built-in synthetic click and chime.
+
+**The lag.** The pipe sink leads the clock by 40 ms on BOF (`FIFO_LEAD_MS`) and aplay keeps an
+80 ms buffer (`-B 80000`): about a tenth of a second from a flipper to its click. With the
+emulator rig's 200 ms lead and aplay's default half-second buffer it was a second on the
+machine (2026-10-04).
 
 ## Proven (2026-10-03, without a machine)
 

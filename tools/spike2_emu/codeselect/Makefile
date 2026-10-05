@@ -130,6 +130,7 @@ CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
             -DDEF_MEDIA='"$(PREFIX)/media"' \
             -DDEF_COLOUR_FILE='"$(PREFIX)/color"' \
             -DCARD_FONT='"/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"' \
+            -DFIFO_LEAD_MS=40 -DFIFO_PIPE_MAX_MS=120 \
             -I$(BUILD) $(EXTRA_CFLAGS)
 LDPRE     = -static
 LDPOST    =

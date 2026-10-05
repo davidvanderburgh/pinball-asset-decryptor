@@ -177,14 +177,20 @@ def test_random_card_media_build_and_inject_args():
 
 
 def test_sounds_are_compared_as_mkbofmulti_renders_them():
-    # 'auto' is rendered as the synthetic sound / no bed; the manifest says so
-    assert mt.sound_as_rendered("bof", "sound", "auto") == "synth"
-    assert mt.sound_as_rendered("bof", "sound", "auto@3") == "synth"
-    assert mt.sound_as_rendered("bof", "music", "auto") == "none"
-    assert mt.sound_as_rendered("bof", "sound", "/mnt/d/x.wav") == "/mnt/d/x.wav"
+    # 'auto' is the game's own sound out of the .fun (recorded 'auto'), or, where there
+    # was none, the synthetic one / no bed (recorded as that): either answers an 'auto'
+    for rec in ("auto", "synth"):
+        assert mt.sound_as_rendered("bof", "sound", "auto", rec) == rec
+    assert mt.sound_as_rendered("bof", "sound", "auto@3", "synth") == "synth"
+    for rec in ("auto", "none"):
+        assert mt.sound_as_rendered("bof", "music", "auto", rec) == rec
+    # nothing rendered yet, or rendered from something else: still asked for
+    assert mt.sound_as_rendered("bof", "sound", "auto", None) == "auto"
+    assert mt.sound_as_rendered("bof", "music", "auto", "/mnt/x/old.wav") == "auto"
+    assert mt.sound_as_rendered("bof", "sound", "/mnt/d/x.wav", "auto") == "/mnt/d/x.wav"
     for plat in ("stern", "jjp"):
-        assert mt.sound_as_rendered(plat, "sound", "auto") == "auto"
-        assert mt.sound_as_rendered(plat, "music", "auto") == "auto"
+        assert mt.sound_as_rendered(plat, "sound", "auto", "synth") == "auto"
+        assert mt.sound_as_rendered(plat, "music", "auto", "none") == "auto"
 
 
 def test_build_commands_run_nothing_as_root():
@@ -224,7 +230,7 @@ def test_preview_conf_names_the_programs():
     form.images[1].confirm = "D:/snd/yes.wav"
     assert mt.card_media_names(form)[1][2:] == ("music1.wav", "confirm1.wav")
     form.images[0].music = "auto"
-    assert mt.card_media_names(form)[0][2] == ""        # 'auto' music: nothing reads a .fun's own yet
+    assert mt.card_media_names(form)[0][2] == "music0.wav"   # 'auto' music: the build's own bed
     # a JJP form still names art<N>.png for 'auto'
     jform = MultibootForm(images=[ImageRow(path="D:/a.iso"), ImageRow(path="D:/b.iso")], platform="jjp")
     assert mt.card_media_names(jform)[0][0] == "art0.png"

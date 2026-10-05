@@ -38,7 +38,10 @@
 # plays it on the USB sound card the game uses.  The player starts only when
 # the conf names a sound, and it is stopped and WAITED FOR before the game
 # starts, so the game's sound server finds the card free.  No aplay, or no
-# card: the menu is silent and nothing else changes.
+# card: the menu is silent and nothing else changes.  aplay keeps an 80 ms
+# buffer (-B), not its default half second, and the menu's mix runs 40 ms
+# ahead of the clock (the BOF build's FIFO_LEAD_MS): together they are the
+# lag between a flipper and its click, which was a second (David, 2026-10-04).
 #
 # PADSELECT_HOME moves /home/pinball (the tests); PADSELECT_NO_SUDO=1 runs the
 # menu without sudo; PADSELECT_AUDIO_PLAYER replaces aplay (the tests) and
@@ -140,7 +143,8 @@ start_player() {
         say "sound: cannot make the pipe $FIFO: the menu is silent"; FIFO=""; return 0
     fi
     # bounded like the menu; the player reads the pipe until the menu closes it
-    timeout -k 2 $((timeout_s + 70)) $SUDO $play -q -t raw -f S16_LE -r 44100 -c 2 -D "$dev" "$FIFO" \
+    timeout -k 2 $((timeout_s + 70)) $SUDO $play -q -t raw -f S16_LE -r 44100 -c 2 -B 80000 -F 20000 \
+        -D "$dev" "$FIFO" \
         </dev/null >/dev/null 2>>"$P/audio.log" &
     player=$!
     AUDIO="fifo:$FIFO"

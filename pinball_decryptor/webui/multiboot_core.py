@@ -792,18 +792,13 @@ def card_media_names(form):
             confirm = (row.confirm or "").strip() if row.confirm_on_card else (
                 "gconfirm%d.wav" % gi if confirm_spec(row) != "none" else "")
             if bof and not row.music_on_card and _media_value(row.music).lower().startswith("auto"):
-                music = ""
+                music = ""                # a random card has no build of its own to take a bed from
         else:
             i = first.get(ri, 0)
             art = "art%d.png" % i if art_spec(row) != "none" else ""
             anim = "anim%d.gif" % i if anim_spec(row) != "none" else ""
             music = "music%d.wav" % i if _media_value(row.music) != "none" else ""
             confirm = "confirm%d.wav" % i if confirm_spec(row) != "none" else ""
-            if bof and _media_value(row.music).lower().startswith("auto"):
-                # PAD-342: 'auto' art and clips are the build's own attract
-                # clip (mkbofmulti.py media), but nothing reads a .fun's music
-                # yet, so 'auto' music is no bed; an 'auto' confirm is the chime
-                music = ""
         out.append((art, anim, music, confirm))
     return out
 
@@ -2115,17 +2110,21 @@ def confirm_spec(row):
     return wsl(v)
 
 
-def sound_as_rendered(platform, kind, value):
+def sound_as_rendered(platform, kind, value, recorded=None):
     """The spec the media tool RECORDS for a form's sound (*kind* 'sound') or
     music bed (*kind* 'music') - the form's own word everywhere but Barrels
-    of Fun, where ``mkbofmulti.py media`` hands selectmedia what a .fun can
-    give (PAD-342): an 'auto' sound is the synthetic 'synth', 'auto' music is
-    none.  Compared without this, every BOF sound read as stale against its
-    manifest, so the strip said 'not rendered' for good and every highlight
-    change rendered the sounds again."""
-    if backend_for(platform).key != "bof" or not (value or "").strip().lower().startswith("auto"):
+    of Fun (PAD-342).  There ``mkbofmulti.py media`` takes an 'auto' sound or
+    bed out of the build's own .fun and records 'auto', and where it found
+    none it falls back - a sound to the synthetic one ('synth'), a bed to
+    none - and records THAT.  So an 'auto' is answered by whichever of the
+    two the manifest holds (*recorded*).  Compared without this, every BOF
+    sound read as stale against its manifest, so the strip said 'not
+    rendered' for good and every highlight change rendered them again."""
+    v = (value or "").strip().lower()
+    if backend_for(platform).key != "bof" or not v.startswith("auto"):
         return value
-    return "synth" if kind == "sound" else "none"
+    fallback = "synth" if kind == "sound" else "none"
+    return recorded if recorded in (value, fallback) else value
 
 
 def split_confirm_source(spec):
@@ -8408,9 +8407,9 @@ class MultibootPanel:
         row = ImageRow(path=path, title=title, subtitle=subtitle)
         if be.key == "bof":
             # PAD-342: the build's own title or attract clip, moving, as the
-            # card (mkbofmulti.py media pulls it out of the .fun); no bed until
-            # one is picked, and the menu-wide move / confirm sounds
-            row.art, row.anim, row.music, row.confirm = "auto", "auto", "none", ""
+            # card, and its own music while it is highlighted (mkbofmulti.py
+            # media pulls both out of the .fun); the menu-wide confirm sound
+            row.art, row.anim, row.music, row.confirm = "auto", "auto", "auto", ""
         self._rows.append(row)
         self._refresh_tree(select=len(self._rows) - 1)
         if len(self._rows) == 1:
@@ -11741,11 +11740,13 @@ class MultibootPanel:
 
         missing = []
         plat = self._backend.key
-        move_now = sound_as_rendered(plat, "sound", _media_value(self._move_var.get().strip() or "none"))
+        move_now = sound_as_rendered(plat, "sound", _media_value(self._move_var.get().strip() or "none"),
+                                     manifest.get("sound_move_source"))
         if gone(move_now != "none", manifest.get("sound_move"),
                 manifest.get("sound_move_source"), move_now):
             missing.append("the move sound")
-        confirm_now = sound_as_rendered(plat, "sound", _media_value(self._confirm_var.get().strip() or "none"))
+        confirm_now = sound_as_rendered(plat, "sound", _media_value(self._confirm_var.get().strip() or "none"),
+                                        manifest.get("sound_confirm_source"))
         if gone(self._menu_confirm() != "none", manifest.get("sound_confirm"),
                 manifest.get("sound_confirm_source"), confirm_now):
             missing.append("the confirm sound")
@@ -11770,11 +11771,11 @@ class MultibootPanel:
                 what = "image %d's" % (i + 1)
             entry = rows[key] if 0 <= key < len(rows) and isinstance(rows[key], dict) \
                 else {}
-            music_now = sound_as_rendered(plat, "music", _media_value(row.music))
+            music_now = sound_as_rendered(plat, "music", _media_value(row.music), entry.get("music_source"))
             if gone(music_now not in ("", "none"), entry.get("music"),
                     entry.get("music_source"), music_now):
                 missing.append("%s music" % what)
-            confirm_now = sound_as_rendered(plat, "sound", confirm_spec(row))
+            confirm_now = sound_as_rendered(plat, "sound", confirm_spec(row), entry.get("confirm_source"))
             if gone(confirm_now != "none", entry.get("confirm"),
                     entry.get("confirm_source"), confirm_now):
                 missing.append("%s confirm sound" % what)

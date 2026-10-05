@@ -124,6 +124,16 @@ TITLES = collections.OrderedDict([
                           ("assets/videos/attract_background_view_of_castle.ogv", 2.0),
                           ("assets/videos/attract_background_garden_view_of_castle.ogv", 2.0),
                           ("assets/videos/attract_background_front_walls.ogv", 2.0)],
+        # ...and its own SOUND ('auto', PAD-342), the game's imported samples (source paths:
+        # each one's .import names the .sample it became).  A build's music bed is picked the
+        # way its clip is: image 0 the first, the gold title's "Into the Labyrinth" loop (the
+        # title clip itself is silent); any other build the first it changed - the Sarah
+        # build's intro soundtrack, the sound of the very clip its card plays.  The flipper's
+        # click is the game's own service-menu sound and START the clock's bell, off image 0.
+        "music": [("assets/sounds/music/Into_the_Labyrinth-Anxious_ssd_loopable_dpp_remaster_01.wav", None),
+                  ("assets/sounds/sfx/logo_video_v9_audio.wav", None)],
+        "sound_move": "assets/sounds/sfx/service_menu/menu_down.wav",
+        "sound_confirm": "assets/sounds/sfx/clock_bell.wav",
     }),
 ])
 #: titles a BOF .fun can be, and why they are not offered yet
@@ -1308,6 +1318,95 @@ def _copy_out(program, d, e, dest):
     os.rename(dest + ".part", dest)
 
 
+def _read_packed(program, d, e):
+    """One small packed file's bytes, md5-checked against the directory."""
+    with open(program, "rb") as f:
+        f.seek(d.pck_off + d.base + e["ofs"])
+        data = f.read(e["size"])
+    if len(data) != e["size"] or hashlib.md5(data).digest() != bytes(e["md5"]):
+        raise Refused("%s: a packed file does not match its md5" % os.path.basename(program))
+    return data
+
+
+def _imported(program, d, files, src):
+    """The imported resource a source file became (``res://`` path=... in its .import), or None."""
+    imp = files.get(src + ".import")
+    if not imp:
+        return None
+    m = re.search(rb'path="res://([^"]+)"', _read_packed(program, d, imp))
+    res = m.group(1).decode("utf-8", "replace") if m else None
+    return res if res in files else None
+
+
+def _sound_out(program, d, files, res, src, mdir):
+    """A packed sample (*res*, from *src*) decoded to a sound file in *mdir*, written once - a
+    .wav for PCM and QOA (plugins/bof/source_converter.py), an .ogg passed through.  None when
+    it does not decode."""
+    from pinball_decryptor.plugins.bof import source_converter
+    stem = os.path.join(mdir, re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.splitext(src)[0]))
+    for ext in (".wav", ".ogg"):
+        if os.path.isfile(stem + ext):
+            return stem + ext
+    ext, data = source_converter._decode_sample(_read_packed(program, d, files[res]))
+    if not data or ext not in (".wav", ".ogg"):
+        return None
+    with open(stem + ".part", "wb") as f:
+        f.write(data)
+    os.rename(stem + ".part", stem + ext)
+    return stem + ext
+
+
+def own_audio(images, cache_dir, music_need, sounds):
+    """``{"music": {image: file}, "move": file|None, "confirm": file|None}`` - the game's own
+    sound for 'auto' (TITLES[..]['music'] / 'sound_move' / 'sound_confirm'), decoded out of
+    each build's pack into CACHE/<unpack>.media/.  The music bed is each asked-for build's own
+    (pick_clip's rule: image 0 the first, a mod the first it changed); the move and confirm
+    sounds are image 0's, and only when *sounds*.  What cannot be found or decoded is left
+    out, and says so: the caller falls back (no bed; the synthetic click and chime)."""
+    out = {"music": {}, "move": None, "confirm": None}
+    if not music_need and not sounds:
+        return out
+    u0 = cached_unpack(images[0], cache_dir)
+    spec = TITLES[u0.title]
+    try:
+        d0, base = _pack_files(u0.program)
+    except Exception as e:                                  # noqa: BLE001
+        say("note: %s's pack cannot be read (%s): 'auto' sounds are the synthetic ones"
+            % (os.path.basename(images[0]), e))
+        return out
+    if sounds:
+        mdir = u0.root + MEDIA_SUFFIX
+        os.makedirs(mdir, exist_ok=True)
+        for key in ("move", "confirm"):
+            src = spec.get("sound_" + key)
+            res = _imported(u0.program, d0, base, src) if src else None
+            out[key] = _sound_out(u0.program, d0, base, res, src, mdir) if res else None
+            say("%s sound: %s" % (key, ("the game's own %s" % src) if out[key] else "not found, the synthetic one"))
+    for i in sorted(music_need):
+        u = u0 if i == 0 else cached_unpack(images[i], cache_dir)
+        try:
+            d, files = (d0, base) if i == 0 else _pack_files(u.program)
+        except Exception as e:                              # noqa: BLE001
+            say("note: image %d: its pack cannot be read (%s): no music of its own" % (i, e))
+            continue
+        table = [(r, s) for r, s in ((_imported(u.program, d, files, s), s) for s, _t in spec.get("music") or [])
+                 if r]
+        pick = pick_clip(table, base, files, i)
+        if pick is None:
+            say("note: image %d carries none of the music 'auto' knows: no bed" % i)
+            continue
+        res, src, changed = pick
+        mdir = u.root + MEDIA_SUFFIX
+        os.makedirs(mdir, exist_ok=True)
+        f = _sound_out(u.program, d, files, res, src, mdir)
+        if f:
+            out["music"][i] = f
+            say("image %d: its own music, %s%s" % (i, src, " (changed from image 0)" if changed else ""))
+        else:
+            say("note: image %d: %s does not decode: no bed" % (i, src))
+    return out
+
+
 def own_media(images, cache_dir, need):
     """{image: (clip, still)} - each asked-for build's OWN attract clip and a still of it, out
     of its own program (PAD-342: what 'auto' is on BOF, the way a Stern card's 'auto' is its
@@ -1386,10 +1485,11 @@ def _is_style(spec):
 def cmd_media(a):
     """The menu's pictures and sounds through selectmedia.py prepare.  'auto' art and animation
     are the build's own attract clip and a still of it (:func:`own_media`), and those stills are
-    the logos a random card's styles are drawn from (``--logo``); media.json still records
-    'auto', which is what the tab asked for.  'auto' music is none (the game's sounds are
-    imported samples nothing reads yet) and an 'auto' sound is the synthetic one.  The sounds
-    play through the machine's own aplay (padselect.sh pipes the menu's mix to it)."""
+    the logos a random card's styles are drawn from (``--logo``).  'auto' music is the build's
+    own bed and an 'auto' move or confirm sound the game's own (:func:`own_audio`); what cannot
+    be found falls back to no bed and the synthetic click and chime.  media.json still records
+    'auto' for what was resolved, which is what the tab asked for.  The sounds play through the
+    machine's own aplay (padselect.sh pipes the menu's mix to it)."""
     import selectmedia
     images = [os.path.abspath(a.primary)] + [os.path.abspath(e) for e in a.extra]
     n = len(images)
@@ -1424,13 +1524,39 @@ def cmd_media(a):
         argv += ["--anim", "%d=%s" % (i, spec)]
     for i in sorted(own):
         argv += ["--logo", "%d=%s" % (i, own[i][1])]
+    # THE GAME'S OWN SOUND for 'auto' (own_audio): each build's music bed, the move click and
+    # the START sound; what it cannot find stays what it was (no bed, the synthetic ones)
+    auto = lambda s: (s or "").strip().lower().startswith("auto")       # noqa: E731
+    confirms = [s.partition("=")[2] if s.partition("=")[1] and s.partition("=")[0].strip().isdigit() else s
+                for s in a.sound_confirm or []] + [s.partition("=")[2] for s in a.group_confirm]
+    sounds = not a.visual_only and (auto(a.sound_move) or any(auto(s) for s in confirms))
+    aud = own_audio(images, a.cache_dir or CACHE_DIR_DEFAULT, {i for i in range(n) if auto(musics[i])}, sounds)
+    top = {}                                       # media.json top-level key -> the spec asked for
+
+    def sound(s, key=None, rows=None):
+        if not auto(s):
+            return s
+        kind = "confirm" if key != "sound_move_source" else "move"
+        if not aud[kind]:
+            return _bof_sound(s)
+        if rows is not None:
+            resolved[rows] = s
+        elif key:
+            top[key] = s
+        return aud[kind]
     for i, spec in enumerate(musics):
-        argv += ["--music", "%d=%s" % (i, "none" if spec.startswith("auto") else spec)]
-    argv += ["--sound-move", _bof_sound(a.sound_move)]
+        if auto(spec):
+            if i in aud["music"]:
+                resolved[("music_source", i)] = spec
+            spec = aud["music"].get(i, "none")
+        argv += ["--music", "%d=%s" % (i, spec)]
+    argv += ["--sound-move", sound(a.sound_move, "sound_move_source")]
     for spec in a.sound_confirm or ["none"]:
         idx, sep, val = spec.partition("=")
-        argv += ["--sound-confirm", ("%s=%s" % (idx, _bof_sound(val))) if sep and idx.strip().isdigit()
-                 else _bof_sound(spec)]
+        if sep and idx.strip().isdigit():
+            argv += ["--sound-confirm", "%s=%s" % (idx, sound(val, rows=("confirm_source", int(idx))))]
+        else:
+            argv += ["--sound-confirm", sound(spec, "sound_confirm_source")]
     for spec in a.group_members:
         argv += ["--group-members", spec]
 
@@ -1448,7 +1574,8 @@ def cmd_media(a):
                              ("--group-anim", a.group_anim, picture),
                              ("--group-music", a.group_music,
                               lambda _g, s: "none" if s.lower().startswith("auto") else s),
-                             ("--group-confirm", a.group_confirm, lambda _g, s: _bof_sound(s))):
+                             ("--group-confirm", a.group_confirm,
+                              lambda g, s: sound(s, rows=("group", "confirm_source", int(g))))):
         for spec in specs:
             g, _sep, val = spec.partition("=")
             argv += [flag, "%s=%s" % (g, fix(g, val))]
@@ -1460,17 +1587,21 @@ def cmd_media(a):
     if a.work:
         argv += ["--work", a.work]
     rc = selectmedia.main(argv)
-    if rc == 0 and resolved:
-        # THE MANIFEST SAYS WHAT WAS ASKED FOR: 'auto', not the clip it came to in the cache -
-        # the tab offers a rendered picture only while its source is the row's own spec, and a
-        # load of the update reads the row back from it
+    if rc == 0 and (resolved or top):
+        # THE MANIFEST SAYS WHAT WAS ASKED FOR: 'auto', not the clip or sample it came to in the
+        # cache - the tab offers a rendered picture, and counts a sound as ready, only while its
+        # source is the row's own spec, and a load of the update reads the row back from it
         man_path = os.path.join(os.path.abspath(a.out), "media.json")
         with open(man_path) as f:
             man = json.load(f)
-        for (key, i), spec in resolved.items():
-            rows = man.get("images") or []
+        for where, spec in resolved.items():
+            section, key, i = ("images",) + where if len(where) == 2 else where
+            rows = man.get("groups" if section == "group" else "images") or []
             if i < len(rows) and isinstance(rows[i], dict) and rows[i].get(key) not in (None, "none"):
                 rows[i][key] = spec
+        for key, spec in top.items():
+            if man.get(key) not in (None, "none"):
+                man[key] = spec
         with open(man_path + ".part", "w") as f:
             json.dump(man, f)
         os.replace(man_path + ".part", man_path)
@@ -1552,9 +1683,9 @@ def main(argv=None):
     s.add_argument("--anim", action="append", default=[], metavar="N=auto|none|PATH[@START[:SECONDS[:FPS]]]",
                    help="image N's clip ('auto' = the build's own attract clip, out of its .fun)")
     s.add_argument("--music", action="append", default=[], metavar="N=none|PATH",
-                   help="the bed that loops while image N is highlighted ('auto' = none on BOF)")
+                   help="the bed that loops while image N is highlighted ('auto' = the build's own, out of its .fun)")
     s.add_argument("--sound-move", default="none", metavar="PATH|synth|none",
-                   help="the click a flipper makes ('auto' = synth on BOF)")
+                   help="the click a flipper makes ('auto' = the game's own menu sound)")
     s.add_argument("--sound-confirm", action="append", default=[], metavar="[N=]PATH|synth|none",
                    help="the sound START makes: a bare value for every card, N= for image N's own")
     s.add_argument("--cards", type=int, default=0, metavar="N",

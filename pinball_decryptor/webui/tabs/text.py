@@ -1089,7 +1089,11 @@ class TextTab(TabService):
     def reveal_text_string(self, text, scene_dir=None):
         """Scenes window: find one display string on this tab (clearing any
         filter that would hide it) and land on its row; with *scene_dir*, the
-        row from that scene when it has one (PAD-384)."""
+        row from that scene when it has one (PAD-384).  A scene's line breaks
+        are spaces in this tab's rows (text_manifest.escape_cell), and the
+        search box would drop them (DragonRR: "JET JAGUARVS.MEGALON")."""
+        from ...core import text_manifest
+        text = text_manifest.escape_cell(text or "")
         self.window.select_tab(self.ns)
         if not self._text_rows and self._text_scan_dir == "":
             self._scan_text_strings()

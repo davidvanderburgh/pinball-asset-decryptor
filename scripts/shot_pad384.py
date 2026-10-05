@@ -25,6 +25,10 @@ import shot_pad312 as base  # noqa: E402
 def main():
     repo, out_dir = sys.argv[1:3]
     after = "--after" in sys.argv
+    # round 2 (DragonRR): a text that breaks over lines; --scene <dir> --match <words>
+    scene = sys.argv[sys.argv.index("--scene") + 1] if "--scene" in sys.argv else None
+    match = sys.argv[sys.argv.index("--match") + 1] if "--match" in sys.argv else None
+    tag = "_multiline" if match else ""
     os.makedirs(out_dir, exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="pad384-")
     project = base._project(scratch)
@@ -50,11 +54,13 @@ def main():
             base._wait_scan(state, "images")
             api("images.open_scenes", base.PORTRAIT)
             time.sleep(2)
-            api("text_scenes.select", base.BATTLE + "/scene.radium") or api(
-                "text_scenes.select", base.BATTLE)
+            where = scene or base.BATTLE
+            api("text_scenes.select", where + "/scene.radium") or api(
+                "text_scenes.select", where)
             time.sleep(8)
             tv = (state().get("text_scenes") or {}).get("tree_view") or {}
-            lay = next((l for l in tv.get("layers") or [] if l.get("kind") == "Text"), None)
+            lay = next((l for l in tv.get("layers") or [] if l.get("kind") == "Text"
+                        and (not match or match in (l.get("text") or ""))), None)
             print("text layer:", lay and (lay["id"], lay["name"], lay.get("text")), flush=True)
             if lay:
                 api("text_scenes.tree_select", lay["id"], "")
@@ -69,7 +75,7 @@ def main():
                 time.sleep(1.6)
             box = page.query_selector(".tree-layers")
             b = box.bounding_box() if box else None
-            page.screenshot(path=out("scenes_layers.png"), clip={
+            page.screenshot(path=out("scenes_layers%s.png" % tag), clip={
                 "x": max(0, b["x"] - 20), "y": max(0, b["y"] - 20),
                 "width": b["width"] + 300, "height": min(b["height"] + 40, 700)} if b else None)
             if btn:
@@ -77,7 +83,7 @@ def main():
                 time.sleep(4)
             page.mouse.move(5, 990)
             time.sleep(0.5)
-            page.screenshot(path=out("text_tab.png"))
+            page.screenshot(path=out("text_tab%s.png" % tag))
             print("text tab search:", (state().get("text") or {}).get("text_search_var"),
                   flush=True)
             print("page errors:", errors, flush=True)

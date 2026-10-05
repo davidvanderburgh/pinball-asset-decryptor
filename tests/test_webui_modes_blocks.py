@@ -119,6 +119,26 @@ def test_start_mode_now_reaches_a_blocks_mode_built_into_the_run(tmp_path, previ
                      "asked the game to start ramp_frenzy. A game must be in play.")
 
 
+def test_the_game_modes_choice_reaches_the_blocks_page_and_its_c(tmp_path, preview_on):  # noqa: F811
+    # PAD-373: the form's "While it runs, the game's modes" for a blocks mode
+    proj = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new_blocks_mode", "Ramp Frenzy")
+        b = w.state("modes")["code"]["blocks"]
+        assert b["program"]["game_modes"] == "stack" and b["program"]["block_modes"] == []
+        ch = b["choices"]
+        ids = [m["id"] for m in ch["game_modes"]]
+        assert ids and set(ch["game_modes_default"]) <= set(ids)
+        assert ch["block_off"] == "" and ch["give_way_off"] == ""
+        prog = b["program"]
+        prog.update(game_modes="block", block_modes=[ids[0]])
+        assert w.call("modes.blocks_save", "ramp_frenzy", prog)["problems"] == []
+        b = w.state("modes")["code"]["blocks"]
+        assert b["program"]["game_modes"] == "block" and b["program"]["block_modes"] == [ids[0]]
+        assert "#define GAME_MODES       2" in b["c"] and "BLOCK_IDS[1] = {%d};" % ids[0] in b["c"]
+
+
 def test_own_clips_and_sounds_are_picked_into_the_folder_and_carried(tmp_path, preview_on):  # noqa: F811
     """PAD-374: "+ Clip…" / "+ Sound…" / "Music…" copy the file into the mode's folder and name it;
     the saved program puts it in assets.json, and the problems look for it in the folder."""

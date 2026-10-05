@@ -178,6 +178,9 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk-pal.bk-num, .bk-pal.bk-bool { border-radius: 999px; }
 .bk-ws { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px; }
 .bk-settings { gap: 8px; align-items: center; }
+.bk-gamemodes { display: flex; flex-direction: column; gap: 6px; }
+.bk-gamemodes .row { gap: 8px; align-items: center; }
+.bk-gamemodes .modes-shots { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); padding-left: 12px; }
 .bk-vars { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .bk-varbox { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 6px; border-radius: 8px; background: #c8553a22; border: 1px solid #c8553a66; }
 .bk-scripts { display: flex; flex-direction: column; gap: 14px; }

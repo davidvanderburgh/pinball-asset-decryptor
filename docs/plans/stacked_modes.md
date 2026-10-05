@@ -124,6 +124,24 @@ Not named anywhere: multiballs (by design), and a few starts the veto cannot tak
 Eating Contest Ready; the plain-C rejects in `sdk/cstarts/json`). A refused start may use up what lit it on
 some titles (Stranger Things' award table counts the award before it calls the mode).
 
+## Blocks modes get the same lever (PAD-373)
+
+David, 2026-10-04: "Ideally the blocks provide the same amount of integration as the C code". A blocks
+mode's `blocks.json` carries `game_modes` (stack, the default and what every blocks mode did before;
+give_way; block) and `block_modes` (ids; [] = the port's checked defaults), and its editor shows the form's
+row and ticks. The generated C does what the examples do with the kit: a Start the mode waits while one of
+the game's modes runs or two balls are in play (kit_wait_game; the tab's Start mode now does not wait), it
+calls pm_block_list + pm_block_game_modes after pm_begin (kit_isolate_list) and lets go in end, and one of
+the game's modes beginning ends it at once (kit_game_began) - except that its own Multiball block's balls
+are not taken for the game's multiball while they are in play.
+
+- **Emulator (godzilla_pro 1.16, muted, hidden, rig 1; `C:/tmp/PAD-373/job.sh`).** MASER BARRAGE's
+  isolation rebuilt in blocks (the Maser target starts it, block 21 23): the Maser target switch started it
+  and the runtime said "keeps the game's modes 21 23 (its own list) from starting"; Jet Fighter Attack and
+  Tesla Strike forced through the game's own start were refused; Planet X Hurry Up (not ticked) ran and
+  ended ours in the same tick ("lets the game's modes start again"); a Maser target during the hurry-up
+  logged "not started (a block): a stock mode is running" and did not start it.
+
 ## Still to do
 
 - The Scenes editor's "Beside a game mode" view: a mode's screen laid out a second time for when a game

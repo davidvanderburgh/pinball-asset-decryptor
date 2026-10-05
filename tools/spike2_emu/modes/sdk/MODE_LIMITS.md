@@ -8,7 +8,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 
 - **Your modes:** wide open. Your own start, shots, scoring, screen, clips, sounds, music and lights.
 - **The game's modes:** you can change their numbers (timers, awards), not how they work.
-- **Everything else:** progression, settings, coils, high scores and Insider Connected are off limits.
+- **Everything else:** progression, settings, high scores and Insider Connected are off limits, and so are the coils, apart from a few Godzilla mechanisms a mode may hold for a moment.
 
 ## Quick answers
 
@@ -43,7 +43,11 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 
 | I want to... | Answer |
 |---|---|
-| Fire a coil, magnet, kickback, lock or diverter | No |
+| Hold the ball on Godzilla's magnet | Godzilla 1.16: up to 5 s when the Godzilla target is hit. [Limits](#why-your-mode-always-gives-way) |
+| Hold a ball in the scoop | Godzilla 1.16: up to 10 s, then the game kicks it out as usual |
+| Hold the Mechagodzilla magnet or the bridge | Godzilla Premium/LE 1.16: up to 5 s, as it starts or on a shot |
+| Turn the shield or move the building | Not yet |
+| Fire a flipper, slingshot, pop bumper, kickback, lock, the trough or any other coil | No |
 | Add a switch or a shot | No. A mode sees the shots the game reports. |
 | Change settings, audits or high scores from a mode | No. Settings are on the Defaults tab. |
 | Send scores to Insider Connected | No. Players can log in, but a card with modes sends no scores. |
@@ -134,7 +138,17 @@ The catches:
 
 Modes used to be able to hold the screen so the game's lesser displays waited. On a real Godzilla Premium that held up the Magna-Grab screen, and the game keeps the ball on the magnet until that screen plays. The magnet stayed on until the machine was switched off.
 
-So a mode never makes the game wait for anything now. The Display priority setting is still there for older modes, but it doesn't hold anything back. Same thinking behind the other hard limits: no coils, multiballs always win, and a mode ends cleanly whenever the game moves on.
+So a mode never makes the game wait for anything now. The Display priority setting is still there for older modes, but it doesn't hold anything back. Same thinking behind the other hard limits: multiballs always win, and a mode ends cleanly whenever the game moves on.
+
+The few mechanisms a mode may hold (Godzilla's magnet and scoop, and on a Premium/LE the Mechagodzilla magnet and the bridge) give way the same way, and a mode can't raise their limits:
+
+- One hold at a time per mechanism, up to 5 s (the scoop 10 s), then at least 3 s of rest, and no more than 6 a minute.
+- At the game's own power: the same pulse and hold it uses itself.
+- Never while the game is using it or the operator has switched it off. If the game wants it in the middle of a hold, yours lets go at once.
+- Let go when the mode ends, the ball drains, the player tilts or the game ends.
+- The scoop's kick-out is always the game's own.
+
+All of it was tested on a real Godzilla Premium.
 
 ## Which games
 
@@ -150,9 +164,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Elvira 1.13 | ✓ | no | not yet | all |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | all |  |
-| Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons |
-| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons |
+| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all |  |
@@ -185,6 +199,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 - **Lights:** *shots* lights just the scoring shots' inserts; *all* holds every insert in the mode's colour.
 - **HUD:** counters, a timer and a gauge at the screen's edges, like Godzilla's own battles.
 - **Buttons:** the flipper and Action buttons count as shots.
+- **Magnet, scoop, mechanisms:** what a mode may hold for a moment: the magnet, a ball in the scoop, the Mechagodzilla magnet and the bridge.
 - **Never waits:** a mode can't be set to wait for the game's modes.
 - **Not listed?** Pick the card anyway. The app works out its hooks; press Check this game (about two minutes) before trusting them.
 

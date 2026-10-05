@@ -45,7 +45,7 @@
 #define PADLED_H
 
 #define PADLED_MAGIC   0x44454c50u      /* 'PLED' */
-#define PADLED_VERSION 4
+#define PADLED_VERSION 5
 
 /* Node ids run to 14 and index to 95, so a flat [16][96] covers every board
  * with room to spare and needs no per-node base to get wrong. */
@@ -120,6 +120,33 @@ struct padled_shm {
     unsigned char seen[PADLED_NODES][PADLED_IDX];
     unsigned wide_decoded;        /* wide-dialect frames parsed exactly     */
     unsigned wide_skipped;        /* wide-dialect frames that did not close */
+    /* VERSION 5 (PAD-381): what each coil is DRIVEN to, and until when.
+     * `coil`/`lvl` above say a coil was addressed; these say whether it is
+     * still on, which is the question a held magnet asks. Offsets for a Python
+     * reader: drive_t0 4776, drive_tps 4780, drive_until 4784,
+     * drive_pulse_t 5808, drive_hold_t 6320, drive_pulse_pwr 6832,
+     * drive_hold_pwr 7088, drive_fires 7344, drive_offs 7348,
+     * drive_rule_fires 7352.
+     *
+     * The frame and every field are named from the game's own serialiser -
+     * coil_drive_decode() in hwshim.c has the addresses. Times are in BOARD
+     * TICKS as sent; ms = ticks * 1000 / drive_tps (the tick rate the rig's
+     * boards claim). drive_until is the guest pad_ms() at which the last
+     * command's pulse + hold run out, 0 once an OFF (cmd 4d) lands. A coil is
+     * ON while drive_until > now, where now = the reader's CLOCK_MONOTONIC ms
+     * minus drive_t0. That the board stops there is the GAME's reading (it
+     * counts the coil busy for exactly pulse + hold), not a measurement of a
+     * board. */
+    unsigned drive_t0;            /* pad_ms()'s CLOCK_MONOTONIC origin, ms  */
+    unsigned drive_tps;           /* board ticks per second, as claimed     */
+    unsigned drive_until[PADLED_NODES][PADLED_COILS];
+    unsigned short drive_pulse_t[PADLED_NODES][PADLED_COILS];
+    unsigned short drive_hold_t[PADLED_NODES][PADLED_COILS];
+    unsigned char drive_pulse_pwr[PADLED_NODES][PADLED_COILS];
+    unsigned char drive_hold_pwr[PADLED_NODES][PADLED_COILS];
+    unsigned drive_fires;         /* 14-byte cmd 40 commands, ever          */
+    unsigned drive_offs;          /* cmd 4d, ever                           */
+    unsigned drive_rule_fires;    /* the short cmd 40 (fire by rule), ever  */
 };
 
 #endif

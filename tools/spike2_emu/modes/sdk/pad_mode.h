@@ -442,6 +442,55 @@ int pm_balls_in_play(void);
  * own multiball it only lengthens that multiball's save (the framework keeps the longer). */
 int pm_ball_save(unsigned seconds);
 
+/* ---- the magnet (PAD-381; MODE_SDK.md "The magnet") ------------------------------------------
+ * A grab with the playfield magnet, for `ms` milliseconds. You ask for a time and nothing else:
+ * the powers are the operator's own magnet adjustments (draw power for the draw time, then hold
+ * power), and the runtime decides whether you may and lets go by itself. It is a coil on 48 V, so
+ * the limits are the runtime's and cannot be raised:
+ *   - `ms` is clamped to 100..5000, the draw time included. The whole grab goes to the board as ONE
+ *     command that ends by itself, and is never re-sent: if your mode, the runtime or the game
+ *     stops, the magnet still lets go when that time is up.
+ *   - only while your mode runs, in a game (not attract, not tilted), with the magnet not disabled
+ *     in the settings, while none of the game's own magnet sequences runs, one grab at a time, 3 s
+ *     from the end of one grab to the start of the next, at most 6 grabs a minute.
+ *   - the runtime lets go at the grab's end, when you call pm_magnet_release, when your mode ends,
+ *     when the ball ends, and when the game ends or tilts. If the game starts a magnet sequence of
+ *     its own while you hold, yours steps aside and the game drives the magnet.
+ *   - the grab runs as a game process of the runtime's that takes control of the magnet, as the
+ *     game's own grabs do (without it the game switches the magnet off at once); if the game ends
+ *     that process (a drain, a tilt), the magnet goes off the game's own way.
+ * pm_magnet_grab: 1 = grabbing; 0 = refused (the reason is in mode.log). Godzilla only (the port's
+ * `site coil_fire` and `value magnet_dev`); PM_CAN_COILS says whether this game has it. */
+#define PM_CAN_COILS        0x200000u /* pm_magnet_grab / pm_magnet_release / pm_magnet_holding */
+int pm_magnet_grab(unsigned ms);
+void pm_magnet_release(void);
+int pm_magnet_holding(void);
+/* PAD-381: the same hold for any coil of that kind the port names (`text held_coils`; Godzilla Premium/LE:
+ * "magnet" the Godzilla magnet, "mg_magnet" the Mechagodzilla magnet, "bridge" the bridge diverter), with
+ * the same limits each: one command from a process of the runtime's that controls the coil, the coil's own
+ * powers, at most 5000 ms, 3 s between holds, 6 a minute, never while the game uses it.
+ * pm_magnet_grab(ms) is pm_coil_hold("magnet", ms). pm_coil_known: 1 when this game has that coil. */
+int pm_coil_hold(const char *name, unsigned ms);
+void pm_coil_release(const char *name);
+int pm_coil_holding(const char *name);
+int pm_coil_known(const char *name);
+
+/* ---- the scoop (PAD-381; MODE_SDK.md "The scoop") ---------------------------------------------
+ * Hold a ball that lands in the scoop for `ms` milliseconds while your mode runs, then let the game
+ * kick it out. You ask for a time and nothing else: the kick-out is the game's own, at the operator's
+ * SCOOP KICK POWER, with the game's own retries, and nothing here fires a coil. The game's own use of
+ * a landing ball (its rules, a select screen) always comes first; your hold starts when it is done.
+ *   - `ms` is 100..10000; 0 = no hold (and a ball held now goes). It applies to every ball that
+ *     settles in the scoop while your mode runs.
+ *   - the hold ends at its time, on pm_scoop_release, when your mode ends, and when the game ends or
+ *     tilts.
+ * pm_scoop_hold: 1 = set; 0 = not the running mode, or no PM_CAN_SCOOP on this game (the port's
+ * `site scoop_handler`, `data scoop_slot`, `value scoop_event`). pm_scoop_holding: 1 while a ball is held. */
+#define PM_CAN_SCOOP        0x100000u /* pm_scoop_hold / pm_scoop_release / pm_scoop_holding */
+int pm_scoop_hold(unsigned ms);
+void pm_scoop_release(void);
+int pm_scoop_holding(void);
+
 /* ---- the shield platform (PAD-379) ---------------------------------------------------------------
  * Godzilla Premium/LE carries its three shield targets on a platform a motor turns. AWAY: the spinner
  * side faces the player and the shields cannot be reached from the flippers - the game's home, and

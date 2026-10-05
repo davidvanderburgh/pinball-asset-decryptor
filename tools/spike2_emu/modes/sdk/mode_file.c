@@ -81,6 +81,13 @@ struct mode_cfg {
     uint64_t add_ball_bits;
     unsigned ball_save_s;             /* `ball_save <s>`: a ball save when it starts, no multiball; 0 = none */
     uint64_t mball_on_bits;           /* PAD-228 `multiball_on <mask>`: the balls come on that shot, not at the start */
+    unsigned magnet_ms;               /* PAD-381 `magnet <ms> [mask]`: a grab on each hit of that shot; 0 = none */
+    uint64_t magnet_bits;
+    unsigned scoop_ms;                /* PAD-381 `scoop_hold <ms>`: a ball landing in the scoop is held; 0 = none */
+    char coil_name[4][16];            /* PAD-381 `coil_hold <name> <ms> [mask]`: a held coil of the port's */
+    unsigned coil_ms[4];
+    uint64_t coil_bits[4];            /* ... on each hit of these shots; 0 = once, when the mode starts */
+    unsigned n_coil;
     /* PAD-227: more than one thing to meet before it starts (their own functions below) */
     uint64_t also_bits[ALSO_MAX];
     unsigned also_count[ALSO_MAX], n_also;
@@ -234,6 +241,74 @@ static int ball_save_line(struct slot *M, const char *line)
     cfg.ball_save_s = (unsigned)num(&a);
     if (cfg.ball_save_s > 120) cfg.ball_save_s = 120;
     return 1;
+}
+
+/* PAD-381: the playfield magnet (MODE_SDK.md "The magnet")
+ *   magnet <ms> [mask]    while the mode runs, every hit of the shot the magnet sits at - the port's
+ *                         `value magnet_shot` (Godzilla: the Godzilla target), or <mask> - holds the
+ *                         ball on the magnet for <ms>, the hit that starts the mode included. The time
+ *                         is only asked for: pm_magnet_grab clamps it to 100-5000 ms, picks the powers
+ *                         from the operator's magnet settings and refuses inside its own limits (a
+ *                         refused hit is logged and the mode carries on). 0 = none. */
+static int magnet_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "magnet");
+    if (!a) return 0;
+    cfg.magnet_ms = (unsigned)num(&a);
+    cfg.magnet_bits = (*a >= '0' && *a <= '9') ? num(&a) : (uint64_t)(unsigned long)pm_port_value("magnet_shot", 0);
+    return 1;
+}
+
+/* PAD-381: the scoop (MODE_SDK.md "The scoop")
+ *   scoop_hold <ms>       while the mode runs, a ball that settles in the scoop is held there <ms> more
+ *                         (100-10000; pm_scoop_hold) once the game is done with it, then the game kicks it
+ *                         out as it always does. 0 = none. */
+static int scoop_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "scoop_hold");
+    if (!a) return 0;
+    cfg.scoop_ms = (unsigned)num(&a);
+    return 1;
+}
+
+/* PAD-381: held coils (MODE_SDK.md "Held coils")
+ *   coil_hold <name> <ms> [mask]   the port's held coil <name> (magnet, mg_magnet, bridge on a Godzilla
+ *                                  Premium) held <ms> through pm_coil_hold, with all of its limits: on every
+ *                                  hit of <mask> while the mode runs (the starting hit included), or once when
+ *                                  the mode starts when there is no mask. Up to 4 lines. */
+static int coil_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "coil_hold");
+    unsigned k = 0, n;
+    if (!a) return 0;
+    if (cfg.n_coil >= 4) return 1;
+    n = cfg.n_coil;
+    while (*a && !is_space(*a) && k + 1 < sizeof cfg.coil_name[n]) cfg.coil_name[n][k++] = *a++;
+    cfg.coil_name[n][k] = 0;
+    while (*a && !is_space(*a)) a++;
+    cfg.coil_ms[n] = (unsigned)num(&a);
+    cfg.coil_bits[n] = (*a >= '0' && *a <= '9') ? num(&a) : 0;
+    if (k && cfg.coil_ms[n]) cfg.n_coil++;
+    return 1;
+}
+
+static void coils_at(struct slot *M, uint64_t mask)   /* mask 0: the mode's start */
+{
+    unsigned i;
+    for (i = 0; i < cfg.n_coil; i++) {
+        if (mask ? !(mask & cfg.coil_bits[i]) : cfg.coil_bits[i] != 0) continue;
+        pm_log("%s: %s %u ms %s - %s", cfg.name, cfg.coil_name[i], cfg.coil_ms[i], mask ? "on its shot" : "as it starts",
+               pm_coil_hold(cfg.coil_name[i], cfg.coil_ms[i]) ? "holding" : "no hold (the runtime's line says why)");
+    }
+}
+
+/* A shot of the running mode's: the magnet, when it is the magnet's shot */
+static void magnet_shot(struct slot *M, uint64_t mask)
+{
+    coils_at(M, mask);                       /* PAD-381: the held coils on their shots, too */
+    if (!cfg.magnet_ms || !(mask & cfg.magnet_bits)) return;
+    pm_log("%s: magnet shot %08x_%08x - %s", cfg.name, (unsigned)(mask >> 32), (unsigned)mask,
+           pm_magnet_grab(cfg.magnet_ms) ? "holding the ball" : "no grab (the runtime's line says why)");
 }
 
 static int stack_line(struct slot *M, const char *line)
@@ -1652,6 +1727,9 @@ static void cfg_line(struct slot *M, const char *line)
     if (block_modes_line(M, line)) return;   /* PAD-363 */
     if (multiball_line(M, line)) return;     /* item 167 */
     if (ball_save_line(M, line)) return;     /* PAD-225 */
+    if (magnet_line(M, line)) return;        /* PAD-381 */
+    if (scoop_line(M, line)) return;         /* PAD-381 */
+    if (coil_line(M, line)) return;          /* PAD-381 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -1704,6 +1782,17 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.mball_on_bits)
         pm_log("\"%s\": the multiball comes on %08x_%08x%s", cfg.name, (unsigned)(cfg.mball_on_bits >> 32),
                (unsigned)cfg.mball_on_bits, cfg.mball_balls ? "" : " - but there is no multiball line: ignored");
+    if (cfg.magnet_ms)                       /* PAD-381 */
+        pm_log("\"%s\": the magnet holds the ball %u ms on %08x_%08x%s", cfg.name, cfg.magnet_ms,
+               (unsigned)(cfg.magnet_bits >> 32), (unsigned)cfg.magnet_bits,
+               !cfg.magnet_bits ? " - but no shot is the magnet's (the port has no magnet_shot): ignored"
+               : pm_can(PM_CAN_COILS) ? "" : " - this game's port cannot drive the magnet: no grab");
+    if (cfg.n_coil)                          /* PAD-381 */
+        pm_log("\"%s\": %u held coil line(s), the first %s %u ms%s", cfg.name, cfg.n_coil, cfg.coil_name[0],
+               cfg.coil_ms[0], pm_can(PM_CAN_COILS) ? "" : " - this game's port names no held coils: no hold");
+    if (cfg.scoop_ms)                        /* PAD-381 */
+        pm_log("\"%s\": a ball in the scoop is held %u ms%s", cfg.name, cfg.scoop_ms,
+               pm_can(PM_CAN_SCOOP) ? "" : " - this game's port cannot hold the scoop: no hold");
     params_loaded(M);
     more_loaded(M);                          /* PAD-227 */
 }
@@ -1837,6 +1926,8 @@ static void mode_start(struct slot *M, const char *why)
         multiball_served(M);
     }
     run.saving = !cfg.mball_balls && cfg.ball_save_s && pm_ball_save(cfg.ball_save_s);   /* no refusal stops the mode */
+    if (cfg.scoop_ms) pm_scoop_hold(cfg.scoop_ms);       /* PAD-381: the runtime lets it go when the mode ends */
+    coils_at(M, 0);                                      /* PAD-381: held coils with no shot hold as it starts */
     run.no_clock = cfg.seconds == 0;
     run.active = 1;
     run.slot = M;
@@ -2136,6 +2227,8 @@ static void on_shot(uint64_t mask)
     if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_on) multiball_shot(M, mask);
     else if (run.active && (M = run.slot) != 0 && p == run.player && run.mball_wait && end_pending != M)
         multiball_on_shot(M, mask);          /* PAD-228 */
+    if (run.active && (M = run.slot) != 0 && p == run.player && end_pending != M)
+        magnet_shot(M, mask);                /* PAD-381 */
     end_shot_seen(mask, p);
     if (p < 1 || p > 4) return;
     for (k = 0; k < MODES_MAX; k++) {
@@ -2160,6 +2253,7 @@ static void on_shot(uint64_t mask)
             if (!hit || !M->seq_done[p]) continue;
             if (also_met(M, p)) mode_start(M, "shot sequence");
             else pm_log("%s: its sequence is met - waiting for its other shots (player %u)", cfg.name, p);
+            if (running(M)) magnet_shot(M, mask);   /* PAD-381: the hit that starts it counts */
             continue;
         }
         if (mask & cfg.trigger_bits) {
@@ -2170,6 +2264,7 @@ static void on_shot(uint64_t mask)
         if (!hit || !cfg.trigger_bits || M->trig[p] < cfg.trigger_count) continue;
         if (also_met(M, p)) mode_start(M, "trigger shot");
         else pm_log("%s: its trigger is met - waiting for its other shots (player %u)", cfg.name, p);
+        if (running(M)) magnet_shot(M, mask);       /* PAD-381: the hit that starts it counts */
     }
 }
 

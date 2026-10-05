@@ -44,6 +44,9 @@ const T = {
   balls: "How many balls are in play together, 2 to 6. A machine with fewer balls serves what it has.",
   ballSave: "For this many seconds after the balls are served, a drained ball is served back.",
   startSave: "When the mode starts, the game's own ball saver is on for this many seconds: a ball that drains in that time is served back, and the ball does not end. A multiball uses its own ball save instead.",
+  coils: "Holds this mechanism the same way as the magnet: one command at the power the game itself uses for it, for this long (0.1 to 5 seconds), then it is let go. As the mode starts, or on every hit of a shot while it runs. The same limits as the magnet: one hold at a time, 3 seconds between holds, at most 6 a minute, never while the game is using it, and let go when the mode or the ball ends or the game tilts.",
+  scoop: "While the mode runs, a ball that lands in the scoop stays there this long once the game is done with it (its own awards and screens always come first), then the game kicks it out the way it always does, at the kick power the operator set. Your mode never fires the scoop itself. 0.1 to 10 seconds; the ball goes at once when the mode ends or the game tilts.",
+  magnet: "While the mode runs, every hit of the shot the magnet sits at (the one that starts the mode too) holds the ball on the magnet for this long, then lets it go. The magnet runs at the power the operator set for it in the game's settings. To keep the coil safe, the app always holds the same limits: 0.1 to 5 seconds a grab, one grab at a time, 3 seconds between grabs, at most 6 a minute, never while the game is using the magnet itself, and it lets go when the mode or the ball ends or the game tilts. A grab it refuses is skipped and the mode carries on.",
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
@@ -338,6 +341,9 @@ function ModePage({ s, f, off, dis, rs }) {
   const mbOff = off || dis.multiball;
   const mbIn = mbOff || !f.multiball;
   const bsOff = off || dis.ball_save || f.multiball;
+  const magOff = off || dis.magnet;                                            // PAD-381
+  const scoopOff = off || dis.scoop;                                           // PAD-381
+  const coilsOff = off || dis.coils;                                           // PAD-381
   const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
   const ballOpts = f.add_ball_shot && !balls.some((o) => o.value === f.add_ball_shot) ? [{ value: f.add_ball_shot, label: f.add_ball_shot }, ...balls] : balls;
   const mbOnOpts = withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x })), f.mb_on_shot);
@@ -448,6 +454,30 @@ function ModePage({ s, f, off, dis, rs }) {
           <${Num} k="start_save_s" value=${f.start_save_s} disabled=${bsOff || !f.start_save} width=${64} title=${T.startSave} /><span class="dim">seconds</span>
         </div>
         ${f.multiball && !dis.ball_save ? html`<div class="small muted">A multiball has its own ball save, below.</div>` : null}
+      <//>
+      <${Sec} title="Magnet" reason=${rs.magnet}>
+        <${Check} label=${`Hold the ball on the magnet when ${prof.magnet_shot ? `the ${prof.magnet_shot}` : "its shot"} is hit`} checked=${f.magnet} disabled=${magOff} title=${T.magnet} ns="modes" k="f:magnet" />
+        <div class="row wrap" style="padding-left:26px">
+          <span class="dim nw">for</span>
+          <${Num} k="magnet_s" value=${f.magnet_s} disabled=${magOff || !f.magnet} width=${64} title=${T.magnet} /><span class="dim">seconds (up to 5)</span>
+        </div>
+      <//>
+      <${Sec} title="Scoop" reason=${rs.scoop}>
+        <${Check} label="Hold a ball that lands in the scoop" checked=${f.scoop} disabled=${scoopOff} title=${T.scoop} ns="modes" k="f:scoop" />
+        <div class="row wrap" style="padding-left:26px">
+          <span class="dim nw">for</span>
+          <${Num} k="scoop_s" value=${f.scoop_s} disabled=${scoopOff || !f.scoop} width=${64} title=${T.scoop} /><span class="dim">seconds (up to 10), then the game kicks it out</span>
+        </div>
+      <//>
+      <${Sec} title="Other mechanisms" reason=${rs.coils}>
+        ${(prof.held_coils || []).length ? (prof.held_coils || []).map((c, i) => html`<div key=${c.name || i}>
+          <${Check} label=${`Hold the ${c.label}`} checked=${f["coil_on_" + i]} disabled=${coilsOff} title=${T.coils} ns="modes" k=${"f:coil_on_" + i} />
+          <div class="row wrap" style="padding-left:26px">
+            <span class="dim nw">for</span>
+            <${Num} k=${"coil_s_" + i} value=${f["coil_s_" + i]} disabled=${coilsOff || !f["coil_on_" + i]} width=${64} title=${T.coils} /><span class="dim nw">seconds,</span>
+            <${Select} value=${f["coil_when_" + i]} options=${withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x === "(when it starts)" ? x : "on " + x })), f["coil_when_" + i])} ns="modes" k=${"f:coil_when_" + i} disabled=${coilsOff || !f["coil_on_" + i]} width=${180} title=${T.coils} />
+          </div>
+        </div>`) : html`<div class="small muted">This game has no other mechanism a mode can hold.</div>`}
       <//>
       <${Sec} title="Multiball" reason=${rs.multiball}>
         <${Check} label="A multiball: the game serves more balls" checked=${f.multiball} disabled=${mbOff} title=${T.multiball} ns="modes" k="f:multiball" />

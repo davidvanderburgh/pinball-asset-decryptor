@@ -499,6 +499,45 @@ site balls_in_play         0x0037101c 0xe92d4010 0xe30744e4
 # ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00371198 0xe92d41f0 0xe305e8ea
+
+# ---- the magnet: a grab of the mode's own (PAD-381; pad_mode_runtime.c "the magnet") - Pro 1.16.
+# coil_fire = ControlCoil's fire (device, pulse power, pulse ms, hold power, hold ms, x ms): one command
+# the board ends by itself; all zeros = OFF (cmd 4d). adjustment = read one adjustment (ids: magnet_adj_*
+# default to the LO set 363-366 and DISABLED 343, the same on Pro and LE 1.16). proc_exists = is a game
+# process alive; magnet_procs = the game's own magnet processes (a mode never grabs while one runs, and
+# steps aside when one starts). magnet_get = the GodzillaMagnet object, its device at +4 = magnet_dev.
+site coil_fire             0x00402ff4 0xe3500000 0xe52de004
+site adjustment            0x00286e00 0xe92d40f0 0xe2504000
+site proc_exists           0x003ab72c 0xe30d2158 0xe340207d
+site magnet_get            0x000511cc 0xe92d40f0 0xe30545bc
+value magnet_dev           11
+value magnet_shot          0x00080000  # the Godzilla target: the magnet sits 6 px from its switch on the
+#                                        playfield picture (devicexy), so its hit is the ball over the magnet;
+#                                        a mode file's `magnet <ms>` grabs on it
+text magnet_procs          360 362 363 364
+# A grab is a GAME PROCESS of ours (2026-10-05): the game's coil update switches off any coil no process
+# controls, 1 ms after a grab fired from the tick. proc_create = create a process if its id is free (id,
+# entry, flags 0); proc_sleep = the running process sleeps n ticks; coil_take = the running process takes
+# control of a coil (coil, wait ticks), with an exit hook that gives it back; coil_give = give it back
+# (coil, 1), after which the coil's own update switches it off. magnet_proc = our process's id, one the
+# game never uses (no create, exists or kill call names it). LE 1.16's four found from Pro 1.16 by code.
+site proc_create           0x003ab0fc 0xe30dc158 0xe340c07d
+site proc_sleep            0x003ab22c 0xe30d3158 0xe340307d
+site coil_take             0x0005079c 0xe92d40f8 0xe30d715c
+site coil_give             0x00050860 0xe3510000 0xe92d4038
+value magnet_proc          13185
+# Held coils (PAD-381): the Pro has the Godzilla magnet only.
+text held_coils            magnet
+
+# ---- the scoop: a ball held there for a mode, then the game kicks it out (PAD-381; pad_mode_runtime.c
+# "the scoop"). scoop_handler = the right scoop's event handler (the program names it
+# right_scoop_event_handler), called by the framework's ball device through scoop_slot, a pointer in the
+# device's record (RW data); the runtime swaps that pointer for a wrapper that runs the handler, then
+# holds a settled ball (scoop_event, measured with a call probe) for the running mode. The kick-out stays
+# the game's. LE 1.16's handler found from Pro 1.16's by its first 13 words, and it names the same string.
+site scoop_handler         0x0007cd94 0xe30538ea 0xe2401002
+data scoop_slot            0x0074b480
+value scoop_event          2
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
 
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------

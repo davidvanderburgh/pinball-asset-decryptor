@@ -5,7 +5,7 @@
 <repo> is the source tree to serve (the ticket branch, or a ``git archive`` of main for the "before" shot).
 Writes into <out_dir>:
 
-- <prefix>_blocks_le116.png  a blocks mode on a Godzilla Premium/LE 1.16 project: the first slingshot starts
+- <prefix>_blocks_le116.png  a blocks mode on a Godzilla Premium/LE 1.16 project: the Maser target starts
   it, the Godzilla target holds the magnet 2 s, the left ramp the bridge 3 s, it holds the next ball in the
   scoop 5 s as it starts (on a tree with the blocks; on one without, the same mode with none of them)
 - <prefix>_blocks_pro115.png  the same on a Godzilla Pro 1.15 project, where none of it can be held: the
@@ -41,10 +41,10 @@ def program(BM):
     return {
         "name": "COIL TEST", "seconds": 0, "ends_on_drain": True, "screen": False,
         "scripts": [
-            {"hat": {"kind": "shot", "shot": "Slingshot", "when": "idle"}, "do": start},
-            {"hat": {"kind": "mode_start"}, "do": on_start},
             {"hat": {"kind": "shot", "shot": "Godzilla target", "when": "running"}, "do": target},
             {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": ramp},
+            {"hat": {"kind": "mode_start"}, "do": on_start},
+            {"hat": {"kind": "shot", "shot": "Maser target", "when": "idle"}, "do": start},
         ]}
 
 

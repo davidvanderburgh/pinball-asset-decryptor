@@ -131,3 +131,56 @@ def test_a_second_fit_replaces_the_first(tmp_path):
     X.add(a, "/c", {"op": "text_rect", "node": 5, "rect": [0, 0, 10, 10]})
     X.add(a, "/c", {"op": "text_rect", "node": 5, "rect": [0, 0, 8, 9]})
     assert X.ops_for(a, "/c") == [{"op": "text_rect", "node": 5, "rect": [0, 0, 8, 9]}]
+
+
+def test_a_resized_box_turns_word_wrap_on_on_both_sides():
+    """DragonRR, round 3: "Bounding box doesn't change the text size, the words shuffle to try
+    to fit within the area"; a box resized by hand turns the Text's wrap flag on."""
+    man = E.manifest(T.parse(scene()))
+    ops = [{"op": "text_rect", "node": 53, "rect": [-2.0, -2.0, 30.0, 60.0], "wrap": True}]
+    preview = X.apply_manifest(man, ops)[0]
+    title = [d for d in E.draw_list(preview, 1) if d["kind"] == "text"][0]
+    assert title["flags"][0] == 1 and title["rect"] == pytest.approx([-2, -2, 30, 60])
+    sc = T.parse(scene())
+    assert X.apply_scene(sc, ops, names=X.names_of(man)) == (1, [])
+    card = E.manifest(T.parse(T.serialize(sc)))
+    got = [d for d in E.draw_list(card, 1) if d["kind"] == "text"][0]
+    assert got["flags"][0] == 1 and got["rect"] == pytest.approx([-2, -2, 30, 60])
+    assert X.describe(ops[0]) == "box resized"
+
+
+def test_a_narrower_box_wraps_the_words_at_their_size(tmp_path, fonts):
+    d = _text("GODZILLA VS GIGAN", (-2, -2, 340, 40), 1)
+    one = _draw(tmp_path, d, fonts)
+    narrow = dict(d, rect=[-2, -2, 70, 40], flags=[1, 0])
+    two = _draw(tmp_path, narrow, fonts)
+    a, b = _ink_box(one), _ink_box(two)
+    assert b[3] - b[1] > 2 * (a[3] - a[1])          # three lines now, not one
+    assert b[2] - b[0] < a[2] - a[0]
+
+
+def test_the_box_handles_and_w_h_px_size_a_texts_box_not_its_words(tmp_path):
+    from tests.test_gui_scene_editor import _seed, _open, _tv, _ops
+    from tests.webui_harness import web_app
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        title = next(h for h in _tv(w)["hits"] if h["name"] == "Title")["id"]
+        assert w.call("text_scenes.tree_select", title)
+        p = _tv(w)["props"]
+        assert w.call("text_scenes.tree_set_box", title, p["x"], p["y"], p["w"] + 40, p["h"] + 20)
+        q = _tv(w)["props"]
+        assert (q["x"], q["y"], q["w"], q["h"]) == (p["x"], p["y"], p["w"] + 40, p["h"] + 20)
+        assert q["scale"] == 100 and q["scale_y"] == 100
+        assert [o["op"] for o in _ops(folder)] == ["text_rect"] and _ops(folder)[0]["wrap"]
+        # W px on a text sizes the box too (one edit: the second folds into the first)
+        assert w.call("text_scenes.tree_set_pixels", title, 30, None, True)
+        r = _tv(w)["props"]
+        assert r["w"] == 30 and r["h"] == q["h"] and r["scale"] == 100
+        assert [o["op"] for o in _ops(folder)] == ["text_rect"]
+        # Size % still sizes the words
+        assert w.call("text_scenes.tree_set_scale", title, 200)
+        assert _tv(w)["props"]["scale"] == 200
+        w.call("text_scenes.close")

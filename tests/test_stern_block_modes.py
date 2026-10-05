@@ -122,6 +122,20 @@ def test_the_clock_blocks_take_a_value_and_an_old_number_still_loads():
     assert "set_time((long long)secs_left());" in src
 
 
+def test_the_game_modes_choice_loads_as_saved_or_as_may_start():
+    # PAD-373: a program saved before it may start beside the game's modes, as it always did
+    p = BM.normalize(prog([]))
+    assert p["game_modes"] == "stack" and p["block_modes"] == []
+    assert "#define GAME_MODES       0" in BM.to_c(p, "blk")
+    p = BM.normalize(prog([], game_modes="block", block_modes=[23, 21, 21, 200, -1, "7", True]))
+    assert p["game_modes"] == "block" and p["block_modes"] == [21, 23]
+    src = BM.to_c(p, "blk")
+    assert "#define GAME_MODES       2" in src
+    assert "BLOCK_IDS[2] = {21, 23};" in src and "#define BLOCK_N          2" in src
+    assert BM.normalize(prog([], game_modes="later"))["game_modes"] == "stack"
+    assert "#define GAME_MODES       1" in BM.to_c(prog([], game_modes="give_way"), "blk")
+
+
 def test_limits_on_size_and_depth():
     deep = {"op": "start_mode"}
     for _ in range(BM.MAX_DEPTH + 2):
@@ -140,6 +154,7 @@ def test_the_c_only_calls_what_the_header_declares():
         {"op": "lights_off", "shot": "*"}, {"op": "lights_off", "shot": "Left ramp"},
         {"op": "callout", "id": 1291}, {"op": "if", "cond": {"k": "stock"}, "then": [], "else": []},
         {"op": "score", "points": {"k": "balls"}}]})
+    p["game_modes"] = "block"                         # PAD-373: and what holding the game's modes off calls
     src = BM.to_c(p, "ramp_frenzy")
     used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
     assert used <= _header_calls(), used - _header_calls()
@@ -270,6 +285,7 @@ def test_the_starter_builds_with_build_mode_sh(tmp_path, which):
     src = tmp_path / "ramp_frenzy.c"
     program = {"starter": lambda: BM.starter("RAMP FRENZY", SHOTS), "own clips and sounds": _media_prog,
                "light shows": _lights_prog}[which]()
+    program.update(game_modes="block", block_modes=[21, 23])      # PAD-373
     src.write_text(BM.to_c(program, "ramp_frenzy"), encoding="utf-8")
     out = tmp_path / "mode.so"
     r = subprocess.run(["bash", os.path.join(SDK, "build_mode.sh"), "-o", str(out), str(src),
@@ -595,6 +611,63 @@ def test_a_loop_asked_for_while_idle_and_once_without_a_loop_say_why(tmp_path, m
     # the start's clip behind the HUD comes before the Building's idle script asks for the loop
     once = _at(out, r"\[TEST MODE\] own clip sever: not played behind the HUD - no clip of its own loops there")
     assert "BACKDROP ONCE" not in out and _at(out, "BACKDROP PadMode_blk_Loop") >= once
+
+
+# ---- PAD-373: the game's own modes while it runs ------------------------------------------------------
+GATE = [{"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "shot", "shot": "Maser target", "when": "running"}, "do": [{"op": "score", "points": num(5)}]}]
+
+
+def test_may_start_runs_beside_the_games_modes(tmp_path):
+    out = play(tmp_path, prog(GATE, seconds=0), "battle", 1, "shot", "Building", "shot", "Maser target",
+               "timed", 1, "secs", 1, "shot", "Maser target")
+    assert "START (a block)" in out and scores(out) == [5, 5]
+    assert "] END (" not in out and "BLOCK" not in out
+
+
+def test_give_way_waits_for_the_games_mode_and_ends_when_one_begins(tmp_path):
+    out = play(tmp_path, prog(GATE, seconds=0, game_modes="give_way"),
+               "battle", 1, "shot", "Building", "battle", 0, "balls", 2, "shot", "Building", "balls", 1,
+               "shot", "Building", "shot", "Maser target", "timed", 1, "secs", 0.5, "shot", "Maser target")
+    assert "not started (a block): a battle is running" in out
+    assert out.count("START (a block)") == 1                     # the third Building: none running
+    assert "gives way - one of the game's modes starting ends it" in out
+    assert "END (the game's own mode began)" in out
+    assert scores(out) == [5]                                     # the Maser after it ended pays nothing
+    assert "BLOCK" not in out
+
+
+def test_block_holds_the_ticked_modes_off_while_it_runs(tmp_path):
+    out = play(tmp_path, prog(GATE, seconds=2, game_modes="block", block_modes=[23, 21]),
+               "shot", "Building", "secs", 3)
+    assert re.search(r"BLOCKLIST 21 23 TEST MODE\n\s*\d+ BLOCK 1 TEST MODE", out)
+    assert "END (time ran out)" in out
+    assert out.index("END (time ran out)") > out.index("BLOCK 0 TEST MODE")   # given back as it ends
+    # none ticked: the port's checked defaults
+    out = play(tmp_path, prog(GATE, seconds=0, game_modes="block"), "shot", "Building", "multiball", 1, "secs", 0.5)
+    assert "BLOCKLIST defaults TEST MODE" in out
+    assert "END (the game's own mode began)" in out and "BLOCK 0 TEST MODE" in out   # a multiball still ends it
+
+
+def test_its_own_multiball_is_not_the_game_beginning_one(tmp_path):
+    p = prog(GATE + [{"hat": {"kind": "mode_start"}, "do": [{"op": "multiball", "balls": 2, "save": 0}]}],
+             seconds=0, game_modes="block")
+    # the runtime counts two balls in play as a multiball: the mode's own does not end it, but once
+    # it is down to one ball, a multiball of the game's does
+    out = play(tmp_path, p, "shot", "Building", "multiball", 1, "secs", 1, "shot", "Maser target",
+               "balls", 1, "secs", 0.5, "shot", "Maser target")
+    assert "MULTIBALL 2 balls" in out and scores(out) == [5]
+    assert "END (the game's own mode began)" in out
+
+
+def test_start_mode_now_does_not_wait_for_the_games_mode(tmp_path, monkeypatch):
+    dump = tmp_path / "dump"
+    dump.mkdir()
+    monkeypatch.setenv("HARNESS_DUMP", str(dump))
+    out = play(tmp_path, prog(GATE, seconds=0, game_modes="give_way"), "timed", 1, "shot", "Building",
+               "trigger", "blk.start", "secs", 1)
+    assert "not started (a block): a stock mode is running" in out
+    assert "START (trigger file)" in out
 
 
 # ---- PAD-376: light shows, and a lit shot's pace ----------------------------------------------------
@@ -928,3 +1001,16 @@ def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, 
     t = _at(out, ">> ball_end")
     assert re.search(r"^\s*%d SHOW PadMode_blk_Hud 0" % t, out, re.M)
     assert "END lamps held 0, display priority 0" in out
+
+
+def test_a_hud_mode_that_gives_way_takes_its_hud_down_when_a_game_mode_begins(tmp_path):
+    # PAD-373's give_way beside the HUD: one of the game's modes beginning ends it at once, its HUD
+    # and display given back in the same tick (the kit's kit_game_began), no TOTAL left over the game's
+    p = maser_hud()
+    p["game_modes"] = "give_way"
+    out = play(tmp_path, p, "shot", "Maser target", "secs", 1, "battle", 1, "secs", 1, slug="maser")
+    end = _at(out, r"\[TEST MODE\] END \(the game's own mode began\)")
+    assert re.search(r"^\s*%d SHOW PadMode_maser_Hud 0" % end, out, re.M)
+    assert re.search(r"^\s*%d DISPLAY 0 TEST MODE" % end, out, re.M)
+    # nothing of its HUD is written after that tick
+    assert all(int(t) <= end for t in re.findall(r"^\s*(\d+) WORDS PadMode_maser_Hud", out, re.M))

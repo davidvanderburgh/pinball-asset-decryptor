@@ -81,6 +81,7 @@
 #define MULT_MAX           6
 #define OTHER_SHOT         500000ull
 #define TOTAL_SHOWN_MS     10000
+#define AFTER_ANOTHER_MS   300            /* the shot that just ended another of ours is not a start */
 
 #define N_PLACES 5
 #define MAX_LIT  5
@@ -655,6 +656,11 @@ static void on_shot(uint64_t shot)
     }
     if (!run.on) {
         if (!ready[p] || !start_mask || !(shot & start_mask) || !kit_fresh(&db, start_mask)) return;
+        if (kit_just_ended(AFTER_ANOTHER_MS)) {
+            pm_log("not started (the Building): it just ended another mode of ours - still lit, the next Building "
+                   "starts it");
+            return;
+        }
         start("the Building, GODZILLA ANGRY lit");   /* another of ours running: kit_begin says no, still lit */
         return;
     }

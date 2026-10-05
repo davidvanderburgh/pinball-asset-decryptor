@@ -108,3 +108,39 @@ multiballs; ours count a shot as a lock and the ball goes on, the way modern Ste
   - Isolation, seen for real: rage pokes on the inlanes collected the game's own missiles and started its JET FIGHTER
     ATTACK, and GODZILLA ANGRY waited ("a stock mode is running - still ready"), as PAD-347 has it.
   - segv 0, fatal 0, the baseline 6 throws in every run.
+- **Emulator (with their assets), 2026-10-05: Try it's set built by Write's own code (`build_set.py`: the five
+  modes' HUDs in the slide-outs scene, 38 clips in the video bank, 38 own sounds (33 calls, 5 music beds), the validation bypass) on
+  the same stock Premium 1.16 copy; runs fullA, fullB, fullC2, fullD, glass shots in each run folder:**
+  - GODZILLA ANGRY (fullB): the RAGE meter on the right edge (RAGE n/5, ten pips) filled by real slingshots, the
+    award line's notes, GODZILLA IS ANGRY / SHOOT THE BUILDING; the intro full screen, the chase's HUD over the
+    pagoda march (LOCKS 0/5, JACKPOT, SUPER, the ANGRY badge with the place's clock), the five locks, BABY FOUND full
+    screen, the six-ball multiball's HUD (MULTIPLIER, JACKPOT AT BABY, JACKPOTS), drains to one ball, the ending clip.
+    Total 157M (six Baby jackpots).
+  - KIRYU (fullA): the intro, CHARGE / ABSOLUTE ZERO / MULTIPLIER over Kiryu at sunset, the overheat (X2 - 200%, the
+    badge counting the overheat), fired by the real Action button, the blast and the ending clip.
+  - BIOLLANTE (fullA): BANKS CUT / SAP JACKPOT / PER SWITCH over the rose, collects with the sap clip, the beast, the
+    final blow at the Building, WON.
+  - DESTOROYAH (fullC2): the aggregate bursting from the bay, WAVE / KILLS / CITY over the SDF line, wave 1 cleared,
+    the perfect form, three Building hits, DESTOROYAH DEFEATED.
+  - SPACEGODZILLA (fullC2, fullD): LOCKS ARE LIT, three crystals, the descent, TOWERS / JACKPOT / SUPER over the
+    crystal field, jackpot clips behind the HUD, the SUPER badge, the super adds a ball, drains to one ball, the
+    explosion ending.
+  - Every sound the game looked up was the mode's own record (`[pad] sound swap: request N looked up <stock>, took
+    <ours>`); segv 0, fatal 0, the baseline 6 throws.
+- **Found and fixed on the way:** the edge counters clip long values (C1 on the left, C3 on the right) - short ones
+  now ("0/5", "100K"); diamond and spike gauge pips run down onto the score panel - every gauge is segment pips, GODZILLA
+  ANGRY's meter ten; BIOLLANTE's final blow at the Building also started a lit GODZILLA ANGRY on the same shot -
+  `kit_just_ended()` (a shot that ended another of ours is not a start).
+- **Rig behaviour, not the modes'** (recorded so the next run does not chase them): the rig never drains a ball itself
+  (`plunge.py drain`); after a multiball's drains its trough model reads "not a stack" and a SECOND multiball in that
+  game is not served; and 15-20 s with no switch hit starts Godzilla's ball search, after which a multiball asked for is
+  not served either. Keep the rig playing (a slingshot every 2 s) and prove each multiball first in its game.
+- The game's own award displays (LOOPS, BUILDING ATTACK, POWERLINE ATTACK AWARD, TANKS ADVANCE, its LOCK IS LIT) come
+  through over the HUD while ours run, as PAD-353 decided; the middle words step aside and come back.
+
+## Owed
+
+- A machine. Everything above is the emulator: the feel of the meter's pace (100 to 200 hits a level), the lock
+  shots, and each mode's values want a real game.
+- Nothing is cut from a film into the repo: the Modes tab's Examples cut each mode's assets from the person's own copy
+  (`film_recipes.json`, the same collection as the six before).

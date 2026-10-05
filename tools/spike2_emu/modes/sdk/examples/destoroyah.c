@@ -228,7 +228,8 @@ static void show(void)
     pm_snprintf(w, sizeof w, "%u/%d", run.wave, WAVES);
     kit_hud_counter(&hud, 0, "WAVE", w, "THE SWARM");
     pm_snprintf(k, sizeof k, "%u/%u", run.kills, wave_need());
-    kit_hud_counter(&hud, 1, "KILLS", k, kit_short(v, sizeof v, run.wave_total));
+    pm_snprintf(line, sizeof line, "WAVE %s", kit_short(v, sizeof v, run.wave_total));     /* "WAVE 2.25M" */
+    kit_hud_counter(&hud, 1, "KILLS", k, run.wave_total ? line : "X1 X2 X4");
     kit_hud_counter(&hud, 2, "CITY", c, "HITS TO TAKE");
     kit_hud_timer(&hud, -1);
     kit_hud_pips(&hud, (int)wave_need());

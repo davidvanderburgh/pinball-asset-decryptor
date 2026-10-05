@@ -1757,6 +1757,19 @@ def test_godzilla_angry_with_no_lock_the_trail_goes_cold_and_the_building_starts
     assert "MULTIBALL" not in out
 
 
+def test_godzilla_angry_does_not_start_on_the_building_that_ended_another_mode(harness):
+    """Emulator run fullA: BIOLLANTE's final blow at the Building also started the lit chase, on the same shot."""
+    out = play(harness, *GA_LIGHT, *BIO_RAMPS, "secs", 1, *(BIO_BANKS * 2), "secs", 1,
+               "shot", "Shield target left", "shot", "Shield target center", "shot", "Shield target right", "secs", 2,
+               "shot", "Building", "secs", 3, "shot", "Building", "secs", 1)
+    won = _at(out, "[BIOLLANTE] END (the final blow)")
+    assert won is not None
+    # whichever of the two the object asks first: BIOLLANTE still running, or it just ended on this very shot
+    refused = [ln for ln in lines(out, GA) if "not started" in ln and (" ms" not in ln)]
+    assert any("BIOLLANTE is running" in ln or "it just ended another mode of ours" in ln for ln in refused), refused
+    assert _at(out, "[GODZILLA ANGRY] START") > won + 2000                  # the next Building starts it
+
+
 def test_godzilla_angry_a_lit_shot_puts_a_short_clock_back_to_fifteen(harness):
     out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 1, "shot", "Godzilla target", "secs", 20,
                "shot", "Left ramp", "secs", 1)

@@ -592,6 +592,10 @@ __attribute__((weak, visibility("hidden"))) const char *kit_running;
 /* A pack mode that asked to start while another of ours ran (item 157): a mode that is only
  * showing its total (ANGUIRUS after the game's battle) gives way at once when it sees this. */
 __attribute__((weak, visibility("hidden"))) const char *kit_asked;
+/* PAD-379: pm_ms() when one of ours last ended (0 = never). A shot that ends a mode (BIOLLANTE's final blow at the
+ * Building) must not also START another one lit on the same shot (GODZILLA ANGRY's Building, emulator run fullA):
+ * a mode started by a shot asks kit_just_ended() first. Weak and shared, like the ledger. */
+__attribute__((weak, visibility("hidden"))) unsigned long kit_ended_ms;
 
 static KIT_UNUSED int kit_begin(const char *name)
 {
@@ -627,6 +631,13 @@ static KIT_UNUSED void kit_end(void)
     pm_display_priority(0);                /* given up before pm_end (MODE_SDK.md) */
     pm_end();
     kit_running = 0;
+    kit_ended_ms = pm_ms() ? pm_ms() : 1;
+}
+
+/* PAD-379: 1 = one of ours ended less than `ms` ago (the shot that ended it is not a start for the next) */
+static KIT_UNUSED int kit_just_ended(unsigned long ms)
+{
+    return kit_ended_ms && pm_ms() - kit_ended_ms < ms;
 }
 
 /* The mode is over but its ENDING is still to play: the full-screen clip, then the total (hud-layers,
@@ -643,6 +654,7 @@ static KIT_UNUSED void kit_end_after(unsigned long ms)
         return;
     }
     kit_running = 0;
+    kit_ended_ms = pm_ms() ? pm_ms() : 1;
     pm_log("the ending keeps the screen for %lu s", ms / 1000);
 }
 

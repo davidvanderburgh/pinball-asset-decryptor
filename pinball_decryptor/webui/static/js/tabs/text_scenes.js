@@ -756,6 +756,9 @@ function TreeLayers({ t }) {
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
         onClick=${(e) => { e.stopPropagation(); showPics(l.pics, e); }}><${Icon} name="image" /></button>`
+        : l.text ? html`<button type="button" class="ly-img ly-txt"
+        aria-label="Find on the Replace Text tab" ...${tip("Find these words on the Replace Text tab")}
+        onClick=${(e) => { e.stopPropagation(); call("text_scenes.activate", "str::" + l.text); }}><${Icon} name="text" /></button>`
         : html`<span></span>`}
     </div>`)}
   </div>`;

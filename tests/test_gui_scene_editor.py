@@ -1238,3 +1238,24 @@ def test_a_layers_picture_button_lands_on_it_on_the_images_tab(tmp_path):
         assert _wait(w, lambda: ((w.state("images").get("focus") or {}).get("id")
                                  == art["pics"][0]), 20)
         assert w.state("shell")["tab"] == "images"
+
+
+def test_a_text_layers_button_finds_its_words_on_the_replace_text_tab(tmp_path):
+    """PAD-384 (DragonRR): a text layer carries the words it draws, like a picture layer
+    carries its pictures, and its button lands on them on the Replace Text tab."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        layers = _tv(w)["layers"]
+        art = next(l for l in layers if l["name"] == "Art")
+        title = next(l for l in layers if l["name"] == "Title")
+        assert title["kind"] == "Text"
+        assert title["text"]
+        assert art["text"] is None
+        assert all(l["text"] is None for l in layers if l["kind"] != "Text")
+
+        w.call("text_scenes.activate", "str::" + title["text"])
+        assert _wait(w, lambda: w.state("shell")["tab"] == "text", 20)
+        assert w.state("text")["search"] == title["text"]

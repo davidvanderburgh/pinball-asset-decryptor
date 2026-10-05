@@ -809,6 +809,7 @@ class TreeEditMixin:
                     pics.append(rel)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "pics": ["images/" + rel for rel in pics],
+                           "text": _text_of(man, n, kind),
                            "color": _colour_switch(n, kind, pics, picks, settings,
                                                    added_ops.get(n["id"]), unlock["on"],
                                                    built),
@@ -2289,6 +2290,19 @@ def _pics_of(man, n, memo):
             memo[oid] = rels
         out += memo[oid]
     return list(dict.fromkeys(rel for rel in out if rel))
+
+
+def _text_of(man, n, kind):
+    """The words a Text layer draws as the card has them: the Layers list's button to them
+    on the Replace Text tab (DragonRR, PAD-384).  None for anything else, and for a text
+    added here, which that tab does not list."""
+    if kind != "Text" or n.get("added"):
+        return None
+    for _s, oid in n["comps"]:
+        o = man["objects"].get(str(oid)) or {}
+        if o.get("kind") == "Text" and o.get("text"):
+            return o["text"]
+    return None
 
 
 def _kind_of(man, n):

@@ -604,6 +604,26 @@ def test_a_drain_ends_the_mode_with_its_total(harness, start):
     assert re.search(r"\] END \(ball ended\)", out), out[-2000:]
 
 
+def test_a_note_is_not_shown_while_the_games_mode_has_the_middle(harness):
+    """PAD-390, David's Premium 2026-10-05: a note is the award line, in the middle; while one of the game's modes
+    (here a battle) has the middle it is not shown at all - the count still goes on"""
+    out = play(harness, "battle", 1, "secs", 1, "shot", "Powerline left", "secs", 2, "battle", 0, "secs", 1)
+    t0, t1 = _at(out, ">> battle 1"), _at(out, ">> battle 0")
+    assert has(out, "KING GHIDORAH", "powerlines 1 of 3 (player 1)")
+    assert not [ms for ms, w in hud(out, "ghidorah_heads", "Award") if t0 <= ms < t1 and w == "POWERLINES 1 OF 3"]
+
+
+def test_a_note_up_when_the_games_mode_begins_waits_off_the_glass(harness):
+    """a note already up when one of the game's modes begins: its words are blanked (the HUD says why)"""
+    out = play(harness, "shot", "Powerline left", "secs", 0.5, "battle", 1, "secs", 1)
+    t = _at(out, ">> battle 1")
+    assert [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms < t and w == "POWERLINES 1 OF 3"]
+    assert has(out, "KING GHIDORAH",
+               "hud ghidorah_heads: its note waits while the game's mode has the middle of the screen")
+    blank = [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms >= t and w.strip() == ""]
+    assert blank and blank[0] <= t + 100
+
+
 def test_the_final_wars_note_waits_for_another_modes_total_to_go(harness):
     out = play(harness, "trigger", "final_wars.light", "trigger", "oxygen_destroyer.start", "secs", 9,
                "trigger", "oxygen_destroyer.stop", "secs", 12)

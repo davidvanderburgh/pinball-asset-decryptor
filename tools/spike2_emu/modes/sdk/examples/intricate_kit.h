@@ -1030,6 +1030,11 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
 {
     int k;
     if (kit_hud_up && kit_hud_up != h && !kit_hud_up->metering) return 0;
+    /* PAD-390 (David's Premium, 2026-10-05: MELTDOWN IS READY during the game's multiball, a SPACEGODZILLA lock
+     * while one of the game's modes ran): a note's line IS the award line, in the middle, so it has no place to
+     * step aside to - while the game's mode or multiball has the middle it is not shown (a meter's gauge at the
+     * edge stays; a note already up waits in kit_hud_tick) */
+    if (pm_aside() && !h->metering) return 0;
     if (h->up && !h->noting) return 0;
     h->want_title[0] = h->want_line[0] = 0;
     for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
@@ -1131,7 +1136,7 @@ static KIT_UNUSED void kit_hud_recheck(struct kit_hud *h)
 /* every tick: find, expire the award, and send the glass what changed */
 static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
 {
-    int k, j, aside, low, off;
+    int k, j, aside, low, off, covered;
     const char *title, *line, *award, *awardsub;
     kit_hud_find(h);
     kit_hud_recheck(h);
@@ -1145,14 +1150,19 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     }
     if (!h->found || !h->up) return;
     /* PAD-353: a display of the game's has the screen (an award, a mode's start screen): its words are where
-     * ours are, so ours are blank until it is gone; the badge and the gauge at the edges stay */
-    off = pm_display_covered();
+     * ours are, so ours are blank until it is gone; the badge and the gauge at the edges stay. PAD-390: a
+     * qualification note's words too while one of the game's modes or multiballs has the middle - a note's line
+     * is the award line already, so it has nowhere to step aside to */
+    aside = pm_aside();
+    covered = pm_display_covered();
+    off = covered || (h->noting && aside);
     if (off != h->off) {
-        pm_log("hud %s: %s", h->slug, off ? "its words wait while a display of the game's has the screen"
-                                          : "its words are back");
+        pm_log("hud %s: %s", h->slug, !off ? "its words are back"
+               : covered ? "its words wait while a display of the game's has the screen"
+               : "its note waits while the game's mode has the middle of the screen");
         h->off = off;
     }
-    aside = h->noting ? 0 : pm_aside();          /* a qualification note is in the award line already */
+    if (h->noting) aside = 0;                    /* a qualification note is in the award line already */
     kit_hud_aside_note(h, aside);
     title = h->want_title;
     line = h->want_line;

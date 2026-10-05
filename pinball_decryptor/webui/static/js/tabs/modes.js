@@ -217,7 +217,7 @@ function newMenuItems(s, onNewCode, onNewBlocks) {
     { header: "Advanced" },
     { label: "Mode in C", icon: "edit", submenu: codeItems(s, onNewCode) },
     { sep: true },
-    { label: "What a mode can and can't do", icon: "file", title: s.limits_doc, onClick: () => call("modes.open_limits_doc") },
+    { label: "What a mode can and can't do", icon: "help", title: "Opens the Tips for this tab", onClick: () => call("modes.open_limits_doc") },
   ];
 }
 
@@ -1040,7 +1040,7 @@ function FirstMode({ s, onNewCode, onNewBlocks }) {
       <div class="stack" style="gap:4px">
         <div class="row wrap" style="justify-content:space-between">
           <h2 class="h2">Make your first mode</h2>
-          <button type="button" class="modes-doc-link small" ...${tip(s.limits_doc)} onClick=${() => call("modes.open_limits_doc")}>What a mode can and can't do</button>
+          <button type="button" class="modes-doc-link small" ...${tip("Opens the Tips for this tab")} onClick=${() => call("modes.open_limits_doc")}>What a mode can and can't do</button>
         </div>
         <div class="small muted wrap">A mode is something new for the game to do: what starts it, how long it runs, which shots score, and what the display, lights and speakers do meanwhile.</div>
         ${s.no_port ? html`<div class="small warn-ink wrap">${s.no_port}</div>` : null}

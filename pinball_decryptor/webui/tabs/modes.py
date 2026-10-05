@@ -336,7 +336,6 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                         "value": "", "row_on": False},
                  film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, n_blocks=0, ready=False,
                  fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
-                 limits_doc=self.limits_doc(),
                  no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
                  game_hidden=0, check_offer=False, check_wanted=False, check_done=None,
                  check_tip=self.CHECK_TIP, insider_note="")
@@ -2469,7 +2468,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @rpc
     def open_limits_doc(self):
-        self.open_path(self.limits_doc())
+        """"What a mode can and can't do": the Tips window on this tab, at that
+        section (PAD-386: never MODE_LIMITS.md in another app)."""
+        from ..help_content import MODES_LIMITS_TITLE
+        from ..tips_render import slug
+        self.ctx.bus.publish("open_dialog", name="tips",
+                             props={"tab": self.key, "anchor": slug(MODES_LIMITS_TITLE)})
         return True
 
     def _duplicate_code(self, slug):

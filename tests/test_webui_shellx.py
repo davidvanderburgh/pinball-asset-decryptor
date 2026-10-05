@@ -445,7 +445,72 @@ def test_tips_for_each_visible_tab(tmp_path):
             got = w.call("shellx.tips", tab["key"])
             assert [s[0] for s in got["sections"]] == [
                 s[0] for s in sections_for(tab["key"])]
+            # PAD-386: each section is [title, blocks, anchor], and draws something
+            for title, blocks, anchor in got["sections"] + got["general"]:
+                assert blocks and anchor, title
+                assert all(b["t"] in ("p", "h", "ul", "ol", "table", "note",
+                                      "cards", "flow") for b in blocks), title
         w.call("ui.settings_action", "tips")      # opens without error
+
+
+def test_tips_light_markdown_draws_as_blocks():
+    """PAD-386: a tip's words in a light markdown become the blocks the window
+    draws; plain words stay one paragraph, as they always drew."""
+    from pinball_decryptor.webui.tips_render import plain, render, slug
+    assert render("Just words.\nA second line.") == [
+        {"t": "p", "r": [["t", "Just words.\nA second line."]]}]
+    got = render("Lead with **bold**, *a word* and `code`, then [a jump](#sizes) "
+                 "and [a link](https://example.com).\n\n"
+                 "1. one\n2. two\n\n### A heading\n- a\n- b\n  goes on\n\n"
+                 "> careful\n> - here\n\n"
+                 "| Game | Clip | Save |\n|---|---|---|\n| G | ✓ | not yet |\n"
+                 "| H | No. Never. | Yes |")
+    assert [b["t"] for b in got] == ["p", "ol", "h", "ul", "note", "table"]
+    assert got[0]["r"] == [["t", "Lead with "], ["b", "bold"], ["t", ", "],
+                           ["i", "a word"], ["t", " and "], ["c", "code"],
+                           ["t", ", then "], ["a", "a jump", "sizes"], ["t", " and "],
+                           ["t", "a link"], ["t", "."]]
+    assert got[1]["items"] == [[["t", "one"]], [["t", "two"]]]
+    assert got[2]["id"] == "a-heading"
+    assert got[3]["items"][1] == [["t", "b goes on"]]
+    assert [b["t"] for b in got[4]["b"]] == ["p", "ul"]
+    table = got[5]
+    assert [r[0][1] for r in table["head"]] == ["Game", "Clip", "Save"]
+    (g, clip, save), (h, no, yes) = table["rows"]
+    assert g["chip"] == "" and clip["chip"] == "yes" and clip["label"] == ""
+    assert save["chip"] == "part" and no["chip"] == "no" and no["r"] == [["t", "Never."]]
+    assert yes["chip"] == "yes" and yes["label"] == "Yes"
+    assert "G | ✓ | not yet" in plain(got)
+    # picture blocks, PAD-380's table shape, a function, and a body that fails
+    pics = render([{"cards": [{"icon": "check", "tone": "ok", "title": "A", "text": "**x**"}]},
+                   {"flow": [{"title": "Go", "text": "y"}]},
+                   {"note": lambda: "z", "kind": "warn"},
+                   {"text": "t", "table": {"head": ["a"], "rows": [["1"]]}, "after": "- q"},
+                   lambda: 1 / 0])
+    assert [b["t"] for b in pics] == ["cards", "flow", "note", "p", "table", "ul"]
+    assert pics[0]["items"][0]["r"] == [["b", "x"]] and pics[2]["kind"] == "warn"
+    assert slug("1. \"Add Mothra to Godzilla's battle\"") == "1-add-mothra-to-godzillas-battle"
+
+
+def test_every_tip_draws_without_stray_marks(monkeypatch):
+    """PAD-386: no tip (every tab's, the General ones, and the preview features' with
+    them on) leaves a markdown mark undrawn: a ** or a ]( in the words means a tip
+    was written in a shape the window does not read."""
+    from pinball_decryptor.core import preview
+    from pinball_decryptor.webui import help_content as HD
+    from pinball_decryptor.webui.tips_render import plain, render
+    monkeypatch.setattr(preview, "enabled", lambda feature: True)
+    tabs = set(HD.HELP_CONTENT) | {t for f in HD.PREVIEW_HELP.values() for t in f}
+    seen = 0
+    for tab in sorted(tabs):
+        for title, body in HD.sections_for(tab):
+            words = plain(render(body))
+            assert words, (tab, title)
+            assert "**" not in words and "](" not in words, (tab, title)
+            seen += 1
+    for title, body in HD.GENERAL_CONTENT:
+        assert plain(render(body)), title
+    assert seen > 100
 
 
 # ----------------------------------------------------------- disclaimer

@@ -113,31 +113,83 @@ function ErrorNote({ text }) {
 }
 
 // -------------------------------------------------------------- Tips
-// A section's body is its words, or (PAD-380) {text, table: {head, rows}, after}.
-function TipBody({ b }) {
-  if (typeof b === "string") return html`<p>${b}</p>`;
-  const t = b.table;
-  return html`
-    ${b.text ? html`<p>${b.text}</p>` : null}
-    ${t ? html`<div class="sx-tips-tablewrap"><table class="sx-tips-table">
-      <thead><tr>${t.head.map((h) => html`<th>${h}</th>`)}</tr></thead>
-      <tbody>${t.rows.map((r) => html`<tr>${r.map((c) => html`<td>${c}</td>`)}</tr>`)}</tbody>
-    </table></div>` : null}
-    ${b.after ? html`<p>${b.after}</p>` : null}`;
+// A section is [title, blocks, anchor]; webui/tips_render.py makes the blocks (PAD-386, the
+// end of the wall of text): p / h (runs), ul / ol, table (cells may carry a yes / no /
+// not-yet chip), note (a callout), cards (a row of coloured cards) and flow (steps joined
+// by arrows).  A run is [kind, text] (t, b, i, c) or ["a", text, anchor], a jump inside
+// the window.
+function Runs({ r, go }) {
+  return (r || []).map((x) => {
+    const [k, s] = x;
+    if (k === "b") return html`<b>${s}</b>`;
+    if (k === "i") return html`<i>${s}</i>`;
+    if (k === "c") return html`<code>${s}</code>`;
+    if (k === "a") return html`<a class="sx-tips-a" role="button" tabindex="0" onClick=${() => go(x[2])}
+      onKeyDown=${(e) => { if (e.key === "Enter") go(x[2]); }}>${s}</a>`;
+    return s;
+  });
 }
+
+const CHIP_ICON = { yes: "check", no: "x", part: "minus" };
+function Cell({ c, go }) {
+  if (!c.chip) return html`<${Runs} r=${c.r} go=${go} />`;
+  const rest = c.r && c.r.length;
+  return html`<span class=${cx("sx-chip", c.chip, !c.label && "solo")}><${Icon} name=${CHIP_ICON[c.chip]} />${c.label}</span>${rest ? " " : null}${rest ? html`<${Runs} r=${c.r} go=${go} />` : null}`;
+}
+
+function Blocks({ bs, go }) {
+  return (bs || []).map((b) => html`<${Block} b=${b} go=${go} />`);
+}
+
+function Block({ b, go }) {
+  switch (b.t) {
+    case "p": return html`<p><${Runs} r=${b.r} go=${go} /></p>`;
+    case "h": return html`<h4 id=${"tipa-" + b.id}><${Runs} r=${b.r} go=${go} /></h4>`;
+    case "ul": return html`<ul class="sx-tips-list">${b.items.map((r) => html`<li><${Runs} r=${r} go=${go} /></li>`)}</ul>`;
+    case "ol": return html`<ol class="sx-tips-list sx-tips-steps">${b.items.map((r) => html`<li><${Runs} r=${r} go=${go} /></li>`)}</ol>`;
+    case "table": return html`<div class="sx-tips-tablewrap"><table class="sx-tips-table">
+      <thead><tr>${b.head.map((h) => html`<th><${Runs} r=${h} go=${go} /></th>`)}</tr></thead>
+      <tbody>${b.rows.map((row) => html`<tr>${row.map((c) => html`<td><${Cell} c=${c} go=${go} /></td>`)}</tr>`)}</tbody>
+    </table></div>`;
+    case "note": return html`<div class=${cx("sx-tips-note", b.kind === "warn" && "warn")}>
+      <${Icon} name=${b.kind === "warn" ? "warn" : "info"} /><div class="grow"><${Blocks} bs=${b.b} go=${go} /></div></div>`;
+    case "cards": return html`<div class="sx-tips-cards">${b.items.map((c) => html`<div class=${cx("sx-tips-card", c.tone)}>
+      <span class="sx-tips-ic"><${Icon} name=${c.icon} /></span>
+      <div class="grow"><span class="sx-tips-card-t">${c.title}</span><div><${Runs} r=${c.r} go=${go} /></div></div></div>`)}</div>`;
+    case "flow": return html`<ol class="sx-tips-flow">${b.items.map((c, i) => html`<li>
+      ${i ? html`<span class="sx-tips-arrow" aria-hidden="true"><${Icon} name="right" /></span>` : null}
+      <div class="sx-tips-step"><span class="sx-tips-ic">${c.icon ? html`<${Icon} name=${c.icon} />` : i + 1}</span>
+        <b>${c.title}</b><span><${Runs} r=${c.r} go=${go} /></span></div></li>`)}</ol>`;
+    default: return null;
+  }
+}
+
+// the open Tips window's "show this tab, at this anchor" (a second open hands it over)
+let tipsGo = null;
 
 // The green ? window (help_dialog.TabHelpWindow): the tab's own sections,
 // then "General".  Not modal, like Tk's: it floats beside the page and
-// follows the tab that is showing.
-function TipsPanel({ close }) {
+// follows the tab that is showing.  *tab* and *anchor* open it on a tab at a
+// section or heading (the Modes tab's "What a mode can and can't do").
+function TipsPanel({ close, tab, anchor }) {
   const dup = useSingleton("tips", close);
   const shell = useNs("shell");
   const railTab = (shell.tabs || []).find((t) => t.ns === shell.tab);
-  const [picked, setPicked] = useState(null);
+  const [picked, setPicked] = useState(tab || null);
+  const [want, setWant] = useState(anchor || null);
   const key = picked || (railTab && railTab.key) || "Extract";
   const [data, setData] = useState(null);
   const body = useRef(null);
-  useEffect(() => { setPicked(null); }, [shell.tab]);
+  const seenTab = useRef(shell.tab);
+  useEffect(() => {
+    if (shell.tab !== seenTab.current) { seenTab.current = shell.tab; setPicked(null); }
+  }, [shell.tab]);
+  useEffect(() => {
+    if (dup) { if (tipsGo && (tab || anchor)) tipsGo(tab, anchor); return undefined; }
+    const mine = (t, a) => { if (t) setPicked(t); if (a) setWant(a); };
+    tipsGo = mine;
+    return () => { if (tipsGo === mine) tipsGo = null; };
+  }, []);
   useEffect(() => {
     let live = true;
     call("shellx.tips", key).then((d) => { if (live && d) { setData(d); if (body.current) body.current.scrollTop = 0; } });
@@ -155,11 +207,15 @@ function TipsPanel({ close }) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+  const scrollTo = (el) => { if (el && body.current) body.current.scrollTop = el.offsetTop - 8; };
+  const jump = (id) => scrollTo(body.current && body.current.querySelector("#" + id));
+  const go = (a) => scrollTo(body.current && body.current.querySelector("#tipa-" + CSS.escape(a)));
+  useEffect(() => {
+    if (!want || !data || data.tab !== key) return;
+    go(want);
+    setWant(null);
+  }, [data, want]);
   if (dup) return null;
-  const jump = (id) => {
-    const el = body.current && body.current.querySelector("#" + id);
-    if (el) body.current.scrollTop = el.offsetTop - 8;
-  };
   const sections = (data && data.sections) || [];
   const general = (data && data.general) || [];
   const tabs = (data && data.tabs) || [];
@@ -180,9 +236,9 @@ function TipsPanel({ close }) {
       <div class="sx-tips-text" ref=${body}>
         ${!data ? html`<div class="row"><${Spinner} /><span class="muted">Loading…</span></div>` : null}
         ${data && !sections.length ? html`<p class="muted">No tips for this tab yet: the general ones are below.</p>` : null}
-        ${sections.map(([t, b], i) => html`<section id=${"tip-" + i}><h3>${t}</h3><${TipBody} b=${b} /></section>`)}
+        ${sections.map(([t, b, a], i) => html`<section id=${"tip-" + i}><h3 id=${"tipa-" + a}>${t}</h3><${Blocks} bs=${b} go=${go} /></section>`)}
         ${data ? html`<div class="sx-rule eyebrow">General</div>` : null}
-        ${general.map(([t, b], i) => html`<section id=${"gen-" + i}><h3>${t}</h3><p>${b}</p></section>`)}
+        ${general.map(([t, b, a], i) => html`<section id=${"gen-" + i}><h3 id=${"tipg-" + a}>${t}</h3><${Blocks} bs=${b} go=${go} /></section>`)}
       </div>
     </div>
   </aside>`;

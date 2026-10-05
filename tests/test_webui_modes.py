@@ -757,21 +757,40 @@ def test_the_sdk_document_is_always_reachable(tmp_path, preview_on):
         assert w.state("modes")["tryit_line"] == MP.NO_PROJECT_HELP
 
 
-def test_the_limits_document_is_reachable_and_its_sizes_are_the_editors(tmp_path, preview_on):
-    """PAD-380: "What a mode can and can't do" opens MODE_LIMITS.md beside MODE_SDK.md, and
-    its Sizes table says the numbers the blocks editor enforces."""
+def test_the_limits_document_is_reachable_and_its_sizes_are_the_editors(tmp_path, preview_on,
+                                                                        monkeypatch):
+    """PAD-380: "What a mode can and can't do" is MODE_LIMITS.md, beside MODE_SDK.md, and its
+    Sizes table says the numbers the blocks editor enforces.  PAD-386: the link opens the
+    app's own Tips window on this tab at that section, never the file in another app, and
+    the window shows the file's parts."""
     import os
     from pinball_decryptor.plugins.stern import block_modes as BM
     from pinball_decryptor.plugins.stern import mode_project as MP
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)
-        opened = []
+        opened, dialogs = [], []
         svc._opener = opened.append
-        st = w.state("modes")
-        assert st["limits_doc"] == svc.limits_doc()
-        assert os.path.dirname(st["limits_doc"]) == os.path.dirname(st["sdk_doc"])
+        real = w.ctx.bus.publish
+
+        def _publish(event, **data):
+            if event == "open_dialog":
+                dialogs.append(data)
+            return real(event, **data)
+        monkeypatch.setattr(w.ctx.bus, "publish", _publish)
+        assert os.path.dirname(svc.limits_doc()) == os.path.dirname(w.state("modes")["sdk_doc"])
+        assert "limits_doc" not in w.state("modes")        # no path to show or open
         assert w.call("modes.open_limits_doc") is True
-        assert opened == [svc.limits_doc()]
+        assert opened == []
+        assert [d["name"] for d in dialogs] == ["tips"]
+        props = dialogs[0]["props"]
+        assert props["tab"] == "Modes"
+        tips = w.call("shellx.tips", props["tab"])
+        anchors = {a: t for t, _b, a in tips["sections"]}
+        assert anchors.get(props["anchor"]) == "What a mode can and can't do"
+        shown = json.dumps(tips, ensure_ascii=False)
+        assert "Run two of mine at once" in shown                 # its Quick answers
+        assert "Add Mothra to Godzilla" in shown                  # its Examples
+        assert "%d per project" % MP.MAX_MODES in shown           # its Sizes
     with open(svc.limits_doc(), encoding="utf-8") as fh:
         doc = fh.read()
     for words in ("%d scripts, %d blocks, nested at most %d deep" % (

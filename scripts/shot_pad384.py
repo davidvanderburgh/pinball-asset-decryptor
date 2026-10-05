@@ -28,10 +28,31 @@ def main():
     # round 2 (DragonRR): a text that breaks over lines; --scene <dir> --match <words>
     scene = sys.argv[sys.argv.index("--scene") + 1] if "--scene" in sys.argv else None
     match = sys.argv[sys.argv.index("--match") + 1] if "--match" in sys.argv else None
-    tag = "_multiline" if match else ""
+    # round 3 (DragonRR): that text replaced on the Text tab first; --replace <new words>
+    new = sys.argv[sys.argv.index("--replace") + 1] if "--replace" in sys.argv else None
+    tag = "_replaced" if new else "_multiline" if match else ""
     os.makedirs(out_dir, exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="pad384-")
     project = base._project(scratch)
+    if new:
+        tsv = os.path.join(project, "text", "strings.tsv")
+        with open(tsv, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        lines = [ln.split("\t")[0] + "\t" + match + "\t" + new
+                 if ln.startswith(scene + "/") and ln.split("\t")[1:2] == [match] else ln
+                 for ln in lines]
+        with open(tsv, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        # the scene re-read off a card built with that edit: it draws the new words
+        import json
+        trees = os.path.join(project, "images", "scene_textures", "scene_tree.json")
+        with open(trees, encoding="utf-8") as f:
+            data = json.load(f)
+        for o in data[scene + "/scene.radium"]["objects"].values():
+            if o.get("kind") == "Text" and o.get("text", "").replace("\n", " ") == match:
+                o["text"] = new
+        with open(trees, "w", encoding="utf-8") as f:
+            json.dump(data, f)
     print("serving", repo, "project", project, flush=True)
     proc, url = base._serve(repo, scratch, project)
     api = lambda m, *a: webui_shot.api(url, m, *a)          # noqa: E731
@@ -60,7 +81,8 @@ def main():
             time.sleep(8)
             tv = (state().get("text_scenes") or {}).get("tree_view") or {}
             lay = next((l for l in tv.get("layers") or [] if l.get("kind") == "Text"
-                        and (not match or match in (l.get("text") or ""))), None)
+                        and (not match or (new or match) in (l.get("text") or "").replace(chr(10), " "))),
+                       None)
             print("text layer:", lay and (lay["id"], lay["name"], lay.get("text")), flush=True)
             if lay:
                 api("text_scenes.tree_select", lay["id"], "")

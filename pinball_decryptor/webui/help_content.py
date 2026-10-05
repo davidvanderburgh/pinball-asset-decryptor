@@ -145,223 +145,164 @@ HELP_CONTENT = {
          "the card file changes, so a second click can't redo it by accident."),
     ],
     "Replace Audio": [
-        ("Scan and assign",
-         "Scan lists every sound slot in the assets folder. Assign a "
-         "replacement per slot — almost any audio format is accepted (mp3, "
-         "wav, ogg, flac, m4a, …); it doesn't need to match the original, "
-         "it's converted and fitted (length / sample rate / volume) "
-         "automatically when you build. Export from your editor at whatever "
-         "sample rate and bit depth it likes — 16, 24 or 32-bit, float or "
-         "integer, any rate — there's nothing to match by hand."),
-        ("Matching the original's volume",
-         "Replacements are levelled against the sound they replace, not to a "
-         "fixed peak: the original slot is decoded, its speech level "
-         "measured, and yours gained to match. That matters most when one "
-         "stray transient (a lip smack, a desk knock) is the loudest thing in "
-         "your recording — normalizing to that peak would leave the voice far "
-         "quieter than the callouts around it. It works the other way too, "
-         "bringing a hot music clip down to the level of its neighbours.\n\n"
-         "The match ignores the level you mixed your own file at — the same "
-         "track exported quietly or hot builds the same card — so if you "
-         "want a replacement louder or quieter than stock, do it in "
-         "Advanced Audio Options rather than in your editor. The "
-         "\"Replacement loudness\" row there keeps the match as the default, "
-         "offers normalizing to full scale instead, and takes a ±12 dB "
-         "offset on top of either; boosts are soft-limited, never "
-         "hard-clipped. Music is the usual reason to reach for it: Stern "
-         "mixes its music as a bed under the callouts, so a matched song "
-         "sits there too. The build log states which setting built the "
-         "card.\n\n"
-         "That row is one setting for the whole build, so it moves every "
-         "replacement together. To lift one clip on its own, use the "
-         "\"Loudness for this clip\" box beside the Replacement preview on "
-         "the Audio tab — its dB stacks on top of the build-wide one, the "
-         "Level column shows which clips you have levelled, and \"Apply to "
-         "all shown\" puts the same offset on everything the list is "
-         "currently showing (set Type to Music first and only the songs "
-         "move)."),
-        ("Assets folder + applying",
-         "The assets folder is the one Extract produced — the same folder the "
-         "Write tab reads. There's no separate \"stage\" step: the "
-         "replacements you assign are applied automatically when you build the "
-         "update on the Write tab."),
-        ("Replacing a whole folder at once",
-         "\"Replace from folder…\" beside the project folder takes a "
-         "folder of your own files and picks each one for the sound with "
-         "its name, so a whole set reworked outside the app goes in as "
-         "one action instead of one pick per sound.\n\n"
-         "Names pair whatever the file type and whatever the capital "
-         "letters: a converter that wrote .wav for a card full of .ogg still pairs, and each file is converted to suit its slot "
-         "when you build, like any other pick. Subfolders are searched "
-         "too, and a file's own folders help it choose — when two slots "
-         "are named the same, put the file under a folder named like its "
-         "slot's.\n\n"
-         "Keep your files in a folder of their own, OUTSIDE the project "
-         "folder: the project folder holds the card's own files, so "
-         "choosing it, or anything inside it, is refused. What comes back "
-         "is ordinary replacements — they show in the Replacement column, "
-         "the next build applies them, and \"Clear replacements…\" drops "
-         "them again.\n\n"
-         "Whatever it leaves out is named in the log: files named like no "
-         "slot on this tab, files named like more than one of them, and "
-         "files another file in the folder shares a name with."),
-        ("Clearing replacements",
-         "A replacement you pick is remembered against the PROJECT FOLDER, "
-         "not against the card: it is stored in the folder itself, so it "
-         "survives closing the app, and it is still there if you point the "
-         "Extract tab at a different card image. That is what lets you come "
-         "back to a project days later, and it is why picks never disappear "
-         "on their own.\n\n"
-         "To drop some, select the rows — click one, then Shift-click for a "
-         "range or Ctrl-click to add single sounds — and right-click the "
-         "selection. Sort by the Replacement column first and everything you "
-         "have picked sits together. \"Clear replacements…\" (in the More "
-         "menu, the ⋯ button at the top) drops every pick on this tab at once.\n\n"
-         "Clearing takes the replacement back out. A pick nothing has applied "
-         "yet is simply dropped; a slot that a build, or Start on the Emulate "
-         "tab, already wrote into the project folder gets the card's own file "
-         "put back as well, so the list, the next build and the next emulator "
-         "run all agree. None of your own files are touched. A slot changed "
-         "some other way (a file copied over it by hand, or a build from "
-         "before the app kept a saved original) keeps what it has — "
-         "\"Revert all changes…\" on the Write tab is what restores those."),
-        ("Change markers",
-         "Green = assigned this session (staged when you build). "
-         "\"✓ changed on disk\" = the file sitting in your PROJECT FOLDER no "
-         "longer matches the one Extract put there — because an earlier build "
-         "replaced it, or because you copied a file over it yourself. It says "
-         "nothing about your source card image (never touched) or about a "
-         "card you have already written. Either way the next build packs it, "
-         "which is why replacing files in the project folder by hand works: "
-         "batch-process them however you like, drop them over the originals, "
-         "press Scan, and they show up here as changed. The counter shows "
-         "every change the next build will pack, not just this session's.\n\n"
-         "\"⚠ not on this card\" is the opposite answer: that file is in your "
-         "project folder but not in the extract, so nothing on the card "
-         "matches its name, no original was overwritten, and the next build "
-         "cannot place it. It's usually a mod pack built from an older "
-         "extract whose names for some files have since changed — importing "
-         "that pack again takes the strays back out, and \"Transfer Mods to "
-         "New Version\" on the Mod Pack tab carries the change over by "
-         "content instead of by name."),
-        ("Preview",
-         "Two players side by side — \"Original (stock)\" on the left, "
-         "\"Replacement (your file)\" on the right — each with its own "
-         "controls, so you can "
-         "compare them before you commit to a build. Starting one pauses "
-         "the other, and ■ on either silences both — only the pane you "
-         "pressed rewinds."),
-        ("Play sequentially",
-         "Tick it and a finished clip selects and plays the next row on its "
-         "own, following whatever sort, search and Type filter you have set — "
-         "so you can listen through a whole card without clicking each row. "
-         "It stops at the end of the list, and pressing ■ or clicking another "
-         "row stops it. Anything you notice on the way is already selected, "
-         "so hit F2 or right-click it there and then. Opening a replacement "
-         "picker also stops the audition rather than play on behind the "
-         "dialog — press ▶ when you're back to carry on from there.\n\nTick \"Play "
-         "replacements\" as well and every row that has a replacement "
-         "(picked now, or already changed on disk) plays the replacement "
-         "instead of the original — the list sounds the way the built card "
-         "will, so anything that still sounds stock is a clip you haven't "
-         "replaced yet. It only acts while sequential play is stepping "
-         "through the list, so ticking it turns \"Play sequentially\" on "
-         "too."),
-        ("Undo",
-         "Right-click a slot: \"Remove replacement\" cancels an un-built "
-         "assignment; \"Revert to original\" restores an already-changed "
-         "file. \"Revert all changes…\" on the Write tab resets everything."),
+        ("Scan and assign", [
+            "Pick a new sound for any slot; the app fits it to the card when you build.",
+            {"flow": [
+                {"icon": "search", "title": "Scan",
+                 "text": "lists every sound slot in the project folder Extract made"},
+                {"icon": "audio", "title": "Assign",
+                 "text": "a file of your own to each slot you want changed"},
+                {"icon": "write", "title": "Build",
+                 "text": "on the **Write** tab; there is no separate stage step"}]},
+            "- Almost any audio file works: mp3, wav, ogg, flac, m4a and more.\n"
+            "- Any sample rate or bit depth (16, 24 or 32-bit, float or integer). "
+            "Length, rate and volume are fitted for you when you build.",
+        ]),
+        ("Loudness", [
+            "Each replacement is matched to the loudness of the sound it replaces, "
+            "so it sits with its neighbours.",
+            "- The match measures the speech level, not the loudest peak, so one "
+            "stray click in your recording can't leave the voice too quiet. It also "
+            "brings a hot music clip down.\n"
+            "- How loud you exported your file makes no difference. To make a sound "
+            "louder or quieter than stock, use the boxes below, not your editor.",
+            {"cards": [
+                {"icon": "gear", "tone": "info", "title": "Whole build",
+                 "text": "**Replacement loudness** in Advanced Audio Options: match "
+                         "(default) or full scale, plus a ±12 dB offset. Moves every "
+                         "replacement together."},
+                {"icon": "wave", "tone": "ok", "title": "One clip",
+                 "text": "**Loudness for this clip**, beside the Replacement preview. "
+                         "Stacks on the build-wide offset; the Level column shows "
+                         "which clips you levelled."}]},
+            "- **Apply to all shown** puts the same offset on every row the list "
+            "shows: set Type to Music first to move only the songs (Stern mixes its "
+            "music quietly, under the callouts).\n"
+            "- Boosts are soft-limited, never clipped. The build log says which "
+            "setting built the card.",
+        ]),
+        ("Replace from folder",
+         "**Replace from folder…**, beside the project folder, picks a whole folder "
+         "of your files at once: each file goes to the slot with its name.\n\n"
+         "- Any file type, any capitals: a .wav pairs with a slot that is .ogg.\n"
+         "- Subfolders are searched. If two slots share a name, put the file in a "
+         "folder named like its slot's folder.\n"
+         "- The log names what was left out: files that match no slot, match more "
+         "than one, or share a name with another file in the folder.\n"
+         "- What comes back are ordinary picks: the next build applies them and "
+         "**Clear replacements…** drops them.\n\n"
+         "> Keep your files in their own folder OUTSIDE the project folder. The "
+         "project folder, or anything inside it, is refused."),
+        ("Clearing and undo",
+         "Your picks are saved in the project folder itself, so they survive "
+         "closing the app and changing the card. They never vanish on their own.\n\n"
+         "- **Right-click** a row (Shift-click or Ctrl-click to select several): "
+         "**Remove replacement** drops a pick not built yet; **Revert to "
+         "original** puts the card's own sound back in a slot already changed.\n"
+         "- **Clear replacements…** (the ⋯ More menu at the top) drops every pick "
+         "on this tab. Sort by the Replacement column to see your picks together.\n"
+         "- A cleared slot that a build or Emulate Start already wrote gets the "
+         "card's own file back too, so list, build and emulator agree. Your own "
+         "files are never touched.\n"
+         "- A slot changed some other way (a file copied over by hand) keeps what "
+         "it has: **Revert all changes…** on the Write tab restores everything."),
+        ("Change markers", [
+            {"cards": [
+                {"icon": "plus", "tone": "ok", "title": "Green",
+                 "text": "Picked this session. The next build applies it."},
+                {"icon": "check", "tone": "info", "title": "✓ changed on disk",
+                 "text": "The file in your project folder differs from the extract "
+                         "(an earlier build, or a file you copied over it). The next "
+                         "build packs it."},
+                {"icon": "warn", "tone": "warn", "title": "⚠ not on this card",
+                 "text": "In your project folder but not on the card, so the build "
+                         "can't place it."}]},
+            "- \"Changed on disk\" is about the project folder only: your source card "
+            "image is never touched.\n"
+            "- So editing files by hand works: drop your versions over the originals "
+            "in the project folder, press **Scan**, and they show as changed.\n"
+            "- The counter shows every change the next build will pack, not just "
+            "this session's.\n"
+            "- \"Not on this card\" is usually a mod pack from an older extract whose "
+            "names changed. Importing the pack again removes the strays; **Transfer "
+            "Mods to New Version** on the Mod Pack tab carries them over by content.",
+        ]),
+        ("Listening",
+         "Two players side by side: **Original (stock)** and **Replacement (your "
+         "file)**. Starting one pauses the other; ■ on either silences both.\n\n"
+         "- **Play sequentially** plays down the list on its own, following your "
+         "sort, search and Type filter. It stops at the end, on ■, on a click on "
+         "another row, or when you open a replacement picker. The playing row is "
+         "selected, so F2 or a right-click works on it right there.\n"
+         "- **Play replacements** (turns Play sequentially on too) plays your "
+         "replacement wherever a row has one, so the list sounds like the built "
+         "card. Anything still stock-sounding is a clip you haven't replaced."),
         ("Finding things",
-         "Click any column header to sort (click again to flip). The search "
-         "box filters by name — with auto-naming on, that includes the "
-         "transcribed call-out text and matched song titles. The Type "
-         "dropdown (shown when the folder classifies) filters to one kind "
-         "of audio: Music (the song and bank tracks — and on a game whose "
-         "own naming identifies no music at all, anything at least 20 "
-         "seconds long instead, because some pins store their songs as "
-         "Sound-Test-named sequences; a slot promoted that way reads Music "
-         "in the Type column too, so the column and the filter always "
-         "agree), Sound FX (named by the game's own Sound Test menu), "
-         "Callouts (speech — needs Auto-name call-outs to have run), or "
-         "Other. The Show dropdown narrows the list by change state: "
-         "Changed = the slots you've replaced or that already differ from "
-         "the extract, for reviewing a big mod; Unchanged = only what you "
-         "haven't touched yet, so a part-finished pass is the list in front "
-         "of you instead of something to scroll past. Export CSV saves the "
-         "whole table (every slot, not just the filtered view) for tracking "
-         "a large project in a spreadsheet."),
+         "Click a column header to sort (again to flip). **Search** filters by "
+         "name, including transcribed callout words and matched song titles.\n\n"
+         "| Filter | Shows |\n"
+         "|---|---|\n"
+         "| Type: Music | Songs and bank tracks. On a game that names no music, "
+         "anything 20 seconds or longer |\n"
+         "| Type: Sound FX | Sounds named by the game's Sound Test menu |\n"
+         "| Type: Callouts | Speech (needs Auto-name call-outs to have run) |\n"
+         "| Show: Changed | Slots you replaced or that differ from the extract |\n"
+         "| Show: Unchanged | Only what you haven't touched yet |\n\n"
+         "**Export CSV** saves the whole table (every slot, not just the filtered "
+         "view) for a spreadsheet."),
         ("Where is this on the card?",
-         "Right-click a slot → \"Find in Partition Explorer\" opens the "
-         "card image at the file the asset came from, expanding the tree "
-         "down to it. Sounds aren't separate files on a Spike 2 card — "
-         "they're decoded out of a bank — so an audio row reveals that "
-         "bank (image.bin, or the image-scNN.bin for music) and says so."),
-        ("Name and type (Properties)",
-         "Right-click a slot → \"Properties…\" to correct its name (e.g. a "
-         "call-out the auto-transcriber mis-heard). The name is remembered "
-         "by the sound's content, so a future extract — same card or a "
-         "newer firmware carrying the same sound — reapplies it before "
-         "transcription runs, and the slot keeps its Type bucket. Blank "
-         "restores the stock name and forgets it. On Stern titles with a "
-         "Sound Test menu the extract already names the sounds it lists "
-         "(\"SE FX MATCH\" and the like), and writes the full menu "
-         "listing to sound_test_names.csv; the dialog offers those names as "
-         "suggestions, so you can play a number on the machine's Sound Test "
-         "menu and either confirm what the extract called that slot or pick "
-         "the entry (type its number to find it) yourself."),
+         "Right-click a slot, then **Find in Partition Explorer**. Sounds on a Spike 2 "
+         "card live inside a bank, so it opens that bank (image.bin, or "
+         "image-scNN.bin for music) and says so."),
+        ("Renaming a sound",
+         "Right-click a slot, then **Properties…** to fix its name (say, a callout "
+         "the transcriber misheard).\n\n"
+         "- The name follows the sound itself, so a later extract of this or a "
+         "newer game version names it again.\n"
+         "- Blank puts the stock name back.\n"
+         "- On Stern games with a Sound Test menu, the dialog suggests the menu's "
+         "names (also saved in sound_test_names.csv). Play a number on the "
+         "machine's Sound Test menu, then type that number to find its entry."),
         ("Blip-free callouts (Advanced Audio Options)",
-         "Opt-in, and confirmed working on real machines. The machine reads "
-         "two ~512-byte "
-         "windows out of "
-         "every sound at boot to set up its decoder, and each result feeds "
-         "the next, so re-encoding one sound would desync the whole bank. "
-         "The plain fix puts the original bytes back in those two windows, "
-         "which are inside the audible part — so you hear a ~6 ms scrap of "
-         "the original twice in every replacement. Blip-free instead stashes "
-         "a copy of those bytes in the game binary and points the boot-time "
-         "read at the copy, so your audio plays for the whole sound. It "
-         "needs the Linux filesystem driver (the same one full-size video "
-         "replacement uses) because it makes the game binary slightly "
-         "longer, and it is skipped for a direct-SD write. It is left as a "
-         "choice, rather than on for every write, only because of that image-"
-         "build requirement. Leaving it off costs you the brief scrap "
-         "described above, which a tester listening for it could not hear."),
+         "Removes a tiny scrap of the original sound from every replacement. "
+         "Optional; works on real machines.\n\n"
+         "- Without it, the machine needs a few bytes of each original sound at "
+         "boot, so about 6 ms of the original plays twice inside every "
+         "replacement. A tester listening for it could not hear it.\n"
+         "- With it, those bytes are kept in the game program instead, and your "
+         "audio plays all the way through.\n"
+         "- It makes the game program slightly bigger, so it needs the card "
+         "built as an image (the Linux filesystem driver, as full-size videos "
+         "do). A Direct-SD write skips it."),
         ("Longer replacements (Advanced Audio Options)",
-         "Opt-in, and confirmed on a real machine. On Spike 2 a replacement "
-         "is normally fitted to "
-         "the sound it replaces, so a longer clip is trimmed: the card's "
-         "sound bank records where every sound starts, and lengthening one "
-         "in place would strand all the rest. Ticking this appends your "
-         "audio past the end of the bank instead, adds a copy of that "
-         "sound's record pointing at it, and re-points the game's play "
-         "tables at the copy, so every other sound on the card is untouched "
-         "and the whole clip plays. The preview shows such a clip whole, "
-         "with a green line where the original ended, instead of hatching "
-         "its tail as trimmed. It needs the Linux filesystem driver (the "
-         "file gets bigger) and is skipped for a direct-SD write, which "
-         "trims as before. Longer cues have been confirmed playing on a real "
-         "machine (no loop, correct cut-off).\n\n"
-         "There are two size limits. The game can open a sound bank only up "
-         "to about 2 GB, and every lengthened sound is added on top of the "
-         "original bank at its whole length, not just the extra (on "
-         "Godzilla 1.16 that is room for about 45 minutes of lengthened "
-         "stereo sound); anything over that is trimmed and named in the "
-         "log. The lengthened sounds also need room on the card's games "
-         "partition, which they share with full-size replacement videos, "
-         "and a stock 8 GB card can have only a few hundred MB free. When "
-         "that room runs short, longer sounds are trimmed to fit it (songs "
-         "marked \"Keep this song whole if the bank fills up\" are kept whole "
-         "first), and the log names each one and, when there is one, the SD "
-         "card size that would keep them whole. SD card size on the "
-         "Write tab (Windows and Linux) builds for a bigger SD card and gives "
-         "the games partition that room, but it does not raise the 2 GB "
-         "limit."),
+         "Lets a Spike 2 replacement be longer than the sound it replaces. "
+         "Optional; confirmed on a real machine (no loop, correct cut-off).\n\n"
+         "- Off, a longer clip is trimmed to the original's length.\n"
+         "- On, your clip is added at the end of the sound bank and the game is "
+         "pointed at it; every other sound is untouched. The preview shows the "
+         "whole clip with a green line where the original ended.\n"
+         "- It needs the card built as an image (the Linux filesystem driver). "
+         "A Direct-SD write trims as before.\n\n"
+         "### Two size limits\n"
+         "1. **The 2 GB bank.** The game can open a sound bank only up to about "
+         "2 GB, and each lengthened sound adds its whole length on top (on "
+         "Godzilla 1.16, room for about 45 minutes of stereo). Anything over is "
+         "trimmed and named in the log.\n"
+         "2. **The games partition.** Lengthened sounds share it with full-size "
+         "videos, and a stock 8 GB card may have only a few hundred MB free. When "
+         "room runs short, longer sounds are trimmed to fit it; songs marked "
+         "**Keep this song whole if the bank fills up** are kept whole first. The "
+         "log names each one and the SD card size that would keep them whole.\n\n"
+         "> SD card size on the Write tab (Windows and Linux) builds for a bigger "
+         "card and gives the games partition more room, but it does not raise the "
+         "2 GB limit."),
         ("Save and load settings",
-         "More > Save settings to a file... keeps this tab's picks, ticks and "
-         "options in one small file; Load settings from a file... puts them "
-         "back, on this card or another one. Slots the file doesn't set keep "
-         "what they have, and slots this card doesn't have are skipped. The "
-         "file only names your files, it doesn't hold them."),
+         "**More > Save settings to a file…** keeps this tab's picks, ticks and "
+         "options in one small file. **Load settings from a file…** puts them back, "
+         "on this card or another.\n\n"
+         "- Slots the file doesn't set keep what they have; slots this card lacks "
+         "are skipped.\n"
+         "- The file only names your sound files, it doesn't hold them."),
     ],
     "Replace Video": [
         ("Scan and assign",
@@ -972,107 +913,93 @@ HELP_CONTENT = {
          "file only names your files, it doesn't hold them."),
     ],
     "Replace Text": [
-        ("Scan and edit",
-         "Scan loads the game's editable display strings from the assets "
-         "folder Extract produced — the same folder the Write tab reads. Pick "
-         "a row and type the new text in the edit panel — the original is "
-         "always kept alongside for reference. Edits are saved straight into "
-         "the manifest and patched in on the next Write."),
-        ("Length limits",
-         "The Max column is the byte budget. Scene text no longer has to "
-         "fit its slot: same-length or shorter is padded automatically in "
-         "place, and a longer line (up to the 96-byte cap the Max shows) "
-         "has its scene file rewritten at the new length and written "
-         "whole — the box it draws in is the scene's fixed template, so "
-         "check a longer line in the Scenes tab preview. Game-program "
-         "text no longer has to fit either: a row whose Max reads \"96 (grows)\" "
-         "may take up to 96 bytes, and a replacement longer than its slot "
-         "is placed in a NEW area of the game program (a small read-only "
-         "piece added in the spare space between the code and its data; "
-         "the original bytes stay where they were) with every reference "
-         "to the old string — the display code's pointers, a settings "
-         "caption, a champion-table entry — pointed at the new copy. A "
-         "fitting edit is still patched in place. Because the game binary "
-         "gets longer, this needs the card built as an image (the same "
-         "Linux filesystem path full-size video replacement uses): a "
-         "Direct-SD write skips those over-long edits with a named reason "
-         "and lands everything else. Be aware that NO MACHINE HAS YET "
-         "BOOTED a card built this way — it has run only in the emulator "
-         "— so keep the stock card to hand, and switch it off "
-         "(PAD_STERN_TEXT_GROW=0 in the environment) if you would rather "
-         "every row kept its original budget. The few rows the tool can't "
-         "move (a line it can't find every reference to) keep the old "
-         "rule and say so when an edit is refused. A project extracted "
-         "before the tool measured which strings can move shows its "
-         "game-program rows as growable too — Scan re-reads the exact "
-         "limits from the card the project came out of when it is still "
-         "where it was, and the build checks every string against the "
-         "card either way."),
+        ("Scan and edit", [
+            "Change the words the game shows on its display.",
+            {"flow": [
+                {"icon": "search", "title": "Scan",
+                 "text": "loads the editable lines from the project folder Extract made"},
+                {"icon": "edit", "title": "Edit",
+                 "text": "pick a row and type; the original stays beside it"},
+                {"icon": "write", "title": "Write",
+                 "text": "edits save at once and go onto the card at the next Write"}]},
+        ]),
+        ("Scene text vs game-program text", [
+            {"cards": [
+                {"icon": "scenes", "tone": "info", "title": "Scene text",
+                 "text": "Lives in a scene file; the Scene column names it."},
+                {"icon": "gear", "tone": "info", "title": "Game-program text",
+                 "text": "Drawn by the game code itself: titles, battle names, award "
+                         "lines. The Scene column reads **game program**."}]},
+            {"note": "A scene's line is often a placeholder the code writes over. If a "
+                     "line still shows the old words on the machine after you changed "
+                     "every scene copy, edit its game-program row.", "kind": "tip"},
+        ]),
+        ("Length limits", [
+            "The **Max** column is each line's budget in bytes (letters). A row reading "
+            "**96 (grows)** can take up to 96.",
+            "| Edit | What happens |\n"
+            "|---|---|\n"
+            "| Same length or shorter | Padded and patched in place |\n"
+            "| Longer scene text | The scene file is rewritten at the new length. "
+            "Its box doesn't grow, so check it in the Scenes preview |\n"
+            "| Longer game-program text | Placed in a new area of the game program, "
+            "with everything that used the old line pointed at it |\n"
+            "| Over the budget | Refused, with the reason |",
+            "- Longer lines need the card built as an image (the Linux filesystem "
+            "driver, as full-size videos do). A Direct-SD write skips them, names why, "
+            "and writes everything else.\n"
+            "- A few game-program rows can't move; they keep their old budget and say "
+            "so when an edit is refused. The build checks every line against the card.\n"
+            "- A grown game program has booted on a real machine. A scene rewritten "
+            "longer is proven in the PC emulator only.\n"
+            "- To keep every line at its original budget, untick **Advanced: grow the "
+            "game program / a scene for longer text** on the Write tab.",
+            {"note": "Keep your stock card to hand when you write longer lines.",
+             "kind": "warn"},
+        ]),
         ("Replace everywhere",
-         "\"Replace everywhere…\" (a button beside Search, and on the "
-         "right-click menu) is Find / Replace over the whole list: every "
-         "row whose ORIGINAL contains the text you're looking for gets the "
-         "replacement, so \"EBIRAH\" to \"BIOLLANTE\" reaches the battle "
-         "title, its bare-name tail row and the settings caption in one "
-         "Apply — which is also what keeps a tail row and its line "
-         "agreeing. Match case is on by default (the originals are "
-         "upper-case). The dialog counts the rows that fit as you type, "
-         "and the ones that would no longer fit their budget are listed, "
-         "not applied, so you can shorten them by hand. Opened from a row "
-         "you've already edited, it pre-fills Find and Replace with the "
-         "one word you changed."),
-        ("Scene text vs game-program text",
-         "Two kinds of string are listed. Scene text lives in a scene file "
-         "(the Scene column names it). Game-program text is drawn by the game "
-         "code itself — mode titles, battle names, award lines — and shows "
-         "\"game program\" in that column. A scene's text is often only a "
-         "placeholder the code overwrites, so if a line still reads the old "
-         "way on the machine after you changed every scene copy of it, the "
-         "one that matters is the game-program row."),
-        ("Names that live inside a longer line",
-         "Some names have no string of their own: the machine draws the tail "
-         "end of a longer line, so \"EBIRAH\" is really the last part of "
-         "\"GODZILLA VS EBIRAH\". Those get their own row, budgeted by the "
-         "length of the line they sit inside. Edit BOTH rows and make the "
-         "line END with the new name — say \"GZ VS BIOLLANTE\" plus "
-         "\"BIOLLANTE\" — and the pointer is moved for you. If the two don't "
-         "agree, the build log says so and leaves that line alone."),
+         "**Replace everywhere…** (beside Search, and on the right-click menu) is "
+         "find-and-replace over the whole list.\n\n"
+         "- Every row whose ORIGINAL holds the words gets the change, so EBIRAH to "
+         "BIOLLANTE reaches the battle title, its name row and the settings caption "
+         "in one go.\n"
+         "- Match case is on by default (the originals are upper-case).\n"
+         "- It counts matching rows as you type. Rows that would go over budget are "
+         "listed, not changed, so you can shorten them by hand.\n"
+         "- Opened from an edited row, it fills in the word you changed."),
+        ("Names inside a longer line",
+         "Some names are only the tail end of a longer line: EBIRAH is the end of "
+         "GODZILLA VS EBIRAH. That tail gets its own row.\n\n"
+         "1. Edit BOTH rows.\n"
+         "2. Make the long line END with the new name: GZ VS BIOLLANTE and "
+         "BIOLLANTE.\n\n"
+         "The app moves the pointer for you. If the two don't agree, the build log "
+         "says so and leaves that line alone."),
         ("Apply to all",
-         "\"Apply to every scene with the same original text\" repeats the "
-         "edit everywhere that exact original string occurs (many strings "
-         "repeat once per scene/keyframe)."),
+         "**Apply to every scene with the same original text** makes the same edit "
+         "everywhere that exact line appears (many lines repeat once per scene)."),
         ("Seeing the line in its scene",
-         "\"Show in Scenes…\" (also on the right-click menu) opens the "
-         "Scenes tab on the scene that draws the selected line, with the "
-         "line itself picked out — so you can see the font, the colour and "
-         "the art it sits on before changing the words. The preview draws "
-         "your PENDING edits too: change a row here and the scene redraws "
-         "with the new words (its Contents row says \"shows: …\" and "
-         "\"(not built yet)\"), so a longer rename can be checked against "
-         "its box before anything is written. That includes game-program "
-         "lines whose scene is a placeholder the code overwrites — the "
-         "program edit is what the scene shows, since that is what the "
-         "machine will draw. Game-program lines no scene draws at all are "
-         "still drawn by the game code at runtime and have nothing to "
-         "preview."),
+         "**Show in Scenes…** (also on the right-click menu) opens the Scenes tab on "
+         "the scene that draws the line, with the line picked out: its font, colour "
+         "and the art behind it.\n\n"
+         "- Your edits show there before anything is written (the Contents row says "
+         "\"(not built yet)\"), so you can check a longer line fits its box.\n"
+         "- A game-program line whose scene is a placeholder shows your edit, since "
+         "that is what the machine draws.\n"
+         "- Game-program lines no scene draws have nothing to preview."),
         ("Narrowing a big card down",
-         "Show gives you All / Changed / Unchanged: Unchanged is exactly the "
-         "lines you haven't dealt with yet, so a part-finished pass is what's "
-         "left in front of you. Scene narrows to the game program or to one "
-         "scene file, each listed with how many strings it holds. Both stay "
-         "with the project folder, so you come back to the view you left."),
+         "- **Show:** All, Changed or Unchanged. Unchanged is what you haven't done "
+         "yet.\n"
+         "- **Scene:** the game program or one scene file, each with its line count.\n"
+         "- Both are remembered with the project, so you come back to the same view."),
         ("Naming a scene",
-         "Spike 2 names every scene folder with a hash, so the Scene column "
-         "is characters that mean nothing until you've opened them. "
-         "Right-click a row and choose \"Name this scene…\" to give it a name "
-         "of your own; it shows in the Name column and in the Scene "
-         "dropdown. The folder name never changes, so the name sticks — and "
-         "it's the same name the Replace Images tab shows for that scene, "
-         "from either direction."),
+         "Spike 2 scene folders have meaningless hash names. Right-click a row, then "
+         "**Name this scene…** to give it your own. It shows in the Name column, the "
+         "Scene list, and on the Replace Images tab for that scene too."),
         ("Save and load edits",
-         "\"Save / load\" saves every text you changed to a small file, and "
-         "loads such a file onto the same texts of this card or another one. "
-         "Text too long for this card is skipped."),
+         "**Save / load** saves every line you changed to a small file and loads it "
+         "onto the same lines of this card or another. Text too long for that card "
+         "is skipped."),
     ],
     "Color profile": [
         ("What it does",

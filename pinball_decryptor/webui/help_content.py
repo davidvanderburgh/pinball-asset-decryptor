@@ -282,358 +282,293 @@ HELP_CONTENT = {
          "- The file only names your sound files, it doesn't hold them."),
     ],
     "Replace Video": [
-        ("Scan and assign",
-         "Scan lists every video slot; assign a replacement clip per slot "
-         "and compare it against the original in the side-by-side preview "
-         "players before building. A clip that already matches the "
-         "original's format, resolution and frame rate is used as-is; "
-         "anything else is auto-re-encoded to match (transparency is kept "
-         "where the original has it). The log says which one happened the "
-         "moment you pick the file — \"already matches this slot — will be "
-         "copied in, no re-encode\" or \"will be re-encoded to match this "
-         "slot\" — so you never have to guess whether your clip was "
-         "converted."),
-        ("Assets folder + applying",
-         "The assets folder is the one Extract produced — the same folder the "
-         "Write tab reads. There's no separate \"stage\" step: the "
-         "replacements you assign are applied automatically when you build the "
-         "update on the Write tab."),
-        ("Replacing a whole folder at once",
-         "\"Replace from folder…\" beside the project folder takes a "
-         "folder of your own files and picks each one for the clip with "
-         "its name, so a whole set reworked outside the app goes in as "
-         "one action instead of one pick per clip.\n\n"
-         "Names pair whatever the file type and whatever the capital "
-         "letters: a converter that wrote .mp4 for the card's .mov clips still pairs, and each file is converted to suit its slot "
-         "when you build, like any other pick. Subfolders are searched "
-         "too, and a file's own folders help it choose — when two slots "
-         "are named the same, put the file under a folder named like its "
-         "slot's. A clip that was set to go on as-is and comes back as a different file type is set to be converted instead, because going on as-is needs the slot's own file type.\n\n"
-         "Keep your files in a folder of their own, OUTSIDE the project "
-         "folder: the project folder holds the card's own files, so "
-         "choosing it, or anything inside it, is refused. What comes back "
-         "is ordinary replacements — they show in the Replacement column, "
-         "the next build applies them, and \"Clear replacements…\" drops "
-         "them again.\n\n"
-         "Whatever it leaves out is named in the log: files named like no "
-         "slot on this tab, files named like more than one of them, and "
-         "files another file in the folder shares a name with."),
-        ("Clearing replacements",
-         "A replacement you pick is remembered against the PROJECT FOLDER, "
-         "not against the card: it is stored in the folder itself, so it "
-         "survives closing the app, and it is still there if you point the "
-         "Extract tab at a different card image. That is what lets you come "
-         "back to a project days later, and it is why picks never disappear "
-         "on their own.\n\n"
-         "To drop some, select the rows — click one, then Shift-click for a "
-         "range or Ctrl-click to add single clips — and right-click the "
-         "selection. Sort by the Replacement column first and everything you "
-         "have picked sits together. \"Clear replacements…\" (in the More "
-         "menu, the ⋯ button at the top) drops every pick on this tab at once.\n\n"
-         "Clearing takes the replacement back out. A pick nothing has applied "
-         "yet is simply dropped; a slot that a build, or Start on the Emulate "
-         "tab, already wrote into the project folder gets the card's own file "
-         "put back as well, so the list, the next build and the next emulator "
-         "run all agree. None of your own files are touched. A slot changed "
-         "some other way (a file copied over it by hand, or a build from "
-         "before the app kept a saved original) keeps what it has — "
-         "\"Revert all changes…\" on the Write tab is what restores those."),
-        ("Scene editor (move, resize, turn, tint, layers, add)",
-         "When the project has a scene's tree (Extract or \"Re-read from card…\" "
-         "records it), the Scenes tab draws that scene the way the machine does - "
-         "every picture and line of text in its own place, size, tilt and fade, at one "
-         "MOMENT of its timeline - and you edit it right there. Click something in the "
-         "preview (or its row under Layers) to select it; drag it to move it, drag a "
-         "corner to resize it about its middle, or use the arrow keys to nudge it (Shift "
-         "for 10 px). Ctrl-click (Cmd on a Mac) picks more than one, or takes one out "
-         "again, and Shift-click in Layers picks every row between; dragging any of them "
-         "or the arrow keys then move them all together (one Undo), Delete removes them, "
-         "and the panel can hide or show them. The panel beside the preview sets its position and size exactly "
-         "(W px / H px, keeping its shape or not), turns it (\"Turn °\" is degrees clockwise "
-         "from as shipped; the 90° buttons turn it a quarter), tints it (a colour and an opacity), hides it, and moves it forward or back "
-         "among the layers beside it - later layers draw on top. A picture also shows its "
-         "own size and how big the scene draws it (\"Picture W x H px, drawn at N%\"); "
-         "\"Draw 1:1\" takes the scene's scaling off so it draws pixel for pixel, "
-         "keeping its top-left corner in place. A line of text also has "
-         "\"Add a drop shadow\": a dark copy of the text just beneath it, a few pixels down "
-         "and right, selected after so you can move, tint or remove it, and \"Fit box to text\", which shrinks or grows "
-         "the line's box to sit round its words without moving them (copies drawn from the same text follow). \"Picture…\" and "
-         "\"Text…\" add something new (text is written in the font and size of the "
-         "selected line). \"Moment\" picks where in the scene's own timeline to look "
-         "(Play runs the animation at its own speed; Stop goes back), "
-         "and \"Switchable parts\" (click the box to open it; the number is how many "
-         "parts it lists, numbered down the list) shows each part of the scene the "
-         "game's code switches between looks (which monster Battle Select shows, a "
-         "tile's Locked or city) - the file holds them all, the game chooses; pick one "
-         "to preview it, which changes only the preview. Undo (Ctrl+Z) takes back the last edit, "
-         "whichever button or key made it, and Redo (Ctrl+Y or Ctrl+Shift+Z) puts it back. A greyed layer is one the game is not "
-         "drawing at this moment: click its name and it is shown on top, "
-         "where it sits, at this same moment while it stays selected, ready to edit "
-         "(an edit belongs to the layer, so it holds at every moment). A layer's eye works as in "
-         "Photoshop or Fusion: it hides the layer in the preview only, to place things or reach "
-         "what is under it, and never changes the card. H hides or shows the selected layers, "
-         "and Alt+click on an eye shows that layer alone (Alt+click again brings the others "
-         "back). Hiding a layer in the game is its own mark, like Fusion's Suppress: the card "
-         "at the end of its row (or right-click, Hide in the game). The Write leaves it out of "
-         "the card, the row is struck through and reads 'hidden in game', the status line names "
-         "every such layer, and the preview is not changed. A scene opened for the first time "
-         "starts with its eyes shut on the layers hidden in the game; after that the eyes stay "
-         "as you set them until Reset puts them back ('Preview eyes as in the game', or As "
-         "shipped). Delete hides a layer in both. Picking any layer shows it on top, even one "
-         "hidden with its eye, and picking "
-         "a sprite shows everything in it; no eye changes by picking. A dark layer "
-         "with a crossed-out eye is off only because its switchable part shows another "
-         "look: its eye turns it on in the preview (and back off). The "
-         "layers inside that look keep their own eyes, like an editor's layers: one "
-         "shows only while the look it sits in is on, and turning the look on leaves "
-         "a layer you hid inside it hidden. Select "
-         "something else and the scene goes back to what the game draws. A layer that draws a picture "
-         "(itself or through what it holds) has a picture button at the end of its row: it opens "
-         "that picture on the Images tab (a layer with several lists them to pick from). "
-         "A text layer has a T button in the same place: it opens its words on the Text tab. "
-         "Every edit is kept in the project and "
-         "listed on the Write tab; the Write puts them on the card (moves, resizes, "
-         "tints, hides and layer changes even straight to an SD card; an added picture "
-         "or line of text makes the scene bigger, which needs an image build). The "
-         "game's own parts are hidden rather than deleted, because its code finds them "
-         "by name. Colour: these games draw most text in a styled font whose colours "
-         "are baked in, so Tint is the way to recolour it. A project extracted before the "
-         "editor existed has its scenes read off the Extract tab's card the first time the "
-         "Scenes tab opens (about ten seconds, once). While you edit, the picture you see "
-         "stays up and a small \"Updating\" tag shows while the change is drawn. Drag the "
-         "dividers between the scene list, the preview and the panel on the right (and the one "
-         "above Layers) to share the room the way you like; the app remembers them, and a "
-         "double-click puts one back. To look closer, hold Ctrl (or Shift, or Cmd on a Mac) and turn the mouse wheel over the preview, or use the zoom buttons in the bar above it; the fit button goes back to 100%, and while zoomed you can drag the view with the middle mouse button. There is nothing to save: every edit is kept the "
-         "moment you make it, and Write puts it on the card (\"Export picture…\" only makes a "
-         "picture for you). Reset, under the preview, puts a scene back the way the last Write "
-         "left it or the way the game shipped it, or every scene at once. With the Emulate "
-         "tab running this project's edits (\"Apply my replaced assets on top\"), an edit is "
-         "handed to the running game on the fly: a scene the game loads each time it shows "
-         "it (most mode and message screens) changes the next time it comes up, and the tag "
-         "under the preview says so; one the game loads when it starts (the score display, "
-         "Battle Select) changes after a restart. Untick \"Include my Scenes tab edits\" (under \"Apply my replaced assets on top\") to run the card with your other replacements but the scenes as they were. Lines of W's (or AAA) are the game's own placeholders "
-         "for text it fills in while it runs, such as high score initials: the game writes the "
-         "player's letters there, so they are as wide as the widest name can be."),
-        ("Save and load scene edits",
-         "\"Save / load edits\" at the head of the Scenes page saves this scene's "
-         "edits, or every edited scene's, to one .zip with the pictures they add, "
-         "to share or keep. Loading such a file replaces a scene's own edits (it "
-         "asks first when the scene has some). A scene is found by its path, so a "
-         "file from the LE loads on the Pro; a scene this card lacks is left out "
-         "and named, and an added picture whose name is taken by a different one "
-         "is renamed. Saving one scene also carries that scene's Text-tab words. "
-         "\"Save every scene with pictures, text and color profiles\" saves the "
-         "project's whole look in one file (sounds, videos and modes aside): every "
-         "scene's edits, every picture you replaced on the Images tab, even ones no "
-         "scene draws (the file, its Keep size tick, its color switch and the color "
-         "profile baked into it), every Text tab edit, the color profiles of the "
-         "pictures you added, and the whole screen overlay; the machine screen "
-         "stays each PC's own. A text edit loads onto the line with the same scene "
-         "and original words; one that can't be found or is too long is left out "
-         "and named, and one that would change your own words asks first. Loading "
-         "it copies the pictures into the project's \"Shared pictures\" folder and "
-         "never deletes or overwrites a file; when it would change a picture you "
-         "replaced, a scene you edited or your overlay, it asks first."),
-        ("Size limits",
-         "On most games patching is size-neutral: a same-or-smaller "
-         "replacement fits as-is, a larger one is re-encoded down to the "
-         "slot's byte budget. A replacement that already matches the slot's "
-         "format is copied through verbatim, with no quality loss. On Barrels "
-         "of Fun the update's file offsets are rewritten around the new "
-         "clip, so an oversized replacement skips the byte budget "
-         "entirely.\n\n"
-         "Stern Spike 2 has no byte budget per slot either: an image build "
-         "puts every clip assigned here on the card at full size. The limit "
-         "is the free room on the card's games partition, which all the "
-         "full-size clips share with any lengthened sounds. A stock 8 GB "
-         "card can have only a few hundred MB free, so a big retheme can run "
-         "out; SD card size on the Write tab (Windows and Linux) builds for a "
-         "bigger SD card and gives the games partition that room. A build "
-         "whose clips won't fit is stopped before anything is written to the "
-         "card image, and says how much room it needs. A clip is squeezed to "
-         "fit its slot's "
-         "byte size only on a direct SD write, when this computer can't "
-         "write whole files to the card (on Windows that needs WSL2), or "
-         "when the file picked for it has since been moved or deleted."),
-        ("What the machine can actually play",
-         "A clip only goes onto a Spike 2 card untouched when it's a real "
-         "drop-in for the one it replaces — same container, H.264, 8-bit "
-         "4:2:0, and the slot's own resolution and frame rate. The machine's "
-         "decoder isn't a desktop player: give it an MKV, HEVC, a 10-bit "
-         "clip or the wrong size and it plays the sound over a black "
-         "picture. Anything that isn't a drop-in is converted first (still "
-         "at full size, no byte budget) and the build log says which clip "
-         "and why. The song videos also need a key frame every few frames, "
-         "the way Stern encodes them: one with key frames far apart plays "
-         "stuttering and slows the whole game down, so it is converted too."),
-        ("Encoding your own clips",
-         "Right-click a slot and pick \"What this slot needs…\" to see exactly "
-         "what a replacement has to be to go on the card untouched: container, "
-         "codec, H.264 profile and level, frame size, frame rate, key-frame "
-         "spacing where the slot needs a short one, and whether the clip has "
-         "an audio track. It also gives you an ffmpeg command that produces "
-         "one, with only the flags that have to match, so you can add your "
-         "own bitrate and preset around them. Every value is read off the clip already in that slot, which "
-         "is the only real authority on what the machine will play — Spike 2 "
-         "decodes H.264 in hardware and nothing else, so a ProRes or HEVC "
-         "file plays its sound over a black picture no matter how good it "
-         "looks on a PC."),
-        ("Audio in a video file",
-         "Most game clips have no audio track at all, and the game plays its "
-         "own sound over them. A replacement that keeps its source's audio "
-         "adds a soundtrack the machine really will play on top. Converting "
-         "now matches the slot (a silent slot gets a silent replacement), and "
-         "a file you copy in as-is is flagged in the Convert column as \"As-is "
-         "⚠ audio\" so you can strip it first. Slots that do have their own "
-         "audio keep it."),
-        ("Use my files as-is",
-         "This one checkbox covers EVERY replacement you have picked, not "
-         "just the slot showing in the preview — tick or untick it any time "
-         "and the Convert column re-answers for the whole list. You never "
-         "have to pick files again to change your mind about converting "
-         "them. On, each replacement is copied in byte-for-byte and has to "
-         "already be game-ready; off, anything that isn't already a match is "
-         "converted to suit the slot, still at full size."),
-        ("The Convert column",
-         "Once you assign a replacement, the Convert column says what the "
-         "build will do with it: \"As-is\" means the clip already matches the "
-         "slot's container, codec, size and frame rate and is copied straight "
-         "in; \"Repackage\" means it already IS this slot's video and only the "
-         "container around it is wrong, so ffmpeg rewrites the wrapper and "
-         "every frame survives untouched; \"Re-encode\" means ffmpeg converts "
-         "the picture itself, which is where a long build spends its time and "
-         "the only one of the three that costs any quality. With \"Use my "
-         "files as-is\" on you may "
-         "also see \"✗ needs .mov\" (the build would refuse a different "
-         "container) or \"✗ wrong format\" (it would be copied on untouched, "
-         "but the machine can't decode it, so it would play its sound over a "
-         "black picture) — untick the box for those and they get converted "
-         "instead. The answer is worked out in the background, so a row can "
-         "read \"…\" for a moment, and it re-checks itself whenever you "
-         "change either checkbox. Export CSV carries the column too."),
-        ("Slots already holding a wrong-format clip",
-         "A ⚠ next to the Format cell means the clip sitting in that slot "
-         "RIGHT NOW is one the machine can't decode (ProRes, HEVC, 10-bit) — "
-         "usually one that went on as-is before the app checked for it. "
-         "Select the row and a callout under the preview says so in words. "
-         "The Format and Audio columns always describe the clip currently in "
-         "the slot, so after you assign a good replacement they keep showing "
-         "the old clip's format until the next build applies it — the "
-         "callout turns amber and says the build will fix it. The "
-         "\"Original\" preview pane shows the untouched factory clip "
-         "whenever its backup exists, even for a slot you've already "
-         "replaced — its title reads \"Original (stock)\" against "
-         "\"Replacement (your file)\" so the two panes can't be mixed up "
-         "when both sides carry the same slot name. That factory clip is "
-         "also what the Convert column measures your replacement against: "
-         "a slot whose current file is a wrong-format one you put there "
-         "earlier can't teach the app the wrong frame rate, size or "
-         "profile, so a clip cut to the machine's real spec still reads "
-         "\"As-is\"."),
-        ("Each clip's length",
-         "Right-click a slot and pick \"This clip's length\" to choose how "
-         "long that one clip plays: follow the Trim / pad box (the default), "
-         "match the stock clip, keep your file's full length, or type a "
-         "length in seconds. A clip with its own length shows it after the "
-         "Length cell. Trim / pad always measures against the stock clip, "
-         "so a slot you already replaced is still fitted to the original "
-         "length on later builds."),
-        ("Undo",
-         "Right-click a slot to remove an un-built assignment or revert an "
-         "already-changed file."),
-        ("Seeing where a clip plays",
-         "Right-click a slot and pick \"Show scene contents…\" to open the "
-         "Scenes tab on the scene that plays it, with the images, fonts "
-         "and text it shares the screen with."),
-        ("Very short clips",
-         "Plenty of Spike 2 slots hold a clip well under a second — a sixth "
-         "of one Batman card's 6331 do, down to one-frame stills — so the "
-         "Length column shows those with their milliseconds (0:00.033) "
-         "instead of rounding them to 0:00, which reads as an empty slot. "
-         "The preview posters the first frame of a clip that short, "
-         "because it is the whole clip."),
-        ("Checking a card you already built",
-         "\"Check card…\" (in the More menu, the ⋯ button at the top) asks the other question: not what "
-         "you are about to put on, but how the clips ALREADY on a card came "
-         "out. Point it at a built card image and it measures every clip on "
-         "it and lists the ones low enough in bitrate to look blocky — the "
-         "same test a build applies to a replacement, applied after the fact. "
-         "It reads the image only, takes a few seconds, and needs no "
-         "extract.\n\n"
-         "The list separates two very different problems, because the fix is "
-         "different. A clip marked \"squeezed to fit\" was too big for the "
-         "slot it replaced and the build shrank it to fit: build an image "
-         "file (not a direct-SD write) with WSL working and it goes on whole "
-         "instead, no re-export needed. Whole clips need room on the card's "
-         "games partition, though, and a stock 8 GB card can have only a "
-         "few hundred MB free, so when many clips come back squeezed, build "
-         "for a bigger SD card with SD card size on the Write tab (Windows "
-         "and Linux). A clip that is just low in bitrate was not squeezed, "
-         "and the card can't say which of two things it is. If it went on as "
-         "your own file, it is exactly as you exported it, so only a better "
-         "export will improve it. If it went on as the app's converted copy "
-         "(a replacement that isn't an exact match for its slot is "
-         "converted), an older version of the app may have converted it far "
-         "below Stern's bitrate, and building again from your original "
-         "replacement files converts it at the bitrate of the clip it "
-         "replaces. The same room limit applies to that rebuild.\n\n"
-         "A handful of the game's own clips sit under the bar by design "
-         "(long attract loops are encoded lean), so a card with nothing of "
-         "yours on it is not expected to come back empty."),
-        ("Best quality from your own files",
-         "Stern Spike 2. A replacement that isn't already an exact match for "
-         "its slot is converted, and by default the conversion is held to "
-         "the bitrate of the clip it replaces, so it fits where that clip "
-         "was. Tick \"Best quality\" (or use \"Best quality…\" on the "
-         "toolbar) and each clip is converted at full quality instead: it "
-         "gets the bits its picture needs, which for a detailed clip is "
-         "more than the stock clip had and for a simple one can be less. "
-         "Build for a 16 GB or 32 GB SD card on the Write tab if they don't "
-         "fit; a build that won't fit says so before it copies anything. "
-         "Converted clips are kept in the project, so building again only "
-         "converts the clips whose file or setting changed.\n\n"
-         "If the project doesn't know which files your clips came from — "
-         "you built the card on another PC, or picked the clips from files "
-         "named nothing like the slots — \"Best quality…\" can find them. "
-         "Pick a card built with your videos, the stock card it was built "
-         "from, and the folder your videos are in, then Find. Every clip "
-         "that card replaced is compared with every video in the folder by "
-         "what it looks like, so names and file types don't matter, and a "
-         "colour clip is told from its black-and-white twin. Where the "
-         "folder has the same video more than once (a master and an "
-         "export, two copies), the best copy is used. Amber rows are worth "
-         "a look before you use them; \"already on the card untouched\" "
-         "means your file went onto the card exactly as it is, so building "
-         "from it again won't make that clip any better. Untick anything "
-         "you don't want, then \"Use these files at best quality\". The "
-         "first search of a big folder takes a few minutes; a second one "
-         "reuses what it read."),
+        ("Scan and assign", [
+            "Pick a clip of yours for any video slot; the build puts it on.",
+            {"flow": [
+                {"icon": "search", "title": "Scan", "text": "lists every video slot"},
+                {"icon": "file", "title": "Pick", "text": "a clip of yours for a slot"},
+                {"icon": "compare", "title": "Compare",
+                 "text": "Original (stock) beside Replacement (your file)"},
+                {"icon": "write", "title": "Build",
+                 "text": "on the **Write** tab: picks apply then"}]},
+            "- No stage step: the assets folder is the one Extract made and Write reads.\n"
+            "- The log says at once whether a pick \"already matches this slot\" (copied "
+            "in, no re-encode) or \"will be re-encoded to match this slot\". "
+            "Transparency is kept where the original has it.\n"
+            "- Picks are stored in the project folder, not the card: they survive "
+            "closing the app or pointing Extract at another card image.",
+        ]),
+        ("Replace from a folder", [
+            "**Replace from folder…**, beside the project folder, picks each file in a "
+            "folder of yours for the clip with its name: a whole set in one go.",
+            "- Names pair whatever the file type or capitals (.mp4 for a .mov clip "
+            "pairs); each is converted to suit its slot when you build. A clip set to "
+            "go on as-is that comes back as another file type is set to convert.\n"
+            "- Subfolders count. When two slots share a name, put the file under a "
+            "folder named like its slot's.\n"
+            "- The log names files left out: named like no slot, like several, or "
+            "sharing a name with another file.\n"
+            "- The rest are ordinary picks: in **Replacement**, applied by the next "
+            "build, dropped by **Clear replacements…**.",
+            {"note": "Keep your files OUTSIDE the project folder. It holds the card's own "
+                     "files, so choosing it, or anything in it, is refused.", "kind": "warn"},
+        ]),
+        ("Right-click a slot",
+         "| Pick | What it does |\n"
+         "|---|---|\n"
+         "| What this slot needs… | the exact format that goes on untouched, plus an "
+         "ffmpeg command ([more](#what-the-machine-can-play)) |\n"
+         "| This clip's length | how long this one clip plays ([more](#clip-length)) |\n"
+         "| Show scene contents… | the Scenes tab, on the scene that plays it |\n"
+         "| Remove / revert | drops a pick, or puts back a file a build changed "
+         "([more](#clearing-and-undoing)) |"),
+        ("Clearing and undoing",
+         "Right-click a slot, or a selection (Shift-click a range, Ctrl-click to add), "
+         "to drop picks. **Clear replacements…** (More menu, the ⋯ button at the top) "
+         "drops every pick on this tab.\n\n"
+         "- Sort by **Replacement** to put every pick together.\n"
+         "- A slot a build, or Start on the Emulate tab, already wrote gets the card's "
+         "own file put back, so the list, the next build and the emulator agree. Your "
+         "own files are never touched.\n"
+         "- A slot changed some other way (copied over by hand, or built before the "
+         "app kept a saved original) keeps what it has: **Revert all changes…** on the "
+         "Write tab restores it."),
+        ("Convert column", [
+            "**Convert** says what the build will do with each pick (a row can read "
+            "\"…\" while it works it out). Export CSV carries it too.",
+            "| Convert | Means |\n"
+            "|---|---|\n"
+            "| As-is | already matches the slot: copied straight in |\n"
+            "| Repackage | the slot's video in the wrong container: rewrapped, every "
+            "frame kept |\n"
+            "| Re-encode | the picture is converted: slow, and the only one that costs "
+            "quality |\n"
+            "| As-is ⚠ audio | adds a soundtrack the machine will play: strip it first |\n"
+            "| ✗ needs .mov | the build would refuse the container |\n"
+            "| ✗ wrong format | goes on, but plays sound over a black picture |",
+            "### Use my files as-is\n"
+            "One checkbox for EVERY pick; flip it any time and Convert re-answers, no "
+            "re-picking.\n\n"
+            "- **On:** files are copied in byte for byte and must be game-ready. The ✗ "
+            "answers show only then.\n"
+            "- **Off:** anything not a match is converted to suit the slot, still at "
+            "full size.",
+        ]),
+        ("What the machine can play", [
+            "A Spike 2 card takes a clip untouched only when it is a true drop-in for the "
+            "one it replaces.",
+            {"cards": [
+                {"icon": "check", "tone": "ok", "title": "Plays",
+                 "text": "Same container, **H.264**, 8-bit 4:2:0, the slot's size and "
+                         "frame rate. Song videos: a key frame every few frames."},
+                {"icon": "error", "tone": "err", "title": "Sound, black picture",
+                 "text": "MKV, HEVC, ProRes, 10-bit or the wrong size. Spike 2 decodes "
+                         "only H.264, in hardware."}]},
+            "Anything else is converted first (at full size), and the build log says "
+            "which clip and why. A song video with key frames far apart stutters and "
+            "slows the whole game, so it is converted too.",
+            "### Encoding your own clips\n"
+            "Right-click > **What this slot needs…** lists what goes on untouched "
+            "(container, codec, H.264 profile and level, size, frame rate, key-frame "
+            "spacing, audio track or not), read off the slot's own clip, plus an ffmpeg "
+            "command with only the flags that must match: add your own bitrate and "
+            "preset.",
+            "### Sound in a video\n"
+            "Most game clips are silent and the game plays its own sound. A replacement "
+            "with audio plays it on top. Converting matches the slot (silent stays "
+            "silent); a file copied as-is shows **As-is ⚠ audio**. Slots with their own "
+            "audio keep it.",
+        ]),
+        ("Wrong-format clips already on",
+         "A ⚠ by **Format** means the clip in the slot RIGHT NOW can't be decoded "
+         "(ProRes, HEVC, 10-bit), usually one put on as-is before the app checked. "
+         "Select the row: a callout under the preview says so.\n\n"
+         "- **Format** and **Audio** describe the clip in the slot now, so after a good "
+         "pick they show the old one until the next build (the callout turns amber).\n"
+         "- **Original (stock)** shows the factory clip whenever its backup exists, and "
+         "Convert measures your file against it, so a clip cut to the machine's real "
+         "spec still reads As-is."),
+        ("Clip length",
+         "Right-click > **This clip's length**: follow the **Trim / pad** box (default), "
+         "match the stock clip, keep your file's full length, or type seconds.\n\n"
+         "- A clip with its own length shows it after the **Length** cell.\n"
+         "- Trim / pad always measures against the stock clip, even on a replaced "
+         "slot.\n"
+         "- Clips under a second (a sixth of one Batman card's 6331, down to one-frame "
+         "stills) show milliseconds, like 0:00.033, not an empty-looking 0:00. The "
+         "preview shows their first frame."),
+        ("Size limits", [
+            "How big a replacement may be depends on the game.",
+            {"cards": [
+                {"icon": "disk", "tone": "info", "title": "Most games",
+                 "text": "**Same size or smaller** fits. Bigger is re-encoded down to the "
+                         "slot's byte budget. A clip in the slot's format goes in with no "
+                         "quality loss."},
+                {"icon": "check", "tone": "ok", "title": "Barrels of Fun",
+                 "text": "**No byte budget.** The update's offsets are rewritten around "
+                         "the clip."},
+                {"icon": "sd", "tone": "warn", "title": "Stern Spike 2",
+                 "text": "**No byte budget per slot.** An image build puts clips on at "
+                         "full size; the card's free room is the limit."}]},
+            "### Stern Spike 2: room on the card\n"
+            "- Full-size clips and lengthened sounds share the free room on the card's "
+            "games partition. A stock 8 GB card may have only a few hundred MB.\n"
+            "- **SD card size on the Write tab (Windows and Linux)** builds for a bigger "
+            "SD card with more room.\n"
+            "- A build that won't fit is stopped before anything is written to the card "
+            "image, and says how much room it needs.\n"
+            "- A clip is squeezed to its slot's byte size only on a direct SD write, when "
+            "this computer can't write whole files to the card (Windows needs WSL2), or "
+            "when its picked file was moved or deleted.",
+        ]),
+        ("Best quality from your own files", [
+            "Stern Spike 2. A pick that isn't an exact match is converted, by default at "
+            "the bitrate of the clip it replaces.",
+            {"cards": [
+                {"icon": "film", "tone": "info", "title": "Default",
+                 "text": "**Stock bitrate.** Fits where the old clip was."},
+                {"icon": "star", "tone": "ok", "title": "Best quality",
+                 "text": "Tick **Best quality** (or toolbar **Best quality…**): each clip "
+                         "gets the bits its picture needs."}]},
+            "- Too big? Build for a 16 GB or 32 GB SD card on the Write tab; a build that "
+            "won't fit says so before copying.\n"
+            "- Converted clips are kept, so a rebuild converts only what changed.",
+            "### Finding your original files\n"
+            "Card built on another PC, or from oddly named files? **Best quality…** finds "
+            "them by how they look, not by name or file type.",
+            {"flow": [
+                {"icon": "folder", "title": "Pick",
+                 "text": "your built card, its stock card, your videos folder"},
+                {"icon": "search", "title": "Find", "text": "minutes the first time"},
+                {"icon": "check", "title": "Use",
+                 "text": "untick any, then **Use these files at best quality**"}]},
+            "- Colour is told from black-and-white, and of several copies the best wins.\n"
+            "- Check amber rows. \"already on the card untouched\" means a rebuild from "
+            "that file won't improve the clip.",
+        ]),
+        ("Checking a card you already built", [
+            "**Check card…** (More menu, ⋯ at the top) lists the clips on a built card "
+            "image whose bitrate is low enough to look blocky. Seconds, image only, no "
+            "extract.",
+            {"cards": [
+                {"icon": "down", "tone": "warn", "title": "Squeezed to fit",
+                 "text": "Shrunk into its slot. Build an **image file** (not a direct-SD "
+                         "write) with WSL working and it goes on whole."},
+                {"icon": "film", "tone": "info", "title": "Just low in bitrate",
+                 "text": "Your own export (only a better export helps) or an older app's "
+                         "converted copy (a rebuild helps): the card can't tell."}]},
+            "- Building again from your original replacement files converts at the "
+            "bitrate of the clip it replaces.\n"
+            "- Whole clips need room on the games partition. For many squeezed clips or "
+            "a big rebuild, use **SD card size on the Write tab (Windows and Linux)**.\n"
+            "- A few stock clips (long attract loops) sit under the bar by design.",
+        ]),
+        ("Colors (Spike 2)", [
+            "### The Color column\n"
+            "Each replaced clip shows a palette. The Color profile tab's **Every replaced "
+            "video** covers clips with no switch of their own.",
+            {"cards": [
+                {"icon": "palette", "tone": "ok", "title": "Green",
+                 "text": "Color profile attached: the individual files profile is baked "
+                         "in at build (re-encoded)."},
+                {"icon": "palette", "tone": "err", "title": "Red",
+                 "text": "No color profile attached: goes on as it is."},
+                {"icon": "lock", "tone": "info", "title": "Blue lock",
+                 "text": "The game's own clip, never changed. **Advanced** on the toolbar "
+                         "gives it a palette; detaching puts the original back."}]},
+            "### Preview colors\n"
+            "Switches above the players show the clips as the machine will (preview "
+            "only; no re-encode). All off is your PC's own colors; click a name to open "
+            "it on the Color profile tab.",
+            {"flow": [
+                {"icon": "image", "title": "Whole screen", "text": "the overlay"},
+                {"icon": "palette", "title": "Individual files",
+                 "text": "picks with a color profile attached"},
+                {"icon": "eye", "title": "Machine screen",
+                 "text": "every clip, unless the gear menu lets unattached files skip it"}]},
+        ]),
         ("Save and load settings",
-         "More > Save settings to a file... keeps this tab's picks, ticks and "
-         "options in one small file; Load settings from a file... puts them "
-         "back, on this card or another one. Slots the file doesn't set keep "
-         "what they have, and slots this card doesn't have are skipped. The "
-         "file only names your files, it doesn't hold them."),
-        ("Color column (Spike 2)",
-         "A replaced clip shows a Color palette: green, a color profile is "
-         "attached to it, so the Color profile tab's individual files profile is "
-         "baked into it when you build (it is re-encoded for that); red, no "
-         "color profile is attached and it goes on the card as it is. The Color profile tab's 'Every replaced video' sets "
-         "every clip that has no switch of its own. The game's own clips show "
-         "a blue lock and are never changed; tick Advanced on the toolbar to "
-         "give each one its own palette, and detaching one (or unticking "
-         "Advanced) puts the original back."),
-        ("Preview colors (Spike 2)",
-         "The row above the players shows the clips the way the machine will, "
-         "with a switch for each step: the Whole screen overlay, the "
-         "Individual files correction (a replacement with the color profile "
-         "attached) and the Machine screen. Turn them on and off to see what each "
-         "one does; all three off is your PC's own colors. Every clip goes "
-         "through the Machine screen; tick the gear menu's 'Files with no "
-         "color profile attached skip the Machine screen' to let a replacement "
-         "with no color profile attached skip it (it still gets the overlay). Click a name to open it on the Color profile "
-         "tab. Only the preview changes: the card is not, and no clip is "
-         "re-encoded for it."),
+         "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "
+         "**Load settings from a file…** puts them back, on this card or another. Slots "
+         "the file doesn't set keep theirs, slots this card lacks are skipped. The file "
+         "names your files, it doesn't hold them."),
+        ("Scene editor", [
+            "The **Scenes** tab draws a scene as the machine does, at one moment, and you "
+            "edit it in place. Needs the scene's tree (Extract or **Re-read from card…**). "
+            "Edits keep themselves; nothing to save.",
+            "### Select and move\n"
+            "- Click it in the preview or under **Layers**. Ctrl-click (Cmd on a Mac) "
+            "adds or removes; Shift-click in Layers takes a range.\n"
+            "- Drag to move, drag a corner to resize, arrows to nudge (Shift: 10 px).\n"
+            "- **Ctrl+Z** undo, **Ctrl+Y** or **Ctrl+Shift+Z** redo.",
+            "### The panel\n"
+            "- Position, size (**W px / H px**), **Turn °** (clockwise; 90° buttons), "
+            "tint and opacity, hide, and layer order (later draws on top).\n"
+            "- A picture shows its size and scale; **Draw 1:1** draws it pixel for pixel.\n"
+            "- Text: **Add a drop shadow** and **Fit box to text**. Most text is a font "
+            "with baked-in colours, so **Tint** recolours it.\n"
+            "- **Picture…** and **Text…** add new items.",
+            "### Moment and switchable parts\n"
+            "- **Moment** picks the point in the timeline; Play runs it, Stop goes back.\n"
+            "- **Switchable parts** previews each look the game's code picks between "
+            "(which monster Battle Select shows). Preview only.\n"
+            "- A greyed layer isn't drawn at this moment: click it to show and edit it. "
+            "Edits hold at every moment.",
+            "### Eyes and hiding",
+            {"cards": [
+                {"icon": "eye", "tone": "info", "title": "The eye",
+                 "text": "Hides a layer **in the preview only**. **H** toggles the "
+                         "selection; **Alt+click** an eye solos it."},
+                {"icon": "x", "tone": "warn", "title": "Hide in the game",
+                 "text": "The card mark at a row's end (or right-click). Write leaves it "
+                         "off the card; the row is struck through."},
+                {"icon": "trash", "tone": "err", "title": "Delete",
+                 "text": "Hides the selection in both."}]},
+            "- A new scene opens with eyes shut on layers hidden in the game; **Reset** "
+            "puts eyes back.\n"
+            "- Selecting shows a layer even with its eye shut; it never changes an eye.\n"
+            "- A crossed-out eye: off because its switchable part shows another look. The "
+            "eye turns it on in the preview.\n"
+            "- The game's own parts are hidden, never deleted: its code finds them by "
+            "name.\n"
+            "- A row's picture button opens it on **Images**; a text row's **T** opens "
+            "**Text**.",
+            "### Onto the card\n"
+            "- Edits are listed on **Write**. Moves, resizes, tints, hides and order can "
+            "go straight to an SD card; an added picture or text needs an image build.\n"
+            "- **Reset** puts a scene, or every scene, back to the last Write or as "
+            "shipped. **Export picture…** only makes a picture for you.\n"
+            "- On a running Emulate (**Apply my replaced assets on top**), edits reach the "
+            "game live: most screens at their next showing, ones loaded at start (score "
+            "display, Battle Select) after a restart. Untick **Include my Scenes tab "
+            "edits** to run without them.",
+            "### Good to know\n"
+            "- An older project reads its scenes off the card the first time (about ten "
+            "seconds, once).\n"
+            "- Drag the dividers to resize panes; double-click resets one.\n"
+            "- Zoom: Ctrl (or Shift, or Cmd) + wheel, or the zoom buttons; middle-drag "
+            "to pan.\n"
+            "- Rows of W's or AAA are placeholders the game fills in, like high score "
+            "initials.",
+        ]),
+        ("Save and load scene edits", [
+            "**Save / load edits**, at the head of the Scenes page, saves edits and the "
+            "pictures they add to one .zip.",
+            {"cards": [
+                {"icon": "scenes", "tone": "info", "title": "One or all edited scenes",
+                 "text": "Their edits and pictures. One scene also carries its Text-tab "
+                         "words."},
+                {"icon": "save", "tone": "ok", "title": "The whole look",
+                 "text": "**Every scene with pictures, text and color profiles:** scenes, "
+                         "every replaced picture, Text edits, profiles and overlay. Not "
+                         "sounds, videos or the machine screen."}]},
+            "### Loading\n"
+            "- Scenes match by path, so an LE file loads on the Pro. Missing scenes and "
+            "unplaceable or too-long text are left out and named; clashing picture names "
+            "are renamed.\n"
+            "- Pictures go into **Shared pictures**. Nothing is deleted or overwritten: "
+            "it asks before replacing your own edits, pictures, words or overlay.",
+        ]),
     ],
     "Replace Images": [
         ("Scan and assign",

@@ -837,3 +837,18 @@ def test_move_is_cancelled_when_another_scene_is_picked(tmp_path):
         assert w.call("text_scenes.layout_done", {"dx": "7"}) is False
         assert text_layout.load(folder) == {}
         w.call("text_scenes.close")
+
+
+def test_reveal_text_string_prefers_the_scenes_own_row(tmp_path):
+    """PAD-384: a Scenes text layer's button lands on its words in ITS scene when the same
+    words show in several, and on the first row with them otherwise."""
+    folder = _manifest(tmp_path / "proj", _rows())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        svc = w.window.service("text")
+        assert w.run(svc.reveal_text_string, "EBIRAH", "/g/bbbbbbbbbbbbbbbbbbbb")
+        assert svc._current == _row_index(w, "EBIRAH", "bbbb")
+        assert w.state("text")["search"] == "EBIRAH"
+        assert w.run(svc.reveal_text_string, "EBIRAH", "/g/cccccccccccccccccccc")
+        assert svc._current == _row_index(w, "EBIRAH", "aaaa")
+        assert not w.run(svc.reveal_text_string, "NOT THERE", "/g/bbbbbbbbbbbbbbbbbbbb")

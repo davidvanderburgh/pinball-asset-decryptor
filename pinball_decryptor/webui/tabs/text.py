@@ -1086,9 +1086,10 @@ class TextTab(TabService):
     def _open_font_studio(self, preselect_rel=None):
         return self.open_font_studio(preselect_rel=preselect_rel)
 
-    def reveal_text_string(self, text):
+    def reveal_text_string(self, text, scene_dir=None):
         """Scenes window: find one display string on this tab (clearing any
-        filter that would hide it) and land on its row."""
+        filter that would hide it) and land on its row; with *scene_dir*, the
+        row from that scene when it has one (PAD-384)."""
         self.window.select_tab(self.ns)
         if not self._text_rows and self._text_scan_dir == "":
             self._scan_text_strings()
@@ -1100,12 +1101,16 @@ class TextTab(TabService):
         finally:
             self._suspend -= 1
         self._refresh_list()
-        for i, r in enumerate(self._text_rows):
-            if r["original"] == text:
-                self.select(i)
-                self.set(focus_row=i)
-                return True
-        return False
+        hits = [i for i, r in enumerate(self._text_rows) if r["original"] == text]
+        if scene_dir:
+            want = scene_dir.replace("\\", "/").rstrip("/")
+            hits = [i for i in hits if (self._text_rows[i]["path"] or "").replace(
+                "\\", "/").rsplit("/", 1)[0] == want] + hits
+        if not hits:
+            return False
+        self.select(hits[0])
+        self.set(focus_row=hits[0])
+        return True
 
     @rpc
     def open_folder(self):

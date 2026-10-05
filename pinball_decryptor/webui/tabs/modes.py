@@ -2252,9 +2252,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         why_clip = (p.why_not("clip") or "") if p is not None else ""
         why_sound = (p.why_not("own_sound") or self._own_extra_why(p)) if p is not None else ""
         why_music = why_sound or self._own_music_why(p)
+        # PAD-375: the HUD is built into Godzilla's slide-outs scene (code_modes' build); elsewhere a
+        # blocks mode with a HUD runs with nothing at the edges
+        hud = p is None or bool(p.can("screen") and (p.lcd("hud") or "").endswith(MA.HUD_SCENE))
         return {"shots": shots, "events": events, "callouts": callouts, "light": BM.show_choices(),
                 "title": p.label if p is not None else "",
                 "why_clip": why_clip, "why_sound": why_sound, "why_music": why_music,
+                "hud": hud, "icons": list(BM.HUD_ICONS),
                 "game_modes": gms,
                 "game_modes_default": [i for i, _n, on in getattr(p, "game_modes", ()) if on] if p is not None else [],
                 "give_way_off": ("Not on this game: " + stack_why) if stack_why else "",

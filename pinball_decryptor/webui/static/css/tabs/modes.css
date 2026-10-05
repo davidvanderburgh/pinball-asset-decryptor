@@ -205,6 +205,9 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk-varbox.timer { background: #b0457e22; border-color: #b0457e66; }
 .bk-flow { background: #d77a21; }
 .bk-show { background: #3a78c9; }
+.bk-hud { background: #a8457a; }                 /* PAD-375: the HUD blocks and its settings */
+.bk-hudset { color: #fff; }
+.bk-hudset .bk-line { padding-left: 10px; }
 .bk-num { background: #4aa36b; }
 .bk-bool { background: #169a92; }
 .bk-pal.bk-hat { border-radius: 10px 10px 6px 6px; }

@@ -9,6 +9,8 @@
 // what is wrong with it. This page edits its own copy of the program and sends the whole of it
 // after each change (modes.blocks_save), a moment after the person stops.
 //
+// PAD-375: Its HUD gives the mode what the examples have at the glass's edges (the title and an
+// instruction line, three counters, a timer badge, a gauge, an award line); the HUD blocks write it.
 // PAD-374: a mode's OWN clips and sounds sit above its scripts (picked from files, copied into its
 // folder by modes.blocks_pick), each with the name its Play a clip / Play a sound blocks call it by.
 //
@@ -51,6 +53,15 @@ const TIP = {
   total: "The points the mode's Score blocks have paid since it started.",
   stock: "One of the game's own modes, battles or multiballs is running.",
   addTime: "Adds this many seconds to the mode's clock (less than 0 takes some off). Any value: a number, a variable, a sum.",
+  hud: "The mode's HUD at the edges of the screen, as the game's own battles have: its name and an instruction line above the score, up to three counters along the top, a timer badge counting its clock and a gauge on the right. It steps out of the way of the game's own displays and modes by itself. Built on Godzilla cards.",
+  hudOff: "This card's game has no HUD scene for it: the mode runs the same with nothing at the edges.",
+  hudLine: "The white line under the mode's name: what to shoot. The Show on the HUD block changes it.",
+  counter: "A counter along the top: a label, a big number and a smaller line under it. No label = not shown.",
+  follows: "The number it shows, kept up to date by itself (a variable, points so far). Empty: a Set counter block sets it.",
+  timer: "The badge on the left edge counting the mode's clock down, with its label and icon (a mode with no clock has none).",
+  gauge: "Pips on the right edge, lit up to a number: a gauge of how far along the mode is.",
+  gaugeFollows: "How many pips are lit, kept up to date by itself. Empty: a Fill the gauge block sets it.",
+  hudAward: "A big line, and a smaller one under it, for a moment (a jackpot). Before the mode starts it is a note shown alone, when no other mode's HUD is up.",
   setTime: "Puts the mode's clock at this many seconds, up or down (0 = time is up). Put up, a When that many seconds are left does not run again.",
   shared: "Shared with the other modes: every mode with a variable of this name reads and writes the same number, so one mode can be lit by what another did (played it, won it). It resets each ball or each game.",
   timers: "A timer counts down in milliseconds, apart from the mode's clock: start it from a block (any value, so a window can get shorter), and a When it runs out script runs the moment it does. A ball ending stops every timer.",
@@ -109,6 +120,9 @@ function stmtTemplates(ch, vars, prog = {}) {
       { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" },
       { op: "show", show: "burst" }, { op: "log", text: "" }]],
     ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null }]],
+    ["HUD", [{ op: "hud_text", which: "line", text: "SHOOT THE LIT SHOT", value: null },
+      { op: "hud_counter", counter: 1, value: num(0), sub: null }, { op: "hud_gauge", value: num(1) },
+      { op: "hud_award", text: "JACKPOT", value: null, sub: "", seconds: 2 }]],
   ];
 }
 
@@ -128,7 +142,11 @@ const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: 
   can_start: "the mode could start now", stock: "a game mode of its own runs" };
 const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", log: "show",
-  clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer" };
+  clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
+  hud_gauge: "hud", hud_award: "hud" };
+const WHICH = [["title", "title"], ["line", "instruction line"]];
+const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
+const GAUGES = [["diamond", "diamonds"], ["segment", "a bar of segments"], ["spike", "spikes"]];
 
 // ------------------------------------------------------------------ the program, by path
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -170,8 +188,8 @@ function TimerPick({ value, ed, onChange }) {
   return html`<${Pick} value=${value} options=${ed.timers.map((t) => t.name)} missing="(no such timer)" onChange=${onChange} />`;
 }
 
-function Text({ value, onChange, width = 150, placeholder }) {
-  return html`<${Field} sm width=${width} value=${value || ""} maxLength=${60} placeholder=${placeholder} onChange=${onChange} />`;
+function Text({ value, onChange, width = 150, placeholder, max = 60, title }) {
+  return html`<${Field} sm width=${width} value=${value || ""} maxLength=${max} placeholder=${placeholder} title=${title} onChange=${onChange} />`;
 }
 
 function X({ onClick, title = "Take this block out" }) {
@@ -201,7 +219,7 @@ function Slot({ kind, value, path, ed, optional, empty }) {
   if (!value) {
     return html`<button type="button" class=${cx("bk-slot", kind, over && "over")} ...${drop}
       onClick=${(e) => slotMenu(e, kind, ed, path)} ...${tip(kind === "bool" ? "A condition: drop one here, or press to pick" : "A value: drop one here, or press to pick")}>
-      ${kind === "bool" ? "condition" : optional ? (empty || "(no number)") : "value"}</button>`;
+      ${kind === "bool" ? "condition" : empty || (optional ? "(no number)" : "value")}</button>`;
   }
   return html`<span class=${cx("bk-rep", kind, over && "over")} ...${drop}>
     ${kind === "bool" ? html`<${Cond} e=${value} path=${path} ed=${ed} />` : html`<${Val} e=${value} path=${path} ed=${ed} />`}
@@ -281,6 +299,18 @@ function StmtBody({ b, path, ed }) {
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
       <span class="bk-w">balls, ball save</span><${Num} value=${b.save} width=${44} onChange=${(v) => set("save", v)} /><span class="bk-w">s</span>`;
     case "log": return html`<span class="bk-w">Write</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="a line" /><span class="bk-w">in the log</span>`;
+    case "hud_text": return html`<span class="bk-w">Show</span><${Text} value=${b.text} max=${40} width=${220} onChange=${(v) => set("text", v)} placeholder="words" />
+      <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} />
+      <span class="bk-w">as the HUD's</span><${Pick} value=${b.which} options=${WHICH} onChange=${(v) => set("which", v)} />`;
+    case "hud_counter": return html`<span class="bk-w">Set the HUD's</span><${Pick} value=${b.counter} options=${COUNTERS}
+        onChange=${(v) => set("counter", Number(v))} /><span class="bk-w">to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />
+      <${Check} checked=${b.sub != null} label="and its line to" onChange=${(on) => set("sub", on ? "" : null)} />
+      ${b.sub != null ? html`<${Text} value=${b.sub} max=${16} width=${120} onChange=${(v) => set("sub", v)} placeholder="words" />` : null}`;
+    case "hud_gauge": return html`<span class="bk-w">Fill the HUD's gauge to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">pips</span>`;
+    case "hud_award": return html`<span class="bk-w" ...${tip(TIP.hudAward)}>Award</span><${Text} value=${b.text} max=${40} width=${120} onChange=${(v) => set("text", v)} placeholder="words" />
+      <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} />
+      <span class="bk-w">over</span><${Text} value=${b.sub} max=${40} width=${120} onChange=${(v) => set("sub", v)} placeholder="a smaller line" />
+      <span class="bk-w">for</span><${Num} value=${b.seconds} width=${40} onChange=${(v) => set("seconds", v)} /><span class="bk-w">s</span>`;
     case "timer_start": return html`<span class="bk-w" ...${tip(TIP.timerStart)}>Start timer</span><${TimerPick} value=${b.timer} ed=${ed} onChange=${(v) => set("timer", v)} />
       <span class="bk-w">at</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
     case "timer_stop": return html`<span class="bk-w">Stop timer</span><${TimerPick} value=${b.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
@@ -427,6 +457,7 @@ function stmtLabel(b) {
     score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound",
+    hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
@@ -446,6 +477,42 @@ function Palette({ ed }) {
     ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, "Drag into a value slot (the round holes)"))}
     <div class="bk-pal-h">Conditions</div>
     ${condTemplates().map((t) => piece("bk-bool", COND_WORDS[t.k], t, null, "Drag into an If's condition slot"))}
+  </div>`;
+}
+
+// ------------------------------------------------------------------ the HUD (PAD-375)
+function Hud({ prog, ed }) {
+  const h = prog.hud || {};
+  const can = ed.ch.hud !== false;
+  const icons = ed.ch.icons || ["xilien"];
+  const counters = h.counters || [{}, {}, {}];
+  const timer = h.timer || {};
+  const gauge = h.gauge || {};
+  const at_ = (...k) => ["hud", ...k];
+  return html`<div class="bk bk-hud bk-hudset">
+    <div class="bk-line"><span class="bk-w b" ...${tip(TIP.hud)}>Its HUD</span>
+      <span class="bk-w">${prog.name || "its name"}, and under it</span>
+      <${Text} value=${h.line} max=${40} width=${340} title=${TIP.hudLine} onChange=${(v) => ed.set(at_("line"), v)} placeholder="what to shoot" />
+      ${can ? null : html`<span class="bk-w small" ...${tip(TIP.hudOff)}>(not on this card's game)</span>`}</div>
+    ${counters.map((c, k) => html`<div class="bk-line" key=${k}>
+      <span class="bk-w" ...${tip(TIP.counter)}>Counter ${k + 1}</span>
+      <${Text} value=${c.label} max=${16} width=${120} onChange=${(v) => ed.set(at_("counters", k, "label"), v)} placeholder="its label" />
+      <span class="bk-w">shows</span><${Slot} kind="num" value=${c.value} path=${at_("counters", k, "value")} ed=${ed} empty="(set by a block)" />
+      <span class="bk-w">over</span><${Text} value=${c.sub} max=${16} width=${120} onChange=${(v) => ed.set(at_("counters", k, "sub"), v)} placeholder="a smaller line" />
+    </div>`)}
+    <div class="bk-line">
+      <${Check} checked=${timer.on !== false} label="timer badge" title=${TIP.timer} onChange=${(v) => ed.set(at_("timer", "on"), v)} />
+      ${timer.on !== false ? html`<${Text} value=${timer.label} max=${12} width=${110} onChange=${(v) => ed.set(at_("timer", "label"), v)} placeholder=${(prog.name || "").slice(0, 12) || "its label"} />
+        <${Pick} value=${timer.icon} options=${icons} onChange=${(v) => ed.set(at_("timer", "icon"), v)} title="Its icon" />` : null}
+    </div>
+    <div class="bk-line">
+      <${Check} checked=${!!gauge.on} label="gauge" title=${TIP.gauge} onChange=${(v) => ed.set(at_("gauge", "on"), v)} />
+      ${gauge.on ? html`<${Text} value=${gauge.label} max=${16} width=${110} onChange=${(v) => ed.set(at_("gauge", "label"), v)} placeholder="its label" />
+        <span class="bk-w">of</span><${Num} value=${gauge.count} width=${40} onChange=${(v) => ed.set(at_("gauge", "count"), v)} />
+        <${Pick} value=${gauge.kind} options=${GAUGES} onChange=${(v) => ed.set(at_("gauge", "kind"), v)} />
+        <input type="color" class="bk-color" value=${gauge.color || "#ff7800"} onInput=${(e) => ed.set(at_("gauge", "color"), e.target.value)} ...${tip("The lit pips' colour")} />
+        <span class="bk-w" ...${tip(TIP.gaugeFollows)}>lit to</span><${Slot} kind="num" value=${gauge.value} path=${at_("gauge", "value")} ed=${ed} empty="(set by a block)" />` : null}
+    </div>
   </div>`;
 }
 
@@ -665,6 +732,7 @@ export function BlocksEditor({ s, c }) {
         Object.values(o).forEach(walk);
       };
       walk(d.scripts);
+      walk(d.hud);                                                // PAD-375: what its counters and gauge follow
     }, "vars/" + i + "/name"),
     renameTimer: (i, name) => edit((d) => {
       const old = (d.timers[i] || {}).name;
@@ -733,11 +801,15 @@ export function BlocksEditor({ s, c }) {
         <span class="lbl" ...${tip(TIP.displayPriority)}>Display priority</span>
         <${Select} sm value=${String(prog.priority || 0)} title=${TIP.displayPriority} onChange=${(v) => ed.set(["priority"], Number(v))}
           options=${[...DISPLAY_PRIORITIES, ...(DISPLAY_PRIORITIES.some(([n]) => n === (prog.priority || 0)) ? [] : [[prog.priority, String(prog.priority)]])]
-            .map(([value, label]) => ({ value: String(value), label }))} />
+            .map(([value, label]) => ({ value: String(value),
+              // PAD-375: a HUD keeps a priority of its own, so its words wait under the game's displays
+              label: value === 0 && (prog.hud || {}).on ? "the HUD's (180)" : label }))} />
+        <${Check} checked=${!!(prog.hud || {}).on} label="its HUD" title=${TIP.hud} onChange=${(v) => ed.set(["hud", "on"], v)} />
       </div>
       <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />
       <${Timers} prog=${prog} ed=${ed} />
+      ${(prog.hud || {}).on ? html`<${Hud} prog=${prog} ed=${ed} />` : null}
       <${OwnMedia} prog=${prog} ed=${ed} s=${s} folder=${c.folder} />
       ${(b.notes || []).map((t) => html`<${Note} key=${t}>${t}<//>`)}
       <div class="bk-scripts">

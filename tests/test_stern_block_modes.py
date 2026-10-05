@@ -329,7 +329,7 @@ def play(tmp_path, program, *args, slug="blk"):
     src.write_text(BM.to_c(program, slug), encoding="utf-8")
     exe = tmp_path / "harness"
     r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", SDK,
-                        "-o", str(exe), os.path.join(SDK, "examples", "desk_harness.c"), str(src)],
+                        "-I", os.path.join(SDK, "examples"), "-o", str(exe), os.path.join(SDK, "examples", "desk_harness.c"), str(src)],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert "warning" not in r.stderr.lower(), r.stderr
@@ -932,3 +932,241 @@ def test_a_blink_that_hurries_follows_the_clock_and_a_light_again_is_left_alone(
     assert 9950 <= hurry[1][0] <= 10100 and 19950 <= hurry[2][0] <= 20100 and 26950 <= hurry[3][0] <= 27100
     assert out.count("LAMP RIGHT RAMP ffb000 blink 300") == 1           # lit again each second: sent once
     assert "LAMP OFF LEFT RAMP" in out and "END lamps held 0" in out
+
+
+# ---- PAD-375: the HUD -------------------------------------------------------------------------------
+def var(n):
+    return {"k": "var", "name": n}
+
+
+def maser_hud():
+    """MASER BARRAGE's chain in blocks, with its HUD as the example's (film_recipes.json): the
+    multiplier, barrages and points along the top, the MASER badge, a CHAIN gauge of three."""
+    return prog([
+        {"hat": {"kind": "shot", "shot": "Maser target", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": [{"op": "set", "var": "mult", "value": num(1)}]},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [
+            {"op": "set", "var": "step", "value": num(1)},
+            {"op": "hud_text", "which": "line", "text": "NOW THE RIGHT RAMP", "value": None}]},
+        {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"}, "do": [
+            {"op": "set", "var": "step", "value": num(2)},
+            {"op": "hud_text", "which": "line", "text": "NOW THE BUILDING", "value": None}]},
+        {"hat": {"kind": "shot", "shot": "Building", "when": "running"}, "do": [
+            {"op": "if", "cond": {"k": "cmp", "op": "=", "a": var("step"), "b": num(2)}, "then": [
+                {"op": "score", "points": {"k": "op", "op": "*", "a": num(1000000), "b": var("mult")}},
+                {"op": "change", "var": "barrages", "by": num(1)},
+                {"op": "change", "var": "mult", "by": num(1)},
+                {"op": "set", "var": "step", "value": num(0)},
+                {"op": "hud_counter", "counter": 2, "value": var("barrages"), "sub": "COMPLETED"},
+                {"op": "hud_award", "text": "BARRAGE", "value": var("barrages"), "sub": "MULTIPLIER UP",
+                 "seconds": 2}], "else": None}]},
+    ], vars=[{"name": "step", "reset": "mode"}, {"name": "mult", "reset": "mode"},
+             {"name": "barrages", "reset": "mode"}], seconds=20,
+        hud={"on": True, "line": "LEFT RAMP  >  RIGHT RAMP  >  BUILDING",
+             "counters": [{"label": "MULTIPLIER", "sub": "MAX X5", "value": var("mult")},
+                          {"label": "BARRAGES", "sub": ""},
+                          {"label": "POINTS", "sub": "THIS MODE", "value": {"k": "total"}}],
+             "timer": {"on": True, "label": "MASER", "icon": "maser"},
+             "gauge": {"on": True, "label": "CHAIN", "kind": "diamond", "count": 3, "color": "#008cff",
+                       "value": var("step")}})
+
+
+def test_the_hud_is_the_examples_hud_in_the_assets_file(tmp_path):
+    p = maser_hud()
+    assert BM.problems(p, SHOTS) == [] and BM.notes(p) == []
+    assert BM.hud_spec(p, "maser") == {
+        "title": "TEST MODE", "line": "LEFT RAMP  >  RIGHT RAMP  >  BUILDING",
+        "counters": [["MULTIPLIER", "0", "MAX X5"], ["BARRAGES", "0", " "], ["POINTS", "0", "THIS MODE"]],
+        "timer": {"label": "MASER", "icon": "maser"},
+        "gauge": {"label": "CHAIN", "kind": "diamond", "count": 3, "colours": [[0, 140, 255]]}}
+    # an unlabelled counter at the end is not built, one in the middle is left empty; the badge
+    # says the mode's name with no label of its own; no gauge unless ticked
+    q = prog([], hud={"on": True, "counters": [{}, {"label": "B"}], "timer": {}})
+    assert BM.hud_spec(q) == {"title": "TEST MODE", "line": " ", "counters": [[], ["B", "0", " "]],
+                              "timer": {"label": "TEST MODE", "icon": "xilien"}}
+    assert BM.hud_spec(prog([])) == {}
+    # saved: the assets file carries it (the build draws it) and the kit sits beside the C
+    project = _card(tmp_path)
+    slug, path = BM.new_blocks_mode(project, "Maser", shots=SHOTS)
+    folder = MP.mode_folder(project, slug)
+    assert not os.path.isfile(os.path.join(folder, BM.KIT_FILE))
+    BM.save(project, slug, p)
+    assert CM.load(project, slug).hud == BM.hud_spec(p, slug)
+    with open(os.path.join(folder, BM.KIT_FILE), encoding="utf-8") as f, \
+            open(os.path.join(SDK, "examples", BM.KIT_FILE), encoding="utf-8") as g:
+        assert f.read() == g.read()
+    with open(path, encoding="utf-8") as f:
+        assert '#include "intricate_kit.h"' in f.read()
+    # switched off: no HUD in the assets, and the C no longer includes the kit
+    p["hud"]["on"] = False
+    BM.save(project, slug, p)
+    assert CM.load(project, slug).hud == {}
+    with open(path, encoding="utf-8") as f:
+        assert "intricate_kit.h" not in f.read()
+
+
+def test_the_hud_blocks_are_checked_and_noted():
+    bad = prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "hud_text", "which": "middle", "text": "X" * 41, "value": None},
+        {"op": "hud_counter", "counter": 4, "value": None},
+        {"op": "hud_award", "text": "A", "value": None, "sub": "", "seconds": 11}]}],
+        hud={"on": True, "counters": [{"label": "A", "value": {"k": "var", "name": "nope"}}]})
+    probs = BM.problems(bad)
+    assert any("title or line" in t for t in probs)
+    assert any("more than 40 letters" in t for t in probs)
+    assert any("1, 2 or 3" in t for t in probs)
+    assert any("1 to 10 seconds" in t for t in probs)
+    assert any("HUD's counter 1 uses a variable that is not there" in t for t in probs)
+    # HUD blocks with the HUD off, a counter with no label, a gauge switched off, a badge with no clock
+    off = prog([{"hat": {"kind": "mode_start"}, "do": [{"op": "hud_gauge", "value": num(1)}]}])
+    assert any("tick Its HUD" in t for t in BM.notes(off))
+    on = prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "hud_gauge", "value": num(1)}, {"op": "hud_counter", "counter": 2, "value": num(1)},
+        {"op": "start_mode"}]}], seconds=0, ends_on_drain=True, hud={"on": True})
+    words = " ".join(BM.notes(on))
+    assert "counter 2, which has no label" in words and "gauge, which is switched off" in words
+    assert "timer badge counts the mode's clock, and it has none" in words
+    # the HUD blocks with the HUD off write nothing but a comment
+    assert "kit_hud" not in BM.to_c(off, "off") and "/* hud_gauge: the mode has no HUD */" in BM.to_c(off, "off")
+
+
+def test_the_hud_c_calls_only_the_header_and_the_kit():
+    src = BM.to_c(maser_hud(), "maser")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    with open(os.path.join(SDK, "examples", BM.KIT_FILE), encoding="utf-8") as f:
+        kit = set(re.findall(r"\b(kit_[a-z_]+)\s*\(", f.read()))
+    kit_used = set(re.findall(r"\b(kit_[a-z_]+)\s*\(", src))
+    assert kit_used and kit_used <= kit, kit_used - kit
+    assert 'static struct kit_hud hud = { .slug = "maser" };' in src
+    # a HUD with no priority of its own takes a mode's 180 (PAD-377's choice wins when made)
+    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_MS)" in src
+    p = maser_hud()
+    p["priority"] = 190
+    assert re.search(r"#define DISPLAY_PRIORITY 190\b", BM.to_c(p, "maser"))
+    p["hud"]["on"] = False
+    p["priority"] = 0
+    assert re.search(r"#define DISPLAY_PRIORITY 0\b", BM.to_c(p, "maser"))
+
+
+def test_the_hud_builds_with_build_mode_sh(tmp_path):
+    if os.name == "nt":
+        pytest.skip("build_mode.sh runs under bash with arm-linux-gnueabihf-gcc (WSL or Linux)")
+    if not shutil.which("bash") or not shutil.which("arm-linux-gnueabihf-gcc"):
+        pytest.skip("no arm-linux-gnueabihf-gcc here")
+    src = tmp_path / "maser.c"
+    src.write_text(BM.to_c(maser_hud(), "maser"), encoding="utf-8")
+    shutil.copyfile(os.path.join(SDK, "examples", BM.KIT_FILE), str(tmp_path / BM.KIT_FILE))
+    out = tmp_path / "mode.so"
+    r = subprocess.run(["bash", os.path.join(SDK, "build_mode.sh"), "-o", str(out), str(src),
+                        os.path.join(SDK, "mode_file.c")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "warning" not in (r.stdout + r.stderr).lower()
+
+
+def _hud_words(out, piece):
+    """Every value written to one piece of the HUD, in order."""
+    return re.findall(r"WORDS PadMode_\w+?_Hud_%s: (.*)$" % piece, out, re.M)
+
+
+def test_the_hud_follows_the_blocks_and_ends_with_the_total(tmp_path):
+    out = play(tmp_path, maser_hud(), "shot", "Maser target", "shot", "Left ramp", "shot", "Right ramp",
+               "shot", "Building", "secs", 3, "secs", 20, slug="maser")
+    assert "SHOW PadMode_maser_Hud 1" in out and "DISPLAY 180 TEST MODE" in out
+    assert _hud_words(out, "Title")[0] == "TEST MODE"
+    assert _hud_words(out, "Line")[:3] == ["LEFT RAMP  >  RIGHT RAMP  >  BUILDING", "NOW THE RIGHT RAMP",
+                                           "NOW THE BUILDING"]
+    # the multiplier follows its variable; barrages is set by its block, with its own line
+    assert _hud_words(out, "C1_Label")[0] == "MULTIPLIER" and _hud_words(out, "C1_Value")[:2] == ["1", "2"]
+    assert _hud_words(out, "C2_Value")[:2] == ["0", "1"] and "COMPLETED" in _hud_words(out, "C2_Sub")
+    assert "1.00M" in _hud_words(out, "C3_Value")         # short enough for the counter (kit_short)
+    # the award for its two seconds, the badge counting the clock, the chain gauge lit 1, 2, then 0
+    award = _hud_words(out, "Award")
+    assert award[:3] == [" ", "BARRAGE 1", " "]
+    assert "MULTIPLIER UP" in _hud_words(out, "AwardSub")
+    timer = _hud_words(out, "Timer_Num")
+    assert timer[0] == "20" and "10" in timer
+    lit = re.findall(r"SHOW \S+_Hud_G(\d)_On 1", out)
+    assert lit[:2] == ["1", "2"]
+    # time up: the TOTAL for three seconds, then hidden
+    assert "TEST MODE TOTAL" in _hud_words(out, "Title") and "1,000,000" in award
+    end = int(re.search(r"^\s*(\d+) \[TEST MODE\] END \(time ran out\)", out, re.M).group(1))
+    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_maser_Hud 0", out, re.M)]
+    assert any(2950 <= t - end <= 3050 for t in hidden), (end, hidden)
+    assert "display priority 0" in out
+
+
+def test_the_hud_steps_aside_for_the_games_modes_and_displays(tmp_path):
+    p = maser_hud()
+    p["screen"] = True
+    out = play(tmp_path, p, "shot", "Maser target", "secs", 1, "battle", 1, "secs", 1,
+               "covered", 1, "secs", 1, "covered", 0, "battle", 0, "secs", 1, "ball_end", "secs", 1, slug="maser")
+    # a battle: its lines into the award line, the counters blank, the badge one slot down, its screen hidden
+    assert "aside for a battle - its lines in the award line" in out
+    aside = out[out.index(">> battle 1"):out.index(">> covered 1")]
+    assert "Hud_Award: TEST MODE" in aside and "Hud_AwardSub: LEFT RAMP  >  RIGHT RAMP  >  BUILDING" in aside
+    assert "Hud_C1_Value:  " in aside and "_Hud_Timer2 1" in aside and "_Hud_Timer 0" in aside
+    assert "SHOW PadMode_maser_Screen 0" in aside
+    # under a display of the game's: its words blank, the edges stay
+    covered = out[out.index(">> covered 1"):out.index(">> covered 0")]
+    assert "its words wait while a display of the game's has the screen" in covered
+    assert "Hud_Award:  " in covered and "_Hud_Gauge 0" not in covered
+    # both over: back in its places, its screen back
+    back = out[out.index(">> battle 0"):out.index(">> ball_end")]
+    assert "back in its places" in back and "Hud_C1_Label: MULTIPLIER" in back
+    assert "SHOW PadMode_maser_Screen 1" in back
+    # a drain: down at once, the display given back in the same tick
+    drain = out[out.index(">> ball_end"):]
+    t = int(re.search(r"^\s*(\d+) >> ball_end", out, re.M).group(1))
+    assert re.search(r"^\s*%d SHOW PadMode_maser_Hud 0" % t, drain, re.M)
+    assert re.search(r"^\s*%d DISPLAY 0 TEST MODE" % t, drain, re.M)
+
+
+def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
+    p = maser_hud()
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "hud_award", "text": "MASER", "value": {"k": "hits", "shot": "Big loop"}, "sub": "",
+         "seconds": 2}]})
+    out = play(tmp_path, p, "shot", "Big loop", "secs", 3, slug="maser")
+    note = out[out.index(">> shot Big loop"):]
+    assert "Hud_Award: MASER 1" in note and "Hud_AwardSub: TEST MODE" in note
+    assert "SHOW PadMode_maser_Hud 1" in note and "SHOW PadMode_maser_Hud 0" in note
+    assert "Hud_Title:  " in note                  # a note is the award line alone
+
+
+def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, monkeypatch):
+    # PAD-375 beside PAD-374 and PAD-376: the HUD's kit, the light-show engine and the assets header
+    # in one mode's C, without a name meeting another
+    _cc()
+    p = _media_prog()
+    p["hud"] = maser_hud()["hud"]
+    p["vars"] = [{"name": "step"}, {"name": "mult"}, {"name": "barrages"}]
+    p["scripts"].append({"hat": {"kind": "mode_start"}, "do": [
+        {"op": "show", "show": "own", "steps": GHIDORAH_START},
+        {"op": "hud_award", "text": "GO", "value": None, "sub": "", "seconds": 2}]})
+    assert BM.problems(p, SHOTS) == []
+    src = BM.to_c(p, "blk")
+    assert '#include "intricate_kit.h"' in src and '#include "pad_mode_assets.h"' in src
+    dump = _assets(tmp_path, "blk", p, [{"key": "music", "request": 125, "sid": 618}])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Building", "secs", 1, "ball_end", "secs", 1)
+    start = _at(out, r"\[TEST MODE\] START")
+    assert "SHOW PadMode_blk_Hud 1" in out and "Hud_Award: GO" in out
+    assert _at(out, "CLIP PadMode_blk_Intro") >= start
+    assert "show its own: 4 step(s)" in out
+    t = _at(out, ">> ball_end")
+    assert re.search(r"^\s*%d SHOW PadMode_blk_Hud 0" % t, out, re.M)
+    assert "END lamps held 0, display priority 0" in out
+
+
+def test_a_hud_mode_that_gives_way_takes_its_hud_down_when_a_game_mode_begins(tmp_path):
+    # PAD-373's give_way beside the HUD: one of the game's modes beginning ends it at once, its HUD
+    # and display given back in the same tick (the kit's kit_game_began), no TOTAL left over the game's
+    p = maser_hud()
+    p["game_modes"] = "give_way"
+    out = play(tmp_path, p, "shot", "Maser target", "secs", 1, "battle", 1, "secs", 1, slug="maser")
+    end = _at(out, r"\[TEST MODE\] END \(the game's own mode began\)")
+    assert re.search(r"^\s*%d SHOW PadMode_maser_Hud 0" % end, out, re.M)
+    assert re.search(r"^\s*%d DISPLAY 0 TEST MODE" % end, out, re.M)
+    # nothing of its HUD is written after that tick
+    assert all(int(t) <= end for t in re.findall(r"^\s*(\d+) WORDS PadMode_maser_Hud", out, re.M))

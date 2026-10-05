@@ -118,6 +118,8 @@ def add(assets_dir, card, op):
         last["s"] = round(last["s"] * op["s"], 6)
         if abs(last["s"] - 1.0) < 1e-6 and abs(last.get("sy", 1.0) - 1.0) < 1e-6:
             ops.pop()
+    elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_rect":
+        last["rect"] = op["rect"]
     elif (last and last.get("node") == op.get("node") and last["op"] == op["op"] == "rotate"
           and (last.get("px"), last.get("py")) == (op.get("px"), op.get("py"))):
         last["deg"] = round(last["deg"] + op["deg"], 4)
@@ -440,6 +442,8 @@ def describe(op):
         return "added a drop shadow"
     if k == "remove":
         return "removed"
+    if k == "text_rect":
+        return "box fitted"
     return k
 
 
@@ -540,7 +544,8 @@ def apply_manifest(man, ops):
         index = _man_index(man)
         k = op.get("op")
         try:
-            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow"):
+            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
+                     "text_rect"):
                 got = index.get(op["node"])
                 if got is None:
                     notes.append("%s: node %s is not in this scene" % (k, op["node"]))
@@ -582,6 +587,13 @@ def apply_manifest(man, ops):
                     sibs.insert(max(0, min(len(sibs), int(op["index"]))), n)
                 elif k == "remove":
                     sibs.remove(n)
+                elif k == "text_rect":
+                    texts = [o for o in (man["objects"].get(str(oid)) or {}
+                                         for _s, oid in n["comps"]) if o.get("kind") == "Text"]
+                    if not texts:
+                        notes.append("text_rect: node %s draws no text" % op["node"])
+                    for o in texts:
+                        o["rect"] = [float(v) for v in op["rect"]]
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:
@@ -707,7 +719,8 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
         k = op.get("op")
         index = _tree_index(scene)
         try:
-            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow"):
+            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
+                     "text_rect"):
                 nid = fresh.get(op["node"], op["node"])
                 got = index.get(nid)
                 want = names.get(op["node"])
@@ -762,6 +775,13 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                         n.keyframes = [(1, 0)]
                     else:
                         sibs.remove(n)
+                elif k == "text_rect":
+                    texts = [c.obj for c in n.components if c.obj.kind == "Text"]
+                    if not texts:
+                        notes.append("text_rect: node %s draws no text; left alone" % op["node"])
+                        continue
+                    for o in texts:
+                        o.body["rect"] = tuple(float(v) for v in op["rect"])
                 applied += 1
             elif k in ("add_picture", "add_text"):
                 parent = op.get("parent")

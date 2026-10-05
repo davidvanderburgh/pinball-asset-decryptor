@@ -1363,6 +1363,28 @@ class TreeEditMixin:
                                "mul": [0.0, 0.0, 0.0, self._SHADOW_ALPHA]})
 
     @rpc
+    def tree_fit_text(self, node):
+        """Fit a line of text's box to its words (DragonRR, PAD-383: "a single button that
+        snaps the bounding box to the actual text"): the Text's own rect, so the selection,
+        its handles and W/H px all go round what it shows.  The words do not move."""
+        from ..plugins.stern import fontrender as fr, scene_render
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        d = next((d for d in self._tdraws if d["node"] == node and d["kind"] == "text"), None)
+        if d is None:
+            return False
+        if self._fonts is None:
+            self._fonts = fr.load_fonts(self.assets_dir)
+        by_key = {f["key"]: f for f in self._fonts or ()}
+        font = fr.font_at_size(by_key.get(d.get("font") or ""), d.get("font_px") or 0)
+        rect = scene_render.text_fit_rect(d, font, self._pending_texts(card, None))
+        if rect is None or all(abs(a - b) < 0.5 for a, b in zip(rect, d.get("rect") or ())):
+            return False
+        return self._tree_add({"op": "text_rect", "node": node, "rect": rect})
+
+    @rpc
     def tree_set_scale(self, node, pct):
         card, man = self._tree_card()
         if card is None:

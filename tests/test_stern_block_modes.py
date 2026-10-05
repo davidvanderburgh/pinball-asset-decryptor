@@ -292,6 +292,23 @@ def test_the_starter_builds_with_build_mode_sh(tmp_path, which):
                         os.path.join(SDK, "mode_file.c")], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "warning" not in (r.stdout + r.stderr).lower()
+    # PAD-377: two modes sharing a variable, a timer, the priority and the multiball wait, in ONE object
+    final = prog([{"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "var", "name": "maser won"}, "b": num(1)},
+         "then": [{"op": "start_mode"}], "else": None}]}],
+        vars=[{"name": "maser won", "reset": "game", "shared": True}], name="FINAL WARS", priority=190)
+    srcs = []
+    for slug, p in (("maser", _maser()), ("final", final)):
+        srcs.append(tmp_path / (slug + ".c"))
+        srcs[-1].write_text(BM.to_c(p, slug), encoding="utf-8")
+    r = subprocess.run(["bash", os.path.join(SDK, "build_mode.sh"), "-o", str(out)] + [str(s) for s in srcs]
+                       + [os.path.join(SDK, "mode_file.c")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "warning" not in (r.stdout + r.stderr).lower()
+    nm = shutil.which("arm-linux-gnueabihf-nm")
+    if nm:
+        syms = subprocess.run([nm, str(out)], capture_output=True, text=True).stdout
+        assert len(re.findall(r"\bpad_shared_maser_won$", syms, re.M)) == 1   # one value for both
 
 
 # ---- the desk harness ------------------------------------------------------------------------------
@@ -421,6 +438,138 @@ def test_the_tabs_start_and_end_triggers_reach_it(tmp_path, monkeypatch):
     assert scores(out) == [42]
 
 
+# ---- PAD-377: what the kit gives a mode in C ---------------------------------------------------------
+def _maser():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    import shot_pad377
+    return shot_pad377.maser_program()
+
+
+def test_shared_variables_timers_and_the_start_options_are_checked():
+    assert BM.problems(_maser(), shots=SHOTS) == []
+    p = prog([{"hat": {"kind": "timer_done", "timer": "nope"}, "do": [
+        {"op": "timer_start", "timer": "w", "ms": num(0)}, {"op": "timer_stop", "timer": ""},
+        {"op": "score", "points": {"k": "timer_left", "timer": "gone"}}]}],
+        vars=[{"name": "won", "reset": "mode", "shared": True}, {"name": "a b", "shared": True, "reset": "game"},
+              {"name": "a_b", "shared": True, "reset": "game"}],
+        timers=[{"name": "w"}, {"name": "W"}, {"name": "9x"}])
+    out = BM.problems(p)
+    assert any("won is shared" in t and "each ball or each game" in t for t in out)
+    assert "Two variables are called a_b." in out                     # one shared value: pad_shared_a_b
+    assert "Two timers are called W." in out
+    assert any("timer's name '9x'" in t for t in out)
+    assert any("names a timer that is not there" in t for t in out)  # the hat's, and the value's
+    assert any("has no timer chosen" in t for t in out)
+    assert any("1 to %d milliseconds" % BM.TIMER_MAX_MS in t for t in out)
+    # shared is per name, whatever the case or a space for a _
+    assert BM.shared_ident("Maser Won") == BM.shared_ident("maser_won") == "pad_shared_maser_won"
+    n = BM.normalize({"priority": 999, "wait_multiball": 1})
+    assert n["priority"] == BM.PRIORITY_MAX and n["wait_multiball"] is True and n["timers"] == []
+    assert BM.normalize({})["priority"] == 0 and BM.normalize({})["wait_multiball"] is False
+    assert BM.starter("X", SHOTS)["wait_multiball"] is True            # as the examples do
+    assert any("never runs" in t for t in BM.notes(prog([{"hat": {"kind": "timer_done", "timer": "w"}, "do": []}],
+                                                        timers=[{"name": "w"}])))
+
+
+def test_the_kit_parts_only_call_what_the_header_declares():
+    src = BM.to_c(_maser(), "maser")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    assert '__attribute__((weak, visibility("hidden"))) long long pad_shared_maser_won[5];' in src
+    assert "#define DISPLAY_PRIORITY 180" in src and "#define WAITS_OUT_MULTIBALL 1" in src
+
+
+def play_many(tmp_path, programs, *args):
+    """Several blocks modes built into ONE object, as a card's are, played together."""
+    cc = _cc()
+    srcs = []
+    for slug, program in programs.items():
+        src = tmp_path / (slug + ".c")
+        src.write_text(BM.to_c(program, slug), encoding="utf-8")
+        srcs.append(str(src))
+    exe = tmp_path / "harness"
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", SDK,
+                        "-o", str(exe), os.path.join(SDK, "examples", "desk_harness.c")] + srcs,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "warning" not in r.stderr.lower(), r.stderr
+    r = subprocess.run([str(exe), "new_game"] + [str(a) for a in args], capture_output=True, text=True,
+                       timeout=60)
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def _at_any(out, pattern):
+    return int(re.search(r"^\s*(\d+) .*%s" % pattern, out, re.M).group(1))
+
+
+def test_maser_barrages_chain_window_is_milliseconds_and_shrinks(tmp_path):
+    # MASER BARRAGE's chain (sdk/examples/maser_barrage.c) in blocks: a 7000 ms window after the
+    # Left ramp, the Building inside it a barrage (x2, the window 1000 ms shorter), outside it the
+    # chain breaks; started by 3 Maser target hits
+    out = play(tmp_path, _maser(), "shot", "Maser target", "shot", "Maser target", "shot", "Maser target",
+               "shot", "Left ramp", "ms", 6800, "shot", "Building",          # 6.85 s: inside 7 s
+               "shot", "Left ramp", "ms", 5900, "shot", "Building",          # 5.95 s: inside 6 s -> x3
+               "shot", "Left ramp", "ms", 5100, "shot", "Building",          # 5.15 s: past 5 s
+               slug="maser")
+    assert "START (a block)" in out
+    assert scores(out) == [1000000, 5000000, 2000000, 10000000, 3000000]   # the last Building pays nothing
+    broke = _at_any(out, r"\[MASER BARRAGE\] CHAIN BROKEN")
+    third = [int(m) for m in re.findall(r"^\s*(\d+) >> shot Left ramp", out, re.M)][2]
+    # the window ran out 5000 ms after the third Left ramp, to a tick (a shot is seen the tick after)
+    assert 5000 <= broke - third <= 5000 + 34, broke - third
+    assert "DISPLAY 180 MASER BARRAGE" in out
+
+
+def test_a_shared_variable_lights_one_mode_from_another(tmp_path):
+    # FINAL WARS lit by the ledger: it starts only once MASER BARRAGE has been won this game
+    final = prog([
+        {"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+            {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "var", "name": "Maser won"}, "b": num(1)},
+             "then": [{"op": "start_mode"}], "else": [{"op": "log", "text": "not lit"}]}]},
+        {"hat": {"kind": "mode_start"}, "do": [{"op": "score", "points": {"k": "op", "op": "*", "a": num(1000),
+            "b": {"k": "var", "name": "maser_played"}}}]},
+    ], vars=[{"name": "Maser won", "reset": "game", "shared": True},
+             {"name": "maser_played", "reset": "game", "shared": True}], name="FINAL WARS", seconds=0)
+    win = ["shot", "Maser target"] * 3 + ["shot", "Left ramp", "shot", "Building"]
+    out = play_many(tmp_path, {"maser": _maser(), "final": final},
+                    "shot", "Big loop", *win, "ball_end", "shot", "Big loop",
+                    "game_over", "secs", 1, "new_game", "secs", 1, "shot", "Big loop")
+    assert out.count("[FINAL WARS] not lit") == 2                 # before the barrage, and in the next game
+    assert out.count("[FINAL WARS] START (a block)") == 1
+    assert 1000 in scores(out)                                   # "maser played" read across too
+    assert out.index("[FINAL WARS] START") > out.index("[MASER BARRAGE] END")
+
+
+def test_a_start_waits_out_a_multiball_and_the_next_one_after_it_starts_it(tmp_path):
+    p = prog([
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [
+            {"op": "if", "cond": {"k": "can_start"}, "then": [{"op": "log", "text": "can"}],
+             "else": [{"op": "log", "text": "cannot"}]},
+            {"op": "start_mode"}]},
+    ], seconds=0, wait_multiball=True)
+    out = play(tmp_path, p, "balls", 2, "shot", "Left ramp", "multiball", 1, "balls", 1, "shot", "Left ramp",
+               "multiball", 0, "shot", "Left ramp")
+    assert out.count("] cannot\n") == 2 and out.count("] can\n") == 1
+    assert out.count("still ready") == 1                          # said once in 10 s, not at every shot
+    assert out.count("START (a block)") == 1
+    assert out.index("START (a block)") > out.index(">> multiball 0")
+    # without the option a multiball does not stop it
+    p["wait_multiball"] = False
+    out = play(tmp_path, p, "balls", 2, "shot", "Left ramp")
+    assert "START (a block)" in out and "] can\n" in out
+
+
+def test_the_display_priority_is_held_while_it_runs_and_back_at_a_drain(tmp_path):
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
+             seconds=5, priority=190)
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 6, "shot", "Left ramp", "secs", 1, "ball_end")
+    assert out.count("DISPLAY 190 TEST MODE") == 2
+    assert "END (time ran out)" in out and "END (ball ended)" in out
+    # the clock running out keeps it for the total on its screen; a drain gives it back at once
+    assert _at_any(out, "DISPLAY lingers TEST MODE 3000 ms") == _at_any(out, r"END \(time ran out\)")
+    assert _at_any(out, "DISPLAY 0 TEST MODE") == _at_any(out, r"END \(ball ended\)") == _at_any(out, ">> ball_end")
+    assert "DISPLAY" not in play(tmp_path, dict(p, priority=0), "shot", "Left ramp", "secs", 6)
 # ---- PAD-374: the mode's own clips and sounds ------------------------------------------------------
 def _media_prog(**kw):
     """KING GHIDORAH's way with its own assets, in blocks: an intro full screen and a loop behind
@@ -890,7 +1039,14 @@ def test_the_hud_c_calls_only_the_header_and_the_kit():
     kit_used = set(re.findall(r"\b(kit_[a-z_]+)\s*\(", src))
     assert kit_used and kit_used <= kit, kit_used - kit
     assert 'static struct kit_hud hud = { .slug = "maser" };' in src
-    assert "pm_display_priority(180)" in src and "pm_end_holding(3000u)" in src
+    # a HUD with no priority of its own takes a mode's 180 (PAD-377's choice wins when made)
+    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_MS)" in src
+    p = maser_hud()
+    p["priority"] = 190
+    assert re.search(r"#define DISPLAY_PRIORITY 190\b", BM.to_c(p, "maser"))
+    p["hud"]["on"] = False
+    p["priority"] = 0
+    assert re.search(r"#define DISPLAY_PRIORITY 0\b", BM.to_c(p, "maser"))
 
 
 def test_the_hud_builds_with_build_mode_sh(tmp_path):

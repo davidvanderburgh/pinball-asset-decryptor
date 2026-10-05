@@ -20,6 +20,9 @@ import { PlayButton } from "./modes_dialogs.js";
 
 const WHEN = [["any", "any time"], ["idle", "while it is not running"], ["running", "while it runs"]];
 const RESETS = [["ball", "each ball"], ["mode", "each time it starts"], ["game", "each game"]];
+const SHARED_RESETS = RESETS.filter(([r]) => r !== "mode");
+// MODE_SDK.md "Display priority": a mode's 180 lets jackpots, starts and the tilt warning through
+const DISPLAY_PRIORITIES = [[0, "none"], [180, "a mode's (180)"], [190, "a wizard mode's (190)"]];
 const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"],
   ["hurry", "blinking faster"]];
 const PACED = ["blink", "pulse", "chase"];
@@ -52,6 +55,13 @@ const TIP = {
   gaugeFollows: "How many pips are lit, kept up to date by itself. Empty: a Fill the gauge block sets it.",
   hudAward: "A big line, and a smaller one under it, for a moment (a jackpot). Before the mode starts it is a note shown alone, when no other mode's HUD is up.",
   setTime: "Puts the mode's clock at this many seconds, up or down (0 = time is up). Put up, a When that many seconds are left does not run again.",
+  shared: "Shared with the other modes: every mode with a variable of this name reads and writes the same number, so one mode can be lit by what another did (played it, won it). It resets each ball or each game.",
+  timers: "A timer counts down in milliseconds, apart from the mode's clock: start it from a block (any value, so a window can get shorter), and a When it runs out script runs the moment it does. A ball ending stops every timer.",
+  timerStart: "Starts the timer (again, if it runs) at this many milliseconds: 1000 = one second. Any value: a variable makes a window that shrinks.",
+  timerLeft: "The milliseconds the timer has left; 0 when it is not running.",
+  wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
+  canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
+  displayPriority: "While it runs, the game's lesser full-screen displays wait for it (the example modes use a mode's 180; FINAL WARS a wizard's 190). Kept for the total on its own screen, given back at once at a drain.",
   gameModes: "May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Cannot start: as End this one, and while it runs the modes ticked below cannot start at all. A multiball of the game's is never held off: it starts, and this mode ends. Its own Multiball block does not end it.",
   blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
   blockLast: "One at least: to let them all start, choose \"may start\" above.",
@@ -72,7 +82,7 @@ const TIP = {
 // ------------------------------------------------------------------ the blocks there are
 const num = (v) => ({ k: "num", v });
 
-function hatTemplates(ch) {
+function hatTemplates(ch, timers) {
   const shot = (ch.shots || [])[0] || "";
   const ev = ((ch.events || [])[0] || {}).name || "";
   return [
@@ -80,12 +90,14 @@ function hatTemplates(ch) {
     { kind: "shot", shot, when: "running" }, { kind: "any_shot", when: "running" },
     { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 },
     { kind: "ball_end" }, { kind: "event", event: ev, when: "any" },
+    { kind: "timer_done", timer: (timers[0] || {}).name || "" },
   ];
 }
 
 function stmtTemplates(ch, vars, prog = {}) {
   const shot = (ch.shots || [])[0] || "";
   const v = (vars[0] || {}).name || "";
+  const t = ((prog.timers || [])[0] || {}).name || "";
   const clip = ((prog.clips || [])[0] || {}).name || "";
   const sound = ((prog.sounds || [])[0] || {}).name || "";
   return [
@@ -94,6 +106,7 @@ function stmtTemplates(ch, vars, prog = {}) {
       { op: "multiball", balls: 2, save: 10 }]],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
       { op: "change", var: v, by: num(1) }]],
+    ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
     ["Control", [{ op: "if", cond: null, then: [], else: null }, { op: "if", cond: null, then: [], else: [] }]],
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
       { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" },
@@ -105,22 +118,24 @@ function stmtTemplates(ch, vars, prog = {}) {
   ];
 }
 
-function valueTemplates(ch, vars) {
+function valueTemplates(ch, vars, timers) {
   return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" },
-    { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "balls" }, { k: "player" },
-    { k: "op", op: "+", a: null, b: null }];
+    { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "timer_left", timer: ((timers || [])[0] || {}).name || "" },
+    { k: "balls" }, { k: "player" }, { k: "op", op: "+", a: null, b: null }];
 }
 
 const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and", a: null, b: null },
-  { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }, { k: "stock" }];
+  { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }, { k: "can_start" }, { k: "stock" }];
 
 const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", scored: "times it has scored",
-  total: "points so far", secs_left: "seconds left", balls: "balls in play", player: "the player up", op: "a sum" };
+  total: "points so far", secs_left: "seconds left", timer_left: "ms left on a timer", balls: "balls in play",
+  player: "the player up", op: "a sum" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
-  stock: "a game mode of its own runs" };
+  can_start: "the mode could start now", stock: "a game mode of its own runs" };
 const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", log: "show",
-  clip: "own", sound: "own", hud_text: "hud", hud_counter: "hud", hud_gauge: "hud", hud_award: "hud" };
+  clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
+  hud_gauge: "hud", hud_award: "hud" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
 const GAUGES = [["diamond", "diamonds"], ["segment", "a bar of segments"], ["spike", "spikes"]];
@@ -148,6 +163,10 @@ function Pick({ value, options, onChange, width, title, missing = "(not on this 
   return html`<${Select} sm value=${value ?? ""} options=${opts} onChange=${onChange} width=${width} title=${title} />`;
 }
 
+function TimerPick({ value, ed, onChange }) {
+  return html`<${Pick} value=${value} options=${ed.timers.map((t) => t.name)} missing="(no such timer)" onChange=${onChange} />`;
+}
+
 function Text({ value, onChange, width = 150, placeholder, max = 60, title }) {
   return html`<${Field} sm width=${width} value=${value || ""} maxLength=${max} placeholder=${placeholder} title=${title} onChange=${onChange} />`;
 }
@@ -163,14 +182,14 @@ function X({ onClick, title = "Take this block out" }) {
 function slotMenu(e, kind, ed, path) {
   const items = kind === "bool"
     ? condTemplates().map((t) => ({ label: COND_WORDS[t.k], onClick: () => ed.set(path, t) }))
-    : valueTemplates(ed.ch, ed.vars).map((t) => ({ label: VALUE_WORDS[t.k], onClick: () => ed.set(path, t) }));
+    : valueTemplates(ed.ch, ed.vars, ed.timers).map((t) => ({ label: VALUE_WORDS[t.k], onClick: () => ed.set(path, t) }));
   openMenu(e.currentTarget, items);
 }
 
 function Slot({ kind, value, path, ed, optional, empty }) {
   const [over, setOver] = useState(false);
   const fits = () => dragging && dragging.tpl && (kind === "bool" ? dragging.tpl.k && condTemplates().some((t) => t.k === dragging.tpl.k)
-    : dragging.tpl.k && valueTemplates(ed.ch, ed.vars).some((t) => t.k === dragging.tpl.k));
+    : dragging.tpl.k && valueTemplates(ed.ch, ed.vars, ed.timers).some((t) => t.k === dragging.tpl.k));
   const drop = {
     onDragOver: (e) => { if (fits()) { e.preventDefault(); e.stopPropagation(); setOver(true); } },
     onDragLeave: () => setOver(false),
@@ -194,6 +213,7 @@ function Val({ e, path, ed }) {
     case "var": return html`<${Pick} value=${e.name} options=${ed.vars.map((v) => v.name)} missing="(no such variable)"
       onChange=${(v) => set("name", v)} />`;
     case "hits": return html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${Pick} value=${e.shot} options=${ed.ch.shots || []} onChange=${(v) => set("shot", v)} />`;
+    case "timer_left": return html`<span class="bk-w" ...${tip(TIP.timerLeft)}>ms left on</span><${TimerPick} value=${e.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
     case "op": return html`<span class="bk-w">(</span><${Slot} kind="num" value=${e.a} path=${[...path, "a"]} ed=${ed} />
       <${Pick} value=${e.op} options=${OPS} width=${54} onChange=${(v) => set("op", v)} />
       <${Slot} kind="num" value=${e.b} path=${[...path, "b"]} ed=${ed} /><span class="bk-w">)</span>`;
@@ -270,6 +290,9 @@ function StmtBody({ b, path, ed }) {
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} />
       <span class="bk-w">over</span><${Text} value=${b.sub} max=${40} width=${120} onChange=${(v) => set("sub", v)} placeholder="a smaller line" />
       <span class="bk-w">for</span><${Num} value=${b.seconds} width=${40} onChange=${(v) => set("seconds", v)} /><span class="bk-w">s</span>`;
+    case "timer_start": return html`<span class="bk-w" ...${tip(TIP.timerStart)}>Start timer</span><${TimerPick} value=${b.timer} ed=${ed} onChange=${(v) => set("timer", v)} />
+      <span class="bk-w">at</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
+    case "timer_stop": return html`<span class="bk-w">Stop timer</span><${TimerPick} value=${b.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
     case "clip": return html`<span class="bk-w">Play the clip</span><${Pick} value=${b.clip} options=${(ed.prog.clips || []).map((x) => x.name)} missing="(not one of its own)" onChange=${(v) => set("clip", v)} />
       <${Pick} value=${b.where} options=${CLIP_WHERE} title=${TIP.where} onChange=${(v) => set("where", v)} />`;
     case "sound": {
@@ -383,6 +406,7 @@ function HatBody({ h, path, ed }) {
     case "every": return html`<span class="bk-w b">Every</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds while it runs</span>`;
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
     case "event": return html`<span class="bk-w b">When</span><${Pick} value=${h.event} options=${(ed.ch.events || []).map((x) => [x.name, x.label])} onChange=${(v) => set("event", v)} />${when}`;
+    case "timer_done": return html`<span class="bk-w b">When timer</span><${TimerPick} value=${h.timer} ed=${ed} onChange=${(v) => set("timer", v)} /><span class="bk-w b">runs out</span>`;
     default: return html`<span class="bk-w b">${h.kind}</span>`;
   }
 }
@@ -404,7 +428,7 @@ function Script({ s, si, n, ed }) {
 function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", every: "Every N seconds", seconds_left: "When N seconds are left",
-    ball_end: "When the ball drains", event: "When the game does…" }[h.kind] || h.kind;
+    ball_end: "When the ball drains", event: "When the game does…", timer_done: "When a timer runs out" }[h.kind] || h.kind;
 }
 
 function stmtLabel(b) {
@@ -413,6 +437,7 @@ function stmtLabel(b) {
     words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
+    timer_start: "Start a timer", timer_stop: "Stop a timer",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 
@@ -421,10 +446,10 @@ function Palette({ ed }) {
     onDragStart=${(e) => { dragging = { tpl: clone(tpl) }; e.dataTransfer.effectAllowed = "copy"; e.dataTransfer.setData("text/plain", "block"); }}
     onDragEnd=${() => { dragging = null; ed.setOver(null); }}
     onClick=${onPress} ...${tip(title || TIP.palette)}>${label}</button>`;
-  const vals = valueTemplates(ed.ch, ed.vars);
+  const vals = valueTemplates(ed.ch, ed.vars, ed.timers);
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
-    ${hatTemplates(ed.ch).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
+    ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
     ${stmtTemplates(ed.ch, ed.vars, ed.prog).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t))))}`)}
     <div class="bk-pal-h">Values</div>
@@ -483,11 +508,30 @@ function Variables({ prog, ed }) {
     ${vars.map((v, i) => html`<span class="bk-varbox" key=${i}>
       <${Field} sm width=${110} value=${v.name} maxLength=${24} onChange=${(t) => ed.renameVar(i, t)} title="Its name" />
       <span class="small muted">reset</span>
-      <${Select} sm value=${v.reset || "ball"} options=${RESETS.map(([value, label]) => ({ value, label }))}
+      <${Select} sm value=${v.reset || "ball"} options=${(v.shared ? SHARED_RESETS : RESETS).map(([value, label]) => ({ value, label }))}
         onChange=${(r) => ed.set(["vars", i, "reset"], r)} />
+      <${Check} checked=${!!v.shared} label="shared" title=${TIP.shared}
+        onChange=${(on) => ed.edit((d) => { d.vars[i].shared = on; if (on && d.vars[i].reset === "mode") d.vars[i].reset = "game"; })} />
       <${X} title="Take this variable out" onClick=${() => ed.edit((d) => { d.vars.splice(i, 1); })} />
     </span>`)}
     <${Button} size="sm" kind="ghost" icon="plus" onClick=${add}>Variable<//>
+  </div>`;
+}
+
+function Timers({ prog, ed }) {
+  const timers = prog.timers || [];
+  const add = () => {
+    let n = 1;
+    while (timers.some((t) => (t.name || "").toLowerCase() === ("timer " + n))) n++;
+    ed.edit((d) => { d.timers = [...(d.timers || []), { name: "timer " + n }]; });
+  };
+  return html`<div class="bk-vars">
+    <span class="lbl" ...${tip(TIP.timers)}>Timers</span>
+    ${timers.map((t, i) => html`<span class="bk-varbox timer" key=${i}>
+      <${Field} sm width=${110} value=${t.name} maxLength=${24} onChange=${(name) => ed.renameTimer(i, name)} title="Its name" />
+      <${X} title="Take this timer out" onClick=${() => ed.edit((d) => { d.timers.splice(i, 1); })} />
+    </span>`)}
+    <${Button} size="sm" kind="ghost" icon="plus" onClick=${add}>Timer<//>
   </div>`;
 }
 
@@ -590,7 +634,7 @@ export function BlocksEditor({ s, c }) {
   };
   const edit = (fn) => setProg((p) => { const d = clone(p); fn(d); save(d); return d; });
   const ed = {
-    prog, ch: b.choices || {}, vars: prog.vars || [], target, over, setOver,
+    prog, ch: b.choices || {}, vars: prog.vars || [], timers: prog.timers || [], target, over, setOver,
     setTarget, edit,
     set: (path, v) => edit((d) => put(d, path, v)),
     remove: (stack, i) => edit((d) => { at(d, stack).splice(i, 1); }),
@@ -620,6 +664,18 @@ export function BlocksEditor({ s, c }) {
       };
       walk(d.scripts);
       walk(d.hud);                                                // PAD-375: what its counters and gauge follow
+    }),
+    renameTimer: (i, name) => edit((d) => {
+      const old = (d.timers[i] || {}).name;
+      d.timers[i].name = name;
+      // every block naming the timer follows it
+      const walk = (o) => {
+        if (Array.isArray(o)) { o.forEach(walk); return; }
+        if (!o || typeof o !== "object") return;
+        if (o.timer === old) o.timer = name;
+        Object.values(o).forEach(walk);
+      };
+      walk(d.scripts);
     }),
     // a clip or sound renamed: every block playing it follows it
     renameMedia: (kind, i, name) => edit((d) => {
@@ -666,12 +722,20 @@ export function BlocksEditor({ s, c }) {
         <${Num} value=${prog.seconds} width=${56} title=${TIP.seconds} onChange=${(v) => ed.set(["seconds"], v)} /><span class="small muted">seconds</span>
         <${Check} checked=${prog.ends_on_drain !== false} label="ends when the ball drains" title=${TIP.drain} onChange=${(v) => ed.set(["ends_on_drain"], v)} />
         <${Check} checked=${!!prog.screen} label="its own screen" title=${TIP.screen} onChange=${(v) => ed.set(["screen"], v)} />
+        <${Check} checked=${!!prog.wait_multiball} label="waits out a multiball" title=${TIP.wait} onChange=${(v) => ed.set(["wait_multiball"], v)} />
+        <span class="lbl" ...${tip(TIP.displayPriority)}>Display priority</span>
+        <${Select} sm value=${String(prog.priority || 0)} title=${TIP.displayPriority} onChange=${(v) => ed.set(["priority"], Number(v))}
+          options=${[...DISPLAY_PRIORITIES, ...(DISPLAY_PRIORITIES.some(([n]) => n === (prog.priority || 0)) ? [] : [[prog.priority, String(prog.priority)]])]
+            .map(([value, label]) => ({ value: String(value),
+              // PAD-375: a HUD keeps a priority of its own, so its words wait under the game's displays
+              label: value === 0 && (prog.hud || {}).on ? "the HUD's (180)" : label }))} />
         <${Check} checked=${!!(prog.hud || {}).on} label="its HUD" title=${TIP.hud} onChange=${(v) => ed.set(["hud", "on"], v)} />
         <span class="sp"></span>
         <span class="small muted">${saving ? "Saving…" : "Saved · Try it builds it in"}</span>
       </div>
       <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />
+      <${Timers} prog=${prog} ed=${ed} />
       ${(prog.hud || {}).on ? html`<${Hud} prog=${prog} ed=${ed} />` : null}
       <${OwnMedia} prog=${prog} ed=${ed} s=${s} folder=${c.folder} />
       ${(b.notes || []).map((t) => html`<${Note} key=${t}>${t}<//>`)}

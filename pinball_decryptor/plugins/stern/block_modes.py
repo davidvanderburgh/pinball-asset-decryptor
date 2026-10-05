@@ -20,6 +20,10 @@ THE PROGRAM (``blocks.json``)::
                                   start ("block": as give_way, and the ones in block_modes are held off)
       "block_modes": [21, 23],    the title's mode ids it holds off ([] = the port's checked defaults)
       "vars": [{"name": "combo", "reset": "ball"}],   per player; reset "ball" | "mode" | "game"
+                                  ("shared": true = the same value in every mode that names it)
+      "timers": [{"name": "window"}],  counts down in milliseconds (PAD-377)
+      "wait_multiball": true,     a Start the mode while a multiball runs waits for the next one
+      "priority": 180,            its display priority while it runs (0 = none)
       "hud": {"on": true, "line": "SHOOT THE RAMPS",    PAD-375: the mode's HUD at the glass's edges
               "counters": [{"label": "COMBO", "sub": "", "value": {...}}, ...],   three across the top
               "timer": {"on": true, "label": "RAMPS", "icon": "maser"},         the badge counting its clock
@@ -46,7 +50,23 @@ one of its own sounds (with a callout of the game's when the card could not carr
 a shot at a pace of its own (any value, in ms) or blinking faster as the clock runs down. Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
-compare two values, and / or / not, the mode is running, one of the game's own modes is running.
+compare two values, and / or / not, the mode is running, one of the game's own modes is running,
+the mode could start now.
+
+What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 gives the blocks:
+
+- A SHARED variable is one value per player that every mode naming it reads and writes - the
+  kit's ledger, with which FINAL WARS is lit by what the other modes did. It is a weak C global
+  (``pad_shared_<name>``), so the linker keeps one for all the modes built into the card; a mode
+  written in C shares it by declaring the same line. It resets each ball or each game.
+- A TIMER counts down in milliseconds, not whole seconds: Start timer (any value, so a window can
+  shrink), Stop timer, the milliseconds a timer has left, and a When a timer runs out hat. Timers
+  run whether the mode does or not; a ball ending stops them.
+- WAITS OUT A MULTIBALL (``wait_multiball``): Start the mode does nothing while a multiball or
+  one of the game's own modes runs (the kit's ``kit_wait_game``); the mode stays ready, so the
+  next block that starts it afterwards does. "the mode could start now" asks the same.
+- A DISPLAY PRIORITY (``priority``): held while the mode runs (``kit_display``), kept for the
+  total its own screen shows at the end, given back at once at a drain.
 
 THE HUD (PAD-375). Ticked on, the mode has what the examples have at the glass's edges, built by the
 card build like theirs (:mod:`.mode_hud`, from the ``hud`` this module writes into assets.json): the
@@ -105,6 +125,11 @@ MAX_SCRIPTS = 48
 MAX_BLOCKS = 400
 MAX_DEPTH = 10
 MAX_VARS = 24
+MAX_TIMERS = 8
+TIMER_MAX_MS = SECONDS_MAX * 1000
+PRIORITY_MAX = 255
+#: the display priorities the page offers (any 0..255 loads): MODE_SDK.md "Display priority"
+PRIORITIES = {0: "none", 180: "a mode's (180)", 190: "a wizard mode's (190)"}
 NUMBER_MAX = 10 ** 15            # points, counts and seconds: any sane number fits
 TEXT_MAX = 60
 
@@ -118,13 +143,15 @@ HATS = {
     "seconds_left": "When seconds are left",
     "ball_end": "When the ball drains",
     "event": "When the game does something",
+    "timer_done": "When a timer runs out",
 }
 #: a shot / event hat's "when": the mode's state it runs in
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
 RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game"}
+SHARED_RESETS = ("ball", "game")
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
-              "show", "hud_text", "hud_counter", "hud_gauge", "hud_award")
+              "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award")
 #: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
 HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus")
 GAUGE_KINDS = ("diamond", "segment", "spike")
@@ -134,7 +161,8 @@ COUNTER_MAX = 16                 # a counter's label or sub-label (the kit holds
 BADGE_MAX = 12                   # the badge's label, lettered on the stock BATTLE panel
 AWARD_SECONDS_MAX = 10
 KIT_FILE = "intricate_kit.h"
-DISPLAY_PRIORITY = 180           # the kit's KIT_DISPLAY_MODE: what pm_display_covered watches for
+HUD_PRIORITY = 180               # a HUD mode with no priority of its own takes the kit's KIT_DISPLAY_MODE:
+                                 # pm_display_covered watches for it
 TOTAL_MS = 3000                  # the HUD's TOTAL stays up this long after the end
 #: a lit shot's pattern: the SDK's, and its pace (ms) when the block gives none. "hurry" is a
 #: blink that quickens as the clock runs down (PAD-376, the kit's kit_hurry_ms)
@@ -208,8 +236,9 @@ SHOWS = {
 }
 #: the game's own callouts a block can name by what they say (every port carries these roles)
 CALLOUT_ROLES = {"ten_seconds": "Ten seconds left", "time_up": "Time is up"}
-NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "player", "op")
-BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock")
+NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "player", "op",
+             "timer_left")
+BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start")
 OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
 CMPS = {"<": "<", "<=": "<=", "=": "==", "!=": "!=", ">=": ">=", ">": ">"}
 #: PAD-373: what the mode does about the game's own modes while it runs (the form's choice, PAD-363)
@@ -273,6 +302,12 @@ def normalize(data):
     out["block_modes"] = sorted({i for i in ids if isinstance(i, int) and not isinstance(i, bool)
                                  and 0 <= i <= BLOCK_ID_MAX})
     out["vars"] = [v for v in (out.get("vars") or []) if isinstance(v, dict)]
+    out["timers"] = [t for t in (out.get("timers") or []) if isinstance(t, dict)]
+    out["wait_multiball"] = bool(out.get("wait_multiball", False))
+    try:
+        out["priority"] = max(0, min(PRIORITY_MAX, int(out.get("priority", 0) or 0)))
+    except (TypeError, ValueError):
+        out["priority"] = 0
     out["clips"] = [c for c in (out.get("clips") or []) if isinstance(c, dict)]
     out["sounds"] = [c for c in (out.get("sounds") or []) if isinstance(c, dict)]
     out["music"] = str(out.get("music") or "")
@@ -476,6 +511,7 @@ def starter(name, shots=()):
     num = lambda v: {"k": "num", "v": v}                            # noqa: E731
     return normalize({
         "name": name, "seconds": 30, "ends_on_drain": True, "screen": False,
+        "wait_multiball": True,         # as the examples: a multiball running, the next shot starts it
         "vars": [{"name": "combo", "reset": "mode"}],
         "scripts": [
             {"hat": {"kind": "shot", "shot": start, "when": "idle"}, "do": [
@@ -526,22 +562,39 @@ def problems(program, shots=None, events=None, folder=None):
     out = []
     names = [str(v.get("name") or "") for v in program["vars"]]
     seen = set()
-    for n in names:
+    for v, n in zip(program["vars"], names):
         if not VAR_RE.match(n):
             out.append("A variable's name %r is not one: start with a letter, then letters, "
                        "digits, spaces or _ (24 at most)." % n)
-        elif n.lower() in seen:
+        elif n.lower() in seen or (v.get("shared") and shared_ident(n) in seen):
             out.append("Two variables are called %s." % n)
         seen.add(n.lower())
+        if v.get("shared"):
+            seen.add(shared_ident(n))       # "maser won" and "maser_won" are one shared value
+            if v.get("reset", "ball") not in SHARED_RESETS:
+                out.append("%s is shared with the other modes, so it resets each ball or each game, "
+                           "not each time this mode starts." % n)
     if len(names) > MAX_VARS:
         out.append("%d variables: %d at most." % (len(names), MAX_VARS))
+    timers = [str(t.get("name") or "") for t in program["timers"]]
+    tseen = set()
+    for n in timers:
+        if not VAR_RE.match(n):
+            out.append("A timer's name %r is not one: start with a letter, then letters, "
+                       "digits, spaces or _ (24 at most)." % n)
+        elif n.lower() in tseen:
+            out.append("Two timers are called %s." % n)
+        tseen.add(n.lower())
+    if len(timers) > MAX_TIMERS:
+        out.append("%d timers: %d at most." % (len(timers), MAX_TIMERS))
     if len(program["scripts"]) > MAX_SCRIPTS:
         out.append("%d scripts: %d at most." % (len(program["scripts"]), MAX_SCRIPTS))
     clips = _check_media(program["clips"], "clip", MAX_CLIPS, folder, out)
     sounds = _check_media(program["sounds"], "sound", MAX_SOUNDS, folder, out)
     if program["music"] and folder is not None and not os.path.isfile(os.path.join(folder, program["music"])):
         out.append("Its music %s is not in the mode's folder: pick it again." % program["music"])
-    ctx = {"vars": set(n.lower() for n in names), "shots": set(shots) if shots is not None else None,
+    ctx = {"vars": set(n.lower() for n in names), "timers": tseen,
+           "shots": set(shots) if shots is not None else None,
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds}
     hud = program["hud"]
@@ -627,6 +680,8 @@ def notes(program):
             out.append("A block fills the HUD's gauge, which is switched off: tick Gauge under Its HUD.")
         if hud["timer"]["on"] and not program["seconds"]:
             out.append("The HUD's timer badge counts the mode's clock, and it has none: it is not shown.")
+    if "timer_done" in kinds and "timer_start" not in ops:
+        out.append("No block starts a timer, so When a timer runs out never runs.")
     if "behind" in wheres and "loop" not in wheres:
         out.append("A clip behind the HUD, once, plays in the place of the mode's loop: start a "
                    "clip over and over behind the HUD first (When the mode starts is the place).")
@@ -679,6 +734,15 @@ def _check_hat(hat, n, ctx):
     if kind in ("every", "seconds_left"):
         if not _int_ok(hat.get("seconds"), 1, SECONDS_MAX):
             ctx["out"].append("%s's seconds must be 1 to %d." % (where, SECONDS_MAX))
+    if kind == "timer_done":
+        _check_timer(hat.get("timer"), where + "'s When", ctx)
+
+
+def _check_timer(name, where, ctx):
+    if not name:
+        ctx["out"].append("%s has no timer chosen." % where)
+    elif str(name).lower() not in ctx["timers"]:
+        ctx["out"].append("%s names a timer that is not there: make it under Timers." % where)
 
 
 def _int_ok(v, lo, hi):
@@ -779,6 +843,15 @@ def _check_stack(stack, depth, where, ctx):
                 _check_num(b.get("value"), where, ctx)
             if not _int_ok(b.get("seconds"), 1, AWARD_SECONDS_MAX):
                 ctx["out"].append("%s shows an award for 1 to %d seconds." % (where, AWARD_SECONDS_MAX))
+        elif op in ("timer_start", "timer_stop"):
+            _check_timer(b.get("timer"), where + "'s timer", ctx)
+            if op == "timer_start":
+                ms = b.get("ms")
+                _check_num(ms, where, ctx)
+                if (isinstance(ms, dict) and ms.get("k") == "num"
+                        and _int_ok(ms.get("v"), -NUMBER_MAX, NUMBER_MAX)
+                        and not _int_ok(ms.get("v"), 1, TIMER_MAX_MS)):
+                    ctx["out"].append("%s starts a timer: 1 to %d milliseconds." % (where, TIMER_MAX_MS))
         elif op == "clip":
             if not b.get("clip"):
                 ctx["out"].append("%s plays a clip with none chosen." % where)
@@ -862,6 +935,8 @@ def _check_num(e, where, ctx, depth=0):
             ctx["out"].append("%s uses a variable that is not there: make it under Variables." % where)
     elif k == "hits":
         _check_shot(e.get("shot"), where + "'s hits", ctx)
+    elif k == "timer_left":
+        _check_timer(e.get("timer"), where + "'s time left", ctx)
     elif k == "op":
         if e.get("op") not in OPS:
             ctx["out"].append("%s has a sum with no + - x or /." % where)
@@ -925,13 +1000,35 @@ class _Gen:
         self.events = []
         self.vars = {}                  # lower name -> index
         self.var_names = []
+        self.shared = set()             # indices of the shared variables
         for v in program["vars"]:
             n = str(v.get("name") or "")
             if VAR_RE.match(n) and n.lower() not in self.vars:
+                reset = v.get("reset") if v.get("reset") in RESETS else "ball"
+                if v.get("shared"):
+                    if reset not in SHARED_RESETS:
+                        reset = "game"
+                    self.shared.add(len(self.var_names))
                 self.vars[n.lower()] = len(self.var_names)
-                self.var_names.append((n, v.get("reset") if v.get("reset") in RESETS else "ball"))
+                self.var_names.append((n, reset))
+        self.timers = {}                # lower name -> index
+        self.timer_names = []
+        for t in program["timers"]:
+            n = str(t.get("name") or "")
+            if VAR_RE.match(n) and n.lower() not in self.timers:
+                self.timers[n.lower()] = len(self.timer_names)
+                self.timer_names.append(n)
         self.hits = []                  # shots whose hits this ball the program reads
         self.shows = []                 # each Light show block's steps, in order: SHOW_<n>
+
+    def var(self, i, p="P()"):
+        """Variable ``i`` of player ``p``, as C: its own row, or the shared global."""
+        if i in self.shared:
+            return "%s[%s]" % (shared_ident(self.var_names[i][0]), p)
+        return "V[%d][%s]" % (i, p)
+
+    def timer(self, name):
+        return self.timers.get(str(name or "").lower())
 
     def shot(self, name):
         return "S[%d]" % self.shot_i(name)
@@ -968,7 +1065,10 @@ class _Gen:
             return "(%dLL)" % v
         if k == "var":
             i = self.vars.get(str(e.get("name") or "").lower())
-            return "V[%d][P()]" % i if i is not None else "0LL"
+            return self.var(i) if i is not None else "0LL"
+        if k == "timer_left":
+            i = self.timer(e.get("timer"))
+            return "timer_left(%d)" % i if i is not None else "0LL"
         if k == "hits":
             return "(long long)" + self.hit(e.get("shot"))[0]
         if k == "scored":
@@ -1005,6 +1105,8 @@ class _Gen:
             return "run.on"
         if k == "stock":
             return "pm_stock_mode_running(PM_STOCK_ANY)"
+        if k == "can_start":
+            return "can_start()"
         return "0"
 
     # blocks
@@ -1024,11 +1126,19 @@ class _Gen:
             elif op == "set":
                 i = self.vars.get(str(b.get("var") or "").lower())
                 if i is not None:
-                    out.append(pad + "V[%d][P()] = %s;" % (i, self.num(b.get("value"))))
+                    out.append(pad + "%s = %s;" % (self.var(i), self.num(b.get("value"))))
             elif op == "change":
                 i = self.vars.get(str(b.get("var") or "").lower())
                 if i is not None:
-                    out.append(pad + "V[%d][P()] += %s;" % (i, self.num(b.get("by"))))
+                    out.append(pad + "%s += %s;" % (self.var(i), self.num(b.get("by"))))
+            elif op == "timer_start":
+                i = self.timer(b.get("timer"))
+                if i is not None:
+                    out.append(pad + "timer_start(%d, %s);" % (i, self.num(b.get("ms"))))
+            elif op == "timer_stop":
+                i = self.timer(b.get("timer"))
+                if i is not None:
+                    out.append(pad + "T[%d] = 0;" % i)
             elif op == "if":
                 out.append(pad + "if (%s) {" % self.cond(b.get("cond")))
                 out.extend(self.stack(b.get("then"), ind + 1))
@@ -1139,6 +1249,12 @@ def c_ident(slug):
     return MT._c_ident(slug)
 
 
+def shared_ident(name):
+    """The C global a shared variable is in every mode that names it: case, spaces and _ aside,
+    the same name is the same value (``"Maser won"`` -> ``pad_shared_maser_won``)."""
+    return "pad_shared_" + re.sub(r"[^a-z0-9]", "_", str(name or "").lower())
+
+
 def to_c(program, slug):
     """The C a program makes: one mode for the Mode SDK, in the template's shape."""
     program = normalize(program)
@@ -1185,6 +1301,9 @@ def to_c(program, slug):
             elif kind == "seconds_left":
                 secs = max(1, min(SECONDS_MAX, int(hat.get("seconds") or 1)))
                 test = "(run.on && sec_changed && run.seconds_shown == %du)" % secs
+            elif kind == "timer_done":
+                t = g.timer(hat.get("timer"))
+                test = "(due[%d])" % t if t is not None else "(0)"
             else:
                 test = None
             if test is None:
@@ -1230,6 +1349,12 @@ def to_c(program, slug):
     L.append("#define ENDS_ON_DRAIN    %d" % (1 if program["ends_on_drain"] else 0))
     L.append("#define TICKS_PER_SECOND 60")
     L.append("#define CLOCK_MAX        %d         /* the most seconds the clock holds */" % SECONDS_MAX)
+    L.append("#define WAITS_OUT_MULTIBALL %d       /* 1 = a start while a multiball runs waits for the next */"
+             % (1 if program["wait_multiball"] else 0))
+    L.append("#define DISPLAY_PRIORITY %d          /* held while it runs; 0 = none (MODE_SDK.md) */"
+             % (program["priority"] or (HUD_PRIORITY if has_hud else 0)))
+    L.append("#define TIMER_MAX_MS     %dL" % TIMER_MAX_MS)
+    L.append("#define ENDING_MS        3000        /* the total its own screen shows at the end */")
     L.append("#define UNUSED __attribute__((unused))   /* a helper the blocks may not call */")
     L.append("")
     gm = program["game_modes"]                           # PAD-373: as a form mode's (PAD-363)
@@ -1258,6 +1383,18 @@ def to_c(program, slug):
     for i, (n, reset) in enumerate(g.var_names):
         L.append("/* V[%d] = %s, per player, reset %s */" % (i, _comment(n), RESETS[reset]))
     L.append("UNUSED static long long V[%d][5];            /* the variables, per player 1-4 */" % nvars)
+    for i in sorted(g.shared):
+        n, reset = g.var_names[i]
+        L.append("/* %s: SHARED - one value per player for every mode that names it, reset %s. The linker"
+                 % (_comment(n), RESETS[reset]))
+        L.append(" * keeps one of these weak lines for all the modes built in; a mode in C shares it by"
+                 " declaring the same. */")
+        L.append('__attribute__((weak, visibility("hidden"))) long long %s[5];' % shared_ident(n))
+    ntimers = max(1, len(g.timer_names))
+    for i, n in enumerate(g.timer_names):
+        L.append("/* T[%d] = the timer %s */" % (i, _comment(n)))
+    L.append("UNUSED static unsigned long T[%d];           /* each timer's end, pm_ms(); 0 = not running */"
+             % ntimers)
     for i, n in enumerate(g.hits):
         L.append("/* H[%d] = hits of %s this ball */" % (i, _comment(n)))
     L.append("UNUSED static unsigned H[%d][5];             /* hits this ball, per player */" % nhits)
@@ -1310,13 +1447,31 @@ def to_c(program, slug):
     L.append("    return run.on && RUN_SECONDS ? (run.ticks_left + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND : 0;")
     L.append("}")
     L.append("")
+    L.append("/* a timer: ms from now (0 or less stops it); the milliseconds it has left */")
+    L.append("UNUSED static void timer_start(int i, long long ms)")
+    L.append("{")
+    L.append("    if (ms <= 0) {")
+    L.append("        T[i] = 0;")
+    L.append("        return;")
+    L.append("    }")
+    L.append("    if (ms > TIMER_MAX_MS) ms = TIMER_MAX_MS;")
+    L.append("    T[i] = pm_ms() + (unsigned long)ms;")
+    L.append("    if (!T[i]) T[i] = 1;")
+    L.append("}")
+    L.append("")
+    L.append("UNUSED static long long timer_left(int i)")
+    L.append("{")
+    L.append("    long left = T[i] ? (long)(T[i] - pm_ms()) : 0;")
+    L.append("    return left > 0 ? left : 0;")
+    L.append("}")
+    L.append("")
     for when in ("ball", "mode"):
         L.append("static void reset_%s(void)          /* the variables reset %s */" % (when, RESETS[when]))
         L.append("{")
         L.append("    unsigned p = P();")
         for i, (_n, reset) in enumerate(g.var_names):
             if reset == when:
-                L.append("    V[%d][p] = 0;" % i)
+                L.append("    %s = 0;" % g.var(i, "p"))
         L.append("    (void)p;")
         L.append("}")
         L.append("")
@@ -1447,6 +1602,12 @@ def to_c(program, slug):
     L.append("    return 0;")
     L.append("}")
     L.append("")
+    L.append("/* \"the mode could start now\": in a game, not running, and nothing of the game's to wait out */")
+    L.append("UNUSED static int can_start(void)")
+    L.append("{")
+    L.append("    return !run.on && pm_in_game() && !((WAITS_OUT_MULTIBALL || GAME_MODES) && game_busy());")
+    L.append("}")
+    L.append("")
     L.append("static void start(const char *why, int counted);")
     L.append("static void end(const char *why);")
     L.append("")
@@ -1464,7 +1625,7 @@ def to_c(program, slug):
     L.append("static void start(const char *why, int counted)")
     L.append("{")
     L.append("    if (run.on || !pm_in_game()) return;")
-    L.append("    if (GAME_MODES && counted) {      /* it waits: the next Start the mode starts it */")
+    L.append("    if ((WAITS_OUT_MULTIBALL || GAME_MODES) && counted) {   /* it waits: the next Start the mode starts it */")
     L.append("        static unsigned long said_at;")
     L.append("        const char *what = game_busy();")
     L.append("        if (what) {")
@@ -1476,6 +1637,7 @@ def to_c(program, slug):
     L.append("    }")
     L.append("    if (!pm_begin()) return;          /* another of our modes is running */")
     L.append("    pm_running_name(MODE_NAME);")
+    L.append("    if (DISPLAY_PRIORITY) pm_display_priority(DISPLAY_PRIORITY);   /* first: before the screen */")
     L.append("    if (GAME_MODES == 2) {            /* the game's modes it holds off cannot start while it runs */")
     L.append("        pm_block_list(BLOCK_IDS, BLOCK_N);")
     L.append("        if (pm_block_game_modes(1))")
@@ -1497,8 +1659,6 @@ def to_c(program, slug):
     L.append("    hide_ticks = 0;")
     L.append('    reset_mode();')
     if watch:
-        L.append("    pm_display_priority(%d);         /* first: then pm_display_covered watches for it */"
-                 % DISPLAY_PRIORITY)
         L.append("    screen_away = 0;")
     L.append("    if (screen) {")
     L.append("        words(MODE_NAME, 0, 0);")
@@ -1562,27 +1722,24 @@ def to_c(program, slug):
         L.append("        kit_hud_hide_in(&hud, %du);" % TOTAL_MS)
         L.append("    }")
     L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
-    if watch:
-        L.append("    /* the total keeps the display watched for its moment (the kit's kit_end_after) */")
-        L.append("    if (!pm_end_holding(%du)) {" % TOTAL_MS)
-        L.append("        pm_display_priority(0);")
-        L.append("        pm_end();")
-        L.append("    }")
-    else:
-        L.append("    pm_end();")
+    L.append("    /* the total keeps the display watched for its moment on its HUD or its own screen (the kit's")
+    L.append("     * kit_end_after, pm_end_holding); a drain or the game hands it back at once (end_now) */")
+    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_MS))) {" % ("1" if has_hud else "screen"))
+    L.append("        pm_display_priority(0);")
+    L.append("        pm_end();")
+    L.append("    }")
     L.append('    pm_log("END (%s): %u scores, total %llu", why, run.shots, (unsigned long long)run.total);')
     L.append("}")
     L.append("")
-    L.append("/* ended by a drain or the game moving on: the game's own screen (the bonus, the next player) comes")
-    L.append(" * at once, so the total does not stay over it (the kit's kit_end_now) */")
+    L.append("/* ended by a drain, a tilt's drain, the game moving on or one of its modes beginning: the game's own")
+    L.append(" * screen comes at once, so its display is handed back and its total does not stay over it (the")
+    L.append(" * kit's kit_end_now) */")
     L.append("static void end_now(const char *why)")
     L.append("{")
-    L.append("    if (!run.on) return;")
     L.append("    end(why);")
     L.append("    hide_ticks = 0;")
     L.append("    if (screen) pm_show(screen, 0);")
-    if watch:
-        L.append("    pm_display_priority(0);")
+    L.append("    if (DISPLAY_PRIORITY) pm_display_priority(0);")
     if has_hud:
         L.append("    kit_hud_drop_now();")
     L.append("}")
@@ -1651,8 +1808,12 @@ def to_c(program, slug):
     L.append("        for (p = 0; p < 5; p++) {")
     L.append("            for (v = 0; v < %d; v++) H[v][p] = 0;" % nhits)
     for i, (_n, reset) in enumerate(g.var_names):
-        L.append("            V[%d][p] = 0;" % i)
+        L.append("            %s = 0;" % g.var(i, "p"))
     L.append("        }")
+    L.append("    }")
+    L.append("    if (!in_game && was_in_game) {    /* the game is over: no timer runs on */")
+    L.append("        unsigned t;")
+    L.append("        for (t = 0; t < %d; t++) T[t] = 0;" % ntimers)
     L.append("    }")
     L.append("    was_in_game = in_game;")
     L.append("    if (++poll % 30 == 0) {            /* the tab's Start mode now / End mode */")
@@ -1660,6 +1821,17 @@ def to_c(program, slug):
     L.append('        if (pm_trigger("%s.stop")) end("trigger file");' % slug)
     L.append("    }")
     L.append("    if (hide_ticks && --hide_ticks == 0 && !run.on && screen) pm_show(screen, 0);")
+    timer_scripts = scripts_of("timer_done")
+    if timer_scripts:
+        L.append("    if (in_game) {                    /* the timers that ran out, then their scripts */")
+        L.append("        int due[%d], t;" % ntimers)
+        L.append("        unsigned long now = pm_ms();")
+        L.append("        for (t = 0; t < %d; t++) {" % ntimers)
+        L.append("            due[t] = T[t] && (long)(now - T[t]) >= 0;")
+        L.append("            if (due[t]) T[t] = 0;")
+        L.append("        }")
+        L.extend("    " + line if line else line for code in timer_scripts for line in code.split("\n"))
+        L.append("    }")
     L.append("    sec_changed = 0;")
     L.append("    if (!run.on) return;")
     L.append("    if (!in_game || pm_player() != run.player) {")
@@ -1699,6 +1871,8 @@ def to_c(program, slug):
     L.append("")
     L.append("static void on_ball_end(void)")
     L.append("{")
+    L.append("    unsigned t;")
+    L.append("    for (t = 0; t < %d; t++) T[t] = 0;   /* a ball ending stops every timer */" % ntimers)
     L.extend(scripts_of("ball_end"))
     L.append("    if (ENDS_ON_DRAIN) end_now(\"ball ended\");")
     if media:
@@ -2122,4 +2296,6 @@ def _hat_words(hat):
         return "when %s seconds are left" % hat.get("seconds")
     if kind == "event":
         return "when %s, %s" % (MP.EVENT_LABELS.get(hat.get("event"), hat.get("event")), when)
+    if kind == "timer_done":
+        return "when the timer %s runs out" % (hat.get("timer") or "(no timer)")
     return HATS.get(kind, "?").lower()

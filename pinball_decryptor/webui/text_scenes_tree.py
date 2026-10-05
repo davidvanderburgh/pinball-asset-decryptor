@@ -187,7 +187,11 @@ class TreeEditMixin:
         unveil = self._tree_hidden(card)
         view = self._tree_view_hidden(card)
         if peek is not None:
-            gone = view - {peek} - self._tree_inside(peek, view) - self._tree_ancestors(peek)
+            # a DELETED layer (hidden in the game and here, PAD-391) stays hidden in a picked
+            # sprite; only picking it itself shows it (DragonRR: "to avoid confusion")
+            deleted = view & unveil
+            gone = (view - {peek} - (self._tree_inside(peek, view) - deleted)
+                    - self._tree_ancestors(peek))
         else:
             gone = view
         draws = scene_eval.draw_list(man, frame, pins=pins, worlds=worlds, show=peek,

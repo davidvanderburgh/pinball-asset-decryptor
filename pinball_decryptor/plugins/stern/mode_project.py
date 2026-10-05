@@ -252,7 +252,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet")
+         "magnet", "scoop")
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -435,12 +435,42 @@ def _magnet_cannot(key, label, port=None):
                        "hold the ball on it in the emulator, so it cannot here yet." % label),)
 
 
+#: PAD-381: a ball held in the scoop for the mode, then kicked out by the game as always. What
+#: pad_mode_runtime.c's scoop_arm needs - (sites, data, values): the game's handler for the scoop's ball
+#: device, the pointer to it in the device's record (swapped for a wrapper), and the event a settled ball
+#: is held in. The kick-out is never the mode's: nothing here fires a coil (MODE_SDK.md "The scoop").
+SCOOP_NEEDS = (("scoop_handler", "proc_sleep"), ("scoop_slot",), ("scoop_event",))
+SCOOP_MIN_MS = 100                     # pad_mode_runtime.c SCOOP_MIN_MS / SCOOP_MAX_MS (a test holds them equal)
+SCOOP_MAX_MS = 10000
+#: The builds where a mode file's ``scoop_hold`` line was seen in the emulator: a ball that settled while the
+#: mode ran was held its time and then kicked out by the game (its own 64 ms kick), the same landing with no
+#: mode was kicked at the game's own time, and the mode ending let it go at once.
+SCOOP_PROVEN = frozenset({
+    "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: no mode, kicked 1782 ms after landing; scoop_hold 4000, 5776 ms (held 4016); the mode stopped 1.5 s in, let go then (2998 ms); no abort
+    "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: 1785 / 5770 (held 4016) / let go at the mode's end (2591 ms); a TILT during a 10 s hold ended the ball, the hold let go and the game kicked the ball out, no abort
+})
+
+
+def _scoop_cannot(key, label, port=None):
+    """The ``cannot`` entry for holding a ball in the scoop on build ``key``, or () when it can."""
+    sites, data, values = SCOOP_NEEDS
+    if not port or not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+                        and all(n in port["value"] for n in values)):
+        return (("scoop", "The app has not found how %s runs its scoop, so a mode of yours cannot hold a "
+                          "ball in it." % label),)
+    if key in SCOOP_PROVEN:
+        return ()
+    return (("scoop", "The app has found how %s runs its scoop but has not yet seen a mode of yours hold a "
+                      "ball in it in the emulator, so it cannot here yet." % label),)
+
+
 #: item 167: the hand-written profile carries the same verdict as its port (its port names the
 #: framework's serve call; the tab offers Multiball once the build is in MULTIBALL_PROVEN). PAD-381: its
-#: port names no magnet calls (only the 1.16 ports do), so Magnet stays greyed on it.
+#: port names no magnet or scoop calls (only the 1.16 ports do), so both stay greyed on it.
 GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _ball_save_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
-                            + _magnet_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
+                            + _magnet_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _scoop_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
@@ -1036,6 +1066,7 @@ def profile_from_port(path):
     cannot += list(_multiball_cannot(key, label, sites))     # item 167
     cannot += list(_ball_save_cannot(key, label, sites))     # PAD-225
     cannot += list(_magnet_cannot(key, label, port))         # PAD-381
+    cannot += list(_scoop_cannot(key, label, port))          # PAD-381
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1638,6 +1669,9 @@ class ModeSpec:
     # the Godzilla target), the one that starts it included, holds the ball on the magnet this many ms
     # (MAGNET_MIN_MS..MAGNET_MAX_MS; the runtime's own limits still apply); 0 = never
     magnet_ms: int = 0
+    # PAD-381: while it runs, a ball that settles in the scoop is held there this many ms more once the game
+    # is done with it (SCOOP_MIN_MS..SCOOP_MAX_MS), then the game kicks it out as always; 0 = never
+    scoop_hold_ms: int = 0
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1797,6 +1831,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.start_ball_save = 0
     if not p.can("magnet"):
         spec.magnet_ms = 0
+    if not p.can("scoop"):
+        spec.scoop_hold_ms = 0
     return spec
 
 
@@ -2377,6 +2413,7 @@ def validate(spec, folder=None):
     out += validate_multiball(spec, p)
     out += validate_ball_save(spec, p)
     out += validate_magnet(spec, p)                    # PAD-381
+    out += validate_scoop(spec, p)                     # PAD-381
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
     return out
@@ -2514,6 +2551,28 @@ def magnet_lines(spec, p):
     if not ms or not p.can("magnet") or not p.magnet_shot:
         return []
     return ["magnet         %d 0x%08x" % (ms, p.mask([p.magnet_shot]))]
+
+
+# ---- PAD-381: holding a ball in the scoop ---------------------------------------------
+def validate_scoop(spec, p):
+    """Every reason the scoop part cannot be built; nothing when the mode has none."""
+    ms = _int_or_none(spec.scoop_hold_ms)
+    if ms == 0:
+        return []
+    out = []
+    if ms is None or not SCOOP_MIN_MS <= ms <= SCOOP_MAX_MS:
+        out.append("The scoop holds a ball %g to %g seconds." % (SCOOP_MIN_MS / 1000, SCOOP_MAX_MS / 1000))
+    if not p.can("scoop"):
+        out.append("Holding a ball in the scoop is not on %s yet (Mode says why)." % p.label)
+    return out
+
+
+def scoop_lines(spec, p):
+    """The runtime line of the scoop hold: nothing without one or where the title cannot."""
+    ms = _int_or_none(spec.scoop_hold_ms)
+    if not ms or not p.can("scoop"):
+        return []
+    return ["scoop_hold     %d" % ms]
 
 
 # ---- item 142: cuts from a film ------------------------------------------------------
@@ -2688,6 +2747,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += multiball_lines(spec, p)       # item 167: nothing unless the mode is a multiball
     lines += ball_save_lines(spec, p)       # PAD-225: nothing unless it has a ball save (and no multiball)
     lines += magnet_lines(spec, p)          # PAD-381: nothing unless it holds the ball on the magnet
+    lines += scoop_lines(spec, p)           # PAD-381: nothing unless it holds a ball in the scoop
     if spec.screen and p.can("screen"):
         lines += [
             "screen_scene   %s" % p.hud_scene,

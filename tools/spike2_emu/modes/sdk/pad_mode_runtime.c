@@ -768,11 +768,13 @@ void pm_running_name(const char *name)
 
 static void bd_reset(const char *why);
 static void magnet_let_go(const char *why);   /* PAD-381: the magnet section */
+static void scoop_let_go(void);               /* PAD-381: the scoop section */
 void pm_end(void)
 {
     if (running == current) running = 0, running_as[0] = 0;
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
+    if (!running) scoop_let_go();
 }
 int pm_running(void) { return running && running == current; }
 
@@ -3595,6 +3597,122 @@ static void coils_arm(void)
         MAGNET_PER_MIN);
 }
 
+/* ---- the scoop: a ball held there for the mode, then the game kicks it out (PAD-381) ----------
+ * David (2026-10-04): "putting the ball in the scoop during a mode". A mode may HOLD a ball that lands
+ * in the scoop for a while - its screen, a callout - and nothing else: the kick-out stays the game's
+ * own, at the operator's SCOOP KICK POWER, with the game's own retries. No coil is ever fired here.
+ *
+ * What the game does (Godzilla Pro 1.16; docs/plans/mode_coils.md): the scoop is a ball device of the
+ * framework's, which runs it in a game process and calls the GAME's handler for it (`site
+ * scoop_handler`, 0x7cd94, the program names it right_scoop_event_handler) through a pointer in the
+ * device's record (`data scoop_slot`, 0x74b480, RW data) with an event number in r0. Measured on a
+ * landing ball (a call probe, 2026-10-05): 21 the switch closed; 2 at +0.8 s, the ball has settled -
+ * the game's own hold (its rules, a battle's select screen) loops in there and returns when it is
+ * done; 13 a short wait for a display; 16 and 17 at +1.7 s, the kick (coil_fire(10, adj 351, 64 ms),
+ * every adj-352th retry a burst of five); 18 the ball left.
+ *
+ * So the hold WRAPS event 2 (`value scoop_event`): the record's pointer is swapped for scoop_wrap on
+ * the first tick (checked to be the handler first), which runs the game's handler as it was and THEN,
+ * if the running mode asked for a hold, sleeps a tick at a time in the device's own process until the
+ * time is up, the mode lets go or ends, or the game ends or tilts - and returns, so the game's eject
+ * goes on exactly as before. The game's own hold always comes first. A process the game ends (a tilt)
+ * unwinds through this frame, which build_mode.sh's -funwind-tables makes safe.
+ *
+ * The limits, not the mode's to change: 100 ms to SCOOP_MAX_MS a hold; only the running mode, only in
+ * a game; the hold ends with the mode. Holding a ball powers nothing; the cap keeps a ball from waiting
+ * in the scoop long enough for the game to start looking for it. */
+#define SCOOP_MAX_MS 10000u
+#define SCOOP_MIN_MS   100u
+
+static struct {
+    unsigned slot;                          /* the device record's handler pointer */
+    unsigned (*orig)(unsigned, unsigned, unsigned, unsigned);
+    unsigned event;                         /* the event a settled ball is held in */
+    unsigned hold_ms;                       /* the running mode's hold; 0 = none */
+    unsigned long until;                    /* pm_ms() a hold ends; 0 = not holding */
+    int release;                            /* the mode let go */
+    int armed;                              /* 0 not swapped yet, 1 wrapped, -1 refused */
+} scoop;
+
+static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
+{
+    unsigned r = scoop.orig(ev, a1, a2, a3);
+    unsigned long t0;
+    const char *why;
+    if (ev != scoop.event || !scoop.hold_ms || !running || !pm_in_game()) return r;
+    t0 = pm_ms();
+    scoop.until = t0 + scoop.hold_ms;
+    scoop.release = 0;
+    say("scoop: a ball settled - holding it %u ms for the mode; then the game kicks it out", scoop.hold_ms);
+    while (!scoop.release && scoop.hold_ms && running && pm_in_game() && pm_ms() < scoop.until)
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    why = scoop.release ? "the mode let go" : !scoop.hold_ms || !running ? "the mode ended"
+        : !pm_in_game() ? "the game ended or tilted" : "its time ran out";
+    say("scoop: let go after %lu ms (%s) - the game kicks it out", pm_ms() - t0, why);
+    scoop.until = 0;
+    scoop.release = 0;
+    return r;
+}
+
+int pm_scoop_hold(unsigned ms)
+{
+    if (!(can & PM_CAN_SCOOP) || !pm_running()) return 0;
+    if (ms && ms < SCOOP_MIN_MS) ms = SCOOP_MIN_MS;
+    if (ms > SCOOP_MAX_MS) ms = SCOOP_MAX_MS;
+    scoop.hold_ms = ms;
+    if (!ms) scoop.release = 1;
+    say("scoop: %s", ms ? "a ball that lands in the scoop is held for the mode" : "no hold");
+    return 1;
+}
+
+void pm_scoop_release(void)
+{
+    if (pm_running() && scoop.until) scoop.release = 1;
+}
+
+int pm_scoop_holding(void) { return scoop.until != 0; }
+
+static void scoop_let_go(void)
+{
+    scoop.hold_ms = 0;                      /* the hold loop sees it on its next tick */
+}
+
+/* The first tick (the game's main() has run): swap the record's pointer, once, if it still points at the
+ * game's handler. Then, every tick: a hold whose process the game ended is not waited for. */
+static void scoop_tick(void)
+{
+    unsigned *slot;
+    if (!(can & PM_CAN_SCOOP)) return;
+    if (!scoop.armed) {
+        slot = (unsigned *)(unsigned long)scoop.slot;
+        if (!maps_has(scoop.slot, 4, MAP_R | MAP_GAME) || *slot != fn("scoop_handler")) {
+            scoop.armed = -1;
+            can &= ~PM_CAN_SCOOP;
+            say("scoop: switched OFF for this run - the device record at 0x%08x does not point at the "
+                "handler 0x%08x", scoop.slot, fn("scoop_handler"));
+            return;
+        }
+        scoop.orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)*slot;
+        *slot = (unsigned)(unsigned long)scoop_wrap;
+        scoop.armed = 1;
+        say("scoop: its handler 0x%08x is wrapped (event %u holds a ball for the mode)", fn("scoop_handler"),
+            scoop.event);
+    }
+    if (scoop.until && pm_ms() > scoop.until + 2000ul) scoop.until = 0;   /* the game ended that process */
+}
+
+static void scoop_arm(void)
+{
+    static const char *const s[] = { "scoop_handler", "proc_sleep", 0 };
+    static const char *const d[] = { "scoop_slot", 0 };
+    static const char *const v[] = { "scoop_event", 0 };
+    if (!have_sites(s) || !have_data(d) || !have_values(v)) return;
+    scoop.slot = data("scoop_slot");
+    scoop.event = (unsigned)pm_port_value("scoop_event", 2);
+    can |= PM_CAN_SCOOP;
+    say("scoop: a mode may hold a ball there, up to %u ms; the kick-out stays the game's", SCOOP_MAX_MS);
+}
+
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
  * A rule the game shipped with (a battle, a multiball) is a compiled object with a vtable, and
  * its SHOT HANDLER (one vtable slot) tests the RAW shot mask against fixed bits: Godzilla's
@@ -4733,6 +4851,7 @@ static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
 static void stock_tick(void);             /* item 160 */
 static void magnet_tick(void);            /* PAD-381 */
+static void scoop_tick(void);             /* PAD-381 */
 
 static void on_tick(unsigned *r)
 {
@@ -4756,6 +4875,7 @@ static void on_tick(unsigned *r)
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
+    scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
     roster_deferred_tick();
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
@@ -5668,6 +5788,7 @@ static void pad_mode_start(void)
     stock_arm();                                    /* item 160: the port's `rule` lines (stock rules section) */
     multiball_arm();                                /* item 167: a multiball of the mode's own */
     coils_arm();                                    /* PAD-381: a magnet grab of the mode's own */
+    scoop_arm();                                    /* PAD-381: a ball held in the scoop */
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
@@ -5676,12 +5797,13 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
         can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
-        can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "");
+        can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
+        can & PM_CAN_SCOOP ? " scoop" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

@@ -73,6 +73,7 @@ PART_KEYS = {
     "multiball": ("multiball", "add_ball"),                  # item 167
     "ball_save": ("ball_save",),                             # PAD-225
     "magnet": ("magnet",),                                   # PAD-381
+    "scoop": ("scoop_hold",),                                # PAD-381
     "screen": ("screen_scene", "screen_node", "screen_text"),
     "clip": ("clip_start", "clip_end"),
     "lights": ("light_owner", "light_on", "light_off"),
@@ -113,7 +114,8 @@ def _mb(name):
     """Item 167: a multiball of the mode's own is a part every port names the call for, greyed
     until the build is emulator-proven (MULTIBALL_PROVEN); the PORTS table says nothing of it."""
     return (set() if name in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if name in MP.BALL_SAVE_PROVEN else {"ball_save"}) | \
-        (set() if name in MP.MAGNET_PROVEN else {"magnet"})      # PAD-225: the same call, its own proof; PAD-381 the magnet
+        (set() if name in MP.MAGNET_PROVEN else {"magnet"}) | \
+        (set() if name in MP.SCOOP_PROVEN else {"scoop"})      # PAD-225: the same call, its own proof; PAD-381 the magnet, the scoop
 
 
 def _check_runtime_file(p, spec, slug):
@@ -149,7 +151,7 @@ def test_a_profile_per_port(name):
     assert p.key == "%s_%s" % (game, version.replace(".", "_"))
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
-    cannot = (set(cannot) - {"multiball", "ball_save", "magnet"}) | _mb(name)
+    cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop"}) | _mb(name)
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)

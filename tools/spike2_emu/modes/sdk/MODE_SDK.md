@@ -1489,6 +1489,58 @@ Not measured: a machine (nothing has been flashed); a tilt mid-grab (it ends pro
 does); a magnet sequence of the game's starting while a grab already holds (the rig raised one only as the
 first hit landed, on the LE).
 
+## The scoop (PAD-381)
+
+A mode may hold a ball that lands in the scoop - while its screen or a callout plays - and nothing more:
+the kick-out stays the game's own (its 64 ms kick at the operator's SCOOP KICK POWER, with its own
+retries), and nothing in a mode or the runtime fires the scoop's coil.
+
+```c
+if (pm_can(PM_CAN_SCOOP)) pm_scoop_hold(4000);   /* while this mode runs, a ball in the scoop waits 4 s */
+pm_scoop_release();                              /* or let it go now */
+```
+
+A mode file says `scoop_hold <ms>` (set when the mode starts); Mode > Scoop on the Modes tab writes it, in
+seconds (0.1 to 10), greyed on a build until it was seen in the emulator (`mode_project.SCOOP_PROVEN`).
+
+**How it holds.** The scoop is a ball device of the framework's: a game process watches it and calls the
+GAME's handler for it with an event number (`site scoop_handler`, Godzilla Pro 1.16 `0x7cd94`; the program
+names it `right_scoop_event_handler`), through a pointer in the device's record (`data scoop_slot`,
+`0x74b480`). Measured on a landing ball with a call probe: event 21 as the switch closes, **2 when the
+ball has settled** (the game's own hold - its rules, a battle's select screen - loops in there), 13 a short
+wait for a display, 16 and 17 the kick about 1.7 s after landing, 18 the ball gone. On the first tick the
+runtime checks that the record still points at the handler and swaps in a wrapper: it runs the handler as
+it was and, on event 2 (`value scoop_event`), if the running mode asked for a hold, sleeps a tick at a time
+in the device's own process until the time is up, the mode lets go or ends, or the game ends or tilts -
+then returns, and the game's eject carries on as it always does. The game's own hold always comes first.
+
+**The limits:** 100 ms to 10 s a hold; only the running mode; only in a game; the hold ends with the mode.
+Holding a ball powers nothing; the cap keeps a ball from sitting in the scoop long enough for the game to
+go looking for it. A tilt or the end of a ball that ends the device's process unwinds through the wrapper
+safely (the runtime is built with unwind tables, "The magnet").
+
+**The port lines** (Pro and LE 1.16; LE: handler `0x7d8e4`, slot `0x7570a4`, found from Pro's code):
+
+```
+site scoop_handler         0x0007cd94 0xe30538ea 0xe2401002
+data scoop_slot            0x0074b480
+value scoop_event          2
+```
+
+(`site proc_sleep` is the magnet's.)
+
+**Emulator-proven** (2026-10-05, rig 1, muted, the stock Pro 1.16 and Premium/LE 1.16 cards; a mode file
+with `scoop_hold 4000`; a landing is the Right Scoop switch held closed until the game's kick):
+- no mode running: the game kicked 1782 ms (Pro) / 1785 ms (LE) after landing - its own timing;
+- the mode running: 5776 / 5770 ms, the runtime's `scoop: ... holding it 4000 ms` then `let go after
+  4016 ms (its time ran out)`; every kick the game's own (255 for 64 ms, `[coildrive]` node 8 coil 8);
+- the mode stopped 1.5 s after landing: `let go ... (the mode ended)`, the kick at 2998 / 2591 ms;
+- a TILT during a 10 s hold (LE): the ball ended, the hold let go and the game kicked the ball out; no
+  abort.
+
+Not measured: a machine; a battle's select screen holding the ball first (the game's own hold, which the
+wrapper runs before its own).
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in

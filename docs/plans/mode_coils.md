@@ -153,9 +153,21 @@ test). This is a last line of defence, not a guardrail of ours.
     its end, a mid-grab hit refused with no game OFF, a mode stop and a drain mid-grab let go early, no
     abort; on the LE a game magnet process started by the first hit made the grab stand aside.
 
+- **Step 4 (2026-10-05): a ball held in the scoop.** The scoop is a framework ball device; its game process
+  calls the GAME's handler (`0x7cd94`, `right_scoop_event_handler`) through a pointer in the device record
+  (`0x74b480`, RW data) with an event in r0. A call probe on a landing ball: 21 switch closed, **2 settled**
+  (the game's own hold loops there), 13 a display wait, 16/17 the kick (coil_fire(10, adj 351, 64 ms); every
+  adj-352th retry a burst of five), 18 gone. The runtime swaps the pointer (checked first) for a wrapper that
+  runs the handler and then, on event 2, sleeps in the device's own process for the mode's hold (100-10000 ms)
+  - so the kick-out stays the game's and nothing fires a coil. `pm_scoop_hold` / `pm_scoop_release`, a mode
+  file's `scoop_hold <ms>`, Mode > Scoop on the tab; `SCOOP_PROVEN` = Pro and LE 1.16. LE: handler `0x7d8e4`,
+  slot `0x7570a4`. Emulator: control 1782/1785 ms to the kick, hold 4000 -> 5776/5770, a mode stop and a tilt
+  let go, no abort (MODE_SDK.md "The scoop").
+
 ## Next
 
-1. The scoop: its eject is a ball device of the framework's, not a ControlCoil; find the eject and the
-   hold-in-scoop flag (FG_KING_OF_THE_MONSTERS_BOUNTY_COLLECT_HOLD_BALL_IN_SCOOP shows the game has one).
-2. A supervised machine test on David's Premium, a short grab first (Mode > Magnet, 1 s), with a hand on
-   the power switch: the ball held on the Godzilla target hit, let go at 1 s, and a drain mid-grab.
+1. A supervised machine test on David's Premium, with a hand on the power switch: Mode > Magnet 1 s on the
+   Godzilla target (the ball held, let go at 1 s; a drain mid-grab), and Mode > Scoop 3 s (the ball waits,
+   then the game's own kick).
+2. Other titles: the ports carry the magnet and scoop lines only for Godzilla 1.16; every other build greys
+   both parts with its reason.

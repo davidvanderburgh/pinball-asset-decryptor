@@ -466,4 +466,20 @@ int pm_magnet_grab(unsigned ms);
 void pm_magnet_release(void);
 int pm_magnet_holding(void);
 
+/* ---- the scoop (PAD-381; MODE_SDK.md "The scoop") ---------------------------------------------
+ * Hold a ball that lands in the scoop for `ms` milliseconds while your mode runs, then let the game
+ * kick it out. You ask for a time and nothing else: the kick-out is the game's own, at the operator's
+ * SCOOP KICK POWER, with the game's own retries, and nothing here fires a coil. The game's own use of
+ * a landing ball (its rules, a select screen) always comes first; your hold starts when it is done.
+ *   - `ms` is 100..10000; 0 = no hold (and a ball held now goes). It applies to every ball that
+ *     settles in the scoop while your mode runs.
+ *   - the hold ends at its time, on pm_scoop_release, when your mode ends, and when the game ends or
+ *     tilts.
+ * pm_scoop_hold: 1 = set; 0 = not the running mode, or no PM_CAN_SCOOP on this game (the port's
+ * `site scoop_handler`, `data scoop_slot`, `value scoop_event`). pm_scoop_holding: 1 while a ball is held. */
+#define PM_CAN_SCOOP        0x100000u /* pm_scoop_hold / pm_scoop_release / pm_scoop_holding */
+int pm_scoop_hold(unsigned ms);
+void pm_scoop_release(void);
+int pm_scoop_holding(void);
+
 #endif

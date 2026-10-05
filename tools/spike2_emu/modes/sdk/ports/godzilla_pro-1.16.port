@@ -526,6 +526,16 @@ site proc_sleep            0x003ab22c 0xe30d3158 0xe340307d
 site coil_take             0x0005079c 0xe92d40f8 0xe30d715c
 site coil_give             0x00050860 0xe3510000 0xe92d4038
 value magnet_proc          13185
+
+# ---- the scoop: a ball held there for a mode, then the game kicks it out (PAD-381; pad_mode_runtime.c
+# "the scoop"). scoop_handler = the right scoop's event handler (the program names it
+# right_scoop_event_handler), called by the framework's ball device through scoop_slot, a pointer in the
+# device's record (RW data); the runtime swaps that pointer for a wrapper that runs the handler, then
+# holds a settled ball (scoop_event, measured with a call probe) for the running mode. The kick-out stays
+# the game's. LE 1.16's handler found from Pro 1.16's by its first 13 words, and it names the same string.
+site scoop_handler         0x0007cd94 0xe30538ea 0xe2401002
+data scoop_slot            0x0074b480
+value scoop_event          2
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
 
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------

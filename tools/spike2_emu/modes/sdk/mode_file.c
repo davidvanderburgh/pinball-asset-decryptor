@@ -83,6 +83,7 @@ struct mode_cfg {
     uint64_t mball_on_bits;           /* PAD-228 `multiball_on <mask>`: the balls come on that shot, not at the start */
     unsigned magnet_ms;               /* PAD-381 `magnet <ms> [mask]`: a grab on each hit of that shot; 0 = none */
     uint64_t magnet_bits;
+    unsigned scoop_ms;                /* PAD-381 `scoop_hold <ms>`: a ball landing in the scoop is held; 0 = none */
     /* PAD-227: more than one thing to meet before it starts (their own functions below) */
     uint64_t also_bits[ALSO_MAX];
     unsigned also_count[ALSO_MAX], n_also;
@@ -251,6 +252,18 @@ static int magnet_line(struct slot *M, const char *line)
     if (!a) return 0;
     cfg.magnet_ms = (unsigned)num(&a);
     cfg.magnet_bits = (*a >= '0' && *a <= '9') ? num(&a) : (uint64_t)(unsigned long)pm_port_value("magnet_shot", 0);
+    return 1;
+}
+
+/* PAD-381: the scoop (MODE_SDK.md "The scoop")
+ *   scoop_hold <ms>       while the mode runs, a ball that settles in the scoop is held there <ms> more
+ *                         (100-10000; pm_scoop_hold) once the game is done with it, then the game kicks it
+ *                         out as it always does. 0 = none. */
+static int scoop_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "scoop_hold");
+    if (!a) return 0;
+    cfg.scoop_ms = (unsigned)num(&a);
     return 1;
 }
 
@@ -1679,6 +1692,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (multiball_line(M, line)) return;     /* item 167 */
     if (ball_save_line(M, line)) return;     /* PAD-225 */
     if (magnet_line(M, line)) return;        /* PAD-381 */
+    if (scoop_line(M, line)) return;         /* PAD-381 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -1736,6 +1750,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
                (unsigned)(cfg.magnet_bits >> 32), (unsigned)cfg.magnet_bits,
                !cfg.magnet_bits ? " - but no shot is the magnet's (the port has no magnet_shot): ignored"
                : pm_can(PM_CAN_COILS) ? "" : " - this game's port cannot drive the magnet: no grab");
+    if (cfg.scoop_ms)                        /* PAD-381 */
+        pm_log("\"%s\": a ball in the scoop is held %u ms%s", cfg.name, cfg.scoop_ms,
+               pm_can(PM_CAN_SCOOP) ? "" : " - this game's port cannot hold the scoop: no hold");
     params_loaded(M);
     more_loaded(M);                          /* PAD-227 */
 }
@@ -1869,6 +1886,7 @@ static void mode_start(struct slot *M, const char *why)
         multiball_served(M);
     }
     run.saving = !cfg.mball_balls && cfg.ball_save_s && pm_ball_save(cfg.ball_save_s);   /* no refusal stops the mode */
+    if (cfg.scoop_ms) pm_scoop_hold(cfg.scoop_ms);       /* PAD-381: the runtime lets it go when the mode ends */
     run.no_clock = cfg.seconds == 0;
     run.active = 1;
     run.slot = M;

@@ -260,6 +260,14 @@ def test_pick_clip_takes_a_mods_own():
     assert mb.pick_clip(table, base, {"other.ogv": e(b"9")}, 1) is None
 
 
+def test_a_missing_sample_decoder_is_the_fallback_sound_not_a_failed_build(monkeypatch, tmp_path):
+    """COOLTOY's Mac (2026-10-05): the container carried the pack reader but not
+    plugins.bof.source_converter, and the media step died on the ImportError.  Now
+    the sound is simply not the game's own (the caller falls back to the synth)."""
+    monkeypatch.setitem(sys.modules, "pinball_decryptor.plugins.bof.source_converter", None)
+    assert mb._sound_out("prog", None, {}, "res", "assets/sounds/sfx/x.wav", str(tmp_path)) is None
+
+
 def test_copy_out_checks_the_md5(tmp_path):
     prog = tmp_path / "prog"
     prog.write_bytes(b"ENGINE" + b"PCKHDR" + b"hello clip" + b"tail")

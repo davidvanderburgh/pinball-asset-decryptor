@@ -127,9 +127,14 @@ _RIGS = ("jjp_emu", "spike2_emu", "bof_emu")
 #: directories with plugins.bof.pck_directory to make the delta that keeps a
 #: BOF multi-boot update under FAT32's 4 GiB (PAD-342).  The app's own copy
 #: is inside the bundle's archive, so the build ships these as files
-#: (installer/build_macos.sh) and they are staged from there.
+#: (installer/build_macos.sh) and they are staged from there.  'auto' sound
+#: decodes the game's own samples with plugins.bof.source_converter (and its
+#: QOA decoder): without them a Mac build's media step failed with an
+#: ImportError (COOLTOY, 2026-10-05).
 _PACKAGE_FILES = ("pinball_decryptor/plugins/bof/pck_directory.py",
-                  "pinball_decryptor/plugins/bof/aes_py.py")
+                  "pinball_decryptor/plugins/bof/aes_py.py",
+                  "pinball_decryptor/plugins/bof/source_converter.py",
+                  "pinball_decryptor/plugins/bof/qoa_codec.py")
 
 #: Copied without these - build scratch that is large, useless in the
 #: container, and in __pycache__'s case actively wrong (host .pyc files).

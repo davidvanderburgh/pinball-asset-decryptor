@@ -1342,7 +1342,13 @@ def _sound_out(program, d, files, res, src, mdir):
     """A packed sample (*res*, from *src*) decoded to a sound file in *mdir*, written once - a
     .wav for PCM and QOA (plugins/bof/source_converter.py), an .ogg passed through.  None when
     it does not decode."""
-    from pinball_decryptor.plugins.bof import source_converter
+    try:
+        from pinball_decryptor.plugins.bof import source_converter
+    except ImportError as e:
+        # an install that does not carry the decoder: the fallback sound, never a failed build
+        # (a Mac build stopped here with the module missing from its container, 2026-10-05)
+        say("note: the game's sounds cannot be decoded here (%s)" % e)
+        return None
     stem = os.path.join(mdir, re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.splitext(src)[0]))
     for ext in (".wav", ".ogg"):
         if os.path.isfile(stem + ext):

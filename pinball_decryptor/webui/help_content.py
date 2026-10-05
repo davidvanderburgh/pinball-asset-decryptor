@@ -528,7 +528,9 @@ HELP_CONTENT = {
                  "text": "The card mark at a row's end (or right-click). Write leaves it "
                          "off the card; the row is struck through."},
                 {"icon": "trash", "tone": "err", "title": "Delete",
-                 "text": "Hides the selection in both."}]},
+                 "text": "**Delete** (or right-click) asks first. A layer you added is "
+                         "taken out; the game's own are hidden in both. **Undo** brings "
+                         "it back."}]},
             "- A new scene opens with eyes shut on layers hidden in the game; **Reset** "
             "puts eyes back.\n"
             "- Selecting shows a layer even with its eye shut; it never changes an eye.\n"

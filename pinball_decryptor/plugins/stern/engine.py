@@ -3769,10 +3769,17 @@ def _shader_colour_profile(assets_dir):
     everything the game draws (PAD-305), or ``None``: no profile staged on
     the Color profile tab, an Emulate run's "Stock colors" hold
     (core/colour_profile.forced) and a profile that changes nothing all
-    answer ``None``.  Never raises."""
+    answer ``None``.  An Emulate run with "Show it through the machine's
+    screen" (PAD-389) gets a shader_profile.Shown: the profile, then the
+    Machine screen.  Never raises."""
     try:
         from ...core import colour_profile
-        return colour_profile.active(assets_dir)
+        prof = colour_profile.active(assets_dir)
+        screen = colour_profile.emulated_screen(assets_dir)
+        if screen is None:
+            return prof
+        from .shader_profile import Shown
+        return Shown(prof, screen)
     except Exception:                                   # noqa: BLE001
         return None
 

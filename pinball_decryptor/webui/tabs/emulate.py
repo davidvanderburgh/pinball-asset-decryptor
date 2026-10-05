@@ -133,6 +133,10 @@ class EmulateTab(TabService):
         # correction (the profile is made for the machine's screen, and the
         # emulator is watched on the PC's).  Not remembered: off each session.
         self.emulate_colour_stock_var = self.var("colour_stock", "bool", False)
+        # PAD-389 (DragonRR): draw the game through the Machine screen, so
+        # the PC shows what the machine's own screen will.  Off by default.
+        self.emulate_machine_screen_var = self.var("machine_screen", "bool",
+                                                   False)
         self.emulate_country_var = self.var("country", "str",
                                             rig.COUNTRY_GAME)
         self.emulate_power_var = self.var("power", "str",
@@ -235,6 +239,8 @@ class EmulateTab(TabService):
             "write", lambda *_a: self._overrides_paint())
         self.emulate_colour_stock_var.trace_add(
             "write", lambda *_a: self._on_colour_stock())
+        self.emulate_machine_screen_var.trace_add(
+            "write", lambda *_a: self.colour_live())
         self._volume_var.trace_add("write", self._on_volume_change)
         self._mute_var.trace_add("write", self._on_volume_change)
 
@@ -1725,9 +1731,21 @@ class EmulateTab(TabService):
         if stock and colour_profile.for_project(assets) is not None:
             self._log("[emulate] stock colors: your color profile is left "
                       "out of this run")
-        with colour_profile.forced(False if stock else None):
+        screen = self._machine_screen_on()
+        if screen:
+            self._log("[emulate] the game is drawn through your Machine "
+                      "screen, as the machine's own screen will show it "
+                      "(this run only; a Write never carries it)")
+        with colour_profile.forced(False if stock else None),                 colour_profile.through_screen(screen):
             return self._prepare_overrides_inner(card, assets,
                                                  selector=selector)
+
+    def _machine_screen_on(self):
+        """PAD-389: is "Show it through the machine's screen" ticked?"""
+        try:
+            return bool(self.emulate_machine_screen_var.get())
+        except Exception:                                # noqa: BLE001
+            return False
 
     def _prepare_overrides_inner(self, card, assets, selector=False):
         from ...core.checksums import read_checksums

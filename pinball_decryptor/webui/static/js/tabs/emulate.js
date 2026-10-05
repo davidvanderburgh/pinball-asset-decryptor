@@ -193,10 +193,13 @@ function CardSource({ s }) {
           label="Include my Scenes tab edits"
           title="On: the game runs with what you changed on the Scenes tab (and takes further edits there while it runs, for the screens it loads each time it shows them). Off: the scenes run as the card has them; everything else you replaced still applies." />
       </div>` : null}
-      ${s.overrides && s.colour_offer ? html`<div class="emu-ovr-sub">
-        <${Check} ns="emulate" k="colour_stock" checked=${!!s.colour_stock}
+      ${s.overrides ? html`<div class="emu-ovr-sub">
+        ${s.colour_offer ? html`<${Check} ns="emulate" k="colour_stock" checked=${!!s.colour_stock}
           label="Stock colors: leave out my color profile"
-          title="Your color profile corrects colors for the machine's screen, so on this PC it can look darker or warmer than you made it. Tick this to see your pictures and videos here exactly as you made them. Builds still apply the profile. Flip it while the game runs to switch live: a video or a screen the game loads each time it shows changes the next time it shows; a screen loaded at boot changes at the next Start." />
+          title="Your color profile corrects colors for the machine's screen, so on this PC it can look darker or warmer than you made it. Tick this to see your pictures and videos here exactly as you made them. Builds still apply the profile. Flip it while the game runs to switch live: a video or a screen the game loads each time it shows changes the next time it shows; a screen loaded at boot changes at the next Start." />` : null}
+        <${Check} ns="emulate" k="machine_screen" checked=${!!s.machine_screen}
+          label="Show it through the machine's screen"
+          title="Draws everything through your Machine screen (Color profile tab), the way the Scenes preview does, so this PC shows the colors the machine's own screen will. Off: you see the colors exactly as they go on the card, which on a PC look darker or bluer where your color profiles correct for the machine. Only for this emulator: a Write never carries it. Takes effect at the next Start." />
         ${s.colour_live ? html`<div class="small muted">${s.colour_live}</div>` : null}
       </div>` : null}
       <div class="row emu-ovr-row">

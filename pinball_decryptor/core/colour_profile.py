@@ -842,14 +842,50 @@ def active(assets_dir):
     return None if prof is None or prof.is_identity() else prof
 
 
+#: The Emulate tab's "Show it through the machine's screen" (PAD-389): while
+#: :func:`through_screen` holds it on, a build also draws everything through
+#: the Machine screen, so the emulator on a PC shows what the machine's own
+#: screen will.  Module-wide like :data:`_FORCED`, and only an Emulate run's
+#: preparation ever turns it on: a Write never carries the screen.
+_THROUGH_SCREEN = False
+
+
+@contextlib.contextmanager
+def through_screen(on):
+    """Within the block, :func:`emulated_screen` answers the Machine screen
+    when *on*."""
+    global _THROUGH_SCREEN
+    with _FORCED_LOCK:
+        prev, _THROUGH_SCREEN = _THROUGH_SCREEN, bool(on)
+    try:
+        yield
+    finally:
+        with _FORCED_LOCK:
+            _THROUGH_SCREEN = prev
+
+
+def emulated_screen(assets_dir):
+    """The Machine screen an Emulate run draws everything through, after the
+    whole screen overlay (as the Scenes preview does), or ``None``: not held
+    on by :func:`through_screen`, or a screen that changes nothing."""
+    if not _THROUGH_SCREEN or not assets_dir:
+        return None
+    screen = screen_shown(assets_dir)[0]
+    return None if screen is None or screen.is_identity() else screen
+
+
 def signature(assets_dir):
     """A short text that changes whenever what :func:`active` would apply
     changes ("" when nothing): an emulator override set records it so a
-    changed or held-off profile rebuilds the set rather than reusing it."""
+    changed or held-off profile rebuilds the set rather than reusing it.
+    The Machine screen an Emulate run shows (:func:`emulated_screen`) counts
+    too."""
     prof = active(assets_dir)
-    if prof is None:
-        return ""
-    return prof.key()
+    out = "" if prof is None else prof.key()
+    screen = emulated_screen(assets_dir)
+    if screen is not None:
+        out += "|screen:" + screen.key()
+    return out
 
 
 # -- the chosen-files profile (PAD-312) ---------------------------------------

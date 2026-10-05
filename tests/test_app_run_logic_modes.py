@@ -3081,7 +3081,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
 
     sections = HD.sections_for("Modes")
     assert [t for t, _b in sections] == [
-        "What it's for", "Which games", "Making a mode", "Several modes",
+        "What it's for", "What it can't do", "Which games", "Making a mode", "Several modes",
         "Scores and Insider Connected", "Another card", "Save and load a file",
         "Try it", "Modes written in C", "Modes made of blocks", "The game's own modes",
         "Cut from a video",
@@ -3104,6 +3104,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert "All to stock" in stock and "Defaults tab" in stock and "Text tab" in stock
     assert "listed under yours" in stock and "All timers and awards" in stock
     assert "never the video" in bodies["Cut from a video"]
+    assert "MODE_LIMITS.md" in bodies["What it can't do"] and "seven slots" in bodies["What it can't do"]
     assert "Examples" not in bodies["Making a mode"] and "under Examples" not in json.dumps(bodies)
     assert "as many modes as you make" in bodies["Several modes"] and "counted apart" in bodies["Several modes"]
     for title, body in sections:

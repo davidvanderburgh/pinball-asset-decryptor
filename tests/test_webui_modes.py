@@ -757,6 +757,34 @@ def test_the_sdk_document_is_always_reachable(tmp_path, preview_on):
         assert w.state("modes")["tryit_line"] == MP.NO_PROJECT_HELP
 
 
+def test_the_limits_document_is_reachable_and_its_sizes_are_the_editors(tmp_path, preview_on):
+    """PAD-380: "What a mode can and can't do" opens MODE_LIMITS.md beside MODE_SDK.md, and
+    its Sizes table says the numbers the blocks editor enforces."""
+    import os
+    from pinball_decryptor.plugins.stern import block_modes as BM
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        opened = []
+        svc._opener = opened.append
+        st = w.state("modes")
+        assert st["limits_doc"] == svc.limits_doc()
+        assert os.path.dirname(st["limits_doc"]) == os.path.dirname(st["sdk_doc"])
+        assert w.call("modes.open_limits_doc") is True
+        assert opened == [svc.limits_doc()]
+    with open(svc.limits_doc(), encoding="utf-8") as fh:
+        doc = fh.read()
+    for words in ("%d scripts, %d blocks, nested at most %d deep" % (
+                      BM.MAX_SCRIPTS, BM.MAX_BLOCKS, BM.MAX_DEPTH),
+                  "%d per mode, names up to 24 characters" % BM.MAX_VARS,
+                  "%d per mode, up to %d seconds each" % (BM.MAX_TIMERS, BM.SECONDS_MAX),
+                  "up to %d seconds (0 = no clock)" % BM.SECONDS_MAX,
+                  "A blocks or C mode: %d. Each" % BM.MAX_CLIPS,
+                  "A blocks or C mode: %d. WAV" % BM.MAX_SOUNDS,
+                  "%d per project" % MP.MAX_MODES):
+        assert words in doc, words
+
+
 # ------------------------------------------------------------------ Try it, for real
 class _R:
     returncode = 0

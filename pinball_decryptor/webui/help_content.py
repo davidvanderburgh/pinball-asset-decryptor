@@ -3039,6 +3039,19 @@ PREVIEW_HELP = {
              "running game reads, so it behaves like a mode the game shipped with: "
              "it scores through the game's own scoring and plays through its own "
              "light and sound calls."),
+            ("What it can't do",
+             "The game's own modes are compiled code in the game program, and the "
+             "app does not rewrite that code. So a mode of your own is wide open "
+             "(its own start, shots, scoring, screen, clips, sounds, music and "
+             "lights); the game's own modes change only where the game keeps a "
+             "timer or an award as one number; and the game's progression, "
+             "operator settings, coils and magnets, high score table and Insider "
+             "Connected reports are not something a mode changes. One example: "
+             "Godzilla's BATTLE SELECTION screen has seven slots fixed in its "
+             "code, so a new monster cannot be added, but a mode can take one "
+             "slot's place. 'What a mode can and can't do', on the first mode's "
+             "page and under New, opens the whole list with worked examples "
+             "(MODE_LIMITS.md, beside MODE_SDK.md)."),
             ("Which games", _modes_which_games),
             ("Making a mode",
              "New, over the list, makes a blank mode or one from an example (KAIJU "

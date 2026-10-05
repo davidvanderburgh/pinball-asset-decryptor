@@ -240,7 +240,7 @@ project open and nothing ticked. The log says what was found:
 | log | `pm_log("...")` | goes to `/dump/mode.log`, prefixed with your mode's name |
 | wait for the game's own battle or multiball | `pm_stock_mode_running(PM_STOCK_BATTLE \| PM_STOCK_MULTIBALL)` | the kind found (`pm_stock_mode_what` names it), 0 none, -1 this port cannot tell; see "The game's own modes" |
 | react to what the game does | `.event = fn(unsigned id)` and `pm_event("ball_start")` | see "Events" below |
-| keep the game's lesser displays off your clip and screen | `pm_display_priority(180)` (mode file: `priority 180`) | see "Display priority" at the end |
+| note your mode's display priority | `pm_display_priority(180)` (mode file: `priority 180`) | it no longer holds the game's displays back (PAD-353); see "Display priority" at the end |
 
 ### Screens
 

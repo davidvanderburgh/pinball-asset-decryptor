@@ -150,7 +150,7 @@
 struct opts {
     const char *conf, *out, *input, *nodebus, *spi, *padsw, *tables, *last, *log,
                *headless, *font, *preamble, *media, *audio, *audio_fmt, *audio_dump,
-               *snapshot, *codec, *jjpio, *volume_file;
+               *snapshot, *codec, *jjpio, *volume_file, *fast;
     /* PAD-307: the values file, and the boot hook's apply step:
      * --apply-color --image N --program PATH --to OUT */
     const char *colour_file, *apply_program, *apply_to;
@@ -199,11 +199,15 @@ static void usage(FILE *f)
         "codeselect " VERSION " - Spike 2 boot-time code selector\n"
         "  --conf PATH        images.conf (default " DEF_CONF ")\n"
         "  --out PATH         choice file, one line '<index>' (default " DEF_OUT ")\n"
-        "  --input hw|padsw|jjpio|none   button source (default hw; jjpio = a JJP machine's I/O board)\n"
+        "  --input hw|padsw|jjpio|fast|none   button source (default hw; jjpio = a JJP machine's I/O\n"
+        "                     board; fast = a Barrels of Fun machine's FAST Neuron)\n"
         "  --nodebus DEV      node bus tty (default /dev/ttymxc1)\n"
         "  --spi DEV          cabinet spidev, 'none' disables (default /dev/spidev1.0)\n"
         "  --jjpio DEV        jjpio: the I/O board node (default /dev/jjpio100, then /dev/jjpio0)\n"
-        "  --learn            jjpio: log the four cabinet bytes whenever they change (calibration)\n"
+        "  --fast DEV         fast: the Neuron's NET port (default: ask every /dev/ttyACM* but the\n"
+        "                     Audio Controller ID: and take the one answering ID:NET)\n"
+        "  --learn            jjpio: log the four cabinet bytes whenever they change (calibration);\n"
+        "                     fast: log every switch that changes\n"
         "  --padsw PATH       rig keyboard file (default $PAD_SW_SHM or /dump/padsw)\n"
         "  --tables PATH      switch_list.txt (default /dump/tables/$PAD_GAME/switch_list.txt)\n"
         "  --timeout SEC      countdown, 0 = wait for ever (overrides conf)\n"
@@ -337,6 +341,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         ARG("--audio-dump", audio_dump)
         ARG("--codec", codec)
         ARG("--jjpio", jjpio)
+        ARG("--fast", fast)
         ARG("--volume-file", volume_file)
         ARG("--color-file", colour_file)
         ARG("--program", apply_program)
@@ -370,8 +375,8 @@ missing:
         return -1;
     }
     if (strcmp(o->input, "hw") && strcmp(o->input, "padsw") && strcmp(o->input, "jjpio")
-        && strcmp(o->input, "none")) {
-        fprintf(stderr, "codeselect: --input must be hw, padsw, jjpio or none\n");
+        && strcmp(o->input, "fast") && strcmp(o->input, "none")) {
+        fprintf(stderr, "codeselect: --input must be hw, padsw, jjpio, fast or none\n");
         return -1;
     }
     if (strcmp(o->codec, "auto") && strcmp(o->codec, "off")) {
@@ -2112,9 +2117,20 @@ int main(int argc, char **argv)
             icfg.jjp_bit2[k] = c.jjp_bit2[k];
         }
     }
+    /* fast (PAD-342): the NET port, and LEFT / RIGHT / START as switch
+     * numbers (the conf's switch_*=, else the backend's Labyrinth defaults) */
+    icfg.fast = o.fast;
+    {
+        int k;
+        for (k = 0; k < 3; k++) {
+            icfg.fast_sw[k] = c.fast_sw[k];
+            icfg.fast_sw2[k] = c.fast_sw2[k];
+        }
+    }
     if (!strcmp(o.input, "hw")) in = input_hw_open(&icfg);
     else if (!strcmp(o.input, "padsw")) in = input_padsw_open(&icfg);
     else if (!strcmp(o.input, "jjpio")) in = input_jjpio_open(&icfg);
+    else if (!strcmp(o.input, "fast")) in = input_fast_open(&icfg);
 
     /* THE AUDIO SECTION, in the game's order (0x1fa9c8 then 0x1fb2a8): the
      * codecs as found go in the log; the amplifiers are muted in the cabinet

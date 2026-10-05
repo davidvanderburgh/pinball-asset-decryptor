@@ -74,10 +74,11 @@ export default function MultibootTab() {
     };
   }, []);
 
-  const jjp = w.platform === "jjp";
-  const sub = jjp
+  // the platform's own line (PAD-342: the backend says it; the two old
+  // sentences stay for a server that does not)
+  const sub = w.sub || (w.platform === "jjp"
     ? "Two game installs on one USB install stick, with a boot menu the machine shows on power-up."
-    : "Several game images on one SD card, with a boot menu the machine shows on power-up.";
+    : "Several game images on one SD card, with a boot menu the machine shows on power-up.");
 
   if (s.broken) {
     return html`<div class="page mb-page">
@@ -138,8 +139,11 @@ function MenuCard({ s, w, busy }) {
   const pv = s.preview || {};
   const [full, setFull] = useState(false);
   const groups = s.summary_groups;
+  const silent = w.sound === false;
   const footer = html`<${Button} onClick=${() => call("multiboot.menu_settings")} disabled=${busy}>Menu settings…<//>
-    <span class="small muted grow mb-foot-hint">Select in the preview plays the confirm sound and holds the LOADING frame, as the machine will.</span>`;
+    <span class="small muted grow mb-foot-hint">${silent
+      ? "Select in the preview holds the LOADING frame, as the machine will. This menu has no sound."
+      : "Select in the preview plays the confirm sound and holds the LOADING frame, as the machine will."}</span>`;
   return html`<${Card} cls="mb-menu" title="Boot menu" sub="drawn by the selector itself, redrawn on every change" footer=${footer}>
     <${Screen} pv=${pv} tipText=${w.preview_tip} busy=${busy} openFull=${() => setFull(true)} />
     ${full ? html`<${FullView} s=${s} w=${w} busy=${busy} onClose=${() => setFull(false)} />` : null}
@@ -150,12 +154,12 @@ function MenuCard({ s, w, busy }) {
         <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", 1)}>Right flipper ▸<//>
       </div>
       <span class="grow"></span>
-      <div class="row mb-vol" ...${tip(w.volume_tip)}>
+      ${silent ? null : html`<div class="row mb-vol" ...${tip(w.volume_tip)}>
         <label class="lbl" for="mb-vol">Volume</label>
         <input type="range" id="mb-vol" min="0" max="100" step="1" value=${Math.round(Number(s.pv_gain ?? 100))}
           onInput=${(e) => setField(NS, "pv_gain", Number(e.target.value), { delay: 120 })} />
         <${Check} ns=${NS} k="pv_mute" checked=${s.pv_mute} label="Mute" />
-      </div>
+      </div>`}
     </div>
     ${pv.video || pv.audio || pv.caption ? html`<div class="row mb-readout small">
       ${pv.video ? html`<span class="muted nw" ...${tip(w.media_tip)}>Video: ${pv.video}</span>` : null}
@@ -335,6 +339,11 @@ function ImagesCard({ s, w, busy }) {
     { key: "code", label: "Code", width: "52px", cls: "mono" },
     acts,
   ];
+  // PAD-342: a silent menu has no music or confirm sound to show, and only a
+  // Spike 2 card keeps per-image scores
+  const dropKeys = new Set([...(w.sound === false ? ["music", "sound"] : []),
+    ...(w.scores_column === false ? ["scores"] : [])]);
+  const shown = cols.filter((c) => !dropKeys.has(c.key));
   const n = rows.length;
   // room for every row and one more (up to eight), so a selected row is
   // never scrolled under the sticky header
@@ -348,7 +357,7 @@ function ImagesCard({ s, w, busy }) {
     <${Icon} name="plus" /><span>${w.add_text || "Add image or random…"}</span></button>`;
   return html`<${Card} cls="mb-images" head=${head} bodyCls="flush mb-images-bd">
     <div ref=${box} class="mb-tablebox" onContextMenu=${tableMenu}>
-    <${Table} key=${narrow ? "n" : "w"} cls="mb-table" columns=${cols} rows=${rows} rowKey=${(r) => r.i} selected=${s.sel}
+    <${Table} key=${narrow ? "n" : "w"} cls="mb-table" columns=${shown} rows=${rows} rowKey=${(r) => r.i} selected=${s.sel}
       style=${`height:${h}px`} empty=${empty}
       onSelect=${(r, i, e) => (e && e.type === "keydown" ? call("multiboot.select", r.i) : call("multiboot.cell_clicked", r.i))}
       onActivate=${(r) => call("multiboot.edit", r.i)}
@@ -366,7 +375,7 @@ function CardCard({ s, w, busy }) {
     <${Button} kind=${mode === "build" ? "primary" : "danger solid"} size="big" icon=${mode === "build" ? "multiboot" : "stop"}
       disabled=${mode === "cancelling"} title=${mode === "build" ? w.build_tip : w.cancel_tip}
       onClick=${() => call("multiboot.build_flash")}>${mode === "build" ? (w.build_text || "Build / flash card…") : mode === "cancel" ? w.cancel_text : w.cancelling_text}<//>
-    <${Button} disabled=${busy} onClick=${() => call("multiboot.run_emulator")}>Run in emulator<//>
+    ${w.emulate === false ? null : html`<${Button} disabled=${busy} onClick=${() => call("multiboot.run_emulator")}>Run in emulator<//>`}
     ${w.extract ? html`<${Button} kind="ghost" disabled=${!s.recover_live} title=${w.recover_tip} onClick=${() => call("multiboot.recover")}>Recover images…<//>` : null}`;
   const bad = s.card_state === "bad";
   const noun = String(w.out_noun || "card");
@@ -380,7 +389,7 @@ function CardCard({ s, w, busy }) {
         <div class="row mb-pathbtns">
           ${w.read_card ? html`<${Button} disabled=${busy} title=${w.from_card_tip} onClick=${() => call("multiboot.from_card")}>From SD card…<//>` : null}
           <${Button} disabled=${busy} onClick=${() => call("multiboot.browse")}>Browse…<//>
-          <${Button} kind="ghost" disabled=${busy} title=${w.new_tip} onClick=${() => call("multiboot.new_card")}>New card<//>
+          <${Button} kind="ghost" disabled=${busy} title=${w.new_tip} onClick=${() => call("multiboot.new_card")}>${w.new_text || "New card"}<//>
         </div>
       </div>
       <span class=${cx("small", bad ? "err-ink" : "muted")}>${s.card_detail || "Enter reads a card at that path; a new name is where the card is written."}</span>
@@ -473,14 +482,14 @@ function EditDialog({ s, w }) {
           <${Check} ns=${NS} k="ed_own_scores" checked=${s.ed_own_scores} label=${ed.scores_label} />
           <span class="small muted">${ed.scores_note}</span>
         <//>` : null}
-        <${Box} legend="Sounds">
+        ${w.sound === false ? null : html`<${Box} legend="Sounds">
           <div class="kv mb-kv2">
             <${SoundRow} label="Music:" field="ed_music" value=${s.ed_music} words=${ed.music_words} used=${ed.used} playTip=${w.play_tip} />
             <${SoundRow} label="Confirm sound:" field="ed_confirm" value=${s.ed_confirm} words=${ed.confirm_words} used=${ed.used} playTip=${w.play_tip} />
             <span></span><span class="small dim">${ed.confirm_note}</span>
           </div>
           <span class="small muted">${ed.sounds_note}</span>
-        <//>
+        <//>`}
       </div>
       <${Box} legend="Preview" cls="mb-ed-pv"><${CardPreview} card=${ed.card} /><//>
     </div>
@@ -546,7 +555,7 @@ function MenuDialog({ s, w }) {
   const num = { type: "number", min: 0, step: 1, width: 90 };
   return html`<${Modal} title="Menu settings" onClose=${grabbed("mb-dlg-menu", cancel)} wide cls="mb-dlg mb-dlg-menu" footer=${footer}>
     <div class="stack mb-md" onKeyDown=${okOnEnter(ok)}>
-    <${Box} legend="Sounds">
+    ${w.sound === false ? null : html`<${Box} legend="Sounds">
       <div class="kv mb-kv2">
         <${SoundRow} label="Move sound:" field="move" value=${s.move} words=${md.sound_words} used=${md.used} playTip=${w.play_tip} />
         <${SoundRow} label="Confirm sound:" field="confirm" value=${s.confirm} words=${md.sound_words} used=${md.used} playTip=${w.play_tip} />
@@ -556,7 +565,7 @@ function MenuDialog({ s, w }) {
       ${w.machine_volume ? html`<${Check} ns=${NS} k="machine_vol" checked=${s.machine_vol} wrap
         label="On the machine, play at its own volume setting (recommended)" />` : null}
       <span class="small muted">${md.sounds_note}</span>
-    <//>
+    <//>`}
     <${Box} legend="Look">
       <div class="kv mb-kv2">
         <label class="k" for=${fid("heading")}>Heading:</label>
@@ -623,12 +632,14 @@ function BuildDialog({ s, w }) {
         onChange=${(v) => call("multiboot.build_tick", "write", v)} />
       <p class="small muted mb-indent mb-p">${bf.write_detail}</p>
     <//>
-    <${Box} legend=${w.flash_frame}>
+    ${w.flash === false ? html`<${Box} legend=${w.flash_frame}>
+      <p class="small muted mb-p wrap">${w.flash_detail}</p>
+    <//>` : html`<${Box} legend=${w.flash_frame}>
       <${Check} checked=${bf.flash} disabled=${!canFlash} wrap label=${w.flash_tick}
         onChange=${(v) => call("multiboot.build_tick", "flash", v)} />
       <p class="small muted mb-indent mb-p wrap">${w.flash_detail}</p>
       ${!canFlash ? html`<p class="small muted mb-indent mb-p">There is no finished card to flash yet - build one first.</p>` : null}
-    <//>
+    <//>`}
     </div>
   <//>`;
 }

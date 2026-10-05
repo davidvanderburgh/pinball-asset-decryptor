@@ -54,6 +54,13 @@ struct input_cfg {
     int jjp_byte[5], jjp_bit[5];
     int jjp_byte2[5], jjp_bit2[5];   /* a second place for each (byte -1 = none) */
     int jjp_learn;
+    /* fast (a Barrels of Fun machine, input_fast.c, PAD-342): the FAST NET
+     * port, or NULL to probe /dev/ttyACM*; the LEFT, RIGHT and START buttons
+     * as switch numbers in the Neuron's SA: reply (-1 = the defaults:
+     * Labyrinth's), and a second switch for each (-1 = none).  --learn is
+     * jjp_learn above, one flag for both boards. */
+    const char *fast;
+    int fast_sw[3], fast_sw2[3];
 };
 
 struct input;
@@ -94,6 +101,9 @@ struct input *input_padsw_open(const struct input_cfg *cfg);
 /* jjpio: a JJP machine's cabinet buttons off /dev/jjpio (input_jjpio.c);
  * only in the JJP build - the Stern build does not link it */
 struct input *input_jjpio_open(const struct input_cfg *cfg);
+/* fast: a BOF machine's cabinet buttons off its FAST Neuron (input_fast.c);
+ * only in the BOF build */
+struct input *input_fast_open(const struct input_cfg *cfg);
 /* hw only - no-ops on every other backend (they return -1 / do nothing):
  *   input_hw_bridge  sends the CPU board's bridge MCU a one-argument command
  *                    ({cmd, 01, arg}, write-only, like the game's 0x59ebac)

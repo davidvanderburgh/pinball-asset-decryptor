@@ -92,6 +92,12 @@ pyinstaller \
     `# macOS build has ever been able to plan or build a multi-boot ISO` \
     `# (PAD-192).` \
     --add-data "$ROOT_DIR/tools/jjp_emu:tools/jjp_emu" \
+    `# The Barrels of Fun rig, for the BOF Multi-boot tab (PAD-342), staged` \
+    `# into the tab's container with the two leaf modules mkbofmulti.py` \
+    `# imports from a bare python3 (multiboot_docker._PACKAGE_FILES).` \
+    --add-data "$ROOT_DIR/tools/bof_emu:tools/bof_emu" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/pck_directory.py:pinball_decryptor/plugins/bof" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto_v3.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/filelist.py:pinball_decryptor/plugins/jjp" \

@@ -10,6 +10,7 @@ import types
 
 import pytest
 
+from pinball_decryptor.webui import multiboot_core as mt
 from tests.webui_harness import web_app
 
 
@@ -93,6 +94,78 @@ def test_jjp_words_and_gating(tmp_path):
             "Install ISO", "Images", "Built", "Ready for the stick"]
         # a JJP install has no random cards
         assert [c["attr"] for c in s["add_choices"]] == ["_add_image"]
+
+
+def test_bof_sound_random_card_and_four_builds(tmp_path):
+    # PAD-342: a Barrels of Fun update has the menu's sounds and a random card
+    # over the builds in the list; a .fun is named for its title, so each
+    # build sits in its own folder and no folder of builds makes a group
+    funs = []
+    for name in ("Stock", "Sarah", "Third", "Fourth", "Fifth"):
+        (tmp_path / name).mkdir()
+        funs.append(_raw(tmp_path, name + "/lab.fun"))
+    with web_app(tmp_path, mfr="bof") as w:
+        s = _st(w)
+        w_ = s["w"]
+        assert w_["platform"] == "bof" and w_["sound"] and w_["groups"]
+        assert w_["add_text"] == "Add another build or random…"
+        assert [c["attr"] for c in s["add_choices"]] == [
+            "_add_image", "_add_random_over_existing"]
+        _add(w, funs[0])
+        _add(w, funs[1])
+        w.call("multiboot.add_choice", "_add_random_over_existing")
+        s = _st(w)
+        assert len(s["rows"]) == 3 and s["rows"][2]["group"]
+        rnd = _panel(w)._rows[2]
+        # a style is drawn from the builds' own stills, as on a Stern card
+        assert rnd.keep and mt.group_media_kind(rnd) == mt.GROUP_MEDIA_DEFAULT
+        # a new build's card is its own clip, moving, with its own music and the menu's confirm
+        row = _panel(w)._rows[1]
+        assert (row.art, row.anim, row.music, row.confirm) == ("auto", "auto", "auto", "")
+        # the random card is a card, not a build: two more builds fit, a fifth does not
+        _add(w, funs[2])
+        _add(w, funs[3])
+        assert len(_st(w)["rows"]) == 5
+        _add(w, funs[4])
+        s = _st(w)
+        assert len(s["rows"]) == 5
+        assert "At most 4 builds fit one update." in s["message"]
+
+
+def test_bof_auto_sounds_count_as_rendered(tmp_path):
+    # mkbofmulti media renders an 'auto' sound as the synthetic one and records
+    # 'synth' as its source; read as the form's 'auto', every sound looked stale,
+    # the strip said "not rendered" for good and each highlight rendered them again
+    import json
+    funs = []
+    for name in ("Stock", "Sarah"):
+        (tmp_path / name).mkdir()
+        funs.append(_raw(tmp_path, name + "/lab.fun"))
+    media = tmp_path / "multi" / "media"
+    media.mkdir(parents=True)
+    for f in ("move.wav", "confirm.wav"):
+        (media / f).write_bytes(b"RIFF")
+    (media / "media.json").write_text(json.dumps({
+        "sound_move": "move.wav", "sound_move_source": "synth",
+        "sound_confirm": "confirm.wav", "sound_confirm_source": "synth",
+        "images": [{"music": None, "music_source": "none", "confirm": None, "confirm_source": None}] * 2,
+        "groups": []}), encoding="utf-8")
+    with web_app(tmp_path, mfr="bof") as w:
+        _add(w, funs[0])
+        _add(w, funs[1])
+        panel = _panel(w)
+
+        def setup(move, music):
+            panel._out_var.set(str(tmp_path / "multi" / "lab.fun"))
+            panel._move_var.set(move)
+            panel._confirm_var.set("auto")
+            panel._rows[1].music = music
+        w.run(setup, "auto", "auto")
+        assert w.run(panel._sounds_missing) == []
+        assert w.run(panel._audio_state) == "ready"
+        # a sound the set was NOT rendered from is still stale
+        w.run(setup, "D:/snd/click.wav", "auto")
+        assert w.run(panel._sounds_missing) == ["the move sound"]
 
 
 @pytest.mark.parametrize("era", ["spike1", "whitestar"])

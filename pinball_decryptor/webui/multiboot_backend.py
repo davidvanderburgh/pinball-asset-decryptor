@@ -1,7 +1,8 @@
 """The Multi-boot tab's PLATFORMS (item 118): what the tab hard-coded for
 Stern, gathered into one object per manufacturer, so the same tab builds a
-Jersey Jack multi-boot install ISO with the same rows, the same preview and
-the same green button.
+Jersey Jack multi-boot install ISO - and, from PAD-342, a Barrels of Fun
+multi-boot update (.fun) - with the same rows, the same preview and the same
+green button.
 
 The tab (:mod:`.multiboot_core`) was written for ONE card: the Stern Spike 2
 SD card, ``tools/spike2_emu/mkmulticard.py`` behind it.  The 2026-09-12
@@ -97,10 +98,42 @@ class MultibootBackend:
     #: machine.  Only a Stern game can be adjusted (its colors are in its own
     #: drawing shaders), so only Stern offers the tick.
     settings_tile: bool = False
+    #: THE MENU'S SOUND: music, move / confirm sounds and the volume.  Every
+    #: platform has it.  A Barrels of Fun menu is one static binary that cannot
+    #: load the machine's sound library, so it streams its mix into a pipe and
+    #: the machine's own aplay plays it (padselect_bof.sh, PAD-342).
+    sound: bool = True
+    #: the per-image high-score store (PAD-226) is a Spike 2 card's: the column
+    #: is shown (blank) on JJP as it always was, and left off where it means
+    #: nothing at all
+    scores_column: bool = True
+    #: 'Run in emulator': JJP and Stern rigs boot a multi-boot image with its
+    #: menu; the BOF rig runs one program and has no menu step yet
+    emulate: bool = True
+    #: the Build dialog's second box - flash an SD card / make an install
+    #: stick.  A BOF update is ONE FILE copied onto a FAT32 stick, which the
+    #: tab says in words instead
+    flash: bool = True
+    #: the subtitle under the tab's heading
+    tab_sub: str = ("Several game images on one SD card, with a boot menu the "
+                    "machine shows on power-up.")
+    #: WHAT THE LIST'S ADD ROW OFFERS, by method name (None = every choice).  A
+    #: BOF update is named for its title (lab.fun), so every build sits in a
+    #: folder of its own: no folder holds a group's builds and no file dialog
+    #: picks several, so its random card is the one over builds already in the
+    #: list.  The edits folders are a Stern card's.
+    add_choices: frozenset = None
+    #: the BUILDS an output holds, when those and not the rows are the limit
+    #: (0 = the rows, max_cards).  A BOF update carries four builds in one FAT32
+    #: file, and a random card over them is a row that adds no build.
+    max_games: int = 0
 
     # ---- pure helpers -----------------------------------------------------
     def device(self, img):
-        """images.conf's device token for image *img* (0 = the primary)."""
+        """images.conf's device token for image *img* (0 = the primary).  On
+        BOF it is the program FILE the image becomes (mkbofmulti.py)."""
+        if self.key == "bof":
+            return "GDCraze.x86_64" if img == 0 else "pad_image%d.bin" % img
         if self.key == "jjp":
             return "rootA" if img == 0 else ("rootB" if img == 1 else "rootB:img%d" % img)
         return "p3" if img == 0 else ("p7" if img == 1 else "p7:img%d" % img)
@@ -114,6 +147,17 @@ class MultibootBackend:
         # the way the building machine spelled it, and a card built on
         # Windows is read on Linux too (os.path.basename splits only on /)
         b = re.split(r"[\\/]", path or "")[-1]
+        if self.key == "bof":
+            # A .fun is named for its TITLE (lab.fun) whatever build it is, so
+            # the file says which game and the folder may say which build:
+            # "Labyrinth (Sarah mod)" names the build, "BoF" names a library
+            parts = [x for x in re.split(r"[\\/]", path or "") if x]
+            folder = re.sub(r"[_\s]+", " ", parts[-2] if len(parts) > 1 else "").strip()
+            stem = re.sub(r"\.fun$", "", b, flags=re.I)
+            game = BOF_GAME_NAMES.get(b.lower(), stem)
+            if folder and game.lower() in folder.lower():
+                return folder, ""
+            return game, ""
         if self.key == "jjp":
             b = re.sub(r"\.(iso|raw|img)$", "", b, flags=re.I)
             return re.sub(r"[_\s]+", " ", b).strip(), ""
@@ -124,7 +168,12 @@ class MultibootBackend:
         return head, tail
 
     def output_name(self, primary):
-        """The default output's file name for a primary image."""
+        """The default output's file name for a primary image.  A BOF update
+        keeps its title's own name (lab.fun) - the machine's updater looks
+        for exactly that name on the stick - in the multi/ folder the caller
+        puts every output in."""
+        if self.key == "bof":
+            return os.path.basename(primary or "") or "lab.fun"
         base = os.path.basename(primary or "")
         stem = re.sub(r"\.(raw|img|iso)$", "", base, flags=re.I)
         return stem + self.out_suffix
@@ -132,6 +181,10 @@ class MultibootBackend:
     def is_image(self, path):
         return (path or "").strip().strip('"').lower().endswith(self.image_exts)
 
+
+#: a BOF .fun's own name -> the game it is (the title a fresh row starts with)
+BOF_GAME_NAMES = {"lab.fun": "Labyrinth", "dune.fun": "Dune",
+                  "winchester.fun": "Winchester Mystery House"}
 
 _SPIKE2 = "tools/spike2_emu"
 _JJP = "tools/jjp_emu"
@@ -227,9 +280,65 @@ JJP = MultibootBackend(
     selector_default="/var/tmp/jjpselect",
     selector_suffix="/jjpe/gen1/padselect", selector_binary="jjpe/gen1/padselect/jjpselect",
     preview_native=True, conf_font="/var/tmp/jjpselect/jjpe/gen1/padselect/font.ttf",
-    root_steps=frozenset(("selector", "prepare", "build", "verify", "inject")))
+    root_steps=frozenset(("selector", "prepare", "build", "verify", "inject")),
+    tab_sub=("Two game installs on one USB install stick, with a boot menu the "
+             "machine shows on power-up."))
 
-BACKENDS = {STERN.key: STERN, JJP.key: JJP}
+#: BARRELS OF FUN (PAD-342): Labyrinth's updater installs a .fun's one program
+#: and runs the update's own update.sh, which copies its .bash_profile over the
+#: machine's - so ONE .fun carries the stock program, every other build as a
+#: delta against it, the menu, and a profile that shows it first
+#: (tools/bof_emu/mkbofmulti.py).  Nothing needs root: the .fun files are
+#: decrypted into a cache under /var/tmp as the user, and the menu program is
+#: one static binary built natively (ensurebofselect.sh), which also draws the
+#: preview.  The output is one file on a FAT32 stick, so its size limit is the
+#: file system's 4 GiB, which the plan checks.
+_BOF = "tools/bof_emu"
+BOF = MultibootBackend(
+    key="bof", label="Barrels of Fun",
+    tool_dir=_BOF, tool=_BOF + "/mkbofmulti.py",
+    media_tool=(_BOF + "/mkbofmulti.py", "media"),
+    selector_src=_SPIKE2 + "/codeselect", ensure_tool=_BOF + "/ensurebofselect.sh",
+    card_flag="--fun",
+    image_exts=(".fun",),
+    image_types=(("Barrels of Fun updates", "*.fun"), ("All files", "*.*")),
+    image_noun="update (.fun)", image_pick_title="Pick a Barrels of Fun update (.fun) for the menu",
+    out_ext=".fun", out_suffix=".fun", out_noun="update",
+    out_label="Multi-boot update (.fun):",
+    empty_path_text=("No update yet. Add the .fun files below - the stock one "
+                     "first - and the path fills itself in, or type where the "
+                     "multi-boot .fun should be written."),
+    medium="USB stick", medium_needed="USB stick needed:", medium_holds="stick holds",
+    flash_frame="Put it on a USB stick",
+    flash_tick="Copy the update onto a USB stick",
+    flash_detail=("Copy the finished .fun onto a FAT32 USB stick under its own "
+                  "name (lab.fun for Labyrinth) and install it on the machine the "
+                  "way every Barrels of Fun update is installed. The install "
+                  "rebuilds the other builds from the stock one, checks every "
+                  "one, and shows the menu from the next power-up. Installing "
+                  "any normal update later takes the menu away again."),
+    build_flash_text="Build update…",
+    overhead_label="The menu, its pictures and the scripts",
+    sizes=(("8G", "8 GB"), ("16G", "16 GB"), ("32G", "32 GB"), ("64G", "64 GB")),
+    fits_re=re.compile(r"fits USB\s+(\d+G)\s+stick size\s+\d+:\s+(YES|NO)\s*\(spare\s+(-?\d+)\)"),
+    total_re=re.compile(r"^fun-size\s+(\d+)"),
+    status_checks=(("card", "Update"), ("images", "Images"),
+                   ("built", "Built"), ("ready", "Ready for the stick")),
+    max_cards=6, groups=True, compact=False, machine_volume=False,
+    # the attract clip is the build's own, out of its .fun (mkbofmulti.py media)
+    volume_default=50, volume_max=100, attract_clip=True,
+    update=False, bypass=False, extract=False, read_card=False,
+    selector_default="/var/tmp/bofselect",
+    selector_suffix="/bofselect", selector_binary="bofselect",
+    preview_native=True, conf_font="/var/tmp/bofselect/font.ttf",
+    root_steps=frozenset(),
+    sound=True, scores_column=False, emulate=False, flash=False,
+    tab_sub=("Several builds of one game in one update file, with a boot menu "
+             "the machine shows on power-up."),
+    add_choices=frozenset({"_add_image", "_add_random_over_existing"}),
+    max_games=4)
+
+BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF}
 
 
 def backend_for(what):

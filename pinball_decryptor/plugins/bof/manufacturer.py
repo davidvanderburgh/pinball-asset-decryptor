@@ -185,6 +185,12 @@ class BOFManufacturer(Manufacturer):
         # Emulate tab (PAD-257): run the .fun's game on this PC against the
         # emulated boards in tools/bof_emu.
         emulate_bof=True,
+        # Multi-boot (PAD-342): the Multi-boot tab with its BOF backend - the
+        # stock .fun and other builds of the same title become ONE .fun whose
+        # install puts a boot menu in front of the game
+        # (tools/bof_emu/mkbofmulti.py; the menu is the same code selector the
+        # Stern card carries, built static for the machine's Arch Linux).
+        multiboot=True,
         # Surfaces the "Update version date" control on the Write tab — the
         # game only applies a .fun dated newer than what's installed.
         write_version_date=True,

@@ -10,6 +10,14 @@
 #                           hardware files; the menu sources are the same copy.
 #                           JJPROOT=<mounted card image root> links against the
 #                           card's own libraries and proves every symbol.
+#   make PLATFORM=bof       a Barrels of Fun machine (PAD-342): x86-64, ONE
+#                           STATIC binary (the machine's Arch glibc is whatever
+#                           it is), as $(BUILD)/bofselect, plus $(BUILD)/paddelta,
+#                           the install step's program rebuilder.  fb_linux.c
+#                           (the console framebuffer BOF's own updater draws
+#                           on), input_fast.c (the FAST Neuron's SA: switch
+#                           levels) and stubs_bof.c (no codecs, no node bus, no
+#                           sound) stand in for the Stern hardware files.
 #
 # THE STERN BUILD.  The card rootfs copy ($(ROOT)) is used as the sysroot BY
 # HAND: the cross gcc searches its own tooldir /usr/arm-linux-gnueabihf/
@@ -33,6 +41,8 @@
 PLATFORM ?= stern
 ifeq ($(PLATFORM),jjp)
 BUILD    ?= build-jjp
+else ifeq ($(PLATFORM),bof)
+BUILD    ?= build-bof
 else
 BUILD    ?= build
 endif
@@ -98,8 +108,37 @@ endif
 GLLIBS    =
 AUDLIBS   =
 LIBC      =
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c input_fast.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
 HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h jjp_glibc.h $(BUILD)/theme_table.h
+else ifeq ($(PLATFORM),bof)
+# ---- BOF: native x86-64, the host gcc, STATIC, the machine's paths baked in ----
+# Everything the menu keeps lives under the update's own folder: the
+# machine's updater starts every update with rm -rf /home/pinball/extracted/*,
+# so a later normal update takes the whole multi-boot install away with it.
+CC        = gcc
+CROSS     =
+BINNAME   = bofselect
+PREFIX   ?= /home/pinball/extracted/decrypt/padselect
+QEMU      = $(CURDIR)/test/native.sh
+export QEMU
+CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
+            -DDEF_CONF='"$(PREFIX)/images.conf"' \
+            -DDEF_OUT='"/tmp/padselect.choice"' \
+            -DDEF_LAST='"$(PREFIX)/last"' \
+            -DDEF_FONT='"$(PREFIX)/font.ttf"' \
+            -DDEF_MEDIA='"$(PREFIX)/media"' \
+            -DDEF_COLOUR_FILE='"$(PREFIX)/color"' \
+            -DCARD_FONT='"/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"' \
+            -DFIFO_LEAD_MS=40 -DFIFO_PIPE_MAX_MS=120 \
+            -I$(BUILD) $(EXTRA_CFLAGS)
+LDPRE     = -static
+LDPOST    =
+GLLIBS    =
+AUDLIBS   =
+LIBC      = -lpthread -lm
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c input.c input_jjpio.c input_padsw.c input_fast.c stubs_bof.c log.c art.c audio.c audio_fifo.c nvm.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
 else
 # ---- Stern: the ARM cross build against the card rootfs ----
 CC        = $(CROSS)gcc
@@ -138,7 +177,7 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 AUDLIBS   = -l:libasound.so.2
 # input_jjpio.c is plain POSIX and rides along: codeselect.c dispatches every
 # backend by name, and on a Stern card `--input jjpio` finds no /dev/jjpio
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c input_fast.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
 HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
 endif
 
@@ -158,7 +197,17 @@ CAPBIN    = $(CAPBUILD)/$(BINNAME)
 OBJS = $(SRCS:%.c=$(BUILD)/%.o)
 BIN  = $(BUILD)/$(BINNAME)
 
+ifeq ($(PLATFORM),bof)
+# the install step's program rebuilder (paddelta.c): one static binary of its own
+DELTA = $(BUILD)/paddelta
+all: $(BIN) $(DELTA)
+
+$(DELTA): paddelta.c | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -static paddelta.c -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
+else
 all: $(BIN)
+endif
 
 $(BUILD):
 > mkdir -p $(BUILD)
@@ -184,7 +233,29 @@ $(BIN): $(OBJS)
 capbin:
 > $(MAKE) PLATFORM=$(PLATFORM) JJPROOT="$(JJPROOT)" BUILD="$(CAPBUILD)" EXTRA_CFLAGS=-DCONF_MAX_CARDS=$(CAP_N) "$(CAPBIN)"
 
-ifeq ($(PLATFORM),jjp)
+ifeq ($(PLATFORM),bof)
+check: $(BIN) $(DELTA)
+> bash test/check_elf_bof.sh "$(BIN)" "$(DELTA)"
+> bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> $(PYTHON) test/fast_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> $(PYTHON) test/paddelta_test.py "$(DELTA)" "$(BUILD)/t"
+> bash -n padselect_bof.sh && bash -n pad_install_bof.sh && bash test/padselect_bof_test.sh "$(BIN)" "$(DELTA)" "$(DEJAVU)"
+> bash test/fb_bof_test.sh "$(BIN)" "$(DEJAVU)"
+> @echo "check: OK (bof)"
+
+check-hw:
+> @echo "check-hw: the node-bus test is Stern's; the BOF board test is part of make check"
+
+# the menu, the rebuilder, the hook and the install step, all in the update's
+# own padselect folder (the builder copies them from here)
+install: $(BIN) $(DELTA)
+> install -d "$(DESTDIR)$(PREFIX)"
+> install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/bofselect"
+> install -m 755 "$(DELTA)" "$(DESTDIR)$(PREFIX)/paddelta"
+> install -m 755 padselect_bof.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
+> install -m 755 pad_install_bof.sh "$(DESTDIR)$(PREFIX)/pad_install.sh"
+> if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
+else ifeq ($(PLATFORM),jjp)
 check: $(BIN) capbin
 > bash test/check_elf_jjp.sh "$(BIN)" "$(JJPROOT)"
 > bash test/check_elf_jjp_selftest.sh "$(BUILD)/t"

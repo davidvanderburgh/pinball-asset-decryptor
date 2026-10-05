@@ -20,7 +20,8 @@ macOS and Linux.
 - **Emulate** the game on your PC to see and hear your changes before they
   go near the machine.
 - **Multi-boot**: put several complete games on one Stern Spike 2 SD card
-  (or Jersey Jack install stick) and pick one from a menu at power-up.
+  (or Jersey Jack install stick, or Barrels of Fun update) and pick one from a
+  menu at power-up.
 
 <p>
   <a href="docs/screenshots/stern-extract.png"><img src="docs/screenshots/stern-extract.png" width="49%" alt="The Extract tab with a Stern Godzilla LE SD-card image detected and per-type extract checkboxes"></a>
@@ -34,7 +35,7 @@ macOS and Linux.
 | Manufacturer | Games | What you can do |
 |---|---|---|
 | American Pinball | 6 | Extract, Write, Replace Audio/Video, Emulate |
-| Barrels of Fun | 4 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate (Bon Jovi: extract only) |
+| Barrels of Fun | 4 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate, Multi-boot (Labyrinth) (Bon Jovi: extract only) |
 | Chicago Gaming Company | 5 | Extract, Write, Mod Pack, Replace Audio |
 | Data East (classic DMD) | 16 | Capture DMD animations + sound with PinMAME |
 | Dutch Pinball | 2 | Extract, Write, Apply Delta, Mod Pack, Replace Audio/Video, Emulate |

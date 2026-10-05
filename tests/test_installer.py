@@ -1264,7 +1264,7 @@ def test_the_appimage_ships_the_rigs_its_multiboot_tab_runs():
     JJP ISO onto a game SSD runs mkjjpmulti.py the same way.  The Emulate JJP
     and Spike 1 tabs are WSL-only, so the AppImage needs no more than these."""
     linux_build = (INSTALLER / "build_linux.sh").read_text(encoding="utf-8")
-    for rig in ("spike2_emu", "jjp_emu"):
+    for rig in ("spike2_emu", "jjp_emu", "bof_emu"):
         assert "tools/%s:tools/%s" % (rig, rig) in linux_build, (
             "the AppImage does not carry tools/%s" % rig)
 
@@ -1284,9 +1284,22 @@ def test_the_mac_app_ships_the_rigs_its_multiboot_tab_runs():
     rig, so only the packaging list can show this.
     """
     mac_build = (INSTALLER / "build_macos.sh").read_text(encoding="utf-8")
-    for rig in ("spike2_emu", "jjp_emu"):
+    for rig in ("spike2_emu", "jjp_emu", "bof_emu"):
         assert "tools/%s:tools/%s" % (rig, rig) in mac_build, (
             "the macOS .app does not carry tools/%s" % rig)
+
+
+def test_the_bof_multiboot_builder_s_leaf_modules_ship_as_files():
+    """PAD-342: tools/bof_emu/mkbofmulti.py reads both programs' Godot pack
+    directories with plugins.bof.pck_directory from a bare python3; inside a
+    bundle the package is in the archive, so the two leaf modules ship as
+    files - or the delta falls back to byte offsets and the update outgrows a
+    FAT32 stick."""
+    for build in ("build_linux.sh", "build_macos.sh"):
+        text = (INSTALLER / build).read_text(encoding="utf-8")
+        for mod in ("pck_directory.py", "aes_py.py"):
+            assert ("pinball_decryptor/plugins/bof/%s:pinball_decryptor/plugins/bof" % mod) in text, (
+                "%s does not ship plugins/bof/%s" % (build, mod))
 
 
 def test_the_jjp_rig_can_run_from_program_files():

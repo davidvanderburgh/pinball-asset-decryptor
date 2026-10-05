@@ -2901,6 +2901,32 @@ HELP_CONTENT = {
          "that image's own ISO, keeping the machine's settings and scores. "
          "Both images must be the same game version (they share one settings "
          "partition); the build refuses a mismatch and says why."),
+        ("A Barrels of Fun machine (one update file)",
+         "Pick Barrels of Fun on the picker and the tab takes the stock .fun "
+         "of a game and up to three more builds of it - a mod, say - and "
+         "Build update... writes ONE .fun under the game's own name (lab.fun "
+         "for Labyrinth). Copy it onto a FAT32 USB stick and install it the "
+         "way every Barrels of Fun update is installed: nothing is opened "
+         "up. The install puts the first build in place, rebuilds the others "
+         "from it and checks each one, and from the next power-up the machine "
+         "shows the menu on its own screen before the game starts: flippers "
+         "choose, START or LAUNCH boots, and the countdown boots the build "
+         "chosen last. Every build after the first is carried as its "
+         "difference from the first, which is what keeps two builds under "
+         "the 4 GB one FAT32 file can be; the size strip says when it does "
+         "not. The menu fills the backbox, and it can show a picture or a "
+         "video clip on each card, play music and the move and confirm "
+         "sounds, and offer a random card that boots one of the builds above "
+         "it (Add random over the images above). A card's 'auto' picture "
+         "and clip are that build's own title or attract video, taken out "
+         "of its .fun (a mod that changed the attract shows its own); "
+         "'auto' music is the build's own too (stock plays the game's theme, "
+         "a mod that changed its intro plays that intro's soundtrack), and "
+         "the 'auto' sounds are the game's own menu click and clock bell. All "
+         "builds share the game's one set of settings and scores, and "
+         "installing any normal update afterwards takes the menu away again. "
+         "Labyrinth is supported; Dune and Winchester update differently and "
+         "are not yet."),
     ],
 }
 

@@ -973,9 +973,10 @@ def test_suggest_title_splits_the_card_name():
     assert suggest_title("card.img") == ("card", "")
 
 
-def test_capability_is_spike2_and_jjp_only(manufacturers_by_key):
-    """Multi-boot is Stern's Spike 2 era and Jersey Jack (item 118: the same
-    tab with a JJP backend behind it) - and nobody else."""
+def test_capability_is_spike2_jjp_and_bof_only(manufacturers_by_key):
+    """Multi-boot is Stern's Spike 2 era, Jersey Jack (item 118: the same
+    tab with a JJP backend behind it) and Barrels of Fun (PAD-342: a BOF
+    backend) - and nobody else."""
     from pinball_decryptor.core.registry import Capabilities
     assert Capabilities().multiboot is False
     stern = manufacturers_by_key["stern"]
@@ -989,8 +990,9 @@ def test_capability_is_spike2_and_jjp_only(manufacturers_by_key):
     finally:
         stern.set_era("spike2")
     assert manufacturers_by_key["jjp"].capabilities.multiboot is True
+    assert manufacturers_by_key["bof"].capabilities.multiboot is True
     for key, mfr in manufacturers_by_key.items():
-        if key not in ("stern", "jjp"):
+        if key not in ("stern", "jjp", "bof"):
             assert getattr(mfr.capabilities, "multiboot", False) is False, key
 
 

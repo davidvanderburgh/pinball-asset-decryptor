@@ -2,3 +2,4 @@
 build/
 # and the raised-cap build make check makes beside it (BUILD-capN)
 build-cap*/
+build-bof/

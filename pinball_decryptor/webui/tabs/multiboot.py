@@ -180,7 +180,12 @@ class MultibootTab(TabService):
     def run_card(self, path):
         """The panel's ``emulate_fn`` (main_window's ``run_emulator``): the
         Emulate tab's launch with the boot selector ticked, or the Emulate
-        JJP tab's for a JJP multi-boot ISO."""
+        JJP tab's for a JJP multi-boot ISO.  A Barrels of Fun update has no
+        menu step in its rig yet (PAD-342), so the page offers no button."""
+        if getattr(self._multiboot_panel, "platform", "stern") == "bof":
+            self.window.append_log("[multi-boot] the Barrels of Fun emulator runs one "
+                                   "program and has no boot-menu step yet")
+            return
         if getattr(self._multiboot_panel, "platform", "stern") == "jjp":
             target = getattr(self.window, "_jjp_emulate_panel", None) \
                 or self.window.service("emulate_jjp")

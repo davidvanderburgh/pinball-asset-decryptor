@@ -297,8 +297,8 @@ def test_the_image_carries_ffmpeg_for_the_menu_media():
 #: package list under an unchanged tag reaches nobody who needs it - which is
 #: the mistake PAD-194's fix would have made.  Change one, change both.
 _IMAGE_AS_AGREED = (
-    "pad-multiboot:3",
-    "590084b88f65c964ac6b492799ba89983b9500bae71bdbfa38b1a6e6f10f380a",
+    "pad-multiboot:4",
+    "44260b35c00af9e2e1cb98d608e98b736368a9e3bfa73141af745ea0ce8b2014",
 )
 
 

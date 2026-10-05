@@ -63,7 +63,7 @@ import sys
 #: image inspect`` succeeds on a stale image built from an older Dockerfile,
 #: so a new package list that kept the old tag would never reach anybody who
 #: had already built one.
-IMAGE = "pad-multiboot:3"
+IMAGE = "pad-multiboot:4"
 CONTAINER = "pad-multiboot-worker"
 
 #: The architecture the image and the container are built and run for - see
@@ -101,11 +101,15 @@ ARCH = "amd64"
 #: that is not already 44.1 kHz 16-bit, a frame of a video and every GIF.
 #: With neither, the first picture refused ("neither ffmpeg nor PIL is
 #: available to scale ...") and a Mac could not build a menu with art on it.
+#:
+#: ``gnupg`` IS A BARRELS OF FUN UPDATE (PAD-342).  A .fun is a GPG-symmetric
+#: tarball: ``mkbofmulti.py`` decrypts the two the menu offers and encrypts the
+#: one it writes, so without it a Mac's plan stopped at "this needs gpg".
 DOCKERFILE = """\
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \\
         partclone e2fsprogs xorriso pigz gzip coreutils util-linux \\
-        python3 bash make gcc libc6-dev fonts-dejavu-core ffmpeg \\
+        python3 bash make gcc libc6-dev fonts-dejavu-core ffmpeg gnupg \\
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp
 CMD ["bash"]
@@ -116,7 +120,16 @@ CMD ["bash"]
 #: Docker Desktop shares by default, and the JJP pipeline already answers
 #: this the same way (``_stage_project_file`` copies partclone_to_raw.py
 #: into the cache rather than mounting the bundle).
-_RIGS = ("jjp_emu", "spike2_emu")
+_RIGS = ("jjp_emu", "spike2_emu", "bof_emu")
+
+#: ...and the package's leaf modules a rig imports from a bare python3 (see
+#: plugins/__init__.py): mkbofmulti.py reads both programs' Godot pack
+#: directories with plugins.bof.pck_directory to make the delta that keeps a
+#: BOF multi-boot update under FAT32's 4 GiB (PAD-342).  The app's own copy
+#: is inside the bundle's archive, so the build ships these as files
+#: (installer/build_macos.sh) and they are staged from there.
+_PACKAGE_FILES = ("pinball_decryptor/plugins/bof/pck_directory.py",
+                  "pinball_decryptor/plugins/bof/aes_py.py")
 
 #: Copied without these - build scratch that is large, useless in the
 #: container, and in __pycache__'s case actively wrong (host .pyc files).
@@ -242,6 +255,12 @@ def stage_rig(repo_src):
             continue
         dst = os.path.join(dst_root, "tools", rig)
         shutil.copytree(src, dst, ignore=_SKIP, dirs_exist_ok=True)
+    for rel in _PACKAGE_FILES:
+        src = os.path.join(repo_src, *rel.split("/"))
+        if os.path.isfile(src):
+            dst = os.path.join(dst_root, *rel.split("/"))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
     return dst_root
 
 

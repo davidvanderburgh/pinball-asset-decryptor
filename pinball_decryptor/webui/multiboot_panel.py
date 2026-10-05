@@ -51,6 +51,22 @@ def no_rig():
     return os.environ.get("PAD_UI_NO_RIG", "") not in ("", "0")
 
 
+#: The status checks' sentences are written for the Stern card; on the
+#: Barrels of Fun platform (PAD-342) the thing built is an UPDATE and its
+#: button is "Build update…".  Whole phrases only, so nothing else moves.
+_BOF_PHRASES = (("Build / flash card... ", "Build update… "),
+                ("Build / flash card…", "Build update…"),
+                ("multi-boot card", "multi-boot update"),
+                ("Build the card first", "Build the update first"),
+                ("Writing the card now", "Writing the update now"))
+
+
+def bof_words(text):
+    for a, b in _BOF_PHRASES:
+        text = text.replace(a, b)
+    return text
+
+
 # ----------------------------------------------------------------------
 # widget stand-ins
 # ----------------------------------------------------------------------
@@ -788,9 +804,17 @@ class WebMultibootPanel(_Base):
 
     def _pub_words(self, out):
         be = self._backend
-        jjp = be.key == "jjp"
         out["w"] = {
             "platform": be.key,
+            "sub": be.tab_sub,
+            # PAD-342: what a Barrels of Fun update does not have - a
+            # per-image score store, a menu step in its emulator, a stick
+            # writer - so the page leaves those controls off
+            "sound": bool(be.sound),
+            "scores_column": bool(be.scores_column),
+            "emulate": bool(be.emulate),
+            "flash": bool(be.flash),
+            "new_text": "New update" if be.key == "bof" else "New card",
             "out_label": be.out_label,
             "out_noun": be.out_noun,
             "medium": be.medium,
@@ -808,7 +832,7 @@ class WebMultibootPanel(_Base):
             "settings_tile": bool(be.settings_tile),
             "volume_max": int(be.volume_max),
             "max_cards": min(mt.MAX_IMAGES, be.max_cards),
-            "about": self.ABOUT_TIP_JJP if jjp else self.ABOUT_TIP,
+            "about": self.about_tip(),
             "list_tip": self.LIST_TIP,
             "size_tip": self.SIZE_TIP,
             "path_tip": self.PATH_TIP,
@@ -879,6 +903,8 @@ class WebMultibootPanel(_Base):
         for key, label, state, detail in self.checks():
             if label == plain.get(key):
                 label = words.get(key, label)
+            if self._backend.key == "bof":
+                detail = bof_words(detail)
             checks.append({"key": key, "label": label, "state": state,
                            "mark": mt.CHECK_MARKS.get(state, ""),
                            "detail": detail})
@@ -950,8 +976,9 @@ class WebMultibootPanel(_Base):
                 (countdown if extra.startswith("countdown says")
                  else menu).append(extra)
             groups = [["Menu", " · ".join(menu)],
-                      ["Countdown", " · ".join(countdown)],
-                      ["Sounds", " · ".join(parts[:2])]]
+                      ["Countdown", " · ".join(countdown)]]
+            if self._backend.sound:
+                groups.append(["Sounds", " · ".join(parts[:2])])
         out.update(summary=text, summary_groups=groups)
 
     def _pub_preview(self, out):
@@ -965,7 +992,8 @@ class WebMultibootPanel(_Base):
             "caption": getattr(self, "_pv_full", "") or "",
             "error": bool(self._pv_error),
             "video": self._media_state.get("video", ""),
-            "audio": self._media_state.get("audio", ""),
+            # a silent menu has no sounds to have rendered (PAD-342)
+            "audio": self._media_state.get("audio", "") if self._backend.sound else "",
             "hl": hl,
             "sketch": None,
             "placeholder": "",

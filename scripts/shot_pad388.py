@@ -6,7 +6,8 @@
 "before" shots).  For each manufacturer (default: all of them) the app starts on it, and
 every tab its Tips window lists that has tips of its own is shot once, at the top of its
 tips: <out_dir>/<prefix>_<tab>.png (tab lower-cased, spaces to _).  A tab already shot
-under an earlier manufacturer is not shot again.  Prints the tab keys it shot.
+under an earlier manufacturer is not shot again.  ``--tab <key>`` (repeatable) shoots only
+those tabs, even one whose Tips window is empty.  Prints the tab keys it shot.
 """
 
 import json
@@ -20,6 +21,7 @@ sys.path.insert(0, HERE)
 import shot_pad232 as S  # noqa: E402
 import webui_shot  # noqa: E402
 
+ONLY = set()     # --tab <key>: shoot these tabs only (even one with no tips)
 MFRS = ("stern", "jjp", "dp", "bof", "ap", "spooky", "pb", "cgc", "williams")
 
 
@@ -46,7 +48,10 @@ def shoot_mfr(repo, out_dir, prefix, mfr, done):
     proc, url = _serve(repo, scratch, project, mfr)
     try:
         tabs = webui_shot.api(url, "shellx.tips").get("tabs") or []
-        want = [t["key"] for t in tabs if t["key"] not in done and sections_for(t["key"])]
+        want = [t["key"] for t in tabs if t["key"] not in done
+                and (sections_for(t["key"]) or t["key"] in ONLY)]
+        if ONLY:
+            want = [k for k in want if k in ONLY]
         if not want:
             return
         if os.environ.get("PAD_PWLIB"):
@@ -77,7 +82,12 @@ def main():
     repo = os.path.abspath(sys.argv[1])
     out_dir = os.path.abspath(sys.argv[2])
     prefix = sys.argv[3]
-    mfrs = sys.argv[4:] or MFRS
+    args = sys.argv[4:]
+    while "--tab" in args:
+        i = args.index("--tab")
+        ONLY.add(args[i + 1])
+        del args[i:i + 2]
+    mfrs = args or MFRS
     os.makedirs(out_dir, exist_ok=True)
     done = set()
     for mfr in mfrs:

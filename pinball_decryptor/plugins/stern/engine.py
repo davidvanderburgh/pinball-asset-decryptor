@@ -3900,6 +3900,9 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         for e in _radium.enumerate_strings(data):
             if e["kind"] == "display-text":
                 occ_by_text.setdefault(e["text"], []).append(e)
+        # a line with line breaks is in the manifest flattened (PAD-382)
+        from ...core import text_manifest as _tm
+        pairs = _tm.resolve(occ_by_text, pairs)
         over = [(o, r) for o, r in pairs
                 if len(r.encode("latin1", "replace"))
                 > len(o.encode("latin1", "replace"))]

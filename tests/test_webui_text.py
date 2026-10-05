@@ -856,3 +856,24 @@ def test_reveal_text_string_prefers_the_scenes_own_row(tmp_path):
         assert w.run(svc.reveal_text_string, "GODZILLA VS\nEBIRAH", "/g/aaaaaaaaaaaaaaaaaaaa")
         assert svc._current == _row_index(w, "GODZILLA VS EBIRAH")
         assert w.state("text")["search"] == "GODZILLA VS EBIRAH"
+
+
+def test_reveal_text_string_finds_a_line_by_its_new_words(tmp_path):
+    """PAD-384 round 3 (DragonRR): a scene re-read off a card built with this tab's edits
+    draws the NEW words; the link lands on the row they replace, searched by its original."""
+    rows = _rows()
+    rows[0]["replacement"] = "GODZILLA\\nVS. GIGAN"         # a typed break is "\n" here
+    rows[2]["replacement"] = "HEDORAH"
+    folder = _manifest(tmp_path / "proj", rows)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        svc = w.window.service("text")
+        assert w.run(svc.reveal_text_string, "GODZILLA\nVS. GIGAN", "/g/aaaaaaaaaaaaaaaaaaaa")
+        assert svc._current == _row_index(w, "GODZILLA VS EBIRAH")
+        assert w.state("text")["search"] == "GODZILLA VS EBIRAH"
+        assert w.run(svc.reveal_text_string, "HEDORAH", "/g/bbbbbbbbbbbbbbbbbbbb")
+        assert svc._current == _row_index(w, "EBIRAH", "bbbb")
+        assert w.state("text")["search"] == "EBIRAH"
+        # the stock words still win in the same scene
+        assert w.run(svc.reveal_text_string, "EBIRAH", "/g/aaaaaaaaaaaaaaaaaaaa")
+        assert svc._current == _row_index(w, "EBIRAH", "aaaa")

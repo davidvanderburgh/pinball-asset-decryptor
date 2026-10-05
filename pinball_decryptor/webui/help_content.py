@@ -500,6 +500,9 @@ HELP_CONTENT = {
             "- Click it in the preview or under **Layers**. Ctrl-click (Cmd on a Mac) "
             "adds or removes; Shift-click in Layers takes a range.\n"
             "- Drag to move, drag a corner to resize, arrows to nudge (Shift: 10 px).\n"
+            "- Drag a row in **Layers** above or below another to re-order it; drop an "
+            "added layer on a group's row to move it into that group. The game's own "
+            "layers stay in their group.\n"
             "- **Ctrl+Z** undo, **Ctrl+Y** or **Ctrl+Shift+Z** redo.",
             "### The panel\n"
             "- Position, size (**W px / H px**), **Turn °** (clockwise; 90° buttons), "

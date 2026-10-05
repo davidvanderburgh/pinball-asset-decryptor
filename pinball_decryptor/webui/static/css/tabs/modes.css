@@ -178,6 +178,9 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk-pal.bk-num, .bk-pal.bk-bool { border-radius: 999px; }
 .bk-ws { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px; }
 .bk-settings { gap: 8px; align-items: center; }
+/* PAD-378: Undo / Redo and the saved line, kept in sight while the scripts scroll */
+.bk-bar { gap: 6px; align-items: center; position: sticky; top: -12px; z-index: 3; margin: -12px -16px 0; padding: 6px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--line); }
 .bk-gamemodes { display: flex; flex-direction: column; gap: 6px; }
 .bk-gamemodes .row { gap: 8px; align-items: center; }
 .bk-gamemodes .modes-shots { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); padding-left: 12px; }

@@ -13,6 +13,10 @@
 // instruction line, three counters, a timer badge, a gauge, an award line); the HUD blocks write it.
 // PAD-374: a mode's OWN clips and sounds sit above its scripts (picked from files, copied into its
 // folder by modes.blocks_pick), each with the name its Play a clip / Play a sound blocks call it by.
+//
+// PAD-378: Undo and Redo, here in the page (the program is the page's own copy): every change is a
+// step, a run of typing or dragging in one box is one step, and Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z
+// work them as on the Color profile tab (a text box keeps its own undo).
 
 import { html, useEffect, useRef, useState, Button, Field, Select, Check, Note, tip, cx, call,
          openMenu } from "../core/ui.js";
@@ -31,6 +35,8 @@ const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"
 const CLIP_WHERE = [["full", "full screen"], ["behind", "behind the HUD, once"], ["loop", "behind the HUD, over and over"]];
 const PRIORITIES = [3, 4, 5, 6, 7].map((p) => [String(p), "priority " + p]);
 const SAVE_MS = 450;
+const UNDO_STEPS = 100;
+const MERGE_MS = 1000;        // the same box changed again within this is the same step
 
 const TIP = {
   palette: "Drag a block into a script, or press it to add it to the script you picked last (the one with the lit edge).",
@@ -39,6 +45,8 @@ const TIP = {
   screen: "The build makes the mode a screen of its own: a panel with its name, and a line the Show words block writes. It costs a little build time.",
   seconds: "How long the mode runs once it starts. 0 = no clock: it runs until a block ends it (or the ball drains, if ticked).",
   drain: "The ball draining ends the mode.",
+  undo: "Undo the last change to the blocks (Ctrl+Z)",
+  redo: "Redo the change just undone (Ctrl+Y or Ctrl+Shift+Z)",
   asC: "Carry on in C: the mode keeps the C its blocks made, and the blocks are put away.",
   hits: "How many times the player up has made this shot in this ball (while the mode runs or not).",
   scored: "How many times a Score block has paid since the mode started.",
@@ -146,6 +154,19 @@ function at(obj, path) { return path.reduce((o, k) => (o == null ? o : o[k]), ob
 function put(obj, path, value) { at(obj, path.slice(0, -1))[path[path.length - 1]] = value; }
 const samePath = (a, b) => a && b && a.length === b.length && a.every((x, i) => x === b[i]);
 const within = (inner, outer) => inner.length >= outer.length && outer.every((x, i) => inner[i] === x);
+
+// Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z: undo (false), redo (true), or null for another key. A text box
+// keeps its own undo; a list box has none, so there it is the blocks'.
+function undoKeyOf(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
+  const k = (e.key || "").toLowerCase();
+  const redo = k === "y" || (k === "z" && e.shiftKey);
+  if (k !== "z" && !redo) return null;
+  const el = e.target;
+  if (el && (el.isContentEditable || el.tagName === "TEXTAREA"
+      || (el.tagName === "INPUT" && !/^(range|checkbox|radio|button|color)$/.test(el.type)))) return null;
+  return redo;
+}
 
 // what is being dragged: {tpl} from the palette, or {from: stack path, i} a block in a script
 let dragging = null;
@@ -620,8 +641,16 @@ export function BlocksEditor({ s, c }) {
   const [saving, setSaving] = useState(false);
   const timer = useRef(null);
   const slugRef = useRef(c.slug);
+  const progRef = useRef(prog);
+  // the steps back and forward; key + when: the last change's box, to fold typing into one step
+  const hist = useRef({ past: [], future: [], key: null, when: 0 });
   // another mode opened (or this one duplicated, or put back by Python): take its program
-  useEffect(() => { slugRef.current = c.slug; setProg(clone(b.program || {})); setTarget(null); }, [c.slug]);
+  useEffect(() => {
+    slugRef.current = c.slug;
+    progRef.current = clone(b.program || {});
+    hist.current = { past: [], future: [], key: null, when: 0 };
+    setProg(progRef.current); setTarget(null);
+  }, [c.slug]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const save = (next) => {
@@ -632,11 +661,51 @@ export function BlocksEditor({ s, c }) {
       Promise.resolve(call("modes.blocks_save", slug, next)).finally(() => setSaving(false));
     }, SAVE_MS);
   };
-  const edit = (fn) => setProg((p) => { const d = clone(p); fn(d); save(d); return d; });
+  const show = (next) => { progRef.current = next; setProg(next); save(next); };
+  // key: the box changed, so a run of changes to it is one step (none = a step of its own)
+  const edit = (fn, key = null) => {
+    const was = progRef.current;
+    const d = clone(was);
+    fn(d);
+    if (JSON.stringify(d) === JSON.stringify(was)) return;      // a box giving back what it had
+    const h = hist.current, now = Date.now();
+    if (!(key && key === h.key && now - h.when < MERGE_MS)) {
+      h.past.push(was);
+      if (h.past.length > UNDO_STEPS) h.past.shift();
+    }
+    h.future = [];
+    h.key = key;
+    h.when = now;
+    show(d);
+  };
+  const undo = (redo = false) => {
+    const h = hist.current;
+    const [from, to] = redo ? [h.future, h.past] : [h.past, h.future];
+    if (!from.length) return;
+    to.push(progRef.current);
+    h.key = null;
+    const p = from.pop();
+    show(p);
+    setTarget((t) => (t && Array.isArray(at(p, t)) ? t : null));
+  };
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+  useEffect(() => {
+    const onKey = (e) => {
+      if (document.querySelector(".scrim, .menu")) return;          // a window or a menu is open
+      const redo = undoKeyOf(e);
+      if (redo == null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      undoRef.current(redo);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const ed = {
     prog, ch: b.choices || {}, vars: prog.vars || [], timers: prog.timers || [], target, over, setOver,
     setTarget, edit,
-    set: (path, v) => edit((d) => put(d, path, v)),
+    set: (path, v) => edit((d) => put(d, path, v), path.join("/")),
     remove: (stack, i) => edit((d) => { at(d, stack).splice(i, 1); }),
     insert: (stack, i, blk) => edit((d) => { at(d, stack).splice(i, 0, blk); }),
     addScript: (hat) => edit((d) => { d.scripts = [...(d.scripts || []), { hat, do: [] }]; setTarget(["scripts", d.scripts.length - 1, "do"]); }),
@@ -664,7 +733,7 @@ export function BlocksEditor({ s, c }) {
       };
       walk(d.scripts);
       walk(d.hud);                                                // PAD-375: what its counters and gauge follow
-    }),
+    }, "vars/" + i + "/name"),
     renameTimer: (i, name) => edit((d) => {
       const old = (d.timers[i] || {}).name;
       d.timers[i].name = name;
@@ -676,7 +745,7 @@ export function BlocksEditor({ s, c }) {
         Object.values(o).forEach(walk);
       };
       walk(d.scripts);
-    }),
+    }, "timers/" + i + "/name"),
     // a clip or sound renamed: every block playing it follows it
     renameMedia: (kind, i, name) => edit((d) => {
       const old = (d[kind][i] || {}).name;
@@ -689,7 +758,7 @@ export function BlocksEditor({ s, c }) {
         Object.values(o).forEach(walk);
       };
       walk(d.scripts);
-    }),
+    }, kind + "/" + i + "/name"),
     dropAt: (path, i) => {
       const drag = dragging;
       dragging = null;
@@ -715,6 +784,12 @@ export function BlocksEditor({ s, c }) {
   return html`<div class="bk-editor">
     <${Palette} ed=${ed} />
     <div class="bk-ws" ...${wsDrop} onClick=${() => setTarget(null)}>
+      <div class="bk-bar row" onClick=${(e) => e.stopPropagation()}>
+        <${Button} size="sm" kind="ghost" icon="undo" disabled=${!hist.current.past.length} title=${TIP.undo} onClick=${() => undo()}>Undo<//>
+        <${Button} size="sm" kind="ghost" icon="redo" disabled=${!hist.current.future.length} title=${TIP.redo} onClick=${() => undo(true)}>Redo<//>
+        <span class="sp"></span>
+        <span class="small muted">${saving ? "Saving…" : "Saved · Try it builds it in"}</span>
+      </div>
       <div class="bk-settings row wrap">
         <label class="lbl" for="bk-name">Name</label>
         <${Field} id="bk-name" sm width=${180} value=${prog.name || ""} maxLength=${40} onChange=${(t) => ed.set(["name"], t)} />
@@ -730,8 +805,6 @@ export function BlocksEditor({ s, c }) {
               // PAD-375: a HUD keeps a priority of its own, so its words wait under the game's displays
               label: value === 0 && (prog.hud || {}).on ? "the HUD's (180)" : label }))} />
         <${Check} checked=${!!(prog.hud || {}).on} label="its HUD" title=${TIP.hud} onChange=${(v) => ed.set(["hud", "on"], v)} />
-        <span class="sp"></span>
-        <span class="small muted">${saving ? "Saving…" : "Saved · Try it builds it in"}</span>
       </div>
       <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />

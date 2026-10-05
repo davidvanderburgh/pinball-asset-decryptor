@@ -1297,7 +1297,9 @@ def test_the_bof_multiboot_builder_s_leaf_modules_ship_as_files():
     FAT32 stick."""
     for build in ("build_linux.sh", "build_macos.sh"):
         text = (INSTALLER / build).read_text(encoding="utf-8")
-        for mod in ("pck_directory.py", "aes_py.py"):
+        # 'auto' sound decodes the game's samples: a Mac build's media step
+        # failed on the missing source_converter (PAD-342, 2026-10-05)
+        for mod in ("pck_directory.py", "aes_py.py", "source_converter.py", "qoa_codec.py"):
             assert ("pinball_decryptor/plugins/bof/%s:pinball_decryptor/plugins/bof" % mod) in text, (
                 "%s does not ship plugins/bof/%s" % (build, mod))
 

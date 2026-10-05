@@ -98,6 +98,8 @@ pyinstaller \
     --add-data "$ROOT_DIR/tools/bof_emu:tools/bof_emu" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/pck_directory.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/qoa_codec.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto_v3.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/filelist.py:pinball_decryptor/plugins/jjp" \

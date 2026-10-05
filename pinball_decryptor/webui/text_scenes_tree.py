@@ -1236,6 +1236,39 @@ class TreeEditMixin:
                                      for n in nodes if n not in hidden])
 
     @rpc
+    def tree_delete(self, nodes):
+        """The Delete key, in Layers or on the preview (PAD-391, DragonRR): asks first, then
+        removes what was added and hides the game's own in the game and the preview (its code
+        still looks for them, so they stay in the scene)."""
+        if self._tman is None:
+            return False
+        nodes = self._tree_top(self._tree_nodes(nodes))
+        byid = {n["id"]: n for n, _p, _d in _walk_man(self._tman)}
+        nodes = [n for n in nodes if n in byid]
+        if not nodes:
+            return False
+        added = [n for n in nodes if byid[n].get("added")]
+        own = [n for n in nodes if not byid[n].get("added")]
+        what = ('"%s"' % byid[nodes[0]]["name"] if len(nodes) == 1
+                else "these %d layers" % len(nodes))
+        lines = []
+        if added:
+            lines.append("Added by you, so taken out of the scene: %s."
+                         % ", ".join(byid[n]["name"] for n in added[:6])
+                         + (" and %d more" % (len(added) - 6) if len(added) > 6 else ""))
+        if own:
+            lines.append("The game's own, so hidden in the game and the preview instead (the "
+                         "game still looks for them): %s." % ", ".join(
+                             byid[n]["name"] for n in own[:6])
+                         + (" and %d more" % (len(own) - 6) if len(own) > 6 else "")
+                         + " Click the card mark at the end of a row to put one back.")
+        lines.append("Undo (Ctrl+Z) takes it back.")
+        if not compat.messagebox.askyesno("Delete layer" if len(nodes) == 1 else "Delete layers",
+                                          "Delete %s?\n\n%s" % (what, "\n\n".join(lines))):
+            return False
+        return self.tree_remove_many(nodes)
+
+    @rpc
     def tree_remove_many(self, nodes):
         """Delete on a multiple selection: ADDED nodes are removed, the game's own hidden."""
         from ..plugins.stern import scene_edit

@@ -624,7 +624,7 @@ const gameTip = (l) => ({
     ["Click", "put it back in the game"],
   ] : [
     ["Click", "hide it in the game (Write leaves it out of the card)"],
-    ["Delete", "hide it in the game and the preview (with the preview focused)"],
+    ["Delete", "hide it in the game and the preview, after asking"],
     `The preview is not changed; the eye hides it here.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
@@ -668,7 +668,8 @@ const rowTip = (l, cs) => ({
     ["Shift+click", "select a run of layers"],
     ["Drag", l.added ? "draw it over or under other layers, or drop it on a group to put it in there"
       : "draw it over or under the other layers in its group"],
-    ["Right-click", "hide, show alone, hide in the game"],
+    ["Delete", l.added ? "delete it, after asking" : "hide it in the game and the preview, after asking"],
+    ["Right-click", "hide, show alone, hide in the game, delete"],
   ].filter(Boolean) });
 
 function eyeClick(l, e) {
@@ -699,6 +700,10 @@ function layerMenu(t, l, e) {
     { label: allGone ? "Put back in the game" : "Hide in the game", icon: "sd",
       title: allGone ? `Write puts ${what} on the card again` : `Write leaves ${what} out of the card; the preview is not changed`,
       onClick: () => call("text_scenes.tree_visible_many", ids, allGone) },
+    { sep: true },
+    { label: "Delete…", icon: "trash", kbd: "Delete",
+      title: `Asks first. A layer you added is taken out; the game's own is hidden in the game and the preview`,
+      onClick: () => call("text_scenes.tree_delete", ids) },
   ].filter(Boolean));
 }
 
@@ -779,7 +784,10 @@ function TreeLayers({ t }) {
   tRef.current = t;
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key.toLowerCase() !== "h" || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      // PAD-391: Delete too (asks first); the preview handles its own when it has the focus
+      const del = e.key === "Delete";
+      if ((e.key.toLowerCase() !== "h" && !del) || e.ctrlKey || e.metaKey || e.altKey || e.repeat
+          || e.defaultPrevented) return;
       const el = e.target;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
       const cur = tRef.current;
@@ -787,6 +795,7 @@ function TreeLayers({ t }) {
       if (!ids.length || !listRef.current || !listRef.current.getClientRects().length
           || document.querySelector(".scrim")) return;
       e.preventDefault();
+      if (del) { call("text_scenes.tree_delete", ids); return; }
       const off = ids.every((id) => ((cur.layers || []).find((x) => x.id === id) || {}).view_off);
       call("text_scenes.tree_view_many", ids, off);
     };
@@ -1147,7 +1156,7 @@ function TreeCanvas({ s }) {
     if (moves[e.key]) { e.preventDefault(); nudge(sels, ...moves[e.key]); }
     else if (e.key === "Delete") {
       e.preventDefault(); flushNudge();
-      if (multi) call("text_scenes.tree_remove_many", sels); else call("text_scenes.tree_remove", p.id);
+      call("text_scenes.tree_delete", multi ? sels : [p.id]);
     }
   };
   // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere on the page, not only with the preview focused

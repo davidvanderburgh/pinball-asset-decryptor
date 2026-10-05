@@ -354,3 +354,29 @@ def test_a_drop_shadow_is_a_dark_copy_of_the_text_just_beneath_it():
     X.apply_scene(sc, gone, names=X.names_of(man))
     assert T.serialize(sc) == scene()
     assert X.describe(ops[0]) == "added a drop shadow"
+
+
+def test_an_added_node_goes_into_a_group_where_it_was_and_both_sides_agree():
+    """PAD-391 (DragonRR): a layer dragged in Layers onto another group goes into it.  Its
+    tracks are multiplied by the old group's drawing then the new one's undone, so it is drawn
+    where it was; the game's own nodes stay put (its code finds them by their path)."""
+    man = _man()
+    add = {"op": "add_text", "parent": None, "index": 99, "id": X.FIRST_ADDED_ID,
+           "name": "New", "text": "HELLO", "x": 20, "y": 30, "like": 53}
+    into = {"op": "parent", "node": X.FIRST_ADDED_ID, "parent": 51, "index": 9,
+            "m": [1, 0, 0, 1, -10, -10]}                # Tile_1 draws at (10, 10)
+    stock = {"op": "parent", "node": 53, "parent": 51, "index": 0, "m": [1, 0, 0, 1, 0, 0]}
+    ops = [add, into, stock]
+    preview, notes = X.apply_manifest(man, ops)
+    assert len(notes) == 1 and "53" in notes[0]
+    sc = T.parse(scene())
+    n, notes = X.apply_scene(sc, ops, names=X.names_of(man))
+    assert n == 2 and len(notes) == 1 and "left where it was" in notes[0]
+    card = E.manifest(T.parse(T.serialize(sc)))
+    assert _draws(preview) == _draws(card)
+    at = {tuple(d["path"]): d["m"] for d in E.draw_list(card, 1)}
+    # Tile_1 and Tile_2 share one sprite: it is in both, Tile_1's where it was
+    assert at[("Tile_1", "New")][4:] == pytest.approx((20, 30))
+    assert at[("Tile_2", "New")][4:] == pytest.approx((20, 220))
+    assert ("New",) not in at and ("Title",) in at
+    assert X.describe(into) == "put in another group"

@@ -264,7 +264,11 @@ def test_a_missing_sample_decoder_is_the_fallback_sound_not_a_failed_build(monke
     """COOLTOY's Mac (2026-10-05): the container carried the pack reader but not
     plugins.bof.source_converter, and the media step died on the ImportError.  Now
     the sound is simply not the game's own (the caller falls back to the synth)."""
+    # `from pkg import mod` takes the package's attribute when an earlier test on this
+    # worker already imported it, so hide that too, not just the sys.modules entry
+    import pinball_decryptor.plugins.bof as bof_pkg
     monkeypatch.setitem(sys.modules, "pinball_decryptor.plugins.bof.source_converter", None)
+    monkeypatch.delattr(bof_pkg, "source_converter", raising=False)
     assert mb._sound_out("prog", None, {}, "res", "assets/sounds/sfx/x.wav", str(tmp_path)) is None
 
 

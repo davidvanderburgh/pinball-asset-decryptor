@@ -41,6 +41,8 @@ drawing straight onto black, and over anything else the black bits finally show.
 import json
 import os
 
+from ...core import text_manifest
+
 SCENE_LAYOUT_MANIFEST = os.path.join("images", "scene_textures",
                                      "scene_layout.json")
 
@@ -581,7 +583,7 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
             # A replacement typed on the Text tab but not built yet: draw
             # the new letters in the old line's place.  Every other lookup
             # below stays on the ORIGINAL string (the manifests' key).
-            shown = (text_edits or {}).get(tx["text"]) or tx["text"]
+            shown = text_manifest.edit_for(text_edits, tx["text"]) or tx["text"]
             try:
                 ink, _missing = fr.render_text(font, shown,
                                                metric_scale=scale)
@@ -1069,7 +1071,7 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             font = fr.font_at_size(by_key.get(d.get("font") or ""), d.get("font_px") or 0)
             if font is None or not d["text"]:
                 continue
-            shown = (text_edits or {}).get(d["text"]) or d["text"]
+            shown = text_manifest.edit_for(text_edits, d["text"]) or d["text"]
             rgba = list(d.get("rgba") or (1, 1, 1, 1))
             if d.get("styled"):
                 rgba = [1.0, 1.0, 1.0, rgba[3]]          # the game ignores it (see scene_eval)

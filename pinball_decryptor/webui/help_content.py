@@ -571,262 +571,197 @@ HELP_CONTENT = {
         ]),
     ],
     "Replace Images": [
-        ("Scan and assign",
-         "Scan lists the game's replaceable images. Assign a replacement "
-         "per slot — almost any image format works; it is auto-scaled to "
-         "the original's pixel dimensions and converted to the slot's "
-         "format (transparency is kept where the original has it). Keep "
-         "the original resolution for best results."),
-        ("Color column (Spike 2)",
-         "Every row has a Color mark. A replaced picture shows a palette: "
-         "green, a color profile is attached to it, so the Color profile "
-         "tab's individual files profile is baked into it when you build; red, "
-         "no color profile is attached and it goes on the card as it is. The "
-         "box under the preview does the same. The Color profile tab's 'Every replaced picture' "
-         "sets every picture that has no box of its own. The game's own "
-         "pictures show a blue lock and are never changed; tick 'Unlock "
-         "extracted images' under Advanced to give each one its own "
-         "palette, and detaching one (or locking again) puts the "
-         "original back."),
-        ("A bigger picture than the original",
-         "Stern Spike 2: a picture inside a game scene (Source \"Radium\", "
-         "not a font) can keep its OWN size instead, e.g. a longer name "
-         "banner. Tick \"Keep this picture's own size\" under the preview, "
-         "or its box in the Keep size column of the list: the build grows "
-         "the scene to fit it and the game draws it at the new size, from "
-         "the same top-left corner, so a wider picture "
-         "reaches further right. Needs an image build, not a direct SD "
-         "write. Verified in the PC emulator; no machine has run one yet. "
-         "A few pictures cannot take a new size, because nothing in their "
-         "scene draws them by size (full-screen backgrounds, for one). The "
-         "build fits those to the original size instead, exactly as with "
-         "the box unticked, and the log names each one."),
-        ("Assets folder + applying",
-         "The assets folder is the one Extract produced — the same folder the "
-         "Write tab reads. There's no separate \"stage\" step: each "
-         "replacement you assign is auto-fit to its slot (scaled, "
-         "format-converted, size-matched) and applied automatically when you "
-         "build the update on the Write tab."),
-        ("Replacing a whole folder at once",
-         "\"Replace from folder…\" beside the project folder takes a "
-         "folder of your own files and picks each one for the image with "
-         "its name, so a whole set reworked outside the app goes in as "
-         "one action instead of one pick per image.\n\n"
-         "Names pair whatever the file type and whatever the capital "
-         "letters: a batch export that wrote .png over the card's .jpg still pairs, and each file is converted to suit its slot "
-         "when you build, like any other pick. Subfolders are searched "
-         "too, and a file's own folders help it choose — when two slots "
-         "are named the same, put the file under a folder named like its "
-         "slot's. Scene pictures and font glyphs are named with a fingerprint of the card they were extracted from, so copies from another card's extract cannot pair by name at all — \"Transfer Mods to New Version\" on the Mod Pack tab carries those over by content instead.\n\n"
-         "Keep your files in a folder of their own, OUTSIDE the project "
-         "folder: the project folder holds the card's own files, so "
-         "choosing it, or anything inside it, is refused. What comes back "
-         "is ordinary replacements — they show in the Replacement column, "
-         "the next build applies them, and \"Clear replacements…\" drops "
-         "them again.\n\n"
-         "Whatever it leaves out is named in the log: files named like no "
-         "slot on this tab, files named like more than one of them, and "
-         "files another file in the folder shares a name with."),
-        ("Clearing replacements",
-         "A replacement you pick is remembered against the PROJECT FOLDER, "
-         "not against the card: it is stored in the folder itself, so it "
-         "survives closing the app, and it is still there if you point the "
-         "Extract tab at a different card image. That is what lets you come "
-         "back to a project days later, and it is why picks never disappear "
-         "on their own.\n\n"
-         "To drop some, select the rows — click one, then Shift-click for a "
-         "range or Ctrl-click to add single images — and right-click the "
-         "selection. Sort by the Replacement column first and everything you "
-         "have picked sits together. \"Clear replacements…\" (in the More "
-         "menu, the ⋯ button at the top) drops every pick on this tab at once, and a scene "
-         "group's own right-click menu clears just that animation.\n\n"
-         "Clearing takes the replacement back out. A pick nothing has applied "
-         "yet is simply dropped; a slot that a build, or Start on the Emulate "
-         "tab, already wrote into the project folder gets the card's own file "
-         "put back as well, so the list, the next build and the next emulator "
-         "run all agree. None of your own files are touched. A slot changed "
-         "some other way (a file copied over it by hand, or a build from "
-         "before the app kept a saved original) keeps what it has — "
-         "\"Revert all changes…\" on the Write tab is what restores those."),
-        ("Where images come from",
-         "The Source column tells the stores apart. \"File\" = a "
-         "plain image file on the card (menus, apron/test art). \"Scene "
-         "texture\" = artwork decoded out of the game's compiled display "
-         "scenes — many are frames of an animation or sprite sheets. "
-         "\"Radium\" = images embedded inside the scene descriptions "
-         "themselves (song-title banners and similar). \"Glyph\" = a single "
-         "character sliced out of a font atlas (see Font atlases below). "
-         "\"Boot screen\" = the picture the machine shows while it starts "
-         "up (Stern's logo, SternLogo.png), which lives on the OS partition "
-         "rather than with the game's files; an extract made before this "
-         "version doesn't have it until you Extract again. "
-         "All of them replace the same way; the Source dropdown in the toolbar "
-         "narrows the list to one store, and clicking the Source header "
-         "sorts by it."),
-        ("Scene groups",
-         "\"Group by scene\" nests each image under the scene / animation "
-         "it belongs to, in play order. Right-click a group header to "
-         "assign one replacement to every frame, blank the whole "
-         "animation (transparent), clear its pending replacements, or "
-         "rename the group — most factory scene names are generic "
-         "(\"unnamed_instance_14\"); your name is remembered for that "
-         "assets folder and is matched by Search. Search finds an image by "
-         "its own file name or by any scene it appears in — the scene's "
-         "name, your rename, or its id/hash — so a hit doesn't always have "
-         "the words in its file name; \"Group by scene\" shows which scene "
-         "matched."),
-        ("Font atlases",
-         "Some scene textures are font/glyph maps — a grid of characters "
-         "the game draws text from. You can re-style the whole grid, but "
-         "keep every glyph in its original position: the game blits fixed "
-         "rectangles, so moving or resizing glyphs scrambles on-screen text."),
-        ("Editing one letter (Glyph source)",
-         "To restyle a single character without touching the grid, set the "
-         "Source dropdown to \"Glyph\": the app slices each font atlas into "
-         "one image per character (named by its letter, e.g. \"U+0041 A\") "
-         "and drops your replacement back into that character's exact "
-         "rectangle — so you can redraw just the \"S\" and leave the rest "
-         "alone. These sit under scene_textures/glyphs/ in the extract."),
-        ("Fonts window (preview + import)",
-         "The \"Fonts…\" toolbar button (where available) opens a preview "
-         "of every game font: pick one, type your own text, and see it "
-         "rendered from the real glyphs with the game's own spacing — "
-         "pending glyph edits show up live. \"Import font file…\" fits a "
-         "normal desktop font (TTF/OTF) into the game font automatically: "
-         "one size is chosen so every letter fits the space its character "
-         "has, each letter is baseline-aligned into its slot, and the ink "
-         "color starts matched to the original. Apply writes the glyph "
-         "PNGs (build on Write as usual); \"Revert font\" restores every "
-         "letter from the atlas, \"Revert all fonts\" puts the whole "
-         "project back to stock, and \"Undo\" steps back one write at a "
-         "time. One typeface is baked into its own atlas per size AND per "
-         "scene, so it fills several rows here that can look identical — "
-         "those rows are marked \"copy 2 of 3\" and so on, and the line "
-         "above the list says how many of them are further copies. The "
-         "tick by the buttons changes every copy at once, and it governs "
-         "Apply, \"Blank font\" and \"Revert font\" alike, so a restyle, a "
-         "blanked outline and the way back all reach the same rows. If "
-         "the font has an OUTLINE companion (a "
-         "second font the game draws in black behind the letters) it is "
-         "named above the buttons, and \"Remove it\" blanks that border in "
-         "the scenes this font is in — only there, so the same outline "
-         "stays put elsewhere. \"Outline\" is your own border in pixels, 0 "
-         "for none; \"Letter width\" draws letters narrower inside their "
-         "slots, which is what puts a gap between letters that touch (the "
-         "game's own spacing is fixed on the card). Fonts under 30px are "
-         "marked \"tiny\" because a desktop font rarely survives being "
-         "fitted that small. \"Blank font\" erases a font's letters so it "
-         "draws nothing, which is how an outline or shadow font is removed "
-         "on its own; it asks first and names how many further copies and "
-         "scenes it will reach, and \"Revert font\" comes back exactly that "
-         "far — outline companions included — in one \"Undo\". \"Behind\" "
-         "puts the preview on something other than "
-         "black, the only way to see a black outline or where a letter's "
-         "box ends. The \"Color\" swatch works with no font file too: pick "
-         "a colour and it previews on whatever font you select, then Apply "
-         "repaints that font's existing letters in it. Remember the SCENE "
-         "multiplies that colour — the line under the controls says which "
-         "colours the scenes draw this font in, and a font a scene tints "
-         "black stays black whatever you pick."),
+        ("How it works", [
+            "Pick a picture of your own for any slot, and the next build on the "
+            "**Write** tab puts it on the card.",
+            {"flow": [
+                {"icon": "search", "title": "Scan",
+                 "text": "lists the game's pictures in the folder Extract made"},
+                {"icon": "image", "title": "Pick",
+                 "text": "a replacement per row: almost any image format"},
+                {"icon": "fit", "title": "Auto-fit",
+                 "text": "scaled to the original's size and format, transparency kept"},
+                {"icon": "write", "title": "Build",
+                 "text": "on the Write tab: there is no separate stage step"}]},
+            "- The folder is the one **Extract** made, the same one Write reads.\n"
+            "- Keep the original's resolution for the best result.",
+        ]),
+        ("Where pictures come from",
+         "The **Source** column says where a picture lives. They all replace the "
+         "same way.\n\n"
+         "| Source | What it is |\n"
+         "|---|---|\n"
+         "| File | a plain picture file on the card: menus, apron and test art |\n"
+         "| Scene texture | art from the game's display scenes; many are animation "
+         "frames or sprite sheets |\n"
+         "| Radium | pictures inside the scene descriptions: song-title banners "
+         "and the like |\n"
+         "| Glyph | one letter cut out of a font (see [Fonts](#fonts)) |\n"
+         "| Boot screen | the picture shown while the machine starts (SternLogo.png); "
+         "an older extract needs Extract again |\n\n"
+         "The **Source** dropdown narrows the list to one kind; click the Source "
+         "header to sort by it."),
+        ("Size limits", [
+            "A replacement must fit in the original slot's bytes, so the card's "
+            "layout never changes.",
+            {"cards": [
+                {"icon": "check", "tone": "ok", "title": "Fits",
+                 "text": "Drops straight in."},
+                {"icon": "minus", "tone": "warn", "title": "Too big",
+                 "text": "Re-compressed with fewer colours until it fits."},
+                {"icon": "x", "tone": "err", "title": "Still too big",
+                 "text": "Skipped: the slot is left unchanged. Use a simpler picture."}]},
+            "Font and sprite atlases in scenes are the exception: they are re-encoded "
+            "losslessly at the slot's exact size, with no byte limit.",
+        ]),
+        ("A bigger picture (Spike 2)",
+         "On Stern Spike 2 a picture inside a game scene (Source **Radium**, not a "
+         "font) can keep its own size, e.g. a longer name banner.\n\n"
+         "- Tick **Keep this picture's own size** under the preview, or its box in "
+         "the **Keep size** column.\n"
+         "- The build grows the scene to fit it. The game draws it from the same "
+         "top-left corner, so a wider picture reaches further right.\n"
+         "- Needs an image build, not a direct SD write.\n"
+         "- A few pictures can't change size (full-screen backgrounds, for one): the "
+         "build fits those to the original size and the log names each.\n"
+         "- Tested in the PC emulator; no machine has run one yet."),
+        ("Color column (Spike 2)", [
+            "Every row has a Color mark saying whether a color profile goes into "
+            "that picture when you build.",
+            {"cards": [
+                {"icon": "palette", "tone": "ok", "title": "Green palette",
+                 "text": "Attached: the Color profile tab's individual files profile "
+                         "is baked in."},
+                {"icon": "palette", "tone": "err", "title": "Red palette",
+                 "text": "Not attached: it goes on the card as it is."},
+                {"icon": "lock", "tone": "info", "title": "Blue lock",
+                 "text": "The game's own picture: never changed."}]},
+            "- The box under the preview does the same as the palette.\n"
+            "- The Color profile tab's **Every replaced picture** sets every picture "
+            "with no setting of its own.\n"
+            "- Tick **Unlock extracted images** under Advanced to give the game's own "
+            "pictures a palette too. Detaching one, or locking again, puts the "
+            "original back.",
+        ]),
+        ("Replace from folder", [
+            "**Replace from folder…**, beside the project folder, gives each file in "
+            "a folder of your own to the slot with its name, all in one go.\n\n"
+            "- Names pair whatever the file type or capitals (a .png pairs with the "
+            "card's .jpg). Subfolders count: when two slots share a name, put the "
+            "file in a folder named like its slot's.\n"
+            "- Scene pictures and font letters carry a fingerprint of their card, so "
+            "another card's copies can't pair by name: **Transfer Mods to New "
+            "Version** on the Mod Pack tab carries them over by content.\n"
+            "- They come back as ordinary picks in the Replacement column. The log "
+            "names files left out: named like no slot, like several, or sharing a "
+            "name with another file.",
+            {"note": "Keep your files outside the project folder. It holds the card's "
+                     "own files, so choosing it, or anything inside it, is refused."},
+        ]),
+        ("Clearing and undo", [
+            "Your picks are saved in the project folder itself, so they survive "
+            "closing the app (even with another card picked on Extract) and never "
+            "disappear on their own.\n\n"
+            "- **Some:** select rows (Shift-click a range, Ctrl-click one more) and "
+            "right-click. Sort by Replacement to bring your picks together.\n"
+            "- **All:** **Clear replacements…** in the More menu (the ⋯ button at the top).\n"
+            "- **One animation:** its scene group's right-click menu.\n"
+            "- **One slot:** right-click it to drop a pick not built yet, or revert a "
+            "file already changed.\n\n"
+            "A slot a build (or Emulate's Start) already wrote gets the card's own "
+            "file back too, so the list, the next build and the emulator agree. Your "
+            "own files are never touched.",
+            {"note": "A slot changed another way (a file copied over it by hand, or "
+                     "a build from before the app kept an original) keeps what it has: "
+                     "**Revert all changes…** on the Write tab restores those."},
+        ]),
+        ("Scene groups and search",
+         "**Group by scene** nests each picture under its scene or animation, in "
+         "play order.\n\n"
+         "- Right-click a group to give every frame one replacement, blank the "
+         "animation (transparent), clear its picks, or rename it (factory names "
+         "like `unnamed_instance_14` say little; yours is kept and searchable).\n"
+         "- **Search** matches a file name or any scene a picture is in (name, your "
+         "rename, id or hash), so a hit may not have the words in its file name: "
+         "Group by scene shows which scene matched."),
+        ("Fonts", [
+            "A font is a grid of letters (an atlas) the game draws text from. Three "
+            "ways to change one:",
+            {"cards": [
+                {"icon": "image", "tone": "warn", "title": "The whole grid",
+                 "text": "Restyle it, but keep every letter in place: the game cuts "
+                         "fixed boxes, so a moved letter scrambles the text."},
+                {"icon": "edit", "tone": "ok", "title": "One letter",
+                 "text": "Source **Glyph**: one picture per letter (e.g. `U+0041 A`), "
+                         "put back in its exact box."},
+                {"icon": "text", "tone": "info", "title": "A desktop font",
+                 "text": "**Fonts…** > **Import font file…** fits a TTF or OTF: every "
+                         "letter fits its box, on the baseline, ink colour matched."}]},
+            "### The Fonts window\n"
+            "- Type your own text to see it in the real letters and the game's "
+            "spacing, pending edits included.\n"
+            "- **Apply** writes the letters (build on Write as usual). **Revert font**, "
+            "**Revert all fonts** and **Undo** (one write) go back.\n"
+            "- A typeface is baked per size and per scene, so rows read \"copy 2 of "
+            "3\". The tick by the buttons makes Apply, Blank font and Revert font "
+            "reach every copy.\n"
+            "- An outline font (black, behind the letters) is named above the "
+            "buttons; **Remove it** blanks it only in this font's scenes.\n"
+            "- **Outline**: your own border in pixels (0 for none). **Letter width**: "
+            "narrower letters, for a gap between ones that touch.\n"
+            "- **Blank font** erases a font's letters (how a shadow font goes). It "
+            "asks first, and Revert font undoes it in one go.\n"
+            "- **Behind** puts the preview on something other than black.\n"
+            "- **Color** repaints the letters on Apply, no font file needed. The scene "
+            "multiplies it (the line under the controls names the scene colours): a "
+            "font a scene tints black stays black.\n"
+            "- Fonts under 30px are marked \"tiny\": a desktop font rarely survives "
+            "that small.",
+        ]),
         ("Scenes tab",
-         "The Scenes tab (an image's right-click \"Show scene contents…\" opens it too) lists every "
-         "scene on the card with the images, fonts and on-screen text it "
-         "is built from — double-click an item to jump to its row here, in "
-         "the Fonts window, or on Replace Text. Right-click any scene "
-         "image for \"Show scene contents\" to land there directly. It "
-         "also PREVIEWS the scene as the machine draws it, composited from "
-         "THIS project folder — replace an image or import a font and the "
-         "preview redraws with your version. Titles are drawn the way the "
-         "machine layers them — the black outline font underneath, then "
-         "the fill on top — so a border can be checked here (over a light "
-         "\"Behind\" backdrop; black on black is as invisible here as on "
-         "the machine), and a scene's font sizes are quoted with the same "
-         "numbers the Fonts window uses, so the two windows always call "
-         "one font one size. Click any column heading to "
-         "sort the list — by image count to find the big scenes, by Video "
-         "to find the ones that play a clip. One scene file holds every "
-         "screen a mode can put up — its intro, each award, the phase and "
-         "victory screens — and the machine shows one at a time as the "
-         "game runs, so the \"Screen\" box draws them one at a time under "
-         "the game's own names instead of piling them on top of each "
-         "other; the ◀ ▶ buttons step through them. Scenes that animate "
-         "play their frames at the frame rate written in the scene itself "
-         "(it varies per scene), and the \"Speed\" box — which only "
-         "appears for a scene that actually moves — overrides it if you "
-         "want a closer look at a fast one. On a big scene, Play first "
-         "shows \"Getting frames ready…\" until enough frames are drawn "
-         "that the first loop can run without stalling. \"Export picture…\" writes a "
-         "still scene out full size as a PNG; on a scene that moves the button reads "
-         "\"Export video…\" and writes the whole scene as an MP4 at its own frame "
-         "rate, every frame drawn the way the preview draws it (your edits, the "
-         "preview eyes, the backdrop and the Machine screen included), or the frame "
-         "on the preview as a PNG if you pick that instead. The MP4 needs ffmpeg "
-         "installed. \"Export all pictures…\" does the whole list at once: one "
-         "PNG per scene into a folder you pick, following whatever the "
-         "Search box is filtering on, so you can flip through a card's "
-         "screens in an image viewer. \"Export all videos…\" is the same in one click "
-         "for videos: an MP4 of every listed scene that moves and a PNG of each still "
-         "one. Both run in the background — the "
-         "same button becomes Cancel while it works, closing the window "
-         "stops it, a name already in the folder is suffixed rather than "
-         "overwritten, and the message beside the buttons tells you how many were "
-         "written and how many could not be drawn. \"Re-read from card…\" re-reads the scene "
-         "layouts off the card image on the Extract tab in a few seconds; "
-         "it rewrites only the layout file, so your images, glyph slices "
-         "and font imports are left alone (a full re-extract would "
-         "overwrite them). \"Behind\" lays the preview over a lighter "
-         "backdrop or a checkerboard instead of the machine's black — the "
-         "only way to see a black border or the edge of a piece of art. "
-         "RIGHT-CLICK anything in the Contents list to act on it: a text "
-         "line offers \"Text colour…\", which is where a text colour "
-         "actually lives (the font is white on purpose so the scene can "
-         "tint it), and a font offers \"Blank this font in this scene\" or "
-         "everywhere it is used — one atlas is shared by every scene that "
-         "draws it, so prefer the scoped one."),
-        ("Text layout (move, alignment, font size)",
-         "The same right-click on a text line also offers \"Move…\", an "
-         "\"Alignment\" submenu (Left / Centre / Right) and \"Font size…\". "
-         "All three are per-scene, in-place, size-neutral edits of that "
-         "scene's file, exactly like a text colour: a move shifts the "
-         "line's box by the pixels you type, alignment rewrites the flag "
-         "the scene keeps beside it, and the preview follows every change "
-         "as you make it. \"Font size\" here means the size THIS scene "
-         "bakes the font at — each scene carries its own copy of the "
-         "glyph metrics for every face it draws — so it is a percentage "
-         "of the scene's own size, and the dialog shows the pixels it "
-         "comes to next to the scene's original. Shrinking is lossless; "
-         "enlarging past the size of the master art blurs, because the "
-         "atlas is only scaled, never redrawn. Two things to know: the "
-         "edit applies to every keyframe of that string in the scene "
-         "(the outline drawn under a title moves with its fill), and a "
-         "size change resizes every OTHER line in that scene drawn with "
-         "the same font, because they share the one metric table — the "
-         "log names them when you write. \"Back to the original layout\" "
-         "drops the edit; nothing touches the card until the Write tab, "
-         "where layout edits ride the same path as text colour and show "
-         "up in its preview and the list of changes to write. The words "
-         "themselves are changed on Replace Text, not here — but a "
-         "replacement you have typed there is what this preview draws, "
-         "so the box, alignment and size can be judged against the new "
-         "text rather than the stock one; the row reads \"shows: …\" and "
-         "\"(not built yet)\" while it is pending."),
-        ("Size limits",
-         "Patching is size-neutral: the encoded replacement must fit the "
-         "original slot's byte budget — a small enough image drops "
-         "straight in, a larger one is re-compressed (fewer colours) to "
-         "fit, and one that still won't fit is skipped (left unchanged); "
-         "use a simpler image. Exception: scene/radium glyph and sprite "
-         "atlases are re-encoded losslessly to the slot's exact "
-         "dimensions with no byte-size limit."),
-        ("Undo",
-         "Right-click a slot to remove an un-built assignment or revert an "
-         "already-changed file."),
+         "The **Scenes** tab lists every scene with the pictures, fonts and text it "
+         "is built from, and previews it as the machine draws it, with your "
+         "changes. A picture's right-click **Show scene contents…** opens it there.\n\n"
+         "- Double-click an item to jump to its row here, in Fonts or on Replace Text.\n"
+         "- Click a heading to sort: image count finds big scenes, Video the ones "
+         "with a clip.\n"
+         "- **Screen** shows a mode's screens (intro, awards, victory) one at a time; "
+         "◀ ▶ step through. **Speed** overrides a moving scene's own frame rate.\n"
+         "- **Behind** sets a light backdrop or checkerboard, to see black borders.\n"
+         "- **Re-read from card…** re-reads only the layouts off the Extract tab's "
+         "card, leaving your pictures and fonts alone (a full re-extract overwrites "
+         "them).\n"
+         "- **Export picture…** saves a PNG; on a moving scene, **Export video…** "
+         "saves an MP4 (needs ffmpeg). **Export all pictures…** / **Export all "
+         "videos…** do every listed scene into a folder, in the background, never "
+         "overwriting a name already there."),
+        ("Text in a scene",
+         "Right-click a line in the Scenes **Contents** list to change how that one "
+         "scene draws it. The preview follows each change.\n\n"
+         "| Item | What it does |\n"
+         "|---|---|\n"
+         "| Text colour… | the line's real colour (the font is white so the scene "
+         "can tint it) |\n"
+         "| Move… | shifts the line's box by the pixels you type |\n"
+         "| Alignment | Left, Centre or Right |\n"
+         "| Font size… | a percentage of this scene's size; shrinking is lossless, "
+         "past the master art it blurs |\n"
+         "| Blank this font | in this scene, or everywhere (one atlas serves every "
+         "scene: prefer this scene) |\n\n"
+         "- An edit reaches every keyframe of the line, outline included.\n"
+         "- A size change resizes every other line in the scene in that font; the "
+         "log names them when you write.\n"
+         "- **Back to the original layout** drops the edit. Nothing reaches the card "
+         "until Write, which lists these with your other changes.\n"
+         "- The words are changed on Replace Text; the preview draws a typed "
+         "replacement (\"shows: …\", \"(not built yet)\")."),
         ("Save and load settings",
-         "More > Save settings to a file... keeps this tab's picks, ticks and "
-         "options in one small file; Load settings from a file... puts them "
-         "back, on this card or another one. Slots the file doesn't set keep "
-         "what they have, and slots this card doesn't have are skipped. The "
-         "file only names your files, it doesn't hold them."),
+         "**More > Save settings to a file…** keeps this tab's picks, ticks and "
+         "options in one small file. **Load settings from a file…** puts them back, "
+         "on this card or another one.\n\n"
+         "- Slots the file doesn't set keep what they have; slots this card doesn't "
+         "have are skipped.\n"
+         "- The file only names your pictures, it doesn't hold them."),
     ],
     "Replace Text": [
         ("Scan and edit", [
@@ -917,103 +852,108 @@ HELP_CONTENT = {
          "onto the same lines of this card or another. Text too long for that card "
          "is skipped."),
     ],
-    "Color profile": [
-        ("What it does",
-         "A color profile corrects the colors of this project's build: the "
-         "middle shades and color level of each channel, the color strength "
-         "and the shadow lift. On Spike 2 the game itself draws every picture "
-         "and video through it; on other machines the replaced pictures and "
-         "videos are corrected when they are staged. 'No change' leaves the "
-         "colors alone."),
-        ("Starting points",
-         "Recommended is the usual starting point; Black and white suits the "
-         "black-and-white playfield editions. Hover a starting point's button "
-         "to see how it was made, then adjust the sliders and watch the curve "
-         "graph and the preview."),
-        ("Preview and emulator",
-         "Drag across the preview to compare before and after on a test card, "
-         "one of your Images-tab replacements or another picture. 'See it in "
-         "the emulator' runs this project's edits with the profile; Emulate's "
-         "'Stock colors' tick leaves it out."),
+    "Color Profile": [
+        ("What it does", [
+            "A color profile corrects this project's colors: each channel's middle "
+            "shades and level, the color strength and the shadow lift. **No change** "
+            "leaves the colors alone. There are three profiles:",
+            {"cards": [
+                {"icon": "sun", "tone": "info", "title": "Whole screen overlay",
+                 "text": "Spike 2: the game draws everything through it, its own art "
+                         "too. Other machines: the replaced files are corrected when "
+                         "staged."},
+                {"icon": "image", "tone": "ok", "title": "Individual files",
+                 "text": "Spike 2: baked into only the replaced files it is attached to."},
+                {"icon": "eye", "tone": "warn", "title": "Machine screen",
+                 "text": "Spike 2, preview only: what your machine's screen does. "
+                         "Never on the card."}]},
+        ]),
+        ("Starting points and preview",
+         "Pick a starting point, then fine-tune it.\n\n"
+         "- **Recommended** is the usual start. **Black and white** suits the "
+         "black-and-white playfield editions. Hover one to see how it was made.\n"
+         "- Move the sliders and watch the curve graph and the preview. Drag across "
+         "the preview to compare before and after (a test card, one of your Images "
+         "replacements or another picture).\n"
+         "- **See it in the emulator** runs this project's edits with the profile. "
+         "Emulate's **Stock colors** tick leaves it out."),
         ("Part of the project",
-         "The profile is a staged change of this project: Write lists it as "
-         "pending, Revert all clears it, and Save a copy / Load move it "
-         "between projects. Saved profiles lists the copies saved in that "
-         "folder by file name: pick one to use it. The one in use is shown "
-         "there, and the starting point in use is highlighted."),
+         "- The profile is a change of this project: Write lists it as pending, "
+         "and **Revert all** clears it.\n"
+         "- **Save a copy** and **Load** move it between projects. Keep one per "
+         "machine.\n"
+         "- **Saved profiles** lists the saved copies by file name: pick one to use "
+         "it. The one in use shows there, and its starting point is highlighted."),
         ("Individual files (Spike 2)",
-         "The whole screen overlay reaches the game's own art too, which "
-         "Stern already made for that screen. Adjust individual files for "
-         "a second profile that is baked into only the replaced pictures "
-         "and videos (and pictures added in Scenes) it is attached to: tick "
-         "'Every replaced picture' or 'Every replaced video' there, or one "
-         "file at a time in the Color column of the Images and Video tabs "
-         "and the palette in the Scenes layers. It starts from Recommended. "
-         "The game's own pictures have no switch (a blue lock) until Advanced unlocks them on the Images or Video tab. "
-         "Both can be on at once: the overlay is drawn over the baked files "
-         "like everything else."),
-        ("Machine screen (Spike 2, preview only)",
-         "Not a correction but the screen itself: what your machine does to "
-         "what it is given. Scenes and the Video tab's players draw through "
-         "it when its switch under Preview colors is on; nothing is written "
-         "to the card and Revert all leaves it. Besides the sliders it has "
-         "Color ranges (one band of hues at a time: hue, width, soft edge, "
-         "hue shift, saturation and brightness, with greys protected) and "
-         "Curves (RGB, then Red, Green and Blue, through points you drag or "
-         "type). Every control has a number box and a reset; new ones "
-         "change nothing until moved. Save a copy keeps them; loaded into "
-         "the other two modes they are left out."),
-        ("Preview colors (Scenes)",
-         "The row under the Scenes preview draws the scene the way the "
-         "machine will, with a switch for each step: the Whole screen "
-         "overlay, the Individual files correction (the files it is attached to) "
-         "and the Machine screen (set on the Color profile tab; until you "
-         "set one, the Recommended screen). Turn them on and "
-         "off to see what each one does; all three off is your PC's own "
-         "colors. The Machine screen reaches the pictures and videos, a test "
-         "card you added included, but not lines of text: they keep their "
-         "own color and get only the overlay. Tick the gear menu's 'Files with no color "
-         "profile attached skip the Machine screen' to let a file with no color "
-         "profile attached (a red palette in Layers) skip it, to see it against the game's own art; it still "
-         "gets the overlay. Click a name to open it on the "
-         "Color profile tab. Only the preview changes: the card is not."),
-        ("Color profiles bar (Scenes, Images, Video)",
-         "The rainbow Colors tab on the right edge of the Scenes, Images and "
-         "Video tabs slides out the Color profile tab's controls beside the "
-         "page, so you tune a profile with the scene and its Layers, or the "
-         "list and its Color column, in view: each file's color switch stays "
-         "at hand. It is one set of profiles wherever it is opened: a saved "
-         "profile picked from the list on the Images tab is the one Scenes "
-         "and the Video tab use too, and the other way round. On Images and "
-         "Video the bar opens on Files the first time, the profile their "
-         "Color column attaches to a file. On Scenes the scene list steps "
-         "aside while it is open: the Scenes tab down the left edge brings "
-         "it back, the arrow at the end of its search row hides it again. "
-         "Each tab remembers whether its bar was left open. Drag the bar's "
-         "left edge to make it wider or narrower (double-click puts it back). "
-         "Undo and Redo (Ctrl+Z, Ctrl+Y) step back through the changes to "
-         "the profile on show; each profile keeps its own. Clicking a name "
-         "under Preview colors opens it on that profile. Overlay, Files and "
-         "Machine screen pick the profile, with a dot on those in use; Copy "
-         "and Paste carry one profile's numbers (ranges and curves too) to "
-         "another. The same starting points, sliders, number boxes, Color "
-         "ranges, Curves, Save a copy and Load are there. The scene, or the "
-         "Video tab's players, is drawn again a moment after each move, while "
-         "'Show it in this preview' (the same switch as under Preview colors) "
-         "is ticked; the Images tab's preview does not draw through the "
-         "profiles, so its bar has no such switch."),
+         "The overlay reaches the game's own art too, which Stern already made for "
+         "that screen. **Individual files** is a second profile, baked only into the "
+         "files it is attached to. It starts from Recommended.\n\n"
+         "- Attach it with **Every replaced picture** or **Every replaced video**, "
+         "or one file at a time in the Color column (Images, Video) or the palette "
+         "in the Scenes layers.\n"
+         "- The game's own pictures show a blue lock until Advanced unlocks them "
+         "on the Images or Video tab.\n"
+         "- Both can be on: the overlay draws over the baked files like everything "
+         "else."),
         ("One profile per file",
-         "Each picture, clip or picture added in Scenes can have a color "
-         "profile of its own. Click it (a row on Images or Video, a layer in "
-         "Scenes) with the Colors bar open, or open the bar with it clicked, "
-         "and Files shows that file's profile: the one baked into it now. "
-         "Pick a starting point or a saved profile, or move a slider, and "
-         "that file gets it as its own (its color profile is attached if it "
-         "was not). Same as the other files drops it again. A file with no "
-         "profile of its own gets the individual files profile, which the "
-         "bar shows with no file clicked and the Color profile tab always "
-         "shows. Hover over a file, or a layer in Scenes, to see its Color "
-         "profile, or None."),
+         "Any picture, clip or picture added in Scenes can have a profile of its "
+         "own.\n\n"
+         "1. Click it (a row on Images or Video, a layer in Scenes) with the "
+         "**Colors** bar open: **Files** shows the profile baked into it now.\n"
+         "2. Pick a starting point or a saved profile, or move a slider: the file "
+         "gets it as its own (and is attached if it was not).\n\n"
+         "- **Same as the other files** drops it: the file then gets the individual "
+         "files profile, the one this tab shows.\n"
+         "- Hover a file or a Scenes layer to see its Color profile, or None."),
+        ("Machine screen (Spike 2, preview only)",
+         "Not a correction but your machine's screen itself. It is never written to "
+         "the card, and Revert all leaves it alone.\n\n"
+         "- Scenes and the Video tab's players draw through it when its switch "
+         "under Preview colors is on.\n"
+         "- Until you set one, it is the **Recommended** screen, tuned on a real "
+         "Spike 2.\n"
+         "- Extra controls: **Color ranges** (one band of hues: hue, width, soft "
+         "edge, hue shift, saturation, brightness; greys protected) and **Curves** "
+         "(RGB, Red, Green, Blue; drag or type the points).\n"
+         "- Every control has a number box and a reset. Save a copy keeps them; "
+         "loaded as an overlay or files profile, they are left out."),
+        ("Preview colors (Scenes)", [
+            "The row under the Scenes preview draws the scene as the machine will, "
+            "with a switch for each step:",
+            {"flow": [
+                {"icon": "image", "title": "Individual files",
+                 "text": "the files it is attached to"},
+                {"icon": "sun", "title": "Whole screen overlay",
+                 "text": "over everything"},
+                {"icon": "eye", "title": "Machine screen",
+                 "text": "the Recommended one until you set it"}]},
+            "- Switch each on and off to see what it does. All off is your PC's "
+            "own colors.\n"
+            "- Pictures, videos and test cards go through the Machine screen. Lines "
+            "of text don't: they keep their own color and get only the overlay.\n"
+            "- The gear menu's **Files with no color profile attached skip the "
+            "Machine screen** lets red-palette files skip it, to compare them with "
+            "the game's art. They still get the overlay.\n"
+            "- Click a name to open that profile. Only the preview changes, never "
+            "the card.",
+        ]),
+        ("Color profiles bar (Scenes, Images, Video)",
+         "The rainbow **Colors** tab on the right edge of Scenes, Images and Video "
+         "slides out this tab's controls, so you tune with the page and each "
+         "file's color switch in view.\n\n"
+         "- One set of profiles everywhere: a saved profile picked on Images is the "
+         "one Scenes and Video use too.\n"
+         "- **Overlay**, **Files** and **Machine screen** pick the profile, a dot "
+         "marking those in use. Images and Video open on Files the first time.\n"
+         "- **Copy** and **Paste** carry one profile's numbers (ranges and curves "
+         "too) to another. **Undo** and **Redo** (Ctrl+Z, Ctrl+Y) work per profile.\n"
+         "- Scenes and the Video players redraw after each move while **Show it in "
+         "this preview** is ticked. The Images preview doesn't draw through "
+         "profiles, so it has no such switch.\n"
+         "- On Scenes the scene list steps aside: the Scenes tab on the left edge "
+         "brings it back.\n"
+         "- Drag the bar's left edge to resize it (double-click puts it back). Each "
+         "tab remembers whether its bar was open."),
     ],
     # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
     # preview code shows none of them (sections_for).  The key stays so every

@@ -20,129 +20,106 @@ import os
 # exactly (the tab's key, as the ? window asks for it).
 HELP_CONTENT = {
     "Select Card": [
+        ("The whole job", [
+            "A mod is four steps, one tab each.",
+            {"flow": [
+                {"icon": "sd", "title": "Pick", "text": "the card, here"},
+                {"icon": "extract", "title": "Extract",
+                 "text": "its files into a project folder"},
+                {"icon": "edit", "title": "Replace", "text": "what you like"},
+                {"icon": "write", "title": "Write",
+                 "text": "a new card image, then flash it"}]},
+        ]),
         ("Pick the card",
-         "Browse… to a dumped card image / update file. Plugins with "
-         "direct-media support also offer a \"From SD "
-         "card / SSD\" mode that reads the physical media in a reader "
-         "(needs Administrator on Windows). The Extract tab reads the card "
-         "picked here."),
+         "**Browse…** to a card image or update file. Or use **From SD card / SSD** "
+         "(where available) to read a card in a reader; on Windows that needs "
+         "Administrator."),
         ("Is it the right card?",
-         "Once a Stern Spike 2 card is picked, the page shows what the "
-         "machine puts on the screen while it starts: the game's own "
-         "loading screen, or, on a multi-boot card, its boot menu with the "
-         "default game highlighted. The menu is drawn by the same tools the "
-         "Multi-boot tab uses and takes a few seconds the first time; a card "
-         "in a reader shows the first game's loading screen instead. Under "
-         "it, Card details lists everything the app can read off the card "
-         "(firmware version, edition, games on it, asset counts, "
-         "partitions), with Copy for a bug report. Nothing on the card is "
-         "changed."),
+         "For a Stern Spike 2 card, the page shows what the machine shows as it starts: "
+         "the game's loading screen, or a multi-boot card's menu with the default game "
+         "lit (a few seconds the first time; a card in a reader shows the first game's "
+         "screen).\n\n"
+         "**Card details**, under it, lists firmware, edition, games, asset counts and "
+         "partitions; **Copy** is for bug reports. Nothing on the card is changed."),
         ("What works without an extract",
-         "The list on the right says what each tab can do. Partitions, "
-         "Compare, Emulate and Multi-boot work straight from a card, and so "
-         "does Write on machines whose Build / flash dialog can write an "
-         "existing card image onto an SD card (Stern, JJP, CGC). The "
-         "Replace tabs and Mod Pack (and Write on the other machines) work "
-         "on the files an extract pulls off the card, so until the project "
-         "folder holds an extract they are greyed out in the list on the "
-         "left, with a lock. They still open, under a banner saying what is "
-         "missing and where to go next."),
+         "| Tab | Straight from the card |\n"
+         "|---|---|\n"
+         "| Partitions, Compare, Emulate, Multi-boot | Yes |\n"
+         "| Write | Yes on Stern, JJP and CGC (flash an existing image). Others need "
+         "an extract. |\n"
+         "| Replace tabs, Mod Pack | No. They need an extract. |\n\n"
+         "Tabs that need an extract show a lock in the list on the left. They still "
+         "open, under a banner saying what is missing."),
     ],
     "Extract": [
-        ("Pick a source",
-         "The card comes from the Select card tab (a dumped card image / "
-         "update file, or the physical media in a reader); the Extract tab "
-         "shows it with a Change button that goes back there."),
+        ("What Extract does",
+         "Extract copies the ticked kinds (**Audio**, **Video**, **Images**, **Text**) "
+         "off the card picked on Select card into the **Project Folder**: the one folder "
+         "the Replace, Write and Mod Pack tabs all work out of.\n\n"
+         "- **Change** goes back to Select card.\n"
+         "- The ticks and auto-name options are remembered per manufacturer."),
         ("Which game is this card?",
-         "In \"From SD card\" mode the game on the card you picked is named "
-         "under the dropdown, read straight off the card with nothing copied "
-         "anywhere — so a stack of cards can be sorted out by plugging each "
-         "one in and reading the line. A card carrying a boot menu says so "
-         "and how many games are on it. Card details, under the card on the "
-         "Select card tab, reads the rest off the card itself: firmware "
-         "version, edition, asset counts and partitions. Reading a "
-         "card in place needs Administrator on Windows, and the line says so "
-         "when it hasn't got it."),
-        ("Save card as image",
-         "In \"From SD card\" mode, \"Save card as image…\" copies the whole "
-         "card, sector for sector, into one .raw file — the reverse of the "
-         "Write tab's flash. Use it to back a stock card up before modding "
-         "it, to keep a copy of a card someone sent you, or to dump the same "
-         "card twice (before and after a change made on the machine) and diff "
-         "the two on the Compare tab. The file is as big as the card is, "
-         "empty space included, and nothing on the card is changed."),
+         "In **From SD card** mode, the line under the dropdown names the game on the "
+         "card (and how many games a boot menu holds), read in place with nothing "
+         "copied: plug cards in one by one to sort a stack. Needs Administrator on "
+         "Windows; the line says when it's missing."),
         ("Detection",
-         "Once the game is recognised, its name (and firmware version) "
-         "appears in the window's title bar. \"Not recognised\" under the "
-         "path usually means the wrong kind of file — or a copy that is "
-         "still in progress; try again once the copy finishes. If the file "
-         "belongs to a different manufacturer, that line offers a one-click "
-         "switch."),
-        ("Multi-boot cards hold several games — you get the first",
-         "A card with a boot menu carries a complete game per menu entry, and "
-         "everything here works on the FIRST one: the extract, the "
-         "replacements you make from it, and the card a Build writes. Press "
-         "Extract (or Build) on such a card and a notice says so, lists the "
-         "games on it, and names the one in play. Nothing is lost — a Build "
-         "copies the other games and the menu through untouched, so you get a "
-         "working multi-boot card with the first game changed. To change one "
-         "of the others, extract THAT game's own image, replace what you want "
-         "and build it, then load the card on the Multi-boot tab, point that "
-         "game's row at your new build and update the card in place. The "
-         "Info button beside the path lists a card's games at any time."),
-        ("What gets extracted",
-         "The Audio / Video / Images / Text checkboxes choose which asset "
-         "types to pull. Everything lands in the Project Folder — the one "
-         "folder the Replace, Write and Mod Pack tabs all work out of "
-         "(their folder rows are read-only views of this one). These "
-         "choices (and the auto-name options) are remembered per "
-         "manufacturer across sessions."),
+         "The recognised game and firmware version show in the title bar.\n\n"
+         "- **Not recognised** usually means the wrong kind of file, or a copy still "
+         "in progress.\n"
+         "- A file from another manufacturer gets a one-click switch."),
+        ("Save card as image",
+         "In **From SD card** mode, **Save card as image…** copies the whole card, "
+         "sector for sector, into one .raw file as big as the card. Nothing on the card "
+         "is changed.\n\n"
+         "- Back a stock card up before modding it.\n"
+         "- Save a card before and after a change on the machine, then diff the two on "
+         "the Compare tab."),
+        ("Multi-boot cards",
+         "On a card with a boot menu, Extract and Build work on the **first** game. A "
+         "notice says so and lists the games; a Build copies the others and the menu "
+         "through untouched. **Info** beside the path lists the games any time.\n\n"
+         "### To change another game\n"
+         "1. Extract and change that game's own image, and build it.\n"
+         "2. On the Multi-boot tab, load the card, point that game's row at your build "
+         "and update the card in place."),
         ("Projects",
-         "The folder you extract into IS your project: a hidden project "
-         "file appears in it automatically (first extract or first staged "
-         "change) recording the manufacturer, stock image and options — "
-         "picking that folder again later restores the whole setup. The "
-         "blue folder button in the header holds the project actions: New, "
-         "Open, Save as (a full fork copy, minus the rebuildable build "
-         "output), Recent, the Projects list (sizes, notes, Archive to "
-         "reclaim disk space from dormant projects), and Properties."),
-        ("Auto-naming",
-         "\"Auto-name call-outs\" transcribes speech locally (the first run "
-         "downloads a ~75 MB model, after that it works offline). "
-         "\"Auto-name music\" fingerprints full-length tracks against the "
-         "online AcoustID database — the number after a matched title (e.g. "
-         "0.97) is the match confidence. Results are also written to "
-         "callouts.csv and music_titles.csv in the output folder. "
-         "For better transcriptions at the cost of extra processing time, "
-         "raise \"Voice recognition quality\" in the ⚙ settings menu (larger "
-         "models are downloaded on first use)."),
-        ("Length-prefixed names",
-         "\"Length-prefix names\" (where available) leads each extracted "
-         "sound's filename with its play length — e.g. "
-         "\"01m22s235 - idx0001.wav\" — so sorting by name lines the same "
-         "sounds up across firmware versions: slot numbers shift between "
-         "releases, play lengths rarely do."),
-        ("The baseline",
-         "Extract writes a hidden .checksums.md5 file recording the pristine "
-         "assets. The Replace tabs and Write use it to tell what you have "
-         "changed — leave it in place."),
+         "The folder you extract into **is** your project: a hidden file in it keeps "
+         "the manufacturer, stock image and options, so opening it again restores "
+         "everything.\n\n"
+         "The blue folder button in the header has **New**, **Open**, **Save as** (a "
+         "full copy minus build output), **Recent**, **Properties** and **Projects** "
+         "(sizes, notes, and **Archive** to free disk space)."),
+        ("Naming the sounds", [
+            {"cards": [
+                {"icon": "wave", "tone": "info", "title": "Auto-name call-outs",
+                 "text": "Speech to text on this PC. First run downloads a ~75 MB "
+                         "model, then works offline."},
+                {"icon": "audio", "tone": "info", "title": "Auto-name music",
+                 "text": "Online AcoustID match. The number after a title (e.g. 0.97) "
+                         "is how sure it is."},
+                {"icon": "list", "tone": "info", "title": "Length-prefix names",
+                 "text": "Where available: `01m22s235 - idx0001.wav`, so the same "
+                         "sounds sort together across firmware versions."}]},
+            "Results also go to callouts.csv and music_titles.csv. Better call-out "
+            "names: raise **Voice recognition quality** in the ⚙ settings menu (slower; "
+            "bigger model).",
+        ]),
+        ("Re-extracting", [
+            {"note": "Extracting into a folder with files in it **overwrites your "
+                     "edits** (after a confirmation). Use one project folder per "
+                     "firmware version.", "kind": "warn"},
+            "- Leave the hidden **.checksums.md5** alone: it is how the Replace tabs "
+            "and Write tell what you changed.\n"
+            "- Into an **archived** project, your edits are set aside and put back "
+            "over the fresh extract.\n"
+            "- After an extract, **Extract** stays grey until the card, folder or an "
+            "option changes, so a second click can't redo it.",
+        ]),
         ("\"The source image has changed\"",
-         "A banner appears when the image you extracted from is no longer the "
-         "file it was — swapped, reverted or rebuilt outside PAD — because the "
-         "\"Original\" names on the Replace tabs then describe assets that "
-         "image no longer holds. Re-extract to resync, or press Dismiss if you "
-         "know it doesn't matter to you: that silences it for this image only, "
-         "and it stays silenced after a restart. The next change to the image "
-         "brings it back."),
-        ("Re-extracting",
-         "Extracting into a non-empty folder overwrites your edits (after a "
-         "confirmation). Use a fresh project folder per firmware version — "
-         "each project is one folder, one game version. (Extracting into an "
-         "ARCHIVED project is different: that's the hydrate — your edited "
-         "files are set aside first and restored over the fresh extraction "
-         "automatically.) After a finished extract the Extract button greys "
-         "out until you pick the card (on Select card) or folder again, change an option, or "
-         "the card file changes, so a second click can't redo it by accident."),
+         "The image you extracted from is no longer the same file, so the **Original** "
+         "names on the Replace tabs may be wrong. Re-extract, or **Dismiss** to silence "
+         "it for this image, even after a restart (the next change brings it back)."),
     ],
     "Replace Audio": [
         ("Scan and assign", [
@@ -1105,254 +1082,168 @@ HELP_CONTENT = {
     "Modes": [],
     "Write": [
         ("What a build does",
-         "Build copies the pristine original and repacks every file in the "
-         "assets folder that differs from the extract baseline — including "
-         "changes from earlier sessions, not just today's. Changed sounds "
-         "are re-encoded and replaced videos / images / text are patched "
-         "in, on most games size-neutrally, so the built file is a drop-in "
-         "replacement for the original. On Stern Spike 2, replaced videos "
-         "and lengthened sounds go on at full size, in the free room on the "
-         "card's games partition, and a build for a bigger SD card (SD card "
-         "size, below) is that card's size, so it needs an SD card at least "
-         "that big. The Modified Files list previews exactly what will "
-         "go in before you click — it's only a preview: the build does its "
-         "own full comparison, so there's no need to wait for the scan to "
-         "finish before building."),
+         "**Build** copies the untouched original and puts in every file that differs "
+         "from the extract baseline, from every session, not just today's.\n\n"
+         "- Sounds are re-encoded; videos, pictures and text are patched in, on most "
+         "games at the same size, so the build drops in for the original.\n"
+         "- On Stern Spike 2, videos and lengthened sounds go on at full size, in the "
+         "free room on the games partition ([SD card size](#sd-card-size-stern-spike-2)).\n"
+         "- **Modified Files** is only a preview; no need to wait for its scan."),
         ("Building again",
-         "A second build onto the same file can be an update. When the file "
-         "in the build folder is the build this app made from this original "
-         "and project, and nothing has touched it since, the Build button "
-         "offers to update it in place: the card image is not copied again, "
-         "replacements already on it stay put, only the ones that changed "
-         "since are written, and anything taken back since gets its stock "
-         "content back. On a mod with hundreds of replaced videos that is "
-         "minutes rather than hours. The build's record lives beside it (a "
-         ".pad-build.json file); answer No, or delete the record, to build "
-         "from the original again. Anything the record can't vouch for — a "
-         "different original, a file changed since, a copy that failed, an "
-         "app update — makes the build start over from the original, and the "
-         "log says why."),
+         "A rebuild onto this app's own untouched build **updates it in place**: only "
+         "what changed since is written, and anything taken back gets its stock content "
+         "back. Minutes, not hours, on a big mod.\n\n"
+         "- Its record is the **.pad-build.json** beside it. Answer **No**, or delete "
+         "it, to build from the original.\n"
+         "- A different original, a file changed since, a failed copy or an app update "
+         "starts over from the original; the log says why."),
         ("Building from a multi-boot card",
-         "The build is the whole card again, so a multi-boot original gives "
-         "you a multi-boot build: the first game on it carries your changes "
-         "and every other game, plus the menu, is copied through exactly as "
-         "it was. A notice before the build says which game that is. To "
-         "change one of the others, build that game's own image and then put "
-         "it onto the card from the Multi-boot tab (load the card, point that "
-         "game's row at your build, update in place) — only the parts that "
-         "changed are written."),
+         "A multi-boot original gives a multi-boot build: the **first** game carries "
+         "your changes, the other games and the menu are copied as they were. To "
+         "change another game, build its own image and put it on from the Multi-boot "
+         "tab (point its row at your build, update in place)."),
         ("SD card size (Stern Spike 2)",
-         "Every replaced video and grown sound goes onto the card's games "
-         "partition, which only has the room Stern left on it for the "
-         "original's card size: a stock 8 GB card can have a few hundred MB "
-         "free, and a big retheme can run out of it. If the SD card in your "
-         "machine is bigger, pick its size under SD card size, below the "
-         "Build Image line: the games partition grows to fill that card size "
-         "and everything else on the card stays exactly as it was. The built "
-         "image is then that size, so it only fits an SD card at least that "
-         "big, and flashing it takes longer. Room is all a bigger card "
-         "gives: the game still can't open a sound bank over about 2 GB, so "
-         "the limit on lengthened sound stays where it is, and nothing that "
-         "is fitted to its original's slot gets any bigger. Before anything "
-         "is written to the card image, a build adds up what it will put on "
-         "the games partition. Longer sounds are trimmed to the room that is "
-         "left. A build whose videos won't fit is refused then, with the "
-         "numbers and the smallest SD card size that could take it (when one "
-         "could), and the file already at the output is left as it was. "
-         "When a bigger SD card size would fit it, the app asks whether to "
-         "change to that size; Yes sets SD card size and builds again. A "
-         "video that has to be converted is counted once it is, so that "
-         "refusal can come after the conversions; the converted videos are "
-         "kept in the project. An update that no longer fits "
-         "beside the last build's files is built from the original instead. "
-         "A few small files made during the build are only estimated ahead, "
-         "so a build right at the limit can still stop at the copy at the "
-         "end, and the log says so. Only sizes bigger than the "
-         "original that it can be built at are offered (a multi-boot card is "
-         "sized on the Multi-boot tab instead), and the option isn't "
-         "available on macOS yet. The size applies to building an image: a "
-         "direct write keeps the card's own partitions, and Port + build "
-         "makes every other card at its own size. The card, and whether this "
-         "computer can grow one, are checked before anything is converted; "
-         "if either can't, the note under SD card size says why, and a build "
-         "is refused with that reason before any other question. When the "
-         "original's file name carries its card size, as Stern's own names "
-         "do (\"…Release.8G.sdcard.raw\"), the build is named for the size it "
-         "is built for instead, so it lands beside a build made at the "
-         "original's size. Any other name stays the same at every size, so "
-         "the bigger build replaces the other one: give it a name of its own "
-         "with Change… to keep both."),
+         "Videos and grown sounds go onto the card's **games partition**, which has only "
+         "the room Stern left: a few hundred MB on a stock 8 GB card.\n\n"
+         "If your machine's SD card is bigger, pick its size under **SD card size**, "
+         "below the Build Image line. The games partition grows to fill it; the rest of "
+         "the card stays as it was.\n\n"
+         "- The image is then that size: it needs an SD card at least that big, and "
+         "flashes slower.\n"
+         "- Only room: the game still can't open a sound bank over about 2 GB, and "
+         "nothing fitted to its slot gets bigger.\n"
+         "- Only bigger sizes are offered. Multi-boot cards are sized on the Multi-boot "
+         "tab. Not on macOS yet. A direct write and Port + build keep each card's own "
+         "size.\n\n"
+         "### When it won't fit\n"
+         "Before anything is written to the card image, a build adds up what goes on "
+         "the games partition.\n\n"
+         "- Longer sounds are trimmed to the room left.\n"
+         "- Videos that won't fit: the build is refused, with the numbers and the "
+         "smallest SD card size that could take it. The file at the output is left as "
+         "it was, and if a bigger size fits, the app offers to switch and rebuild.\n"
+         "- A video that has to be converted is counted once it is, so that refusal "
+         "can come after the conversions; the converted videos are kept in the "
+         "project.\n"
+         "- An update that no longer fits is built from the original instead.\n"
+         "- A few small files are only estimated, so a build right at the limit can "
+         "still stop at the copy at the end.\n"
+         "- If the card or this computer can't grow, the note under SD card size says "
+         "why, and a build is refused with that reason first.\n\n"
+         "### The file name\n"
+         "A name carrying its card size, as Stern's do (`…Release.8G.sdcard.raw`), is "
+         "renamed for the new size, so both builds sit side by side. Any other name "
+         "stays the same at every size, so the bigger build replaces the other: use "
+         "**Change…** to keep both."),
         ("Output name",
-         "The Build Image line shows the exact file the build will "
-         "produce. Builds land in the project's own build\\ folder — one "
-         "build per project, overwritten on each rebuild — with a distinct "
-         "default name (e.g. \"…-modified.raw\", where supported) so it "
-         "can't be mistaken for the stock file. \"Change…\" is one Save-As "
-         "picker for both the folder and the name — handy when a "
-         "NAS-hosted project should build to a local drive; the required "
-         "extension is applied automatically. A folder you typed that "
-         "doesn't exist yet is created when the build starts — and if it "
-         "can't be, you're told which folder and why before any work "
-         "happens, not a minute into the build."),
-        ("Reading the Modified Files list",
-         "Click any column header — File, Type or Status — to sort the "
-         "list; click the same one again to flip it, and a third time to "
-         "put it back in the scan's own order, which groups Pending above "
-         "Modified. Export CSV saves every row exactly as it reads on "
-         "screen, so two projects that disagree on their change count can "
-         "be diffed in a spreadsheet instead of by eye."),
-        ("Undo",
-         "\"Revert all changes…\" restores every changed asset back to its "
-         "extract original (the build inputs, not any card)."),
-        ("Direct write",
-         "\"Write to SD card / SSD\" (where available) applies the same "
-         "changes straight to the physical media. Remove the media from the "
-         "machine first and always keep a backup image."),
-        ("Build / flash",
-         "On SD-card machines (Stern Spike 2, CGC) \"Build / flash SD "
-         "card…\" is the single build button: it opens a two-part dialog "
-         "where you build a fresh image, write an image onto a card, or "
-         "tick both to build and then flash the fresh build in one step — "
-         "the quickest way to test a change on the machine. With building "
-         "unticked it flashes any pre-built or backup image, without a "
-         "separate imaging tool. The whole card is erased and replaced; a "
-         "size check refuses an image too big for the card. Requires "
-         "Administrator. The dialog opens on whichever pair you ran last "
-         "(remembered per manufacturer, across sessions), so a build-only or "
-         "flash-only habit doesn't have to be re-ticked every time. (Other "
-         "machines keep a plain Build button.)"),
-        ("USB install stick (JJP)",
-         "On Jersey Jack machines the same button reads \"Build / make USB "
-         "install stick…\", and the stick section does something different: "
-         "instead of raw-writing the ISO it formats the stick FAT32 and "
-         "copies the ISO's files onto it — the only stick layout a JJP "
-         "machine can read. A stick written with balenaEtcher, dd or Rufus' "
-         "DD mode fails on the machine with 'Failed to mount USB stick'. "
-         "Put the finished stick in a USB port on the computer in the "
-         "backbox (the cabinet's front slot works too, but on some machines "
-         "it is thirty times slower: a minute on the Restore menu, hours to "
-         "install), leave the "
-         "purple security key plugged in, and power on: the installer runs "
-         "by itself — the Utilities USB-update menu is only for JJP's small "
-         "delta updates and ignores install sticks. The installer checks for "
-         "the security key first and stops on \"Security key not found\" if "
-         "it is missing."),
-        ("Onto the game's SSD instead (JJP)",
-         "The stick dialog's \"Onto:\" row offers the game's SSD in a dock on "
-         "this PC as a second place for a JJP install ISO. The app then does "
-         "what the machine's installer would - the partition table from JJP's "
-         "own template, every partition restored, the machine's filesystem "
-         "IDs - and reads the disk back before it says done. It needs the app "
-         "run as Administrator (the disk is handed to WSL whole), erases the "
-         "disk, and needs no stick and no security key for the write; the key "
-         "is still needed to play. On a disk that already holds this install, "
-         "the \"Write:\" choice replaces only the boot menu (make the change "
-         "to the ISO on the Multi-boot tab first) or only one image from that "
-         "image's own install ISO, and keeps the settings and scores; both "
-         "images must be the same game version, and the dialog checks the "
-         "disk really is this install before a byte is written."),
+         "The **Build Image** line shows the exact file the build makes: in the "
+         "project's **build** folder, one per project, overwritten each time, named "
+         "unlike the stock file (e.g. `…-modified.raw`).\n\n"
+         "**Change…** picks another folder and name (say, a local drive for a NAS "
+         "project). A missing folder is made, or you're told why it can't be before "
+         "any work starts."),
+        ("Modified Files and undo",
+         "- Click a column header to sort; again to flip; a third time for the scan's "
+         "order.\n"
+         "- **Export CSV** saves the rows, to compare two projects in a spreadsheet.\n"
+         "- **Revert all changes…** puts every changed asset back to its extract "
+         "original (not on any card)."),
+        ("Build / flash an SD card", [
+            "On Stern Spike 2 and CGC, **Build / flash SD card…** does both; tick "
+            "either part, or both. Other machines have a plain **Build**.",
+            {"flow": [
+                {"icon": "write", "title": "Build", "text": "a fresh card image"},
+                {"icon": "sd", "title": "Flash",
+                 "text": "it, or any saved image, onto an SD card"},
+                {"icon": "play", "title": "Test", "text": "on the machine"}]},
+            "- Flashing needs Administrator, and refuses an image too big for the card.\n"
+            "- The dialog remembers your last ticks per manufacturer.",
+            {"note": "Flashing **erases the whole card**.", "kind": "warn"},
+        ]),
+        ("Direct write", [
+            {"note": "**Write to SD card / SSD** (where available) changes the card "
+                     "itself. Take it out of the machine first, and always keep a "
+                     "backup image.", "kind": "warn"},
+        ]),
+        ("USB install stick (JJP)", [
+            "On Jersey Jack the button is **Build / make USB install stick…**: it "
+            "formats the stick FAT32 and copies the ISO's files on, the only stick a "
+            "JJP machine reads.",
+            {"note": "balenaEtcher, dd or Rufus' DD mode sticks fail with 'Failed to "
+                     "mount USB stick'.", "kind": "warn"},
+            "1. Plug it into the backbox computer. (The front slot works, but can be "
+            "thirty times slower: hours to install.)\n"
+            "2. Leave the purple security key in, or it stops on \"Security key not "
+            "found\".\n"
+            "3. Power on; the installer runs by itself. (The Utilities USB-update menu "
+            "is for small delta updates only.)",
+        ]),
+        ("Onto the game's SSD (JJP)", [
+            "The stick dialog's **Onto:** row writes the install ISO straight onto the "
+            "game's SSD in a dock on this PC, as the machine's installer would, and "
+            "reads it back. No stick or key needed to write (the key is to play).",
+            {"note": "This **erases the disk**, and needs Administrator.",
+             "kind": "warn"},
+            "On a disk already holding this install, **Write:** can swap just the boot "
+            "menu or one image (same game version), keeping settings and scores. The "
+            "disk is checked to be this install before a byte is written.",
+        ]),
     ],
     "Mod Pack": [
-        ("What it's for",
-         "Mod packs are zips holding only your modified files, so a mod is "
-         "small enough to hand to someone else. The Project Folder shown at "
-         "the top is the same one every Replace tab and the Write tab work "
-         "out of — packs export from it and import into it."),
-        ("Export",
-         "Export bundles everything you've changed (versus the extract "
-         "baseline) into a single shareable mod-pack file. That means ALL "
-         "your changes to this folder since you last extracted it — not "
-         "just the ones made this session — so a mod built over many "
-         "sittings exports in one go. Re-running Extract into a folder "
-         "makes its current contents the new baseline, so export before "
-         "you re-extract, and keep each firmware version in its own "
-         "folder."),
+        ("What it's for", [
+            "A mod pack is a small zip of only your changed files, to share. It works "
+            "with the Project Folder at the top.",
+            {"cards": [
+                {"icon": "upload", "tone": "info", "title": "Export",
+                 "text": "your changes, into one pack"},
+                {"icon": "download", "tone": "info", "title": "Import",
+                 "text": "a pack, onto a matching extract"},
+                {"icon": "copy", "tone": "ok", "title": "Transfer mods",
+                 "text": "onto another version or model"},
+                {"icon": "modpack", "tone": "ok", "title": "Port + build",
+                 "text": "onto stock cards, built, in one click"}]},
+        ]),
+        ("Export", [
+            "**Export** packs every change since you last extracted, from every session.",
+            {"note": "Re-extracting makes the folder's files the new baseline: export "
+                     "first, and keep each firmware version in its own folder.",
+             "kind": "warn"},
+        ]),
         ("Import",
-         "Import applies a mod pack onto a matching extract — the pack "
-         "records which game/version it was made from, and only files this "
-         "extract actually has are written. A pack built from another card "
-         "(an LE pack onto a Pro extract, say) keeps its sounds and art in "
-         "different places, so most of it fits nothing here: those files are "
-         "skipped and counted rather than dropped into the folder, where they "
-         "would list as slots no build can use. Use \"Transfer mods\" for that "
-         "instead.\n\nThe confirmation before an import counts the skips, and "
-         "a \"Details\" button on it opens the full list — every file that "
-         "won't be applied, each with the reason it isn't: either your "
-         "extract has no such file (it stays in the zip, untouched), or it's "
-         "a stray this import will take back out of the project folder. The "
-         "log names them one per line as well, so the same list is still "
-         "there to read after the dialog is gone.\n\nYour staged Defaults, high-score defaults and the names "
-         "you gave image groups and scenes ride along in the pack as well — "
-         "they are project settings rather than files, so they are keyed by "
-         "the firmware's own names and land staged for the next Build. One "
-         "thing no import can APPLY: files you replaced on the card image "
-         "itself with the Partitions tab (SternLogo.png and friends). Those "
-         "are written into the .raw rather than into the project folder, and "
-         "putting one back means resizing inside the card's own filesystem. "
-         "The pack carries your copies anyway, as long as the file you "
-         "swapped in is still on this PC: Import drops them into the "
-         "project's card_files folder under the same on-card path, so it is "
-         "one right-click Replace on the Partitions tab. If that file has "
-         "moved since, Import can only name it for you to redo."),
-        ("Port + build (one click)",
-         "\"Port + build onto card image(s)...\" runs the whole chain for "
-         "you: pick one or more STOCK card images — the new firmware "
-         "version, the other model of the same title (Pro to Premium/LE or "
-         "back), or several at once — and for each one the app extracts the "
-         "card, transfers this project's mods onto it, and builds its "
-         "modded image, unattended, one after another. Each card's extract "
-         "folder is created next to the built images and reused on the next "
-         "port, so re-shipping after a small change skips straight to the "
-         "transfer and build (which the Write's own caches make fast). "
-         "Audio slots whose index now holds a different sound are skipped "
-         "automatically (the safe choice); everything skipped or dropped is "
-         "named in the log, per target, exactly like the step-by-step "
-         "transfer below."),
+         "**Import** writes only the files this extract has; the pack knows which game "
+         "and version it came from.\n\n"
+         "- Everything else is skipped and counted. **Details** lists each with why. "
+         "For a pack from another card (LE onto Pro), use "
+         "[Transfer mods](#transfer-mods).\n"
+         "- Staged Defaults, high-score defaults and your image group and scene names "
+         "come along, ready for the next Build.\n"
+         "- Files swapped on the Partitions tab (like SternLogo.png) can't be applied: "
+         "Import puts them in the project's **card_files** folder for one right-click "
+         "**Replace** there."),
+        ("Port + build", [
+            "**Port + build onto card image(s)…** does it all for one or more **stock** "
+            "card images: a new firmware, the other model (Pro, Premium, LE), or several.",
+            {"flow": [
+                {"icon": "extract", "title": "Extract", "text": "each card"},
+                {"icon": "copy", "title": "Transfer", "text": "your mods onto it"},
+                {"icon": "write", "title": "Build", "text": "its modded image"}]},
+            "Extracts are kept for next time. Audio slots that now hold a different "
+            "sound are skipped; the log names everything skipped.",
+        ]),
         ("Transfer mods",
-         "\"Transfer mods from another extract\" (where available) carries "
-         "your Replace edits from an older firmware's extract onto a new "
-         "version's extract. Audio is matched by content signature, so it "
-         "survives renumbered slots and renamed files. Before the confirm "
-         "dialog opens, the log lists the whole plan slot by slot: every sound "
-         "that moved to a new index, both ends of the move, and everything "
-         "that can't be carried with the reason why — nothing is silently "
-         "dropped. Text works the same way: any string the two old-version "
-         "extracts can't be lined up on is quoted in the log under the asset "
-         "it came from, with which of the two extracts it was in, so a skipped "
-         "count is something you can actually check your own edits against. "
-         "The log stops that list at 40 so a big card can't push everything "
-         "else out of the pane; the complete list, every string in full, is "
-         "written to unmatched-text.txt in the new extract's logs folder and "
-         "the log line right after it says where. "
-         "Your staged "
-         "Defaults (settings and high-score slots) come along too — those "
-         "are keyed by the firmware's own names, and the build skips any "
-         "the new image doesn't have.\n\nRunning the same transfer onto "
-         "the same folder again REPLACES the earlier run rather than "
-         "adding to it: anything that run staged and this one doesn't "
-         "find goes back to the slot's original, and anything you "
-         "re-pointed yourself since is kept. The confirm dialog says how "
-         "many assignments are about to be replaced.\n\nThe same thing works between the "
-         "two models of one game: point it at your Pro/Prem/LE extract and "
-         "a fresh extract of the other model, and what they share moves "
-         "over.\n\nFields 1 "
-         "and 3 are never alternatives, and neither takes priority: field 1 "
-         "(your old extract) is where your mods come FROM and is always "
-         "required; field 3 is an optional clean, unmodified twin of that "
-         "same old version, used only as the reference your old extract is "
-         "compared against — with it, the factory's own between-version "
-         "changes aren't mistaken for your mods, and audio + text mods can "
-         "be carried too.\n\nIf your old extract came off a card THIS app "
-         "built, the mods already baked into that card are the folder's "
-         "starting point rather than replacements, so on its own the "
-         "transfer carries only the replacements you assigned inside that "
-         "folder - the confirm dialog and the log both say so. Fill field 3 "
-         "with a stock extract of that card's own code and it offers to "
-         "carry BOTH in one run: the baked-in mods first, compared against "
-         "that stock extract, then this folder's own replacements on top, "
-         "which win on any slot the two share by being the newer round. "
-         "Each pass keeps its own confirm, and turning the first one down "
-         "still runs the second."),
+         "**Transfer mods from another extract** (where available) carries your edits "
+         "onto a newer firmware's extract, or the other model's.\n\n"
+         "| Field | What it is |\n"
+         "|---|---|\n"
+         "| 1: your old extract | Where your mods come **from**. Always needed. |\n"
+         "| 3: a clean twin | Optional: a stock extract of the same old version, so "
+         "factory changes aren't taken for yours, and audio and text can move too. |\n\n"
+         "- Audio is matched by content, so renumbered slots don't matter.\n"
+         "- The log shows the plan before you confirm, and why anything can't move; "
+         "unmatched text is listed in full in **unmatched-text.txt**.\n"
+         "- Running it again **replaces** the last run; your own re-pointing is kept.\n"
+         "- From a card this app built, fill field 3 with that card's stock extract to "
+         "carry both the baked-in mods and the folder's own."),
     ],
     "Partition Explorer": [
         ("What it's for", [
@@ -2615,45 +2506,28 @@ HELP_CONTENT = {
 # appended to the tabs its launch buttons sit on (see _CONTENT_EXTRAS).
 _IMAGE_INFO_SECTIONS = [
     ("The ⓘ button",
-     "The small ⓘ button next to the image picker opens a read-only window "
-     "with everything the app knows about that image: the file itself, what "
-     "was detected (manufacturer, game, format), firmware details, on-card "
-     "asset counts and the partition layout. Useful for telling firmware "
-     "versions apart, comparing two releases, and reporting problems. Its "
-     "Copy Report button puts a plain-text version on the clipboard, ready "
-     "to paste into a bug report. When the image is the card picked on the "
-     "Select card tab, the button takes you there instead, because the same "
-     "details already sit under the card on that tab."),
+     "The **ⓘ** beside the image picker opens a read-only window on that image: file, "
+     "detected game and format, firmware, on-card asset counts and partitions. Good "
+     "for telling firmware versions apart; **Copy Report** is for bug reports. For the "
+     "card picked on Select card it takes you there instead, where the same details "
+     "sit."),
     ("Where its details come from",
-     "Only from the image itself and its filename — or, for a card opened "
-     "from the Extract tab's card row, from the card in the reader (there is "
-     "no filename then, so the game is named by the card's own game folder). A Stern card's version "
-     "is read from the card's own update index — the version is a fact "
-     "about the image, so renaming the file cannot change it — and the "
-     "filename is used only when that index cannot be read. If the name "
-     "claims a different version than the card, both are shown and the "
-     "card wins. The short Version ID (like VEN106LE) is "
-     "assembled from the title code inside the game firmware. Videos, "
-     "images, scenes, sounds and sound fragments are all counted straight "
-     "off the card, no Extract needed: those sound counts are the asset "
-     "container's own header words. \"Sounds\" is what an Extract decodes "
-     "to WAVs; \"Sound fragments\" is the (larger) pool of audio pieces "
-     "the game's sound requests draw on — a request can chain several "
-     "fragments, and several requests can share one. \"Sound requests\" is "
-     "that third number, the calls the game code itself can make: it is no "
-     "header word, so it is read from the request table inside the game "
-     "firmware, and the row is left out rather than guessed at on a card "
-     "whose table cannot be read."),
+     "Only from the image and its file name (or, for a card in a reader, the card).\n\n"
+     "- **Version** (Stern) is read from the card's update index, so renaming the file "
+     "can't change it. If the name disagrees, both show and the card wins.\n"
+     "- **Version ID** (like VEN106LE) is built from the title code in the firmware.\n"
+     "- All counts are read off the card, no Extract needed.\n\n"
+     "| Count | What it is |\n"
+     "|---|---|\n"
+     "| Sounds | What an Extract decodes to WAVs |\n"
+     "| Sound fragments | The bigger pool of audio pieces sounds are built from |\n"
+     "| Sound requests | The sound calls the game code can make (left out if "
+     "unreadable) |"),
     ("Adjustments and high scores",
-     "\"Adjustments\" is how many operator settings this firmware defines — "
-     "the settings list in the machine's own service menu — and \"High "
-     "scores\" is how many places its high-score board keeps: the four high "
-     "scores, the Grand Champion, and every mode or challenge champion the "
-     "game tracks. Both are read from the game firmware on the card. What "
-     "the card cannot tell you is the machine's current state: the settings "
-     "an operator has chosen and the scores actually played are kept in the "
-     "machine's own memory, not on the SD card. The Defaults tab edits the "
-     "values a freshly flashed machine starts from."),
+     "**Adjustments** is how many operator settings the firmware has; **High scores** "
+     "how many places its board keeps (top four, Grand Champion, every champion). The "
+     "machine's current settings and scores live in its own memory, not on the card; "
+     "the Defaults tab sets what a freshly flashed machine starts from."),
 ]
 
 # Non-tab help appended to the tabs whose UI hosts the feature.

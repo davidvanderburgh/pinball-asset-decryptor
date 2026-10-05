@@ -467,6 +467,7 @@ HELP_CONTENT = {
          "something else and the scene goes back to what the game draws. A layer that draws a picture "
          "(itself or through what it holds) has a picture button at the end of its row: it opens "
          "that picture on the Images tab (a layer with several lists them to pick from). "
+         "A text layer has a T button in the same place: it opens its words on the Text tab. "
          "Every edit is kept in the project and "
          "listed on the Write tab; the Write puts them on the card (moves, resizes, "
          "tints, hides and layer changes even straight to an SD card; an added picture "

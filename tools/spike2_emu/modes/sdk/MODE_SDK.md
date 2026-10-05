@@ -1485,9 +1485,14 @@ The first proof of this section (magnet_test_mode.c, the same day) read the runt
 grab in it was switched off by the game 1 ms after it was sent, which the `[coildrive]` lines showed and
 nobody read. Its clamp and refusal lines stand (they are decisions, not drive); its "held" lines did not.
 
-Not measured: a machine (nothing has been flashed); a tilt mid-grab (it ends processes the way a drain
-does); a magnet sequence of the game's starting while a grab already holds (the rig raised one only as the
-first hit landed, on the LE).
+**Hardware-confirmed** (a Godzilla Premium 1.16, 2026-10-05, the branch's pinned runtime and port with mode files from `runtime_cfg`, read from the card's `/dump/mode.log`; docs/plans/mode_coils.md "Machine test"): the Godzilla magnet held once for 1 s and four times for 2 s (255 for 350 ms
+then 50), each let go at 1000-2016 ms; three hits were refused while the game's own magnet was working, and one
+grab stood aside before it began when the game wanted the magnet (`let go before the hold began (the game wants
+it)`). On the machine the game's own magnet process is busy only some of the time, not on every hit as in the
+LE emulator runs.
+
+Not measured: a drain or a tilt mid-grab on a machine (both drains there came between grabs; the emulator's
+drain stands); a magnet sequence of the game's starting while a grab already holds.
 
 ## Held coils (PAD-381)
 
@@ -1535,7 +1540,11 @@ text bridge_label          bridge
   1 s into it refused; held again later, and a mode stop let go 617 ms early; no abort;
 - the Godzilla magnet, now read the same way, unchanged on the Pro card (255 for 350 then 50).
 
-Not measured: a machine; what the bridge diverts on a real playfield (the rig has no ball on it).
+**Hardware-confirmed** (a Godzilla Premium 1.16, 2026-10-05, the branch's pinned runtime and port with mode files from `runtime_cfg`, read from the card's `/dump/mode.log`; docs/plans/mode_coils.md "Machine test"): the Mechagodzilla magnet held 1 s or 2 s at four mode starts and on two
+building hits (255 for 250 ms then 80), a building hit 1.5 s into a hold refused; the bridge held 3 s eight
+times, on the Maser target and the left ramp (255 for 300 ms then 25); every hold let go at 1000-3019 ms.
+
+Not measured: a drain or a tilt mid-hold on a machine.
 
 ## The scoop (PAD-381)
 
@@ -1586,8 +1595,11 @@ with `scoop_hold 4000`; a landing is the Right Scoop switch held closed until th
 - a TILT during a 10 s hold (LE): the ball ended, the hold let go and the game kicked the ball out; no
   abort.
 
-Not measured: a machine; a battle's select screen holding the ball first (the game's own hold, which the
-wrapper runs before its own).
+**Hardware-confirmed** (a Godzilla Premium 1.16, 2026-10-05, the branch's pinned runtime and port with mode files from `runtime_cfg`, read from the card's `/dump/mode.log`; docs/plans/mode_coils.md "Machine test"): a ball in the scoop held 5021 ms (`scoop_hold 5000`), then the game's own
+kick.
+
+Not measured: a battle's select screen holding the ball first (the game's own hold, which the wrapper runs
+before its own); a tilt during a hold on a machine.
 
 ## Ports: why your mode runs on any game
 

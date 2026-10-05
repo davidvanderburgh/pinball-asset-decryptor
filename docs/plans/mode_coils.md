@@ -184,10 +184,33 @@ test). This is a last line of defence, not a guardrail of ours.
     polls it ~2000 times a run and never moved it in the rig: the rig most likely does not model this stepper,
     so it needs an emulator model before anything can be proven.
 
+## Machine test (2026-10-05, David's Godzilla Premium 1.16)
+
+His card's p2 was backed up, the branch's pinned `mode.so`, its `godzilla_le-1.16.port` and one mode file from
+`runtime_cfg` put on it with `mode_install.py`, written back over the p2 range and read back by SHA-256; each
+round's exact files ran in the emulator first. The results come from the card's `/dump/mode.log`.
+
+- **Round 1 (1 s holds; the mode started on the Maser target, 90 s):** nothing seen. The log: the first game
+  never hit the Maser target, so the mode never ran; in the second it ran 27 s before the drain. In that time
+  the Mechagodzilla magnet (twice, at the starts) and the Godzilla magnet (once) were held 1 s and let go on
+  time; the left ramp and the scoop were not hit. The test, not the code, failed: it needed a shot to start,
+  showed nothing on the glass, ended at the drain, and a magnet with no ball near it does nothing visible.
+- **Round 2 (the first slingshot of every ball starts it, it runs to the drain; magnets 2 s, bridge 3 s, scoop
+  5 s):** two runs (230 s and 66 s), each started by the ball on a slingshot. Held and let go on time: the
+  bridge 8 times (3000-3019 ms), the Mechagodzilla magnet 4 times (2000-2016 ms; two at the starts, two on the
+  building), the Godzilla magnet 3 times (2000-2004 ms), a ball in the scoop once (5021 ms). Refused as
+  designed: a building hit mid-hold ("a grab is already holding"), three Godzilla target hits while the game's
+  own magnet worked, and one grab that stood aside before it began because the game wanted the magnet. Both runs
+  ended at the drain. David: the bridge, the scoop and the magnet "seemed to work".
+
+Learned: the game's own magnet process on a Premium is busy only some of the time (in the LE emulator it was
+busy on every hit), so the Godzilla target grab does happen on a Premium. Not covered on the machine: a drain
+or tilt in the middle of a hold (both drains came between holds); the emulator's drain proof stands.
+
 ## Next
 
-1. A supervised machine test on David's Premium, hand on the power switch: Mode > Magnet 1 s on the Godzilla
-   target (and a drain mid-grab), Mode > Scoop 3 s, Mode > Other mechanisms (Mechagodzilla magnet, bridge) 1 s.
+1. Done: the supervised machine test (above). Then the card goes back to David's own modes (p2 restored from
+   the backup).
 2. Shield (David's call): the motor's take-control call and `v[16]` move, run from a process of ours like the
    coils; emulator-provable today.
 3. Building (David's call): a stepper model in the rig first (BUILDING UP/DOWN), then the same approach.

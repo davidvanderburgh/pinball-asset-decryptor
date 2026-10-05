@@ -51,6 +51,9 @@ const TIP = {
   wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
   displayPriority: "While it runs, the game's lesser full-screen displays wait for it (the example modes use a mode's 180; FINAL WARS a wizard's 190). Kept for the total on its own screen, given back at once at a drain.",
+  gameModes: "May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Cannot start: as End this one, and while it runs the modes ticked below cannot start at all. A multiball of the game's is never held off: it starts, and this mode ends. Its own Multiball block does not end it.",
+  blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
+  blockLast: "One at least: to let them all start, choose \"may start\" above.",
   own: "Clips and sounds of the mode's own, picked from your files and copied into its folder. Write and Try it carry them onto the card; a Play a clip or Play a sound block plays one by its name.",
   where: "Full screen plays over everything, the HUD too, half a second after it is asked for (so the game's own clip for the same shot does not take its place). Behind the HUD, over and over, plays in the city's place under the score while the mode runs. Behind the HUD, once, plays in that loop's place and then the loop again.",
   fallback: "What to say instead when the card could not carry this sound (a card with no spare sound for it): one of the game's own callouts, or nothing.",
@@ -465,6 +468,40 @@ function Timers({ prog, ed }) {
   </div>`;
 }
 
+// PAD-373: what the mode does about the game's own modes, as the form asks it (PAD-363). No ticks
+// saved = the title's usual ones, shown ticked; the last tick stays, so the list never goes back to
+// those by itself.
+function GameModes({ prog, ed }) {
+  const ch = ed.ch;
+  const gm = prog.game_modes || "stack";
+  const rows = ch.game_modes || [];
+  const on = new Set(prog.block_modes && prog.block_modes.length ? prog.block_modes : (ch.game_modes_default || []));
+  const opts = [{ value: "stack", label: "may start (this one carries on)" },
+    { value: "give_way", label: "may start, and end this one", disabled: !!ch.give_way_off && gm !== "give_way" },
+    { value: "block", label: "cannot start (the ones ticked)", disabled: !!ch.block_off && gm !== "block" }];
+  const tick = (id, v) => {
+    const next = new Set(on);
+    if (v) next.add(id); else next.delete(id);
+    ed.set(["block_modes"], [...next].sort((a, b) => a - b));
+  };
+  const why = gm === "give_way" ? ch.give_way_off : gm === "block" ? (ch.block_off
+    || (rows.length && !on.size ? "None ticked: none is held off, and one of them starting ends this mode." : "")) : "";
+  return html`<div class="bk-gamemodes">
+    <div class="row wrap">
+      <span class="lbl" ...${tip(TIP.gameModes)}>While it runs, the game's modes</span>
+      <${Select} sm value=${gm} options=${opts} width=${260} title=${TIP.gameModes} onChange=${(v) => ed.set(["game_modes"], v)} />
+    </div>
+    ${gm === "block" && rows.length ? html`<div class="modes-shots">
+      ${rows.map((m) => {
+        const last = on.size === 1 && on.has(m.id);
+        return html`<${Check} key=${"b" + m.id} label=${m.label} checked=${on.has(m.id)} disabled=${last}
+          title=${last ? TIP.blockLast : TIP.blockPick} onChange=${(v) => tick(m.id, v)} />`;
+      })}
+    </div>` : null}
+    ${why ? html`<div class="small muted">${why}</div>` : null}
+  </div>`;
+}
+
 // PAD-374: the mode's own clips, sounds and music: each a file in its folder and a name.
 function OwnMedia({ prog, ed, s, folder }) {
   const ch = ed.ch;
@@ -625,6 +662,7 @@ export function BlocksEditor({ s, c }) {
         <span class="sp"></span>
         <span class="small muted">${saving ? "Saving…" : "Saved · Try it builds it in"}</span>
       </div>
+      <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />
       <${Timers} prog=${prog} ed=${ed} />
       <${OwnMedia} prog=${prog} ed=${ed} s=${s} folder=${c.folder} />

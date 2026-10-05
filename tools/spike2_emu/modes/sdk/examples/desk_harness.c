@@ -370,6 +370,7 @@ int pm_block_list(const unsigned char *ids, int n)
     printf("%s %s\n", n ? "" : " defaults", current && current->name ? current->name : "?");
     return 1;
 }
+void pm_running_name(const char *name) { (void)name; }   /* PAD-373: a blocks mode names itself */
 const char *pm_stock_mode_what(unsigned kind)
 {
     return kind & PM_STOCK_BATTLE ? "a battle" : kind & PM_STOCK_MULTIBALL ? "a multiball" : "a stock mode";

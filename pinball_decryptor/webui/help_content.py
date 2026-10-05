@@ -8,8 +8,13 @@ user can pull up "everything worth knowing about this page" on demand
 Content is deliberately static + manufacturer-agnostic (plugin-specific
 behaviours say "where available"); if per-manufacturer help is ever needed,
 grow ``HELP_CONTENT`` into a hook on ``Manufacturer`` like ``write_intro``.
+
+A body is words in a light markdown, or a list of words and picture blocks
+(``webui/tips_render.py`` says what each draws, PAD-386): bullets, steps and
+a callout read faster than a paragraph, so new tips use them.
 """
 
+import os
 
 # (title, body) sections per notebook-tab name.  Keys match the tab captions
 # exactly (the tab's key, as the ? window asks for it).
@@ -3048,171 +3053,232 @@ def _modes_which_games():
     return {"text": lead + "Shots, scoring, timers, multiball and holding off the game's "
                            "modes work on all of them; the columns are what differs.",
             "table": {"head": list(MODES_GAMES_HEAD), "rows": [list(r) for r in rows]},
-            "after": "Lights: shots = just the scoring shots' inserts; all = every insert in "
-                     "the mode's colour. HUD = counters, a timer and a gauge at the screen's "
-                     "edges. Buttons = the flipper and Action buttons count as shots. Never "
-                     "waits = a mode can't be set to wait for the game's modes.\n\n"
-                     "A build not listed gets its hooks worked out when you pick its card: "
-                     "press Check this game before trusting them. MODE_SDK.md, \"Making a "
-                     "port for another game or version\", covers the rest."}
+            "after": "- **Countdown no:** the game's voice never says a number on its own.\n"
+                     "- **Ball save not yet:** found in the game, not yet seen working.\n"
+                     "- **Lights:** *shots* lights just the scoring shots' inserts; *all* "
+                     "holds every insert in the mode's colour.\n"
+                     "- **HUD:** counters, a timer and a gauge at the screen's edges.\n"
+                     "- **Buttons:** the flipper and Action buttons count as shots.\n"
+                     "- **Never waits:** a mode can't be set to wait for the game's modes.\n\n"
+                     "> **Not listed?** Pick the card anyway: the app works out its hooks. "
+                     "Press Check this game (about two minutes) before trusting them. "
+                     "MODE_SDK.md, \"Making a port for another game or version\", covers the rest."}
+
+
+def _limits(heading):
+    """A part of MODE_LIMITS.md, the Mode SDK's "What a mode can and can't do", read
+    when the window renders (PAD-386: the tab opens it HERE, never in another app).
+    The file stays the one copy of those words; its tests keep its sizes the
+    editor's and its games the ports'."""
+    def read():
+        from ..plugins.stern import mode_runtime as MR
+        from .tips_render import md_part
+        return md_part(os.path.join(MR.sdk_dir(), "MODE_LIMITS.md"), heading)
+    return read
+
+
+#: The Modes tips' section "What a mode can and can't do" opens on (PAD-386)
+MODES_LIMITS_TITLE = "What a mode can and can't do"
 
 
 PREVIEW_HELP = {
     "modes": {
         "Modes": [
-            ("What it's for",
-             "Make a game mode of your own: what starts it, how long it runs, "
-             "which shots score and what they pay, and what the display, lights "
-             "and speakers do while it runs. A mode is a small text file that the "
-             "running game reads, so it behaves like a mode the game shipped with: "
-             "it scores through the game's own scoring and plays through its own "
-             "light and sound calls."),
-            ("What it can't do",
-             "Stern's own modes are compiled into the game program, and the app "
-             "doesn't rewrite that code. So your modes are wide open (start, shots, "
-             "scoring, screen, clips, sounds, music, lights); the game's modes change "
-             "only where a timer or award is one number; and progression, settings, "
-             "coils, high scores and Insider Connected are off limits. Example: "
-             "Godzilla's battle selection has seven slots fixed in its code, so you "
-             "can't add a monster, but a mode can take over a slot. 'What a mode can "
-             "and can't do', on the first mode's page and under New, has the full "
-             "list (MODE_LIMITS.md)."),
+            ("What it's for", [
+                "Make a game mode of your own. A mode is a small file the running "
+                "game reads, so it plays like one the game shipped with: it scores "
+                "through the game's own scoring and plays through its own light and "
+                "sound calls.",
+                {"flow": [
+                    {"icon": "flag", "title": "Starts",
+                     "text": "on a shot made a few times, a run of shots, an event, or after another mode"},
+                    {"icon": "modes", "title": "Runs",
+                     "text": "on its own clock; the shots you pick score what you set"},
+                    {"icon": "film", "title": "Shows",
+                     "text": "its own screen, clips, sounds, music and lights"},
+                    {"icon": "stop", "title": "Ends",
+                     "text": "when time is up, on a shot, or on a drain"}]},
+            ]),
+            (MODES_LIMITS_TITLE, [
+                "Stern's own modes are compiled into the game program, and the app "
+                "doesn't rewrite that code. Your mode runs beside it, through hooks "
+                "the app knows for each build.",
+                {"cards": [
+                    {"icon": "check", "tone": "ok", "title": "Your modes",
+                     "text": "**Wide open.** Start, shots, scoring, screen, clips, sounds, music, lights."},
+                    {"icon": "defaults", "tone": "warn", "title": "The game's modes",
+                     "text": "**Numbers only.** Timers and awards, not how they play."},
+                    {"icon": "lock", "tone": "err", "title": "Everything else",
+                     "text": "**Off limits.** Progression, settings, coils, high scores, Insider Connected."}]},
+                _limits("Quick answers"),
+            ]),
             ("Which games", _modes_which_games),
-            ("Making a mode",
-             "New, over the list, makes a blank mode or one from an example (KAIJU "
-             "RUSH is the one that has run on a machine); a project with no mode "
-             "yet offers the same on the page. Name it, then pick the shot "
-             "that starts it and how many times, how long it runs, which shots "
-             "score and what the first one pays (Starts on can also ask for up to "
-             "three more shots in the same ball, in any order, or for shots made in "
-             "order, with any other shot starting the sequence over; 'Only after' "
-             "holds it until another mode has run this ball or game; a minus "
-             "number under Points per shot takes that much away on each hit of "
-             "that shot; and Ends on can end it sooner, on a pick of shots or on "
-             "any shot that does not score). "
-             "Everything else is optional: a "
-             "screen (a panel in your colours or a picture of your own, showing "
-             "what each shot paid and the total), a clip (a title card or a video "
-             "of your own, played full screen when the mode starts or ends), the "
-             "countdown and the sound when time is up, sounds of its own when it "
-             "starts, on a scoring shot and underneath, a colour sweep or the "
-             "scoring shots lit on the playfield, how often it can start, whether "
-             "it runs during the game's own modes, and an event that starts or "
-             "ends it. A section the project's game cannot do is greyed, with the "
-             "reason. Every change saves itself in the project's modes folder about "
-             "half a second after you stop typing, and the line at the bottom of "
-             "the form says whether the mode can be built."),
+            ("Making a mode", [
+                "**New**, over the list, makes a blank mode or one from an example "
+                "(KAIJU RUSH is the one that has run on a real machine). A project "
+                "with no mode yet offers the same on the page. Then:\n\n"
+                "1. **Name it.**\n"
+                "2. **Starts on:** the shot that starts it and how many times. It can "
+                "also ask for up to three more shots in the same ball, in any order or "
+                "in order (any other shot starts the sequence over). *Only after* "
+                "holds it until another mode has run this ball or game.\n"
+                "3. **Runs for:** how long it runs.\n"
+                "4. **Points per shot:** which shots score and what the first one "
+                "pays. A minus number takes that much away on each hit.\n"
+                "5. **Ends on** (if you like): a pick of shots, or any shot that "
+                "does not score, ends it sooner.\n\n"
+                "### Everything else is optional\n"
+                "- **Screen:** a panel in your colours or a picture of your own, "
+                "showing what each shot paid and the total.\n"
+                "- **Clip:** a title card or a video of your own, full screen when "
+                "the mode starts or ends.\n"
+                "- **Sound:** the countdown, the sound when time is up, and sounds of "
+                "its own when it starts, on a scoring shot and underneath.\n"
+                "- **Lights:** a colour sweep, or the scoring shots lit on the playfield.\n"
+                "- **Rules:** how often it can start, whether it runs during the "
+                "game's own modes, and an event that starts or ends it.",
+                {"note": "Every change saves itself in the project's modes folder about "
+                         "half a second after you stop typing. The line at the bottom of "
+                         "the form says whether the mode can be built, and a section this "
+                         "game can't do is greyed, with the reason."},
+            ]),
+            ("Try it", [
+                "**Try it** builds this project's modes exactly as Write puts them on "
+                "a card, then starts the card in the Emulate tab with them.",
+                {"flow": [
+                    {"icon": "write", "title": "Build", "text": "your modes, as Write would"},
+                    {"icon": "emulate", "title": "Run", "text": "the card, on the Emulate tab"},
+                    {"icon": "play", "title": "Play",
+                     "text": "a mode starts on its shots, or at once with Start mode now"}]},
+                "- The button reads **Cancel** while it works, and the line under it "
+                "says what is happening. Cancel, here or on the Emulate tab, stops the build.\n"
+                "- A mode's own sound is the slow part: about a minute the first time "
+                "it changes, reused after that. A set nothing changed since the last "
+                "Try it is used as it is.\n"
+                "- **End mode** ends whichever of this project's modes is running. The "
+                "run is the Emulate tab's, and its Stop stops it.\n"
+                "- An edit made while the game runs reaches it within a second; a new "
+                "sound or clip reaches it at the next Try it.\n"
+                "- A refusal is shown beside Try it and on the Emulate tab, with the reason.",
+            ]),
             ("Several modes",
-             "A card holds as many modes as you make; the count is under New, "
-             "with modes made of blocks and modes written in C counted apart. Each starts from its own "
-             "shot, and one runs at a time: a mode whose shots come up while "
-             "another is running does not start then, but its next starting shot "
-             "after that one ends starts it. A card carries one end sound of a "
-             "mode's own: the first mode that has one, and the Sound section says "
-             "whose."),
-            ("Scores and Insider Connected",
-             "A mode scores through the game's own scoring, so its points are not "
-             "the game's stock scoring. With modes on the card, players still log "
-             "in to Insider Connected and see its message of the day, but the "
-             "machine sends it no game, no scores, no high scores and no "
-             "achievements: the mode runtime holds those reports back on the "
-             "machine, the game logs each as a failed message and plays on. The "
-             "page says so under the title, and a title whose port cannot do this "
-             "(one worked out before the gate existed) cannot carry modes until "
-             "its port is worked out again."),
-            ("Another card",
-             "Copy to…, under the list, copies every mode here into another "
-             "card's project: pick that project's folder. Each mode goes with "
-             "its picture, clip and sounds, and is matched to that card's shots "
-             "by name, as opening it there would match it. A mode that loses "
-             "nothing is saved for that card and builds there as it is; one that "
-             "names a shot the card lacks is copied as it was, and the message "
-             "says to open it there and pick its shots. Another version of the "
-             "same game, or its Pro beside the Premium, keeps every sound "
-             "number; another game keeps only the callouts the app measured on "
-             "both."),
-            ("Save and load a file",
-             "Save / load, under the list, saves the open mode, or every mode, "
-             "to one .zip holding each mode's whole folder (picture, clip, "
-             "sounds and code), to share or keep. Loading such a file adds its "
-             "modes to this project exactly as Copy to… would: each is matched "
-             "to this card's shots by name, and a name already here gets _2."),
-            ("Try it",
-             "Try it builds this project's modes exactly as Write puts them on a "
-             "card, then starts the card in the Emulate tab with them; the run is "
-             "that tab's, and its Stop stops it. The button reads Cancel while it "
-             "works, and the line under it says what is happening. A mode's own "
-             "sound is the slow part: about a minute the first time it "
-             "changes, and reused after that. A set nothing changed since the last "
-             "Try it is used as it is. A refusal is shown beside the Try it button "
-             "and on the Emulate tab, with the reason. Cancel, here or on the "
-             "Emulate tab, stops the build. Once a game is in play, a mode starts "
-             "on its shots or at once with Start mode now, and End mode ends "
-             "whichever of this project's modes is running. An edit made while the "
-             "game runs reaches it within a second; a new sound or clip reaches it "
-             "at the next Try it."),
-            ("Modes written in C",
-             "New > Mode in C > Blank mode in C… copies the Mode SDK's template into "
-             "this project's modes folder, for what the form cannot do, and opens it; "
-             "Open MODE_SDK.md opens the SDK's guide. The folder's name is the mode's "
-             "trigger name (its test triggers are <folder>.start and .stop), so "
-             "keep it to letters, digits and _. An assets.json beside the code "
-             "names a clip, a picture, music and calls of the mode's own, and Try "
-             "it and Write compile the mode in with them. The Code modes line "
-             "lists each one. On a Godzilla title, New > Mode in C adds six "
-             "examples written in C, among them the MELTDOWN multiball, lit by "
-             "ten Magna captive-ball hits. Each plays its clips full-screen behind "
-             "a HUD of its own, with a clip and a light show at its start and "
-             "end. Their clips, music and calls are cut from "
-             "your own copy of the films: until they are, the example's page says "
-             "which films it needs, with Choose your films folder…. Start mode "
-             "now starts the open code mode through its <folder>.start trigger, "
-             "once a Try it has built it into the running game."),
-            ("Modes made of blocks",
-             "New > Mode from blocks… makes a mode you build from blocks instead of "
-             "the form or C: a small working one on this card's shots to change. "
-             "Each script is a When block (the mode starts or ends, a shot is "
-             "made, any shot, every few seconds, some seconds left, the ball "
-             "drains, one of the game's events) with the blocks it runs under it, "
-             "top to bottom: start or end the mode, score, set or change a "
-             "variable, If and If ... else, a callout, words on the mode's own "
-             "screen, light a shot or hand its lights back, add time, a multiball, "
-             "a line in the log. Values and conditions snap into a block's slots "
-             "and nest: hits of a shot this ball, points so far, seconds left, "
-             "sums, compare, and, or, not. Drag a block from the left into a "
-             "script, or press it to add it to the script picked last; a stack's "
-             "own + adds one too. A variable holds a number for each player and "
-             "goes back to 0 each ball, each time the mode starts, or each game. "
-             "Every change saves itself; the line at the top says what is left "
-             "to fix. The app turns the blocks into a mode in C, which Try it and "
-             "Write build like any other: C it makes shows it, and Edit as C… "
-             "keeps that C and puts the blocks away, for carrying on in C."),
+             "- A card holds as many modes as you make. The count is under New, with "
+             "modes made of blocks and modes written in C counted apart.\n"
+             "- **One runs at a time.** A mode whose shots come up while another is "
+             "running does not start then, but its next starting shot after that one "
+             "ends starts it.\n"
+             "- A card carries one end sound of a mode's own: the first mode that has "
+             "one. The Sound section says whose."),
+            ("Modes made of blocks", [
+                "**New > Mode from blocks…** makes a small working mode on this card's "
+                "shots, built from blocks instead of the form or C.",
+                {"cards": [
+                    {"icon": "flag", "tone": "info", "title": "When",
+                     "text": "Starts each script: the mode starts or ends, a shot is made, "
+                             "any shot, every few seconds, some seconds left, the ball "
+                             "drains, one of the game's events."},
+                    {"icon": "list", "tone": "ok", "title": "Do",
+                     "text": "Runs under it, top to bottom: score, a variable, If and If "
+                             "... else, a callout, words on screen, light a shot, add "
+                             "time, a multiball, a log line, start or end the mode."},
+                    {"icon": "blocks", "tone": "warn", "title": "Values",
+                     "text": "Snap into a block's slots and nest: hits of a shot this "
+                             "ball, points so far, seconds left, sums, compare, and, or, not."}]},
+                "- Drag a block from the left into a script, or press it to add it to "
+                "the script picked last. A stack's own + adds one too.\n"
+                "- A variable holds a number for each player, and goes back to 0 each "
+                "ball, each time the mode starts, or each game.\n"
+                "- Every change saves itself; the line at the top says what is left to fix.",
+                {"note": "The app turns the blocks into a mode in C, which Try it and "
+                         "Write build like any other. **C it makes** shows it, and "
+                         "**Edit as C…** keeps that C and puts the blocks away, for "
+                         "carrying on in C."},
+            ]),
+            ("Modes written in C", [
+                "For what the form can't do.\n\n"
+                "- **New > Mode in C > Blank mode in C…** copies the Mode SDK's "
+                "template into this project's modes folder and opens it. **Open "
+                "MODE_SDK.md** opens the SDK's guide.\n"
+                "- The folder's name is the mode's trigger name (its test triggers are "
+                "*folder*.start and .stop), so keep it to letters, digits and _.\n"
+                "- An **assets.json** beside the code names a clip, a picture, music "
+                "and calls of the mode's own, and Try it and Write compile the mode in "
+                "with them. The Code modes line lists each one.\n"
+                "- **Start mode now** starts the open code mode through its .start "
+                "trigger, once a Try it has built it into the running game.",
+                {"note": "On a Godzilla title, New > Mode in C adds six examples written "
+                         "in C, among them the MELTDOWN multiball, lit by ten Magna "
+                         "captive-ball hits. Each plays its clips full screen behind a HUD "
+                         "of its own. Their clips, music and calls are cut from your own "
+                         "copy of the films: until they are, the example's page says which "
+                         "films it needs, with **Choose your films folder…**."},
+            ]),
             ("The game's own modes",
-             "The game's own modes are listed under yours. Pick one to see its "
-             "page: its timers and awards (type a new value and press Set; Stock "
-             "puts that number back to the game's own), and on a game whose port "
-             "allows it, a shot that counts as one of its own and a rewrite of its "
-             "shots in C. All timers and awards…, under the list, shows every "
-             "number in one table, and All to stock there puts every one back. A timer that is an operator setting is the "
-             "same number the Defaults tab shows, and a number the game works "
-             "out in code cannot be changed here (the row says why). Changes are "
-             "saved with the project and put on the card by Write. A mode's name "
-             "is changed on the Text tab."),
-            ("Cut from a video",
-             "The Cut from a video buttons cut this mode's clip, its sound or its "
-             "screen's picture from a video file of your own (a film, an episode, "
-             "anything): pick the video, a start time and a length of up to 30 "
-             "seconds, and whether to keep its letterbox or fill the frame. The "
-             "mode keeps only the cut (clip.mp4, end.wav, art.png), never the "
-             "video. A title that cannot use a clip, a picture or a sound of the "
-             "mode's own greys that button, with the reason."),
-            ("A preview feature",
-             "The mode maker is a preview: it is in every copy of the app, switched "
-             "off, and a personal code from the app's author switches it on "
-             "(Settings, the gear, > Preview features: paste the code and press "
-             "Unlock). The window says whose code it is and the last day it works; "
-             "after that day the Modes tab is gone again at the next start. Your "
-             "modes stay in the project's modes folder either way."),
+             "They are listed under yours. Pick one to see its page.\n\n"
+             "- **Timers and awards:** type a new value and press Set. Stock puts that "
+             "number back to the game's own.\n"
+             "- **Shots:** on a game whose port allows it, a shot that counts as one of "
+             "its own, and a rewrite of its shots in C.\n"
+             "- **All timers and awards…**, under the list, shows every number in one "
+             "table, and **All to stock** there puts every one back.\n"
+             "- A timer that is an operator setting is the same number the Defaults tab "
+             "shows. A number the game works out in code can't be changed here: the row "
+             "says why.\n"
+             "- Changes are saved with the project and put on the card by Write. A "
+             "mode's name is changed on the Text tab."),
+            ("Cut from a video", [
+                "The **Cut from a video** buttons cut this mode's clip, its sound or its "
+                "screen's picture from a video file of your own: a film, an episode, anything.",
+                {"flow": [
+                    {"icon": "film", "title": "Pick", "text": "a video file"},
+                    {"icon": "edit", "title": "Trim", "text": "a start time and up to 30 seconds"},
+                    {"icon": "fit", "title": "Frame", "text": "keep its letterbox, or fill the frame"}]},
+                "The mode keeps only the cut (clip.mp4, end.wav, art.png), never the "
+                "video. A title that can't use a clip, a picture or a sound of the "
+                "mode's own greys that button, with the reason.",
+            ]),
+            ("Copy and share",
+             "- **Copy to…**, under the list, copies every mode here into another "
+             "card's project: pick that project's folder. Each mode goes with its "
+             "picture, clip and sounds, and is matched to that card's shots by name.\n"
+             "- A mode that loses nothing builds there as it is. One that names a shot "
+             "the card lacks is copied as it was: open it there and pick its shots.\n"
+             "- Another version of the same game, or its Pro beside the Premium, keeps "
+             "every sound number. Another game keeps only the callouts the app "
+             "measured on both.\n"
+             "- **Save / load** saves the open mode, or every mode, to one .zip holding "
+             "each mode's whole folder (picture, clip, sounds and code), to share or "
+             "keep. Loading one adds its modes as Copy to… would; a name already here "
+             "gets _2."),
+            ("Five things people ask for", _limits("Examples")),
+            ("Why your mode always gives way", _limits("Why your mode always gives way")),
+            ("Sizes", _limits("Sizes")),
+            ("Before you flash a real machine", [
+                {"note": _limits("Before you flash a real machine"), "kind": "warn"},
+                "### Scores and Insider Connected\n"
+                "A mode scores through the game's own scoring, so its points are not "
+                "the game's stock scoring. With modes on the card, players still log in "
+                "to Insider Connected and see its message of the day, but the machine "
+                "sends it no game, no scores, no high scores and no achievements: the "
+                "mode runtime holds those reports back, and the game logs each as a "
+                "failed message and plays on.\n\n"
+                "The page says so under the title. A title whose port cannot do this "
+                "(one worked out before the gate existed) cannot carry modes until its "
+                "port is worked out again.",
+            ]),
+            ("A preview feature", [
+                "The mode maker is a preview: it is in every copy of the app, switched "
+                "off, and a personal code from the app's author switches it on.",
+                {"flow": [
+                    {"icon": "gear", "title": "Settings", "text": "the gear, top right"},
+                    {"icon": "star", "title": "Preview features…", "text": "paste your code"},
+                    {"icon": "check", "title": "Unlock", "text": "the Modes tab appears"}]},
+                "- The window says whose code it is and the last day it works. After "
+                "that day the Modes tab is gone again at the next start.\n"
+                "- Your modes stay in the project's modes folder either way.\n\n"
+                "### Asking for more",
+                _limits("Asking for more"),
+            ]),
         ],
         "Write": [
             ("Preview features",

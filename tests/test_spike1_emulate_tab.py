@@ -235,7 +235,9 @@ def test_spike2_era_does_not_get_the_spike1_flag():
 
 def test_help_has_an_entry_for_the_spike1_tab():
     from pinball_decryptor.webui.help_content import HELP_CONTENT
-    body = " ".join(t + " " + b for t, b in HELP_CONTENT["Emulate Spike1"])
+    from pinball_decryptor.webui.tips_render import plain, render
+    body = " ".join(t + " " + plain(render(b))
+                    for t, b in HELP_CONTENT["Emulate Spike1"])
     assert "dot-matrix" in body.lower() or "dmd" in body.lower()
     assert "card" in body.lower()
 

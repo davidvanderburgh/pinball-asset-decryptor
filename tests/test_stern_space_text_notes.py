@@ -19,6 +19,7 @@ from pinball_decryptor.plugins.stern import pipeline as pl
 from pinball_decryptor.plugins.stern.manufacturer import (SternManufacturer,
                                                           _bigger_card_words)
 from pinball_decryptor.webui.help_content import HELP_CONTENT
+from pinball_decryptor.webui.tips_render import plain, render
 
 CONTROL = "SD card size on the Write tab"
 
@@ -121,7 +122,7 @@ def test_static_help_says_where_the_control_is():
                           "Longer replacements (Advanced Audio Options)"),
                          ("Replace Video", "Size limits"),
                          ("Replace Video", "Checking a card you already built")):
-        text = dict(HELP_CONTENT[tab])[section]
+        text = plain(render(dict(HELP_CONTENT[tab])[section]))
         assert text.count(CONTROL) == text.count(CONTROL + " (Windows and "
                                                            "Linux)"), section
         assert CONTROL in text, section
@@ -139,7 +140,7 @@ def test_help_says_longer_sounds_are_trimmed_to_the_room():
 def test_help_names_every_case_a_clip_is_squeezed():
     """engine._prepare_video_patches squeezes an assigned clip whose own file
     is gone from disk too."""
-    size = dict(HELP_CONTENT["Replace Video"])["Size limits"]
+    size = plain(render(dict(HELP_CONTENT["Replace Video"])["Size limits"]))
     note = SternManufacturer().video_length_note()
     for text in (size, note):
         assert "moved or deleted" in text, text
@@ -149,8 +150,8 @@ def test_help_names_every_case_a_clip_is_squeezed():
 def test_check_card_help_agrees_with_the_report():
     """PAD-171: a low-bitrate clip may be the app's own old conversion, which
     a rebuild does fix; the report says so and the help must too."""
-    text = dict(HELP_CONTENT["Replace Video"])[
-        "Checking a card you already built"]
+    text = plain(render(dict(HELP_CONTENT["Replace Video"])[
+        "Checking a card you already built"]))
     small = " ".join(vq.summary_lines([_clip()]))
     assert "rebuilding changes nothing" not in text
     assert "never touched" not in text
@@ -175,7 +176,7 @@ def test_help_never_says_a_refused_build_encoded_nothing():
     """The engine's refusal comes after the Build converted the replacements
     it had to; only the card image is sure to be untouched, and the help
     says a video still to be converted is counted once it is."""
-    size = dict(HELP_CONTENT["Replace Video"])["Size limits"]
+    size = plain(render(dict(HELP_CONTENT["Replace Video"])["Size limits"]))
     tip = dict(HELP_CONTENT["Write"])["SD card size (Stern Spike 2)"]
     for text in (size, tip):
         assert "before anything is encoded" not in text

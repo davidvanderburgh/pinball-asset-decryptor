@@ -131,5 +131,7 @@ def test_stern_enables_replace_image_with_a_note():
     # Images tab.
     assert mfr.image_note() == ""
     from pinball_decryptor.webui.help_content import HELP_CONTENT
-    img_help = " ".join(t + " " + b for t, b in HELP_CONTENT["Replace Images"])
+    from pinball_decryptor.webui.tips_render import plain, render
+    img_help = " ".join(t + " " + plain(render(b))
+                        for t, b in HELP_CONTENT["Replace Images"])
     assert "byte" in img_help.lower() and "auto-fit" in img_help.lower()

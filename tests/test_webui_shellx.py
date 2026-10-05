@@ -453,6 +453,23 @@ def test_tips_for_each_visible_tab(tmp_path):
         w.call("ui.settings_action", "tips")      # opens without error
 
 
+def test_every_rail_tab_has_tips_under_its_own_key():
+    """PAD-388: the ? window looks a tab's tips up by the tab's key, so a
+    HELP_CONTENT entry spelt otherwise ("Color profile" for the tab keyed
+    "Color Profile") left that tab's Tips window empty."""
+    from pinball_decryptor.webui.help_content import HELP_CONTENT, sections_for
+    from pinball_decryptor.webui.tabs import TABS
+    keys = [key for _m, _ns, key, _label, _group, _icon in TABS if key]
+    missing = [k for k in keys if not HELP_CONTENT.get(k) and k != "Modes"]
+    assert not missing, missing
+    assert not [k for k in HELP_CONTENT if k not in keys], "a key no tab has"
+    assert sections_for("Color Profile")
+    # Scenes borrows the scene sections of the Replace tabs and Color Profile
+    assert [t for t, _b in sections_for("Scenes")] == [
+        "Scenes tab", "Scene editor", "Text in a scene", "Preview colors (Scenes)",
+        "Save and load scene edits"]
+
+
 def test_tips_light_markdown_draws_as_blocks():
     """PAD-386: a tip's words in a light markdown become the blocks the window
     draws; plain words stay one paragraph, as they always drew."""

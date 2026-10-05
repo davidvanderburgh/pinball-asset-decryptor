@@ -54,7 +54,8 @@ def test_the_port_names_the_godzilla_target_as_the_magnets_shot():
     assert PRO_116.magnet_shot == "Godzilla target"
     le = MP.profile_from_port(str(SDK / "ports" / "godzilla_le-1.16.port"))
     assert le.magnet_shot == "Godzilla target"
-    assert MP.GODZILLA_PRO_1_15.magnet_shot == "" and not MP.GODZILLA_PRO_1_15.can("magnet")
+    # PAD-394: Pro 1.15's port names the magnet too, and a grab was seen there
+    assert MP.GODZILLA_PRO_1_15.magnet_shot == "Godzilla target" and MP.GODZILLA_PRO_1_15.can("magnet")
 
 
 def test_a_mode_has_no_magnet_until_one_is_set():
@@ -140,7 +141,7 @@ def test_the_interpreter_only_ever_asks_the_runtime():
 
 
 def test_the_ports_name_the_shot_the_magnet_sits_at():
-    for name in ("godzilla_pro-1.16", "godzilla_le-1.16"):
+    for name in ("godzilla_pro-1.16", "godzilla_le-1.16", "godzilla_pro-1.15"):
         port = MP.read_port(str(SDK / "ports" / (name + ".port")))
         assert port["value"]["magnet_shot"] == dict(port["shot"])["Godzilla target"], name
 

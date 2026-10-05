@@ -673,3 +673,33 @@ text block_name_31      Treasure Hunt
 site block_start_32     0x00198578 0xe92d4ff0 0xe24dd014
 data block_obj_32       0x008a8840
 text block_name_32      Terror on the Tower
+
+# ---- held coils (PAD-381's runtime; PAD-394): King Kong's ControlCoil objects a mode may hold, the way the
+# Godzilla Premium's magnets and bridge are held (MODE_SDK.md "Held coils"). King Kong's ControlCoil is
+# Godzilla's: its take/give (+44 the controlling process), and the vtable slots the runtime calls - v[29] pulse
+# power, v[30] pulse ms, v[31] hold power, v[36], v[40] disabled, v[54..58] - are the same functions at the
+# same slots (two more virtuals at the end, 61). The framework calls drafted from Godzilla Pro 1.16 by
+# port_tool.py (strict); each getter found by its class's vtable (the function-static object the ControlCoil
+# constructor builds, its device the constructor's r1) and checked by the tests. magnet_proc: no process call
+# of this program names 13185..13188.
+site coil_fire             0x004b0498 0xe3500000 0xe52de004
+site adjustment            0x003e19dc 0xe92d40f0 0xe2504000
+site proc_exists           0x0051f65c 0xe30b2c88 0xe340208e
+site proc_create           0x0051f02c 0xe30bcc88 0xe340c08e
+site proc_sleep            0x0051f15c 0xe30b3c88 0xe340308e
+site coil_take             0x0005e18c 0xe92d40f8 0xe30b7c8c
+site coil_give             0x0005e250 0xe3510000 0xe92d4038
+value magnet_proc          13185
+# spider_magnet = SpiderMagnet (its powers from adjustments 370..; the spider's magnet), log_diverter =
+# LogDiverter, ramp_diverter = CenterRampDiverter. Never here: the TrainLock post (it holds locked balls),
+# the VUKs, the trough, flippers, slingshots and pops.
+text held_coils            spider_magnet log_diverter ramp_diverter
+site spider_magnet_get     0x0007b2bc 0xe92d40f0 0xe3004a2c
+value spider_magnet_dev    10
+text spider_magnet_label   spider magnet
+site log_diverter_get      0x00076f14 0xe92d40f0 0xe30045f0
+value log_diverter_dev     13
+text log_diverter_label    log diverter
+site ramp_diverter_get     0x002a5348 0xe92d4070 0xe3034160
+value ramp_diverter_dev    15
+text ramp_diverter_label   center ramp diverter

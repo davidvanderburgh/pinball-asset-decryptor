@@ -62,6 +62,38 @@ def test_the_reference_build_reproduces_its_own_port(tmp_path):
     assert _entries(out) == _entries(PORT)
 
 
+ELVES = pathlib.Path(r"C:\tmp\PAD-363\elves")
+
+
+@pytest.mark.slow
+def test_the_scoop_slot_is_the_word_holding_its_handler_and_magnet_values_stay_in_the_title(tmp_path):
+    """PAD-394: no code loads the scoop's slot by name (the framework walks its device records), so a draft
+    places it as the one writable word holding the placed handler's address; the magnet's shot (a mask,
+    however large) is copied within a title, and a held coil's device and the magnet's shot and process id are
+    left out for another title."""
+    pro116, pro115, kk = (ELVES / ("%s.elf" % k) for k in ("godzilla_pro-1.16", "godzilla_pro-1.15",
+                                                         "king_kong_le-0.97"))
+    for p in (pro116, pro115):
+        _need(str(p))
+    tool = _load("port_tool")
+    ref = SDK / "ports" / "godzilla_pro-1.16.port"
+    out = tmp_path / "pro115.port"
+    tool.main([str(pro116), str(ref), str(pro115), "-o", str(out)])
+    got, hand = _entries(out), _entries(PORT)
+    assert got[("data", "scoop_slot")] == hand[("data", "scoop_slot")] == 0x744728
+    for s in ("coil_fire", "adjustment", "proc_exists", "magnet_get", "proc_create", "proc_sleep", "coil_take",
+              "coil_give", "scoop_handler"):
+        assert got[("site", s)] == hand[("site", s)], s
+    assert "\nvalue magnet_shot          0x00080000" in out.read_text(encoding="utf-8")
+    if kk.exists():
+        out = tmp_path / "kk.port"
+        tool.main([str(pro116), str(ref), str(kk), "-o", str(out), "--game", "king_kong_le", "--version", "0.97"])
+        text = out.read_text(encoding="utf-8")
+        for v in ("magnet_dev", "magnet_shot", "magnet_proc"):
+            assert "\nvalue %s " % v not in text and "# value %s " % v in text, v
+        assert _entries(out)[("site", "coil_take")][0] == 0x5e18c
+
+
 @pytest.mark.slow
 def test_godzilla_le_draft_places_everything_and_keeps_its_relations(tmp_path):
     _need(PRO_ELF)

@@ -49,8 +49,12 @@ SCORE_PAIRS = (("score_add", "scores"), ("score_add32", "scores32"))
 HOOKED = ("tick", "shot_dispatch", "ball_end", "sound_lookup", "hook_dispatch", "switch_edge",
           "agent_header", "agent_begin")     # item 166: the Insider Connected score gate
 # values that are one title's rules, not the framework's: Godzilla's are Tesla Strike's
-# light owner and light set, and its powerline-tower award screen
-TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type")
+# light owner and light set, and its powerline-tower award screen. PAD-394: a held coil's device and
+# the magnet's shot and process id are one title's machine too (Godzilla's magnet is device 11 on a Pro)
+TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type", "magnet_shot", "magnet_dev", "magnet_proc",
+                "mg_magnet_dev", "bridge_dev")
+#: values that are a shot mask, not an address, however large: copied within a title
+SHOT_VALUES = ("magnet_shot",)
 MIN_N, MAX_N = 8, 48
 # globals ONE lined-up place may place (the rule is two), each with the reason one is enough
 ONE_PLACE_DATA = {
@@ -66,6 +70,9 @@ ONE_PLACE_DATA = {
     "tank_spot_list": "the tank rule's spot getter loads the rodata list from ONE literal; the runtime "
                       "reads it only through a rule whose vtable words matched",
 }
+#: PAD-394: globals that are a pointer to a site of the same port, set in a record the framework walks
+#: (so no code loads them by name): placed as the one writable word holding the target site's address
+SLOT_DATA = {"scoop_slot": "scoop_handler"}
 DERIVE_TRIES = 60
 MORE_TRIES = 140
 CALLER_TRIES = 80
@@ -146,6 +153,19 @@ class Elf:
     def word(self, va):
         o = self.off(va)
         return struct.unpack_from("<I", self.b, o)[0] if o is not None and o + 4 <= len(self.b) else None
+
+    def rw_words(self, value):
+        """Every aligned word of the program's writable data that holds ``value``."""
+        pat, out = struct.pack("<I", value), []
+        for off, va, fsz, flags in self.loads:
+            if not flags & 2:
+                continue
+            i = self.b.find(pat, off, off + fsz)
+            while i >= 0:
+                if (i - off) % 4 == 0:
+                    out.append(va + i - off)
+                i = self.b.find(pat, i + 1, off + fsz)
+        return out
 
     def cstring(self, va, cap=64):
         o = self.off(va)
@@ -1403,6 +1423,15 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
                     v1, how1 = T.derive(rec, va, want=1)
                     if v1 is not None:
                         v, how = v1, "%s; ONE place is enough here: %s" % (how1, ONE_PLACE_DATA[name])
+            if v is None and name in SLOT_DATA and ("site", SLOT_DATA[name]) in placed:
+                # no code loads the slot by name (the framework walks its device records), but it
+                # holds the address of a site placed above: the one writable word that does is it
+                held = tgt.rw_words(placed[("site", SLOT_DATA[name])])
+                if len(held) == 1:
+                    v, how = held[0], "the one writable word holding %s's address (0x%x)" % (
+                        SLOT_DATA[name], placed[("site", SLOT_DATA[name])])
+                else:
+                    how = "%s; %d writable words hold %s's address" % (how, len(held), SLOT_DATA[name])
             if v is None:
                 out.append("# data %-22s NOT PLACED: %s" % (name, how))
                 report["data missing"] += 1
@@ -1544,7 +1573,7 @@ def _score_pair(out, placed, tgt, hows):
 def _address_value(parts):
     """Is a `value` line's number an address (a struct offset or a count is small)?"""
     try:
-        return len(parts) > 1 and int(parts[1], 0) >= 0x10000
+        return len(parts) > 1 and parts[0] not in SHOT_VALUES and int(parts[1], 0) >= 0x10000
     except ValueError:
         return False
 

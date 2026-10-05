@@ -113,6 +113,47 @@ def test_the_getter_builds_the_ports_device(name):
     assert (0xE3A01000 | dev) in words, "the getter does not pass device %d" % dev
 
 
+# PAD-394: other titles whose ControlCoil is Godzilla's (the same take/give and vtable slots). Each getter must
+# build its object with the port's device, and the framework sites must start with the port's words.
+OTHER_PORTS = {
+    "king_kong_le-0.97": (("spider_magnet", 10), ("log_diverter", 13), ("ramp_diverter", 15)),
+    "jaws_le-1.02": (("left_post", 14), ("right_post", 13)),
+}
+ELVES = [os.environ.get("PAD_ELVES", ""), r"C:\tmp\PAD-363\elves", "/mnt/c/tmp/PAD-363/elves"]
+
+
+@pytest.mark.parametrize("key", sorted(OTHER_PORTS))
+def test_the_other_titles_ports_name_their_coils(key):
+    port = MP.read_port(str(SDK / "ports" / (key + ".port")))
+    assert port["text"]["held_coils"].split() == [n for n, _d in OTHER_PORTS[key]]
+    for name, dev in OTHER_PORTS[key]:
+        assert port["value"]["%s_dev" % name] == dev and "%s_get" % name in port["site"]
+        assert port["text"]["%s_label" % name]
+    for s in ("coil_fire", "proc_exists", "proc_create", "proc_sleep", "coil_take", "coil_give"):
+        assert s in port["site"], s
+    assert "magnet_get" not in port["site"]                  # no Godzilla magnet: the Magnet part stays greyed
+
+
+@pytest.mark.parametrize("key", sorted(OTHER_PORTS))
+def test_the_other_titles_getters_build_the_ports_devices(key):
+    path = next((os.path.join(d, key + ".elf") for d in ELVES if d and os.path.isfile(os.path.join(d, key + ".elf"))),
+                None)
+    if path is None:
+        pytest.skip("no %s game program here" % key)
+    b = open(path, "rb").read()
+    port = MP.read_port(str(SDK / "ports" / (key + ".port")))
+    for name, (addr, w0, w1) in port["site"].items():
+        assert (_word(b, addr), _word(b, addr + 4)) == (w0, w1), name
+    for name, dev in OTHER_PORTS[key]:
+        addr = port["site"]["%s_get" % name][0]
+        words = [_word(b, addr + 4 * k) for k in range(64)]
+        assert (0xE3A01000 | dev) in words, "%s's getter does not pass device %d" % (name, dev)
+    # take control: the controlling process at +44 (ldrh r3, [r0, #0x2c]); give back: it is cleared
+    take, give = port["site"]["coil_take"][0], port["site"]["coil_give"][0]
+    assert 0xE1D032BC in [_word(b, take + 4 * k) for k in range(12)]
+    assert _word(b, give + 16) == 0xE1C052BC
+
+
 # ---- the app ---------------------------------------------------------------------------------
 LE = MP.profile_from_port(str(LE_PORT))
 

@@ -134,8 +134,24 @@ def tunable_terms(prof):
     return out
 
 
+@dataclasses.dataclass(frozen=True)
+class Shown:
+    """A profile, then the machine's screen (PAD-389): what an Emulate run
+    with "Show it through the machine's screen" draws through, so the PC
+    shows what the machine will.  *prof* may be ``None`` (no whole screen
+    overlay).  Only ever built for an Emulate run, never a Write."""
+    prof: object
+    screen: object
+
+    def label(self):
+        return "%s, through the Machine screen %s" % (
+            self.prof.label() if self.prof is not None else "No change",
+            self.screen.label())
+
+
 def correction_glsl(prof, premultiplied, qualified=False):
-    """The ``pad_cp`` function for *prof* (a core.colour_profile.Profile).
+    """The ``pad_cp`` function for *prof* (a core.colour_profile.Profile, or
+    a :class:`Shown`: the profile's terms, then the screen's).
 
     *qualified* gives every float type an explicit ``highp``: a GLSL ES 3.00
     fragment shader has no default float precision, so an unqualified
@@ -145,6 +161,11 @@ def correction_glsl(prof, premultiplied, qualified=False):
     :data:`TUNABLE_TEMPLATE`'s shape: that is what lets the multi-boot menu
     change the numbers on the machine (PAD-307)."""
     q = "highp " if qualified else ""
+    screen = None
+    if isinstance(prof, Shown):
+        from ...core.colour_profile import Profile
+        screen = prof.screen
+        prof = prof.prof if prof.prof is not None else Profile()
     body = []
     if premultiplied:
         body.append("%sfloat a=f.a;%svec3 c=clamp(f.rgb/max(a,0.0001),0.0,1.0);"
@@ -155,6 +176,15 @@ def correction_glsl(prof, premultiplied, qualified=False):
     extras = extras_glsl(prof, qualified)
     if extras:
         body.append("c=%s(c);" % _EXTRAS)
+    if screen is not None:
+        # the machine's screen after it, in the same shapes; its ranges and
+        # curves under names of their own (the range function is shared)
+        body.append(tunable_terms(screen))
+        s_extras = extras_glsl(screen, qualified, name=_SCREEN_EXTRAS,
+                               with_range=_RANGE not in extras)
+        if s_extras:
+            extras += s_extras
+            body.append("c=%s(c);" % _SCREEN_EXTRAS)
     body.append("return vec4(c*a,a);" if premultiplied
                 else "return vec4(c,a);")
     return extras + "%svec4 %s(%svec4 f){%s}" % (q, _FUNC, q, "".join(body))
@@ -165,6 +195,8 @@ def correction_glsl(prof, premultiplied, qualified=False):
 #: ``pad_cp``'s body is read back as one brace-free run (:data:`_FUNC_RE`).
 _EXTRAS = "pad_cx"
 _RANGE = "pad_cr"
+#: the machine screen's ranges and curves in an Emulate run (PAD-389)
+_SCREEN_EXTRAS = "pad_sx"
 
 #: Where the curves are sampled: every 8th level and the last, straight
 #: between them (within a level or two of the 256-entry tables)
@@ -221,16 +253,18 @@ def _curve_glsl(tables):
     return "".join(out) + ";"
 
 
-def extras_glsl(prof, qualified=False):
+def extras_glsl(prof, qualified=False, name=_EXTRAS, with_range=True):
     """The GLSL of *prof*'s colour ranges and curves (PAD-343), ``pad_cx``
     (and ``pad_cr`` for the ranges), or ``""`` when it has none that change
-    anything, so a profile without them builds exactly the shader it did."""
+    anything, so a profile without them builds exactly the shader it did.
+    *name* names the function; *with_range* False leaves ``pad_cr`` out,
+    for a second profile whose ranges use the first one's (PAD-389)."""
     if not prof.has_extras():
         return ""
     from ...core.colour_profile import range_neutral
     q = "highp " if qualified else ""
     live = [r for r in prof.ranges if not range_neutral(r)]
-    head = _range_glsl(q) if live else ""
+    head = _range_glsl(q) if live and with_range else ""
     body = []
     for hue, width, soft, shift, sat, bright, protect in live:
         body.append("c=%s(c,%s);" % (_RANGE, ",".join(
@@ -240,7 +274,7 @@ def extras_glsl(prof, qualified=False):
     if tabs is not None:
         body.append(_curve_glsl(tabs))
     body.append("return clamp(c,0.0,1.0);")
-    return head + "%svec3 %s(%svec3 c){%s}" % (q, _EXTRAS, q, "".join(body))
+    return head + "%svec3 %s(%svec3 c){%s}" % (q, name, q, "".join(body))
 
 
 def _premultiplied(text):

@@ -110,12 +110,28 @@ test). This is a last line of defence, not a guardrail of ours.
   64 ms pulses show at 100 ticks/s as 60 ms: the rig's default rate rounds a
   time down to 10 ms.
 
+- **Step 2 (2026-10-05): a mode's own magnet grab, with the limits in the runtime.** What the game's
+  magnet does, read from its code:
+  - `0x286e00` is get-adjustment. GodzillaMagnet::v[29..32] read the LO or HI draw/hold power and time
+    live (363-366 LO, 367-370 HI; the adjustment name table). 343 is GODZILLA MAGNET DISABLED.
+  - The game's process calls: create `0x3ab00c`, create-if-absent `0x3ab0fc`, kill `0x3ab37c`, exists
+    `0x3ab72c`. The rules start process 363 (entry `0x51dc8`) or 362 (`0x52034`) after `magnet->v[36](3750)`.
+    Each loops a tick at a time while game conditions hold (display effects, other processes), pushing
+    ball search back, then runs the release `0x51a68`. Nothing in the loop caps the time: PAD-353.
+  - `0x514d8` is the game's own release (kills 363/362, coil off).
+  - LE 1.16: the same adjustment ids; the magnet is device 13 (Pro: 11); the calls found by code.
+
+  The runtime (`pad_mode_runtime.c` "the magnet"): `pm_magnet_grab(ms)` sends ONE bounded command (LO
+  draw power for the draw time, LO hold power for the rest; 100-5000 ms in all), never re-sent; refuses
+  outside a game, when disabled, while a game magnet process runs, while holding, within 3 s of the last
+  end, past 6 a minute; lets go at its end, on release, mode end, ball end, game end or tilt; steps aside
+  without an OFF if the game's magnet starts. Ports: Pro and LE 1.16. `sdk/magnet_test_mode.c` drives it.
+  Emulator-proven on the Pro 1.16 card (MODE_SDK.md "The magnet" has every line); desk tests in
+  `tests/test_spike2_mode_magnet.py`.
+
 ## Next
 
-1. Find the magnet process (360/362/363) and its grab and release entries. A
-   mode's grab and release ride those.
-2. The runtime's coil layer (`pm_coil_*` behind `PM_CAN_COILS`), the port
-   allowlist, the limits and the release-on-everything list. Prove in the
-   emulator that a mode killed mid-grab still lets the magnet go.
-3. Behind the preview code. Then a supervised machine test with a short
-   cut-off first.
+1. The mode-file key (`magnet <ms>` on a shot) and the Modes tab control, behind the preview code.
+2. The scoop: its eject is a ball device of the framework's, not a ControlCoil; find the eject and the
+   hold-in-scoop flag (FG_KING_OF_THE_MONSTERS_BOUNTY_COLLECT_HOLD_BALL_IN_SCOOP shows the game has one).
+3. A supervised machine test, short grab first.

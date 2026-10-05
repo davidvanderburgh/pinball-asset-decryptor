@@ -767,10 +767,12 @@ void pm_running_name(const char *name)
 }
 
 static void bd_reset(const char *why);
+static void magnet_let_go(const char *why);   /* PAD-381: the magnet section */
 void pm_end(void)
 {
     if (running == current) running = 0, running_as[0] = 0;
     if (!running) bd_reset("the mode ended");
+    if (!running) magnet_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }
 
@@ -3303,6 +3305,212 @@ static void multiball_arm(void)
         pm_port_value("multiball_arg3", 0xbb));
 }
 
+/* ---- the magnet: a grab of the mode's own, with limits it cannot raise (PAD-381) --------------
+ * David (2026-10-04): modes need "access to these controls" - the scoop, the magnet - "However, we
+ * need guardrails on this since these are physical high voltage things and we can't be breaking
+ * anything or causing any fires". So a mode asks for a grab of so many ms and nothing else: the
+ * runtime picks the powers, clamps the time, decides whether it may, and lets go by itself.
+ *
+ * What the game does (Godzilla Pro 1.16; docs/plans/mode_coils.md has every address):
+ *   - ControlCoil fires through ONE call, `site coil_fire` (0x402ff4): (device, pulse power, pulse ms,
+ *     hold power, then on the stack hold ms and an x ms that is always 0). The board drives the pulse,
+ *     then the hold, and the game counts the coil busy for exactly that long: a command ENDS BY
+ *     ITSELF. An all-zero call is OFF (the coil service sends cmd 4d). Emulator-proven: hwshim's
+ *     [coildrive] lines on the ball search's magnet, 255 for 350 ms then 50 for 5500 ms.
+ *   - The magnet's powers and times are the operator's adjustments, read live by GodzillaMagnet::
+ *     v[29..32]: the LO set, `value magnet_adj_draw_power` 363, `_draw_time` 364, `_hold_power` 365,
+ *     `_hold_time` 366 (the adjustment table's own names); `value magnet_adj_disabled` 343 is GODZILLA
+ *     MAGNET DISABLED (also the id the magnet's constructor keeps). `site adjustment` reads one.
+ *   - The game's own grabs are PROCESSES (`text magnet_procs`: 363 started by the rules, 362 the
+ *     Magna-Grab, 360 a timed pulse). Each loops a tick at a time until the game's conditions clear -
+ *     a display still playing among them, which is how PAD-353's magnet stayed on - and while one
+ *     exists GodzillaMagnet refuses its own fire and off. `site proc_exists` asks.
+ *
+ * THE GUARDRAILS, none of them the mode's to change:
+ *   1. ONE BOUNDED COMMAND PER GRAB, never re-sent. The operator's draw power for the operator's draw
+ *      time, then the operator's hold power for the rest of the grab, the whole clamped to
+ *      MAGNET_MAX_MS. If everything here stops - the mode wedges, the tick stops, the game dies - the
+ *      board lets go when that command runs out. The OFF at the deadline only makes it sooner.
+ *   2. Only the running mode, only in a game (not attract, not tilted: pm_in_game), never with the
+ *      magnet disabled, never while one of the game's magnet processes runs, never twice at once, not
+ *      within MAGNET_COOL_MS of the last grab ending, at most MAGNET_PER_MIN grabs a minute.
+ *   3. Let go on: the deadline (every tick), pm_magnet_release, the mode ending, the ball ending, the
+ *      game ending or tilting.
+ *   4. The game wins. A magnet process of the game's starting while ours holds makes ours stand aside
+ *      WITHOUT an OFF: the game drives the magnet now, and an OFF would drop its ball.
+ * The device is the port's (`value magnet_dev`: 11 on Pro 1.16, 13 on LE 1.16) and must equal the
+ * game's own magnet object's (`site magnet_get`, its device at +4), or nothing is armed. */
+#define MAGNET_MAX_MS  5000u   /* the longest grab a mode may ask for, pulse included */
+#define MAGNET_MIN_MS   100u
+#define MAGNET_COOL_MS 3000u   /* from one grab's end to the next one's start */
+#define MAGNET_PER_MIN    6u   /* grab starts in any 60 s */
+
+struct magnet_cmd { unsigned draw_pwr, draw_ms, hold_pwr, hold_ms; };
+
+/* The one command a grab of `ms` sends, from the operator's adjustments; 0 with *why when the
+ * adjustments read as nothing a magnet would be driven with. (tests lift it verbatim) */
+static int magnet_plan(unsigned ms, unsigned dp, unsigned dt, unsigned hp, struct magnet_cmd *c,
+                       const char **why)
+{
+    if (ms < MAGNET_MIN_MS) ms = MAGNET_MIN_MS;
+    if (ms > MAGNET_MAX_MS) ms = MAGNET_MAX_MS;
+    if (!dp || dp > 255 || hp > 255) {
+        *why = "the magnet's power adjustments read out of range";
+        return 0;
+    }
+    if (dt > ms) dt = ms;                   /* the pulse is part of the grab, never extra */
+    c->draw_pwr = dp;
+    c->draw_ms = dt;
+    c->hold_ms = ms - dt;
+    c->hold_pwr = c->hold_ms ? hp : 0;
+    if (!c->hold_pwr) c->hold_ms = 0;
+    return 1;
+}
+
+/* Why a grab may not start now, or 0. `starts` holds the last MAGNET_PER_MIN start times (0 =
+ * none). (tests lift it verbatim) */
+static const char *magnet_refusal(int running_mode, int in_game, int disabled, int game_busy,
+                                  unsigned long holding_until, unsigned long last_end, unsigned long now,
+                                  const unsigned long starts[MAGNET_PER_MIN])
+{
+    unsigned i, recent = 0;
+    if (!running_mode) return "only the running mode may grab";
+    if (!in_game) return "no game is being played (attract or a tilt)";
+    if (disabled) return "the operator has the magnet disabled";
+    if (game_busy) return "the game's own magnet is working";
+    if (holding_until) return "a grab is already holding";
+    if (last_end && now - last_end < MAGNET_COOL_MS) return "the last grab ended less than 3 s ago";
+    for (i = 0; i < MAGNET_PER_MIN; i++)
+        if (starts[i] && now - starts[i] < 60000ul) recent++;
+    if (recent >= MAGNET_PER_MIN) return "six grabs in the last minute already";
+    return 0;
+}
+
+static struct {
+    unsigned dev;
+    unsigned long until;                    /* pm_ms() the grab ends; 0 = not holding */
+    unsigned long started, ended;
+    unsigned long starts[MAGNET_PER_MIN];
+    unsigned next;
+} mag;
+
+static unsigned magnet_adj(const char *name, unsigned fallback)
+{
+    return ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(
+        (unsigned)pm_port_value(name, fallback));
+}
+
+static int magnet_game_busy(void)
+{
+    const char *t = pm_port_text("magnet_procs");
+    unsigned id;
+    while (t && *t) {
+        while (*t == ' ') t++;
+        for (id = 0; *t >= '0' && *t <= '9'; t++) id = id * 10 + (unsigned)(*t - '0');
+        if (id && (((unsigned (*)(unsigned))(unsigned long)fn("proc_exists"))(id) & 0xffu)) return 1;
+        while (*t && *t != ' ') t++;
+    }
+    return 0;
+}
+
+static void magnet_send(unsigned p1, unsigned t1, unsigned p2, unsigned t2)
+{
+    ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("coil_fire"))
+        (mag.dev, p1, t1, p2, t2, 0);
+}
+
+static void magnet_let_go(const char *why)
+{
+    unsigned long now = pm_ms();
+    if (!mag.until) return;
+    if (magnet_game_busy()) {
+        say("magnet: the game's own magnet took over (%s) - no OFF sent, the game drives it now", why);
+    } else {
+        magnet_send(0, 0, 0, 0);
+        say("magnet: OFF - %s, after %lu ms (%ld ms before the command's own end)", why, now - mag.started,
+            (long)(mag.until - now));
+    }
+    mag.until = 0;
+    mag.ended = now;
+}
+
+static int magnet_device_ok(void);
+int pm_magnet_grab(unsigned ms)
+{
+    unsigned long now = pm_ms();
+    struct magnet_cmd c;
+    const char *why;
+    if (!(can & PM_CAN_COILS) || !magnet_device_ok()) return 0;
+    why = magnet_refusal(pm_running(), pm_in_game(), magnet_adj("magnet_adj_disabled", 343) != 0,
+                         magnet_game_busy(), mag.until, mag.ended, now, mag.starts);
+    if (!why)
+        magnet_plan(ms, magnet_adj("magnet_adj_draw_power", 363), magnet_adj("magnet_adj_draw_time", 364),
+                    magnet_adj("magnet_adj_hold_power", 365), &c, &why);
+    if (why) {
+        say("magnet: no grab - %s", why);
+        return 0;
+    }
+    magnet_send(c.draw_pwr, c.draw_ms, c.hold_pwr, c.hold_ms);
+    mag.started = now;
+    mag.until = now + c.draw_ms + c.hold_ms;
+    mag.starts[mag.next++ % MAGNET_PER_MIN] = now;
+    say("magnet: GRAB for %u ms (asked %u) - draw %u/255 for %u ms, then hold %u/255 for %u ms, as ONE "
+        "command: the board lets go by itself at its end", c.draw_ms + c.hold_ms, ms, c.draw_pwr,
+        c.draw_ms, c.hold_pwr, c.hold_ms);
+    return 1;
+}
+
+void pm_magnet_release(void)
+{
+    if (pm_running()) magnet_let_go("the mode let go");
+}
+
+int pm_magnet_holding(void) { return mag.until != 0; }
+
+/* Every tick: the deadline, and the game taking over or ending. */
+static void magnet_tick(void)
+{
+    if (!mag.until) return;
+    if (magnet_game_busy()) magnet_let_go("a magnet process of the game's started");
+    else if (pm_ms() >= mag.until) magnet_let_go("its time ran out");
+    else if (!pm_in_game()) magnet_let_go("the game ended or tilted");
+    else if (!running) magnet_let_go("no mode is running");
+}
+
+/* The port's device against the game's own magnet object, once, on the first grab: not at arm
+ * time, which is before the game's main() has run (the magnet object is built on first use). A
+ * mismatch takes the capability away for the rest of the run. */
+static int magnet_device_ok(void)
+{
+    static int checked;                     /* 0 not yet, 1 matches, -1 does not */
+    unsigned obj, dev;
+    if (checked) return checked > 0;
+    obj = ((unsigned (*)(void))(unsigned long)fn("magnet_get"))();
+    dev = obj && maps_has(obj + 4, 2, MAP_R) ? *(const unsigned short *)(unsigned long)(obj + 4) : 0xffffu;
+    if (dev != mag.dev) {
+        checked = -1;
+        can &= ~PM_CAN_COILS;
+        say("magnet: switched OFF for this run - the game's magnet object is device %u, the port says %u",
+            dev, mag.dev);
+        return 0;
+    }
+    checked = 1;
+    say("magnet: the game's magnet object is device %u, as the port says", dev);
+    return 1;
+}
+
+static int have_values(const char *const *names);   /* the gate section, below */
+static void coils_arm(void)
+{
+    static const char *const s[] = { "coil_fire", "adjustment", "proc_exists", "magnet_get", 0 };
+    static const char *const v[] = { "magnet_dev", 0 };
+    if (!have_sites(s) || !have_values(v) || !pm_port_text("magnet_procs")) return;
+    mag.dev = (unsigned)pm_port_value("magnet_dev", 0);
+    can |= PM_CAN_COILS;
+    say("magnet: a mode's own grab, device %u through 0x%08x; at most %u ms as one command, %u s between "
+        "grabs, %u a minute", mag.dev, fn("coil_fire"), MAGNET_MAX_MS, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
+}
+
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
  * A rule the game shipped with (a battle, a multiball) is a compiled object with a vtable, and
  * its SHOT HANDLER (one vtable slot) tests the RAW shot mask against fixed bits: Godzilla's
@@ -4440,6 +4648,7 @@ static void events_deliver(void);             /* the events section below */
 static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
 static void stock_tick(void);             /* item 160 */
+static void magnet_tick(void);            /* PAD-381 */
 
 static void on_tick(unsigned *r)
 {
@@ -4462,6 +4671,7 @@ static void on_tick(unsigned *r)
     switches_deliver();
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
+    magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
     roster_deferred_tick();
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
@@ -4495,6 +4705,7 @@ static void on_ball_end(unsigned *r)
     current = 0;
     if (disp_linger_until) disp_release("the ball ended");
     bd_reset("the ball ended");
+    magnet_let_go("the ball ended");          /* PAD-381 */
     roster_owed_ball_end();
 }
 
@@ -5372,6 +5583,7 @@ static void pad_mode_start(void)
     lamps_arm();                                    /* the port's named inserts (lights section) */
     stock_arm();                                    /* item 160: the port's `rule` lines (stock rules section) */
     multiball_arm();                                /* item 167: a multiball of the mode's own */
+    coils_arm();                                    /* PAD-381: a magnet grab of the mode's own */
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
@@ -5380,12 +5592,12 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
         can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
-        can & PM_CAN_BACKDROP ? " backdrop" : "");
+        can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

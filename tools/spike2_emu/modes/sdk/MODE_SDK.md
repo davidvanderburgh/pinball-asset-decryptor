@@ -1388,6 +1388,68 @@ own multiball; two players.
 
 `mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
 
+## The magnet (PAD-381)
+
+David (2026-10-04): modes need access to the coils, "However, we need guardrails on this since these are
+physical high voltage things and we can't be breaking anything or causing any fires". So a mode asks for
+a grab of so many milliseconds and nothing else:
+
+```c
+if (pm_can(PM_CAN_COILS) && pm_magnet_grab(2000)) ...   /* hold the ball on the magnet for 2 s */
+pm_magnet_release();                                    /* or let go sooner */
+```
+
+**What the runtime sends.** One coil command, through the game's own coil call (ControlCoil's, `site
+coil_fire`): the operator's GODZILLA MAGNET LO DRAW POWER for its DRAW TIME, then its LO HOLD POWER for
+the rest of the grab. The board drives that and stops by itself when it runs out; the runtime never
+re-sends it. So if the mode wedges, the runtime's tick stops or the game dies, the magnet still lets go
+when that command ends. The OFF the runtime sends at the deadline only makes it sooner.
+
+**The limits, none of them the mode's to change:** a grab is 100 to 5000 ms, the draw included (asking
+for more gets 5000); only the running mode, only in a game (not attract, not tilted); never with GODZILLA
+MAGNET DISABLED set; never while one of the game's own magnet sequences runs (`text magnet_procs`); one
+grab at a time; 3 s from the end of one grab to the start of the next; at most 6 grabs in any minute.
+A refused grab returns 0 and says why in mode.log (`[pad] magnet: no grab - ...`).
+
+**It lets go:** at the grab's end; on `pm_magnet_release`; when the mode ends; when the ball ends; when
+the game ends or tilts. If a magnet sequence of the game's starts while a mode holds, the mode's grab
+steps aside WITHOUT an OFF: the game is driving the magnet then, and an OFF would drop its ball.
+
+**Where the numbers come from** (Godzilla Pro 1.16, docs/plans/mode_coils.md has every address): the coil
+frame and the tick conversion from the game's serialiser; the adjustment ids from the game's adjustment
+name table (LO draw power 363, draw time 364, hold power 365, hold time 366, MAGNET DISABLED 343 - the
+same on LE 1.16); the magnet's device from its object (11 on Pro 1.16, 13 on LE 1.16: `value magnet_dev`,
+checked against the game's own magnet object on the first grab). The game's own grabs are processes
+(363, 362 the Magna-Grab, 360 a timed pulse) that hold until the game's conditions clear, a display still
+playing among them: that is how PAD-353's magnet stayed on, and why a mode's grab is a single bounded
+command instead.
+
+**The port lines** (Pro and LE 1.16 only):
+
+```
+site coil_fire             0x00402ff4 0xe3500000 0xe52de004
+site adjustment            0x00286e00 0xe92d40f0 0xe2504000
+site proc_exists           0x003ab72c 0xe30d2158 0xe340207d
+site magnet_get            0x000511cc 0xe92d40f0 0xe30545bc
+value magnet_dev           11
+text magnet_procs          360 362 363 364
+```
+
+**Emulator-proven** (Godzilla Pro 1.16 card, muted, `sdk/magnet_test_mode.c`, 2026-10-05), every line
+below from the runtime's mode.log and hwshim's `[coildrive]` lines for node 9 coil 6, the magnet:
+- a 2000 ms grab: one command, draw 255 for 350 ms then hold 50 for 1650 ms, OFF at its end;
+- 60000 ms asked: 5000 sent (350 + 4650); the mode ended 1.5 s in and the OFF came with 3500 ms left;
+- `pm_magnet_release` 0.5 s in: OFF with 1000 ms of the command left;
+- a mode that WEDGED after a 3000 ms grab (no release, no end, nothing): the runtime's deadline OFF at 3000 ms;
+- refusals: no game (attract), a grab already holding, the 3 s cool-down, the seventh grab in a minute;
+- a ball drained mid-grab: the game itself switched the magnet off about 2.9 s after the drain, then the
+  deadline OFF; the runtime's own ball-end release comes after the game's end of ball, so it was not the
+  one that fired here.
+
+Not measured: a machine (nothing has been flashed); a game magnet sequence starting while a mode holds
+(the rig does not raise the Magna-Grab, PAD-353); LE 1.16 in the emulator (its port lines are found from
+Pro 1.16's code and checked against its program by `tests/test_spike2_mode_magnet.py`).
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in

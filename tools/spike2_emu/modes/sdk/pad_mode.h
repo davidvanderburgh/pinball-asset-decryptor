@@ -442,4 +442,25 @@ int pm_balls_in_play(void);
  * own multiball it only lengthens that multiball's save (the framework keeps the longer). */
 int pm_ball_save(unsigned seconds);
 
+/* ---- the magnet (PAD-381; MODE_SDK.md "The magnet") ------------------------------------------
+ * A grab with the playfield magnet, for `ms` milliseconds. You ask for a time and nothing else:
+ * the powers are the operator's own magnet adjustments (draw power for the draw time, then hold
+ * power), and the runtime decides whether you may and lets go by itself. It is a coil on 48 V, so
+ * the limits are the runtime's and cannot be raised:
+ *   - `ms` is clamped to 100..5000, the draw time included. The whole grab goes to the board as ONE
+ *     command that ends by itself, and is never re-sent: if your mode, the runtime or the game
+ *     stops, the magnet still lets go when that time is up.
+ *   - only while your mode runs, in a game (not attract, not tilted), with the magnet not disabled
+ *     in the settings, while none of the game's own magnet sequences runs, one grab at a time, 3 s
+ *     from the end of one grab to the start of the next, at most 6 grabs a minute.
+ *   - the runtime lets go at the grab's end, when you call pm_magnet_release, when your mode ends,
+ *     when the ball ends, and when the game ends or tilts. If the game starts a magnet sequence of
+ *     its own while you hold, yours steps aside and the game drives the magnet.
+ * pm_magnet_grab: 1 = grabbing; 0 = refused (the reason is in mode.log). Godzilla only (the port's
+ * `site coil_fire` and `value magnet_dev`); PM_CAN_COILS says whether this game has it. */
+#define PM_CAN_COILS        0x80000u  /* pm_magnet_grab / pm_magnet_release / pm_magnet_holding */
+int pm_magnet_grab(unsigned ms);
+void pm_magnet_release(void);
+int pm_magnet_holding(void);
+
 #endif

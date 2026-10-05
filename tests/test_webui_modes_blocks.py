@@ -32,6 +32,9 @@ def test_a_blocks_mode_is_made_listed_opened_saved_and_taken_to_c(tmp_path, prev
         assert "Maser target" in b["choices"]["shots"]
         assert {"name": "skill_shot", "label": "the skill shot is made"} in b["choices"]["events"]
         assert {"role": "ten_seconds", "label": "Ten seconds left"} in b["choices"]["callouts"]
+        light = b["choices"]["light"]                             # PAD-376: the Light show block's boxes
+        assert [s["key"] for s in light["shows"]][:2] == ["burst", "beams"] and light["shows"][0]["steps"]
+        assert ["bolts", "lightning"] in light["fx"] and ["top", "the top"] in light["places"]
         assert b["c"].startswith("/* ramp_frenzy.c - Ramp Frenzy, a mode made of blocks")
         assert opened == []                                       # nothing opens in an editor
         # the title the mode was made for is stamped, as for a code mode

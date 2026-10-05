@@ -276,14 +276,15 @@ def test_a_newer_or_broken_blocks_file_is_refused(tmp_path):
 
 
 # ---- the ARM build ---------------------------------------------------------------------------------
-@pytest.mark.parametrize("which", ["starter", "own clips and sounds"])     # PAD-374: the second
+@pytest.mark.parametrize("which", ["starter", "own clips and sounds", "light shows"])   # PAD-374, PAD-376
 def test_the_starter_builds_with_build_mode_sh(tmp_path, which):
     if os.name == "nt":
         pytest.skip("build_mode.sh runs under bash with arm-linux-gnueabihf-gcc (WSL or Linux)")
     if not shutil.which("bash") or not shutil.which("arm-linux-gnueabihf-gcc"):
         pytest.skip("no arm-linux-gnueabihf-gcc here")
     src = tmp_path / "ramp_frenzy.c"
-    program = BM.starter("RAMP FRENZY", SHOTS) if which == "starter" else _media_prog()
+    program = {"starter": lambda: BM.starter("RAMP FRENZY", SHOTS), "own clips and sounds": _media_prog,
+               "light shows": _lights_prog}[which]()
     program.update(game_modes="block", block_modes=[21, 23])      # PAD-373
     src.write_text(BM.to_c(program, "ramp_frenzy"), encoding="utf-8")
     out = tmp_path / "mode.so"
@@ -667,3 +668,118 @@ def test_start_mode_now_does_not_wait_for_the_games_mode(tmp_path, monkeypatch):
                "trigger", "blk.start", "secs", 1)
     assert "not started (a block): a stock mode is running" in out
     assert "START (trigger file)" in out
+
+
+# ---- PAD-376: light shows, and a lit shot's pace ----------------------------------------------------
+def _step(fx, ms, a, b, at="center", rate=0, gi="keep"):
+    return {"fx": fx, "ms": ms, "a": a, "b": b, "at": at, "rate": rate, "gi": gi}
+
+
+#: KING GHIDORAH's start show (ghidorah_heads.c SHOW_START), built step by step in a block
+GHIDORAH_START = [_step("bolts", 1500, "#ffb000", "#000000", "center", 190, "dark"),
+                  _step("strobe", 500, "#ffffff", "#ffb000", "center", 60, "flash"),
+                  _step("burst", 800, "#ffb000", "#ff4000", "top", 0, "dark"),
+                  _step("fade", 400, "#ff4000", "#000000", "center")]
+
+
+def _lights_prog():
+    return prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "show", "show": "own", "steps": GHIDORAH_START}, _light("Building", rate={"k": "secs_left"}),
+        _light("Left ramp", "hurry")]},
+        {"hat": {"kind": "mode_end"}, "do": [{"op": "show", "show": "fizzle"}, {"op": "lights_off", "shot": "*"}]}])
+
+
+def _light(shot, pattern="blink", rate=None, color="#ffb000"):
+    b = {"op": "light_shot", "shot": shot, "color": color, "pattern": pattern}
+    if rate is not None:
+        b["rate"] = num(rate) if isinstance(rate, int) else rate
+    return b
+
+
+def test_light_show_and_pace_problems():
+    def probs(*blocks):
+        return BM.problems(prog([{"hat": {"kind": "mode_start"}, "do": list(blocks)}]), SHOTS)
+    assert probs({"op": "show", "show": "lightning"}, _light("Building", rate=250),
+                 _light("Building", "hurry"), {"op": "show", "show": "own", "steps": GHIDORAH_START}) == []
+    assert any("no light show" in t or "none chosen" in t for t in probs({"op": "show", "show": "nope"}))
+    assert any("with no steps" in t for t in probs({"op": "show", "show": "own", "steps": []}))
+    bad = [_step("warp", 100, "#ffffff", "#000000"), _step("burst", 10, "#ffffff", "#000000"),
+           _step("burst", 100, "white", "#000000"), _step("burst", 100, "#ffffff", "#000000", at="moon"),
+           _step("spin", 100, "#ffffff", "#000000", rate=9000), _step("spin", 100, "#ffffff", "#000000", gi="x")]
+    said = " ".join(probs({"op": "show", "show": "own", "steps": bad}))
+    for words in ("step 1, has no pattern", "step 2, lasts 50 to 10000 ms", "step 3, has a colour missing",
+                  "step 4, has no place", "step 5, has a pace of 0 to 2000", "step 6, says nothing"):
+        assert words in said, words
+    eleven = {"op": "show", "show": "own", "steps": [GHIDORAH_START[0]] * 11}
+    assert any("11 steps: 10 at most" in t for t in probs(eleven))
+    assert any("pace of 20 to 5000 ms" in t for t in probs(_light("Building", rate=5)))
+    assert any("empty number slot" in t for t in probs(_light("Building", rate={"k": "nope"})))
+    # a solid light's pace is not asked for
+    assert probs(_light("Building", "solid", rate=5)) == []
+    # a hurrying blink with no clock blinks at an even pace: a note, not a problem
+    p = prog([{"hat": {"kind": "mode_start"}, "do": [_light("Building", "hurry")]}], seconds=0)
+    assert any("faster as time runs out" in t for t in BM.notes(p))
+
+
+def test_the_light_show_c_only_calls_what_the_header_declares_and_only_when_used():
+    p = prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "show", "show": "own", "steps": GHIDORAH_START}, {"op": "show", "show": "rainbow"},
+        _light("Building", rate={"k": "secs_left"}), _light("Left ramp", "hurry"),
+        {"op": "lights_off", "shot": "Building"}, {"op": "lights_off", "shot": "*"}]}])
+    src = BM.to_c(p, "blk")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    assert "static const struct fx_step SHOW_0[] = {" in src and "SHOW_1[]" in src
+    assert "{ FX_BOLTS, 1500, 0xffb000u, 0x000000u, 150, 330, 190, GI_DARK }" in src
+    assert 'show_start(SHOW_1, 3, "rainbow");' in src
+    assert "light(0, 0xffb000u, PM_LAMP_BLINK, (long long)secs_left(), 0);" in src
+    assert "light(1, 0xffb000u, PM_LAMP_BLINK, 0LL, 1);" in src
+    plain = BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    assert "show_tick" not in plain and "fx_colour" not in plain and "#define SHOWING 0" in plain
+
+
+def test_king_ghidoras_start_show_and_a_blink_that_quickens_in_blocks(tmp_path, monkeypatch):
+    # KING GHIDORAH (ghidorah_heads.c) in blocks: its start show, step by step; the Building lit
+    # blinking every 500 ms, 250 ms with 10 s left and 100 ms with 4 s left; a ready-made show at the end
+    _cc()
+    monkeypatch.setenv("HARNESS_PLACES", "1")
+    p = prog([
+        {"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": [{"op": "show", "show": "own", "steps": GHIDORAH_START},
+                                               _light("Building", rate=500)]},
+        {"hat": {"kind": "seconds_left", "seconds": 10}, "do": [_light("Building", rate=250)]},
+        {"hat": {"kind": "seconds_left", "seconds": 4}, "do": [_light("Building", rate=100)]},
+        {"hat": {"kind": "mode_end"}, "do": [{"op": "show", "show": "rainbow"}]},
+    ], seconds=15)
+    out = play(tmp_path, p, "shot", "Building", "secs", 22)
+    start = _at(out, r"\[TEST MODE\] START")
+    assert "show its own: 4 step(s) over 18 placed inserts, 2 GI string(s)" in out
+    # the show has the playfield: the Building's light waits for it to end (3.2 s), then comes on
+    over = _at(out, r"\[TEST MODE\] show its own: over")
+    assert 3200 <= over - start <= 3250
+    lit = [(int(t), ms) for t, ms in re.findall(r"^\s*(\d+) LAMP BUILDING ffb000 blink (\d+)", out, re.M)]
+    assert [ms for _t, ms in lit] == ["500", "250", "100"], lit
+    assert lit[0][0] - over <= 20
+    assert 4950 <= lit[1][0] - start <= 5100 and 10950 <= lit[2][0] - start <= 11100
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert _at(out, r"\[TEST MODE\] show rainbow: 3 step\(s\)") - end <= 20
+    assert 3100 <= _at(out, r"\[TEST MODE\] show rainbow: over") - end <= 3150
+    assert int(re.search(r"END paints (\d+)", out).group(1)) > 200      # it painted, step after step
+    assert "END lamps held 0" in out                                   # and handed every insert back
+
+
+def test_a_blink_that_hurries_follows_the_clock_and_a_light_again_is_left_alone(tmp_path):
+    p = prog([
+        {"hat": {"kind": "event", "event": "skill_shot", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": [_light("Left ramp", "hurry", color="#ff0000")]},
+        {"hat": {"kind": "every", "seconds": 1}, "do": [_light("Right ramp", rate=300)]},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [
+            {"op": "lights_off", "shot": "Left ramp"}]},
+    ], seconds=30)
+    out = play(tmp_path, p, "event", "skill_shot", "secs", 29.5, "shot", "Left ramp", "secs", 2)
+    start = _at(out, r"\[TEST MODE\] START")
+    hurry = [(int(t) - start, ms) for t, ms in re.findall(r"^\s*(\d+) LAMP LEFT RAMP ff0000 blink (\d+)", out, re.M)]
+    assert [ms for _t, ms in hurry] == ["700", "400", "200", "100"], hurry
+    assert 9950 <= hurry[1][0] <= 10100 and 19950 <= hurry[2][0] <= 20100 and 26950 <= hurry[3][0] <= 27100
+    assert out.count("LAMP RIGHT RAMP ffb000 blink 300") == 1           # lit again each second: sent once
+    assert "LAMP OFF LEFT RAMP" in out and "END lamps held 0" in out

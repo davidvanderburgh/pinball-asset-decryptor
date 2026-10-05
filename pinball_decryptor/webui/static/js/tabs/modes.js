@@ -300,6 +300,16 @@ function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>
         <${Button} size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
           title="Copy every mode here into another card's project: pick that project's folder. Each is matched to that card's shots by name, and the app says which need a look there.">Copy to…<//>
+        ${s.port_shown ? html`<${Button} size="sm" iconRight="down" disabled=${!s.port_ok}
+          title=${`Every mode here, made to run on this game's ${s.port_word || "other model"} in one go: shots matched by their switches, mechanisms that model does not have left out. Each mode keeps its version for this model, and porting again replaces the earlier port and keeps what you set there.`}
+          onClick=${(e) => openMenu(e.currentTarget, [
+            ...(s.port_targets || []).map((t) => ({ label: t.label, icon: "folder", title: t.folder,
+              onClick: () => call("modes.port_to", t.folder) })),
+            ...((s.port_targets || []).length ? [{ sep: true }] : []),
+            { label: "Another project…", icon: "folder",
+              title: "Pick the folder of a project made from this game's other model",
+              onClick: () => call("modes.port_to") },
+          ])}>${s.port_word ? `Port to ${s.port_word}` : "Port to…"}<//>` : null}
         <${Button} size="sm" iconRight="down" disabled=${!s.project}
           title="Save modes to a file, to keep as a backup or send to someone, and load a file of modes into this project"
           onClick=${(e) => openMenu(e.currentTarget, [

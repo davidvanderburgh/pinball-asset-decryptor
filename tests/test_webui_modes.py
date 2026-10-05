@@ -1536,6 +1536,36 @@ def test_copy_to_puts_the_modes_in_another_cards_project(tmp_path, preview_on):
         assert w.asked[-1]["title"] == "Copy modes" and "Duplicate" in w.asked[-1]["message"]
 
 
+def test_pad396_port_to_the_other_model(tmp_path, preview_on):
+    """PAD-396: Port to Pro shows on a Godzilla Premium/LE project, lists the known Pro projects, and
+    carries every mode there in one call; porting again asks, then replaces the earlier port."""
+    src = _card_project(tmp_path / "premium", "godzilla_le-1_16_0.raw")
+    dest = _card_project(tmp_path / "pro", "godzilla_pro-1_16_0.raw")
+    tmnt = _card_project(tmp_path / "tmnt", "turtles_pro-1_59_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(lambda: w.window.app._settings.__setitem__("projects", [
+            {"folder": str(f), "manufacturer": "stern", "last_opened": ""} for f in (src, tmnt, dest)]))
+        _project(w, src, card=None)
+        st = w.state("modes")
+        assert st["port_shown"] is True and st["port_ok"] is False
+        assert st["port_word"] == "Pro"
+        assert st["port_targets"] == [{"folder": str(dest), "label": "Godzilla Pro 1.16 (pro)"}]
+        assert w.call("modes.example", "KAIJU RUSH") == "kaiju_rush"
+        assert w.state("modes")["port_ok"] is True
+        r = w.call("modes.port_to", str(dest))
+        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "kaiju_rush")]
+        assert w.asked[-1]["title"] == "Port modes" and w.asked[-1]["message"].startswith("Ported 1 mode into ")
+        w.answers.append("no")
+        assert w.call("modes.port_to", str(dest)) is None
+        assert "KAIJU RUSH is already in pro" in w.asked[-1]["message"]
+        w.answers.append("yes")
+        r = w.call("modes.port_to", str(dest))
+        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "kaiju_rush")]
+        assert _modes_on_disk(dest) == ["kaiju_rush"]
+        _project(w, tmnt)
+        assert w.state("modes")["port_shown"] is True and w.state("modes")["port_targets"] == []
+
+
 def test_pad363_the_game_modes_lever_holds_off_the_ticked_modes(tmp_path, preview_on):
     """PAD-363: "While it runs, the game's modes" may start / end this one / cannot start, with a tick for each
     of the title's modes its port can hold off (never a multiball); the ticks are saved by id and come back."""

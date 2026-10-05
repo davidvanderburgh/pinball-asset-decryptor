@@ -176,6 +176,8 @@ becomes. A key a newer editor wrote is kept in `extra` and written back, never d
 | `magnet_ms` | 0 | Magnet > Hold the ball on the magnet when the <shot> is hit, for 0.1-5 seconds (0 = never) | `magnet <ms> <the profile's magnet_shot mask>` when not 0 (nothing on a title that cannot: `validate` says so) |
 | `scoop_hold_ms` | 0 | Scoop > Hold a ball that lands in the scoop for 0.1-10 seconds (0 = never) | `scoop_hold <ms>` when not 0 (nothing on a title that cannot: `validate` says so) |
 | `coil_holds` | [] | Other mechanisms > Hold the <mechanism> for 0.1-5 seconds, as it starts or on a shot (one row per proven coil) | `coil_hold <name> <ms> [mask]` per row (nothing on a title that cannot: `validate` says so) |
+| `models` | {} | (none: kept by Port to... and by opening, copying or building on the game's other model, PAD-396) | nothing: the mode's shots and mechanisms on each OTHER model of its game (`{"pro": {...}}`), put back when it goes back there |
+| `ported` | {} | (none) | nothing: the shots and mechanisms the last port to this model made, so Port to... can tell an edit made since from them |
 | `add_ball_shot` | "" | Multiball > Add a ball on (a shot name, or none) | `add_ball <mask> <add_ball_max>` when a shot is picked; dropped by a retarget to a title without the shot |
 | `multiball_on_shot` | "" | Multiball > Balls come ((when it starts), or a shot name) | `multiball_on <mask>` when a shot is picked and the mode is a multiball; `validate` wants a shot the title has and `seconds` above 0 (the window to hit it); dropped by a retarget to a title without the shot |
 | `add_ball_max` | 1 | Multiball > up to N times, 1-6 | the second word of `add_ball` |

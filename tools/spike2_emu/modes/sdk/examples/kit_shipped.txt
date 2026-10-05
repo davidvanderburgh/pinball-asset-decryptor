@@ -1,0 +1,21 @@
+# intricate_kit.h as the app has shipped it, one sha256 per version (CRLF read as LF), oldest first.
+# PAD-390: a code mode's folder holds its own copy of the kit, put there when the example was added. A card
+# build brings a copy that is one of these (the app's own, never edited) up to the app's kit, so a kit fix
+# reaches a project made before it; an edited copy is left as it is. Add the kit's new hash here whenever it
+# changes (tests/test_stern_code_modes.py checks the current kit is listed).
+753055064e195370bec0e944d3847072ec1c096c6d784ea1ce144efeed6f1a41
+25b8a59bcc366af89bceb8ebe5e67475de7dd61bf9b0c194931cd1e7eb910835
+fa16b3764b8053693dd29bc93ce175eaccaf67de86635278842d3087380967a3
+b072d231cc5e8cf06aea46fda7779c853f59e8479331b0fa212f1db38d1595ba
+6b017b90bd32c279ba9485aef42f2429e7a34fae6bf7ec79aae8d3a58d3a5d90
+f98a602ed610495565f8848d193c4377bfb372f3d48d63d8dc52bfdc8c196aa0
+1a5a6b25c696f31a27d119bced464712f91dfffdb6379bbc080deafce77a22a5
+fb5a3fd88f6384610662f17eec22c3cb3607b3301921a77bb5eba347cab6661b
+4434a9b85fe70597b5248b9e67cb11afcdc4f85092fa4f63bbeee45a810e5d3c
+0ead22fff6be372b48e900a9c631eeb0e2247ebf91006004129873baf302b56c
+a16bfac7a5da8e21b13f2ec3fd0a51519040f3028c4682426433bd016315a904
+79b23fc938ae2f6e3b18d77c18b324ce18ca628eadc6edd038e8c90c564468bd
+5d2bb43d8bd880e65cc872bb3a96de9dac933d9618c382787929a4729cfcd7c1
+d82dfce537797603bffd2185abcbda8100bbb691ad2f7b7fa5fee29787d298d1
+ac120bce5512148a9d409ce1cbc1af0af27ac0142b503b4dfb39b6e54df6bc1d
+ec5ccbae689a1f5a0b51a06cff4c4f88fce728d7eee74f26637c0cfc8ec36f16

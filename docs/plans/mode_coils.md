@@ -170,6 +170,22 @@ test). This is a last line of defence, not a guardrail of ours.
   380-383; the shield rule grabs with it, `v[36](1875)`), BridgeDiverter (device 12, getter `0x1d7174`, 255 for
   300 ms then 25). `coil_hold <name> <ms> [mask]`, Mode > Other mechanisms. Emulator-proven (9ee4ab1a).
 
+- **Step 6 (PAD-395, 2026-10-05): blocks.** A blocks mode has a Mechanisms group: *Hold the <mechanism> for N
+  ms* (`pm_coil_hold`, any value, clamped to 100-5000 in the C and again by the runtime), *Hold the next ball /
+  every ball in the scoop for N ms* (`pm_scoop_hold`; "the next ball" switches the hold off once that ball has
+  been held and gone, watched each tick through `pm_scoop_holding`), and *Let go of* one mechanism, the scoop,
+  or everything it holds. The mechanisms offered are the form's: the magnet where `can("magnet")`, the port's
+  proven held coils where `can("coils")`; the scoop where `can("scoop")`. Elsewhere the palette greys the block
+  with the form's reason, and a saved block naming one is a problem. Every other limit stays the runtime's.
+  The desk harness models the holds (its limits, `scoop`, `HOLD`/`LET GO`/`SCOOP` lines).
+  Emulator-proven on the stock Premium/LE 1.16 card (rig 1, hidden, muted, `PAD_COIL_PROBE=1`), a blocks mode
+  started by its trigger: the Mechagodzilla magnet held 2000 ms as it started (`[coildrive]` node 9 coil 7: 255
+  for 250 ms then 80 for 1750, OFF at its end); the next ball in the scoop held 4012 ms and then kicked by the
+  game (node 8 coil 8), the hold switched off after it ("scoop: no hold"), and the next landing kicked at the
+  game's own time; a Maser target hit asked for the magnet and stood aside for the game's magnet process (as in
+  every LE emulator run), a second hit refused; the bridge held (255 for 300 ms then 25) and Let go of
+  everything cut it with 1115 ms left; no abort.
+
 - **The shield and the building: what is known, nothing shipped.**
   - Shield: ShieldMotor -> SingleDirectionCoilMotor (node 9 coil 2), a static object at `0x7bbf88` (vptr
     `0x6502a8`), run to SHIELD MOTOR OPEN (86, matrix 41) or CLOSED (87, matrix 42). The rig already models it

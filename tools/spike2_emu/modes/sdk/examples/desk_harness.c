@@ -27,6 +27,7 @@
  *   trigger <file>      /dump/<file> appears (a mode's test trigger), with optional text: trigger f=text
  *   covered <0|1>       a display of the game's that beats the held display priority has the screen
  *   lamps               print every insert held now: "HELD <name> <rrggbb> <pattern> <ms> <mode>"
+ *   scoop               a ball settles in the scoop: held for the running mode's pm_scoop_hold, then kicked
  *
  * Every line a mode logs is printed as "<ms> [<mode>] <text>", every score as "SCORE +<n>",
  * every word written to a screen as "WORDS <node>: <words>", every show/hide as "SHOW <node> 0|1",
@@ -38,6 +39,9 @@
  * "LAMP OFF <name> <mode>" when handed back and "LAMP PRIORITY <p> <mode>"; the display priority as
  * "DISPLAY <p> <mode>" ("DISPLAY 0" given up, "DISPLAY released" when its mode ended without it).
  * A light show's paints (pm_lamp_paint, with HARNESS_PLACES=1) print nothing; "END paints <n>" counts them.
+ * A held mechanism (PAD-395) prints as "HOLD <coil> <ms> <mode>", "HOLD <coil> refused - <why>" and
+ * "LET GO <coil> after <ms> ms (<why>)"; the scoop as "SCOOP HOLD <ms> <mode>", "SCOOP ball held <ms> ms"
+ * and "SCOOP KICK after <ms> ms (<why>)".
  * The last line says how many inserts are still held and the display priority still held.
  */
 #define _GNU_SOURCE
@@ -169,7 +173,12 @@ int pm_begin(void)
     if (disp_linger_until && disp_owner != current) disp_linger_release("another mode began");
     return 1;
 }
-void pm_end(void) { if (running == current) running = 0; }
+static void mechs_let_go(const char *why);   /* PAD-395: the held mechanisms, below */
+void pm_end(void)
+{
+    if (running == current) running = 0;
+    if (!running) mechs_let_go("the mode ended");
+}
 int pm_running(void) { return running && running == current; }
 unsigned pm_callout_id(const char *role)
 {
@@ -275,6 +284,95 @@ static void shield_tick(void)
     if (shield_at == shield_to || now_ms < shield_due) return;
     shield_at = shield_to;
     printf("%6lu SHIELD stopped %s\n", now_ms, shield_at == PM_SHIELD_TOWARD ? "toward the player" : "away");
+}
+/* PAD-395: the held mechanisms and the scoop (pad_mode_runtime.c "the magnet", "the scoop"), with the runtime's
+ * limits on a hold that a mode cannot change: 100..5000 ms, only the running mode, one hold of a coil at a time,
+ * 3 s from the last one's end; all let go when the mode ends or the ball does. A ball that settles in the scoop
+ * (the `scoop` command) waits for the running mode's hold, then the game kicks it out. HARNESS_COILS=none is a
+ * game with neither. */
+static struct { const char *name; unsigned long started, until, ended; } coil_h[] = {
+    { "magnet", 0, 0, 0 }, { "mg_magnet", 0, 0, 0 }, { "bridge", 0, 0, 0 },
+};
+#define N_COILS (int)(sizeof coil_h / sizeof coil_h[0])
+static unsigned scoop_ms;
+static unsigned long scoop_from, scoop_until;
+static int no_coils(void) { const char *e = getenv("HARNESS_COILS"); return e && !strcmp(e, "none"); }
+static int coil_at(const char *name)
+{
+    for (int i = 0; i < N_COILS && name; i++)
+        if (!strcmp(coil_h[i].name, name)) return i;
+    return -1;
+}
+static void coil_off(int i, const char *why)
+{
+    printf("%6lu LET GO %s after %lu ms (%s)\n", now_ms, coil_h[i].name, now_ms - coil_h[i].started, why);
+    coil_h[i].until = 0;
+    coil_h[i].ended = now_ms;
+}
+static void scoop_kick(const char *why)
+{
+    printf("%6lu SCOOP KICK after %lu ms (%s)\n", now_ms, now_ms - scoop_from, why);
+    scoop_until = 0;
+}
+static void mechs_let_go(const char *why)
+{
+    for (int i = 0; i < N_COILS; i++)
+        if (coil_h[i].until) coil_off(i, why);
+    scoop_ms = 0;
+    if (scoop_until) scoop_kick(why);
+}
+static void mechs_tick(void)
+{
+    for (int i = 0; i < N_COILS; i++)
+        if (coil_h[i].until && now_ms >= coil_h[i].until) coil_off(i, "its time ran out");
+    if (scoop_until && now_ms >= scoop_until) scoop_kick("its time ran out");
+}
+int pm_coil_hold(const char *name, unsigned ms)
+{
+    int i = coil_at(name);
+    const char *why = 0;
+    if (i < 0 || no_coils()) return 0;
+    if (!pm_running()) why = "not the running mode";
+    else if (coil_h[i].until) why = "a hold is already on";
+    else if (coil_h[i].ended && now_ms - coil_h[i].ended < 3000) why = "within 3 s of the last";
+    if (why) {
+        printf("%6lu HOLD %s refused - %s\n", now_ms, name, why);
+        return 0;
+    }
+    if (ms < 100) ms = 100;
+    if (ms > 5000) ms = 5000;
+    coil_h[i].started = now_ms;
+    coil_h[i].until = now_ms + ms;
+    printf("%6lu HOLD %s %u ms %s\n", now_ms, name, ms, current && current->name ? current->name : "?");
+    return 1;
+}
+void pm_coil_release(const char *name)
+{
+    int i = coil_at(name);
+    if (i >= 0 && pm_running() && coil_h[i].until) coil_off(i, "the mode let go");
+}
+int pm_coil_holding(const char *name) { int i = coil_at(name); return i >= 0 && coil_h[i].until != 0; }
+int pm_coil_known(const char *name) { return !no_coils() && coil_at(name) >= 0; }
+int pm_scoop_hold(unsigned ms)
+{
+    if (no_coils() || !pm_running()) return 0;
+    if (ms && ms < 100) ms = 100;
+    if (ms > 10000) ms = 10000;
+    scoop_ms = ms;
+    printf("%6lu SCOOP HOLD %u %s\n", now_ms, ms, current && current->name ? current->name : "?");
+    if (!ms && scoop_until) scoop_kick("the mode let go");
+    return 1;
+}
+void pm_scoop_release(void) { if (pm_running() && scoop_until) scoop_kick("the mode let go"); }
+int pm_scoop_holding(void) { return scoop_until != 0; }
+static void scoop_settle(void)
+{
+    scoop_from = now_ms;
+    if (scoop_ms && running) {
+        scoop_until = now_ms + scoop_ms;
+        printf("%6lu SCOOP ball held %u ms\n", now_ms, scoop_ms);
+    } else
+        printf("%6lu SCOOP KICK at once (no hold)\n", now_ms);
 }
 const char *pm_port_text(const char *name)
 {
@@ -635,6 +733,7 @@ static void tick(void)
     ticks++;
     now_ms = ticks * 1000 / 60;
     shield_tick();
+    mechs_tick();
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     if (disp_prio && running != disp_owner && disp_linger_until && !running && now_ms < disp_linger_until) {
@@ -697,8 +796,12 @@ int main(int argc, char **argv)
         } else if (!strcmp(c, "balls")) { balls_in_play = atoi(argv[++k]); printf("%6lu >> balls in play %d\n", now_ms, balls_in_play); }
         else if (!strcmp(c, "ball_end")) {
             printf("%6lu >> ball_end\n", now_ms);
+            mechs_let_go("the ball ended");
             EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
             current = 0;
+        } else if (!strcmp(c, "scoop")) {          /* PAD-395: a ball settles in the scoop */
+            printf("%6lu >> scoop\n", now_ms);
+            scoop_settle();
         } else if (!strcmp(c, "player")) player = (unsigned)atoi(argv[++k]);
         else if (!strcmp(c, "game_over")) in_game = 0;
         else if (!strcmp(c, "new_game")) {

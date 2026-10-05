@@ -198,3 +198,37 @@ def test_own_sounds_cannot_be_picked_where_the_card_cannot_carry_them(tmp_path, 
         ch = w.state("modes")["code"]["blocks"]["choices"]
         assert ch["why_sound"].startswith("the app has not found spare sounds on") and ch["why_music"]
         assert w.call("modes.blocks_pick", "sound", []) is None and not w.answers
+
+
+
+def test_the_mechanism_blocks_are_offered_where_the_game_can_hold_them(tmp_path, preview_on):  # noqa: F811
+    """PAD-395: Godzilla Premium/LE 1.16 offers the magnet, the Mechagodzilla magnet, the bridge and the scoop;
+    Pro 1.15 offers none of them, and says why (the palette greys them with it)."""
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, tmp_path / "pro")
+        w.call("modes.new_blocks_mode", "Coils")
+        ch = w.state("modes")["code"]["blocks"]["choices"]
+        assert ch["mechs"] == []
+        assert ch["mechs_off"].startswith("Not on this game: The app has not found how Godzilla Pro 1.15 drives")
+        assert ch["scoop_off"].startswith("Not on this game: The app has not found how Godzilla Pro 1.15 runs")
+        prog = w.state("modes")["code"]["blocks"]["program"]
+        prog["scripts"][0]["do"].append({"op": "hold", "what": "magnet", "ms": {"k": "num", "v": 2000}})
+        got = w.call("modes.blocks_save", "coils", prog)
+        assert "Script 1 holds the magnet, which a mode cannot hold on this card's game." in got["problems"]
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, tmp_path / "le", card="godzilla_le-1_16_0.raw")
+        w.call("modes.new_blocks_mode", "Coils")
+        b = w.state("modes")["code"]["blocks"]
+        ch = b["choices"]
+        assert ch["mechs"] == [{"name": "magnet", "label": "magnet"},
+                               {"name": "mg_magnet", "label": "Mechagodzilla magnet"},
+                               {"name": "bridge", "label": "bridge"}]
+        assert ch["mechs_off"] == "" and ch["scoop_off"] == ""
+        prog = b["program"]
+        prog["scripts"][0]["do"] += [{"op": "hold", "what": "bridge", "ms": {"k": "num", "v": 3000}},
+                                     {"op": "scoop_hold", "ms": {"k": "num", "v": 5000}, "which": "next"}]
+        got = w.call("modes.blocks_save", "coils", prog)
+        assert got["problems"] == []
+        with open(tmp_path / "le" / "modes" / "coils" / "coils.c", encoding="utf-8") as f:
+            c = f.read()
+        assert 'hold("bridge", (3000LL));' in c and "scoop_hold((5000LL), 1);" in c

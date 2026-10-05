@@ -32,6 +32,7 @@ const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"
 const PACED = ["blink", "pulse", "chase"];
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
+const SCOOP_WHICH = [["next", "the next ball"], ["every", "every ball"]];   // PAD-395
 const CLIP_WHERE = [["full", "full screen"], ["behind", "behind the HUD, once"], ["loop", "behind the HUD, over and over"]];
 const PRIORITIES = [3, 4, 5, 6, 7].map((p) => [String(p), "priority " + p]);
 const SAVE_MS = 450;
@@ -85,6 +86,9 @@ const TIP = {
   ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colours, from a place on the playfield.",
   stepRate: "The pattern's pace, ms (a strobe's flash, a beam's turn, a chase's step). 0 = its usual.",
   gi: "The lights between the inserts (the general illumination) during this step: the game's, dark, or flashing white.",
+  hold: "Holds the mechanism this many ms (100 to 5000) at its own power settings, then lets go. Only while the mode runs, never while the game uses it, 3 s apart and 6 a minute at most; the mode ending, the ball draining or a tilt lets go at once. Any value: a number, a variable, a sum.",
+  scoopHold: "A ball that settles in the scoop waits this many ms (100 to 10000), then the game kicks it out as always. The next ball, or every ball while the mode runs. The game's own use of the scoop comes first; the mode ending lets it go.",
+  letGo: "Lets go of a held mechanism now, or stops holding balls in the scoop (a ball held there goes).",
 };
 
 // ------------------------------------------------------------------ the blocks there are
@@ -112,6 +116,9 @@ function stmtTemplates(ch, vars, prog = {}) {
     ["Mode", [{ op: "start_mode" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
       { op: "set_time", seconds: num(10) },
       { op: "multiball", balls: 2, save: 10 }]],
+    // PAD-395: the mechanisms the form's Magnet, Scoop and Other mechanisms hold (greyed where the game cannot)
+    ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
+      { op: "scoop_hold", ms: num(3000), which: "next" }, { op: "let_go", what: "*" }]],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
       { op: "change", var: v, by: num(1) }]],
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
@@ -143,7 +150,7 @@ const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: 
 const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", log: "show",
   clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
-  hud_gauge: "hud", hud_award: "hud" };
+  hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
 const GAUGES = [["diamond", "diamonds"], ["segment", "a bar of segments"], ["spike", "spikes"]];
@@ -323,6 +330,14 @@ function StmtBody({ b, path, ed }) {
         <span class="bk-w" ...${tip(TIP.fallback)}>else say</span><${Pick} value=${cur} options=${opts} title=${TIP.fallback}
           onChange=${(v) => set("fallback", v === "-" ? null : (/^[0-9]+$/.test(v) ? Number(v) : v))} />`;
     }
+    case "hold": return html`<span class="bk-w" ...${tip(TIP.hold)}>Hold the</span><${Pick} value=${b.what}
+        options=${(ed.ch.mechs || []).map((m) => [m.name, m.label])} missing="(not on this game)" onChange=${(v) => set("what", v)} />
+      <span class="bk-w">for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
+    case "scoop_hold": return html`<span class="bk-w" ...${tip(TIP.scoopHold)}>Hold</span><${Pick} value=${b.which || "next"} options=${SCOOP_WHICH} onChange=${(v) => set("which", v)} />
+      <span class="bk-w">in the scoop for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
+    case "let_go": return html`<span class="bk-w" ...${tip(TIP.letGo)}>Let go of</span><${Pick} value=${b.what}
+        options=${[["*", "everything it holds"], ...(ed.ch.mechs || []).map((m) => [m.name, "the " + m.label]), ["scoop", "the scoop"]]}
+        missing="(not on this game)" onChange=${(v) => set("what", v)} />`;
     default: return html`<span class="bk-w">${b.op}</span>`;
   }
 }
@@ -459,20 +474,30 @@ function stmtLabel(b) {
     clip: "Play a clip", sound: "Play a sound",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
+    hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 
+// PAD-395: why a palette block cannot be used on this card's game ("" = it can)
+function whyOff(t, ch) {
+  if (t.op === "hold") return ch.mechs_off || "";
+  if (t.op === "scoop_hold") return ch.scoop_off || "";
+  if (t.op === "let_go") return ch.mechs_off && ch.scoop_off ? ch.mechs_off : "";
+  return "";
+}
+
 function Palette({ ed }) {
-  const piece = (cls, label, tpl, onPress, title) => html`<button type="button" class=${cx("bk-pal", cls)} draggable="true"
-    onDragStart=${(e) => { dragging = { tpl: clone(tpl) }; e.dataTransfer.effectAllowed = "copy"; e.dataTransfer.setData("text/plain", "block"); }}
+  const piece = (cls, label, tpl, onPress, title, off) => html`<button type="button" class=${cx("bk-pal", cls)} draggable=${off ? "false" : "true"}
+    aria-disabled=${off ? "true" : undefined}
+    onDragStart=${(e) => { if (off) { e.preventDefault(); return; } dragging = { tpl: clone(tpl) }; e.dataTransfer.effectAllowed = "copy"; e.dataTransfer.setData("text/plain", "block"); }}
     onDragEnd=${() => { dragging = null; ed.setOver(null); }}
-    onClick=${onPress} ...${tip(title || TIP.palette)}>${label}</button>`;
+    onClick=${off ? null : onPress} ...${tip(off || title || TIP.palette)}>${label}</button>`;
   const vals = valueTemplates(ed.ch, ed.vars, ed.timers);
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
     ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
     ${stmtTemplates(ed.ch, ed.vars, ed.prog).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
-      ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t))))}`)}
+      ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t)), null, whyOff(t, ed.ch)))}`)}
     <div class="bk-pal-h">Values</div>
     ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, "Drag into a value slot (the round holes)"))}
     <div class="bk-pal-h">Conditions</div>

@@ -1170,3 +1170,108 @@ def test_a_hud_mode_that_gives_way_takes_its_hud_down_when_a_game_mode_begins(tm
     assert re.search(r"^\s*%d DISPLAY 0 TEST MODE" % end, out, re.M)
     # nothing of its HUD is written after that tick
     assert all(int(t) <= end for t in re.findall(r"^\s*(\d+) WORDS PadMode_maser_Hud", out, re.M))
+
+
+# ---- PAD-395: the mechanisms (the magnet, the scoop, the Premium's held coils) ----------------------------
+def _coil_prog(**kw):
+    return prog([
+        {"hat": {"kind": "shot", "shot": "Slingshot", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": [{"op": "scoop_hold", "ms": num(5000), "which": "next"}]},
+        {"hat": {"kind": "shot", "shot": "Godzilla target", "when": "running"}, "do": [
+            {"op": "hold", "what": "magnet", "ms": num(2000)}]},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [
+            {"op": "hold", "what": "bridge", "ms": {"k": "op", "op": "*", "a": num(3), "b": num(1000)}}]},
+        {"hat": {"kind": "shot", "shot": "Building", "when": "running"}, "do": [{"op": "let_go", "what": "*"}]},
+        {"hat": {"kind": "shot", "shot": "Maser target", "when": "running"}, "do": [
+            {"op": "hold", "what": "mg_magnet", "ms": {"k": "var", "name": "long"}}]},
+    ], vars=[{"name": "long", "reset": "mode"}], seconds=0, **kw)
+
+
+def test_the_mechanism_blocks_are_checked_against_the_runtimes_limits_and_the_game():
+    mechs = {"magnet": "magnet", "mg_magnet": "Mechagodzilla magnet", "bridge": "bridge"}
+    assert BM.problems(_coil_prog(), mechs=mechs, scoop=True) == []
+    assert BM.problems(_coil_prog()) == []                       # no card: no game to check against
+    p = prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "hold", "what": "magnet", "ms": num(6000)}, {"op": "hold", "what": "", "ms": num(1000)},
+        {"op": "hold", "what": "bridge", "ms": num(50)}, {"op": "scoop_hold", "ms": num(20000), "which": "next"},
+        {"op": "scoop_hold", "ms": num(1000), "which": "all of them"}, {"op": "let_go", "what": ""}]}])
+    got = BM.problems(p, mechs={"magnet": "magnet"}, scoop=False)
+    assert got == [
+        "Script 1 holds it 100 to 5000 ms.",
+        "Script 1 holds a mechanism with none chosen.",
+        "Script 1 holds the bridge, which a mode cannot hold on this card's game.",
+        "Script 1 holds a ball in the scoop, which a mode cannot do on this card's game.",
+        "Script 1 holds a ball 100 to 10000 ms.",
+        "Script 1 holds a ball in the scoop: the next one or every one.",
+        "Script 1 lets go of nothing chosen."]
+    assert BM.HOLD_MAX_MS == MP.COIL_MAX_MS == MP.MAGNET_MAX_MS and BM.SCOOP_MAX_MS == MP.SCOOP_MAX_MS
+    # a hold where the mode is not running does nothing: said, not refused
+    idle = prog([{"hat": {"kind": "mode_end"}, "do": [{"op": "hold", "what": "magnet", "ms": num(1000)}]}])
+    assert any("held only while the mode runs" in n for n in BM.notes(idle))
+    assert not any("held only while" in n for n in BM.notes(_coil_prog()))
+
+
+def test_the_mechanism_c_calls_only_the_header_and_only_when_a_block_holds():
+    src = BM.to_c(_coil_prog(), "coils")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    assert {"pm_coil_hold", "pm_coil_release", "pm_scoop_hold", "pm_scoop_holding"} <= used
+    assert 'hold("magnet", (2000LL));' in src and "scoop_hold((5000LL), 1);" in src and "let_go_all();" in src
+    # every coil a block names is let go by Let go of everything; nothing fires a coil by number
+    lets = re.search(r"static void let_go_all\(void\)\n\{(.*?)\n\}", src, re.S).group(1)
+    assert [m for m in re.findall(r'pm_coil_release\("(\w+)"\)', lets)] == ["magnet", "bridge", "mg_magnet"]
+    assert "if (ms > 5000) ms = 5000;" in src and "if (ms > 10000) ms = 10000;" in src
+    assert "pm_coil_hold" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    assert "scoop_tick" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+
+
+def test_the_mechanisms_build_with_build_mode_sh(tmp_path):
+    if os.name == "nt":
+        pytest.skip("build_mode.sh runs under bash with arm-linux-gnueabihf-gcc (WSL or Linux)")
+    if not shutil.which("bash") or not shutil.which("arm-linux-gnueabihf-gcc"):
+        pytest.skip("no arm-linux-gnueabihf-gcc here")
+    src = tmp_path / "coils.c"
+    src.write_text(BM.to_c(_coil_prog(), "coils"), encoding="utf-8")
+    out = tmp_path / "mode.so"
+    r = subprocess.run(["bash", os.path.join(SDK, "build_mode.sh"), "-o", str(out), str(src)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "warning" not in (r.stdout + r.stderr).lower()
+
+
+def test_the_blocks_hold_the_magnet_the_bridge_and_the_next_ball_in_the_scoop(tmp_path):
+    out = play(tmp_path, _coil_prog(),
+               "shot", "Slingshot", "scoop", "secs", 6, "scoop",
+               "shot", "Godzilla target", "shot", "Godzilla target", "secs", 3,
+               "shot", "Godzilla target", "secs", 3.5, "shot", "Godzilla target",
+               "shot", "Left ramp", "ms", 500, "shot", "Building",
+               "shot", "Maser target", "ball_end")
+    assert "START (a block)" in out
+    # the next ball in the scoop is held 5 s and kicked; the one after it is kicked at once
+    assert re.search(r"SCOOP ball held 5000 ms\n(?:.*\n)*?\s*\d+ SCOOP KICK after 50\d\d ms \(its time ran out\)", out)
+    assert "SCOOP KICK at once (no hold)" in out
+    assert re.search(r"SCOOP HOLD 0 TEST MODE", out)
+    # the magnet: held 2 s, a hit mid-hold refused, one 3 s after refused (within 3 s of its end), then held
+    assert out.count("HOLD magnet 2000 ms TEST MODE") == 2
+    assert "HOLD magnet refused - a hold is already on" in out
+    assert "HOLD magnet refused - within 3 s of the last" in out
+    assert re.search(r"LET GO magnet after 20\d\d ms \(its time ran out\)", out)
+    # the bridge for a value (3 x 1000), let go early by Let go of everything
+    assert "HOLD bridge 3000 ms TEST MODE" in out
+    assert re.search(r"LET GO bridge after 5\d\d ms \(the mode let go\)", out)
+    # a variable of 0 is clamped up to the runtime's least, and the drain ends it and lets go
+    assert "HOLD mg_magnet 100 ms TEST MODE" in out
+    assert "END (ball ended)" in out
+
+
+def test_holding_every_ball_in_the_scoop_and_a_game_with_no_mechanisms(tmp_path, monkeypatch):
+    p = _coil_prog()
+    p["scripts"][1]["do"][0]["which"] = "every"
+    p["scripts"][1]["do"][0]["ms"] = num(20000)                 # past the cap: the runtime's 10 s
+    out = play(tmp_path, p, "shot", "Slingshot", "scoop", "secs", 11, "scoop", "secs", 1, "shot", "Building")
+    assert out.count("SCOOP ball held 10000 ms") == 2               # every ball, at most 10 s
+    assert re.search(r"SCOOP KICK after \d+ ms \(the mode let go\)", out)   # Let go of everything
+    monkeypatch.setenv("HARNESS_COILS", "none")
+    out = play(tmp_path, _coil_prog(), "shot", "Slingshot", "scoop", "shot", "Godzilla target")
+    assert "hold magnet: refused" in out and "scoop: no hold on this game" in out
+    assert "HOLD magnet" not in out and "SCOOP KICK at once (no hold)" in out

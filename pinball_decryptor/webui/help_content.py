@@ -1428,193 +1428,146 @@ HELP_CONTENT = {
          "still runs the second."),
     ],
     "Partition Explorer": [
-        ("What it's for",
-         "Browse a raw card image (.raw / .img) the way a file manager would. "
-         "Handy for pulling a file (a radium scene, a boot script) out of an "
-         "old modded card to reuse, or dumping a folder to compare a modded "
-         "card against a stock one. Browsing never changes the card — only "
-         "\"Replace with…\" writes to it, and only when you confirm."),
-        ("Open a card",
-         "Point \"Card Image\" at a card image and press Open. The app reads "
-         "the disk's partitions and picks the first browsable Linux (ext4) one; "
-         "switch partitions with the dropdown. FAT and extended partitions are "
-         "listed but not browsable."),
-        ("Browse + preview",
-         "Expand folders in the tree to walk the filesystem — children load as "
-         "you open each folder, so even a full card opens instantly. Selecting "
-         "a file shows it in the Preview pane: text as text, and images and "
-         "fonts drawn as a picture with their format and real pixel size. "
-         "Anything too big to draw, or of a kind that doesn't render, says to "
+        ("What it's for", [
+            "Browse a card image (.raw / .img) like a file manager: pull a file off "
+            "an old modded card to reuse, or dump a folder to compare two cards.",
+            {"note": "Browsing never changes the card. Only **Replace with…** writes "
+                     "to it, and only after you confirm."},
+        ]),
+        ("Open and browse",
+         "Pick the card in **Card Image** and press **Open**.\n\n"
+         "- The app opens the first Linux (ext4) partition. Switch with the partition "
+         "dropdown. FAT and extended partitions are listed but can't be browsed.\n"
+         "- Expand folders in the tree. Each loads as you open it, so even a full card "
+         "opens at once.\n"
+         "- Pick a file to see it in **Preview**: text as text, images and fonts as a "
+         "picture with their format and size. Anything too big or of another kind: "
          "extract it instead."),
         ("The Changed column",
-         "\"Changed\" marks the files you have replaced on THIS card image, "
-         "with the date of the last swap, and the mark survives closing the "
-         "app. It is PAD's own record of what PAD did — an edit made outside "
-         "PAD leaves nothing to find, and if the image is swapped or rebuilt "
-         "underneath the marks they're dropped rather than shown against a "
-         "card they no longer describe. \"Show:\" filters the tree to All, "
-         "Changed (just those files, already expanded) or Unchanged "
-         "(everything else). Find searches the whole partition either way — "
-         "it clears the filter first so a hit can't stay hidden behind it."),
-        ("Properties",
-         "Right-click any file → \"Properties…\" for its full on-card path "
-         "(the path it has when the partition is mounted, for lining PAD's "
-         "edits up with a hand-mount workflow), its partition, size and type "
-         "— and, for a file you've replaced, every swap PAD made to it on "
-         "this image with the file each one came from."),
-        ("Extract",
-         "\"Extract Selected\" saves the highlighted file, or the highlighted "
-         "folder's whole subtree, to a location you pick. \"Extract Whole "
-         "Partition\" dumps the entire filesystem — useful for diffing two "
-         "cards."),
-        ("Replace a file on the card",
-         "Right-click any file → \"Replace with…\" swaps it for one of your "
-         "own: a boot or game script, a font, the Stern splash screen on the "
-         "OS partition (sda2, /usr/local/spike/SternLogo.png; that one is "
-         "also on the Replace Images tab as \"Boot screen\", and a build puts "
-         "it on the card like any other image). Your file does "
-         "NOT have to match the original's size. A same-size file is written "
-         "straight into the blocks the original occupied, which changes no "
-         "filesystem structure at all and needs nothing installed. A bigger "
-         "or smaller one has to have blocks allocated or freed, so the card "
-         "image is mounted through the Linux filesystem driver (WSL2 on "
-         "Windows — the same dependency full-size video replacement uses) and "
-         "the kernel does that part. Either way the file keeps its name, "
-         "location and permissions, and its Stern validation record is "
-         "refreshed — including the stored file size when the length "
-         "changed. The confirmation dialog tells you which of the two routes "
-         "your pick will take before anything is written."),
-        ("Before you replace",
-         "Work on a copy of the image if it's precious: a replace writes into "
-         "the image straight away and there is no undo. Files the validation "
-         "manifest doesn't index (everything on the OS partition, for "
-         "instance) simply have no record to refresh, and the log says so. A "
-         "resize needs free space on that partition, and you'll be told the "
-         "numbers rather than left with a half-written file if there isn't "
-         "any."),
+         "**Changed** marks the files PAD replaced on THIS card image, with the date "
+         "of the last swap. The mark stays after you close the app.\n\n"
+         "- It only knows what PAD did. An edit made outside PAD leaves no mark.\n"
+         "- If the image is swapped or rebuilt underneath, the marks are dropped.\n"
+         "- **Show:** filters the tree to All, Changed (opened out) or Unchanged.\n"
+         "- **Find** always searches the whole partition; it clears the filter first."),
+        ("Properties and Extract",
+         "- Right-click a file > **Properties…**: its full on-card path (as when the "
+         "partition is mounted), partition, size and type, plus every swap PAD made "
+         "to it on this image and the file each came from.\n"
+         "- **Extract Selected** saves the picked file, or a folder and all inside it.\n"
+         "- **Extract Whole Partition** dumps everything, handy for diffing two cards."),
+        ("Replace a file on the card", [
+            "Right-click a file > **Replace with…** to swap in your own: a boot or game "
+            "script, a font, the Stern splash screen (sda2, "
+            "/usr/local/spike/SternLogo.png; also on Replace Images as \"Boot screen\"). "
+            "Your file does NOT have to be the same size.",
+            {"cards": [
+                {"icon": "check", "tone": "ok", "title": "Same size",
+                 "text": "Written straight over the old file's blocks. Nothing to install."},
+                {"icon": "disk", "tone": "info", "title": "Bigger or smaller",
+                 "text": "The image is mounted through the Linux filesystem driver "
+                         "(**WSL2** on Windows) to find or free space. Needs free "
+                         "space on that partition; you are told the numbers if not."}]},
+            "- The confirm box says which of the two it will be before anything is written.\n"
+            "- The file keeps its name, place and permissions, and its Stern validation "
+            "record (size too) is refreshed. Files the record doesn't list (the whole "
+            "OS partition, for one) have nothing to refresh; the log says so.",
+            {"note": "A replace writes into the image at once and there is no undo. "
+                     "Work on a copy if the image is precious.", "kind": "warn"},
+        ]),
     ],
     "Default Settings": [
-        ("What it's for",
-         "Preset the operator-adjustment DEFAULTS baked into a card image — "
-         "free play, volume, pricing, brightness and more — so a machine "
-         "comes up the way you want without adjusting it by hand every time "
-         "you flash a fresh card. The Card Image shown is the master image "
-         "set on the Extract tab; the settings are read from its game "
-         "firmware."),
-        ("Fresh cards only (important)",
-         "A machine uses these defaults on a fresh flash or after a factory "
-         "reset. A machine that has already been set up keeps its own "
-         "settings — Stern stores those on the board, not on the card, so the "
-         "app cannot change a machine that's already configured. Think of this "
-         "as \"how a brand-new card boots\"."),
-        ("How the list is ordered",
-         "Settings are grouped under headings — Game, Sound, Lighting, "
-         "Insider Connected, High scores — and every score on the machine's "
-         "high-score board is collected into the High Scores block at the "
-         "bottom, whether or not the firmware carries a player name to go "
-         "with it. \"Allow High Scores\" and \"Reset High Scores After\" sit "
-         "just above that block because they govern the board without being "
-         "places on it."),
-        ("Edit + build",
-         "\"On card\" is the default currently baked into the image (Stern's "
-         "factory value unless it was changed here before); set \"New "
-         "default\" to what you want — a ● marks every row that deviates "
-         "from the card, and every change stages itself automatically, like "
-         "edits on the Replace tabs. The log names each field you change and "
-         "both values, once you leave the field. The next card you Build gets "
-         "the staged defaults baked in (validation record refreshed "
-         "automatically) while your master image stays untouched. \"Reset "
-         "Fields\" puts everything back to the image's own defaults and "
-         "clears the staged changes."),
-        ("When the Range looks wrong",
-         "A few settings ship with a default outside the range the firmware "
-         "itself declares for them — Led Zeppelin 1.22's two ELECTRIC MAGIC "
-         "champions default to 2,000,000 against a stated minimum of "
-         "5,000,000. That is the firmware, not a misread: the Range column "
-         "says so, the row counts as unchanged until you touch it, and if "
-         "you do edit it the value written is pulled into the declared range "
-         "(the game rejects anything else)."),
-        ("Settings the machine edits elsewhere",
-         "Hovering a setting's name tells you when the machine won't show it "
-         "in its Adjustments menu — the master volume, for one, lives on a "
-         "service screen rather than in Adjustments. See the Menu column in "
-         "the all-settings list below the form for the same information on "
-         "every setting."),
+        ("What it's for", [
+            "Set the operator-adjustment DEFAULTS baked into a card (free play, volume, "
+            "pricing, brightness and more), so a fresh card boots the way you want. "
+            "The Card Image is the master image set on the Extract tab.",
+            {"note": "**Fresh cards only.** A machine uses these on a fresh flash or "
+                     "after a factory reset. A machine already set up keeps its own "
+                     "settings: Stern stores them on the board, not the card.",
+             "kind": "warn"},
+        ]),
+        ("Edit and build", [
+            {"flow": [
+                {"icon": "edit", "title": "Set", "text": "a **New default** for any row"},
+                {"icon": "check", "title": "Staged", "text": "by itself, ● marks it"},
+                {"icon": "write", "title": "Build", "text": "the next card gets it baked in"}]},
+            "- **On card** is the default in the image now (Stern's, unless changed here "
+            "before). Rows are grouped: Game, Sound, Lighting, Insider Connected, High "
+            "scores.\n"
+            "- The log names each change and both values when you leave the field.\n"
+            "- The master image is never changed, and the validation record is refreshed.\n"
+            "- **Reset Fields** puts every row back to the image's own and clears the "
+            "staged changes.\n"
+            "- A Range that looks wrong may be the firmware's own: Led Zeppelin 1.22's "
+            "two ELECTRIC MAGIC champions default to 2,000,000 under a stated minimum of "
+            "5,000,000. The row counts as unchanged until you edit it, and an edit is "
+            "pulled into the range (the game rejects anything else).\n"
+            "- Hover a setting's name to see if the machine edits it outside Adjustments.",
+        ]),
+        ("Presets",
+         "Save the form as a named preset with **Save As…** and pick it from the "
+         "dropdown any time (its values stage at once).\n\n"
+         "- **Apply this preset automatically to every card I build** belongs to the "
+         "picked preset: every Write build gets it, without visiting this tab.\n"
+         "- Only the settings a game has are applied, so one preset works across titles.\n"
+         "- Leave it off when different machines need different defaults."),
         ("Master Volume",
-         "This row is the volume the machine comes up at, and \"On card\" is "
-         "the number this game was built with — 30 on Led Zeppelin, 10 on "
-         "Godzilla, 24 on John Wick. It is not the setting's own compiled "
-         "default: every Stern card ships that as 64, one past the 63 the "
-         "firmware accepts, so the machine ignores it and uses its built-in "
-         "number instead. Setting this row moves both, including the one a "
-         "factory reset reads, so a fresh card comes up on your number. Same "
-         "\"fresh cards only\" rule as the rest: a machine that has already "
-         "been set up keeps the volume it has until it is factory reset, "
-         "because Stern stores that on the board."),
+         "The volume the machine comes up at. **On card** is the number the game was "
+         "built with: 30 on Led Zeppelin, 10 on Godzilla, 24 on John Wick.\n\n"
+         "- The setting's own default is 64 on every Stern card, one past the 63 the "
+         "firmware accepts, so the machine ignores it and uses that built-in number.\n"
+         "- Setting this row changes both, including the one a factory reset reads.\n"
+         "- Fresh cards only, as always: a set-up machine keeps its volume until a "
+         "factory reset."),
         ("High scores",
-         "The \"High Scores\" block is the board a fresh card boots with — "
-         "Stern ships it filled with the design team's initials. Each slot "
-         "takes new initials, a new player name and (where the firmware "
-         "exposes it) a new default score. Initials and names are written "
-         "into the slot's own space in the game firmware, so each field is "
-         "capped at the number of characters that slot has room for — "
-         "initials are always 3. Same \"fresh cards only\" rule as every "
-         "other default: a machine that already has scores stored keeps "
-         "them."),
-        ("All settings on this image (and what \"Debug\" means)",
-         "Below the editable form is every adjustment the firmware carries, "
-         "with the caption the machine itself prints and its id. "
-         "The \"Menu\" column says where you can reach it on the machine. "
-         "\"Adjustments\" is the ordinary operator Adjustments menu. "
-         "\"Service menu\" is a real setting the machine edits on a different "
-         "screen — volume, speakers, software update, tournament, redemption. "
-         "\"Debug\" is one no menu shows at all: factory tuning values, "
-         "mech timings and developer leftovers that Stern left in the "
-         "firmware but never listed. This isn't guesswork — the app reads the "
-         "menu's own pages out of the game binary and works out what they "
-         "can't reach. A build whose menu can't be read says so and flags "
-         "nothing rather than guessing. Click a column header to sort the "
-         "list, again to reverse it, and a third time to put it back in the "
-         "firmware's own order; the value columns sort as numbers rather "
-         "than as the text in the cell."),
-        ("Changing a setting the form doesn't draw",
-         "Double-click any row in that list to set its default, including the "
-         "Debug ones. It stages and logs exactly like the form above, and the "
-         "\"New default\" column shows what the next Build will bake in. Two "
-         "differences from the form: the value is in the firmware's own units "
-         "(the form converts a few, like the master volume, into what the "
-         "machine displays), and there is no help text or safety curation "
-         "behind it — a factory tuning value set to something the game never "
-         "expected is on you. \"Back to card value\" in the dialog unstages "
-         "it again. Same fresh-cards-only rule as everything else here."),
-        ("Showing hidden settings on the machine itself",
-         "A Debug setting is hidden because the machine's Feature Adjustments "
-         "page stops before it — nothing marks the setting itself. \"Show "
-         "hidden settings in the machine's menu…\" moves where that page "
-         "stops, so the machine lists and edits those settings like any "
-         "other. Pick how far it opens: the page is one straight run of "
-         "settings, so everything between the current end and your pick comes "
-         "with it — you cannot expose one and skip its neighbour. It is "
-         "staged for the next Build like any other change, and by name rather "
-         "than by number, so rebuilding on a different game version can't "
-         "expose whatever that number happens to mean there. Worth knowing "
-         "before you use it: this rewrites one instruction in the game's code "
-         "rather than changing a value (the card stays the same size and its "
-         "validation record is refreshed as usual), it has been checked "
-         "against the firmware but not yet on a real machine, and the tail it "
-         "reaches usually mixes genuinely useful settings with factory test "
-         "entries and the game's own internal bookkeeping flags. Titles whose "
-         "menu the app couldn't fully read don't offer the button at all."),
-        ("Presets (set once, reuse everywhere)",
-         "Save a set of values as a named preset with \"Save As…\", then pick "
-         "it from the dropdown any time to fill the form (the values stage "
-         "automatically). The auto-apply checkbox belongs to the selected "
-         "preset: tick it and that preset is baked into every card you build "
-         "on the Write tab, so you never have to revisit this tab — only the "
-         "settings a given game actually has are applied, so one preset "
-         "works across titles. Use presets without auto-apply when different "
-         "machines need different defaults; tick it when one preset fits "
-         "everything you build."),
+         "The **High Scores** block at the bottom is the board a fresh card boots "
+         "with (Stern ships the design team's initials). Every place on the board is "
+         "listed, named or not.\n\n"
+         "- Each place takes new initials, a player name and, where the firmware has "
+         "it, a score.\n"
+         "- Each field is capped at the room that place has in the firmware. Initials "
+         "are always 3.\n"
+         "- **Allow High Scores** and **Reset High Scores After** sit just above it.\n"
+         "- A machine that already has scores keeps them."),
+        ("All settings (and \"Debug\")", [
+            "Under the form is every adjustment in the firmware, with the caption the "
+            "machine prints and its id. The **Menu** column says where the machine "
+            "shows it:",
+            {"cards": [
+                {"icon": "list", "tone": "ok", "title": "Adjustments",
+                 "text": "The ordinary operator menu."},
+                {"icon": "gear", "tone": "info", "title": "Service menu",
+                 "text": "Edited on another screen: volume, speakers, software update, "
+                         "tournament, redemption."},
+                {"icon": "eye", "tone": "warn", "title": "Debug",
+                 "text": "No menu shows it: factory tuning, mech timings, developer "
+                         "leftovers."}]},
+            "- Read from the menu's own pages in the game program, not guessed. A build "
+            "whose menu can't be read flags nothing.\n"
+            "- Click a header to sort, again to reverse, a third time for the firmware's "
+            "order. Values sort as numbers.\n"
+            "- **Double-click** a row to set its default, Debug ones too. It stages like "
+            "the form; **Back to card value** unstages it. Values are in the firmware's "
+            "own units (the form converts a few, like the volume).",
+            {"note": "A row set this way has no help text or safety checks. A factory "
+                     "value set to something the game never expected is on you.",
+             "kind": "warn"},
+        ]),
+        ("Show hidden settings on the machine", [
+            "**Show hidden settings in the machine's menu…** moves where the Feature "
+            "Adjustments page stops, so the machine lists and edits the Debug settings "
+            "after it.",
+            "- The page is one straight run: everything up to your pick comes along. You "
+            "can't show one and skip its neighbour.\n"
+            "- Staged for the next Build by name, so a different game version can't "
+            "show the wrong ones.\n"
+            "- The tail often mixes useful settings with factory test entries and the "
+            "game's own bookkeeping flags.\n"
+            "- Titles whose menu couldn't be fully read don't offer the button.",
+            {"note": "This changes one instruction in the game's program (same card "
+                     "size, validation refreshed). Checked against the firmware but not "
+                     "yet on a real machine.", "kind": "warn"},
+        ]),
     ],
     "Emulate Spike1": [
         ("What it does",
@@ -2424,86 +2377,65 @@ HELP_CONTENT = {
     ],
     "Compare": [
         ("What it does",
-         "Pick two card images of the same game — two releases, or a modded "
-         "card against its stock base — and Compare reports what changed "
-         "from A to B: added, modified and deleted files per asset type "
-         "(videos, images, scenes, music banks), the sound counts, "
-         "adjustment defaults and the high-score board. Copy Report puts "
-         "the whole diff on the clipboard as plain text."),
-        ("How much of each list you see",
-         "Every change list in the report is complete — a version that "
-         "renumbers four thousand sounds produces four thousand rows. "
-         "\"Rows per list\" (12 / 25 / 50 / 100 / All, next to Copy Report) "
-         "sets how many of each you see at once; the rest fold into a "
-         "single \"… and N more\" line. DOUBLE-CLICK that line to list the "
-         "rest of THAT group and nothing else, with your place on the "
-         "screen kept. Changing the setting only re-draws the report "
-         "already in memory — the cards are never read again — and it "
-         "is remembered the next time you open the app. Copy Report "
-         "ignores it entirely and writes every row."),
-        ("Open a file the report lists",
-         "DOUBLE-CLICK any file row in the report to look at the file "
-         "itself — it is pulled off the card it belongs to (image A for a "
-         "deleted file, image B for an added or modified one) into a "
-         "temp folder and opened with whatever your desktop uses for "
-         "that file type. No Extract needed, and it stays quick on a "
-         "multi-GB card because only that one file is read. Spike 2 "
-         "videos are stored without a file extension, so the app looks "
-         "at the first bytes and names the temp copy .mp4 / .png / .jpg / "
-         ".wav / .ogg to match; a file it does not recognise keeps the "
-         "name it has on the card and may not open on its own."),
-        ("Extract Both",
-         "Runs a full Extract on image A and then image B into one "
-         "parent folder you pick once, each card into its own sub-folder "
-         "named after the card file. Use it when the report tells you "
-         "WHAT changed and you now want both versions' assets side by "
-         "side. Pick the folder that should CONTAIN the two "
-         "sub-folders, not a project folder. The second card starts "
-         "only once the first has really begun, so cancelling or "
-         "declining an overwrite stops the pair there instead of "
-         "queueing card B onto some later run."),
+         "Pick two card images of the same game (two releases, or a modded card and "
+         "its stock base) and see what changed from A to B:\n\n"
+         "- files added, changed and deleted, per kind: videos, images, scenes, music "
+         "banks\n"
+         "- the sounds\n"
+         "- adjustment defaults and the high-score board\n\n"
+         "**Copy Report** puts the whole report on the clipboard as plain text."),
+        ("Reading the report",
+         "Every list is complete: a version that renumbers 4,000 sounds lists 4,000 "
+         "rows.\n\n"
+         "- **Rows per list** (12 / 25 / 50 / 100 / All, next to Copy Report) sets how "
+         "many show; the rest fold into one \"… and N more\" line. It only redraws "
+         "(the cards are not read again) and is remembered. Copy Report always has "
+         "every row.\n"
+         "- **Double-click** \"… and N more\" to open just that list, keeping your place.\n"
+         "- **Double-click** a file row to open the file itself in your usual program. "
+         "Only that file is read off its card (A for a deleted file, B otherwise), so "
+         "it is quick. Spike 2 stores videos without a file type, so the app names the "
+         "copy .mp4 / .png / .jpg / .wav / .ogg from its first bytes; a file it doesn't "
+         "know may not open."),
         ("How files are diffed",
-         "Straight off the cards, no Extract needed: every moddable file on "
-         "a Spike 2 card is indexed in the card's own validation manifest "
-         "with its size and a digest, so \"modified\" means Stern's own "
-         "stored digest changed — comparing two multi-GB cards takes "
-         "seconds, not a full read. A scene counts as modified when any "
-         "file in its folder changed. Sounds are the exception — see "
-         "\"Sounds\" below."),
-        ("Sounds",
-         "The sounds are packed inside one container file (image.bin) whose "
-         "per-sound layout only exists once a card has been extracted, so "
-         "from the cards alone the report can show the container's sound "
-         "and fragment counts and its size, and nothing more. It "
-         "deliberately does NOT judge the sounds by that container's "
-         "digest: Stern repacks and re-keys image.bin on every build, so "
-         "two releases carrying identical sounds still have completely "
-         "different container bytes.\n\n"
-         "For the real answer, press Extract Both and then Compare again. "
-         "Once both cards have been extracted the Sounds section lists the "
-         "sounds that changed, moved to a new slot, were added or were "
-         "removed — matched by content first, so one inserted sound doesn't "
-         "read as a thousand changed ones. Double-click a listed sound to "
-         "play it."
-         "\n\n"
-         "The match is on the AUDIO, not on the raw file. The first frame "
-         "a Spike 2 sound decodes to is read out of whatever image.bin "
-         "packs in front of it, so a version that repacks its audio "
-         "changes that one frame on every sound at once and nothing "
-         "after it. The report steps over that frame and prints a "
-         "\"Codec lead-in\" row saying how many pairs needed it, rather "
-         "than calling an untouched catalog rewritten."
-         "\n\n"
-         "The extracts are found by the source card each one "
-         "records, so it does not matter which naming options they were "
-         "made with or in what order."),
+         "Straight off the cards, no Extract needed, in seconds. Every moddable file "
+         "on a Spike 2 card is in the card's validation record with its size and a "
+         "digest, so \"modified\" means Stern's own digest changed. A scene counts as "
+         "modified when any file in its folder changed. Sounds work differently (next)."),
+        ("Sounds", [
+            "All sounds are packed in one file (image.bin), and Stern repacks it on "
+            "every build, so two releases with the same sounds still differ byte for "
+            "byte. Compare never judges sounds by that.",
+            {"cards": [
+                {"icon": "sd", "tone": "", "title": "From the cards alone",
+                 "text": "Only the sound and fragment counts and the size."},
+                {"icon": "wave", "tone": "ok", "title": "After Extract Both",
+                 "text": "Sounds changed, moved to a new slot, added or removed. "
+                         "**Double-click** one to play it."}]},
+            "- Sounds are matched by content first, so one inserted sound doesn't read "
+            "as a thousand changed.\n"
+            "- The match is on the audio. A repack changes the first decoded frame of "
+            "every sound; the report steps over it and a \"Codec lead-in\" row says how "
+            "many pairs needed it.\n"
+            "- The extracts are found by the card each one came from, whatever their "
+            "names or order.",
+        ]),
+        ("Extract Both", [
+            {"flow": [
+                {"icon": "folder", "title": "Pick a folder",
+                 "text": "the one to HOLD both, not a project folder"},
+                {"icon": "extract", "title": "Card A", "text": "extracted to its own sub-folder"},
+                {"icon": "extract", "title": "Card B", "text": "then the same"}]},
+            "Use it when the report says WHAT changed and you want both versions' files "
+            "side by side (and to see which sounds changed). Each sub-folder is named "
+            "after its card file. Cancelling, or saying no to an overwrite, stops the "
+            "pair there; card B is not left queued.",
+        ]),
         ("Adjustments and high scores",
-         "Both game firmwares are decoded with the same parsers the "
-         "Defaults tab uses, then diffed: settings added or removed, "
-         "defaults that changed, and high-score places whose default "
-         "initials, player name or score moved. As always these are the "
-         "cards' compiled defaults — a machine's live settings and scores "
-         "are in its own memory, not on the card."),
+         "Both game programs are read the same way the Defaults tab reads them: "
+         "settings added or removed, defaults that changed, and high-score places "
+         "whose initials, name or score changed. These are the cards' built-in "
+         "defaults; a machine's live settings and scores are in its own memory."),
     ],
     "Multi-boot": [
         ("What it does",
@@ -3320,44 +3252,43 @@ def sections_for(tab_name):
 # Appended to every tab's sections — app-wide behaviours users ask about.
 GENERAL_CONTENT = [
     ("The ⚙ settings menu",
-     "The gear in the top-right collects the app-wide controls: light/dark "
-     "theme, update check (both a manual \"Check for updates\" and \"Check "
-     "automatically\", which sets how often the app re-checks while it's "
-     "running — startup only, hourly, every 6 hours, or daily), disk-space "
-     "management, voice recognition quality, the prerequisite tools "
-     "(status, re-check, install), and a re-readable copy of the "
-     "first-launch disclaimer (View disclaimer…)."),
+     "The gear at the top right holds the app-wide controls:\n\n"
+     "- light / dark theme\n"
+     "- **Check for updates**, and **Check automatically**: at startup only, hourly, "
+     "every 6 hours or daily\n"
+     "- disk-space management and voice recognition quality\n"
+     "- the prerequisite tools: status, re-check, install\n"
+     "- **View disclaimer…**, the first-launch disclaimer again"),
     ("Prerequisites",
-     "Each manufacturer needs a few tools installed. While anything is "
-     "still being checked or missing, a strip under the title lists them: "
-     "[?] = still checking, [✗] = missing (\"Install Missing\" sets them "
-     "up), [✓] = ready. Once everything is ready the strip tucks itself "
-     "away — the ⚙ menu keeps the status, and its "
-     "\"Install / repair prerequisites…\" entry stays clickable even "
-     "then. All-green means every PROBE passed, not that there is "
-     "nothing left to install: ffplay, which the audio Preview needs, "
-     "is nobody's probe, and re-running the installer is what brings "
-     "the full ffmpeg build that carries it."),
+     "Each manufacturer needs a few tools. While any is being checked or missing, "
+     "a strip under the title lists them:\n\n"
+     "| Mark | Means |\n"
+     "|---|---|\n"
+     "| [?] | still checking |\n"
+     "| [✗] | missing: **Install Missing** sets it up |\n"
+     "| [✓] | ready |\n\n"
+     "Once all are ready the strip hides; the ⚙ menu keeps the status and its "
+     "**Install / repair prerequisites…** entry. All green means every check passed, not "
+     "that nothing is left: ffplay (for the audio Preview) is checked by none, and "
+     "re-running the installer brings the full ffmpeg that has it."),
     ("Recent paths",
-     "Every file/folder box keeps a per-manufacturer history — open its "
-     "dropdown to reuse a recent path."),
+     "Every file or folder box remembers recent paths per manufacturer: open its "
+     "dropdown to reuse one."),
     ("Change history",
-     "Every replacement pick (with the file it replaced), text edit, staged "
-     "default, build and revert is appended with a date and time to a "
-     ".history.log file at the root of the project folder — so months later "
-     "a slot that says \"changed on disk\" still tells you what it was "
-     "changed with, and from where. Open it from Project ▾ → "
-     "\"Change history…\"; it's plain text, so it greps and diffs fine too."),
+     "Every pick (and the file it replaced), text edit, staged default, build and "
+     "revert is logged with date and time in **.history.log** at the top of the "
+     "project folder. So a slot that says \"changed on disk\" still shows, months "
+     "later, what it was changed with. Open it from **Project ▾ > Change history…**; "
+     "it is plain text."),
     ("Moved to another PC?",
-     "A project records WHERE each replacement came from, not a copy of it, "
-     "so moving the project (or your media library to another drive) leaves "
-     "every recorded path pointing at nothing and the Replace tabs come up "
-     "empty. Project ▾ → \"Relink moved files…\" lists the files it can't "
-     "reach, takes one folder to look in, and re-points every slot at once — "
-     "matched on the file names, so a new drive letter or a re-organised "
-     "library still lands. Nothing is copied, and nothing is written until "
-     "you press Relink."),
+     "A project records WHERE each replacement came from, not a copy. Move the "
+     "project or your media to another drive and the Replace tabs come up empty.\n\n"
+     "1. **Project ▾ > Relink moved files…** lists the files it can't reach.\n"
+     "2. Give it one folder to look in.\n"
+     "3. Press **Relink**: every slot is re-pointed at once, matched by file name, "
+     "so a new drive letter or a re-sorted library still works.\n\n"
+     "Nothing is copied, and nothing is written until you press Relink."),
     ("The log",
-     "The progress dots and log at the bottom mirror every operation; "
-     "right-click the log to copy text for a bug report."),
+     "The progress dots and log at the bottom follow every job. Right-click the log "
+     "to copy text for a bug report."),
 ]

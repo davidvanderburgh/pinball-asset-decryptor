@@ -929,6 +929,8 @@ function TreeCanvas({ s }) {
   const wantRef = useRef(0);
   const nudgeT = useRef(null);
   const [hover, setHover] = useState(null);
+  // a text's box resized on the canvas, shown until the redraw that has it comes back
+  const [boxPend, setBoxPend] = useState(null);
   const p = t.props;
   // the selection (PAD-279: several at once): what a drag, the arrow keys and Delete act on.
   // *key* names it for the edits shown by hand and the layers the server draws for it.
@@ -937,7 +939,8 @@ function TreeCanvas({ s }) {
   const keyOf = (ids) => ids.join(",");
   const moveCall = (ids, dx, dy) => (ids.length > 1 ? call("text_scenes.tree_move_many", ids, dx, dy)
     : call("text_scenes.tree_move", ids[0], dx, dy));
-  useEffect(() => { setPend(null); setDrag(null); }, [t.card]);
+  useEffect(() => { setPend(null); setDrag(null); setBoxPend(null); }, [t.card]);
+  useEffect(() => { setBoxPend((b) => (b && b.rev !== (t.rev || 0) ? null : b)); }, [t.rev]);
   // a redraw came in: the edits it draws are no longer shown by hand
   useEffect(() => {
     setPend((q) => {
@@ -1000,7 +1003,11 @@ function TreeCanvas({ s }) {
     for (let i = hits.length - 1; i >= 0; i--) if (inPoly(hits[i].pts, x, y)) return hits[i];
     return null;
   };
-  const selBox = p && !multi && p.x != null ? { x: p.x, y: p.y, w: p.w, h: p.h } : null;
+  const boxOf = (d) => ({ x: Math.min(d.fx, d.x), y: Math.min(d.fy, d.y), w: Math.abs(d.x - d.fx), h: Math.abs(d.y - d.fy) });
+  // a line of text's box is resized apart from its words (PAD-383); the words re-flow in it
+  const boxLive = drag && drag.mode === "box" ? boxOf(drag)
+    : boxPend && p && boxPend.node === p.id ? boxPend.box : null;
+  const selBox = boxLive || (p && !multi && p.x != null ? { x: p.x, y: p.y, w: p.w, h: p.h } : null);
   const corner = (x, y) => {
     if (!selBox) return null;
     const r = box.current.getBoundingClientRect();
@@ -1016,6 +1023,13 @@ function TreeCanvas({ s }) {
     flushNudge();
     const [x, y] = toStage(e);
     box.current.setPointerCapture(e.pointerId);
+    if (corner(x, y) && p.kind === "Text") {
+      // the corner across from the one picked stays put
+      const fx = Math.abs(x - selBox.x) < Math.abs(x - (selBox.x + selBox.w)) ? selBox.x + selBox.w : selBox.x;
+      const fy = Math.abs(y - selBox.y) < Math.abs(y - (selBox.y + selBox.h)) ? selBox.y + selBox.h : selBox.y;
+      setDrag({ mode: "box", node: p.id, fx, fy, x, y, x0: x, y0: y });
+      return;
+    }
     if (corner(x, y)) {
       const cx0 = selBox.x + selBox.w / 2, cy0 = selBox.y + selBox.h / 2;
       setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1 });
@@ -1034,6 +1048,7 @@ function TreeCanvas({ s }) {
     const [x, y] = toStage(e);
     if (!drag) { const h = pick(x, y); setHover(h ? h.id : null); return; }
     if (drag.mode === "move") setDrag({ ...drag, dx: x - drag.x0, dy: y - drag.y0 });
+    else if (drag.mode === "box") setDrag({ ...drag, x, y });
     else setDrag({ ...drag, f: Math.max(0.05, Math.hypot(x - drag.cx, y - drag.cy) / drag.d0) });
   };
   const up = () => {
@@ -1043,6 +1058,13 @@ function TreeCanvas({ s }) {
     if (d.mode === "move" && Math.abs(d.dx) + Math.abs(d.dy) >= 1) {
       const dx = Math.round(d.dx), dy = Math.round(d.dy);
       send(d.ids, { m: "move", dx, dy }, () => moveCall(d.ids, dx, dy));
+    }
+    if (d.mode === "box" && Math.abs(d.x - d.x0) + Math.abs(d.y - d.y0) >= 1) {
+      const b = boxOf(d);
+      const r = { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) };
+      setBoxPend({ node: d.node, box: r, rev: t.rev || 0 });
+      Promise.resolve(call("text_scenes.tree_set_box", d.node, r.x, r.y, r.w, r.h))
+        .then((ok) => { if (ok === false) setBoxPend(null); }, () => setBoxPend(null));
     }
     if (d.mode === "scale" && Math.abs(d.f - 1) > 0.01)
       send([d.node], { m: "scale", cx: d.cx, cy: d.cy, f: d.f }, () => call("text_scenes.tree_scale", d.node, d.f));
@@ -1081,8 +1103,8 @@ function TreeCanvas({ s }) {
 
   // what is moved by hand: the drag under way, then edits not yet drawn (on the picture) or
   // not yet in the outlines the page was sent (on the outline)
-  const live = drag ? drag.id : pend ? pend.id : null;
-  const dragOp = drag ? (drag.mode === "move" ? { m: "move", dx: drag.dx, dy: drag.dy }
+  const live = drag && drag.mode !== "box" ? drag.id : pend ? pend.id : null;
+  const dragOp = drag && drag.mode !== "box" ? (drag.mode === "move" ? { m: "move", dx: drag.dx, dy: drag.dy }
     : { m: "scale", cx: drag.cx, cy: drag.cy, f: drag.f }) : null;
   const opsSince = (rev) => [...(dragOp ? [dragOp] : []),
     ...(pend && pend.id === live ? pend.ops.filter((o) => o.want == null || o.want > rev) : [])];
@@ -1092,7 +1114,7 @@ function TreeCanvas({ s }) {
   const loading = s.tree_loading || (!full && !s.canvas_msg);
   const busy = !loading && (s.tree_busy || !!(pend && pend.ops.some((o) => o.want == null || o.want > shownRev)));
   const hov = hover != null && !sels.includes(hover) ? (t.hits || []).filter((h) => h.id === hover) : [];
-  const selPolys = (t.hits || []).filter((h) => sels.includes(h.id));
+  const selPolys = boxLive ? [] : (t.hits || []).filter((h) => sels.includes(h.id));
   return html`<div class=${cx("scenes-canvas tree-canvas", loading && "loading")} ref=${box} tabIndex="0" onKeyDown=${key}
       style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}
       onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${() => setHover(null)}>
@@ -1123,6 +1145,7 @@ function TreeSide({ t, play, playFrame }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
   const [keepShape, setKeepShape] = useState(true);
+  const isText = !!p && p.kind === "Text";
   useEffect(() => { if (p) setTint(p.tint); }, [p && p.id, p && p.tint]);
   const num = (label, value, onCommit, title) => html`<label class="tree-num" ...${tip(title)}>
     <span class="lbl">${label}</span>
@@ -1189,14 +1212,20 @@ function TreeSide({ t, play, playFrame }) {
         ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)")}
       </div>` : html`<div class="small muted">Not on the glass at this moment.</div>`}
       ${p.w != null ? html`<div class="tree-row">
-        ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), "Its width on the screen, in pixels (the screen is 1360 x 768)")}
-        ${num("H px", p.h, (v) => call("text_scenes.tree_set_pixels", p.id, null, v, keepShape), "Its height on the screen, in pixels")}
+        ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), isText
+          ? "The width of its box on the screen, in pixels. The words stay their size and wrap to fit inside it (the corner handles do the same)."
+          : "Its width on the screen, in pixels (the screen is 1360 x 768)")}
+        ${num("H px", p.h, (v) => call("text_scenes.tree_set_pixels", p.id, null, v, keepShape), isText
+          ? "The height of its box on the screen, in pixels. The words stay their size."
+          : "Its height on the screen, in pixels")}
       </div>
-      <label class="tree-row small tree-keep" title="On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.">
+      ${isText ? null : html`<label class="tree-row small tree-keep" title="On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.">
         <input type="checkbox" checked=${keepShape} onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
-      </label>` : null}
+      </label>`}` : null}
       <div class="tree-row">
-        ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), "Both ways at once; 100 = the size the game ships")}
+        ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), isText
+          ? "The size of the words (and their box with them), both ways at once; 100 = the size the game ships"
+          : "Both ways at once; 100 = the size the game ships")}
       </div>
       <div class="tree-row">
         ${num("Width %", p.scale, (v) => call("text_scenes.tree_set_size", p.id, v, null), "Stretch it sideways only")}

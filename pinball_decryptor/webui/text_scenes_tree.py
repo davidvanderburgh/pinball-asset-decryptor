@@ -1385,6 +1385,53 @@ class TreeEditMixin:
             return False
         return self._tree_add({"op": "text_rect", "node": node, "rect": rect})
 
+    def _tree_text_draw(self, node):
+        return next((d for d in self._tdraws if d["node"] == node and d["kind"] == "text"), None)
+
+    @rpc
+    def tree_set_box(self, node, x, y, w, h):
+        """A line of text's box set to (*x*, *y*, *w*, *h*) on the glass, its words left the
+        size they are (DragonRR, PAD-383: "Bounding box doesn't change the text size, the
+        words shuffle to try to fit within the area. Scaling controls the text size"): the
+        Text's own rect, with word wrap turned on so the words re-flow inside it.  The
+        alignment the line has is kept."""
+        from ..plugins.stern import scene_eval
+        node = int(node)
+        d = self._tree_text_draw(node)
+        if d is None:
+            return False
+        try:
+            x, y, w, h = float(x), float(y), float(w), float(h)
+        except (TypeError, ValueError):
+            return False
+        if w < 4 or h < 4:
+            return False
+        inv = scene_eval.invert(d["m"])
+        if inv is None:
+            return False
+        pts = [scene_eval.apply(inv, px, py)
+               for px, py in ((x, y), (x + w, y), (x, y + h), (x + w, y + h))]
+        rect = [round(min(p[0] for p in pts), 3), round(min(p[1] for p in pts), 3),
+                round(max(p[0] for p in pts), 3), round(max(p[1] for p in pts), 3)]
+        if all(abs(a - b) < 0.5 for a, b in zip(rect, d.get("rect") or ())) \
+                and (d.get("flags") or [0])[0]:
+            return False
+        return self._tree_add({"op": "text_rect", "node": node, "rect": rect, "wrap": True})
+
+    def _tree_set_text_pixels(self, node, w, h):
+        """W px / H px on a line of text: its box, not its words.  The box keeps its top and
+        the edge (or, centred, the middle) its words are aligned to."""
+        box = self._tree_box(node)
+        d = self._tree_text_draw(node)
+        if box is None or d is None:
+            return False
+        x0, y0, x1, y1 = box
+        nw = x1 - x0 if w is None else w
+        nh = y1 - y0 if h is None else h
+        align = d.get("align", 1)
+        nx = x0 if align == 0 else (x1 - nw if align == 2 else (x0 + x1 - nw) / 2.0)
+        return self.tree_set_box(node, nx, y0, nw, nh)
+
     @rpc
     def tree_set_scale(self, node, pct):
         card, man = self._tree_card()
@@ -1416,6 +1463,8 @@ class TreeEditMixin:
             return False
         if (w is not None and w < 1) or (h is not None and h < 1) or (w is None and h is None):
             return False
+        if self._tree_text_draw(node) is not None:
+            return self._tree_set_text_pixels(node, w, h)
         fw = w / cur_w if w is not None and cur_w > 0 else None
         fh = h / cur_h if h is not None and cur_h > 0 else None
         if keep_shape:

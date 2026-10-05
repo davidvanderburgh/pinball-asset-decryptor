@@ -120,6 +120,8 @@ def add(assets_dir, card, op):
             ops.pop()
     elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_rect":
         last["rect"] = op["rect"]
+        if op.get("wrap"):
+            last["wrap"] = True
     elif (last and last.get("node") == op.get("node") and last["op"] == op["op"] == "rotate"
           and (last.get("px"), last.get("py")) == (op.get("px"), op.get("py"))):
         last["deg"] = round(last["deg"] + op["deg"], 4)
@@ -453,7 +455,7 @@ def describe(op):
     if k == "remove":
         return "removed"
     if k == "text_rect":
-        return "box fitted"
+        return "box resized" if op.get("wrap") else "box fitted"
     return k
 
 
@@ -604,6 +606,8 @@ def apply_manifest(man, ops):
                         notes.append("text_rect: node %s draws no text" % op["node"])
                     for o in texts:
                         o["rect"] = [float(v) for v in op["rect"]]
+                        if op.get("wrap"):
+                            o["flags"] = [1] + list(o.get("flags") or (0, 0))[1:2]
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:
@@ -792,6 +796,9 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                         continue
                     for o in texts:
                         o.body["rect"] = tuple(float(v) for v in op["rect"])
+                        if op.get("wrap"):
+                            # the first flag byte: the words wrap at the rect's width
+                            o.body["flags"] = (1, tuple(o.body.get("flags") or (0, 0))[1])
                 applied += 1
             elif k in ("add_picture", "add_text"):
                 parent = op.get("parent")

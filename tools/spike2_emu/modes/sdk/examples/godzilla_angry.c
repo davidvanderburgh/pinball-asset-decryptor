@@ -269,18 +269,19 @@ static void meter_tick(void)
 {
     unsigned p = pm_player();
     char label[24];
-    int pips;
+    int pips, n_pips;
     if (run.on || !pm_in_game() || p < 1 || p > 4 || meter_wait || tilted || mb_now) {
         kit_hud_meter(&hud, -1, 0);
         return;
     }
     kit_hud_pips(&hud, 0);
+    n_pips = hud.n_pips ? hud.n_pips : KIT_HUD_PIPS;    /* as many as the card was built with */
     if (ready[p]) {
-        pips = KIT_HUD_PIPS;
+        pips = n_pips;
         kit_copy(label, sizeof label, "ANGRY!");
     } else {
         unsigned need = level_need(p, level[p]);
-        pips = (int)(hits[p] * KIT_HUD_PIPS / need);
+        pips = (int)(hits[p] * (unsigned)n_pips / need);
         pm_snprintf(label, sizeof label, "RAGE %u/%d", level[p] + 1, LEVELS);
     }
     kit_hud_meter(&hud, pips, label);
@@ -383,7 +384,7 @@ static void show(void)
     if (run.phase == PHASE_CHASE) {
         what_to_shoot(line, sizeof line);
         kit_hud_title(&hud, "GODZILLA ANGRY!", line);
-        pm_snprintf(n, sizeof n, "%u OF %d", run.locks, N_PLACES);
+        pm_snprintf(n, sizeof n, "%u/%d", run.locks, N_PLACES);
         kit_hud_counter(&hud, 0, "LOCKS", n, run.place < N_PLACES ? PLACE[run.place].place : "BABY");
         kit_hud_counter(&hud, 1, "JACKPOT", kit_short(v, sizeof v, run.jackpot), "BUILT BY SHOTS");
         kit_hud_counter(&hud, 2, "SUPER", kit_short(s, sizeof s, run.super), "FED BY SWITCHES");
@@ -394,11 +395,11 @@ static void show(void)
     }
     pm_snprintf(line, sizeof line, "BABY IS AT THE %s", JP_SAYS[run.baby]);
     kit_hud_title(&hud, "ANGRY MULTIBALL", line);
-    kit_hud_counter(&hud, 0, "JACKPOT", kit_short(v, sizeof v, run.jackpot), "AT BABY");
     pm_snprintf(n, sizeof n, "X%u", run.mult);
-    kit_hud_counter(&hud, 1, "MULTIPLIER", n, "OTHERS RAISE IT");
+    kit_hud_counter(&hud, 0, "MULTIPLIER", n, "OTHERS RAISE IT");
+    kit_hud_counter(&hud, 1, "JACKPOT", kit_short(v, sizeof v, run.jackpot), "AT BABY");
     pm_snprintf(s, sizeof s, "%u", run.babies);
-    kit_hud_counter(&hud, 2, "BABY JACKPOTS", s, " ");
+    kit_hud_counter(&hud, 2, "JACKPOTS", s, "AT BABY");
     kit_hud_timer(&hud, -1);
     kit_hud_pips(&hud, MULT_MAX);
     kit_hud_gauge(&hud, (int)run.mult, "MULTIPLIER");

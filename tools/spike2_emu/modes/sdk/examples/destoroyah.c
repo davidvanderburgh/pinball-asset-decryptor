@@ -210,11 +210,11 @@ static void show(void)
 {
     char line[KIT_HUD_WORDS], w[16], k[16], c[16], v[24];
     show_lamps();
-    pm_snprintf(c, sizeof c, "%u LEFT", CITY_HITS - run.city);
+    pm_snprintf(c, sizeof c, "%u", CITY_HITS - run.city);
     if (run.phase == PHASE_BOSS) {
         kit_hud_title(&hud, "PERFECT DESTOROYAH", "SHOOT THE BUILDING: 3 HITS");
-        pm_snprintf(k, sizeof k, "%u OF %d", run.boss_hits, BOSS_HITS);
-        kit_hud_counter(&hud, 0, "PERFECT FORM", k, "HITS");
+        pm_snprintf(k, sizeof k, "%u/%d", run.boss_hits, BOSS_HITS);
+        kit_hud_counter(&hud, 0, "HITS", k, "PERFECT FORM");
         kit_hud_counter(&hud, 1, "SUPER JACKPOT", kit_short(v, sizeof v, run.kill_total), "EVERY KILL AGAIN");
         kit_hud_counter(&hud, 2, "CITY", c, "HITS TO TAKE");
         kit_hud_timer(&hud, (int)kit_timer_seconds(&run.clock));
@@ -225,9 +225,9 @@ static void show(void)
     if (run.phase == PHASE_GAP) pm_snprintf(line, sizeof line, "WAVE %u IS COMING", run.wave);
     else pm_snprintf(line, sizeof line, "WAVE %u: %u MORE  -  CLOSER PAYS MORE", run.wave, wave_need() - run.kills);
     kit_hud_title(&hud, "DESTOROYAH", line);
-    pm_snprintf(w, sizeof w, "%u OF %d", run.wave, WAVES);
+    pm_snprintf(w, sizeof w, "%u/%d", run.wave, WAVES);
     kit_hud_counter(&hud, 0, "WAVE", w, "THE SWARM");
-    pm_snprintf(k, sizeof k, "%u OF %u", run.kills, wave_need());
+    pm_snprintf(k, sizeof k, "%u/%u", run.kills, wave_need());
     kit_hud_counter(&hud, 1, "KILLS", k, kit_short(v, sizeof v, run.wave_total));
     kit_hud_counter(&hud, 2, "CITY", c, "HITS TO TAKE");
     kit_hud_timer(&hud, -1);

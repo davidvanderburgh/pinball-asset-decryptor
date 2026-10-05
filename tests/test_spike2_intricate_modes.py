@@ -1719,7 +1719,7 @@ def test_godzilla_angry_chase_five_places_five_locks_baby_found_and_a_six_ball_m
     assert hud_said(out, s, "Line", "YOKKAICHI: LEFT RAMP, RIGHT RAMP") and hud_said(out, s, "Line", "YOKKAICHI: RIGHT RAMP")
     assert hud_said(out, s, "Line", "OSAKA: BIG LOOP, BUILDING") and hud_said(out, s, "Line", "MAKUHARI: 5 LIT SHOTS TO GO")
     assert hud_said(out, s, "Line", "SHOOT THE BUILDING: BABY IS THERE")
-    assert hud_said(out, s, "C1_Value", "5 OF 5") and hud_said(out, s, "C3_Label", "SUPER")
+    assert hud_said(out, s, "C1_Value", "5/5") and hud_said(out, s, "C3_Label", "SUPER")
     assert hud_said(out, s, "Award", "SUPER JACKPOT") and hud_said(out, s, "Title", "ANGRY MULTIBALL")
     assert hud_said(out, s, "Gauge_Label", "LOCKS") and hud_said(out, s, "Gauge_Label", "MULTIPLIER")
     assert hud_next(out, s, "Title", _at(out, "[GODZILLA ANGRY] END")) == "GODZILLA AND BABY"
@@ -1894,7 +1894,7 @@ def test_biollante_every_switch_feeds_the_sap_three_banks_bring_the_beast_and_th
     assert has(out, "BIOLLANTE", "END (the final blow): WON")
     assert end_total(out, "BIOLLANTE") == scored(out, "", "BIOLLANTE")
     assert hud_said(out, s, "Award", "SAP JACKPOT X2") and hud_said(out, s, "Title", "BIOLLANTE BEAST")
-    assert hud_said(out, s, "C1_Value", "125,000") and hud_said(out, s, "C3_Value", "2 OF 3")
+    assert hud_said(out, s, "C3_Value", "125K") and hud_said(out, s, "C1_Value", "2/3")
     assert hud_next(out, s, "Title", _at(out, "[BIOLLANTE] END")) == "BIOLLANTE IS FREE"
     assert "[BIOLLANTE] lights: shot 0x400000 ffaa00 blink 700" in out
 

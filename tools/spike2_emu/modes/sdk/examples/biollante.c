@@ -138,6 +138,13 @@ static uint64_t pay(uint64_t points)
 
 static uint64_t switch_value(void) { return SWITCH_VALUE + SWITCH_STEP * run.collects; }
 
+/* "125K": the switch value short enough for the right edge's counter */
+static const char *switch_short(char *buf, unsigned cap)
+{
+    pm_snprintf(buf, cap, "%uK", (unsigned)(switch_value() / 1000u));
+    return buf;
+}
+
 /* ---- the glass and the inserts ------------------------------------------------------------------------ */
 static void show_lamps(void)
 {
@@ -170,17 +177,17 @@ static void show(void)
     show_lamps();
     if (run.phase == PHASE_BEAST) {
         kit_hud_title(&hud, "BIOLLANTE BEAST", "FINAL BLOW: SHOOT THE BUILDING");
-        kit_hud_counter(&hud, 0, "PER SWITCH", kit_num(v, sizeof v, switch_value()), "SAP");
+        kit_hud_counter(&hud, 0, "BANKS CUT", "3/3", "THE BEAST");
         kit_hud_counter(&hud, 1, "FINAL BLOW", kit_short(s, sizeof s, run.collected), "BUILDING");
-        kit_hud_counter(&hud, 2, "VINES CUT", "3 OF 3", "THE BEAST");
+        kit_hud_counter(&hud, 2, "PER SWITCH", switch_short(v, sizeof v), "SAP");
         kit_hud_gauge(&hud, 6, "BEAST");
     } else {
         kit_hud_title(&hud, "BIOLLANTE", "SWITCHES FEED THE SAP  -  CUT A VINE BANK");
-        kit_hud_counter(&hud, 0, "PER SWITCH", kit_num(v, sizeof v, switch_value()), "SAP");
+        pm_snprintf(n, sizeof n, "%u/%d", run.collects, COLLECTS);
+        kit_hud_counter(&hud, 0, "BANKS CUT", n, "VINE BANKS");
         pm_snprintf(sub, sizeof sub, "X%u AT A BANK", run.collects + 1);
         kit_hud_counter(&hud, 1, "SAP JACKPOT", kit_short(s, sizeof s, run.sap), sub);
-        pm_snprintf(n, sizeof n, "%u OF %d", run.collects, COLLECTS);
-        kit_hud_counter(&hud, 2, "BANKS CUT", n, " ");
+        kit_hud_counter(&hud, 2, "PER SWITCH", switch_short(v, sizeof v), "SAP");
         kit_hud_gauge(&hud, (int)vines_cut(), "VINES");
     }
     kit_hud_timer(&hud, (int)kit_timer_seconds(&run.clock));

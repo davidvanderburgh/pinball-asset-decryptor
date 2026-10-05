@@ -87,4 +87,24 @@ multiballs; ours count a shot as a lock and the ball goes on, the way modern Ste
   banks, the beast, the final blow, the clock floors; the swarm advancing, the closeness multipliers, the waves, the
   city, the perfect form. Every generic pack test runs on them too (HUD text widths, display priority first, a drain or
   tilt handing everything back, isolation, the assets header, clips by cue).
-- The emulator proof and the film assets are recorded below as they land.
+- **Emulator (logic), 2026-10-04, a stock Godzilla Premium 1.16 copy, the five built into one object with
+  `mode_file.c`, hidden and muted, `C:\tmp\PAD-379\proof` (`run_logic*.sh`, `run_sg*.sh`):**
+  - GODZILLA ANGRY (run logic3): 150 real slingshot presses counted as switch hits through the game's 0x1 dispatch
+    (about nine in ten land in the rig), RAGE LEVEL 1 at 100. The meter filled by its trigger, then real switches
+    played the whole chase: the Building started it, the captive ball and the Maser took the five locks, the Building
+    was BABY FOUND, the game served all six balls, five drains took it to one and it ended "one ball left"; the
+    meter started again at 125. That run's 19 Baby jackpots paid 500M, so the jackpot now builds half as fast.
+  - KIRYU, BIOLLANTE, DESTOROYAH (run logic4): 30 real spins of the Mechagodzilla spinner started KIRYU, real shots
+    charged it past 100% and the real ACTION BUTTON fired it (it ended "fired" 4 s later); six real ramps started
+    BIOLLANTE, the real shield and powerline targets cut three banks (x1, x2, x3), the beast came and the Building
+    was the final blow (WON); 30 real center spins started DESTOROYAH, aggregates came over the top at the real
+    powerlines and the kills cleared waves 1 and 2 with their supers; the perfect form took two hits, then its clock
+    ran out (the third press was lost in the rig).
+  - SPACEGODZILLA (runs sg1, sg2): a real shield lit all three locks, three real Big loops planted the crystals and
+    the multiball started; started by its trigger file and by its third crystal the game served the balls and the
+    drains ended it "one ball left". **Found:** asked for inside the Big loop shot itself, the game said it was serving
+    but never fired the trough (runs logic2-4); the multiball now starts 1.5 s after the third crystal (its
+    SPACEGODZILLA ARRIVES moment), and the game serves it.
+  - Isolation, seen for real: rage pokes on the inlanes collected the game's own missiles and started its JET FIGHTER
+    ATTACK, and GODZILLA ANGRY waited ("a stock mode is running - still ready"), as PAD-347 has it.
+  - segv 0, fatal 0, the baseline 6 throws in every run.

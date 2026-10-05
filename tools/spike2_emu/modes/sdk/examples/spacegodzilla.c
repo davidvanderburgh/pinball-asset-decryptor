@@ -203,8 +203,8 @@ static void show(void)
     kit_hud_title(&hud, run.kind ? KIND[run.kind].name : "SPACEGODZILLA",
                   run.super_lit ? "SUPER JACKPOT: SHOOT THE BIG LOOP" : run.kind == 1 ?
                   "SHATTER TOWERS  -  SHIELDS RAISE JACKPOTS" : "SHATTER THE CRYSTAL TOWERS");
-    pm_snprintf(n, sizeof n, "%u LEFT", towers_left());
-    kit_hud_counter(&hud, 0, "TOWERS", n, KIND[run.kind].name);
+    pm_snprintf(n, sizeof n, "%u", towers_left());
+    kit_hud_counter(&hud, 0, "TOWERS", n, "STANDING");
     kit_hud_counter(&hud, 1, "JACKPOT", kit_short(v, sizeof v, run.base + JACKPOT_STEP * run.jackpots), " ");
     kit_hud_counter(&hud, 2, "SUPER", kit_short(s, sizeof s, run.sum), run.super_lit ? "BIG LOOP" : "THE SUM");
     kit_hud_timer(&hud, run.super_lit ? (int)kit_timer_seconds(&run.clock) : -1);

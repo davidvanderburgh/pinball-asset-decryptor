@@ -1222,6 +1222,9 @@ function TreeSide({ t, play, playFrame }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
       ${p.kind === "Text" ? html`<div class="tree-row">
+        <${Button} size="xs" disabled=${p.x == null}
+          title="Shrink or grow this text's box to go round its words, with a small border. The words stay where they are. Words the game puts in while it plays can be longer than these."
+          onClick=${() => call("text_scenes.tree_fit_text", p.id)}>Fit box to text<//>
         <${Button} size="xs" title="A dark copy of this text just beneath it, a few pixels down and right. It is selected after, to move, tint or remove."
           onClick=${() => call("text_scenes.tree_shadow", p.id)}>Add a drop shadow<//>
       </div>` : null}

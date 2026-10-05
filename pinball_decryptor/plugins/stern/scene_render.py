@@ -980,6 +980,67 @@ def text_lines(text, width, wrap, measure):
     return out
 
 
+#: the border "Fit box to text" leaves round the words (PAD-383), in the text's own pixels
+FIT_MARGIN = 6.0
+
+
+def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
+    """The rect ``[L, T, R, B]`` that hugs what text draw *d* shows, with *margin* to spare
+    (DragonRR, PAD-383: a shorter line left in its wide box ran the box off the screen), or
+    None when it draws nothing.  The words stay where they are: the edge the line is aligned
+    to and the top are kept (a centred line keeps its middle), and a line that wraps keeps
+    room for its widest line, so it breaks where it did."""
+    from . import fontrender as fr
+    if font is None or not d.get("text"):
+        return None
+    if ink_of is None:
+        ink_of = lambda s: fr.render_text(font, s)[0]           # noqa: E731
+    shown = (text_edits or {}).get(d["text"]) or d["text"]
+    L, T, R, B = (list(d.get("rect") or (0, 0, 0, 0)) + [0, 0, 0, 0])[:4]
+    align = d.get("align", 1)
+    asc = float(d.get("ascent") or font.get("ascent", 0))
+    step = float(d.get("line") or 0) or float(font.get("ascent", 0) + font.get("descent", 0))
+    wrap = _wraps(d, B - T, step)
+    lines = text_lines(shown, R - L - 2 * _GUTTER, wrap, lambda s: _ink_width(ink_of, s))
+    x0 = y1 = x1 = None
+    widest = 0
+    for k, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            ink = ink_of(line)
+        except Exception:                                      # noqa: BLE001
+            continue
+        iw = ink.size[0]
+        widest = max(widest, iw)
+        bb = ink.getchannel("A").getbbox() if ink.mode == "RGBA" else ink.getbbox()
+        if bb is None:
+            continue
+        # placed exactly as render_tree places it
+        x = (L + _GUTTER if align == 0 else
+             (R - _GUTTER - iw if align == 2 else L + (R - L - iw) / 2.0))
+        y = T + _GUTTER + asc - font.get("ascent", 0) + k * step
+        x0 = x + bb[0] if x0 is None else min(x0, x + bb[0])
+        x1 = x + bb[2] if x1 is None else max(x1, x + bb[2])
+        y1 = y + bb[3] if y1 is None else max(y1, y + bb[3])
+    if x0 is None:
+        return None
+    room = 2 * _GUTTER + widest if wrap else 0.0
+    if align == 0:
+        nl, nr = L, max(x1 + margin, L + room)
+    elif align == 2:
+        nl, nr = min(x0 - margin, R - room), R
+    else:
+        mid = (L + R) / 2.0
+        half = max(mid - x0, x1 - mid, room / 2.0) + margin
+        nl, nr = mid - half, mid + half
+    nb = y1 + margin
+    if not d.get("flags") and step > 0:
+        # an old manifest decides wrapping by the rect's height: keep that the same
+        nb = max(nb, T + 1.6 * step) if wrap else min(nb, T + 1.6 * step - 0.01)
+    return [round(nl, 3), round(T, 3), round(nr, 3), round(nb, 3)]
+
+
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 background=None, colors=None, text_edits=None, draws=None, cache=None,
                 split=None, pictures=None, sizes=None, inks=None, view=None,

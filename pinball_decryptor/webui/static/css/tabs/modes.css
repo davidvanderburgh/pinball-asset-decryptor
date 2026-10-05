@@ -98,6 +98,9 @@ button.modes-list-grp:hover { color: var(--ink-2); background: var(--panel-2); }
 .modes-first-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .modes-first-opt { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
 .modes-first-opt.rec { border-color: var(--accent); }
+.modes-doc-link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; }
+.modes-doc-link:hover { text-decoration: underline; }
+.modes-doc-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
 .modes-first-opt > .row { gap: 8px; }
 html.bp-1280 .modes-first-grid { grid-template-columns: minmax(0, 1fr); }
 

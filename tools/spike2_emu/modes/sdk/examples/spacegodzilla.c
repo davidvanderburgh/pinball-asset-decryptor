@@ -47,6 +47,7 @@
 #define LOCK_SHOT          "Big loop"
 #define LOCKS              3
 #define LOCK_AWARD         250000ull
+#define ARRIVE_MS          1500           /* the third crystal's moment, then the multiball (from the tick) */
 #define BALLS              3
 #define BALL_SAVE_S        15
 #define END_GRACE_MS       3000
@@ -72,6 +73,7 @@ static const struct { const char *name; uint64_t base; } KIND[N_KINDS] = {
 static uint64_t tower_mask[N_TOWERS], lock_mask, shield_mask;
 static unsigned crystals[5], lit[5], shield_hits[5], plays[5];
 static int mb_ready[5];                              /* three crystals planted: the next Big loop starts it */
+static unsigned long start_due;                      /* the third crystal: SpaceGodzilla arrives this long after */
 static struct kit_db db;
 static struct kit_game game;
 static struct kit_lamps lamps, lock_lamps;
@@ -270,6 +272,8 @@ static void end(const char *why)
     run.on = 0;
     kit_lamps_off(&lamps);
     kit_end_after(TOTAL_SHOWN_MS);
+    if (kit_natural_end(why) && !pa_call(&own, run.supers ? "won" : "lost") && !(run.supers))
+        pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.supers ? "won" : "lost");
     kit_show_start(&show_fx, "spacegodzilla end", SHOW_END, N_SHOW(SHOW_END));
@@ -386,7 +390,7 @@ static void qualify_shot(uint64_t shot, unsigned p)
             if (!kit_running && !show_fx.on) kit_show_start(&show_fx, "crystal", SHOW_LOCK, N_SHOW(SHOW_LOCK));
             if (crystals[p] >= LOCKS) {
                 kit_hud_note(&hud, 2500, "CRYSTAL 3 PLANTED", "SPACEGODZILLA ARRIVES");
-                start("the third crystal");
+                start_due = pm_ms() + ARRIVE_MS;          /* not inside the loop shot: its moment first */
             } else {
                 pm_snprintf(line, sizeof line, "CRYSTAL %u PLANTED", crystals[p]);
                 kit_hud_note(&hud, 2000, line, lit[p] ? "ANOTHER LOCK IS LIT" : "SHIELDS LIGHT THE NEXT LOCK");
@@ -497,8 +501,13 @@ static void on_tick(void)
         check_triggers();
         lock_light();
     }
+    if (start_due && pm_ms() >= start_due) {
+        start_due = 0;
+        start("the third crystal");
+    }
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) crystals[p] = lit[p] = shield_hits[p] = plays[p] = 0, mb_ready[p] = 0;
+        start_due = 0;
         pm_log("new game: the crystals cleared");
     }
     if (!run.on) return;
@@ -516,8 +525,11 @@ static void on_tick(void)
 
 static void on_ball_end(void)
 {
+    unsigned p = pm_player();
     end("ball ended");
     kit_end_now();
+    if (start_due && p >= 1 && p <= 4) mb_ready[p] = 1;    /* the third crystal's moment cut short: still ready */
+    start_due = 0;
 }
 
 static void on_event(unsigned id)

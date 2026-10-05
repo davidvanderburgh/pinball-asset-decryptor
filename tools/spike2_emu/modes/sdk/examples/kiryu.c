@@ -235,6 +235,8 @@ static void end(const char *why)
     run.on = 0;
     kit_lamps_off(&lamps);
     kit_end_after(TOTAL_SHOWN_MS);
+    if (kit_natural_end(why) && !pa_call(&own, run.fired ? "won" : "lost") && !(run.fired))
+        pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.fired ? "won" : "lost");
     kit_show_start(&show_fx, "kiryu end", SHOW_END, N_SHOW(SHOW_END));

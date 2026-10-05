@@ -628,12 +628,14 @@ ASSETS = {
     "meltdown": ("MELTDOWN", 590, {"lit": 1203, "jackpot": 1205, "cool": 1207, "heat": 1209, "critical": 1211,
                                    "meltdown": 1213, "won": 1215, "lost": 1217, "add": 1219}),
     "godzilla_angry": ("GODZILLA ANGRY", 600, {"rage": 1301, "angry": 1303, "lock": 1305, "baby": 1307,
-                                               "jackpot": 1309, "super": 1311}),
+                                               "jackpot": 1309, "super": 1311,
+                                               "won": 1313, "lost": 1315}),
     "spacegodzilla": ("SPACEGODZILLA", 610, {"lit": 1321, "lock": 1323, "jackpot": 1325, "tower": 1327,
-                                             "super": 1329, "add": 1331}),
-    "kiryu": ("KIRYU", 620, {"charge": 1341, "ready": 1343, "fire": 1345, "overheat": 1347}),
-    "biollante": ("BIOLLANTE", 630, {"cut": 1361, "collect": 1363, "beast": 1365}),
-    "destoroyah": ("DESTOROYAH", 640, {"kill": 1381, "escape": 1383, "wave": 1385, "boss": 1387}),
+                                             "super": 1329, "add": 1331,
+                                             "won": 1333, "lost": 1335}),
+    "kiryu": ("KIRYU", 620, {"charge": 1341, "ready": 1343, "fire": 1345, "overheat": 1347, "won": 1349, "lost": 1351}),
+    "biollante": ("BIOLLANTE", 630, {"cut": 1361, "collect": 1363, "beast": 1365, "won": 1367, "lost": 1369}),
+    "destoroyah": ("DESTOROYAH", 640, {"kill": 1381, "escape": 1383, "wave": 1385, "boss": 1387, "won": 1389, "lost": 1391}),
 }
 
 
@@ -1471,7 +1473,7 @@ def test_every_text_a_mode_writes_on_its_hud_fits(harness):
         ["raw", "0x1"] * 760 + ["secs", 2] + GA_LIGHT + GA_CHASE + ["shot", "Building", "secs", 3] + GA_JP
         + ["secs", 20, "balls", 1, "secs", 25],
         GA_LIGHT + ["shot", "Building", "secs", 1, "shot", "Godzilla target", "secs", 32, "balls", 1, "secs", 25],
-        SG_FIRST + ["secs", 1] + SG_TOWERS_DOWN + ["secs", 1, "shot", "Big loop", "secs", 2, "trigger",
+        SG_FIRST + ["secs", 2] + SG_TOWERS_DOWN + ["secs", 1, "shot", "Big loop", "secs", 2, "trigger",
                                                     "spacegodzilla.stop", "secs", 12, "balls", 1] + SG_SECOND
         + ["secs", 1, "shot", "Shield target left", "secs", 22, "balls", 1, "secs", 12],
         KIRYU_SPINS + ["secs", 1, "trigger", "kiryu.charge=215", "secs", 14, "trigger", "kiryu.charge=105", "secs", 1,
@@ -1763,8 +1765,8 @@ def test_godzilla_angry_a_lit_shot_puts_a_short_clock_back_to_fifteen(harness):
 
 # ---- PAD-379: SPACEGODZILLA - lock lighting that gets harder each time, supers worth the sum ----------------------
 def test_spacegodzilla_locks_get_harder_to_light_each_multiball(harness):
-    stop = ["secs", 1, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1]
-    out = play(harness, *SG_FIRST, *stop, *SG_SECOND, *stop, *SG_THIRD, "secs", 1)
+    stop = ["secs", 2, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1]
+    out = play(harness, *SG_FIRST, *stop, *SG_SECOND, *stop, *SG_THIRD, "secs", 2)     # each 1.5 s after its crystal
     assert has(out, SG, "Shield target left: every lock is lit (3) for player 1")
     for k in (1, 2, 3):
         assert has(out, SG, "CRYSTAL %d PLANTED at Big loop (player 1): +%d" % (k, 250000 * k))
@@ -1795,8 +1797,8 @@ def test_spacegodzilla_towers_fall_the_super_is_the_sum_and_adds_a_ball(harness)
 
 
 def test_spacegodzilla_moguera_shields_raise_every_jackpot(harness):
-    stop = ["secs", 1, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1]
-    out = play(harness, *SG_FIRST, *stop, *SG_SECOND, "secs", 1, "shot", "Shield target left", "ms", 300,
+    stop = ["secs", 2, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1]
+    out = play(harness, *SG_FIRST, *stop, *SG_SECOND, "secs", 2, "shot", "Shield target left", "ms", 300,
                "shot", "Left ramp", "secs", 1)
     assert has(out, SG, "spiral grenade at Shield target left: the jackpot base 1750000")
     assert re.search(r"\[SPACEGODZILLA\] JACKPOT 1 at Left ramp: \+1750000, the tower cracks", out)
@@ -1806,7 +1808,7 @@ def test_spacegodzilla_nothing_lights_or_locks_during_a_multiball_and_a_full_set
     out = play(harness, "balls", 2, "secs", 1, *SG_FIRST, "balls", 1, "secs", 1, *SG_LOOP)
     assert not has(out, SG, "every lock is lit") and not has(out, SG, "CRYSTAL")
     out = play(harness, "shot", "Shield target left", "ms", 300, *(SG_LOOP * 2), "timed", 1, "secs", 1, *SG_LOOP,
-               "timed", 0, "secs", 1, *SG_LOOP, "secs", 1)
+               "secs", 2, "timed", 0, "secs", 1, *SG_LOOP, "secs", 1)
     assert has(out, SG, "not started (the third crystal): one of the game's modes is running - still ready") or \
         has(out, SG, "not started (the third crystal): a stock mode is running - still ready")
     started = _at(out, "[SPACEGODZILLA] START")

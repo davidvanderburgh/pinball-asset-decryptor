@@ -704,6 +704,15 @@ static KIT_UNUSED int kit_wait_game(const char *who, const char *why, const char
     return 1;
 }
 
+/* PAD-379: 1 = the mode ended by itself (won, lost on its clock, its multiball over, a stop) - its ending call
+ * plays; 0 = a drain, a tilt, the game moving on or one of the game's own modes beginning took it away, when the
+ * game's own sounds (the bonus, the tilt, that mode's start) have the speakers. */
+static KIT_UNUSED int kit_natural_end(const char *why)
+{
+    return !(kit_same(why, "ball ended") || kit_same(why, "tilted") || kit_same(why, "the game moved on") ||
+             kit_same(why, "the game's own mode began"));
+}
+
 /* 1 = one of the game's own modes is running now (asked by a mode of ours that is running) */
 static KIT_UNUSED int kit_game_began(void)
 {

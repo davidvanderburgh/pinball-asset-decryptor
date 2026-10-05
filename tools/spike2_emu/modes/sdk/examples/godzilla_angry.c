@@ -23,8 +23,8 @@
  *                5 MAKUHARI       both ramps, the Big loop, the Building and the center powerline, then
  *                                 lock at the captive ball
  *                6 BABY           the BUILDING: BABY FOUND, the SUPER JACKPOT and a 6-ball multiball
- *              A shot pays 500,000, +500,000 a place and +25,000 a shot within it, and adds a quarter of
- *              it to the JACKPOT; a lock pays twice that and adds 500,000 a place. Every switch hit adds 10,000
+ *              A shot pays 500,000, +500,000 a place and +25,000 a shot within it, and adds an eighth of
+ *              it to the JACKPOT; a lock pays twice that and adds 250,000 a place. Every switch hit adds 10,000
  *              to the SUPER JACKPOT (from 5,000,000). Each place has 30 s; a lit shot with under 15 s left
  *              puts it back to 15 (EHoH's Haunts).
  *   FAILING STILL PAYS (EHoH: the balls you locked become a smaller multiball): a place's clock running out
@@ -69,8 +69,8 @@
 #define SHOT_BASE          500000ull
 #define SHOT_PLACE_STEP    500000ull
 #define SHOT_WITHIN_STEP   25000ull
-#define LOCK_JACKPOT_STEP  500000ull
-#define JACKPOT_SHARE      4              /* a lit shot adds a quarter of what it paid to the JACKPOT */
+#define LOCK_JACKPOT_STEP  250000ull
+#define JACKPOT_SHARE      8              /* a lit shot adds an eighth of what it paid to the JACKPOT */
 #define SUPER_START        5000000ull
 #define SUPER_PER_SWITCH   10000ull
 #define MB_BALLS_FULL      6
@@ -532,6 +532,8 @@ static void end(const char *why)
     run.on = 0;
     kit_lamps_off(&lamps);
     kit_end_after(TOTAL_SHOWN_MS);
+    if (kit_natural_end(why) && !pa_call(&own, run.full ? "won" : "lost") && !(run.full))
+        pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     if (run.phase == PHASE_MB) {
         pa_clip_full(&own, run.full ? "won" : "lost");

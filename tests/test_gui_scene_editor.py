@@ -1334,3 +1334,30 @@ def test_delete_asks_first_then_removes_or_hides(tmp_path):
         assert w.call("text_scenes.tree_delete", [ids["Art"]])
         assert w.asked[-1]["title"] == "Delete layer" and '"Art"' in w.asked[-1]["message"]
         w.call("text_scenes.close")
+
+
+def test_a_deleted_layer_stays_hidden_when_its_sprite_is_picked(tmp_path):
+    """PAD-391 round 3 (DragonRR): picking a sprite shows every layer in it (PAD-289), but not
+    one that was DELETED (hidden in the game and the preview): that shows only when it is
+    picked itself.  One hidden with its eye alone is still shown with its sprite."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        body, box, art = ly["BodyB"]["id"], ly["Body_Textbox"]["id"], ly["Body_Art"]["id"]
+        assert w.call("text_scenes.tree_state", ly["Select"]["id"], 2)     # the picker on B
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_delete", [art])
+        assert w.call("text_scenes.tree_view", box, False)                 # eye only
+        assert w.call("text_scenes.tree_select", body)
+        hits = [h["id"] for h in _tv(w)["hits"]]
+        assert art not in hits and box in hits
+        assert w.call("text_scenes.tree_select", art)
+        tv = _tv(w)
+        assert tv["hits"][-1]["id"] == art and tv["props"]["peek"]
+        assert w.call("text_scenes.tree_select", None)
+        hits = [h["id"] for h in _tv(w)["hits"]]
+        assert art not in hits and box not in hits
+        w.call("text_scenes.close")

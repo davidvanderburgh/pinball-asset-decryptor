@@ -92,8 +92,11 @@ def test_the_screen_steps_aside_while_the_games_mode_runs_and_comes_back(harness
     off = next(i for i, ln in enumerate(lines) if ln.startswith("STOCK 0"))
     shows = [(i, ln.split()[1]) for i, ln in enumerate(lines) if ln.startswith("SHOW ")]
     assert [v for i, v in shows if i < on][-1] == "1"                        # up while the mode runs alone
-    assert [v for i, v in shows if on < i < off] == ["0"]                    # hidden once, while the game's runs
-    assert [v for i, v in shows if i > off] == ["1"]                         # back once it is over
+    hidden = [v for i, v in shows if on < i < off]
+    assert hidden and set(hidden) == {"0"}                                  # hidden while the game's runs (PAD-390:
+                                                                            # and again at every 2 s re-check)
+    back = [v for i, v in shows if i > off]
+    assert back and set(back) == {"1"}                                      # back once it is over (and kept up)
     assert "RUSH: its screen steps aside - a stock mode has the middle of the screen" in out
     assert "RUSH: its screen is back - the game's mode is over" in out
     assert start < on

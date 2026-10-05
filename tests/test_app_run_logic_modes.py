@@ -1471,6 +1471,8 @@ def test_modes_tab_premium_1_16_project_offers_godzillas_names(tmp_path):
             assert "not yet seen a mode of yours start one" in st["reasons"].pop("multiball")
         if "godzilla_le-1.16" not in MP.BALL_SAVE_PROVEN:   # PAD-225: the same
             assert "not yet seen a mode of yours give a ball save" in st["reasons"].pop("ball_save")
+        if "godzilla_le-1.16" not in MP.MAGNET_PROVEN:      # PAD-381: the same
+            assert "not yet seen a mode of yours hold the ball on it" in st["reasons"].pop("magnet")
         assert st["reasons"] == {}, st["reasons"]
         assert not st["dis"]["lights"]
         spec = MP.load(str(project / "modes" / "kaiju_rush" / "mode.json"))
@@ -2837,17 +2839,18 @@ def test_a_mode_edit_makes_the_write_tab_rescan(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------------- code modes with assets
 @pytest.mark.usefixtures("preview_modes_on")
-def test_modes_tab_offers_the_six_intricate_modes_as_code_examples(tmp_path):
-    """Examples lists the form modes, then the SDK's six intricate modes as CODE modes (a Godzilla
-    title only: their shots are Godzilla's)."""
+def test_modes_tab_offers_the_intricate_modes_as_code_examples(tmp_path):
+    """Examples lists the form modes, then the SDK's intricate modes (the six and PAD-379's five) as CODE
+    modes (a Godzilla title only: their shots are Godzilla's)."""
     project = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, project)
         labels = [e.get("label") or e["name"] for e in _st(w)["examples"]]
         assert labels[0] == "KAIJU RUSH"
-        assert sorted(labels[-6:]) == ["ANGUIRUS (code mode)", "FINAL WARS (code mode)",
-                                       "KING GHIDORAH (code mode)", "MASER BARRAGE (code mode)",
-                                       "MELTDOWN (code mode)", "OXYGEN DESTROYER (code mode)"]
+        assert sorted(labels[-11:]) == ["ANGUIRUS (code mode)", "BIOLLANTE (code mode)", "DESTOROYAH (code mode)",
+                                        "FINAL WARS (code mode)", "GODZILLA ANGRY (code mode)", "KING GHIDORAH (code mode)",
+                                        "KIRYU (code mode)", "MASER BARRAGE (code mode)", "MELTDOWN (code mode)",
+                                        "OXYGEN DESTROYER (code mode)", "SPACEGODZILLA (code mode)"]
         assert "No code modes in this project" in _st(w)["code_words"]
 
 
@@ -3001,7 +3004,7 @@ def test_modes_tab_counts_the_modes_and_at_the_cap_greys_only_the_form_examples(
         states = {e.get("label") or e["name"]: e["disabled"] for e in st["examples"]}
         assert states["KAIJU RUSH"] is True
         code = {k: v for k, v in states.items() if k.endswith(" (code mode)")}
-        assert len(code) == 6 and set(code.values()) == {False}
+        assert len(code) == 11 and set(code.values()) == {False}      # the six and PAD-379's five
         w.run(svc.delete_mode, slugs[0])
         st = _st(w)
         assert st["cap_text"] == "" and st["n_form"] == 2

@@ -1388,6 +1388,282 @@ own multiball; two players.
 
 `mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
 
+## The magnet (PAD-381)
+
+David (2026-10-04): modes need access to the coils, "However, we need guardrails on this since these are
+physical high voltage things and we can't be breaking anything or causing any fires". So a mode asks for
+a grab of so many milliseconds and nothing else:
+
+```c
+if (pm_can(PM_CAN_COILS) && pm_magnet_grab(2000)) ...   /* hold the ball on the magnet for 2 s */
+pm_magnet_release();                                    /* or let go sooner */
+```
+
+**What the runtime sends.** One coil command, through the game's own coil call (ControlCoil's, `site
+coil_fire`): the operator's GODZILLA MAGNET LO DRAW POWER for its DRAW TIME, then its LO HOLD POWER for
+the rest of the grab. The board drives that and stops by itself when it runs out; the runtime never
+re-sends it. So if the mode wedges, the runtime stops or the game dies, the magnet still lets go when that
+command ends. Letting go sooner is the game's own OFF (below).
+
+**A grab is a game process that controls the magnet.** The game keeps every coil OFF that no process of
+its own controls: ControlCoil::v[38], the coil's update, runs on the game's events (a Godzilla target
+hit among them) and switches an uncontrolled coil off unless an on-time was asked for. The first version
+of the grab fired from the runtime's tick, and the emulator showed the game's OFF 1 ms after every grab
+(the runtime's own log said "held 2000 ms"; `[coildrive]` said 1 ms). So `pm_magnet_grab` starts a game
+process of ours (`value magnet_proc`, an id the game never uses; `site proc_create`). The process takes
+control of the magnet (`site coil_take`, the call the game's own grabs use), sends the one command, sleeps
+a tick at a time (`site proc_sleep`) until its time is up or the runtime asks it to let go, and gives
+control back (`site coil_give`): the game's coil update then switches the magnet off. While it controls the
+magnet, the game's update leaves it alone. The game ends a process at a drain or a tilt by unwinding its
+stack, and taking control registered an exit hook that gives control back - so a grab the game ends goes
+off the game's own way. (That unwind needs unwind tables in every frame on the stack: `build_mode.sh`
+compiles with `-funwind-tables`, and without it the emulator's drain test aborted the game.) The on-time
+route (`v[36]`) is not used: the game re-fires the operator's pulse and hold for as long as an on-time is
+set, which is "held until told", not one bounded command.
+
+**The limits, none of them the mode's to change:** a grab is 100 to 5000 ms, the draw included (asking
+for more gets 5000); only the running mode, only in a game (not attract, not tilted); never with GODZILLA
+MAGNET DISABLED set; never while one of the game's own magnet sequences runs (`text magnet_procs`); one
+grab at a time; 3 s from the end of one grab to the start of the next; at most 6 grabs in any minute.
+A refused grab returns 0 and says why in mode.log (`[pad] magnet: no grab - ...`).
+
+**It lets go:** at the grab's end; on `pm_magnet_release`; when the mode ends; when the ball ends; when
+the game ends or tilts; and when the game ends the grab's process itself. If a magnet sequence of the
+game's starts while a mode holds (or before its grab began), the mode's grab gives the magnet back at
+once and the game's own update drives it.
+
+**Where the numbers come from** (Godzilla Pro 1.16, docs/plans/mode_coils.md has every address): the coil
+frame and the tick conversion from the game's serialiser; the adjustment ids from the game's adjustment
+name table (LO draw power 363, draw time 364, hold power 365, hold time 366, MAGNET DISABLED 343 - the
+same on LE 1.16); the magnet's device from its object (11 on Pro 1.16, 13 on LE 1.16: `value magnet_dev`,
+checked against the game's own magnet object on the first grab). The game's own grabs are processes
+(363, 362 the Magna-Grab, 360 a timed pulse) that hold until the game's conditions clear, a display still
+playing among them: that is how PAD-353's magnet stayed on, and why a mode's grab is a single bounded
+command instead. The process calls: create-if-absent (id, entry, flags 0) `0x3ab0fc`, sleep `0x3ab22c`,
+take control `0x5079c` (coil, wait ticks), give control back `0x50860` (coil, 1); the coil's update
+`0x4ffc8`, its controller at +44.
+
+**From a mode file, and the Modes tab.** `magnet <ms> [mask]`: while the mode runs, every hit of the shot the
+magnet sits at holds the ball there for `<ms>`, the hit that starts the mode included, through `pm_magnet_grab`
+with all of the limits above (a refused hit is logged as `magnet shot ... - no grab` and the mode carries on).
+The port names that shot, `value magnet_shot`: on Godzilla the Godzilla target, whose switch is the device
+nearest the magnet on the playfield picture (6 px; the next is 29 px away), so its hit is the ball over the
+magnet. Mode > Magnet on the tab writes the line, in seconds (0.1 to 5); it is greyed on a build until a mode
+file's grab was seen there in the emulator (`mode_project.MAGNET_PROVEN`).
+
+**The port lines** (Pro and LE 1.16 only):
+
+```
+site coil_fire             0x00402ff4 0xe3500000 0xe52de004
+site adjustment            0x00286e00 0xe92d40f0 0xe2504000
+site proc_exists           0x003ab72c 0xe30d2158 0xe340207d
+site magnet_get            0x000511cc 0xe92d40f0 0xe30545bc
+value magnet_dev           11
+value magnet_shot          0x00080000
+text magnet_procs          360 362 363 364
+site proc_create           0x003ab0fc 0xe30dc158 0xe340c07d
+site proc_sleep            0x003ab22c 0xe30d3158 0xe340307d
+site coil_take             0x0005079c 0xe92d40f8 0xe30d715c
+site coil_give             0x00050860 0xe3510000 0xe92d4038
+value magnet_proc          13185
+```
+
+**Emulator-proven** (2026-10-05, rig 1, muted, the stock Pro 1.16 and Premium/LE 1.16 cards; a mode file
+`magnet 2000` started on the Godzilla target), every line from the runtime's mode.log and hwshim's
+`[coildrive]` lines for node 9 coil 6, the magnet on both builds:
+- the starting hit: one command, draw 255 for 350 ms then hold 50 for 1650 ms, HELD TO ITS END - the next
+  magnet frame is the game's OFF at +2000 ms, after control went back;
+- a hit 1 s into the grab: refused ("a grab is already holding") and NO OFF from the game - it was cut
+  1 ms in before the grab took control;
+- a hit 6 s later: a second grab, held to its end; a mode stop 1.4-1.6 s into a third: OFF with 565 ms
+  (Pro) / 584 ms (LE) of the command left;
+- a ball drained 1.2 s into a grab: the game ended the grab's process, its exit gave control back and the
+  magnet went OFF with 798 ms (Pro) / 782 ms (LE) left; the game played on (no abort);
+- on the LE the first hit also started a magnet process of the game's: the grab stood aside before it
+  began, and the next hit was refused ("the game's own magnet is working").
+The first proof of this section (magnet_test_mode.c, the same day) read the runtime's log alone: every
+grab in it was switched off by the game 1 ms after it was sent, which the `[coildrive]` lines showed and
+nobody read. Its clamp and refusal lines stand (they are decisions, not drive); its "held" lines did not.
+
+**Hardware-confirmed** (a Godzilla Premium 1.16, 2026-10-05, the branch's pinned runtime and port with mode files from `runtime_cfg`, read from the card's `/dump/mode.log`; docs/plans/mode_coils.md "Machine test"): the Godzilla magnet held once for 1 s and four times for 2 s (255 for 350 ms
+then 50), each let go at 1000-2016 ms; three hits were refused while the game's own magnet was working, and one
+grab stood aside before it began when the game wanted the magnet (`let go before the hold began (the game wants
+it)`). On the machine the game's own magnet process is busy only some of the time, not on every hit as in the
+LE emulator runs.
+
+Not measured: a drain or a tilt mid-grab on a machine (both drains there came between grabs; the emulator's
+drain stands); a magnet sequence of the game's starting while a grab already holds.
+
+## Held coils (PAD-381)
+
+The magnet's hold, for every coil of that kind a game has. A Godzilla Premium/LE has three: the Godzilla
+magnet (`magnet`), the Mechagodzilla magnet (`mg_magnet`) and the bridge diverter (`bridge`); the Pro has the
+magnet only. Each is a ControlCoil object of the game's, fired by the game as a pulse then a hold.
+
+```c
+if (pm_coil_known("bridge")) pm_coil_hold("bridge", 2000);   /* the bridge diverter held 2 s */
+pm_coil_release("bridge");                                   /* or let it go sooner */
+```
+
+A mode file says `coil_hold <name> <ms> [mask]` (up to 4 lines): on every hit of that shot while the mode runs,
+or once as the mode starts with no mask. Mode > Other mechanisms on the Modes tab writes them, one row per coil
+the build has proven (`mode_project.HELD_COILS_PROVEN`).
+
+**Every coil, the same code and the same limits** as "The magnet": one command, at the COIL OBJECT's own
+powers - its v[29] pulse power, v[30] pulse ms, v[31] hold power, which is what the game itself would fire it
+with (the Mechagodzilla magnet's are the operator's adjustments 380-383; the bridge's its own constants, 255 for
+300 ms then 25) - sent from a process of ours that controls the coil; 100-5000 ms; one hold at a time per coil,
+3 s between holds, 6 a minute; never while the operator has it disabled (the object's v[40]); never while the
+GAME uses it, and given back at once when it wants it mid-hold: a process of the game's controls it (+44), the
+game asked for an on-time (+36: what its rules' `v[36](ms)` grabs set - the shield rule grabs with the
+Mechagodzilla magnet that way, `v[36](1875)`), or one of the game's processes the port names (`text
+magnet_procs`).
+
+**The port lines** (Premium/LE 1.16; the getters found from the classes' vtables, each checked by the tests to
+construct the port's device):
+
+```
+text held_coils            magnet mg_magnet bridge
+site mg_magnet_get         0x001d9410 0xe92d40f0 0xe30b4f28
+value mg_magnet_dev        14
+site bridge_get            0x001d7174 0xe92d4030 0xe30b4e04
+value bridge_dev           12
+text mg_magnet_label       Mechagodzilla magnet
+text bridge_label          bridge
+```
+
+**Emulator-proven** (2026-10-05, rig 1, muted, the stock Premium/LE 1.16 card; `coil_hold mg_magnet 2000` and
+`coil_hold bridge 2000 0x00100000`), from mode.log and `[coildrive]`:
+- the Mechagodzilla magnet (node 9 coil 7) as the mode started: 255 for 250 ms then 80 for 1750 ms, held to its
+  end;
+- the bridge (node 9 coil 3) on the left ramp: 255 for 300 ms then 25 for 1700 ms, held to its end; a left ramp
+  1 s into it refused; held again later, and a mode stop let go 617 ms early; no abort;
+- the Godzilla magnet, now read the same way, unchanged on the Pro card (255 for 350 then 50).
+
+**Hardware-confirmed** (a Godzilla Premium 1.16, 2026-10-05, the branch's pinned runtime and port with mode files from `runtime_cfg`, read from the card's `/dump/mode.log`; docs/plans/mode_coils.md "Machine test"): the Mechagodzilla magnet held 1 s or 2 s at four mode starts and on two
+building hits (255 for 250 ms then 80), a building hit 1.5 s into a hold refused; the bridge held 3 s eight
+times, on the Maser target and the left ramp (255 for 300 ms then 25); every hold let go at 1000-3019 ms.
+
+Not measured: a drain or a tilt mid-hold on a machine.
+
+## The scoop (PAD-381)
+
+A mode may hold a ball that lands in the scoop - while its screen or a callout plays - and nothing more:
+the kick-out stays the game's own (its 64 ms kick at the operator's SCOOP KICK POWER, with its own
+retries), and nothing in a mode or the runtime fires the scoop's coil.
+
+```c
+if (pm_can(PM_CAN_SCOOP)) pm_scoop_hold(4000);   /* while this mode runs, a ball in the scoop waits 4 s */
+pm_scoop_release();                              /* or let it go now */
+```
+
+A mode file says `scoop_hold <ms>` (set when the mode starts); Mode > Scoop on the Modes tab writes it, in
+seconds (0.1 to 10), greyed on a build until it was seen in the emulator (`mode_project.SCOOP_PROVEN`).
+
+**How it holds.** The scoop is a ball device of the framework's: a game process watches it and calls the
+GAME's handler for it with an event number (`site scoop_handler`, Godzilla Pro 1.16 `0x7cd94`; the program
+names it `right_scoop_event_handler`), through a pointer in the device's record (`data scoop_slot`,
+`0x74b480`). Measured on a landing ball with a call probe: event 21 as the switch closes, **2 when the
+ball has settled** (the game's own hold - its rules, a battle's select screen - loops in there), 13 a short
+wait for a display, 16 and 17 the kick about 1.7 s after landing, 18 the ball gone. On the first tick the
+runtime checks that the record still points at the handler and swaps in a wrapper: it runs the handler as
+it was and, on event 2 (`value scoop_event`), if the running mode asked for a hold, sleeps a tick at a time
+in the device's own process until the time is up, the mode lets go or ends, or the game ends or tilts -
+then returns, and the game's eject carries on as it always does. The game's own hold always comes first.
+
+**The limits:** 100 ms to 10 s a hold; only the running mode; only in a game; the hold ends with the mode.
+Holding a ball powers nothing; the cap keeps a ball from sitting in the scoop long enough for the game to
+go looking for it. A tilt or the end of a ball that ends the device's process unwinds through the wrapper
+safely (the runtime is built with unwind tables, "The magnet").
+
+**The port lines** (Pro and LE 1.16; LE: handler `0x7d8e4`, slot `0x7570a4`, found from Pro's code):
+
+```
+site scoop_handler         0x0007cd94 0xe30538ea 0xe2401002
+data scoop_slot            0x0074b480
+value scoop_event          2
+```
+
+(`site proc_sleep` is the magnet's.)
+
+**Emulator-proven** (2026-10-05, rig 1, muted, the stock Pro 1.16 and Premium/LE 1.16 cards; a mode file
+with `scoop_hold 4000`; a landing is the Right Scoop switch held closed until the game's kick):
+- no mode running: the game kicked 1782 ms (Pro) / 1785 ms (LE) after landing - its own timing;
+- the mode running: 5776 / 5770 ms, the runtime's `scoop: ... holding it 4000 ms` then `let go after
+  4016 ms (its time ran out)`; every kick the game's own (255 for 64 ms, `[coildrive]` node 8 coil 8);
+- the mode stopped 1.5 s after landing: `let go ... (the mode ended)`, the kick at 2998 / 2591 ms;
+- a TILT during a 10 s hold (LE): the ball ended, the hold let go and the game kicked the ball out; no
+  abort.
+
+**Hardware-confirmed** (a Godzilla Premium 1.16, 2026-10-05, the branch's pinned runtime and port with mode files from `runtime_cfg`, read from the card's `/dump/mode.log`; docs/plans/mode_coils.md "Machine test"): a ball in the scoop held 5021 ms (`scoop_hold 5000`), then the game's own
+kick.
+
+Not measured: a battle's select screen holding the ball first (the game's own hold, which the wrapper runs
+before its own); a tilt during a hold on a machine.
+## The shield platform (Godzilla Premium/LE, PAD-379)
+
+Godzilla Premium and LE carry their three shield targets on a platform a motor turns. Most of the game
+it faces AWAY: the spinner side (the shield ramp spinner) faces the player and the shields cannot be hit
+from the flippers. The game turns it TOWARD the player for parts of its Mechagodzilla multiball. A Pro
+has no platform: its two shield targets are fixed and always face the player.
+
+A mode that plays the shield targets turns the platform itself:
+
+```c
+pm_shield(PM_SHIELD_TOWARD);              /* the shields to the flippers; about a second to get there */
+if (pm_shield_position() == PM_SHIELD_TOWARD) { /* they can be hit now */ }
+pm_shield(PM_SHIELD_AWAY);                /* back where the game keeps them */
+```
+
+`pm_shield` returns 0 on a Pro (and on any port without the shield lines); `pm_shield_position` says -1
+there, so `pm_shield_position() < 0 || pm_shield_position() == PM_SHIELD_TOWARD` is "a shield can be hit
+now" on every Godzilla. The examples do it through the kit: `kit_shields_in` at the start (the platform
+turns 1.5 s later, once the ball that started the mode is clear of it), `kit_shields_tick` every tick,
+`kit_shields_out(why)` at the end, which turns it back AWAY unless the end was the game's own mode
+beginning (that mode has the platform then), and `kit_shields_reachable()` before putting anything a
+mode needs on a shield. An operator can switch the motor off in the adjustments (SHIELD MOTOR
+DISABLED): `pm_shield` then says 0, the platform stays AWAY and `pm_shield_position` never says TOWARD,
+so a mode must never depend on the shields alone.
+
+**How it works.** The motor is the game's `ShieldMotor` (a `SingleDirectionCoilMotor`: the SHIELD MOTOR
+coil, node 9 coil 2, runs one way until a position switch closes). Its two positions are switches 86
+(SHIELD MOTOR OPEN: away) and 87 (SHIELD MOTOR CLOSED: toward). `shield_move(motor, position switch)` is
+the motor's own go-to (its vtable slot 29, Premium 1.16 `0x1db3d8`): 0 when the motor is switched off, 1
+when it is already there or a move process has started - the target at `+48`, the coil run with that
+switch as its stop, `+44` the switch on arrival. The service menu's shield test calls the same through
+slot 9, which first insists the caller is the motor's owner process; a mode calls slot 29 itself.
+`RuleMechagodzillaShield` counts a shield hit only while `+44` is 87. (Not `0x1da004`, which a first try
+used: it only stores `+50`, the position the move process assumes when a move fails, and the motor never
+ran.) The port lines:
+
+```
+site shield_move           0x001db3d8 0xe92d4038 0xe1a05001
+data shield_motor          0x007bbf88
+value shield_motor_vptr    0x6502a8     # the object's vtable word: checked before every move
+value shield_pos_at        44
+value shield_target_at     48
+value shield_away          86
+value shield_toward        87
+```
+
+The emulator plays the motor (PAD-256's coil-motor model: the coil's rule names the switch that stops it,
+the switch it leaves opens, that one closes 600 ms later).
+
+**The game turns it away by itself.** A shield target hit while the platform faces the player makes the game
+turn it away about 30 ms later and leave it there (its own Mechagodzilla shield reaction:
+`RuleMechagodzillaShield`'s shot handler, outside its multiball too, starts a process for any shield hit
+while `+44` is 87), and the ball search pulses it toward and back. So a mode that wants the shields keeps
+asking: `kit_shields_tick` turns them back 1.5 s after they were left facing away, for as long as the mode
+runs. In play that reads as the shield recoiling from the hit and coming back.
+
+**What is measured (emulator, stock Godzilla Premium 1.16, muted, `C:\tmp\PAD-379\proof`, runs shield2 and
+shield3).** KIRYU, BIOLLANTE, DESTOROYAH and SPACEGODZILLA's M.O.G.U.E.R.A. each turned the platform toward the
+player 1.5 s after they started (`[motor] node 9 coil 2: runs until input 23`, switch 87 made 600 ms later)
+and back to switch 86 when they ended; CRYSTAL TOWERS (SPACEGODZILLA's first multiball) never moved it.
+BIOLLANTE's shield vines lit only while the platform faced the player. Each real shield hit knocked it away
+and the mode brought it back. Not measured: a machine (the real motor's speed); the motor switched off in
+the adjustments (desk only: `pm_shield` says 0).
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in
@@ -3313,7 +3589,9 @@ as an unlit shot does in stock. With the file left out of the build the battle i
 build (the engine calls the handlers make, the slot numbers, the cmode fields, and Ebirah's and tank's
 own words and pieces), in each Godzilla port right after item 160's `rule` lines. They took the
 runtime's tables past their old caps (48 sites, 64 values: Premium's port now has 64 and 105), so
-`N_SITES` is 80 and `N_VALUES` 128; `tests/test_stern_mode_runtime.py` reads the caps from the source
+`N_SITES` became 80 and `N_VALUES` 128 (since raised: `N_SITES` 256 for PAD-363's mode starts,
+`N_VALUES` 192 when PAD-381's held coils and scoop met PAD-379's shield at 129 Premium/LE values);
+`tests/test_stern_mode_runtime.py` reads the caps from the source
 and still fails a port that outgrows one. Every `site` word pair was read from the ELF by
 `port_words.py`; the Pro 1.15 twins were checked against a decompile of both builds (every function's
 shape the same), and nothing on Pro has run.

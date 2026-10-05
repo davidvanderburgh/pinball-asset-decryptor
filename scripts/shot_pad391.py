@@ -28,6 +28,7 @@ def main():
     repo, source, out = sys.argv[1:4]
     drag = "--drag" in sys.argv[4:]
     delete = "--delete" in sys.argv[4:]          # round 2: Delete pressed in Layers
+    sprite = "--sprite" in sys.argv[4:]          # round 3: a deleted picture, its group picked
     print("repo:", repo, flush=True)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="pad391-")
@@ -82,6 +83,26 @@ def main():
             time.sleep(1)
             src = page.locator('.tree-layers [data-node="%s"]' % added)
             src.scroll_into_view_if_needed()
+            if sprite:
+                kids = [l for l in layers if l.get("parent") == group and l["drawn"]
+                        and l["kind"] == "Bitmap"]
+                gone = kids[0]["id"]
+                print("deleting", kids[0]["name"], gone, "in group", group, flush=True)
+                api("text_scenes.tree_remove_many", [gone])  # what Delete's Yes does
+                time.sleep(1)
+                rig._wait(lambda: not state().get("tree_busy"), 60)
+                row = page.locator('.tree-layers [data-node="%s"]' % group)
+                row.evaluate("el => el.scrollIntoView({block: 'start'})")
+                row.click()
+                time.sleep(2)
+                rig._wait(lambda: not state().get("tree_busy"), 60)
+                hits = [h["id"] for h in state()["tree_view"]["hits"]]
+                print("deleted picture drawn with its group picked:", gone in hits, flush=True)
+                page.mouse.move(5, 995)
+                time.sleep(3)
+                page.screenshot(path=out)
+                browser.close()
+                return
             if delete:
                 src.evaluate("el => el.scrollIntoView({block: 'end'})")
                 src.click()

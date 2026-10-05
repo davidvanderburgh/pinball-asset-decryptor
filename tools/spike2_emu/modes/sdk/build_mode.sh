@@ -23,7 +23,11 @@ shift $((OPTIND - 1))
 [ -n "$OUT" ] && [ $# -ge 1 ] || { echo "usage: build_mode.sh -o mode.so mode.c [mode.c ...]" >&2; exit 2; }
 CC=${CC:-arm-linux-gnueabihf-gcc}
 command -v "$CC" >/dev/null || { echo "build_mode.sh: $CC not found" >&2; exit 1; }
-"$CC" -std=gnu17 -marm -mfloat-abi=hard -fno-stack-protector -fPIC -fvisibility=hidden -shared -O2 -nostdlib \
+# -funwind-tables (PAD-381): the game ENDS a process by throwing a C++ exception through its stack
+# (do_stack_unwind_exception_t), at a tilt or the end of a ball. A frame of ours on that stack - the
+# runtime's magnet grab runs as a game process - must carry unwind tables, or the unwind stops there
+# and the game aborts ("terminate called ..."). They cost a few bytes a function and change no code.
+"$CC" -std=gnu17 -marm -mfloat-abi=hard -fno-stack-protector -fPIC -fvisibility=hidden -shared -O2 -nostdlib     -funwind-tables \
     -Wall -Wextra -Wno-unused-parameter -Werror=implicit-function-declaration \
     -I"$SDK" -Wl,-soname,mode.so \
     -o "$OUT" ${RUNTIME:+"$RUNTIME"} "$@" -lgcc

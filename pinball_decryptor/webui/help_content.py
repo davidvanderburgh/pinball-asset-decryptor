@@ -2469,6 +2469,8 @@ def modes_games_rows(ports=None):
             also.append("HUD")
         if any("button" in n.lower() for n, _m in p.shots):
             also.append("buttons")
+        also += [w for k, w in (("magnet", "magnet"), ("scoop", "scoop"), ("coils", "mechanisms"))
+                 if p.can(k)]                                       # PAD-381: what a mode may hold
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
         if not p.can("stack"):
@@ -2505,6 +2507,8 @@ def _modes_which_games():
                      "holds every insert in the mode's colour.\n"
                      "- **HUD:** counters, a timer and a gauge at the screen's edges.\n"
                      "- **Buttons:** the flipper and Action buttons count as shots.\n"
+                     "- **Magnet, scoop, mechanisms:** what a mode may hold for a moment: the "
+                     "magnet, a ball in the scoop, the Mechagodzilla magnet and the bridge.\n"
                      "- **Never waits:** a mode can't be set to wait for the game's modes.\n\n"
                      "> **Not listed?** Pick the card anyway: the app works out its hooks. "
                      "Press Check this game (about two minutes) before trusting them. "
@@ -2555,7 +2559,7 @@ PREVIEW_HELP = {
                     {"icon": "defaults", "tone": "warn", "title": "The game's modes",
                      "text": "**Numbers only.** Timers and awards, not how they play."},
                     {"icon": "lock", "tone": "err", "title": "Everything else",
-                     "text": "**Off limits.** Progression, settings, coils, high scores, Insider Connected."}]},
+                     "text": "**Off limits.** Progression, settings, high scores, Insider Connected, and coils but a few Godzilla mechanisms."}]},
                 _limits("Quick answers"),
             ]),
             ("Which games", _modes_which_games),

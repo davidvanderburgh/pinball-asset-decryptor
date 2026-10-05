@@ -503,7 +503,77 @@ site balls_in_play         0x00388e0c 0xe92d4010 0xe3034930
 # ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00388f88 0xe92d41f0 0xe301e16a
+
+# ---- the magnet: a grab of the mode's own (PAD-381; pad_mode_runtime.c "the magnet") - LE 1.16 (found from Pro 1.16 by code, movw/movt and branch fields masked).
+# coil_fire = ControlCoil's fire (device, pulse power, pulse ms, hold power, hold ms, x ms): one command
+# the board ends by itself; all zeros = OFF (cmd 4d). adjustment = read one adjustment (ids: magnet_adj_*
+# default to the LO set 363-366 and DISABLED 343, the same on Pro and LE 1.16). proc_exists = is a game
+# process alive; magnet_procs = the game's own magnet processes (a mode never grabs while one runs, and
+# steps aside when one starts). magnet_get = the GodzillaMagnet object, its device at +4 = magnet_dev.
+site coil_fire             0x003e8c78 0xe3500000 0xe52de004
+site adjustment            0x002b3614 0xe92d40f0 0xe2504000
+site proc_exists           0x003f3700 0xe3062278 0xe340207d
+site magnet_get            0x0005131c 0xe92d40f0 0xe3014bf4
+value magnet_dev           13
+value magnet_shot          0x00080000  # the Godzilla target: the magnet sits 6 px from its switch on the
+#                                        playfield picture (devicexy), so its hit is the ball over the magnet;
+#                                        a mode file's `magnet <ms>` grabs on it
+text magnet_procs          360 362 363 364 365 366
+# A grab is a GAME PROCESS of ours (2026-10-05): the game's coil update switches off any coil no process
+# controls, 1 ms after a grab fired from the tick. proc_create = create a process if its id is free (id,
+# entry, flags 0); proc_sleep = the running process sleeps n ticks; coil_take = the running process takes
+# control of a coil (coil, wait ticks), with an exit hook that gives it back; coil_give = give it back
+# (coil, 1), after which the coil's own update switches it off. magnet_proc = our process's id, one the
+# game never uses (no create, exists or kill call names it). LE 1.16's four found from Pro 1.16 by code.
+site proc_create           0x003f30d0 0xe306c278 0xe340c07d
+site proc_sleep            0x003f3200 0xe3063278 0xe340307d
+site coil_take             0x000508ec 0xe92d40f8 0xe306727c
+site coil_give             0x000509b0 0xe3510000 0xe92d4038
+value magnet_proc          13185
+# Held coils (PAD-381): the coils a mode may hold like the magnet, each a ControlCoil of the game's. <name>_get =
+# the game's getter for its object, <name>_dev = its device (checked against the object). mg_magnet = the
+# Mechagodzilla magnet (MechagodzillaMagnet: its powers from adjustments 380-383, DISABLED 344; the game's
+# shield rule grabs with it, v[36](1875)); bridge = the bridge diverter (BridgeDiverter: 255 for 300 ms,
+# then 25 for 5500, DISABLED adjustment 384; the ball search fires it). Getters found by their vtables.
+text held_coils            magnet mg_magnet bridge
+site mg_magnet_get         0x001d9410 0xe92d40f0 0xe30b4f28
+value mg_magnet_dev        14
+site bridge_get            0x001d7174 0xe92d4030 0xe30b4e04
+value bridge_dev           12
+text mg_magnet_label       Mechagodzilla magnet
+text bridge_label          bridge
+
+# ---- the scoop: a ball held there for a mode, then the game kicks it out (PAD-381; pad_mode_runtime.c
+# "the scoop"). scoop_handler = the right scoop's event handler (the program names it
+# right_scoop_event_handler), called by the framework's ball device through scoop_slot, a pointer in the
+# device's record (RW data); the runtime swaps that pointer for a wrapper that runs the handler, then
+# holds a settled ball (scoop_event, measured with a call probe) for the running mode. The kick-out stays
+# the game's. LE 1.16's handler found from Pro 1.16's by its first 13 words, and it names the same string.
+site scoop_handler         0x0007d8e4 0xe301316a 0xe2401002
+data scoop_slot            0x007570a4
+value scoop_event          2
 # EMU 2026-09-26 (mb_e2e.sh): served 3 on a mode file's start, add-a-ball to 4, drains to 1, END (one ball left). PROVEN.
+
+# ---- PAD-379: the shield platform (Premium/LE only; a Pro's shield targets are fixed) ---------------------------
+# The three shield targets sit on a platform a motor turns: ShieldMotor (vtable 0x6502a0, a SingleDirectionCoilMotor:
+# SHIELD MOTOR, node 9 coil 2, runs one way until a position switch), one object at 0x7bbf88. Two positions, from its
+# table at 0x650330: switch 86 "Shield Motor Open" - the spinner side faces the player, the shields away (the game's
+# home, where most battles play) - and switch 87 "Shield Motor Closed" - the shield targets face the flippers
+# (parts of Mechagodzilla multiball; RuleMechagodzillaShield counts a shield hit only while +44 is 87). The move is the
+# motor's v[29] (SingleDirectionCoilMotor's go-to, 0x1db3d8): (motor, position switch) refuses when the operator
+# switched the motor off (v[15], SHIELD MOTOR DISABLED), returns 1 when it is already there, else starts the move
+# process (0x1db46c): the target at +48, the coil run with that switch as its stop, +44 the switch on arrival. The
+# service menu's shield test calls the same through v[9] (0x1db36c), which first insists the caller is the motor's
+# owner process. +44 is the switch it last stopped on (0 = not known: its homing sends it to 86). NOT 0x1da004: that
+# only stores +50, a position the move process assumes when a move fails (emulator run shield1: the motor never ran).
+# pm_shield / pm_shield_position.
+site shield_move           0x001db3d8 0xe92d4038 0xe1a05001
+data shield_motor          0x007bbf88
+value shield_motor_vptr    0x6502a8
+value shield_pos_at        44
+value shield_target_at     48
+value shield_away          86
+value shield_toward        87
 
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------
 # The Action button (the game's LOCKDOWN BUTTON) and the flipper buttons have no handler of their own

@@ -62,6 +62,8 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Skill shot", 0x400000000ull }, { "Big loop", 0x1000000000ull }, { "Slingshot", 0x2ull },
     { "Left return lane", 0x4ull }, { "Right return lane", 0x10ull }, { "Pop bumper", 0x40ull },
     { "Mecha exit bottom", 0x10000000000ull }, { "Left spinner", 0x200ull },
+    { "Top spinner", 0x2000ull }, { "Shield ramp spinner", 0x20000ull },
+    { "Action button", 0x1000000000000000ull },         /* a `switch` line of the port (PAD-228) */
 };
 #define N_SHOTS (int)(sizeof SHOTS / sizeof SHOTS[0])
 static const struct { const char *name; int id; } EVENTS[] = {
@@ -226,6 +228,56 @@ int pm_multiball_add(unsigned n, unsigned save_s)
     return 1;
 }
 int pm_balls_in_play(void) { return balls_in_play; }
+int pm_ball_save(unsigned seconds)
+{
+    printf("%6lu BALL SAVE %u s\n", now_ms, seconds);
+    return 1;
+}
+/* PAD-379: the shield platform, AWAY until a mode turns it; it takes SHIELD_TURN_MS to get there.
+ * HARNESS_SHIELD=none is a Pro (fixed shields: no platform), =off an operator who switched the motor off. */
+#define SHIELD_TURN_MS 1000
+static int shield_at = PM_SHIELD_AWAY, shield_to = PM_SHIELD_AWAY;
+static unsigned long shield_due;
+static int shield_kind(void)
+{
+    static int k = -1;
+    if (k < 0) {
+        const char *e = getenv("HARNESS_SHIELD");
+        k = e && !strcmp(e, "none") ? 1 : e && !strcmp(e, "off") ? 2 : 0;
+    }
+    return k;
+}
+int pm_shield(int where)
+{
+    if (shield_kind() == 1) return 0;
+    printf("%6lu SHIELD %s%s\n", now_ms, where == PM_SHIELD_TOWARD ? "toward the player" : "away",
+           shield_kind() == 2 ? " - refused, the motor is off" : "");
+    if (shield_kind() == 2) return 0;                   /* the game's go-to refuses a motor switched off */
+    if (where != shield_to) {
+        shield_to = where;
+        shield_due = now_ms + SHIELD_TURN_MS;
+    }
+    return 1;
+}
+int pm_shield_position(void)
+{
+    if (shield_kind() == 1) return -1;
+    return shield_at == shield_to ? shield_at : 0;
+}
+static void shield_knock(uint64_t mask)
+{
+    if (shield_kind() || shield_at != PM_SHIELD_TOWARD || shield_to != PM_SHIELD_TOWARD ||
+        !(mask & 0x380000000ull)) return;
+    shield_to = PM_SHIELD_AWAY;                 /* the game's own reaction to a shield hit: it turns the platform away */
+    shield_due = now_ms + SHIELD_TURN_MS;
+    printf("%6lu SHIELD knocked away by the hit\n", now_ms);
+}
+static void shield_tick(void)
+{
+    if (shield_at == shield_to || now_ms < shield_due) return;
+    shield_at = shield_to;
+    printf("%6lu SHIELD stopped %s\n", now_ms, shield_at == PM_SHIELD_TOWARD ? "toward the player" : "away");
+}
 const char *pm_port_text(const char *name)
 {
     if (!strcmp(name, "example_lights_on"))
@@ -584,6 +636,7 @@ static void tick(void)
     const struct pm_mode *m;
     ticks++;
     now_ms = ticks * 1000 / 60;
+    shield_tick();
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     if (disp_prio && running != disp_owner && disp_linger_until && !running && now_ms < disp_linger_until) {
@@ -600,6 +653,7 @@ static void tick(void)
 static void dispatch(uint64_t mask)
 {
     const struct pm_mode *m;
+    shield_knock(mask);
     EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
     current = 0;
 }
@@ -639,7 +693,10 @@ int main(int argc, char **argv)
         } else if (!strcmp(c, "battle")) { battle = atoi(argv[++k]); printf("%6lu >> battle %d\n", now_ms, battle); }
         else if (!strcmp(c, "multiball")) { multiball = atoi(argv[++k]); printf("%6lu >> multiball %d\n", now_ms, multiball); }
         else if (!strcmp(c, "timed")) { timed = atoi(argv[++k]); printf("%6lu >> timed %d\n", now_ms, timed); }
-        else if (!strcmp(c, "balls")) { balls_in_play = atoi(argv[++k]); printf("%6lu >> balls in play %d\n", now_ms, balls_in_play); }
+        else if (!strcmp(c, "shield")) {             /* the game turns the platform itself (its ball search) */
+            shield_to = shield_at = !strcmp(argv[++k], "toward") ? PM_SHIELD_TOWARD : PM_SHIELD_AWAY;
+            printf("%6lu >> shield %s\n", now_ms, argv[k]);
+        } else if (!strcmp(c, "balls")) { balls_in_play = atoi(argv[++k]); printf("%6lu >> balls in play %d\n", now_ms, balls_in_play); }
         else if (!strcmp(c, "ball_end")) {
             printf("%6lu >> ball_end\n", now_ms);
             EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }

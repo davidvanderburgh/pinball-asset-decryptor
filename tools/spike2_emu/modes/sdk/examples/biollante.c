@@ -22,6 +22,8 @@
  *              clock in the badge. A vine cut plays her tendrils burning, a collect the sap spraying; the
  *              beast and the endings are full screen.
  *   INSERTS    The vines still standing green; the BEAST: the BUILDING blinking gold, faster as it runs out.
+ *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
+ *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
  *   DISPLAY    Priority 180.
  *
  * Emulator test triggers: /dump/biollante.start, .stop, .shot "<shot name>", .beast (the beast form now).
@@ -52,9 +54,11 @@ static const char *const BANK[N_BANKS][3] = {
     { "Powerline left", "Powerline center", "Powerline right" },
 };
 static const char *const BANK_SAYS[N_BANKS] = { "THE SHIELD VINES", "THE POWERLINE VINES" };
+#define SHIELD_BANK 0
 
 /* ---- state ----------------------------------------------------------------------------------- */
 static uint64_t ramp_mask, final_mask, pop_mask, vine_mask[N_BANKS][3];
+static unsigned bank_all[N_BANKS], bank_n[N_BANKS];    /* the targets this game has (Pro: two shields) */
 static unsigned ramps[5], plays[5];
 static int waiting[5];
 static struct kit_db db;
@@ -62,6 +66,7 @@ static struct kit_game game;
 static struct kit_lamps lamps;
 static struct kit_hud hud = { .slug = FOLDER };
 static struct kit_show show_fx;
+static struct kit_shields shields;           /* PAD-379: the Premium's shield platform, turned toward the player */
 static unsigned poll;
 
 enum { PHASE_ROSE, PHASE_BEAST };
@@ -154,7 +159,8 @@ static void show_lamps(void)
     if (run.phase == PHASE_ROSE) {
         for (b = 0; b < N_BANKS; b++)
             for (i = 0; i < 3; i++)
-                if (!(run.cut[b] & (1u << i))) standing |= vine_mask[b][i];
+                if (!(run.cut[b] & (1u << i)) && (b != SHIELD_BANK || kit_shields_reachable()))
+                    standing |= vine_mask[b][i];               /* the shields once they face the player */
         kit_lamps_shot(&lamps, standing, BI_VINE, PM_LAMP_SOLID, 0);
     } else {
         kit_lamps_shot(&lamps, final_mask, KIT_GOLD, PM_LAMP_BLINK,
@@ -202,7 +208,7 @@ static int start(const char *why)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (kit_wait_game(MODE_NAME, why, "still lit: the next ramp after it starts it")) {
+    if (kit_wait_game(MODE_NAME, why, "the next ramp after it starts it")) {
         waiting[p] = 1;
         return 0;
     }
@@ -212,6 +218,7 @@ static int start(const char *why)
     }
     kit_display(KIT_DISPLAY_MODE);
     kit_isolate_list(own.give_way, own.block_ids, own.block_n);
+    kit_shields_in(&shields);
     run.on = 1;
     run.player = p;
     run.phase = PHASE_ROSE;
@@ -241,6 +248,7 @@ static void end(const char *why)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);
+    kit_shields_out(&shields, why);
     kit_end_after(TOTAL_SHOWN_MS);
     if (kit_natural_end(why) && !pa_call(&own, run.won ? "won" : "lost") && !(run.won))
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
@@ -318,10 +326,10 @@ static void run_shot(uint64_t shot)
             uint64_t m = vine_mask[b][i];
             if (!m || !(shot & m) || (run.cut[b] & (1u << i)) || !kit_fresh(&db, m)) continue;
             run.cut[b] |= 1u << i;
-            pm_log("vine cut: %s (%s %u of 3)", BANK[b][i], BANK_SAYS[b],
-                   (run.cut[b] & 1u) + ((run.cut[b] >> 1) & 1u) + ((run.cut[b] >> 2) & 1u));
+            pm_log("vine cut: %s (%s %u of %u)", BANK[b][i], BANK_SAYS[b],
+                   (run.cut[b] & 1u) + ((run.cut[b] >> 1) & 1u) + ((run.cut[b] >> 2) & 1u), bank_n[b]);
             if (kit_timer_at_least(&run.clock, LIT_SHOT_FLOOR)) pm_log("the clock back up to %d s", LIT_SHOT_FLOOR);
-            if (run.cut[b] == 7u) collect(b);
+            if ((run.cut[b] & bank_all[b]) == bank_all[b]) collect(b);
             else sound(CUE_CUT);
             if (run.phase != PHASE_ROSE) return;
         }
@@ -366,6 +374,7 @@ static void on_init(void)
     for (b = 0; b < N_BANKS; b++)
         for (i = 0; i < 3; i++) {
             vine_mask[b][i] = pm_shot(BANK[b][i]);
+            if (vine_mask[b][i]) bank_all[b] |= 1u << i, bank_n[b]++;
             if (!vine_mask[b][i]) pm_log("this port has no \"%s\"", BANK[b][i]);
         }
     final_mask = pm_shot(FINAL_SHOT);
@@ -395,6 +404,7 @@ static void on_tick(void)
     kit_hud_tick(&hud);
     kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
+    kit_shields_tick(&shields);
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) ramps[p] = plays[p] = 0, waiting[p] = 0;

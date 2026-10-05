@@ -1015,6 +1015,15 @@ def _all_back(out):
     return "END lamps held 0, display priority 0" in out
 
 
+def _all_back_but_lit_locks(out):
+    """everything handed back - but the powerlines that start KING GHIDORAH light SPACEGODZILLA's locks too
+    (PAD-379), and its lit lock keeps one insert, the Big loop blinking purple, until it is planted"""
+    if _all_back(out):
+        return True
+    return ("END lamps held 1, display priority 0" in out and has(out, "SPACEGODZILLA", "every lock is lit")
+            and any(c == "be28ff" for _t, c, _p, _ms in _lamp(out, "BIG LOOP", "SPACEGODZILLA")))
+
+
 ENDING_MS = 10000     # a natural end keeps the display hold this long: the ending clip, then the total
 
 
@@ -1054,7 +1063,7 @@ def test_ghidorah_final_blow_flashes_the_maser_and_every_insert_goes_back_when_i
         assert final in _released(out, name)                                     # the heads are gone
     end = _at(out, "[KING GHIDORAH] END (super jackpot)")
     assert end in _released(out, "MASER") and end in _released(out, "MASER READY")
-    assert _ending_back(out, "KING GHIDORAH", end) and _all_back(out)
+    assert _ending_back(out, "KING GHIDORAH", end) and _all_back_but_lit_locks(out)
 
 
 def test_a_mode_started_during_anothers_ending_takes_the_display_at_once(harness):
@@ -1414,9 +1423,9 @@ GA_JP = ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "ms", 300, "shot"
          "shot", "Building", "ms", 300]
 SG = "SPACEGODZILLA"
 SG_LOOP = ["shot", "Big loop", "ms", 300]
-SG_FIRST = ["shot", "Shield target left", "ms", 300] + SG_LOOP * 3
-SG_SECOND = (["shot", "Shield target center", "ms", 300] + SG_LOOP) * 3
-SG_THIRD = (["shot", "Shield target right", "ms", 300, "shot", "Shield target left", "ms", 300] + SG_LOOP) * 3
+SG_FIRST = ["shot", "Powerline left", "ms", 300] + SG_LOOP * 3
+SG_SECOND = (["shot", "Powerline center", "ms", 300] + SG_LOOP) * 3
+SG_THIRD = (["shot", "Powerline right", "ms", 300, "shot", "Powerline left", "ms", 300] + SG_LOOP) * 3
 SG_TOWERS_DOWN = ["shot", "Left ramp", "ms", 300, "shot", "Building", "ms", 300, "shot", "Right ramp", "ms", 300] * 2
 KIRYU_SPINS = ["raw", "0x20000"] * 30
 BIO_RAMPS = ["shot", "Left ramp", "ms", 300] * 6
@@ -1520,7 +1529,7 @@ STACK_STARTS = [
     ("final_wars", ["trigger", "final_wars.light", "secs", 8, "shot", "Building"]),
     ("meltdown", MELTDOWN_START),
     ("godzilla_angry", ["trigger", "godzilla_angry.light", "secs", 1, "shot", "Building"]),
-    ("spacegodzilla", ["shot", "Shield target left", "ms", 300] + ["shot", "Big loop", "ms", 300] * 3),
+    ("spacegodzilla", ["shot", "Powerline left", "ms", 300] + ["shot", "Big loop", "ms", 300] * 3),
     ("kiryu", ["raw", "0x20000"] * 30),
     ("biollante", ["shot", "Left ramp", "ms", 300] * 6),
     ("destoroyah", ["raw", "0x2000"] * 30),
@@ -1539,7 +1548,7 @@ def test_a_mode_ends_the_moment_one_of_the_games_modes_begins(harness, slug, sta
     assert t in _hid(out, slug)                                              # its words go in the same tick
     assert _at(out, "[%s] lights: all handed back to the game" % mode) == t
     if busy != "battle":                                  # ANGUIRUS joins a battle of the game's and lights the shields
-        assert "END lamps held 0" in out
+        assert "END lamps held 0" in out or (slug == "ghidorah_heads" and _all_back_but_lit_locks(out))
 
 
 @pytest.mark.parametrize("slug,start", STACK_STARTS, ids=[s for s, _ in STACK_STARTS])
@@ -1778,19 +1787,23 @@ def test_godzilla_angry_a_lit_shot_puts_a_short_clock_back_to_fifteen(harness):
 
 # ---- PAD-379: SPACEGODZILLA - lock lighting that gets harder each time, supers worth the sum ----------------------
 def test_spacegodzilla_locks_get_harder_to_light_each_multiball(harness):
-    stop = ["secs", 2, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1]
+    # a ball between: three powerlines in one ball would start GHIDORAH'S HEADS (its own start, by design)
+    stop = ["secs", 2, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1, "ball_end", "secs", 1]
     out = play(harness, *SG_FIRST, *stop, *SG_SECOND, *stop, *SG_THIRD, "secs", 2)     # each 1.5 s after its crystal
-    assert has(out, SG, "Shield target left: every lock is lit (3) for player 1")
+    assert has(out, SG, "Powerline left: every lock is lit (3) for player 1")
     for k in (1, 2, 3):
         assert has(out, SG, "CRYSTAL %d PLANTED at Big loop (player 1): +%d" % (k, 250000 * k))
     starts = re.findall(r"\[SPACEGODZILLA\] START \(the third crystal\): player 1, ([\w. ]+), 3 balls", out)
     assert starts == ["CRYSTAL TOWERS", "M.O.G.U.E.R.A.", "SPACE BEAST"]
-    assert has(out, SG, "Shield target center: a lock is lit (1 lit, 0 planted) for player 1")
-    assert has(out, SG, "Shield target right: 1 of 2 for the next lock (player 1)")
-    assert has(out, SG, "Shield target left: a lock is lit (1 lit, 0 planted) for player 1")
+    assert has(out, SG, "Powerline center: a lock is lit (1 lit, 0 planted) for player 1")
+    assert has(out, SG, "Powerline right: 1 of 2 for the next lock (player 1)")
+    assert has(out, SG, "Powerline left: a lock is lit (1 lit, 0 planted) for player 1")
+    assert not has(out, SG, "Shield target")                             # the shields light nothing now
     assert len(re.findall(r"MULTIBALL 3 balls, save 15 s", out)) == 3
-    assert hud_said(out, "spacegodzilla", "Award", "LOCKS ARE LIT") and hud_said(out, "spacegodzilla", "Award",
-                                                                                 "CRYSTAL 2 PLANTED")
+    # a powerline that lights a lock is also one of KING GHIDORAH's three: its "POWERLINES 1 OF 3" has the HUD for a
+    # moment, so the crystals' words show on a Big loop a little later
+    out = play(harness, "shot", "Powerline left", "secs", 3, *SG_LOOP, "secs", 1)
+    assert hud_said(out, "spacegodzilla", "Award", "CRYSTAL 1 PLANTED")
 
 
 def test_spacegodzilla_towers_fall_the_super_is_the_sum_and_adds_a_ball(harness):
@@ -1820,7 +1833,7 @@ def test_spacegodzilla_moguera_shields_raise_every_jackpot(harness):
 def test_spacegodzilla_nothing_lights_or_locks_during_a_multiball_and_a_full_set_waits_for_the_games_mode(harness):
     out = play(harness, "balls", 2, "secs", 1, *SG_FIRST, "balls", 1, "secs", 1, *SG_LOOP)
     assert not has(out, SG, "every lock is lit") and not has(out, SG, "CRYSTAL")
-    out = play(harness, "shot", "Shield target left", "ms", 300, *(SG_LOOP * 2), "timed", 1, "secs", 1, *SG_LOOP,
+    out = play(harness, "shot", "Powerline left", "ms", 300, *(SG_LOOP * 2), "timed", 1, "secs", 1, *SG_LOOP,
                "secs", 2, "timed", 0, "secs", 1, *SG_LOOP, "secs", 1)
     assert has(out, SG, "not started (the third crystal): one of the game's modes is running - still ready") or \
         has(out, SG, "not started (the third crystal): a stock mode is running - still ready")
@@ -1976,3 +1989,106 @@ def test_a_meter_gives_way_to_another_modes_note_and_comes_back(harness):
     assert gone, "the meter did not give way"
     back = re.findall(r"^\s*(\d+) SHOW PadMode_godzilla_angry_Hud 1$", out, re.M)
     assert any(int(t) > note + 1900 for t in back), "the meter did not come back"
+
+
+# ---- PAD-379: the shield platform (Godzilla Premium/LE) ---------------------------------------------------------------
+#: each mode that plays the shield targets, how to start it, and how it ends by itself
+SHIELD_MODES = [
+    ("KIRYU", KIRYU_SPINS, ["trigger", "kiryu.stop"]),
+    ("BIOLLANTE", BIO_RAMPS, ["trigger", "biollante.stop"]),
+    ("DESTOROYAH", ["trigger", "destoroyah.start"], ["trigger", "destoroyah.stop"]),
+    ("MELTDOWN", MELTDOWN_START, ["trigger", "meltdown.stop"]),
+    ("FINAL WARS", ["trigger", "final_wars.light", "secs", 8, "shot", "Building"], ["trigger", "final_wars.stop"]),
+]
+
+
+def play_env(harness, env, *args):
+    r = subprocess.run([str(harness)] + [str(a) for a in args], capture_output=True, text=True, timeout=60,
+                       env=dict(os.environ, **env))
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+@pytest.mark.parametrize("mode,begin,stop", SHIELD_MODES, ids=[m[0] for m in SHIELD_MODES])
+def test_a_mode_that_plays_the_shields_turns_them_to_the_player_and_back(harness, mode, begin, stop):
+    out = play(harness, *begin, "secs", 4, *stop, "secs", 2)
+    started, ended = _at(out, "[%s] START" % mode), _at(out, "[%s] END" % mode)
+    assert started is not None and ended is not None, out[-3000:]
+    toward = _at(out, "SHIELD toward the player")
+    assert toward is not None and started + 1400 <= toward <= started + 1700       # once the ball is clear of it
+    assert has(out, mode, "the shields turn toward the player")
+    assert _at(out, "SHIELD stopped toward the player") > toward
+    away = _at(out, "SHIELD away")
+    assert away is not None and ended <= away <= ended + 20
+    assert has(out, mode, "the shields turn away again (trigger file)")
+
+
+def test_the_shields_knocked_away_under_a_mode_come_back_after_each_hit(harness):
+    """Emulator run shield2: a shield hit while the platform faces the player makes the game turn it away (and leave
+    it there); the ball search pulses it too. The mode brings it back 1.5 s after each, for as long as it runs."""
+    hits = []
+    for name in ("Shield target left", "Shield target center", "Shield target right", "Shield target left"):
+        hits += ["shot", name, "secs", 4]
+    out = play(harness, *BIO_RAMPS, "secs", 4, *hits, "shield", "away", "secs", 4)
+    knocks = [int(t) for t in re.findall(r"^\s*(\d+) SHIELD knocked away by the hit$", out, re.M)]
+    assert len(knocks) == 4
+    back = [int(t) for t in re.findall(r"^\s*(\d+) SHIELD toward the player$", out, re.M)]
+    assert len(back) == 1 + 4 + 1                                      # the first; after each hit; after the search
+    for k in knocks:                                                   # stopped away 1 s later, back 1.5 s after that
+        assert any(k + 2400 <= t <= k + 2600 for t in back), (k, back)
+    assert has(out, "BIOLLANTE", "the shields were turned away under the mode (a shield hit, the ball search): toward "
+                                 "the player again (3)")
+    assert not has(out, "BIOLLANTE", "toward the player again (5)")             # the log says the first three only
+
+
+def test_a_mode_over_before_the_shields_turned_never_moves_them(harness):
+    out = play(harness, *KIRYU_SPINS, "ms", 500, "trigger", "kiryu.stop", "secs", 3)
+    assert _at(out, "[KIRYU] END") is not None
+    assert not re.search(r"^\s*\d+ SHIELD ", out, re.M)
+
+
+def test_the_shields_stay_put_when_the_games_own_mode_takes_over(harness):
+    out = play(harness, *BIO_RAMPS, "secs", 3, "battle", 1, "secs", 2)
+    assert has(out, "BIOLLANTE", "END (the game's own mode began)")
+    assert has(out, "BIOLLANTE", "the shields stay where they are: the game's own mode has the platform now")
+    assert "SHIELD away" not in out
+
+
+def test_a_pro_has_no_platform_and_nothing_turns(harness):
+    out = play_env(harness, {"HARNESS_SHIELD": "none"}, *KIRYU_SPINS, "secs", 4, "trigger", "kiryu.stop", "secs", 2)
+    assert _at(out, "[KIRYU] START") is not None and _at(out, "[KIRYU] END") is not None
+    assert not re.search(r"^\s*\d+ SHIELD ", out, re.M) and not has(out, "KIRYU", "the shields")
+
+
+def test_spacegodzilla_turns_the_shields_only_for_moguera(harness):
+    stop = ["secs", 3, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1]
+    out = play(harness, *SG_FIRST, *stop, *SG_SECOND, *stop)
+    starts = [int(t) for t in re.findall(r"^\s*(\d+) \[SPACEGODZILLA\] START", out, re.M)]
+    assert len(starts) == 2
+    toward = [int(t) for t in re.findall(r"^\s*(\d+) SHIELD toward the player", out, re.M)]
+    assert toward and all(t > starts[1] for t in toward)                   # CRYSTAL TOWERS never turned them
+    assert len(re.findall(r"^\s*\d+ SHIELD away", out, re.M)) == 1
+
+
+def test_destoroyah_brings_no_aggregate_to_a_shield_the_player_cannot_reach(harness):
+    """An operator who switched the motor off: the platform stays away, so the close ring is the Maser and the
+    captive ball only. With it on, the shields are in the close ring."""
+    seq = ["trigger", "destoroyah.start", "secs", 60]
+    off = play_env(harness, {"HARNESS_SHIELD": "off"}, *seq)
+    assert "SHIELD toward the player - refused, the motor is off" in off       # asked; refused
+    assert not has(off, "DESTOROYAH", "the shields turn") and "SHIELD away" not in off
+    assert re.search(r"\[DESTOROYAH\] an aggregate advances to (Maser target|Godzilla target)", off)
+    assert not re.search(r"\[DESTOROYAH\] an aggregate advances to Shield target", off)
+    on = play(harness, *seq)
+    assert re.search(r"\[DESTOROYAH\] an aggregate advances to Shield target", on)
+
+
+def test_biollante_lights_the_shield_vines_once_they_face_the_player(harness):
+    out = play(harness, *BIO_RAMPS, "secs", 4)
+    started = _at(out, "[BIOLLANTE] START")
+    facing = _at(out, "SHIELD stopped toward the player")
+    assert started is not None and facing is not None
+    before = [ln for ln in lines(out, "BIOLLANTE") if " lights: " in ln and int(ln.split()[0]) < facing]
+    after = [ln for ln in lines(out, "BIOLLANTE") if " lights: " in ln and int(ln.split()[0]) >= facing]
+    assert before and all("shot 0x70000000 " in ln for ln in before), before   # the powerline vines only
+    assert any("shot 0x3f0000000 " in ln for ln in after), after[:3]          # and the shield vines

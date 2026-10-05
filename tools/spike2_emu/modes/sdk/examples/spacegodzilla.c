@@ -6,8 +6,8 @@
  * Godzilla vs. SpaceGodzilla (1994): SpaceGodzilla plants crystal towers across Fukuoka to draw power;
  * Godzilla and M.O.G.U.E.R.A. tear them down before they strike at him.
  *
- *   LIGHT A LOCK   The SHIELD targets. The first multiball: any shield target lights all three locks. The
- *                  second: each shield target hit lights one lock. From the third: two shield hits a lock.
+ *   LIGHT A LOCK   The POWERLINE targets. The first multiball: any powerline target lights all three locks.
+ *                  The second: each powerline hit lights one lock. From the third: two powerline hits a lock.
  *   LOCK           The BIG LOOP while a lock is lit: SpaceGodzilla plants CRYSTAL 1, 2, 3 (250,000 a crystal,
  *                  times its number). The locks are virtual (the ball goes on) and wait across balls. Nothing
  *                  lights or locks during a multiball or while another mode of ours runs.
@@ -22,6 +22,8 @@
  *                    1 CRYSTAL TOWERS  jackpots from 1,000,000
  *                    2 M.O.G.U.E.R.A.  from 1,500,000, towers one jackpot stronger, and every SHIELD target
  *                                      is a spiral grenade: +250,000 on the jackpot for the rest of it
+ *                                      (on Godzilla Premium/LE the shield platform turns toward the player
+ *                                      for it, and back away when it ends)
  *                    3 SPACE BEAST     from 2,000,000, towers stronger, and every 5th jackpot lights the
  *                                      super as well (EHoH's Attic Attack)
  *   ENDS           One ball left (after the ball save and 3 s more), a tilt, one of the game's own modes
@@ -64,6 +66,7 @@
 static const char *const TOWER[N_TOWERS] = { "Left ramp", "Building", "Right ramp" };
 static const char *const TOWER_SAYS[N_TOWERS] = { "LEFT RAMP", "BUILDING", "RIGHT RAMP" };
 static const char *const SHIELDS[3] = { "Shield target left", "Shield target center", "Shield target right" };
+static const char *const POWERLINES[3] = { "Powerline left", "Powerline center", "Powerline right" };
 #define N_KINDS 3
 static const struct { const char *name; uint64_t base; } KIND[N_KINDS] = {
     { "CRYSTAL TOWERS", 1000000ull }, { "M.O.G.U.E.R.A.", 1500000ull }, { "SPACE BEAST", 2000000ull },
@@ -71,7 +74,7 @@ static const struct { const char *name; uint64_t base; } KIND[N_KINDS] = {
 
 /* ---- state ----------------------------------------------------------------------------------- */
 static uint64_t tower_mask[N_TOWERS], lock_mask, shield_mask;
-static unsigned crystals[5], lit[5], shield_hits[5], plays[5];
+static unsigned crystals[5], lit[5], line_hits[5], plays[5];
 static int mb_ready[5];                              /* three crystals planted: the next Big loop starts it */
 static unsigned long start_due;                      /* the third crystal: SpaceGodzilla arrives this long after */
 static struct kit_db db;
@@ -79,6 +82,7 @@ static struct kit_game game;
 static struct kit_lamps lamps, lock_lamps;
 static struct kit_hud hud = { .slug = FOLDER };
 static struct kit_show show_fx;
+static struct kit_shields shields;           /* PAD-379: M.O.G.U.E.R.A. turns the Premium's shields to the player */
 static unsigned poll;
 static int mb_now;
 
@@ -219,7 +223,7 @@ static int start(const char *why)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (kit_wait_game(MODE_NAME, why, "still ready: the next Big loop after it starts it")) {
+    if (kit_wait_game(MODE_NAME, why, "the next Big loop after it starts it")) {
         mb_ready[p] = 1;
         return 0;
     }
@@ -251,8 +255,9 @@ static int start(const char *why)
     run.started = pm_ms();
     run.one_ball_since = 0;
     mb_ready[p] = 0;
-    crystals[p] = lit[p] = shield_hits[p] = 0;
+    crystals[p] = lit[p] = line_hits[p] = 0;
     plays[p]++;
+    if (run.kind == 1) kit_shields_in(&shields);
     kit_lamps_begin(&lock_lamps);
     kit_lamps_commit(&lock_lamps);
     kit_hud_begin(&hud, "SPACEGODZILLA", "");
@@ -271,6 +276,7 @@ static void end(const char *why)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);
+    kit_shields_out(&shields, why);
     kit_end_after(TOTAL_SHOWN_MS);
     if (kit_natural_end(why) && !pa_call(&own, run.supers ? "won" : "lost") && !(run.supers))
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
@@ -393,26 +399,26 @@ static void qualify_shot(uint64_t shot, unsigned p)
                 start_due = pm_ms() + ARRIVE_MS;          /* not inside the loop shot: its moment first */
             } else {
                 pm_snprintf(line, sizeof line, "CRYSTAL %u PLANTED", crystals[p]);
-                kit_hud_note(&hud, 2000, line, lit[p] ? "ANOTHER LOCK IS LIT" : "SHIELDS LIGHT THE NEXT LOCK");
+                kit_hud_note(&hud, 2000, line, lit[p] ? "ANOTHER LOCK IS LIT" : "POWERLINES LIGHT THE NEXT LOCK");
             }
         }
         return;
     }
     if (crystals[p] + lit[p] >= LOCKS) return;
     for (i = 0; i < 3; i++) {
-        uint64_t m = pm_shot(SHIELDS[i]);
+        uint64_t m = pm_shot(POWERLINES[i]);
         unsigned need = hits_a_lock(p);
         if (!m || !(shot & m) || !kit_fresh(&db, m)) continue;
         if (!need) {
             lit[p] = LOCKS - crystals[p];
-            pm_log("%s: every lock is lit (%u) for player %u", SHIELDS[i], lit[p], p);
-        } else if (++shield_hits[p] >= need) {
-            shield_hits[p] = 0;
+            pm_log("%s: every lock is lit (%u) for player %u", POWERLINES[i], lit[p], p);
+        } else if (++line_hits[p] >= need) {
+            line_hits[p] = 0;
             lit[p]++;
-            pm_log("%s: a lock is lit (%u lit, %u planted) for player %u", SHIELDS[i], lit[p], crystals[p], p);
+            pm_log("%s: a lock is lit (%u lit, %u planted) for player %u", POWERLINES[i], lit[p], crystals[p], p);
         } else {
-            pm_log("%s: %u of %u for the next lock (player %u)", SHIELDS[i], shield_hits[p], need, p);
-            kit_hud_note(&hud, 1500, "CRYSTALS GROWING", "ONE MORE SHIELD LIGHTS A LOCK");
+            pm_log("%s: %u of %u for the next lock (player %u)", POWERLINES[i], line_hits[p], need, p);
+            kit_hud_note(&hud, 1500, "CRYSTALS GROWING", "ONE MORE POWERLINE LIGHTS A LOCK");
             continue;
         }
         kit_hud_note(&hud, 2000, lit[p] > 1 ? "LOCKS ARE LIT" : "LOCK IS LIT", "SHOOT THE BIG LOOP");
@@ -444,8 +450,9 @@ static void on_init(void)
     for (i = 0; i < 3; i++) shield_mask |= pm_shot(SHIELDS[i]);
     lock_mask = pm_shot(LOCK_SHOT);
     pa_load(&own);
-    pm_log("ready on %s %s: the shields (0x%llx) light the locks, %s (0x%llx) locks; towers 0x%llx 0x%llx 0x%llx; "
-           "multiball %s", pm_game(), pm_version(), (unsigned long long)shield_mask, LOCK_SHOT,
+    pm_log("ready on %s %s: the powerlines (0x%llx) light the locks, %s (0x%llx) locks; towers 0x%llx 0x%llx 0x%llx; "
+           "multiball %s", pm_game(), pm_version(),
+           (unsigned long long)(pm_shot(POWERLINES[0]) | pm_shot(POWERLINES[1]) | pm_shot(POWERLINES[2])), LOCK_SHOT,
            (unsigned long long)lock_mask, (unsigned long long)tower_mask[0], (unsigned long long)tower_mask[1],
            (unsigned long long)tower_mask[2], pm_can(PM_CAN_MULTIBALL) ? "yes" : "NOT in this port");
 }
@@ -496,6 +503,7 @@ static void on_tick(void)
     kit_hud_tick(&hud);
     kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
+    kit_shields_tick(&shields);
     if (++poll % 6 == 0) mb_now = pm_in_game() && multiball_on();
     if (poll % KIT_POLL == 0) {
         check_triggers();
@@ -506,7 +514,7 @@ static void on_tick(void)
         start("the third crystal");
     }
     if (kit_new_game(&game)) {
-        for (p = 0; p < 5; p++) crystals[p] = lit[p] = shield_hits[p] = plays[p] = 0, mb_ready[p] = 0;
+        for (p = 0; p < 5; p++) crystals[p] = lit[p] = line_hits[p] = plays[p] = 0, mb_ready[p] = 0;
         start_due = 0;
         pm_log("new game: the crystals cleared");
     }

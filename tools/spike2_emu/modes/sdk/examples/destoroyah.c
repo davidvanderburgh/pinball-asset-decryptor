@@ -24,6 +24,9 @@
  *              are full screen.
  *   INSERTS    Each aggregate's shot: far yellow and solid, near orange and blinking, close red and
  *              flickering. The perfect form: the BUILDING blinking red, faster as its clock runs out.
+ *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
+ *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
+ *              No aggregate comes to a shield until they face the player.
  *   DISPLAY    Priority 180.
  *
  * Emulator test triggers: /dump/destoroyah.start, .stop, .shot "<shot name>", .boss (the perfect form now).
@@ -63,7 +66,7 @@ static const char *const RING_SHOTS[RINGS][5] = {
 };
 
 /* ---- state ----------------------------------------------------------------------------------- */
-static uint64_t ring_mask[RINGS][5], spin_mask, boss_mask;
+static uint64_t ring_mask[RINGS][5], spin_mask, boss_mask, shield_mask;
 static unsigned ring_n[RINGS];
 static unsigned spins[5], plays[5];
 static int waiting[5];
@@ -72,6 +75,7 @@ static struct kit_game game;
 static struct kit_lamps lamps;
 static struct kit_hud hud = { .slug = FOLDER };
 static struct kit_show show_fx;
+static struct kit_shields shields;           /* PAD-379: the Premium's shield platform, turned toward the player */
 static unsigned poll, rnd = 1995;
 
 struct agg { int on; unsigned ring, at; unsigned long step_at; };
@@ -178,7 +182,7 @@ static int free_shot(unsigned ring, unsigned *at)
         k = next_random(ring_n[ring]);
         for (i = 0; i < ALIVE_MAX; i++)
             if (run.a[i].on && run.a[i].ring == ring && run.a[i].at == k) taken = 1;
-        if (!taken && ring_mask[ring][k]) {
+        if (!taken && ring_mask[ring][k] && (!(ring_mask[ring][k] & shield_mask) || kit_shields_reachable())) {
             *at = k;
             return 1;
         }
@@ -272,7 +276,7 @@ static int start(const char *why)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (kit_wait_game(MODE_NAME, why, "still lit: the next spin after it starts it")) {
+    if (kit_wait_game(MODE_NAME, why, "the next spin after it starts it")) {
         waiting[p] = 1;
         return 0;
     }
@@ -282,6 +286,7 @@ static int start(const char *why)
     }
     kit_display(KIT_DISPLAY_MODE);
     kit_isolate_list(own.give_way, own.block_ids, own.block_n);
+    kit_shields_in(&shields);
     run.on = 1;
     run.player = p;
     run.won = 0;
@@ -309,6 +314,7 @@ static void end(const char *why)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);
+    kit_shields_out(&shields, why);
     kit_end_after(TOTAL_SHOWN_MS);
     if (kit_natural_end(why) && !pa_call(&own, run.won ? "won" : "lost") && !(run.won))
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
@@ -504,6 +510,7 @@ static void on_init(void)
     }
     spin_mask = pm_shot(SPIN_SHOT);
     boss_mask = pm_shot(BOSS_SHOT);
+    shield_mask = pm_shot("Shield target left") | pm_shot("Shield target center") | pm_shot("Shield target right");
     rnd ^= (unsigned)pm_ms();
     pa_load(&own);
     pm_log("ready on %s %s: %d spins of %s (0x%llx) start it; %u far, %u near and %u close shots; the perfect form "
@@ -530,6 +537,7 @@ static void on_tick(void)
     kit_hud_tick(&hud);
     kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
+    kit_shields_tick(&shields);
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) spins[p] = plays[p] = 0, waiting[p] = 0;

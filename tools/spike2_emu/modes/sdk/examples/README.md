@@ -125,6 +125,18 @@ upper playfield (left, center, right); the GODZILLA target is upper left, beside
 MASER target is on the left side, halfway down; the three SHIELD targets are on the right side,
 halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the top.
 
+**The shields on a Premium/LE (PAD-379).** There the shield targets sit on a platform a motor turns, and most of
+the game it faces AWAY: the shield ramp spinner faces the player and the shields cannot be hit from the flippers
+(the game turns them toward the player for parts of its Mechagodzilla multiball). So the modes that play the
+shields - MELTDOWN, FINAL WARS, KIRYU, BIOLLANTE, DESTOROYAH and SPACEGODZILLA's M.O.G.U.E.R.A. multiball - turn the
+platform toward the player 1.5 s after they start (the ball that started the mode is clear of it by then) and back
+away when they end (`pm_shield`, `kit_shields_in` / `kit_shields_out`). A shield hit makes the game turn the platform
+away (its own reaction); the mode turns it back 1.5 s later, so the shield recoils and returns. If one of the game's own modes takes over,
+the platform is left as that mode wants it. While it turns, or if an operator switched the motor off, the modes put
+nothing they need on the shields (`kit_shields_reachable`). A Pro's two shield targets are fixed and face the
+player: nothing turns. ANGUIRUS is the exception: it joins the game's own battles, and those play with the shields
+away, so on a Premium its spikes are only reachable when the battle itself has the shields toward the player.
+
 ### MELTDOWN (`meltdown.c`): a multiball of our own
 
 - **How to light it:** hit the Magna-Grab CAPTIVE BALL (the Godzilla target) 10 times in a game. Each hit
@@ -286,8 +298,9 @@ and calls cut from the films.
 
 ### SPACEGODZILLA (`spacegodzilla.c`): locks that are harder to light each time
 
-- **How to light a lock:** the SHIELD targets. The first time any shield target lights all three locks; the second time
-  each shield hit lights one lock; from the third, two shield hits a lock (EHoH's Garage, Batman '66's villain locks).
+- **How to light a lock:** the POWERLINE targets. The first time any powerline lights all three locks; the second time
+  each powerline hit lights one lock; from the third, two powerline hits a lock (EHoH's Garage, Batman '66's villain
+  locks). The powerlines face the player on every Godzilla; the three in one ball also start KING GHIDORAH.
 - **How to lock:** the BIG LOOP while a lock is lit: SpaceGodzilla plants CRYSTAL 1, 2, 3 (250,000 times the crystal's
   number). The locks are virtual and wait across balls. Nothing lights or locks during a multiball or another of our
   modes.
@@ -298,7 +311,8 @@ and calls cut from the films.
   20 s, worth every jackpot since the last super (Metallica's Casket). The first three supers add a ball. Then the towers
   grow back one jackpot stronger.
 - **In turn:** the first multiball is CRYSTAL TOWERS (jackpots from 1,000,000); the second M.O.G.U.E.R.A. (from
-  1,500,000, stronger towers, and every SHIELD target a spiral grenade: +250,000 on every jackpot); the third and after
+  1,500,000, stronger towers, and every SHIELD target a spiral grenade: +250,000 on every jackpot, the shields turned
+  toward the player for it on a Premium); the third and after
   SPACE BEAST (from 2,000,000, and every 5th jackpot lights the super too, EHoH's Attic Attack).
 - **How it ends:** one ball left, a tilt, one of the game's own modes beginning.
 - **Inserts:** a lit lock, the BIG LOOP blinking purple; the towers purple, blinking on their last jackpot; the super, the
@@ -310,7 +324,8 @@ and calls cut from the films.
 - **How to start it:** spin the MECHAGODZILLA spinner (the shield ramp's) 30 times; every spin counts. Then 40, then 50
   (Metallica's Sparky: each start costs more).
 - **What to do:** a 40 s clock. The lit shots charge Kiryu's ABSOLUTE ZERO: the ramps, the Building and the Big loop 15%,
-  the Maser 10%, each shield target 8%, every spin of the Mechagodzilla spinner 1%. Each shot pays 750,000; a lit shot
+  the Maser 10%, each shield target 8% (turned toward the player for the mode on a Premium, which closes the spinner),
+  every spin of the Mechagodzilla spinner 1%. Each shot pays 750,000; a lit shot
   with under 15 s left puts the clock back to 15.
 - **Fire or push your luck:** from 100% the CAPTIVE BALL (Godzilla) or the ACTION BUTTON fires it: 10,000,000 times the
   multiplier plus a quarter of everything the mode scored, and KIRYU WINS. Or charge on: 200% is x2, 300% x3, 400% x4. From
@@ -326,7 +341,8 @@ and calls cut from the films.
 - **How to start it:** 6 ramp shots in a game (either ramp); then 8, then 10.
 - **What to do:** a 40 s clock. EVERY playfield switch scores the switch value (100,000, +25,000 for each vine bank cut)
   and adds it to the SAP JACKPOT (TWD's Blood Bath, Metallica's FUEL). The three SHIELD targets and the three POWERLINE
-  targets are two banks of vines: a whole bank cut COLLECTS the sap jackpot times the banks cut so far (x1, x2, x3) and
+  targets are two banks of vines (the shields turned toward the player for the mode on a Premium; on a Pro its two
+  shield targets are the bank): a whole bank cut COLLECTS the sap jackpot times the banks cut so far (x1, x2, x3) and
   grows back. A vine with under 15 s left puts the clock back to 15; each pop bumper hit gives a second back.
 - **The beast:** after three collects Biollante comes back as the BEAST: 20 s, and the BUILDING is the FINAL BLOW, worth
   everything the three collects paid.
@@ -339,7 +355,8 @@ and calls cut from the films.
 - **What to do:** aggregates come over the top at the POWERLINES (far, x1) and advance every few seconds to the RAMPS,
   the BUILDING or the BIG LOOP (near, x2), then to the MASER, the SHIELDS or the CAPTIVE BALL (close, x4), then into
   the city. Up to two at a time. A kill pays 1,000,000 (+250,000 a wave) times how close it was: let one come closer
-  for more, at your risk.
+  for more, at your risk. On a Premium the shields turn toward the player for the mode, and no aggregate comes to a
+  shield until they face the player.
 - **Waves:** 3, 4 and 5 kills; they advance every 7, 6 and 5 s. A cleared wave pays every kill of the wave again.
 - **The city:** an aggregate that gets past the close shots hits the city; three hits and Destoroyah wins.
 - **The perfect form:** after wave 3, the BUILDING for 25 s: three hits of 5,000,000, the third the SUPER JACKPOT,

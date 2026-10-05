@@ -725,6 +725,75 @@ static KIT_UNUSED int kit_natural_end(const char *why)
              kit_same(why, "the game's own mode began"));
 }
 
+/* ---- PAD-379: the shield platform ------------------------------------------------------------------------------
+ * Godzilla Premium/LE carries its shield targets on a platform a motor turns (pm_shield): AWAY, the game's home,
+ * where the spinner side faces the player and the shields cannot be hit; or TOWARD the flippers. A mode that plays
+ * the shield targets turns them in KIT_SHIELD_DELAY_MS after it starts (the ball that started it is clear of the
+ * platform first) and back AWAY when it ends - unless the game's own mode began, which has the platform now. A
+ * Pro's shield targets are fixed and face the player: nothing turns. kit_shields_reachable() says whether a shield
+ * can be hit now: a mode puts nothing it NEEDS on the shields while it says 0 (still turning, or an operator
+ * switched the motor off).
+ * The GAME turns the platform away by itself when a shield target is hit while it faces the player (its own
+ * Mechagodzilla shield reaction: emulator run shield2, 30 ms after each hit), and its ball search pulses it: the kit
+ * turns it back KIT_SHIELD_BACK_MS after it was left facing away, for as long as the mode runs. */
+#define KIT_SHIELD_DELAY_MS 1500
+#define KIT_SHIELD_BACK_MS  1500           /* knocked away under the mode: toward the player again after this */
+struct kit_shields { int asked; unsigned again; unsigned long due, away_since; };
+
+static KIT_UNUSED void kit_shields_in(struct kit_shields *s)
+{
+    s->asked = 0;
+    s->due = 0;
+    if (pm_shield_position() < 0) return;                  /* fixed shields (a Pro) */
+    s->due = pm_ms() + KIT_SHIELD_DELAY_MS;
+}
+
+static KIT_UNUSED void kit_shields_tick(struct kit_shields *s)
+{
+    if (s->asked) {
+        if (pm_shield_position() != PM_SHIELD_AWAY) s->away_since = 0;
+        else if (!s->away_since) s->away_since = pm_ms() ? pm_ms() : 1;
+        else if (pm_ms() - s->away_since >= KIT_SHIELD_BACK_MS) {
+            s->away_since = 0;
+            s->again++;
+            if (s->again <= 3 || s->again % 10 == 0)
+                pm_log("the shields were turned away under the mode (a shield hit, the ball search): toward the "
+                       "player again (%u)", s->again);
+            pm_shield(PM_SHIELD_TOWARD);
+        }
+    }
+    if (!s->due || pm_ms() < s->due) return;
+    s->due = 0;
+    if (pm_shield_position() == PM_SHIELD_TOWARD) {
+        pm_log("the shields already face the player");
+        return;
+    }
+    s->asked = pm_shield(PM_SHIELD_TOWARD);
+    s->again = 0;
+    s->away_since = 0;
+    pm_log(s->asked ? "the shields turn toward the player" : "the shields stay away: the motor refused (switched off?)");
+}
+
+static KIT_UNUSED void kit_shields_out(struct kit_shields *s, const char *why)
+{
+    int asked = s->asked;
+    s->asked = 0;
+    s->due = 0;
+    if (!asked) return;
+    if (kit_same(why, "the game's own mode began")) {
+        pm_log("the shields stay where they are: the game's own mode has the platform now");
+        return;
+    }
+    if (pm_shield(PM_SHIELD_AWAY)) pm_log("the shields turn away again (%s)", why);
+}
+
+/* 1 = a shield target can be hit now: fixed shields, or the platform stopped facing the player */
+static KIT_UNUSED int kit_shields_reachable(void)
+{
+    int at = pm_shield_position();
+    return at < 0 || at == PM_SHIELD_TOWARD;
+}
+
 /* 1 = one of the game's own modes is running now (asked by a mode of ours that is running) */
 static KIT_UNUSED int kit_game_began(void)
 {

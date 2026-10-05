@@ -429,7 +429,7 @@ static int start(const char *why)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (kit_wait_game(MODE_NAME, why, "still lit: the Building after it starts it")) return 0;   /* PAD-347 */
+    if (kit_wait_game(MODE_NAME, why, "the Building after it starts it")) return 0;   /* PAD-347 */
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_MODE);
     kit_isolate_list(own.give_way, own.block_ids, own.block_n);

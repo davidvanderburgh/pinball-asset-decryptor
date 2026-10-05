@@ -56,13 +56,15 @@ Star Trek, Godzilla.
 | Mode | Lyman mechanic | Starts on | Monster and film |
 |---|---|---|---|
 | GODZILLA ANGRY | EHoH's Gappa Angry: a meter of every switch, staged locks, a 6-ball multiball, failing still pays, Scream Test | the RAGE meter, then the Building | Baby Godzilla taken by G-Force: Godzilla vs. Mechagodzilla II (1993) |
-| SPACEGODZILLA | EHoH's Garage and Batman '66's villain locks (harder each time), three multiballs in turn, supers worth the sum, the first supers add a ball | the shield targets light locks, the Big loop locks | SpaceGodzilla's crystal towers: Godzilla vs. SpaceGodzilla (1994) |
+| SPACEGODZILLA | EHoH's Garage and Batman '66's villain locks (harder each time), three multiballs in turn, supers worth the sum, the first supers add a ball | the powerline targets light locks, the Big loop locks | SpaceGodzilla's crystal towers: Godzilla vs. SpaceGodzilla (1994) |
 | KIRYU | Metallica's Sparky (a meter, each start costs more) and cash out or carry on | 30 spins of the Mechagodzilla spinner (+10 a time) | Kiryu's Absolute Zero: Godzilla Against Mechagodzilla (2002) |
 | BIOLLANTE | TWD's Blood Bath and Metallica's FUEL (every switch scores into a jackpot a bank collects), generous clocks | 6 ramps (+2 a time) | Biollante, rose and beast: Godzilla vs. Biollante (1989) |
 | DESTOROYAH | TWD's Horde (enemies advance; closer kills pay more; waves one kill longer; a cleared wave pays it again) | 30 center spins (+10 a time) | the Destoroyah aggregates: Godzilla vs. Destoroyah (1995) |
 
 Every start shot is one no other pack mode qualifies on (KING GHIDORAH the powerlines, OXYGEN DESTROYER the left
-spinner, MASER BARRAGE the Maser, MELTDOWN the captive ball, FINAL WARS the Building when lit). GODZILLA ANGRY's Building
+spinner, MASER BARRAGE the Maser, MELTDOWN the captive ball, FINAL WARS the Building when lit). SPACEGODZILLA's locks
+LIGHT at the powerlines (they started at the shields: see "The shield platform" below), so the powerline that lights
+them also counts toward KING GHIDORAH's three, and its "POWERLINES 1 OF 3" has the HUD for that moment. GODZILLA ANGRY's Building
 is FINAL WARS's too when both are lit; whichever is asked first starts and the other stays lit.
 
 **Isolation (PAD-347).** All five start only while none of the game's own modes runs and one ball is in play (a refused
@@ -138,8 +140,40 @@ multiballs; ours count a shot as a lock and the ball goes on, the way modern Ste
 - The game's own award displays (LOOPS, BUILDING ATTACK, POWERLINE ATTACK AWARD, TANKS ADVANCE, its LOCK IS LIT) come
   through over the HUD while ours run, as PAD-353 decided; the middle words step aside and come back.
 
+## The shield platform (David, 2026-10-05)
+
+David: "In order for the shield targets to be accessible from the flippers in the premium game, the platform it's on
+needs to be mechanically rotated towards the player ... Do we have control of this mech?" and "During most monster
+modes in the game, the shields are facing away (spinner is accessible). Shields are usually only towards the player
+during parts of mecha Godzilla multi-ball."
+
+- **What it is (read off godzilla_le 1.16).** `ShieldMotor` at 0x7bbf88 (a `SingleDirectionCoilMotor`: SHIELD MOTOR,
+  node 9 coil 2). Switch 86 SHIELD MOTOR OPEN = away (home), 87 SHIELD MOTOR CLOSED = toward. Its go-to is vtable slot
+  29 (0x1db3d8): refuses when the motor is switched off in the adjustments, else starts the move process (target +48,
+  +44 the switch on arrival). Slot 9 (0x1db36c, the service test's) is the same behind an owner-process check.
+- **The trap I fell in first:** 0x1da004 looked like the move (it takes the motor and a position switch) but only
+  stores +50, a position the move process assumes when a move fails. Run shield1: every mode logged its turn, the
+  motor never ran. Run shield2 with slot 29: it turns.
+- **The game knocks it away.** A shield hit while it faces the player makes the game turn it away 30 ms later and
+  leave it (RuleMechagodzillaShield's shot handler, outside its multiball too); the ball search pulses it. The kit
+  turns it back 1.5 s after it was left facing away, for as long as the mode runs.
+- **SDK:** `pm_shield(PM_SHIELD_TOWARD | PM_SHIELD_AWAY)`, `pm_shield_position()`, `PM_CAN_SHIELD`; the port's shield
+  lines (Premium/LE only); kit `kit_shields_in` / `kit_shields_tick` / `kit_shields_out` / `kit_shields_reachable`.
+  A Pro has no platform (its two shields are fixed): every call is a no-op there.
+- **The modes:** KIRYU, BIOLLANTE, DESTOROYAH, MELTDOWN, FINAL WARS and SPACEGODZILLA's M.O.G.U.E.R.A. turn it toward
+  the player 1.5 s after they start (the starting ball clear of it) and back when they end, unless the game's own mode
+  took over. SPACEGODZILLA's locks now LIGHT at the powerlines (they were the shields). BIOLLANTE lights its shield
+  vines, and DESTOROYAH sends aggregates to the shields, only while they face the player. Two fixes on the way:
+  BIOLLANTE's banks are the targets the game has (a Pro's shield bank is two), KIRYU lights on a Pro's right spinner.
+- **Not changed: ANGUIRUS.** It joins the game's own battles, which play with the shields away, so on a Premium its
+  spikes are only reachable when the battle turns them; turning the platform under the game's battle would take the
+  spinner the battle may need. Owed: David's call.
+- **Proven:** desk (`tests/test_spike2_intricate_modes.py`, the harness plays the platform, the game's knock-away and a
+  Pro); emulator runs shield2 and shield3 (MODE_SDK.md "The shield platform").
+
 ## Owed
 
+- ANGUIRUS on a Premium (above): leave it, give it other targets while the shields face away, or turn them.
 - A machine. Everything above is the emulator: the feel of the meter's pace (100 to 200 hits a level), the lock
   shots, and each mode's values want a real game.
 - Nothing is cut from a film into the repo: the Modes tab's Examples cut each mode's assets from the person's own copy

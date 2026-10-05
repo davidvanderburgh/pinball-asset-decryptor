@@ -8,7 +8,7 @@
  *   LIGHT IT   Spin the MECHAGODZILLA spinner (the shield ramp's) 30 times; every spin counts. It starts at
  *              once. The next time it takes 40 spins, then 50...
  *   CHARGE     A 40 s clock. The lit shots charge the cannon: the RAMPS, the BUILDING and the BIG LOOP 15%
- *              each, the MASER 10%, each SHIELD target 8%, every spin of the Mechagodzilla spinner 1%. Each
+ *              each, the MASER 10%, each SHIELD target 8%, every spin of the Mechagodzilla spinner 1% (the shields close it on a Premium). Each
  *              shot pays 750,000. A lit shot with under 15 s left puts the clock back to 15.
  *   FIRE       From 100% ABSOLUTE ZERO is READY: the CAPTIVE BALL (Godzilla) or the ACTION BUTTON fires it:
  *              10,000,000 times the multiplier, plus a quarter of everything the mode has scored. Firing
@@ -24,6 +24,8 @@
  *              Kiryu sparking; the shot and the endings are full screen.
  *   INSERTS    The charging shots ice blue; ready: the CAPTIVE BALL (MAGNA GRAB) and the ACTION BUTTON
  *              flashing white; overheating: flashing red, faster as the seconds run out.
+ *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
+ *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
  *   DISPLAY    Priority 180.
  *
  * Emulator test triggers: /dump/kiryu.start, .stop, .shot "<shot name>", .charge "<percent>" (set the charge).
@@ -35,6 +37,7 @@
 #define MODE_NAME          "KIRYU"
 #define FOLDER             "kiryu"
 #define SPIN_SHOT          "Shield ramp spinner"
+#define SPIN_SHOT_PRO      "Right spinner"     /* the same spinner on Godzilla Pro */
 #define FIRE_SHOT          "Godzilla target"
 #define BUTTON_SHOT        "Action button"
 #define SPINS_FIRST        30
@@ -66,6 +69,7 @@ static struct kit_game game;
 static struct kit_lamps lamps;
 static struct kit_hud hud = { .slug = FOLDER };
 static struct kit_show show_fx;
+static struct kit_shields shields;           /* PAD-379: the Premium's shield platform, turned toward the player */
 static unsigned poll;
 
 enum { PHASE_CHARGE, PHASE_FIRED };
@@ -196,7 +200,7 @@ static int start(const char *why)
         pm_log("not started (%s): no game in play", why);
         return 0;
     }
-    if (kit_wait_game(MODE_NAME, why, "still lit: the next spin after it starts it")) {
+    if (kit_wait_game(MODE_NAME, why, "the next spin after it starts it")) {
         waiting[p] = 1;
         return 0;
     }
@@ -206,6 +210,7 @@ static int start(const char *why)
     }
     kit_display(KIT_DISPLAY_MODE);
     kit_isolate_list(own.give_way, own.block_ids, own.block_n);
+    kit_shields_in(&shields);
     run.on = 1;
     run.player = p;
     run.phase = PHASE_CHARGE;
@@ -234,6 +239,7 @@ static void end(const char *why)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);
+    kit_shields_out(&shields, why);
     kit_end_after(TOTAL_SHOWN_MS);
     if (kit_natural_end(why) && !pa_call(&own, run.fired ? "won" : "lost") && !(run.fired))
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
@@ -377,6 +383,7 @@ static void on_init(void)
         if (!charge_mask[i]) pm_log("this port has no \"%s\"", CHARGE[i].shot);
     }
     spin_mask = pm_shot(SPIN_SHOT);
+    if (!spin_mask) spin_mask = pm_shot(SPIN_SHOT_PRO);
     fire_mask = pm_shot(FIRE_SHOT);
     button_mask = pm_shot(BUTTON_SHOT);
     pa_load(&own);
@@ -430,6 +437,7 @@ static void on_tick(void)
     kit_hud_tick(&hud);
     kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
+    kit_shields_tick(&shields);
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) spins[p] = plays[p] = 0, waiting[p] = 0;

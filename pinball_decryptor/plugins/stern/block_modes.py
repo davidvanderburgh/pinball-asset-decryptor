@@ -21,6 +21,9 @@ THE PROGRAM (``blocks.json``)::
               "timer": {"on": true, "label": "RAMPS", "icon": "maser"},         the badge counting its clock
               "gauge": {"on": false, "label": "", "kind": "diamond", "count": 3, "color": "#ff7800",
                         "value": {...}}},                                       pips on the right edge
+      "clips": [{"name": "sever", "file": "sever.mp4"}],      PAD-374: its own clips and sounds,
+      "sounds": [{"name": "roar", "file": "roar.wav", "priority": 4}],   files in its folder
+      "music": "music.wav",       its own music bed while it runs ("" = the game's music)
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
          "do": [{"op": "if", "cond": {...}, "then": [...], "else": [...]}, ...]}
@@ -32,7 +35,11 @@ ends, a shot is made (any time, or only while the mode runs or does not), any sh
 seconds while it runs, N seconds left, the ball drains, one of the game's events. Blocks: start
 or end the mode, score, set or change a variable, if / else, a callout, words on the mode's
 screen, light or free a shot's inserts, add time or set the clock (to any value: a variable,
-the seconds left, a sum), a multiball, a line in the log. Values: a
+the seconds left, a sum), a multiball, a line in the log, and (PAD-374) play one of the mode's
+own clips (full screen, behind the HUD once, or behind the HUD over and over while it runs) or
+one of its own sounds (with a callout of the game's when the card could not carry it), and
+(PAD-376) run a light show (a ready-made one, or its own steps: the examples' kit_show) and light
+a shot at a pace of its own (any value, in ms) or blinking faster as the clock runs down. Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running.
@@ -56,6 +63,20 @@ The C is the SDK's template (``sdk/template_mode.c``) in shape: static state, ne
 test triggers (``/dump/<slug>.start`` / ``.stop``) so the tab's Start mode now and End mode reach
 it. Its names follow ``mode_tryit.code_mode_text`` (``PadMode_<slug>_Screen``, ``<ident>_mode``)
 so a rename rewrites it the way it rewrites any code mode.
+
+ITS OWN CLIPS AND SOUNDS (PAD-374) are a code mode's: every save puts them in the mode's
+``assets.json`` (``clips``, ``calls``, ``music``; :func:`_sync_assets`), so Write and Try it carry
+them as they carry an example's, and the C plays them by name through ``pad_mode_assets.h``. A
+clip's or sound's name is its cue there. The C starts the mode's own assets itself rather than
+with ``pa_start``, so no name is special: a clip called "intro" or "loop" plays when a block
+says, never on its own.
+
+LIGHTS (PAD-376). The shots the blocks light are kept in a table (``LIT``), not only sent: a light
+show (the kit's ``kit_show``, its engine written into the C only when a Light show block is there)
+paints every placed insert while it runs, and at its end hands them back and sends the table
+again; a blink that hurries is sent again each time the clock moves it to a faster pace; and the
+same light lit again is not sent again, so a blink keeps its beat. A show started in When the
+mode ends runs on after the mode, as the examples' end shows do.
 """
 from __future__ import annotations
 
@@ -91,8 +112,8 @@ HATS = {
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
 RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game"}
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
-              "light_shot", "lights_off", "add_time", "set_time", "multiball", "log",
-              "hud_text", "hud_counter", "hud_gauge", "hud_award")
+              "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
+              "show", "hud_text", "hud_counter", "hud_gauge", "hud_award")
 #: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
 HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus")
 GAUGE_KINDS = ("diamond", "segment", "spike")
@@ -104,14 +125,90 @@ AWARD_SECONDS_MAX = 10
 KIT_FILE = "intricate_kit.h"
 DISPLAY_PRIORITY = 180           # the kit's KIT_DISPLAY_MODE: what pm_display_covered watches for
 TOTAL_MS = 3000                  # the HUD's TOTAL stays up this long after the end
+#: a lit shot's pattern: the SDK's, and its pace (ms) when the block gives none. "hurry" is a
+#: blink that quickens as the clock runs down (PAD-376, the kit's kit_hurry_ms)
 PATTERNS = {"solid": ("PM_LAMP_SOLID", 0), "blink": ("PM_LAMP_BLINK", 500),
-            "pulse": ("PM_LAMP_PULSE", 1600), "chase": ("PM_LAMP_CHASE", 150)}
+            "pulse": ("PM_LAMP_PULSE", 1600), "chase": ("PM_LAMP_CHASE", 150),
+            "hurry": ("PM_LAMP_BLINK", 0)}
+RATE_MIN, RATE_MAX = 20, 5000    # a blink's, pulse's or chase's pace, ms
+# ---- light shows (PAD-376): the kit's kit_show, steps of a pattern over the placed inserts ----
+#: a step's pattern: its C name, and the words the page shows
+FX = {"burst": ("FX_BURST", "a ring bursting out"), "implode": ("FX_IMPLODE", "a ring closing in"),
+      "sweep_up": ("FX_SWEEP_UP", "a sweep up"), "sweep_down": ("FX_SWEEP_DOWN", "a sweep down"),
+      "sweep_lr": ("FX_SWEEP_LR", "a sweep left to right"), "sweep_rl": ("FX_SWEEP_RL", "a sweep right to left"),
+      "spin": ("FX_SPIN", "a turning beam"), "rainbow": ("FX_RAINBOW", "a turning rainbow"),
+      "strobe": ("FX_STROBE", "a strobe"), "sparkle": ("FX_SPARKLE", "sparkles"),
+      "fire": ("FX_FIRE", "fire"), "pulse": ("FX_PULSE", "breathing"),
+      "chase": ("FX_CHASE_RING", "a chase round"), "fade": ("FX_FADE_OUT", "a fade to dark"),
+      "bolts": ("FX_BOLTS", "lightning")}
+#: where a step centres: a place on the playfield picture (x 0-300 across, y 0-600 down)
+PLACES = {"center": ("the middle", 150, 330), "top": ("the top", 150, 120),
+          "flippers": ("the flippers", 150, 560), "left": ("the left", 60, 330),
+          "right": ("the right", 240, 330)}
+#: what the general illumination does during a step (the kit's KIT_GI_*)
+GI = {"keep": "GI: the game's", "dark": "GI: dark", "flash": "GI: flashing"}
+SHOW_STEPS = 10                  # the kit's KIT_SHOW_STEPS
+STEP_MS_MIN, STEP_MS_MAX = 50, 10000
+FX_RATE_MAX = 2000
+
+
+def _step(fx, ms, a, b, at, rate=0, gi="keep"):
+    return {"fx": fx, "ms": ms, "a": a, "b": b, "at": at, "rate": rate, "gi": gi}
+
+
+#: the ready-made shows a Light show block picks from (made after the examples' own)
+SHOWS = {
+    "burst": ("A burst of gold", [
+        _step("strobe", 450, "#ffffff", "#ffb000", "center", 55, "flash"),
+        _step("burst", 700, "#ffffff", "#ffb000", "center", 0, "dark"),
+        _step("fade", 400, "#ffb000", "#000000", "center")]),
+    "beams": ("Blue beams", [
+        _step("strobe", 450, "#ffffff", "#0050ff", "center", 55, "flash"),
+        _step("spin", 1600, "#a0e0ff", "#000000", "center", 110, "dark"),
+        _step("sweep_lr", 500, "#ffffff", "#0050ff", "center", 0, "dark"),
+        _step("sweep_rl", 500, "#ffffff", "#0050ff", "center", 0, "dark"),
+        _step("fade", 400, "#0050ff", "#000000", "center")]),
+    "lightning": ("Lightning", [
+        _step("bolts", 1500, "#ffb000", "#000000", "center", 190, "dark"),
+        _step("strobe", 500, "#ffffff", "#ffb000", "center", 60, "flash"),
+        _step("burst", 800, "#ffb000", "#ff4000", "top", 0, "dark"),
+        _step("fade", 400, "#ff4000", "#000000", "center")]),
+    "fire": ("Fire", [
+        _step("strobe", 500, "#ffffff", "#ff3000", "center", 60, "flash"),
+        _step("fire", 1200, "#ffc000", "#ff3000", "center", 0, "dark"),
+        _step("fade", 400, "#ff3000", "#000000", "center")]),
+    "rainbow": ("A rainbow (a win)", [
+        _step("burst", 800, "#ffffff", "#ffb000", "center", 0, "flash"),
+        _step("rainbow", 1800, "#000000", "#000000", "center", 60),
+        _step("fade", 500, "#ffb000", "#000000", "center")]),
+    "sweep": ("Sweeps up and down", [
+        _step("sweep_up", 600, "#ffffff", "#00c040", "center", 0, "dark"),
+        _step("sweep_down", 600, "#ffffff", "#00c040", "center", 0, "dark"),
+        _step("chase", 900, "#00ff60", "#000000", "center", 40),
+        _step("fade", 400, "#00c040", "#000000", "center")]),
+    "sparkle": ("Sparkles", [
+        _step("sparkle", 1200, "#ffffff", "#4000a0", "center", 0, "dark"),
+        _step("pulse", 1200, "#a040ff", "#200040", "center", 300),
+        _step("fade", 500, "#a040ff", "#000000", "center")]),
+    "fizzle": ("A fizzle (a loss)", [
+        _step("spin", 1200, "#a000ff", "#000000", "center", 90, "dark"),
+        _step("implode", 900, "#ffb000", "#a000ff", "center", 0, "dark"),
+        _step("fade", 700, "#a000ff", "#000000", "center")]),
+}
 #: the game's own callouts a block can name by what they say (every port carries these roles)
 CALLOUT_ROLES = {"ten_seconds": "Ten seconds left", "time_up": "Time is up"}
 NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "player", "op")
 BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock")
 OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
 CMPS = {"<": "<", "<=": "<=", "=": "==", "!=": "!=", ">=": ">=", ">": ">"}
+#: PAD-374: where a clip block plays the mode's own clip
+CLIP_WHERE = {"full": "full screen", "behind": "behind the HUD, once",
+              "loop": "behind the HUD, over and over"}
+#: a clip's or sound's name: its cue in assets.json and <slug>.assets (code_modes.CUE_RE)
+MEDIA_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
+MAX_CLIPS = 12                   # pad_mode_assets.h PA_CLIPS_MAX
+MAX_SOUNDS = 16                  # pad_mode_assets.h PA_CALLS_MAX
+VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
 VAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _]{0,23}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -157,6 +254,9 @@ def normalize(data):
     out["ends_on_drain"] = bool(out.get("ends_on_drain", True))
     out["screen"] = bool(out.get("screen", False))
     out["vars"] = [v for v in (out.get("vars") or []) if isinstance(v, dict)]
+    out["clips"] = [c for c in (out.get("clips") or []) if isinstance(c, dict)]
+    out["sounds"] = [c for c in (out.get("sounds") or []) if isinstance(c, dict)]
+    out["music"] = str(out.get("music") or "")
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
     out["hud"] = _norm_hud(out.get("hud"))
     for s in out["scripts"]:
@@ -261,21 +361,67 @@ def _copy_kit(folder):
 
 def _sync_assets(project, slug, program):
     """The mode's assets.json says its name, its clock and whether it has a screen of its own
-    (the build makes the screen: a panel with its name, and a line of words the blocks write)."""
+    (the build makes the screen: a panel with its name, and a line of words the blocks write),
+    and (PAD-374) its own clips, sounds and music, so Write carries them as a code mode's."""
     from . import code_modes as CM
     try:
         spec = CM.load(project, slug)
     except (OSError, ValueError):
         spec = CM.CodeAssets(screen=False)
     hud = hud_spec(program, slug)
+    clips, calls = media_assets(program)
     changed = (spec.name != (program["name"] or slug.upper()) or bool(spec.screen) != program["screen"]
-               or spec.seconds != max(1, program["seconds"] or 60) or dict(spec.hud or {}) != hud)
+               or spec.seconds != max(1, program["seconds"] or 60)
+               or (spec.clips or {}) != clips or (spec.calls or {}) != calls
+               or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud)
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
         spec.screen = program["screen"]
         spec.seconds = max(1, program["seconds"] or 60)
         spec.hud = hud
+        spec.clips = clips
+        spec.calls = calls
+        spec.music = program["music"]
         CM.save(project, slug, spec)
+
+
+def media_assets(program):
+    """``(clips, calls)`` as assets.json holds them: ``{name: file}`` and ``{name: {"wav",
+    "priority"}}``, every well-named entry with a file (the first of a name wins)."""
+    clips, calls = {}, {}
+    for c in program.get("clips") or []:
+        name, f = str(c.get("name") or ""), str(c.get("file") or "")
+        if MEDIA_RE.match(name) and f and name not in clips and len(clips) < MAX_CLIPS:
+            clips[name] = f
+    for c in program.get("sounds") or []:
+        name, f = str(c.get("name") or ""), str(c.get("file") or "")
+        if MEDIA_RE.match(name) and f and name not in calls and len(calls) < MAX_SOUNDS:
+            calls[name] = {"wav": f, "priority": _priority(c.get("priority"))}
+    return clips, calls
+
+
+def _priority(v):
+    try:
+        p = int(v)
+    except (TypeError, ValueError):
+        return 4
+    return p if 1 <= p <= 7 else 4
+
+
+def media_name(stem, taken=()):
+    """A clip's or sound's name from its file's name: lower-case letters, digits and _, starting
+    with a letter, 15 at most, and not one of ``taken``."""
+    base = re.sub(r"[^a-z0-9_]+", "_", str(stem or "").lower()).strip("_")
+    if not base or not base[0].isalpha():
+        base = "s_" + base if base else "sound"
+    base = base[:15].rstrip("_") or "sound"
+    taken = {str(t).lower() for t in taken or ()}
+    name, n = base, 2
+    while name in taken:
+        tail = "_%d" % n
+        name = base[:15 - len(tail)] + tail
+        n += 1
+    return name
 
 
 def regenerate(project, slug, name=None):
@@ -351,11 +497,12 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
-def problems(program, shots=None, events=None):
+def problems(program, shots=None, events=None, folder=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
-    have is named here. The C is written anyway (a missing shot is 0 to the game, which never
-    matches), so a half-made program always saves."""
+    have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
+    must be. The C is written anyway (a missing shot is 0 to the game, which never matches),
+    so a half-made program always saves."""
     program = normalize(program)
     out = []
     names = [str(v.get("name") or "") for v in program["vars"]]
@@ -371,9 +518,13 @@ def problems(program, shots=None, events=None):
         out.append("%d variables: %d at most." % (len(names), MAX_VARS))
     if len(program["scripts"]) > MAX_SCRIPTS:
         out.append("%d scripts: %d at most." % (len(program["scripts"]), MAX_SCRIPTS))
+    clips = _check_media(program["clips"], "clip", MAX_CLIPS, folder, out)
+    sounds = _check_media(program["sounds"], "sound", MAX_SOUNDS, folder, out)
+    if program["music"] and folder is not None and not os.path.isfile(os.path.join(folder, program["music"])):
+        out.append("Its music %s is not in the mode's folder: pick it again." % program["music"])
     ctx = {"vars": set(n.lower() for n in names), "shots": set(shots) if shots is not None else None,
            "events": set(events) if events is not None else None, "count": 0, "out": out,
-           "seconds": program["seconds"]}
+           "seconds": program["seconds"], "clips": clips, "sounds": sounds}
     hud = program["hud"]
     if hud["on"]:
         for k, c in enumerate(hud["counters"]):
@@ -389,16 +540,43 @@ def problems(program, shots=None, events=None):
     return _unique(out)
 
 
+def _check_media(items, what, most, folder, out):
+    """The names of the mode's own clips (or sounds), saying what is wrong with the list."""
+    names = set()
+    if len(items) > most:
+        out.append("%d %ss of its own: %d at most." % (len(items), what, most))
+    for c in items:
+        name, f = str(c.get("name") or ""), str(c.get("file") or "")
+        if not MEDIA_RE.match(name):
+            out.append("A %s's name %r is not one: start with a lower-case letter, then lower-case "
+                       "letters, digits or _ (15 at most)." % (what, name))
+        elif name in names:
+            out.append("Two %ss are called %s." % (what, name))
+        names.add(name)
+        if not f:
+            out.append("The %s %s has no file: pick one." % (what, name))
+        elif folder is not None and not os.path.isfile(os.path.join(folder, f)):
+            out.append("The %s %s's file %s is not in the mode's folder: pick it again." % (what, name, f))
+        if what == "sound" and not _int_ok(c.get("priority", 4), 1, 7):
+            out.append("The sound %s's priority is 1 to 7." % name)
+    return names
+
+
 def notes(program):
     """What is worth knowing but does not stop a build: nothing starts the mode, a timer block
-    with no clock, words with no screen."""
+    with no clock, words with no screen, a clip behind the HUD with no loop to play it in."""
     program = normalize(program)
     ops = set()
     kinds = set()
+    wheres = set()
     for s in program["scripts"]:
         kinds.add((s.get("hat") or {}).get("kind"))
         for b in _walk(s.get("do") or []):
             ops.add(b.get("op"))
+            if b.get("op") == "clip":
+                wheres.add(b.get("where"))
+            if b.get("op") == "light_shot" and b.get("pattern") == "hurry":
+                ops.add("hurry")
     out = []
     if "start_mode" not in ops:
         out.append("No block starts the mode yet: put Start the mode in a script (Start mode now "
@@ -408,6 +586,9 @@ def notes(program):
                    "and no End the mode block.")
     if not program["seconds"] and ({"seconds_left"} & kinds or {"add_time", "set_time"} & ops):
         out.append("The mode has no clock, so seconds-left, add-time and set-the-clock blocks do nothing.")
+    if not program["seconds"] and "hurry" in ops:
+        out.append("The mode has no clock, so a shot blinking faster as time runs out blinks at "
+                   "an even pace.")
     if "words" in ops and not program["screen"]:
         out.append("Show words needs the mode's own screen: tick Its own screen.")
     hud = program["hud"]
@@ -427,6 +608,9 @@ def notes(program):
             out.append("A block fills the HUD's gauge, which is switched off: tick Gauge under Its HUD.")
         if hud["timer"]["on"] and not program["seconds"]:
             out.append("The HUD's timer badge counts the mode's clock, and it has none: it is not shown.")
+    if "behind" in wheres and "loop" not in wheres:
+        out.append("A clip behind the HUD, once, plays in the place of the mode's loop: start a "
+                   "clip over and over behind the HUD first (When the mode starts is the place).")
     return out
 
 
@@ -527,6 +711,15 @@ def _check_stack(stack, depth, where, ctx):
                     ctx["out"].append("%s lights a shot in no colour." % where)
                 if b.get("pattern") not in PATTERNS:
                     ctx["out"].append("%s lights a shot in no pattern." % where)
+                rate = b.get("rate")
+                if rate is not None and b.get("pattern") not in ("solid", "hurry"):
+                    _check_num(rate, where, ctx)
+                    if (isinstance(rate, dict) and rate.get("k") == "num"
+                            and _int_ok(rate.get("v"), -NUMBER_MAX, NUMBER_MAX)
+                            and not _int_ok(rate.get("v"), RATE_MIN, RATE_MAX)):
+                        ctx["out"].append("%s lights a shot at a pace of %d to %d ms." % (where, RATE_MIN, RATE_MAX))
+        elif op == "show":
+            _check_show(b, where, ctx)
         elif op in ("add_time", "set_time"):
             secs = b.get("seconds")
             _check_num(secs, where, ctx)
@@ -567,6 +760,71 @@ def _check_stack(stack, depth, where, ctx):
                 _check_num(b.get("value"), where, ctx)
             if not _int_ok(b.get("seconds"), 1, AWARD_SECONDS_MAX):
                 ctx["out"].append("%s shows an award for 1 to %d seconds." % (where, AWARD_SECONDS_MAX))
+        elif op == "clip":
+            if not b.get("clip"):
+                ctx["out"].append("%s plays a clip with none chosen." % where)
+            elif b.get("clip") not in ctx["clips"]:
+                ctx["out"].append("%s plays the clip %s, which the mode does not have: add it under "
+                                  "Its own clips and sounds." % (where, b.get("clip")))
+            if b.get("where") not in CLIP_WHERE:
+                ctx["out"].append("%s plays a clip with no where." % where)
+        elif op == "sound":
+            if not b.get("sound"):
+                ctx["out"].append("%s plays a sound with none chosen." % where)
+            elif b.get("sound") not in ctx["sounds"]:
+                ctx["out"].append("%s plays the sound %s, which the mode does not have: add it under "
+                                  "Its own clips and sounds." % (where, b.get("sound")))
+            fb = b.get("fallback")
+            if fb not in (None, "") and fb not in CALLOUT_ROLES and not _int_ok(fb, 1, 65535):
+                ctx["out"].append("%s falls back on a callout that is not one." % where)
+
+
+def _check_show(b, where, ctx):
+    show = b.get("show")
+    if show in SHOWS:
+        return
+    if show != "own":
+        ctx["out"].append("%s runs a light show with none chosen." % where)
+        return
+    steps = b.get("steps")
+    if not isinstance(steps, list) or not steps:
+        ctx["out"].append("%s runs a light show of its own with no steps." % where)
+        return
+    if len(steps) > SHOW_STEPS:
+        ctx["out"].append("%s's light show has %d steps: %d at most." % (where, len(steps), SHOW_STEPS))
+    for n, st in enumerate(steps, 1):
+        here = "%s's light show, step %d," % (where, n)
+        if not isinstance(st, dict) or st.get("fx") not in FX:
+            ctx["out"].append("%s has no pattern." % here)
+            continue
+        if not _int_ok(st.get("ms"), STEP_MS_MIN, STEP_MS_MAX):
+            ctx["out"].append("%s lasts %d to %d ms." % (here, STEP_MS_MIN, STEP_MS_MAX))
+        if not (COLOR_RE.match(str(st.get("a") or "")) and COLOR_RE.match(str(st.get("b") or ""))):
+            ctx["out"].append("%s has a colour missing." % here)
+        if st.get("at", "center") not in PLACES:
+            ctx["out"].append("%s has no place." % here)
+        if not _int_ok(st.get("rate", 0), 0, FX_RATE_MAX):
+            ctx["out"].append("%s has a pace of 0 to %d ms." % (here, FX_RATE_MAX))
+        if st.get("gi", "keep") not in GI:
+            ctx["out"].append("%s says nothing of the lights between the inserts." % here)
+
+
+def show_steps(b):
+    """The steps a Light show block runs: its ready-made show's, or its own."""
+    if b.get("show") in SHOWS:
+        return SHOWS[b["show"]][1]
+    steps = b.get("steps") if b.get("show") == "own" else None
+    return [st for st in (steps or []) if isinstance(st, dict) and st.get("fx") in FX][:SHOW_STEPS]
+
+
+def show_choices():
+    """What the Light show block's boxes offer: the ready-made shows (with their steps, so "its
+    own steps" can start from one), the patterns, the places and the GI's settings."""
+    return {"shows": [{"key": k, "label": label, "steps": copy.deepcopy(steps)}
+                      for k, (label, steps) in SHOWS.items()],
+            "fx": [[k, words] for k, (_c, words) in FX.items()],
+            "places": [[k, p[0]] for k, p in PLACES.items()],
+            "gi": [[k, words] for k, words in GI.items()]}
 
 
 def _check_num(e, where, ctx, depth=0):
@@ -654,12 +912,16 @@ class _Gen:
                 self.vars[n.lower()] = len(self.var_names)
                 self.var_names.append((n, v.get("reset") if v.get("reset") in RESETS else "ball"))
         self.hits = []                  # shots whose hits this ball the program reads
+        self.shows = []                 # each Light show block's steps, in order: SHOW_<n>
 
     def shot(self, name):
+        return "S[%d]" % self.shot_i(name)
+
+    def shot_i(self, name):
         name = str(name or "")
         if name not in self.shots:
             self.shots.append(name)
-        return "S[%d]" % self.shots.index(name)
+        return self.shots.index(name)
 
     def event(self, name):
         name = str(name or "")
@@ -756,31 +1018,34 @@ class _Gen:
                     out.extend(self.stack(b.get("else"), ind + 1))
                 out.append(pad + "}")
             elif op == "callout":
-                role = b.get("role")
-                if role in CALLOUT_ROLES:
-                    out.append(pad + "pm_callout(pm_callout_id(%s));" % _c_str(role))
-                else:
-                    try:
-                        out.append(pad + "pm_callout(%du);" % max(1, min(65535, int(b.get("id")))))
-                    except (TypeError, ValueError):
-                        pass
+                said = self.callout(b.get("role") if b.get("role") in CALLOUT_ROLES else b.get("id"))
+                if said:
+                    out.append(pad + said + ";")
             elif op == "words":
                 value = b.get("value")
                 out.append(pad + "words(%s, %s, %d);" % (
                     _c_str(str(b.get("text") or "")[:TEXT_MAX]),
                     self.num(value) if value is not None else "0LL", 0 if value is None else 1))
             elif op == "light_shot":
-                pat, ms = PATTERNS.get(b.get("pattern"), PATTERNS["solid"])
+                pattern = b.get("pattern") if b.get("pattern") in PATTERNS else "solid"
+                pat, ms = PATTERNS[pattern]
                 color = str(b.get("color") or "#ffffff")
                 rgb = int(color[1:], 16) if COLOR_RE.match(color) else 0xFFFFFF
-                out.append(pad + "if (%s) pm_lamp_shot(%s, 0x%06xu, %s, %du);"
-                           % (self.shot(b.get("shot")), self.shot(b.get("shot")), rgb, pat, ms))
+                rate = b.get("rate")
+                pace = self.num(rate) if rate is not None and pattern not in ("solid", "hurry") else "%dLL" % ms
+                out.append(pad + "light(%d, 0x%06xu, %s, %s, %d);"
+                           % (self.shot_i(b.get("shot")), rgb, pat, pace, 1 if pattern == "hurry" else 0))
             elif op == "lights_off":
                 if b.get("shot") == "*":
-                    out.append(pad + "pm_lamp_release_all();")
+                    out.append(pad + "unlight_all();")
                 else:
-                    s = self.shot(b.get("shot"))
-                    out.append(pad + "if (%s) pm_lamp_release_shot(%s);" % (s, s))
+                    out.append(pad + "unlight(%d);" % self.shot_i(b.get("shot")))
+            elif op == "show":
+                steps = show_steps(b)
+                if steps:
+                    self.shows.append(steps)
+                    name = b.get("show") if b.get("show") in SHOWS else "its own"
+                    out.append(pad + "show_start(SHOW_%d, %d, %s);" % (len(self.shows) - 1, len(steps), _c_str(name)))
             elif op in ("add_time", "set_time"):
                 out.append(pad + "%s(%s);" % (op, self.num(b.get("seconds"))))
             elif op == "multiball":
@@ -820,7 +1085,33 @@ class _Gen:
                     _c_str(str(b.get("text") or "")[:HUD_TEXT_MAX]),
                     self.num(value) if value is not None else "0LL", 0 if value is None else 1,
                     _c_str(str(b.get("sub") or "")[:HUD_TEXT_MAX]), secs * 1000))
+            elif op == "clip":
+                name = str(b.get("clip") or "")
+                if MEDIA_RE.match(name):
+                    fn = {"full": "clip_full", "behind": "clip_behind", "loop": "clip_loop"}.get(
+                        b.get("where"), "clip_full")
+                    out.append(pad + "%s(%s);" % (fn, _c_str(name)))
+            elif op == "sound":
+                name = str(b.get("sound") or "")
+                if MEDIA_RE.match(name):
+                    fb = self.callout(b.get("fallback"))
+                    if fb:
+                        out.append(pad + "if (!sound(%s)) %s;" % (_c_str(name), fb))
+                    else:
+                        out.append(pad + "sound(%s);" % _c_str(name))
         return out
+
+    @staticmethod
+    def callout(v):
+        """The C that says a game's callout (a role's name or a number), or "" for none."""
+        if v in CALLOUT_ROLES:
+            return "pm_callout(pm_callout_id(%s))" % _c_str(v)
+        if v in (None, ""):
+            return ""
+        try:
+            return "pm_callout(%du)" % max(1, min(65535, int(v)))
+        except (TypeError, ValueError):
+            return ""
 
 
 def c_ident(slug):
@@ -836,6 +1127,7 @@ def to_c(program, slug):
     from . import mode_tryit as MT
     title = MT._c_title(name, slug)
     ident = c_ident(slug)
+    media = uses_media(program)
 
     # every script's body first: that is when the tables fill
     bodies = {k: [] for k in HATS}
@@ -910,6 +1202,8 @@ def to_c(program, slug):
     L.append('#include "pad_mode.h"')
     if has_hud:
         L.append('#include "%s"   /* the examples\' kit: the HUD (copied here at every save) */' % KIT_FILE)
+    if media:
+        L.append('#include "pad_mode_assets.h"     /* its own clips and sounds, as Write carried them */')
     L.append("")
     L.append('#define MODE_NAME        %s' % _c_str(title))
     L.append("#define RUN_SECONDS      %d          /* 0 = no clock */" % program["seconds"])
@@ -1102,6 +1396,16 @@ def to_c(program, slug):
         L.append("                      HUD_GAUGE_LABEL);")
         L.append("}")
         L.append("")
+    if g.shows:
+        L.extend(_show_decls(g.shows))
+    else:
+        L.append("#define SHOWING 0                         /* no Light show block */")
+        L.append("")
+    L.extend((_LAMPS_C % {"n": len(g.shots), "size": nshots, "lo": RATE_MIN, "hi": RATE_MAX}).split("\n"))
+    if g.shows:
+        L.extend(_SHOW_C.split("\n"))
+    if media:
+        L.extend((_MEDIA_C % {"slug": slug}).split("\n"))
     L.append("static void start(const char *why);")
     L.append("static void end(const char *why);")
     L.append("")
@@ -1147,6 +1451,13 @@ def to_c(program, slug):
         L.append("    hud_level = 0;")
         L.append("    kit_hud_pips(&hud, HUD_GAUGE);      /* the build's count: any more are hidden */")
         L.append("    kit_hud_begin(&hud, MODE_NAME, HUD_LINE);")
+    if media:
+        L.append("    pa_load(&own);                    /* its own sounds' priorities, and its music */")
+        L.append("    own.running = 1;")
+        L.append("    if (own.loaded) {")
+        L.append("        pa_priorities(&own);")
+        L.append("        pa_music_begin(&own);")
+        L.append("    }")
     L.append('    pm_log("START (%s): player %u", why, run.player);')
     L.append("    on_mode_start();")
     if has_hud:
@@ -1160,7 +1471,14 @@ def to_c(program, slug):
     L.append("    on_mode_end();")
     L.append("    ending = 0;")
     L.append("    run.on = 0;")
-    L.append("    pm_lamp_release_all();")
+    if media:
+        L.append("    loop_waiting = 0;")
+        L.append("    if (looping) {                    /* the city behind the HUD again */")
+        L.append("        pm_backdrop(0);")
+        L.append("        looping = 0;")
+        L.append("    }")
+        L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
+    L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
     L.append("    if (screen) {")
     L.append('        words("TOTAL", (long long)run.total, 1);')
     L.append("        hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
@@ -1217,6 +1535,8 @@ def to_c(program, slug):
     L.append("        named |= mask;")
     L.append('    pm_log("ready on %%s %%s: %%d shot(s) named by the blocks", pm_game(), pm_version(), %d);'
              % len(g.shots))
+    if media:
+        L.append("    pa_load(&own);")
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
     L.append("")
@@ -1257,6 +1577,10 @@ def to_c(program, slug):
     L.append("    find_screen();")
     if has_hud:
         L.append("    kit_hud_tick(&hud);                /* finds it, expires an award, writes what changed */")
+    if media:
+        L.append("    own_tick();                       /* every tick: an end call outlives the mode */")
+    if g.shows:
+        L.append("    show_tick();                      /* every tick: an end show outlives the mode */")
     L.append("    if (in_game && !was_in_game) {    /* a new game: every player's \"each game\" values */")
     L.append("        unsigned p, v;")
     L.append("        for (p = 0; p < 5; p++) {")
@@ -1287,6 +1611,7 @@ def to_c(program, slug):
     L.append("        }")
     L.append("    }")
     L.append("    (void)seconds;")
+    L.append("    lamps_tick();")
     L.extend(scripts_of("every", "seconds_left"))
     L.append("    if (run.on && RUN_SECONDS && run.ticks_left == 0)")
     L.append('        end("time ran out");')
@@ -1306,6 +1631,8 @@ def to_c(program, slug):
     L.append("{")
     L.extend(scripts_of("ball_end"))
     L.append("    if (ENDS_ON_DRAIN) end_now(\"ball ended\");")
+    if media:
+        L.append("    looping = 0;                      /* no backdrop outlives the ball */")
     L.append("    {")
     L.append("        unsigned p = P(), v;")
     L.append("        for (v = 0; v < %d; v++) H[v][p] = 0;" % nhits)
@@ -1323,6 +1650,393 @@ def to_c(program, slug):
     L.append("};")
     L.append("PM_REGISTER(%s_mode);" % ident)
     return "\n".join(L) + "\n"
+
+
+#: the C that holds the shots' lights (PAD-376); %(n)d shots named, LIT sized %(size)d
+_LAMPS_C = """/* ---- the shots' lights the blocks hold (PAD-376): kept, so a light show gives them back when
+ * it is over, and a blink that hurries follows the clock ---- */
+#define N_SHOTS   %(n)d
+#define RATE_MIN  %(lo)d                     /* a blink's, pulse's or chase's pace, ms */
+#define RATE_MAX  %(hi)d
+UNUSED static struct { unsigned rgb, ms, sent; int pattern, hurry, on; } LIT[%(size)d];
+
+/* the kit's kit_hurry_ms: slow with most of the time left, faster as it runs down, a flicker in
+ * the last three seconds */
+UNUSED static unsigned hurry_ms(void)
+{
+    unsigned long left = (unsigned long)run.ticks_left * 1000u / TICKS_PER_SECOND;
+    unsigned long total = (unsigned long)RUN_SECONDS * 1000u;
+    if (!run.on || !RUN_SECONDS) return 500;
+    if (left * 3 > total * 2) return 700;
+    if (left * 3 > total) return 400;
+    if (left > 3000) return 200;
+    return 100;
+}
+
+UNUSED static void lamp_send(int i)
+{
+    unsigned ms;
+    if (i < 0 || i >= N_SHOTS || !S[i] || !LIT[i].on || SHOWING) return;
+    ms = LIT[i].hurry ? hurry_ms() : LIT[i].ms;
+    pm_lamp_shot(S[i], LIT[i].rgb, LIT[i].pattern, ms);
+    LIT[i].sent = ms;
+}
+
+/* a shot's inserts lit; the same light again is left alone (a blink keeps its beat) */
+UNUSED static void light(int i, unsigned rgb, int pattern, long long ms, int hurry)
+{
+    if (i < 0 || i >= N_SHOTS) return;
+    if (pattern == PM_LAMP_SOLID || hurry) ms = 0;
+    else if (ms < RATE_MIN) ms = RATE_MIN;
+    else if (ms > RATE_MAX) ms = RATE_MAX;
+    if (LIT[i].on && LIT[i].rgb == rgb && LIT[i].pattern == pattern && LIT[i].ms == (unsigned)ms
+        && LIT[i].hurry == hurry) return;
+    LIT[i].rgb = rgb;
+    LIT[i].pattern = pattern;
+    LIT[i].ms = (unsigned)ms;
+    LIT[i].hurry = hurry;
+    LIT[i].on = 1;
+    lamp_send(i);
+}
+
+UNUSED static void unlight(int i)
+{
+    if (i < 0 || i >= N_SHOTS) return;
+    LIT[i].on = 0;
+    if (S[i]) pm_lamp_release_shot(S[i]);
+}
+
+static void unlight_all(void)
+{
+    int i;
+    for (i = 0; i < N_SHOTS; i++) LIT[i].on = 0;
+    pm_lamp_release_all();
+}
+
+UNUSED static void relight_all(void)                /* after a show: every light the blocks hold */
+{
+    int i;
+    for (i = 0; i < N_SHOTS; i++) lamp_send(i);
+}
+
+static void lamps_tick(void)                        /* a hurrying blink follows the clock */
+{
+    int i;
+    for (i = 0; i < N_SHOTS; i++)
+        if (LIT[i].on && LIT[i].hurry && !SHOWING && hurry_ms() != LIT[i].sent) lamp_send(i);
+}
+"""
+
+
+def _show_decls(shows):
+    """The C of the light shows' steps (one table per Light show block) and their state."""
+    out = ["/* ---- light shows (PAD-376): the kit's kit_show (intricate_kit.h). A show is a few STEPS,",
+           " * each a pattern over the playfield's inserts by their PLACE (the port's \"at X,Y\": x 0-300",
+           " * across, y 0-600 down) for some ms, in its two colours; the GI strings follow each step. A",
+           " * port with no placed inserts runs a show on the GI only. ---- */",
+           "enum { %s };" % ", ".join(c for c, _w in FX.values()),
+           "#define GI_KEEP   0                       /* the GI does what the game says */",
+           "#define GI_DARK   1                       /* the GI off: only the show lights the playfield */",
+           "#define GI_FLASH  2                       /* the GI flashing white with a strobe */",
+           "struct fx_step { int fx; unsigned ms, a, b; int x, y; unsigned rate; int gi; };"]
+    gi_c = {"keep": "GI_KEEP", "dark": "GI_DARK", "flash": "GI_FLASH"}
+    for n, steps in enumerate(shows):
+        out.append("static const struct fx_step SHOW_%d[] = {" % n)
+        for st in steps:
+            at = PLACES.get(st.get("at"), PLACES["center"])
+            col = [int(str(st.get(k))[1:], 16) if COLOR_RE.match(str(st.get(k) or "")) else 0 for k in ("a", "b")]
+            try:
+                ms = max(STEP_MS_MIN, min(STEP_MS_MAX, int(st.get("ms"))))
+            except (TypeError, ValueError):
+                ms = 500
+            try:
+                rate = max(0, min(FX_RATE_MAX, int(st.get("rate") or 0)))
+            except (TypeError, ValueError):
+                rate = 0
+            out.append("    { %s, %d, 0x%06xu, 0x%06xu, %d, %d, %d, %s },   /* %s, at %s */" % (
+                FX[st["fx"]][0], ms, col[0], col[1], at[1], at[2], rate,
+                gi_c.get(st.get("gi"), "GI_KEEP"), FX[st["fx"]][1], at[0]))
+        out.append("};")
+    out += ["#define SHOW_LAMPS 256",
+            "static struct {",
+            "    const struct fx_step *steps;",
+            "    const char *name;",
+            "    int n, step, on, gi[8], n_gi, placed;",
+            "    unsigned long t0, step_t0;",
+            "    unsigned seed;",
+            "} show;",
+            "#define SHOWING show.on",
+            ""]
+    return out
+
+
+#: the light-show engine: intricate_kit.h's kit_show, on the lights above (relight_all at its end)
+_SHOW_C = r"""static unsigned fx_mix(unsigned a, unsigned b, int f256)       /* a..b by f/256 */
+{
+    int k, out = 0;
+    if (f256 < 0) f256 = 0;
+    if (f256 > 256) f256 = 256;
+    for (k = 0; k < 3; k++) {
+        int ca = (int)((a >> (16 - 8 * k)) & 255u), cb = (int)((b >> (16 - 8 * k)) & 255u);
+        out |= ((ca + (cb - ca) * f256 / 256) & 255) << (16 - 8 * k);
+    }
+    return (unsigned)out;
+}
+
+static unsigned fx_scale(unsigned c, int f256) { return fx_mix(0, c, f256); }
+
+static unsigned fx_hue(int h)             /* 0..1535 round the colour wheel, full brightness */
+{
+    int s = ((h % 1536) + 1536) % 1536, i = s / 256, f = s % 256;
+    switch (i) {
+    case 0: return PM_RGB(255, f, 0);
+    case 1: return PM_RGB(255 - f, 255, 0);
+    case 2: return PM_RGB(0, 255, f);
+    case 3: return PM_RGB(0, 255 - f, 255);
+    case 4: return PM_RGB(f, 0, 255);
+    default: return PM_RGB(255, 0, 255 - f);
+    }
+}
+
+static unsigned fx_rand(void)
+{
+    show.seed = show.seed * 1103515245u + 12345u;
+    return (show.seed >> 16) & 0x7fffu;
+}
+
+static int fx_isqrt(int v)
+{
+    int r = 0, b = 1 << 14;
+    if (v <= 0) return 0;
+    while (b > v) b >>= 2;
+    while (b) {
+        if (v >= r + b) { v -= r + b; r = (r >> 1) + b; } else r >>= 1;
+        b >>= 2;
+    }
+    return r;
+}
+
+static int fx_angle(int dx, int dy)        /* atan2 in 1/1536 turns (the hue wheel's) */
+{
+    int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy, a;
+    if (!ax && !ay) return 0;
+    a = ax >= ay ? (ay * 192) / (ax ? ax : 1) : 384 - (ax * 192) / (ay ? ay : 1);
+    if (dx < 0) a = 768 - a;
+    if (dy < 0) a = 1536 - a;
+    return a % 1536;
+}
+
+static int is_gi(const char *s)            /* a GI string: "GI" a word of its own in the name */
+{
+    int i;
+    for (i = 0; s && s[i] && s[i + 1]; i++)
+        if (s[i] == 'G' && s[i + 1] == 'I' && (i == 0 || s[i - 1] < 'A' || s[i - 1] > 'Z')
+            && (s[i + 2] < 'A' || s[i + 2] > 'Z'))
+            return 1;
+    return 0;
+}
+
+static void show_start(const struct fx_step *steps, int n, const char *name)
+{
+    int k, cnt = pm_lamp_count();
+    show.steps = steps;
+    show.n = n;
+    show.name = name;
+    show.step = 0;
+    show.on = pm_can(PM_CAN_LAMPS) && n > 0;
+    show.t0 = show.step_t0 = pm_ms();
+    show.seed = (unsigned)show.t0 | 1u;
+    show.n_gi = show.placed = 0;
+    for (k = 0; k < cnt && k < SHOW_LAMPS; k++) {
+        int x, y;
+        if (pm_lamp_xy(k, &x, &y)) show.placed++;
+        else if (show.n_gi < 8 && is_gi(pm_lamp_at(k, 0))) show.gi[show.n_gi++] = k;
+    }
+    if (show.on) pm_log("show %s: %d step(s) over %d placed inserts, %d GI string(s)", name, n, show.placed, show.n_gi);
+}
+
+/* the colour of the insert at (x, y) for step st at `t` ms into it */
+static unsigned fx_colour(const struct fx_step *st, int x, int y, int idx, unsigned t)
+{
+    int f = st->ms ? (int)((unsigned long)t * 256u / st->ms) : 256;     /* 0..256 through the step */
+    int dx = x - st->x, dy = y - st->y, d, r, w, v;
+    unsigned rate = st->rate ? st->rate : 100;
+    switch (st->fx) {
+    case FX_BURST:
+    case FX_IMPLODE:
+        d = fx_isqrt(dx * dx + dy * dy);
+        r = st->fx == FX_BURST ? f * 700 / 256 : (256 - f) * 700 / 256;
+        w = d - r;
+        if (w > 0 && w < 60) return fx_scale(st->a, 256 - w * 4);          /* the ring's leading edge */
+        if (w <= 0 && w > -140) return fx_mix(st->a, st->b, -w * 256 / 140); /* its wake */
+        return w <= 0 ? st->b : 0;
+    case FX_SWEEP_UP:
+    case FX_SWEEP_DOWN:
+        r = st->fx == FX_SWEEP_UP ? 640 - f * 720 / 256 : f * 720 / 256 - 40;
+        w = st->fx == FX_SWEEP_UP ? y - r : r - y;
+        if (w >= 0 && w < 50) return st->a;
+        if (w >= 50) return fx_mix(st->a, st->b, (w - 50) * 3);
+        return 0;
+    case FX_SWEEP_LR:
+    case FX_SWEEP_RL:
+        r = st->fx == FX_SWEEP_LR ? f * 380 / 256 - 40 : 340 - f * 380 / 256;
+        w = st->fx == FX_SWEEP_LR ? r - x : x - r;
+        if (w >= 0 && w < 30) return st->a;
+        if (w >= 30) return fx_mix(st->a, st->b, (w - 30) * 4);
+        return 0;
+    case FX_SPIN:
+        v = (fx_angle(dx, dy) - (int)(t * 1536u / (rate * 8u))) % 1536;
+        if (v < 0) v += 1536;
+        return v < 160 ? st->a : v < 400 ? fx_mix(st->a, st->b, (v - 160) * 256 / 240) : st->b;
+    case FX_RAINBOW:
+        return fx_hue(fx_angle(dx, dy) + (int)(t * 1536u / (rate * 10u)) + fx_isqrt(dx * dx + dy * dy) * 2);
+    case FX_STROBE:
+        return (t / rate) % 2 ? st->b : st->a;
+    case FX_SPARKLE:
+        return ((fx_rand() + (unsigned)idx * 7u) % 100u) < 18u ? st->a : st->b;
+    case FX_FIRE:
+        v = (int)(fx_rand() % 90u);
+        w = (600 - y) * 256 / 600;                                           /* 0 at the flippers */
+        return fx_scale(fx_mix(st->b, st->a, w + v - 45), 150 + v);
+    case FX_PULSE:
+        v = (int)((t % (rate * 2u)) * 512u / (rate * 2u));
+        v = v < 256 ? v : 512 - v;
+        return fx_mix(st->b, st->a, v);
+    case FX_CHASE_RING:
+        v = (fx_angle(dx, dy) * 12 / 1536 + 12 - (int)((t / rate) % 12u)) % 12;
+        return v == 0 ? st->a : v == 1 ? fx_scale(st->a, 110) : st->b;
+    case FX_FADE_OUT:
+        return fx_scale(st->a, 256 - f);
+    case FX_BOLTS:
+        v = (int)((t / rate) % 5u);                                          /* five strikes */
+        r = 40 + v * 55 + (int)((unsigned)(y * 13 + v * 71) % 40u) - 20;     /* the bolt's jagged x */
+        w = x - r;
+        if (w < 0) w = -w;
+        return w < 18 && (t % rate) < rate * 2 / 3 ? st->a : st->b;
+    }
+    return 0;
+}
+
+/* every tick while the show runs: each placed insert painted, the GI as the step says; at its
+ * end every insert goes back to the game and the blocks' own shot lights are sent again */
+static void show_tick(void)
+{
+    const struct fx_step *st;
+    unsigned long now = pm_ms();
+    unsigned t;
+    int k, cnt;
+    if (!show.on) return;
+    while (show.step < show.n && now - show.step_t0 >= show.steps[show.step].ms) {
+        show.step_t0 += show.steps[show.step].ms;
+        show.step++;
+    }
+    if (show.step >= show.n) {
+        show.on = 0;
+        pm_lamp_release_all();
+        relight_all();
+        pm_log("show %s: over, %lu ms", show.name, now - show.t0);
+        return;
+    }
+    st = &show.steps[show.step];
+    t = (unsigned)(now - show.step_t0);
+    cnt = pm_lamp_count();
+    for (k = 0; k < cnt && k < SHOW_LAMPS; k++) {
+        int x, y;
+        if (pm_lamp_xy(k, &x, &y)) pm_lamp_paint(k, fx_colour(st, x, y, k, t));
+    }
+    for (k = 0; k < show.n_gi; k++) {
+        if (st->gi == GI_DARK) pm_lamp_paint(show.gi[k], 0);
+        else if (st->gi == GI_FLASH) pm_lamp_paint(show.gi[k], ((t / (st->rate ? st->rate : 100)) % 2) ? 0 : 0xffffffu);
+        else pm_lamp_release(pm_lamp_at(show.gi[k], 0));
+    }
+}
+"""
+
+
+def uses_media(program):
+    """1 when the mode has clips, sounds or music of its own, or a block that plays one."""
+    if program.get("clips") or program.get("sounds") or program.get("music"):
+        return True
+    return any(b.get("op") in ("clip", "sound") for s in program.get("scripts") or []
+               for b in _walk(s.get("do") or []))
+
+
+#: the C of a mode with its own clips and sounds (pad_mode_assets.h); %(slug)s is its folder
+_MEDIA_C = """/* ---- its own clips and sounds (PAD-374): what Write carried, named in %(slug)s.assets ---- */
+static struct pa_assets own = { .folder = "%(slug)s" };
+static const char *clip_waiting, *loop_waiting;   /* MODE_SDK.md "Clips race the game's own" */
+static unsigned long clip_due;
+static int looping;                     /* a clip of its own loops behind the HUD */
+
+static int own_clip(const char *cue)
+{
+    pa_load(&own);
+    if (pa_clip_name(&own, cue)) return 1;
+    pm_log("own clip %%s: the build carried none", cue);
+    return 0;
+}
+
+/* full screen, over everything: half a second from now, so the game's own clip for the shot
+ * that asked does not take the one video surface; the newest asked for wins */
+UNUSED static void clip_full(const char *cue)
+{
+    if (!own_clip(cue)) return;
+    if (clip_waiting && clip_waiting != cue)
+        pm_log("own clip %%s dropped before it played: %%s was asked for after it", clip_waiting, cue);
+    clip_waiting = cue;
+    clip_due = pm_ms() + PA_CLIP_AFTER_MS;
+}
+
+/* behind the HUD over and over while the mode runs (after a full-screen clip still waiting) */
+UNUSED static void clip_loop(const char *cue)
+{
+    const char *n;
+    if (!own_clip(cue)) return;
+    if (!run.on) {
+        pm_log("own clip %%s: not looped behind the HUD - the mode is not running", cue);
+        return;
+    }
+    if (clip_waiting) {
+        loop_waiting = cue;
+        return;
+    }
+    n = pa_clip_name(&own, cue);
+    looping = pm_backdrop(n);
+    pm_log("own clip %%s (%%s) behind the HUD, over and over: %%s", cue, n,
+           looping ? "asked" : "this port has no backdrop");
+}
+
+/* behind the HUD once, in the loop's place, then the loop again */
+UNUSED static void clip_behind(const char *cue)
+{
+    if (!own_clip(cue)) return;
+    if (!run.on || !looping || !pa_clip_event(&own, cue))
+        pm_log("own clip %%s: not played behind the HUD - %%s", cue,
+               !run.on ? "the mode is not running" : "no clip of its own loops there");
+}
+
+/* 1 = the build carried it (played now, or waiting for the voice bus); 0 = it did not */
+UNUSED static int sound(const char *cue)
+{
+    if (pa_call(&own, cue)) return 1;
+    pm_log("own sound %%s: the build carried none", cue);
+    return 0;
+}
+
+static void own_tick(void)
+{
+    pa_tick(&own);
+    if (!clip_waiting || pm_ms() < clip_due) return;
+    pa_clip_full(&own, clip_waiting);
+    clip_waiting = 0;
+    if (loop_waiting && run.on) {
+        const char *cue = loop_waiting;
+        loop_waiting = 0;
+        clip_loop(cue);
+    }
+}
+
+"""
 
 
 def _hat_words(hat):

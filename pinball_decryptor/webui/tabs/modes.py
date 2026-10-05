@@ -2245,18 +2245,25 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             roles = {getattr(p, "callout_ten_seconds", None), getattr(p, "callout_time_up", None)}
             callouts += [{"id": number, "label": "%s (%d)" % (label, number)}
                          for label, number in MP.callout_choices(p) if number and number not in roles]
+        # PAD-374: why the mode's own clips, sounds or music cannot be carried here ("" = they can)
+        why_clip = (p.why_not("clip") or "") if p is not None else ""
+        why_sound = (p.why_not("own_sound") or self._own_extra_why(p)) if p is not None else ""
+        why_music = why_sound or self._own_music_why(p)
         # PAD-375: the HUD is built into Godzilla's slide-outs scene (code_modes' build); elsewhere a
         # blocks mode with a HUD runs with nothing at the edges
         hud = p is None or bool(p.can("screen") and (p.lcd("hud") or "").endswith(MA.HUD_SCENE))
-        return {"shots": shots, "events": events, "callouts": callouts,
-                "title": p.label if p is not None else "", "hud": hud, "icons": list(BM.HUD_ICONS)}
+        return {"shots": shots, "events": events, "callouts": callouts, "light": BM.show_choices(),
+                "title": p.label if p is not None else "",
+                "why_clip": why_clip, "why_sound": why_sound, "why_music": why_music,
+                "hud": hud, "icons": list(BM.HUD_ICONS)}
 
-    def _blocks_check(self, program):
-        """``(problems, notes)`` of a program on the shown title (its shots and events)."""
+    def _blocks_check(self, program, folder=None):
+        """``(problems, notes)`` of a program on the shown title (its shots and events), its own
+        clips and sounds looked for in ``folder``."""
         p = self._shown or self._profile
         shots = [n for n, _m in p.shots] if p is not None else None
         events = list(p.events or ()) if p is not None else None
-        return BM.problems(program, shots, events), BM.notes(program)
+        return BM.problems(program, shots, events, folder), BM.notes(program)
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,
@@ -2270,7 +2277,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             data["blocks"] = {"error": "Its blocks could not be read: %s" % e}
             return
         from ...plugins.stern import code_modes as CM
-        problems, notes = self._blocks_check(program)
+        problems, notes = self._blocks_check(program, MP.mode_folder(project, slug))
         try:
             with open(CM.source_path(project, slug), "r", encoding="utf-8", errors="replace") as f:
                 c_text = f.read()
@@ -2327,6 +2334,55 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         c = self.get("code") or {}
         b = c.get("blocks") or {}
         return {"problems": b.get("problems", []), "notes": b.get("notes", [])}
+
+    @rpc
+    def blocks_pick(self, what, taken=()):
+        """PAD-374: "+ Clip…", "+ Sound…" and "Music…" in the block editor: pick a video or a
+        WAV, copy it into the open blocks mode's folder and return ``{"name", "file", "path"}``
+        (the name its blocks call it by, from the file's, none of ``taken``) for the page to add
+        to the program; None when nothing was picked or it cannot be carried here."""
+        project, slug = self.project(), self._code_slug
+        if not project or not slug or not BM.is_blocks(project, slug):
+            return None
+        ch = self._blocks_choices()
+        why = {"clip": ch["why_clip"], "sound": ch["why_sound"], "music": ch["why_music"]}.get(what)
+        if why is None:
+            return None
+        if why:
+            self._say("%s: %s" % ({"clip": "A clip of its own", "sound": "A sound of its own",
+                                   "music": "Its own music"}[what], why))
+            return None
+        if what == "clip":
+            path = self.window.ask_open("modes_file", "Choose a clip for the mode", self.VIDEO_TYPES)
+        else:
+            path = self.window.ask_open("modes_file", "Choose the mode's music" if what == "music"
+                                        else "Choose a sound for the mode", [("WAV sounds", "*.wav")])
+        if not path:
+            return None
+        stem, ext = os.path.splitext(os.path.basename(path))
+        ext = ext.lower()
+        if what == "clip" and ext not in BM.VIDEO_EXTS:
+            self._say("%s is not a video the build can cut a clip from." % os.path.basename(path))
+            return None
+        if what != "clip" and ext != ".wav":
+            self._say("%s is not a WAV sound." % os.path.basename(path))
+            return None
+        name = "music" if what == "music" else BM.media_name(stem, taken)
+        folder = MP.mode_folder(project, slug)
+        dest = name + ext
+        n = 2
+        while os.path.isfile(os.path.join(folder, dest)) and not _same_file(path, os.path.join(folder, dest)):
+            dest = "%s_%d%s" % (name, n, ext)
+            n += 1
+        try:
+            os.makedirs(folder, exist_ok=True)
+            if not _same_file(path, os.path.join(folder, dest)):
+                shutil.copyfile(path, os.path.join(folder, dest))
+        except OSError as e:
+            self._say("%s could not be copied into the mode's folder: %s" % (os.path.basename(path), e))
+            return None
+        self._say("modes/%s: copied %s in as %s" % (slug, os.path.basename(path), dest))
+        return {"name": name, "file": dest, "path": os.path.join(folder, dest)}
 
     @rpc
     def blocks_to_code(self):
@@ -3409,6 +3465,14 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
 
 _SMALL = ("a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "vs")
+
+
+def _same_file(a, b):
+    """True when paths ``a`` and ``b`` are one file."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
 
 
 def _title_case(caption):

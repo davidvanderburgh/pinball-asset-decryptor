@@ -261,13 +261,16 @@ def test_a_newer_or_broken_blocks_file_is_refused(tmp_path):
 
 
 # ---- the ARM build ---------------------------------------------------------------------------------
-def test_the_starter_builds_with_build_mode_sh(tmp_path):
+@pytest.mark.parametrize("which", ["starter", "own clips and sounds", "light shows"])   # PAD-374, PAD-376
+def test_the_starter_builds_with_build_mode_sh(tmp_path, which):
     if os.name == "nt":
         pytest.skip("build_mode.sh runs under bash with arm-linux-gnueabihf-gcc (WSL or Linux)")
     if not shutil.which("bash") or not shutil.which("arm-linux-gnueabihf-gcc"):
         pytest.skip("no arm-linux-gnueabihf-gcc here")
     src = tmp_path / "ramp_frenzy.c"
-    src.write_text(BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy"), encoding="utf-8")
+    program = {"starter": lambda: BM.starter("RAMP FRENZY", SHOTS), "own clips and sounds": _media_prog,
+               "light shows": _lights_prog}[which]()
+    src.write_text(BM.to_c(program, "ramp_frenzy"), encoding="utf-8")
     out = tmp_path / "mode.so"
     r = subprocess.run(["bash", os.path.join(SDK, "build_mode.sh"), "-o", str(out), str(src),
                         os.path.join(SDK, "mode_file.c")], capture_output=True, text=True)
@@ -400,6 +403,313 @@ def test_the_tabs_start_and_end_triggers_reach_it(tmp_path, monkeypatch):
     out = play(tmp_path, p, "trigger", "blk.start", "secs", 1, "trigger", "blk.stop", "secs", 1)
     assert "START (trigger file)" in out and "END (trigger file)" in out
     assert scores(out) == [42]
+
+
+# ---- PAD-374: the mode's own clips and sounds ------------------------------------------------------
+def _media_prog(**kw):
+    """KING GHIDORAH's way with its own assets, in blocks: an intro full screen and a loop behind
+    the HUD when it starts, a clip behind the HUD and a call on a shot, a call (else the game's
+    Time is up) at the end."""
+    return prog([
+        {"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": [{"op": "clip", "clip": "intro", "where": "full"},
+                                               {"op": "clip", "clip": "loop", "where": "loop"}]},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [
+            {"op": "clip", "clip": "sever", "where": "behind"}, {"op": "sound", "sound": "sever"}]},
+        {"hat": {"kind": "mode_end"}, "do": [{"op": "sound", "sound": "lost", "fallback": "time_up"},
+                                             {"op": "clip", "clip": "won", "where": "full"}]},
+    ], seconds=10,
+        clips=[{"name": "intro", "file": "intro.mp4"}, {"name": "loop", "file": "loop.mp4"},
+               {"name": "sever", "file": "sever.mp4"}, {"name": "won", "file": "won.mp4"}],
+        sounds=[{"name": "sever", "file": "sever.wav", "priority": 4},
+                {"name": "lost", "file": "lost.wav", "priority": 3}],
+        music="music.wav", **kw)
+
+
+def _media_files(folder):
+    for f in ("intro.mp4", "loop.mp4", "sever.mp4", "won.mp4", "sever.wav", "lost.wav", "music.wav"):
+        with open(os.path.join(folder, f), "wb") as fh:
+            fh.write(b"x")
+
+
+def test_own_clips_and_sounds_ride_in_assets_json_as_a_code_modes(tmp_path):
+    project = _card(tmp_path)
+    slug, _path = BM.new_blocks_mode(project, "Heads", shots=SHOTS)
+    folder = MP.mode_folder(project, slug)
+    _media_files(folder)
+    BM.save(project, slug, _media_prog())
+    spec = CM.load(project, slug)
+    assert spec.clips == {"intro": "intro.mp4", "loop": "loop.mp4", "sever": "sever.mp4", "won": "won.mp4"}
+    assert spec.calls == {"sever": {"wav": "sever.wav", "priority": 4}, "lost": {"wav": "lost.wav", "priority": 3}}
+    assert spec.music == "music.wav" and spec.has_assets()
+    assert CM.validate(spec, folder) == []
+    # what Write asks the sound bank for, and the file it puts beside mode.so
+    wants = CM.sound_wants(project, [(slug, spec)])
+    assert [w["key"] for w in wants] == ["music", "call:sever", "call:lost"]
+    carried = [{"slug": slug, "key": "music", "request": 125, "sid": 618},
+               {"slug": slug, "key": "call:sever", "request": 1251, "ms": 1500}]
+    text = CM.runtime_text(slug, spec, GZ, own_sounds=carried, clip=True)
+    assert "clip   intro PadMode_heads_Intro" in text and "clip   won PadMode_heads_Won" in text
+    assert "music  125 618" in text and "call   sever 1251 1500 4" in text
+    assert "call   lost" not in text                     # not carried: the block says Time is up
+    # taken out of the blocks, taken out of the assets
+    p = BM.load(project, slug)
+    p["clips"], p["sounds"], p["music"] = [], [], ""
+    BM.save(project, slug, p)
+    spec = CM.load(project, slug)
+    assert spec.clips == {} and spec.calls == {} and spec.music == ""
+
+
+def test_own_clip_and_sound_problems_and_notes(tmp_path):
+    p = _media_prog()
+    assert BM.problems(p, SHOTS) == []
+    folder = str(tmp_path)
+    got = BM.problems(p, SHOTS, folder=folder)
+    assert "The clip intro's file intro.mp4 is not in the mode's folder: pick it again." in got
+    assert "Its music music.wav is not in the mode's folder: pick it again." in got
+    _media_files(folder)
+    assert BM.problems(p, SHOTS, folder=folder) == []
+    bad = _media_prog()
+    bad["clips"].append({"name": "Intro!", "file": "x.mp4"})
+    bad["sounds"].append({"name": "sever", "file": "", "priority": 9})
+    bad["scripts"][2]["do"] += [{"op": "clip", "clip": "roar", "where": "full"},
+                                {"op": "clip", "clip": "", "where": "up"},
+                                {"op": "sound", "sound": "nope", "fallback": "shout"}]
+    got = BM.problems(bad, SHOTS)
+    assert any(t.startswith("A clip's name 'Intro!' is not one") for t in got)
+    assert "Two sounds are called sever." in got
+    assert "The sound sever has no file: pick one." in got and "The sound sever's priority is 1 to 7." in got
+    assert ("Script 3 plays the clip roar, which the mode does not have: add it under Its own clips and "
+            "sounds.") in got
+    assert "Script 3 plays a clip with none chosen." in got and "Script 3 plays a clip with no where." in got
+    assert "Script 3 plays the sound nope, which the mode does not have: add it under Its own clips and sounds." in got
+    assert "Script 3 falls back on a callout that is not one." in got
+    many = _media_prog()
+    many["clips"] = [{"name": "c%d" % i, "file": "c.mp4"} for i in range(BM.MAX_CLIPS + 1)]
+    assert "13 clips of its own: 12 at most." in BM.problems(many, SHOTS)
+    # once behind the HUD needs a loop to play in
+    noloop = _media_prog()
+    noloop["scripts"][1]["do"] = noloop["scripts"][1]["do"][:1]
+    assert any(t.startswith("A clip behind the HUD, once, plays in the place of the mode's loop")
+               for t in BM.notes(noloop))
+    assert not any("behind the HUD" in t for t in BM.notes(_media_prog()))
+
+
+def test_media_names_come_from_the_files():
+    assert BM.media_name("King Ghidorah - Sever!") == "king_ghidorah_s"
+    assert BM.media_name("01 roar") == "s_01_roar"
+    assert BM.media_name("roar", taken=["roar", "ROAR_2"]) == "roar_3"
+    assert BM.media_name("") == "sound"
+    assert BM.media_name("a" * 20, taken=["a" * 15]) == "a" * 13 + "_2"
+    for n in ("king_ghidorah_s", "s_01_roar", "roar_3", "a" * 13 + "_2"):
+        assert BM.MEDIA_RE.match(n)
+
+
+def test_the_c_plays_its_own_through_the_sdk_header_and_only_when_it_has_some():
+    plain = BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    assert "pad_mode_assets.h" not in plain and "pa_" not in plain
+    src = BM.to_c(_media_prog(), "heads")
+    assert '#include "pad_mode_assets.h"' in src
+    assert 'static struct pa_assets own = { .folder = "heads" };' in src
+    assert src.count("pa_load(&own);") >= 2 and "own_tick();" in src and "pa_end(&own);" in src
+    assert "pa_start(" not in src                       # no name starts a clip on its own
+    assert 'clip_full("intro");' in src and 'clip_loop("loop");' in src and 'clip_behind("sever");' in src
+    assert 'if (!sound("lost")) pm_callout(pm_callout_id("time_up"));' in src
+    assert '    sound("sever");' in src
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    # a name that is not one never reaches the C
+    p = _media_prog()
+    p["scripts"][2]["do"].append({"op": "sound", "sound": 'x"); evil("'})
+    assert "evil" not in BM.to_c(p, "heads")
+
+
+def _assets(tmp_path, slug, program, carried):
+    """The <slug>.assets Write would put beside mode.so for this program, in a dump folder."""
+    project = _card(tmp_path / "proj")
+    os.makedirs(MP.mode_folder(project, slug))
+    _media_files(MP.mode_folder(project, slug))
+    BM.save(project, slug, program)
+    spec = CM.load(project, slug)
+    dump = tmp_path / "dump"
+    dump.mkdir()
+    own = [dict(u, slug=slug) for u in carried]
+    (dump / (slug + ".assets")).write_text(CM.runtime_text(slug, spec, GZ, own_sounds=own, clip=True))
+    return str(dump)
+
+
+def _at(out, pattern):
+    m = re.search(r"^\s*(\d+) " + pattern, out, re.M)
+    assert m, pattern
+    return int(m.group(1))
+
+
+def test_own_clips_and_sounds_play_where_the_blocks_say(tmp_path, monkeypatch):
+    _cc()
+    dump = _assets(tmp_path, "blk", _media_prog(), [
+        {"key": "music", "request": 125, "sid": 618}, {"key": "call:sever", "request": 1251, "ms": 1500}])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, _media_prog(), "shot", "Building", "secs", 1, "shot", "Left ramp", "secs", 12)
+    start = _at(out, r"\[TEST MODE\] START")
+    assert "own assets: /dump/blk.assets" in out
+    # its music: the game's (67) fades, the carrier plays its own bed
+    assert _at(out, "FADE 67 250") >= start and "SID 125 618" in out and _at(out, "SOUND 125") >= start
+    # the intro full screen half a second later, then the loop behind the HUD
+    intro = _at(out, "CLIP PadMode_blk_Intro")
+    assert 500 <= intro - start <= 600
+    assert _at(out, "BACKDROP PadMode_blk_Loop") >= intro
+    # the shot: a clip behind the HUD once, and its own call
+    ramp = _at(out, "BACKDROP ONCE PadMode_blk_Sever")
+    assert ramp > intro and _at(out, "SOUND 1251") >= ramp
+    # the end: no "lost" call was carried, so the game's Time is up; the won clip full screen;
+    # the loop off and the music faded
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert _at(out, "CALLOUT 1295") <= end
+    assert "own sound lost: the build carried none" in out
+    assert _at(out, "BACKDROP OFF") <= end + 20
+    assert _at(out, "FADE 125 400") <= end + 20
+    assert 500 <= _at(out, "CLIP PadMode_blk_Won") - end <= 600
+
+
+def test_without_its_file_the_blocks_still_play_the_games_own(tmp_path, monkeypatch):
+    _cc()
+    dump = tmp_path / "empty"
+    dump.mkdir()
+    monkeypatch.setenv("HARNESS_DUMP", str(dump))
+    out = play(tmp_path, _media_prog(), "shot", "Building", "secs", 1, "shot", "Left ramp", "secs", 12)
+    assert "no blk.assets" in out
+    assert "CLIP " not in out and "BACKDROP" not in out and "SOUND " not in out
+    assert "CALLOUT 1295" in out and "END (time ran out)" in out
+
+
+def test_a_loop_asked_for_while_idle_and_once_without_a_loop_say_why(tmp_path, monkeypatch):
+    _cc()
+    p = _media_prog()
+    p["scripts"][1]["do"] = [{"op": "clip", "clip": "sever", "where": "behind"}]
+    p["scripts"].append({"hat": {"kind": "any_shot", "when": "idle"}, "do": [
+        {"op": "clip", "clip": "loop", "where": "loop"}]})
+    dump = _assets(tmp_path, "blk", p, [])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Left ramp", "shot", "Building", "secs", 1)
+    assert "own clip loop: not looped behind the HUD - the mode is not running" in out
+    # the start's clip behind the HUD comes before the Building's idle script asks for the loop
+    once = _at(out, r"\[TEST MODE\] own clip sever: not played behind the HUD - no clip of its own loops there")
+    assert "BACKDROP ONCE" not in out and _at(out, "BACKDROP PadMode_blk_Loop") >= once
+
+
+# ---- PAD-376: light shows, and a lit shot's pace ----------------------------------------------------
+def _step(fx, ms, a, b, at="center", rate=0, gi="keep"):
+    return {"fx": fx, "ms": ms, "a": a, "b": b, "at": at, "rate": rate, "gi": gi}
+
+
+#: KING GHIDORAH's start show (ghidorah_heads.c SHOW_START), built step by step in a block
+GHIDORAH_START = [_step("bolts", 1500, "#ffb000", "#000000", "center", 190, "dark"),
+                  _step("strobe", 500, "#ffffff", "#ffb000", "center", 60, "flash"),
+                  _step("burst", 800, "#ffb000", "#ff4000", "top", 0, "dark"),
+                  _step("fade", 400, "#ff4000", "#000000", "center")]
+
+
+def _lights_prog():
+    return prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "show", "show": "own", "steps": GHIDORAH_START}, _light("Building", rate={"k": "secs_left"}),
+        _light("Left ramp", "hurry")]},
+        {"hat": {"kind": "mode_end"}, "do": [{"op": "show", "show": "fizzle"}, {"op": "lights_off", "shot": "*"}]}])
+
+
+def _light(shot, pattern="blink", rate=None, color="#ffb000"):
+    b = {"op": "light_shot", "shot": shot, "color": color, "pattern": pattern}
+    if rate is not None:
+        b["rate"] = num(rate) if isinstance(rate, int) else rate
+    return b
+
+
+def test_light_show_and_pace_problems():
+    def probs(*blocks):
+        return BM.problems(prog([{"hat": {"kind": "mode_start"}, "do": list(blocks)}]), SHOTS)
+    assert probs({"op": "show", "show": "lightning"}, _light("Building", rate=250),
+                 _light("Building", "hurry"), {"op": "show", "show": "own", "steps": GHIDORAH_START}) == []
+    assert any("no light show" in t or "none chosen" in t for t in probs({"op": "show", "show": "nope"}))
+    assert any("with no steps" in t for t in probs({"op": "show", "show": "own", "steps": []}))
+    bad = [_step("warp", 100, "#ffffff", "#000000"), _step("burst", 10, "#ffffff", "#000000"),
+           _step("burst", 100, "white", "#000000"), _step("burst", 100, "#ffffff", "#000000", at="moon"),
+           _step("spin", 100, "#ffffff", "#000000", rate=9000), _step("spin", 100, "#ffffff", "#000000", gi="x")]
+    said = " ".join(probs({"op": "show", "show": "own", "steps": bad}))
+    for words in ("step 1, has no pattern", "step 2, lasts 50 to 10000 ms", "step 3, has a colour missing",
+                  "step 4, has no place", "step 5, has a pace of 0 to 2000", "step 6, says nothing"):
+        assert words in said, words
+    eleven = {"op": "show", "show": "own", "steps": [GHIDORAH_START[0]] * 11}
+    assert any("11 steps: 10 at most" in t for t in probs(eleven))
+    assert any("pace of 20 to 5000 ms" in t for t in probs(_light("Building", rate=5)))
+    assert any("empty number slot" in t for t in probs(_light("Building", rate={"k": "nope"})))
+    # a solid light's pace is not asked for
+    assert probs(_light("Building", "solid", rate=5)) == []
+    # a hurrying blink with no clock blinks at an even pace: a note, not a problem
+    p = prog([{"hat": {"kind": "mode_start"}, "do": [_light("Building", "hurry")]}], seconds=0)
+    assert any("faster as time runs out" in t for t in BM.notes(p))
+
+
+def test_the_light_show_c_only_calls_what_the_header_declares_and_only_when_used():
+    p = prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "show", "show": "own", "steps": GHIDORAH_START}, {"op": "show", "show": "rainbow"},
+        _light("Building", rate={"k": "secs_left"}), _light("Left ramp", "hurry"),
+        {"op": "lights_off", "shot": "Building"}, {"op": "lights_off", "shot": "*"}]}])
+    src = BM.to_c(p, "blk")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    assert "static const struct fx_step SHOW_0[] = {" in src and "SHOW_1[]" in src
+    assert "{ FX_BOLTS, 1500, 0xffb000u, 0x000000u, 150, 330, 190, GI_DARK }" in src
+    assert 'show_start(SHOW_1, 3, "rainbow");' in src
+    assert "light(0, 0xffb000u, PM_LAMP_BLINK, (long long)secs_left(), 0);" in src
+    assert "light(1, 0xffb000u, PM_LAMP_BLINK, 0LL, 1);" in src
+    plain = BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    assert "show_tick" not in plain and "fx_colour" not in plain and "#define SHOWING 0" in plain
+
+
+def test_king_ghidoras_start_show_and_a_blink_that_quickens_in_blocks(tmp_path, monkeypatch):
+    # KING GHIDORAH (ghidorah_heads.c) in blocks: its start show, step by step; the Building lit
+    # blinking every 500 ms, 250 ms with 10 s left and 100 ms with 4 s left; a ready-made show at the end
+    _cc()
+    monkeypatch.setenv("HARNESS_PLACES", "1")
+    p = prog([
+        {"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": [{"op": "show", "show": "own", "steps": GHIDORAH_START},
+                                               _light("Building", rate=500)]},
+        {"hat": {"kind": "seconds_left", "seconds": 10}, "do": [_light("Building", rate=250)]},
+        {"hat": {"kind": "seconds_left", "seconds": 4}, "do": [_light("Building", rate=100)]},
+        {"hat": {"kind": "mode_end"}, "do": [{"op": "show", "show": "rainbow"}]},
+    ], seconds=15)
+    out = play(tmp_path, p, "shot", "Building", "secs", 22)
+    start = _at(out, r"\[TEST MODE\] START")
+    assert "show its own: 4 step(s) over 18 placed inserts, 2 GI string(s)" in out
+    # the show has the playfield: the Building's light waits for it to end (3.2 s), then comes on
+    over = _at(out, r"\[TEST MODE\] show its own: over")
+    assert 3200 <= over - start <= 3250
+    lit = [(int(t), ms) for t, ms in re.findall(r"^\s*(\d+) LAMP BUILDING ffb000 blink (\d+)", out, re.M)]
+    assert [ms for _t, ms in lit] == ["500", "250", "100"], lit
+    assert lit[0][0] - over <= 20
+    assert 4950 <= lit[1][0] - start <= 5100 and 10950 <= lit[2][0] - start <= 11100
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert _at(out, r"\[TEST MODE\] show rainbow: 3 step\(s\)") - end <= 20
+    assert 3100 <= _at(out, r"\[TEST MODE\] show rainbow: over") - end <= 3150
+    assert int(re.search(r"END paints (\d+)", out).group(1)) > 200      # it painted, step after step
+    assert "END lamps held 0" in out                                   # and handed every insert back
+
+
+def test_a_blink_that_hurries_follows_the_clock_and_a_light_again_is_left_alone(tmp_path):
+    p = prog([
+        {"hat": {"kind": "event", "event": "skill_shot", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": [_light("Left ramp", "hurry", color="#ff0000")]},
+        {"hat": {"kind": "every", "seconds": 1}, "do": [_light("Right ramp", rate=300)]},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [
+            {"op": "lights_off", "shot": "Left ramp"}]},
+    ], seconds=30)
+    out = play(tmp_path, p, "event", "skill_shot", "secs", 29.5, "shot", "Left ramp", "secs", 2)
+    start = _at(out, r"\[TEST MODE\] START")
+    hurry = [(int(t) - start, ms) for t, ms in re.findall(r"^\s*(\d+) LAMP LEFT RAMP ff0000 blink (\d+)", out, re.M)]
+    assert [ms for _t, ms in hurry] == ["700", "400", "200", "100"], hurry
+    assert 9950 <= hurry[1][0] <= 10100 and 19950 <= hurry[2][0] <= 20100 and 26950 <= hurry[3][0] <= 27100
+    assert out.count("LAMP RIGHT RAMP ffb000 blink 300") == 1           # lit again each second: sent once
+    assert "LAMP OFF LEFT RAMP" in out and "END lamps held 0" in out
 
 
 # ---- PAD-375: the HUD -------------------------------------------------------------------------------
@@ -593,3 +903,28 @@ def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
     assert "Hud_Award: MASER 1" in note and "Hud_AwardSub: TEST MODE" in note
     assert "SHOW PadMode_maser_Hud 1" in note and "SHOW PadMode_maser_Hud 0" in note
     assert "Hud_Title:  " in note                  # a note is the award line alone
+
+
+def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, monkeypatch):
+    # PAD-375 beside PAD-374 and PAD-376: the HUD's kit, the light-show engine and the assets header
+    # in one mode's C, without a name meeting another
+    _cc()
+    p = _media_prog()
+    p["hud"] = maser_hud()["hud"]
+    p["vars"] = [{"name": "step"}, {"name": "mult"}, {"name": "barrages"}]
+    p["scripts"].append({"hat": {"kind": "mode_start"}, "do": [
+        {"op": "show", "show": "own", "steps": GHIDORAH_START},
+        {"op": "hud_award", "text": "GO", "value": None, "sub": "", "seconds": 2}]})
+    assert BM.problems(p, SHOTS) == []
+    src = BM.to_c(p, "blk")
+    assert '#include "intricate_kit.h"' in src and '#include "pad_mode_assets.h"' in src
+    dump = _assets(tmp_path, "blk", p, [{"key": "music", "request": 125, "sid": 618}])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Building", "secs", 1, "ball_end", "secs", 1)
+    start = _at(out, r"\[TEST MODE\] START")
+    assert "SHOW PadMode_blk_Hud 1" in out and "Hud_Award: GO" in out
+    assert _at(out, "CLIP PadMode_blk_Intro") >= start
+    assert "show its own: 4 step(s)" in out
+    t = _at(out, ">> ball_end")
+    assert re.search(r"^\s*%d SHOW PadMode_blk_Hud 0" % t, out, re.M)
+    assert "END lamps held 0, display priority 0" in out

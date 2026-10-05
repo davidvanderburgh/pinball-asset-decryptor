@@ -230,6 +230,9 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk-rep .bk-x { width: 18px; height: 18px; line-height: 16px; border-radius: 999px; }
 .bk .field.sm { background: var(--panel); color: var(--ink); }
 .bk .chk { color: #fff; }
+/* a Light show block's own steps (PAD-376): one line each, under the block's own line */
+.bk-steps { display: flex; flex-direction: column; gap: 3px; margin: 2px 0 4px 18px; padding: 4px 6px; background: rgba(0,0,0,.16); border-radius: 6px; }
+.bk-steps .bk-step { padding: 0; gap: 4px; min-height: 30px; }
 .bk-color { width: 30px; height: 24px; padding: 0; border: 1px solid rgba(0,0,0,.3); border-radius: 4px; background: none; cursor: pointer; }
 .bk-c-src { margin: 0; padding: 12px 14px; background: var(--log-bg); color: var(--log-ink); border: 1px solid var(--line);
   border-radius: 8px; font-size: 12px; line-height: 1.45; overflow: auto; max-height: 100%; white-space: pre; }
@@ -239,3 +242,7 @@ html.bp-860 .bk-editor { flex-direction: column; }
 html.bp-860 .bk-palette { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); }
 .bk-stack.bk-empty > .bk-gap { height: 22px; border: 1px dashed var(--line-2); border-radius: 6px; margin: 2px 0; }
 .bk-stack.bk-empty > .bk-gap.on { background: var(--accent-soft); border-color: var(--accent); }
+/* PAD-374: the mode's own clips and sounds, and the blocks that play them */
+.bk-own, .bk.bk-own, .bk-pal.bk-own { background: #b8458f; color: #fff; }
+.bk-ownbox { background: #b8458f22; border-color: #b8458f66; }
+.bk-file { max-width: 140px; }

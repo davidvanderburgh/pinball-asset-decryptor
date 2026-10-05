@@ -11,6 +11,11 @@ Modes written in C against `pad_mode.h` (read `../MODE_SDK.md` first). Each file
 | `final_wars.c` | FINAL WARS | a multi-phase wizard mode, lit by playing the other modes, with add-time shots |
 | `anguirus_assist.c` | ANGUIRUS | a mode that stacks with the game's own battle on purpose: it starts and ends with it |
 | `meltdown.c` | MELTDOWN | a MULTIBALL of our own: a core temperature that climbs, sets the jackpots' multiplier, and melts down at 100% (hud-layers) |
+| `godzilla_angry.c` | GODZILLA ANGRY | a RAGE meter every switch fills (on the glass all game), a chase in staged locks, a 6-ball multiball (PAD-379, after EHoH's Gappa Angry) |
+| `spacegodzilla.c` | SPACEGODZILLA | a multiball of crystal locks that are harder to light each time, three multiballs in turn, supers worth the sum (PAD-379) |
+| `kiryu.c` | KIRYU | charge the Absolute Zero, then fire it or push your luck into an overheat (PAD-379, after Metallica's Sparky) |
+| `biollante.c` | BIOLLANTE | a switch frenzy: every switch feeds a sap jackpot the vine banks collect (PAD-379, after TWD's Blood Bath) |
+| `destoroyah.c` | DESTOROYAH | waves of aggregates that advance down the playfield; the closer the kill, the more it pays (PAD-379, after TWD's Horde) |
 | `ebirah_rewrite.c` | EBIRAH, three shots then the Building | the game's OWN Ebirah battle with its shot logic replaced in C (item 161, against `../pad_stock.h`; emulator-proven on Premium 1.16, MODE_SDK.md says what was measured) |
 
 **How they look (hud-layers).** Like the game's own battles: an intro clip full screen when a mode starts,
@@ -67,6 +72,11 @@ time-up call, or silence). The countdown (ten seconds, 5..1) is always the game'
 | MASER BARRAGE | `barrage` (a barrage completed), `broken` (the chain broken), `won` / `lost` (the clock, with or without a barrage) | Godzilla vs. Megalon (1973): the Maser cannons, the music, the calls |
 | FINAL WARS | `phase1`, `phase2` (a phase won), `won` (the wizard shot), `lost` (a phase's clock runs out) | Godzilla: Final Wars (2004) |
 | ANGUIRUS | `spike` (a spike charged), `roll` (a rolling attack), `won` / `lost` (it leaves, with or without a roll) | Godzilla Raids Again (1955) |
+| GODZILLA ANGRY | `rage` (a rage level), `angry` (the meter full), `lock`, `baby` (BABY FOUND), `jackpot`, `super`, `won` / `lost` | Godzilla vs. Mechagodzilla II (1993) |
+| SPACEGODZILLA | `lit` (a lock lit), `lock` (a crystal planted), `jackpot`, `tower` (a tower falls), `super`, `add`, `won` / `lost` | Godzilla vs. SpaceGodzilla (1994) |
+| KIRYU | `charge` (another 100%), `ready`, `fire` (ABSOLUTE ZERO), `overheat` (and a vent), `won` / `lost` | Godzilla Against Mechagodzilla (2002) |
+| BIOLLANTE | `cut` (a vine), `collect` (a bank: the sap jackpot), `beast` (her beast form), `won` / `lost` | Godzilla vs. Biollante (1989) |
+| DESTOROYAH | `kill`, `escape` (the city is hit), `wave` (a wave cleared), `boss` (the perfect form), `won` / `lost` | Godzilla vs. Destoroyah (1995) |
 
 `film_recipes.json` has every film time (clip, picture frame, music loop, each call) and what was
 measured to pick it; nothing of a film is in this repo. The Modes tab's Examples add these five as
@@ -76,7 +86,8 @@ Build them all, with the mode-file interpreter, into the object a card carries:
 
 ```bash
 bash ../build_mode.sh -o mode.so ghidorah_heads.c oxygen_destroyer.c maser_barrage.c \
-    final_wars.c anguirus_assist.c ../mode_file.c
+    final_wars.c anguirus_assist.c meltdown.c godzilla_angry.c spacegodzilla.c kiryu.c \
+    biollante.c destoroyah.c ../mode_file.c
 ```
 
 Each mode finds its screen as `PadMode_<file name>_Screen` (MODE_SDK.md, "Screens"); the card build
@@ -97,7 +108,8 @@ Linux (ELF) C compiler.
 
 ```bash
 gcc -std=gnu17 -I.. -o harness desk_harness.c ghidorah_heads.c oxygen_destroyer.c \
-    maser_barrage.c final_wars.c anguirus_assist.c
+    maser_barrage.c final_wars.c anguirus_assist.c meltdown.c godzilla_angry.c spacegodzilla.c \
+    kiryu.c biollante.c destoroyah.c
 ./harness shot "Powerline left" shot "Powerline center" shot "Powerline right" \
           shot "Left ramp" secs 12 event skill_shot battle 1 secs 1 ball_end
 ```
@@ -112,6 +124,18 @@ BUILDING is the city building, upper middle-left; the three POWERLINE targets ar
 upper playfield (left, center, right); the GODZILLA target is upper left, beside the Building; the
 MASER target is on the left side, halfway down; the three SHIELD targets are on the right side,
 halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the top.
+
+**The shields on a Premium/LE (PAD-379).** There the shield targets sit on a platform a motor turns, and most of
+the game it faces AWAY: the shield ramp spinner faces the player and the shields cannot be hit from the flippers
+(the game turns them toward the player for parts of its Mechagodzilla multiball). So the modes that play the
+shields - MELTDOWN, FINAL WARS, KIRYU, BIOLLANTE, DESTOROYAH and SPACEGODZILLA's M.O.G.U.E.R.A. multiball - turn the
+platform toward the player 1.5 s after they start (the ball that started the mode is clear of it by then) and back
+away when they end (`pm_shield`, `kit_shields_in` / `kit_shields_out`). A shield hit makes the game turn the platform
+away (its own reaction); the mode turns it back 1.5 s later, so the shield recoils and returns. If one of the game's own modes takes over,
+the platform is left as that mode wants it. While it turns, or if an operator switched the motor off, the modes put
+nothing they need on the shields (`kit_shields_reachable`). A Pro's two shield targets are fixed and face the
+player: nothing turns. ANGUIRUS is the exception: it joins the game's own battles, and those play with the shields
+away, so on a Premium its spikes are only reachable when the battle itself has the shields toward the player.
 
 ### MELTDOWN (`meltdown.c`): a multiball of our own
 
@@ -231,6 +255,116 @@ halfway down, in front of Mechagodzilla; the BIG LOOP is the orbit across the to
   (`pm_display_covered`); after that its award line speaks for 3 s at a spike, the roll lit and each rolling
   attack, holding display priority 180 only for those moments; its total waits for the battle's own.
 - **How often:** once per game battle.
+
+## The Lyman Sheats modes (PAD-379)
+
+David, 2026-10-04: "I want to see some new modes in Godzilla that are inspired by Lyman Sheets games. For example, having
+a 'Gappa Angry' type mode would be amazing in Godzilla with a switch hit counter on the UI and feedback that it's
+progressing towards the mode (and not counting switch hits during multiball) and having staged locks". Lyman F. Sheats Jr.
+wrote the rules of Elvira's House of Horrors (to 1.00), The Walking Dead, Metallica, Batman '66, AC/DC and Medieval
+Madness, among others; Godzilla's own are Rick Naegele's and Keith Elwin's. Each mode below borrows one of his signature
+mechanics (`docs/plans/lyman_modes.md` has the research and the sources) and a Toho monster the stock game never uses,
+so it plays on shots and in stories the game has not worn out. They follow the pack's rules: one of ours at a time,
+isolated from the game's own modes (PAD-347), the HUD at the glass's edges, the light language above, own clips, music
+and calls cut from the films.
+
+### GODZILLA ANGRY (`godzilla_angry.c`): EHoH's Gappa Angry
+
+- **How to start it:** fill the RAGE meter. Every playfield switch hit counts (the game's 0x1 dispatch), all game, for
+  the player up: five levels of 100, 125, 150, 175 and 200 hits (EHoH's 150 to 250, for Godzilla's single pop bumper),
+  each paying 1,000,000 more 500,000 a level with a roar and a red throb up the playfield. Nothing counts during a
+  multiball (two balls in play, or the game's own), during the mode, or after a tilt. The meter stays on the glass: a
+  gauge of 12 pips on the right edge labelled RAGE n/5, and the award line every quarter of a level ("40 MORE FOR RAGE
+  3"). At level 5 GODZILLA IS ANGRY: the BUILDING insert pulses red and the BUILDING starts the chase.
+- **The chase (Godzilla vs. Mechagodzilla II: G-Force carried Baby Godzilla away):** five places, each its lit shots in
+  any order and then a LOCK (virtual: the ball stays in play). ADONOA ISLAND: lock at the captive ball. YOKKAICHI: both
+  ramps, lock at the Maser. OSAKA: the Big loop and the Building, lock at the captive ball. KYOTO: both ramps, the
+  Building and the Big loop, lock at the Maser. MAKUHARI: both ramps, the Big loop, the Building and the center
+  powerline, lock at the captive ball. Then BABY: the Building is BABY FOUND, the SUPER JACKPOT and a 6-ball multiball.
+- **Scoring:** a lit shot pays 500,000, +500,000 a place and +25,000 a shot within it, and an eighth of it goes to the
+  JACKPOT; a lock pays twice the shot and adds 250,000 a place to the JACKPOT. Every switch hit during the chase adds
+  10,000 to the SUPER JACKPOT (from 5,000,000). A 5 s ball save at the start.
+- **Clocks:** 30 s a place; a lit shot with under 15 s left puts it back to 15 (EHoH's Haunts).
+- **Failing still pays:** a place's clock running out with locks made turns them into a multiball of the locks + 1
+  balls, scoring the JACKPOT built. With no lock yet the trail goes cold (still angry: the Building starts it again). A
+  drain ends the chase and the place and its locks wait for the next ball.
+- **ANGRY MULTIBALL:** the ramps, the Building and the Big loop are lit; one is BABY (green, it moves every 10 s and when
+  hit): BABY pays the JACKPOT times the multiplier; any other lit shot pays 500,000 and raises the multiplier, up to x6
+  (EHoH's Scream Test). 15 s ball save; it ends with one ball left.
+- **How it ends:** the multiball's last ball, a tilt, one of the game's own modes beginning. Then the meter starts again,
+  every level 25 hits more.
+- **Inserts:** ready, the BUILDING pulsing red; the chase, the place's shots red and the lock white, blinking faster as
+  the clock runs out; the multiball, the jackpot shots orange and BABY green. Display priority 180, 190 in the multiball.
+
+### SPACEGODZILLA (`spacegodzilla.c`): locks that are harder to light each time
+
+- **How to light a lock:** the POWERLINE targets. The first time any powerline lights all three locks; the second time
+  each powerline hit lights one lock; from the third, two powerline hits a lock (EHoH's Garage, Batman '66's villain
+  locks). The powerlines face the player on every Godzilla; the three in one ball also start KING GHIDORAH.
+- **How to lock:** the BIG LOOP while a lock is lit: SpaceGodzilla plants CRYSTAL 1, 2, 3 (250,000 times the crystal's
+  number). The locks are virtual and wait across balls. Nothing lights or locks during a multiball or another of our
+  modes.
+- **How to start it:** the third crystal starts CRYSTAL MULTIBALL, 3 balls with a 15 s ball save. While one of the game's
+  own modes runs it waits, still ready: the next Big loop after it starts it.
+- **What to do:** three crystal towers stand on the LEFT RAMP, the BUILDING and the RIGHT RAMP. Each JACKPOT (the base,
+  +100,000 a jackpot) cracks its tower; a tower falls after 2. All three down lights the SUPER JACKPOT at the BIG LOOP for
+  20 s, worth every jackpot since the last super (Metallica's Casket). The first three supers add a ball. Then the towers
+  grow back one jackpot stronger.
+- **In turn:** the first multiball is CRYSTAL TOWERS (jackpots from 1,000,000); the second M.O.G.U.E.R.A. (from
+  1,500,000, stronger towers, and every SHIELD target a spiral grenade: +250,000 on every jackpot, the shields turned
+  toward the player for it on a Premium); the third and after
+  SPACE BEAST (from 2,000,000, and every 5th jackpot lights the super too, EHoH's Attic Attack).
+- **How it ends:** one ball left, a tilt, one of the game's own modes beginning.
+- **Inserts:** a lit lock, the BIG LOOP blinking purple; the towers purple, blinking on their last jackpot; the super, the
+  BIG LOOP flashing white; M.O.G.U.E.R.A.'s shields pulsing cyan. Display priority 190.
+- **How often:** every three crystals.
+
+### KIRYU (`kiryu.c`): charge, then fire or push your luck
+
+- **How to start it:** spin the MECHAGODZILLA spinner (the shield ramp's) 30 times; every spin counts. Then 40, then 50
+  (Metallica's Sparky: each start costs more).
+- **What to do:** a 40 s clock. The lit shots charge Kiryu's ABSOLUTE ZERO: the ramps, the Building and the Big loop 15%,
+  the Maser 10%, each shield target 8% (turned toward the player for the mode on a Premium, which closes the spinner),
+  every spin of the Mechagodzilla spinner 1%. Each shot pays 750,000; a lit shot
+  with under 15 s left puts the clock back to 15.
+- **Fire or push your luck:** from 100% the CAPTIVE BALL (Godzilla) or the ACTION BUTTON fires it: 10,000,000 times the
+  multiplier plus a quarter of everything the mode scored, and KIRYU WINS. Or charge on: 200% is x2, 300% x3, 400% x4. From
+  200% the reactor OVERHEATS: 12 s to fire, each 100% more gives 12 s again; run out and Kiryu VENTS, the charge back
+  to 0 (Metallica's Crank It Up and Batman '66's cash it now or take +1x).
+- **How it ends:** fired; the clock (at 100% or more Kiryu fires on its own at x1 with no bonus, under it the charge is
+  lost); a drain; a tilt; one of the game's own modes beginning.
+- **Inserts:** the charging shots ice blue; ready, the CAPTIVE BALL and the ACTION BUTTON flashing white; overheating,
+  flashing red, faster as the seconds run out. Display priority 180.
+
+### BIOLLANTE (`biollante.c`): a switch frenzy
+
+- **How to start it:** 6 ramp shots in a game (either ramp); then 8, then 10.
+- **What to do:** a 40 s clock. EVERY playfield switch scores the switch value (100,000, +25,000 for each vine bank cut)
+  and adds it to the SAP JACKPOT (TWD's Blood Bath, Metallica's FUEL). The three SHIELD targets and the three POWERLINE
+  targets are two banks of vines (the shields turned toward the player for the mode on a Premium; on a Pro its two
+  shield targets are the bank): a whole bank cut COLLECTS the sap jackpot times the banks cut so far (x1, x2, x3) and
+  grows back. A vine with under 15 s left puts the clock back to 15; each pop bumper hit gives a second back.
+- **The beast:** after three collects Biollante comes back as the BEAST: 20 s, and the BUILDING is the FINAL BLOW, worth
+  everything the three collects paid.
+- **How it ends:** the final blow (BIOLLANTE IS FREE), the clock (she withers), a drain, a tilt, one of the game's own modes.
+- **Inserts:** the vines still standing green; the beast, the BUILDING blinking gold. Display priority 180.
+
+### DESTOROYAH (`destoroyah.c`): TWD's Horde
+
+- **How to start it:** spin the CENTER spinner 30 times (then 40, 50).
+- **What to do:** aggregates come over the top at the POWERLINES (far, x1) and advance every few seconds to the RAMPS,
+  the BUILDING or the BIG LOOP (near, x2), then to the MASER, the SHIELDS or the CAPTIVE BALL (close, x4), then into
+  the city. Up to two at a time. A kill pays 1,000,000 (+250,000 a wave) times how close it was: let one come closer
+  for more, at your risk. On a Premium the shields turn toward the player for the mode, and no aggregate comes to a
+  shield until they face the player.
+- **Waves:** 3, 4 and 5 kills; they advance every 7, 6 and 5 s. A cleared wave pays every kill of the wave again.
+- **The city:** an aggregate that gets past the close shots hits the city; three hits and Destoroyah wins.
+- **The perfect form:** after wave 3, the BUILDING for 25 s: three hits of 5,000,000, the third the SUPER JACKPOT,
+  every kill of the mode again.
+- **How it ends:** the perfect form defeated (won), three city hits or the perfect form's clock (lost), a drain, a tilt,
+  one of the game's own modes beginning.
+- **Inserts:** each aggregate's shot, far yellow, near orange and blinking, close red and flickering; the perfect form,
+  the BUILDING blinking red. Display priority 180.
 
 Only one pack mode runs at a time, whatever starts it.
 

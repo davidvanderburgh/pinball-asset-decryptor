@@ -314,6 +314,49 @@ def icon(kind):
             tx, ty = c + 92 * math.cos(a), c + 40 + 84 * math.sin(a)
             nx, ny = -math.sin(a) * 12, math.cos(a) * 12
             d.polygon([(bx - nx, by - ny), (tx, ty), (bx + nx, by + ny)], fill=255)
+    elif kind == "rage":                                        # PAD-379: a flame, his rage
+        def flame(cx, base, h, w):
+            pts = []
+            for t in np.linspace(0, 1, 28):                    # the right edge up to the tip, curling over
+                pts.append((cx + w * math.sin(math.pi * (1 - t)) * (1 - t) ** 0.6 + 10 * t, base - h * t))
+            for t in np.linspace(1, 0, 28):                    # the left edge back down
+                pts.append((cx - w * math.sin(math.pi * (1 - t)) * (1 - t) ** 0.4 + 10 * t * t, base - h * t))
+            d.polygon(pts, fill=255)
+        flame(c - 36, n - 12, 104, 30)
+        flame(c + 36, n - 12, 104, 30)
+        flame(c, n - 8, 150, 44)
+        d.ellipse((c - 18, n - 70, c + 18, n - 22), fill=0)
+    elif kind == "crystal":                                     # PAD-379: SpaceGodzilla's crystal towers
+        for dx, h, w in ((-44, 96, 22), (0, 140, 28), (44, 110, 22)):
+            base = n - 14
+            d.polygon([(c + dx - w, base), (c + dx - w, base - h + w), (c + dx, base - h), (c + dx + w, base - h + w),
+                       (c + dx + w, base)], fill=255)
+            d.line((c + dx, base - h + 8, c + dx, base - 6), fill=0, width=5)
+    elif kind == "snowflake":                                   # PAD-379: Kiryu's ABSOLUTE ZERO
+        for k in range(6):
+            a = math.radians(k * 60)
+            ex, ey = c + 78 * math.cos(a), c + 78 * math.sin(a)
+            d.line((c, c, ex, ey), fill=255, width=12)
+            for t, br in ((0.5, 26), (0.78, 18)):
+                bx, by = c + 78 * t * math.cos(a), c + 78 * t * math.sin(a)
+                for s in (-1, 1):
+                    b2 = a + s * math.radians(50)
+                    d.line((bx, by, bx + br * math.cos(b2), by + br * math.sin(b2)), fill=255, width=9)
+        d.ellipse((c - 16, c - 16, c + 16, c + 16), fill=255)
+    elif kind == "rose":                                        # PAD-379: Biollante's rose
+        d.line((c, c + 10, c - 6, n - 6), fill=255, width=12)
+        d.ellipse((c - 54, c + 30, c - 8, c + 56), fill=255)       # a leaf
+        for k in range(5):
+            a = math.radians(-90 + k * 72)
+            px, py = c + 34 * math.cos(a), c - 22 + 34 * math.sin(a)
+            d.ellipse((px - 30, py - 30, px + 30, py + 30), fill=255)
+        d.ellipse((c - 22, c - 44, c + 22, c), fill=0)
+        d.arc((c - 16, c - 38, c + 16, c - 6), 0, 300, fill=255, width=8)
+    elif kind == "claw":                                        # PAD-379: a Destoroyah aggregate's pincer
+        d.ellipse((c - 78, c - 60, c + 38, c + 60), fill=255)    # the claw
+        d.pieslice((c - 110, c - 92, c + 70, c + 92), 158, 202, fill=0)   # its open jaws
+        d.ellipse((c - 30, c - 12, c - 6, c + 12), fill=0)       # the hinge of the bite
+        d.polygon([(c + 20, c - 26), (c + 86, c - 14), (c + 86, c + 14), (c + 20, c + 26)], fill=255)   # the arm
     else:
         from PIL import ImageFont
         d.rectangle((0, 0, 0, 0), fill=0)

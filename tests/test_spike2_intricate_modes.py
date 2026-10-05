@@ -1,4 +1,5 @@
-"""Item 152: the INTRICATE example modes (tools/spike2_emu/modes/sdk/examples/), and MELTDOWN (hud-layers).
+"""Item 152: the INTRICATE example modes (tools/spike2_emu/modes/sdk/examples/), MELTDOWN (hud-layers), and the
+five Lyman Sheats modes (PAD-379: GODZILLA ANGRY, SPACEGODZILLA, KIRYU, BIOLLANTE, DESTOROYAH).
 
 Three layers, each skipping cleanly where its tools are missing:
 
@@ -24,10 +25,14 @@ import pytest
 
 SDK = pathlib.Path(__file__).resolve().parents[1] / "tools" / "spike2_emu" / "modes" / "sdk"
 EX = SDK / "examples"
-MODES = ["ghidorah_heads", "oxygen_destroyer", "maser_barrage", "final_wars", "anguirus_assist", "meltdown"]
+MODES = ["ghidorah_heads", "oxygen_destroyer", "maser_barrage", "final_wars", "anguirus_assist", "meltdown",
+         "godzilla_angry", "spacegodzilla", "kiryu", "biollante", "destoroyah"]
 NAMES = {"ghidorah_heads": "KING GHIDORAH", "oxygen_destroyer": "OXYGEN DESTROYER",
          "maser_barrage": "MASER BARRAGE", "final_wars": "FINAL WARS", "anguirus_assist": "ANGUIRUS",
-         "meltdown": "MELTDOWN"}
+         "meltdown": "MELTDOWN", "godzilla_angry": "GODZILLA ANGRY", "spacegodzilla": "SPACEGODZILLA",
+         "kiryu": "KIRYU", "biollante": "BIOLLANTE", "destoroyah": "DESTOROYAH"}
+#: PAD-379: the five modes after Lyman Sheats' rule sets
+LYMAN = ["godzilla_angry", "spacegodzilla", "kiryu", "biollante", "destoroyah"]
 PREMIUM_PORT = SDK / "ports" / "godzilla_le-1.16.port"
 
 
@@ -38,7 +43,7 @@ def _src(slug):
 def _port_shots(path):
     out = set()
     for line in path.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"shot\s+0x[0-9a-fA-F]+\s+(.+?)\s*$", line)
+        m = re.match(r"(?:shot|switch\s+\d+)\s+0x[0-9a-fA-F]+\s+(.+?)\s*$", line)
         if m:
             out.add(m.group(1))
     return out
@@ -78,7 +83,8 @@ def test_each_mode_registers_one_mode_named_for_its_folder(slug):
 def test_every_shot_a_mode_names_is_in_the_premium_port(slug):
     shots = _port_shots(PREMIUM_PORT)
     named = set(re.findall(r'"((?:Left|Right) ramp|Building|Godzilla target|Maser target|Powerline \w+|'
-                           r'Shield target \w+|Big loop|Skill shot|Left spinner)"', _src(slug)))
+                           r'Shield target \w+|Big loop|Skill shot|Left spinner|Top spinner|Shield ramp spinner|'
+                           r'Pop bumper|Action button)"', _src(slug)))
     assert named, slug
     assert named <= shots, named - shots
 
@@ -138,7 +144,7 @@ def test_each_mode_builds_alone_with_build_mode_sh(slug, tmp_path):
     assert out.stat().st_size > 0
 
 
-def test_all_six_build_into_one_object_with_mode_file_c(tmp_path):
+def test_all_the_modes_build_into_one_object_with_mode_file_c(tmp_path):
     _arm()
     out = tmp_path / "mode.so"
     r = subprocess.run(["bash", str(SDK / "build_mode.sh"), "-o", str(out)]
@@ -173,7 +179,7 @@ def _harness_source():
     starts on. A harness without them shows up here rather than as a mode that silently shows nothing."""
     src = (EX / "desk_harness.c").read_text(encoding="utf-8")
     cap = re.search(r"static struct fake_node nodes\[(\d+)\];", src)
-    assert cap and int(cap.group(1)) >= 6 * 42, "desk_harness.c: the fake scene cannot hold six modes' HUDs"
+    assert cap and int(cap.group(1)) >= len(MODES) * 42, "desk_harness.c: the fake scene cannot hold every HUD"
     assert '{ "Left spinner", 0x200ull }' in src
     return src
 
@@ -621,6 +627,15 @@ ASSETS = {
     "anguirus_assist": ("ANGUIRUS", 357, {"spike": 1197, "roll": 972, "won": 1281, "lost": 1259}),
     "meltdown": ("MELTDOWN", 590, {"lit": 1203, "jackpot": 1205, "cool": 1207, "heat": 1209, "critical": 1211,
                                    "meltdown": 1213, "won": 1215, "lost": 1217, "add": 1219}),
+    "godzilla_angry": ("GODZILLA ANGRY", 600, {"rage": 1301, "angry": 1303, "lock": 1305, "baby": 1307,
+                                               "jackpot": 1309, "super": 1311,
+                                               "won": 1313, "lost": 1315}),
+    "spacegodzilla": ("SPACEGODZILLA", 610, {"lit": 1321, "lock": 1323, "jackpot": 1325, "tower": 1327,
+                                             "super": 1329, "add": 1331,
+                                             "won": 1333, "lost": 1335}),
+    "kiryu": ("KIRYU", 620, {"charge": 1341, "ready": 1343, "fire": 1345, "overheat": 1347, "won": 1349, "lost": 1351}),
+    "biollante": ("BIOLLANTE", 630, {"cut": 1361, "collect": 1363, "beast": 1365, "won": 1367, "lost": 1369}),
+    "destoroyah": ("DESTOROYAH", 640, {"kill": 1381, "escape": 1383, "wave": 1385, "boss": 1387, "won": 1389, "lost": 1391}),
 }
 
 
@@ -863,6 +878,19 @@ CLIP_FLOWS = {
                  "MELTDOWN", "jackpot", "lost"),
     "anguirus_assist": (["battle", 1, "secs", 2, "shot", "Shield target left", "shot", "Shield target center",
                          "shot", "Shield target right", "secs", 1, "battle", 0, "secs", 6], "ANGUIRUS", None, "lost"),
+    "godzilla_angry": (["trigger", "godzilla_angry.light", "secs", 1, "shot", "Building", "secs", 1,
+                        "shot", "Godzilla target", "secs", 1, "trigger", "godzilla_angry.stop", "secs", 1],
+                       "GODZILLA ANGRY", "lock", "lost"),
+    "spacegodzilla": (["trigger", "spacegodzilla.start", "secs", 1, "shot", "Left ramp", "secs", 1,
+                       "trigger", "spacegodzilla.stop", "secs", 1], "SPACEGODZILLA", "jackpot", "lost"),
+    "kiryu": (["trigger", "kiryu.start", "secs", 1, "trigger", "kiryu.charge=105", "secs", 1, "trigger", "kiryu.stop",
+               "secs", 1], "KIRYU", "ready", "lost"),
+    "biollante": (["trigger", "biollante.start", "secs", 1, "shot", "Shield target left", "shot", "Shield target center",
+                   "shot", "Shield target right", "secs", 1, "trigger", "biollante.stop", "secs", 1],
+                  "BIOLLANTE", "collect", "lost"),
+    "destoroyah": (["trigger", "destoroyah.start", "secs", 4, "shot", "Powerline left", "shot", "Powerline center",
+                    "shot", "Powerline right", "secs", 1, "trigger", "destoroyah.stop", "secs", 1],
+                   "DESTOROYAH", "kill", "lost"),
 }
 
 
@@ -987,6 +1015,15 @@ def _all_back(out):
     return "END lamps held 0, display priority 0" in out
 
 
+def _all_back_but_lit_locks(out):
+    """everything handed back - but the powerlines that start KING GHIDORAH light SPACEGODZILLA's locks too
+    (PAD-379), and its lit lock keeps one insert, the Big loop blinking purple, until it is planted"""
+    if _all_back(out):
+        return True
+    return ("END lamps held 1, display priority 0" in out and has(out, "SPACEGODZILLA", "every lock is lit")
+            and any(c == "be28ff" for _t, c, _p, _ms in _lamp(out, "BIG LOOP", "SPACEGODZILLA")))
+
+
 ENDING_MS = 10000     # a natural end keeps the display hold this long: the ending clip, then the total
 
 
@@ -1026,7 +1063,7 @@ def test_ghidorah_final_blow_flashes_the_maser_and_every_insert_goes_back_when_i
         assert final in _released(out, name)                                     # the heads are gone
     end = _at(out, "[KING GHIDORAH] END (super jackpot)")
     assert end in _released(out, "MASER") and end in _released(out, "MASER READY")
-    assert _ending_back(out, "KING GHIDORAH", end) and _all_back(out)
+    assert _ending_back(out, "KING GHIDORAH", end) and _all_back_but_lit_locks(out)
 
 
 def test_a_mode_started_during_anothers_ending_takes_the_display_at_once(harness):
@@ -1180,6 +1217,11 @@ def test_anguirus_total_gives_way_when_another_mode_of_ours_asks_to_start(harnes
     (["trigger", "final_wars.light", "secs", 8, "shot", "Building"], "FINAL WARS", 190),
     (["battle", 1], "ANGUIRUS", 180),
     (MELTDOWN_START, "MELTDOWN", 190),
+    (["trigger", "godzilla_angry.light", "secs", 1, "shot", "Building"], "GODZILLA ANGRY", 180),
+    (["trigger", "spacegodzilla.start", "secs", 1], "SPACEGODZILLA", 190),
+    (["raw", "0x20000"] * 30, "KIRYU", 180),
+    (["shot", "Left ramp", "ms", 300] * 6, "BIOLLANTE", 180),
+    (["raw", "0x2000"] * 30 + ["secs", 2], "DESTOROYAH", 180),          # its first aggregate, 2.5 s in
 ])
 @pytest.mark.parametrize("ending", ["ball_end", "tilt"])
 def test_a_drain_or_a_tilt_hands_every_insert_and_the_display_back_at_once(harness, start, mode, prio, ending):
@@ -1197,8 +1239,7 @@ def test_a_drain_or_a_tilt_hands_every_insert_and_the_display_back_at_once(harne
         or "display priority 0" in out.splitlines()[-1]
     # PAD-301: the mode's HUD (its total) goes down with it: the game's end-of-ball bonus or the tilt has the
     # screen, and a total kept up for its seconds sat on the bonus screen's words on a machine
-    slug = {"KING GHIDORAH": "ghidorah_heads", "OXYGEN DESTROYER": "oxygen_destroyer", "MASER BARRAGE": "maser_barrage",
-            "FINAL WARS": "final_wars", "ANGUIRUS": "anguirus_assist", "MELTDOWN": "meltdown"}[mode]
+    slug = {name: slug for slug, name in NAMES.items()}[mode]
     assert t in _hid(out, slug), out[-1500:]
 
 
@@ -1367,6 +1408,36 @@ def test_meltdown_ends_when_one_ball_is_left_after_the_ball_save_and_its_grace(h
 # its label and sub-label, the award line, the title, and the instruction line above the score panel. The award's
 # smaller line sits under the award as wide as the instruction line. Measured from what each mode WRITES in full
 # runs of its flows, not from its source.
+# ---- PAD-379: the Lyman Sheats modes' flows ------------------------------------------------------------------------
+GA = "GODZILLA ANGRY"
+GA_LIGHT = ["trigger", "godzilla_angry.light", "secs", 1]
+#: the Building starts the chase; then ADONOA ISLAND, YOKKAICHI, OSAKA, KYOTO and MAKUHARI, a lock each
+GA_CHASE = ["shot", "Building", "secs", 1, "shot", "Godzilla target", "secs", 1,
+            "shot", "Left ramp", "shot", "Right ramp", "secs", 1, "shot", "Maser target", "secs", 1,
+            "shot", "Big loop", "shot", "Building", "secs", 1, "shot", "Godzilla target", "secs", 1,
+            "shot", "Left ramp", "shot", "Right ramp", "shot", "Building", "shot", "Big loop", "secs", 1,
+            "shot", "Maser target", "secs", 1,
+            "shot", "Left ramp", "shot", "Right ramp", "shot", "Big loop", "shot", "Building",
+            "shot", "Powerline center", "secs", 1, "shot", "Godzilla target", "secs", 1]
+GA_JP = ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "ms", 300, "shot", "Big loop", "ms", 300,
+         "shot", "Building", "ms", 300]
+SG = "SPACEGODZILLA"
+SG_LOOP = ["shot", "Big loop", "ms", 300]
+SG_FIRST = ["shot", "Powerline left", "ms", 300] + SG_LOOP * 3
+SG_SECOND = (["shot", "Powerline center", "ms", 300] + SG_LOOP) * 3
+SG_THIRD = (["shot", "Powerline right", "ms", 300, "shot", "Powerline left", "ms", 300] + SG_LOOP) * 3
+SG_TOWERS_DOWN = ["shot", "Left ramp", "ms", 300, "shot", "Building", "ms", 300, "shot", "Right ramp", "ms", 300] * 2
+KIRYU_SPINS = ["raw", "0x20000"] * 30
+BIO_RAMPS = ["shot", "Left ramp", "ms", 300] * 6
+BIO_BANKS = ["shot", "Slingshot", "shot", "Slingshot", "shot", "Shield target left", "shot", "Shield target center",
+             "shot", "Shield target right", "ms", 300, "shot", "Slingshot", "shot", "Powerline left",
+             "shot", "Powerline center", "shot", "Powerline right", "ms", 300]
+DE_FAR = ["shot", "Powerline left", "shot", "Powerline center", "shot", "Powerline right"]
+DE_NEAR = ["shot", "Left ramp", "shot", "Right ramp", "shot", "Big loop", "shot", "Building"]
+DE_CLOSE = ["shot", "Maser target", "shot", "Shield target left", "shot", "Shield target center",
+            "shot", "Shield target right", "shot", "Godzilla target"]
+
+
 HUD_LIMITS = {"Value": 10, "Label": 16, "Sub": 16, "Gauge_Label": 16, "Award": 24, "Title": 24, "Line": 44,
               "AwardSub": 44}
 # Longer than the HUD's width today (reported with the rework; take a line out when its mode is fixed).
@@ -1407,6 +1478,19 @@ def test_every_text_a_mode_writes_on_its_hud_fits(harness):
                           "shot", "Left ramp", "secs", 1, "trigger", "meltdown.heat=99", "secs", 1,
                           "shot", "Building", "secs", 1, "trigger", "meltdown.heat=99", "secs", 22,
                           "balls", 1, "secs", 25],
+        # PAD-379
+        ["raw", "0x1"] * 760 + ["secs", 2] + GA_LIGHT + GA_CHASE + ["shot", "Building", "secs", 3] + GA_JP
+        + ["secs", 20, "balls", 1, "secs", 25],
+        GA_LIGHT + ["shot", "Building", "secs", 1, "shot", "Godzilla target", "secs", 32, "balls", 1, "secs", 25],
+        SG_FIRST + ["secs", 2] + SG_TOWERS_DOWN + ["secs", 1, "shot", "Big loop", "secs", 2, "trigger",
+                                                    "spacegodzilla.stop", "secs", 12, "balls", 1] + SG_SECOND
+        + ["secs", 1, "shot", "Shield target left", "secs", 22, "balls", 1, "secs", 12],
+        KIRYU_SPINS + ["secs", 1, "trigger", "kiryu.charge=215", "secs", 14, "trigger", "kiryu.charge=105", "secs", 1,
+                       "shot", "Godzilla target", "secs", 16],
+        BIO_RAMPS + ["secs", 1] + BIO_BANKS * 3 + ["secs", 4, "shot", "Building", "secs", 12],
+        ["trigger", "destoroyah.start", "secs", 4] + DE_FAR + ["secs", 25, "trigger", "destoroyah.boss", "secs", 2,
+                                                              "shot", "Building", "ms", 400, "shot", "Building", "ms",
+                                                              400, "shot", "Building", "secs", 12],
     ]
     seen = {}                                     # (slug, field) -> every text written
     for flow in flows:
@@ -1444,6 +1528,11 @@ STACK_STARTS = [
     ("maser_barrage", [*MASER3]),
     ("final_wars", ["trigger", "final_wars.light", "secs", 8, "shot", "Building"]),
     ("meltdown", MELTDOWN_START),
+    ("godzilla_angry", ["trigger", "godzilla_angry.light", "secs", 1, "shot", "Building"]),
+    ("spacegodzilla", ["shot", "Powerline left", "ms", 300] + ["shot", "Big loop", "ms", 300] * 3),
+    ("kiryu", ["raw", "0x20000"] * 30),
+    ("biollante", ["shot", "Left ramp", "ms", 300] * 6),
+    ("destoroyah", ["raw", "0x2000"] * 30),
 ]
 
 
@@ -1459,7 +1548,7 @@ def test_a_mode_ends_the_moment_one_of_the_games_modes_begins(harness, slug, sta
     assert t in _hid(out, slug)                                              # its words go in the same tick
     assert _at(out, "[%s] lights: all handed back to the game" % mode) == t
     if busy != "battle":                                  # ANGUIRUS joins a battle of the game's and lights the shields
-        assert "END lamps held 0" in out
+        assert "END lamps held 0" in out or (slug == "ghidorah_heads" and _all_back_but_lit_locks(out))
 
 
 @pytest.mark.parametrize("slug,start", STACK_STARTS, ids=[s for s, _ in STACK_STARTS])
@@ -1488,7 +1577,11 @@ MASER_X3 = ["shot", "Maser target", "ms", 300] * 3
     ("KING GHIDORAH", POWERLINES, ["shot", "Powerline left"]),
     ("OXYGEN DESTROYER", SPINS, ["shot", "Left spinner"]),
     ("MASER BARRAGE", MASER_X3, ["shot", "Maser target"]),
-], ids=["ghidorah", "oxygen", "maser"])
+    ("GODZILLA ANGRY", ["trigger", "godzilla_angry.light", "secs", 1, "shot", "Building"], ["shot", "Building"]),
+    ("KIRYU", ["raw", "0x20000"] * 30, ["raw", "0x20000"]),
+    ("BIOLLANTE", ["shot", "Left ramp", "ms", 300] * 6, ["shot", "Right ramp"]),
+    ("DESTOROYAH", ["raw", "0x2000"] * 30, ["raw", "0x2000"]),
+], ids=["ghidorah", "oxygen", "maser", "godzilla_angry", "kiryu", "biollante", "destoroyah"])
 def test_a_single_ball_mode_waits_out_the_games_modes_still_ready(harness, busy, mode, qualify, again):
     cmd, on, off, over = busy
     # two qualifying shots after it: after a battle ANGUIRUS shows its total, which gives way to the first
@@ -1546,3 +1639,456 @@ def test_game_modes_give_way_in_its_assets_file_means_it_blocks_nothing(harness,
     assert _at(out, "[MASER BARRAGE] START") is not None
     assert "BLOCK 1 MASER BARRAGE" not in out
     assert has(out, "MASER BARRAGE", "isolated: gives way - one of the game's modes starting ends it")
+
+
+# ---- PAD-379: GODZILLA ANGRY - EHoH's Gappa Angry: a RAGE meter of every switch, a chase in staged locks ----------
+def _ga_super(out):
+    """5,000,000 and 10,000 for every switch of the chase (each shot dispatches 0x1 first)"""
+    start, baby = _at(out, "[GODZILLA ANGRY] START"), _at(out, "[GODZILLA ANGRY] BABY FOUND")
+    shots = [int(t) for t in re.findall(r"^\s*(\d+) >> shot ", out, re.M)]
+    return 5000000 + 10000 * len([t for t in shots if start < t <= baby])
+
+
+def test_godzilla_angry_every_switch_fills_the_rage_meter_and_level_five_lights_the_building(harness):
+    s = "godzilla_angry"
+    out = play(harness, "secs", 1, *(["raw", "0x1", "tick", 1] * 749), "secs", 1, "raw", "0x1", "secs", 3)
+    for lv, award in ((1, 1000000), (2, 1500000), (3, 2000000), (4, 2500000), (5, 3000000)):
+        assert has(out, GA, "RAGE LEVEL %d of 5 (player 1): +%d" % (lv, award)), lv
+    assert not has(out, GA, "RAGE LEVEL 6")
+    lit = _at(out, "[GODZILLA ANGRY] GODZILLA IS ANGRY for player 1: the Building starts the chase")
+    assert lit > _at(out, "[GODZILLA ANGRY] RAGE LEVEL 4 of 5")              # the 750th switch (100+125+150+175+200)
+    assert len(re.findall(r"SCORE \+", out)) == 5
+    # the meter on the glass: RAGE n/5 on the right edge's gauge, then ANGRY! full, notes in the award line
+    for lv in range(1, 6):
+        assert hud_said(out, s, "Gauge_Label", "RAGE %d/5" % lv), lv
+    assert hud_said(out, s, "Gauge_Label", "ANGRY!") and hud_said(out, s, "Award", "GODZILLA IS ANGRY!")
+    assert hud_said(out, s, "AwardSub", "SHOOT THE BUILDING")
+    # the BUILDING pulses red once the light show of GODZILLA IS ANGRY is over
+    pulse = _at(out, "[GODZILLA ANGRY] lights: shot 0x400000 ff0a00 pulse 700")
+    assert pulse is not None and pulse > _at(out, "[GODZILLA ANGRY] show angry: over")
+
+
+def test_godzilla_angry_the_meter_counts_a_quarter_at_a_time_on_the_award_line(harness):
+    s = "godzilla_angry"
+    out = play(harness, "secs", 1, *(["raw", "0x1", "ms", 20] * 51), "secs", 3)
+    assert has(out, GA, "rage 1: 25 of 100 switch hits (player 1)") and has(out, GA, "rage 1: 50 of 100")
+    assert hud_said(out, s, "Award", "75 MORE FOR RAGE 1") and hud_said(out, s, "Award", "50 MORE FOR RAGE 1")
+    assert hud_said(out, s, "AwardSub", "GODZILLA IS GETTING ANGRY")
+    # the gauge fills a pip at a time: 12 pips for the level's 100 hits
+    on = re.findall(r"SHOW PadMode_godzilla_angry_Hud\.PadMode_godzilla_angry_Hud_Gauge\.PadMode_godzilla_angry_Hud_G(\d+)_On 1",
+                    out)
+    assert {int(k) for k in on} == set(range(1, 7))                       # 51 of 100: six of twelve
+
+
+@pytest.mark.parametrize("busy,on,off", [("balls", 2, 1), ("multiball", 1, 0)], ids=["two_balls", "games_multiball"])
+def test_godzilla_angry_rage_does_not_count_in_a_multiball(harness, busy, on, off):
+    out = play(harness, "secs", 1, busy, on, "secs", 1, *(["raw", "0x1"] * 150), "secs", 1, busy, off, "secs", 1,
+               *(["raw", "0x1"] * 100), "secs", 1)
+    level = _at(out, "[GODZILLA ANGRY] RAGE LEVEL 1 of 5")
+    assert level is not None and level > _at(out, ">> %s %s" % ("balls in play" if busy == "balls" else busy, off))
+    assert not has(out, GA, "RAGE LEVEL 2")
+    hidden = [t for t in _hid(out, "godzilla_angry") if t > _at(out, ">> %s %s" % (
+        "balls in play" if busy == "balls" else busy, on))]
+    assert hidden, "the meter stays on the glass during a multiball"
+
+
+def test_godzilla_angry_rage_does_not_count_after_a_tilt_until_the_next_ball(harness):
+    out = play(harness, "secs", 1, "event", "tilt", "secs", 1, *(["raw", "0x1"] * 150), "secs", 1, "ball_end",
+               "secs", 1, *(["raw", "0x1"] * 100), "secs", 1)
+    assert _at(out, "[GODZILLA ANGRY] RAGE LEVEL 1 of 5") > _at(out, ">> ball_end")
+
+
+def test_godzilla_angry_chase_five_places_five_locks_baby_found_and_a_six_ball_multiball(harness):
+    s = "godzilla_angry"
+    out = play(harness, *GA_LIGHT, *GA_CHASE, "shot", "Building", "secs", 3, *GA_JP, "secs", 20, "balls", 1, "secs", 8)
+    start = _at(out, "[GODZILLA ANGRY] START")
+    assert has(out, GA, "START (the Building, GODZILLA ANGRY lit): player 1, place 1 (ADONOA ISLAND), 0 lock(s)")
+    assert _at(out, "BALL SAVE 5 s") == start and _at(out, "DISPLAY 180 GODZILLA ANGRY") <= start
+    assert has(out, GA, "LOCK 1 at Godzilla target (ADONOA ISLAND): +1000000")
+    assert has(out, GA, "YOKKAICHI: Left ramp +1000000") and has(out, GA, "YOKKAICHI: Right ramp +1025000")
+    assert has(out, GA, "LOCK IS LIT at Maser target")
+    assert has(out, GA, "LOCK 2 at Maser target (YOKKAICHI): +2100000")       # twice 500,000 +500,000 +2 x 25,000
+    assert has(out, GA, "LOCK 3 at Godzilla target (OSAKA)") and has(out, GA, "LOCK 4 at Maser target (KYOTO)")
+    assert has(out, GA, "MAKUHARI: Powerline center +2600000")
+    assert has(out, GA, "LOCK 5 at Godzilla target (MAKUHARI)")
+    assert has(out, GA, "BABY: the Building is BABY FOUND for 30 s")
+    assert has(out, GA, "BABY FOUND: SUPER JACKPOT +%d (switches built it)" % _ga_super(out))
+    baby = _at(out, "[GODZILLA ANGRY] BABY FOUND")
+    assert _at(out, "MULTIBALL 6 balls, save 15 s") == baby and _at(out, "DISPLAY 190 GODZILLA ANGRY") == baby
+    assert len(re.findall(r"\[GODZILLA ANGRY\] BABY JACKPOT 1 at ", out)) == 1
+    assert re.search(r"\[GODZILLA ANGRY\] \w[\w ]*: \+500000, BABY x2", out)
+    babies = len(re.findall(r"\[GODZILLA ANGRY\] BABY JACKPOT \d+ at ", out))
+    assert babies >= 1
+    assert has(out, GA, "END (one ball left): the multiball after BABY FOUND, 5 lock(s), %d baby jackpot(s)" % babies)
+    assert has(out, GA, "the RAGE meter starts again for player 1: RAGE 1 at 125 hits")
+    assert end_total(out, GA) == scored(out, "", GA)
+    # the glass: the place and what to shoot, the locks, the jackpot and the super across the top, the clock
+    assert hud_next(out, s, "Title", start) == "GODZILLA ANGRY!"
+    assert hud_said(out, s, "Line", "LOCK IS LIT AT THE CAPTIVE BALL")
+    assert hud_said(out, s, "Line", "YOKKAICHI: LEFT RAMP, RIGHT RAMP") and hud_said(out, s, "Line", "YOKKAICHI: RIGHT RAMP")
+    assert hud_said(out, s, "Line", "OSAKA: BIG LOOP, BUILDING") and hud_said(out, s, "Line", "MAKUHARI: 5 LIT SHOTS TO GO")
+    assert hud_said(out, s, "Line", "SHOOT THE BUILDING: BABY IS THERE")
+    assert hud_said(out, s, "C1_Value", "5/5") and hud_said(out, s, "C3_Label", "SUPER")
+    assert hud_said(out, s, "Award", "SUPER JACKPOT") and hud_said(out, s, "Title", "ANGRY MULTIBALL")
+    assert hud_said(out, s, "Gauge_Label", "LOCKS") and hud_said(out, s, "Gauge_Label", "MULTIPLIER")
+    assert hud_next(out, s, "Title", _at(out, "[GODZILLA ANGRY] END")) == "GODZILLA AND BABY"
+    # the lights: the lock white and blinking, the place's shots red, BABY green over the orange jackpots
+    assert "[GODZILLA ANGRY] lights: shot 0x80000 ffffff blink 700" in out
+    assert "[GODZILLA ANGRY] lights: shot 0x300000 ff0a00 solid" in out
+    assert re.search(r"\[GODZILLA ANGRY\] lights: shot 0x[0-9a-f]+ ff5000 solid; shot 0x[0-9a-f]+ 00ff3c blink 200", out)
+
+
+def test_godzilla_angry_the_clock_running_out_turns_the_locks_into_a_smaller_multiball(harness):
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 1, "shot", "Godzilla target", "secs", 32,
+               "balls", 1, "secs", 25)
+    assert has(out, GA, "YOKKAICHI's clock ran out with 1 lock(s): they become a 2-ball multiball")
+    out_mb = _at(out, "MULTIBALL 2 balls, save 15 s")
+    assert out_mb is not None and out_mb == _at(out, "[GODZILLA ANGRY] ANGRY MULTIBALL (the clock ran out): 2 balls")
+    assert has(out, GA, "END (one ball left): a smaller multiball, 1 lock(s)")
+    assert hud_said(out, "godzilla_angry", "Award", "THE LOCKS BREAK LOOSE")
+
+
+def test_godzilla_angry_a_drain_mid_chase_keeps_the_place_and_its_locks_for_the_next_ball(harness):
+    s = "godzilla_angry"
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 1, "shot", "Godzilla target", "secs", 1,
+               "shot", "Left ramp", "shot", "Right ramp", "secs", 1, "shot", "Maser target", "secs", 1, "ball_end",
+               "secs", 2, "shot", "Building", "secs", 2)
+    assert has(out, GA, "END (ball ended): the chase, 2 lock(s)")
+    assert has(out, GA, "START (the Building, GODZILLA ANGRY lit): player 1, place 3 (OSAKA), 2 lock(s)")
+    assert hud_said(out, s, "Award", "THE TRAIL AGAIN") and hud_said(out, s, "AwardSub", "OSAKA")
+
+
+def test_godzilla_angry_with_no_lock_the_trail_goes_cold_and_the_building_starts_it_again(harness):
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 32, "shot", "Building", "secs", 1)
+    assert has(out, GA, "the trail goes cold at ADONOA ISLAND: still angry, the Building starts the chase again")
+    assert has(out, GA, "END (the trail went cold)")
+    assert len(re.findall(r"\[GODZILLA ANGRY\] START", out)) == 2
+    assert "MULTIBALL" not in out
+
+
+def test_godzilla_angry_does_not_start_on_the_building_that_ended_another_mode(harness):
+    """Emulator run fullA: BIOLLANTE's final blow at the Building also started the lit chase, on the same shot."""
+    out = play(harness, *GA_LIGHT, *BIO_RAMPS, "secs", 1, *(BIO_BANKS * 2), "secs", 1,
+               "shot", "Shield target left", "shot", "Shield target center", "shot", "Shield target right", "secs", 2,
+               "shot", "Building", "secs", 3, "shot", "Building", "secs", 1)
+    won = _at(out, "[BIOLLANTE] END (the final blow)")
+    assert won is not None
+    # whichever of the two the object asks first: BIOLLANTE still running, or it just ended on this very shot
+    refused = [ln for ln in lines(out, GA) if "not started" in ln and (" ms" not in ln)]
+    assert any("BIOLLANTE is running" in ln or "it just ended another mode of ours" in ln for ln in refused), refused
+    assert _at(out, "[GODZILLA ANGRY] START") > won + 2000                  # the next Building starts it
+
+
+def test_godzilla_angry_a_lit_shot_puts_a_short_clock_back_to_fifteen(harness):
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 1, "shot", "Godzilla target", "secs", 20,
+               "shot", "Left ramp", "secs", 1)
+    assert has(out, GA, "the clock back up to 15 s")
+
+
+# ---- PAD-379: SPACEGODZILLA - lock lighting that gets harder each time, supers worth the sum ----------------------
+def test_spacegodzilla_locks_get_harder_to_light_each_multiball(harness):
+    # a ball between: three powerlines in one ball would start GHIDORAH'S HEADS (its own start, by design)
+    stop = ["secs", 2, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1, "ball_end", "secs", 1]
+    out = play(harness, *SG_FIRST, *stop, *SG_SECOND, *stop, *SG_THIRD, "secs", 2)     # each 1.5 s after its crystal
+    assert has(out, SG, "Powerline left: every lock is lit (3) for player 1")
+    for k in (1, 2, 3):
+        assert has(out, SG, "CRYSTAL %d PLANTED at Big loop (player 1): +%d" % (k, 250000 * k))
+    starts = re.findall(r"\[SPACEGODZILLA\] START \(the third crystal\): player 1, ([\w. ]+), 3 balls", out)
+    assert starts == ["CRYSTAL TOWERS", "M.O.G.U.E.R.A.", "SPACE BEAST"]
+    assert has(out, SG, "Powerline center: a lock is lit (1 lit, 0 planted) for player 1")
+    assert has(out, SG, "Powerline right: 1 of 2 for the next lock (player 1)")
+    assert has(out, SG, "Powerline left: a lock is lit (1 lit, 0 planted) for player 1")
+    assert not has(out, SG, "Shield target")                             # the shields light nothing now
+    assert len(re.findall(r"MULTIBALL 3 balls, save 15 s", out)) == 3
+    # a powerline that lights a lock is also one of KING GHIDORAH's three: its "POWERLINES 1 OF 3" has the HUD for a
+    # moment, so the crystals' words show on a Big loop a little later
+    out = play(harness, "shot", "Powerline left", "secs", 3, *SG_LOOP, "secs", 1)
+    assert hud_said(out, "spacegodzilla", "Award", "CRYSTAL 1 PLANTED")
+
+
+def test_spacegodzilla_towers_fall_the_super_is_the_sum_and_adds_a_ball(harness):
+    s = "spacegodzilla"
+    out = play(harness, "trigger", "spacegodzilla.start", "secs", 1, *SG_TOWERS_DOWN, "secs", 1, *SG_LOOP, "secs", 2,
+               "shot", "Left ramp", "secs", 1, "balls", 1, "secs", 25)
+    for k, v in enumerate((1000000, 1100000, 1200000, 1300000, 1400000, 1500000), 1):
+        assert re.search(r"\[SPACEGODZILLA\] JACKPOT %d at [\w ]+: \+%d, the tower " % (k, v), out), k
+    assert has(out, SG, "SUPER JACKPOT lit at Big loop for 20 s (every tower down): 7500000")
+    assert has(out, SG, "SUPER JACKPOT 1 at Big loop: +7500000 (the sum of 6 jackpots)")
+    assert "ADD-A-BALL 1, save 10 s" in out and has(out, SG, "the super adds a ball (1)")
+    assert has(out, SG, "the crystal towers grow back: 3 jackpots each")
+    assert has(out, SG, "END (one ball left): CRYSTAL TOWERS, 7 jackpot(s), 1 super(s), 1 ball(s) added")
+    assert hud_said(out, s, "Award", "LEFT RAMP TOWER FALLS") and hud_said(out, s, "Line", "SUPER JACKPOT: SHOOT THE BIG LOOP")
+    assert hud_next(out, s, "Title", _at(out, "[SPACEGODZILLA] END")) == "SPACEGODZILLA FALLS"
+    assert "[SPACEGODZILLA] lights: shot 0x100000 be28ff blink 300; shot 0x400000 be28ff solid; shot 0x200000 be28ff solid" in out
+
+
+def test_spacegodzilla_moguera_shields_raise_every_jackpot(harness):
+    stop = ["secs", 2, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1]
+    out = play(harness, *SG_FIRST, *stop, *SG_SECOND, "secs", 2, "shot", "Shield target left", "ms", 300,
+               "shot", "Left ramp", "secs", 1)
+    assert has(out, SG, "spiral grenade at Shield target left: the jackpot base 1750000")
+    assert re.search(r"\[SPACEGODZILLA\] JACKPOT 1 at Left ramp: \+1750000, the tower cracks", out)
+
+
+def test_spacegodzilla_nothing_lights_or_locks_during_a_multiball_and_a_full_set_waits_for_the_games_mode(harness):
+    out = play(harness, "balls", 2, "secs", 1, *SG_FIRST, "balls", 1, "secs", 1, *SG_LOOP)
+    assert not has(out, SG, "every lock is lit") and not has(out, SG, "CRYSTAL")
+    out = play(harness, "shot", "Powerline left", "ms", 300, *(SG_LOOP * 2), "timed", 1, "secs", 1, *SG_LOOP,
+               "secs", 2, "timed", 0, "secs", 1, *SG_LOOP, "secs", 1)
+    assert has(out, SG, "not started (the third crystal): one of the game's modes is running - still ready") or \
+        has(out, SG, "not started (the third crystal): a stock mode is running - still ready")
+    started = _at(out, "[SPACEGODZILLA] START")
+    assert started is not None and started > _at(out, ">> timed 0")
+    assert has(out, SG, "START (the Big loop, three crystals planted)")
+
+
+# ---- PAD-379: KIRYU - charge the Absolute Zero, fire it or push your luck ---------------------------------------
+def test_kiryu_starts_on_thirty_mechagodzilla_spins_then_forty(harness):
+    out = play(harness, *(["raw", "0x20000", "tick", 1] * 30), "secs", 1, "trigger", "kiryu.stop", "secs", 12,
+               *(["raw", "0x20000"] * 39),
+               "secs", 1, "raw", "0x20000", "secs", 1)
+    starts = [int(t) for t in re.findall(r"^\s*(\d+) \[KIRYU\] START", out, re.M)]
+    assert len(starts) == 2
+    assert has(out, "KIRYU", "START (the Mechagodzilla spinner): player 1, 40 s") and has(out, "KIRYU", "next time 40 spins")
+    assert has(out, "KIRYU", "Shield ramp spinner 40 of 40 (player 1)")
+    assert hud_said(out, "kiryu", "Award", "29 SPINS TO KIRYU") and hud_said(out, "kiryu", "Award", "1 SPIN TO KIRYU")
+
+
+def test_kiryu_charges_on_lit_shots_and_fires_at_the_captive_ball(harness):
+    s = "kiryu"
+    charge = ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "ms", 300, "shot", "Building", "ms", 300,
+              "shot", "Big loop", "ms", 300, "shot", "Maser target", "ms", 300, "shot", "Shield target left", "ms", 300,
+              "shot", "Shield target center", "ms", 300, "shot", "Shield target right", "ms", 300,
+              "shot", "Left ramp", "ms", 300]
+    out = play(harness, *KIRYU_SPINS, "secs", 1, *charge, "secs", 1, "shot", "Godzilla target", "secs", 5)
+    assert has(out, "KIRYU", "Left ramp: +750000, charge +15%") and has(out, "KIRYU", "Maser target: +750000, charge +10%")
+    assert has(out, "KIRYU", "the charge passes 100% (Left ramp): x1")
+    fired = re.search(r"\[KIRYU\] ABSOLUTE ZERO fired \(the captive ball\): x1 at 109%, \+(\d+)", out)
+    assert fired and int(fired.group(1)) == 10000000 + (9 * 750000) // 4
+    end = _at(out, "[KIRYU] END (fired)")
+    assert end - _at(out, "[KIRYU] ABSOLUTE ZERO fired") == 4000          # the shot's moment, then the ending
+    assert has(out, "KIRYU", "END (fired): FIRED, the charge 109%, 0 vent(s)")
+    assert hud_said(out, s, "Award", "ABSOLUTE ZERO READY") and hud_said(out, s, "Line", "FIRE: THE CAPTIVE BALL  -  OR CHARGE ON")
+    assert hud_said(out, s, "C1_Value", "109%") and hud_said(out, s, "C3_Sub", "X2 AT 200%")
+    assert hud_next(out, s, "Title", end) == "KIRYU WINS"
+    assert "[KIRYU] lights: shot 0x1388700000 8cdcff solid; shot 0x1000000000080000 ffffff blink 300" in out
+
+
+def test_kiryu_overheats_from_two_hundred_percent_and_vents_the_charge(harness):
+    out = play(harness, "trigger", "kiryu.start", "secs", 1, "trigger", "kiryu.charge=215", "secs", 14,
+               "trigger", "kiryu.charge=305", "secs", 1, "raw", "0x1000000000000000", "secs", 6)
+    assert has(out, "KIRYU", "OVERHEATING: 12 s to fire") and has(out, "KIRYU", "KIRYU VENTS: the reactor ran too hot at 215%")
+    assert has(out, "KIRYU", "the charge passes 300% (trigger file): x3")
+    assert has(out, "KIRYU", "ABSOLUTE ZERO fired (the action button): x3 at 305%, +30000000")
+    assert hud_said(out, "kiryu", "Line", "OVERHEATING! FIRE NOW") and hud_said(out, "kiryu", "Gauge_Label", "OVERHEAT")
+    assert hud_said(out, "kiryu", "Award", "KIRYU VENTS")
+
+
+@pytest.mark.parametrize("charge,fired", [(150, True), (60, False)], ids=["ready_fires_itself", "not_ready_is_lost"])
+def test_kiryu_the_clock_running_out(harness, charge, fired):
+    out = play(harness, "trigger", "kiryu.start", "secs", 1, "trigger", "kiryu.charge=%d" % charge, "secs", 45)
+    if fired:
+        assert has(out, "KIRYU", "the clock ran out at 150%: Kiryu fires on its own, x1, no bonus")
+        assert has(out, "KIRYU", "ABSOLUTE ZERO fired (the clock ran out): x1 at 150%, +10000000")
+        assert has(out, "KIRYU", "END (fired): FIRED")
+    else:
+        assert has(out, "KIRYU", "END (time ran out): not fired, the charge 60%")
+
+
+# ---- PAD-379: BIOLLANTE - a switch frenzy whose sap jackpot the vine banks collect -------------------------------
+def test_biollante_starts_on_six_ramps_then_eight(harness):
+    out = play(harness, *BIO_RAMPS, "secs", 1, "trigger", "biollante.stop", "secs", 12,
+               *(["shot", "Right ramp", "ms", 300] * 8), "secs", 1)
+    assert len(re.findall(r"\[BIOLLANTE\] START \(the ramps\)", out)) == 2
+    assert has(out, "BIOLLANTE", "ramps 8 of 8 (player 1)") and has(out, "BIOLLANTE", "next time 8 ramps")
+    assert hud_said(out, "biollante", "Award", "5 RAMPS TO BIOLLANTE")
+
+
+def test_biollante_every_switch_feeds_the_sap_three_banks_bring_the_beast_and_the_final_blow(harness):
+    s = "biollante"
+    out = play(harness, *BIO_RAMPS, "secs", 1, *(BIO_BANKS * 2), "secs", 1,
+               "shot", "Shield target left", "shot", "Shield target center", "shot", "Shield target right", "secs", 2,
+               "shot", "Building", "secs", 12)
+    # the first bank: two slingshots and the three shield vines are five switches at 100,000
+    assert has(out, "BIOLLANTE", "VINES CUT: THE SHIELD VINES, the SAP JACKPOT x1: +500000 (the sap was 500000)")
+    # the second: a slingshot and three powerline vines at 125,000 (a bank cut)
+    assert has(out, "BIOLLANTE", "VINES CUT: THE POWERLINE VINES, the SAP JACKPOT x2: +1000000 (the sap was 500000)")
+    assert has(out, "BIOLLANTE", "BEAST FORM: the Building is the final blow for 20 s")
+    collects = [int(v) for v in re.findall(r"\[BIOLLANTE\] VINES CUT: .*?: \+(\d+)", out)]
+    assert len(collects) == 3
+    assert has(out, "BIOLLANTE", "FINAL BLOW at Building: +%d" % sum(collects))
+    assert has(out, "BIOLLANTE", "END (the final blow): WON")
+    assert end_total(out, "BIOLLANTE") == scored(out, "", "BIOLLANTE")
+    assert hud_said(out, s, "Award", "SAP JACKPOT X2") and hud_said(out, s, "Title", "BIOLLANTE BEAST")
+    assert hud_said(out, s, "C3_Value", "125K") and hud_said(out, s, "C1_Value", "2/3")
+    assert hud_next(out, s, "Title", _at(out, "[BIOLLANTE] END")) == "BIOLLANTE IS FREE"
+    assert "[BIOLLANTE] lights: shot 0x400000 ffaa00 blink 700" in out
+
+
+def test_biollante_a_vine_puts_a_short_clock_back_to_fifteen_and_the_pop_bumper_gives_a_second(harness):
+    out = play(harness, *BIO_RAMPS, "secs", 30, "shot", "Shield target left", "secs", 1)
+    assert has(out, "BIOLLANTE", "the clock back up to 15 s")
+    out = play(harness, *BIO_RAMPS, "secs", 30, *(["shot", "Pop bumper"] * 5), "secs", 14)
+    assert not has(out, "BIOLLANTE", "END")                                     # 10 s left + 5 pops: still on
+    out = play(harness, *BIO_RAMPS, "secs", 30, *(["shot", "Pop bumper"] * 5), "secs", 16)
+    assert has(out, "BIOLLANTE", "END (time ran out): not won")
+
+
+# ---- PAD-379: DESTOROYAH - TWD's Horde: the aggregates advance, closer kills pay more -------------------------------
+def test_destoroyah_starts_on_thirty_center_spins(harness):
+    out = play(harness, *(["raw", "0x2000"] * 30), "secs", 1)
+    assert has(out, "DESTOROYAH", "START (the center spinner): player 1, 3 waves, 3 city hits allowed; next time 40 spins")
+
+
+def test_destoroyah_an_aggregate_advances_far_near_close_and_hits_the_city(harness):
+    out = play(harness, "trigger", "destoroyah.start", "secs", 4, "secs", 21, "secs", 2)
+    came = _at(out, "[DESTOROYAH] an aggregate comes over the top at")
+    assert came is not None
+    adv = [int(t) for t in re.findall(r"^\s*(\d+) \[DESTOROYAH\] an aggregate advances to [\w ]+ \((?:NEAR|CLOSE)", out, re.M)]
+    assert adv and adv[0] - came == 7000
+    assert has(out, "DESTOROYAH", "an aggregate got through at") and has(out, "DESTOROYAH", "the city is hit (1 of 3)")
+    assert hud_said(out, "destoroyah", "Award", "THE CITY IS HIT") and hud_said(out, "destoroyah", "AwardSub", "2 HITS LEFT")
+    out = play(harness, "trigger", "destoroyah.start", "secs", 60)
+    assert has(out, "DESTOROYAH", "the city is hit (3 of 3)") and has(out, "DESTOROYAH", "END (the city fell): not won")
+    assert hud_next(out, "destoroyah", "Title", _at(out, "[DESTOROYAH] END")) == "DESTOROYAH WINS"
+
+
+def test_destoroyah_a_kill_pays_more_the_closer_it_is(harness):
+    out = play(harness, "trigger", "destoroyah.start", "secs", 4, *DE_FAR, "secs", 2)
+    assert re.search(r"\[DESTOROYAH\] KILL 1 of 3 at Powerline \w+ \(FAR, x1\): \+1000000", out)
+    out = play(harness, "trigger", "destoroyah.start", "secs", 11.5, *DE_NEAR, "secs", 1)
+    assert re.search(r"\[DESTOROYAH\] KILL 1 of 3 at [\w ]+ \(NEAR, x2\): \+2000000", out)
+    out = play(harness, "trigger", "destoroyah.start", "secs", 18.5, *DE_CLOSE, "secs", 1)
+    assert re.search(r"\[DESTOROYAH\] KILL 1 of 3 at [\w ]+ \(CLOSE, x4\): \+4000000", out)
+    assert "[DESTOROYAH] lights: shot 0x" in out
+
+
+def test_destoroyah_a_cleared_wave_pays_every_kill_again_and_the_perfect_form_pays_them_all(harness):
+    s = "destoroyah"
+    wave1 = ["secs", 4] + DE_FAR + ["secs", 2] + DE_FAR + ["secs", 2] + DE_FAR
+    out = play(harness, "trigger", "destoroyah.start", *wave1, "secs", 2, "trigger", "destoroyah.boss", "secs", 2,
+               "shot", "Building", "ms", 400, "shot", "Building", "ms", 400, "shot", "Building", "secs", 12)
+    assert has(out, "DESTOROYAH", "WAVE 1 CLEARED: the WAVE SUPER +3000000")
+    assert has(out, "DESTOROYAH", "WAVE 2: 4 kills, advancing every 6000 ms")
+    assert has(out, "DESTOROYAH", "PERFECT FORM hit 3 of 3: +5000000")
+    kills = sum(int(v) for v in re.findall(r"\[DESTOROYAH\] KILL \d+ of \d+ at .*: \+(\d+)", out))
+    assert has(out, "DESTOROYAH", "DESTOROYAH DEFEATED: SUPER JACKPOT +%d (every kill again)" % kills)
+    assert has(out, "DESTOROYAH", "END (the perfect form defeated): WON")
+    assert hud_said(out, s, "Award", "WAVE 1 CLEARED") and hud_said(out, s, "Title", "PERFECT DESTOROYAH")
+    assert hud_next(out, s, "Title", _at(out, "[DESTOROYAH] END")) == "DESTOROYAH DEFEATED"
+
+
+# ---- PAD-379: the pack's kit, its METER ----------------------------------------------------------------------------
+def test_a_meter_gives_way_to_another_modes_note_and_comes_back(harness):
+    """kit_hud_meter (GODZILLA ANGRY's rage) is the politest thing on the glass: KING GHIDORAH's qualification note
+    takes the place at once, and the meter is back when the note is gone."""
+    out = play(harness, "secs", 1, *(["raw", "0x1"] * 10), "secs", 1, "shot", "Powerline left", "secs", 3)
+    note = hud_at(out, "ghidorah_heads", "Award", "POWERLINES 1 OF 3")
+    assert note is not None
+    gone = [t for t in _hid(out, "godzilla_angry") if t <= note + 20]
+    assert gone, "the meter did not give way"
+    back = re.findall(r"^\s*(\d+) SHOW PadMode_godzilla_angry_Hud 1$", out, re.M)
+    assert any(int(t) > note + 1900 for t in back), "the meter did not come back"
+
+
+# ---- PAD-379: the shield platform (Godzilla Premium/LE) ---------------------------------------------------------------
+#: each mode that plays the shield targets, how to start it, and how it ends by itself
+SHIELD_MODES = [
+    ("KIRYU", KIRYU_SPINS, ["trigger", "kiryu.stop"]),
+    ("BIOLLANTE", BIO_RAMPS, ["trigger", "biollante.stop"]),
+    ("DESTOROYAH", ["trigger", "destoroyah.start"], ["trigger", "destoroyah.stop"]),
+    ("MELTDOWN", MELTDOWN_START, ["trigger", "meltdown.stop"]),
+    ("FINAL WARS", ["trigger", "final_wars.light", "secs", 8, "shot", "Building"], ["trigger", "final_wars.stop"]),
+]
+
+
+def play_env(harness, env, *args):
+    r = subprocess.run([str(harness)] + [str(a) for a in args], capture_output=True, text=True, timeout=60,
+                       env=dict(os.environ, **env))
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+@pytest.mark.parametrize("mode,begin,stop", SHIELD_MODES, ids=[m[0] for m in SHIELD_MODES])
+def test_a_mode_that_plays_the_shields_turns_them_to_the_player_and_back(harness, mode, begin, stop):
+    out = play(harness, *begin, "secs", 4, *stop, "secs", 2)
+    started, ended = _at(out, "[%s] START" % mode), _at(out, "[%s] END" % mode)
+    assert started is not None and ended is not None, out[-3000:]
+    toward = _at(out, "SHIELD toward the player")
+    assert toward is not None and started + 1400 <= toward <= started + 1700       # once the ball is clear of it
+    assert has(out, mode, "the shields turn toward the player")
+    assert _at(out, "SHIELD stopped toward the player") > toward
+    away = _at(out, "SHIELD away")
+    assert away is not None and ended <= away <= ended + 20
+    assert has(out, mode, "the shields turn away again (trigger file)")
+
+
+def test_the_shields_knocked_away_under_a_mode_come_back_after_each_hit(harness):
+    """Emulator run shield2: a shield hit while the platform faces the player makes the game turn it away (and leave
+    it there); the ball search pulses it too. The mode brings it back 1.5 s after each, for as long as it runs."""
+    hits = []
+    for name in ("Shield target left", "Shield target center", "Shield target right", "Shield target left"):
+        hits += ["shot", name, "secs", 4]
+    out = play(harness, *BIO_RAMPS, "secs", 4, *hits, "shield", "away", "secs", 4)
+    knocks = [int(t) for t in re.findall(r"^\s*(\d+) SHIELD knocked away by the hit$", out, re.M)]
+    assert len(knocks) == 4
+    back = [int(t) for t in re.findall(r"^\s*(\d+) SHIELD toward the player$", out, re.M)]
+    assert len(back) == 1 + 4 + 1                                      # the first; after each hit; after the search
+    for k in knocks:                                                   # stopped away 1 s later, back 1.5 s after that
+        assert any(k + 2400 <= t <= k + 2600 for t in back), (k, back)
+    assert has(out, "BIOLLANTE", "the shields were turned away under the mode (a shield hit, the ball search): toward "
+                                 "the player again (3)")
+    assert not has(out, "BIOLLANTE", "toward the player again (5)")             # the log says the first three only
+
+
+def test_a_mode_over_before_the_shields_turned_never_moves_them(harness):
+    out = play(harness, *KIRYU_SPINS, "ms", 500, "trigger", "kiryu.stop", "secs", 3)
+    assert _at(out, "[KIRYU] END") is not None
+    assert not re.search(r"^\s*\d+ SHIELD ", out, re.M)
+
+
+def test_the_shields_stay_put_when_the_games_own_mode_takes_over(harness):
+    out = play(harness, *BIO_RAMPS, "secs", 3, "battle", 1, "secs", 2)
+    assert has(out, "BIOLLANTE", "END (the game's own mode began)")
+    assert has(out, "BIOLLANTE", "the shields stay where they are: the game's own mode has the platform now")
+    assert "SHIELD away" not in out
+
+
+def test_a_pro_has_no_platform_and_nothing_turns(harness):
+    out = play_env(harness, {"HARNESS_SHIELD": "none"}, *KIRYU_SPINS, "secs", 4, "trigger", "kiryu.stop", "secs", 2)
+    assert _at(out, "[KIRYU] START") is not None and _at(out, "[KIRYU] END") is not None
+    assert not re.search(r"^\s*\d+ SHIELD ", out, re.M) and not has(out, "KIRYU", "the shields")
+
+
+def test_spacegodzilla_turns_the_shields_only_for_moguera(harness):
+    stop = ["secs", 3, "trigger", "spacegodzilla.stop", "secs", 12, "balls", 1, "secs", 1]
+    out = play(harness, *SG_FIRST, *stop, *SG_SECOND, *stop)
+    starts = [int(t) for t in re.findall(r"^\s*(\d+) \[SPACEGODZILLA\] START", out, re.M)]
+    assert len(starts) == 2
+    toward = [int(t) for t in re.findall(r"^\s*(\d+) SHIELD toward the player", out, re.M)]
+    assert toward and all(t > starts[1] for t in toward)                   # CRYSTAL TOWERS never turned them
+    assert len(re.findall(r"^\s*\d+ SHIELD away", out, re.M)) == 1
+
+
+def test_destoroyah_brings_no_aggregate_to_a_shield_the_player_cannot_reach(harness):
+    """An operator who switched the motor off: the platform stays away, so the close ring is the Maser and the
+    captive ball only. With it on, the shields are in the close ring."""
+    seq = ["trigger", "destoroyah.start", "secs", 60]
+    off = play_env(harness, {"HARNESS_SHIELD": "off"}, *seq)
+    assert "SHIELD toward the player - refused, the motor is off" in off       # asked; refused
+    assert not has(off, "DESTOROYAH", "the shields turn") and "SHIELD away" not in off
+    assert re.search(r"\[DESTOROYAH\] an aggregate advances to (Maser target|Godzilla target)", off)
+    assert not re.search(r"\[DESTOROYAH\] an aggregate advances to Shield target", off)
+    on = play(harness, *seq)
+    assert re.search(r"\[DESTOROYAH\] an aggregate advances to Shield target", on)
+
+
+def test_biollante_lights_the_shield_vines_once_they_face_the_player(harness):
+    out = play(harness, *BIO_RAMPS, "secs", 4)
+    started = _at(out, "[BIOLLANTE] START")
+    facing = _at(out, "SHIELD stopped toward the player")
+    assert started is not None and facing is not None
+    before = [ln for ln in lines(out, "BIOLLANTE") if " lights: " in ln and int(ln.split()[0]) < facing]
+    after = [ln for ln in lines(out, "BIOLLANTE") if " lights: " in ln and int(ln.split()[0]) >= facing]
+    assert before and all("shot 0x70000000 " in ln for ln in before), before   # the powerline vines only
+    assert any("shot 0x3f0000000 " in ln for ln in after), after[:3]          # and the shield vines

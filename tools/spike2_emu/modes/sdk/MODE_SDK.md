@@ -1388,6 +1388,70 @@ own multiball; two players.
 
 `mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
 
+## The shield platform (Godzilla Premium/LE, PAD-379)
+
+Godzilla Premium and LE carry their three shield targets on a platform a motor turns. Most of the game
+it faces AWAY: the spinner side (the shield ramp spinner) faces the player and the shields cannot be hit
+from the flippers. The game turns it TOWARD the player for parts of its Mechagodzilla multiball. A Pro
+has no platform: its two shield targets are fixed and always face the player.
+
+A mode that plays the shield targets turns the platform itself:
+
+```c
+pm_shield(PM_SHIELD_TOWARD);              /* the shields to the flippers; about a second to get there */
+if (pm_shield_position() == PM_SHIELD_TOWARD) { /* they can be hit now */ }
+pm_shield(PM_SHIELD_AWAY);                /* back where the game keeps them */
+```
+
+`pm_shield` returns 0 on a Pro (and on any port without the shield lines); `pm_shield_position` says -1
+there, so `pm_shield_position() < 0 || pm_shield_position() == PM_SHIELD_TOWARD` is "a shield can be hit
+now" on every Godzilla. The examples do it through the kit: `kit_shields_in` at the start (the platform
+turns 1.5 s later, once the ball that started the mode is clear of it), `kit_shields_tick` every tick,
+`kit_shields_out(why)` at the end, which turns it back AWAY unless the end was the game's own mode
+beginning (that mode has the platform then), and `kit_shields_reachable()` before putting anything a
+mode needs on a shield. An operator can switch the motor off in the adjustments (SHIELD MOTOR
+DISABLED): `pm_shield` then says 0, the platform stays AWAY and `pm_shield_position` never says TOWARD,
+so a mode must never depend on the shields alone.
+
+**How it works.** The motor is the game's `ShieldMotor` (a `SingleDirectionCoilMotor`: the SHIELD MOTOR
+coil, node 9 coil 2, runs one way until a position switch closes). Its two positions are switches 86
+(SHIELD MOTOR OPEN: away) and 87 (SHIELD MOTOR CLOSED: toward). `shield_move(motor, position switch)` is
+the motor's own go-to (its vtable slot 29, Premium 1.16 `0x1db3d8`): 0 when the motor is switched off, 1
+when it is already there or a move process has started - the target at `+48`, the coil run with that
+switch as its stop, `+44` the switch on arrival. The service menu's shield test calls the same through
+slot 9, which first insists the caller is the motor's owner process; a mode calls slot 29 itself.
+`RuleMechagodzillaShield` counts a shield hit only while `+44` is 87. (Not `0x1da004`, which a first try
+used: it only stores `+50`, the position the move process assumes when a move fails, and the motor never
+ran.) The port lines:
+
+```
+site shield_move           0x001db3d8 0xe92d4038 0xe1a05001
+data shield_motor          0x007bbf88
+value shield_motor_vptr    0x6502a8     # the object's vtable word: checked before every move
+value shield_pos_at        44
+value shield_target_at     48
+value shield_away          86
+value shield_toward        87
+```
+
+The emulator plays the motor (PAD-256's coil-motor model: the coil's rule names the switch that stops it,
+the switch it leaves opens, that one closes 600 ms later).
+
+**The game turns it away by itself.** A shield target hit while the platform faces the player makes the game
+turn it away about 30 ms later and leave it there (its own Mechagodzilla shield reaction:
+`RuleMechagodzillaShield`'s shot handler, outside its multiball too, starts a process for any shield hit
+while `+44` is 87), and the ball search pulses it toward and back. So a mode that wants the shields keeps
+asking: `kit_shields_tick` turns them back 1.5 s after they were left facing away, for as long as the mode
+runs. In play that reads as the shield recoiling from the hit and coming back.
+
+**What is measured (emulator, stock Godzilla Premium 1.16, muted, `C:\tmp\PAD-379\proof`, runs shield2 and
+shield3).** KIRYU, BIOLLANTE, DESTOROYAH and SPACEGODZILLA's M.O.G.U.E.R.A. each turned the platform toward the
+player 1.5 s after they started (`[motor] node 9 coil 2: runs until input 23`, switch 87 made 600 ms later)
+and back to switch 86 when they ended; CRYSTAL TOWERS (SPACEGODZILLA's first multiball) never moved it.
+BIOLLANTE's shield vines lit only while the platform faced the player. Each real shield hit knocked it away
+and the mode brought it back. Not measured: a machine (the real motor's speed); the motor switched off in
+the adjustments (desk only: `pm_shield` says 0).
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in

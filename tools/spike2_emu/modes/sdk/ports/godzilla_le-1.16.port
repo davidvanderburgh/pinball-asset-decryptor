@@ -505,6 +505,27 @@ site balls_in_play         0x00388e0c 0xe92d4010 0xe3034930
 site multiball_serve       0x00388f88 0xe92d41f0 0xe301e16a
 # EMU 2026-09-26 (mb_e2e.sh): served 3 on a mode file's start, add-a-ball to 4, drains to 1, END (one ball left). PROVEN.
 
+# ---- PAD-379: the shield platform (Premium/LE only; a Pro's shield targets are fixed) ---------------------------
+# The three shield targets sit on a platform a motor turns: ShieldMotor (vtable 0x6502a0, a SingleDirectionCoilMotor:
+# SHIELD MOTOR, node 9 coil 2, runs one way until a position switch), one object at 0x7bbf88. Two positions, from its
+# table at 0x650330: switch 86 "Shield Motor Open" - the spinner side faces the player, the shields away (the game's
+# home, where most battles play) - and switch 87 "Shield Motor Closed" - the shield targets face the flippers
+# (parts of Mechagodzilla multiball; RuleMechagodzillaShield counts a shield hit only while +44 is 87). The move is the
+# motor's v[29] (SingleDirectionCoilMotor's go-to, 0x1db3d8): (motor, position switch) refuses when the operator
+# switched the motor off (v[15], SHIELD MOTOR DISABLED), returns 1 when it is already there, else starts the move
+# process (0x1db46c): the target at +48, the coil run with that switch as its stop, +44 the switch on arrival. The
+# service menu's shield test calls the same through v[9] (0x1db36c), which first insists the caller is the motor's
+# owner process. +44 is the switch it last stopped on (0 = not known: its homing sends it to 86). NOT 0x1da004: that
+# only stores +50, a position the move process assumes when a move fails (emulator run shield1: the motor never ran).
+# pm_shield / pm_shield_position.
+site shield_move           0x001db3d8 0xe92d4038 0xe1a05001
+data shield_motor          0x007bbf88
+value shield_motor_vptr    0x6502a8
+value shield_pos_at        44
+value shield_target_at     48
+value shield_away          86
+value shield_toward        87
+
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------
 # The Action button (the game's LOCKDOWN BUTTON) and the flipper buttons have no handler of their own
 # (descriptor flags 0), so the rules never send them as a shot and no switch_hit broadcasts them. The

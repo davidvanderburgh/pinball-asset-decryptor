@@ -27,6 +27,8 @@
  *              GRAB), and it follows MONSTER X as it moves. Phase 3: the BUILDING blinks gold,
  *              faster as the clock runs down. In every phase the three SHIELD inserts pulse
  *              green while add-time is left. Everything is handed back at the end.
+ *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
+ *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
  *   DISPLAY    Priority 190, the wizard's: the game's jackpots wait until it ends, and its
  *              full-screen shot awards, multiball and battle start screens and totals are not
  *              shown while it runs; the battle select screen, the raid award and the tilt
@@ -92,6 +94,7 @@ static int between_balls;                 /* a ball ended; the next shot or ball
 static int ball_start_event = -1;
 static struct kit_hud hud = { .slug = FOLDER };
 static struct kit_show show_fx;
+static struct kit_shields shields;           /* PAD-379: the Premium's shield platform, turned toward the player */
 
 /* ---- light shows (hud-layers): unique to FINAL WARS, every colour at once ---------------------------- */
 #define FW_FIRE        PM_RGB(255, 60, 0)
@@ -311,6 +314,7 @@ static int start(const char *why)
     if (!kit_begin(MODE_NAME)) return 0;
     kit_display(KIT_DISPLAY_WIZARD);              /* first: before the screen and the clip */
     kit_isolate_list(own.give_way, own.block_ids, own.block_n);   /* PAD-347/363: the game's modes wait for it */
+    kit_shields_in(&shields);
     run.on = 1;
     run.player = p;
     run.total = 0;
@@ -331,6 +335,7 @@ static void end(const char *why, int won)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);                         /* every insert back to the game, at once */
+    kit_shields_out(&shields, why);
     kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     sound(CUE_END);
     pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
@@ -486,6 +491,7 @@ static void on_tick(void)
     kit_hud_tick(&hud);
     kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
+    kit_shields_tick(&shields);
     if (++poll % KIT_POLL == 0) {
         check_triggers();
         qualify_watch();

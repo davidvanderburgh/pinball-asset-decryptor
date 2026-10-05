@@ -37,6 +37,8 @@
  *   LIGHTS     Its own shows: at the start, the playfield dark and a red fire rising from the
  *              flippers into a white-hot strobe; MELTDOWN, a white implosion into the Building;
  *              the super jackpot, a burst of blue and white (Junior's rebirth); the end, embers.
+ *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
+ *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
  *   DISPLAY    Priority 190 (a multiball of ours: the game's own jackpots and start screens wait).
  *
  * Emulator test triggers: /dump/meltdown.start (start now, as if lit), .stop, .shot "<shot name>",
@@ -83,6 +85,7 @@ static struct kit_game game;
 static struct kit_lamps lamps;
 static struct kit_hud hud = { .slug = FOLDER };
 static struct kit_show show_fx;
+static struct kit_shields shields;           /* PAD-379: the Premium's shield platform, turned toward the player */
 static struct kit_lamps ready_lamps;   /* the MAGNA GRAB insert pulsing red while MELTDOWN is ready */
 static unsigned poll, rnd = 777;
 
@@ -298,6 +301,7 @@ static int start(const char *why)
     }
     kit_display(KIT_DISPLAY_WIZARD);
     kit_isolate_list(own.give_way, own.block_ids, own.block_n);   /* PAD-347/363: the game's modes wait for it */
+    kit_shields_in(&shields);
     run.on = 1;
     run.player = p;
     run.phase = PHASE_BURN;
@@ -370,6 +374,7 @@ static void end(const char *why)
     if (!run.on) return;
     run.on = 0;
     kit_lamps_off(&lamps);
+    kit_shields_out(&shields, why);
     kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     sound(CUE_END);
     pa_clip_full(&own, run.meltdowns ? "won" : "lost");
@@ -535,6 +540,7 @@ static void on_tick(void)
     kit_hud_tick(&hud);
     kit_show_tick(&show_fx, &lamps);
     pa_tick(&own);
+    kit_shields_tick(&shields);
     if (++poll % KIT_POLL == 0) {
         check_triggers();
         ready_light();

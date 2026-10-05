@@ -311,7 +311,7 @@ def test_the_rig_scripts_carry_the_assets_files():
 # ---- the examples ---------------------------------------------------------------------------------------
 def test_the_intricate_modes_are_the_code_examples_and_their_recipes_fit():
     assert CM.example_names() == ["KING GHIDORAH", "OXYGEN DESTROYER", "MASER BARRAGE", "FINAL WARS", "ANGUIRUS",
-                                  "MELTDOWN"]
+                                  "MELTDOWN", "GODZILLA ANGRY", "SPACEGODZILLA", "KIRYU", "BIOLLANTE", "DESTOROYAH"]
     for ex in CM.EXAMPLES:
         src = open(os.path.join(EX, ex["source"]), encoding="utf-8").read()
         assert '#define FOLDER             "%s"' % ex["slug"] in src

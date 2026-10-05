@@ -837,3 +837,43 @@ def test_move_is_cancelled_when_another_scene_is_picked(tmp_path):
         assert w.call("text_scenes.layout_done", {"dx": "7"}) is False
         assert text_layout.load(folder) == {}
         w.call("text_scenes.close")
+
+
+def test_reveal_text_string_prefers_the_scenes_own_row(tmp_path):
+    """PAD-384: a Scenes text layer's button lands on its words in ITS scene when the same
+    words show in several, and on the first row with them otherwise."""
+    folder = _manifest(tmp_path / "proj", _rows())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        svc = w.window.service("text")
+        assert w.run(svc.reveal_text_string, "EBIRAH", "/g/bbbbbbbbbbbbbbbbbbbb")
+        assert svc._current == _row_index(w, "EBIRAH", "bbbb")
+        assert w.state("text")["search"] == "EBIRAH"
+        assert w.run(svc.reveal_text_string, "EBIRAH", "/g/cccccccccccccccccccc")
+        assert svc._current == _row_index(w, "EBIRAH", "aaaa")
+        assert not w.run(svc.reveal_text_string, "NOT THERE", "/g/bbbbbbbbbbbbbbbbbbbb")
+        # a scene's line breaks are spaces in the rows and in the search (DragonRR)
+        assert w.run(svc.reveal_text_string, "GODZILLA VS\nEBIRAH", "/g/aaaaaaaaaaaaaaaaaaaa")
+        assert svc._current == _row_index(w, "GODZILLA VS EBIRAH")
+        assert w.state("text")["search"] == "GODZILLA VS EBIRAH"
+
+
+def test_reveal_text_string_finds_a_line_by_its_new_words(tmp_path):
+    """PAD-384 round 3 (DragonRR): a scene re-read off a card built with this tab's edits
+    draws the NEW words; the link lands on the row they replace, searched by its original."""
+    rows = _rows()
+    rows[0]["replacement"] = "GODZILLA\\nVS. GIGAN"         # a typed break is "\n" here
+    rows[2]["replacement"] = "HEDORAH"
+    folder = _manifest(tmp_path / "proj", rows)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        svc = w.window.service("text")
+        assert w.run(svc.reveal_text_string, "GODZILLA\nVS. GIGAN", "/g/aaaaaaaaaaaaaaaaaaaa")
+        assert svc._current == _row_index(w, "GODZILLA VS EBIRAH")
+        assert w.state("text")["search"] == "GODZILLA VS EBIRAH"
+        assert w.run(svc.reveal_text_string, "HEDORAH", "/g/bbbbbbbbbbbbbbbbbbbb")
+        assert svc._current == _row_index(w, "EBIRAH", "bbbb")
+        assert w.state("text")["search"] == "EBIRAH"
+        # the stock words still win in the same scene
+        assert w.run(svc.reveal_text_string, "EBIRAH", "/g/aaaaaaaaaaaaaaaaaaaa")
+        assert svc._current == _row_index(w, "EBIRAH", "aaaa")

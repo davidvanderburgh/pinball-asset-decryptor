@@ -236,11 +236,12 @@ def test_rebuild_advice_says_whole_clips_need_room():
     games partition out of room.  Both pieces of rebuild advice say so and
     point at SD card size; the Check card help says the same."""
     from pinball_decryptor.webui.help_content import HELP_CONTENT
+    from pinball_decryptor.webui.tips_render import plain, render
     squeezed = " ".join(vq.summary_lines([_clip("a.mp4", True, padded=True)]))
     small = " ".join(vq.summary_lines([_clip("a.mp4", True)]))
     fine = " ".join(vq.summary_lines([_clip("a.mp4", False)]))
-    help_ = dict(HELP_CONTENT["Replace Video"])[
-        "Checking a card you already built"]
+    help_ = plain(render(dict(HELP_CONTENT["Replace Video"])[
+        "Checking a card you already built"]))
     for text in (squeezed, small, help_):
         assert "games partition" in text and "SD card size" in text, text
     assert "games partition" not in fine    # nothing to rebuild, no advice

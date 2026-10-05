@@ -182,6 +182,15 @@
 .ly-game:focus-visible { outline: 2px solid var(--accent); }
 .ly-item.not-in-game .sc-t { text-decoration: line-through; color: var(--err); }
 .ly-item .sc-i.in-game, .tree-props .in-game { color: var(--err); }
+/* PAD-391: a row dragged in Layers - a line where it lands, a lit group it goes into; red
+   where a game layer cannot go (another group) */
+.ly-item.ly-dragging { opacity: .4; }
+.ly-item.ly-drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.ly-item.ly-drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.ly-item.ly-drop-into { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.ly-item.ly-drop-no.ly-drop-before { box-shadow: inset 0 2px 0 var(--err); }
+.ly-item.ly-drop-no.ly-drop-after { box-shadow: inset 0 -2px 0 var(--err); }
+.ly-item.ly-drop-no.ly-drop-into { background: transparent; box-shadow: inset 0 0 0 1px var(--err); }
 
 /* a narrow window: the scene list goes across the top, the preview and inspector under it */
 @container (max-width: 1060px) {

@@ -337,3 +337,17 @@ def test_re_extract_keeps_the_edits_already_in_the_manifest(tmp_path):
     assert again[("/g/scene/a.radium", "CLOCK NOT SET")] ==         "CLOCK IS NOT SET YET"
     assert again[("/g/scene/b.radium", "PLAYER 1")] == ""
     assert ("/g/scene/gone.radium", "OLD") not in again
+
+
+def test_replace_finds_a_line_broken_original_flattened_in_the_manifest(tmp_path):
+    """PAD-382 (DragonRR): strings.tsv holds "A B\nC D" as "A B C D"; Write
+    still finds it and keeps the break where the words around it stayed."""
+    original = "JET JAGUAR\nVS. GIGAN"
+    buf = _make_radium(original, 2)
+    reader = _FakeReader({"/g/a.radium": buf})
+    _write_tsv(tmp_path, [("/g/a.radium", "JET JAGUAR VS. GIGAN", "JET JAGUAR VS. OMEGA")])
+    writes, n, _ov, _fw, _grown = engine._radium_text_writes(
+        reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
+    assert n == 1 and len(writes) == 2
+    dts = radium.display_texts(_apply(buf, writes))
+    assert [e["text"] for e in dts] == ["JET JAGUAR\nVS. OMEGA"] * 2

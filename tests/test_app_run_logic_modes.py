@@ -11,6 +11,7 @@ for, and any process start fails the test.
 import json
 import os
 import pathlib
+import re
 import threading
 import time
 import types
@@ -3077,25 +3078,30 @@ def test_modes_tab_words_name_the_title_card_and_no_light_grammar():
 def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     """The "?" text for the Modes tab (in PREVIEW_HELP, so behind the switch): "Which games"
     is read off the ports when the window renders and names every one, the drafted ones as
-    such; the other sections describe the tab as it is on this branch."""
+    such; the other sections describe the tab as it is on this branch.  PAD-386: short,
+    with bullets, steps, cards and flows, and MODE_LIMITS.md's parts shown in the window."""
     from pinball_decryptor.plugins.stern import mode_project as MP
     from pinball_decryptor.webui import help_content as HD
+    from pinball_decryptor.webui import tips_render as TR
 
     sections = HD.sections_for("Modes")
     assert [t for t, _b in sections] == [
-        "What it's for", "Which games", "Making a mode", "Several modes",
-        "Scores and Insider Connected", "Another card", "Save and load a file",
-        "Try it", "Modes written in C", "Modes made of blocks", "The game's own modes",
-        "Cut from a video",
+        "What it's for", HD.MODES_LIMITS_TITLE, "Which games", "Making a mode", "Try it",
+        "Several modes", "Modes made of blocks", "Modes written in C", "The game's own modes",
+        "Cut from a video", "Copy and share", "Five things people ask for",
+        "Why your mode always gives way", "Sizes", "Before you flash a real machine",
         "A preview feature"]
-    bodies = dict(sections)
-    assert all(isinstance(b, str) and b for b in bodies.values())
-    which = bodies["Which games"]
+    bodies = {t: TR.plain(TR.render(b)) for t, b in sections}
+    assert all(bodies.values()), [t for t, b in bodies.items() if not b]
+    # PAD-380: a table, one row per port, what differs from build to build
+    which = dict(sections)["Which games"]
     ports = list(MP.profiles().values())
-    assert ports and all(p.label in which for p in ports)
+    rows = which["table"]["rows"]
+    assert ports and sorted(r[0] for r in rows) == sorted(p.label for p in ports)
+    assert all(len(r) == len(which["table"]["head"]) == len(HD.MODES_GAMES_HEAD) for r in rows)
     drafted = [p.label for p in ports if not p.proven]
-    assert ("drafted and never run" in which) == bool(drafted)
-    assert "for now" not in which and "Making a port for another game or version" in which
+    assert sorted(r[0] for r in rows if "never run" in r[-1]) == sorted(drafted)
+    assert "Making a port for another game or version" in which["after"]
     assert callable(dict(HD.PREVIEW_HELP["modes"]["Modes"])["Which games"])   # read at render
     assert "about a minute" in bodies["Try it"] and "Cancel" in bodies["Try it"]
     assert "used as it is" in bodies["Try it"] and "Start mode now" in bodies["Try it"]
@@ -3106,14 +3112,25 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert "All to stock" in stock and "Defaults tab" in stock and "Text tab" in stock
     assert "listed under yours" in stock and "All timers and awards" in stock
     assert "never the video" in bodies["Cut from a video"]
+    limits = bodies[HD.MODES_LIMITS_TITLE]
+    assert "Wide open" in limits and "Off limits" in limits and "Run two of mine at once" in limits
+    assert "MODE_LIMITS.md" not in json.dumps(bodies)          # nothing sends anyone to the file
+    assert "seven slots" in bodies["Five things people ask for"]
+    assert "Insider Connected" in bodies["Before you flash a real machine"]
     assert "Examples" not in bodies["Making a mode"] and "under Examples" not in json.dumps(bodies)
     assert "as many modes as you make" in bodies["Several modes"] and "counted apart" in bodies["Several modes"]
     for title, body in sections:
-        assert "\u2014" not in body, title
+        assert "—" not in json.dumps(TR.render(body), ensure_ascii=False), title
+    # every jump inside the window lands on a section or a heading the window draws
+    drawn = [TR.render(b) for _t, b in sections]
+    targets = {TR.slug(t) for t, _b in sections} | {
+        x["id"] for bl in drawn for x in bl if x["t"] == "h"}
+    links = set(re.findall(r'\["a", "[^"]*", "([^"]+)"\]', json.dumps(drawn, ensure_ascii=False)))
+    assert links and links <= targets, links - targets
     # and it is what the window shows
     with web_app(tmp_path, mfr="stern") as w:
         shown = json.dumps(w.call("shellx.tips", "Modes"))
-    assert "Modes written in C" in shown and "Ports so far" in shown
+    assert "Modes written in C" in shown and "Ball save" in shown and "Godzilla Pro 1.15" in shown
 
 
 def test_modes_help_stays_behind_the_switch_and_its_which_games_never_raises(monkeypatch):
@@ -3123,9 +3140,8 @@ def test_modes_help_stays_behind_the_switch_and_its_which_games_never_raises(mon
 
     assert not preview.enabled("modes")
     assert HD.sections_for("Modes") == []
-    assert HD._and_list(["a"]) == "a" and HD._and_list(["a", "b", "c"]) == "a, b and c"
     monkeypatch.setattr(MP, "profiles", lambda ports_dir=None: (_ for _ in ()).throw(OSError("x")))
-    assert "No port could be read" in HD._modes_which_games()
+    assert "No game list could be read" in HD._modes_which_games()
     # a section whose body fails to render is left out, never a traceback in the window
     monkeypatch.setitem(HD.HELP_CONTENT, "Modes", [("Broken", lambda: 1 / 0), ("Kept", "words")])
     assert HD.sections_for("Modes") == [("Kept", "words")]

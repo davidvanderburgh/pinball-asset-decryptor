@@ -50,7 +50,7 @@ const T = {
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
-  priority: "How the mode's screen and clip sit among the game's own displays while it runs, on the game's own scale (1-255). At 180 the game's full-screen shot awards wait until the mode ends (on Godzilla: LOOPS and BATTLE IS LIT); its jackpots, multiball and battle starts and the tilt warning still come through, and the mode's screen is back when they end. Higher holds more back (190: starts and jackpots wait too). 0 leaves the game's display order as it is.",
+  priority: "Kept for modes made before it changed: it no longer holds the game's displays back. A mode never makes the game's screens wait (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off), so the game's awards, starts and jackpots always come through, and the mode's screen is back when they end. 0 = none.",
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
   rising: "The Nth scoring shot pays N times its points: 1x, 2x, 3x...",
   fixed: "Every scoring shot pays its points once.",
@@ -219,6 +219,8 @@ function newMenuItems(s, onNewCode, onNewBlocks) {
     { sep: true },
     { header: "Advanced" },
     { label: "Mode in C", icon: "edit", submenu: codeItems(s, onNewCode) },
+    { sep: true },
+    { label: "What a mode can and can't do", icon: "help", title: "Opens the Tips for this tab", onClick: () => call("modes.open_limits_doc") },
   ];
 }
 
@@ -587,7 +589,7 @@ function ShowPage({ s, f, off, dis, rs, labels, files, showClip }) {
         <div class="row wrap">
           <span class="lbl nw">Display priority</span>
           <${Num} k="priority" value=${f.priority} disabled=${off || dis.show_order} width=${72} title=${T.priority} />
-          <span class="small muted">0 = none, 180 = over the game's shot awards</span>
+          <span class="small muted">0 = none; it no longer holds the game's displays</span>
         </div>
       <//>
       <${FilmSec} f=${f} off=${off} dis=${dis} rs=${rs} labels=${labels} />
@@ -1066,7 +1068,10 @@ function FirstMode({ s, onNewCode, onNewBlocks }) {
   return html`<section class="card modes-editor modes-first">
     <div class="bd modes-editor-bd">
       <div class="stack" style="gap:4px">
-        <h2 class="h2">Make your first mode</h2>
+        <div class="row wrap" style="justify-content:space-between">
+          <h2 class="h2">Make your first mode</h2>
+          <button type="button" class="modes-doc-link small" ...${tip("Opens the Tips for this tab")} onClick=${() => call("modes.open_limits_doc")}>What a mode can and can't do</button>
+        </div>
         <div class="small muted wrap">A mode is something new for the game to do: what starts it, how long it runs, which shots score, and what the display, lights and speakers do meanwhile.</div>
         ${s.no_port ? html`<div class="small warn-ink wrap">${s.no_port}</div>` : null}
       </div>

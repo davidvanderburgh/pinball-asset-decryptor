@@ -212,13 +212,6 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                "light shows; every other insert keeps doing what the game wants. They go back "
                "to the game the moment the mode ends. Blink and Pulse repeat about twice a "
                "second and every 1.6 s; Chase lights one of them at a time.")
-    PRIORITY_TIP = ("How the mode's screen and clip sit among the game's own displays while it "
-                    "runs, on the game's own scale (1-255). At 180 the game's full-screen shot "
-                    "awards wait until the mode ends (on Godzilla: LOOPS and BATTLE IS LIT); its "
-                    "jackpots, multiball and battle starts and the tilt warning still come "
-                    "through, and the mode's screen is back when they end. Higher holds more "
-                    "back (190: starts and jackpots wait too). 0 leaves the game's display order "
-                    "as it is.")
     FILM_TIP = ("Cut this mode's clip, its sound or its screen's picture from a video file of "
                 "your own (a film, an episode, anything): pick the video, a start time and a "
                 "length (up to 30 seconds), and whether to keep its letterbox or fill the "
@@ -2528,6 +2521,16 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     @rpc
     def open_sdk_doc(self):
         self.open_path(self.sdk_doc())
+        return True
+
+    @rpc
+    def open_limits_doc(self):
+        """"What a mode can and can't do": the Tips window on this tab, at that
+        section (PAD-386: never MODE_LIMITS.md in another app)."""
+        from ..help_content import MODES_LIMITS_TITLE
+        from ..tips_render import slug
+        self.ctx.bus.publish("open_dialog", name="tips",
+                             props={"tab": self.key, "anchor": slug(MODES_LIMITS_TITLE)})
         return True
 
     def _duplicate_code(self, slug):

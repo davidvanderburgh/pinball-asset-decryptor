@@ -1006,6 +1006,11 @@ class TryItMixin:
     def sdk_doc(self):
         return os.path.join(MR.sdk_dir(), "MODE_SDK.md")
 
+    def limits_doc(self):
+        """What a mode can and can't do (PAD-380). The Modes tips show its parts in the
+        app's own Tips window (help_content._limits, PAD-386); nothing opens the file."""
+        return os.path.join(MR.sdk_dir(), "MODE_LIMITS.md")
+
     def open_path(self, path):
         opener = self._opener
         try:

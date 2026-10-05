@@ -213,15 +213,16 @@ export function ScenesActions() {
           title: "The edits of every scene you changed in this project, in one .zip file",
           onClick: () => call("text_scenes.edits_save", "all") },
         // PAD-369 (DragonRR): everything, to hand to someone else
-        { label: "Save this scene with pictures and color profiles…", icon: "download", disabled: !s.tree_view,
-          title: "Its edits, plus each picture in it you replaced on the Images tab (the file itself, its size tick, its color switch and color profile), the pictures you added, and the whole screen overlay, in one .zip file",
+        { label: "Save this scene with pictures, text and color profiles…", icon: "download", disabled: !s.tree_view,
+          title: "Its edits, plus each picture in it you replaced on the Images tab (the file itself, its size tick, its color switch and color profile), the pictures you added, its words you changed on the Text tab, and the whole screen overlay, in one .zip file",
           onClick: () => call("text_scenes.edits_save", "this", true) },
-        { label: "Save every scene with pictures and color profiles…", icon: "download",
-          title: "Every scene's edits, plus every picture the scenes draw that you replaced on the Images tab, with its size tick, color switch and color profile, and the whole screen overlay, in one .zip file",
+        // PAD-387: the project's whole look, sounds, videos and modes aside
+        { label: "Save every scene with pictures, text and color profiles…", icon: "download",
+          title: "Your project's whole look in one .zip file: every scene's edits, every picture you replaced on the Images tab (with its size tick, color switch and color profile), every Text tab edit and the whole screen overlay. Sounds, videos and modes are not in it.",
           onClick: () => call("text_scenes.edits_save", "all", true) },
         { sep: true },
         { label: "Load scene edits from a file…", icon: "upload",
-          title: "Put the edits in a file saved here or by someone else onto the same scenes of this card. A scene this card does not have is left out. A file saved with pictures and color profiles brings those too: its pictures are copied into the project's Shared pictures folder, and nothing on this PC is deleted. Anything of yours it would change is asked about first.",
+          title: "Put the edits in a file saved here or by someone else onto the same scenes of this card. A scene this card does not have is left out. A file saved with pictures, text and color profiles brings those too: its pictures are copied into the project's Shared pictures folder, its text goes onto the same lines on the Text tab, and nothing on this PC is deleted. Anything of yours it would change is asked about first.",
           onClick: () => call("text_scenes.edits_load") },
       ])}>Save / load edits<//>
     <${Button} kind="ghost" icon=${s.rebuilding ? "x" : "refresh"} title=${tips.rebuild}
@@ -623,7 +624,7 @@ const gameTip = (l) => ({
     ["Click", "put it back in the game"],
   ] : [
     ["Click", "hide it in the game (Write leaves it out of the card)"],
-    ["Delete", "hide it in the game and the preview (with the preview focused)"],
+    ["Delete", "hide it in the game and the preview, after asking"],
     `The preview is not changed; the eye hides it here.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
@@ -665,7 +666,10 @@ const rowTip = (l, cs) => ({
     ["Click", "select it (shown on top while selected)"],
     ["Ctrl+click", "add it to the selection or take it out"],
     ["Shift+click", "select a run of layers"],
-    ["Right-click", "hide, show alone, hide in the game"],
+    ["Drag", l.added ? "draw it over or under other layers, or drop it on a group to put it in there"
+      : "draw it over or under the other layers in its group"],
+    ["Delete", l.added ? "delete it, after asking" : "hide it in the game and the preview, after asking"],
+    ["Right-click", "hide, show alone, hide in the game, delete"],
   ].filter(Boolean) });
 
 function eyeClick(l, e) {
@@ -696,13 +700,80 @@ function layerMenu(t, l, e) {
     { label: allGone ? "Put back in the game" : "Hide in the game", icon: "sd",
       title: allGone ? `Write puts ${what} on the card again` : `Write leaves ${what} out of the card; the preview is not changed`,
       onClick: () => call("text_scenes.tree_visible_many", ids, allGone) },
+    { sep: true },
+    { label: "Delete…", icon: "trash", kbd: "Delete",
+      title: `Asks first. A layer you added is taken out; the game's own is hidden in the game and the preview`,
+      onClick: () => call("text_scenes.tree_delete", ids) },
   ].filter(Boolean));
+}
+
+// PAD-391 (DragonRR): a row dragged up or down the list is drawn over or under the others
+// there; dropped on the middle of a group's row it goes into that group.  Only a layer the
+// user added can change group: the game finds its own by the group they sit in, so those
+// show a red mark and the drop says why.  Near the list's top or bottom edge it scrolls.
+const DROP_EDGE = 36;
+function dropWhere(l, e) {
+  const r = e.currentTarget.getBoundingClientRect();
+  const f = (e.clientY - r.top) / (r.height || 1);
+  if (l.group) return f < 0.35 ? "before" : "into";
+  return f < 0.5 ? "before" : "after";
+}
+function useDragScroll(listRef) {
+  const at = useRef(null);
+  const raf = useRef(0);
+  const step = () => {
+    const el = listRef.current;
+    const p = at.current;
+    if (el && p) {
+      const r = el.getBoundingClientRect();
+      if (p.x >= r.left && p.x <= r.right) {
+        const up = r.top + DROP_EDGE - p.y;
+        const down = p.y - (r.bottom - DROP_EDGE);
+        if (up > 0 && p.y > r.top - 60) el.scrollTop -= Math.min(24, 2 + up / 3);
+        else if (down > 0 && p.y < r.bottom + 60) el.scrollTop += Math.min(24, 2 + down / 3);
+      }
+    }
+    raf.current = requestAnimationFrame(step);
+  };
+  const onOver = (e) => { at.current = { x: e.clientX, y: e.clientY }; };
+  const start = () => {
+    document.addEventListener("dragover", onOver);
+    cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(step);
+  };
+  const stop = () => {
+    document.removeEventListener("dragover", onOver);
+    cancelAnimationFrame(raf.current);
+    at.current = null;
+  };
+  useEffect(() => stop, []);
+  return { start, stop };
 }
 
 function TreeLayers({ t }) {
   const cs = useNs("color");
   const listRef = useRef(null);
   const sels = t.sels || [];
+  const [drag, setDrag] = useState(null);           // the row being dragged
+  const [over, setOver] = useState(null);           // { id, where, ok } of the drop
+  const scroll = useDragScroll(listRef);
+  const endDrag = () => { scroll.stop(); setDrag(null); setOver(null); };
+  const dropOk = (l, where) => drag.added || (where === "into" ? l.id : l.parent) === drag.parent;
+  const onRowOver = (l, e) => {
+    if (!drag || drag.id === l.id) { if (over) setOver(null); return; }
+    e.preventDefault();
+    const where = dropWhere(l, e);
+    const ok = dropOk(l, where);
+    e.dataTransfer.dropEffect = "move";
+    if (!over || over.id !== l.id || over.where !== where || over.ok !== ok) setOver({ id: l.id, where, ok });
+  };
+  const onRowDrop = (l, e) => {
+    e.preventDefault();
+    const d = drag;
+    const where = dropWhere(l, e);
+    endDrag();
+    if (d && d.id !== l.id) call("text_scenes.tree_drop", d.id, l.id, where);
+  };
   useEffect(() => {
     if (t.sel == null || !listRef.current) return;
     const el = listRef.current.querySelector(`[data-node="${t.sel}"]`);
@@ -713,7 +784,10 @@ function TreeLayers({ t }) {
   tRef.current = t;
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key.toLowerCase() !== "h" || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      // PAD-391: Delete too (asks first); the preview handles its own when it has the focus
+      const del = e.key === "Delete";
+      if ((e.key.toLowerCase() !== "h" && !del) || e.ctrlKey || e.metaKey || e.altKey || e.repeat
+          || e.defaultPrevented) return;
       const el = e.target;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
       const cur = tRef.current;
@@ -721,6 +795,7 @@ function TreeLayers({ t }) {
       if (!ids.length || !listRef.current || !listRef.current.getClientRects().length
           || document.querySelector(".scrim")) return;
       e.preventDefault();
+      if (del) { call("text_scenes.tree_delete", ids); return; }
       const off = ids.every((id) => ((cur.layers || []).find((x) => x.id === id) || {}).view_off);
       call("text_scenes.tree_view_many", ids, off);
     };
@@ -734,8 +809,14 @@ function TreeLayers({ t }) {
         ...${tip({ head: "One layer is shown alone", lines: [["Click", "bring the other layers back"], ["Alt+click", "its eye does the same"]] })}
         onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
-        class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game")}
+        class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game",
+          drag && drag.id === l.id && "ly-dragging", over && over.id === l.id && `ly-drop-${over.where}`, over && over.id === l.id && !over.ok && "ly-drop-no")}
         style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l, cs))}
+        draggable="true"
+        onDragStart=${(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", l.name); setDrag(l); scroll.start(); }}
+        onDragEnd=${endDrag}
+        onDragOver=${(e) => onRowOver(l, e)}
+        onDrop=${(e) => onRowDrop(l, e)}
         onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
         onContextMenu=${(e) => layerMenu(t, l, e)}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
@@ -756,6 +837,9 @@ function TreeLayers({ t }) {
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
         onClick=${(e) => { e.stopPropagation(); showPics(l.pics, e); }}><${Icon} name="image" /></button>`
+        : l.text ? html`<button type="button" class="ly-img ly-txt"
+        aria-label="Find on the Replace Text tab" ...${tip("Find these words on the Replace Text tab")}
+        onClick=${(e) => { e.stopPropagation(); call("text_scenes.activate", "str::" + l.text); }}><${Icon} name="text" /></button>`
         : html`<span></span>`}
     </div>`)}
   </div>`;
@@ -925,6 +1009,8 @@ function TreeCanvas({ s }) {
   const wantRef = useRef(0);
   const nudgeT = useRef(null);
   const [hover, setHover] = useState(null);
+  // a text's box resized on the canvas, shown until the redraw that has it comes back
+  const [boxPend, setBoxPend] = useState(null);
   const p = t.props;
   // the selection (PAD-279: several at once): what a drag, the arrow keys and Delete act on.
   // *key* names it for the edits shown by hand and the layers the server draws for it.
@@ -933,7 +1019,8 @@ function TreeCanvas({ s }) {
   const keyOf = (ids) => ids.join(",");
   const moveCall = (ids, dx, dy) => (ids.length > 1 ? call("text_scenes.tree_move_many", ids, dx, dy)
     : call("text_scenes.tree_move", ids[0], dx, dy));
-  useEffect(() => { setPend(null); setDrag(null); }, [t.card]);
+  useEffect(() => { setPend(null); setDrag(null); setBoxPend(null); }, [t.card]);
+  useEffect(() => { setBoxPend((b) => (b && b.rev !== (t.rev || 0) ? null : b)); }, [t.rev]);
   // a redraw came in: the edits it draws are no longer shown by hand
   useEffect(() => {
     setPend((q) => {
@@ -996,7 +1083,11 @@ function TreeCanvas({ s }) {
     for (let i = hits.length - 1; i >= 0; i--) if (inPoly(hits[i].pts, x, y)) return hits[i];
     return null;
   };
-  const selBox = p && !multi && p.x != null ? { x: p.x, y: p.y, w: p.w, h: p.h } : null;
+  const boxOf = (d) => ({ x: Math.min(d.fx, d.x), y: Math.min(d.fy, d.y), w: Math.abs(d.x - d.fx), h: Math.abs(d.y - d.fy) });
+  // a line of text's box is resized apart from its words (PAD-383); the words re-flow in it
+  const boxLive = drag && drag.mode === "box" ? boxOf(drag)
+    : boxPend && p && boxPend.node === p.id ? boxPend.box : null;
+  const selBox = boxLive || (p && !multi && p.x != null ? { x: p.x, y: p.y, w: p.w, h: p.h } : null);
   const corner = (x, y) => {
     if (!selBox) return null;
     const r = box.current.getBoundingClientRect();
@@ -1012,6 +1103,13 @@ function TreeCanvas({ s }) {
     flushNudge();
     const [x, y] = toStage(e);
     box.current.setPointerCapture(e.pointerId);
+    if (corner(x, y) && p.kind === "Text") {
+      // the corner across from the one picked stays put
+      const fx = Math.abs(x - selBox.x) < Math.abs(x - (selBox.x + selBox.w)) ? selBox.x + selBox.w : selBox.x;
+      const fy = Math.abs(y - selBox.y) < Math.abs(y - (selBox.y + selBox.h)) ? selBox.y + selBox.h : selBox.y;
+      setDrag({ mode: "box", node: p.id, fx, fy, x, y, x0: x, y0: y });
+      return;
+    }
     if (corner(x, y)) {
       const cx0 = selBox.x + selBox.w / 2, cy0 = selBox.y + selBox.h / 2;
       setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1 });
@@ -1030,6 +1128,7 @@ function TreeCanvas({ s }) {
     const [x, y] = toStage(e);
     if (!drag) { const h = pick(x, y); setHover(h ? h.id : null); return; }
     if (drag.mode === "move") setDrag({ ...drag, dx: x - drag.x0, dy: y - drag.y0 });
+    else if (drag.mode === "box") setDrag({ ...drag, x, y });
     else setDrag({ ...drag, f: Math.max(0.05, Math.hypot(x - drag.cx, y - drag.cy) / drag.d0) });
   };
   const up = () => {
@@ -1039,6 +1138,13 @@ function TreeCanvas({ s }) {
     if (d.mode === "move" && Math.abs(d.dx) + Math.abs(d.dy) >= 1) {
       const dx = Math.round(d.dx), dy = Math.round(d.dy);
       send(d.ids, { m: "move", dx, dy }, () => moveCall(d.ids, dx, dy));
+    }
+    if (d.mode === "box" && Math.abs(d.x - d.x0) + Math.abs(d.y - d.y0) >= 1) {
+      const b = boxOf(d);
+      const r = { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) };
+      setBoxPend({ node: d.node, box: r, rev: t.rev || 0 });
+      Promise.resolve(call("text_scenes.tree_set_box", d.node, r.x, r.y, r.w, r.h))
+        .then((ok) => { if (ok === false) setBoxPend(null); }, () => setBoxPend(null));
     }
     if (d.mode === "scale" && Math.abs(d.f - 1) > 0.01)
       send([d.node], { m: "scale", cx: d.cx, cy: d.cy, f: d.f }, () => call("text_scenes.tree_scale", d.node, d.f));
@@ -1050,7 +1156,7 @@ function TreeCanvas({ s }) {
     if (moves[e.key]) { e.preventDefault(); nudge(sels, ...moves[e.key]); }
     else if (e.key === "Delete") {
       e.preventDefault(); flushNudge();
-      if (multi) call("text_scenes.tree_remove_many", sels); else call("text_scenes.tree_remove", p.id);
+      call("text_scenes.tree_delete", multi ? sels : [p.id]);
     }
   };
   // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere on the page, not only with the preview focused
@@ -1077,8 +1183,8 @@ function TreeCanvas({ s }) {
 
   // what is moved by hand: the drag under way, then edits not yet drawn (on the picture) or
   // not yet in the outlines the page was sent (on the outline)
-  const live = drag ? drag.id : pend ? pend.id : null;
-  const dragOp = drag ? (drag.mode === "move" ? { m: "move", dx: drag.dx, dy: drag.dy }
+  const live = drag && drag.mode !== "box" ? drag.id : pend ? pend.id : null;
+  const dragOp = drag && drag.mode !== "box" ? (drag.mode === "move" ? { m: "move", dx: drag.dx, dy: drag.dy }
     : { m: "scale", cx: drag.cx, cy: drag.cy, f: drag.f }) : null;
   const opsSince = (rev) => [...(dragOp ? [dragOp] : []),
     ...(pend && pend.id === live ? pend.ops.filter((o) => o.want == null || o.want > rev) : [])];
@@ -1088,7 +1194,7 @@ function TreeCanvas({ s }) {
   const loading = s.tree_loading || (!full && !s.canvas_msg);
   const busy = !loading && (s.tree_busy || !!(pend && pend.ops.some((o) => o.want == null || o.want > shownRev)));
   const hov = hover != null && !sels.includes(hover) ? (t.hits || []).filter((h) => h.id === hover) : [];
-  const selPolys = (t.hits || []).filter((h) => sels.includes(h.id));
+  const selPolys = boxLive ? [] : (t.hits || []).filter((h) => sels.includes(h.id));
   return html`<div class=${cx("scenes-canvas tree-canvas", loading && "loading")} ref=${box} tabIndex="0" onKeyDown=${key}
       style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}
       onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${() => setHover(null)}>
@@ -1119,6 +1225,7 @@ function TreeSide({ t, play, playFrame }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
   const [keepShape, setKeepShape] = useState(true);
+  const isText = !!p && p.kind === "Text";
   useEffect(() => { if (p) setTint(p.tint); }, [p && p.id, p && p.tint]);
   const num = (label, value, onCommit, title) => html`<label class="tree-num" ...${tip(title)}>
     <span class="lbl">${label}</span>
@@ -1185,14 +1292,20 @@ function TreeSide({ t, play, playFrame }) {
         ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)")}
       </div>` : html`<div class="small muted">Not on the glass at this moment.</div>`}
       ${p.w != null ? html`<div class="tree-row">
-        ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), "Its width on the screen, in pixels (the screen is 1360 x 768)")}
-        ${num("H px", p.h, (v) => call("text_scenes.tree_set_pixels", p.id, null, v, keepShape), "Its height on the screen, in pixels")}
+        ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), isText
+          ? "The width of its box on the screen, in pixels. The words stay their size and wrap to fit inside it (the corner handles do the same)."
+          : "Its width on the screen, in pixels (the screen is 1360 x 768)")}
+        ${num("H px", p.h, (v) => call("text_scenes.tree_set_pixels", p.id, null, v, keepShape), isText
+          ? "The height of its box on the screen, in pixels. The words stay their size."
+          : "Its height on the screen, in pixels")}
       </div>
-      <label class="tree-row small tree-keep" title="On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.">
+      ${isText ? null : html`<label class="tree-row small tree-keep" title="On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.">
         <input type="checkbox" checked=${keepShape} onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
-      </label>` : null}
+      </label>`}` : null}
       <div class="tree-row">
-        ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), "Both ways at once; 100 = the size the game ships")}
+        ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), isText
+          ? "The size of the words (and their box with them), both ways at once; 100 = the size the game ships"
+          : "Both ways at once; 100 = the size the game ships")}
       </div>
       <div class="tree-row">
         ${num("Width %", p.scale, (v) => call("text_scenes.tree_set_size", p.id, v, null), "Stretch it sideways only")}
@@ -1222,6 +1335,9 @@ function TreeSide({ t, play, playFrame }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
       ${p.kind === "Text" ? html`<div class="tree-row">
+        <${Button} size="xs" disabled=${p.x == null}
+          title="Shrink or grow this text's box to go round its words, with a small border. The words stay where they are. Words the game puts in while it plays can be longer than these."
+          onClick=${() => call("text_scenes.tree_fit_text", p.id)}>Fit box to text<//>
         <${Button} size="xs" title="A dark copy of this text just beneath it, a few pixels down and right. It is selected after, to move, tint or remove."
           onClick=${() => call("text_scenes.tree_shadow", p.id)}>Add a drop shadow<//>
       </div>` : null}

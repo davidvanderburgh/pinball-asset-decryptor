@@ -69,7 +69,7 @@ const TIP = {
   timerLeft: "The milliseconds the timer has left; 0 when it is not running.",
   wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
-  displayPriority: "While it runs, the game's lesser full-screen displays wait for it (the example modes use a mode's 180; FINAL WARS a wizard's 190). Kept for the total on its own screen, given back at once at a drain.",
+  displayPriority: "Kept for the total on its own screen. It no longer makes the game's displays wait: a mode always gives way to them (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off).",
   gameModes: "May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Cannot start: as End this one, and while it runs the modes ticked below cannot start at all. A multiball of the game's is never held off: it starts, and this mode ends. Its own Multiball block does not end it.",
   blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
   blockLast: "One at least: to let them all start, choose \"may start\" above.",

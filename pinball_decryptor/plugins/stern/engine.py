@@ -3769,10 +3769,17 @@ def _shader_colour_profile(assets_dir):
     everything the game draws (PAD-305), or ``None``: no profile staged on
     the Color profile tab, an Emulate run's "Stock colors" hold
     (core/colour_profile.forced) and a profile that changes nothing all
-    answer ``None``.  Never raises."""
+    answer ``None``.  An Emulate run with "Show it through the machine's
+    screen" (PAD-389) gets a shader_profile.Shown: the profile, then the
+    Machine screen.  Never raises."""
     try:
         from ...core import colour_profile
-        return colour_profile.active(assets_dir)
+        prof = colour_profile.active(assets_dir)
+        screen = colour_profile.emulated_screen(assets_dir)
+        if screen is None:
+            return prof
+        from .shader_profile import Shown
+        return Shown(prof, screen)
     except Exception:                                   # noqa: BLE001
         return None
 
@@ -3900,6 +3907,9 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         for e in _radium.enumerate_strings(data):
             if e["kind"] == "display-text":
                 occ_by_text.setdefault(e["text"], []).append(e)
+        # a line with line breaks is in the manifest flattened (PAD-382)
+        from ...core import text_manifest as _tm
+        pairs = _tm.resolve(occ_by_text, pairs)
         over = [(o, r) for o, r in pairs
                 if len(r.encode("latin1", "replace"))
                 > len(o.encode("latin1", "replace"))]

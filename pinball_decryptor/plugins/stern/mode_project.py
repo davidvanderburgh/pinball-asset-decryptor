@@ -2951,7 +2951,7 @@ def validate_display_lights(spec):
     """The reasons ``priority`` / ``light_shots`` cannot be built, as sentences."""
     out = []
     if _priority_value(spec) is None:
-        out.append("The display priority is 0 (none) to 255; 180 puts the mode over the game's shot awards.")
+        out.append("The display priority is 0 (none) to 255.")
     colour = spec.light_shots
     if colour and not (isinstance(colour, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", colour)):
         out.append("The colour of the lit shots is not a colour like #ff6000.")

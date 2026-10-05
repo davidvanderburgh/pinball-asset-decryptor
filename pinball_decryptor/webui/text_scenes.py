@@ -1181,6 +1181,10 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                     return False
                 self._step_aside_for_jump()
                 return bool(self.tab.reveal_text_string(text))
+            if iid.startswith("str::"):
+                # PAD-384: a Layers row's text, its words carried in the id
+                self._step_aside_for_jump()
+                return bool(self.tab.reveal_text_string(iid[5:], self._sel))
             if iid.startswith("img::"):
                 name, noun, what = "reveal_image_slot", "Images", "tab"
                 args, kw = (iid[5:],), {}

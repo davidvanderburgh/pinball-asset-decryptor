@@ -27,6 +27,8 @@ log = logging.getLogger(__name__)
 
 _TREE_DISPLAY = (1360, 768)          # the canvas image is drawn full size: it is edited on
 _ORDER = ("up", "down", "front", "back")
+_DROP = ("before", "after", "into")
+_GROUP_KINDS = ("Sprite", "StreamingFlipbook")
 
 
 #: a sprite state that is on its way in or out (tree_show tries these last)
@@ -798,7 +800,7 @@ class TreeEditMixin:
         picks = self._tree_pictures()
         added_ops = {int(op["id"]): op for op in ops
                      if op.get("op") == "add_picture" and op.get("id") is not None}
-        for n, _parent, depth in _walk_man(man):
+        for n, parent, depth in _walk_man(man):
             kind = _kind_of(man, n)
             pics = []
             for rel in _pics_of(man, n, memo):
@@ -808,7 +810,10 @@ class TreeEditMixin:
                 if have[rel]:
                     pics.append(rel)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
+                           "parent": parent["id"] if parent is not None else None,
+                           "group": kind in _GROUP_KINDS,
                            "pics": ["images/" + rel for rel in pics],
+                           "text": _text_of(man, n, kind),
                            "color": _colour_switch(n, kind, pics, picks, settings,
                                                    added_ops.get(n["id"]), unlock["on"],
                                                    built),
@@ -1231,6 +1236,39 @@ class TreeEditMixin:
                                      for n in nodes if n not in hidden])
 
     @rpc
+    def tree_delete(self, nodes):
+        """The Delete key, in Layers or on the preview (PAD-391, DragonRR): asks first, then
+        removes what was added and hides the game's own in the game and the preview (its code
+        still looks for them, so they stay in the scene)."""
+        if self._tman is None:
+            return False
+        nodes = self._tree_top(self._tree_nodes(nodes))
+        byid = {n["id"]: n for n, _p, _d in _walk_man(self._tman)}
+        nodes = [n for n in nodes if n in byid]
+        if not nodes:
+            return False
+        added = [n for n in nodes if byid[n].get("added")]
+        own = [n for n in nodes if not byid[n].get("added")]
+        what = ('"%s"' % byid[nodes[0]]["name"] if len(nodes) == 1
+                else "these %d layers" % len(nodes))
+        lines = []
+        if added:
+            lines.append("Added by you, so taken out of the scene: %s."
+                         % ", ".join(byid[n]["name"] for n in added[:6])
+                         + (" and %d more" % (len(added) - 6) if len(added) > 6 else ""))
+        if own:
+            lines.append("The game's own, so hidden in the game and the preview instead (the "
+                         "game still looks for them): %s." % ", ".join(
+                             byid[n]["name"] for n in own[:6])
+                         + (" and %d more" % (len(own) - 6) if len(own) > 6 else "")
+                         + " Click the card mark at the end of a row to put one back.")
+        lines.append("Undo (Ctrl+Z) takes it back.")
+        if not compat.messagebox.askyesno("Delete layer" if len(nodes) == 1 else "Delete layers",
+                                          "Delete %s?\n\n%s" % (what, "\n\n".join(lines))):
+            return False
+        return self.tree_remove_many(nodes)
+
+    @rpc
     def tree_remove_many(self, nodes):
         """Delete on a multiple selection: ADDED nodes are removed, the game's own hidden."""
         from ..plugins.stern import scene_edit
@@ -1363,6 +1401,75 @@ class TreeEditMixin:
                                "mul": [0.0, 0.0, 0.0, self._SHADOW_ALPHA]})
 
     @rpc
+    def tree_fit_text(self, node):
+        """Fit a line of text's box to its words (DragonRR, PAD-383: "a single button that
+        snaps the bounding box to the actual text"): the Text's own rect, so the selection,
+        its handles and W/H px all go round what it shows.  The words do not move."""
+        from ..plugins.stern import fontrender as fr, scene_render
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        d = next((d for d in self._tdraws if d["node"] == node and d["kind"] == "text"), None)
+        if d is None:
+            return False
+        if self._fonts is None:
+            self._fonts = fr.load_fonts(self.assets_dir)
+        by_key = {f["key"]: f for f in self._fonts or ()}
+        font = fr.font_at_size(by_key.get(d.get("font") or ""), d.get("font_px") or 0)
+        rect = scene_render.text_fit_rect(d, font, self._pending_texts(card, None))
+        if rect is None or all(abs(a - b) < 0.5 for a, b in zip(rect, d.get("rect") or ())):
+            return False
+        return self._tree_add({"op": "text_rect", "node": node, "rect": rect})
+
+    def _tree_text_draw(self, node):
+        return next((d for d in self._tdraws if d["node"] == node and d["kind"] == "text"), None)
+
+    @rpc
+    def tree_set_box(self, node, x, y, w, h):
+        """A line of text's box set to (*x*, *y*, *w*, *h*) on the glass, its words left the
+        size they are (DragonRR, PAD-383: "Bounding box doesn't change the text size, the
+        words shuffle to try to fit within the area. Scaling controls the text size"): the
+        Text's own rect, with word wrap turned on so the words re-flow inside it.  The
+        alignment the line has is kept."""
+        from ..plugins.stern import scene_eval
+        node = int(node)
+        d = self._tree_text_draw(node)
+        if d is None:
+            return False
+        try:
+            x, y, w, h = float(x), float(y), float(w), float(h)
+        except (TypeError, ValueError):
+            return False
+        if w < 4 or h < 4:
+            return False
+        inv = scene_eval.invert(d["m"])
+        if inv is None:
+            return False
+        pts = [scene_eval.apply(inv, px, py)
+               for px, py in ((x, y), (x + w, y), (x, y + h), (x + w, y + h))]
+        rect = [round(min(p[0] for p in pts), 3), round(min(p[1] for p in pts), 3),
+                round(max(p[0] for p in pts), 3), round(max(p[1] for p in pts), 3)]
+        if all(abs(a - b) < 0.5 for a, b in zip(rect, d.get("rect") or ())) \
+                and (d.get("flags") or [0])[0]:
+            return False
+        return self._tree_add({"op": "text_rect", "node": node, "rect": rect, "wrap": True})
+
+    def _tree_set_text_pixels(self, node, w, h):
+        """W px / H px on a line of text: its box, not its words.  The box keeps its top and
+        the edge (or, centred, the middle) its words are aligned to."""
+        box = self._tree_box(node)
+        d = self._tree_text_draw(node)
+        if box is None or d is None:
+            return False
+        x0, y0, x1, y1 = box
+        nw = x1 - x0 if w is None else w
+        nh = y1 - y0 if h is None else h
+        align = d.get("align", 1)
+        nx = x0 if align == 0 else (x1 - nw if align == 2 else (x0 + x1 - nw) / 2.0)
+        return self.tree_set_box(node, nx, y0, nw, nh)
+
+    @rpc
     def tree_set_scale(self, node, pct):
         card, man = self._tree_card()
         if card is None:
@@ -1393,6 +1500,8 @@ class TreeEditMixin:
             return False
         if (w is not None and w < 1) or (h is not None and h < 1) or (w is None and h is None):
             return False
+        if self._tree_text_draw(node) is not None:
+            return self._tree_set_text_pixels(node, w, h)
         fw = w / cur_w if w is not None and cur_w > 0 else None
         fh = h / cur_h if h is not None and cur_h > 0 else None
         if keep_shape:
@@ -1735,6 +1844,60 @@ class TreeEditMixin:
         return self._tree_add({"op": "order", "node": node, "index": to})
 
     @rpc
+    def tree_drop(self, node, target, where):
+        """A row dragged in Layers (PAD-391) and dropped *where* (before, after or into)
+        the row *target*.  Inside its own group it is re-ordered; an ADDED layer can go into
+        another group too, and stays where it was on the screen.  The game's own layers stay
+        in their group: its code finds them by the group they sit in."""
+        from ..plugins.stern import scene_edit, scene_eval
+        if where not in _DROP or node is None or target is None:
+            return False
+        node, target = int(node), int(target)
+        man = self._tman
+        index = scene_edit._man_index(man)
+        if node == target or node not in index or target not in index:
+            return False
+        n, sibs = index[node]
+        parents = {m["id"]: p["id"] if p is not None else None for m, p, _d in _walk_man(man)}
+        if where == "into":
+            if _kind_of(man, index[target][0]) not in _GROUP_KINDS:
+                return False
+            parent = target
+            kids = scene_edit._man_kids_of(man, index, parent)
+            to = len(kids)
+        else:
+            parent = parents.get(target)
+            kids = index[target][1]
+            to = kids.index(index[target][0]) + (where == "after")
+        p = parent
+        while p is not None:                         # never into itself or its own kids
+            if p == node:
+                return False
+            p = parents.get(p)
+        if kids is sibs:
+            cur = sibs.index(n)
+            if to > cur:
+                to -= 1
+            if to == cur:
+                return False
+            return self._tree_add({"op": "order", "node": node, "index": to})
+        if not n.get("added"):
+            compat.messagebox.showinfo(
+                "Layers", "%s is one of the game's own layers. The game finds it by the "
+                "group it sits in, so it stays in that group: drag it up or down inside it to "
+                "change what it is drawn over. A picture or a line of text you added can go "
+                "into any group." % n["name"])
+            return False
+        # its tracks are in its group's units: the old group's drawing then the new one's
+        # undone keeps it where it is (either group off the screen now: kept as it is)
+        old = (self._tworlds.get(node) or (None,))[0]
+        new = scene_eval.IDENTITY if parent is None else             (self._tworlds.get(parent) or (None, None))[1]
+        inv = scene_eval.invert(new) if new is not None else None
+        m = scene_eval.compose(inv, old) if inv is not None and old is not None             else scene_eval.IDENTITY
+        return self._tree_add({"op": "parent", "node": node, "parent": parent, "index": to,
+                               "m": [round(v, 6) for v in m]})
+
+    @rpc
     def tree_reset(self, node):
         from ..plugins.stern import scene_edit
         card, _man = self._tree_card()
@@ -1917,22 +2080,34 @@ class TreeEditMixin:
         self._flush_images()
         stem = re.sub(r'[\\/:*?"<>|·]+', "_", stem).strip() or "scenes"
         path = self.window.ask_save(
-            "scene_edits_file", "Save %s with pictures and color profiles" % (
+            "scene_edits_file", "Save %s with pictures, text and color profiles" % (
                 "this scene" if which == "this" else "every scene"),
             initialfile=stem + " with pictures.zip", filetypes=[("PAD scene edits", "*.zip")],
             defaultextension=".zip")
         if not path:
             return None
         try:
-            n, pics = scene_share.export_all(self.assets_dir, path, cards, trees)
+            n, pics, texts = scene_share.export_all(self.assets_dir, path, cards, trees)
         except (scene_edit.SceneEditError, OSError) as e:
             compat.messagebox.showerror("Save scenes", str(e))
             return None
-        self._set_caption("Saved the edits of %d scene%s and %d replaced picture%s, with their "
-                          "color profiles, to %s" % (n, "" if n == 1 else "s", pics,
-                                                     "" if pics == 1 else "s",
-                                                     os.path.basename(path)))
+        self._set_caption("Saved the edits of %d scene%s, %d replaced picture%s with their "
+                          "color profiles and %d text edit%s to %s"
+                          % (n, "" if n == 1 else "s", pics, "" if pics == 1 else "s",
+                             texts, "" if texts == 1 else "s", os.path.basename(path)))
         return path
+
+    def _text_rows_here(self):
+        """``(Text tab, its rows)`` when the Text tab holds this project's rows, so a load goes
+        through it (its list, history and Scenes stay in step); else ``(None, the manifest's
+        rows)`` (PAD-387)."""
+        from ..core import text_manifest
+        from .tabs.text import _same_folder
+        svc = self.window.service("text")
+        rows = getattr(svc, "_text_rows", None)
+        if rows and _same_folder(getattr(svc, "_text_scan_dir", ""), self.assets_dir):
+            return svc, rows
+        return None, text_manifest.load(self.assets_dir)
 
     @rpc
     def edits_load(self, path=None):
@@ -1949,16 +2124,28 @@ class TreeEditMixin:
         if not path:
             return None
         from ..plugins.stern import scene_share
+        from . import text_rules as R
         images = self._flush_images()
         pics, gone, more = [], [], False
+        tfits, tmissing, tlong = [], [], 0
         try:
             scenes = scene_edit.read_share(path)
-            extras = scene_share.read_extras(path)
+            # PAD-385: a picture named otherwise here (a project of another card) is found by
+            # the scene nodes that draw it
+            extras = scene_share.localise(self.assets_dir, scene_share.read_extras(path),
+                                          self._load_trees())
             got, missing = scene_edit.match_cards(scenes, self._load_trees().keys())
             mine = scene_edit.load(self.assets_dir)
             over = [c for c in got if mine.get(c)]
             more = scene_share.has_extras(extras)
-            if not got and not more:
+            # PAD-387: the Text tab's edits it carries, on this card's lines, when they fit
+            text_tab, rows = (self._text_rows_here() if extras["text"] else (None, []))
+            tpairs, tmissing = (scene_share.match_text(extras["text"], rows, self._load_trees())
+                                if extras["text"] else ([], []))
+            tfits = [(r, new) for r, new in tpairs if R.row_len(r, new) <= R.row_budget(r)]
+            tlong = len(tpairs) - len(tfits)
+            tclash = [r for r, new in tfits if R.is_edited(r) and r["replacement"] != new]
+            if not got and not more and not tfits:
                 compat.messagebox.showinfo(
                     "Load scene edits", "None of the %d scene%s in %s %s on this card, so "
                     "nothing was loaded." % (len(scenes), "" if len(scenes) == 1 else "s",
@@ -1977,6 +2164,9 @@ class TreeEditMixin:
                 mine_words.append("%d picture%s you replaced" % (k, "" if k == 1 else "s"))
             if clash["overlay"]:
                 mine_words.append("your whole screen overlay")
+            if tclash:
+                mine_words.append("%d line%s of text you changed"
+                                  % (len(tclash), "" if len(tclash) == 1 else "s"))
             if mine_words:
                 what = (", ".join(mine_words[:-1]) + " and " + mine_words[-1]
                         if len(mine_words) > 1 else mine_words[0])
@@ -1994,6 +2184,13 @@ class TreeEditMixin:
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
                                                        renamed=renamed)
+            if tfits:
+                if text_tab is not None:
+                    text_tab._set_replacements(
+                        [(r, "" if new == r["original"] else new) for r, new in tfits])
+                else:
+                    scene_share.import_text(self.assets_dir, rows, tfits)
+                    self.text_edits_changed()
         except (scene_edit.SceneEditError, OSError) as e:
             compat.messagebox.showerror("Load scene edits", str(e))
             return None
@@ -2007,6 +2204,18 @@ class TreeEditMixin:
             words = words[:-1] + " and %d replaced picture%s with %s color profile%s." % (
                 len(pics), "" if len(pics) == 1 else "s",
                 "its" if len(pics) == 1 else "their", "" if len(pics) == 1 else "s")
+        if tfits:
+            words = words[:-1] + " and %d text edit%s." % (len(tfits),
+                                                           "" if len(tfits) == 1 else "s")
+        if tmissing:
+            words += (" %d text edit%s in the file %s for words not on this card and %s "
+                      "left out." % (len(tmissing), "" if len(tmissing) == 1 else "s",
+                                     "is" if len(tmissing) == 1 else "are",
+                                     "was" if len(tmissing) == 1 else "were"))
+        if tlong:
+            words += (" %d text edit%s %s too long for this card's line and %s left out."
+                      % (tlong, "" if tlong == 1 else "s", "is" if tlong == 1 else "are",
+                         "was" if tlong == 1 else "were"))
         if gone:
             words += (" %d picture%s in the file %s not in this project and %s left out."
                       % (len(gone), "" if len(gone) == 1 else "s",
@@ -2018,7 +2227,7 @@ class TreeEditMixin:
                          "is" if len(missing) == 1 else "are",
                          "was" if len(missing) == 1 else "were"))
         self._set_caption(words)
-        if missing or gone:
+        if missing or gone or tmissing or tlong:
             compat.messagebox.showinfo("Load scene edits", words)
         return sorted(got)
 
@@ -2267,6 +2476,19 @@ def _pics_of(man, n, memo):
             memo[oid] = rels
         out += memo[oid]
     return list(dict.fromkeys(rel for rel in out if rel))
+
+
+def _text_of(man, n, kind):
+    """The words a Text layer draws as the card has them: the Layers list's button to them
+    on the Replace Text tab (DragonRR, PAD-384).  None for anything else, and for a text
+    added here, which that tab does not list."""
+    if kind != "Text" or n.get("added"):
+        return None
+    for _s, oid in n["comps"]:
+        o = man["objects"].get(str(oid)) or {}
+        if o.get("kind") == "Text" and o.get("text"):
+            return o["text"]
+    return None
 
 
 def _kind_of(man, n):

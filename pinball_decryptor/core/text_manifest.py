@@ -58,6 +58,82 @@ def escape_cell(s):
     return s.replace("\t", " ").replace("\r", " ").replace("\n", " ")
 
 
+def card_form(card_text, replacement):
+    r"""*replacement* the way the card should hold it in place of *card_text*.
+
+    A scene line broken over several lines (Godzilla's "GODZILLA AND JET
+    JAGUAR\nVS.\nMEGALON AND GIGAN") reaches the manifest with its breaks
+    flattened to spaces by :func:`escape_cell`, so the replacement typed
+    against it has none either.  A typed ``\n`` is a line break, as it is in
+    a game-program row; with none typed, the original's breaks are put back
+    where the words around them are the same (counted from the start, or
+    from the end), or at the same word when the word count is unchanged.
+    A break and a space are one byte each, so the length never changes
+    (DragonRR, PAD-382)."""
+    rep = replacement or ""
+    if "\\n" in rep and "\\n" not in (card_text or ""):
+        return rep.replace("\\n", "\n")
+    if "\n" not in (card_text or "") or "\n" in rep:
+        return rep
+    import re
+    parts = re.split(r"([ \n])", card_text)
+    words_o, seps_o = parts[0::2], parts[1::2]
+    words_r = rep.split(" ")
+    seps_r = [" "] * (len(words_r) - 1)
+    n_o, n_r = len(words_o), len(words_r)
+    pre = 0
+    while pre < min(n_o, n_r) and words_o[pre] == words_r[pre]:
+        pre += 1
+    suf = 0
+    while (suf < min(n_o, n_r) - pre
+           and words_o[n_o - 1 - suf] == words_r[n_r - 1 - suf]):
+        suf += 1
+    for i, sep in enumerate(seps_o):
+        if sep != "\n":
+            continue
+        after = n_o - 1 - i                   # words that follow the break
+        if i < pre and i < len(seps_r):
+            seps_r[i] = "\n"
+        elif after <= suf:
+            seps_r[n_r - 1 - after] = "\n"
+        elif n_o == n_r:
+            seps_r[i] = "\n"
+    out = [words_r[0]]
+    for sep, w in zip(seps_r, words_r[1:]):
+        out += [sep, w]
+    return "".join(out)
+
+
+def edit_for(edits, card_text):
+    """The replacement *edits* (``{original: replacement}``) holds for the
+    string *card_text* exactly as a scene draws it, in the form the card
+    holds it (:func:`card_form`); ``None`` when it is not edited.  Matches the
+    manifest's flattened form of a line that has line breaks."""
+    if not edits or not card_text:
+        return None
+    rep = edits.get(card_text)
+    if not rep:
+        flat = escape_cell(card_text)
+        rep = edits.get(flat) if flat != card_text else None
+    return card_form(card_text, rep) if rep else None
+
+
+def resolve(card_texts, pairs):
+    """*pairs* (``[(original, replacement)]`` of one asset's manifest rows)
+    keyed on the strings the asset really holds, *card_texts*: a manifest
+    original that is a line-broken string flattened by :func:`escape_cell`
+    becomes that string, and its replacement takes :func:`card_form`.  An
+    original found nowhere is kept as it is (the caller reports it)."""
+    flat = {}
+    for t in card_texts:
+        flat.setdefault(escape_cell(t), t)
+    out = []
+    for orig, rep in pairs:
+        key = orig if orig in card_texts else flat.get(orig, orig)
+        out.append((key, card_form(key, rep) if key in card_texts else rep))
+    return out
+
+
 def load(assets_dir):
     """Return the manifest as a list of ``{path, original, replacement}`` dicts,
     in file order.  Comment (``#``) and blank lines are skipped; a missing file

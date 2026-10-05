@@ -1086,26 +1086,48 @@ class TextTab(TabService):
     def _open_font_studio(self, preselect_rel=None):
         return self.open_font_studio(preselect_rel=preselect_rel)
 
-    def reveal_text_string(self, text):
+    def reveal_text_string(self, text, scene_dir=None):
         """Scenes window: find one display string on this tab (clearing any
-        filter that would hide it) and land on its row."""
+        filter that would hide it) and land on its row; with *scene_dir*, the
+        row from that scene when it has one (PAD-384).  A scene's line breaks
+        are spaces in this tab's rows (text_manifest.escape_cell), and the
+        search box would drop them (DragonRR: "JET JAGUARVS.MEGALON").  A
+        scene re-read off a card built with this tab's edits draws the NEW
+        words, so a row whose replacement is *text* is found too, and the
+        search is set to that row's original (DragonRR: a changed line was
+        not found at all)."""
+        from ...core import text_manifest
+        text = text_manifest.escape_cell(text or "")
         self.window.select_tab(self.ns)
         if not self._text_rows and self._text_scan_dir == "":
             self._scan_text_strings()
+        rows = self._text_rows
+
+        def flat(s):
+            # a typed line break is "\n" in the replacement column
+            return text_manifest.escape_cell((s or "").replace("\\n", "\n"))
+
+        by_orig = [i for i, r in enumerate(rows) if r["original"] == text]
+        by_rep = [i for i, r in enumerate(rows)
+                  if r["replacement"] and flat(r["replacement"]) == text]
+        hits = by_orig + [i for i in by_rep if i not in by_orig]
+        if scene_dir:
+            want = scene_dir.replace("\\", "/").rstrip("/")
+            hits = [i for i in hits if (rows[i]["path"] or "").replace(
+                "\\", "/").rsplit("/", 1)[0] == want] + hits
         self._suspend += 1
         try:
             self.text_change_filter_var.set("All")
             self.text_scene_filter_var.set(R.SCENE_ALL)
-            self.text_search_var.set(text)
+            self.text_search_var.set(rows[hits[0]]["original"] if hits else text)
         finally:
             self._suspend -= 1
         self._refresh_list()
-        for i, r in enumerate(self._text_rows):
-            if r["original"] == text:
-                self.select(i)
-                self.set(focus_row=i)
-                return True
-        return False
+        if not hits:
+            return False
+        self.select(hits[0])
+        self.set(focus_row=hits[0])
+        return True
 
     @rpc
     def open_folder(self):

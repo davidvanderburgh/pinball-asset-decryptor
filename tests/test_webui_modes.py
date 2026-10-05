@@ -757,6 +757,58 @@ def test_the_sdk_document_is_always_reachable(tmp_path, preview_on):
         assert w.state("modes")["tryit_line"] == MP.NO_PROJECT_HELP
 
 
+def test_the_limits_document_is_reachable_and_its_sizes_are_the_editors(tmp_path, preview_on,
+                                                                        monkeypatch):
+    """PAD-380: "What a mode can and can't do" is MODE_LIMITS.md, beside MODE_SDK.md, and its
+    Sizes table says the numbers the blocks editor enforces.  PAD-386: the link opens the
+    app's own Tips window on this tab at that section, never the file in another app, and
+    the window shows the file's parts."""
+    import os
+    from pinball_decryptor.plugins.stern import block_modes as BM
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        opened, dialogs = [], []
+        svc._opener = opened.append
+        real = w.ctx.bus.publish
+
+        def _publish(event, **data):
+            if event == "open_dialog":
+                dialogs.append(data)
+            return real(event, **data)
+        monkeypatch.setattr(w.ctx.bus, "publish", _publish)
+        assert os.path.dirname(svc.limits_doc()) == os.path.dirname(w.state("modes")["sdk_doc"])
+        assert "limits_doc" not in w.state("modes")        # no path to show or open
+        assert w.call("modes.open_limits_doc") is True
+        assert opened == []
+        assert [d["name"] for d in dialogs] == ["tips"]
+        props = dialogs[0]["props"]
+        assert props["tab"] == "Modes"
+        tips = w.call("shellx.tips", props["tab"])
+        anchors = {a: t for t, _b, a in tips["sections"]}
+        assert anchors.get(props["anchor"]) == "What a mode can and can't do"
+        shown = json.dumps(tips, ensure_ascii=False)
+        assert "Run two of mine at once" in shown                 # its Quick answers
+        assert "Add Mothra to Godzilla" in shown                  # its Examples
+        assert "%d per project" % MP.MAX_MODES in shown           # its Sizes
+    with open(svc.limits_doc(), encoding="utf-8") as fh:
+        doc = fh.read()
+    for words in ("%d scripts, %d blocks, nested at most %d deep" % (
+                      BM.MAX_SCRIPTS, BM.MAX_BLOCKS, BM.MAX_DEPTH),
+                  "%d per mode, names up to 24 characters" % BM.MAX_VARS,
+                  "%d per mode, up to %d seconds each" % (BM.MAX_TIMERS, BM.SECONDS_MAX),
+                  "up to %d seconds (0 = no clock)" % BM.SECONDS_MAX,
+                  "Blocks or C: %d. Up to 30 seconds" % BM.MAX_CLIPS,
+                  "Blocks or C: %d. WAV" % BM.MAX_SOUNDS,
+                  "%d per project" % MP.MAX_MODES):
+        assert words in doc, words
+    # its "Which games" table is the "?" window's, row for row
+    from pinball_decryptor.webui import help_content as HD
+    assert "| " + " | ".join(HD.MODES_GAMES_HEAD) + " |" in doc
+    for row in HD.modes_games_rows():
+        assert "| " + " | ".join(row) + " |" in doc, row
+
+
 # ------------------------------------------------------------------ Try it, for real
 class _R:
     returncode = 0

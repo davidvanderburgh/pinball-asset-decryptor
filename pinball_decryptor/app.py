@@ -43,6 +43,7 @@ PROJECT_FIELDS = (
     ("emulate_card", "emulate_card_var", "path", ""),
     ("emulate_savestates", "emulate_savestates_var", "bool", False),
     ("emulate_overrides", "emulate_overrides_var", "bool", False),
+    ("emulate_machine_screen", "emulate.emulate_machine_screen_var", "bool", False),
     ("emulate_select", "emulate._select_var", "bool", False),
     ("emulate_topper", "emulate._topper_var", "bool", True),
     ("jjp_emulate_iso", "jjp_emulate_iso_var", "path", ""),

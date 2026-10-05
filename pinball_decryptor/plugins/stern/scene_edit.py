@@ -37,6 +37,13 @@ Operations (``op`` and its fields)::
                                   beneath it (sharing its Text, as the game's own outline and
                                   fill pairs do), moved (dx, dy) and its colour multiplied by
                                   *mul* (black, part see-through)
+    parent  node, parent, index, m
+                                  move an ADDED node into another group (*parent*, a node
+                                  whose component is a Sprite; None = the root), at *index*
+                                  among its kids, every track of it multiplied by the affine
+                                  *m* (a, b, c, d, tx, ty) so it stays where it was on the
+                                  glass (PAD-391; the game's own nodes stay in their group:
+                                  its code finds them by their path)
     remove  node                  drop a node an add_* made (stock nodes are hidden instead:
                                   the game's code finds them by name and must still find them)
 
@@ -118,6 +125,10 @@ def add(assets_dir, card, op):
         last["s"] = round(last["s"] * op["s"], 6)
         if abs(last["s"] - 1.0) < 1e-6 and abs(last.get("sy", 1.0) - 1.0) < 1e-6:
             ops.pop()
+    elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_rect":
+        last["rect"] = op["rect"]
+        if op.get("wrap"):
+            last["wrap"] = True
     elif (last and last.get("node") == op.get("node") and last["op"] == op["op"] == "rotate"
           and (last.get("px"), last.get("py")) == (op.get("px"), op.get("py"))):
         last["deg"] = round(last["deg"] + op["deg"], 4)
@@ -273,24 +284,34 @@ def read_share(zip_path):
             for c, v in scenes.items() if isinstance(v, list) and v}
 
 
-def match_cards(scenes, cards_here):
-    """``({card here: ops}, [card of the file with no scene here])``: a card path matches the
-    same path here, else the one path here that differs only in the game folder (``/godzilla_le/``
-    and ``/godzilla_pro/`` share a scene the scene id names)."""
-    if cards_here is None:
-        return dict(scenes), []
+def card_finder(cards_here):
+    """A function naming the card here that a card path of a file stands for, or None: the
+    same path here, else the one path here that differs only in the game folder
+    (``/godzilla_le/`` and ``/godzilla_pro/`` share a scene the scene id names)."""
     here = set(cards_here)
     by_rest = {}
     for c in here:
         by_rest.setdefault(c.lstrip("/").split("/", 1)[-1], []).append(c)
+
+    def find(card):
+        if card in here:
+            return card
+        same = by_rest.get(card.lstrip("/").split("/", 1)[-1], [])
+        return same[0] if len(same) == 1 else None
+    return find
+
+
+def match_cards(scenes, cards_here):
+    """``({card here: ops}, [card of the file with no scene here])``, each card matched by
+    :func:`card_finder`."""
+    if cards_here is None:
+        return dict(scenes), []
+    find = card_finder(cards_here)
     got, missing = {}, []
     for card, ops in scenes.items():
-        if card in here:
-            got[card] = ops
-            continue
-        same = by_rest.get(card.lstrip("/").split("/", 1)[-1], [])
-        if len(same) == 1:
-            got[same[0]] = ops
+        mine = find(card)
+        if mine is not None:
+            got[mine] = ops
         else:
             missing.append(card)
     return got, missing
@@ -438,8 +459,12 @@ def describe(op):
         return "turned %+g°" % op["deg"]
     if k == "shadow":
         return "added a drop shadow"
+    if k == "parent":
+        return "put in another group"
     if k == "remove":
         return "removed"
+    if k == "text_rect":
+        return "box resized" if op.get("wrap") else "box fitted"
     return k
 
 
@@ -479,6 +504,14 @@ def _rotated(m6, deg, px, py):
     rx, ry = cs * px - sn * py, sn * px + cs * py
     return (a * cs + c * sn, b * cs + d * sn, -a * sn + c * cs, -b * sn + d * cs,
             tx + a * (px - rx) + c * (py - ry), ty + b * (px - rx) + d * (py - ry))
+
+
+def _composed(p, m):
+    """Affine *p* applied after *m* (both a, b, c, d, tx, ty)."""
+    a, b, c, d, tx, ty = p
+    a2, b2, c2, d2, tx2, ty2 = m
+    return (a * a2 + c * b2, b * a2 + d * b2, a * c2 + c * d2, b * c2 + d * d2,
+            a * tx2 + c * ty2 + tx, b * tx2 + d * ty2 + ty)
 
 
 def _tint_steps(steps):
@@ -540,7 +573,8 @@ def apply_manifest(man, ops):
         index = _man_index(man)
         k = op.get("op")
         try:
-            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow"):
+            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
+                     "text_rect", "parent"):
                 got = index.get(op["node"])
                 if got is None:
                     notes.append("%s: node %s is not in this scene" % (k, op["node"]))
@@ -580,8 +614,27 @@ def apply_manifest(man, ops):
                 elif k == "order":
                     sibs.remove(n)
                     sibs.insert(max(0, min(len(sibs), int(op["index"]))), n)
+                elif k == "parent":
+                    kids = _man_kids_of(man, index, op.get("parent"))
+                    if kids is None or not n.get("added"):
+                        notes.append("parent: node %s cannot go into %s"
+                                     % (op["node"], op.get("parent")))
+                        continue
+                    m = tuple(op["m"])
+                    n["tr"] = [[f, list(_composed(m, t))] for f, t in n["tr"]] or [[1, list(m)]]
+                    sibs.remove(n)
+                    kids.insert(max(0, min(len(kids), int(op["index"]))), n)
                 elif k == "remove":
                     sibs.remove(n)
+                elif k == "text_rect":
+                    texts = [o for o in (man["objects"].get(str(oid)) or {}
+                                         for _s, oid in n["comps"]) if o.get("kind") == "Text"]
+                    if not texts:
+                        notes.append("text_rect: node %s draws no text" % op["node"])
+                    for o in texts:
+                        o["rect"] = [float(v) for v in op["rect"]]
+                        if op.get("wrap"):
+                            o["flags"] = [1] + list(o.get("flags") or (0, 0))[1:2]
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:
@@ -638,6 +691,18 @@ def _tree_index(scene):
 
     run(scene.root["kids"])
     return out
+
+
+def _tree_kids_of(index, fresh, parent, scene):
+    """The kids list of group *parent* (a preview id; None = the root) on the card's scene."""
+    if parent is None:
+        return scene.root["kids"]
+    got = index.get(fresh.get(parent, parent))
+    if got is not None:
+        for c in got[0].components:
+            if c.obj.kind in ("Sprite", "StreamingFlipbook"):
+                return c.obj.body["kids"]
+    return None
 
 
 def _max_id(scene):
@@ -707,7 +772,8 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
         k = op.get("op")
         index = _tree_index(scene)
         try:
-            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow"):
+            if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
+                     "text_rect", "parent"):
                 nid = fresh.get(op["node"], op["node"])
                 got = index.get(nid)
                 want = names.get(op["node"])
@@ -755,6 +821,18 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                 elif k == "order":
                     sibs.remove(n)
                     sibs.insert(max(0, min(len(sibs), int(op["index"]))), n)
+                elif k == "parent":
+                    kids = _tree_kids_of(index, fresh, op.get("parent"), scene)
+                    if op["node"] not in fresh or kids is None:
+                        notes.append("parent: node %s cannot go into the group %s on this "
+                                     "card's scene; left where it was"
+                                     % (op["node"], op.get("parent")))
+                        continue
+                    m = tuple(op["m"])
+                    base = n.tracks or [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])]
+                    n.tracks = [(f, _m16_with(t, _composed(m, _m6_of16(t)))) for f, t in base]
+                    sibs.remove(n)
+                    kids.insert(max(0, min(len(kids), int(op["index"]))), n)
                 elif k == "remove":
                     if op["node"] not in fresh:
                         notes.append("remove: only an added node can be removed (%s is the "
@@ -762,22 +840,24 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                         n.keyframes = [(1, 0)]
                     else:
                         sibs.remove(n)
+                elif k == "text_rect":
+                    texts = [c.obj for c in n.components if c.obj.kind == "Text"]
+                    if not texts:
+                        notes.append("text_rect: node %s draws no text; left alone" % op["node"])
+                        continue
+                    for o in texts:
+                        o.body["rect"] = tuple(float(v) for v in op["rect"])
+                        if op.get("wrap"):
+                            # the first flag byte: the words wrap at the rect's width
+                            o.body["flags"] = (1, tuple(o.body.get("flags") or (0, 0))[1])
                 applied += 1
             elif k in ("add_picture", "add_text"):
                 parent = op.get("parent")
-                if parent is None:
-                    kids = scene.root["kids"]
-                else:
-                    got = index.get(fresh.get(parent, parent))
-                    kids = None
-                    if got is not None:
-                        for c in got[0].components:
-                            if c.obj.kind in ("Sprite", "StreamingFlipbook"):
-                                kids = c.obj.body["kids"]
-                    if kids is None:
-                        notes.append("%s: the group %s is not on this card's scene"
-                                     % (k, parent))
-                        continue
+                kids = _tree_kids_of(index, fresh, parent, scene)
+                if kids is None:
+                    notes.append("%s: the group %s is not on this card's scene"
+                                 % (k, parent))
+                    continue
                 if k == "add_picture":
                     sym = _symbol_of(scene, "Bitmap")
                     if sym is None or not assets_dir:

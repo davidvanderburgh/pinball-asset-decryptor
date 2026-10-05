@@ -1238,3 +1238,99 @@ def test_a_layers_picture_button_lands_on_it_on_the_images_tab(tmp_path):
         assert _wait(w, lambda: ((w.state("images").get("focus") or {}).get("id")
                                  == art["pics"][0]), 20)
         assert w.state("shell")["tab"] == "images"
+
+
+def test_a_text_layers_button_finds_its_words_on_the_replace_text_tab(tmp_path):
+    """PAD-384 (DragonRR): a text layer carries the words it draws, like a picture layer
+    carries its pictures, and its button lands on them on the Replace Text tab."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        layers = _tv(w)["layers"]
+        art = next(l for l in layers if l["name"] == "Art")
+        title = next(l for l in layers if l["name"] == "Title")
+        assert title["kind"] == "Text"
+        assert title["text"]
+        assert art["text"] is None
+        assert all(l["text"] is None for l in layers if l["kind"] != "Text")
+
+        w.call("text_scenes.activate", "str::" + title["text"])
+        assert _wait(w, lambda: w.state("shell")["tab"] == "text", 20)
+        assert w.state("text")["search"] == title["text"]
+
+
+def test_a_layer_dragged_in_layers_is_re_ordered_or_goes_into_a_group(tmp_path):
+    """PAD-391 (DragonRR): drag and drop in Layers.  Inside its own group any layer is
+    re-ordered; an added one can also go into another group and stays where it is on the
+    screen; the game's own layer is refused another group, and told why."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ids = {l["name"]: l["id"] for l in _tv(w)["layers"]}
+        lay = {l["name"]: l for l in _tv(w)["layers"]}
+        assert lay["Tile_1"]["group"] and not lay["Art"]["group"]
+        assert lay["Frame_Art"]["parent"] == ids["Tile_1"] and lay["Art"]["parent"] is None
+        # dropped just above Art: the root's first layer, drawn under the rest
+        assert w.call("text_scenes.tree_drop", ids["Title"], ids["Art"], "before")
+        assert _ops(folder) == [{"op": "order", "node": ids["Title"], "index": 0}]
+        assert [l["name"] for l in _tv(w)["layers"]][:2] == ["Title", "Art"]
+        assert not w.call("text_scenes.tree_drop", ids["Title"], ids["Art"], "before")
+        # the game's own layer into another group: refused, with a word why
+        asked = len(w.asked)
+        assert not w.call("text_scenes.tree_drop", ids["Art"], ids["Tile_1"], "into")
+        assert len(w.asked) == asked + 1 and len(_ops(folder)) == 1
+        # an added line of text into Tile_1: drawn where it was
+        assert w.call("text_scenes.tree_select", None) is not None
+        assert w.call("text_scenes.tree_add_text", "HELLO", ids["Title"])
+        new = _tv(w)["props"]["id"]
+        p0 = _tv(w)["props"]
+        assert w.call("text_scenes.tree_drop", new, ids["Tile_1"], "into")
+        op = _ops(folder)[-1]
+        assert op["op"] == "parent" and op["parent"] == ids["Tile_1"]
+        row = next(l for l in _tv(w)["layers"] if l["id"] == new)
+        assert row["parent"] == ids["Tile_1"] and row["depth"] == 1
+        assert w.call("text_scenes.tree_select", new)
+        p1 = _tv(w)["props"]
+        assert (p1["x"], p1["y"]) == (p0["x"], p0["y"])
+        # and back out, above Art on the top level
+        assert w.call("text_scenes.tree_drop", new, ids["Art"], "after")
+        row = next(l for l in _tv(w)["layers"] if l["id"] == new)
+        assert row["parent"] is None
+        # a group never goes into itself
+        assert not w.call("text_scenes.tree_drop", ids["Tile_1"], ids["Frame_Art"], "after")
+        # one undo takes the last drop back
+        assert w.call("text_scenes.tree_undo")
+        assert next(l for l in _tv(w)["layers"] if l["id"] == new)["parent"] == ids["Tile_1"]
+        w.call("text_scenes.close")
+
+
+def test_delete_asks_first_then_removes_or_hides(tmp_path):
+    """PAD-391 round 2 (DragonRR): Delete on a layer, with a confirmation.  No keeps it; yes
+    takes an added layer out and hides the game's own (its code still looks for it)."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ids = {l["name"]: l["id"] for l in _tv(w)["layers"]}
+        assert w.call("text_scenes.tree_add_text", "HELLO", ids["Title"])
+        new = _tv(w)["props"]["id"]
+        n_ops = len(_ops(folder))
+        w.answers.append("no")
+        assert not w.call("text_scenes.tree_delete", [new, ids["Title"]])
+        assert "Delete these 2 layers?" in w.asked[-1]["message"]
+        assert len(_ops(folder)) == n_ops
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_delete", [new, ids["Title"]])
+        msg = w.asked[-1]["message"]
+        assert "PAD_Text" in msg and "Title" in msg and "hidden in the game" in msg
+        lay = {l["id"]: l for l in _tv(w)["layers"]}
+        assert new not in lay and lay[ids["Title"]]["hidden"] and lay[ids["Title"]]["view_off"]
+        w.answers.append("yes")
+        assert w.call("text_scenes.tree_delete", [ids["Art"]])
+        assert w.asked[-1]["title"] == "Delete layer" and '"Art"' in w.asked[-1]["message"]
+        w.call("text_scenes.close")

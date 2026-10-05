@@ -366,8 +366,9 @@ def test_video_size_texts_name_the_games_partition_not_a_byte_budget():
     (a direct SD write, or no way to write whole files)."""
     from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
     from pinball_decryptor.webui.help_content import HELP_CONTENT
+    from pinball_decryptor.webui.tips_render import plain, render
     note = SternManufacturer().video_length_note()
-    size = dict(HELP_CONTENT["Replace Video"])["Size limits"]
+    size = plain(render(dict(HELP_CONTENT["Replace Video"])["Size limits"]))
     build = dict(HELP_CONTENT["Write"])["What a build does"]
     for text in (note, size):
         assert "full size" in text, text

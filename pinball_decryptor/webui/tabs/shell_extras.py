@@ -771,12 +771,14 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
     @rpc(loop=False)
     def tips(self, tab_key=None):
         """The ? window's content for *tab_key* (default: the tab showing):
-        its own sections, then the General ones."""
+        its own sections, then the General ones, each [title, blocks, anchor]
+        (webui/tips_render.py draws the words as blocks, PAD-386)."""
         key = tab_key or self.window.current_tab_key() or "Extract"
         try:
             from ..help_content import GENERAL_CONTENT, sections_for
-            sections = sections_for(key)
-            general = list(GENERAL_CONTENT)
+            from ..tips_render import render, slug
+            sections = [(t, render(b), slug(t)) for t, b in sections_for(key)]
+            general = [(t, render(b), slug(t)) for t, b in GENERAL_CONTENT]
         except Exception:                               # noqa: BLE001
             log.exception("tips content")
             sections, general = [], []
@@ -786,8 +788,8 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
                 tabs.append({"key": svc.key, "label": svc.label,
                              "ns": svc.ns})
         return {"tab": key, "title": ("Tips — %s" % key) if key else "Tips",
-                "sections": [[t, b] for t, b in sections],
-                "general": [[t, b] for t, b in general],
+                "sections": [list(s) for s in sections],
+                "general": [list(s) for s in general],
                 "tabs": tabs}
 
     # ------------------------------------------------------------------

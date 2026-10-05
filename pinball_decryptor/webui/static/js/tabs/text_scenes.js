@@ -213,15 +213,16 @@ export function ScenesActions() {
           title: "The edits of every scene you changed in this project, in one .zip file",
           onClick: () => call("text_scenes.edits_save", "all") },
         // PAD-369 (DragonRR): everything, to hand to someone else
-        { label: "Save this scene with pictures and color profiles…", icon: "download", disabled: !s.tree_view,
-          title: "Its edits, plus each picture in it you replaced on the Images tab (the file itself, its size tick, its color switch and color profile), the pictures you added, and the whole screen overlay, in one .zip file",
+        { label: "Save this scene with pictures, text and color profiles…", icon: "download", disabled: !s.tree_view,
+          title: "Its edits, plus each picture in it you replaced on the Images tab (the file itself, its size tick, its color switch and color profile), the pictures you added, its words you changed on the Text tab, and the whole screen overlay, in one .zip file",
           onClick: () => call("text_scenes.edits_save", "this", true) },
-        { label: "Save every scene with pictures and color profiles…", icon: "download",
-          title: "Every scene's edits, plus every picture the scenes draw that you replaced on the Images tab, with its size tick, color switch and color profile, and the whole screen overlay, in one .zip file",
+        // PAD-387: the project's whole look, sounds, videos and modes aside
+        { label: "Save every scene with pictures, text and color profiles…", icon: "download",
+          title: "Your project's whole look in one .zip file: every scene's edits, every picture you replaced on the Images tab (with its size tick, color switch and color profile), every Text tab edit and the whole screen overlay. Sounds, videos and modes are not in it.",
           onClick: () => call("text_scenes.edits_save", "all", true) },
         { sep: true },
         { label: "Load scene edits from a file…", icon: "upload",
-          title: "Put the edits in a file saved here or by someone else onto the same scenes of this card. A scene this card does not have is left out. A file saved with pictures and color profiles brings those too: its pictures are copied into the project's Shared pictures folder, and nothing on this PC is deleted. Anything of yours it would change is asked about first.",
+          title: "Put the edits in a file saved here or by someone else onto the same scenes of this card. A scene this card does not have is left out. A file saved with pictures, text and color profiles brings those too: its pictures are copied into the project's Shared pictures folder, its text goes onto the same lines on the Text tab, and nothing on this PC is deleted. Anything of yours it would change is asked about first.",
           onClick: () => call("text_scenes.edits_load") },
       ])}>Save / load edits<//>
     <${Button} kind="ghost" icon=${s.rebuilding ? "x" : "refresh"} title=${tips.rebuild}

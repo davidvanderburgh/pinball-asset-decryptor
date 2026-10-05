@@ -3405,35 +3405,77 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
     return 0;
 }
 
-static struct {
-    unsigned dev;
-    unsigned long until;                    /* pm_ms() the grab ends; 0 = not holding */
+/* ---- held coils: the magnet and the port's other coils of the same kind (PAD-381) --------------
+ * A Godzilla Premium has three coils a mode may HOLD the same way: the Godzilla magnet, the Mechagodzilla
+ * magnet and the bridge diverter - each a ControlCoil object of the game's, each fired by the game as a
+ * pulse then a hold (the bridge: 255 for 300 ms, then 25 for up to 5500 ms). The port names them, `text
+ * held_coils` (default "magnet"), and for each <name>: `site <name>_get` (the game's getter for its
+ * object), `value <name>_dev` (its device, checked against the object's on the first hold), and for the
+ * magnet `text magnet_procs` (the game's own magnet processes).
+ *
+ * Every coil gets the guardrails above, the same code: ONE bounded command (the object's own pulse power
+ * for its own pulse time, then its own hold power, the whole clamped to MAGNET_MAX_MS), sent from a game
+ * process of ours that takes control of it (`value magnet_proc` + the coil's index) and gives control back
+ * at the end; the limits per coil (one at a time, MAGNET_COOL_MS between holds, MAGNET_PER_MIN a minute);
+ * refused while the operator has it disabled (the object's v[40]) and while the GAME uses it - a process
+ * of the game's controls it (+44), the game asked for an on-time (+36, v[36]: its rules' grabs), or one of
+ * the game's processes the port names runs - and given back at once when the game wants it mid-hold.
+ * The powers are read from the object (v[29] pulse power, v[30] pulse ms, v[31] hold power): what the game
+ * itself would fire it with now (the Godzilla magnet's LO/HI settings, the Mechagodzilla magnet's
+ * adjustments 380-383, the bridge's own constants). */
+#define COILS_MAX 4
+
+struct held_coil {
+    char name[16];
+    unsigned dev, obj, id;                  /* the port's device, the game's object, our process's id */
+    unsigned long until;                    /* pm_ms() the hold ends; 0 = not holding */
     unsigned long started, ended;
     unsigned long starts[MAGNET_PER_MIN];
     unsigned next;
     struct magnet_cmd cmd;                  /* what the process sends */
-    unsigned obj;                           /* the game's magnet object, for take/give */
-    unsigned id;                            /* our process's id (`value magnet_proc`) */
-    int proc;                               /* our process holds control of the magnet */
+    int proc;                               /* our process holds control of the coil */
     int release;                            /* the runtime asked it to let go */
+    int checked;                            /* the device check: 0 not yet, 1 matches, -1 does not */
     const char *why;                        /* ... and why */
-} mag;
-
-static unsigned magnet_adj(const char *name, unsigned fallback)
-{
-    return ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(
-        (unsigned)pm_port_value(name, fallback));
-}
+};
+static struct held_coil coils[COILS_MAX];
+static int n_coils;
 
 static int proc_alive(unsigned id)
 {
     return (((unsigned (*)(unsigned))(unsigned long)fn("proc_exists"))(id) & 0xffu) != 0;
 }
 
-static int magnet_game_busy(void)
+static struct held_coil *coil_named(const char *name)
 {
-    const char *t = pm_port_text("magnet_procs");
-    unsigned id;
+    int i;
+    for (i = 0; i < n_coils; i++)
+        if (name && str_eq(coils[i].name, name)) return &coils[i];
+    return 0;
+}
+
+/* The object's virtual `slot`, called with the object (ControlCoil's: v[29] pulse power, v[30] pulse ms,
+ * v[31] hold power, v[40] disabled) */
+static unsigned coil_virtual(unsigned obj, unsigned slot)
+{
+    unsigned vt = *(const unsigned *)(unsigned long)obj;
+    return ((unsigned (*)(unsigned))(unsigned long)(*(const unsigned *)(unsigned long)(vt + 4u * slot)))(obj);
+}
+
+/* Is the GAME using this coil: a process of its own controls it, it asked for an on-time, or one of the
+ * game's processes the port names for it runs? */
+static int coil_game_busy(const struct held_coil *c)
+{
+    char key[40];
+    const char *t;
+    unsigned id, ctl;
+    if (c->obj) {
+        ctl = *(const unsigned short *)(unsigned long)(c->obj + 44);
+        if (ctl && ctl != c->id) return 1;
+        if (*(const unsigned *)(unsigned long)(c->obj + 36)) return 1;
+    }
+    pm_snprintf(key, sizeof key, "%s_procs", c->name);
+    t = pm_port_text(key);
     while (t && *t) {
         while (*t == ' ') t++;
         for (id = 0; *t >= '0' && *t <= '9'; t++) id = id * 10 + (unsigned)(*t - '0');
@@ -3443,158 +3485,210 @@ static int magnet_game_busy(void)
     return 0;
 }
 
-static void magnet_send(unsigned p1, unsigned t1, unsigned p2, unsigned t2)
+static void magnet_send(const struct held_coil *c, unsigned p1, unsigned t1, unsigned p2, unsigned t2)
 {
     ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("coil_fire"))
-        (mag.dev, p1, t1, p2, t2, 0);
+        (c->dev, p1, t1, p2, t2, 0);
 }
 
-static void magnet_done(void)
+static void magnet_done(struct held_coil *c)
 {
-    mag.proc = 0;
-    mag.release = 0;
-    mag.until = 0;
-    mag.ended = pm_ms();
+    c->proc = 0;
+    c->release = 0;
+    c->until = 0;
+    c->ended = pm_ms();
 }
 
-/* THE GRAB, as a game process (the game's scheduler runs it on its own stack, like the game's own
- * magnet processes; it ends by returning). It takes control, sends the ONE bounded command, waits a
- * tick at a time, and gives control back: the game's coil update then switches the magnet off. */
-static void magnet_proc(void)
+/* THE HOLD, as a game process (the game's scheduler runs it on its own stack, like the game's own magnet
+ * processes; it ends by returning). It takes control, sends the ONE bounded command, waits a tick at a
+ * time, and gives control back: the game's coil update then switches the coil off. */
+static void magnet_proc(struct held_coil *c)
 {
     unsigned long sent;
-    unsigned total = mag.cmd.draw_ms + mag.cmd.hold_ms;
-    if (!mag.until || mag.release) {
-        say("magnet: let go before the grab began (%s)", mag.why ? mag.why : "asked to");
-        magnet_done();
+    unsigned total = c->cmd.draw_ms + c->cmd.hold_ms;
+    if (!c->until || c->release) {
+        say("%s: let go before the hold began (%s)", c->name, c->why ? c->why : "asked to");
+        magnet_done(c);
         return;
     }
-    if (!(((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_take"))(mag.obj, 0) & 0xffu)) {
-        say("magnet: no grab - a process of the game's controls the magnet");
-        magnet_done();
+    if (!(((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_take"))(c->obj, 0) & 0xffu)) {
+        say("%s: no hold - a process of the game's controls it", c->name);
+        magnet_done(c);
         return;
     }
-    mag.proc = 1;
-    magnet_send(mag.cmd.draw_pwr, mag.cmd.draw_ms, mag.cmd.hold_pwr, mag.cmd.hold_ms);
+    c->proc = 1;
+    magnet_send(c, c->cmd.draw_pwr, c->cmd.draw_ms, c->cmd.hold_pwr, c->cmd.hold_ms);
     sent = pm_ms();
-    mag.until = sent + total;               /* the deadline counts from the command itself */
-    say("magnet: holding - process %u controls the magnet; ONE command: draw %u/255 for %u ms, then hold "
-        "%u/255 for %u ms, which the board ends by itself", mag.id, mag.cmd.draw_pwr, mag.cmd.draw_ms,
-        mag.cmd.hold_pwr, mag.cmd.hold_ms);
-    while (!mag.release && pm_ms() < mag.until)
+    c->until = sent + total;                /* the deadline counts from the command itself */
+    say("%s: holding - process %u controls it; ONE command: draw %u/255 for %u ms, then hold %u/255 for %u "
+        "ms, which the board ends by itself", c->name, c->id, c->cmd.draw_pwr, c->cmd.draw_ms, c->cmd.hold_pwr,
+        c->cmd.hold_ms);
+    while (!c->release && pm_ms() < c->until)
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
-    ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_give"))(mag.obj, 1);
-    say("magnet: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
-        "game's coil update switches it off", mag.release && mag.why ? mag.why : "its time ran out",
-        pm_ms() - sent, (long)(mag.until - pm_ms()));
-    magnet_done();
+    ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_give"))(c->obj, 1);
+    say("%s: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
+        "game's coil update switches it off", c->name, c->release && c->why ? c->why : "its time ran out",
+        pm_ms() - sent, (long)(c->until - pm_ms()));
+    magnet_done(c);
 }
 
-/* Ask the grab to let go: the process gives control back on its next wake, within a tick. */
-static void magnet_let_go(const char *why)
+/* one process entry per coil: the game's create passes its entry no argument */
+static void coil_proc0(void) { magnet_proc(&coils[0]); }
+static void coil_proc1(void) { magnet_proc(&coils[1]); }
+static void coil_proc2(void) { magnet_proc(&coils[2]); }
+static void coil_proc3(void) { magnet_proc(&coils[3]); }
+static void (*const coil_procs[COILS_MAX])(void) = { coil_proc0, coil_proc1, coil_proc2, coil_proc3 };
+
+/* Ask a hold to let go: the process gives control back on its next wake, within a tick. */
+static void coil_let_go(struct held_coil *c, const char *why)
 {
-    if (!mag.until || mag.release) return;
-    mag.release = 1;
-    mag.why = why;
+    if (!c->until || c->release) return;
+    c->release = 1;
+    c->why = why;
 }
 
-static int magnet_device_ok(void);
-int pm_magnet_grab(unsigned ms)
+static void magnet_let_go(const char *why)  /* every held coil (the mode ended, the ball ended) */
 {
-    unsigned long now = pm_ms();
-    struct magnet_cmd c;
-    const char *why;
-    if (!(can & PM_CAN_COILS) || !magnet_device_ok()) return 0;
-    why = magnet_refusal(pm_running(), pm_in_game(), magnet_adj("magnet_adj_disabled", 343) != 0,
-                         magnet_game_busy(), mag.until, mag.ended, now, mag.starts);
-    if (!why && proc_alive(mag.id)) why = "the last grab's process is still ending";
-    if (!why)
-        magnet_plan(ms, magnet_adj("magnet_adj_draw_power", 363), magnet_adj("magnet_adj_draw_time", 364),
-                    magnet_adj("magnet_adj_hold_power", 365), &c, &why);
-    if (why) {
-        say("magnet: no grab - %s", why);
+    int i;
+    for (i = 0; i < n_coils; i++) coil_let_go(&coils[i], why);
+}
+
+/* The port's device against the game's object, once, on the first hold: not at arm time, which is before
+ * the game's main() has run (the objects are built on first use). A mismatch takes that coil away. */
+static int coil_device_ok(struct held_coil *c)
+{
+    char key[40];
+    unsigned obj, dev;
+    if (c->checked) return c->checked > 0;
+    pm_snprintf(key, sizeof key, "%s_get", c->name);
+    obj = ((unsigned (*)(void))(unsigned long)fn(key))();
+    dev = obj && maps_has(obj + 4, 2, MAP_R) ? *(const unsigned short *)(unsigned long)(obj + 4) : 0xffffu;
+    if (dev != c->dev) {
+        c->checked = -1;
+        say("%s: switched OFF for this run - the game's object is device %u, the port says %u", c->name, dev,
+            c->dev);
         return 0;
     }
-    mag.cmd = c;
-    mag.release = 0;
-    mag.why = 0;
-    mag.started = now;
-    mag.until = now + c.draw_ms + c.hold_ms;
-    if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
-            mag.id, magnet_proc, 0)) {
-        mag.until = 0;
-        say("magnet: no grab - the game would not start its process %u", mag.id);
-        return 0;
-    }
-    mag.starts[mag.next++ % MAGNET_PER_MIN] = now;
-    say("magnet: GRAB for %u ms (asked %u) - process %u takes control of the magnet and sends ONE command",
-        c.draw_ms + c.hold_ms, ms, mag.id);
+    c->obj = obj;
+    c->checked = 1;
+    say("%s: the game's object is device %u, as the port says", c->name, dev);
     return 1;
 }
 
-void pm_magnet_release(void)
+int pm_coil_hold(const char *name, unsigned ms)
 {
-    if (pm_running()) magnet_let_go("the mode let go");
+    struct held_coil *c = coil_named(name);
+    unsigned long now = pm_ms();
+    struct magnet_cmd cmd;
+    const char *why;
+    if (!(can & PM_CAN_COILS) || !c || !coil_device_ok(c)) return 0;
+    why = magnet_refusal(pm_running(), pm_in_game(), (coil_virtual(c->obj, 40) & 0xffu) != 0,
+                         coil_game_busy(c), c->until, c->ended, now, c->starts);
+    if (!why && proc_alive(c->id)) why = "the last hold's process is still ending";
+    if (!why)
+        magnet_plan(ms, coil_virtual(c->obj, 29) & 0xffu, coil_virtual(c->obj, 30) & 0xffffu,
+                    coil_virtual(c->obj, 31) & 0xffu, &cmd, &why);
+    if (why) {
+        say("%s: no hold - %s", c->name, why);
+        return 0;
+    }
+    c->cmd = cmd;
+    c->release = 0;
+    c->why = 0;
+    c->started = now;
+    c->until = now + cmd.draw_ms + cmd.hold_ms;
+    if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
+            c->id, coil_procs[c - coils], 0)) {
+        c->until = 0;
+        say("%s: no hold - the game would not start its process %u", c->name, c->id);
+        return 0;
+    }
+    c->starts[c->next++ % MAGNET_PER_MIN] = now;
+    say("%s: HOLD for %u ms (asked %u) - process %u takes control of it and sends ONE command", c->name,
+        cmd.draw_ms + cmd.hold_ms, ms, c->id);
+    return 1;
 }
 
-int pm_magnet_holding(void) { return mag.until != 0; }
+void pm_coil_release(const char *name)
+{
+    struct held_coil *c = coil_named(name);
+    if (c && pm_running()) coil_let_go(c, "the mode let go");
+}
 
-/* Every tick: the game taking over, ending or killing the grab, and the deadline (the process checks
- * that too). A grab whose process is gone was ended by the game (a tilt or the end of a ball kills
- * it): its exit hook gave control back, which switched the magnet off. */
+int pm_coil_holding(const char *name)
+{
+    struct held_coil *c = coil_named(name);
+    return c && c->until != 0;
+}
+
+int pm_coil_known(const char *name)
+{
+    struct held_coil *c = coil_named(name);
+    return (can & PM_CAN_COILS) && c && c->checked >= 0;
+}
+
+int pm_magnet_grab(unsigned ms) { return pm_coil_hold("magnet", ms); }
+void pm_magnet_release(void) { pm_coil_release("magnet"); }
+int pm_magnet_holding(void) { return pm_coil_holding("magnet"); }
+
+/* Every tick, each coil: the game taking over, ending or killing the hold, and the deadline (the process
+ * checks that too). A hold whose process is gone was ended by the game (a tilt or the end of a ball kills
+ * it): its exit hook gave control back, which switched the coil off. */
 static void magnet_tick(void)
 {
-    if (!mag.until) return;
-    if (!proc_alive(mag.id)) {
-        if (mag.proc || pm_ms() - mag.started > 1000ul) {
-            say("magnet: the grab's process is gone (the game ended it) - its exit gave control back");
-            magnet_done();
+    int i;
+    for (i = 0; i < n_coils; i++) {
+        struct held_coil *c = &coils[i];
+        if (!c->until) continue;
+        if (!proc_alive(c->id)) {
+            if (c->proc || pm_ms() - c->started > 1000ul) {
+                say("%s: the hold's process is gone (the game ended it) - its exit gave control back", c->name);
+                magnet_done(c);
+            }
+            continue;
         }
-        return;
+        if (c->release) continue;           /* the process is letting go */
+        if (coil_game_busy(c)) coil_let_go(c, "the game wants it");
+        else if (pm_ms() >= c->until) coil_let_go(c, "its time ran out");
+        else if (!pm_in_game()) coil_let_go(c, "the game ended or tilted");
+        else if (!running) coil_let_go(c, "no mode is running");
     }
-    if (mag.release) return;                /* the process is letting go */
-    if (magnet_game_busy()) magnet_let_go("a magnet process of the game's started");
-    else if (pm_ms() >= mag.until) magnet_let_go("its time ran out");
-    else if (!pm_in_game()) magnet_let_go("the game ended or tilted");
-    else if (!running) magnet_let_go("no mode is running");
-}
-
-/* The port's device against the game's own magnet object, once, on the first grab: not at arm
- * time, which is before the game's main() has run (the magnet object is built on first use). A
- * mismatch takes the capability away for the rest of the run. */
-static int magnet_device_ok(void)
-{
-    static int checked;                     /* 0 not yet, 1 matches, -1 does not */
-    unsigned obj, dev;
-    if (checked) return checked > 0;
-    obj = ((unsigned (*)(void))(unsigned long)fn("magnet_get"))();
-    dev = obj && maps_has(obj + 4, 2, MAP_R) ? *(const unsigned short *)(unsigned long)(obj + 4) : 0xffffu;
-    mag.obj = obj;
-    if (dev != mag.dev) {
-        checked = -1;
-        can &= ~PM_CAN_COILS;
-        say("magnet: switched OFF for this run - the game's magnet object is device %u, the port says %u",
-            dev, mag.dev);
-        return 0;
-    }
-    checked = 1;
-    say("magnet: the game's magnet object is device %u, as the port says", dev);
-    return 1;
 }
 
 static int have_values(const char *const *names);   /* the gate section, below */
 static void coils_arm(void)
 {
-    static const char *const s[] = { "coil_fire", "adjustment", "proc_exists", "magnet_get", "proc_create",
-                                     "proc_sleep", "coil_take", "coil_give", 0 };
-    static const char *const v[] = { "magnet_dev", "magnet_proc", 0 };
-    if (!have_sites(s) || !have_values(v) || !pm_port_text("magnet_procs")) return;
-    mag.dev = (unsigned)pm_port_value("magnet_dev", 0);
-    mag.id = (unsigned)pm_port_value("magnet_proc", 0) & 0xffffu;
+    static const char *const s[] = { "coil_fire", "proc_exists", "proc_create", "proc_sleep", "coil_take",
+                                     "coil_give", 0 };
+    static const char *const v[] = { "magnet_proc", 0 };
+    const char *t = pm_port_text("held_coils");
+    char key[40];
+    unsigned base;
+    if (!have_sites(s) || !have_values(v)) return;
+    base = (unsigned)pm_port_value("magnet_proc", 0) & 0xffffu;
+    if (!t) t = "magnet";
+    while (*t && n_coils < COILS_MAX) {
+        struct held_coil *c = &coils[n_coils];
+        unsigned k = 0;
+        while (*t == ' ') t++;
+        while (*t && *t != ' ' && k + 1 < sizeof c->name) c->name[k++] = *t++;
+        c->name[k] = 0;
+        while (*t && *t != ' ') t++;
+        if (!k) break;
+        pm_snprintf(key, sizeof key, "%s_get", c->name);
+        if (!fn(key)) { say("%s: the port names no %s - not armed", c->name, key); continue; }
+        pm_snprintf(key, sizeof key, "%s_dev", c->name);
+        c->dev = (unsigned)pm_port_value(key, 0);
+        if (!c->dev) { say("%s: the port names no %s - not armed", c->name, key); continue; }
+        c->id = base + (unsigned)n_coils;
+        n_coils++;
+    }
+    if (!n_coils) return;
     can |= PM_CAN_COILS;
-    say("magnet: a mode's own grab, device %u through 0x%08x by process %u; at most %u ms as one command, %u s "
-        "between grabs, %u a minute", mag.dev, fn("coil_fire"), mag.id, MAGNET_MAX_MS, MAGNET_COOL_MS / 1000,
-        MAGNET_PER_MIN);
+    say("held coils: %d (%s%s%s%s%s%s%s) through 0x%08x by processes %u..; each at most %u ms as one command, %u s "
+        "between holds, %u a minute", n_coils, coils[0].name, n_coils > 1 ? " " : "", n_coils > 1 ? coils[1].name : "",
+        n_coils > 2 ? " " : "", n_coils > 2 ? coils[2].name : "", n_coils > 3 ? " " : "",
+        n_coils > 3 ? coils[3].name : "", fn("coil_fire"), base, MAGNET_MAX_MS, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
 }
 
 /* ---- the scoop: a ball held there for the mode, then the game kicks it out (PAD-381) ----------

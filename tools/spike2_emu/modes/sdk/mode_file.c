@@ -84,6 +84,10 @@ struct mode_cfg {
     unsigned magnet_ms;               /* PAD-381 `magnet <ms> [mask]`: a grab on each hit of that shot; 0 = none */
     uint64_t magnet_bits;
     unsigned scoop_ms;                /* PAD-381 `scoop_hold <ms>`: a ball landing in the scoop is held; 0 = none */
+    char coil_name[4][16];            /* PAD-381 `coil_hold <name> <ms> [mask]`: a held coil of the port's */
+    unsigned coil_ms[4];
+    uint64_t coil_bits[4];            /* ... on each hit of these shots; 0 = once, when the mode starts */
+    unsigned n_coil;
     /* PAD-227: more than one thing to meet before it starts (their own functions below) */
     uint64_t also_bits[ALSO_MAX];
     unsigned also_count[ALSO_MAX], n_also;
@@ -267,9 +271,41 @@ static int scoop_line(struct slot *M, const char *line)
     return 1;
 }
 
+/* PAD-381: held coils (MODE_SDK.md "Held coils")
+ *   coil_hold <name> <ms> [mask]   the port's held coil <name> (magnet, mg_magnet, bridge on a Godzilla
+ *                                  Premium) held <ms> through pm_coil_hold, with all of its limits: on every
+ *                                  hit of <mask> while the mode runs (the starting hit included), or once when
+ *                                  the mode starts when there is no mask. Up to 4 lines. */
+static int coil_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "coil_hold");
+    unsigned k = 0, n;
+    if (!a) return 0;
+    if (cfg.n_coil >= 4) return 1;
+    n = cfg.n_coil;
+    while (*a && !is_space(*a) && k + 1 < sizeof cfg.coil_name[n]) cfg.coil_name[n][k++] = *a++;
+    cfg.coil_name[n][k] = 0;
+    while (*a && !is_space(*a)) a++;
+    cfg.coil_ms[n] = (unsigned)num(&a);
+    cfg.coil_bits[n] = (*a >= '0' && *a <= '9') ? num(&a) : 0;
+    if (k && cfg.coil_ms[n]) cfg.n_coil++;
+    return 1;
+}
+
+static void coils_at(struct slot *M, uint64_t mask)   /* mask 0: the mode's start */
+{
+    unsigned i;
+    for (i = 0; i < cfg.n_coil; i++) {
+        if (mask ? !(mask & cfg.coil_bits[i]) : cfg.coil_bits[i] != 0) continue;
+        pm_log("%s: %s %u ms %s - %s", cfg.name, cfg.coil_name[i], cfg.coil_ms[i], mask ? "on its shot" : "as it starts",
+               pm_coil_hold(cfg.coil_name[i], cfg.coil_ms[i]) ? "holding" : "no hold (the runtime's line says why)");
+    }
+}
+
 /* A shot of the running mode's: the magnet, when it is the magnet's shot */
 static void magnet_shot(struct slot *M, uint64_t mask)
 {
+    coils_at(M, mask);                       /* PAD-381: the held coils on their shots, too */
     if (!cfg.magnet_ms || !(mask & cfg.magnet_bits)) return;
     pm_log("%s: magnet shot %08x_%08x - %s", cfg.name, (unsigned)(mask >> 32), (unsigned)mask,
            pm_magnet_grab(cfg.magnet_ms) ? "holding the ball" : "no grab (the runtime's line says why)");
@@ -1693,6 +1729,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (ball_save_line(M, line)) return;     /* PAD-225 */
     if (magnet_line(M, line)) return;        /* PAD-381 */
     if (scoop_line(M, line)) return;         /* PAD-381 */
+    if (coil_line(M, line)) return;          /* PAD-381 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -1750,6 +1787,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
                (unsigned)(cfg.magnet_bits >> 32), (unsigned)cfg.magnet_bits,
                !cfg.magnet_bits ? " - but no shot is the magnet's (the port has no magnet_shot): ignored"
                : pm_can(PM_CAN_COILS) ? "" : " - this game's port cannot drive the magnet: no grab");
+    if (cfg.n_coil)                          /* PAD-381 */
+        pm_log("\"%s\": %u held coil line(s), the first %s %u ms%s", cfg.name, cfg.n_coil, cfg.coil_name[0],
+               cfg.coil_ms[0], pm_can(PM_CAN_COILS) ? "" : " - this game's port names no held coils: no hold");
     if (cfg.scoop_ms)                        /* PAD-381 */
         pm_log("\"%s\": a ball in the scoop is held %u ms%s", cfg.name, cfg.scoop_ms,
                pm_can(PM_CAN_SCOOP) ? "" : " - this game's port cannot hold the scoop: no hold");
@@ -1887,6 +1927,7 @@ static void mode_start(struct slot *M, const char *why)
     }
     run.saving = !cfg.mball_balls && cfg.ball_save_s && pm_ball_save(cfg.ball_save_s);   /* no refusal stops the mode */
     if (cfg.scoop_ms) pm_scoop_hold(cfg.scoop_ms);       /* PAD-381: the runtime lets it go when the mode ends */
+    coils_at(M, 0);                                      /* PAD-381: held coils with no shot hold as it starts */
     run.no_clock = cfg.seconds == 0;
     run.active = 1;
     run.slot = M;

@@ -78,6 +78,7 @@ class TitleProfile:
     bank_tree: str = "auto_loaded"   # item 164: the lcd tree the video bank is in (JP LE, Avengers,
     hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
     magnet_shot: str = ""            # PAD-381: the shot whose hit is the ball over the magnet; "" = no magnet
+    held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -252,7 +253,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop")
+         "magnet", "scoop", "coils")
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -451,6 +452,38 @@ SCOOP_PROVEN = frozenset({
 })
 
 
+#: PAD-381: the port's other HELD COILS (`text held_coils`, besides "magnet", which has its own part): each held
+#: like the magnet - one command at the coil's own powers from a process of the runtime's that controls it, at
+#: most COIL_MAX_MS - by a mode file's ``coil_hold <name> <ms> [mask]``. The (build, coil) pairs seen held in
+#: the emulator; a coil not here is not offered.
+COIL_MIN_MS = 100
+COIL_MAX_MS = 5000                     # pad_mode_runtime.c MAGNET_MAX_MS: every held coil's cap
+HELD_COILS_PROVEN = frozenset({
+    ("godzilla_le-1.16", "mg_magnet"),  # 2026-10-05 rig 1, the stock Premium/LE card: held 2000 ms as the mode started (255 for 250, then 80 for 1750: its own adjustments), OFF at its end
+    ("godzilla_le-1.16", "bridge"),     # the same run: held 2000 ms on the left ramp (255 for 300, then 25 for 1700), a hit mid-hold refused, held again, a mode stop let go 617 ms early; no abort
+})
+
+
+def _held_coils(port):
+    """The port's held coils besides the magnet, ``((name, label), ...)``: each with its getter and device."""
+    out = []
+    for name in (port["text"].get("held_coils", "") if port else "").split():
+        if name != "magnet" and ("%s_get" % name) in port["site"] and port["value"].get("%s_dev" % name):
+            out.append((name, port["text"].get("%s_label" % name, name)))
+    return tuple(out)
+
+
+def _coils_cannot(key, label, port=None):
+    """The ``cannot`` entry for the other held coils on build ``key``, or () when at least one is proven."""
+    held = _held_coils(port)
+    if not held:
+        return (("coils", "The app has not found any other mechanism of %s's a mode can hold." % label),)
+    if any((key, name) in HELD_COILS_PROVEN for name, _l in held):
+        return ()
+    return (("coils", "The app has found %s on %s but has not yet seen a mode of yours hold it in the emulator, "
+                      "so it cannot here yet." % (", ".join(lab for _n, lab in held), label)),)
+
+
 def _scoop_cannot(key, label, port=None):
     """The ``cannot`` entry for holding a ball in the scoop on build ``key``, or () when it can."""
     sites, data, values = SCOOP_NEEDS
@@ -470,7 +503,8 @@ def _scoop_cannot(key, label, port=None):
 GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _ball_save_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _magnet_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
-                            + _scoop_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
+                            + _scoop_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _coils_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
@@ -1067,6 +1101,7 @@ def profile_from_port(path):
     cannot += list(_ball_save_cannot(key, label, sites))     # PAD-225
     cannot += list(_magnet_cannot(key, label, port))         # PAD-381
     cannot += list(_scoop_cannot(key, label, port))          # PAD-381
+    cannot += list(_coils_cannot(key, label, port))          # PAD-381
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1115,6 +1150,7 @@ def profile_from_port(path):
         bank_tree=measured.get("bank_tree", "auto_loaded"),
         hud_tree=measured.get("hud_tree", "auto_loaded"),
         magnet_shot=_magnet_shot_name(port),                 # PAD-381
+        held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
     )
 
 
@@ -1672,6 +1708,9 @@ class ModeSpec:
     # PAD-381: while it runs, a ball that settles in the scoop is held there this many ms more once the game
     # is done with it (SCOOP_MIN_MS..SCOOP_MAX_MS), then the game kicks it out as always; 0 = never
     scoop_hold_ms: int = 0
+    # PAD-381: other mechanisms held like the magnet: [[coil name, ms, shot]] - the shot "" holds once as the mode
+    # starts, a shot name on every hit of it while the mode runs (the profile's held_coils names the coils)
+    coil_holds: list = field(default_factory=list)
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1833,6 +1872,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.magnet_ms = 0
     if not p.can("scoop"):
         spec.scoop_hold_ms = 0
+    if not p.can("coils"):
+        spec.coil_holds = []
     return spec
 
 
@@ -2414,6 +2455,7 @@ def validate(spec, folder=None):
     out += validate_ball_save(spec, p)
     out += validate_magnet(spec, p)                    # PAD-381
     out += validate_scoop(spec, p)                     # PAD-381
+    out += validate_coils(spec, p)                     # PAD-381
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
     return out
@@ -2573,6 +2615,40 @@ def scoop_lines(spec, p):
     if not ms or not p.can("scoop"):
         return []
     return ["scoop_hold     %d" % ms]
+
+
+# ---- PAD-381: other mechanisms held like the magnet ---------------------------------------
+def validate_coils(spec, p):
+    """Every reason the mechanisms part cannot be built; nothing when the mode holds none."""
+    out = []
+    held = dict(p.held_coils)
+    shots = dict(p.shots)
+    for row in spec.coil_holds or ():
+        name, ms, shot = (list(row) + ["", 0, ""])[:3]
+        label = held.get(name, name)
+        if name not in held:
+            out.append("%s has no mechanism called %r a mode can hold." % (p.label, name))
+            continue
+        n = _int_or_none(ms)
+        if n is None or not COIL_MIN_MS <= n <= COIL_MAX_MS:
+            out.append("The %s holds %g to %g seconds." % (label, COIL_MIN_MS / 1000, COIL_MAX_MS / 1000))
+        if shot and shot not in shots:
+            out.append("%s has no shot called %r to hold the %s on." % (p.label, shot, label))
+    if spec.coil_holds and not p.can("coils"):
+        out.append("Holding the game's other mechanisms is not on %s yet (Mode says why)." % p.label)
+    return out
+
+
+def coil_lines(spec, p):
+    """The runtime lines of the held mechanisms: ``coil_hold <name> <ms> [mask]``."""
+    if not p.can("coils"):
+        return []
+    held, out = dict(p.held_coils), []
+    for row in spec.coil_holds or ():
+        name, ms, shot = (list(row) + ["", 0, ""])[:3]
+        if name in held and _int_or_none(ms):
+            out.append("coil_hold      %s %d%s" % (name, int(ms), " 0x%08x" % p.mask([shot]) if shot else ""))
+    return out
 
 
 # ---- item 142: cuts from a film ------------------------------------------------------
@@ -2748,6 +2824,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += ball_save_lines(spec, p)       # PAD-225: nothing unless it has a ball save (and no multiball)
     lines += magnet_lines(spec, p)          # PAD-381: nothing unless it holds the ball on the magnet
     lines += scoop_lines(spec, p)           # PAD-381: nothing unless it holds a ball in the scoop
+    lines += coil_lines(spec, p)            # PAD-381: the other mechanisms it holds
     if spec.screen and p.can("screen"):
         lines += [
             "screen_scene   %s" % p.hud_scene,

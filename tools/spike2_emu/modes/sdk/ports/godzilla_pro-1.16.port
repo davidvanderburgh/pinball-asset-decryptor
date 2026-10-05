@@ -526,6 +526,8 @@ site proc_sleep            0x003ab22c 0xe30d3158 0xe340307d
 site coil_take             0x0005079c 0xe92d40f8 0xe30d715c
 site coil_give             0x00050860 0xe3510000 0xe92d4038
 value magnet_proc          13185
+# Held coils (PAD-381): the Pro has the Godzilla magnet only.
+text held_coils            magnet
 
 # ---- the scoop: a ball held there for a mode, then the game kicks it out (PAD-381; pad_mode_runtime.c
 # "the scoop"). scoop_handler = the right scoop's event handler (the program names it

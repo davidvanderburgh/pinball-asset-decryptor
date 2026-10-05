@@ -1489,6 +1489,54 @@ Not measured: a machine (nothing has been flashed); a tilt mid-grab (it ends pro
 does); a magnet sequence of the game's starting while a grab already holds (the rig raised one only as the
 first hit landed, on the LE).
 
+## Held coils (PAD-381)
+
+The magnet's hold, for every coil of that kind a game has. A Godzilla Premium/LE has three: the Godzilla
+magnet (`magnet`), the Mechagodzilla magnet (`mg_magnet`) and the bridge diverter (`bridge`); the Pro has the
+magnet only. Each is a ControlCoil object of the game's, fired by the game as a pulse then a hold.
+
+```c
+if (pm_coil_known("bridge")) pm_coil_hold("bridge", 2000);   /* the bridge diverter held 2 s */
+pm_coil_release("bridge");                                   /* or let it go sooner */
+```
+
+A mode file says `coil_hold <name> <ms> [mask]` (up to 4 lines): on every hit of that shot while the mode runs,
+or once as the mode starts with no mask. Mode > Other mechanisms on the Modes tab writes them, one row per coil
+the build has proven (`mode_project.HELD_COILS_PROVEN`).
+
+**Every coil, the same code and the same limits** as "The magnet": one command, at the COIL OBJECT's own
+powers - its v[29] pulse power, v[30] pulse ms, v[31] hold power, which is what the game itself would fire it
+with (the Mechagodzilla magnet's are the operator's adjustments 380-383; the bridge's its own constants, 255 for
+300 ms then 25) - sent from a process of ours that controls the coil; 100-5000 ms; one hold at a time per coil,
+3 s between holds, 6 a minute; never while the operator has it disabled (the object's v[40]); never while the
+GAME uses it, and given back at once when it wants it mid-hold: a process of the game's controls it (+44), the
+game asked for an on-time (+36: what its rules' `v[36](ms)` grabs set - the shield rule grabs with the
+Mechagodzilla magnet that way, `v[36](1875)`), or one of the game's processes the port names (`text
+magnet_procs`).
+
+**The port lines** (Premium/LE 1.16; the getters found from the classes' vtables, each checked by the tests to
+construct the port's device):
+
+```
+text held_coils            magnet mg_magnet bridge
+site mg_magnet_get         0x001d9410 0xe92d40f0 0xe30b4f28
+value mg_magnet_dev        14
+site bridge_get            0x001d7174 0xe92d4030 0xe30b4e04
+value bridge_dev           12
+text mg_magnet_label       Mechagodzilla magnet
+text bridge_label          bridge
+```
+
+**Emulator-proven** (2026-10-05, rig 1, muted, the stock Premium/LE 1.16 card; `coil_hold mg_magnet 2000` and
+`coil_hold bridge 2000 0x00100000`), from mode.log and `[coildrive]`:
+- the Mechagodzilla magnet (node 9 coil 7) as the mode started: 255 for 250 ms then 80 for 1750 ms, held to its
+  end;
+- the bridge (node 9 coil 3) on the left ramp: 255 for 300 ms then 25 for 1700 ms, held to its end; a left ramp
+  1 s into it refused; held again later, and a mode stop let go 617 ms early; no abort;
+- the Godzilla magnet, now read the same way, unchanged on the Pro card (255 for 350 then 50).
+
+Not measured: a machine; what the bridge diverts on a real playfield (the rig has no ball on it).
+
 ## The scoop (PAD-381)
 
 A mode may hold a ball that lands in the scoop - while its screen or a callout plays - and nothing more:

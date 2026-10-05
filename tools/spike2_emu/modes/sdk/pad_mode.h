@@ -465,6 +465,15 @@ int pm_ball_save(unsigned seconds);
 int pm_magnet_grab(unsigned ms);
 void pm_magnet_release(void);
 int pm_magnet_holding(void);
+/* PAD-381: the same hold for any coil of that kind the port names (`text held_coils`; Godzilla Premium/LE:
+ * "magnet" the Godzilla magnet, "mg_magnet" the Mechagodzilla magnet, "bridge" the bridge diverter), with
+ * the same limits each: one command from a process of the runtime's that controls the coil, the coil's own
+ * powers, at most 5000 ms, 3 s between holds, 6 a minute, never while the game uses it.
+ * pm_magnet_grab(ms) is pm_coil_hold("magnet", ms). pm_coil_known: 1 when this game has that coil. */
+int pm_coil_hold(const char *name, unsigned ms);
+void pm_coil_release(const char *name);
+int pm_coil_holding(const char *name);
+int pm_coil_known(const char *name);
 
 /* ---- the scoop (PAD-381; MODE_SDK.md "The scoop") ---------------------------------------------
  * Hold a ball that lands in the scoop for `ms` milliseconds while your mode runs, then let the game

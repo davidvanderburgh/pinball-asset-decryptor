@@ -530,6 +530,18 @@ site proc_sleep            0x003f3200 0xe3063278 0xe340307d
 site coil_take             0x000508ec 0xe92d40f8 0xe306727c
 site coil_give             0x000509b0 0xe3510000 0xe92d4038
 value magnet_proc          13185
+# Held coils (PAD-381): the coils a mode may hold like the magnet, each a ControlCoil of the game's. <name>_get =
+# the game's getter for its object, <name>_dev = its device (checked against the object). mg_magnet = the
+# Mechagodzilla magnet (MechagodzillaMagnet: its powers from adjustments 380-383, DISABLED 344; the game's
+# shield rule grabs with it, v[36](1875)); bridge = the bridge diverter (BridgeDiverter: 255 for 300 ms,
+# then 25 for 5500, DISABLED adjustment 384; the ball search fires it). Getters found by their vtables.
+text held_coils            magnet mg_magnet bridge
+site mg_magnet_get         0x001d9410 0xe92d40f0 0xe30b4f28
+value mg_magnet_dev        14
+site bridge_get            0x001d7174 0xe92d4030 0xe30b4e04
+value bridge_dev           12
+text mg_magnet_label       Mechagodzilla magnet
+text bridge_label          bridge
 
 # ---- the scoop: a ball held there for a mode, then the game kicks it out (PAD-381; pad_mode_runtime.c
 # "the scoop"). scoop_handler = the right scoop's event handler (the program names it

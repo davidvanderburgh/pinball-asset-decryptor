@@ -164,16 +164,21 @@ def test_one_command_per_grab_and_it_is_never_resent():
     src = _src()
     calls = [m.start() for m in re.finditer(r"\bmagnet_send\(", src)]
     assert len(calls) == 2, "magnet_send: its definition and the grab's process - nothing else may send"
-    proc = _lift(src, "static void magnet_proc(void)")
-    grab = _lift(src, "int pm_magnet_grab(")
-    let_go = _lift(src, "static void magnet_let_go(")
+    proc = _lift(src, "static void magnet_proc(struct held_coil *c)")
+    grab = _lift(src, "int pm_coil_hold(")                 # PAD-381: pm_magnet_grab is pm_coil_hold("magnet")
+    let_go = _lift(src, "static void coil_let_go(")
     tick = _lift(src, "static void magnet_tick(")
+    assert 'return pm_coil_hold("magnet", ms);' in _lift(src, "int pm_magnet_grab(")
     assert proc.count("magnet_send(") == 1
     # the one send comes after control is taken, and the process gives control back on its way out
     assert proc.index('fn("coil_take")') < proc.index("magnet_send(") < proc.index('fn("coil_give")')
     assert 'fn("proc_sleep"))(1)' in proc                  # a tick at a time, never a busy wait
-    assert "magnet_send" not in grab and 'fn("proc_create")' in grab and "magnet_proc, 0)" in grab
-    assert "magnet_send" not in let_go and "mag.release = 1;" in let_go   # a request, not a command
+    assert "magnet_send" not in grab and 'fn("proc_create")' in grab and "coil_procs[c - coils], 0)" in grab
+    assert "magnet_send" not in let_go and "c->release = 1;" in let_go   # a request, not a command
+    # the powers are the coil object's own (what the game would fire it with), never a number of the mode's
+    for slot in ("coil_virtual(c->obj, 29)", "coil_virtual(c->obj, 30)", "coil_virtual(c->obj, 31)",
+                 "coil_virtual(c->obj, 40)"):
+        assert slot in grab, slot
     assert "magnet_send" not in tick                       # the tick only ever asks
     assert re.search(r"#define MAGNET_MAX_MS\s+5000u", src)
 
@@ -195,8 +200,8 @@ def test_the_runtime_lets_go_on_every_end():
     assert 'magnet_let_go("the ball ended")' in _lift(src, "static void on_ball_end(")
     assert "magnet_tick();" in _lift(src, "static void on_tick(")
     tick = _lift(src, "static void magnet_tick(")
-    for why in ("a magnet process of the game's started", "its time ran out", "the game ended or tilted",
-                "no mode is running", "the grab's process is gone"):
+    for why in ("the game wants it", "its time ran out", "the game ended or tilted",
+                "no mode is running", "the hold's process is gone"):
         assert why in tick
 
 

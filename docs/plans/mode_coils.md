@@ -164,10 +164,30 @@ test). This is a last line of defence, not a guardrail of ours.
   slot `0x7570a4`. Emulator: control 1782/1785 ms to the kick, hold 4000 -> 5776/5770, a mode stop and a tilt
   let go, no abort (MODE_SDK.md "The scoop").
 
+- **Step 5 (2026-10-05): the Premium's other coils - Mechagodzilla magnet and bridge.** The magnet's runtime
+  became a table of held coils the port names (`text held_coils`), one code path and one set of limits; the powers
+  come from the coil object's own v[29..31]. Premium/LE: MechagodzillaMagnet (device 14, getter `0x1d9410`, adj
+  380-383; the shield rule grabs with it, `v[36](1875)`), BridgeDiverter (device 12, getter `0x1d7174`, 255 for
+  300 ms then 25). `coil_hold <name> <ms> [mask]`, Mode > Other mechanisms. Emulator-proven (9ee4ab1a).
+
+- **The shield and the building: what is known, nothing shipped.**
+  - Shield: ShieldMotor -> SingleDirectionCoilMotor (node 9 coil 2), a static object at `0x7bbf88` (vptr
+    `0x6502a8`), run to SHIELD MOTOR OPEN (86, matrix 41) or CLOSED (87, matrix 42). The rig already models it
+    (the shim's coil-motor: `[motor] node 9 coil 2: runs until input 22`). `0x1da004(obj, sw)` is NOT a move: it is
+    called by the OPEN/CLOSED SWITCH HANDLERS (`0x18db10` / `0x18db44`, in the switch table at `0x777870`) and
+    records the position reached (+50), then restarts process 200/201. A first attempt called it as a move: the
+    emulator showed no motor run, the code was withdrawn (scratch patch kept). The move looks like
+    `ShieldMotor::v[16](obj, position switch)` (its self-test `0x1d99b4` loops the position table at `0x650330`
+    with it); motors also need process CONTROL ("caller not a process", "control function called without
+    control") - find the motor's take/give like the coils' `0x508ec`/`0x509b0`. The shield rule reads +44 == 87.
+  - Building: BuildingStepper -> StepperMotor (`0x7bbe64`), BUILDING UP/DOWN switches 92/93 on node 10. The game
+    polls it ~2000 times a run and never moved it in the rig: the rig most likely does not model this stepper,
+    so it needs an emulator model before anything can be proven.
+
 ## Next
 
-1. A supervised machine test on David's Premium, with a hand on the power switch: Mode > Magnet 1 s on the
-   Godzilla target (the ball held, let go at 1 s; a drain mid-grab), and Mode > Scoop 3 s (the ball waits,
-   then the game's own kick).
-2. Other titles: the ports carry the magnet and scoop lines only for Godzilla 1.16; every other build greys
-   both parts with its reason.
+1. A supervised machine test on David's Premium, hand on the power switch: Mode > Magnet 1 s on the Godzilla
+   target (and a drain mid-grab), Mode > Scoop 3 s, Mode > Other mechanisms (Mechagodzilla magnet, bridge) 1 s.
+2. Shield (David's call): the motor's take-control call and `v[16]` move, run from a process of ours like the
+   coils; emulator-provable today.
+3. Building (David's call): a stepper model in the rig first (BUILDING UP/DOWN), then the same approach.

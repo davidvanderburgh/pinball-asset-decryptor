@@ -1028,6 +1028,14 @@ def text_lines(text, width, wrap, measure, keep_space=False):
     return out
 
 
+def _unpadded(text):
+    """*text* as the next Write puts it on the card: a line an older Write padded with a run
+    of spaces after its words (3 or more, ``engine._old_padding``) has them placed where its
+    alignment hides them, so it is drawn by its words alone (PAD-412)."""
+    t = str(text)
+    return t.rstrip(" ") if t.endswith("   ") and t.strip() else t
+
+
 #: a Text's VerticalAlignment (the last u32 of its record): where its lines sit in its rect
 VALIGN_TOP, VALIGN_MIDDLE, VALIGN_BOTTOM = 0, 1, 2
 
@@ -1121,7 +1129,7 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
     if ink_of is None:
         ink_of = lambda s: fr.render_text(font, s)[0]           # noqa: E731
     # matched the way render_tree matches it (PAD-382: a line with breaks is keyed flat)
-    shown = text_manifest.edit_for(text_edits, d["text"]) or d["text"]
+    shown = text_manifest.edit_for(text_edits, d["text"]) or _unpadded(d["text"])
     L, T, R, B = (list(d.get("rect") or (0, 0, 0, 0)) + [0, 0, 0, 0])[:4]
     align = d.get("align", 1)
     line_h = float(d.get("line") or 0) or float(font.get("ascent", 0) + font.get("descent", 0))
@@ -1258,7 +1266,7 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             font = fr.font_at_size(by_key.get(d.get("font") or ""), d.get("font_px") or 0)
             if font is None or not d["text"]:
                 continue
-            shown = text_manifest.edit_for(text_edits, d["text"]) or d["text"]
+            shown = text_manifest.edit_for(text_edits, d["text"]) or _unpadded(d["text"])
             rgba = list(d.get("rgba") or (1, 1, 1, 1))
             if d.get("styled"):
                 rgba = [1.0, 1.0, 1.0, rgba[3]]          # the game ignores it (see scene_eval)

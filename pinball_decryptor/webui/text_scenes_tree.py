@@ -134,7 +134,10 @@ class TreeEditMixin:
 
     def _tree_edited(self, card, man):
         from ..plugins.stern import scene_edit
-        edited, notes = scene_edit.apply_manifest(man, self._tree_ops(card))
+        # PAD-403: less the edits the project's scene already shows (its card was built with
+        # them), which would otherwise move and size their nodes twice
+        edited, notes = scene_edit.apply_manifest(
+            man, scene_edit.to_apply(self.assets_dir, card, man, self._tree_ops(card)))
         return edited, notes
 
     def _tree_default(self, card):
@@ -2132,7 +2135,7 @@ class TreeEditMixin:
         images = self._flush_images()
         pics, gone, more = [], [], False
         tfits, tmissing, tlong, thave = [], [], 0, []
-        kept, saved_to, reset_n = 0, None, 0
+        kept, saved_to, reset_n, shown = 0, None, 0, 0
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -2222,6 +2225,15 @@ class TreeEditMixin:
                 got, missing = scene_edit.import_edits(self.assets_dir, path,
                                                        self._load_trees().keys(),
                                                        renamed=renamed, skip=skip_scenes)
+                # PAD-403: a scene here that already shows the file's edits (the card was
+                # built with them) gets only the ones it does not
+                states = scene_edit.read_states(path)
+                find = scene_edit.card_finder(states.keys())
+                trees = self._load_trees()
+                shown = sum(1 for k in scene_edit.note_shown(
+                    self.assets_dir, {c: trees[c] for c in got if c in trees},
+                    states={c: states[find(c)] for c in got if find(c) in states}).values()
+                    if k)
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
                                                        renamed=renamed, overlay=overlay)
@@ -2250,6 +2262,10 @@ class TreeEditMixin:
         if tfits:
             words = words[:-1] + " and %d text edit%s." % (len(tfits),
                                                            "" if len(tfits) == 1 else "s")
+        if shown:
+            words += (" %d scene%s on this card already %s some or all of the file's edits "
+                      "built in, so those are not applied a second time."
+                      % (shown, "" if shown == 1 else "s", "has" if shown == 1 else "have"))
         if thave:
             words += (" %d text edit%s in the file %s already on this card."
                       % (len(thave), "" if len(thave) == 1 else "s",

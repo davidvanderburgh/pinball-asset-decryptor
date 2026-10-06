@@ -195,6 +195,9 @@ def export_all(assets_dir, zip_path, cards, trees):
             doc["overlay"] = extras["overlay"]
         if extras["text"]:
             doc["text"] = extras["text"]
+        states = scene_edit.states_to_save(assets_dir, edits, trees)
+        if states:
+            doc["states"] = states                   # PAD-403
         z.writestr(scene_edit.SHARE_MANIFEST, json.dumps(doc, indent=1, sort_keys=True))
     return len(edits), len(pictures), len(extras["text"])
 

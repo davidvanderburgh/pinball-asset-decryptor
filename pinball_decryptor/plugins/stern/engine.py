@@ -4067,7 +4067,16 @@ def _apply_tree_ops(data, card_path, ops, names, assets_dir, log):
         log("Scene %s: its edits from the Scenes window were not written - the scene on this "
             "card does not read as a scene tree (%s)." % (card_path, e), "warning")
         return data, 0
-    n, notes = _scene_edit.apply_scene(sc, ops, assets_dir, names)
+    # PAD-403: a card built with some of these edits already shows them; applied again they
+    # would move and size their nodes twice
+    todo = _scene_edit.to_apply_on_card(assets_dir, card_path, sc, ops)
+    if len(todo) < len(ops):
+        log("Scene %s: %d of its %d edit(s) from the Scenes window are already on this card's "
+            "scene and are not applied again." % (card_path, len(ops) - len(todo), len(ops)),
+            "info")
+    if not todo:
+        return data, 0
+    n, notes = _scene_edit.apply_scene(sc, todo, assets_dir, names)
     for note in notes:
         log("Scene %s: %s." % (card_path, note), "warning")
     if not n:

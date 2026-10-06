@@ -1711,6 +1711,11 @@ class ModeSpec:
     # PAD-381: other mechanisms held like the magnet: [[coil name, ms, shot]] - the shot "" holds once as the mode
     # starts, a shot name on every hit of it while the mode runs (the profile's held_coils names the coils)
     coil_holds: list = field(default_factory=list)
+    # PAD-396: the mode on the title's OTHER models (the Pro beside the Premium/LE): {model word: {field: value}}
+    # of MODEL_FIELDS, as the mode last was on that model, put back when it goes back (:func:`port_model`)
+    models: dict = field(default_factory=dict)
+    # PAD-396: MODEL_FIELDS as the last port to this model made them, so an edit made since can be told from it
+    ported: dict = field(default_factory=dict)
 
     # ---- JSON ----------------------------------------------------------------
     def to_json(self):
@@ -1950,6 +1955,7 @@ def retarget(spec, p):
     out = ModeSpec.from_json(spec.to_json())
     names = [n for n, _m in p.shots]
     dropped = []
+    model_port = _port_model(out, spec.title, p)      # PAD-396: the Pro beside the Premium/LE
     if out.start_shot not in names:
         if out.start_shot:
             dropped.append(out.start_shot)
@@ -1971,7 +1977,172 @@ def retarget(spec, p):
         out.start_sequence = [s for s in out.start_sequence if s not in gone]
     _retarget_advanced(out, spec.title, p, names, dropped)
     out.title = p.key
+    if model_port:
+        out.ported = _model_fields(out)
     return out, dropped
+
+
+# ---- PAD-396: the Pro beside the Premium/LE ---------------------------------------------
+#: The parts of a mode that belong to ONE model of a title: its shots and the mechanisms it holds. A
+#: mode taken to another model of its title keeps these as they were in ``models[<old model>]`` and
+#: takes that model's own from ``models[<new model>]`` when it has been there before, else they are
+#: matched (:func:`_port_model`). Everything else - the name, clock, points, screen, clip, sounds,
+#: lights - is the same mode on every model.
+MODEL_FIELDS = ("start_shot", "start_also", "start_sequence", "scoring_shots", "shot_award", "end_shot",
+                "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds")
+#: what each model word is called in the words
+MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "Premium"}
+
+
+def model_of_key(key):
+    """The model word of a profile key (``godzilla_le_1_16`` -> ``le``, ``beatles_1_0`` -> ``""``)."""
+    g = re.sub(r"(_\d+)+$", "", str(key or "")).lower()
+    for s in MODEL_SUFFIXES:
+        if g.endswith(s) and len(g) > len(s):
+            return s[1:]
+    return ""
+
+
+def model_word(key):
+    """``Pro`` / ``Premium/LE`` for a profile key; "" for a title with one model."""
+    m = model_of_key(key)
+    return MODEL_WORDS.get(m, m.upper())
+
+
+def other_model(old_key, p):
+    """Is title ``p`` the same game as ``old_key`` on ANOTHER model (the Pro beside the Premium/LE)?"""
+    a, b = model_of_key(old_key), model_of_key(p.key)
+    return bool(a and b and a != b and family_of_key(old_key) == title_family(p.game_dir))
+
+
+def _model_fields(spec):
+    return {f: json.loads(json.dumps(getattr(spec, f))) for f in MODEL_FIELDS}
+
+
+def shot_twin(name, src, p):
+    """The shot of ``p`` that ``name`` (a shot of ``src``, the same game) is: ``name`` itself when ``p``
+    has it, else ``p``'s one shot on the same switches (Godzilla's Premium "Shield ramp spinner" is the
+    Pro's "Right spinner"; the Premium's centre shield target is the switch the Pro calls its right one).
+    None when ``p`` has neither."""
+    have = dict(p.shots)
+    if name in have:
+        return name
+    mask = dict(src.shots).get(name) if src is not None else None
+    if not mask:
+        return None
+    same = [n for n, m in p.shots if m == mask]
+    return same[0] if len(same) == 1 else None
+
+
+def _map_shots(spec, fn):
+    """Every shot name ``spec`` holds, put through ``fn`` (a name -> a name), lists kept free of repeats."""
+    def one(n):
+        return fn(n) if isinstance(n, str) and n else n
+
+    def uniq(xs):
+        out = []
+        for x in xs:
+            if x not in out:
+                out.append(x)
+        return out
+
+    spec.start_shot = one(spec.start_shot)
+    if isinstance(spec.scoring_shots, list):
+        spec.scoring_shots = uniq([one(s) for s in spec.scoring_shots])
+    if isinstance(spec.start_sequence, list):
+        spec.start_sequence = [one(s) for s in spec.start_sequence]
+    for key in ("start_also", "shot_award"):
+        rows = getattr(spec, key)
+        if isinstance(rows, list):
+            setattr(spec, key, [[one(r[0]), r[1]] if isinstance(r, (list, tuple)) and len(r) == 2 else r
+                                for r in rows])
+    if isinstance(spec.end_shot, list):
+        spec.end_shot = uniq([one(s) for s in spec.end_shot])
+    elif spec.end_shot != END_SHOT_OTHERS:
+        spec.end_shot = one(spec.end_shot)
+    spec.add_ball_shot = one(spec.add_ball_shot)
+    spec.multiball_on_shot = one(spec.multiball_on_shot)
+    if isinstance(spec.coil_holds, list):
+        spec.coil_holds = [[r[0], r[1], one(r[2])] if isinstance(r, (list, tuple)) and len(r) == 3 else r
+                           for r in spec.coil_holds]
+
+
+def _port_model(out, old_key, p):
+    """Match ``out`` (a copy of a mode of ``old_key``) to title ``p`` when ``p`` is the same game, before
+    :func:`retarget` matches it by name. Any version or model of it: a shot ``p`` names otherwise is
+    taken by its switches (:func:`shot_twin`). Another MODEL (PAD-396): ``out``'s :data:`MODEL_FIELDS`
+    are kept in ``out.models`` under the old model, and the new model's own, when the mode was there
+    before, come back; else the mechanisms ``p`` cannot hold are left out. Returns True for another
+    model."""
+    if old_key == p.key or family_of_key(old_key) != title_family(p.game_dir):
+        return False
+    try:
+        src = profile(old_key)
+    except ModeProjectError:
+        src = None
+    # a copy: ``out`` came from to_json/from_json, which share the dict with the mode it was made from
+    out.models = json.loads(json.dumps(out.models)) if isinstance(out.models, dict) else {}
+    port = other_model(old_key, p)
+    if port:
+        out.models[model_of_key(old_key)] = _model_fields(out)
+        mine = out.models.pop(model_of_key(p.key), None)
+        if isinstance(mine, dict):
+            for f in MODEL_FIELDS:
+                if f in mine:
+                    setattr(out, f, json.loads(json.dumps(mine[f])))
+            src = p                     # its own shots: nothing to match
+    _map_shots(out, lambda n: shot_twin(n, src, p) or n)
+    if port:
+        held = dict(p.held_coils) if p.can("coils") else {}
+        if isinstance(out.coil_holds, list):
+            out.coil_holds = [r for r in out.coil_holds
+                              if isinstance(r, (list, tuple)) and r and r[0] in held]
+        if not p.can("magnet"):
+            out.magnet_ms = 0
+        if not p.can("scoop"):
+            out.scoop_hold_ms = 0
+    return port
+
+
+def port_words(old, new, p):
+    """What taking ``old`` to title ``p`` did for the model (PAD-396), as phrases for
+    :func:`retarget_words`: its own version for ``p`` put back, the shots it calls by another name there,
+    the mechanisms ``p`` does not have; and that its old model's version is kept. [] for the same model,
+    or when nothing differs."""
+    if not other_model(old.title, p):
+        return []
+    was, now = model_word(old.title), p.label
+    kept = "its %s shots and mechanisms are kept in the mode for when it goes back" % was
+    try:
+        src = profile(old.title)
+    except ModeProjectError:
+        src = None
+    seen, twin = [], ModeSpec.from_json(json.loads(json.dumps(old.to_json())))
+    _map_shots(twin, lambda n: seen.append(n) or shot_twin(n, src, p) or n)
+    if isinstance(old.models, dict) and isinstance(old.models.get(model_of_key(p.key)), dict)             and _model_fields(new) != _model_fields(twin):
+        return ["it takes back its own shots and mechanisms for %s, as you left them there" % now, kept]
+    words = []
+    for n in seen:
+        line = "%s is %s on %s" % (n, shot_twin(n, src, p), now)
+        if shot_twin(n, src, p) not in (None, n) and line not in words:
+            words.append(line)
+    held = dict(p.held_coils) if p.can("coils") else {}
+    names = dict(getattr(src, "held_coils", ()) or ())
+    gone = []
+    for r in old.coil_holds if isinstance(old.coil_holds, list) else ():
+        if isinstance(r, (list, tuple)) and r and r[0] not in held:
+            label = "the " + names.get(r[0], str(r[0]))
+            if label not in gone:
+                gone.append(label)
+    if _int_or_none(old.magnet_ms) and not new.magnet_ms:
+        gone.append("the magnet")
+    if _int_or_none(old.scoop_hold_ms) and not new.scoop_hold_ms:
+        gone.append("the scoop")
+    if gone:
+        words.append("%s does not hold %s, so %s left out there" % (
+            now, " or ".join(gone), "it is" if len(gone) == 1 else "they are"))
+        words.append(kept)
+    return words
 
 
 #: how :func:`retarget` names a callout it dropped, in its ``dropped`` list
@@ -2076,8 +2247,8 @@ def retarget_words(old, new, dropped, p):
     are its returns), as one sentence for the person; "" when nothing changed. The Modes
     tab says it in its status line when a mode is opened on another card's project, and
     :func:`copy_modes` in its report."""
-    words = []
-    if old.start_shot and new.start_shot != old.start_shot:
+    words = port_words(old, new, p)                  # PAD-396
+    if old.start_shot and new.start_shot != old.start_shot and old.start_shot in dropped:
         words.append("%s is not a shot on %s, so it starts on %s until you pick one" % (
             old.start_shot, p.label, new.start_shot))
     gone = [s for s in old.scoring_shots if s in dropped]
@@ -2220,7 +2391,7 @@ def _free_slug(project, base, taken):
     return slug
 
 
-def copy_modes(src, dest, slugs=None):
+def copy_modes(src, dest, slugs=None, replace=False):
     """Copy the modes of project ``src`` into project ``dest``, for the card ``dest`` was made
     from. Each mode goes as its whole folder (picture, clip and sounds too) and is matched
     to that card's title the way opening it there would be (:func:`retarget`: shots by
@@ -2228,7 +2399,8 @@ def copy_modes(src, dest, slugs=None):
     for the title, so it builds there as it is; one that names a shot the card lacks is
     copied as it was, so a build there keeps refusing it until it is opened and its shots
     picked - its words say which. A code mode (``modes/<slug>/<slug>.c``) is copied as it
-    is. ``slugs`` picks some; None takes them all. Nothing in ``src`` changes.
+    is. ``slugs`` picks some; None takes them all. Nothing in ``src`` changes. ``replace``
+    (:func:`port_modes`) puts a mode over the one of its folder name already in ``dest``.
 
     Returns a :class:`CopyReport`. Raises :class:`ModeProjectError` when ``dest`` is
     ``src`` itself, names no card, or is a card with no port."""
@@ -2257,18 +2429,26 @@ def copy_modes(src, dest, slugs=None):
     there = list_modes(dest)[0]
     taken = {s for s, _ in there} | set(CM.code_slugs(dest))
     room = MAX_MODES - len(there)
+    there_specs = dict(there)
     for slug in want:
         if slug in specs:
             spec = specs[slug]
-            if room <= 0:
+            over = there_specs.get(slug) if replace else None
+            if over is not None:
+                spec = _keep_their_model(spec, over, p)
+            elif room <= 0:
                 report.modes.append(CopiedMode(slug, spec.name, COPY_SKIPPED, words=(
                     "a card holds at most %d modes, and %s has them" % (MAX_MODES, dest))))
                 continue
             new, dropped = retarget(spec, p)
-            new_slug = _free_slug(dest, slug, taken)
+            if over is not None:
+                new_slug = slug
+                shutil.rmtree(mode_folder(dest, slug))
+            else:
+                new_slug = _free_slug(dest, slug, taken)
+                room -= 1
             shutil.copytree(mode_folder(src, slug), mode_folder(dest, new_slug))
             taken.add(new_slug)
-            room -= 1
             words = retarget_words(spec, new, dropped, p)
             if dropped:
                 report.modes.append(CopiedMode(slug, spec.name, COPY_TO_FIX, new_slug, words))
@@ -2280,7 +2460,11 @@ def copy_modes(src, dest, slugs=None):
                 name = CM.load(src, slug).name
             except (OSError, ValueError):
                 name = slug.upper()
-            new_slug = _free_slug(dest, slug, taken)
+            if replace and slug in CM.code_slugs(dest):
+                new_slug = slug
+                shutil.rmtree(mode_folder(dest, slug))
+            else:
+                new_slug = _free_slug(dest, slug, taken)
             shutil.copytree(mode_folder(src, slug), mode_folder(dest, new_slug))
             if new_slug != slug:
                 # a code mode is modes/<slug>/<slug>.c: the file follows its folder's new name
@@ -2301,6 +2485,66 @@ def copy_modes(src, dest, slugs=None):
             report.modes.append(CopiedMode(slug, slug, COPY_SKIPPED,
                                            words="no mode called %s in %s" % (slug, src)))
     return report
+
+
+def _keep_their_model(spec, over, p):
+    """PAD-396: ``spec``, about to be put over ``over`` (the mode of its name already in a project of
+    title ``p``), carrying ``over``'s shots and mechanisms as its version for ``p`` when they are the
+    person's own: changed since the last port made them, or never a port's. A port's, unchanged, is
+    made again from ``spec``."""
+    if not other_model(spec.title, p) or model_of_key(over.title) != model_of_key(p.key):
+        return spec
+    theirs = _model_fields(over)
+    if over.ported and theirs == over.ported:
+        return spec
+    out = ModeSpec.from_json(json.loads(json.dumps(spec.to_json())))
+    out.models = dict(out.models) if isinstance(out.models, dict) else {}
+    out.models[model_of_key(p.key)] = theirs
+    return out
+
+
+def port_modes(src, dest, slugs=None):
+    """One click from a card's project to its game's other model (PAD-396, "port to Pro"): every mode of
+    ``src`` into ``dest`` as :func:`copy_modes` copies them, but a mode already in ``dest`` under its
+    folder name is REPLACED - the port made before - keeping the shots and mechanisms set for ``dest``'s
+    model there. So porting again after an edit carries the edit, and the other model's choices stay."""
+    return copy_modes(src, dest, slugs, replace=True)
+
+
+def port_replaces(src, dest):
+    """The names of ``src``'s modes :func:`port_modes` would put over modes already in ``dest``."""
+    from . import code_modes as CM
+    there = {s for s, _ in list_modes(dest)[0]}
+    codes_there = set(CM.code_slugs(dest))
+    return ([sp.name for s, sp in list_modes(src)[0] if s in there]
+            + [s.upper() for s in CM.code_slugs(src) if s in codes_there])
+
+
+def port_targets(project, folders):
+    """``[(folder, words, model)]``: of ``folders`` (the app's known projects), those whose card is this
+    project's game on ANOTHER model, with words like ``Godzilla Pro 1.16 (GZ Pro)`` and the model's word
+    (``Pro``, :func:`model_word`). Reads only the
+    projects' own files; a folder gone or naming no card is left out."""
+    try:
+        card, p = project_profile(project)
+    except Exception:                                   # noqa: BLE001
+        return []
+    if p is None:
+        return []
+    out, seen = [], {_norm_path(project)}
+    for folder in folders or ():
+        key = _norm_path(folder)
+        if not folder or key in seen or not os.path.isdir(folder):
+            continue
+        seen.add(key)
+        try:
+            _c, q = project_profile(folder)
+        except Exception:                               # noqa: BLE001
+            continue
+        if q is not None and other_model(p.key, q):
+            out.append((folder, "%s (%s)" % (q.label, os.path.basename(os.path.normpath(folder))),
+                        model_word(q.key)))
+    return out
 
 
 # ---- a file of modes to share or keep (PAD-281) --------------------------------------

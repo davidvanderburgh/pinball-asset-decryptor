@@ -341,6 +341,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
                  cap_text="", new_ok=False, ex_ok=False, dup_ok=False, del_ok=False, copy_ok=False,
+                 port_ok=False, port_shown=False, port_word="", port_targets=[],                 # PAD-396
                  examples=[], open=False, editor_on=False, form=dict(self.f),
                  shots_on=[], end_shots_on=[], awards=dict(self._shot_awards), shots_text="", status="",
                  save_state="", labels={}, files={}, starts_words="", preview=None,
@@ -543,6 +544,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._new_ok = bool(project) and len(found) < MP.MAX_MODES
         self._ex_ok = bool(project)
         self._apply_project_title(project)
+        self._refresh_port_targets(project)                 # PAD-396: after the card's title is known
         self._show_cap(project, len(found))
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
@@ -2087,6 +2089,43 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return report.to_json()
 
     @rpc
+    def port_to(self, dest=None):
+        """Port to... (PAD-396): every mode here into a project of this game's other model (the Pro
+        beside the Premium/LE; ``dest``, else its folder is asked for), as Copy to... copies them, but
+        each mode ported there before is replaced, keeping the shots and mechanisms set for that model
+        there (:func:`.mode_project.port_modes`). Returns the report, or None."""
+        project = self.project()
+        if not project:
+            return None
+        self._save_if_edited()
+        if not dest:
+            dest = self.window.ask_folder(
+                "modes_copy_to", "Port the modes to the other model's project: pick its folder",
+                initialdir=os.path.dirname(os.path.normpath(project)))
+        if not dest:
+            return None
+        dest = os.path.normpath(str(dest))
+        try:
+            over = MP.port_replaces(project, dest)
+        except (MP.ModeProjectError, OSError):
+            over = []
+        if over and not compat.messagebox.askyesno(
+                "Port modes", "%s %s already in %s from an earlier port. Put this project's over %s? "
+                "The shots and mechanisms you set there for that model are kept." % (
+                    ", ".join(over), "is" if len(over) == 1 else "are",
+                    os.path.basename(dest), "it" if len(over) == 1 else "them")):
+            return None
+        try:
+            report = MP.port_modes(project, dest)
+        except MP.ModeProjectError as e:
+            compat.messagebox.showinfo("Port modes", str(e))
+            return None
+        for line in report.lines():
+            self._say("ported to %s: %s" % (report.dest, line))
+        compat.messagebox.showinfo("Port modes", report.summary().replace("Copied ", "Ported ", 1))
+        return report.to_json()
+
+    @rpc
     def save_file(self, which="this"):
         """Save to a file... (PAD-281): the open mode (``which`` "this") or every mode here
         ("all") into a zip to keep or to share; Load from a file... brings it into any
@@ -2216,6 +2255,24 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     def _refresh_code_modes(self, project):
         self.set(code_words=self.code_modes_words(project), cut_ok=bool(project),
                  copy_ok=bool(project) and bool(self._slugs or self._code_list))
+
+    def _refresh_port_targets(self, project):
+        """PAD-396: Port to..., beside Copy to...: the known projects whose card is this game's other
+        model (the Pro beside the Premium/LE), and the word for that model on the button."""
+        targets, shown = [], False
+        if project and self._card_bound and self._profile is not None:
+            shown = bool(MP.model_of_key(self._profile.key))
+            from ...core import project_registry
+            settings = getattr(self.app, "_settings", None) or {}
+            folders = [e.get("folder") for e in project_registry.entries(settings)]
+            try:
+                targets = MP.port_targets(project, folders)
+            except Exception:                               # noqa: BLE001
+                targets = []
+        words = {m for _f, _w, m in targets}
+        word = words.pop() if len(words) == 1 else ""
+        self.set(port_targets=[{"folder": f, "label": w} for f, w, _m in targets], port_word=word,
+                 port_shown=shown, port_ok=bool(project) and bool(self._slugs or self._code_list))
 
     def _show_code(self, slug):
         """The code mode ``slug`` in the editor's place: its Code and Assets panes."""

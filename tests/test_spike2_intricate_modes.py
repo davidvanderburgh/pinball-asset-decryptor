@@ -2229,3 +2229,16 @@ def test_godzilla_angry_a_drain_without_a_lock_is_not_a_multiball(harness):
     out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 7, "shot", "Trough", "secs", 1, "ball_end", "secs", 1)
     assert not has(out, GA, "a drain at") and "MULTIBALL" not in out
     assert has(out, GA, "END (ball ended): the chase, 0 lock(s)")
+
+
+def test_godzilla_angry_the_meter_is_back_when_the_next_ball_starts(harness):
+    """PAD-416, David at the machine: "the rage bar wasn't always shown on the hud (like when starting a game and the
+    ball is in the shooter lane)". The bonus has the glass after a drain; the next ball's start brings the meter back,
+    the ball still in the shooter lane - it used to wait for the first switch."""
+    out = play(harness, "secs", 1, *(["raw", "0x1"] * 10), "secs", 1, "ball_end", "secs", 3, "event", "ball_start",
+               "secs", 2)
+    ended, started = _at(out, ">> ball_end"), _at(out, ">> event ball_start")
+    shown = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_godzilla_angry_Hud 1$", out, re.M)]
+    assert [t for t in _hid(out, "godzilla_angry") if ended <= t < started]       # off for the bonus
+    assert [t for t in shown if started <= t <= started + 100]                     # back with the new ball
+    assert not [t for t in shown if ended <= t < started]

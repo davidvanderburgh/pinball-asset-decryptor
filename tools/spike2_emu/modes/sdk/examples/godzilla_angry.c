@@ -131,7 +131,7 @@ static const char *says(const char *shot)
 /* ---- state ----------------------------------------------------------------------------------- */
 static uint64_t start_mask, jp_mask[N_JP], trough_mask;   /* trough_mask: PAD-416, the port's "Trough" */
 static unsigned hits[5], level[5], plays[5];         /* the RAGE meter, per player */
-static int ready[5], tilted, meter_wait;             /* meter_wait: hidden from a drain to the next switch */
+static int ready[5], tilted, meter_wait;             /* meter_wait: hidden from a drain to the next ball */
 static int angry_owed[5];                            /* PAD-416: GODZILLA IS ANGRY reached in a multiball, said after it */
 static int mb_now;                                   /* a multiball is on (asked ten times a second) */
 static unsigned place_at[5], locks_at[5];            /* a chase left by a drain: where, and its locks */
@@ -307,7 +307,7 @@ static void rage_switch(unsigned p)
 }
 
 /* The meter on the glass: the right edge's gauge while it counts, its own label; nothing while the mode
- * runs (its HUD is the mode's), during a multiball, from a drain to the next switch hit, outside a game. */
+ * runs (its HUD is the mode's), during a multiball, from a drain to the next ball, outside a game. */
 static void meter_tick(void)
 {
     unsigned p = pm_player();
@@ -857,11 +857,17 @@ static void on_ball_end(void)
     end("ball ended");
     kit_end_now();
     tilted = 0;
-    meter_wait = 1;                                /* the bonus has the glass: the meter waits for a switch */
+    meter_wait = 1;                                /* the bonus has the glass: the meter waits for the next ball */
 }
 
 static void on_event(unsigned id)
 {
+    static int ball_start = -2;
+    if (ball_start == -2) ball_start = pm_event("ball_start");
+    /* PAD-416: the next ball has begun - the bonus is over, so the meter is back with the ball in the shooter lane
+     * (David: "the rage bar wasn't always shown ... when the ball is in the shooter lane"); it used to wait for the
+     * first switch */
+    if (ball_start >= 0 && (int)id == ball_start) meter_wait = 0;
     if (kit_is_tilt(id)) {
         end("tilted");
         kit_end_now();

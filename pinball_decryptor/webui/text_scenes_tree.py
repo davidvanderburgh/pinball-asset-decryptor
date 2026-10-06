@@ -2132,7 +2132,7 @@ class TreeEditMixin:
         images = self._flush_images()
         pics, gone, more = [], [], False
         tfits, tmissing, tlong, thave = [], [], 0, []
-        kept, saved_to = 0, None
+        kept, saved_to, reset_n = 0, None, 0
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -2172,19 +2172,35 @@ class TreeEditMixin:
                 n = len(items)
                 answer = self.window.ask_conflicts(
                     "Load scene edits", "%s changes %d thing%s you edited yourself. Tick the "
-                    "ones the file's should replace, or answer for all of them. Nothing else "
-                    "of yours changes, and no file on this PC is deleted or overwritten: the "
+                    "ones the file's should replace, or answer for all of them. Reset my "
+                    "scenes puts every scene back as the game shipped it first; otherwise "
+                    "nothing else of yours changes. No file on this PC is deleted or "
+                    "overwritten: the "
                     "file's pictures are copied into the project's \"%s\" folder."
                     % (os.path.basename(path), n, "" if n == 1 else "s",
                        scene_share.SHARED_DIR), items,
                     backup_label="Save my scenes, pictures and text to a backup file before "
-                                 "replacing any")
+                                 "replacing any",
+                    buttons=[{"id": "cancel", "label": "Cancel"},
+                             {"id": "reset", "label": "Reset my scenes, then load"},
+                             {"id": "skip", "label": "Skip conflicts"},
+                             {"id": "replace", "label": "Replace all"},
+                             {"id": "pick", "label": "Replace ticked only",
+                              "style": "primary"}])
                 if answer is None:
                     return None
-                _choice, take, want_backup = answer
+                choice, take, want_backup = answer
+                # PAD-402 (DragonRR, round 2): every scene back as the game shipped it, the
+                # ones the file does not touch too, and then the whole file loaded
+                reset = choice == "reset"
+                if reset:
+                    take = {it["id"] for it in items}
                 kept = n - len(take)
-                if take and want_backup:
+                if (take or reset) and want_backup:
                     saved_to = scene_share.backup(self.assets_dir, path, self._load_trees())
+                if reset:
+                    reset_n = len(mine)
+                    scene_edit.clear(self.assets_dir)
                 skip_scenes = {c for c in over if "scene:" + c not in take}
                 for c in skip_scenes:
                     got.pop(c, None)
@@ -2221,6 +2237,8 @@ class TreeEditMixin:
             return None
         if more:
             self._shared_loaded(images)
+        if reset_n:
+            self._tree_view_reset()
         self._tsel = None
         self._tree_refresh()
         words = "Loaded the edits of %d scene%s from %s." % (
@@ -2245,6 +2263,9 @@ class TreeEditMixin:
             words += (" %d text edit%s %s too long for this card's line and %s left out."
                       % (tlong, "" if tlong == 1 else "s", "is" if tlong == 1 else "are",
                          "was" if tlong == 1 else "were"))
+        if reset_n:
+            words = "Put %d scene%s back as the game shipped %s first. " % (
+                reset_n, "" if reset_n == 1 else "s", "it" if reset_n == 1 else "them") + words
         if kept:
             words += " %d thing%s you edited %s kept as %s." % (
                 kept, "" if kept == 1 else "s", "was" if kept == 1 else "were",

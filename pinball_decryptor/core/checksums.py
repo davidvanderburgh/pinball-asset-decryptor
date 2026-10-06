@@ -32,8 +32,13 @@ TRACKING_SIDECARS = frozenset({"callouts.csv", "music_titles.csv"})
 # packed into a mod pack.
 # ".write_cache" holds the Write's encode-result cache (stern engine's
 # _AudioBodyCache) — derived from the assets, never an asset itself.
+# "Shared pictures" holds the pictures a loaded scene file brings
+# (plugins.stern.scene_share.SHARED_DIR): they are the user's picks for the
+# card's slots, so listing them as slots of their own flagged them "not on
+# this card" (PAD-417).
+SHARED_PICTURES_DIR = "Shared pictures"
 NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
-                            ".write_cache"})
+                            ".write_cache", SHARED_PICTURES_DIR})
 
 
 def is_other_extract(path):

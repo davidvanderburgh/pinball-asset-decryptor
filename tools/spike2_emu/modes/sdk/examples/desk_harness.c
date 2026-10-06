@@ -86,7 +86,7 @@ static const struct pm_mode *current, *running;
 static char trigger_file[64], trigger_text[128];
 
 struct fake_node { char name[160]; };
-static struct fake_node nodes[1024];   /* six modes' HUDs: ~42 nodes each */
+static struct fake_node nodes[4096];   /* every mode's HUD: ~42 nodes, and 80 more for 40 gauge slices (PAD-416) */
 static int n_nodes;
 
 static void *fake(const char *path)
@@ -94,7 +94,7 @@ static void *fake(const char *path)
     int i;
     for (i = 0; i < n_nodes; i++)
         if (!strcmp(nodes[i].name, path)) return &nodes[i];
-    if (n_nodes == 1024) return 0;
+    if (n_nodes == 4096) return 0;
     snprintf(nodes[n_nodes].name, sizeof nodes[n_nodes].name, "%s", path);
     return &nodes[n_nodes++];
 }

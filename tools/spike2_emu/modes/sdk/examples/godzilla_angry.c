@@ -6,14 +6,17 @@
  * Godzilla vs. Mechagodzilla II (1993): G-Force carries Baby Godzilla away as bait. Godzilla comes for him.
  *
  *   THE RAGE   Every playfield switch hit (the game's 0x1 dispatch) fills the RAGE meter, for the player up,
- *              all game. Five levels: 100, 125, 150, 175 and 200 hits (EHoH's 150..250, scaled to Godzilla's
- *              one pop bumper). Each level pays 1,000,000 more 500,000 a level, with a roar. It counts through
- *              every other mode and multiball, ours and the game's (PAD-416, David: "make sure the rage meter
- *              accumulates throughout the game (even during other modes)"; it no longer pauses in a multiball):
- *              only the mode itself and a tilt stop it. In a multiball it counts quietly - the meter is off the
- *              glass, a level pays without its note - and GODZILLA IS ANGRY is said once the multiball is over. The meter is on the glass all the time: a gauge on the right edge (RAGE n/5), the award
- *              line every quarter of a level ("40 MORE FOR RAGE 3"). Level 5 lights it: GODZILLA IS ANGRY,
- *              and the BUILDING insert pulses red.
+ *              all game: one meter from empty to GODZILLA IS ANGRY (PAD-416, David: "the whole meter should be
+ *              100% towards the mode"), in the stock POWERUP meter's manner at the glass's top-right corner,
+ *              GODZILLA RAGE and its percent beside it. 750 hits fill it: five stretches of 100, 125, 150, 175
+ *              and 200 (EHoH's 150..250, scaled to Godzilla's one pop bumper), each a cell of the tube, and
+ *              each stretch's end pays 1,000,000 more 500,000 a stretch, with a roar ("RAGE 40%"). The award
+ *              line says how far it is every quarter of a stretch ("120 MORE TO GODZILLA ANGRY"). It counts
+ *              through every other mode and multiball, ours and the game's (PAD-416, David: "make sure the rage
+ *              meter accumulates throughout the game (even during other modes)"): only the mode itself and a
+ *              tilt stop it. While another mode of ours has the glass the meter waits off it; in a multiball it
+ *              counts quietly (a stretch pays without its note) and GODZILLA IS ANGRY is said once the multiball
+ *              is over. Full, it lights the mode: GODZILLA IS ANGRY, and the BUILDING insert pulses red.
  *   START      The BUILDING while it is lit (no other mode of ours, none of the game's, one ball in play):
  *              a 5 s ball save, and the chase.
  *   THE CHASE  Five places, each a set of lit shots (any order) then a LOCK (a virtual one: the ball stays
@@ -219,6 +222,23 @@ static unsigned level_need(unsigned p, unsigned lv)          /* hits for level l
     return LEVEL_FIRST + LEVEL_STEP * lv + REPEAT_STEP * plays[p];
 }
 
+/* PAD-416: the whole meter, toward the mode - David: "it shouldn't cycle 1/5 over and over again. the whole meter
+ * should be 100% towards the mode". The levels stay (each still pays), as stretches of one meter. */
+static unsigned rage_total(unsigned p)
+{
+    unsigned lv, n = 0;
+    for (lv = 0; lv < LEVELS; lv++) n += level_need(p, lv);
+    return n;
+}
+
+static unsigned rage_done(unsigned p)
+{
+    unsigned lv, n = hits[p];
+    if (ready[p]) return rage_total(p);
+    for (lv = 0; lv < level[p] && lv < LEVELS; lv++) n += level_need(p, lv);
+    return n;
+}
+
 /* a multiball is on: two balls in play, or the game's own (EHoH: no Freak Fryer progress in its 6-ball wizard
  * multiball; David: "not counting switch hits during multiball") */
 static int multiball_on(void)
@@ -253,7 +273,7 @@ static void rage_switch(unsigned p)
                                        need, p);
         else if (q1 != q0) {
             pm_log("rage %u: %u of %u switch hits (player %u)", level[p] + 1, hits[p], need, p);
-            pm_snprintf(line, sizeof line, "%u MORE FOR RAGE %u", need - hits[p], level[p] + 1);
+            pm_snprintf(line, sizeof line, "%u MORE TO GODZILLA ANGRY", rage_total(p) - rage_done(p));
             kit_hud_note(&hud, 1500, line, "GODZILLA IS GETTING ANGRY");
         }
         return;
@@ -277,7 +297,7 @@ static void rage_switch(unsigned p)
             sound(CUE_ANGRY);
             show_fx_if_free("angry", SHOW_ANGRY, N_SHOW(SHOW_ANGRY));
         } else {
-            pm_snprintf(line, sizeof line, "RAGE LEVEL %u", level[p]);
+            pm_snprintf(line, sizeof line, "RAGE %u%%", rage_done(p) * 100u / rage_total(p));
             pm_snprintf(sub, sizeof sub, "%s", kit_num(v, sizeof v, got));
             kit_hud_note(&hud, 2200, line, sub);
             sound(CUE_RAGE);
@@ -309,10 +329,10 @@ static void meter_tick(void)
     if (ready[p]) {
         pips = n_pips;
         kit_copy(label, sizeof label, "ANGRY!");
-    } else {
-        unsigned need = level_need(p, level[p]);
-        pips = (int)(hits[p] * (unsigned)n_pips / need);
-        pm_snprintf(label, sizeof label, "RAGE %u/%d", level[p] + 1, LEVELS);
+    } else {                                        /* PAD-416: one meter, 0 to 100% toward the mode */
+        unsigned done = rage_done(p), total = rage_total(p);
+        pips = (int)(done * (unsigned)n_pips / total);
+        pm_snprintf(label, sizeof label, "%u%%", done * 100u / total);
     }
     kit_hud_meter(&hud, pips, label);
 }

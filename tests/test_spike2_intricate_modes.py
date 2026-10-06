@@ -1733,9 +1733,11 @@ def test_godzilla_angry_every_switch_fills_the_rage_meter_and_level_five_lights_
     lit = _at(out, "[GODZILLA ANGRY] GODZILLA IS ANGRY for player 1: the Building starts the chase")
     assert lit > _at(out, "[GODZILLA ANGRY] RAGE LEVEL 4 of 5")              # the 750th switch (100+125+150+175+200)
     assert len(re.findall(r"SCORE \+", out)) == 5
-    # the meter on the glass: RAGE n/5 on the right edge's gauge, then ANGRY! full, notes in the award line
-    for lv in range(1, 6):
-        assert hud_said(out, s, "Gauge_Label", "RAGE %d/5" % lv), lv
+    # PAD-416: ONE meter to the mode, its percent beside it (100, 225, 375 and 550 of 750 hits at the levels' ends),
+    # never a level's n/5; then ANGRY! full, notes in the award line
+    for pct in ("13%", "30%", "50%", "73%"):
+        assert hud_said(out, s, "Gauge_Label", pct) and hud_said(out, s, "Award", "RAGE " + pct), pct
+    assert not hud_said(out, s, "Gauge_Label", "RAGE 1/5")
     assert hud_said(out, s, "Gauge_Label", "ANGRY!") and hud_said(out, s, "Award", "GODZILLA IS ANGRY!")
     assert hud_said(out, s, "AwardSub", "SHOOT THE BUILDING")
     # the BUILDING pulses red once the light show of GODZILLA IS ANGRY is over
@@ -1747,12 +1749,13 @@ def test_godzilla_angry_the_meter_counts_a_quarter_at_a_time_on_the_award_line(h
     s = "godzilla_angry"
     out = play(harness, "secs", 1, *(["raw", "0x1", "ms", 20] * 51), "secs", 3)
     assert has(out, GA, "rage 1: 25 of 100 switch hits (player 1)") and has(out, GA, "rage 1: 50 of 100")
-    assert hud_said(out, s, "Award", "75 MORE FOR RAGE 1") and hud_said(out, s, "Award", "50 MORE FOR RAGE 1")
+    assert hud_said(out, s, "Award", "725 MORE TO GODZILLA ANGRY") and hud_said(out, s, "Award", "700 MORE TO GODZILLA ANGRY")
     assert hud_said(out, s, "AwardSub", "GODZILLA IS GETTING ANGRY")
-    # the gauge fills a pip at a time: 12 pips for the level's 100 hits
+    # PAD-416: the bar fills a slice at a time toward the MODE: 40 slices for its 750 hits
     on = re.findall(r"SHOW PadMode_godzilla_angry_Hud\.PadMode_godzilla_angry_Hud_Gauge\.PadMode_godzilla_angry_Hud_G(\d+)_On 1",
                     out)
-    assert {int(k) for k in on} == set(range(1, 7))                       # 51 of 100: six of twelve
+    assert {int(k) for k in on} == {1, 2}                                   # 51 of 750: two of forty
+    assert hud_said(out, s, "Gauge_Label", "6%")
 
 
 @pytest.mark.parametrize("busy,on,off", [("balls", 2, 1), ("multiball", 1, 0)], ids=["two_balls", "games_multiball"])

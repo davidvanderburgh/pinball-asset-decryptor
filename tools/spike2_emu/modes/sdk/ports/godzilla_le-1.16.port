@@ -578,6 +578,11 @@ value shield_toward        87
 # turns the platform back AWAY about 2 s after every move of a mode's (emulator, stock card); pm_shield_keep keeps
 # it turned only while this feature sees none.
 text shield_rule           Mechagodzilla Shield
+# PAD-409: the motor's own pass (ShieldMotor v[0], the vtable at 0x6502a8 slot 0), run by the game's update every ~3 s:
+# unless a motor process of the game's owns the motor (+60) it sends the platform to the resting place its v[1]
+# (0x1d9c24) picks from the game's rules - AWAY once the shield ramp spinner has been played. The runtime skips this
+# one pass while a mode of ours has the shield; nothing else of the game's is held.
+site shield_update         0x001da978 0xe301316a 0xe340307d
 
 # ---- PAD-393: the building (Premium/LE only) -----------------------------------------------------------------------
 # BuildingStepper (vtable 0x64ff88, a StepperMotor the node board runs: node 10 motor 0, BUILDING UP 92 / DOWN 93), one

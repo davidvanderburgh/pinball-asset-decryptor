@@ -115,6 +115,44 @@ def test_it_is_kept_only_while_the_games_shield_feature_sees_no_shots():
     assert "SHIELD_BACK_MS" in tick
 
 
+def test_the_games_return_to_rest_waits_only_while_the_mode_has_the_shield():
+    """PAD-409: the motor's own pass (every ~3 s it sends the platform to the game's resting place) is skipped
+    only for the shield motor, only while a mode of ours has moved it and runs, never while one of the game's
+    modes or multiballs has the stage; letting go ends the hold at once, before the put-back."""
+    src = _rt()
+    veto = _lift(src, "static int shield_update_veto(")
+    for need in ("shd.hold", "r[0] != obj", "!running", "pm_aside()"):
+        assert need in veto, need
+    assert "hook_veto(fn(\"shield_update\"), shield_update_veto)" in _lift(src, "static void shield_arm(")
+    assert "shd.hold = 1;" in _lift(src, "static unsigned shield_go(")
+    let_go = _lift(src, "static void shield_let_go(")
+    assert let_go.index("shd.hold = 0;") < let_go.index("putback_why = why")
+    text = (SDK / "ports" / "godzilla_le-1.16.port").read_text(encoding="utf-8")
+    assert re.search(r"^site shield_update\s+0x001da978 0xe301316a 0xe340307d\s*$", text, re.M)
+
+
+@pytest.mark.parametrize("elf", [os.environ.get("PAD_GODZILLA_LE_116_GAME", ""), r"C:\tmp\gzle116_stock.elf",
+                                 "/mnt/c/tmp/gzle116_stock.elf"])
+def test_the_hooked_pass_is_the_shield_motors_own_in_the_game_program(elf):
+    """The site is slot 0 of the vtable the port checks the motor's object against, and its words are the game's."""
+    import struct
+    if not elf or not os.path.isfile(elf):
+        pytest.skip("game program not present: %s" % elf)
+    b = open(elf, "rb").read()
+    phoff, phnum = struct.unpack_from("<I", b, 0x1c)[0], struct.unpack_from("<H", b, 0x2c)[0]
+    segs = [struct.unpack_from("<8I", b, phoff + i * 32) for i in range(phnum)]
+
+    def word(va):
+        for t, off, v, _pa, fs, _ms, _fl, _al in segs:
+            if t == 1 and v <= va < v + fs:
+                return struct.unpack_from("<I", b, off + va - v)[0]
+        raise AssertionError(hex(va))
+    text = (SDK / "ports" / "godzilla_le-1.16.port").read_text(encoding="utf-8")
+    vptr = int(re.search(r"^value shield_motor_vptr\s+(0x[0-9a-f]+)", text, re.M).group(1), 16)
+    assert word(vptr) == 0x1da978
+    assert (word(0x1da978), word(0x1da97c)) == (0xe301316a, 0xe340307d)
+
+
 def test_the_port_names_the_feature_that_turns_it_back():
     text = (SDK / "ports" / "godzilla_le-1.16.port").read_text(encoding="utf-8")
     rule = re.search(r"^text shield_rule\s+(.+?)\s*$", text, re.M).group(1)

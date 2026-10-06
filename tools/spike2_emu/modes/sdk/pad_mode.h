@@ -516,7 +516,9 @@ int pm_scoop_holding(void);
  * never while one of the game's own modes or multiballs runs (the game has the platform then); 1.5 s from
  * one move's start to the next, at most 12 moves a minute (0 = refused, the reason in mode.log). When
  * your mode ends, the ball ends, or the game ends or tilts, the runtime turns the platform back where it
- * was before your first move - unless the game has since turned it itself.
+ * was before your first move - unless the game has since turned it itself. PAD-409: from your first move
+ * until then, the game's own background return of the platform to its resting place (every ~3 s) waits, so
+ * it stays where you put it; the game's ball search and its own modes still move it.
  * pm_shield_keep turns it and KEEPS it there while your mode runs: the game's ball search swings the
  * platform and leaves it AWAY, so a platform found resting elsewhere for 1.5 s is turned back, within the
  * same limits. It is kept only while the game's own shield feature (on Godzilla: Mechagodzilla Shield)

@@ -232,7 +232,18 @@ test). This is a last line of defence, not a guardrail of ours.
   its start and kept it toward for 18.5 s through six shield-target hits (all six scored), then put it back
   AWAY; a blocks mode turned it, turned it back once after the game swung it, stopped keeping it with 20 s
   left, and at time up found the game had moved it and left it there; the ball ending put it back; no abort.
-  Not machine-tested.
+- **Machine test and PAD-409 (2026-10-06): the game's background return to rest.** On David's Premium the
+  shield turned in every mode that asked and was put back at every end, but the game flipped it back 2-3 times
+  early in each mode - "it looked bad on the playfield ... doesn't give us real control of the mech. better to
+  not physically break it though". A watcher hook on the go-to (callers by return address), then on the list it
+  runs (0x1dae20, reached from the game's UpdateObject loop every ~3 s), found the job: the shield motor's own
+  `v[0]` (0x1da978 -> SingleDirectionCoilMotor update 0x1db830). Unless a motor process owns the motor (+60),
+  it asks `v[1]` (0x1d9c24) for the resting place - picked from the game's rules (rule 1's state: AWAY, or
+  TOWARD in parts of Mechagodzilla; a fresh game has none, which is why the first proofs held) - and sends the
+  platform there. Faking the owner was ruled out (the game's own motor processes check it and would skip
+  themselves); instead the runtime skips that one pass for the shield motor while a mode of ours has moved it,
+  not during the game's modes or multiballs, and ends the hold the moment the mode, ball or game ends. Emulator:
+  after 30 spins, kept toward 30 s (before: turned back every ~3 s); only the ball search's 12 s jiggles moved it.
 
 ## Machine test (2026-10-05, David's Godzilla Premium 1.16)
 

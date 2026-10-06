@@ -42,15 +42,19 @@
  *              place, what to shoot, LOCKS, JACKPOT and SUPER at the edges, the place's clock in the badge,
  *              the locks on the right edge's gauge. A lock plays Godzilla smashing through; BABY FOUND,
  *              the super and the endings are full screen.
- *   INSERTS    Ready: the BUILDING pulsing red. The chase: the place's shots still to make red, the lock
- *              white and blinking, faster as the clock runs out. The multiball: the jackpot shots orange,
- *              BABY green and blinking.
+ *   INSERTS    Ready: the BUILDING pulsing red. The chase: the place's shots still to make flashing red, the
+ *              lock white and blinking, faster as the clock runs out. The multiball: the jackpot shots flashing
+ *              orange, BABY green and blinking fast.
  *   DISPLAY    Priority 180 for the chase, 190 for the multiball.
  *
  * Emulator test triggers: /dump/godzilla_angry.start (the chase now, as if lit), .stop, .light (the meter
  * full), .shot "<shot name>", .rage "<hits>" (add switch hits to the meter), .mb "<balls>" (the multiball now).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the rage cools to embers */
+#define GAME_SHOW_START "Insert chase"
+#define GAME_SHOW_END   "Ember fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -335,7 +339,7 @@ static void show_lamps(void)
     if (run.phase == PHASE_CHASE) {
         if (run.place < N_PLACES) {
             uint64_t todo = place_shots(run.place) & ~run.made_mask;
-            if (!run.lock_lit && todo) kit_lamps_shot(&lamps, todo, GA_RED, PM_LAMP_SOLID, 0);
+            if (!run.lock_lit && todo) kit_lamps_shot(&lamps, todo, GA_RED, PM_LAMP_BLINK, KIT_LIT_MS);
             if (run.lock_lit)
                 kit_lamps_shot(&lamps, pm_shot(PLACE[run.place].lock), KIT_WHITE, PM_LAMP_BLINK,
                                kit_hurry_ms(left, PLACE_SECONDS * 1000u));
@@ -346,7 +350,7 @@ static void show_lamps(void)
         uint64_t rest = 0;
         for (i = 0; i < N_JP; i++)
             if (i != run.baby) rest |= jp_mask[i];
-        kit_lamps_shot(&lamps, rest, KIT_ORANGE, PM_LAMP_SOLID, 0);
+        kit_lamps_shot(&lamps, rest, KIT_ORANGE, PM_LAMP_BLINK, KIT_LIT_MS);
         kit_lamps_shot(&lamps, jp_mask[run.baby], KIT_GREEN, PM_LAMP_BLINK, 200);
     }
     kit_lamps_commit(&lamps);
@@ -452,7 +456,7 @@ static int start(const char *why)
     show();
     kit_hud_award(&hud, 3000, place_at[p] ? "THE TRAIL AGAIN" : "GODZILLA ANGRY!",
                   place_at[p] ? PLACE[place_at[p]].place : "THEY TOOK BABY GODZILLA");
-    kit_show_start(&show_fx, "angry start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "angry start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, place %u (%s), %u lock(s), jackpot %llu, super %llu, score %llu", why, p,
            run.place + 1, run.place < N_PLACES ? PLACE[run.place].place : "BABY", run.locks,
@@ -549,7 +553,9 @@ static void end(const char *why)
     } else {
         pa_clip_full(&own, "lost");
     }
-    kit_show_start(&show_fx, "angry end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, "angry end", SHOW_END, N_SHOW(SHOW_END));
+    }
     if (run.phase == PHASE_MB)
         pm_snprintf(b, sizeof b, "%u BABY JACKPOT%s  -  %u LOCK%s", run.babies, run.babies == 1 ? "" : "S", run.locks,
                     run.locks == 1 ? "" : "S");

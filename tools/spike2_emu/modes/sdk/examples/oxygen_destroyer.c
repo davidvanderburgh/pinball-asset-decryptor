@@ -35,6 +35,10 @@
  * Emulator test triggers: /dump/oxygen_destroyer.start, .stop, .shot "<shot name>".
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the Oxygen Destroyer sinks: an ocean-blue fade */
+#define GAME_SHOW_START "Playfield wave"
+#define GAME_SHOW_END   "Blue fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -212,7 +216,7 @@ static int start(const char *why, int counted)
     kit_hud_begin(&hud, "OXYGEN DESTROYER", "");
     show();
     kit_hud_award(&hud, 2500, "OXYGEN DESTROYER", "COLLECT IT BEFORE IT IS GONE");
-    kit_show_start(&show_fx, "oxygen start", SHOW_START, N_STEPS(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "oxygen start", SHOW_START, N_STEPS(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, the value %llu falls %llu a second; collect at %s; start %u this game, "
            "score %llu", why, p, (unsigned long long)VALUE_START, (unsigned long long)VALUE_PER_SECOND,
@@ -231,8 +235,10 @@ static void end(const char *why, int won)
     kit_ledger_note(KIT_OXYGEN, run.player, won);
     sound(CUE_END);
     pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
-    kit_show_start(&show_fx, won ? "oxygen won" : "oxygen lost", won ? SHOW_WON : SHOW_LOST,
-                   won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, won ? "oxygen won" : "oxygen lost", won ? SHOW_WON : SHOW_LOST,
+                       won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    }
     pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
     kit_hud_title(&hud, won ? "GODZILLA IS GONE" : run.collected ? "OXYGEN DESTROYER" : "THE OXYGEN IS GONE", " ");
     kit_hud_counter(&hud, 0, 0, 0, 0);

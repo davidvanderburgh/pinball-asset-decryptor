@@ -77,7 +77,10 @@ static KIT_UNUSED const char *kit_short(char *buf, unsigned cap, uint64_t v)
 #define KIT_DB_SLOTS 24
 struct kit_db { uint64_t bit[KIT_DB_SLOTS]; unsigned long at[KIT_DB_SLOTS]; unsigned next; };
 
-/* 1 if this shot (one bit, or a mask treated as one shot) counts now; it is then remembered */
+static KIT_UNUSED void kit_hit(uint64_t shot);    /* the lights section, below */
+
+/* 1 if this shot (one bit, or a mask treated as one shot) counts now; it is then remembered. A hit that counts
+ * while this mode runs also answers at once (kit_hit, PAD-415): every scoring shot of the pack passes here. */
 static KIT_UNUSED int kit_fresh(struct kit_db *db, uint64_t bit)
 {
     unsigned long now = pm_ms();
@@ -91,11 +94,13 @@ static KIT_UNUSED int kit_fresh(struct kit_db *db, uint64_t bit)
                 return 0;
             }
             db->at[i] = now;
+            if (pm_running()) kit_hit(bit);
             return 1;
         }
     i = db->next++ % KIT_DB_SLOTS;
     db->bit[i] = bit;
     db->at[i] = now;
+    if (pm_running()) kit_hit(bit);
     return 1;
 }
 
@@ -321,13 +326,17 @@ static KIT_UNUSED void kit_lights_off(struct kit_lights *l)
  * runs (1 to 145), so a lit shot of ours is never hidden by a show of the game's, and below 255,
  * where a mode file's inserts sit by default.
  *
- * How the pack speaks with lights (so the five read as one game):
- *   solid      lit and worth shooting, no clock on it
- *   blink      lit with a clock: the faster, the less time is left (kit_hurry_ms)
- *   pulse      optional: adds time, or a head that is growing back
- *   dim solid  part of the sequence, not next yet (MASER BARRAGE) */
+ * How the pack speaks with lights - the game's own language, so a lit shot never looks broken (PAD-415, David after
+ * a machine test: "the inserts that are lit for shots should pretty much always be flashing - when they're solid,
+ * they look broken"):
+ *   blink KIT_LIT_MS  lit and worth shooting, no clock on it (slower for one far off, faster as it gets close)
+ *   blink faster      lit with a clock: the faster, the less time is left (kit_hurry_ms)
+ *   pulse             optional: adds time, a head growing back; dim, a step of a sequence not next yet
+ *   solid             done (a spike charged): never a shot still to make
+ * And a hit answers: the hit shot's inserts strobe white for a moment over all of this (kit_hit). */
 #define KIT_LAMP_PRIORITY 200
 #define KIT_LAMP_GROUPS   8
+#define KIT_LIT_MS        500      /* a lit shot's blink with no clock on it */
 #define KIT_GOLD          PM_RGB(255, 170, 0)
 #define KIT_ORANGE        PM_RGB(255, 80, 0)
 #define KIT_GREEN         PM_RGB(0, 255, 60)
@@ -472,6 +481,24 @@ static KIT_UNUSED void kit_lamps_off(struct kit_lamps *l)
     pm_log("lights: all handed back to the game");
 }
 
+/* ---- a hit answers (PAD-415) ----------------------------------------------------------------------
+ * While one of ours runs the game's rules see no shots, so the game plays none of its own sounds or insert flashes
+ * for them: a hit has to answer from here. Every hit that counts (kit_fresh) strobes the shot's inserts white for
+ * KIT_HIT_FLASH_MS over whatever the mode lights them in (pm_lamp_flash), and plays one of the game's own hit
+ * sounds, a step higher each hit (pm_hit_sound: on Godzilla its eight pitched orchestra hits, so a run of hits
+ * climbs, and starts low again after the eighth). kit_hit_reset() starts the climb again (kit_begin does).
+ * Nothing plays on a port without them. */
+#define KIT_HIT_FLASH_MS 480
+static unsigned kit_hits;
+static KIT_UNUSED void kit_hit_reset(void) { kit_hits = 0; }
+static KIT_UNUSED void kit_hit(uint64_t shot)
+{
+    int n = pm_hit_sounds();
+    if (pm_can(PM_CAN_LAMPS)) pm_lamp_flash(shot, KIT_WHITE, KIT_HIT_FLASH_MS);
+    if (n) pm_hit_sound((int)(kit_hits % (unsigned)n) + 1);
+    kit_hits++;
+}
+
 /* A blink's period for a clock: slow with most of the time left, faster as it runs down, a flicker
  * in the last three seconds. Four steps only, so the inserts change a handful of times a mode. */
 static KIT_UNUSED unsigned kit_hurry_ms(unsigned long left_ms, unsigned long total_ms)
@@ -605,6 +632,7 @@ static KIT_UNUSED int kit_begin(const char *name)
     }
     kit_running = name;
     kit_asked = 0;
+    kit_hit_reset();                       /* PAD-415: its hits climb from the bottom */
     return 1;
 }
 
@@ -659,6 +687,16 @@ static KIT_UNUSED void kit_end_after(unsigned long ms)
 }
 
 static KIT_UNUSED void kit_hud_drop_now(void);    /* the HUD section, below */
+
+/* PAD-411: one of the GAME's own light shows, by the port's name for it ("Strobe burst"), in the place of a kit
+ * show: its start's and its end's (David, 2026-10-06: "mode start should be flashy and mode end should be more
+ * subdued"). 1 = the game's plays; 0 = not on this game (a Pro, another title): the caller plays its own. */
+static KIT_UNUSED int kit_game_show(const char *name, const char *why)
+{
+    if (!name || !pm_game_show_named(name)) return 0;
+    pm_log("light show: the game's %s (%s)", name, why);
+    return 1;
+}
 
 static KIT_UNUSED void kit_end_now(void)
 {

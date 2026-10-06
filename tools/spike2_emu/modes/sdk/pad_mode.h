@@ -167,6 +167,13 @@ int pm_sound_sid(unsigned request, unsigned sid);
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms);
 int pm_sound_fade(unsigned request, unsigned ms);
 int pm_sound_playing(unsigned *requests, unsigned *buses, int max);
+/* PAD-415: the game's own hit sounds, a rising run the port names (`value hit_sound_<n>`, n from 1, low to high: on
+ * Godzilla its eight pitched orchestra hits), so every hit of a mode is heard - while one of ours runs the game's
+ * rules see no shots, and play no sound of their own for them. pm_hit_sound(n) plays the n-th (past the last, the
+ * last), so a mode's hits can climb as it goes; never two within 100 ms (a spinner's run is one sound).
+ * 1 = played; 0 = the port names none, or too soon. pm_hit_sounds: how many the port names (0 = none here). */
+int pm_hit_sound(int n);
+int pm_hit_sounds(void);
 
 /* ---- lights -------------------------------------------------------------------------
  * One command in the game's own light language, e.g.
@@ -217,6 +224,11 @@ int pm_lamp_all(unsigned rgb, int pattern, unsigned period_ms);      /* every in
 int pm_lamp_release(const char *names);
 int pm_lamp_release_shot(uint64_t shots);
 int pm_lamp_release_all(void);                             /* every insert THIS mode holds */
+/* PAD-415: a hit answers at once. The inserts of `shots` strobe in `rgb` (60 ms on, 60 off) for `ms` (0 = 480; at
+ * most 2000) over whatever the mode holds them in, then show it again; one the mode does not hold is held for the
+ * strobe only and handed back to the game after it, and one the mode releases while it strobes finishes the strobe
+ * first. Returns how many inserts strobe (0: none tied to those shots, or no PM_CAN_LAMPS). */
+int pm_lamp_flash(uint64_t shots, unsigned rgb, unsigned ms);
 /* This mode's layer priority, 1-255 (255 when never called): a game show above it covers its
  * inserts. The inserts it holds move to the new layer. Returns the priority now in force. */
 int pm_lamp_priority(unsigned priority);
@@ -549,5 +561,24 @@ int pm_shield_keep(int where);
 #define PM_CAN_BUILDING     0x400000u /* pm_building / pm_building_floor */
 int pm_building(int floor);
 int pm_building_floor(void);
+
+/* ---- the game's own light shows (PAD-411) -----------------------------------------------------------
+ * The game's playfield shows (a jackpot's, a multiball's start, the attract run's) are processes of its own:
+ * each makes a lamp group, plays its layered light-language commands (several effects over the game's light
+ * sets, with their delays and loops), sleeps through the show and stops every effect it started. The port
+ * names them (`site show_<n>`, `text show_name_<n>`); pm_game_show(n) plays show n exactly that way - the
+ * game's own process body, run as a process of the runtime's (`value show_proc`, an id the game never uses),
+ * so its timing, its colours and its clean-up are the game's. One at a time: a new one replaces one still
+ * playing. 1 = playing; 0 = refused (only while your mode runs, or in the first 2 s after it ended - its
+ * ending's show; in a game; no such show; the reason in mode.log). A show keeps playing after your mode ends (an ending's show is meant to), but never longer than
+ * 20 s - some of the game's run until stopped - and the ball ending stops it as it stops every process of the
+ * game's. pm_game_show_stop ends it now: the game's own exit hook takes its lights away. pm_game_show_playing:
+ * 1 while one plays. pm_game_shows: how many the port names (0 = none on this game). */
+#define PM_CAN_GAME_SHOWS   0x800000u /* pm_game_show / pm_game_show_stop / pm_game_show_playing / pm_game_shows */
+int pm_game_show(int n);
+int pm_game_show_named(const char *name);   /* the same by the port's name for it (`text show_name_<n>`, any case) */
+void pm_game_show_stop(void);
+int pm_game_show_playing(void);
+int pm_game_shows(void);
 
 #endif

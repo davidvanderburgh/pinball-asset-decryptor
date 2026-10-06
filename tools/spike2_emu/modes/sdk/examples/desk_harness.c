@@ -670,6 +670,36 @@ int pm_lamp_release_all(void)
         if (held[k].owner && held[k].owner == current) { lamp_off(k); n++; }
     return n;
 }
+/* PAD-415: a hit's strobe and the game's hit sounds. Off unless HARNESS_HITS=1 (the examples' own tests count every
+ * line), on: "STROBE <shots>" and "HIT SOUND <n>", and a port with eight of them. */
+static int hits_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("HARNESS_HITS"); on = e && e[0] == '1'; }
+    return on;
+}
+int pm_lamp_flash(uint64_t shots, unsigned rgb, unsigned ms)
+{
+    int k, n = 0;
+    if (!hits_on()) return 0;
+    for (k = 0; k < N_LAMPS; k++)
+        if (LAMPS[k].shot & shots) n++;
+    if (n) printf("%6lu STROBE %llx %06x %u\n", now_ms, (unsigned long long)shots, rgb & 0xffffffu, ms);
+    return n;
+}
+int pm_hit_sounds(void) { return hits_on() ? 8 : 0; }
+int pm_hit_sound(int n)
+{
+    if (!hits_on()) return 0;
+    printf("%6lu HIT SOUND %d\n", now_ms, n);
+    return 1;
+}
+/* PAD-411: the game's own light shows - none on the desk, so the examples play their own kit shows as before */
+int pm_game_show(int n) { (void)n; return 0; }
+int pm_game_show_named(const char *name) { (void)name; return 0; }
+void pm_game_show_stop(void) {}
+int pm_game_show_playing(void) { return 0; }
+int pm_game_shows(void) { return 0; }
 /* hud-layers: the inserts are placed only with HARNESS_PLACES=1 (PAD-376), so the examples' shows
  * paint none unless a test asks. A paint holds the insert solid, quietly: no LAMP line, but every
  * change of colour is counted ("END paints <n>") and "lamps" lists the painted inserts as HELD. */

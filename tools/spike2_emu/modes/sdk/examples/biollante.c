@@ -21,7 +21,7 @@
  *              SWITCH, SAP JACKPOT and VINES CUT at the edges, the six vines on the right edge's gauge, the
  *              clock in the badge. A vine cut plays her tendrils burning, a collect the sap spraying; the
  *              beast and the endings are full screen.
- *   INSERTS    The vines still standing green; the BEAST: the BUILDING blinking gold, faster as it runs out.
+ *   INSERTS    The vines still standing flashing green; the BEAST: the BUILDING blinking gold, faster as it runs out.
  *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
  *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
  *   DISPLAY    Priority 180.
@@ -29,6 +29,10 @@
  * Emulator test triggers: /dump/biollante.start, .stop, .shot "<shot name>", .beast (the beast form now).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued) */
+#define GAME_SHOW_START "Playfield wave"
+#define GAME_SHOW_END   "Red and blue fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -161,7 +165,7 @@ static void show_lamps(void)
             for (i = 0; i < 3; i++)
                 if (!(run.cut[b] & (1u << i)) && (b != SHIELD_BANK || kit_shields_reachable()))
                     standing |= vine_mask[b][i];               /* the shields once they face the player */
-        kit_lamps_shot(&lamps, standing, BI_VINE, PM_LAMP_SOLID, 0);
+        kit_lamps_shot(&lamps, standing, BI_VINE, PM_LAMP_BLINK, KIT_LIT_MS);
     } else {
         kit_lamps_shot(&lamps, final_mask, KIT_GOLD, PM_LAMP_BLINK,
                        kit_hurry_ms((unsigned long)kit_timer_seconds(&run.clock) * 1000u, BEAST_SECONDS * 1000u));
@@ -235,7 +239,7 @@ static int start(const char *why)
     kit_hud_pips(&hud, 6);
     show();
     kit_hud_award(&hud, 3000, "BIOLLANTE", "EVERY SWITCH FEEDS HER SAP");
-    kit_show_start(&show_fx, "biollante start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "biollante start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %d s, %llu a switch; next time %u ramps, score %llu", why, p, RUN_SECONDS,
            (unsigned long long)switch_value(), ramps_needed(p), (unsigned long long)pm_score(p));
@@ -254,8 +258,10 @@ static void end(const char *why)
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.won ? "won" : "lost");
-    if (run.won) kit_show_start(&show_fx, "spores", SHOW_WON, N_SHOW(SHOW_WON));
-    else kit_show_start(&show_fx, "biollante end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        if (run.won) kit_show_start(&show_fx, "spores", SHOW_WON, N_SHOW(SHOW_WON));
+        else kit_show_start(&show_fx, "biollante end", SHOW_END, N_SHOW(SHOW_END));
+    }
     pm_snprintf(b, sizeof b, "%u SWITCHES  -  %u BANK%s CUT", run.switches, run.collects, run.collects == 1 ? "" : "S");
     kit_hud_title(&hud, run.won ? "BIOLLANTE IS FREE" : "BIOLLANTE WITHERS", b);
     kit_hud_counter(&hud, 0, 0, 0, 0);

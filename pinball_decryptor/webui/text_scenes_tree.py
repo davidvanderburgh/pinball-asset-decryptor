@@ -1458,8 +1458,8 @@ class TreeEditMixin:
         """A line of text's box set to (*x*, *y*, *w*, *h*) on the glass, its words left the
         size they are (DragonRR, PAD-383: "Bounding box doesn't change the text size, the
         words shuffle to try to fit within the area. Scaling controls the text size"): the
-        Text's own rect, with word wrap turned on so the words re-flow inside it.  The
-        alignment the line has is kept."""
+        Text's own rect, with Multiline and WordWrap turned on so the words re-flow inside it
+        on the machine as they do here (PAD-412).  The alignment the line has is kept."""
         from ..plugins.stern import scene_eval
         node = int(node)
         d = self._tree_text_draw(node)
@@ -1479,13 +1479,14 @@ class TreeEditMixin:
         rect = [round(min(p[0] for p in pts), 3), round(min(p[1] for p in pts), 3),
                 round(max(p[0] for p in pts), 3), round(max(p[1] for p in pts), 3)]
         if all(abs(a - b) < 0.5 for a, b in zip(rect, d.get("rect") or ())) \
-                and (d.get("flags") or [0])[0]:
+                and list(d.get("flags") or (0, 0))[:2] == [1, 1]:
             return False
         return self._tree_add({"op": "text_rect", "node": node, "rect": rect, "wrap": True})
 
     def _tree_set_text_pixels(self, node, w, h):
-        """W px / H px on a line of text: its box, not its words.  The box keeps its top and
-        the edge (or, centred, the middle) its words are aligned to."""
+        """W px / H px on a line of text: its box, not its words.  The box keeps the edges
+        (or, centred, the middle) its words are aligned to, across and up and down (PAD-412:
+        a line the game sets at the bottom of its box keeps its bottom), so they stay put."""
         box = self._tree_box(node)
         d = self._tree_text_draw(node)
         if box is None or d is None:
@@ -1495,7 +1496,9 @@ class TreeEditMixin:
         nh = y1 - y0 if h is None else h
         align = d.get("align", 1)
         nx = x0 if align == 0 else (x1 - nw if align == 2 else (x0 + x1 - nw) / 2.0)
-        return self.tree_set_box(node, nx, y0, nw, nh)
+        valign = d.get("valign") or 0
+        ny = y0 if valign == 0 else (y1 - nh if valign == 2 else (y0 + y1 - nh) / 2.0)
+        return self.tree_set_box(node, nx, ny, nw, nh)
 
     @rpc
     def tree_set_scale(self, node, pct):

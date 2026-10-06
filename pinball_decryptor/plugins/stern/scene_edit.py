@@ -317,14 +317,16 @@ def match_cards(scenes, cards_here):
     return got, missing
 
 
-def import_edits(assets_dir, zip_path, cards_here=None, renamed=None):
+def import_edits(assets_dir, zip_path, cards_here=None, renamed=None, skip=()):
     """Load a file :func:`export_edits` wrote: each scene in it that this project has
     (*cards_here*, None: take every one) gets the file's edits in place of its own, and the
     pictures they add are copied in (under a new name when one of the same name is already
     here and differs; *renamed*, a dict, is filled with ``{rel in the file: rel here}``).
+    A scene here in *skip* (PAD-402: the user kept their own) is left as it is.
     Returns ``({card: [op, ...]} as loaded, [card of the file not here])``."""
     import zipfile
     scenes, missing = match_cards(read_share(zip_path), cards_here)
+    scenes = {c: ops for c, ops in scenes.items() if c not in set(skip)}
     renamed = {} if renamed is None else renamed
     with zipfile.ZipFile(zip_path) as z:
         members = set(z.namelist())

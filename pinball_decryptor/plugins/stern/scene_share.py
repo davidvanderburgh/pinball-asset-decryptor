@@ -324,6 +324,64 @@ def clashes(assets_dir, extras):
     return {"pictures": pics, "overlay": overlay}
 
 
+def _ops_words(ops):
+    """A scene's edits in a few words: ``2 edits: moved +25,+0, 50 %``."""
+    words = [scene_edit.describe(op) for op in ops[:3]]
+    more = len(ops) - len(words)
+    return "%d edit%s: %s%s" % (len(ops), "" if len(ops) == 1 else "s", ", ".join(words),
+                                " and %d more" % more if more else "")
+
+
+def conflict_items(assets_dir, over, extras, clash, tclash, label_of=None):
+    """PAD-402 (DragonRR): one row per thing of the user's own here a load would change, for
+    the page to ask about each: ``[{"id", "what", "mine", "theirs"}]``.  *over* ``{card here:
+    (my ops, the file's ops)}``; *clash* :func:`clashes`; *tclash* ``[(Text tab row, the
+    file's words)]``; *label_of* names a scene of a card path.  Ids: ``scene:<card>``,
+    ``picture:<rel>``, ``overlay``, ``text:<n>`` (n-th of *tclash*)."""
+    from ...core import colour_profile as cp, staged_changes
+    label_of = label_of or (lambda card: card.rstrip("/").split("/")[-2][:8])
+    items = []
+    for card, (mine, theirs) in over.items():
+        items.append({"id": "scene:" + card, "what": "Scene " + label_of(card),
+                      "mine": _ops_words(mine), "theirs": _ops_words(theirs)})
+    data = staged_changes.load(assets_dir) or {}
+    picks = data.get("image") or {}
+    for rel in clash["pictures"]:
+        mine = picks.get(rel)
+        items.append({"id": "picture:" + rel, "what": "Picture " + os.path.basename(rel),
+                      "mine": ("replaced by " + os.path.basename(mine)) if mine
+                      else "changed on the card you built",
+                      "theirs": "replaced by " + os.path.basename(
+                          extras["pictures"][rel].get("name") or "a picture")})
+    if clash["overlay"]:
+        mine = data.get(cp.KEY)
+        items.append({"id": "overlay", "what": "Whole screen overlay",
+                      "mine": ((mine or {}).get("name") or "your own") if mine else "none",
+                      "theirs": (extras["overlay"] or {}).get("name") or "the file's own"})
+    for i, (r, new) in enumerate(tclash):
+        items.append({"id": "text:%d" % i, "what": 'Text "%s"' % r["original"],
+                      "mine": '"%s"' % r["replacement"], "theirs": '"%s"' % new})
+    return items
+
+
+def backup(assets_dir, loading, trees):
+    """PAD-402: save every scene's edits, replaced picture, color profile and text edit of the
+    project, as Save every scene... does, to a new file in its Backups folder before *loading*
+    is loaded: loading that file puts them back.  Returns its path, or None when there is
+    nothing to save."""
+    from .mode_project import backup_path
+    path = backup_path(assets_dir, loading)
+    try:
+        export_all(assets_dir, path, None, trees)
+    except scene_edit.SceneEditError:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None
+    return path
+
+
 def _digest(data):
     return hashlib.sha1(data).hexdigest()
 

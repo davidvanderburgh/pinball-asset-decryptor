@@ -880,6 +880,29 @@ class WebWindow:
         })
         return answer == "yes"
 
+    def ask_conflicts(self, title, message, items, backup_label=None, buttons=None):
+        """PAD-402: a load that changes the user's own edits. *items* ``[{"id", "what",
+        "mine", "theirs"}]``, one row each to tick. Returns None (Cancel), else ``(choice,
+        {ids the file's replaces}, back up first)``: choice "replace" (all), "skip" (none),
+        "pick" (the ticked ones) or another of *buttons*' ids."""
+        answer = self.ctx.dialogs.ask({
+            "kind": "conflicts", "title": title or "", "message": str(message or ""),
+            "items": [{k: str(it.get(k) or "") for k in ("id", "what", "mine", "theirs")}
+                      for it in items],
+            "backup_label": backup_label or "", "backup": True,
+            **({"buttons": buttons} if buttons else {})})
+        if not isinstance(answer, dict) or not answer.get("choice") \
+                or answer["choice"] == "cancel":
+            return None
+        ids = {str(it["id"]) for it in items}
+        if answer["choice"] == "replace":
+            take = ids
+        elif answer["choice"] == "pick":
+            take = {str(i) for i in answer.get("take") or ()} & ids
+        else:
+            take = set()
+        return answer["choice"], take, bool(answer.get("backup"))
+
     def _initialdir_for(self, *values):
         for v in values:
             v = (v or "").strip() if isinstance(v, str) else ""

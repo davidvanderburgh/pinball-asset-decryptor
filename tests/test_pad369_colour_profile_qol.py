@@ -517,11 +517,12 @@ def test_scenes_page_loads_text_through_the_text_tab(tmp_path):
         assert w.call("text_scenes.edits_save", "all", True) == zip_path
         assert len(scene_share.read_extras(zip_path)["text"]) == 2
         _open(w, friend)
-        w.answers.extend([zip_path, "no"])          # "... 1 line of text you changed" No
+        w.answers.extend([zip_path, "cancel"])      # PAD-402: the KAIJU line, Cancel
         assert w.call("text_scenes.edits_load") is None
-        assert "1 line of text you changed" in str(w.asked[-1])
+        assert [(i["what"], i["mine"], i["theirs"]) for i in w.asked[-1]["items"]] == [
+            ('Text "KAIJU"', '"BEAST"', '"MONSTER"')]
         assert text_manifest.changed(str(friend)) == {SCARD: [("KAIJU", "BEAST")]}
-        w.answers.extend([zip_path, "yes"])
+        w.answers.extend([zip_path, {"choice": "replace", "backup": False}])
         w.call("text_scenes.edits_load")
         assert _wait(w, lambda: text_manifest.changed(str(friend)) == {
             SCARD: [("KAIJU", "MONSTER")], "/g/game": [("PLAY", "GO!")]})

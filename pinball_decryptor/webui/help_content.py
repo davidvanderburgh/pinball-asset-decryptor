@@ -573,8 +573,13 @@ HELP_CONTENT = {
             "- Scenes match by path, so an LE file loads on the Pro. Missing scenes and "
             "unplaceable or too-long text are left out and named; clashing picture names "
             "are renamed.\n"
-            "- Pictures go into **Shared pictures**. Nothing is deleted or overwritten: "
-            "it asks before replacing your own edits, pictures, words or overlay.",
+            "- Pictures go into **Shared pictures**. Nothing is deleted or overwritten.\n"
+            "- When the file would change something you edited yourself (a scene, a "
+            "picture, a line of text, the overlay), it lists each one beside the file's "
+            "and asks: **Cancel**, **Skip conflicts** (load only the rest), **Replace "
+            "all**, or tick the ones to replace and **Replace ticked only**. Before any of "
+            "yours is replaced it saves them to a file in the project's **Backups** "
+            "folder (untick that to skip it); load that file to put them back.",
         ]),
     ],
     "Replace Images": [
@@ -2707,8 +2712,12 @@ PREVIEW_HELP = {
              "model's card is matched the same way.\n"
              "- **Save / load** saves the open mode, or every mode, to one .zip holding "
              "each mode's whole folder (picture, clip, sounds and code), to share or "
-             "keep. Loading one adds its modes as Copy to… would; a name already here "
-             "gets _2."),
+             "keep. Loading one adds its modes as Copy to… would. A mode already here "
+             "exactly as in the file is left as it is. One of the same folder name with "
+             "other contents is asked about: **Cancel**, **Keep both** (the file's gets "
+             "_2), **Skip conflicts**, **Replace all**, or tick the ones to replace. "
+             "Before any is replaced, every mode here is saved to a file in the "
+             "project's **Backups** folder (untick that to skip it)."),
             ("Five things people ask for", _limits("Examples")),
             ("Why your mode always gives way", _limits("Why your mode always gives way")),
             ("Sizes", _limits("Sizes")),

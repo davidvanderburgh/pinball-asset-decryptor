@@ -2171,10 +2171,63 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                         filetypes=[("PAD modes", "*.zip"), ("All files", "*.*")])
         if not path:
             return None
+        # PAD-402 (DragonRR): a mode of the file named as one here with other contents is a
+        # collaborator's version of it: asked about, each one replacing or not, mine saved first
+        conflicts, same = MP.share_conflicts(path, project)
+        replace, skip, backup = set(), set(same), None
+        if conflicts:
+            n = len(conflicts)
+            got = self.window.ask_conflicts(
+                "Load modes", "%d mode%s in %s %s the folder name of a mode here, with other "
+                "contents. Tick the ones the file's should replace, or answer for all of them. "
+                "Keep both loads the file's beside yours under a new name."
+                % (n, "" if n == 1 else "s", os.path.basename(path), "has" if n == 1 else "have"),
+                [{"id": c["slug"], "what": "%s (modes/%s)" % (c["file"], c["slug"]),
+                  "mine": "%s, changed %s" % (c["here"], c["changed"]) if c["changed"]
+                  else c["here"],
+                  "theirs": "%s, saved %s" % (c["file"], c["saved"]) if c["saved"]
+                  else c["file"]} for c in conflicts],
+                backup_label="Save my modes to a backup file before replacing any",
+                buttons=[{"id": "cancel", "label": "Cancel"},
+                         {"id": "copies", "label": "Keep both"},
+                         {"id": "skip", "label": "Skip conflicts"},
+                         {"id": "replace", "label": "Replace all"},
+                         {"id": "pick", "label": "Replace ticked only", "style": "primary"}])
+            if got is None:
+                return None
+            choice, replace, want_backup = got
+            if choice != "copies":
+                skip |= {c["slug"] for c in conflicts} - replace
+            if replace and want_backup:
+                backup = MP.backup_path(project, path)
+                try:
+                    MP.export_modes(project, backup)
+                except (MP.ModeProjectError, OSError) as e:
+                    compat.messagebox.showinfo("Load modes", "Your modes could not be saved to "
+                                               "a backup file, so nothing was loaded: %s" % e)
+                    return None
+                self._say("saved every mode to %s before loading %s"
+                          % (backup, os.path.basename(path)))
         try:
-            report = MP.import_modes(path, project)
+            report = MP.import_modes(path, project, replace=replace, skip=skip)
         except (MP.ModeProjectError, OSError) as e:
             compat.messagebox.showinfo("Load modes", str(e))
+            return None
+        kept = len(skip - set(same))
+        tail = ""
+        if same:
+            tail += " %d mode%s in the file %s already here as %s." % (
+                len(same), "" if len(same) == 1 else "s", "is" if len(same) == 1 else "are",
+                "it is" if len(same) == 1 else "they are")
+        if kept:
+            tail += " %d of yours %s kept as %s." % (kept, "was" if kept == 1 else "were",
+                                                     "it was" if kept == 1 else "they were")
+        if backup:
+            tail += " Your modes from before are saved in %s." % os.path.join(
+                MP.BACKUP_DIR, os.path.basename(backup))
+        if report is None:
+            compat.messagebox.showinfo("Load modes", "Nothing was loaded from %s.%s"
+                                       % (os.path.basename(path), tail))
             return None
         for line in report.lines():
             self._say("loaded from %s: %s" % (os.path.basename(path), line))
@@ -2184,7 +2237,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         else:
             self.refresh(select=got[0].new_slug if got else None)
         words = "Loaded %d mode%s from %s." % (len(got), "" if len(got) == 1 else "s",
-                                                os.path.basename(path))
+                                                os.path.basename(path)) + tail
         if report.of(MP.COPY_TO_FIX):
             words += (" Open each one marked below and pick again what %s does not have."
                       % report.label)

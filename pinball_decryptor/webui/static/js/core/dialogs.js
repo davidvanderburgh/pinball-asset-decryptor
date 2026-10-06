@@ -7,7 +7,7 @@
 //    bus.publish("open_dialog", name=...), a tab with openDialog(name, props).
 //    The component gets {close, ...props}.
 
-import { html, useEffect, useRef, useState, Modal, Button, Icon, Field, fmtBytes, cx, isTopScrim } from "./ui.js";
+import { html, useEffect, useRef, useState, Modal, Button, Icon, Field, Check, fmtBytes, cx, isTopScrim } from "./ui.js";
 import { useNs, useEvent } from "./store.js";
 import { call, reply } from "./rpc.js";
 
@@ -139,6 +139,46 @@ function DetailsModal({ spec }) {
   </div></div>`;
 }
 
+// PAD-402 (DragonRR): a load that would change the user's own edits. Each conflict is a row
+// to tick (ticked = the file's replaces mine); the buttons answer for all of them at once or
+// for the ticked ones, and the backup tick says whether mine are saved to a file first.
+// Answers {choice, take: [ids ticked], backup} or "cancel".
+function ConflictsModal({ spec }) {
+  const items = spec.items || [];
+  const [take, setTake] = useState(new Set());
+  const [backup, setBackup] = useState(spec.backup !== false);
+  const scrim = useRef(null);
+  const answer = (choice) => reply(spec.id, choice === "cancel" ? "cancel"
+    : { choice, take: choice === "replace" ? items.map((i) => i.id) : choice === "pick" ? [...take] : [], backup });
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape" && isTopScrim(scrim.current)) { e.preventDefault(); answer("cancel"); } };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [spec.id, take, backup]);
+  const flip = (id, on) => { const next = new Set(take); if (on) next.add(id); else next.delete(id); setTake(next); };
+  const cell = "padding:5px 10px;border-bottom:1px solid var(--line);vertical-align:top";
+  const cols = spec.columns || ["Replace", "What", "Yours now", "In the file"];
+  const buttons = spec.buttons || [{ id: "cancel", label: "Cancel" }, { id: "skip", label: "Skip conflicts" },
+    { id: "replace", label: "Replace all" }, { id: "pick", label: "Replace ticked only", style: "primary" }];
+  return html`<div class="scrim" ref=${scrim}><div class="modal wide" role="alertdialog" aria-modal="true" aria-label=${spec.title}>
+    <div class="hd"><span class="icon-w"><${Icon} name="warn" cls="lg" /></span><span class="h2">${spec.title}</span></div>
+    <div class="bd"><div class="msg">${spec.message}</div>
+      <div class="row small">
+        <${Button} size="sm" kind="ghost" onClick=${() => setTake(new Set(items.map((i) => i.id)))}>Tick all<//>
+        <${Button} size="sm" kind="ghost" onClick=${() => setTake(new Set())}>Untick all<//>
+        <span class="muted">${take.size} of ${items.length} ticked to replace</span></div>
+      <div class="card" style="max-height:300px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr>${cols.map((c) => html`<th style=${"text-align:left;" + cell} class="eyebrow">${c}</th>`)}</tr></thead>
+        <tbody>${items.map((it) => html`<tr key=${it.id}>
+          <td style=${cell}><${Check} checked=${take.has(it.id)} onChange=${(v) => flip(it.id, v)} /></td>
+          <td style=${cell}>${it.what}</td><td style=${cell} class="muted">${it.mine}</td><td style=${cell}>${it.theirs}</td></tr>`)}</tbody></table></div>
+      ${spec.backup_label ? html`<${Check} checked=${backup} onChange=${setBackup} label=${spec.backup_label} />` : null}
+      ${spec.detail ? html`<div class="msg muted small">${spec.detail}</div>` : null}
+    </div>
+    <div class="ft">${buttons.map((b) => html`<${Button} kind=${b.style === "primary" ? "primary" : ""} onClick=${() => answer(b.id)}>${b.label}<//>`)}</div>
+  </div></div>`;
+}
+
 export function DialogHost() {
   const modals = useNs("modals");
   const [local, setLocal] = useState([]);
@@ -156,6 +196,7 @@ export function DialogHost() {
     ${top ? (top.kind === "file"
       ? html`<${FileBrowser} key=${top.id} spec=${top} onDone=${(v) => reply(top.id, v)} />`
       : top.kind === "details" ? html`<${DetailsModal} key=${top.id} spec=${top} />`
+      : top.kind === "conflicts" ? html`<${ConflictsModal} key=${top.id} spec=${top} />`
       : top.kind === "prompt" ? html`<${PromptModal} key=${top.id + (top.error || "")} spec=${top} />`
       : html`<${MessageModal} key=${top.id} spec=${top} />`) : null}`;
 }

@@ -4053,7 +4053,10 @@ static void shield_putback(unsigned obj)
 {
     unsigned home = shield_switch(shd.home), to = shield_field(obj, "shield_target_at", 48),
              at = shield_field(obj, "shield_pos_at", 44);
-    if (to && to != shd.ours)
+    if (shd.ours == home)                   /* the mode's own last move was the way back (its move process may not
+                                               have written the target yet: read now, it is the old one) */
+        say("shield: already on its way back %s (%s)", shield_word(shd.home), shd.putback_why);
+    else if (to && to != shd.ours)
         say("shield: not put back (%s) - the game has sent it to switch %u of its own", shd.putback_why, to);
     else if (pm_aside())
         say("shield: not put back (%s) - the game's own mode or multiball has it now", shd.putback_why);

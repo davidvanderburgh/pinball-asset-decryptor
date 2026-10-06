@@ -15,10 +15,12 @@ THE PROGRAM (``blocks.json``)::
       "name": "RAMP FRENZY",
       "seconds": 30,              the mode's clock; 0 = no clock (it runs until a block ends it)
       "ends_on_drain": true,      the ball draining ends it
-      "game_modes": "stack",      PAD-373: while it runs, the game's own modes may start ("stack"), may start
+      "game_modes": "block",      PAD-373: while it runs, the game's own modes may start ("stack"), may start
                                   and end it ("give_way": it also starts only while none runs), or cannot
-                                  start ("block": as give_way, and the ones in block_modes are held off)
-      "block_modes": [21, 23],    the title's mode ids it holds off ([] = the port's checked defaults)
+                                  start ("block", PAD-398's default: as give_way, the ones in block_modes are
+                                  held off, and the game's features see no shots but keep_rules)
+      "block_modes": [21, 23],    the title's mode ids it holds off ([] = every one the port names)
+      "keep_rules": ["Bridge"],   PAD-398: the game's features (rules, by name) that keep counting
       "vars": [{"name": "combo", "reset": "ball"}],   per player; reset "ball" | "mode" | "game"
                                   ("shared": true = the same value in every mode that names it)
       "timers": [{"name": "window"}],  counts down in milliseconds (PAD-377)
@@ -296,8 +298,10 @@ def normalize(data):
         out["seconds"] = 30
     out["ends_on_drain"] = bool(out.get("ends_on_drain", True))
     out["screen"] = bool(out.get("screen", False))
-    if out.get("game_modes") not in GAME_MODES:          # PAD-373
-        out["game_modes"] = "stack"
+    if out.get("game_modes") not in GAME_MODES:          # PAD-373; PAD-398: our modes run alone by default
+        out["game_modes"] = "block"
+    keep = out.get("keep_rules") if isinstance(out.get("keep_rules"), list) else []      # PAD-398
+    out["keep_rules"] = [r.strip() for r in keep if isinstance(r, str) and r.strip() and "," not in r][:32]
     ids = out.get("block_modes") if isinstance(out.get("block_modes"), list) else []
     out["block_modes"] = sorted({i for i in ids if isinstance(i, int) and not isinstance(i, bool)
                                  and 0 <= i <= BLOCK_ID_MAX})
@@ -1366,6 +1370,9 @@ def to_c(program, slug):
     L.append("UNUSED static const unsigned char BLOCK_IDS[%d] = {%s};   /* the game's mode ids; none = the port's defaults */"
              % (max(1, len(ids)), ", ".join(str(i) for i in ids) or "0"))
     L.append("#define BLOCK_N          %d" % len(ids))
+    L.append("/* PAD-398: the game's features (its rules, by the port's names) that keep counting while it blocks;")
+    L.append(" * every other one sees no shots. */")
+    L.append("#define KEEP_RULES       %s" % _c_str(", ".join(program.get("keep_rules") or [])))
     L.append("")
     L.append("/* The screen a build added for this mode (its folder is \"%s\"). Not there = no screen. */" % slug)
     L.append('#define SCREEN_NODE  "PadMode_%s_Screen"' % slug)
@@ -1640,6 +1647,7 @@ def to_c(program, slug):
     L.append("    if (DISPLAY_PRIORITY) pm_display_priority(DISPLAY_PRIORITY);   /* first: before the screen */")
     L.append("    if (GAME_MODES == 2) {            /* the game's modes it holds off cannot start while it runs */")
     L.append("        pm_block_list(BLOCK_IDS, BLOCK_N);")
+    L.append("        pm_block_rules_keep_names(KEEP_RULES);")
     L.append("        if (pm_block_game_modes(1))")
     L.append("            pm_log(\"isolated: the game's modes it holds off cannot start while it runs (any other "
              "starting ends it)\");")

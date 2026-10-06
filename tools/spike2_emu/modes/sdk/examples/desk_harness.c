@@ -424,6 +424,21 @@ int pm_block_list(const unsigned char *ids, int n)
     printf("%s %s\n", n ? "" : " defaults", current && current->name ? current->name : "?");
     return 1;
 }
+/* PAD-398: "KEEPRULES <n> ... <mode>" when a mode says which of the game's rules go on counting while it blocks */
+int pm_block_rules_keep(const unsigned char *ns, int n)
+{
+    int i;
+    printf("%6lu KEEPRULES", now_ms);
+    for (i = 0; i < n; i++) printf(" %u", ns[i]);
+    printf("%s %s\n", n ? "" : " none", current && current->name ? current->name : "?");
+    return 1;
+}
+int pm_block_rules_keep_names(const char *names)
+{
+    printf("%6lu KEEPRULES_NAMED %s %s\n", now_ms, names && names[0] ? names : "none",
+           current && current->name ? current->name : "?");
+    return 1;
+}
 void pm_running_name(const char *name) { (void)name; }   /* PAD-373: a blocks mode names itself */
 const char *pm_stock_mode_what(unsigned kind)
 {

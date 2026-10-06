@@ -2990,7 +2990,7 @@ int pm_aside(void)
  * block_name_<id>`. The runtime puts a veto on each named start (several C++ modes may share one: the object
  * tells them apart; a start with no object is one mode's own) and, while a mode of ours that asked runs, refuses
  * the start for the ids in that mode's list (`pm_block_list`, a mode file's `block_modes`) or, when it gave none,
- * the port's checked defaults (`text block_default <ids>`). A refused start never runs: the mode never begins,
+ * every one the port names (PAD-398). A refused start never runs: the mode never begins,
  * and the rule that asked carries on. A multiball is never named (balls in a lock, a magnet: PAD-353). Ids are
  * 0-127 (D&D's map modes run to 70, Venom's to 91). */
 #define BLOCK_IDS 128
@@ -3031,20 +3031,14 @@ static void bm_text(const unsigned *m, char *out, unsigned cap)
     if (!n) pm_snprintf(out, cap, "none");
 }
 
-/* `text block_default 21 23`: the ids a mode that lists none holds off, kept to the named ones */
+/* PAD-398 (David, 2026-10-05: "when our custom modes start, we should ONLY be in those modes unless explicitly
+ * noted"): a mode that lists none holds off EVERY mode of the game's the port names - each one proven refused in
+ * the emulator on every build (PAD-363's library check) - not only the port's `text block_default`, which is
+ * kept in the ports for what it was (the first two checked on Godzilla) and no longer read. */
 static void block_defaults(unsigned *m)
 {
-    const char *s = pm_port_text("block_default");
     int i;
-    for (i = 0; i < BLOCK_WORDS; i++) m[i] = 0;
-    while (s && *s) {
-        unsigned v = 0;
-        int digits = 0;
-        while (*s == ' ' || *s == ',' || *s == '\t') s++;
-        while (*s >= '0' && *s <= '9') v = v * 10 + (unsigned)(*s++ - '0'), digits++;
-        if (!digits) break;
-        if (bm_has(block_named, v)) bm_set(m, v);
-    }
+    for (i = 0; i < BLOCK_WORDS; i++) m[i] = block_named[i];
 }
 
 static int on_block_start(unsigned *r, unsigned hook_n)
@@ -3076,6 +3070,65 @@ int pm_block_list(const unsigned char *ids, int n)
     return 1;
 }
 
+/* PAD-398: the game's rules a mode lets go on counting while it blocks (its keep list: the indices of the port's
+ * `block_rule_<n>`), kept per mode of ours - set from the mode's own files when they are read, so the examples'
+ * code needs no new call. Every other rule the port names sees no shot while the mode blocks. */
+#define KEEP_MODES 32
+static const struct pm_mode *keep_of[KEEP_MODES];
+static unsigned keep_mask_of[KEEP_MODES];
+static unsigned block_rules_keep;              /* the blocking mode's, while it blocks */
+
+int pm_block_rules_keep(const unsigned char *ns, int n)
+{
+    int i, k;
+    unsigned m = 0;
+    if (!(can & PM_CAN_BLOCK_GAME) || !current) return 0;
+    for (i = 0; ns && i < n; i++)
+        if (ns[i] < 32) m |= 1u << ns[i];
+    for (k = 0; k < KEEP_MODES && keep_of[k] && keep_of[k] != current; k++) ;
+    if (k == KEEP_MODES) return 0;
+    keep_of[k] = current;
+    keep_mask_of[k] = m;
+    return 1;
+}
+
+/* the same by the port's names (`text block_rule_name_<n>`, any case), comma-separated: a blocks mode's C is
+ * written without knowing which game it is for, and a name holds from one build of a title to the next */
+int pm_block_rules_keep_names(const char *names)
+{
+    unsigned char ns[32];
+    char want[48], key[28];
+    const char *s = names, *t;
+    int n = 0, i, k;
+    while (s && *s) {
+        while (*s == ' ' || *s == ',') s++;
+        for (k = 0; *s && *s != ',' && k + 1 < (int)sizeof want; s++) want[k++] = *s;
+        while (k && want[k - 1] == ' ') k--;
+        want[k] = 0;
+        while (*s && *s != ',') s++;
+        if (!k) continue;
+        for (i = 0; i < 32 && n < 32; i++) {
+            pm_snprintf(key, sizeof key, "block_rule_name_%d", i);
+            t = pm_port_text(key);
+            for (k = 0; t && want[k] && t[k] && ((want[k] | 0x20) == (t[k] | 0x20)); k++) ;
+            if (t && !want[k] && !t[k]) { ns[n++] = (unsigned char)i; break; }
+        }
+        if (i == 32) say("block: no rule of the game's is called \"%s\" - it cannot be kept counting", want);
+    }
+    return pm_block_rules_keep(ns, n);
+}
+
+static unsigned keep_mask(const struct pm_mode *m)
+{
+    int k;
+    for (k = 0; k < KEEP_MODES && keep_of[k]; k++)
+        if (keep_of[k] == m) return keep_mask_of[k];
+    return 0;
+}
+
+static int block_rules_on;                   /* how many rules are hooked (the rules section, below) */
+static int block_rules_said;                 /* PAD-398: said once a hold, not once a rule a shot */
+
 int pm_block_game_modes(int on)
 {
     char ids[200];
@@ -3095,11 +3148,14 @@ int pm_block_game_modes(int on)
     else block_defaults(block_mask);
     for (i = 0; i < BLOCK_WORDS; i++) block_said[i] = 0;
     block_battle_said = 0;
+    block_rules_said = 0;
+    block_rules_keep = keep_mask(current);
     pm_snprintf(block_who, sizeof block_who, "%s", mode_name(current, "a mode"));
     bm_text(block_mask, ids, sizeof ids);
-    say("block: %s keeps the game's modes %s (%s) from starting while it runs%s", block_who, ids,
-        own ? "its own list" : "the port's checked defaults",
-        block_battles ? ", and the battle rule from lighting a battle or opening its select screen" : "");
+    say("block: %s keeps the game's modes %s (%s) from starting while it runs%s; %d of the game's rules see no "
+        "shots%s", block_who, ids, own ? "its own list" : "every one the port names",
+        block_battles ? ", and the battle rule from lighting a battle or opening its select screen" : "",
+        block_rules_on - __builtin_popcount(block_rules_keep), block_rules_keep ? " (it keeps the others counting)" : "");
     return 1;
 }
 
@@ -3132,9 +3188,7 @@ static void on_battle_shots(unsigned *r)
  * block_rule_name_<n>`), each shown the shot without those bits while a mode of ours blocks - as the battle
  * rule's is (above). The bits still reach every other rule (Godzilla's pops score through the saucer rule, so
  * they score nothing while a mode blocks; emulator, 2026-10-04). */
-#define BLOCK_RULES 8
-static int block_rules_on;                   /* how many are hooked */
-static unsigned block_rule_said[BLOCK_RULES];
+#define BLOCK_RULES 32                       /* PAD-398: every rule of the game's (Godzilla names 24) */
 
 static void on_rule_shots(unsigned *r, unsigned n)
 {
@@ -3142,15 +3196,18 @@ static void on_rule_shots(unsigned *r, unsigned n)
     unsigned lo, hi;
     const char *nm;
     if (n >= BLOCK_RULES || !block_owner || running != block_owner || !pm_in_game()) return;
+    if (block_rules_keep & (1u << n)) return;    /* PAD-398: the mode keeps this one counting */
     pm_snprintf(key, sizeof key, "block_rule_lo_%u", n);
-    lo = (unsigned)pm_port_value(key, 0);
+    lo = (unsigned)pm_port_value(key, 0xffffffffL);  /* PAD-398: no mask lines = every bit */
     pm_snprintf(key, sizeof key, "block_rule_hi_%u", n);
-    hi = (unsigned)pm_port_value(key, 0);
+    hi = (unsigned)pm_port_value(key, 0xffffffffL);
     if (!(r[2] & lo) && !(r[3] & hi)) return;
-    if (block_rule_said[n]++ < 10) {
+    if (!block_rules_said++) {
         pm_snprintf(key, sizeof key, "block_rule_name_%u", n);
         nm = pm_port_text(key);
-        say("block: the game's %s did not see shot 0x%08x_%08x - %s is running", nm ? nm : "rule", r[3], r[2], block_who);
+        say("block: the game's rules see no shots while %s runs (the first: 0x%08x_%08x, kept from %s and every other "
+            "rule the port names%s)", block_who, r[3], r[2], nm ? nm : "a rule",
+            block_rules_keep ? " but the ones it keeps counting" : "");
     }
     r[2] &= ~lo;
     r[3] &= ~hi;
@@ -3179,8 +3236,8 @@ static void block_tick(void)
 /* from the constructor: a veto on each start the port names (once per distinct start), each id's object */
 static void block_arm(void)
 {
-    char name[24], ids[200], dflt[200];
-    unsigned id, a, d[BLOCK_WORDS];
+    char name[24], ids[200];
+    unsigned id, a;
     int i, any = 0;
     for (id = 0; id < BLOCK_IDS && !any; id++) {
         pm_snprintf(name, sizeof name, "block_start_%u", id);
@@ -3220,7 +3277,7 @@ static void block_arm(void)
         pm_snprintf(name, sizeof name, "block_rule_%d", i);
         pm_snprintf(lo, sizeof lo, "block_rule_lo_%d", i);
         pm_snprintf(hi, sizeof hi, "block_rule_hi_%d", i);
-        if (!fn(name) || !(pm_port_value(lo, 0) | pm_port_value(hi, 0))) continue;
+        if (!fn(name) || !(pm_port_value(lo, 0xffffffffL) | pm_port_value(hi, 0xffffffffL))) continue;
         if (hook_n(fn(name), on_rule_shots, (unsigned)i)) block_rules_on++;
         else say("block: %s (0x%08x) could not be hooked", name, fn(name));
     }
@@ -3230,11 +3287,9 @@ static void block_arm(void)
     }
     can |= PM_CAN_BLOCK_GAME;
     bm_text(block_named, ids, sizeof ids);
-    block_defaults(d);
-    bm_text(d, dflt, sizeof dflt);
-    say("block: on - a mode may keep %d of the game's modes from starting: %s (%d start(s) hooked; checked "
-        "defaults %s)%s; %d other rule(s) shown fewer shots while it blocks", bm_count(block_named), ids,
-        block_n_hooked, dflt,
+    say("block: on - a mode keeps %d of the game's modes from starting (all of them unless it lists its own): %s "
+        "(%d start(s) hooked)%s; %d of the game's rules see no shots while it blocks (unless it keeps them)",
+        bm_count(block_named), ids, block_n_hooked,
         block_battles ? "; the battle rule's shot handler is hooked (no battle lit, no select screen while it blocks)" : "",
         block_rules_on);
 }

@@ -68,6 +68,7 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Mecha exit bottom", 0x10000000000ull }, { "Left spinner", 0x200ull },
     { "Top spinner", 0x2000ull }, { "Shield ramp spinner", 0x20000ull },
     { "Action button", 0x1000000000000000ull },         /* a `switch` line of the port (PAD-228) */
+    { "Trough", 0x8000000000000000ull },                /* the trough's switches (PAD-416): a drain */
 };
 #define N_SHOTS (int)(sizeof SHOTS / sizeof SHOTS[0])
 static const struct { const char *name; int id; } EVENTS[] = {

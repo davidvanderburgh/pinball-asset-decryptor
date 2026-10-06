@@ -686,6 +686,16 @@ value switch_polarity_at    28
 switch 34   0x1000000000000000 Action button
 switch 60   0x2000000000000000 Left flipper button
 switch 59   0x4000000000000000 Right flipper button
+# PAD-416: the trough's six positions as one shot, "Trough". A ball draining home closes one of them (and the stack
+# rolling down after an eject closes the next), so a mode that keeps a ball save of its own knows the moment its ball
+# drained - the framework's count of the balls in play does not move while the save serves it back (measured: it
+# stayed 1 through a saved drain). GODZILLA ANGRY sends its locked balls into the multiball on it.
+switch 66   0x8000000000000000 Trough
+switch 67   0x8000000000000000 Trough
+switch 68   0x8000000000000000 Trough
+switch 69   0x8000000000000000 Trough
+switch 70   0x8000000000000000 Trough
+switch 71   0x8000000000000000 Trough
 # the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
 # a mode that lights its shots lights the button
 lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front

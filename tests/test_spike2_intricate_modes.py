@@ -1756,15 +1756,20 @@ def test_godzilla_angry_the_meter_counts_a_quarter_at_a_time_on_the_award_line(h
 
 
 @pytest.mark.parametrize("busy,on,off", [("balls", 2, 1), ("multiball", 1, 0)], ids=["two_balls", "games_multiball"])
-def test_godzilla_angry_rage_does_not_count_in_a_multiball(harness, busy, on, off):
+def test_godzilla_angry_rage_counts_quietly_in_a_multiball(harness, busy, on, off):
+    """PAD-416, David: "make sure the rage meter accumulates throughout the game (even during other modes)". A
+    multiball's hits count too, quietly: the meter off the glass, a level paid without its note."""
     out = play(harness, "secs", 1, busy, on, "secs", 1, *(["raw", "0x1"] * 150), "secs", 1, busy, off, "secs", 1,
                *(["raw", "0x1"] * 100), "secs", 1)
+    over = _at(out, ">> %s %s" % ("balls in play" if busy == "balls" else busy, off))
     level = _at(out, "[GODZILLA ANGRY] RAGE LEVEL 1 of 5")
-    assert level is not None and level > _at(out, ">> %s %s" % ("balls in play" if busy == "balls" else busy, off))
-    assert not has(out, GA, "RAGE LEVEL 2")
+    assert level is not None and level < over
+    assert has(out, GA, "(in a multiball: said quietly)")
+    assert not [ln for ln in lines(out, GA) if "MORE FOR RAGE" in ln and int(ln.split()[0]) < over]
     hidden = [t for t in _hid(out, "godzilla_angry") if t > _at(out, ">> %s %s" % (
         "balls in play" if busy == "balls" else busy, on))]
     assert hidden, "the meter stays on the glass during a multiball"
+    assert _at(out, "[GODZILLA ANGRY] RAGE LEVEL 2 of 5") > over
 
 
 def test_godzilla_angry_rage_does_not_count_after_a_tilt_until_the_next_ball(harness):
@@ -2196,3 +2201,26 @@ def test_every_hit_of_a_running_mode_strobes_its_insert_and_climbs_the_hit_sound
     assert [s for _t, s in strobes] == ["80000000", "100000000", "100000"]
     assert [n for _t, n in sounds] == ["1", "2", "3"]
     assert all(int(t) > started for t, _s in strobes + sounds)
+
+
+@pytest.mark.parametrize("locks,balls", [(1, 2), (3, 3)])
+def test_godzilla_angry_a_drain_with_locks_starts_the_multiball(harness, locks, balls):
+    """PAD-416, David: "when you drain a ball if there are locks, it should NOT end the ball ... go straight to the
+    multi-ball ... count of how many I locked". From the first lock the chase keeps a ball save; the trough's switch
+    (the port's "Trough") is the drain, and the locked balls break loose - two at least, a multiball."""
+    shots = {1: ["shot", "Godzilla target", "secs", 1],
+             3: GA_CHASE[4:28]}[locks]
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 1, *shots, "secs", 11, "shot", "Trough", "secs", 2)
+    assert has(out, GA, "LOCK %d at" % locks)
+    saved = [int(t) for t in re.findall(r"^\s*(\d+) BALL SAVE 15 s$", out, re.M)]
+    drain = _at(out, "[GODZILLA ANGRY] a drain at")
+    assert saved and min(saved) < drain                                   # a save of its own from the first lock
+    assert has(out, GA, "with %d lock(s): the locked balls break loose, a %d-ball multiball" % (locks, balls))
+    assert _at(out, "MULTIBALL %d balls, save 15 s" % balls) == drain
+    assert not has(out, GA, "END (")
+
+
+def test_godzilla_angry_a_drain_without_a_lock_is_not_a_multiball(harness):
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 7, "shot", "Trough", "secs", 1, "ball_end", "secs", 1)
+    assert not has(out, GA, "a drain at") and "MULTIBALL" not in out
+    assert has(out, GA, "END (ball ended): the chase, 0 lock(s)")

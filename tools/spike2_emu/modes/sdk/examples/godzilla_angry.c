@@ -7,9 +7,11 @@
  *
  *   THE RAGE   Every playfield switch hit (the game's 0x1 dispatch) fills the RAGE meter, for the player up,
  *              all game. Five levels: 100, 125, 150, 175 and 200 hits (EHoH's 150..250, scaled to Godzilla's
- *              one pop bumper). Each level pays 1,000,000 more 500,000 a level, with a roar. Nothing counts
- *              during a multiball (two balls in play, or the game's own), during the mode itself, or after a
- *              tilt. The meter is on the glass all the time: a gauge on the right edge (RAGE n/5), the award
+ *              one pop bumper). Each level pays 1,000,000 more 500,000 a level, with a roar. It counts through
+ *              every other mode and multiball, ours and the game's (PAD-416, David: "make sure the rage meter
+ *              accumulates throughout the game (even during other modes)"; it no longer pauses in a multiball):
+ *              only the mode itself and a tilt stop it. In a multiball it counts quietly - the meter is off the
+ *              glass, a level pays without its note - and GODZILLA IS ANGRY is said once the multiball is over. The meter is on the glass all the time: a gauge on the right edge (RAGE n/5), the award
  *              line every quarter of a level ("40 MORE FOR RAGE 3"). Level 5 lights it: GODZILLA IS ANGRY,
  *              and the BUILDING insert pulses red.
  *   START      The BUILDING while it is lit (no other mode of ours, none of the game's, one ball in play):
@@ -30,8 +32,11 @@
  *   FAILING STILL PAYS (EHoH: the balls you locked become a smaller multiball): a place's clock running out
  *              ends the chase, and the locks made become a multiball of locks + 1 balls (2 to 6) scoring
  *              the JACKPOT built. With no lock yet, the trail goes cold: the meter stays full and the
- *              Building starts the chase again. A drain ends the chase too, and the place and its locks wait
- *              for the next ball: the Building picks the trail up there.
+ *              Building starts the chase again. A DRAIN with locks made does not end the ball (PAD-416,
+ *              David: "it should continue the mode since I have locked balls"): from the first lock the chase
+ *              keeps a ball save of its own running, and the drain sends the locked balls straight into the
+ *              multiball, as many as were locked (a multiball is two at least). A drain with no lock yet
+ *              ends the chase, and the place waits for the next ball: the Building picks the trail up there.
  *   MULTIBALL  ANGRY MULTIBALL (6 balls when BABY was found, else the locks + 1), 15 s ball save. The
  *              ramps, the Building and the Big loop are lit; one of them is BABY (it moves every 10 s and
  *              when hit): BABY scores the JACKPOT times the multiplier, any other lit shot pays 500,000 and
@@ -79,6 +84,8 @@
 #define SUPER_PER_SWITCH   10000ull
 #define MB_BALLS_FULL      6
 #define MB_SAVE_S          15
+#define LOCK_SAVE_S        15             /* PAD-416: from the first lock, a ball save ... */
+#define LOCK_SAVE_EVERY_MS 10000          /* ... asked again every 10 s, so it never runs out mid-chase */
 #define END_GRACE_MS       3000
 #define ONE_BALL_MS        2000
 #define BABY_MOVES_MS      10000
@@ -119,9 +126,10 @@ static const char *says(const char *shot)
 }
 
 /* ---- state ----------------------------------------------------------------------------------- */
-static uint64_t start_mask, jp_mask[N_JP];
+static uint64_t start_mask, jp_mask[N_JP], trough_mask;   /* trough_mask: PAD-416, the port's "Trough" */
 static unsigned hits[5], level[5], plays[5];         /* the RAGE meter, per player */
 static int ready[5], tilted, meter_wait;             /* meter_wait: hidden from a drain to the next switch */
+static int angry_owed[5];                            /* PAD-416: GODZILLA IS ANGRY reached in a multiball, said after it */
 static int mb_now;                                   /* a multiball is on (asked ten times a second) */
 static unsigned place_at[5], locks_at[5];            /* a chase left by a drain: where, and its locks */
 static uint64_t jackpot_at[5], super_at[5];
@@ -138,6 +146,7 @@ static struct {
     unsigned player, place, locks, made, mult, baby, babies, balls;
     uint64_t made_mask, jackpot, super, total;
     unsigned long started, baby_at, one_ball_since;
+    unsigned long lock_save_at;            /* PAD-416: when the chase last asked for its locks' ball save, 0 = never */
     struct kit_timer clock;
 } run;
 
@@ -219,10 +228,10 @@ static int multiball_on(void)
     return kit_stock_busy(PM_STOCK_MULTIBALL, MODE_NAME, &what);
 }
 
-/* the meter counts now: a game, one ball, no tilt, the mode not running */
+/* the meter counts now: a game, no tilt, the mode not running (PAD-416: every other mode and multiball too) */
 static int meter_counts(void)
 {
-    return pm_in_game() && !tilted && !run.on && !mb_now;
+    return pm_in_game() && !tilted && !run.on;
 }
 
 static void show_fx_if_free(const char *name, const struct kit_fx_step *steps, int n)
@@ -240,7 +249,9 @@ static void rage_switch(unsigned p)
     hits[p]++;
     q1 = hits[p] * 4 / need;
     if (hits[p] < need) {
-        if (q1 != q0) {
+        if (q1 != q0 && mb_now) pm_log("rage %u: %u of %u switch hits (player %u, in a multiball)", level[p] + 1, hits[p],
+                                       need, p);
+        else if (q1 != q0) {
             pm_log("rage %u: %u of %u switch hits (player %u)", level[p] + 1, hits[p], need, p);
             pm_snprintf(line, sizeof line, "%u MORE FOR RAGE %u", need - hits[p], level[p] + 1);
             kit_hud_note(&hud, 1500, line, "GODZILLA IS GETTING ANGRY");
@@ -251,8 +262,15 @@ static void rage_switch(unsigned p)
         uint64_t asked = LEVEL_AWARD + LEVEL_AWARD_STEP * level[p], got = pm_score_add(p, asked);
         level[p]++;
         hits[p] = 0;
-        pm_log("RAGE LEVEL %u of %d (player %u): +%llu", level[p], LEVELS, p, (unsigned long long)got);
-        if (level[p] >= LEVELS) {
+        pm_log("RAGE LEVEL %u of %d (player %u): +%llu%s", level[p], LEVELS, p, (unsigned long long)got,
+               mb_now ? " (in a multiball: said quietly)" : "");
+        if (level[p] >= LEVELS && mb_now) {
+            ready[p] = 1;
+            angry_owed[p] = 1;
+            pm_log("GODZILLA IS ANGRY for player %u, in a multiball: said when it is over", p);
+        } else if (mb_now) {
+            /* a level in a multiball: paid, its note and roar left out (the multiball has the glass and the sound) */
+        } else if (level[p] >= LEVELS) {
             ready[p] = 1;
             pm_log("GODZILLA IS ANGRY for player %u: the %s starts the chase", p, START_SHOT);
             kit_hud_note(&hud, 3500, "GODZILLA IS ANGRY!", "SHOOT THE BUILDING");
@@ -278,6 +296,13 @@ static void meter_tick(void)
     if (run.on || !pm_in_game() || p < 1 || p > 4 || meter_wait || tilted || mb_now) {
         kit_hud_meter(&hud, -1, 0);
         return;
+    }
+    if (angry_owed[p] && ready[p]) {               /* PAD-416: reached in a multiball, said now it is over */
+        angry_owed[p] = 0;
+        pm_log("GODZILLA IS ANGRY for player %u (reached in the multiball): the %s starts the chase", p, START_SHOT);
+        kit_hud_note(&hud, 3500, "GODZILLA IS ANGRY!", "SHOOT THE BUILDING");
+        sound(CUE_ANGRY);
+        show_fx_if_free("angry", SHOW_ANGRY, N_SHOW(SHOW_ANGRY));
     }
     kit_hud_pips(&hud, 0);
     n_pips = hud.n_pips ? hud.n_pips : KIT_HUD_PIPS;    /* as many as the card was built with */
@@ -448,6 +473,7 @@ static int start(const char *why)
     run.mult = 1;
     run.babies = 0;
     run.started = pm_ms();
+    run.lock_save_at = 0;
     kit_hud_meter(&hud, -1, 0);
     enter_place(place_at[p]);
     if (pm_ball_save(START_SAVE_S)) pm_log("a %d s ball save", START_SAVE_S);
@@ -575,6 +601,26 @@ static void end(const char *why)
            (unsigned long long)pm_score(p));
 }
 
+/* PAD-416: while the chase has locks, a ball save of its own keeps a drain from ending the ball */
+static void lock_save_tick(void)
+{
+    if (!run.locks || (run.lock_save_at && pm_ms() - run.lock_save_at < LOCK_SAVE_EVERY_MS)) return;
+    run.lock_save_at = pm_ms() ? pm_ms() : 1;
+    if (!pm_ball_save(LOCK_SAVE_S)) pm_log("the locks' ball save was refused: a drain ends the chase");
+}
+
+/* PAD-416: the ball drained home (the trough's switch, the port's "Trough" shot) while the chase had locks: its ball
+ * save serves one back, and the locked balls come with it - ANGRY MULTIBALL with as many balls as were locked */
+static void drained_with_locks(void)
+{
+    pm_log("a drain at %s with %u lock(s): the locked balls break loose, a %u-ball multiball",
+           run.place < N_PLACES ? PLACE[run.place].place : "BABY", run.locks, run.locks < 2 ? 2 : run.locks);
+    kit_hud_award(&hud, 3000, "THE LOCKS BREAK LOOSE", "ANGRY MULTIBALL");
+    sound(CUE_LOCK);
+    start_multiball(run.locks, "a drain with locks");
+    show();
+}
+
 /* a place's clock ran out: the locks become a multiball (EHoH: failing still pays), or the trail goes cold */
 static void time_out(void)
 {
@@ -671,6 +717,10 @@ static void on_shot(uint64_t shot)
         return;
     }
     if (p != run.player) return;
+    if (run.phase == PHASE_CHASE && trough_mask && (shot & trough_mask)) {   /* PAD-416: a drain */
+        if (run.locks) drained_with_locks();
+        return;
+    }
     if (run.phase == PHASE_CHASE) chase_shot(shot);
     else mb_shot(shot);
 }
@@ -684,6 +734,8 @@ static void on_init(void)
         jp_mask[i] = pm_shot(JP[i]);
         if (!jp_mask[i]) pm_log("this port has no \"%s\"", JP[i]);
     }
+    trough_mask = pm_shot("Trough");                /* PAD-416: a drain, the moment it happens */
+    if (!trough_mask) pm_log("this port has no \"Trough\": a drain with locks ends the chase (the locks wait)");
     rnd ^= (unsigned)pm_ms();
     pa_load(&own);
     pm_log("ready on %s %s: every switch hit fills the RAGE meter (%d levels from %d hits); %s (0x%llx) starts "
@@ -724,8 +776,9 @@ static void run_tick(void)
     if (run.phase == PHASE_CHASE) {
         if (kit_timer_tick(&run.clock)) {
             time_out();
-            if (!run.on) return;
+            if (!run.on || run.phase != PHASE_CHASE) return;
         }
+        lock_save_tick();
         show();
         return;
     }
@@ -760,7 +813,7 @@ static void on_tick(void)
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) {
             hits[p] = level[p] = plays[p] = 0;
-            ready[p] = 0;
+            ready[p] = angry_owed[p] = 0;
             forget_trail(p);
         }
         tilted = meter_wait = 0;

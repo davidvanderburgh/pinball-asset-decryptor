@@ -244,6 +244,22 @@ def _here(assets_dir, rel):
     return os.path.isfile(os.path.join(assets_dir, *rel.split("/")))
 
 
+def _other_game_folder(assets_dir, rel):
+    """The one picture here of *rel*'s path in another game folder (``images/godzilla_pro/x``
+    of the file is ``images/godzilla_le/x`` here, PAD-401), or None."""
+    parts = rel.split("/")
+    if len(parts) < 3 or parts[0] != "images" or parts[1] == "scene_textures":
+        return None
+    try:
+        dirs = os.listdir(os.path.join(assets_dir, "images"))
+    except OSError:
+        return None
+    same = ["/".join(["images", d] + parts[2:]) for d in sorted(dirs)
+            if d != parts[1] and d != "scene_textures"]
+    same = [h for h in same if _here(assets_dir, h)]
+    return same[0] if len(same) == 1 else None
+
+
 def localise(assets_dir, extras, trees):
     """*extras* (:func:`read_extras`) with its replaced pictures named as this project names
     them (PAD-385).  A picture this project has under the file's name keeps it.  One it does
@@ -252,21 +268,26 @@ def localise(assets_dir, extras, trees):
     when they draw more than one.  A picture here that two of the file's pictures lead to, or
     that the file names itself, goes to neither by lookup.  A picture with nothing found (a
     file saved before PAD-385, a scene this card does not have) keeps the file's name and is
-    left out at load, as before."""
+    left out at load, as before.  A picture no scene draws (a boot screen, a backglass logo) is
+    found in the other game folder here (le/pro folders matched, PAD-401)."""
     pics = extras.get("pictures") or {}
-    if not pics or not trees:
+    if not pics:
         return extras
-    find = scene_edit.card_finder(trees.keys())
+    find = scene_edit.card_finder((trees or {}).keys())
     found = {}
     for rel, p in pics.items():
         if _here(assets_dir, rel):
+            continue
+        other = _other_game_folder(assets_dir, rel)
+        if other:
+            found[rel] = {other}
             continue
         heres = set()
         for d in p.get("drawn") or ():
             if not (isinstance(d, list) and len(d) in (2, 3) and isinstance(d[0], str)):
                 continue
             card = find(d[0])
-            img = _drawn_image(trees.get(card), *d[1:]) if card else None
+            img = _drawn_image((trees or {}).get(card), *d[1:]) if card else None
             here = scene_edit._safe_rel("images/" + img) if img else None
             if here and _here(assets_dir, here):
                 heres.add(here)
@@ -424,7 +445,7 @@ def text_to_save(assets_dir, cards, trees):
     return out
 
 
-def match_text(saved, rows, trees):
+def match_text(saved, rows, trees, already=None):
     """Pair each saved text edit with a row of this project's manifest *rows*
     (:func:`text_manifest.load`) of the same scene or program (le/pro folders matched):
 
@@ -434,7 +455,13 @@ def match_text(saved, rows, trees):
 
     2 and 3 find a line on a card that was built with other words there (the file saved from
     a project extracted from a card built with changes).  Returns ``(pairs, missing)``:
-    ``[(row, new)]`` and the saved edits with no row here."""
+    ``[(row, new)]`` and the saved edits with no row here.
+
+    An edit whose new words a line of its scene or program already shows here, when no line
+    here has its original words or only one the game no longer reads (``unused``: the build
+    moved the line's longer words elsewhere), is already on this card (PAD-401: a modder's
+    own file loaded into the project of the card built from it): it goes to the *already*
+    list when one is given, and is neither paired nor missing."""
     from ...core import text_manifest
     find = scene_edit.card_finder({r["path"] for r in rows})
     near = _neighbours(rows)
@@ -442,6 +469,10 @@ def match_text(saved, rows, trees):
     for r in rows:
         free.setdefault((r["path"], r["original"]), []).append(r)
         between.setdefault((r["path"],) + tuple(near[id(r)]), []).append(r)
+    shows = {}
+    for r in rows:
+        if not r.get("unused"):
+            shows.setdefault((r["path"], (r.get("replacement") or r["original"]).rstrip()), r)
     taken = set()
 
     def first(cands):
@@ -450,6 +481,11 @@ def match_text(saved, rows, trees):
     pairs, missing = [], []
     for e in saved:
         path = find(e["path"])
+        if (already is not None and path and (path, e["new"].rstrip()) in shows
+                and not [r for r in free.get((path, e["original"])) or ()
+                         if not r.get("unused")]):
+            already.append(e)
+            continue
         got = first(free.get((path, e["original"]))) if path else None
         if got is None and path and e.get("nodes"):
             man = (trees or {}).get(path)

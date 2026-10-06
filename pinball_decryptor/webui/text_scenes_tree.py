@@ -2131,7 +2131,7 @@ class TreeEditMixin:
         from . import text_rules as R
         images = self._flush_images()
         pics, gone, more = [], [], False
-        tfits, tmissing, tlong = [], [], 0
+        tfits, tmissing, tlong, thave = [], [], 0, []
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -2144,12 +2144,14 @@ class TreeEditMixin:
             more = scene_share.has_extras(extras)
             # PAD-387: the Text tab's edits it carries, on this card's lines, when they fit
             text_tab, rows = (self._text_rows_here() if extras["text"] else (None, []))
-            tpairs, tmissing = (scene_share.match_text(extras["text"], rows, self._load_trees())
+            # PAD-401: and the ones this card already shows (its own file, its built card)
+            tpairs, tmissing = (scene_share.match_text(extras["text"], rows, self._load_trees(),
+                                                       already=thave)
                                 if extras["text"] else ([], []))
             tfits = [(r, new) for r, new in tpairs if R.row_len(r, new) <= R.row_budget(r)]
             tlong = len(tpairs) - len(tfits)
             tclash = [r for r, new in tfits if R.is_edited(r) and r["replacement"] != new]
-            if not got and not more and not tfits:
+            if not got and not more and not tfits and not thave:
                 compat.messagebox.showinfo(
                     "Load scene edits", "None of the %d scene%s in %s %s on this card, so "
                     "nothing was loaded." % (len(scenes), "" if len(scenes) == 1 else "s",
@@ -2211,6 +2213,10 @@ class TreeEditMixin:
         if tfits:
             words = words[:-1] + " and %d text edit%s." % (len(tfits),
                                                            "" if len(tfits) == 1 else "s")
+        if thave:
+            words += (" %d text edit%s in the file %s already on this card."
+                      % (len(thave), "" if len(thave) == 1 else "s",
+                         "is" if len(thave) == 1 else "are"))
         if tmissing:
             words += (" %d text edit%s in the file %s for words not on this card and %s "
                       "left out." % (len(tmissing), "" if len(tmissing) == 1 else "s",

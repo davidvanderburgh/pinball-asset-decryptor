@@ -337,6 +337,25 @@ def test_localise_takes_only_what_the_nodes_name_alone(tmp_path):
                                             "junk", [LE]]}) == ["images/scene_textures/m.png"]
 
 
+def test_localise_finds_a_logo_in_the_other_game_folder(tmp_path):
+    """PAD-401: a Pro project's backglass logos load into a Premium/LE project, which names
+    them under images/godzilla_le/; no scene draws them, so no tree is needed."""
+    from pinball_decryptor.plugins.stern import scene_share
+    logo = "assets/lcd/GameLogos/backglass_pro.png"
+    b = _pic_proj(tmp_path, "le", "godzilla_le/" + logo, "boot_screen/SternLogo.png")
+
+    def pics(*rels):
+        ex = {"pictures": {r: {"file": "replaced/%d/x.png" % i} for i, r in enumerate(rels)},
+              "added": {}, "overlay": None}
+        return sorted(scene_share.localise(b, ex, None)["pictures"])
+    assert pics("images/godzilla_pro/" + logo) == ["images/godzilla_le/" + logo]
+    # what this project has under the file's name, and what it has nowhere, keep their names
+    assert pics("images/boot_screen/SternLogo.png", "images/godzilla_pro/assets/nope.png") == [
+        "images/boot_screen/SternLogo.png", "images/godzilla_pro/assets/nope.png"]
+    # a scene picture is never looked up by folder
+    assert pics("images/scene_textures/x/" + logo) == ["images/scene_textures/x/" + logo]
+
+
 # -- PAD-387: the whole look in one file - the Text tab's edits and every replaced picture -----
 GAME_LE, GAME_PRO = "/game_le/game", "/game_pro/game"
 LOGO = "images/boot_screen/SternLogo.png"
@@ -443,6 +462,40 @@ def test_a_program_line_built_with_other_words_is_found_between_its_neighbours(t
     assert match("CHAMPION", None) == ["CHAMPION"]
 
 
+def test_text_already_on_a_card_built_from_the_file_is_not_missing_or_too_long(tmp_path):
+    """PAD-401: a modder's own file loaded into the project of the card built from it. The
+    card already shows the new words; a grown program line's old words linger unread
+    (``unused``, fixed at their own length). Neither is 'not on this card' nor 'too long'."""
+    from pinball_decryptor.core import text_manifest
+    from pinball_decryptor.plugins.stern import scene_share
+    b = str(tmp_path / "built")
+    text_manifest.save(b, [
+        {"path": PRO, "original": "BATTRA", "replacement": ""},
+        {"path": GAME_PRO, "original": "Megalon", "replacement": "", "budget": 7,
+         "fixed": True, "unused": True},
+        {"path": GAME_PRO, "original": "SpaceGodzilla", "replacement": "", "budget": 96},
+        {"path": GAME_PRO, "original": "GO", "replacement": "", "budget": 96},
+        {"path": GAME_PRO, "original": "KAIJU JACKPOT", "replacement": "", "budget": 96},
+        {"path": GAME_PRO, "original": "GIGAN JACKPOT", "replacement": "", "budget": 96}])
+    saved = [
+        {"path": LE, "original": "EBIRAH", "new": "BATTRA", "nodes": []},
+        {"path": GAME_LE, "original": "Megalon", "new": "SpaceGodzilla", "nodes": []},
+        {"path": GAME_LE, "original": "GO", "new": "GO!", "nodes": []},
+        # its old words are still read here: a real edit, even with the new words elsewhere
+        {"path": GAME_LE, "original": "GIGAN JACKPOT", "new": "KAIJU JACKPOT", "nodes": []},
+        {"path": GAME_LE, "original": "NOT HERE", "new": "X", "nodes": []}]
+    rows = text_manifest.load(b)
+    have = []
+    pairs, missing = scene_share.match_text(saved, rows, {}, already=have)
+    assert [e["new"] for e in have] == ["BATTRA", "SpaceGodzilla"]
+    assert [(r["original"], new) for r, new in pairs] == [
+        ("GO", "GO!"), ("GIGAN JACKPOT", "KAIJU JACKPOT")]
+    assert [e["original"] for e in missing] == ["NOT HERE"]
+    # without the list asked for, it matches as before
+    pairs, missing = scene_share.match_text(saved, rows, {})
+    assert [r["original"] for r, _new in pairs] == ["Megalon", "GO", "GIGAN JACKPOT"]
+
+
 def test_scenes_page_loads_text_through_the_text_tab(tmp_path):
     from pinball_decryptor.core import text_manifest
     from pinball_decryptor.plugins.stern import scene_share
@@ -474,6 +527,19 @@ def test_scenes_page_loads_text_through_the_text_tab(tmp_path):
             SCARD: [("KAIJU", "MONSTER")], "/g/game": [("PLAY", "GO!")]})
         assert "2 text edits" in w.state("text_scenes").get("caption", ""), w.state(
             "text_scenes").get("caption")
+        # PAD-401: the project of a card built from the file already shows its words
+        built = tmp_path / "built"
+        _seed(built)
+        text_manifest.save(str(built), [
+            {"path": SCARD, "original": "MONSTER", "replacement": ""},
+            {"path": "/g/game", "original": "GO!", "replacement": "", "budget": 8}])
+        _open(w, built)
+        w.answers.append(zip_path)
+        w.call("text_scenes.edits_load")
+        cap = w.state("text_scenes").get("caption_full", "")
+        assert "2 text edits in the file are already on this card." in cap, cap
+        assert "not on this card" not in cap and "too long" not in cap, cap
+        assert text_manifest.changed(str(built)) == {}
 
 
 def test_the_menu_offers_it_and_the_builds_ship_the_module():

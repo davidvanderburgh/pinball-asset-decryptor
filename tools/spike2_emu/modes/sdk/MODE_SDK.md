@@ -1678,6 +1678,50 @@ value shield_toward        87
 The emulator plays the motor (PAD-256's coil-motor model: the coil's rule names the switch that stops it,
 the switch it leaves opens, that one closes 600 ms later).
 
+**The limits, and keeping it turned (PAD-392).** The runtime's, none of them a mode's to raise: only the
+running mode, in a game, never while one of the game's own modes or multiballs runs; 1.5 s from one move's
+start to the next, 12 moves a minute (a call that finds it already there counts for neither). When the mode
+ends, the ball ends, or the game ends or tilts, the runtime turns it back where it was before the mode's first
+move - unless the game has sent it somewhere of its own since. `pm_shield_keep(where)` turns it and keeps it
+there while the mode runs:
+
+```c
+pm_shield_keep(PM_SHIELD_TOWARD);         /* toward the player, and turned back if the game leaves it away */
+pm_shield_keep(0);                        /* stop keeping it: it stays where it is */
+```
+
+Why keeping it needs care: the game moves the platform itself, three ways.
+
+- **Its background return to rest (PAD-409).** The motor has a watchdog: every ~3 s the game's update runs the
+  motor's own pass (ShieldMotor `v[0]`, `site shield_update`), which - unless a motor process of the game's owns
+  the motor - asks the class for its resting place (`v[1]`, picked from the game's rules: AWAY once the shield
+  ramp spinner has been played, TOWARD in parts of Mechagodzilla) and sends the platform there. On David's
+  Premium that turned ours back 2-3 times early in every mode, and in the emulator, once the spinner had been
+  played, every few seconds. From a mode's first move until it lets go, the runtime skips that one pass for the
+  shield motor (a veto hook at its entry; the game's update loop takes nothing back from it). The game's own
+  motor processes (homing, its tests) are not held - they take the motor as owners - and neither is anything
+  while one of its modes or multiballs runs. Letting go ends the hold at once, so the next pass takes the
+  platform where the game wants it.
+- **Its ball search** (every 12 s while no switch closes) jiggles it away and back; the runtime turns it back
+  1.5 s later if it is left elsewhere. And its own
+- **Its own Mechagodzilla Shield feature**, while it counts shots, turns it back AWAY about 2 s after every move
+  of ours (the emulator, stock Premium/LE 1.16, hit or no hit). The port names that feature (`text shield_rule Mechagodzilla
+Shield`, one of the `block_rule_name_<n>` lines, PAD-398), and the platform is kept only while it is blind -
+the mode blocks the game's rules (`game_modes block`, the default) and does not keep that one counting.
+Otherwise `pm_shield_keep` turns it once and leaves it to the game ("shield: left AWAY - the game's own shield
+feature counts shots"), rather than fight it every two seconds. A mode file asks for it with `shield toward`
+(the Modes tab's Shield targets): the platform turns 1.5 s after the mode starts, once the ball that started it
+is clear, and the app refuses the line with `game_modes` other than block or with that feature in
+`keep_rules`. A blocks mode has Turn the shield targets (toward the player, away, where they are).
+
+**Measured (emulator, stock Premium/LE 1.16, muted; `shield_test_mode.c`, PAD-392).** Blind rules: kept
+toward 17 s through shots and hits on the three shield targets (switches 89, 90, 91); turned back after each
+of two ball searches; put back AWAY at the mode's end and at the ball's end. Mechagodzilla Shield kept
+counting: the game turned it back within 2 s and the mode left it. A form mode with `shield toward` kept it
+toward 18.5 s through six shield-target hits, all scored, and put it back when it ended. With the background
+return held (PAD-409), in a game where the spinner had been played 30 times: kept toward 30 s, the only moves
+the ball search's jiggles every 12 s (the platform back toward within a second), put back at the end.
+
 **The game turns it away by itself.** A shield target hit while the platform faces the player makes the game
 turn it away about 30 ms later and leave it there (its own Mechagodzilla shield reaction:
 `RuleMechagodzillaShield`'s shot handler, outside its multiball too, starts a process for any shield hit

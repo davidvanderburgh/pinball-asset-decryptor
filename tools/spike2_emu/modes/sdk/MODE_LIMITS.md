@@ -46,7 +46,8 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Hold the ball on Godzilla's magnet | Godzilla 1.16: up to 5 s when the Godzilla target is hit. [Limits](#why-your-mode-always-gives-way) |
 | Hold a ball in the scoop | Godzilla 1.16: up to 10 s, then the game kicks it out as usual |
 | Hold the Mechagodzilla magnet or the bridge | Godzilla Premium/LE 1.16: up to 5 s, as it starts or on a shot |
-| Turn the shield or move the building | Not yet |
+| Turn the shield targets toward the player | Godzilla Premium/LE 1.16: while the mode runs, then back where they were. Only while the game's modes can't start. Tested in the emulator so far |
+| Move the building | Not yet |
 | Fire a flipper, slingshot, pop bumper, kickback, lock, the trough or any other coil | No |
 | Add a switch or a shot | No. A mode sees the shots the game reports. |
 | Change settings, audits or high scores from a mode | No. Settings are on the Defaults tab. |
@@ -147,8 +148,9 @@ The few mechanisms a mode may hold (Godzilla's magnet and scoop, and on a Premiu
 - Never while the game is using it or the operator has switched it off. If the game wants it in the middle of a hold, yours lets go at once.
 - Let go when the mode ends, the ball drains, the player tilts or the game ends.
 - The scoop's kick-out is always the game's own.
+- The shield platform turns at most once every 1.5 s and 12 times a minute, never while one of the game's own modes or multiballs runs. It stays toward the player only while the game's own Mechagodzilla Shield feature isn't counting, because that feature turns it back. It turns back where it was when the mode ends, the ball drains, the player tilts or the game ends.
 
-All of it was tested on a real Godzilla Premium.
+All of it was tested on a real Godzilla Premium, except the shield, so far tested only in the emulator.
 
 ## Which games
 
@@ -164,7 +166,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Elvira 1.13 | ✓ | no | not yet | all |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | all |  |
-| Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
@@ -200,6 +202,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 - **HUD:** counters, a timer and a gauge at the screen's edges, like Godzilla's own battles.
 - **Buttons:** the flipper and Action buttons count as shots.
 - **Magnet, scoop, mechanisms:** what a mode may hold for a moment: the magnet, a ball in the scoop, the Mechagodzilla magnet and the bridge.
+- **Shield:** a mode may turn the shield targets toward the player while it runs.
 - **Never waits:** a mode can't be set to wait for the game's modes.
 - **Not listed?** Pick the card anyway. The app works out its hooks; press Check this game (about two minutes) before trusting them.
 

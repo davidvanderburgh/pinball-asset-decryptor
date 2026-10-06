@@ -770,6 +770,7 @@ static void bd_reset(const char *why);
 static void magnet_let_go(const char *why);   /* PAD-381: the magnet section */
 static void scoop_let_go(void);               /* PAD-381: the scoop section */
 static void building_let_go(const char *why); /* PAD-393: the building section */
+static void shield_let_go(const char *why);   /* PAD-392: the shield section */
 void pm_end(void)
 {
     if (running == current) running = 0, running_as[0] = 0;
@@ -777,6 +778,7 @@ void pm_end(void)
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();
     if (!running) building_let_go("the mode ended");
+    if (!running) shield_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }
 
@@ -3870,7 +3872,54 @@ static void scoop_arm(void)
  * switch) is the motor's own go-to: 0 when the operator switched the motor off, 1 when it is there or a
  * move process has started (the target at +shield_target_at, +shield_pos_at the switch on arrival, 0
  * before the motor has found itself). The motor is asked only while the object carries the port's
- * vtable word: a build whose object is elsewhere, or not built yet, is refused rather than called. */
+ * vtable word: a build whose object is elsewhere, or not built yet, is refused rather than called.
+ *
+ * PAD-392: THE LIMITS, none of them the mode's to change (the building's, PAD-393, with the motor's numbers):
+ *   1. Only the running mode, only in a game (not attract, not tilted), and never while one of the game's own
+ *      modes or multiballs runs (pm_aside): the game has the platform then.
+ *   2. SHIELD_COOL_MS from one move's start to the next (a turn takes about 600 ms), at most SHIELD_PER_MIN
+ *      moves a minute. A call that finds it already there moves nothing and counts for neither.
+ *   3. Kept (pm_shield_keep): a platform found resting elsewhere for SHIELD_BACK_MS is turned back within the
+ *      same limits - the game's ball search swings it toward and away every 12 s while no switch closes, and
+ *      leaves it away. Only while the game's own shield feature sees no shots: the port names it (`text
+ *      shield_rule`, one of its `block_rule_name_<n>`), and it is blind while a mode of ours blocks and does
+ *      not keep it counting (PAD-398). While it counts, the game turns the platform back about 2 s after
+ *      every move of ours (emulator, stock Premium/LE 1.16, PAD-392), so the mode turns it once and leaves
+ *      it to the game rather than fight it.
+ *   4. Put back: when the mode ends, the ball ends or the game ends or tilts, the platform goes back where it
+ *      was before the mode's first move - unless the game has since sent it somewhere of its own, or one of
+ *      its modes or multiballs runs, which then has it.
+ *   5. PAD-409, the game's own return to its resting place: the motor has a watchdog. Every ~3 s the game's
+ *      update runs the motor's v[0] (`site shield_update`; ShieldMotor's 0x1da978, then the
+ *      SingleDirectionCoilMotor update 0x1db830): unless a motor process of the game's owns the motor (+60), it
+ *      asks the class for its resting place (v[1], 0x1d9c24: chosen from the game's own rules' states - AWAY
+ *      once the shield ramp spinner has been played, TOWARD in parts of Mechagodzilla) and, when the platform is
+ *      elsewhere, sends it there. That is what turned ours back every few seconds (emulator, and David's
+ *      Premium: 2-3 times early in each mode, 2026-10-06). So from the mode's first move until it lets go, that
+ *      one pass is skipped for the shield motor (a veto hook at its entry: the pass is not entered; its caller,
+ *      the game's update loop, takes nothing back from it). Nothing else of the game's is held: its ball search,
+ *      its own move, homing and test processes (they take the motor as owners, not through this pass) and any
+ *      of its modes or multiballs (pm_aside: not held then, and they end ours) all still move it, and the hold
+ *      ends the moment the mode, the ball or the game ends, so the watchdog's next pass takes the platform
+ *      where the game wants it. */
+#define SHIELD_COOL_MS 1500u
+#define SHIELD_PER_MIN   12u
+#define SHIELD_BACK_MS 1500u
+
+static struct {
+    unsigned long starts[SHIELD_PER_MIN];
+    unsigned next;
+    unsigned long last;                     /* pm_ms() of the last move started */
+    int home;                               /* where it was before the mode's first move; 0 = no put-back owed */
+    unsigned ours;                          /* the switch the mode sent it to last */
+    int keep;                               /* pm_shield_keep's: where to keep it; 0 = not kept */
+    unsigned long away_since;
+    unsigned again, said_live, said_wait;
+    const char *putback_why;                /* a put-back owed (the tick does it) */
+    int hold;                               /* PAD-409: the game's background return is held off */
+    unsigned said_hold;
+} shd;
+
 static unsigned shield_obj(void)
 {
     unsigned obj = data("shield_motor");
@@ -3889,16 +3938,174 @@ static unsigned shield_field(unsigned obj, const char *at, long fallback)
     return *(const unsigned short *)(unsigned long)(obj + (unsigned)pm_port_value(at, fallback));
 }
 
+/* Why a move may not start now, or 0. (tests lift it verbatim) */
+static const char *shield_refusal(int running_mode, int in_game, int game_has_it, unsigned long last,
+                                  unsigned long now, const unsigned long starts[SHIELD_PER_MIN])
+{
+    unsigned i, recent = 0;
+    if (!running_mode) return "only the running mode may turn it";
+    if (!in_game) return "no game is being played (attract or a tilt)";
+    if (game_has_it) return "one of the game's own modes or multiballs is running - the game has the platform";
+    if (last && now - last < SHIELD_COOL_MS) return "the last move started less than 1.5 s ago";
+    for (i = 0; i < SHIELD_PER_MIN; i++)
+        if (starts[i] && now - starts[i] < 60000ul) recent++;
+    if (recent >= SHIELD_PER_MIN) return "twelve moves in the last minute already";
+    return 0;
+}
+
+static const char *shield_word(int where)
+{
+    return where == PM_SHIELD_TOWARD ? "TOWARD the player" : "AWAY";
+}
+
+/* the move itself, limits already passed: the game's own go-to; a move counts only when it turns */
+static unsigned shield_go(unsigned obj, int where)
+{
+    unsigned sw = shield_switch(where), was = shield_field(obj, "shield_pos_at", 44), r;
+    unsigned long now = pm_ms();
+    if (!shd.home) shd.home = was == shield_switch(PM_SHIELD_TOWARD) ? PM_SHIELD_TOWARD : PM_SHIELD_AWAY;
+    if (!shd.hold && site("shield_update")) {
+        shd.hold = 1;                           /* PAD-409: until the mode, the ball or the game ends */
+        shd.said_hold = 0;
+    }
+    r = ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("shield_move"))(obj, sw) & 0xffu;
+    if (r && was != sw) {
+        shd.last = now;
+        shd.starts[shd.next++ % SHIELD_PER_MIN] = now;
+    }
+    shd.ours = sw;
+    return r;
+}
+
 int pm_shield(int where)
 {
-    unsigned obj = shield_obj(), sw, was, r;
+    static const unsigned long none[SHIELD_PER_MIN];
+    unsigned obj = shield_obj(), sw, was, to, r;
+    int there;
+    const char *why;
     if (!obj || (where != PM_SHIELD_AWAY && where != PM_SHIELD_TOWARD)) return 0;
     sw = shield_switch(where);
     was = shield_field(obj, "shield_pos_at", 44);
-    r = ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("shield_move"))(obj, sw) & 0xffu;
-    say("shield: %s (switch %u) from switch %u: %s", where == PM_SHIELD_TOWARD ? "TOWARD the player" : "AWAY", sw,
-        was, !r ? "the motor REFUSED (switched off in the adjustments?)" : was == sw ? "already there" : "turning");
+    to = shield_field(obj, "shield_target_at", 48);
+    there = was == sw && (!to || to == sw);                 /* nothing to turn: the rate limits do not apply */
+    why = shield_refusal(pm_running(), pm_in_game(), pm_aside() != 0, there ? 0 : shd.last, pm_ms(),
+                         there ? none : shd.starts);
+    if (why) {
+        say("shield: not turned %s - %s", shield_word(where), why);
+        return 0;
+    }
+    r = shield_go(obj, where);
+    say("shield: %s (switch %u) from switch %u: %s%s", shield_word(where), sw, was,
+        !r ? "the motor REFUSED (switched off in the adjustments?)" : was == sw ? "already there" : "turning",
+        r && shd.home && shd.home != where ? " (turned back when the mode ends)" : "");
     return r ? 1 : 0;
+}
+
+/* 1 = the game's own shield feature counts shots now: the port does not say which it is, nothing of ours
+ * blocks the game's rules, or the blocking mode keeps that one counting (PAD-398) */
+static int shield_rule_counts(void)
+{
+    const char *want = pm_port_text("shield_rule"), *t;
+    char key[28];
+    int i, k;
+    if (!want || !block_owner || running != block_owner) return 1;
+    for (i = 0; i < BLOCK_RULES; i++) {
+        pm_snprintf(key, sizeof key, "block_rule_name_%d", i);
+        t = pm_port_text(key);
+        for (k = 0; t && want[k] && t[k] && (want[k] | 0x20) == (t[k] | 0x20); k++) ;
+        if (!t || want[k] || t[k]) continue;
+        pm_snprintf(key, sizeof key, "block_rule_%d", i);
+        return !site(key) || (block_rules_keep >> i) & 1u;
+    }
+    return 1;
+}
+
+int pm_shield_keep(int where)
+{
+    unsigned obj = shield_obj();
+    if (!obj || !pm_running()) return 0;
+    if (where != PM_SHIELD_AWAY && where != PM_SHIELD_TOWARD) {
+        if (shd.keep) say("shield: no longer kept %s - it stays where it is", shield_word(shd.keep));
+        shd.keep = 0;
+        return 1;
+    }
+    shd.keep = where;
+    shd.away_since = 0;
+    shd.again = shd.said_live = shd.said_wait = 0;
+    say("shield: kept %s while %s runs%s", shield_word(where), mode_name(running, "the mode"),
+        shield_rule_counts() ? " - but the game's own shield feature counts shots, so it turns it back: turned once, "
+                               "left to the game after that" : "");
+    if (pm_shield_position() != where) pm_shield(where);      /* refused now: the tick tries again */
+    return 1;
+}
+
+/* The mode, the ball or the game ended: no longer kept, no longer held (at once: the game's next pass of its
+ * own may move it); owe a put-back (the tick does it). */
+static void shield_let_go(const char *why)
+{
+    shd.keep = 0;
+    shd.hold = 0;
+    if (!shd.home || shd.putback_why) return;
+    shd.putback_why = why;
+}
+
+static void shield_putback(unsigned obj)
+{
+    unsigned home = shield_switch(shd.home), to = shield_field(obj, "shield_target_at", 48),
+             at = shield_field(obj, "shield_pos_at", 44);
+    if (shd.ours == home)                   /* the mode's own last move was the way back (its move process may not
+                                               have written the target yet: read now, it is the old one) */
+        say("shield: already on its way back %s (%s)", shield_word(shd.home), shd.putback_why);
+    else if (to && to != shd.ours)
+        say("shield: not put back (%s) - the game has sent it to switch %u of its own", shd.putback_why, to);
+    else if (pm_aside())
+        say("shield: not put back (%s) - the game's own mode or multiball has it now", shd.putback_why);
+    else if (at == home && (!to || to == at))
+        say("shield: already %s (%s)", shield_word(shd.home), shd.putback_why);
+    else {
+        say("shield: put back %s (%s)", shield_word(shd.home), shd.putback_why);
+        ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("shield_move"))(obj, home);
+    }
+    shd.home = 0;
+    shd.ours = 0;
+    shd.putback_why = 0;
+}
+
+static void shield_tick(void)
+{
+    unsigned obj;
+    int at;
+    const char *why;
+    if (!shd.home && !shd.keep) return;
+    obj = shield_obj();
+    if (!obj) { shd.home = shd.keep = shd.hold = 0, shd.putback_why = 0; return; }
+    if (!shd.putback_why) {
+        if (!pm_in_game()) shield_let_go("the game ended or tilted");
+        else if (!running) shield_let_go("no mode is running");
+    }
+    if (shd.putback_why) { shield_putback(obj); return; }
+    if (!shd.keep) return;
+    at = pm_shield_position();
+    if (at == shd.keep || at == 0) { shd.away_since = 0; return; }          /* there, or turning */
+    if (!shd.away_since) { shd.away_since = pm_ms() | 1ul; return; }
+    if (pm_ms() - shd.away_since < SHIELD_BACK_MS) return;
+    shd.away_since = 0;
+    if (shield_rule_counts()) {
+        if (!shd.said_live++)
+            say("shield: left %s - the game's own shield feature counts shots and turned it there (kept %s only while "
+                "it sees none)", at == PM_SHIELD_AWAY ? "AWAY" : "TOWARD", shield_word(shd.keep));
+        return;
+    }
+    why = shield_refusal(running != 0, pm_in_game(), pm_aside() != 0, shd.last, pm_ms(), shd.starts);
+    if (why) {
+        if (shd.said_wait++ < 3) say("shield: not turned back %s yet - %s", shield_word(shd.keep), why);
+        return;
+    }
+    shd.again++;
+    if (shd.again <= 3 || shd.again % 10 == 0)
+        say("shield: turned back %s (%u) - the game had left it %s (its ball search?)", shield_word(shd.keep),
+            shd.again, at == PM_SHIELD_AWAY ? "AWAY" : "TOWARD");
+    shield_go(obj, shd.keep);
 }
 
 int pm_shield_position(void)
@@ -3910,6 +4117,18 @@ int pm_shield_position(void)
     if (to && at != to) return 0;                       /* on its way somewhere else (or its move failed) */
     return at == shield_switch(PM_SHIELD_TOWARD) ? PM_SHIELD_TOWARD :
            at == shield_switch(PM_SHIELD_AWAY) ? PM_SHIELD_AWAY : 0;
+}
+
+/* PAD-409: the motor's own pass (`site shield_update`, its v[0]): skipped while the mode holds the shield - the
+ * shield motor only, and never while one of the game's own modes or multiballs has the stage. 1 = skip it. */
+static int shield_update_veto(unsigned *r)
+{
+    unsigned obj = shield_obj();
+    if (!shd.hold || !obj || r[0] != obj || !running || pm_aside()) return 0;
+    if (!shd.said_hold++)
+        say("shield: the game's own return of the platform to its resting place waits while %s has it (every ~3 s; "
+            "its ball search, its own motor processes and its modes still move it)", mode_name(running, "the mode"));
+    return 1;
 }
 
 static void shield_arm(void)
@@ -3924,8 +4143,14 @@ static void shield_arm(void)
         return;
     }
     can |= PM_CAN_SHIELD;
-    say("shield: a mode may turn the shield platform (motor 0x%08x, move 0x%08x; away = switch %ld, toward = %ld)",
-        data("shield_motor"), fn("shield_move"), pm_port_value("shield_away", 0), pm_port_value("shield_toward", 0));
+    if (site("shield_update") && !hook_veto(fn("shield_update"), shield_update_veto))
+        say("shield: the game's own return to the resting place could not be hooked - it will turn the platform "
+            "back now and then");
+    say("shield: a mode may turn the shield platform (motor 0x%08x, move 0x%08x; away = switch %ld, toward = %ld); "
+        "%u.%u s between moves, %u a minute, kept only while %s sees no shots, put back when the mode ends",
+        data("shield_motor"), fn("shield_move"), pm_port_value("shield_away", 0), pm_port_value("shield_toward", 0),
+        SHIELD_COOL_MS / 1000, SHIELD_COOL_MS % 1000 / 100, SHIELD_PER_MIN,
+        pm_port_text("shield_rule") ? pm_port_text("shield_rule") : "(the port names no shield feature: never)");
 }
 
 /* ---- the building (PAD-393) ---------------------------------------------------------------------
@@ -5256,6 +5481,7 @@ static void on_tick(unsigned *r)
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
     building_tick();                          /* PAD-393: a put-back owed */
+    shield_tick();                            /* PAD-392: kept, or a put-back owed */
     roster_deferred_tick();
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
@@ -5291,6 +5517,7 @@ static void on_ball_end(unsigned *r)
     bd_reset("the ball ended");
     magnet_let_go("the ball ended");          /* PAD-381 */
     building_let_go("the ball ended");        /* PAD-393 */
+    shield_let_go("the ball ended");          /* PAD-392 */
     roster_owed_ball_end();
 }
 

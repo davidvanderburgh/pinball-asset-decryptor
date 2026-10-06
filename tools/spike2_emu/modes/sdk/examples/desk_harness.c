@@ -273,6 +273,15 @@ int pm_shield_position(void)
     if (shield_kind() == 1) return -1;
     return shield_at == shield_to ? shield_at : 0;
 }
+/* PAD-392: the runtime keeps it turned while the mode runs (its limits are the runtime's, not modelled here) */
+int pm_shield_keep(int where)
+{
+    if (shield_kind() == 1) return 0;
+    printf("%6lu SHIELD KEEP %s\n", now_ms, where == PM_SHIELD_TOWARD ? "toward the player" :
+           where == PM_SHIELD_AWAY ? "away" : "off");
+    if (where == PM_SHIELD_TOWARD || where == PM_SHIELD_AWAY) pm_shield(where);
+    return 1;
+}
 static void shield_knock(uint64_t mask)
 {
     if (shield_kind() || shield_at != PM_SHIELD_TOWARD || shield_to != PM_SHIELD_TOWARD ||

@@ -1813,7 +1813,9 @@ def test_godzilla_angry_chase_five_places_five_locks_baby_found_and_a_six_ball_m
     assert hud_said(out, s, "Line", "SHOOT THE BUILDING: BABY IS THERE")
     assert hud_said(out, s, "C1_Value", "5/5") and hud_said(out, s, "C3_Label", "SUPER")
     assert hud_said(out, s, "Award", "SUPER JACKPOT") and hud_said(out, s, "Title", "ANGRY MULTIBALL")
-    assert hud_said(out, s, "Gauge_Label", "LOCKS") and hud_said(out, s, "Gauge_Label", "MULTIPLIER")
+    # PAD-416: the bar is the RAGE meter's alone - the locks and the multiplier are the counters'
+    assert not hud_said(out, s, "Gauge_Label", "LOCKS") and not hud_said(out, s, "Gauge_Label", "MULTIPLIER")
+    assert hud_said(out, s, "C1_Label", "MULTIPLIER")
     assert hud_next(out, s, "Title", _at(out, "[GODZILLA ANGRY] END")) == "GODZILLA AND BABY"
     # the lights: the lock white and blinking, the place's shots red, BABY green over the orange jackpots
     assert "[GODZILLA ANGRY] lights: shot 0x80000 ffffff blink 700" in out

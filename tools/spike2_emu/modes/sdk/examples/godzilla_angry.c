@@ -47,8 +47,8 @@
  *   ENDS       One ball left (after the ball save and 3 s more), a tilt, one of the game's own modes
  *              beginning, leaving the game. Then the meter starts again, each level 25 hits more.
  *   THE GLASS  Godzilla raging, full screen, at the chase's start; his march behind the score panel; the
- *              place, what to shoot, LOCKS, JACKPOT and SUPER at the edges, the place's clock in the badge,
- *              the locks on the right edge's gauge. A lock plays Godzilla smashing through; BABY FOUND,
+ *              place, what to shoot, LOCKS, JACKPOT and SUPER at the edges, the place's clock in the badge
+ *              (the RAGE bar is off the glass while it runs). A lock plays Godzilla smashing through; BABY FOUND,
  *              the super and the endings are full screen.
  *   INSERTS    Ready: the BUILDING pulsing red. The chase: the place's shots still to make flashing red, the
  *              lock white and blinking, faster as the clock runs out. The multiball: the jackpot shots flashing
@@ -439,8 +439,7 @@ static void show(void)
         kit_hud_counter(&hud, 1, "JACKPOT", kit_short(v, sizeof v, run.jackpot), "BUILT BY SHOTS");
         kit_hud_counter(&hud, 2, "SUPER", kit_short(s, sizeof s, run.super), "FED BY SWITCHES");
         kit_hud_timer(&hud, (int)kit_timer_seconds(&run.clock));
-        kit_hud_pips(&hud, N_PLACES + 1);
-        kit_hud_gauge(&hud, (int)run.locks, "LOCKS");
+        kit_hud_gauge(&hud, -1, 0);      /* PAD-416: the bar is the RAGE meter's; the locks are the counter's */
         return;
     }
     pm_snprintf(line, sizeof line, "BABY IS AT THE %s", JP_SAYS[run.baby]);
@@ -451,8 +450,7 @@ static void show(void)
     pm_snprintf(s, sizeof s, "%u", run.babies);
     kit_hud_counter(&hud, 2, "JACKPOTS", s, "AT BABY");
     kit_hud_timer(&hud, -1);
-    kit_hud_pips(&hud, MULT_MAX);
-    kit_hud_gauge(&hud, (int)run.mult, "MULTIPLIER");
+    kit_hud_gauge(&hud, -1, 0);          /* PAD-416: the bar is the RAGE meter's; the multiplier is the counter's */
 }
 
 /* ---- start, the places, the multiball, the end ------------------------------------------------------------ */

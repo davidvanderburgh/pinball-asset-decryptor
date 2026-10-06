@@ -8,7 +8,8 @@ spkctl.py while the slot's P-ROC game is up.
 
     state               {"up": true, "switches": {n: 1 for each one made},
                          "balls": {"trough", "shooter", "in_play"},
-                         "lights": {}, "paused": bool, "connected": bool}
+                         "lights": {name: [r, g, b]}, "paused": bool,
+                         "connected": bool}
     sw <n> <0|1>        hold / release a switch (n = the board's number,
                         sppswitches.py's table)
     tap <n> [ms]        press and release (150 ms)
@@ -18,7 +19,8 @@ spkctl.py while the slot's P-ROC game is up.
                         other is in play)
     reset               every ball back in the trough
     pause <0|1>         freeze / resume the game (SIGSTOP, as Warden's)
-    leds                {} (the P-ROC games' lamps are not shown)
+    leds                {name: [r, g, b]}: every light the machine yaml wires
+                        (sppswitches.py's map), from the board's LED writes
 
 One JSON line per reply: {"ok": true} or {"err": "..."}, as Warden's.
 `--serve <sock>` answers the same on a unix socket until the game ends.
@@ -69,6 +71,30 @@ class Adapter:
         self.board = board
         self.rig = rig              # the Spooky P-ROC rig's folder (game.pid)
         self.ripping = set()
+        self.led_map = None
+
+    # -- the lights (PAD-405) -----------------------------------------------
+    def _led_map(self):
+        """name -> [board, r, g, b] outputs, sppswitches.py's (in the rig's
+        switches.json: this Python has no yaml to read the machine's)."""
+        if self.led_map is None:
+            try:
+                with open(os.path.join(self.rig, "switches.json"), encoding="utf-8") as f:
+                    self.led_map = json.load(f).get("leds") or {}
+            except (OSError, ValueError):
+                return {}                   # not written yet: ask again
+        return self.led_map
+
+    def lights(self):
+        """{name: [r, g, b]} for EVERY light the machine wires, dark ones
+        too: the window lays its swatches out from the first state it gets,
+        before the game has written a light."""
+        leds = self._led_map()
+        if not leds:
+            return {}
+        vals = self._json("leds")
+        return {name: [int(vals.get("%d:%d" % (b, o), 0)) for o in (r, g, bl)]
+                for name, (b, r, g, bl) in leds.items()}
 
     # -- what the board says --------------------------------------------
     def _json(self, line):
@@ -107,7 +133,7 @@ class Adapter:
         sw = self._json("switches")
         made = {str(s["number"]): 1 for s in sw.values() if s["active"]}
         return {"up": True, "switches": made, "balls": self.balls(sw, st.get("balls")),
-                "lights": {}, "paused": self.paused(), "connected": bool(st.get("host")),
+                "lights": self.lights(), "paused": self.paused(), "connected": bool(st.get("host")),
                 "board": st.get("board"), "drivers": st.get("drivers"),
                 "counts": st.get("counts")}
 
@@ -190,7 +216,7 @@ class Adapter:
             if p[0] == "state":
                 return self.state()
             if p[0] == "leds":
-                return {}
+                return self.lights()
             if p[0] == "plunge":
                 return self._ok("plunge")
             if p[0] == "drain":

@@ -249,10 +249,9 @@ static void end(const char *why)
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.fired ? "won" : "lost");
-    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+    if (!kit_game_show(GAME_SHOW_END, "its end"))
         kit_show_start(&show_fx, "kiryu end", SHOW_END, N_SHOW(SHOW_END));
-        if (run.fired) pm_snprintf(b, sizeof b, "ABSOLUTE ZERO X%u  -  %s", run.mult ? run.mult : 1, kit_num(a, sizeof a, run.shot_paid));
-    }
+    if (run.fired) pm_snprintf(b, sizeof b, "ABSOLUTE ZERO X%u  -  %s", run.mult ? run.mult : 1, kit_num(a, sizeof a, run.shot_paid));
     else pm_snprintf(b, sizeof b, "THE CANNON NEVER FIRED");
     kit_hud_title(&hud, run.fired ? "KIRYU WINS" : "KIRYU IS DOWN", b);
     kit_hud_counter(&hud, 0, 0, 0, 0);

@@ -184,6 +184,16 @@ test). This is a last line of defence, not a guardrail of ours.
     polls it ~2000 times a run and never moved it in the rig: the rig most likely does not model this stepper,
     so it needs an emulator model before anything can be proven.
 
+- **Step 6 (PAD-393, 2026-10-05): the building.** The rig did not model the stepper: with the zero reply the
+  game re-sent its HOME (`34 00 00`) ~3600 times a run, polled the status (`38`) ~42000 times and never sent a
+  move. The board's commands, read from LE 1.16: 32 configure (byte 7 = 0x40|input of 93 DOWN, byte 8 = of 92
+  UP), 34 home, 31 a relative move (s16 steps, then speed/accel/decel u32s), 38+motor status -> u16, u16,
+  flags (0x02 moving, 0x04 homed, 0x08/0x10 fault). hwshim.c now plays it (home = BUILDING UP, a guess; 5000
+  steps/s; `PAD_STEPPER=0` off). The game's floors (`0x1d77d8`): 0 beside home (-bias, -150 on a stock card),
+  1..3 2500/5000/7500 steps further. The game moves it with `0x1d79fc(obj, floor)` (a target and the speed
+  adjustments, no process control); its update sends the steps. `pm_building(floor)` / `pm_building_floor()`
+  with the coils' limits, and a put-back at the mode/ball/game end. Emulator-proven on LE 1.16 (MODE_SDK.md
+  "The building"); no mode file keyword or Modes-tab control yet; not machine-tested.
 - **PAD-394 (2026-10-05): the other titles.** Godzilla Pro 1.15 gets the magnet and the scoop (drafted from Pro
   1.16; emulator-proven); King Kong LE 0.97 and Jaws LE 1.02, whose ControlCoil is Godzilla's, get held coils (the
   spider magnet and two diverters; the inlane up posts; emulator-proven). The census of every other build, the
@@ -218,4 +228,6 @@ or tilt in the middle of a hold (both drains came between holds); the emulator's
    the backup).
 2. Shield (David's call): the motor's take-control call and `v[16]` move, run from a process of ours like the
    coils; emulator-provable today.
-3. Building (David's call): a stepper model in the rig first (BUILDING UP/DOWN), then the same approach.
+3. Building: done in the emulator (step 6). Owed: a machine test (which switch is home, the real speed,
+   whether a move with balls locked in the building is safe for the game's lock count), then a mode file
+   keyword and a Modes-tab control.

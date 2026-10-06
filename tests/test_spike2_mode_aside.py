@@ -74,8 +74,11 @@ def _run(harness, tmp_path, cfg, *args):
     return r.stdout
 
 
-RUSH = ("name RUSH\ntrigger 0x08000000 1\nseconds 20\nshots 0x00300000\naward 1000000\n"
+# PAD-398: a mode file without game_modes runs alone (block); the aside tests are about a mode BESIDE the
+# game's modes, so RUSH says so, and RUSH_PLAIN is the file without the key
+RUSH_PLAIN = ("name RUSH\ntrigger 0x08000000 1\nseconds 20\nshots 0x00300000\naward 1000000\n"
         "screen_node PadMode_rush_Screen\nscreen_text PadMode_rush_Screen.PadMode_rush_Screen_Words\n")
+RUSH = RUSH_PLAIN + "game_modes stack\n"
 
 
 def _shows(out):
@@ -92,8 +95,11 @@ def test_the_screen_steps_aside_while_the_games_mode_runs_and_comes_back(harness
     off = next(i for i, ln in enumerate(lines) if ln.startswith("STOCK 0"))
     shows = [(i, ln.split()[1]) for i, ln in enumerate(lines) if ln.startswith("SHOW ")]
     assert [v for i, v in shows if i < on][-1] == "1"                        # up while the mode runs alone
-    assert [v for i, v in shows if on < i < off] == ["0"]                    # hidden once, while the game's runs
-    assert [v for i, v in shows if i > off] == ["1"]                         # back once it is over
+    hidden = [v for i, v in shows if on < i < off]
+    assert hidden and set(hidden) == {"0"}                                  # hidden while the game's runs (PAD-390:
+                                                                            # and again at every 2 s re-check)
+    back = [v for i, v in shows if i > off]
+    assert back and set(back) == {"1"}                                      # back once it is over (and kept up)
     assert "RUSH: its screen steps aside - a stock mode has the middle of the screen" in out
     assert "RUSH: its screen is back - the game's mode is over" in out
     assert start < on
@@ -246,15 +252,20 @@ def test_game_modes_give_way_waits_for_the_games_mode_and_ends_when_one_begins(h
     assert "BLOCK 1" not in out
 
 
-def test_game_modes_stack_is_what_a_mode_file_without_the_key_does(harness_block, tmp_path):
-    out = _run(harness_block, tmp_path, RUSH, "stock", "1", "shot", "0x08000000", "tick", "10")
-    assert "RUSH START" in out and "BLOCK" not in out and "game's own mode began" not in out
+def test_game_modes_block_is_what_a_mode_file_without_the_key_does(harness_block, tmp_path):
+    """PAD-398 (David, 2026-10-05: "when our custom modes start, we should ONLY be in those modes unless explicitly
+    noted"): a file without the key waits for the game's mode, then holds the game's modes off and runs alone"""
+    out = _run(harness_block, tmp_path, RUSH_PLAIN, "stock", "1", "shot", "0x08000000", "tick", "10")
+    assert "RUSH START" not in out and "trigger count is kept" in out
+    out = _run(harness_block, tmp_path, RUSH_PLAIN, "shot", "0x08000000", "tick", "10")
+    assert "RUSH START" in out and "BLOCK 1" in out
 
 
 @pytest.mark.parametrize("value", ["sideways", ""])
-def test_a_game_modes_that_is_not_known_is_stack(harness_block, tmp_path, value):
-    out = _run(harness_block, tmp_path, RUSH + "game_modes %s\n" % value, "shot", "0x08000000", "tick", "5")
-    assert "game_modes needs stack, give_way or block" in out and "RUSH START" in out
+def test_a_game_modes_that_is_not_known_is_block(harness_block, tmp_path, value):
+    out = _run(harness_block, tmp_path, RUSH_PLAIN + "game_modes %s\n" % value, "shot", "0x08000000", "tick", "5")
+    assert "game_modes needs stack, give_way or block" in out and "read as block" in out
+    assert "RUSH START" in out and "BLOCK 1" in out
 
 
 def test_the_generator_reads_godzillas_modes_as_the_port_has_them():
@@ -284,34 +295,43 @@ def MP_game_modes_of_a_port_without_block_lines():
 def test_a_title_lists_the_modes_its_port_can_hold_off_and_which_are_checked():
     dp, gz = _title("deadpool_le-1.14.port"), _title("godzilla_le-1.16.port")
     rows = {i: (name, on) for i, name, on in dp.game_modes}
-    assert len(rows) == 19 and rows[21] == ("Chimichanga", False) and rows[24] == ("Berserker Rage", False)
-    assert rows[6] == rows[7] == ("Quest", False)                       # two of its modes share a name
+    assert len(rows) == 19 and rows[21] == ("Chimichanga", True) and rows[24] == ("Berserker Rage", True)
+    assert rows[6] == rows[7] == ("Quest", True)                         # two of its modes share a name
     assert not set(rows) & {8, 9, 11, 12, 16, 17, 18}                    # never a multiball
-    assert [i for i, _n, on in gz.game_modes if on] == [21, 23]          # the port's checked defaults
+    # PAD-398 (David, 2026-10-05: "we should ONLY be in those modes"): every one is held off by default
+    assert [i for i, _n, on in gz.game_modes if on] == list(range(12, 27))
     assert MP_game_modes_of_a_port_without_block_lines() == ()      # no block lines: nothing to offer
 
 
-def test_game_modes_validates_and_writes_only_what_differs_from_stack():
+def test_game_modes_validates_and_writes_only_what_differs_from_block():
+    """PAD-398: block is the default (the runtime's for a file that says nothing), holding off every mode the port
+    names; stack is written out; the features a mode keeps counting are written as the port's rule numbers."""
     from pinball_decryptor.plugins.stern import mode_project as MP
     dp, gz = _title("deadpool_le-1.14.port"), _title("godzilla_le-1.16.port")
     spec = MP.ModeSpec()
+    assert spec.game_modes == "block" and spec.keep_rules == []
     assert MP.validate_game_modes(spec, dp) == [] and MP.game_modes_lines(spec) == []
+    assert MP.held_off(spec, gz) == tuple(range(12, 27))                 # every mode the port names
     spec.game_modes = "sideways"
     assert MP.validate_game_modes(spec, dp) == ["What it does about the game's own modes is stack, give_way or block."]
     spec.game_modes = "give_way"
     assert MP.game_modes_lines(spec) == ["game_modes     give_way"]
+    spec.game_modes = "stack"
+    assert MP.game_modes_lines(spec) == ["game_modes     stack"]
     spec.game_modes = "block"
-    assert MP.validate_game_modes(spec, dp) == ["Tick at least one of Deadpool LE 1.14's modes to hold off."]
-    assert MP.validate_game_modes(spec, gz) == [] and MP.held_off(spec, gz) == (21, 23)   # the defaults
-    assert MP.game_modes_lines(spec) == ["game_modes     block"]
+    spec.keep_rules = ["Cities", "Godzilla Powerup", "Nope"]
+    assert MP.validate_game_modes(spec, gz) == ["Godzilla Premium/LE 1.16 has no feature called 'Nope' to keep counting."]
+    spec.keep_rules = ["Godzilla Powerup", "Cities"]
+    assert MP.validate_game_modes(spec, gz) == []
+    assert MP.game_modes_lines(spec, gz) == ["keep_rules     5 8"]
+    spec.keep_rules = []
     spec.block_modes = [24, 21, 8]
     assert MP.validate_game_modes(spec, dp) == ["Deadpool LE 1.14 has no mode the app can hold off numbered 8."]
     spec.block_modes = [24, 21]
     assert MP.validate_game_modes(spec, dp) == [] and MP.held_off(spec, dp) == (21, 24)
-    assert MP.game_modes_lines(spec) == ["game_modes     block", "block_modes    21 24"]
-    assert MP.validate_game_modes(spec, _title("godzilla_pro-1.15.port")) == []   # the runtime gives way there
+    assert MP.game_modes_lines(spec) == ["block_modes    21 24"]
     text = MP.runtime_cfg(spec, "rush")
-    assert "\ngame_modes     block\n" in text and "\nblock_modes    21 24\n" in text
+    assert "game_modes" not in text and "\nblock_modes    21 24\n" in text
 
 
 def test_a_mode_moved_to_another_title_keeps_the_modes_it_holds_off_by_name():
@@ -371,19 +391,28 @@ def test_venom_names_its_modes_past_31_and_never_a_multiball():
 # ---- PAD-363: Godzilla's Saucer Attack rule, and a start refused with 0 ------------------------------------------
 @pytest.mark.parametrize("name,handler", [("godzilla_le-1.16.port", 0x00174f9c), ("godzilla_pro-1.15.port", 0x001715c4),
                                           ("godzilla_pro-1.16.port", 0x001715c4)])
-def test_every_godzilla_hides_the_pops_from_the_saucer_rule_while_a_mode_blocks(name, handler):
-    """David's Premium (2026-10-04): "overlapping text for saucer mode feedback under Ghidorah" - the pop bumper
-    lights Saucer Attack (a rule, no mode to refuse) and its words land on ours. RuleSaucerAttack::v[25] tests lo
-    0x40 (the pop bumper) and hi 0x400 / 0x100; the battle rule's lines are on every Godzilla now too."""
+def test_every_godzilla_hides_every_shot_from_its_rules_while_a_mode_blocks(name, handler):
+    """PAD-363 hid the pop bumper from the Saucer Attack rule; PAD-398 (David, 2026-10-05: "while in those, we
+    cannot start other modes (destruction jackpot, scoop, bridge multi-ball, etc.)") hides every shot from every
+    rule of the game's that reads them: 24 on each Godzilla, Saucer Attack still number 0, no mask lines (every
+    bit), the battle rule left to its own block_battle_shots."""
     port = _port(name)
     assert port[("site", "block_rule_0")] == [handler, 0xe92d47f0, 0xe1a04002]
-    assert port[("value", "block_rule_lo_0")] == [0x40] and port[("value", "block_rule_hi_0")] == [0x500]
+    assert ("value", "block_rule_lo_0") not in port and ("value", "block_rule_hi_0") not in port
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    names = [n for _i, n in MP._game_rules(MP.read_port(str(SDK / "ports" / name)))]
+    assert len(names) == 24 and ("site", "block_rule_24") not in port
+    for want in ("Destruction Jackpot", "Building Locks", "Bridge", "Cities", "Mechagodzilla Shield", "Saucer Attack"):
+        assert any(want in str(n) for n in names), want
+    assert not any("Battle" in str(n) for n in names)
     assert ("site", "block_battle_shots") in port and port[("value", "block_battle_hi")] == [0x20]
 
 
 def test_the_runtime_hooks_other_rules_and_can_refuse_a_start_with_0():
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
-    assert "#define BLOCK_RULES 8" in src and "hook_n(fn(name), on_rule_shots, (unsigned)i)" in src
+    assert "#define BLOCK_RULES 32" in src and "hook_n(fn(name), on_rule_shots, (unsigned)i)" in src
+    assert "if (block_rules_keep & (1u << n)) return;" in src             # PAD-398: a rule the mode keeps
+    assert "for (i = 0; i < BLOCK_WORDS; i++) m[i] = block_named[i];" in src   # every named mode by default
     assert "t[7] = 0x13a00000u | refused;" in src                         # movne r0, #0 or #1
     assert 'pm_snprintf(ret, sizeof ret, "block_ret_%u", id);' in src
 

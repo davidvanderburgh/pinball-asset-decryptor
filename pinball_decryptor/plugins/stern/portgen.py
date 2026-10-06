@@ -853,7 +853,8 @@ def parse_port(text):
 #: PAD-363: the lines game_mode_blocks.py writes from a build's OWN program (each of its modes' start, object and
 #: name, the ones checked by default): never carried from a reference, and never part of what a recipe depends on
 _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block_name_\d+|text block_default|"
-                        r"value block_default|value block_ret_\d+)\b")
+                        r"value block_default|value block_ret_\d+|"
+                        r"site block_rule_\d+|text block_rule_name_\d+|value block_rule_(?:lo|hi)_\d+)\b")   # PAD-398
 
 
 def generated(key, rest):
@@ -1537,7 +1538,11 @@ def block_section(tgt):
         return []
     if not any(m.blockable for m in modes):
         return []
-    return [""] + B.port_lines(modes)
+    try:
+        rules = B.read_rules(tgt.b)                          # PAD-398: the game's rules, from THIS program
+    except Exception:                                        # noqa: BLE001
+        rules = []
+    return [""] + B.port_lines(modes) + ([""] + B.rule_lines(rules) if rules else [])
 
 
 def _score_pair(out, placed, tgt, hows):

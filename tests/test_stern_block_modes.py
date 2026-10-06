@@ -34,8 +34,10 @@ def num(v):
 
 
 def prog(scripts, vars=(), seconds=30, **kw):
+    # PAD-398: a program that says nothing runs alone (block); these tests were written for one beside the
+    # game's modes, so they say so unless a test asks otherwise (game_modes=None: the program says nothing)
     out = {"name": "TEST MODE", "seconds": seconds, "vars": [dict(v) for v in vars],
-           "scripts": scripts}
+           "scripts": scripts, "game_modes": "stack"}
     out.update(kw)
     return out
 
@@ -122,17 +124,24 @@ def test_the_clock_blocks_take_a_value_and_an_old_number_still_loads():
     assert "set_time((long long)secs_left());" in src
 
 
-def test_the_game_modes_choice_loads_as_saved_or_as_may_start():
-    # PAD-373: a program saved before it may start beside the game's modes, as it always did
-    p = BM.normalize(prog([]))
-    assert p["game_modes"] == "stack" and p["block_modes"] == []
-    assert "#define GAME_MODES       0" in BM.to_c(p, "blk")
+def test_the_game_modes_choice_loads_as_saved_or_as_cannot_start():
+    # PAD-373; PAD-398 (David, 2026-10-05: "we should ONLY be in those modes unless explicitly noted"): a program
+    # that says nothing runs alone - the game's modes cannot start and none of its features count
+    p = BM.normalize(prog([], game_modes=None))
+    assert p["game_modes"] == "block" and p["block_modes"] == [] and p["keep_rules"] == []
+    src = BM.to_c(p, "blk")
+    assert "#define GAME_MODES       2" in src and '#define KEEP_RULES       ""' in src
+    assert "pm_block_rules_keep_names(KEEP_RULES);" in src
+    p = BM.normalize(prog([], game_modes="block", keep_rules=["Cities", " Bridge ", 5, "a,b", ""]))
+    assert p["keep_rules"] == ["Cities", "Bridge"]
+    assert '#define KEEP_RULES       "Cities, Bridge"' in BM.to_c(p, "blk")
+    assert "#define GAME_MODES       0" in BM.to_c(prog([], game_modes="stack"), "blk")
     p = BM.normalize(prog([], game_modes="block", block_modes=[23, 21, 21, 200, -1, "7", True]))
     assert p["game_modes"] == "block" and p["block_modes"] == [21, 23]
     src = BM.to_c(p, "blk")
     assert "#define GAME_MODES       2" in src
     assert "BLOCK_IDS[2] = {21, 23};" in src and "#define BLOCK_N          2" in src
-    assert BM.normalize(prog([], game_modes="later"))["game_modes"] == "stack"
+    assert BM.normalize(prog([], game_modes="later"))["game_modes"] == "block"
     assert "#define GAME_MODES       1" in BM.to_c(prog([], game_modes="give_way"), "blk")
 
 
@@ -789,7 +798,7 @@ def test_give_way_waits_for_the_games_mode_and_ends_when_one_begins(tmp_path):
 def test_block_holds_the_ticked_modes_off_while_it_runs(tmp_path):
     out = play(tmp_path, prog(GATE, seconds=2, game_modes="block", block_modes=[23, 21]),
                "shot", "Building", "secs", 3)
-    assert re.search(r"BLOCKLIST 21 23 TEST MODE\n\s*\d+ BLOCK 1 TEST MODE", out)
+    assert re.search(r"BLOCKLIST 21 23 TEST MODE\n\s*\d+ KEEPRULES_NAMED none TEST MODE\n\s*\d+ BLOCK 1 TEST MODE", out)
     assert "END (time ran out)" in out
     assert out.index("END (time ran out)") > out.index("BLOCK 0 TEST MODE")   # given back as it ends
     # none ticked: the port's checked defaults

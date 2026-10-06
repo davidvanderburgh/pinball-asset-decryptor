@@ -148,3 +148,38 @@ are not taken for the game's multiball while they are in play.
   mode runs (a second screen node the runtime shows instead of hiding).
 - Elvira 3's Houses one by one (the House manager's start holds off every House at once today).
 - The tab names a C++ mode by its class (Avengers' "Marvel Hurry Up" shows on the glass as "Binary Hurry Up").
+
+## Our modes run alone (PAD-398)
+
+David, 2026-10-05, after three sessions on his Premium with ten examples: "we still need to work on isolating our
+multi-balls and modes. while in those, we cannot start other modes (destruction jackpot, scoop, bridge multi-ball,
+etc.) this causes issues. when our custom modes start, we should ONLY be in those modes unless explicitly noted."
+And on the plan: "Yes confirmed do that. As long as our users will have that flexibility in the app to customize it
+how they like."
+
+- **What went wrong on the machine.** SPACEGODZILLA's crystal multiball was ended 20 s in by the game's own
+  multiball, twice, with its balls still in play; the game's Destruction Jackpot then sat in the scoop with the
+  lights held. Its towers are on the Building and the ramps, and the game's rules counted those shots all along -
+  most likely its building locks lit and locked its own multiball. DESTOROYAH was ended 4 s in by a game mode.
+  The PAD-363 isolation refused only the port's two checked defaults (Jet Fighter Attack, Tesla Strike) and hid
+  shots from two rules (battle, Saucer Attack).
+- **What a blocking mode does now.** It refuses every mode of the game's the port names (all 15 on each Godzilla),
+  and every rule of the game's that reads shots - 24 on each Godzilla, read from the program by
+  `game_mode_blocks.read_rules` (RTTI `Rule*` classes whose v[25] reads shots; the battle rule stays
+  block_battle_shots) - sees each shot without any bit. Nothing of the game's lights, locks, counts or awards, so no
+  multiball of the game's can be qualified while ours runs; its progress waits and goes on after.
+- **The default.** "cannot start" (block) for form modes, block modes and code modes; a mode file or blocks
+  program that says nothing blocks; an unknown value reads as block.
+- **The levers (David: flexibility in the app).** The Modes tab's "While it runs, the game's modes" keeps may start
+  / end this one / cannot start; under cannot start, the game's modes ticked (all, the last tick stays) and "The
+  game's features that keep counting while it runs" (none ticked: only this mode counts). The blocks editor has the
+  same two lists. A code mode's assets.json takes `keep_rules` (names). In the files: `keep_rules <numbers>` (mode
+  file, assets file), `KEEP_RULES "<names>"` (a blocks mode's C).
+- **Proof (emulator, Premium/LE 1.16, rig 1, muted, hidden; C:/tmp/PAD-398).** A form mode with the default, the
+  same 42 shots before, during and after it: before, POWERLINE ATTACK came up; during, the HUD's TANKS 1/10 and
+  BRIDGE 75% 15/30 did not move and the log said once that the rules saw none of the shots; after, JET FIGHTER
+  ATTACK started at once. With `keep_rules` naming the bridge and the tanks, the bridge went on (15/30 to 15/40)
+  while the rest stood still.
+- **Not measured.** A lock lit before ours began and a ball arriving in it while ours runs (the game's multiball
+  start is still not refused: theirs would start and end ours); every Godzilla feature shot by shot; the other
+  C++ rule titles (their ports have no rule lines yet - a follow-up ticket).

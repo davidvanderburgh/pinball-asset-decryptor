@@ -604,6 +604,26 @@ def test_a_drain_ends_the_mode_with_its_total(harness, start):
     assert re.search(r"\] END \(ball ended\)", out), out[-2000:]
 
 
+def test_a_note_is_not_shown_while_the_games_mode_has_the_middle(harness):
+    """PAD-390, David's Premium 2026-10-05: a note is the award line, in the middle; while one of the game's modes
+    (here a battle) has the middle it is not shown at all - the count still goes on"""
+    out = play(harness, "battle", 1, "secs", 1, "shot", "Powerline left", "secs", 2, "battle", 0, "secs", 1)
+    t0, t1 = _at(out, ">> battle 1"), _at(out, ">> battle 0")
+    assert has(out, "KING GHIDORAH", "powerlines 1 of 3 (player 1)")
+    assert not [ms for ms, w in hud(out, "ghidorah_heads", "Award") if t0 <= ms < t1 and w == "POWERLINES 1 OF 3"]
+
+
+def test_a_note_up_when_the_games_mode_begins_waits_off_the_glass(harness):
+    """a note already up when one of the game's modes begins: its words are blanked (the HUD says why)"""
+    out = play(harness, "shot", "Powerline left", "secs", 0.5, "battle", 1, "secs", 1)
+    t = _at(out, ">> battle 1")
+    assert [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms < t and w == "POWERLINES 1 OF 3"]
+    assert has(out, "KING GHIDORAH",
+               "hud ghidorah_heads: its note waits while the game's mode has the middle of the screen")
+    blank = [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms >= t and w.strip() == ""]
+    assert blank and blank[0] <= t + 100
+
+
 def test_the_final_wars_note_waits_for_another_modes_total_to_go(harness):
     out = play(harness, "trigger", "final_wars.light", "trigger", "oxygen_destroyer.start", "secs", 9,
                "trigger", "oxygen_destroyer.stop", "secs", 12)
@@ -1639,6 +1659,61 @@ def test_game_modes_give_way_in_its_assets_file_means_it_blocks_nothing(harness,
     assert _at(out, "[MASER BARRAGE] START") is not None
     assert "BLOCK 1 MASER BARRAGE" not in out
     assert has(out, "MASER BARRAGE", "isolated: gives way - one of the game's modes starting ends it")
+
+
+# ---- PAD-390: the game's HUD scene back in its authored state --------------------------------------------------
+# David's Premium, 2026-10-05, ball 2: every mode's HUD on the glass at once with the words the card build gave it
+# (CORE 20% TEMPERATURE, HURRY-UP 20,000,000, MULTIPLIER, both badge slots "00"), word on word. A HUD is authored
+# visible and was hidden once, when its mode found it. `rescene` is the game making the scene again: every node
+# found so far is an old copy (renamed STALE:) and a lookup finds a fresh, visible one.
+HUD_SLUGS = [s for s in MODES]
+#: PAD-379: a METER keeps its mode's HUD up all game while no mode runs (kit_hud_meter): GODZILLA ANGRY's RAGE
+METERED = ("godzilla_angry",)
+
+
+def _shown(out, slug):
+    """ms of every time the mode's whole HUD group was shown"""
+    return [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_%s_Hud 1$" % re.escape(slug), out, re.M)]
+
+
+def _stale_touched(out, after):
+    return [ln for ln in out.splitlines()
+            if re.match(r"^\s*(\d+) (SHOW|WORDS) STALE:", ln) and int(ln.split()[0]) > after]
+
+
+def test_a_hud_scene_made_again_is_hidden_again_while_no_mode_runs(harness):
+    out = play(harness, "secs", 3, "rescene", "secs", 3)
+    t = _at(out, ">> rescene")
+    for slug in HUD_SLUGS:
+        assert has(out, NAMES[slug], "hud %s: the game made its HUD scene again - found afresh" % slug), slug
+        seen = _shown(out, slug) if slug in METERED else _hid(out, slug)    # a meter's HUD shown, any other hidden
+        assert any(t < h <= t + 2600 for h in seen), slug                   # the fresh copy, within 2.5 s
+    assert not _stale_touched(out, t)                                       # the old copy is never touched
+
+
+def test_a_running_modes_hud_is_found_afresh_and_written_whole(harness):
+    s = "maser_barrage"
+    out = play(harness, *MASER3, "secs", 2, "rescene", "secs", 3)
+    t = _at(out, ">> rescene")
+    assert _at(out, "[MASER BARRAGE] START") < t
+    shown = re.findall(r"^\s*(\d+) SHOW PadMode_%s_Hud 1$" % s, out, re.M)
+    assert any(t < int(ms) <= t + 2600 for ms in shown)                     # the fresh copy shown
+    assert any(t < ms <= t + 2600 and w == "MASER BARRAGE" for ms, w in hud(out, s, "Title"))  # its words again
+    for slug in HUD_SLUGS:                                                  # every other HUD hidden
+        if slug != s:
+            assert any(t < h <= t + 2600 for h in _hid(out, slug)), slug
+    assert not _stale_touched(out, t)
+
+
+def test_the_same_scene_shown_again_is_hidden_again_every_two_seconds(harness):
+    """the scene's own copy with its nodes shown again by the game: a HUD not in use is hidden again every 2 s"""
+    out = play(harness, "secs", 7)
+    for slug in HUD_SLUGS:
+        hid = _shown(out, slug) if slug in METERED else _hid(out, slug)    # a meter's HUD is sent up again
+        assert len(hid) >= 3, slug
+        assert all(b - a <= 2100 for a, b in zip(hid, hid[1:])), (slug, hid)
+    for s in METERED:                                                       # never hidden by the re-check once up
+        assert all(h <= _shown(out, s)[0] for h in _hid(out, s)), s
 
 
 # ---- PAD-379: GODZILLA ANGRY - EHoH's Gappa Angry: a RAGE meter of every switch, a chase in staged locks ----------

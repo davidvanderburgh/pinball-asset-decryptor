@@ -769,12 +769,14 @@ void pm_running_name(const char *name)
 static void bd_reset(const char *why);
 static void magnet_let_go(const char *why);   /* PAD-381: the magnet section */
 static void scoop_let_go(void);               /* PAD-381: the scoop section */
+static void building_let_go(const char *why); /* PAD-393: the building section */
 void pm_end(void)
 {
     if (running == current) running = 0, running_as[0] = 0;
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();
+    if (!running) building_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }
 
@@ -2990,7 +2992,7 @@ int pm_aside(void)
  * block_name_<id>`. The runtime puts a veto on each named start (several C++ modes may share one: the object
  * tells them apart; a start with no object is one mode's own) and, while a mode of ours that asked runs, refuses
  * the start for the ids in that mode's list (`pm_block_list`, a mode file's `block_modes`) or, when it gave none,
- * the port's checked defaults (`text block_default <ids>`). A refused start never runs: the mode never begins,
+ * every one the port names (PAD-398). A refused start never runs: the mode never begins,
  * and the rule that asked carries on. A multiball is never named (balls in a lock, a magnet: PAD-353). Ids are
  * 0-127 (D&D's map modes run to 70, Venom's to 91). */
 #define BLOCK_IDS 128
@@ -3031,20 +3033,14 @@ static void bm_text(const unsigned *m, char *out, unsigned cap)
     if (!n) pm_snprintf(out, cap, "none");
 }
 
-/* `text block_default 21 23`: the ids a mode that lists none holds off, kept to the named ones */
+/* PAD-398 (David, 2026-10-05: "when our custom modes start, we should ONLY be in those modes unless explicitly
+ * noted"): a mode that lists none holds off EVERY mode of the game's the port names - each one proven refused in
+ * the emulator on every build (PAD-363's library check) - not only the port's `text block_default`, which is
+ * kept in the ports for what it was (the first two checked on Godzilla) and no longer read. */
 static void block_defaults(unsigned *m)
 {
-    const char *s = pm_port_text("block_default");
     int i;
-    for (i = 0; i < BLOCK_WORDS; i++) m[i] = 0;
-    while (s && *s) {
-        unsigned v = 0;
-        int digits = 0;
-        while (*s == ' ' || *s == ',' || *s == '\t') s++;
-        while (*s >= '0' && *s <= '9') v = v * 10 + (unsigned)(*s++ - '0'), digits++;
-        if (!digits) break;
-        if (bm_has(block_named, v)) bm_set(m, v);
-    }
+    for (i = 0; i < BLOCK_WORDS; i++) m[i] = block_named[i];
 }
 
 static int on_block_start(unsigned *r, unsigned hook_n)
@@ -3076,6 +3072,65 @@ int pm_block_list(const unsigned char *ids, int n)
     return 1;
 }
 
+/* PAD-398: the game's rules a mode lets go on counting while it blocks (its keep list: the indices of the port's
+ * `block_rule_<n>`), kept per mode of ours - set from the mode's own files when they are read, so the examples'
+ * code needs no new call. Every other rule the port names sees no shot while the mode blocks. */
+#define KEEP_MODES 32
+static const struct pm_mode *keep_of[KEEP_MODES];
+static unsigned keep_mask_of[KEEP_MODES];
+static unsigned block_rules_keep;              /* the blocking mode's, while it blocks */
+
+int pm_block_rules_keep(const unsigned char *ns, int n)
+{
+    int i, k;
+    unsigned m = 0;
+    if (!(can & PM_CAN_BLOCK_GAME) || !current) return 0;
+    for (i = 0; ns && i < n; i++)
+        if (ns[i] < 32) m |= 1u << ns[i];
+    for (k = 0; k < KEEP_MODES && keep_of[k] && keep_of[k] != current; k++) ;
+    if (k == KEEP_MODES) return 0;
+    keep_of[k] = current;
+    keep_mask_of[k] = m;
+    return 1;
+}
+
+/* the same by the port's names (`text block_rule_name_<n>`, any case), comma-separated: a blocks mode's C is
+ * written without knowing which game it is for, and a name holds from one build of a title to the next */
+int pm_block_rules_keep_names(const char *names)
+{
+    unsigned char ns[32];
+    char want[48], key[28];
+    const char *s = names, *t;
+    int n = 0, i, k;
+    while (s && *s) {
+        while (*s == ' ' || *s == ',') s++;
+        for (k = 0; *s && *s != ',' && k + 1 < (int)sizeof want; s++) want[k++] = *s;
+        while (k && want[k - 1] == ' ') k--;
+        want[k] = 0;
+        while (*s && *s != ',') s++;
+        if (!k) continue;
+        for (i = 0; i < 32 && n < 32; i++) {
+            pm_snprintf(key, sizeof key, "block_rule_name_%d", i);
+            t = pm_port_text(key);
+            for (k = 0; t && want[k] && t[k] && ((want[k] | 0x20) == (t[k] | 0x20)); k++) ;
+            if (t && !want[k] && !t[k]) { ns[n++] = (unsigned char)i; break; }
+        }
+        if (i == 32) say("block: no rule of the game's is called \"%s\" - it cannot be kept counting", want);
+    }
+    return pm_block_rules_keep(ns, n);
+}
+
+static unsigned keep_mask(const struct pm_mode *m)
+{
+    int k;
+    for (k = 0; k < KEEP_MODES && keep_of[k]; k++)
+        if (keep_of[k] == m) return keep_mask_of[k];
+    return 0;
+}
+
+static int block_rules_on;                   /* how many rules are hooked (the rules section, below) */
+static int block_rules_said;                 /* PAD-398: said once a hold, not once a rule a shot */
+
 int pm_block_game_modes(int on)
 {
     char ids[200];
@@ -3095,11 +3150,14 @@ int pm_block_game_modes(int on)
     else block_defaults(block_mask);
     for (i = 0; i < BLOCK_WORDS; i++) block_said[i] = 0;
     block_battle_said = 0;
+    block_rules_said = 0;
+    block_rules_keep = keep_mask(current);
     pm_snprintf(block_who, sizeof block_who, "%s", mode_name(current, "a mode"));
     bm_text(block_mask, ids, sizeof ids);
-    say("block: %s keeps the game's modes %s (%s) from starting while it runs%s", block_who, ids,
-        own ? "its own list" : "the port's checked defaults",
-        block_battles ? ", and the battle rule from lighting a battle or opening its select screen" : "");
+    say("block: %s keeps the game's modes %s (%s) from starting while it runs%s; %d of the game's rules see no "
+        "shots%s", block_who, ids, own ? "its own list" : "every one the port names",
+        block_battles ? ", and the battle rule from lighting a battle or opening its select screen" : "",
+        block_rules_on - __builtin_popcount(block_rules_keep), block_rules_keep ? " (it keeps the others counting)" : "");
     return 1;
 }
 
@@ -3132,9 +3190,7 @@ static void on_battle_shots(unsigned *r)
  * block_rule_name_<n>`), each shown the shot without those bits while a mode of ours blocks - as the battle
  * rule's is (above). The bits still reach every other rule (Godzilla's pops score through the saucer rule, so
  * they score nothing while a mode blocks; emulator, 2026-10-04). */
-#define BLOCK_RULES 8
-static int block_rules_on;                   /* how many are hooked */
-static unsigned block_rule_said[BLOCK_RULES];
+#define BLOCK_RULES 32                       /* PAD-398: every rule of the game's (Godzilla names 24) */
 
 static void on_rule_shots(unsigned *r, unsigned n)
 {
@@ -3142,15 +3198,18 @@ static void on_rule_shots(unsigned *r, unsigned n)
     unsigned lo, hi;
     const char *nm;
     if (n >= BLOCK_RULES || !block_owner || running != block_owner || !pm_in_game()) return;
+    if (block_rules_keep & (1u << n)) return;    /* PAD-398: the mode keeps this one counting */
     pm_snprintf(key, sizeof key, "block_rule_lo_%u", n);
-    lo = (unsigned)pm_port_value(key, 0);
+    lo = (unsigned)pm_port_value(key, 0xffffffffL);  /* PAD-398: no mask lines = every bit */
     pm_snprintf(key, sizeof key, "block_rule_hi_%u", n);
-    hi = (unsigned)pm_port_value(key, 0);
+    hi = (unsigned)pm_port_value(key, 0xffffffffL);
     if (!(r[2] & lo) && !(r[3] & hi)) return;
-    if (block_rule_said[n]++ < 10) {
+    if (!block_rules_said++) {
         pm_snprintf(key, sizeof key, "block_rule_name_%u", n);
         nm = pm_port_text(key);
-        say("block: the game's %s did not see shot 0x%08x_%08x - %s is running", nm ? nm : "rule", r[3], r[2], block_who);
+        say("block: the game's rules see no shots while %s runs (the first: 0x%08x_%08x, kept from %s and every other "
+            "rule the port names%s)", block_who, r[3], r[2], nm ? nm : "a rule",
+            block_rules_keep ? " but the ones it keeps counting" : "");
     }
     r[2] &= ~lo;
     r[3] &= ~hi;
@@ -3179,8 +3238,8 @@ static void block_tick(void)
 /* from the constructor: a veto on each start the port names (once per distinct start), each id's object */
 static void block_arm(void)
 {
-    char name[24], ids[200], dflt[200];
-    unsigned id, a, d[BLOCK_WORDS];
+    char name[24], ids[200];
+    unsigned id, a;
     int i, any = 0;
     for (id = 0; id < BLOCK_IDS && !any; id++) {
         pm_snprintf(name, sizeof name, "block_start_%u", id);
@@ -3220,7 +3279,7 @@ static void block_arm(void)
         pm_snprintf(name, sizeof name, "block_rule_%d", i);
         pm_snprintf(lo, sizeof lo, "block_rule_lo_%d", i);
         pm_snprintf(hi, sizeof hi, "block_rule_hi_%d", i);
-        if (!fn(name) || !(pm_port_value(lo, 0) | pm_port_value(hi, 0))) continue;
+        if (!fn(name) || !(pm_port_value(lo, 0xffffffffL) | pm_port_value(hi, 0xffffffffL))) continue;
         if (hook_n(fn(name), on_rule_shots, (unsigned)i)) block_rules_on++;
         else say("block: %s (0x%08x) could not be hooked", name, fn(name));
     }
@@ -3230,11 +3289,9 @@ static void block_arm(void)
     }
     can |= PM_CAN_BLOCK_GAME;
     bm_text(block_named, ids, sizeof ids);
-    block_defaults(d);
-    bm_text(d, dflt, sizeof dflt);
-    say("block: on - a mode may keep %d of the game's modes from starting: %s (%d start(s) hooked; checked "
-        "defaults %s)%s; %d other rule(s) shown fewer shots while it blocks", bm_count(block_named), ids,
-        block_n_hooked, dflt,
+    say("block: on - a mode keeps %d of the game's modes from starting (all of them unless it lists its own): %s "
+        "(%d start(s) hooked)%s; %d of the game's rules see no shots while it blocks (unless it keeps them)",
+        bm_count(block_named), ids, block_n_hooked,
         block_battles ? "; the battle rule's shot handler is hooked (no battle lit, no select screen while it blocks)" : "",
         block_rules_on);
 }
@@ -3869,6 +3926,170 @@ static void shield_arm(void)
     can |= PM_CAN_SHIELD;
     say("shield: a mode may turn the shield platform (motor 0x%08x, move 0x%08x; away = switch %ld, toward = %ld)",
         data("shield_motor"), fn("shield_move"), pm_port_value("shield_away", 0), pm_port_value("shield_toward", 0));
+}
+
+/* ---- the building (PAD-393) ---------------------------------------------------------------------
+ * Godzilla Premium/LE's building rides a stepper the node board runs: BuildingStepper -> StepperMotor, one
+ * object (`data building_stepper`, its vtable word `value building_vptr`), node 10 motor 0, BUILDING UP /
+ * DOWN switches 92 / 93. The game moves it by FLOOR, never by steps: `site building_move` (0x1d79fc: object,
+ * floor 0..3) stores the floor as the target (+building_target_at) with the operator's speed, accel and
+ * decel adjustments (355-357), and the motor's own update (0x1dc234, every tick) sends the board one move
+ * of the steps between the floor it is at (+building_at) and the target, then waits for the board to say
+ * it stopped. The floors are the game's own table (0x1d77d8: floor 0 beside home, 1..3 2500, 5000, 7500 steps
+ * further, all less the operator's BUILDING STEPPER BIAS; the game keeps it on 0 at rest), so no floor asked for here can send it past the travel the game
+ * itself uses. No process control: unlike a coil (PAD-381) or the shield, the update sends whatever
+ * target is stored, from whichever process stored it. `site building_busy` (0x1d7948) is the game's own
+ * "not now": 1 while the motor is being configured, before it has homed, while a move is under way, and
+ * while the game's own building processes (322, 323: the attract run, the homing) exist.
+ *
+ * THE LIMITS, none of them the mode's to change (the coils' numbers, PAD-381):
+ *   1. Only the running mode, only in a game (not attract, not tilted), a floor 0..building_floors-1.
+ *   2. Never while the game's building is busy (above), the operator has it off (StepperMotor v[2]:
+ *      BUILDING STEPPER DISABLED) or it has faulted (v[0]: the board reported a stall).
+ *   3. One move at a time (busy covers the move under way), MAGNET_COOL_MS from one move's start to the
+ *      next, at most MAGNET_PER_MIN moves a minute.
+ *   4. Put back: when the mode ends, the ball ends or the game ends or tilts, the building goes back to
+ *      the floor it was at before the mode's first move - unless the game has since sent it somewhere of
+ *      its own (the target is no longer the mode's), which then has it. A put-back that finds it busy
+ *      waits for the move under way and tries again, for up to BUILDING_PUTBACK_MS. */
+#define BUILDING_PUTBACK_MS 10000u
+
+static struct {
+    unsigned long starts[MAGNET_PER_MIN];
+    unsigned next;
+    unsigned long last;                     /* pm_ms() of the last move asked for */
+    int home;                               /* the floor before the mode's first move; -1 none owed */
+    int ours;                               /* the floor the mode asked for last */
+    unsigned long putback_until;            /* 0 = no put-back pending */
+    const char *putback_why;
+} bld = { .home = -1, .ours = -1 };
+
+static unsigned building_obj(void)
+{
+    unsigned obj = data("building_stepper");
+    if (!(can & PM_CAN_BUILDING) || !obj) return 0;
+    if (*(const unsigned *)(unsigned long)obj != (unsigned)pm_port_value("building_vptr", 0)) return 0;
+    return obj;
+}
+
+static int building_field(unsigned obj, const char *at, unsigned fallback)
+{
+    return *(const int *)(unsigned long)(obj + (unsigned)pm_port_value(at, fallback));
+}
+
+static int building_busy(unsigned obj)
+{
+    return (((unsigned (*)(unsigned))(unsigned long)fn("building_busy"))(obj) & 0xffu) != 0;
+}
+
+static void building_send(unsigned obj, int floor)
+{
+    ((void (*)(unsigned, unsigned))(unsigned long)fn("building_move"))(obj, (unsigned)floor);
+}
+
+/* Why a move to `floor` may not start now, or 0. (tests lift it verbatim) */
+static const char *building_refusal(int running_mode, int in_game, int floor, int floors, int disabled,
+                                    int faulted, int busy, unsigned long last, unsigned long now,
+                                    const unsigned long starts[MAGNET_PER_MIN])
+{
+    unsigned i, recent = 0;
+    if (!running_mode) return "only the running mode may move it";
+    if (!in_game) return "no game is being played (attract or a tilt)";
+    if (floor < 0 || floor >= floors) return "no such floor";
+    if (disabled) return "the operator has the building stepper disabled";
+    if (faulted) return "the building's stepper has faulted";
+    if (busy) return "the building is busy (moving, homing, or the game's own building process runs)";
+    if (last && now - last < MAGNET_COOL_MS) return "the last move started less than 3 s ago";
+    for (i = 0; i < MAGNET_PER_MIN; i++)
+        if (starts[i] && now - starts[i] < 60000ul) recent++;
+    if (recent >= MAGNET_PER_MIN) return "six moves in the last minute already";
+    return 0;
+}
+
+int pm_building(int floor)
+{
+    unsigned obj = building_obj();
+    unsigned long now = pm_ms();
+    int at, floors = (int)pm_port_value("building_floors", 4);
+    const char *why;
+    if (!obj) return 0;
+    at = building_field(obj, "building_at", 44);
+    why = building_refusal(pm_running(), pm_in_game(), floor, floors, (coil_virtual(obj, 2) & 0xffu) != 0,
+                           (coil_virtual(obj, 0) & 0xffu) != 0, building_busy(obj), bld.last, now, bld.starts);
+    if (why) {
+        say("building: no move to floor %d - %s", floor, why);
+        return 0;
+    }
+    if (bld.home < 0) bld.home = at;        /* the floor to put it back on */
+    bld.ours = floor;
+    bld.last = now;
+    bld.starts[bld.next++ % MAGNET_PER_MIN] = now;
+    bld.putback_until = 0;
+    building_send(obj, floor);
+    say("building: floor %d -> %d%s (put back on %d when the mode ends)", at, floor,
+        at == floor ? " - already there" : "", bld.home);
+    return 1;
+}
+
+int pm_building_floor(void)
+{
+    unsigned obj = building_obj();
+    int at, to;
+    if (!obj) return -1;
+    at = building_field(obj, "building_at", 44);
+    to = building_field(obj, "building_target_at", 48);
+    if (to != at || building_busy(obj)) return -2;      /* moving, or not found yet */
+    return at >= 0 && at < (int)pm_port_value("building_floors", 4) ? at : -2;
+}
+
+/* The mode, the ball or the game ended: owe a put-back (the tick does it). */
+static void building_let_go(const char *why)
+{
+    if (bld.home < 0 || bld.putback_until) return;
+    bld.putback_until = pm_ms() + BUILDING_PUTBACK_MS;
+    bld.putback_why = why;
+}
+
+static void building_tick(void)
+{
+    unsigned obj;
+    int to;
+    if (bld.home < 0) return;
+    if (!bld.putback_until) {
+        if (!pm_in_game()) building_let_go("the game ended or tilted");
+        else if (!running) building_let_go("no mode is running");
+        if (!bld.putback_until) return;
+    }
+    obj = building_obj();
+    if (!obj) { bld.home = -1, bld.putback_until = 0; return; }
+    to = building_field(obj, "building_target_at", 48);
+    if (to != bld.ours) {
+        say("building: not put back (%s) - the game has sent it to floor %d of its own", bld.putback_why, to);
+    } else if (building_busy(obj)) {
+        if (pm_ms() < bld.putback_until) return;        /* the move under way first */
+        say("building: not put back (%s) - still busy after %u s", bld.putback_why, BUILDING_PUTBACK_MS / 1000);
+    } else {
+        say("building: put back on floor %d (%s)", bld.home, bld.putback_why);
+        building_send(obj, bld.home);
+    }
+    bld.home = bld.ours = -1;
+    bld.putback_until = 0;
+}
+
+static void building_arm(void)
+{
+    static const char *const s[] = { "building_move", "building_busy", 0 };
+    static const char *const d[] = { "building_stepper", 0 };
+    static const char *const v[] = { "building_vptr", "building_at", "building_target_at", "building_floors", 0 };
+    if (!site("building_move")) return;                 /* a port without a building stepper (a Pro): silent */
+    if (!have_sites(s) || !have_data(d) || !have_values(v)) {
+        say("building: off - the port's building lines are incomplete or do not match this build");
+        return;
+    }
+    can |= PM_CAN_BUILDING;
+    say("building: a mode may move it by floor (stepper 0x%08x, move 0x%08x, floors 0..%ld); %u s between "
+        "moves, %u a minute, put back when the mode ends", data("building_stepper"), fn("building_move"),
+        pm_port_value("building_floors", 4) - 1, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
 }
 
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
@@ -5034,6 +5255,7 @@ static void on_tick(unsigned *r)
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
+    building_tick();                          /* PAD-393: a put-back owed */
     roster_deferred_tick();
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
@@ -5068,6 +5290,7 @@ static void on_ball_end(unsigned *r)
     if (disp_linger_until) disp_release("the ball ended");
     bd_reset("the ball ended");
     magnet_let_go("the ball ended");          /* PAD-381 */
+    building_let_go("the ball ended");        /* PAD-393 */
     roster_owed_ball_end();
 }
 
@@ -5948,6 +6171,7 @@ static void pad_mode_start(void)
     coils_arm();                                    /* PAD-381: a magnet grab of the mode's own */
     scoop_arm();                                    /* PAD-381: a ball held in the scoop */
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
+    building_arm();                                 /* PAD-393: the Premium's building */
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
@@ -5956,13 +6180,14 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
         can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
-        can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "");
+        can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
+        can & PM_CAN_BUILDING ? " building" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

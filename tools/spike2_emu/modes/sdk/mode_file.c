@@ -57,9 +57,11 @@ struct mode_cfg {
     unsigned starts_game, starts_ball, cooldown_s;   /* item 139: 0 = no limit */
     int stack_no;                   /* item 140: `stack no` - never beside the game's battle or multiball */
     int aside_keep;                 /* PAD-347: `aside keep` - its screen stays up beside a game mode */
-    int game_modes;                 /* PAD-363: GM_STACK (the default), GM_GIVE_WAY or GM_BLOCK */
+    int game_modes;                 /* PAD-363: GM_STACK, GM_GIVE_WAY or GM_BLOCK (PAD-398: the default) */
     unsigned char block_ids[BLOCK_LIST_MAX];   /* PAD-363: `block_modes` - the game's mode ids it holds off */
-    int block_n;                    /* ... how many (0 = the port's checked defaults) */
+    int block_n;                    /* ... how many (0 = every one the port names) */
+    unsigned char keep_rules[32];   /* PAD-398: `keep_rules` - the game's rules that go on counting while it blocks */
+    int keep_n;
     /* item 141: what each shot pays, a shot that ends the mode, and the award ladder */
     uint64_t sa_bits[SHOT_AWARD_MAX], sa_points[SHOT_AWARD_MAX];
     unsigned n_sa;
@@ -110,6 +112,7 @@ struct slot {
     void *node, *text;
     unsigned hide_ticks;
     int aside;                            /* PAD-347: its screen is stepped aside for a game mode */
+    char said[96];                        /* PAD-390: the screen's last words, written again on a fresh copy */
     unsigned ev_trig[5], ev_pending;      /* item 147: event start counts; a start waiting for pm_in_game */
     unsigned also[ALSO_MAX][5];           /* PAD-227: each trigger_also line's count, per player */
     int after_said;                       /* PAD-227: its `after` mode is missing, said once */
@@ -321,10 +324,13 @@ static int stack_line(struct slot *M, const char *line)
     return 1;
 }
 
-/* PAD-363: `game_modes stack` (the default: it runs beside the game's modes, its screen stepping aside),
- * `game_modes give_way` (it starts only while none of the game's modes runs, the trigger count kept, and one of
- * them beginning ends it) or `game_modes block` (as give_way, and while it runs the game's modes in
- * `block_modes <id> ...` - or the port's checked defaults - cannot start: pm_block_game_modes). */
+/* PAD-363: `game_modes stack` (it runs beside the game's modes, its screen stepping aside), `game_modes
+ * give_way` (it starts only while none of the game's modes runs, the trigger count kept, and one of them
+ * beginning ends it) or `game_modes block` (as give_way, and while it runs the game's modes in `block_modes <id>
+ * ...` - or every one the port names - cannot start: pm_block_game_modes, and every rule of the game's the port
+ * names sees no shot but the ones in `keep_rules <n> ...`: pm_block_rules_keep). PAD-398 (David, 2026-10-05:
+ * "when our custom modes start, we should ONLY be in those modes unless explicitly noted"): `block` is the
+ * default, for a file with no game_modes line. */
 #define GM_STACK    0
 #define GM_GIVE_WAY 1
 #define GM_BLOCK    2
@@ -345,8 +351,25 @@ static int game_modes_line(struct slot *M, const char *line)
     else if (value_is(a, "give_way")) cfg.game_modes = GM_GIVE_WAY;
     else if (value_is(a, "stack")) cfg.game_modes = GM_STACK;
     else {
-        cfg.game_modes = GM_STACK;
-        pm_log("game_modes needs stack, give_way or block - \"%.40s\" read as stack", a);
+        cfg.game_modes = GM_BLOCK;           /* PAD-398: what a file that says nothing does */
+        pm_log("game_modes needs stack, give_way or block - \"%.40s\" read as block", a);
+    }
+    return 1;
+}
+
+static int keep_rules_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "keep_rules");
+    unsigned v;
+    if (!a) return 0;
+    cfg.keep_n = 0;
+    while (*a) {
+        while (*a == ' ' || *a == '\t' || *a == ',') a++;
+        if (!*a || *a == '#') break;
+        if (*a < '0' || *a > '9') { pm_log("keep_rules takes the port's rule numbers, 0-31 - \"%.40s\" ignored", a); break; }
+        for (v = 0; *a >= '0' && *a <= '9' && v < 100000; a++) v = v * 10 + (unsigned)(*a - '0');
+        if (v > 31) pm_log("keep_rules: %u is not a rule number the runtime knows (0-31)", v);
+        else if (cfg.keep_n < 32) cfg.keep_rules[cfg.keep_n++] = (unsigned char)v;
     }
     return 1;
 }
@@ -1725,6 +1748,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (aside_line(M, line)) return;         /* PAD-347 */
     if (game_modes_line(M, line)) return;    /* PAD-363 */
     if (block_modes_line(M, line)) return;   /* PAD-363 */
+    if (keep_rules_line(M, line)) return;    /* PAD-398 */
     if (multiball_line(M, line)) return;     /* item 167 */
     if (ball_save_line(M, line)) return;     /* PAD-225 */
     if (magnet_line(M, line)) return;        /* PAD-381 */
@@ -1746,6 +1770,7 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     long i = 0;
     unsigned k;
     for (k = 0; k < sizeof cfg; k++) ((char *)&cfg)[k] = 0;
+    cfg.game_modes = GM_BLOCK;               /* PAD-398: a file that says nothing runs alone */
     own_sounds_clear(M);
     own_lights_clear(M);                     /* item mode-leds */
     while (i < len) {
@@ -1829,6 +1854,7 @@ static int cfg_reload(struct slot *M)
     cfg_parse(M, M->raw, n);
     roster_sync(M);
     M->node = M->text = 0;
+    M->said[0] = 0;                          /* PAD-390: a new file's screen has said nothing yet */
     return 1;
 }
 
@@ -1855,6 +1881,30 @@ static void words(struct slot *M, const char *before, uint64_t value, const char
     pm_commas(number, sizeof number, value);
     pm_snprintf(s, sizeof s, "%s%s%s", before, number, after);
     pm_set_text(M->text, s);
+    pm_snprintf(M->said, sizeof M->said, "%s", s);
+}
+
+/* PAD-390: a screen is authored VISIBLE and was hidden once, when it was found. If the game has the scene back in
+ * its authored state - a fresh copy of it, or its nodes shown again - nothing hid it, and every mode's screen is
+ * on the glass with the words the card build gave it (David's Godzilla Premium, 2026-10-05: every example's HUD
+ * at once, word on word). So every 2 s the screen is looked at again: a different node (a fresh copy, or none)
+ * is found afresh and given its last words, and the old copy is never touched again; the same node is shown or
+ * hidden again as it should be (up while the mode runs or its total shows, unless it stepped aside). */
+static void screen_recheck(struct slot *M)
+{
+    const char *where;
+    void *n;
+    if (!own_screen(M) || !M->node) return;
+    where = cfg.screen_scene[0] ? cfg.screen_scene : "hud";
+    n = pm_node(where, cfg.screen_node);
+    if (n != M->node) {
+        pm_log("%s: the game made its screen's scene again - %s", cfg.name, n ? "found afresh" : "gone for now");
+        M->node = M->text = 0;              /* the old copy's: never shown, hidden or written again */
+        screen_resolve(M);
+        if (!M->node) return;
+        if (M->said[0] && M->text) pm_set_text(M->text, M->said);
+    }
+    pm_show(M->node, (running(M) || M->hide_ticks) && !M->aside);
 }
 
 /* ---- the mode ------------------------------------------------------------------------ */
@@ -1911,6 +1961,7 @@ static void mode_start(struct slot *M, const char *why)
     pm_running_name(cfg.name);               /* PAD-363: the runtime's lines say this mode, not "mode" */
     if (cfg.game_modes == GM_BLOCK) {        /* PAD-363: the listed game's modes cannot start while it runs */
         pm_block_list(cfg.block_ids, cfg.block_n);
+        pm_block_rules_keep(cfg.keep_rules, cfg.keep_n);   /* PAD-398 */
         if (!pm_block_game_modes(1)) pm_log("%s: this game's port cannot hold its modes off - it gives way to them", cfg.name);
     }
     run.mball_on = run.mball_wait = 0;
@@ -2422,6 +2473,7 @@ static void on_tick(void)
         if (ticks % POLL_TICKS == 0 && k < poll_n) {
             if (cfg_reload(M) && running(M)) pm_log("reloaded while running - the new file is live");
             screen_resolve(M);
+            if (ticks % (4 * POLL_TICKS) == 0) screen_recheck(M);   /* PAD-390: every 2 s */
             if (k == 0) pm_snprintf(name, sizeof name, "mode.start");
             else pm_snprintf(name, sizeof name, "mode%u.start", k);
             if (pm_trigger(name)) mode_start(M, "trigger file");

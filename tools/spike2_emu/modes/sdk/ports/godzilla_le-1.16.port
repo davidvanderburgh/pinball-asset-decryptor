@@ -575,6 +575,21 @@ value shield_target_at     48
 value shield_away          86
 value shield_toward        87
 
+# ---- PAD-393: the building (Premium/LE only) -----------------------------------------------------------------------
+# BuildingStepper (vtable 0x64ff88, a StepperMotor the node board runs: node 10 motor 0, BUILDING UP 92 / DOWN 93), one
+# object at 0x7bbe64 (its getter 0x1d7754 returns it). The game moves it by FLOOR: building_move (0x1d79fc: object,
+# floor 0..3) stores the target at +48 with the speed adjustments 355-357, and the motor's update sends the board the
+# steps between +44 (the floor it is at; 4 = not homed yet) and the target - the game's own table, 0/2500/5000/7500
+# steps from home (floor 0, where it rests) less the BUILDING STEPPER BIAS. building_busy (0x1d7948) is the game's "not now": configuring, not
+# homed, moving, or its building processes 322/323 run. pm_building / pm_building_floor.
+site building_move         0x001d79fc 0xe92d40f8 0xe1a04000
+site building_busy         0x001d7948 0xe5d03025 0xe3530000
+data building_stepper      0x007bbe64
+value building_vptr        0x64ff90
+value building_at          44
+value building_target_at   48
+value building_floors      4
+
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------
 # The Action button (the game's LOCKDOWN BUTTON) and the flipper buttons have no handler of their own
 # (descriptor flags 0), so the rules never send them as a shot and no switch_hit broadcasts them. The
@@ -604,15 +619,58 @@ lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index
 site block_battle_shots       0x00124b3c 0xe92d40f8 0xe1a06002
 value block_battle_lo         0x00300000
 value block_battle_hi         0x00000020
-# PAD-363 (David's Premium, 2026-10-04: "overlapping text for saucer mode feedback under Ghidorah"): the
-# Saucer Attack rule is no mode of the game's (nothing to refuse), and puts its own words up from its shot
-# handler, RuleSaucerAttack::v[25] (vtable 0x647528 + 8 + 100): the pop bumper (0x40) and hi 0x400 count
-# toward lighting it ("%d MORE TO LIGHT SAUCER ATTACK"), hi 0x100 (Mecha exit bottom) its other path. A
-# blocking mode hides those bits from it alone (the pops' own score is this rule's: none while it blocks).
-site block_rule_0             0x00174f9c 0xe92d47f0 0xe1a04002
-value block_rule_lo_0         0x00000040
-value block_rule_hi_0         0x00000500
-text block_rule_name_0        Saucer Attack rule
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x00174f9c 0xe92d47f0 0xe1a04002  # RuleSaucerAttack::v[25]
+text block_rule_name_0     Saucer Attack
+site block_rule_1          0x00121da0 0xe92d47f0 0xe24dd028  # RuleAllies::v[25]
+text block_rule_name_1     Allies
+site block_rule_2          0x0012bad8 0xe92d4070 0xe1a04002  # RuleBigLoop::v[25]
+text block_rule_name_2     Big Loop
+site block_rule_3          0x00135d3c 0xe92d47f0 0xe24dd008  # RuleBridge::v[25]
+text block_rule_name_3     Bridge
+site block_rule_4          0x00131d6c 0xe92d40f0 0xe24dd014  # RuleBuildingLocks::v[25]
+text block_rule_name_4     Building Locks
+site block_rule_5          0x0013a6c0 0xe92d4370 0xe1a04002  # RuleCities::v[25]
+text block_rule_name_5     Cities
+site block_rule_6          0x00143ccc 0xe92d4ff0 0xe24dd054  # RuleCityCombos::v[25]
+text block_rule_name_6     City Combos
+site block_rule_7          0x001484a0 0xe92d4ff0 0xe24dd01c  # RuleDestructionJackpot::v[25]
+text block_rule_name_7     Destruction Jackpot
+site block_rule_8          0x0014c74c 0xe92d4070 0xe1a04002  # RuleGodzillaPowerup::v[25]
+text block_rule_name_8     Godzilla Powerup
+site block_rule_9          0x0014fdf0 0xe92d4ff0 0xe24dd034  # RuleGodzillaWallop::v[25]
+text block_rule_name_9     Godzilla Wallop
+site block_rule_10         0x00152980 0xe92d43f0 0xe24dd00c  # RuleHeatRay::v[25]
+text block_rule_name_10    Heat Ray
+site block_rule_11         0x00156840 0xe92d43f8 0xe2028004  # RuleInlanes::v[25]
+text block_rule_name_11    Inlanes
+site block_rule_12         0x00158f20 0xe92d47f0 0xe24dd010  # RuleJetFighters::v[25]
+text block_rule_name_12    Jet Fighters
+site block_rule_13         0x0015a578 0xe92d40d0 0xe1a06002  # RuleKingOfTheMonsters::v[25]
+text block_rule_name_13    King of the Monsters
+site block_rule_14         0x00160828 0xe92d4ff0 0xe24dd01c  # RuleMechagodzillaShield::v[25]
+text block_rule_name_14    Mechagodzilla Shield
+site block_rule_15         0x00162f94 0xe92d4070 0xe1a04002  # RuleMonsterRampage::v[25]
+text block_rule_name_15    Monster Rampage
+site block_rule_16         0x001645ac 0xe92d4070 0xe1a04002  # RuleMystery::v[25]
+text block_rule_name_16    Mystery
+site block_rule_17         0x0016a400 0xe92d40f0 0xe2024207  # RulePowerlines::v[25]
+text block_rule_name_17    Powerlines
+site block_rule_18         0x0016ddfc 0xe5901008 0xe3510001  # RuleRageCombo::v[25]
+text block_rule_name_18    Rage Combo
+site block_rule_19         0x00178520 0xe92d4ff0 0xe24dd03c  # RuleSecretCombos::v[25]
+text block_rule_name_19    Secret Combos
+site block_rule_20         0x00171da0 0xe92d4070 0xe1a05003  # RuleSkillShot::v[25]
+text block_rule_name_20    Skill Shot
+site block_rule_21         0x0017f6b4 0xe92d4070 0xe1a04002  # RuleTailWhip::v[25]
+text block_rule_name_21    Tail Whip
+site block_rule_22         0x0018242c 0xe92d40d0 0xe24dd008  # RuleTanks::v[25]
+text block_rule_name_22    Tanks
+site block_rule_23         0x00188774 0xe92d4070 0xe1a04002  # RuleTrain::v[25]
+text block_rule_name_23    Train
 
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.

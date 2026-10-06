@@ -71,6 +71,8 @@ class TitleProfile:
     stack_note: str = ""         # item 164: what ``stack no`` waits for when it is less than every mode
     game_modes: tuple = ()       # PAD-363: ((id, name, held off by default), ...) the game's own modes a
     #                              mode can keep from starting (the port's block_start_<id> lines)
+    game_rules: tuple = ()       # PAD-398: ((n, name), ...) the game's rules (its features) that see no
+    #                              shots while a mode blocks, unless it keeps them (block_rule_<n> lines)
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
     light_route: str = ""        # item 164: how a mode's Lights run - "language" (the game's own light
@@ -1158,6 +1160,7 @@ def profile_from_port(path):
         switch_shots_note=switch_note,
         stack_note=stack_note,
         game_modes=_game_modes(port),
+        game_rules=_game_rules(port),                        # PAD-398
         lamps=_lit_inserts(port) if key in LAMPS_PROVEN else 0,
         light_route=light_route,
         bank_tree=measured.get("bank_tree", "auto_loaded"),
@@ -1226,15 +1229,29 @@ def _game_modes(port):
     """PAD-363: ``((id, name, held off by default), ...)``, in id order: the game's own modes the port lets
     a mode keep from starting - a `site block_start_<id>` (with its `data block_obj_<id>` on a C++ title; a
     plain-C title's start is the mode's own), as pad_mode_runtime.c's block_arm hooks them, named by `text
-    block_name_<id>`; `text block_default <ids>` is the ones a mode holds off when it lists none."""
+    block_name_<id>`. PAD-398 (David, 2026-10-05: "when our custom modes start, we should ONLY be in those
+    modes"): every one is held off by default, as the runtime does with a mode that lists none."""
     text = port["text"]
-    default = {int(w) for w in text.get("block_default", "").replace(",", " ").split() if w.isdigit()}
     out = []
     for site in port["site"]:
         tail = site[len("block_start_"):] if site.startswith("block_start_") else ""
         if tail.isdigit() and int(tail) < 128:
             i = int(tail)
-            out.append((i, text.get("block_name_" + tail, "").strip() or "mode %d" % i, i in default))
+            out.append((i, text.get("block_name_" + tail, "").strip() or "mode %d" % i, True))
+    return tuple(sorted(out))
+
+
+def _game_rules(port):
+    """PAD-398: ``((n, name), ...)``, in number order: the game's rules - its features (Godzilla's Destruction
+    Jackpot, building locks, bridge, cities...) - the port names (`site block_rule_<n>`, `text
+    block_rule_name_<n>`, sdk/rule_lines.py). While a mode of ours blocks, each sees no shots, so nothing of
+    the game's lights, locks, counts or awards, unless the mode keeps it counting (``keep_rules``)."""
+    text = port["text"]
+    out = []
+    for site in port["site"]:
+        tail = site[len("block_rule_"):] if site.startswith("block_rule_") else ""
+        if tail.isdigit() and int(tail) < 32:
+            out.append((int(tail), text.get("block_rule_name_" + tail, "").strip() or "rule %s" % tail))
     return tuple(sorted(out))
 
 
@@ -1265,7 +1282,8 @@ try:
     _port_115 = read_port(port_path(GODZILLA_PRO_1_15))
     _key_115, _label_115 = "godzilla_pro-1.15", "Godzilla Pro 1.15"
     GODZILLA_PRO_1_15 = replace(
-        GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), magnet_shot=_magnet_shot_name(_port_115),
+        GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
+        magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot if c[0] not in ("magnet", "scoop", "coils"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
@@ -1669,10 +1687,14 @@ class ModeSpec:
     stack: bool = True
     # PAD-363: what it does about the game's own modes. "stack": runs beside them (its screen steps aside);
     # "give_way": starts only while none runs, and one beginning ends it; "block": as give_way, and while it
-    # runs the game's modes in block_modes (the title's game_modes ids; [] = the port's checked defaults)
-    # cannot start. Never a multiball (game_mode_blocks.py)
-    game_modes: str = "stack"
+    # runs the game's modes in block_modes (the title's game_modes ids; [] = every one the port names)
+    # cannot start. Never a multiball (game_mode_blocks.py). PAD-398 (David, 2026-10-05: "when our custom
+    # modes start, we should ONLY be in those modes unless explicitly noted"): "block" is the default, and
+    # while it blocks every rule of the game's (its features: game_rules) sees no shots but the ones named in
+    # keep_rules, so none of the game's jackpots, locks or multiballs light or count
+    game_modes: str = "block"
     block_modes: list = field(default_factory=list)
+    keep_rules: list = field(default_factory=list)   # PAD-398: names from the title's game_rules
     # item 141, the Advanced section: every other parameter the runtime has
     award_ladder: str = "rising"         # rising: the Nth shot pays N x; fixed: every shot x 1
     shot_award: list = field(default_factory=list)   # [[shot name, points]]: pays instead of award
@@ -2223,6 +2245,10 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         for i, name, _on in getattr(p, "game_modes", ()):
             now.setdefault(name, []).append(i)
         out.block_modes = sorted({j for i in out.block_modes if isinstance(i, int) for j in now.get(was.get(i), ())})
+    if old_key != p.key and isinstance(out.keep_rules, list) and out.keep_rules:
+        # PAD-398: kept by name; a feature the other game does not have is dropped
+        have = {name for _n, name in getattr(p, "game_rules", ())}
+        out.keep_rules = [r for r in out.keep_rules if r in have]
     if old_key == p.key or not isinstance(out.callout_at, list):
         return
     try:
@@ -2754,19 +2780,38 @@ def validate_game_modes(spec, p):
             out.append("%s has no mode the app can hold off numbered %r." % (p.label, i))
     if not out and not held_off(spec, p):
         out.append("Tick at least one of %s's modes to hold off." % p.label)
+    rules = {name for _n, name in getattr(p, "game_rules", ())}            # PAD-398
+    keep = spec.keep_rules if isinstance(spec.keep_rules, list) else None
+    if keep is None:
+        out.append("The game's features it keeps counting are a list of their names.")
+    else:
+        for r in keep:
+            if r not in rules:
+                out.append("%s has no feature called %r to keep counting." % (p.label, r))
     return out
 
 
-def game_modes_lines(spec):
-    """The mode file's lines: nothing at "stack", so older files are unchanged."""
+def keep_rule_ids(spec, p):
+    """PAD-398: the port's numbers (block_rule_<n>) of the features *spec* keeps counting while it blocks."""
+    by = {name: n for n, name in getattr(p, "game_rules", ())}
+    keep = spec.keep_rules if isinstance(spec.keep_rules, list) else []
+    return sorted({by[r] for r in keep if r in by})
+
+
+def game_modes_lines(spec, p=None):
+    """The mode file's lines: what differs from the runtime's default. PAD-398: that default is "block" (a file
+    that says nothing runs alone), so "stack" is written out and "block" is not."""
     if spec.game_modes == "give_way":
         return ["game_modes     give_way"]
     if spec.game_modes != "block":
-        return []
-    out = ["game_modes     block"]
+        return ["game_modes     stack"]
+    out = []
     ids = sorted({i for i in spec.block_modes or () if isinstance(i, int) and 0 <= i < 128})
     if ids:
         out.append("block_modes    " + " ".join(str(i) for i in ids))
+    keep = keep_rule_ids(spec, p) if p is not None else []
+    if keep:
+        out.append("keep_rules     " + " ".join(str(n) for n in keep))
     return out
 
 
@@ -3120,7 +3165,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += own_sound_lines(spec, own_sounds, own_sound_ms)
     if not spec.stack:                      # item 140: only when off, so older files are unchanged
         lines.append("stack          no")
-    lines += game_modes_lines(spec)          # PAD-363: nothing unless it gives way or blocks
+    lines += game_modes_lines(spec, p)       # PAD-363 / PAD-398
     lines += parameter_lines(spec, slug, p)
     lines += display_light_lines(spec)
     lines += more_to_start_lines(spec, p)    # PAD-227: nothing unless the mode has them

@@ -991,10 +991,21 @@ starting". The examples now keep to themselves:
   it. Each mode has its own start, so the port names one veto site per mode a mode of ours may refuse
   (`site block_start_<id>`), and the runtime refuses that start at its entry while the asking mode runs:
   the mode never begins, and the rule that asked carries on. Every mode but the multiballs is named
-  (PAD-363, below); a mode that lists none holds off the port's checked defaults (`text block_default`:
-  on Premium 1.16, 21 Jet Fighter Attack and 23 Tesla Strike). The multiballs (balls in a lock; the
-  Godzilla and Mechagodzilla magnets) are never named: one of those starting still ends ours
-  (`kit_game_began`), as a mode whose assets file says `game_modes give_way` does for every game mode.
+  (PAD-363, below); a mode that lists none holds off EVERY mode the port names (PAD-398: on Premium
+  1.16 all 15, ids 12-26; the port's `text block_default` is no longer read). The multiballs (balls in
+  a lock; the Godzilla and Mechagodzilla magnets) are never refused at their start: one of those starting
+  still ends ours (`kit_game_began`). But since PAD-398 none can be LIT while ours runs: every rule of the
+  game's that reads shots (`site block_rule_<n>`, `text block_rule_name_<n>`, 24 on each Godzilla - the
+  Destruction Jackpot, the building locks, the bridge, the cities, the Powerup, the tanks...) is shown each
+  shot without any bit while a mode of ours blocks, so nothing of the game's lights, locks, counts or awards
+  and its multiballs cannot be qualified; a mode KEEPS a rule counting with `keep_rules` (a mode file, an
+  assets file) or `KEEP_RULES` (a blocks mode), `pm_block_rules_keep` / `pm_block_rules_keep_names`. David,
+  2026-10-05: "when our custom modes start, we should ONLY be in those modes unless explicitly noted." The
+  rule lines are read from each program (`game_mode_blocks.read_rules`, `sdk/rule_lines.py`); a drafted port
+  gets its own. Emulator (Premium/LE 1.16, a form mode with the default): the same 42 shots before, during
+  and after it - before, the game lit POWERLINE ATTACK; during, TANKS 1/10 and BRIDGE 75% 15/30 stood still
+  and nothing of the game's came up; after, Jet Fighter Attack started at once. With `keep_rules` naming
+  the bridge, the bridge went on (15/30 to 15/40) while the rest stood still.
   Battles are kept out at the source: the battle
   rule's shot handler (`site block_battle_shots`, RuleBattle::v[25], shot mask in r2:r3) is where a lit
   ramp counts toward a battle and a lit scoop opens the BATTLE SELECTION screen (it creates the process
@@ -1681,6 +1692,55 @@ and back to switch 86 when they ended; CRYSTAL TOWERS (SPACEGODZILLA's first mul
 BIOLLANTE's shield vines lit only while the platform faced the player. Each real shield hit knocked it away
 and the mode brought it back. Not measured: a machine (the real motor's speed); the motor switched off in
 the adjustments (desk only: `pm_shield` says 0).
+
+## The building (Godzilla Premium/LE, PAD-393)
+
+Godzilla Premium and LE have a building on a stepper motor. The game moves it by FLOOR: 0 is where it
+rests (beside its home switch, BUILDING UP), and 1, 2 and 3 are 2500, 5000 and 7500 steps further. A mode
+asks for a floor and nothing else:
+
+```c
+pm_building(3);                           /* the floor furthest from home, at the operator's speeds */
+if (pm_building_floor() == 3) { /* stopped there */ }
+pm_building(0);                           /* back to where the game keeps it */
+```
+
+The limits are the runtime's and cannot be raised: only the running mode, only in a game; never while the
+building is busy (moving, homing, or one of the game's own building processes 322/323 runs), switched off
+(BUILDING STEPPER DISABLED) or faulted (the board reported a stall); 3 s from one move's start to the next;
+at most 6 a minute. When the mode ends, the ball ends, or the game ends or tilts, the runtime puts it back on
+the floor it was at before the mode's first move - unless the game has since sent it somewhere itself.
+`pm_building` returns 0 when refused (the reason is in mode.log) and on a Pro; `pm_building_floor` says the
+floor it is stopped at, -2 while it moves, -1 on a Pro.
+
+**How it works.** `BuildingStepper` (a `StepperMotor` the node board runs: node 10 motor 0), one object at
+`0x7bbe64`. `building_move(object, floor)` (LE 1.16 `0x1d79fc`) stores the floor as the target (`+48`) with
+the speed adjustments 355-357; the motor's own update sends the board one RELATIVE move of the steps between
+the floor it is at (`+44`) and the target. The floors are the game's own table (`0x1d77d8`), less the
+operator's BUILDING STEPPER BIAS (150 on a stock card), so no floor can drive it past the travel the game
+itself uses. Unlike a coil or the shield, no process control is involved. `building_busy` (`0x1d7948`) is
+the game's own "not now". The port lines:
+
+```
+site building_move         0x001d79fc 0xe92d40f8 0xe1a04000
+site building_busy         0x001d7948 0xe5d03025 0xe3530000
+data building_stepper      0x007bbe64
+value building_vptr        0x64ff90     # the object's vtable word: checked before every move
+value building_at          44
+value building_target_at   48
+value building_floors      4
+```
+
+**The emulator plays the stepper** (hwshim.c "A STEPPER THE BOARD RUNS"): cmd 32 configures it, 34 homes
+it, 31 moves it by steps at 5000 a second, 38+motor reports flags 0x02 moving and 0x04 homed. Before it, the
+zero reply made the game re-send the home about 3600 times a run and never reach a floor. Which switch is
+home on a real machine is not known (BUILDING UP here); `PAD_STEPPER_HOME=down` swaps them.
+
+**Measured (emulator, stock Godzilla LE 1.16, muted; `building_test_mode.c`).** The game homed it once, put it
+on floor 0 (-150 steps), and a mode then moved it: floor 3 (-7500 steps, 1.5 s, BUILDING DOWN made on
+arrival), a second move 1.5 s later refused (busy), floor 2 (+2500), floor 9 refused (no such floor), and at
+the mode's end it was put back on floor 0 (+5000). When the ball drained mid-test, the game sent it to floor
+0 itself and the put-back stood aside. Not machine-tested.
 
 ## Ports: why your mode runs on any game
 

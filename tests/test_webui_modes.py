@@ -1574,18 +1574,25 @@ def test_pad363_the_game_modes_lever_holds_off_the_ticked_modes(tmp_path, previe
         _project(w, proj)
         slug = w.call("modes.new")
         st = w.state("modes")
-        assert st["form"]["game_modes"] == "stack" and st["block_on"] == []
         rows = {r["id"]: r["label"] for r in st["profile"]["game_modes"]}
+        # PAD-398: a new mode runs alone - "cannot start", every one of the title's modes ticked
+        assert st["form"]["game_modes"] == "block" and st["block_on"] == sorted(rows)
         assert rows[21] == "Chimichanga" and (rows[6], rows[7]) == ("Quest (6)", "Quest (7)") and 8 not in rows
         assert not st["dis"]["block"] and "block" not in st["reasons"]
+        assert st["profile"]["game_rules"] == []                 # Deadpool's port names no rules
         path = proj / "modes" / slug / "mode.json"
+        w.call("ui.set", "modes", "f:game_modes", "stack")
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("game_modes") == "stack")
         w.call("ui.set", "modes", "f:game_modes", "block")
-        assert _wait(w, lambda: "Tick at least one of Deadpool LE 1.14's modes to hold off."
-                     in (w.state("modes")["status"] or ""))
-        assert w.state("modes")["fix_pages"] == ["mode"]
-        w.call("ui.set", "modes", "block:21", True)
-        w.call("ui.set", "modes", "block:24", True)
+        for i in sorted(rows):
+            if i not in (21, 24):
+                w.call("ui.set", "modes", "block:%d" % i, False)
         w.call("ui.set", "modes", "block:8", True)               # a multiball: not offered, nothing changes
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("block_modes") == [21, 24])
+        w.call("ui.set", "modes", "block:21", False)
+        w.call("ui.set", "modes", "block:24", False)             # PAD-398: the last tick stays
+        assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("block_modes") == [24])
+        w.call("ui.set", "modes", "block:21", True)
         assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("block_modes") == [21, 24])
         assert json.loads(path.read_text("utf-8"))["game_modes"] == "block"
         assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")

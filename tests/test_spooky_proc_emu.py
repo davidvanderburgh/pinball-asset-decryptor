@@ -420,14 +420,19 @@ def test_a_visible_run_listens_for_keys_in_the_game_window():
                     reason="a unix socket and a POSIX game pid")
 def test_serve_answers_the_key_listener_until_the_game_ends(tmp_path):
     import json
+    import shutil
     import socket
     import subprocess
+    import tempfile
     import threading
     game = subprocess.Popen(["sleep", "60"])
+    # macOS caps a unix socket path at 104 bytes and its tmp_path is longer than that
+    # (the rig's own $SPP_RIG/ctl.sock lives in Linux, so only the test needs this)
+    sockdir = tempfile.mkdtemp(prefix="spp", dir="/tmp")
     try:
         (tmp_path / "game.pid").write_text(str(game.pid))
         b = FakeBoard()
-        sock = str(tmp_path / "ctl.sock")
+        sock = os.path.join(sockdir, "ctl.sock")
         t = threading.Thread(target=sppctl.serve, args=(sppctl.Adapter(b, str(tmp_path)), sock),
                              daemon=True)
         t.start()
@@ -451,6 +456,7 @@ def test_serve_answers_the_key_listener_until_the_game_ends(tmp_path):
         game.wait()
     t.join(5)
     assert not t.is_alive() and not os.path.exists(sock)
+    shutil.rmtree(sockdir, ignore_errors=True)
 
 
 def test_the_table_maps_every_light_to_its_board_outputs():

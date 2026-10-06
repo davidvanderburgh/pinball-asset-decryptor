@@ -3811,6 +3811,52 @@ def _game_program_path(reader, cancel):
     return None, None
 
 
+def _radium_text_looks(data):
+    """``{text: [(align, multiline, top, fit)]}``: how each Text of the scene in *data*
+    lays out its string (horizontal alignment, the Multiline flag byte, VerticalAlignment
+    top, ScaleToBounds), keyed as :func:`radium.enumerate_strings` decodes it.  Empty when
+    the scene doesn't parse."""
+    from . import scene_tree as _scene_tree
+    try:
+        scene = _scene_tree.parse(data)
+    except Exception:                                  # noqa: BLE001
+        return {}
+    out = {}
+    for o in scene.objects.values():
+        if o.kind != "Text":
+            continue
+        b = o.body
+        flags = tuple(b.get("flags") or (0, 0)) + (0, 0)
+        tail = tuple(b.get("tail") or (0, 0)) + (0, 0)
+        out.setdefault(b["text"].decode("latin1"), []).append(
+            (int(b.get("align") or 0), bool(flags[0]), not tail[1], bool(tail[0])))
+    return out
+
+
+def _padded_text(new_bytes, orig_len, looks=()):
+    """*new_bytes* padded to *orig_len* for an in-place patch, so the padding never shows.
+
+    The game lays out every byte of a Text's string, trailing spaces too (PAD-412,
+    emulator: "GODZILLA VS BATTRA" padded with 26 spaces drew ~170 px left of centre), so
+    where the spaces go depends on how its Texts (*looks*, :func:`_radium_text_looks`) set
+    it: after the words when left-aligned, before them when right-aligned, half on each
+    side when centred.  A Text that keeps line breaks, sits at the top of its box and isn't
+    scaled to fit it takes them as one more line of spaces under the words instead, which
+    moves no line (centred padding would shift its first and last lines)."""
+    room = orig_len - len(new_bytes)
+    if room <= 0:
+        return new_bytes
+    aligns = {a for a, _m, _t, _f in looks}
+    if not looks or aligns == {0}:
+        return new_bytes + b" " * room
+    if room >= 2 and b"\n" in new_bytes and all(m and t and not f for _a, m, t, f in looks):
+        return new_bytes + b"\n" + b" " * (room - 1)
+    if aligns == {2}:
+        return b" " * room + new_bytes
+    half = room // 2
+    return b" " * half + new_bytes + b" " * (room - half)
+
+
 def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
                         grow_dir=None, dest_is_device=False, shader=None):
     """Resolve the user's display-text edits to a flat list of in-place writes
@@ -3821,7 +3867,8 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     edit ``(original -> replacement)`` patch **all** display-text occurrences
     whose value equals ``original``.  A replacement that fits the original's
     byte budget is space-padded to the exact original length so the file size
-    and every other offset stay byte-identical.  One that does NOT fit either
+    and every other offset stay byte-identical, the spaces placed where the line's
+    alignment hides them (:func:`_padded_text`).  One that does NOT fit either
     sends the whole scene to growth — every one of that scene's edits is
     re-serialised at its exact length (:mod:`.radium_grow`), the file grows,
     and it is copied onto the card whole — or, when growth is off for this
@@ -3920,6 +3967,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         # a line with line breaks is in the manifest flattened (PAD-382)
         from ...core import text_manifest as _tm
         pairs = _tm.resolve(occ_by_text, pairs)
+        looks = _radium_text_looks(data)
         over = [(o, r) for o, r in pairs
                 if len(r.encode("latin1", "replace"))
                 > len(o.encode("latin1", "replace"))]
@@ -3967,7 +4015,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
                 log("Display text in %s: \"%s\" wasn't found in the current "
                     "radium; skipped." % (card_path, original), "warning")
                 continue
-            full = new_bytes.ljust(orig_len, b" ")
+            full = _padded_text(new_bytes, orig_len, looks.get(original, ()))
             for e in occs:
                 if e["length"] != orig_len:
                     continue                       # paranoia: length must match

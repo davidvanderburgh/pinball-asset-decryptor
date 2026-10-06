@@ -672,7 +672,9 @@ def apply_manifest(man, ops):
                     for o in texts:
                         o["rect"] = [float(v) for v in op["rect"]]
                         if op.get("wrap"):
-                            o["flags"] = [1] + list(o.get("flags") or (0, 0))[1:2]
+                            # Multiline and WordWrap: the words re-flow in the box on the
+                            # machine too (PAD-412: the first byte alone keeps the breaks)
+                            o["flags"] = [1, 1]
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:
@@ -886,8 +888,9 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                     for o in texts:
                         o.body["rect"] = tuple(float(v) for v in op["rect"])
                         if op.get("wrap"):
-                            # the first flag byte: the words wrap at the rect's width
-                            o.body["flags"] = (1, tuple(o.body.get("flags") or (0, 0))[1])
+                            # Multiline + WordWrap: the words re-flow at the rect's width
+                            # (PAD-412, emulator: the first byte alone only keeps the breaks)
+                            o.body["flags"] = (1, 1)
                 applied += 1
             elif k in ("add_picture", "add_text"):
                 parent = op.get("parent")

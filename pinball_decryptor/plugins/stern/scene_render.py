@@ -943,13 +943,22 @@ def _load_file(path, key, cache):
     return img
 
 
-def _wraps(d, box_h, step):
-    """Does this line of text wrap at its rect's width?  The Text's first flag byte says so
-    (a manifest from before it was recorded: a rect tall enough for two lines does)."""
+def _text_modes(d, box_h, step):
+    """``(multiline, wrap)`` for text draw *d*: the Text's two flag bytes, Multiline and
+    WordWrap (PAD-412, the game's own names for them, proven on the emulator: with Multiline
+    off its line breaks are dropped and the words run on as one line; only WordWrap breaks a
+    line at the rect's width).  A manifest from before the flags were recorded keeps every
+    line break and wraps when its rect is tall enough for two lines."""
     flags = d.get("flags")
     if flags:
-        return bool(flags[0])
-    return step > 0 and box_h >= 1.6 * step
+        flags = list(flags) + [0, 0]
+        return bool(flags[0]), bool(flags[1])
+    return True, step > 0 and box_h >= 1.6 * step
+
+
+def _wraps(d, box_h, step):
+    """Does this line of text wrap at its rect's width?  (:func:`_text_modes`)"""
+    return _text_modes(d, box_h, step)[1]
 
 
 def _ink_width(ink_of, s):
@@ -959,10 +968,49 @@ def _ink_width(ink_of, s):
         return 0
 
 
-def text_lines(text, width, wrap, measure):
+def _metrics(font, line):
+    """``(width, above, below)`` of *line* by *font*'s glyph metrics, the way the game
+    measures a line to wrap it or scale it to fit (PAD-412, emulator: by the glyphs' metric
+    boxes, not the outline margins their atlas cells carry): how wide the metric boxes reach
+    from the pen's start, and how far above and below the baseline.  None when the font has
+    no metrics for it."""
+    from . import fontrender as fr
+    glyphs = font.get("glyphs") or {}
+    if not glyphs:
+        return None
+    pen = above = below = right = 0.0
+    left = None
+    for i, ch in enumerate(line):
+        g = glyphs.get(ord(ch))
+        if g is None:
+            if ch != " ":
+                return None
+            pen += fr._space_advance(font)          # as fontrender.render_text spaces words
+            continue
+        nxt = ord(line[i + 1]) if i + 1 < len(line) else None
+        if g["lh"] > 1:
+            left = min(left, pen + g["bx"]) if left is not None else pen + g["bx"]
+            right = max(right, pen + g["bx"] + g["lw"])
+            above = max(above, float(g["by"]))
+            below = max(below, float(g["lh"] - g["by"]))
+        pen += g["adv"] + (g["kern"].get(nxt, 0.0) if nxt is not None else 0.0)
+    return right - min(0.0, left or 0.0), above, below
+
+
+def _measure(font, ink_of):
+    """The width of a line as the game measures it (:func:`_metrics`), else its ink's."""
+    def width(s):
+        m = _metrics(font, s)
+        return m[0] if m is not None else _ink_width(ink_of, s)
+    return width
+
+
+def text_lines(text, width, wrap, measure, keep_space=False):
     """*text* as the lines a scene draws it in: broken at every ``\\n``, and, when *wrap*,
     at the last space that keeps a line within *width* (a word longer than the width
-    stays whole on its own line, as a word processor does)."""
+    stays whole on its own line, as a word processor does).  With *keep_space* a line broken
+    at a space keeps it: the machine centres (or right-aligns) such a line with the space on
+    (PAD-412, emulator: half a space left of where its words alone would sit)."""
     out = []
     for para in str(text).replace("\r", "").split("\n"):
         if not wrap or width <= 0 or measure(para) <= width:
@@ -972,12 +1020,87 @@ def text_lines(text, width, wrap, measure):
         for word in para.split(" "):
             cand = word if not cur else cur + " " + word
             if cur and measure(cand) > width:
-                out.append(cur)
+                out.append(cur + " " if keep_space else cur)
                 cur = word
             else:
                 cur = cand
         out.append(cur)
     return out
+
+
+#: a Text's VerticalAlignment (the last u32 of its record): where its lines sit in its rect
+VALIGN_TOP, VALIGN_MIDDLE, VALIGN_BOTTOM = 0, 1, 2
+
+
+def _layout(d, font, shown, ink_of):
+    """:func:`text_layout`'s lines, and the top of the lines and their height (scaled)."""
+    L, T, R, B = (list(d.get("rect") or (0, 0, 0, 0)) + [0, 0, 0, 0])[:4]
+    align = d.get("align", 1)
+    asc = float(d.get("ascent") or font.get("ascent", 0))
+    line_h = float(d.get("line") or 0) or float(font.get("ascent", 0) + font.get("descent", 0))
+    spacing = list(d.get("spacing") or (0, 0)) + [0, 0]
+    step = line_h + float(spacing[0] or 0)
+    multiline, wrap = _text_modes(d, B - T, line_h)
+    text = str(shown).replace("\r", "")
+    if not multiline:
+        text = text.replace("\n", "")
+    width = R - L               # what the words must fit (emulator: the whole rect, gutters too)
+    measure = _measure(font, ink_of)
+    lines = text_lines(text, width, wrap, measure, keep_space=True)
+    inks = []
+    for line in lines:
+        ink = None
+        if line.strip():
+            try:
+                ink = ink_of(line)
+            except Exception:                                  # noqa: BLE001
+                ink = None
+        inks.append(ink)
+    s = 1.0
+    if d.get("fit") and any(ink is not None for ink in inks):
+        # ScaleToBounds: the widest line into the rect's width, the lines' metric height into
+        # its height (emulator: shrink only, never grow)
+        widest = max(measure(line) for line in lines)
+        first = _metrics(font, lines[0]) or (0, asc, 0)
+        last = _metrics(font, lines[-1]) or (0, 0, line_h - asc)
+        tall = (len(lines) - 1) * step + first[1] + last[2]
+        if widest > 0 and width > 0:
+            s = min(s, width / float(widest))
+        if tall > 0 and B - T > 0:
+            s = min(s, (B - T) / float(tall))
+    block = ((len(lines) - 1) * step + line_h) * s
+    top = T + _GUTTER
+    valign = d.get("valign") or VALIGN_TOP
+    y0 = (B - block if valign == VALIGN_BOTTOM else
+          ((top + B - block) / 2.0 if valign == VALIGN_MIDDLE else top))
+    out = []
+    for k, (line, ink) in enumerate(zip(lines, inks)):
+        if ink is None:
+            continue
+        iw = ink.size[0] * s
+        x = (L + _GUTTER if align == 0 else
+             (R - _GUTTER - iw if align == 2 else L + (R - L - iw) / 2.0))
+        out.append((line, ink, x, y0 + s * (asc - font.get("ascent", 0) + k * step), s))
+    return out, y0, block
+
+
+def text_layout(d, font, shown, ink_of):
+    """Where the machine draws the words of text draw *d* (its *shown* string, after any
+    edit) inside the Text's own rect: ``[(line, ink, x, y, s)]``, each line's ink image placed
+    at (x, y) at scale *s* in the Text's pixels (lines with no words are left out).
+
+    Every rule here was measured on the emulator (PAD-251, PAD-412):
+      - a 2 px gutter inside the rect; the first baseline is the font size's DECLARED ascent
+        below the top of the lines, each further line its declared line height plus the
+        Text's LineSpacing (the first spacing float) lower;
+      - Multiline off drops the line breaks; WordWrap breaks where the glyphs' metric boxes
+        would pass the rect's width (:func:`_text_modes`, :func:`_metrics`);
+      - ScaleToBounds (``fit``, the Text's second-last byte) shrinks the words, never grows
+        them, so the widest line fits that width;
+      - VerticalAlignment (``valign``, its last u32): top puts the lines 2 px below the
+        rect's top, bottom puts the last line's height on the rect's bottom, middle half way
+        between the two."""
+    return _layout(d, font, shown, ink_of)[0]
 
 
 #: the border "Fit box to text" leaves round the words (PAD-383), in the text's own pixels
@@ -988,8 +1111,10 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
     """The rect ``[L, T, R, B]`` that hugs what text draw *d* shows, with *margin* to spare
     (DragonRR, PAD-383: a shorter line left in its wide box ran the box off the screen), or
     None when it draws nothing.  The words stay where they are: the edge the line is aligned
-    to and the top are kept (a centred line keeps its middle), and a line that wraps keeps
-    room for its widest line, so it breaks where it did."""
+    to is kept (a centred line keeps its middle), and so is the edge its lines are aligned to
+    up and down (PAD-412: the top, the bottom, or the middle); a line that wraps keeps room
+    for its widest line, so it breaks where it did, and words scaled to fit their box keep
+    its width, so they keep their size."""
     from . import fontrender as fr
     if font is None or not d.get("text"):
         return None
@@ -999,35 +1124,27 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
     shown = text_manifest.edit_for(text_edits, d["text"]) or d["text"]
     L, T, R, B = (list(d.get("rect") or (0, 0, 0, 0)) + [0, 0, 0, 0])[:4]
     align = d.get("align", 1)
-    asc = float(d.get("ascent") or font.get("ascent", 0))
-    step = float(d.get("line") or 0) or float(font.get("ascent", 0) + font.get("descent", 0))
-    wrap = _wraps(d, B - T, step)
-    lines = text_lines(shown, R - L - 2 * _GUTTER, wrap, lambda s: _ink_width(ink_of, s))
-    x0 = y1 = x1 = None
+    line_h = float(d.get("line") or 0) or float(font.get("ascent", 0) + font.get("descent", 0))
+    wrap = _wraps(d, B - T, line_h)
+    placed, top, block = _layout(d, font, shown, ink_of)
+    x0 = y0 = y1 = x1 = None
     widest = 0
-    for k, line in enumerate(lines):
-        if not line.strip():
-            continue
-        try:
-            ink = ink_of(line)
-        except Exception:                                      # noqa: BLE001
-            continue
-        iw = ink.size[0]
-        widest = max(widest, iw)
+    measure = _measure(font, ink_of)
+    for line, ink, x, y, s in placed:
+        widest = max(widest, measure(line))
         bb = ink.getchannel("A").getbbox() if ink.mode == "RGBA" else ink.getbbox()
         if bb is None:
             continue
-        # placed exactly as render_tree places it
-        x = (L + _GUTTER if align == 0 else
-             (R - _GUTTER - iw if align == 2 else L + (R - L - iw) / 2.0))
-        y = T + _GUTTER + asc - font.get("ascent", 0) + k * step
-        x0 = x + bb[0] if x0 is None else min(x0, x + bb[0])
-        x1 = x + bb[2] if x1 is None else max(x1, x + bb[2])
-        y1 = y + bb[3] if y1 is None else max(y1, y + bb[3])
+        x0 = x + s * bb[0] if x0 is None else min(x0, x + s * bb[0])
+        x1 = x + s * bb[2] if x1 is None else max(x1, x + s * bb[2])
+        y0 = y + s * bb[1] if y0 is None else min(y0, y + s * bb[1])
+        y1 = y + s * bb[3] if y1 is None else max(y1, y + s * bb[3])
     if x0 is None:
         return None
-    room = 2 * _GUTTER + widest if wrap else 0.0
-    if align == 0:
+    room = widest if wrap else 0.0
+    if d.get("fit"):
+        nl, nr = L, R
+    elif align == 0:
         nl, nr = L, max(x1 + margin, L + room)
     elif align == 2:
         nl, nr = min(x0 - margin, R - room), R
@@ -1035,11 +1152,19 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
         mid = (L + R) / 2.0
         half = max(mid - x0, x1 - mid, room / 2.0) + margin
         nl, nr = mid - half, mid + half
-    nb = y1 + margin
-    if not d.get("flags") and step > 0:
+    valign = d.get("valign") or VALIGN_TOP
+    if valign == VALIGN_BOTTOM:
+        nt, nb = min(top - _GUTTER, y0) - margin, B
+    elif valign == VALIGN_MIDDLE:
+        # the lines keep their top: (nt + gutter + nb - block) / 2 == top
+        nb = max(y1, top + block) + margin
+        nt = 2.0 * top - _GUTTER - nb + block
+    else:
+        nt, nb = T, y1 + margin
+    if not d.get("flags") and line_h > 0:
         # an old manifest decides wrapping by the rect's height: keep that the same
-        nb = max(nb, T + 1.6 * step) if wrap else min(nb, T + 1.6 * step - 0.01)
-    return [round(nl, 3), round(T, 3), round(nr, 3), round(nb, 3)]
+        nb = max(nb, nt + 1.6 * line_h) if wrap else min(nb, nt + 1.6 * line_h - 0.01)
+    return [round(nl, 3), round(nt, 3), round(nr, 3), round(nb, 3)]
 
 
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
@@ -1140,10 +1265,6 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             pick = (colors or {}).get(d["text"])
             if pick:
                 rgba = [c / 255.0 for c in pick[:3]] + [rgba[3]]
-            L, T, R, B = (list(d.get("rect") or (0, 0, w, h)) + [0, 0, 0, 0])[:4]
-            align = d.get("align", 1)
-            asc = float(d.get("ascent") or font.get("ascent", 0))
-            step = float(d.get("line") or 0) or float(font.get("ascent", 0) + font.get("descent", 0))
             if inks is None:
                 ink_of = lambda s, _f=font: fr.render_text(_f, s)[0]     # noqa: E731
             else:
@@ -1151,26 +1272,13 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                     if (_k, s) not in inks:
                         inks[(_k, s)] = fr.render_text(_f, s)[0]
                     return inks[(_k, s)]
-            lines = text_lines(shown, R - L - 2 * _GUTTER, _wraps(d, B - T, step),
-                               lambda s, _i=ink_of: _ink_width(_i, s))
             mul = tuple(d["mul"][i] * (1.0 if i < 3 else rgba[3]) for i in range(4))
-            for k, line in enumerate(lines):
-                if not line.strip():
-                    continue
-                try:
-                    ink = ink_of(line)
-                except Exception:
-                    continue
+            boxed = d if d.get("rect") else dict(d, rect=[0, 0, w, h])
+            # in its rect as the machine lays it out (text_layout: gutter, declared ascent,
+            # line height + LineSpacing, Multiline/WordWrap, ScaleToBounds, VerticalAlignment)
+            for _line, ink, x, y, s in text_layout(boxed, font, shown, ink_of):
                 ink = _tint(ink, rgba)
-                iw = ink.size[0]
-                # A text field keeps a 2 px gutter inside its rect (every stock rect starts at
-                # -2, -2), and the first baseline sits the font size's DECLARED ascent below
-                # it - measured against the emulator's language screen to the pixel; each
-                # further line is the size's declared line height lower.
-                x = (L + _GUTTER if align == 0 else
-                     (R - _GUTTER - iw if align == 2 else L + (R - L - iw) / 2.0))
-                local = (1.0, 0.0, 0.0, 1.0, x,
-                         T + _GUTTER + asc - font.get("ascent", 0) + k * step)
+                local = (s, 0.0, 0.0, s, x, y)
                 got = _warp(ink, ev.compose(d["m"], local), w, h)
                 if got is not None:
                     _composite(canvas, got[0], got[1], got[2], mul, d["add"],

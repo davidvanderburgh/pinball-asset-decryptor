@@ -22,7 +22,7 @@
  *              ZERO and MULTIPLIER at the edges, the charge on the right edge's gauge, the clock in the badge
  *              (the overheat's seconds while it overheats). Each 100% plays the cannon charging, an overheat
  *              Kiryu sparking; the shot and the endings are full screen.
- *   INSERTS    The charging shots ice blue; ready: the CAPTIVE BALL (MAGNA GRAB) and the ACTION BUTTON
+ *   INSERTS    The charging shots flashing ice blue; ready: the CAPTIVE BALL (MAGNA GRAB) and the ACTION BUTTON
  *              flashing white; overheating: flashing red, faster as the seconds run out.
  *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
  *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
@@ -164,7 +164,7 @@ static void show_lamps(void)
 {
     kit_lamps_begin(&lamps);
     if (run.phase == PHASE_CHARGE) {
-        if (run.charge < CHARGE_MAX) kit_lamps_shot(&lamps, all_charge, KY_ICE, PM_LAMP_SOLID, 0);
+        if (run.charge < CHARGE_MAX) kit_lamps_shot(&lamps, all_charge, KY_ICE, PM_LAMP_BLINK, KIT_LIT_MS);
         if (run.mult) {
             uint64_t fire = fire_mask | button_mask;
             if (run.heat.ticks)

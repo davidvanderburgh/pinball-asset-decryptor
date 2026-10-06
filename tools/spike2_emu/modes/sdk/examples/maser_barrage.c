@@ -22,9 +22,9 @@
  *   ENDS       When the clock runs out, or the ball drains, or the ball is tilted. It counts
  *              as WON with at least one barrage (for FINAL WARS). The screen shows the total.
  *   INSERTS    The NEXT shot's insert is bright Maser blue; the other two shots of the sequence
- *              are a dim blue, so the whole chain is on the playfield. The next shot is solid
- *              while no window runs (the first step), and BLINKS while the window runs, faster
- *              as it closes. Everything is handed back the moment the mode ends.
+ *              pulse a dim blue, so the whole chain is on the playfield. The next shot blinks
+ *              steadily while no window runs (the first step), and faster while the window runs,
+ *              faster still as it closes. Everything is handed back the moment the mode ends.
  *   DISPLAY    Priority 180 (the game's full-screen shot awards are not shown over it; its
  *              jackpots, starts and the tilt warning come through).
  *   THE GLASS  (hud-layers) The Maser tanks rolling up and firing, full screen, then the night
@@ -154,9 +154,9 @@ static void show_lamps(void)
     kit_lamps_begin(&lamps);
     for (i = 0; i < N_STEPS; i++) {
         if (i != run.step) {
-            kit_lamps_shot(&lamps, step_mask[i], KIT_BLUE_DIM, PM_LAMP_SOLID, 0);
+            kit_lamps_shot(&lamps, step_mask[i], KIT_BLUE_DIM, PM_LAMP_PULSE, 1600);   /* not next yet */
         } else if (run.step == 0) {
-            kit_lamps_shot(&lamps, step_mask[i], KIT_BLUE, PM_LAMP_SOLID, 0);     /* no window runs yet */
+            kit_lamps_shot(&lamps, step_mask[i], KIT_BLUE, PM_LAMP_BLINK, KIT_LIT_MS);  /* no window runs yet */
         } else {
             unsigned long used = pm_ms() - run.step_at;
             unsigned long left = used >= run.window_ms ? 0 : run.window_ms - used;

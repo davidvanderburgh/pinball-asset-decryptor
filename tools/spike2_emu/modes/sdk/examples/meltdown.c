@@ -31,8 +31,8 @@
  *              white-hot, BURNING GODZILLA and what to do above the score panel; during MELTDOWN the
  *              MELTDOWN badge counts its 20 s. Jackpots play the spiral ray behind the HUD, cadmium
  *              the freezing mist, crossing into CRITICAL the veins glowing; MELTDOWN is full screen.
- *   INSERTS    The four jackpot shots in the heat's colour (yellow, orange, red, white flashing), the
- *              HEART blinking; the shields pulsing ice blue while the core is above 40%; MELTDOWN:
+ *   INSERTS    The four jackpot shots flashing in the heat's colour (yellow, orange, red, white and fast), the
+ *              HEART blinking faster; the shields pulsing ice blue while the core is above 40%; MELTDOWN:
  *              only the BUILDING, strobing white. Everything back to the game at the end.
  *   LIGHTS     Its own shows: at the start, the playfield dark and a red fire rising from the
  *              flippers into a white-hot strobe; MELTDOWN, a white implosion into the Building;
@@ -231,7 +231,7 @@ static void show_lamps(void)
         uint64_t rest = 0;
         for (i = 0; i < N_JP; i++)
             if (i != run.heart) rest |= jp_mask[i];
-        kit_lamps_shot(&lamps, rest, rgb, run.heat_level == 3 ? PM_LAMP_BLINK : PM_LAMP_SOLID, 150);
+        kit_lamps_shot(&lamps, rest, rgb, PM_LAMP_BLINK, run.heat_level == 3 ? 150 : KIT_LIT_MS);
         kit_lamps_shot(&lamps, jp_mask[run.heart], rgb, PM_LAMP_BLINK, run.heat_level >= 2 ? 100 : 250);  /* the heart */
         if (run.core >= 40) kit_lamps_shot(&lamps, shield_mask, MD_ICE, PM_LAMP_PULSE, 900);
         if (!run.add_used && run.jackpots >= ADD_BALL_AFTER)

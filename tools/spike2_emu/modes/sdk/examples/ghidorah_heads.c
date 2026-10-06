@@ -26,8 +26,8 @@
  *   ENDS       Won (the super jackpot), or GHIDORAH ESCAPES (the clock or the final blow
  *              runs out), or the ball drains, or the ball is tilted. The screen shows the total.
  *   INSERTS    The lit head's two inserts (its ramp or the Building, and its powerline) are
- *              GOLD, and their pattern is its health: solid at full health, blinking at 2,
- *              blinking fast at 1. A wounded head that is not lit PULSES GREEN: it is growing
+ *              GOLD, and their pattern is its health: blinking slowly at full health, faster at 2,
+ *              fast at 1. A wounded head that is not lit PULSES GREEN: it is growing
  *              back. A full head that is not lit, and a severed one, are the game's own again.
  *              The final blow: MASER and MASER READY flash white (faster in its last 5 s).
  *              Everything is handed back the moment the mode ends, however it ends.
@@ -86,7 +86,8 @@ static const struct {
 };
 #define FINAL_SHOT "Maser target"
 #define FINAL_INSERTS_TOO "MASER READY"   /* the insert beside MASER, tied to no shot by the game */
-#define HURT_BLINK_MS      500            /* the lit head at 2 health */
+#define FULL_BLINK_MS      700            /* the lit head at full health */
+#define HURT_BLINK_MS      400            /* ... at 2 */
 #define DYING_BLINK_MS     180            /* ... at 1 */
 #define REGROW_PULSE_MS    1200
 
@@ -199,8 +200,8 @@ static void show_lit(void)
             uint64_t m = big_mask[i] | small_mask[i];
             if (!run.hp[i]) continue;                          /* severed: the game's own again */
             if (i == run.lit)
-                kit_lamps_shot(&lamps, m, KIT_GOLD, run.hp[i] >= HEAD_HP ? PM_LAMP_SOLID : PM_LAMP_BLINK,
-                               run.hp[i] >= 2 ? HURT_BLINK_MS : DYING_BLINK_MS);
+                kit_lamps_shot(&lamps, m, KIT_GOLD, PM_LAMP_BLINK, run.hp[i] >= HEAD_HP ? FULL_BLINK_MS
+                               : run.hp[i] >= 2 ? HURT_BLINK_MS : DYING_BLINK_MS);
             else if (run.hp[i] < HEAD_HP)
                 kit_lamps_shot(&lamps, m, KIT_GREEN, PM_LAMP_PULSE, REGROW_PULSE_MS);   /* growing back */
         }

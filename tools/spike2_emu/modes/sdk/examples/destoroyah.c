@@ -22,7 +22,7 @@
  *              form's clock in the badge. A kill plays an aggregate blown apart (every few seconds), a city
  *              hit an aggregate's attack, a cleared wave the swarm merging; the perfect form and the endings
  *              are full screen.
- *   INSERTS    Each aggregate's shot: far yellow and solid, near orange and blinking, close red and
+ *   INSERTS    Each aggregate's shot: far yellow and blinking slowly, near orange and blinking, close red and
  *              flickering. The perfect form: the BUILDING blinking red, faster as its clock runs out.
  *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
  *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
@@ -201,8 +201,8 @@ static void show_lamps(void)
 {
     unsigned i;
     static const unsigned RGB[RINGS] = { KIT_YELLOW, KIT_ORANGE, KIT_RED };
-    static const int PAT[RINGS] = { PM_LAMP_SOLID, PM_LAMP_BLINK, PM_LAMP_BLINK };
-    static const unsigned MS[RINGS] = { 0, 400, 120 };
+    static const int PAT[RINGS] = { PM_LAMP_BLINK, PM_LAMP_BLINK, PM_LAMP_BLINK };
+    static const unsigned MS[RINGS] = { 700, 400, 120 };
     kit_lamps_begin(&lamps);
     if (run.phase == PHASE_BOSS) {
         kit_lamps_shot(&lamps, boss_mask, KIT_RED, PM_LAMP_BLINK,

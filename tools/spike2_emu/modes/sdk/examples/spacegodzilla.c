@@ -32,8 +32,8 @@
  *                  panel; TOWERS, JACKPOT and SUPER at the edges, the towers' strength on the right edge's
  *                  gauge, the super's window in the badge. A jackpot plays a tower cracking, a fallen tower
  *                  its collapse; the super and the endings are full screen.
- *   INSERTS        A lit lock: the BIG LOOP blinking purple. The towers purple (solid while strong, blinking on
- *                  their last jackpot); the super: the BIG LOOP flashing white; M.O.G.U.E.R.A.'s shields
+ *   INSERTS        A lit lock: the BIG LOOP blinking purple. The towers flashing purple (fast on their last
+ *                  jackpot); the super: the BIG LOOP flashing white; M.O.G.U.E.R.A.'s shields
  *                  pulsing cyan.
  *   DISPLAY        Priority 190 (a multiball of ours).
  *
@@ -194,7 +194,7 @@ static void show_lamps(void)
     unsigned i;
     kit_lamps_begin(&lamps);
     for (i = 0; i < N_TOWERS; i++)
-        if (run.hp[i]) kit_lamps_shot(&lamps, tower_mask[i], SG_PURPLE, run.hp[i] == 1 ? PM_LAMP_BLINK : PM_LAMP_SOLID, 300);
+        if (run.hp[i]) kit_lamps_shot(&lamps, tower_mask[i], SG_PURPLE, PM_LAMP_BLINK, run.hp[i] == 1 ? 200 : KIT_LIT_MS);
     if (run.super_lit)
         kit_lamps_shot(&lamps, lock_mask, KIT_WHITE, PM_LAMP_BLINK,
                        kit_hurry_ms((unsigned long)kit_timer_seconds(&run.clock) * 1000u, SUPER_SECONDS * 1000u));

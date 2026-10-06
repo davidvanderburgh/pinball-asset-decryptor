@@ -849,6 +849,7 @@ int pm_hit_sounds(void)
 int pm_hit_sound(int n)
 {
     static unsigned long last;
+    static int said;
     char key[20];
     int count = pm_hit_sounds();
     unsigned long now = pm_ms();
@@ -858,6 +859,7 @@ int pm_hit_sound(int n)
     pm_snprintf(key, sizeof key, "hit_sound_%d", n);
     if (!pm_sound((unsigned)pm_port_value(key, 0))) return 0;
     last = now | 1;
+    if (said < 40 && ++said) say("hit sound %d: request %ld%s", n, pm_port_value(key, 0), said == 40 ? " (no more of these lines this boot)" : "");
     return 1;
 }
 
@@ -1658,6 +1660,8 @@ int pm_lamp_flash(uint64_t shots, unsigned rgb, unsigned ms)
         h->last[0] = h->last[1] = h->last[2] = -1;
         n++;
     }
+    if (n) lamp_say("lamps: %d insert(s) strobe %06x for %u ms (a hit, shots %08x_%08x)", n, rgb & 0xffffffu, ms,
+                    (unsigned)(shots >> 32), (unsigned)shots);
     return n;
 }
 

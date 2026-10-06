@@ -577,7 +577,9 @@ HELP_CONTENT = {
             "- When the file would change something you edited yourself (a scene, a "
             "picture, a line of text, the overlay), it lists each one beside the file's "
             "and asks: **Cancel**, **Skip conflicts** (load only the rest), **Replace "
-            "all**, or tick the ones to replace and **Replace ticked only**. Before any of "
+            "all**, tick the ones to replace and **Replace ticked only**, or **Reset my "
+            "scenes, then load** (every scene back as the game shipped it, then the whole "
+            "file). Before any of "
             "yours is replaced it saves them to a file in the project's **Backups** "
             "folder (untick that to skip it); load that file to put them back.",
         ]),

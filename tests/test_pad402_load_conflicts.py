@@ -101,6 +101,33 @@ def test_scenes_ask_about_each_conflict_and_back_up_first(tmp_path):
         assert [s.get("kind") for s in w.asked[n:]] == ["file"]
 
 
+def test_scenes_reset_mine_then_load_the_file(tmp_path):
+    """Round 2: every scene of mine back as shipped, the ones the file does not touch too,
+    then the whole file loaded; mine backed up first."""
+    from tests.test_gui_scene_editor import CARD, _open, _wait
+    from tests.webui_harness import web_app
+    mine, friend = _two_projects(tmp_path)
+    other = "/g/other/scene.radium"
+    scene_edit.save(str(mine), {CARD: MINE, other: MINE})
+    zip_path = str(tmp_path / "from sam.zip")
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, friend)
+        w.answers.append(zip_path)
+        assert w.call("text_scenes.edits_save", "all", True) == zip_path
+        _open(w, mine)
+        w.answers.extend([zip_path, {"choice": "reset", "backup": True}])
+        w.call("text_scenes.edits_load")
+        assert "reset" in [b["id"] for b in w.asked[-1]["buttons"]]
+        assert scene_edit.load(str(mine)) == {CARD: THEIRS}
+        assert _wait(w, lambda: text_manifest.changed(str(mine)) == {CARD: [("KAIJU", "BEAST")]})
+        (backup,) = _backups(mine)
+        saved = os.path.join(str(mine), MP.BACKUP_DIR, backup)
+        assert scene_edit.read_share(saved) == {CARD: MINE}
+        cap = w.state("text_scenes")["caption_full"]
+        assert cap.startswith("Put 2 scenes back as the game shipped them first."), cap
+        assert "kept" not in cap and backup in cap, cap
+
+
 def test_modes_ask_about_each_conflict_and_back_up_first(tmp_path, monkeypatch):
     from pinball_decryptor.core import preview
     from tests.test_webui_modes import _card_project, _modes_on_disk, _project

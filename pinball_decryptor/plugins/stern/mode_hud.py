@@ -183,6 +183,30 @@ def _pad4(a):
     return out
 
 
+# ---- the game's textures are PREMULTIPLIED (PAD-416) ---------------------------------------------------------
+# A half-transparent pixel of the game's own carries its colour already multiplied by its alpha (the BATTLE badge:
+# 96% of its half-transparent pixels have no channel above their alpha; a font page 100%), and the engine draws
+# them so: colour + what is behind x (1 - alpha). A picture of ours with plain alpha was drawn far too bright where
+# it fades - the gauge pips' soft glow came out as solid blocks of colour round each pip ("filling up with the
+# colors outside the meter ... looks like a glitch", David), a glass's faint shine as white bars. So our art is
+# drawn with plain alpha (PIL's alpha_composite), stock art read back to plain alpha (straight_alpha), and every
+# Bitmap premultiplied as it is encoded (_bitmap_node).
+def straight_alpha(a):
+    """A premultiplied RGBA array (the game's) as plain alpha."""
+    a = np.asarray(a, dtype=np.uint8).copy()
+    al = a[..., 3:4].astype(np.float32)
+    rgb = np.where(al > 0, a[..., :3].astype(np.float32) * 255.0 / np.maximum(al, 1.0), 0.0)
+    a[..., :3] = np.clip(np.round(rgb), 0, 255).astype(np.uint8)
+    return a
+
+
+def premultiplied(a):
+    """A plain-alpha RGBA array as the game draws its own: each channel times its alpha."""
+    a = np.asarray(a, dtype=np.uint8).copy()
+    a[..., :3] = np.round(a[..., :3].astype(np.float32) * a[..., 3:4].astype(np.float32) / 255.0).astype(np.uint8)
+    return a
+
+
 def stock_badge(hud_data):
     """(panel, disc) RGBA arrays of the stock BATTLE badge in ``32e6ae28`` (its first two textures)."""
     from .engine import parse_radium_images
@@ -193,7 +217,7 @@ def stock_badge(hud_data):
     for im in imgs[:2]:
         raw = hud_data[im["data_off"]:im["data_off"] + im["length"]]
         dec = _dds.decode_bc3 if im["fmt"] == SW.BC3 else _dds.decode_bc1
-        out.append(np.asarray(dec(raw, im["tex_w"], im["tex_h"]), dtype=np.uint8))
+        out.append(straight_alpha(np.asarray(dec(raw, im["tex_w"], im["tex_h"]), dtype=np.uint8)))
     if out[0].shape[:2] != (90, 94) or out[1].shape[:2] != (104, 212):
         raise HudError("the HUD scene's first textures are not the BATTLE badge (%s, %s)"
                        % (out[0].shape[:2], out[1].shape[:2]))
@@ -584,8 +608,9 @@ def _text_node(p, ids, name, words, font, x, y, ltrb, rgba=(1.0, 1.0, 1.0, 1.0),
 
 
 def _bitmap_node(p, ids, name, rgba, x, y, textures):
-    """A Bitmap node; the same pixels already used in this HUD are referenced, not copied."""
-    a = np.asarray(rgba, dtype=np.uint8)
+    """A Bitmap node; the same pixels already used in this HUD are referenced, not copied. ``rgba`` is plain
+    alpha; it goes on the card premultiplied, as the game's own pictures are (PAD-416)."""
+    a = premultiplied(rgba)
     h, w = a.shape[:2]
     key = (w, h, a.tobytes())
     pn, po = ids.take(2)
@@ -691,13 +716,13 @@ def bar_gauge(p, ids, g, gauge, sec, textures):
                               [_bitmap_node(p, ids, "%s_G%d_OnArt" % (g, i + 1), sl, 0.0, 0.0, textures)], tx + x, ty))
     gk.append(_bitmap_node(p, ids, g + "_Gauge_Glass", _pad4(bar_glass()), BAR_X, BAR_Y, textures))
     # the words, three lines centred to the frame's left as the stock meter's are to its right
-    s, cx = 0.3, BAR_X - 74.0
+    s, cx = 0.4, BAR_X - 78.0                         # the stock meter's words are about 22 px high
     words = list(gauge.get("words") or ["GODZILLA", "RAGE"])[:2]
     for k, w in enumerate(words):
-        gk.append(_text_node(p, ids, "%s_Gauge_Word%d" % (g, k + 1), w, sec(0), cx, BAR_Y + 1.0 + 26.0 * k,
+        gk.append(_text_node(p, ids, "%s_Gauge_Word%d" % (g, k + 1), w, sec(0), cx, BAR_Y - 1.0 + 27.0 * k,
                              (-230.0, -2.0, 230.0, 80.0), flags=(1, 0), scale=s))
     gk.append(_text_node(p, ids, "%s_Gauge_Label" % g, gauge.get("label") or " ", sec(0), cx,
-                         BAR_Y + 1.0 + 26.0 * len(words), (-230.0, -2.0, 230.0, 80.0), flags=(1, 0), scale=s))
+                         BAR_Y - 1.0 + 27.0 * len(words), (-230.0, -2.0, 230.0, 80.0), flags=(1, 0), scale=s))
     return gk
 
 

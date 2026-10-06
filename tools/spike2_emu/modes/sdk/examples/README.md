@@ -11,7 +11,7 @@ Modes written in C against `pad_mode.h` (read `../MODE_SDK.md` first). Each file
 | `final_wars.c` | FINAL WARS | a multi-phase wizard mode, lit by playing the other modes, with add-time shots |
 | `anguirus_assist.c` | ANGUIRUS | a mode that stacks with the game's own battle on purpose: it starts and ends with it |
 | `meltdown.c` | MELTDOWN | a MULTIBALL of our own: a core temperature that climbs, sets the jackpots' multiplier, and melts down at 100% (hud-layers) |
-| `godzilla_angry.c` | GODZILLA ANGRY | a RAGE meter every switch fills (on the glass all game), a chase in staged locks, a 6-ball multiball (PAD-379, after EHoH's Gappa Angry) |
+| `godzilla_angry.c` | GODZILLA ANGRY | a RAGE meter every switch fills, all game (one bar to the mode, in the stock POWERUP meter's manner), a chase in staged locks, a 6-ball multiball (PAD-379, after EHoH's Gappa Angry) |
 | `spacegodzilla.c` | SPACEGODZILLA | a multiball of crystal locks that are harder to light each time, three multiballs in turn, supers worth the sum (PAD-379) |
 | `kiryu.c` | KIRYU | charge the Absolute Zero, then fire it or push your luck into an overheat (PAD-379, after Metallica's Sparky) |
 | `biollante.c` | BIOLLANTE | a switch frenzy: every switch feeds a sap jackpot the vine banks collect (PAD-379, after TWD's Blood Bath) |
@@ -271,11 +271,14 @@ and calls cut from the films.
 ### GODZILLA ANGRY (`godzilla_angry.c`): EHoH's Gappa Angry
 
 - **How to start it:** fill the RAGE meter. Every playfield switch hit counts (the game's 0x1 dispatch), all game, for
-  the player up: five levels of 100, 125, 150, 175 and 200 hits (EHoH's 150 to 250, for Godzilla's single pop bumper),
-  each paying 1,000,000 more 500,000 a level with a roar and a red throb up the playfield. Nothing counts during a
-  multiball (two balls in play, or the game's own), during the mode, or after a tilt. The meter stays on the glass: a
-  gauge of 12 pips on the right edge labelled RAGE n/5, and the award line every quarter of a level ("40 MORE FOR RAGE
-  3"). At level 5 GODZILLA IS ANGRY: the BUILDING insert pulses red and the BUILDING starts the chase.
+  the player up, through every other mode and multiball, ours and the game's (PAD-416: only the mode itself and a tilt
+  stop it; in a multiball it counts quietly). It is ONE meter to the mode (PAD-416, David: "the whole meter should be
+  100% towards the mode"): 750 hits, in the stock POWERUP meter's manner at the glass's top-right corner - a metal frame,
+  the rage flame in a diamond, a glass tube in five cells that a red-to-orange liquid fills, GODZILLA / RAGE and its
+  percent beside it. Each cell (100, 125, 150, 175 and 200 hits: EHoH's 150 to 250, for Godzilla's single pop bumper)
+  pays 1,000,000 more 500,000 a cell at its mark, with a roar and a red throb up the playfield ("RAGE 40%"); the award
+  line counts to the mode every quarter of a cell ("120 MORE TO GODZILLA ANGRY"). Full, GODZILLA IS ANGRY: the
+  BUILDING insert pulses red and the BUILDING starts the chase.
 - **The chase (Godzilla vs. Mechagodzilla II: G-Force carried Baby Godzilla away):** five places, each its lit shots in
   any order and then a LOCK (virtual: the ball stays in play). ADONOA ISLAND: lock at the captive ball. YOKKAICHI: both
   ramps, lock at the Maser. OSAKA: the Big loop and the Building, lock at the captive ball. KYOTO: both ramps, the
@@ -287,7 +290,9 @@ and calls cut from the films.
 - **Clocks:** 30 s a place; a lit shot with under 15 s left puts it back to 15 (EHoH's Haunts).
 - **Failing still pays:** a place's clock running out with locks made turns them into a multiball of the locks + 1
   balls, scoring the JACKPOT built. With no lock yet the trail goes cold (still angry: the Building starts it again). A
-  drain ends the chase and the place and its locks wait for the next ball.
+  drain with locks made does not end the ball (PAD-416): from the first lock the chase keeps a ball save of its own, and
+  the drain (the trough's switch) sends the locked balls straight into ANGRY MULTIBALL, as many as were locked (two at
+  least). A drain with no lock ends the chase, and the place waits for the next ball.
 - **ANGRY MULTIBALL:** the ramps, the Building and the Big loop are lit; one is BABY (green, it moves every 10 s and when
   hit): BABY pays the JACKPOT times the multiplier; any other lit shot pays 500,000 and raises the multiplier, up to x6
   (EHoH's Scream Test). 15 s ball save; it ends with one ball left.

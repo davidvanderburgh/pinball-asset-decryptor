@@ -2172,8 +2172,10 @@ class TreeEditMixin:
                 n = len(items)
                 answer = self.window.ask_conflicts(
                     "Load scene edits", "%s changes %d thing%s you edited yourself. Tick the "
-                    "ones the file's should replace, or answer for all of them. Nothing else "
-                    "of yours changes, and no file on this PC is deleted or overwritten: the "
+                    "ones the file's should replace, or answer for all of them. Reset my "
+                    "scenes puts every scene back as the game shipped it first; otherwise "
+                    "nothing else of yours changes. No file on this PC is deleted or "
+                    "overwritten: the "
                     "file's pictures are copied into the project's \"%s\" folder."
                     % (os.path.basename(path), n, "" if n == 1 else "s",
                        scene_share.SHARED_DIR), items,

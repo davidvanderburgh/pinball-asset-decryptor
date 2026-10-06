@@ -3282,9 +3282,33 @@ def _changed_radium_text(assets_dir):
 
     The first two columns (card path, original) are the stable key (the on-card
     radium is unchanged, so its offsets are re-derived at Write time); only rows
-    that were actually edited are returned.  Empty when there's no manifest."""
+    that were actually edited are returned.  Empty when there's no manifest.
+
+    A scene line an older Write space-padded after its words (PAD-412: the game
+    lays those spaces out, so a centred line sat far left of its box) is set
+    back to its words here even when its row isn't edited: a project re-read
+    from such a card holds the padded line as its "original", so without this
+    every card built on top of it kept the shift.  :func:`_padded_text` then
+    puts the spaces where the line's alignment hides them."""
     from ...core import text_manifest
-    return text_manifest.changed(assets_dir)
+    out = text_manifest.changed(assets_dir)
+    try:
+        rows = text_manifest.load(assets_dir)
+    except Exception:                                  # noqa: BLE001
+        rows = []
+    for r in rows:
+        orig, path = r.get("original") or "", r.get("path") or ""
+        if (r.get("replacement") and r["replacement"] != orig) \
+                or not path.endswith(".radium") or not _old_padding(orig):
+            continue
+        out.setdefault(path, []).append((orig, orig.rstrip(" ")))
+    return out
+
+
+def _old_padding(text):
+    """Does *text* end in the run of spaces an older Write padded a shorter scene line
+    with (3 or more; no stock Godzilla line ends in more than 2)?"""
+    return text.endswith("   ") and bool(text.strip())
 
 
 def _mode_family_on():

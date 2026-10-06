@@ -233,3 +233,57 @@ def test_write_pads_a_centred_scene_line_on_both_sides(tmp_path):
     out = T.parse(_apply(buf, writes))
     got = next(o for o in out.objects.values() if o.kind == "Text").body["text"]
     assert got == b" GODZILLA VS BATTRA  "
+
+
+# ---------------------------------------------------------------------------------------------
+# round 3: a card an older Write padded (DragonRR on v1.121.1: "Not fixed. the box is large
+# enough the text is off"). A project re-read from such a card holds the padded line as its
+# original with no edit, so nothing rewrote it; Write now repairs it and Scenes draws it so.
+# ---------------------------------------------------------------------------------------------
+PADDED = "GODZILLA VS BATTRA" + " " * 26
+
+
+def test_an_older_writes_padding_is_recognised():
+    assert engine._old_padding(PADDED)
+    assert not engine._old_padding("KING OF THE MONSTERS UNLOCKED AT PWR UP LVL 8  ")  # stock
+    assert not engine._old_padding("POWERLINES ") and not engine._old_padding("     ")
+
+
+def test_write_sets_an_old_padded_line_back_to_its_words(tmp_path):
+    from tests.test_stern_radium import _write_tsv
+    _write_tsv(tmp_path, [
+        ("/g/a.radium", PADDED, ""),                                  # not edited: repaired
+        ("/g/a.radium", "POWERLINES ", ""),                           # stock: left alone
+        ("/g/b.radium", "SHOOT  " + " " * 4, "SHOOT RAMP"),           # edited: the edit wins
+        ("/godzilla_le/game", "TILT" + " " * 4, ""),                  # program text: not a scene
+    ])
+    edits = engine._changed_radium_text(str(tmp_path))
+    assert edits == {"/g/a.radium": [(PADDED, "GODZILLA VS BATTRA")],
+                     "/g/b.radium": [("SHOOT  " + " " * 4, "SHOOT RAMP")]}
+
+
+def test_scenes_draws_an_old_padded_line_by_its_words(tmp_path, fonts):
+    d = _text("GODZILLA VS BATTRA", (-2, -2, 340, 40), 1)
+    want = _draw(tmp_path, d, fonts)
+    assert np.array_equal(_draw(tmp_path, dict(d, text=PADDED), fonts), want)
+    assert not np.array_equal(_draw(tmp_path, dict(d, text="GODZILLA VS BATTRA  "), fonts),
+                              want)                                # two: a stock line's own
+
+
+def test_write_recentres_a_card_an_older_write_padded(tmp_path):
+    from pinball_decryptor.plugins.stern import radium
+    from tests.test_stern_radium import _FakeReader, _apply, _write_tsv
+    sc = T.parse(scene())
+    text = next(o for o in sc.objects.values() if o.kind == "Text")
+    text.body.update(text=PADDED.encode("latin1"), align=1, flags=(0, 0))
+    buf = T.serialize(sc)
+    if not any(e["text"] == PADDED for e in radium.display_texts(buf)):
+        pytest.skip("the test scene's line isn't classed as display text")
+    _write_tsv(tmp_path, [("/g/a.radium", PADDED, "")])
+    writes, n, _ov, _fw, _grown = engine._radium_text_writes(
+        _FakeReader({"/g/a.radium": buf}), str(tmp_path), log=lambda *a, **k: None,
+        cancel=lambda: False)
+    assert n == 1 and writes
+    out = T.parse(_apply(buf, writes))
+    got = next(o for o in out.objects.values() if o.kind == "Text").body["text"]
+    assert got == b" " * 13 + b"GODZILLA VS BATTRA" + b" " * 13

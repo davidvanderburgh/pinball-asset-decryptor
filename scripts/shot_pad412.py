@@ -22,9 +22,12 @@ sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 import shot_pad251_tab as rig  # noqa: E402
 
-SCENE = "/godzilla_le/assets/lcd/auto_loaded/c0a08ffdc93a1042a3361d9bd8e2e8c837d52a59"
+SCENE = os.environ.get("PAD412_SCENE") or \
+    "/godzilla_le/assets/lcd/auto_loaded/c0a08ffdc93a1042a3361d9bd8e2e8c837d52a59"
 LINE = "Choice_Instance"
 WORDS = "START"
+#: PAD412_NODE: select this node id instead of searching for WORDS (round 3's padded title)
+NODE = int(os.environ.get("PAD412_NODE") or 0)
 
 
 def _tree_v(path):
@@ -72,12 +75,17 @@ def main():
                 print("tree v", want, rig._wait(lambda: _tree_v(tree) >= want, 900, 2),
                       flush=True)
             rig._wait(lambda: not state().get("rebuilding"), 600)
-            assert api("text_scenes.select", SCENE)
+            assert rig._wait(lambda: api("text_scenes.select", SCENE), 120, 1)
             rig._wait(lambda: state().get("tree_view") and state().get("frames"), 120)
             rig._wait(lambda: not state().get("tree_busy"), 60)
             layers = state()["tree_view"]["layers"]
             picked = None
-            for l in [l for l in layers if l["name"] == LINE]:
+            if NODE:
+                api("text_scenes.tree_select", NODE)
+                time.sleep(0.5)
+                rig._wait(lambda: not state().get("tree_busy"), 60)
+                picked = NODE
+            for l in [l for l in layers if l["name"] == LINE and not NODE]:
                 api("text_scenes.tree_select", l["id"])
                 time.sleep(0.5)
                 rig._wait(lambda: not state().get("tree_busy"), 60)

@@ -21,6 +21,7 @@ spkctl.py while the slot's P-ROC game is up.
     leds                {} (the P-ROC games' lamps are not shown)
 
 One JSON line per reply: {"ok": true} or {"err": "..."}, as Warden's.
+`--serve <sock>` answers the same on a unix socket until the game ends.
 """
 import json
 import os
@@ -212,6 +213,57 @@ class Adapter:
         return {"err": "unknown request: " + line.strip()}
 
 
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def serve(ad, path):
+    """--serve <sock>: the same requests on a unix socket, one JSON line back
+    for each - the Warden board's ctl.sock, which the game window's key
+    listener (tools/ap_emu/gamekeys.py) speaks to on every rig.  The board's
+    own socket has no pause or reset; this has.  Ends when the game does."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    srv = socket.socket(socket.AF_UNIX)
+    srv.bind(path)
+    srv.listen(4)
+    srv.settimeout(1.0)
+
+    def client(c):
+        with c, c.makefile("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    reply = ad.command(line)
+                except OSError as e:
+                    reply = {"up": False, "err": str(e)}
+                try:
+                    c.sendall((json.dumps(reply) + "\n").encode())
+                except OSError:
+                    return
+    try:
+        while _alive(ad._game_pid()):
+            try:
+                c, _ = srv.accept()
+            except socket.timeout:
+                continue
+            threading.Thread(target=client, args=(c,), daemon=True).start()
+    finally:
+        srv.close()
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return 0
+
+
 def main(argv):
     slot = os.environ.get("PAD_SLOT", "0")
     if argv[:1] == ["--slot"]:
@@ -222,6 +274,8 @@ def main(argv):
     rig = os.path.join(_root("SPP_ROOT", "/var/tmp/pad_spkproc"), "rig%s" % slot)
     ad = Adapter(Board(slot), rig)
     try:
+        if argv[:1] == ["--serve"] and len(argv) == 2:
+            return serve(ad, argv[1])
         if argv == ["--stream"]:
             for line in sys.stdin:
                 if line.strip():

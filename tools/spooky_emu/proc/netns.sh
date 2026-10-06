@@ -27,7 +27,8 @@ run_as() {      # <log> <cmd...>: as $SPP_USER, env built from scratch
         PATH="$SPP_RIG/bin:$E/bin:/usr/local/bin:/usr/bin:/bin" HOME="$SPP_RIG" USER="$SPP_USER" LANG=C.UTF-8 \
         DISPLAY="$DISPLAY" SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-}" \
         SDL_DISKAUDIOFILE="${SDL_DISKAUDIOFILE:-}" SDL_DISKAUDIODELAY="${SDL_DISKAUDIODELAY:-}" \
-        PULSE_SERVER="${PULSE_SERVER:-}" \
+        PULSE_SERVER="${PULSE_SERVER:-}" PULSE_CLIENTCONFIG="${PULSE_CLIENTCONFIG:-}" \
+        SPP_VISIBLE="${SPP_VISIBLE:-0}" \
         LD_LIBRARY_PATH="$E/lib" PYSDL2_DLL_PATH="$E/lib" \
         PYTHONPATH="$SPP_STUB:$SPP_SITE" PROC_EMU_FPGA="$PROC_EMU_FPGA" SPP_LOG="$SPP_RIG/rig.log" SPP_OSFILES="${SPP_OSFILES:-}" \
         SPP_BALLS="${SPP_BALLS:-}" PROC_EMU_CTL="${PROC_EMU_CTL:-}" SPK_MARK="$SPP_RIG" \
@@ -49,7 +50,10 @@ cd "/game/$SPP_DIR" || exit 3
 if [ -n "$SPP_UNITY" ]; then
     # Alice Cooper: the Unity player draws the screen and listens on :9999;
     # the game dials it once, at start, and dies if nobody answers.
-    run_as "$SPP_RIG/unity.out" "./$SPP_UNITY" -force-glcore -screen-fullscreen 1 \
+    # Full screen fills the hidden display; on a desktop (a visible run) it
+    # would cover everything, so there it is a window (PAD-405).
+    FULL=1; [ "${SPP_VISIBLE:-0}" = 1 ] && FULL=0
+    run_as "$SPP_RIG/unity.out" "./$SPP_UNITY" -force-glcore -screen-fullscreen "$FULL" \
         -screen-width "${SPP_SCREEN%x*}" -screen-height "${SPP_SCREEN#*x}" \
         -logfile "$SPP_RIG/player.log" > "$SPP_RIG/unity.rpid"
     for _ in $(seq 1 600); do

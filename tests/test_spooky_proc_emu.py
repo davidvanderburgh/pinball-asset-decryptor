@@ -323,3 +323,131 @@ def test_killgame_frees_a_paused_game():
     text = (RIG / "killgame.sh").read_text()
     assert 'kill -CONT "$p"' in text and "spp_mark_pids" in text
     assert 'SPK_MARK="$SPP_RIG"' in (RIG / "netns.sh").read_text()
+
+
+# --------------------------------------------------------------- PAD-405
+# The Emulate tab's runs are visible and have sound, and every proof above
+# was hidden and muted: on David's desktop Rick and Morty covered the whole
+# screen and froze on its first attract page, played no sound, and a key in
+# its window did nothing.
+
+_FAKE_CONFIG = '''
+values = {}
+
+def load():
+    global values           # what the machine's config.yaml says
+    values = {"dmd_fullscreen": True, "dmd_window_border": False,
+              "screen_position_x": 123, "keyboard_switch_map": {"1": "startButton"},
+              "dmd_dots_w": 1280}
+'''
+
+_FAKE_LAUNCHER = '''
+import json, os
+import procgame.config
+procgame.config.load()
+with open(os.environ["OUT"], "w") as f:
+    json.dump(procgame.config.values, f)
+'''
+
+
+def _run_spprun(tmp_path, visible):
+    """spprun.py over a stand-in procgame whose load() reads the machine's
+    config, as Rick and Morty's does, then a launcher that loads it."""
+    import json
+    import subprocess
+    pg = tmp_path / "procgame"
+    (pg / "game").mkdir(parents=True)
+    (pg / "__init__.py").write_text("")
+    (pg / "config.py").write_text(_FAKE_CONFIG)
+    (pg / "game" / "__init__.py").write_text("")
+    (pg / "game" / "mode.py").write_text(
+        "class ModeQueue(object):\n    def add(self, m): pass\n    def remove(self, m): pass\n")
+    (tmp_path / "__builtin__.py").write_text("from builtins import open\n")   # py2's name
+    (tmp_path / "RMGame.py").write_text(_FAKE_LAUNCHER)
+    out = tmp_path / "values.json"
+    env = dict(os.environ, PYTHONPATH=str(tmp_path), OUT=str(out),
+               SPP_VISIBLE="1" if visible else "0")
+    env.pop("SPP_LOG", None)
+    subprocess.run([sys.executable, str(RIG / "spprun.py"), "RMGame.py"], cwd=str(tmp_path),
+                   env=env, check=True, timeout=60)
+    return json.loads(out.read_text())
+
+
+def test_the_game_draws_in_a_window_not_full_screen(tmp_path):
+    values = _run_spprun(tmp_path, visible=True)
+    assert values["dmd_fullscreen"] is False
+    assert values["dmd_window_border"] is True          # on a desktop: movable
+    assert values["screen_position_x"] == 0
+    assert values["dmd_dots_w"] == 1280                 # the rest is the game's
+
+
+def test_a_hidden_run_is_borderless_and_the_games_own_keys_are_off(tmp_path):
+    values = _run_spprun(tmp_path, visible=False)
+    assert values["dmd_fullscreen"] is False and values["dmd_window_border"] is False
+    # its developers' map (A = the house, R = a flipper) would press a
+    # second switch for every key the rig's listener also sends
+    assert values["keyboard_switch_map"] == {}
+
+
+def test_the_unity_screen_is_a_window_on_a_desktop():
+    text = (RIG / "netns.sh").read_text()
+    assert '-screen-fullscreen "$FULL"' in text
+    assert '[ "${SPP_VISIBLE:-0}" = 1 ] && FULL=0' in text
+    assert 'SPP_VISIBLE=$VISIBLE' in (RIG / "run_game.sh").read_text()
+
+
+def test_sound_reaches_wslg_without_shared_memory():
+    """The py27 env's libpulse wants WSLg's /dev/shm, which the distro cannot
+    see, and then refused the whole connection: no sound on any run."""
+    run = (RIG / "run_game.sh").read_text()
+    assert "echo 'enable-shm = no' > \"$SPP_RIG/pulse-client.conf\"" in run
+    assert "PULSE_CLIENTCONFIG=$SPP_RIG/pulse-client.conf" in run
+    # netns.sh builds the game's environment from scratch (env -i)
+    assert 'PULSE_CLIENTCONFIG="${PULSE_CLIENTCONFIG:-}"' in (RIG / "netns.sh").read_text()
+
+
+def test_a_visible_run_listens_for_keys_in_the_game_window():
+    run = (RIG / "run_game.sh").read_text()
+    assert '"$SPP_TOOLS/sppctl.py" --serve "$SPP_RIG/ctl.sock"' in run
+    assert '"$SPP_TOOLS/../../ap_emu/gamekeys.py"' in run
+    assert '--sock "$SPP_RIG/ctl.sock"' in run and '--mark "SPK_MARK=$SPP_RIG"' in run
+    assert '"${PAD_GAMEKEYS:-$VISIBLE}" = 1' in run
+    kill = (RIG / "killgame.sh").read_text()
+    assert '--serve $SPP_RIG/ctl.sock' in kill and 'gamekeys.py .*--sock $SPP_RIG/ctl.sock' in kill
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not hasattr(__import__("socket"), "AF_UNIX"),
+                    reason="a unix socket and a POSIX game pid")
+def test_serve_answers_the_key_listener_until_the_game_ends(tmp_path):
+    import json
+    import socket
+    import subprocess
+    import threading
+    game = subprocess.Popen(["sleep", "60"])
+    try:
+        (tmp_path / "game.pid").write_text(str(game.pid))
+        b = FakeBoard()
+        sock = str(tmp_path / "ctl.sock")
+        t = threading.Thread(target=sppctl.serve, args=(sppctl.Adapter(b, str(tmp_path)), sock),
+                             daemon=True)
+        t.start()
+        for _ in range(50):
+            if os.path.exists(sock):
+                break
+            threading.Event().wait(0.05)
+        c = socket.socket(socket.AF_UNIX)
+        c.connect(sock)
+        f = c.makefile("r")
+        c.sendall(b"sw 14 1\n")
+        assert json.loads(f.readline()) == {"ok": True}
+        c.sendall(b"pause 1\n")
+        assert json.loads(f.readline()) == {"paused": True}
+        c.sendall(b"pause 0\n")
+        assert json.loads(f.readline()) == {"paused": False}
+        c.close()
+        assert b.sent == ["sw 14 1"]
+    finally:
+        game.kill()
+        game.wait()
+    t.join(5)
+    assert not t.is_alive() and not os.path.exists(sock)

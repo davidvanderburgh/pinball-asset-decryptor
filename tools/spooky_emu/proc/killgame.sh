@@ -22,6 +22,12 @@ done
 # whatever the game forked.
 for f in game unity ns xvfb; do stop_pid "$(spp_pid $f)"; done
 for p in $(spp_mark_pids); do stop_pid "$p"; done
+# The game window's key listener and the socket it speaks to (run_game.sh,
+# PAD-405) run as root and end with the game by themselves - within a
+# second or two, which a Start straight after a Stop does not wait for.
+for p in $(pgrep -f -- "--serve $SPP_RIG/ctl.sock") $(pgrep -f -- "gamekeys.py .*--sock $SPP_RIG/ctl.sock"); do
+    stop_pid "$p"
+done
 PAD_SLOT=$SPP_SLOT bash "$SPP_PROC/killgame.sh" >/dev/null 2>&1
 
 left=0

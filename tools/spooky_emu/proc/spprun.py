@@ -59,6 +59,40 @@ launcher = sys.argv[1]
 sys.argv = sys.argv[1:]
 
 from procgame.game import mode as pgmode       # the title's own procgame
+import procgame.config as pgconfig
+
+# The machine's config.yaml draws the screen full screen and borderless
+# (Rick and Morty: dmd_fullscreen True) - on a PC that covered the whole
+# desktop, over the virtual playfield (PAD-405).  This procgame reads only
+# ./config.yaml and ~/.pyprocgame/config.yaml (no ../local_config, unlike
+# the AP titles'), so the rig sets the window over whatever it loaded: a
+# window at 0,0, framed when it is on somebody's desktop so it can be moved.
+# Its developers' key map goes too (1 = Start but A = the house, R = a
+# flipper...): the rig's key listener gives the game window the playfield
+# window's keys (run_game.sh), and with both a key pressed two switches.
+CONFIG = {"dmd_fullscreen": False,
+          "dmd_window_border": os.environ.get("SPP_VISIBLE") == "1",
+          "screen_position_x": 0, "screen_position_y": 0,
+          "keyboard_switch_map": {}}
+
+
+def _config():
+    values = getattr(pgconfig, "values", None)
+    if isinstance(values, dict):
+        values.update(CONFIG)
+
+
+_orig_load = pgconfig.load
+
+
+def _load(*a, **k):
+    r = _orig_load(*a, **k)
+    _config()
+    return r
+
+
+pgconfig.load = _load
+_config()
 
 _orig_add = pgmode.ModeQueue.add
 _orig_remove = pgmode.ModeQueue.remove

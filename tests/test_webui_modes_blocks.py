@@ -126,8 +126,9 @@ def test_the_game_modes_choice_reaches_the_blocks_page_and_its_c(tmp_path, previ
         _project(w, proj)
         w.call("modes.new_blocks_mode", "Ramp Frenzy")
         b = w.state("modes")["code"]["blocks"]
-        assert b["program"]["game_modes"] == "stack" and b["program"]["block_modes"] == []
+        assert b["program"]["game_modes"] == "block" and b["program"]["block_modes"] == []   # PAD-398: runs alone
         ch = b["choices"]
+        assert isinstance(ch["game_rules"], list)                # PAD-398: the features a user may keep counting
         ids = [m["id"] for m in ch["game_modes"]]
         assert ids and set(ch["game_modes_default"]) <= set(ids)
         assert ch["block_off"] == "" and ch["give_way_off"] == ""
@@ -137,6 +138,11 @@ def test_the_game_modes_choice_reaches_the_blocks_page_and_its_c(tmp_path, previ
         b = w.state("modes")["code"]["blocks"]
         assert b["program"]["game_modes"] == "block" and b["program"]["block_modes"] == [ids[0]]
         assert "#define GAME_MODES       2" in b["c"] and "BLOCK_IDS[1] = {%d};" % ids[0] in b["c"]
+        if ch["game_rules"]:                                     # PAD-398: kept by name in the C
+            prog = dict(b["program"], keep_rules=[ch["game_rules"][0]])
+            assert w.call("modes.blocks_save", "ramp_frenzy", prog)["problems"] == []
+            b = w.state("modes")["code"]["blocks"]
+            assert '#define KEEP_RULES       "%s"' % ch["game_rules"][0] in b["c"]
 
 
 def test_own_clips_and_sounds_are_picked_into_the_folder_and_carried(tmp_path, preview_on):  # noqa: F811

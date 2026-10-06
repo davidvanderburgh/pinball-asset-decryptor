@@ -20,7 +20,9 @@ code mode, or one of its Examples). What it plays of its own sits beside it, nam
       "game_modes": "block",         PAD-347: while it runs, the game's own modes wait ("block", the
                                      default) or one starting ends it ("give_way")
       "block_modes": [21, 23],       PAD-363: which of the game's modes it holds off (the title's mode ids,
-                                     as the Modes tab lists them; [] = the port's checked defaults)
+                                     as the Modes tab lists them; [] = every one the port names)
+      "keep_rules": ["Bridge"],      PAD-398: the game's features (its rules, by the Modes tab's names) that
+                                     go on counting while it runs; [] = none: only this mode counts
       "film": {...}                  where each was cut from (an Example's recipe), optional
     }
 
@@ -93,7 +95,8 @@ class CodeAssets:
     clips: dict = field(default_factory=dict)     # hud-layers: {cue: file}
     hud: dict = field(default_factory=dict)       # hud-layers: the HUD at the glass's edges
     game_modes: str = "block"                     # PAD-347: GAME_MODES
-    block_modes: list = field(default_factory=list)   # PAD-363: the game's mode ids it holds off; [] = the defaults
+    block_modes: list = field(default_factory=list)   # PAD-363: the game's mode ids it holds off; [] = every one
+    keep_rules: list = field(default_factory=list)    # PAD-398: the game's features (names) that keep counting
     film: dict = field(default_factory=dict)
     extra: dict = field(default_factory=dict)
 
@@ -328,9 +331,13 @@ def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
              "name   %s" % spec.name.strip()]
     if getattr(spec, "game_modes", "block") == "give_way":
         lines.append("game_modes give_way")              # PAD-347: block is what the mode does without it
-    elif isinstance(getattr(spec, "block_modes", None), list) and spec.block_modes:   # PAD-363
-        ids = sorted({i for i in spec.block_modes if isinstance(i, int) and 0 <= i <= 127})
-        lines.append("block_modes %s" % " ".join(str(i) for i in ids))
+    else:
+        if isinstance(getattr(spec, "block_modes", None), list) and spec.block_modes:   # PAD-363
+            ids = sorted({i for i in spec.block_modes if isinstance(i, int) and 0 <= i <= 127})
+            lines.append("block_modes %s" % " ".join(str(i) for i in ids))
+        keep = MP.keep_rule_ids(spec, prof) if prof is not None else []                 # PAD-398
+        if keep:
+            lines.append("keep_rules %s" % " ".join(str(n) for n in keep))
     if screen:
         lines.append("screen %s %s" % (names["screen_node"], names["screen_text"]))
     if clip:

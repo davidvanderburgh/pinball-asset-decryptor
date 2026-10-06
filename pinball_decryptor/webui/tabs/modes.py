@@ -87,7 +87,7 @@ _DEFAULTS = {
     "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
     "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
     "seq_reset_any": False,                                                        # PAD-314
-    "game_modes": "stack",                                                         # PAD-363
+    "game_modes": "block",                                                         # PAD-363; PAD-398
     **{"seq_shot_%d" % i: "(no more shots)" for i in range(8)},
 }
 
@@ -290,6 +290,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._end_shots = set()            # PAD-314: the ticked shots under Ends on > (these shots)
         self._block_on = set()             # PAD-363: the game's modes ticked under "hold these off" (ids)
         self._block_touched = False        # ... and whether a tick changed since the mode opened
+        self._keep_on = set()              # PAD-398: the game's features ticked to keep counting (names)
         self._shot_awards = {n: "" for n in self._shot_names}
         self._slugs = []
         self._found = {}
@@ -479,6 +480,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._edit_end_shot(key[8:], bool(value))
         elif key.startswith("block:"):                   # PAD-363
             self._edit_block(key[6:], bool(value))
+        elif key.startswith("keep:"):                    # PAD-398
+            self._edit_keep(key[5:], bool(value))
         elif key.startswith("award:"):
             self._edit_award(key[6:], "" if value is None else str(value))
         elif key == "try_on":
@@ -735,6 +738,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.set(form=dict(self.f), shots_on=[n for n in self._shot_names if n in self._shots_on],
                  end_shots_on=[n for n in self._shot_names if n in self._end_shots],   # PAD-314
                  block_on=sorted(self._block_on),                                       # PAD-363
+                 keep_on=sorted(self._keep_on),                                         # PAD-398
                  awards=dict(self._shot_awards))
 
     def _open(self, slug, spec):
@@ -878,7 +882,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if not ids:
             return "none is held off: list them in its assets file's block_modes (the ids: %s)" % ", ".join(
                 "%d %s" % (i, n) for i, n in sorted(names.items())[:40])
-        return "these cannot start while it runs: " + ", ".join(names[i] for i in sorted(ids))
+        out = "these cannot start while it runs: " + ", ".join(names[i] for i in sorted(ids))
+        rules = [n for _i, n in getattr(p, "game_rules", ())]                     # PAD-398
+        if rules:
+            keep = [r for r in (getattr(spec, "keep_rules", None) or []) if r in rules]
+            out += ("; the game's features see no shots while it runs" if not keep else
+                    "; the game's features see no shots while it runs but " + ", ".join(keep))
+        return out
 
     def _title(self):
         return self._shown or self._profile
@@ -886,19 +896,36 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     def _open_game_modes(self, spec):
         """"While it runs, the game's own modes": stack / give_way / block, and the ticks under block - its
         own list, or the port's checked defaults when it has none (what the runtime would hold off)."""
-        gm = getattr(spec, "game_modes", "stack")
-        self.f["game_modes"] = gm if gm in MP.GAME_MODES else "stack"
+        gm = getattr(spec, "game_modes", "block")
+        self.f["game_modes"] = gm if gm in MP.GAME_MODES else "block"
         p = self._title()
         have = {i for i, _n, _on in getattr(p, "game_modes", ())} if p is not None else set()
         ids = spec.block_modes if isinstance(spec.block_modes, list) else []
         self._block_on = ({i for i in ids if i in have} if ids
                           else {i for i, _n, on in getattr(p, "game_modes", ()) if on} if p is not None else set())
         self._block_touched = False
+        rules = {name for _n, name in getattr(p, "game_rules", ())} if p is not None else set()   # PAD-398
+        keep = spec.keep_rules if isinstance(getattr(spec, "keep_rules", None), list) else []
+        self._keep_on = {r for r in keep if r in rules}
 
     def _collect_game_modes(self, spec):
-        spec.game_modes = self.f["game_modes"] if self.f["game_modes"] in MP.GAME_MODES else "stack"
+        spec.game_modes = self.f["game_modes"] if self.f["game_modes"] in MP.GAME_MODES else "block"
         if self._block_touched:                 # untouched: the file's own list (or the defaults) stays
             spec.block_modes = sorted(self._block_on)
+        spec.keep_rules = sorted(self._keep_on)  # PAD-398
+
+    def _edit_keep(self, name, on):
+        """PAD-398: a tick under "keep counting": one of the title's features (its rules), by name."""
+        p = self._title()
+        if p is None or name not in {n for _i, n in getattr(p, "game_rules", ())} or (name in self._keep_on) == bool(on):
+            return False
+        if on:
+            self._keep_on.add(name)
+        else:
+            self._keep_on.discard(name)
+        self._publish_form()
+        self._changed()
+        return True
 
     def _edit_block(self, key, on):
         """A tick under "hold these off": one of the title's modes, by id."""
@@ -909,6 +936,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return False
         if p is None or i not in {j for j, _n, _on in p.game_modes} or (i in self._block_on) == bool(on):
             return False
+        if not on and self._block_on == {i}:
+            return False                        # PAD-398: the last tick stays (none saved = every one, again)
         if on:
             self._block_on.add(i)
         else:
@@ -1389,6 +1418,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._shots_on = set()
         self._end_shots = set()
         self._block_on = set()                                                    # PAD-363
+        self._keep_on = set()                                                     # PAD-398
         self._shot_awards = {n: "" for n in self._shot_names}
         self._clip2_file = ""
         self._publish_form()
@@ -1429,6 +1459,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "ball_shots": [self.BALL_NONE] + names,
                 "mb_on_shots": [self.MB_ON_START] + names,
                 "game_modes": self._game_mode_rows(p),                           # PAD-363
+                "game_rules": [n for _i, n in getattr(p, "game_rules", ())],      # PAD-398
                 "magnet_shot": getattr(p, "magnet_shot", ""),                    # PAD-381
                 "held_coils": [{"name": n, "label": lab}
                                for n, lab in getattr(p, "held_coils", ())[:self.COIL_ROWS]]}
@@ -1645,6 +1676,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._shots_on = {n for n in self._shots_on if n in names}
         self._end_shots = {n for n in self._end_shots if n in names}             # PAD-314
         self._block_on = {i for i in self._block_on if i in {j for j, _n, _on in p.game_modes}}   # PAD-363
+        self._keep_on = {r for r in self._keep_on if r in {n for _i, n in getattr(p, "game_rules", ())}}   # PAD-398
         self._shot_awards = {n: self._shot_awards.get(n, "") for n in names}
         self._applied_key = p.key
         self._say(said or "modes here are for %s: %d shots, from %s" % (p.label, len(names), p.port))
@@ -2421,6 +2453,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "hud": hud, "icons": list(BM.HUD_ICONS),
                 "game_modes": gms,
                 "game_modes_default": [i for i, _n, on in getattr(p, "game_modes", ()) if on] if p is not None else [],
+                "game_rules": [n for _i, n in getattr(p, "game_rules", ())] if p is not None else [],   # PAD-398
                 "give_way_off": ("Not on this game: " + stack_why) if stack_why else "",
                 # PAD-395: the mechanisms its blocks may hold here, and why the blocks are greyed if not
                 "mechs": [{"name": n, "label": lab} for n, lab in self._blocks_mechs(p).items()],

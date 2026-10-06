@@ -57,9 +57,11 @@ struct mode_cfg {
     unsigned starts_game, starts_ball, cooldown_s;   /* item 139: 0 = no limit */
     int stack_no;                   /* item 140: `stack no` - never beside the game's battle or multiball */
     int aside_keep;                 /* PAD-347: `aside keep` - its screen stays up beside a game mode */
-    int game_modes;                 /* PAD-363: GM_STACK (the default), GM_GIVE_WAY or GM_BLOCK */
+    int game_modes;                 /* PAD-363: GM_STACK, GM_GIVE_WAY or GM_BLOCK (PAD-398: the default) */
     unsigned char block_ids[BLOCK_LIST_MAX];   /* PAD-363: `block_modes` - the game's mode ids it holds off */
-    int block_n;                    /* ... how many (0 = the port's checked defaults) */
+    int block_n;                    /* ... how many (0 = every one the port names) */
+    unsigned char keep_rules[32];   /* PAD-398: `keep_rules` - the game's rules that go on counting while it blocks */
+    int keep_n;
     /* item 141: what each shot pays, a shot that ends the mode, and the award ladder */
     uint64_t sa_bits[SHOT_AWARD_MAX], sa_points[SHOT_AWARD_MAX];
     unsigned n_sa;
@@ -322,10 +324,13 @@ static int stack_line(struct slot *M, const char *line)
     return 1;
 }
 
-/* PAD-363: `game_modes stack` (the default: it runs beside the game's modes, its screen stepping aside),
- * `game_modes give_way` (it starts only while none of the game's modes runs, the trigger count kept, and one of
- * them beginning ends it) or `game_modes block` (as give_way, and while it runs the game's modes in
- * `block_modes <id> ...` - or the port's checked defaults - cannot start: pm_block_game_modes). */
+/* PAD-363: `game_modes stack` (it runs beside the game's modes, its screen stepping aside), `game_modes
+ * give_way` (it starts only while none of the game's modes runs, the trigger count kept, and one of them
+ * beginning ends it) or `game_modes block` (as give_way, and while it runs the game's modes in `block_modes <id>
+ * ...` - or every one the port names - cannot start: pm_block_game_modes, and every rule of the game's the port
+ * names sees no shot but the ones in `keep_rules <n> ...`: pm_block_rules_keep). PAD-398 (David, 2026-10-05:
+ * "when our custom modes start, we should ONLY be in those modes unless explicitly noted"): `block` is the
+ * default, for a file with no game_modes line. */
 #define GM_STACK    0
 #define GM_GIVE_WAY 1
 #define GM_BLOCK    2
@@ -346,8 +351,25 @@ static int game_modes_line(struct slot *M, const char *line)
     else if (value_is(a, "give_way")) cfg.game_modes = GM_GIVE_WAY;
     else if (value_is(a, "stack")) cfg.game_modes = GM_STACK;
     else {
-        cfg.game_modes = GM_STACK;
-        pm_log("game_modes needs stack, give_way or block - \"%.40s\" read as stack", a);
+        cfg.game_modes = GM_BLOCK;           /* PAD-398: what a file that says nothing does */
+        pm_log("game_modes needs stack, give_way or block - \"%.40s\" read as block", a);
+    }
+    return 1;
+}
+
+static int keep_rules_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "keep_rules");
+    unsigned v;
+    if (!a) return 0;
+    cfg.keep_n = 0;
+    while (*a) {
+        while (*a == ' ' || *a == '\t' || *a == ',') a++;
+        if (!*a || *a == '#') break;
+        if (*a < '0' || *a > '9') { pm_log("keep_rules takes the port's rule numbers, 0-31 - \"%.40s\" ignored", a); break; }
+        for (v = 0; *a >= '0' && *a <= '9' && v < 100000; a++) v = v * 10 + (unsigned)(*a - '0');
+        if (v > 31) pm_log("keep_rules: %u is not a rule number the runtime knows (0-31)", v);
+        else if (cfg.keep_n < 32) cfg.keep_rules[cfg.keep_n++] = (unsigned char)v;
     }
     return 1;
 }
@@ -1726,6 +1748,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (aside_line(M, line)) return;         /* PAD-347 */
     if (game_modes_line(M, line)) return;    /* PAD-363 */
     if (block_modes_line(M, line)) return;   /* PAD-363 */
+    if (keep_rules_line(M, line)) return;    /* PAD-398 */
     if (multiball_line(M, line)) return;     /* item 167 */
     if (ball_save_line(M, line)) return;     /* PAD-225 */
     if (magnet_line(M, line)) return;        /* PAD-381 */
@@ -1747,6 +1770,7 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     long i = 0;
     unsigned k;
     for (k = 0; k < sizeof cfg; k++) ((char *)&cfg)[k] = 0;
+    cfg.game_modes = GM_BLOCK;               /* PAD-398: a file that says nothing runs alone */
     own_sounds_clear(M);
     own_lights_clear(M);                     /* item mode-leds */
     while (i < len) {
@@ -1937,6 +1961,7 @@ static void mode_start(struct slot *M, const char *why)
     pm_running_name(cfg.name);               /* PAD-363: the runtime's lines say this mode, not "mode" */
     if (cfg.game_modes == GM_BLOCK) {        /* PAD-363: the listed game's modes cannot start while it runs */
         pm_block_list(cfg.block_ids, cfg.block_n);
+        pm_block_rules_keep(cfg.keep_rules, cfg.keep_n);   /* PAD-398 */
         if (!pm_block_game_modes(1)) pm_log("%s: this game's port cannot hold its modes off - it gives way to them", cfg.name);
     }
     run.mball_on = run.mball_wait = 0;

@@ -71,7 +71,8 @@ const TIP = {
   wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
   displayPriority: "Kept for the total on its own screen. It no longer makes the game's displays wait: a mode always gives way to them (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off).",
-  gameModes: "May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Cannot start: as End this one, and while it runs the modes ticked below cannot start at all. A multiball of the game's is never held off: it starts, and this mode ends. Its own Multiball block does not end it.",
+  gameModes: "Cannot start (the usual): while this mode runs it is the only thing going - the modes ticked below cannot start, and none of the game's features lights, locks, counts or awards unless you tick it under Keep counting. May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Its own Multiball block does not end it.",
+  keepRule: "Ticked: this feature of the game's goes on counting its shots while this mode runs (its progress, its jackpots, its locks and the multiball it leads to). Not ticked: it sees none of them until this mode ends.",
   blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
   blockLast: "One at least: to let them all start, choose \"may start\" above.",
   own: "Clips and sounds of the mode's own, picked from your files and copied into its folder. Write and Try it carry them onto the card; a Play a clip or Play a sound block plays one by its name.",
@@ -586,8 +587,15 @@ function Timers({ prog, ed }) {
 // those by itself.
 function GameModes({ prog, ed }) {
   const ch = ed.ch;
-  const gm = prog.game_modes || "stack";
+  const gm = prog.game_modes || "block";
   const rows = ch.game_modes || [];
+  const rules = ch.game_rules || [];                         // PAD-398
+  const keep = new Set(prog.keep_rules || []);
+  const keepTick = (n, v) => {
+    const next = new Set(keep);
+    if (v) next.add(n); else next.delete(n);
+    ed.set(["keep_rules"], [...next].sort());
+  };
   const on = new Set(prog.block_modes && prog.block_modes.length ? prog.block_modes : (ch.game_modes_default || []));
   const opts = [{ value: "stack", label: "may start (this one carries on)" },
     { value: "give_way", label: "may start, and end this one", disabled: !!ch.give_way_off && gm !== "give_way" },
@@ -612,6 +620,13 @@ function GameModes({ prog, ed }) {
       })}
     </div>` : null}
     ${why ? html`<div class="small muted">${why}</div>` : null}
+    ${gm === "block" && rules.length ? html`
+      <div class="row wrap"><span class="lbl" ...${tip(TIP.keepRule)}>The game's features that keep counting while it runs</span></div>
+      <div class="modes-shots">
+        ${rules.map((n) => html`<${Check} key=${"k" + n} label=${n} checked=${keep.has(n)} title=${TIP.keepRule}
+          onChange=${(v) => keepTick(n, v)} />`)}
+      </div>
+      <div class="small muted">${keep.size ? "The ones ticked go on counting; every other feature of the game's waits until this mode ends." : "None ticked: only this mode counts while it runs."}</div>` : null}
   </div>`;
 }
 

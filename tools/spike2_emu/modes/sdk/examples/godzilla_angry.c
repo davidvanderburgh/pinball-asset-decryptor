@@ -53,7 +53,7 @@
 #include "intricate_kit.h"
 
 /* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the rage cools to embers */
-#define GAME_SHOW_START "Strobe burst"
+#define GAME_SHOW_START "Insert chase"
 #define GAME_SHOW_END   "Ember fade"
 #include "pad_mode_assets.h"
 

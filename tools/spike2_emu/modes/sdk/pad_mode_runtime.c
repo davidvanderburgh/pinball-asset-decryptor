@@ -4317,12 +4317,15 @@ static void building_tick(void)
  * running process's +0xa0.. by the bodies that have any, are a fresh process's (0): each show's default.
  * A show's lights belong to its process: the exit hook every body registers (0x1bacdc) takes them out of the
  * light engine's list (0x7bb68c) when the process ends - so stopping one is the game's kill by id (`site
- * event_cancel`: every process with that id). Some shows run until stopped (show 8 of Premium/LE 1.16's list,
- * process 315's body, in the emulator), so the runtime stops one after SHOW_MAX_MS. */
+ * event_cancel`: every process with that id). Some shows run until stopped (process 315's body, Premium/LE 1.16's
+ * Insert chase), so the runtime stops one after the port's `value show_secs_<n>` (a moment more than that), and
+ * never later than SHOW_MAX_MS. And none starts while the ball ends: the game stops every process of its own then
+ * (the second machine test: two modes that ended on a drain started their ending's show, and it was gone at once). */
 #define SHOWS_MAX 64
 #define SHOW_MAX_MS 20000ul
 static int shows_n;
-static struct { int n; unsigned long started; } show_now;
+static struct { int n; unsigned long started, limit; } show_now;
+static unsigned long ball_end_at;                    /* when the last ball ended (on_ball_end), 0 = not yet */
 
 int pm_game_shows(void)
 {
@@ -4366,7 +4369,7 @@ void pm_game_show_stop(void)
     if (can & PM_CAN_GAME_SHOWS) show_kill("asked");
 }
 
-/* every tick: no show of ours plays longer than SHOW_MAX_MS */
+/* every tick: no show of ours plays longer than its show_secs (SHOW_MAX_MS at most) */
 static void shows_tick(void)
 {
     if (!show_now.n) return;
@@ -4374,7 +4377,8 @@ static void shows_tick(void)
         show_now.n = 0;
         return;
     }
-    if (pm_ms() - show_now.started > SHOW_MAX_MS) show_kill("its 20 s are up");
+    if (pm_ms() - show_now.started > show_now.limit)
+        show_kill(show_now.limit < SHOW_MAX_MS ? "its time is up" : "its 20 s are up");
 }
 
 int pm_game_show(int n)
@@ -4397,6 +4401,10 @@ int pm_game_show(int n)
             "plays one", n);
         return 0;
     }
+    if (ball_end_at && pm_ms() - ball_end_at < 3000ul) {
+        say("show %d: not played - the ball is ending, and the game stops every show of its own with it", n);
+        return 0;
+    }
     if (proc_alive(id)) show_kill("another show begins");
     if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
             id, (void (*)(void))(unsigned long)fn(key), 0)) {
@@ -4405,6 +4413,9 @@ int pm_game_show(int n)
     }
     show_now.n = n;
     show_now.started = pm_ms();
+    pm_snprintf(key, sizeof key, "show_secs_%d", n);
+    show_now.limit = pm_port_value(key, 0) > 0 ? (unsigned long)pm_port_value(key, 0) * 1000ul + 500ul : SHOW_MAX_MS;
+    if (show_now.limit > SHOW_MAX_MS) show_now.limit = SHOW_MAX_MS;
     say("show %d (%s): the game's own light show, playing as process %u", n, name ? name : "unnamed", id);
     return 1;
 }
@@ -5642,6 +5653,7 @@ static void on_ball_end(unsigned *r)
     (void)r;
     note_thread("ball_end", &said);
     stock_ball_ends++;
+    ball_end_at = pm_ms() | 1;                /* PAD-411: no show of the game's starts now */
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
     if (disp_linger_until) disp_release("the ball ended");

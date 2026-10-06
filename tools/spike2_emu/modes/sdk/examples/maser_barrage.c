@@ -42,7 +42,7 @@
 #include "intricate_kit.h"
 
 /* PAD-411: the game's own light shows at its start (flashy) and its end (subdued) */
-#define GAME_SHOW_START "Colour sweep"
+#define GAME_SHOW_START "Insert chase"
 #define GAME_SHOW_END   "Colour fade"
 #include "pad_mode_assets.h"
 

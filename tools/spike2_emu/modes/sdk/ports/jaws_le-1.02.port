@@ -434,3 +434,26 @@ text block_name_126     Encounter
 site block_start_127    0x000844a8 0xe5902000 0xe30232f8
 data block_obj_127      0x0086a240
 text block_name_127     Jaws
+
+# ---- held coils (PAD-381's runtime; PAD-394): Jaws's inlane up posts, held up by a mode the way the Godzilla
+# Premium's magnets and bridge are held (MODE_SDK.md "Held coils"). Jaws's ControlCoil is Godzilla's (take/give
+# at +44; v[29..31], v[36], v[40], v[54..58] the same functions at the same slots, 60 virtuals). The framework
+# calls drafted from Godzilla Pro 1.16 by port_tool.py (strict); each getter found by its class's vtable (the
+# function-static object the ControlCoil constructor builds, its device the constructor's r1). No process call
+# of this program names 13185..13188. Never here: the FinTarget, the shark and fin motors, the trough, flippers,
+# slingshots and pops.
+site coil_fire              0x002c0984 0xe3500000 0xe52de004
+site adjustment             0x005947e8 0xe92d40f0 0xe2504000
+site proc_exists            0x00563a54 0xe30d2af8 0xe340208a
+site proc_create            0x00563424 0xe30dcaf8 0xe340c08a
+site proc_sleep             0x00563554 0xe30d3af8 0xe340308a
+site coil_take              0x0004a824 0xe92d40f8 0xe30d7afc
+site coil_give              0x0004a8e8 0xe3510000 0xe92d4038
+value magnet_proc          13185
+text held_coils            left_post right_post
+site left_post_get          0x0005005c 0xe92d4030 0xe304431c
+value left_post_dev        14
+text left_post_label       left inlane up post
+site right_post_get         0x00050634 0xe92d4030 0xe3044380
+value right_post_dev       13
+text right_post_label      right inlane up post

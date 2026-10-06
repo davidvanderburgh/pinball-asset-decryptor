@@ -1462,7 +1462,7 @@ nearest the magnet on the playfield picture (6 px; the next is 29 px away), so i
 magnet. Mode > Magnet on the tab writes the line, in seconds (0.1 to 5); it is greyed on a build until a mode
 file's grab was seen there in the emulator (`mode_project.MAGNET_PROVEN`).
 
-**The port lines** (Pro and LE 1.16 only):
+**The port lines** (Pro and LE 1.16, and Pro 1.15 since PAD-394 at its own addresses: `godzilla_pro-1.15.port`):
 
 ```
 site coil_fire             0x00402ff4 0xe3500000 0xe52de004
@@ -1504,6 +1504,10 @@ LE emulator runs.
 
 Not measured: a drain or a tilt mid-grab on a machine (both drains there came between grabs; the emulator's
 drain stands); a magnet sequence of the game's starting while a grab already holds.
+
+**Godzilla Pro 1.15** (PAD-394, emulator, rig 2, the stock card, its port drafted from Pro 1.16 by `port_tool.py`):
+two grabs held to their end (255 for 350 ms then 50, the game's OFF 2017 / 2000 ms on), a hit 1 s in refused with no
+OFF from the game, a mode stop let go early; no abort. Not run there: a drain mid-grab.
 
 ## Held coils (PAD-381)
 
@@ -1557,6 +1561,14 @@ times, on the Maser target and the left ramp (255 for 300 ms then 25); every hol
 
 Not measured: a drain or a tilt mid-hold on a machine.
 
+**Other titles (PAD-394).** The route is the framework's wherever ControlCoil is Godzilla's (the same take/give
+and the same virtuals at the same slots): King Kong LE 0.97 (`spider_magnet`, `log_diverter`, `ramp_diverter`) and
+Jaws LE 1.02 (`left_post`, `right_post`, the inlane up posts) carry the lines, each getter found from its class's
+vtable. Emulator-proven (rig 2, the stock cards): each held 2000 ms as the mode started, one command at the
+object's own powers (King Kong 255/500 then 30, 180/200 then 48, 255/64 then 48; Jaws 255/128 then 51), the game's
+OFF 2015-2016 ms on; a mode stop let all go with about 500 ms left; no abort. Which other titles can follow, and
+why the rest cannot yet: docs/plans/mode_coils_census.md.
+
 ## The scoop (PAD-381)
 
 A mode may hold a ball that lands in the scoop - while its screen or a callout plays - and nothing more:
@@ -1587,7 +1599,9 @@ Holding a ball powers nothing; the cap keeps a ball from sitting in the scoop lo
 go looking for it. A tilt or the end of a ball that ends the device's process unwinds through the wrapper
 safely (the runtime is built with unwind tables, "The magnet").
 
-**The port lines** (Pro and LE 1.16; LE: handler `0x7d8e4`, slot `0x7570a4`, found from Pro's code):
+**The port lines** (Pro and LE 1.16; LE: handler `0x7d8e4`, slot `0x7570a4`, found from Pro's code; Pro 1.15
+since PAD-394: the handler at Pro 1.16's address, slot `0x744728`, which `port_tool.py` places as the one writable
+word holding the handler's address):
 
 ```
 site scoop_handler         0x0007cd94 0xe30538ea 0xe2401002
@@ -1608,6 +1622,10 @@ with `scoop_hold 4000`; a landing is the Right Scoop switch held closed until th
 
 **Hardware-confirmed** (a Godzilla Premium 1.16, 2026-10-05, the branch's pinned runtime and port with mode files from `runtime_cfg`, read from the card's `/dump/mode.log`; docs/plans/mode_coils.md "Machine test"): a ball in the scoop held 5021 ms (`scoop_hold 5000`), then the game's own
 kick.
+
+**Godzilla Pro 1.15** (PAD-394, emulator, rig 2, the stock card): no mode, kicked 1829 ms after landing; with
+`scoop_hold 4000`, 5850 ms (held 4016); a mode stop 3 s into a hold let it go (the kick 912 ms later); after the
+mode ended, 1832 ms; no abort.
 
 Not measured: a battle's select screen holding the ball first (the game's own hold, which the wrapper runs
 before its own); a tilt during a hold on a machine.

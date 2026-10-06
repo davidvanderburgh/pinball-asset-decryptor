@@ -415,6 +415,7 @@ MAGNET_MAX_MS = 5000
 MAGNET_PROVEN = frozenset({
     "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: the starting hit grabbed 2000 ms (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, held to its end), a hit mid-grab refused with no OFF from the game, a grab 6 s later held to its end, a mode stop let go 565 ms early, a drain mid-grab: the game ended the grab's process and the magnet went off 798 ms early, no abort
     "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: the same (held 2000 to its end, mode stop 584 ms early, drain 782 ms early, no abort); and the first hit started a magnet process of the game's, which the grab stood aside for
+    "godzilla_pro-1.15",               # PAD-394 2026-10-05 rig 2, the stock card: two grabs held to their end (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, the game's OFF 2017 / 2000 ms on), a hit 1 s in refused with no OFF from the game, a mode stop let go 115 ms early, no abort
 })
 
 
@@ -451,6 +452,7 @@ SCOOP_MAX_MS = 10000
 SCOOP_PROVEN = frozenset({
     "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: no mode, kicked 1782 ms after landing; scoop_hold 4000, 5776 ms (held 4016); the mode stopped 1.5 s in, let go then (2998 ms); no abort
     "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: 1785 / 5770 (held 4016) / let go at the mode's end (2591 ms); a TILT during a 10 s hold ended the ball, the hold let go and the game kicked the ball out, no abort
+    "godzilla_pro-1.15",               # PAD-394 2026-10-05 rig 2, the stock card: no mode, kicked 1829 ms after landing; scoop_hold 4000, 5850 ms (held 4016); the mode stopped 3 s into a hold, let go then (the kick 912 ms later); after the mode ended, 1832 ms; no abort
 })
 
 
@@ -463,6 +465,17 @@ COIL_MAX_MS = 5000                     # pad_mode_runtime.c MAGNET_MAX_MS: every
 HELD_COILS_PROVEN = frozenset({
     ("godzilla_le-1.16", "mg_magnet"),  # 2026-10-05 rig 1, the stock Premium/LE card: held 2000 ms as the mode started (255 for 250, then 80 for 1750: its own adjustments), OFF at its end
     ("godzilla_le-1.16", "bridge"),     # the same run: held 2000 ms on the left ramp (255 for 300, then 25 for 1700), a hit mid-hold refused, held again, a mode stop let go 617 ms early; no abort
+    # PAD-394 2026-10-05 rig 2, the stock King Kong LE 0.97 card, the three held 2000 ms as the mode started, each
+    # ONE command at the object's own powers and the game's OFF 2016 ms on ([coildrive] node 9 coils 0, 1, 7), then
+    # a mode stop 1.5 s into a second hold let all three go with 490-500 ms of it left; no abort
+    ("king_kong_le-0.97", "spider_magnet"),   # 255 for 500 ms, then 30
+    ("king_kong_le-0.97", "log_diverter"),    # 180 for 200 ms, then 48
+    ("king_kong_le-0.97", "ramp_diverter"),   # 255 for 64 ms, then 48
+    # PAD-394 2026-10-05 rig 2, the stock Jaws LE 1.02 card: both posts up 2000 ms as the mode started (255 for 128 ms,
+    # then 51; [coildrive] node 9 coils 6 and 7, the game's OFF 2015 ms on), a mode stop 1.5 s into a second hold let
+    # both down with 489 ms left; no abort
+    ("jaws_le-1.02", "left_post"),
+    ("jaws_le-1.02", "right_post"),
 })
 
 
@@ -500,8 +513,8 @@ def _scoop_cannot(key, label, port=None):
 
 
 #: item 167: the hand-written profile carries the same verdict as its port (its port names the
-#: framework's serve call; the tab offers Multiball once the build is in MULTIBALL_PROVEN). PAD-381: its
-#: port names no magnet or scoop calls (only the 1.16 ports do), so both stay greyed on it.
+#: framework's serve call; the tab offers Multiball once the build is in MULTIBALL_PROVEN). PAD-381's magnet,
+#: scoop and held coils are judged from its port once that is read (PAD-394, below).
 GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _ball_save_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _magnet_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
@@ -1264,9 +1277,17 @@ def port_path(p):
 
 
 #: PAD-363: the hand-written profile offers the game's modes its port lets a mode hold off, as a read port does
+#: PAD-394: and its magnet, scoop and held coils, judged from the port as a read port's are
 try:
-    _p115 = read_port(port_path(GODZILLA_PRO_1_15))
-    GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, game_modes=_game_modes(_p115), game_rules=_game_rules(_p115))
+    _port_115 = read_port(port_path(GODZILLA_PRO_1_15))
+    _key_115, _label_115 = "godzilla_pro-1.15", "Godzilla Pro 1.15"
+    GODZILLA_PRO_1_15 = replace(
+        GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
+        magnet_shot=_magnet_shot_name(_port_115),
+        held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
+        cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot if c[0] not in ("magnet", "scoop", "coils"))
+        + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
+        + _coils_cannot(_key_115, _label_115, _port_115))
 except OSError:
     pass
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}

@@ -210,6 +210,10 @@ test). This is a last line of defence, not a guardrail of ours.
   adjustments, no process control); its update sends the steps. `pm_building(floor)` / `pm_building_floor()`
   with the coils' limits, and a put-back at the mode/ball/game end. Emulator-proven on LE 1.16 (MODE_SDK.md
   "The building"); no mode file keyword or Modes-tab control yet; not machine-tested.
+- **PAD-394 (2026-10-05): the other titles.** Godzilla Pro 1.15 gets the magnet and the scoop (drafted from Pro
+  1.16; emulator-proven); King Kong LE 0.97 and Jaws LE 1.02, whose ControlCoil is Godzilla's, get held coils (the
+  spider magnet and two diverters; the inlane up posts; emulator-proven). The census of every other build, the
+  generations that cannot follow yet and why: `docs/plans/mode_coils_census.md`.
 
 ## Machine test (2026-10-05, David's Godzilla Premium 1.16)
 

@@ -165,17 +165,17 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Elvira 1.13 | ✓ | no | not yet | all |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | all |  |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms |
-| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons |
+| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all |  |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | all |  |
-| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots |  |
+| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | all |  |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | all |  |
-| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots |  |
+| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | all |  |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |

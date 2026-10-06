@@ -28,7 +28,11 @@ RUNTIME = SDK / "pad_mode_runtime.c"
 PORTS = {"godzilla_pro-1.16": [os.environ.get("PAD_GODZILLA_PRO_116_GAME", ""), r"C:\tmp\gzpro116_stock.elf",
                                "/mnt/c/tmp/gzpro116_stock.elf"],
          "godzilla_le-1.16": [os.environ.get("PAD_GODZILLA_LE_116_GAME", ""), r"C:\tmp\gzle116_stock.elf",
-                              "/mnt/c/tmp/gzle116_stock.elf"]}
+                              "/mnt/c/tmp/gzle116_stock.elf"],
+         # PAD-394: drafted from Pro 1.16 (the slot: the one writable word holding the handler's address)
+         "godzilla_pro-1.15": [os.environ.get("PAD_GODZILLA_PRO_115_GAME", ""),
+                               r"C:\tmp\PAD-363\elves\godzilla_pro-1.15.elf",
+                               "/mnt/c/tmp/PAD-363/elves/godzilla_pro-1.15.elf"]}
 
 
 def _lift(src, signature):

@@ -81,6 +81,8 @@ class TitleProfile:
     hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
     magnet_shot: str = ""            # PAD-381: the shot whose hit is the ball over the magnet; "" = no magnet
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
+    shield_rule: str = ""            # PAD-392: the game's own shield feature (the port's `text shield_rule`, one of
+    #                                  game_rules): it turns the platform back while it counts shots
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -255,7 +257,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop", "coils")
+         "magnet", "scoop", "coils", "shield")
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -456,6 +458,32 @@ SCOOP_PROVEN = frozenset({
 })
 
 
+#: PAD-392: the shield targets on a platform a motor turns (Godzilla Premium/LE; a Pro's are fixed). What
+#: pad_mode_runtime.c's shield_arm needs - (sites, data, values): the motor's own go-to, its object, the object's
+#: vtable word, where it keeps the switch it stopped on and the one it is going to, and the two position switches.
+SHIELD_NEEDS = (("shield_move",), ("shield_motor",),
+                ("shield_motor_vptr", "shield_pos_at", "shield_target_at", "shield_away", "shield_toward"))
+#: The builds where a mode file's ``shield toward`` line was seen in the emulator: the platform turned toward the
+#: player as the mode started, was kept there through the game's ball search and the shield targets' hits, and
+#: turned back when the mode ended.
+SHIELD_PROVEN = frozenset({
+    "godzilla_le-1.16",                # PAD-392 2026-10-06 rig 1, the stock Premium/LE card: turned 1.5 s after the start, kept toward 18.5 s through six shield-target hits (all scored), put back AWAY at the mode's end; a blocks mode's turn, keep after the ball search and put-back the same run; no abort
+})
+
+
+def _shield_cannot(key, label, port=None):
+    """The ``cannot`` entry for turning the shield targets on build ``key``, or () when it can."""
+    sites, data, values = SHIELD_NEEDS
+    if not port or not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+                        and all(n in port["value"] for n in values)):
+        return (("shield", "The app has not found a shield platform on %s, so a mode of yours cannot turn its "
+                           "shield targets." % label),)
+    if key in SHIELD_PROVEN:
+        return ()
+    return (("shield", "The app has found how %s turns its shield platform but has not yet seen a mode of yours "
+                       "turn it in the emulator, so it cannot here yet." % label),)
+
+
 #: PAD-381: the port's other HELD COILS (`text held_coils`, besides "magnet", which has its own part): each held
 #: like the magnet - one command at the coil's own powers from a process of the runtime's that controls it, at
 #: most COIL_MAX_MS - by a mode file's ``coil_hold <name> <ms> [mask]``. The (build, coil) pairs seen held in
@@ -519,7 +547,8 @@ GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzill
                             + _ball_save_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _magnet_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _scoop_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
-                            + _coils_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
+                            + _coils_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _shield_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
@@ -1117,6 +1146,7 @@ def profile_from_port(path):
     cannot += list(_magnet_cannot(key, label, port))         # PAD-381
     cannot += list(_scoop_cannot(key, label, port))          # PAD-381
     cannot += list(_coils_cannot(key, label, port))          # PAD-381
+    cannot += list(_shield_cannot(key, label, port))         # PAD-392
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1167,6 +1197,7 @@ def profile_from_port(path):
         hud_tree=measured.get("hud_tree", "auto_loaded"),
         magnet_shot=_magnet_shot_name(port),                 # PAD-381
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
+        shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
     )
 
 
@@ -1285,9 +1316,9 @@ try:
         GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
-        cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot if c[0] not in ("magnet", "scoop", "coils"))
+        cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot if c[0] not in ("magnet", "scoop", "coils", "shield"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
-        + _coils_cannot(_key_115, _label_115, _port_115))
+        + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115))
 except OSError:
     pass
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
@@ -1754,6 +1785,9 @@ class ModeSpec:
     # PAD-381: other mechanisms held like the magnet: [[coil name, ms, shot]] - the shot "" holds once as the mode
     # starts, a shot name on every hit of it while the mode runs (the profile's held_coils names the coils)
     coil_holds: list = field(default_factory=list)
+    # PAD-392: while it runs the shield targets face the player (Godzilla Premium/LE's platform turns 1.5 s after it
+    # starts, is kept there, and turns back when it ends) - only while the game's own shield feature sees no shots
+    shield: bool = False
     # PAD-396: the mode on the title's OTHER models (the Pro beside the Premium/LE): {model word: {field: value}}
     # of MODEL_FIELDS, as the mode last was on that model, put back when it goes back (:func:`port_model`)
     models: dict = field(default_factory=dict)
@@ -1922,6 +1956,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.scoop_hold_ms = 0
     if not p.can("coils"):
         spec.coil_holds = []
+    if not p.can("shield"):
+        spec.shield = False
     return spec
 
 
@@ -2032,7 +2068,8 @@ def retarget(spec, p):
 #: matched (:func:`_port_model`). Everything else - the name, clock, points, screen, clip, sounds,
 #: lights - is the same mode on every model.
 MODEL_FIELDS = ("start_shot", "start_also", "start_sequence", "scoring_shots", "shot_award", "end_shot",
-                "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds")
+                "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds",
+                "shield")
 #: what each model word is called in the words
 MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "Premium"}
 
@@ -2144,6 +2181,8 @@ def _port_model(out, old_key, p):
             out.magnet_ms = 0
         if not p.can("scoop"):
             out.scoop_hold_ms = 0
+        if not p.can("shield"):
+            out.shield = False
     return port
 
 
@@ -2181,6 +2220,8 @@ def port_words(old, new, p):
         gone.append("the magnet")
     if _int_or_none(old.scoop_hold_ms) and not new.scoop_hold_ms:
         gone.append("the scoop")
+    if old.shield is True and not new.shield:
+        gone.append("the shield platform")
     if gone:
         words.append("%s does not hold %s, so %s left out there" % (
             now, " or ".join(gone), "it is" if len(gone) == 1 else "they are"))
@@ -2843,6 +2884,7 @@ def validate(spec, folder=None):
     out += validate_magnet(spec, p)                    # PAD-381
     out += validate_scoop(spec, p)                     # PAD-381
     out += validate_coils(spec, p)                     # PAD-381
+    out += validate_shield(spec, p)                    # PAD-392
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
     return out
@@ -3057,6 +3099,31 @@ def coil_lines(spec, p):
     return out
 
 
+# ---- PAD-392: the shield targets toward the player -----------------------------------------
+def validate_shield(spec, p):
+    """Every reason the shield part cannot be built; nothing when the mode leaves the platform alone. The
+    platform stays turned only while the game's own shield feature sees no shots: the game's modes cannot
+    start (``game_modes`` block) and that feature is not kept counting - else the game turns it back about 2 s
+    after every move (emulator, PAD-392)."""
+    if spec.shield is not True:
+        return [] if spec.shield in (False, None) else ["The shield is on or off (true or false)."]
+    if not p.can("shield"):
+        return ["Turning the shield targets is not on %s yet (Mode says why)." % p.label]
+    feature = p.shield_rule or "shield"
+    if (spec.game_modes or "block") != "block":
+        return ["The shield targets stay toward the player only while the game's modes cannot start: otherwise "
+                "the game's own %s feature turns them back." % feature]
+    if p.shield_rule and p.shield_rule in (spec.keep_rules or []):
+        return ["The shield targets stay toward the player only while %s does not keep counting: it turns them "
+                "back." % p.shield_rule]
+    return []
+
+
+def shield_lines(spec, p):
+    """The runtime line of the shield: nothing unless it turns the platform, and only where the title can."""
+    return ["shield         toward"] if spec.shield is True and p.can("shield") else []
+
+
 # ---- item 142: cuts from a film ------------------------------------------------------
 FILM_CUT_MAX_SECONDS = 30
 
@@ -3231,6 +3298,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += magnet_lines(spec, p)          # PAD-381: nothing unless it holds the ball on the magnet
     lines += scoop_lines(spec, p)           # PAD-381: nothing unless it holds a ball in the scoop
     lines += coil_lines(spec, p)            # PAD-381: the other mechanisms it holds
+    lines += shield_lines(spec, p)          # PAD-392: the shield targets toward the player while it runs
     if spec.screen and p.can("screen"):
         lines += [
             "screen_scene   %s" % p.hud_scene,

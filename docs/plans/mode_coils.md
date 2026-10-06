@@ -214,6 +214,25 @@ test). This is a last line of defence, not a guardrail of ours.
   1.16; emulator-proven); King Kong LE 0.97 and Jaws LE 1.02, whose ControlCoil is Godzilla's, get held coils (the
   spider magnet and two diverters; the inlane up posts; emulator-proven). The census of every other build, the
   generations that cannot follow yet and why: `docs/plans/mode_coils_census.md`.
+- **Step 8 (PAD-392, 2026-10-06): the shield, from the form and from blocks.** PAD-379's `pm_shield` asked the
+  game's own motor go-to with no limit of ours. Measured first (`shield_test_mode.c`, stock LE 1.16): with the
+  game's rules seeing shots, the game turned the platform back AWAY about 2 s after every move of ours, hit or no
+  hit, and again 1.4 s after our mode ended - its Mechagodzilla Shield feature (kept counting under a blocking
+  mode, it did the same); with the rules blind (PAD-398's default) the platform stayed toward 17 s through shots
+  and hits on all three shield targets (switches 89/90/91: 0x80000000, 0x100000000, 0x200000000). The game's
+  ball search (every 12 s while no switch closes) swings it toward and away and leaves it away. So: `pm_shield`
+  gets the runtime's limits (the running mode, in a game, never while a game mode or multiball runs, 1.5 s
+  between moves, 12 a minute) and a put-back at the mode/ball/game end unless the game has turned it since;
+  `pm_shield_keep(where)` keeps it - turned back 1.5 s after the game left it elsewhere - only while the port's
+  `text shield_rule` feature sees no shots, and otherwise turns once and leaves it to the game. Form modes: the
+  Modes tab's Shield targets ("Turn the shield targets toward the player while it runs", mode file `shield
+  toward`, turned 1.5 s after the start as the kit does); blocks: Turn the shield targets toward the player /
+  away / where they are. Both refused (`validate`, `problems`) unless the game's modes cannot start and the
+  shield feature is not kept counting. Emulator-proven (rig 1, muted, hidden): a form mode turned it 1.5 s after
+  its start and kept it toward for 18.5 s through six shield-target hits (all six scored), then put it back
+  AWAY; a blocks mode turned it, turned it back once after the game swung it, stopped keeping it with 20 s
+  left, and at time up found the game had moved it and left it there; the ball ending put it back; no abort.
+  Not machine-tested.
 
 ## Machine test (2026-10-05, David's Godzilla Premium 1.16)
 
@@ -242,8 +261,9 @@ or tilt in the middle of a hold (both drains came between holds); the emulator's
 
 1. Done: the supervised machine test (above). Then the card goes back to David's own modes (p2 restored from
    the backup).
-2. Shield (David's call): the motor's take-control call and `v[16]` move, run from a process of ours like the
-   coils; emulator-provable today.
+2. Shield: done in the emulator (step 8), through the motor's own go-to rather than a take-control: the game
+   keeps no hold on the motor between moves, and its own feature that moves it is blind while ours blocks. Owed:
+   a machine test (the platform with a ball on it, the real turn time).
 3. Building: done in the emulator (step 6). Owed: a machine test (which switch is home, the real speed,
    whether a move with balls locked in the building is safe for the game's lock count), then a mode file
    keyword and a Modes-tab control.

@@ -1678,6 +1678,36 @@ value shield_toward        87
 The emulator plays the motor (PAD-256's coil-motor model: the coil's rule names the switch that stops it,
 the switch it leaves opens, that one closes 600 ms later).
 
+**The limits, and keeping it turned (PAD-392).** The runtime's, none of them a mode's to raise: only the
+running mode, in a game, never while one of the game's own modes or multiballs runs; 1.5 s from one move's
+start to the next, 12 moves a minute (a call that finds it already there counts for neither). When the mode
+ends, the ball ends, or the game ends or tilts, the runtime turns it back where it was before the mode's first
+move - unless the game has sent it somewhere of its own since. `pm_shield_keep(where)` turns it and keeps it
+there while the mode runs:
+
+```c
+pm_shield_keep(PM_SHIELD_TOWARD);         /* toward the player, and turned back if the game leaves it away */
+pm_shield_keep(0);                        /* stop keeping it: it stays where it is */
+```
+
+Why keeping it needs care: the game moves the platform itself. Its ball search (every 12 s while no switch
+closes) swings it toward and away and leaves it away; the runtime turns it back 1.5 s later. And its own
+Mechagodzilla Shield feature, while it counts shots, turns it back AWAY about 2 s after every move of ours (the
+emulator, stock Premium/LE 1.16, hit or no hit). The port names that feature (`text shield_rule Mechagodzilla
+Shield`, one of the `block_rule_name_<n>` lines, PAD-398), and the platform is kept only while it is blind -
+the mode blocks the game's rules (`game_modes block`, the default) and does not keep that one counting.
+Otherwise `pm_shield_keep` turns it once and leaves it to the game ("shield: left AWAY - the game's own shield
+feature counts shots"), rather than fight it every two seconds. A mode file asks for it with `shield toward`
+(the Modes tab's Shield targets): the platform turns 1.5 s after the mode starts, once the ball that started it
+is clear, and the app refuses the line with `game_modes` other than block or with that feature in
+`keep_rules`. A blocks mode has Turn the shield targets (toward the player, away, where they are).
+
+**Measured (emulator, stock Premium/LE 1.16, muted; `shield_test_mode.c`, PAD-392).** Blind rules: kept
+toward 17 s through shots and hits on the three shield targets (switches 89, 90, 91); turned back after each
+of two ball searches; put back AWAY at the mode's end and at the ball's end. Mechagodzilla Shield kept
+counting: the game turned it back within 2 s and the mode left it. A form mode with `shield toward` kept it
+toward 18.5 s through six shield-target hits, all scored, and put it back when it ended.
+
 **The game turns it away by itself.** A shield target hit while the platform faces the player makes the game
 turn it away about 30 ms later and leave it there (its own Mechagodzilla shield reaction:
 `RuleMechagodzillaShield`'s shot handler, outside its multiball too, starts a process for any shield hit

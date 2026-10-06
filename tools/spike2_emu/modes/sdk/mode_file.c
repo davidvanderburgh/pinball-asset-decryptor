@@ -86,6 +86,7 @@ struct mode_cfg {
     unsigned magnet_ms;               /* PAD-381 `magnet <ms> [mask]`: a grab on each hit of that shot; 0 = none */
     uint64_t magnet_bits;
     unsigned scoop_ms;                /* PAD-381 `scoop_hold <ms>`: a ball landing in the scoop is held; 0 = none */
+    int shield;                       /* PAD-392 `shield toward`: the shield targets face the player while it runs */
     char coil_name[4][16];            /* PAD-381 `coil_hold <name> <ms> [mask]`: a held coil of the port's */
     unsigned coil_ms[4];
     uint64_t coil_bits[4];            /* ... on each hit of these shots; 0 = once, when the mode starts */
@@ -139,6 +140,7 @@ static struct {
     unsigned mball_one_ticks;         /* ticks with one ball (or none) in play since */
     unsigned add_balls_left;
     int mball_wait;                   /* PAD-228: `multiball_on` - the balls are not served until its shot */
+    unsigned long shield_due;         /* PAD-392: when the shield platform turns (0 = turned, or not asked) */
 } run;
 
 static int running(const struct slot *M) { return run.active && run.slot == M; }
@@ -271,6 +273,22 @@ static int scoop_line(struct slot *M, const char *line)
     const char *a = key_is(line, "scoop_hold");
     if (!a) return 0;
     cfg.scoop_ms = (unsigned)num(&a);
+    return 1;
+}
+
+/* PAD-392: the shield platform (MODE_SDK.md "The shield platform")
+ *   shield toward       while the mode runs, the shield targets face the player: the platform turns SHIELD_DELAY_MS
+ *                       after it starts (the ball that started it clear of the platform first, as the examples'
+ *                       kit does) and the runtime keeps it there (pm_shield_keep, with all of its limits), then
+ *                       turns it back when the mode ends. Kept only while the game's own shield feature sees no
+ *                       shots: `game_modes block` (the default) without it in `keep_rules`. */
+#define SHIELD_DELAY_MS 1500
+static int shield_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "shield");
+    if (!a) return 0;
+    if (key_is(a, "toward")) cfg.shield = PM_SHIELD_TOWARD;
+    else pm_log("shield takes toward - \"%.40s\" ignored", a);
     return 1;
 }
 
@@ -1754,6 +1772,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (magnet_line(M, line)) return;        /* PAD-381 */
     if (scoop_line(M, line)) return;         /* PAD-381 */
     if (coil_line(M, line)) return;          /* PAD-381 */
+    if (shield_line(M, line)) return;        /* PAD-392 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -1818,6 +1837,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.scoop_ms)                        /* PAD-381 */
         pm_log("\"%s\": a ball in the scoop is held %u ms%s", cfg.name, cfg.scoop_ms,
                pm_can(PM_CAN_SCOOP) ? "" : " - this game's port cannot hold the scoop: no hold");
+    if (cfg.shield)                          /* PAD-392 */
+        pm_log("\"%s\": the shield targets face the player while it runs%s", cfg.name,
+               pm_can(PM_CAN_SHIELD) ? "" : " - this game has no shield platform: nothing turns");
     params_loaded(M);
     more_loaded(M);                          /* PAD-227 */
 }
@@ -1979,6 +2001,7 @@ static void mode_start(struct slot *M, const char *why)
     run.saving = !cfg.mball_balls && cfg.ball_save_s && pm_ball_save(cfg.ball_save_s);   /* no refusal stops the mode */
     if (cfg.scoop_ms) pm_scoop_hold(cfg.scoop_ms);       /* PAD-381: the runtime lets it go when the mode ends */
     coils_at(M, 0);                                      /* PAD-381: held coils with no shot hold as it starts */
+    run.shield_due = cfg.shield ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-392 */
     run.no_clock = cfg.seconds == 0;
     run.active = 1;
     run.slot = M;
@@ -2517,6 +2540,11 @@ static void on_tick(void)
         return;
     }
     own_sounds_tick(M, ticks);
+    if (run.shield_due && pm_ms() >= run.shield_due) {      /* PAD-392: the runtime keeps it and turns it back */
+        run.shield_due = 0;
+        pm_log("%s: the shield targets turn toward the player - %s", cfg.name,
+               pm_shield_keep(cfg.shield) ? "kept there while it runs" : "no platform on this machine");
+    }
     if (run.mball_on) {
         multiball_tick(M);
         if (!run.active) return;

@@ -268,6 +268,19 @@ class TreeEditMixin:
             self._tview[key] = set(self._tree_hidden(card))
         return self._tview[key]
 
+    def _tree_view_follow(self, card, nodes, on):
+        """Hiding a layer in the game shuts its eye too, and putting it back opens it, so the
+        preview shows what the card will (DragonRR, PAD-407: a name hidden in the game was
+        still drawn over the one replacing it).  The eye can still be opened again to see a
+        layer the game leaves out; the card is not changed by it."""
+        view = self._tree_view_hidden(card)
+        self._tsolo.pop((self.assets_dir, card), None)
+        for node in nodes:
+            if on:
+                view.discard(node)
+            else:
+                view.add(node)
+
     def _tree_view_reset(self, card=None):
         """The preview's eyes back to the game's: for *card*, or every scene."""
         for store in (self._tview, self._tsolo):
@@ -1233,14 +1246,22 @@ class TreeEditMixin:
         if card is None:
             return False
         nodes = self._tree_nodes(nodes)
+        before = set(self._tree_view_hidden(card))
+        self._tree_view_follow(card, nodes, on)
         if on:
             for node in nodes:
                 scene_edit.drop(self.assets_dir, card, node, "visible")
             self._tree_refresh()
             return True
         hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
-        return self._tree_add_group([{"op": "visible", "node": n, "on": False}
-                                     for n in nodes if n not in hidden])
+        if all(n in hidden for n in nodes):
+            self._render_tree_preview(self._sel)          # its eye shut; nothing new to add
+            return True
+        if self._tree_add_group([{"op": "visible", "node": n, "on": False}
+                                 for n in nodes if n not in hidden]):
+            return True
+        self._tree_view_hidden(card).difference_update(set(nodes) - before)
+        return False
 
     @rpc
     def tree_delete(self, nodes):
@@ -1665,11 +1686,17 @@ class TreeEditMixin:
         if card is None:
             return False
         node = int(node)
+        shut = node in self._tree_view_hidden(card)
+        self._tree_view_follow(card, [node], on)
         if on:
             scene_edit.drop(self.assets_dir, card, node, "visible")
             self._tree_refresh()
             return True
-        return self._tree_add({"op": "visible", "node": node, "on": False})
+        if self._tree_add({"op": "visible", "node": node, "on": False}):
+            return True
+        if not shut:                                      # refused: its eye as it was
+            self._tree_view_hidden(card).discard(node)
+        return False
 
     def _colour_unlock(self):
         """The advanced "Unlock the game's own pictures" box (PAD-344): the Images tab's
@@ -1967,12 +1994,17 @@ class TreeEditMixin:
 
     def _tree_put(self, card, h, ops):
         from ..plugins.stern import scene_edit
+        was = self._tree_hidden(card)
         try:
             scene_edit.set_ops(self.assets_dir, card, ops)
         except OSError as e:
             compat.messagebox.showerror("Scene edit", str(e))
             return False
         h["now"] = self._tree_ops(card)
+        now = self._tree_hidden(card)
+        # an undone (or redone) game hide takes its eye with it, as the hide did (PAD-407)
+        self._tree_view_follow(card, was - now, True)
+        self._tree_view_follow(card, now - was, False)
         self._tree_refresh()
         return True
 

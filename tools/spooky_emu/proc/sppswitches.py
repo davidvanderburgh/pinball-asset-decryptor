@@ -73,6 +73,28 @@ def used(name, item):
     return not UNUSED.match(name) or bool(lab)
 
 
+#: a PD-LED light's yaml address: board, then its red, green and blue
+#: outputs (A0-R0-G1-B2), or one output for a single-colour light (A4-R81).
+#: One Rick and Morty entry says G twice (A?-R?-G?-G?): the last is its blue.
+LED = re.compile(r"^A(\d+)-R(\d+)(?:-G(\d+)-[GB](\d+))?$", re.I)
+
+
+def leds(cfg):
+    """name -> [board, red, green, blue output] for every light the yaml
+    wires (PRLEDs): sppctl.py turns the board's LED writes into the window's
+    lights with it (PAD-405).  A one-output light is white at its level."""
+    out = {}
+    for name, item in (cfg.get("PRLEDs") or {}).items():
+        m = LED.match(str((item or {}).get("number") or "").strip())
+        if not m:
+            continue
+        board, r = int(m.group(1)), int(m.group(2))
+        g = int(m.group(3)) if m.group(3) else r
+        b = int(m.group(4)) if m.group(4) else r
+        out[str(name)] = [board, r, g, b]
+    return out
+
+
 def table(cfg, numbers, nc, title, shooter):
     """The table, from the parsed yaml *cfg* and the board's view of it:
     *numbers* name -> switch number, *nc* the NC numbers."""
@@ -136,7 +158,7 @@ def table(cfg, numbers, nc, title, shooter):
             "shooter": by["shooter"]["n"] if "shooter" in by else None,
             "coin_door": None,
             "balls": int(game.get("numBalls") or 0) or None,
-            "switches": sws, "rows": rows, "keymap": keymap}
+            "switches": sws, "rows": rows, "keymap": keymap, "leds": leds(cfg)}
 
 
 def main(argv):

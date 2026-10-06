@@ -451,3 +451,51 @@ def test_serve_answers_the_key_listener_until_the_game_ends(tmp_path):
         game.wait()
     t.join(5)
     assert not t.is_alive() and not os.path.exists(sock)
+
+
+def test_the_table_maps_every_light_to_its_board_outputs():
+    """Frank (PAD-405): the window showed the switches but no lights.  The
+    yaml names each PD-LED light by board and outputs; one-output lights
+    are white, and R&M's one G-twice typo reads the last as blue."""
+    cfg = {"PRLEDs": {
+        "garageLights1": {"number": "A0-R0-G1-B2"},
+        "flasher": {"number": "A4-R81"},
+        "typo": {"number": "A3-R10-G11-G12"},
+        "nothing": {"number": ""},
+        "lamp": {"number": "C-A4-B0-0:R-A4-B1-0"}}}
+    assert sppswitches.leds(cfg) == {"garageLights1": [0, 0, 1, 2],
+                                     "flasher": [4, 81, 81, 81],
+                                     "typo": [3, 10, 11, 12]}
+    t = sppswitches.table(cfg, {}, set(), "Rick and Morty", "shooterLane")
+    assert t["leds"]["flasher"] == [4, 81, 81, 81]
+    assert t["lights"] == []            # placed lights: there is no picture
+
+
+class LedBoard(FakeBoard):
+    def ask(self, line):
+        import json
+        if line.split()[0] == "leds":
+            return json.dumps({"0:0": 255, "0:1": 128, "4:81": 40})
+        return super().ask(line)
+
+
+def test_state_carries_every_light_lit_or_dark(tmp_path):
+    import json
+    (tmp_path / "switches.json").write_text(json.dumps(
+        {"leds": {"garageLights1": [0, 0, 1, 2], "flasher": [4, 81, 81, 81],
+                  "giLeftOrbit1": [0, 12, 13, 14]}}))
+    ad = sppctl.Adapter(LedBoard(), str(tmp_path))
+    st = ad.command("state")
+    # the window lays out its swatches from the first state, so the dark
+    # one is there too
+    assert st["lights"] == {"garageLights1": [255, 128, 0], "flasher": [40, 40, 40],
+                            "giLeftOrbit1": [0, 0, 0]}
+    assert ad.command("leds") == st["lights"]
+
+
+def test_no_table_yet_means_no_lights_and_asks_again(tmp_path):
+    import json
+    ad = sppctl.Adapter(LedBoard(), str(tmp_path))
+    assert ad.command("state")["lights"] == {}
+    (tmp_path / "switches.json").write_text(json.dumps({"leds": {"flasher": [4, 81, 81, 81]}}))
+    assert ad.command("state")["lights"] == {"flasher": [40, 40, 40]}

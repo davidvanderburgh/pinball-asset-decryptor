@@ -34,7 +34,7 @@ import re
 
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 NO_TINT = ((1.0, 1.0, 1.0, 1.0), (0.0, 0.0, 0.0, 0.0))
-MANIFEST_VERSION = 3              # 3: a Text's two flag bytes (the first wraps)
+MANIFEST_VERSION = 4              # 3: Text flag bytes; 4: ScaleToBounds, VerticalAlignment
 
 
 # ---------------------------------------------------------------------------------------------
@@ -106,9 +106,14 @@ def manifest(scene, tex2rel=None, font_of=None, asset2rel=None):
                    # colours: the Text's rgba is ignored (emulator, every flag combination);
                    # the node's colour track still tints it
                    "styled": bool(size.get("variant")),
-                   # the Text's two flag bytes: the first set = the line WRAPS at its rect's
-                   # width (Battle Select's "USE FLIPPERS TO / CHANGE BATTLE", on the machine)
-                   "flags": [int(v) for v in (b.get("flags") or (0, 0))]}
+                   # the Text's two flag bytes, Multiline and WordWrap (the game's names;
+                   # PAD-412, emulator: Multiline off drops the line breaks, WordWrap breaks
+                   # at the rect's width)
+                   "flags": [int(v) for v in (b.get("flags") or (0, 0))],
+                   # its last two fields, ScaleToBounds (1 = the words shrink to fit the rect)
+                   # and VerticalAlignment (0 top, 1 middle, 2 bottom of the rect)
+                   "fit": int((b.get("tail") or (0, 0))[0]),
+                   "valign": int((b.get("tail") or (0, 0))[1])}
         elif k == "Shape":
             out = {"kind": k, "rect": [round(v, 3) for v in b["rect"]],
                    "fill": obj(b["bitmap"])}
@@ -334,7 +339,8 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
                             font_px=o.get("font_px", 0), font_name=o.get("font_name", ""),
                             spacing=o.get("spacing", [0, 0]), ascent=o.get("ascent", 0),
                             line=o.get("line", 0), styled=o.get("styled", False),
-                            flags=o.get("flags")))
+                            flags=o.get("flags"), fit=o.get("fit", 0),
+                            valign=o.get("valign", 0)))
         elif k == "Video":
             out.append(dict(common, kind="video", name=o["name"], w=o["w"], h=o["h"]))
         elif k == "Spine":

@@ -95,7 +95,7 @@ def test_a_replaced_title_with_line_breaks_is_fitted_to_the_replacement(tmp_path
 
 
 def test_a_wrapping_line_breaks_where_it_did(tmp_path, fonts):
-    d = _text("SHOOT THE SWITCHES TO LIGHT THE JACKPOT", (-2, -2, 150, 80), 1, flags=(1, 0))
+    d = _text("SHOOT THE SWITCHES TO LIGHT THE JACKPOT", (-2, -2, 150, 80), 1, flags=(1, 1))
     before = _draw(tmp_path, d, fonts)
     rect = R.text_fit_rect(d, fonts[0])
     assert rect[2] - rect[0] < 152
@@ -135,24 +135,25 @@ def test_a_second_fit_replaces_the_first(tmp_path):
 
 def test_a_resized_box_turns_word_wrap_on_on_both_sides():
     """DragonRR, round 3: "Bounding box doesn't change the text size, the words shuffle to try
-    to fit within the area"; a box resized by hand turns the Text's wrap flag on."""
+    to fit within the area"; a box resized by hand turns the Text's Multiline and WordWrap
+    flags on (PAD-412, emulator: the first alone keeps the line breaks but never wraps)."""
     man = E.manifest(T.parse(scene()))
     ops = [{"op": "text_rect", "node": 53, "rect": [-2.0, -2.0, 30.0, 60.0], "wrap": True}]
     preview = X.apply_manifest(man, ops)[0]
     title = [d for d in E.draw_list(preview, 1) if d["kind"] == "text"][0]
-    assert title["flags"][0] == 1 and title["rect"] == pytest.approx([-2, -2, 30, 60])
+    assert title["flags"] == [1, 1] and title["rect"] == pytest.approx([-2, -2, 30, 60])
     sc = T.parse(scene())
     assert X.apply_scene(sc, ops, names=X.names_of(man)) == (1, [])
     card = E.manifest(T.parse(T.serialize(sc)))
     got = [d for d in E.draw_list(card, 1) if d["kind"] == "text"][0]
-    assert got["flags"][0] == 1 and got["rect"] == pytest.approx([-2, -2, 30, 60])
+    assert got["flags"] == [1, 1] and got["rect"] == pytest.approx([-2, -2, 30, 60])
     assert X.describe(ops[0]) == "box resized"
 
 
 def test_a_narrower_box_wraps_the_words_at_their_size(tmp_path, fonts):
     d = _text("GODZILLA VS GIGAN", (-2, -2, 340, 40), 1)
     one = _draw(tmp_path, d, fonts)
-    narrow = dict(d, rect=[-2, -2, 70, 40], flags=[1, 0])
+    narrow = dict(d, rect=[-2, -2, 70, 40], flags=[1, 1])
     two = _draw(tmp_path, narrow, fonts)
     a, b = _ink_box(one), _ink_box(two)
     assert b[3] - b[1] > 2 * (a[3] - a[1])          # three lines now, not one

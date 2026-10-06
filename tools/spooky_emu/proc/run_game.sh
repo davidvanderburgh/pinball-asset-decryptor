@@ -120,7 +120,13 @@ echo "$SCREEN" > "$SPP_RIG/window"
 
 AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
 if [ "$AUDIO" = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
-    AUDIO_ENV="SDL_AUDIODRIVER=pulse PULSE_SERVER=unix:/mnt/wslg/PulseServer"
+    # No shared memory with WSLg's PulseAudio, as on the AP rig: the py27
+    # env's libpulse (no memfd) wants WSLg's /dev/shm, which this distro
+    # cannot see, and then fails the whole connection ("shm_open() failed"
+    # -> "Could not connect to PulseAudio") - the game started with its
+    # sound off on every visible run (PAD-405).
+    echo 'enable-shm = no' > "$SPP_RIG/pulse-client.conf"
+    AUDIO_ENV="SDL_AUDIODRIVER=pulse PULSE_SERVER=unix:/mnt/wslg/PulseServer PULSE_CLIENTCONFIG=$SPP_RIG/pulse-client.conf"
 else
     AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/dev/null SDL_DISKAUDIODELAY=0"
 fi
@@ -133,7 +139,7 @@ setsid -f unshare --net --mount --propagation private \
     env SPP_TOOLS="$SPP_TOOLS" SPP_RIG="$SPP_RIG" SPP_PY="$SPP_PY" SPP_USER="$SPP_USER" \
         SPP_SITE="$SPP_ROOT/site" SPP_STUB="$SPP_PROC/pystub" SPP_DIR="$DIR" SPP_LAUNCH="$LAUNCH" \
         SPP_UNITY="$UNITY" SPP_OSFILES="$OSFILES" SPP_SCREEN="$SCREEN" SPP_XVFB=$XVFB DISPLAY="$DISP" \
-        SPP_BALLS="$BALLS" PROC_EMU_FPGA="$FPGA" PROC_EMU_CTL="$CTL" $AUDIO_ENV \
+        SPP_BALLS="$BALLS" PROC_EMU_FPGA="$FPGA" PROC_EMU_CTL="$CTL" SPP_VISIBLE=$VISIBLE $AUDIO_ENV \
     bash "$SPP_TOOLS/netns.sh" < /dev/null >> "$SPP_RIG/rig.log" 2>&1
 
 # Up = the game's run loop is going and attract has shown its first page:
@@ -152,6 +158,20 @@ if [ "$AUDIO" = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S /mnt/wslg/PulseServer
 fi
 if spp_alive game && [ -f "$SPP_RIG/attract" ]; then
     rigboard_post spooky-proc "$SPP_SLOT" "$(spp_pid game)" "$(basename "$BUILD")" "$NAME" "$VISIBLE" "$AUDIO"
+    # The playfield window's keys in the game's own window too, as on the
+    # Warden rig (PAD-313): gamekeys.py speaks the Warden board's ctl.sock,
+    # which sppctl.py --serve answers from this board (its own socket has no
+    # pause or reset).  The game's own key map is off (spprun.py), so a key
+    # means one thing in both windows.  Both end with the game (PAD-405).
+    if [ "${PAD_GAMEKEYS:-$VISIBLE}" = 1 ]; then
+        PAD_SLOT=$SPP_SLOT SPP_ROOT=$SPP_ROOT setsid -f python3 "$SPP_TOOLS/sppctl.py" --serve "$SPP_RIG/ctl.sock" \
+            < /dev/null >> "$SPP_RIG/gamekeys.log" 2>&1
+        for _ in $(seq 1 30); do [ -S "$SPP_RIG/ctl.sock" ] && break; sleep 0.1; done
+        setsid -f python3 -u "$SPP_TOOLS/../../ap_emu/gamekeys.py" --display "$DISP" \
+            --mark "SPK_MARK=$SPP_RIG" --sock "$SPP_RIG/ctl.sock" \
+            --pidfile "$SPP_RIG/game.pid" --table "$SPP_RIG/switches.json" \
+            < /dev/null >> "$SPP_RIG/gamekeys.log" 2>&1
+    fi
     echo "Ready: $(basename "$BUILD"), slot $SPP_SLOT, display $DISP"
 else
     echo "run_game.sh: the game did not come up:" >&2

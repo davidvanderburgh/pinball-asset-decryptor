@@ -1199,6 +1199,24 @@ def _rigs_the_app_names():
         for m in pat.finditer(path.read_text(encoding="utf-8",
                                              errors="replace")):
             rigs.add(m.group(1) or m.group(2))
+    # ...and every rig THOSE rigs' scripts reach beside themselves: the
+    # Spooky P-ROC rig and AP's apiav rig cd to ../../proc_emu, which no
+    # tab names, so it never shipped and both failed with exit 7 on every
+    # installed copy (PAD-405).
+    sib = re.compile(r"""\.\./([a-z0-9_]+_emu)\b"""
+                     r"""|["']\.\.["']\s*,\s*["']([a-z0-9_]+_emu)["']""")
+    todo = sorted(rigs)
+    while todo:
+        base = REPO / "tools" / todo.pop()
+        if not base.is_dir():
+            continue
+        for path in list(base.rglob("*.sh")) + list(base.rglob("*.py")):
+            for m in sib.finditer(path.read_text(encoding="utf-8",
+                                                 errors="replace")):
+                rig = m.group(1) or m.group(2)
+                if rig not in rigs and (REPO / "tools" / rig).is_dir():
+                    rigs.add(rig)
+                    todo.append(rig)
     return rigs
 
 

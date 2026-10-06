@@ -135,6 +135,14 @@ Source: "{#ProjectDir}\tools\ap_emu\*"; DestDir: "{app}\tools\ap_emu"; \
 Source: "{#ProjectDir}\tools\spooky_emu\*"; DestDir: "{app}\tools\spooky_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.beetlejuice"
+; The emulated P3-ROC board (tools/proc_emu, PAD-262): the board Rick and
+; Morty and Alice Cooper run on (tools/spooky_emu/proc), and AP's apiav games
+; (tools/ap_emu/apiav).  Neither tab names it - their scripts reach it as
+; ../../proc_emu - so it had no line here and every installed copy failed
+; those games' first Start with exit 7 (PAD-405).  Sources only.
+Source: "{#ProjectDir}\tools\proc_emu\*"; DestDir: "{app}\tools\proc_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png"
 ; The pinHeck emulator (tools/pinheck_emu, PAD-320): the Emulate Spooky tab's
 ; DMD games (Jetsons, Domino's, Rob Zombie).  Pure Python on the app's own
 ; Python - no WSL - with its window's page (page/*.html, .js, .css) and the

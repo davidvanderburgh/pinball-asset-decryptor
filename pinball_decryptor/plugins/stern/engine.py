@@ -3491,6 +3491,16 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
             log("Color profile (%s): %s." % (shader.label(),
                                              shader_profile.describe(s_report)),
                 "info")
+        elif not s_blob and shader_profile.profile_in(raw) is not None:
+            # PAD-406: a card an earlier Write corrected keeps the profile
+            # it was built with (its shaders are left alone), so nothing -
+            # an Emulate run's Machine screen included - is drawn on top
+            log("Color profile: this card's game already carries the color "
+                "profile an earlier Write gave it (%s) and draws with that "
+                "one; %s is not added on top of it. Build from the original "
+                "card to change it."
+                % (shader_profile.profile_in(raw).label(), shader.label()),
+                "warning")
         else:
             log("Color profile: the corrected shaders don't fit the space the "
                 "game program can grow into; the colors are left as they are.",

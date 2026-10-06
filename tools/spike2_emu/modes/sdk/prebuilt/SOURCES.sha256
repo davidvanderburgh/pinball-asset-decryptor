@@ -1,9 +1,9 @@
 # prebuilt/mode.so was built by build_prebuilt.sh from these files (CRs stripped before
 # hashing and compiling). tests/test_stern_mode_runtime.py compares them with the SDK.
-d306d80d38c19a29640dec513288873ae1577447eef49e2627d847dfa68f81a4  pad_mode.h
+c3976ff6af609019cef720a04f74d2e4f61202e95c2b2b514a50e1f3b6f3901c  pad_mode.h
 3ac8ae2d1e7bea15a16188df549e5d4bb14b55ff40fa234845207063de19aaa7  pad_stock.h
-a2e3ac1e6c1e00ac610b095b95f1a9405886e33e3bcd13ebf7fc32c38015ea6f  pad_mode_runtime.c
+8e5c0ee1a209635b99fdd1b18f8409961959094813fe1069f4aecf0f4419e7b9  pad_mode_runtime.c
 db6a196339011f3092b47bad50616358fefd76894cc28bc1d37ab71ea8f3081e  mode_file.c
 9b25ba0f01281e243d120715ae5cb4fc8965b8b7f3fc3a7e0dfd505877eb02d3  build_mode.sh
-eebfea335f73c43029be4cb9c308a0e69f977a14b01bb67079c7cb14a003b749  mode.so
+c8c2c42b56eba134bfd0234c3a583ef1407874816b18fd8829c91b70c13fc5f6  mode.so
 compiler arm-linux-gnueabihf-gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0

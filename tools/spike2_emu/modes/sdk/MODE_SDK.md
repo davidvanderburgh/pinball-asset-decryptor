@@ -1675,6 +1675,55 @@ BIOLLANTE's shield vines lit only while the platform faced the player. Each real
 and the mode brought it back. Not measured: a machine (the real motor's speed); the motor switched off in
 the adjustments (desk only: `pm_shield` says 0).
 
+## The building (Godzilla Premium/LE, PAD-393)
+
+Godzilla Premium and LE have a building on a stepper motor. The game moves it by FLOOR: 0 is where it
+rests (beside its home switch, BUILDING UP), and 1, 2 and 3 are 2500, 5000 and 7500 steps further. A mode
+asks for a floor and nothing else:
+
+```c
+pm_building(3);                           /* the floor furthest from home, at the operator's speeds */
+if (pm_building_floor() == 3) { /* stopped there */ }
+pm_building(0);                           /* back to where the game keeps it */
+```
+
+The limits are the runtime's and cannot be raised: only the running mode, only in a game; never while the
+building is busy (moving, homing, or one of the game's own building processes 322/323 runs), switched off
+(BUILDING STEPPER DISABLED) or faulted (the board reported a stall); 3 s from one move's start to the next;
+at most 6 a minute. When the mode ends, the ball ends, or the game ends or tilts, the runtime puts it back on
+the floor it was at before the mode's first move - unless the game has since sent it somewhere itself.
+`pm_building` returns 0 when refused (the reason is in mode.log) and on a Pro; `pm_building_floor` says the
+floor it is stopped at, -2 while it moves, -1 on a Pro.
+
+**How it works.** `BuildingStepper` (a `StepperMotor` the node board runs: node 10 motor 0), one object at
+`0x7bbe64`. `building_move(object, floor)` (LE 1.16 `0x1d79fc`) stores the floor as the target (`+48`) with
+the speed adjustments 355-357; the motor's own update sends the board one RELATIVE move of the steps between
+the floor it is at (`+44`) and the target. The floors are the game's own table (`0x1d77d8`), less the
+operator's BUILDING STEPPER BIAS (150 on a stock card), so no floor can drive it past the travel the game
+itself uses. Unlike a coil or the shield, no process control is involved. `building_busy` (`0x1d7948`) is
+the game's own "not now". The port lines:
+
+```
+site building_move         0x001d79fc 0xe92d40f8 0xe1a04000
+site building_busy         0x001d7948 0xe5d03025 0xe3530000
+data building_stepper      0x007bbe64
+value building_vptr        0x64ff90     # the object's vtable word: checked before every move
+value building_at          44
+value building_target_at   48
+value building_floors      4
+```
+
+**The emulator plays the stepper** (hwshim.c "A STEPPER THE BOARD RUNS"): cmd 32 configures it, 34 homes
+it, 31 moves it by steps at 5000 a second, 38+motor reports flags 0x02 moving and 0x04 homed. Before it, the
+zero reply made the game re-send the home about 3600 times a run and never reach a floor. Which switch is
+home on a real machine is not known (BUILDING UP here); `PAD_STEPPER_HOME=down` swaps them.
+
+**Measured (emulator, stock Godzilla LE 1.16, muted; `building_test_mode.c`).** The game homed it once, put it
+on floor 0 (-150 steps), and a mode then moved it: floor 3 (-7500 steps, 1.5 s, BUILDING DOWN made on
+arrival), a second move 1.5 s later refused (busy), floor 2 (+2500), floor 9 refused (no such floor), and at
+the mode's end it was put back on floor 0 (+5000). When the ball drained mid-test, the game sent it to floor
+0 itself and the put-back stood aside. Not machine-tested.
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in

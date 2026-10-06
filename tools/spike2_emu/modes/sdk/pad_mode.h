@@ -518,4 +518,21 @@ int pm_scoop_holding(void);
 int pm_shield(int where);
 int pm_shield_position(void);
 
+/* ---- the building (PAD-393) -----------------------------------------------------------------------
+ * Godzilla Premium/LE's building rides a stepper. pm_building asks the game to move it to a FLOOR, 0 (where
+ * the game keeps it at rest, beside its home switch) .. 3 (the furthest the game sends it), at the operator's own building speed settings: the
+ * floors are the game's own, so nothing a mode asks can drive it past the travel the game itself uses.
+ * The limits are the runtime's and cannot be raised:
+ *   - only while your mode runs, in a game (not attract, not tilted); never while the building is busy
+ *     (moving, homing, or one of the game's own building sequences runs), switched off in the settings
+ *     (BUILDING STEPPER DISABLED) or faulted; 3 s from one move's start to the next; at most 6 a minute.
+ *   - when your mode ends, the ball ends, or the game ends or tilts, the runtime puts the building back
+ *     on the floor it was at before your first move - unless the game has since moved it itself.
+ * pm_building: 1 = sent (or already there); 0 = refused (the reason is in mode.log) or no building on this
+ * machine (a Pro, or a port without the building lines). pm_building_floor: the floor it is stopped at,
+ * -2 while it moves (or before the game has homed it), -1 when there is no building. */
+#define PM_CAN_BUILDING     0x400000u /* pm_building / pm_building_floor */
+int pm_building(int floor);
+int pm_building_floor(void);
+
 #endif

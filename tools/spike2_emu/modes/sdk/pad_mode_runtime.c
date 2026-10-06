@@ -769,12 +769,14 @@ void pm_running_name(const char *name)
 static void bd_reset(const char *why);
 static void magnet_let_go(const char *why);   /* PAD-381: the magnet section */
 static void scoop_let_go(void);               /* PAD-381: the scoop section */
+static void building_let_go(const char *why); /* PAD-393: the building section */
 void pm_end(void)
 {
     if (running == current) running = 0, running_as[0] = 0;
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();
+    if (!running) building_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }
 
@@ -3926,6 +3928,170 @@ static void shield_arm(void)
         data("shield_motor"), fn("shield_move"), pm_port_value("shield_away", 0), pm_port_value("shield_toward", 0));
 }
 
+/* ---- the building (PAD-393) ---------------------------------------------------------------------
+ * Godzilla Premium/LE's building rides a stepper the node board runs: BuildingStepper -> StepperMotor, one
+ * object (`data building_stepper`, its vtable word `value building_vptr`), node 10 motor 0, BUILDING UP /
+ * DOWN switches 92 / 93. The game moves it by FLOOR, never by steps: `site building_move` (0x1d79fc: object,
+ * floor 0..3) stores the floor as the target (+building_target_at) with the operator's speed, accel and
+ * decel adjustments (355-357), and the motor's own update (0x1dc234, every tick) sends the board one move
+ * of the steps between the floor it is at (+building_at) and the target, then waits for the board to say
+ * it stopped. The floors are the game's own table (0x1d77d8: floor 0 beside home, 1..3 2500, 5000, 7500 steps
+ * further, all less the operator's BUILDING STEPPER BIAS; the game keeps it on 0 at rest), so no floor asked for here can send it past the travel the game
+ * itself uses. No process control: unlike a coil (PAD-381) or the shield, the update sends whatever
+ * target is stored, from whichever process stored it. `site building_busy` (0x1d7948) is the game's own
+ * "not now": 1 while the motor is being configured, before it has homed, while a move is under way, and
+ * while the game's own building processes (322, 323: the attract run, the homing) exist.
+ *
+ * THE LIMITS, none of them the mode's to change (the coils' numbers, PAD-381):
+ *   1. Only the running mode, only in a game (not attract, not tilted), a floor 0..building_floors-1.
+ *   2. Never while the game's building is busy (above), the operator has it off (StepperMotor v[2]:
+ *      BUILDING STEPPER DISABLED) or it has faulted (v[0]: the board reported a stall).
+ *   3. One move at a time (busy covers the move under way), MAGNET_COOL_MS from one move's start to the
+ *      next, at most MAGNET_PER_MIN moves a minute.
+ *   4. Put back: when the mode ends, the ball ends or the game ends or tilts, the building goes back to
+ *      the floor it was at before the mode's first move - unless the game has since sent it somewhere of
+ *      its own (the target is no longer the mode's), which then has it. A put-back that finds it busy
+ *      waits for the move under way and tries again, for up to BUILDING_PUTBACK_MS. */
+#define BUILDING_PUTBACK_MS 10000u
+
+static struct {
+    unsigned long starts[MAGNET_PER_MIN];
+    unsigned next;
+    unsigned long last;                     /* pm_ms() of the last move asked for */
+    int home;                               /* the floor before the mode's first move; -1 none owed */
+    int ours;                               /* the floor the mode asked for last */
+    unsigned long putback_until;            /* 0 = no put-back pending */
+    const char *putback_why;
+} bld = { .home = -1, .ours = -1 };
+
+static unsigned building_obj(void)
+{
+    unsigned obj = data("building_stepper");
+    if (!(can & PM_CAN_BUILDING) || !obj) return 0;
+    if (*(const unsigned *)(unsigned long)obj != (unsigned)pm_port_value("building_vptr", 0)) return 0;
+    return obj;
+}
+
+static int building_field(unsigned obj, const char *at, unsigned fallback)
+{
+    return *(const int *)(unsigned long)(obj + (unsigned)pm_port_value(at, fallback));
+}
+
+static int building_busy(unsigned obj)
+{
+    return (((unsigned (*)(unsigned))(unsigned long)fn("building_busy"))(obj) & 0xffu) != 0;
+}
+
+static void building_send(unsigned obj, int floor)
+{
+    ((void (*)(unsigned, unsigned))(unsigned long)fn("building_move"))(obj, (unsigned)floor);
+}
+
+/* Why a move to `floor` may not start now, or 0. (tests lift it verbatim) */
+static const char *building_refusal(int running_mode, int in_game, int floor, int floors, int disabled,
+                                    int faulted, int busy, unsigned long last, unsigned long now,
+                                    const unsigned long starts[MAGNET_PER_MIN])
+{
+    unsigned i, recent = 0;
+    if (!running_mode) return "only the running mode may move it";
+    if (!in_game) return "no game is being played (attract or a tilt)";
+    if (floor < 0 || floor >= floors) return "no such floor";
+    if (disabled) return "the operator has the building stepper disabled";
+    if (faulted) return "the building's stepper has faulted";
+    if (busy) return "the building is busy (moving, homing, or the game's own building process runs)";
+    if (last && now - last < MAGNET_COOL_MS) return "the last move started less than 3 s ago";
+    for (i = 0; i < MAGNET_PER_MIN; i++)
+        if (starts[i] && now - starts[i] < 60000ul) recent++;
+    if (recent >= MAGNET_PER_MIN) return "six moves in the last minute already";
+    return 0;
+}
+
+int pm_building(int floor)
+{
+    unsigned obj = building_obj();
+    unsigned long now = pm_ms();
+    int at, floors = (int)pm_port_value("building_floors", 4);
+    const char *why;
+    if (!obj) return 0;
+    at = building_field(obj, "building_at", 44);
+    why = building_refusal(pm_running(), pm_in_game(), floor, floors, (coil_virtual(obj, 2) & 0xffu) != 0,
+                           (coil_virtual(obj, 0) & 0xffu) != 0, building_busy(obj), bld.last, now, bld.starts);
+    if (why) {
+        say("building: no move to floor %d - %s", floor, why);
+        return 0;
+    }
+    if (bld.home < 0) bld.home = at;        /* the floor to put it back on */
+    bld.ours = floor;
+    bld.last = now;
+    bld.starts[bld.next++ % MAGNET_PER_MIN] = now;
+    bld.putback_until = 0;
+    building_send(obj, floor);
+    say("building: floor %d -> %d%s (put back on %d when the mode ends)", at, floor,
+        at == floor ? " - already there" : "", bld.home);
+    return 1;
+}
+
+int pm_building_floor(void)
+{
+    unsigned obj = building_obj();
+    int at, to;
+    if (!obj) return -1;
+    at = building_field(obj, "building_at", 44);
+    to = building_field(obj, "building_target_at", 48);
+    if (to != at || building_busy(obj)) return -2;      /* moving, or not found yet */
+    return at >= 0 && at < (int)pm_port_value("building_floors", 4) ? at : -2;
+}
+
+/* The mode, the ball or the game ended: owe a put-back (the tick does it). */
+static void building_let_go(const char *why)
+{
+    if (bld.home < 0 || bld.putback_until) return;
+    bld.putback_until = pm_ms() + BUILDING_PUTBACK_MS;
+    bld.putback_why = why;
+}
+
+static void building_tick(void)
+{
+    unsigned obj;
+    int to;
+    if (bld.home < 0) return;
+    if (!bld.putback_until) {
+        if (!pm_in_game()) building_let_go("the game ended or tilted");
+        else if (!running) building_let_go("no mode is running");
+        if (!bld.putback_until) return;
+    }
+    obj = building_obj();
+    if (!obj) { bld.home = -1, bld.putback_until = 0; return; }
+    to = building_field(obj, "building_target_at", 48);
+    if (to != bld.ours) {
+        say("building: not put back (%s) - the game has sent it to floor %d of its own", bld.putback_why, to);
+    } else if (building_busy(obj)) {
+        if (pm_ms() < bld.putback_until) return;        /* the move under way first */
+        say("building: not put back (%s) - still busy after %u s", bld.putback_why, BUILDING_PUTBACK_MS / 1000);
+    } else {
+        say("building: put back on floor %d (%s)", bld.home, bld.putback_why);
+        building_send(obj, bld.home);
+    }
+    bld.home = bld.ours = -1;
+    bld.putback_until = 0;
+}
+
+static void building_arm(void)
+{
+    static const char *const s[] = { "building_move", "building_busy", 0 };
+    static const char *const d[] = { "building_stepper", 0 };
+    static const char *const v[] = { "building_vptr", "building_at", "building_target_at", "building_floors", 0 };
+    if (!site("building_move")) return;                 /* a port without a building stepper (a Pro): silent */
+    if (!have_sites(s) || !have_data(d) || !have_values(v)) {
+        say("building: off - the port's building lines are incomplete or do not match this build");
+        return;
+    }
+    can |= PM_CAN_BUILDING;
+    say("building: a mode may move it by floor (stepper 0x%08x, move 0x%08x, floors 0..%ld); %u s between "
+        "moves, %u a minute, put back when the mode ends", data("building_stepper"), fn("building_move"),
+        pm_port_value("building_floors", 4) - 1, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
+}
+
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
  * A rule the game shipped with (a battle, a multiball) is a compiled object with a vtable, and
  * its SHOT HANDLER (one vtable slot) tests the RAW shot mask against fixed bits: Godzilla's
@@ -5089,6 +5255,7 @@ static void on_tick(unsigned *r)
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
+    building_tick();                          /* PAD-393: a put-back owed */
     roster_deferred_tick();
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
@@ -5123,6 +5290,7 @@ static void on_ball_end(unsigned *r)
     if (disp_linger_until) disp_release("the ball ended");
     bd_reset("the ball ended");
     magnet_let_go("the ball ended");          /* PAD-381 */
+    building_let_go("the ball ended");        /* PAD-393 */
     roster_owed_ball_end();
 }
 
@@ -6003,6 +6171,7 @@ static void pad_mode_start(void)
     coils_arm();                                    /* PAD-381: a magnet grab of the mode's own */
     scoop_arm();                                    /* PAD-381: a ball held in the scoop */
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
+    building_arm();                                 /* PAD-393: the Premium's building */
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
@@ -6011,13 +6180,14 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
         can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
-        can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "");
+        can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
+        can & PM_CAN_BUILDING ? " building" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

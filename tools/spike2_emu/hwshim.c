@@ -8979,6 +8979,246 @@ static void motor_note(const unsigned char *p, int n)
     }
 }
 
+/* ---- PAD-393: A STEPPER THE BOARD RUNS (godzilla_le's BUILDING) ---------
+ *
+ * godzilla_le 1.16's building is BuildingStepper -> StepperMotor (object
+ * 0x7bbe64, node 10 motor 0). The board counts the steps; the game sends it
+ * moves and polls a status. Read out of the game (device_building_stepper.cpp,
+ * the wire builders at 0x5af3c8..0x5b4dc4):
+ *
+ *   cmd 32 (23-byte frame)  configure: motor, ..., byte 7 = 0x40|input of
+ *        `32 00 00 3a 20 41 40 ...`   switch 93 (BUILDING DOWN), byte 8 =
+ *                                     0x40|input of switch 92 (BUILDING UP)
+ *   cmd 34 `34 <motor> <dir>`         home (0x5b4dc4, from 0x1d7a48)
+ *   cmd 31 `31 <motor> <s16 steps> <speed u32> <accel u32> <decel u32> ..`
+ *                                     a RELATIVE move (0x5b404c, from
+ *                                     BuildingStepper::v[11] 0x1d7878)
+ *   cmd 38+motor, no payload -> 5     status (0x5af5f0): u16, u16, flags
+ *
+ * The flags the update loop 0x1dc234 tests: 0x02 moving (a move is done when
+ * it clears), 0x04 homed (clears the fault count), 0x08/0x10 a fault.
+ *
+ * WHAT ZEROS DID: the home proc 0x1d7a48 sends 34, waits for "not moving",
+ * and sends 34 again until the status says homed. Nothing ever did, so the
+ * game homed the building ~3600 times a run, polled its status ~42000 times,
+ * and never got as far as a floor (no cmd 31 at all).
+ *
+ * THE FLOORS (0x1d77d8): the game's positions are counts from home, all
+ * negative - floor 0 = 0, 1 = -2500, 2 = -5000, 3 = -7500, each less the
+ * offset adjustment 359 (BUILDING STEPPER BIAS, 150 on a stock card: floor 0
+ * is -150). Home is next to floor 0, where the game keeps it at rest.
+ *
+ * So the board plays the building: 34 runs it home (moving, then position 0,
+ * homed, its home switch made), 31 runs it by the steps asked (moving, the
+ * position stepping there, the home switch open while away), at
+ * PAD_STEPPER_SPS steps a second (default 5000: floor 0 to floor 3 in 1.5 s).
+ * The far switch closes at PAD_STEPPER_TRAVEL steps from home (default 7500).
+ *
+ * WHICH SWITCH IS HOME IS NOT KNOWN. Here it is BUILDING UP (the config's byte
+ * 8), because home is beside floor 0, where the building rests between games
+ * and the floors are the damage it takes; nothing in the rig can tell, and the
+ * game reads only the status, never these switches, to move it. PAD_STEPPER_HOME=down swaps them. The building
+ * starts between the switches, position unknown, as on a machine at power on.
+ *
+ * PAD_STEPPER=0 restores the zero reply and stops the model. */
+#define NB_STEPPERS 6
+
+struct nb_stepper {
+    unsigned char cfg;          /* cmd 32 seen for this motor              */
+    signed char sw[2];          /* input bit: [0] home end, [1] far end    */
+    unsigned char homed;
+    signed char going;          /* -1 idle, 0 homing, 1 a move             */
+    long pos;                   /* steps from home (<= 0)                   */
+    long from, to;              /* the move under way                       */
+    unsigned long start, due;   /* pad_ms() it began / ends                 */
+    unsigned long moves, homes; /* counts, for the log                      */
+    unsigned char made[2];      /* the end switches as last set             */
+};
+static struct nb_stepper nb_steppers[64][NB_STEPPERS];
+static unsigned char nb_stepper_cfg[64];
+
+static int stepper_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("PAD_STEPPER");
+        v = !(e && e[0] == '0');
+    }
+    return v;
+}
+
+static long stepper_env(const char *name, long dflt, long lo)
+{
+    const char *e = getenv(name);
+    long v = (e && *e) ? (long)atoi(e) : dflt;
+    return v < lo ? dflt : v;
+}
+
+static long stepper_sps(void)
+{
+    static long v;
+    if (!v) v = stepper_env("PAD_STEPPER_SPS", 5000, 1);
+    return v;
+}
+
+static long stepper_travel(void)
+{
+    static long v;
+    if (!v) v = stepper_env("PAD_STEPPER_TRAVEL", 7500, 1);
+    return v;
+}
+
+static long stepper_pos(const struct nb_stepper *s)
+{
+    unsigned long e;
+    if (s->going < 0) return s->pos;
+    if (pad_ms() >= s->due || s->due <= s->start) return s->to;
+    e = pad_ms() - s->start;
+    return s->from + (s->to - s->from) * (long)e / (long)(s->due - s->start);
+}
+
+/* The two end switches for where it is now: home made at 0, the far one at
+ * or past the travel. */
+static void stepper_switches(unsigned nid, struct nb_stepper *s)
+{
+    long pos = stepper_pos(s);
+    int moving = s->going >= 0 && pad_ms() < s->due, e;
+    unsigned char made[2];
+    made[0] = pos == 0 && !(moving && s->from == 0);
+    made[1] = pos <= -stepper_travel() && !(moving && s->from <= -stepper_travel());
+    for (e = 0; e < 2; e++) {
+        motor_switch(nid, s->sw[e], made[e]);
+        if (made[e] != s->made[e]) {
+            char b[96];
+            s->made[e] = made[e];
+            snprintf(b, sizeof b, "[stepper] %lu ms node %u %s switch (input %d) %s\n",
+                     pad_ms(), nid, e ? "far-end" : "home", s->sw[e], made[e] ? "made" : "open");
+            motor_say(b);
+        }
+    }
+}
+
+static void stepper_tick(unsigned nid)
+{
+    unsigned k;
+    if (nid >= 64 || !nb_stepper_cfg[nid] || !stepper_on()) return;
+    for (k = 0; k < NB_STEPPERS; k++) {
+        struct nb_stepper *s = &nb_steppers[nid][k];
+        char b[128];
+        if (!s->cfg || s->going < 0 || pad_ms() < s->due) continue;
+        s->pos = s->to;
+        if (s->going == 0) s->homed = 1;
+        snprintf(b, sizeof b, "[stepper] %lu ms node %u motor %u %s, "
+                 "position %ld\n", pad_ms(), nid, k,
+                 s->going == 0 ? "homed" : "arrived", s->pos);
+        s->going = -1;
+        stepper_switches(nid, s);
+        motor_say(b);
+    }
+}
+
+/* A move from where it is now to `to`, timed by the distance. */
+static void stepper_go(unsigned nid, unsigned k, int going, long to)
+{
+    struct nb_stepper *s = &nb_steppers[nid][k];
+    long d;
+    char b[160];
+    s->from = stepper_pos(s);
+    s->to = to;
+    s->going = (signed char)going;
+    s->start = pad_ms();
+    d = s->to - s->from;
+    if (d < 0) d = -d;
+    s->due = s->start + (unsigned long)(d * 1000 / stepper_sps());
+    if (s->due == s->start) s->due++;
+    if (going == 0) s->homes++;
+    else s->moves++;
+    stepper_switches(nid, s);           /* it leaves the switch it was on */
+    snprintf(b, sizeof b, "[stepper] %lu ms node %u motor %u %s %ld -> %ld "
+             "(%ld steps), %lu ms\n", pad_ms(), nid, k,
+             going == 0 ? "homing" : "move", s->from, s->to, s->to - s->from,
+             s->due - s->start);
+    motor_say(b);
+}
+
+/* On the write: 32 configures, 34 homes, 31 moves. */
+static void stepper_note(const unsigned char *p, int n)
+{
+    unsigned nid, k;
+    struct nb_stepper *s;
+    if (n < 5 || !(p[0] & 0x80)) return;
+    if (p[2] != 0x31 && p[2] != 0x32 && p[2] != 0x34) return;
+    nid = (unsigned)p[0] & 0x3f;
+    k = p[3];
+    if (nid >= 64 || k >= NB_STEPPERS) return;
+    s = &nb_steppers[nid][k];
+    if (p[2] == 0x32) {
+        char b[160];
+        const char *h = getenv("PAD_STEPPER_HOME");
+        int down = h && (h[0] == 'd' || h[0] == 'D');
+        /* only the 23-byte stepper frame, both ends named as inputs */
+        if (n < 23 || p[1] != 0x14 || !(p[7] & 0x40) || !(p[8] & 0x40)) return;
+        if (s->cfg) return;
+        s->cfg = 1;
+        s->sw[0] = (signed char)((down ? p[7] : p[8]) & 0x3f);
+        s->sw[1] = (signed char)((down ? p[8] : p[7]) & 0x3f);
+        s->going = -1;
+        s->homed = 0;
+        s->pos = -stepper_travel() / 2;     /* between the switches */
+        nb_stepper_cfg[nid] = 1;
+        snprintf(b, sizeof b, "[stepper] node %u motor %u: home on input %d, "
+                 "far end on input %d at %ld steps, %ld steps/s%s\n", nid, k,
+                 s->sw[0], s->sw[1], -stepper_travel(), stepper_sps(),
+                 stepper_on() ? "" : " - PAD_STEPPER=0, not answered");
+        motor_say(b);
+        if (stepper_on()) stepper_switches(nid, s);
+        return;
+    }
+    if (!s->cfg || !stepper_on()) return;
+    stepper_tick(nid);
+    if (p[2] == 0x34) {
+        if (s->going == 0) return;          /* already on its way home */
+        stepper_go(nid, k, 0, 0);
+        return;
+    }
+    if (n >= 6) {                           /* 31: relative steps */
+        long steps = (short)(p[4] | (p[5] << 8)), to;
+        if (!steps) return;
+        to = stepper_pos(s) + steps;
+        if (to > 0) to = 0;                 /* the home end stops it */
+        if (to < -stepper_travel() - 2000) to = -stepper_travel() - 2000;
+        stepper_go(nid, k, 1, to);
+    }
+}
+
+/* The cmd 38+motor reply, into p[0..4]; 0 = not a stepper here, leave it. */
+static int stepper_status(unsigned nid, unsigned k, unsigned char *p)
+{
+    struct nb_stepper *s;
+    long pos;
+    if (nid >= 64 || k >= NB_STEPPERS || !stepper_on()) return 0;
+    s = &nb_steppers[nid][k];
+    if (!s->cfg) return 0;
+    stepper_tick(nid);
+    pos = stepper_pos(s);
+    p[0] = (unsigned char)(pos & 0xff);
+    p[1] = (unsigned char)((pos >> 8) & 0xff);
+    p[2] = (unsigned char)(s->to & 0xff);
+    p[3] = (unsigned char)((s->to >> 8) & 0xff);
+    p[4] = (unsigned char)((s->going >= 0 ? 0x02 : 0) | (s->homed ? 0x04 : 0));
+    {   /* what the game was told, each time the flags change */
+        static unsigned char last[64][NB_STEPPERS];
+        if (last[nid][k] != (unsigned char)(p[4] | 0x80)) {
+            char b[96];
+            last[nid][k] = (unsigned char)(p[4] | 0x80);
+            snprintf(b, sizeof b, "[stepper] %lu ms node %u motor %u status "
+                     "flags %02x position %ld\n", pad_ms(), nid, k, p[4], pos);
+            motor_say(b);
+        }
+    }
+    return 1;
+}
+
 /* ---- PAD-256: A COIL THAT RUNS A MOTOR UNTIL A SWITCH (jaws_le's SHARK) ----
  *
  * jaws_le 1.02's shark is not a board motor. SharkMotor derives from
@@ -13596,6 +13836,7 @@ long shim_read(int fd, void *b, unsigned long n)
                 if (nid < 64) nb_news[nid] = 0;    /* item 52: news delivered */
                 motor_tick(nid);                   /* PAD-237: a car arriving */
                 coil_motor_tick(nid);              /* PAD-256: the shark */
+                stepper_tick(nid);                 /* PAD-393: the building */
                 if (sw_scan_bytes(nid, bits)) {
                     if (nid < 64) {            /* PAD-237: the motor status */
                         unsigned q;
@@ -13792,6 +14033,10 @@ long shim_read(int fd, void *b, unsigned long n)
                         nb_motor_in_ok[nid] && nb_motor_on())
                         p[2] = nb_motor_in[nid][0];
                 }
+                /* PAD-393: a board-run stepper's status, cmd 38+motor */
+                if (nb_req[2] >= 0x38 && nb_req[2] <= 0x3d && nid < 64 &&
+                    plen >= 5 && nb_stepper_cfg[nid])
+                    stepper_status(nid, (unsigned)nb_req[2] - 0x38, p);
                 /* PAD-259: a spinning disc's angle sensor */
                 if (nb_req[2] == 0x61 && nid < 64 && plen >= 4)
                     disc_reply(nid, nb_req, p);
@@ -13941,6 +14186,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         coil_drive_note(nb_req, nb_req_len);    /* PAD-381 */
         motor_note(nb_req, nb_req_len);
         coil_motor_note(nb_req, nb_req_len);    /* PAD-256 */
+        stepper_note(nb_req, nb_req_len);       /* PAD-393 */
         lcd_publish(nb_req, nb_req_len);        /* item 83: VILLAIN VISION */
         coil_probe(nb_req, nb_req_len);
         nb_trace();

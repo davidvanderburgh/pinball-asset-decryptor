@@ -2400,7 +2400,8 @@ def copy_modes(src, dest, slugs=None, replace=False):
     copied as it was, so a build there keeps refusing it until it is opened and its shots
     picked - its words say which. A code mode (``modes/<slug>/<slug>.c``) is copied as it
     is. ``slugs`` picks some; None takes them all. Nothing in ``src`` changes. ``replace``
-    (:func:`port_modes`) puts a mode over the one of its folder name already in ``dest``.
+    (:func:`port_modes`) puts a mode over the one of its folder name already in ``dest``: True
+    each one, else those of the folder names it holds (PAD-402).
 
     Returns a :class:`CopyReport`. Raises :class:`ModeProjectError` when ``dest`` is
     ``src`` itself, names no card, or is a card with no port."""
@@ -2433,7 +2434,7 @@ def copy_modes(src, dest, slugs=None, replace=False):
     for slug in want:
         if slug in specs:
             spec = specs[slug]
-            over = there_specs.get(slug) if replace else None
+            over = there_specs.get(slug) if _replaces(replace, slug) else None
             if over is not None:
                 spec = _keep_their_model(spec, over, p)
             elif room <= 0:
@@ -2460,7 +2461,7 @@ def copy_modes(src, dest, slugs=None, replace=False):
                 name = CM.load(src, slug).name
             except (OSError, ValueError):
                 name = slug.upper()
-            if replace and slug in CM.code_slugs(dest):
+            if _replaces(replace, slug) and slug in CM.code_slugs(dest):
                 new_slug = slug
                 shutil.rmtree(mode_folder(dest, slug))
             else:
@@ -2485,6 +2486,10 @@ def copy_modes(src, dest, slugs=None, replace=False):
             report.modes.append(CopiedMode(slug, slug, COPY_SKIPPED,
                                            words="no mode called %s in %s" % (slug, src)))
     return report
+
+
+def _replaces(replace, slug):
+    return replace is True or (not isinstance(replace, bool) and slug in (replace or ()))
 
 
 def _keep_their_model(spec, over, p):
@@ -2577,10 +2582,12 @@ def export_modes(project, zip_path, slugs=None):
     return want
 
 
-def import_modes(zip_path, project):
+def import_modes(zip_path, project, replace=(), skip=()):
     """Load a file :func:`export_modes` wrote into ``project``: each mode is added beside the
     ones there (a clash of names gets ``_2``) and matched to the project's card the way
-    :func:`copy_modes` matches a copy. Returns its :class:`CopyReport`."""
+    :func:`copy_modes` matches a copy. PAD-402: a mode of a folder name in ``replace`` goes
+    over the one of that name there instead, and one in ``skip`` is left out. Returns its
+    :class:`CopyReport`, or None when every mode of the file is skipped."""
     import tempfile
     import zipfile
     bad = ModeProjectError("%s is not a file of modes saved by PAD" % os.path.basename(zip_path))
@@ -2615,7 +2622,96 @@ def import_modes(zip_path, project):
                 shutil.copyfileobj(src, out)
         if not slugs:
             raise bad
-        return copy_modes(tmp, project, slugs)
+        slugs = [s for s in slugs if s not in set(skip)]
+        if not slugs:
+            return None
+        return copy_modes(tmp, project, slugs, replace=set(replace))
+
+
+def share_conflicts(zip_path, project):
+    """PAD-402 (DragonRR): what loading a file :func:`export_modes` wrote would do to the modes
+    of ``project``. Returns ``(conflicts, same)``: each mode of the file whose folder name is a
+    mode here with other contents, ``{"slug", "here", "file", "changed", "saved"}`` (its name
+    here and in the file; the time of the newest file of it here, and in the file, as
+    ``YYYY-MM-DD HH:MM``), and the folder names of the file's modes already here file for file.
+    A file that is not one is ``([], [])``: :func:`import_modes` says why."""
+    import time
+    import zipfile
+    from . import code_modes as CM
+    try:
+        z = zipfile.ZipFile(zip_path)
+    except (OSError, zipfile.BadZipFile):
+        return [], []
+    conflicts, same = [], []
+    with z:
+        try:
+            data = json.loads(z.read(SHARE_MANIFEST).decode("utf-8"))
+        except (KeyError, ValueError):
+            return [], []
+        if not isinstance(data, dict) or data.get("kind") != SHARE_KIND:
+            return [], []
+        specs = dict(list_modes(project)[0])
+        codes = set(CM.code_slugs(project))
+        for slug in data.get("modes") or ():
+            if not isinstance(slug, str) or (slug not in specs and slug not in codes):
+                continue
+            top = "%s/%s/" % (MODES_DIRNAME, slug)
+            theirs = {i.filename[len(top):]: i for i in z.infolist()
+                      if i.filename.startswith(top) and not i.is_dir()}
+            folder = mode_folder(project, slug)
+            mine = {}
+            for root, _dirs, files in os.walk(folder):
+                for name in files:
+                    if not name.endswith(".tmp"):
+                        path = os.path.join(root, name)
+                        mine[os.path.relpath(path, folder).replace(os.sep, "/")] = path
+            if set(mine) == set(theirs) and all(
+                    _read_bytes(mine[r]) == z.read(theirs[r]) for r in mine):
+                same.append(slug)
+                continue
+            if slug in specs:
+                here = specs[slug].name
+            else:
+                try:
+                    here = CM.load(project, slug).name
+                except (OSError, ValueError):
+                    here = slug.upper()
+            try:
+                there = json.loads(z.read(top + MODE_FILE).decode("utf-8")).get("name") or here
+            except (KeyError, ValueError, AttributeError):
+                there = here
+            changed = max((os.path.getmtime(p) for p in mine.values()), default=0)
+            saved = max((i.date_time for i in theirs.values()), default=None)
+            conflicts.append({
+                "slug": slug, "here": here, "file": str(there),
+                "changed": time.strftime("%Y-%m-%d %H:%M", time.localtime(changed))
+                if changed else "",
+                "saved": "%04d-%02d-%02d %02d:%02d" % saved[:5] if saved else ""})
+    return conflicts, same
+
+
+def _read_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+#: PAD-402: where a load that replaces the user's own edits saves them first, in the project
+BACKUP_DIR = "Backups"
+
+
+def backup_path(project, loading):
+    """A new zip path in ``project``'s :data:`BACKUP_DIR` for what is there before the file
+    ``loading`` is loaded: ``Before loading <its name> <date time>.zip``."""
+    import time
+    stem = os.path.splitext(os.path.basename(str(loading)))[0]
+    stem = re.sub(r'[\\/:*?"<>|]+', "_", stem).strip(" .") or "a file"
+    folder = os.path.join(project, BACKUP_DIR)
+    os.makedirs(folder, exist_ok=True)
+    base = "Before loading %s %s" % (stem, time.strftime("%Y-%m-%d %H.%M.%S"))
+    path, n = os.path.join(folder, base + ".zip"), 2
+    while os.path.exists(path):
+        path, n = os.path.join(folder, "%s (%d).zip" % (base, n)), n + 1
+    return path
 
 
 def duplicate_mode(project, slug):

@@ -194,10 +194,11 @@ def test_scenes_tab_saves_and_loads_a_file(tmp_path):
         _open(w, friend)
         scene_edit.save(str(friend), {CARD: [{"op": "move", "node": 9, "dx": 1, "dy": 1}]})
         w.answers.append(zip_path)
-        w.answers.append("no")                   # "... has edits here already. Go ahead?" No
+        w.answers.append("cancel")               # PAD-402: "... you edited yourself" Cancel
         assert w.call("text_scenes.edits_load") is None
+        assert w.asked[-1]["kind"] == "conflicts"
         assert scene_edit.ops_for(str(friend), CARD)[0]["node"] == 9
-        w.answers.extend([zip_path, "yes"])
+        w.answers.extend([zip_path, {"choice": "replace", "backup": False}])
         got = w.call("text_scenes.edits_load")
         assert got == [CARD], w.asked[-3:]
         assert scene_edit.ops_for(str(friend), CARD) == [

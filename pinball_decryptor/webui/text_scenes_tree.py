@@ -2132,6 +2132,7 @@ class TreeEditMixin:
         images = self._flush_images()
         pics, gone, more = [], [], False
         tfits, tmissing, tlong, thave = [], [], 0, []
+        kept, saved_to = 0, None
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -2140,7 +2141,8 @@ class TreeEditMixin:
                                           self._load_trees())
             got, missing = scene_edit.match_cards(scenes, self._load_trees().keys())
             mine = scene_edit.load(self.assets_dir)
-            over = [c for c in got if mine.get(c)]
+            # PAD-402: a scene of mine the file would leave as it is, is no conflict
+            over = {c: (mine[c], got[c]) for c in got if mine.get(c) and mine[c] != got[c]}
             more = scene_share.has_extras(extras)
             # PAD-387: the Text tab's edits it carries, on this card's lines, when they fit
             text_tab, rows = (self._text_rows_here() if extras["text"] else (None, []))
@@ -2150,7 +2152,8 @@ class TreeEditMixin:
                                 if extras["text"] else ([], []))
             tfits = [(r, new) for r, new in tpairs if R.row_len(r, new) <= R.row_budget(r)]
             tlong = len(tpairs) - len(tfits)
-            tclash = [r for r, new in tfits if R.is_edited(r) and r["replacement"] != new]
+            tclash = [(r, new) for r, new in tfits
+                      if R.is_edited(r) and r["replacement"] != new]
             if not got and not more and not tfits and not thave:
                 compat.messagebox.showinfo(
                     "Load scene edits", "None of the %d scene%s in %s %s on this card, so "
@@ -2159,37 +2162,53 @@ class TreeEditMixin:
                                              "is" if len(scenes) == 1 else "are"))
                 return None
             # PAD-369 (DragonRR): what of the user's own it changes is asked about first,
-            # and nothing on this PC is deleted
+            # and nothing on this PC is deleted. PAD-402: each one replaced or kept, all at
+            # once or one by one, and the user's own saved to a backup file first
             clash = scene_share.clashes(self.assets_dir, extras)
-            mine_words = []
-            if over:
-                mine_words.append("%d scene%s you edited" % (len(over),
-                                                              "" if len(over) == 1 else "s"))
-            if clash["pictures"]:
-                k = len(clash["pictures"])
-                mine_words.append("%d picture%s you replaced" % (k, "" if k == 1 else "s"))
-            if clash["overlay"]:
-                mine_words.append("your whole screen overlay")
-            if tclash:
-                mine_words.append("%d line%s of text you changed"
-                                  % (len(tclash), "" if len(tclash) == 1 else "s"))
-            if mine_words:
-                what = (", ".join(mine_words[:-1]) + " and " + mine_words[-1]
-                        if len(mine_words) > 1 else mine_words[0])
-                if not compat.messagebox.askyesno(
-                        "Load scene edits", "This file changes %s. Loading puts the file's "
-                        "in their place. No file on this PC is deleted or overwritten: the "
-                        "file's pictures are copied into the project's \"%s\" folder. Go ahead?"
-                        % (what, scene_share.SHARED_DIR)):
+            items = scene_share.conflict_items(self.assets_dir, over, extras, clash, tclash,
+                                               self._scene_label)
+            skip_scenes, overlay = set(), True
+            if items:
+                n = len(items)
+                answer = self.window.ask_conflicts(
+                    "Load scene edits", "%s changes %d thing%s you edited yourself. Tick the "
+                    "ones the file's should replace, or answer for all of them. Nothing else "
+                    "of yours changes, and no file on this PC is deleted or overwritten: the "
+                    "file's pictures are copied into the project's \"%s\" folder."
+                    % (os.path.basename(path), n, "" if n == 1 else "s",
+                       scene_share.SHARED_DIR), items,
+                    backup_label="Save my scenes, pictures and text to a backup file before "
+                                 "replacing any")
+                if answer is None:
                     return None
+                _choice, take, want_backup = answer
+                kept = n - len(take)
+                if take and want_backup:
+                    saved_to = scene_share.backup(self.assets_dir, path, self._load_trees())
+                skip_scenes = {c for c in over if "scene:" + c not in take}
+                for c in skip_scenes:
+                    got.pop(c, None)
+                drop = {rel for rel in clash["pictures"] if "picture:" + rel not in take}
+                # the colour switch of a picture a kept scene adds stays mine too
+                adds = {op.get("image") for c in skip_scenes for op in over[c][1]
+                        if op.get("op") == "add_picture"}
+                extras = dict(extras, pictures={r: p for r, p in extras["pictures"].items()
+                                                if r not in drop},
+                              added={r: a for r, a in extras["added"].items() if r not in adds})
+                overlay = not clash["overlay"] or "overlay" in take
+                gone_text = {id(r) for i, (r, _new) in enumerate(tclash)
+                             if "text:%d" % i not in take}
+                tfits = [(r, new) for r, new in tfits if id(r) not in gone_text]
+                more = scene_share.has_extras(extras) and (
+                    bool(extras["pictures"] or extras["added"]) or overlay)
             renamed = {}
             if got:
                 got, missing = scene_edit.import_edits(self.assets_dir, path,
                                                        self._load_trees().keys(),
-                                                       renamed=renamed)
+                                                       renamed=renamed, skip=skip_scenes)
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
-                                                       renamed=renamed)
+                                                       renamed=renamed, overlay=overlay)
             if tfits:
                 if text_tab is not None:
                     text_tab._set_replacements(
@@ -2226,6 +2245,14 @@ class TreeEditMixin:
             words += (" %d text edit%s %s too long for this card's line and %s left out."
                       % (tlong, "" if tlong == 1 else "s", "is" if tlong == 1 else "are",
                          "was" if tlong == 1 else "were"))
+        if kept:
+            words += " %d thing%s you edited %s kept as %s." % (
+                kept, "" if kept == 1 else "s", "was" if kept == 1 else "were",
+                "it was" if kept == 1 else "they were")
+        if saved_to:
+            words += " Your own from before are saved in %s: load it to put them back." % (
+                os.path.join(os.path.basename(os.path.dirname(saved_to)),
+                             os.path.basename(saved_to)))
         if gone:
             words += (" %d picture%s in the file %s not in this project and %s left out."
                       % (len(gone), "" if len(gone) == 1 else "s",
@@ -2240,6 +2267,14 @@ class TreeEditMixin:
         if missing or gone or tmissing or tlong:
             compat.messagebox.showinfo("Load scene edits", words)
         return sorted(got)
+
+    def _scene_label(self, card):
+        """The Scenes list's name of the scene of *card* (a card path)."""
+        want = card.replace("\\", "/").rsplit("/", 1)[0]
+        for d, sc in (self._scenes or {}).items():
+            if d.replace("\\", "/").rstrip("/") == want:
+                return sc.get("label") or d
+        return want.rsplit("/", 1)[-1][:8]
 
     def _shared_loaded(self, images):
         """A file loaded with pictures and color profiles (PAD-369) wrote picks into the

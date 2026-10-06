@@ -184,7 +184,11 @@ function CardSource({ s }) {
       <${Check} checked=${s.select} label="Boot selector" title=${s.select_tip}
         onChange=${(v) => call("emulate.set_select", v)} />
       <${Check} ns="emulate" k="topper" checked=${s.topper} label="Topper" title=${s.topper_tip} />
+      <${Check} ns="emulate" k="machine_screen" checked=${!!s.machine_screen}
+        label="Show it through the machine's screen"
+        title="Draws the game window through your project's Machine screen (Color profile tab), the way the Scenes preview does, so this PC shows the colors the machine's own screen will. Works on any card, a card you already wrote included, with or without your replaced assets. Off: you see the colors exactly as they go on the card, which on a PC look darker or brighter where your color profiles correct for the machine. Only the emulator's window: the card is never changed. Takes effect at the next Start." />
     </div>
+    ${s.screen_live ? html`<div class="small muted">${s.screen_live}</div>` : null}
     <div class=${cx("note emu-ovr", s.ovr_refused && "warn")}>
       <${Check} ns="emulate" k="overrides" checked=${s.overrides} wrap
         label="Apply my replaced assets on top, without rebuilding the card" />
@@ -197,9 +201,6 @@ function CardSource({ s }) {
         ${s.colour_offer ? html`<${Check} ns="emulate" k="colour_stock" checked=${!!s.colour_stock}
           label="Stock colors: leave out my color profile"
           title="Your color profile corrects colors for the machine's screen, so on this PC it can look darker or warmer than you made it. Tick this to see your pictures and videos here exactly as you made them. Builds still apply the profile. Flip it while the game runs to switch live: a video or a screen the game loads each time it shows changes the next time it shows; a screen loaded at boot changes at the next Start." />` : null}
-        <${Check} ns="emulate" k="machine_screen" checked=${!!s.machine_screen}
-          label="Show it through the machine's screen"
-          title="Draws everything through your Machine screen (Color profile tab), the way the Scenes preview does, so this PC shows the colors the machine's own screen will. Off: you see the colors exactly as they go on the card, which on a PC look darker or bluer where your color profiles correct for the machine. Only for this emulator: a Write never carries it. Takes effect at the next Start." />
         ${s.colour_live ? html`<div class="small muted">${s.colour_live}</div>` : null}
       </div>` : null}
       <div class="row emu-ovr-row">

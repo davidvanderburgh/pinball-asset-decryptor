@@ -240,7 +240,7 @@ class EmulateTab(TabService):
         self.emulate_colour_stock_var.trace_add(
             "write", lambda *_a: self._on_colour_stock())
         self.emulate_machine_screen_var.trace_add(
-            "write", lambda *_a: self.colour_live())
+            "write", lambda *_a: self._on_machine_screen())
         self._volume_var.trace_add("write", self._on_volume_change)
         self._mute_var.trace_add("write", self._on_volume_change)
 
@@ -1731,12 +1731,9 @@ class EmulateTab(TabService):
         if stock and colour_profile.for_project(assets) is not None:
             self._log("[emulate] stock colors: your color profile is left "
                       "out of this run")
-        screen = self._machine_screen_on()
-        if screen:
-            self._log("[emulate] the game is drawn through your Machine "
-                      "screen, as the machine's own screen will show it "
-                      "(this run only; a Write never carries it)")
-        with colour_profile.forced(False if stock else None),                 colour_profile.through_screen(screen):
+        # The Machine screen is not drawn by the set's game program any more
+        # (PAD-389 did): the emulator's window draws it (_screen_env, PAD-408).
+        with colour_profile.forced(False if stock else None):
             return self._prepare_overrides_inner(card, assets,
                                                  selector=selector)
 
@@ -1746,6 +1743,62 @@ class EmulateTab(TabService):
             return bool(self.emulate_machine_screen_var.get())
         except Exception:                                # noqa: BLE001
             return False
+
+    def _on_machine_screen(self):
+        """The tick flipped: a running game takes it at its next Start (the
+        renderer builds its window shader once, PAD-408)."""
+        up = bool(self._last_up) and not self._starting and not self._stopping
+        self.set(screen_live="Takes effect when you Start the game again."
+                 if up else "")
+
+    def _screen_env(self):
+        """PAD-408 (DragonRR): ``["PAD_SCREEN_GLSL=<file>"]`` when "Show it
+        through the machine's screen" is ticked, else ``[]``.
+
+        The emulator's window renderer (tools/spike2_emu/padglhost.c) draws
+        every frame of the game's screen through the project's Machine
+        screen, the one the Scenes preview uses.  PAD-389 put the screen in
+        the game program's shaders instead, which needed "Apply my replaced
+        assets" and could not go on a card PAD had already written (PAD-406):
+        this needs neither, and changes nothing on the card."""
+        if not self._machine_screen_on():
+            return []
+        from ...core import colour_profile
+        from ...plugins.stern import shader_profile
+        assets = self._assets()
+        if not assets or not os.path.isdir(assets):
+            self._log("[emulate] \"Show it through the machine's screen\" "
+                      "needs a project (the Assets folder): its Machine "
+                      "screen is set on the Color profile tab. This run shows "
+                      "the card's own colors.")
+            return []
+        try:
+            screen = colour_profile.screen_shown(assets)[0]
+            glsl = shader_profile.screen_glsl(screen)
+        except Exception as exc:                         # noqa: BLE001
+            self._log("[emulate] the Machine screen could not be read (%s); "
+                      "this run shows the card's own colors." % exc)
+            return []
+        if not glsl:
+            self._log("[emulate] your Machine screen changes nothing, so the "
+                      "game shows the card's own colors.")
+            return []
+        path = os.path.join(os.path.dirname(config.SETTINGS_FILE),
+                            "machine_screen.glsl")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="ascii", newline="\n") as f:
+                f.write(glsl)
+        except OSError as exc:
+            self._log("[emulate] the Machine screen could not be handed to "
+                      "the emulator (%s); this run shows the card's own "
+                      "colors." % exc)
+            return []
+        self._log("[emulate] the game window is drawn through your Machine "
+                  "screen (%s), as the machine's own screen will show it. "
+                  "Only the emulator does this: the card is not changed."
+                  % screen.label())
+        return ["PAD_SCREEN_GLSL=%s" % rig.wsl_path(path)]
 
     def _prepare_overrides_inner(self, card, assets, selector=False):
         from ...core.checksums import read_checksums
@@ -2132,7 +2185,7 @@ class EmulateTab(TabService):
         # tab's run is the one that has a window and a Volume / Mute.
         env = ["PAD_AUDIO=1", "PAD_AUDIO_DUMP=30",
                "PAD_AUDIO_CTL=" + audio_ctl_file()] + \
-            list(src) + self._machine_env()
+            list(src) + self._machine_env() + self._screen_env()
         if self._launch_slot:
             env.append("PAD_SELECT=0")
         elif self._select_touched:
@@ -2229,6 +2282,7 @@ class EmulateTab(TabService):
             return
         self._cancel_prepare = False
         self._starting = True
+        self.set(screen_live="")
         self._run_label(False, True)
         self._set("state", "Starting…")
         src = self._source_env()

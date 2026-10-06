@@ -126,27 +126,3 @@ def test_the_emulate_tick_is_a_per_project_field():
     from pinball_decryptor import app
     keys = {k: w for k, w, _kind, _d in app.PROJECT_FIELDS}
     assert keys["emulate_machine_screen"] == "emulate.emulate_machine_screen_var"
-
-
-def test_the_tick_holds_the_screen_on_for_the_runs_preparation(tmp_path, monkeypatch):
-    """Ticked, the override set is prepared through the Machine screen; the
-    game running says it takes at the next Start; unticked, nothing is."""
-    from tests.webui_harness import web_app
-    proj = _project(tmp_path)
-    with web_app(tmp_path, mfr="stern") as w:
-        emu = w.window.service("emulate")
-        seen = []
-        monkeypatch.setattr(emu, "_prepare_overrides_inner",
-                            lambda card, assets, selector=False: seen.append(
-                                cp.emulated_screen(assets) is not None))
-        emu._prepare_overrides("card.raw", proj)
-        w.call("ui.set", "emulate", "overrides", True)
-        emu._live_set = {"assets": proj, "out": str(tmp_path / "o")}
-        emu._colour_src = ("card.raw", "card.raw")
-        emu._last_up = True
-        w.call("ui.set", "emulate", "machine_screen", True)
-        w.drain()
-        assert "Start the game again" in w.state("emulate").get("colour_live", "")
-        emu._prepare_overrides("card.raw", proj)
-        assert seen == [False, True]
-        assert cp.emulated_screen(proj) is None

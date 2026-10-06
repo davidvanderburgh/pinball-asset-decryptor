@@ -2018,8 +2018,13 @@ def compile_code_object(sources, out, log=None, executor=None, timeout=600):
     :func:`code_object_key`, and a build of the same sources takes the kept one instead of
     compiling (1.5 s, and 10-15 s on a busy PC); a compile of them already started by
     :func:`prefetch_code_object` is waited for. A caller's own executor always compiles."""
+    from . import code_modes as CM
     say = log or (lambda *a, **k: None)
     names = ", ".join(os.path.splitext(os.path.basename(s))[0] for s in sources)
+    try:
+        CM.refresh_kits(sources, log=say)          # PAD-390: an example's kit copy up to the app's
+    except OSError as e:
+        say("Modes: could not bring a code mode's kit up to date (%s) - built with it as it is." % e)
     key = None
     if executor is None and os.environ.get(CODE_CACHE_ENV) != "0":
         try:

@@ -110,6 +110,7 @@ struct slot {
     void *node, *text;
     unsigned hide_ticks;
     int aside;                            /* PAD-347: its screen is stepped aside for a game mode */
+    char said[96];                        /* PAD-390: the screen's last words, written again on a fresh copy */
     unsigned ev_trig[5], ev_pending;      /* item 147: event start counts; a start waiting for pm_in_game */
     unsigned also[ALSO_MAX][5];           /* PAD-227: each trigger_also line's count, per player */
     int after_said;                       /* PAD-227: its `after` mode is missing, said once */
@@ -1829,6 +1830,7 @@ static int cfg_reload(struct slot *M)
     cfg_parse(M, M->raw, n);
     roster_sync(M);
     M->node = M->text = 0;
+    M->said[0] = 0;                          /* PAD-390: a new file's screen has said nothing yet */
     return 1;
 }
 
@@ -1855,6 +1857,30 @@ static void words(struct slot *M, const char *before, uint64_t value, const char
     pm_commas(number, sizeof number, value);
     pm_snprintf(s, sizeof s, "%s%s%s", before, number, after);
     pm_set_text(M->text, s);
+    pm_snprintf(M->said, sizeof M->said, "%s", s);
+}
+
+/* PAD-390: a screen is authored VISIBLE and was hidden once, when it was found. If the game has the scene back in
+ * its authored state - a fresh copy of it, or its nodes shown again - nothing hid it, and every mode's screen is
+ * on the glass with the words the card build gave it (David's Godzilla Premium, 2026-10-05: every example's HUD
+ * at once, word on word). So every 2 s the screen is looked at again: a different node (a fresh copy, or none)
+ * is found afresh and given its last words, and the old copy is never touched again; the same node is shown or
+ * hidden again as it should be (up while the mode runs or its total shows, unless it stepped aside). */
+static void screen_recheck(struct slot *M)
+{
+    const char *where;
+    void *n;
+    if (!own_screen(M) || !M->node) return;
+    where = cfg.screen_scene[0] ? cfg.screen_scene : "hud";
+    n = pm_node(where, cfg.screen_node);
+    if (n != M->node) {
+        pm_log("%s: the game made its screen's scene again - %s", cfg.name, n ? "found afresh" : "gone for now");
+        M->node = M->text = 0;              /* the old copy's: never shown, hidden or written again */
+        screen_resolve(M);
+        if (!M->node) return;
+        if (M->said[0] && M->text) pm_set_text(M->text, M->said);
+    }
+    pm_show(M->node, (running(M) || M->hide_ticks) && !M->aside);
 }
 
 /* ---- the mode ------------------------------------------------------------------------ */
@@ -2422,6 +2448,7 @@ static void on_tick(void)
         if (ticks % POLL_TICKS == 0 && k < poll_n) {
             if (cfg_reload(M) && running(M)) pm_log("reloaded while running - the new file is live");
             screen_resolve(M);
+            if (ticks % (4 * POLL_TICKS) == 0) screen_recheck(M);   /* PAD-390: every 2 s */
             if (k == 0) pm_snprintf(name, sizeof name, "mode.start");
             else pm_snprintf(name, sizeof name, "mode%u.start", k);
             if (pm_trigger(name)) mode_start(M, "trigger file");

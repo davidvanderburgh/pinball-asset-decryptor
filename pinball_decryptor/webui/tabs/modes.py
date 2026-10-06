@@ -2422,18 +2422,47 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "game_modes": gms,
                 "game_modes_default": [i for i, _n, on in getattr(p, "game_modes", ()) if on] if p is not None else [],
                 "give_way_off": ("Not on this game: " + stack_why) if stack_why else "",
+                # PAD-395: the mechanisms its blocks may hold here, and why the blocks are greyed if not
+                "mechs": [{"name": n, "label": lab} for n, lab in self._blocks_mechs(p).items()],
+                "mechs_off": self._blocks_mechs_off(p),
+                "scoop_off": ("Not on this game: " + p.why_not("scoop")) if p is not None and not p.can("scoop")
+                             else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else
                               "Not on this game yet: the app has not found where %s starts its own modes, so a "
                               "mode cannot keep them from starting; set to hold them off, it gives way to them "
                               "instead." % p.label)}
 
+    @staticmethod
+    def _blocks_mechs(p):
+        """PAD-395: ``{name: label}`` of the mechanisms a blocks mode may hold on title ``p`` - the magnet
+        and the port's proven held coils, as the form's Magnet and Other mechanisms (PAD-381)."""
+        out = {}
+        if p is None:
+            return out
+        if p.can("magnet"):
+            out["magnet"] = "magnet"
+        if p.can("coils"):
+            out.update(p.held_coils)
+        return out
+
+    @staticmethod
+    def _blocks_mechs_off(p):
+        """PAD-395: why no Hold block can be used on title ``p`` ("" when one can)."""
+        if p is None:
+            return "No card picked yet."
+        if p.can("magnet") or (p.can("coils") and p.held_coils):
+            return ""
+        return "Not on this game: " + (p.why_not("magnet") or p.why_not("coils"))
+
     def _blocks_check(self, program, folder=None):
-        """``(problems, notes)`` of a program on the shown title (its shots and events), its own
-        clips and sounds looked for in ``folder``."""
+        """``(problems, notes)`` of a program on the shown title (its shots, events and mechanisms),
+        its own clips and sounds looked for in ``folder``."""
         p = self._shown or self._profile
         shots = [n for n, _m in p.shots] if p is not None else None
         events = list(p.events or ()) if p is not None else None
-        return BM.problems(program, shots, events, folder), BM.notes(program)
+        mechs = self._blocks_mechs(p) if p is not None else None
+        scoop = p.can("scoop") if p is not None else None
+        return BM.problems(program, shots, events, folder, mechs, scoop), BM.notes(program)
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

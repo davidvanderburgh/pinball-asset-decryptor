@@ -255,5 +255,7 @@ html.bp-860 .bk-palette { flex-direction: row; flex-wrap: wrap; border-right: 0;
 .bk-stack.bk-empty > .bk-gap.on { background: var(--accent-soft); border-color: var(--accent); }
 /* PAD-374: the mode's own clips and sounds, and the blocks that play them */
 .bk-own, .bk.bk-own, .bk-pal.bk-own { background: #b8458f; color: #fff; }
+.bk-mech, .bk.bk-mech, .bk-pal.bk-mech { background: #5d6b7e; color: #fff; }   /* PAD-395: the mechanisms */
+.bk-pal[aria-disabled="true"] { opacity: .4; cursor: not-allowed; filter: grayscale(.6); }
 .bk-ownbox { background: #b8458f22; border-color: #b8458f66; }
 .bk-file { max-width: 140px; }

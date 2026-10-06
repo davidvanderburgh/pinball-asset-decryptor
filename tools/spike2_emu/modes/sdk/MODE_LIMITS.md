@@ -35,7 +35,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Rename it | Yes, on the Text tab |
 | Give it different music | Not for one mode. A swap on the Audio tab changes it everywhere. |
 | Add a monster to Godzilla's battle selection | No, but you can take over a slot. [Example 1](#1-add-mothra-to-godzillas-battle-selection) |
-| Keep them from starting while mine runs | Yes, except multiballs. [Example 5](#5-running-alongside-the-games-modes) |
+| Keep them from starting while mine runs | Yes, and that's the usual: while yours runs, nothing of the game's starts or counts. [Example 5](#5-running-alongside-the-games-modes) |
 | Make their screens wait for mine | No. [Why](#why-your-mode-always-gives-way) |
 | Change progression (Godzilla's cities, tier 2 battles, King of the Monsters, wizard modes) | No |
 
@@ -123,13 +123,13 @@ Each mode picks one:
 
 | Setting | While yours runs |
 |---|---|
+| cannot start (the usual) | Yours runs alone. None of the game's modes starts, and none of its features (on Godzilla: the Destruction Jackpot, the building locks, the bridge, the cities, the Powerup...) sees a shot, so nothing of theirs lights, locks, counts or awards, and no multiball of theirs can be lit. Tick a feature to keep it counting. |
 | may start (this one carries on) | Both run. Your words step aside while theirs are on screen. |
 | may start, and end this one | Yours starts only when none of theirs is running, and one of theirs starting ends yours. |
-| cannot start | The same, and the ones you tick are held off. |
 
 The catches:
 
-- **Multiballs are never held off.** Balls may be sitting in a lock or on a magnet. Theirs starts and yours ends.
+- **A multiball of the game's is never stopped once it starts.** Balls may be sitting in a lock or on a magnet. With "cannot start" none can be lit or locked while yours runs, so it doesn't happen. If one was already on its way (a lock lit before yours began, a ball save), theirs starts and yours ends.
 - **One screen, one voice.** A clip of yours and one of the game's on the same shot replace each other. Your full-screen clips start half a second late so the game's doesn't win.
 - Some games can't tell which of their modes are running. There the option is greyed out, or your mode just gives way.
 - On some games a held-off start uses up whatever lit it.

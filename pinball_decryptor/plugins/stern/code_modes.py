@@ -20,7 +20,9 @@ code mode, or one of its Examples). What it plays of its own sits beside it, nam
       "game_modes": "block",         PAD-347: while it runs, the game's own modes wait ("block", the
                                      default) or one starting ends it ("give_way")
       "block_modes": [21, 23],       PAD-363: which of the game's modes it holds off (the title's mode ids,
-                                     as the Modes tab lists them; [] = the port's checked defaults)
+                                     as the Modes tab lists them; [] = every one the port names)
+      "keep_rules": ["Bridge"],      PAD-398: the game's features (its rules, by the Modes tab's names) that
+                                     go on counting while it runs; [] = none: only this mode counts
       "film": {...}                  where each was cut from (an Example's recipe), optional
     }
 
@@ -93,7 +95,8 @@ class CodeAssets:
     clips: dict = field(default_factory=dict)     # hud-layers: {cue: file}
     hud: dict = field(default_factory=dict)       # hud-layers: the HUD at the glass's edges
     game_modes: str = "block"                     # PAD-347: GAME_MODES
-    block_modes: list = field(default_factory=list)   # PAD-363: the game's mode ids it holds off; [] = the defaults
+    block_modes: list = field(default_factory=list)   # PAD-363: the game's mode ids it holds off; [] = every one
+    keep_rules: list = field(default_factory=list)    # PAD-398: the game's features (names) that keep counting
     film: dict = field(default_factory=dict)
     extra: dict = field(default_factory=dict)
 
@@ -328,9 +331,13 @@ def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
              "name   %s" % spec.name.strip()]
     if getattr(spec, "game_modes", "block") == "give_way":
         lines.append("game_modes give_way")              # PAD-347: block is what the mode does without it
-    elif isinstance(getattr(spec, "block_modes", None), list) and spec.block_modes:   # PAD-363
-        ids = sorted({i for i in spec.block_modes if isinstance(i, int) and 0 <= i <= 127})
-        lines.append("block_modes %s" % " ".join(str(i) for i in ids))
+    else:
+        if isinstance(getattr(spec, "block_modes", None), list) and spec.block_modes:   # PAD-363
+            ids = sorted({i for i in spec.block_modes if isinstance(i, int) and 0 <= i <= 127})
+            lines.append("block_modes %s" % " ".join(str(i) for i in ids))
+        keep = MP.keep_rule_ids(spec, prof) if prof is not None else []                 # PAD-398
+        if keep:
+            lines.append("keep_rules %s" % " ".join(str(n) for n in keep))
     if screen:
         lines.append("screen %s %s" % (names["screen_node"], names["screen_text"]))
     if clip:
@@ -433,6 +440,63 @@ def example(name):
 def examples_dir():
     from . import mode_runtime as MR
     return os.path.join(MR.sdk_dir(), "examples")
+
+
+# ---- the kit beside a code mode (PAD-390) -------------------------------------------------------
+#: the examples' kit: copied beside an example's C when it is added (:func:`_copy_code`)
+KIT_FILE = "intricate_kit.h"
+#: one sha256 per kit the app has shipped (CRLF read as LF)
+KIT_SHIPPED = "kit_shipped.txt"
+
+
+def _kit_digest(data):
+    import hashlib
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+
+def shipped_kits():
+    """The digests of every ``intricate_kit.h`` the app has shipped (:data:`KIT_SHIPPED`)."""
+    try:
+        with open(os.path.join(examples_dir(), KIT_SHIPPED), "r", encoding="utf-8") as f:
+            return {ln.strip() for ln in f if ln.strip() and not ln.startswith("#")}
+    except OSError:
+        return set()
+
+
+def refresh_kit(folder, log=None):
+    """PAD-390: a code mode's folder holds its own copy of the kit, put there when the example was added and
+    never touched since, so a kit fix (the HUDs hidden again when the game has its HUD scene back as built)
+    never reached a project made before it. A copy that is one the app shipped (never edited) is brought up
+    to the app's kit; an edited one is left as it is, and said. Returns "current", "refreshed", "edited" or
+    "none" (no kit in the folder)."""
+    say = log or (lambda *a, **k: None)
+    dst = os.path.join(folder, KIT_FILE)
+    try:
+        with open(dst, "rb") as f:
+            have = f.read()
+        with open(os.path.join(examples_dir(), KIT_FILE), "rb") as f:
+            app = f.read()
+    except OSError:
+        return "none"
+    if _kit_digest(have) == _kit_digest(app):
+        return "current"
+    slug = os.path.basename(os.path.normpath(folder))
+    if _kit_digest(have) not in shipped_kits():
+        say("Modes: %s's %s is not one the app shipped (edited) - built with it as it is, without the "
+            "app's newer kit." % (slug, KIT_FILE))
+        return "edited"
+    tmp = dst + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(app)
+    os.replace(tmp, dst)
+    say("Modes: %s's %s brought up to this app's kit (it was an earlier app's own copy)." % (slug, KIT_FILE))
+    return "refreshed"
+
+
+def refresh_kits(sources, log=None):
+    """:func:`refresh_kit` for the folder of each code mode's C file in *sources*."""
+    for src in sources:
+        refresh_kit(os.path.dirname(os.path.abspath(src)), log=log)
 
 
 def recipe_films(ex):

@@ -105,7 +105,9 @@ struct pa_assets {
     unsigned n_swaps;
     int give_way;                         /* PAD-347: `game_modes give_way` - it does not block the game's modes */
     unsigned char block_ids[PA_BLOCK_MAX];   /* PAD-363: `block_modes <id> ...` - which of the game's modes it holds off */
-    int block_n;                          /* ... how many (0 = the port's checked defaults) */
+    int block_n;                          /* ... how many (0 = every one the port names) */
+    unsigned char keep_ids[32];           /* PAD-398: `keep_rules <n> ...` - the game's rules that go on counting */
+    int keep_n;
     /* what is under way */
     int running;                          /* between pa_start and pa_end */
     unsigned long clip_due;               /* pm_ms() the start clip plays at; 0 = none */
@@ -212,6 +214,12 @@ static PA_UNUSED void pa_parse_line(struct pa_assets *a, const char *s)
         pa_rest(s, a->name, sizeof a->name);
     } else if (pa_is(key, "game_modes")) {                          /* PAD-347: block (the default) or give_way */
         a->give_way = pa_word(&s, w, sizeof w) && pa_is(w, "give_way");
+    } else if (pa_is(key, "keep_rules")) {                          /* PAD-398: the port's rule numbers, 0-31 */
+        a->keep_n = 0;
+        while (pa_word(&s, w, sizeof w)) {
+            unsigned n = pa_num(w);
+            if (n < 32 && a->keep_n < 32) a->keep_ids[a->keep_n++] = (unsigned char)n;
+        }
     } else if (pa_is(key, "block_modes")) {                         /* PAD-363: the game's mode ids, 0-127 */
         a->block_n = 0;
         while (pa_word(&s, w, sizeof w)) {
@@ -291,11 +299,13 @@ static PA_UNUSED int pa_load(struct pa_assets *a)
     a->music = a->music_sid = 0;
     a->clip_start[0] = 0;
     a->n_clips = 0;
+    a->keep_n = 0;
     for (line = buf; *line; ) {
         pa_parse_line(a, line);
         while (*line && *line != '\n') line++;
         if (*line) line++;
     }
+    pm_block_rules_keep(a->keep_ids, a->keep_n);   /* PAD-398: the rules this mode lets go on counting (none: all held) */
     pm_log("own assets: %s (%s): %u call(s)%s%s%s, %u clip(s)", path, a->name[0] ? a->name : a->folder, a->n_calls,
            a->music ? ", its own music" : "", a->music_sid ? " on its own bed" : "",
            a->clip_start[0] ? ", a start clip" : "", a->n_clips);

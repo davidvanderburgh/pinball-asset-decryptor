@@ -126,3 +126,74 @@ def port_lines(modes, defaults=(), header=None):
     if on:
         out.append("text block_default          %s" % " ".join(str(i) for i in on))
     return out
+
+
+# ---- PAD-398: the game's RULES, which see no shots while a mode of ours runs -----------------------------------
+#: David, 2026-10-05: "when our custom modes start, we should ONLY be in those modes unless explicitly noted."
+#: A C++ rule title's rules (Godzilla's Destruction Jackpot, building locks, bridge, cities...) are `Rule*`
+#: singletons; each reads a shot in its v[25] (vtable + 8 + 100, the mask in r2:r3), which the runtime hooks and
+#: clears while a mode of ours blocks, unless the mode keeps that rule counting (pm_block_rules_keep).
+RULE_V25 = 8 + 4 * 25
+#: the battle rule is the port's `site block_battle_shots` already (two hooks on one entry are not possible)
+RULE_SKIP = ("RuleBattle",)
+#: written first, at number 0, where PAD-363 put it
+RULE_FIRST = ("RuleSaucerAttack",)
+#: the most the runtime hooks (pad_mode_runtime.c BLOCK_RULES)
+MAX_RULES = 32
+#: `mov r0, #0; bx lr`: a handler that reads nothing
+_NO_OP = (0xE3A00000, 0xE12FFF1E)
+
+
+@dataclass
+class GameRule:
+    cls: str            # RuleDestructionJackpot
+    name: str           # Destruction Jackpot: what the port and the Modes tab call it
+    v25: int            # its shot handler
+    words: tuple        # the handler's first two words
+
+
+def rule_name(cls):
+    """RuleKingOfTheMonsters -> King of the Monsters"""
+    import re
+    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", cls[len("Rule"):]).split()
+    return " ".join(w if i == 0 or w.lower() not in ("of", "the", "and") else w.lower()
+                    for i, w in enumerate(words))
+
+
+def read_rules(elf):
+    """[:class:`GameRule`] of a C++ rule title's program (bytes): every `Rule*` class whose shot handler reads
+    shots, the battle rule left out, Saucer Attack first, then by class name. [] when it has none."""
+    from . import stock_scan as S
+    prog = S.Program(elf)
+    model = S.class_model(prog)
+    base = model.get("Rule", {}).get("vtable")
+    base_v25 = _word(prog, base + RULE_V25) if base else None
+    out = []
+    for cls in sorted(model):
+        rec = model[cls]
+        if cls == "Rule" or cls in RULE_SKIP or not rec.get("vtable") or not S.derives(model, cls, "Rule"):
+            continue
+        v25 = _word(prog, rec["vtable"] + RULE_V25)
+        if not v25 or v25 == base_v25:
+            continue
+        words = (_word(prog, v25), _word(prog, v25 + 4))
+        if words == _NO_OP or not movable(words):
+            continue
+        out.append(GameRule(cls, rule_name(cls), v25, words))
+    out.sort(key=lambda r: (r.cls not in RULE_FIRST, r.cls))
+    return out[:MAX_RULES]
+
+
+def rule_lines(rules):
+    """The port's rule lines for *rules*: `site block_rule_<n>` and `text block_rule_name_<n>` (no lo/hi mask
+    lines: every bit is hidden)."""
+    if not rules:
+        return []
+    out = ["# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game",
+           "# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no",
+           "# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`",
+           "# is what the Modes tab lists."]
+    for n, r in enumerate(rules):
+        out.append("site block_rule_%-10d 0x%08x 0x%08x 0x%08x  # %s::v[25]" % (n, r.v25, r.words[0], r.words[1], r.cls))
+        out.append("text block_rule_name_%-5d %s" % (n, r.name))
+    return out

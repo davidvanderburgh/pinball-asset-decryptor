@@ -860,6 +860,7 @@ struct kit_hud {
     int noting;                            /* up only for a qualification note */
     int metering;                          /* PAD-379: up only for a meter (kit_hud_meter) */
     int off;                               /* PAD-353: its words wait for a display of the game's */
+    unsigned long checked_at;              /* PAD-390: the last look at the scene's HUD group */
 };
 
 /* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
@@ -894,6 +895,7 @@ static KIT_UNUSED void kit_hud_find(struct kit_hud *h)
     h->group = kit_hud_find1(h, 0, 0, 0);
     if (!h->group) return;
     h->found = 1;
+    h->checked_at = pm_ms();
     h->t_title = kit_hud_find1(h, ".PadMode_%s_Hud_Title", 1, 0);
     h->t_line = kit_hud_find1(h, ".PadMode_%s_Hud_Line", 1, 0);
     h->t_award = kit_hud_find1(h, ".PadMode_%s_Hud_Award", 1, 0);
@@ -1028,6 +1030,11 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
 {
     int k;
     if (kit_hud_up && kit_hud_up != h && !kit_hud_up->metering) return 0;
+    /* PAD-390 (David's Premium, 2026-10-05: MELTDOWN IS READY during the game's multiball, a SPACEGODZILLA lock
+     * while one of the game's modes ran): a note's line IS the award line, in the middle, so it has no place to
+     * step aside to - while the game's mode or multiball has the middle it is not shown (a meter's gauge at the
+     * edge stays; a note already up waits in kit_hud_tick) */
+    if (pm_aside() && !h->metering) return 0;
     if (h->up && !h->noting) return 0;
     h->want_title[0] = h->want_line[0] = 0;
     for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
@@ -1095,12 +1102,44 @@ static KIT_UNUSED void kit_hud_aside_note(struct kit_hud *h, int aside)
     h->aside = aside;
 }
 
+/* PAD-390: every HUD of the pack on the glass at once, each with the words the card build gave it (David's
+ * Premium, 2026-10-05, ball 2: CORE 20% TEMPERATURE, HURRY-UP 20,000,000, MULTIPLIER, both badge slots "00").
+ * A HUD is authored visible and the mode hid it once, when it found it; the game had the scene back in its
+ * authored state - a fresh copy of it, or its nodes shown again - and nothing hid ours again. So every 2 s
+ * the HUD looks again: the group the scene has now is not the one it found (a fresh copy, or none), it is
+ * found afresh (and hidden, or written whole while the mode uses it); the same group, its state is sent
+ * again - hidden while the mode is not using it, else shown with its badge, gauge and pips re-sent. */
+#define KIT_HUD_RECHECK_MS 2000
+
+static KIT_UNUSED void kit_hud_recheck(struct kit_hud *h)
+{
+    void *g;
+    int k;
+    if (!h->found || pm_ms() - h->checked_at < KIT_HUD_RECHECK_MS) return;
+    h->checked_at = pm_ms();
+    g = kit_hud_find1(h, 0, 0, 0);
+    if (g != h->group) {
+        pm_log("hud %s: the game made its HUD scene again - %s", h->slug,
+               g ? "found afresh" : "gone for now, looked for twice a second");
+        h->found = 0;
+        h->tries = 0;
+        h->group = 0;                      /* never shown or hidden again: the old copy's */
+        kit_hud_find(h);
+        return;
+    }
+    pm_show(h->group, h->up);
+    if (!h->up) return;
+    h->timer_up = h->timer2_up = h->gauge_up = -1;
+    for (k = 0; k < h->n_pips; k++) h->pip_lit[k] = -1;
+}
+
 /* every tick: find, expire the award, and send the glass what changed */
 static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
 {
-    int k, j, aside, low, off;
+    int k, j, aside, low, off, covered;
     const char *title, *line, *award, *awardsub;
     kit_hud_find(h);
+    kit_hud_recheck(h);
     if (h->hide_at && pm_ms() >= h->hide_at) {
         kit_hud_show(h, 0);
         return;
@@ -1111,14 +1150,19 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     }
     if (!h->found || !h->up) return;
     /* PAD-353: a display of the game's has the screen (an award, a mode's start screen): its words are where
-     * ours are, so ours are blank until it is gone; the badge and the gauge at the edges stay */
-    off = pm_display_covered();
+     * ours are, so ours are blank until it is gone; the badge and the gauge at the edges stay. PAD-390: a
+     * qualification note's words too while one of the game's modes or multiballs has the middle - a note's line
+     * is the award line already, so it has nowhere to step aside to */
+    aside = pm_aside();
+    covered = pm_display_covered();
+    off = covered || (h->noting && aside);
     if (off != h->off) {
-        pm_log("hud %s: %s", h->slug, off ? "its words wait while a display of the game's has the screen"
-                                          : "its words are back");
+        pm_log("hud %s: %s", h->slug, !off ? "its words are back"
+               : covered ? "its words wait while a display of the game's has the screen"
+               : "its note waits while the game's mode has the middle of the screen");
         h->off = off;
     }
-    aside = h->noting ? 0 : pm_aside();          /* a qualification note is in the award line already */
+    if (h->noting) aside = 0;                    /* a qualification note is in the award line already */
     kit_hud_aside_note(h, aside);
     title = h->want_title;
     line = h->want_line;

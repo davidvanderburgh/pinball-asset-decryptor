@@ -991,10 +991,21 @@ starting". The examples now keep to themselves:
   it. Each mode has its own start, so the port names one veto site per mode a mode of ours may refuse
   (`site block_start_<id>`), and the runtime refuses that start at its entry while the asking mode runs:
   the mode never begins, and the rule that asked carries on. Every mode but the multiballs is named
-  (PAD-363, below); a mode that lists none holds off the port's checked defaults (`text block_default`:
-  on Premium 1.16, 21 Jet Fighter Attack and 23 Tesla Strike). The multiballs (balls in a lock; the
-  Godzilla and Mechagodzilla magnets) are never named: one of those starting still ends ours
-  (`kit_game_began`), as a mode whose assets file says `game_modes give_way` does for every game mode.
+  (PAD-363, below); a mode that lists none holds off EVERY mode the port names (PAD-398: on Premium
+  1.16 all 15, ids 12-26; the port's `text block_default` is no longer read). The multiballs (balls in
+  a lock; the Godzilla and Mechagodzilla magnets) are never refused at their start: one of those starting
+  still ends ours (`kit_game_began`). But since PAD-398 none can be LIT while ours runs: every rule of the
+  game's that reads shots (`site block_rule_<n>`, `text block_rule_name_<n>`, 24 on each Godzilla - the
+  Destruction Jackpot, the building locks, the bridge, the cities, the Powerup, the tanks...) is shown each
+  shot without any bit while a mode of ours blocks, so nothing of the game's lights, locks, counts or awards
+  and its multiballs cannot be qualified; a mode KEEPS a rule counting with `keep_rules` (a mode file, an
+  assets file) or `KEEP_RULES` (a blocks mode), `pm_block_rules_keep` / `pm_block_rules_keep_names`. David,
+  2026-10-05: "when our custom modes start, we should ONLY be in those modes unless explicitly noted." The
+  rule lines are read from each program (`game_mode_blocks.read_rules`, `sdk/rule_lines.py`); a drafted port
+  gets its own. Emulator (Premium/LE 1.16, a form mode with the default): the same 42 shots before, during
+  and after it - before, the game lit POWERLINE ATTACK; during, TANKS 1/10 and BRIDGE 75% 15/30 stood still
+  and nothing of the game's came up; after, Jet Fighter Attack started at once. With `keep_rules` naming
+  the bridge, the bridge went on (15/30 to 15/40) while the rest stood still.
   Battles are kept out at the source: the battle
   rule's shot handler (`site block_battle_shots`, RuleBattle::v[25], shot mask in r2:r3) is where a lit
   ramp counts toward a battle and a lit scoop opens the BATTLE SELECTION screen (it creates the process

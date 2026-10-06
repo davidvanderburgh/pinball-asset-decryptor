@@ -465,3 +465,66 @@ def test_a_film_recipe_reads_as_sentences_not_a_dict():
     assert CM.recipe_lines({"art": {"film": "g54", "at": 3725}}) == [
         "Picture: the frame of %s at 1:02:05" % CM.FILM_TITLES["g54"]]
     assert CM.recipe_lines(None) == [] and CM.recipe_lines({}) == []
+
+
+# ---- PAD-390: an example's kit copy brought up to the app's at a build -------------------------------------------
+def test_the_apps_current_kit_is_listed_as_shipped():
+    """kit_shipped.txt lists the kit as it is now, so the next kit change can bring this one up to date"""
+    with open(os.path.join(CM.examples_dir(), CM.KIT_FILE), "rb") as f:
+        assert CM._kit_digest(f.read()) in CM.shipped_kits()
+
+
+def _kit_folder(tmp_path, text):
+    d = tmp_path / "modes" / "meltdown"
+    d.mkdir(parents=True)
+    (d / "meltdown.c").write_text("/* mode */\n")
+    (d / CM.KIT_FILE).write_bytes(text)
+    return d
+
+
+def test_a_kit_the_app_shipped_is_brought_up_to_the_apps(tmp_path, monkeypatch):
+    old = b"/* an earlier app's kit */\r\n"
+    d = _kit_folder(tmp_path, old)
+    monkeypatch.setattr(CM, "shipped_kits", lambda: {CM._kit_digest(old)})
+    said = []
+    assert CM.refresh_kit(str(d), log=lambda m, *a, **k: said.append(m)) == "refreshed"
+    with open(os.path.join(CM.examples_dir(), CM.KIT_FILE), "rb") as f:
+        assert (d / CM.KIT_FILE).read_bytes() == f.read()
+    assert any("brought up to this app's kit" in m for m in said)
+    assert CM.refresh_kit(str(d)) == "current"
+
+
+def test_an_edited_kit_is_left_as_it_is(tmp_path, monkeypatch):
+    mine = b"/* my own kit */\n"
+    d = _kit_folder(tmp_path, mine)
+    said = []
+    assert CM.refresh_kit(str(d), log=lambda m, *a, **k: said.append(m)) == "edited"
+    assert (d / CM.KIT_FILE).read_bytes() == mine
+    assert any("not one the app shipped" in m for m in said)
+
+
+def test_a_mode_without_a_kit_is_left_alone(tmp_path):
+    d = tmp_path / "modes" / "mine"
+    d.mkdir(parents=True)
+    assert CM.refresh_kit(str(d)) == "none"
+    assert not (d / CM.KIT_FILE).exists()
+
+
+def test_the_card_build_brings_the_kit_up_before_it_compiles(tmp_path, monkeypatch):
+    old = b"/* an earlier app's kit */\n"
+    d = _kit_folder(tmp_path, old)
+    monkeypatch.setattr(CM, "shipped_kits", lambda: {CM._kit_digest(old)})
+    seen = {}
+
+    class Ex:
+        def to_exec_path(self, p):
+            return p
+
+        def run(self, cmd, timeout=None):
+            seen["kit"] = (d / CM.KIT_FILE).read_bytes()
+            raise RuntimeError("no compiler here")
+
+    with pytest.raises(MW.ModeWriteError):
+        MW.compile_code_object([str(d / "meltdown.c")], str(tmp_path / "out" / "mode.so"), executor=Ex())
+    with open(os.path.join(CM.examples_dir(), CM.KIT_FILE), "rb") as f:
+        assert seen["kit"] == f.read()

@@ -38,7 +38,8 @@ const T = {
   cooldown: "0 = no wait. The wait runs from the moment the mode ends, and carries on through the end of a ball.",
   starts: "Counted for each player. Once a ball starts again on the player's next ball; once a game, and up to N times, start again in the next game.",
   stack: "On: the mode starts whenever its shot is made, even during one of the game's own battles or multiballs. Off: it waits until the game's own battle or multiball ends, and the next start shot after that starts it.",
-  gameModes: "May start: the game's modes start as usual while this one runs, and its screen moves to the edges so their words stay readable. End this one: it starts only while none of the game's modes runs, and one of them starting ends it. Cannot start: as End this one, and while it runs the modes ticked below cannot start at all. A multiball of the game's is never held off: it starts, and this mode ends.",
+  gameModes: "Cannot start (the usual): while this mode runs it is the only thing going - the modes ticked below cannot start, and none of the game's features lights, locks, counts or awards unless you tick it under Keep counting. May start: the game's modes start as usual while this one runs, and its screen moves to the edges so their words stay readable. End this one: it starts only while none of the game's modes runs, and one of them starting ends it.",
+  keepRule: "Ticked: this feature of the game's goes on counting its shots while this mode runs (its progress, its jackpots, its locks and the multiball it leads to). Not ticked: it sees none of them until this mode ends.",
   blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
   multiball: "When the mode starts (or on the shot Balls come names), the game serves balls from the trough until this many are in play, through the game's own ball code, with a ball save of its own. The mode ends when one ball is left (and when its time runs out, if it has a clock). The shots that score are its jackpots; the game's own multiball screens and music stay off, so the mode's screen, clip, sounds and lights are what the player sees and hears.",
   balls: "How many balls are in play together, 2 to 6. A machine with fewer balls serves what it has.",
@@ -370,6 +371,8 @@ function ModePage({ s, f, off, dis, rs }) {
   // PAD-363: what the mode does about the game's own modes, and the ones it holds off
   const gms = prof.game_modes || [];
   const blockOn = new Set(s.block_on || []);
+  const rules = prof.game_rules || [];                       // PAD-398
+  const keepOn = new Set(s.keep_on || []);
   const gmOpts = [{ value: "stack", label: "may start (this one moves aside)" },
     { value: "give_way", label: "may start, and end this one", disabled: !!dis.give_way },
     { value: "block", label: "cannot start (the ones ticked)", disabled: !!dis.block && f.game_modes !== "block" }];
@@ -449,14 +452,21 @@ function ModePage({ s, f, off, dis, rs }) {
       <${Sec} title="The game's own modes" reason=${rs.stack}>
         <div class="row wrap">
           <span class="dim nw">While it runs, the game's modes</span>
-          <${Select} value=${f.game_modes || "stack"} options=${gmOpts} ns="modes" k="f:game_modes" disabled=${off} width=${260} title=${T.gameModes} />
+          <${Select} value=${f.game_modes || "block"} options=${gmOpts} ns="modes" k="f:game_modes" disabled=${off} width=${260} title=${T.gameModes} />
         </div>
         ${f.game_modes === "block" && gms.length ? html`<div class="modes-shots" style="padding-left:26px;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr))">
-          ${gms.map((m) => html`<${Check} key=${"b" + m.id} label=${m.label} checked=${blockOn.has(m.id)} disabled=${off} title=${T.blockPick}
+          ${gms.map((m) => html`<${Check} key=${"b" + m.id} label=${m.label} checked=${blockOn.has(m.id)} disabled=${off || (blockOn.size === 1 && blockOn.has(m.id))} title=${T.blockPick}
               onChange=${(v) => setField("modes", "block:" + m.id, v, { flush: true })} />`)}
         </div>` : null}
         ${f.game_modes === "block" && rs.block ? html`<div class="small muted">${rs.block}</div>` : null}
-        <${Check} label="Can run during the game's own modes" checked=${f.stack} disabled=${off || dis.stack || (f.game_modes || "stack") !== "stack"} title=${T.stack} ns="modes" k="f:stack" />
+        ${(f.game_modes || "block") === "block" && rules.length ? html`
+          <div class="row wrap" style="margin-top:6px"><span class="dim nw" title=${T.keepRule}>The game's features that keep counting while it runs</span></div>
+          <div class="modes-shots" style="padding-left:26px;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr))">
+            ${rules.map((n) => html`<${Check} key=${"k" + n} label=${n} checked=${keepOn.has(n)} disabled=${off} title=${T.keepRule}
+                onChange=${(v) => setField("modes", "keep:" + n, v, { flush: true })} />`)}
+          </div>
+          <div class="small muted">${keepOn.size ? "The ones ticked go on counting; every other feature of the game's waits until this mode ends." : "None ticked: only this mode counts while it runs."}</div>` : null}
+        <${Check} label="Can run during the game's own modes" checked=${f.stack} disabled=${off || dis.stack || (f.game_modes || "block") !== "stack"} title=${T.stack} ns="modes" k="f:stack" />
       <//>
       <${Sec} title="Ball save" reason=${rs.ball_save}>
         <div class="row wrap">

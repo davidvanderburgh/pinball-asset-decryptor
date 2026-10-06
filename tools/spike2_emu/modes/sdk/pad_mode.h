@@ -309,6 +309,14 @@ int pm_aside(void);
 #define PM_CAN_BLOCK_GAME   0x40000u  /* pm_block_game_modes, pm_block_list */
 int pm_block_game_modes(int on);
 int pm_block_list(const unsigned char *ids, int n);
+/* PAD-398: while a mode of ours blocks, every rule of the game's the port names (`site block_rule_<n>`, `text
+ * block_rule_name_<n>`: Godzilla's Destruction Jackpot, its building locks, the bridge, the cities...) is shown
+ * no shots - nothing of the game's lights, locks, counts or awards - except the ones the mode KEEPS: n indices
+ * <n> of those lines. Called from the mode's own files as they are read (a mode file's `keep_rules`, a code
+ * mode's assets file); it holds for the calling mode from its next pm_block_game_modes(1). 0 when the port
+ * cannot block. */
+int pm_block_rules_keep(const unsigned char *ns, int n);
+int pm_block_rules_keep_names(const char *names);   /* the same by name: "Destruction Jackpot, Bridge" */
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

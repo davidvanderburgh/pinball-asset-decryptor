@@ -184,7 +184,7 @@ test). This is a last line of defence, not a guardrail of ours.
     polls it ~2000 times a run and never moved it in the rig: the rig most likely does not model this stepper,
     so it needs an emulator model before anything can be proven.
 
-- **Step 6 (PAD-393, 2026-10-05): the building.** The rig did not model the stepper: with the zero reply the
+- **Step 7 (PAD-393, 2026-10-05): the building.** The rig did not model the stepper: with the zero reply the
   game re-sent its HOME (`34 00 00`) ~3600 times a run, polled the status (`38`) ~42000 times and never sent a
   move. The board's commands, read from LE 1.16: 32 configure (byte 7 = 0x40|input of 93 DOWN, byte 8 = of 92
   UP), 34 home, 31 a relative move (s16 steps, then speed/accel/decel u32s), 38+motor status -> u16, u16,

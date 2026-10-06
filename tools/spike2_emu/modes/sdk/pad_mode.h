@@ -511,12 +511,27 @@ int pm_scoop_holding(void);
  * the game has found it), -1 when there is no platform. A mode that turns it toward the player turns
  * it back AWAY when it ends - unless the game's own mode began, which then has the platform
  * (intricate_kit.h: kit_shields_in / kit_shields_out). An operator who switched the motor off in the
- * adjustments keeps it AWAY: pm_shield says 0 and the position stays AWAY. */
-#define PM_CAN_SHIELD       0x80000u  /* pm_shield / pm_shield_position */
+ * adjustments keeps it AWAY: pm_shield says 0 and the position stays AWAY.
+ * PAD-392: the limits are the runtime's and cannot be raised - only while your mode runs, in a game, and
+ * never while one of the game's own modes or multiballs runs (the game has the platform then); 1.5 s from
+ * one move's start to the next, at most 12 moves a minute (0 = refused, the reason in mode.log). When
+ * your mode ends, the ball ends, or the game ends or tilts, the runtime turns the platform back where it
+ * was before your first move - unless the game has since turned it itself. PAD-409: from your first move
+ * until then, the game's own background return of the platform to its resting place (every ~3 s) waits, so
+ * it stays where you put it; the game's ball search and its own modes still move it.
+ * pm_shield_keep turns it and KEEPS it there while your mode runs: the game's ball search swings the
+ * platform and leaves it AWAY, so a platform found resting elsewhere for 1.5 s is turned back, within the
+ * same limits. It is kept only while the game's own shield feature (on Godzilla: Mechagodzilla Shield)
+ * sees no shots - your mode blocks the game's rules (PAD-398, the default) and does not keep that one
+ * counting. While that feature counts, the game turns the platform back about 2 s after every move, and
+ * pm_shield_keep turns it once and leaves it to the game. 1 = keeping it (0 = stop keeping; it stays where
+ * it is); 0 = no platform or your mode is not running. */
+#define PM_CAN_SHIELD       0x80000u  /* pm_shield / pm_shield_position / pm_shield_keep */
 #define PM_SHIELD_AWAY      1
 #define PM_SHIELD_TOWARD    2
 int pm_shield(int where);
 int pm_shield_position(void);
+int pm_shield_keep(int where);
 
 /* ---- the building (PAD-393) -----------------------------------------------------------------------
  * Godzilla Premium/LE's building rides a stepper. pm_building asks the game to move it to a FLOOR, 0 (where

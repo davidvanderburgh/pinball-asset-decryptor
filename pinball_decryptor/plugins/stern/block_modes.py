@@ -51,7 +51,8 @@ one of its own sounds (with a callout of the game's when the card could not carr
 (PAD-376) run a light show (a ready-made one, or its own steps: the examples' kit_show) and light
 a shot at a pace of its own (any value, in ms) or blinking faster as the clock runs down, and (PAD-395)
 hold one of the game's mechanisms (Godzilla's magnet, and on a Premium/LE the Mechagodzilla magnet
-and the bridge) for a time, hold the next ball (or every ball) in the scoop, and let go. Values: a
+and the bridge) for a time, hold the next ball (or every ball) in the scoop, and let go, and (PAD-392)
+turn Godzilla Premium/LE's shield targets toward the player or away, kept there while it runs. Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running,
@@ -156,13 +157,16 @@ SHARED_RESETS = ("ball", "game")
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
-              "hold", "scoop_hold", "let_go")
+              "hold", "scoop_hold", "let_go", "shield")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
 SCOOP_MIN_MS, SCOOP_MAX_MS = MP.SCOOP_MIN_MS, MP.SCOOP_MAX_MS
 #: a scoop hold's reach: the next ball that settles there, or every one while the mode runs
 SCOOP_WHICH = {"next": "the next ball", "every": "every ball"}
+#: PAD-392: where a block turns the shield targets (Godzilla Premium/LE's platform), kept there while the mode runs;
+#: "leave" stops keeping them (they stay where they are). The runtime turns them back when the mode ends.
+SHIELD_WHERE = {"toward": "toward the player", "away": "away", "leave": "where they are"}
 #: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
 HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus")
 GAUGE_KINDS = ("diamond", "segment", "spike")
@@ -566,13 +570,14 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
-def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None):
+def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
     must be. ``mechs`` (``{name: label}``, the mechanisms a mode may hold on the card's game)
     and ``scoop`` (whether it may hold a ball in the scoop), when given, are the card's too
-    (PAD-395). The C is written anyway (a missing shot is 0 to the game, which never matches),
+    (PAD-395); so is ``shield`` (PAD-392): False where the game has no shield platform a mode may turn,
+    else the name of its own shield feature ("" when the port names none). The C is written anyway (a missing shot is 0 to the game, which never matches),
     so a half-made program always saves."""
     program = normalize(program)
     out = []
@@ -613,7 +618,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "shots": set(shots) if shots is not None else None,
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds,
-           "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop}
+           "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield}
     hud = program["hud"]
     if hud["on"]:
         for k, c in enumerate(hud["counters"]):
@@ -626,6 +631,16 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
         _check_stack(s.get("do") or [], 1, "Script %d" % (i + 1), ctx)
     if ctx["count"] > MAX_BLOCKS:
         out.append("%d blocks: %d at most." % (ctx["count"], MAX_BLOCKS))
+    turns = [b for s in program["scripts"] for b in _walk(s.get("do") or [])
+             if b.get("op") == "shield" and b.get("where") in ("toward", "away")]
+    if turns and shield not in (None, False):          # PAD-392: the game's own shield feature turns them back
+        feature = shield or "shield"
+        if program.get("game_modes", "block") != "block":
+            out.append("The shield targets stay turned only while the game's modes cannot start: otherwise the "
+                       "game's own %s feature turns them back." % feature)
+        elif shield and shield in (program.get("keep_rules") or []):
+            out.append("The shield targets stay turned only while %s does not keep counting: it turns them "
+                       "back." % shield)
     return _unique(out)
 
 
@@ -700,7 +715,7 @@ def notes(program):
     idle = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") in ("mode_end", "ball_end")
             or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "event")
                 and (s.get("hat") or {}).get("when") == "idle")]
-    if any(b.get("op") in ("hold", "scoop_hold") for s in idle for b in _walk(s.get("do") or [])):
+    if any(b.get("op") in ("hold", "scoop_hold", "shield") for s in idle for b in _walk(s.get("do") or [])):
         out.append("A mechanism is held only while the mode runs: a hold in When the mode ends, When the "
                    "ball drains or a script for while it is not running does nothing.")
     if "timer_done" in kinds and "timer_start" not in ops:
@@ -911,6 +926,13 @@ def _check_stack(stack, depth, where, ctx):
             what = b.get("what")
             if what not in ("*", "scoop") and not (what and HOLD_RE.match(str(what))):
                 ctx["out"].append("%s lets go of nothing chosen." % where)
+        elif op == "shield":
+            if b.get("where") not in SHIELD_WHERE:
+                ctx["out"].append("%s turns the shield targets: toward the player, away, or where they are."
+                                  % where)
+            elif ctx["shield"] is False:
+                ctx["out"].append("%s turns the shield targets, which a mode cannot do on this card's game."
+                                  % where)
 
 
 def _check_ms(ms, lo, hi, where, ctx):
@@ -1304,6 +1326,11 @@ class _Gen:
                     if what not in self.holds:
                         self.holds.append(what)
                     out.append(pad + "if (run.on) pm_coil_release(%s);" % _c_str(what))
+            elif op == "shield":
+                where = {"toward": "PM_SHIELD_TOWARD", "away": "PM_SHIELD_AWAY", "leave": "0"}.get(b.get("where"))
+                if where:
+                    self.mech = True
+                    out.append(pad + "shield(%s);" % where)
         return out
 
     @staticmethod
@@ -2322,6 +2349,15 @@ UNUSED static void let_go_all(void)
 {
     if (!run.on) return;
 %(release)s    scoop_let_go();
+}
+
+/* PAD-392: turn the shield targets and keep them there while the mode runs (0: stop keeping them); the runtime
+ * turns them back when the mode ends, keeps them only while the game's own shield feature sees no shots, and
+ * keeps every limit of its own */
+UNUSED static void shield(int where)
+{
+    if (!run.on) return;
+    if (!pm_shield_keep(where)) pm_log("shield: no platform on this game");
 }
 
 /* every tick while it runs: a hold of the next ball only ends once that ball has been held */

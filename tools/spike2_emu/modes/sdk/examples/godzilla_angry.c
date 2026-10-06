@@ -51,6 +51,10 @@
  * full), .shot "<shot name>", .rage "<hits>" (add switch hits to the meter), .mb "<balls>" (the multiball now).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the rage cools to embers */
+#define GAME_SHOW_START "Strobe burst"
+#define GAME_SHOW_END   "Ember fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -452,7 +456,7 @@ static int start(const char *why)
     show();
     kit_hud_award(&hud, 3000, place_at[p] ? "THE TRAIL AGAIN" : "GODZILLA ANGRY!",
                   place_at[p] ? PLACE[place_at[p]].place : "THEY TOOK BABY GODZILLA");
-    kit_show_start(&show_fx, "angry start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "angry start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, place %u (%s), %u lock(s), jackpot %llu, super %llu, score %llu", why, p,
            run.place + 1, run.place < N_PLACES ? PLACE[run.place].place : "BABY", run.locks,
@@ -549,7 +553,9 @@ static void end(const char *why)
     } else {
         pa_clip_full(&own, "lost");
     }
-    kit_show_start(&show_fx, "angry end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, "angry end", SHOW_END, N_SHOW(SHOW_END));
+    }
     if (run.phase == PHASE_MB)
         pm_snprintf(b, sizeof b, "%u BABY JACKPOT%s  -  %u LOCK%s", run.babies, run.babies == 1 ? "" : "S", run.locks,
                     run.locks == 1 ? "" : "S");

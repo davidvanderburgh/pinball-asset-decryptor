@@ -32,6 +32,10 @@
  * Emulator test triggers: /dump/destoroyah.start, .stop, .shot "<shot name>", .boss (the perfect form now).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the city burns down to embers */
+#define GAME_SHOW_START "Strobe burst"
+#define GAME_SHOW_END   "Ember fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -301,7 +305,7 @@ static int start(const char *why)
     kit_hud_begin(&hud, "DESTOROYAH", "");
     show();
     kit_hud_award(&hud, 3000, "DESTOROYAH", "THE AGGREGATES ARE COMING");
-    kit_show_start(&show_fx, "destoroyah start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "destoroyah start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %d waves, %d city hits allowed; next time %u spins, score %llu", why, p, WAVES,
            CITY_HITS, spins_needed(p), (unsigned long long)pm_score(p));
@@ -320,8 +324,10 @@ static void end(const char *why)
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.won ? "won" : "lost");
-    if (run.won) kit_show_start(&show_fx, "destoroyah won", SHOW_WON, N_SHOW(SHOW_WON));
-    else kit_show_start(&show_fx, "destoroyah end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        if (run.won) kit_show_start(&show_fx, "destoroyah won", SHOW_WON, N_SHOW(SHOW_WON));
+        else kit_show_start(&show_fx, "destoroyah end", SHOW_END, N_SHOW(SHOW_END));
+    }
     pm_snprintf(b, sizeof b, "%u KILL%s  -  WAVE %u", run.all_kills, run.all_kills == 1 ? "" : "S", run.wave);
     kit_hud_title(&hud, run.won ? "DESTOROYAH DEFEATED" : "DESTOROYAH WINS", b);
     kit_hud_counter(&hud, 0, 0, 0, 0);

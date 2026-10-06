@@ -771,8 +771,11 @@ static void magnet_let_go(const char *why);   /* PAD-381: the magnet section */
 static void scoop_let_go(void);               /* PAD-381: the scoop section */
 static void building_let_go(const char *why); /* PAD-393: the building section */
 static void shield_let_go(const char *why);   /* PAD-392: the shield section */
+static const struct pm_mode *show_ended_by;   /* PAD-411: a mode's ending may still start its show */
+static unsigned long show_ended_ms;
 void pm_end(void)
 {
+    if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0;
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
@@ -4331,6 +4334,24 @@ int pm_game_show_playing(void)
     return (can & PM_CAN_GAME_SHOWS) && proc_alive((unsigned)pm_port_value("show_proc", 0));
 }
 
+/* by the port's name (`text show_name_<n>`, any case): a mode written without knowing its game asks for "Strobe
+ * burst", and a game whose port names no such show plays nothing (0) */
+int pm_game_show_named(const char *name)
+{
+    char key[24];
+    const char *t;
+    int n, k;
+    if (!(can & PM_CAN_GAME_SHOWS) || !name || !*name) return 0;
+    for (n = 1; n <= shows_n; n++) {
+        pm_snprintf(key, sizeof key, "show_name_%d", n);
+        t = pm_port_text(key);
+        for (k = 0; t && name[k] && t[k] && (name[k] | 0x20) == (t[k] | 0x20); k++) ;
+        if (t && !name[k] && !t[k]) return pm_game_show(n);
+    }
+    say("show \"%s\": not one of this game's shows", name);
+    return 0;
+}
+
 static void show_kill(const char *why)
 {
     unsigned id = (unsigned)pm_port_value("show_proc", 0);
@@ -4370,8 +4391,10 @@ int pm_game_show(int n)
     pm_snprintf(key, sizeof key, "show_name_%d", n);
     name = pm_port_text(key);
     pm_snprintf(key, sizeof key, "show_%d", n);
-    if (!pm_running() || !pm_in_game()) {
-        say("show %d: not played - only the running mode, in a game, plays one", n);
+    if (!(pm_running() || (current && current == show_ended_by && pm_ms() - show_ended_ms < 2000ul)) ||
+        !pm_in_game()) {
+        say("show %d: not played - only the running mode (or one in the first 2 s of its ending), in a game, "
+            "plays one", n);
         return 0;
     }
     if (proc_alive(id)) show_kill("another show begins");

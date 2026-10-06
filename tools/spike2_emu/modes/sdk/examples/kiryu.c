@@ -31,6 +31,10 @@
  * Emulator test triggers: /dump/kiryu.start, .stop, .shot "<shot name>", .charge "<percent>" (set the charge).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): Absolute Zero: an ice-blue fade */
+#define GAME_SHOW_START "Strobe burst"
+#define GAME_SHOW_END   "Blue fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -226,7 +230,7 @@ static int start(const char *why)
     kit_hud_pips(&hud, 10);
     show();
     kit_hud_award(&hud, 3000, "KIRYU ONLINE", "CHARGE THE ABSOLUTE ZERO");
-    kit_show_start(&show_fx, "kiryu start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "kiryu start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %d s, fire at %s or the %s from 100%%; next time %u spins, score %llu", why, p,
            RUN_SECONDS, FIRE_SHOT, BUTTON_SHOT, spins_needed(p), (unsigned long long)pm_score(p));
@@ -245,8 +249,10 @@ static void end(const char *why)
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.fired ? "won" : "lost");
-    kit_show_start(&show_fx, "kiryu end", SHOW_END, N_SHOW(SHOW_END));
-    if (run.fired) pm_snprintf(b, sizeof b, "ABSOLUTE ZERO X%u  -  %s", run.mult ? run.mult : 1, kit_num(a, sizeof a, run.shot_paid));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, "kiryu end", SHOW_END, N_SHOW(SHOW_END));
+        if (run.fired) pm_snprintf(b, sizeof b, "ABSOLUTE ZERO X%u  -  %s", run.mult ? run.mult : 1, kit_num(a, sizeof a, run.shot_paid));
+    }
     else pm_snprintf(b, sizeof b, "THE CANNON NEVER FIRED");
     kit_hud_title(&hud, run.fired ? "KIRYU WINS" : "KIRYU IS DOWN", b);
     kit_hud_counter(&hud, 0, 0, 0, 0);

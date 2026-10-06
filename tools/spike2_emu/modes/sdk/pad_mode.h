@@ -557,13 +557,14 @@ int pm_building_floor(void);
  * names them (`site show_<n>`, `text show_name_<n>`); pm_game_show(n) plays show n exactly that way - the
  * game's own process body, run as a process of the runtime's (`value show_proc`, an id the game never uses),
  * so its timing, its colours and its clean-up are the game's. One at a time: a new one replaces one still
- * playing. 1 = playing; 0 = refused (only while your mode runs, in a game; no such show; the reason in
- * mode.log). A show keeps playing after your mode ends (an ending's show is meant to), but never longer than
+ * playing. 1 = playing; 0 = refused (only while your mode runs, or in the first 2 s after it ended - its
+ * ending's show; in a game; no such show; the reason in mode.log). A show keeps playing after your mode ends (an ending's show is meant to), but never longer than
  * 20 s - some of the game's run until stopped - and the ball ending stops it as it stops every process of the
  * game's. pm_game_show_stop ends it now: the game's own exit hook takes its lights away. pm_game_show_playing:
  * 1 while one plays. pm_game_shows: how many the port names (0 = none on this game). */
 #define PM_CAN_GAME_SHOWS   0x800000u /* pm_game_show / pm_game_show_stop / pm_game_show_playing / pm_game_shows */
 int pm_game_show(int n);
+int pm_game_show_named(const char *name);   /* the same by the port's name for it (`text show_name_<n>`, any case) */
 void pm_game_show_stop(void);
 int pm_game_show_playing(void);
 int pm_game_shows(void);

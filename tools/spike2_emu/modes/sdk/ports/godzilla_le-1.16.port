@@ -587,26 +587,44 @@ site shield_update         0x001da978 0xe301316a 0xe340307d
 # ---- PAD-411: the game's own light shows -------------------------------------------------------------------------
 # Each is a show process's body (pad_mode_runtime.c "the game's own light shows"): it makes a lamp group, plays its
 # tables of {light-language command, owner} records through the player 0x1c7a38, sleeps through the show and stops
-# every effect; pm_game_show(n) runs it as process show_proc (an id the game never uses). 1-12 are the process
-# registry's (0x72bc40, 12-byte {entry, priority, flags} records: their ids in the comments), 13-15 the attract
-# director's (process 296, which starts them by entry). Their names are not known yet: David picks them on the
-# machine (PAD-411's show reel).
+# every effect; pm_game_show(n) / pm_game_show_named(name) runs it as process show_proc (an id the game never uses).
+# Measured in the emulator (PAD-411, every command each one sent recorded at the light runner): the useful ones,
+# flashy first (a mode's start), then subdued (its end), then a small accent. Left out: two that send nothing from a
+# mode (processes 299 and 326's bodies), and three that loop until stopped (process 315's and 333's, and the attract
+# director's 0x1d47a8). show_kind_<n>: flashy / subdued / accent; show_secs_<n>: how long it plays.
 value show_proc            13200
-site show_1                0x00117bdc 0xe92d4038 0xeb036ed3   # process 213
-site show_2                0x001ccce4 0xe92d4ff0 0xe24dd04c   # process 299 (a 34-command table, 0x64b5e8)
-site show_3                0x001cd424 0xe92d4010 0xeb0098c1   # process 300
-site show_4                0x001cd4e8 0xe92d4010 0xeb009890   # process 301
-site show_5                0x001cd5ac 0xe92d4010 0xeb00985f   # process 302
-site show_6                0x001cd670 0xe92d4010 0xeb00982e   # process 304
-site show_7                0x001cfccc 0xe92d41f0 0xeb008e97   # process 312
-site show_8                0x001d496c 0xe52de004 0xe3a03000   # process 315
-site show_9                0x001d02e0 0xe92d4070 0xe306427c   # process 326
-site show_10               0x001d19c0 0xe92d4038 0xeb00875a   # process 330
-site show_11               0x001d1aa4 0xe92d4038 0xeb008721   # process 332
-site show_12               0x001d1b70 0xe92d4038 0xeb0086ee   # process 333
-site show_13               0x001cf6a8 0xe92d47f0 0xe24dd010   # the attract director's (a 24-command table, 0x64be64)
-site show_14               0x001cf458 0xe92d4038 0xeb0090b4   # the attract director's
-site show_15               0x001d47a8 0xe92d4ff0 0xe306427c   # the attract director's
+site show_1                0x001cfccc 0xe92d41f0 0xeb008e97   # process 312: 142 commands, orange-red strobe bursts every ~0.6 s over the whole playfield
+text show_name_1           Strobe burst
+text show_kind_1           flashy
+value show_secs_1          6
+site show_2                0x00117bdc 0xe92d4038 0xeb036ed3   # process 213: 119 commands, a white strobe over a big light set and green sweeps
+text show_name_2           Strobe storm
+text show_kind_2           flashy
+value show_secs_2          16
+site show_3                0x001cf6a8 0xe92d47f0 0xe24dd010   # the attract director's: 18 sweeps at once over every lamp group, many colours
+text show_name_3           Colour sweep
+text show_kind_3           flashy
+value show_secs_3          2
+site show_4                0x001cd424 0xe92d4010 0xeb0098c1   # process 300: a slow blue fade
+text show_name_4           Blue fade
+text show_kind_4           subdued
+value show_secs_4          6
+site show_5                0x001cd4e8 0xe92d4010 0xeb009890   # process 301: blue, yellow and red fading
+text show_name_5           Colour fade
+text show_kind_5           subdued
+value show_secs_5          6
+site show_6                0x001cd5ac 0xe92d4010 0xeb00985f   # process 302: red, blue and orange fading
+text show_name_6           Red and blue fade
+text show_kind_6           subdued
+value show_secs_6          6
+site show_7                0x001cd670 0xe92d4010 0xeb00982e   # process 304: dim reds and oranges fading
+text show_name_7           Ember fade
+text show_kind_7           subdued
+value show_secs_7          6
+site show_8                0x001d19c0 0xe92d4038 0xeb00875a   # process 330: a 0.6 s cyan flick on one light set
+text show_name_8           Cyan flick
+text show_kind_8           accent
+value show_secs_8          1
 
 # ---- PAD-393: the building (Premium/LE only) -----------------------------------------------------------------------
 # BuildingStepper (vtable 0x64ff88, a StepperMotor the node board runs: node 10 motor 0, BUILDING UP 92 / DOWN 93), one

@@ -52,6 +52,10 @@
  *   echo "Left ramp" > /dump/ghidorah_heads.shot   act as if the game dispatched that shot
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the three heads' gold, red and blue */
+#define GAME_SHOW_START "Strobe burst"
+#define GAME_SHOW_END   "Colour fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs -------------------------------------------------------------------------- */
@@ -269,7 +273,7 @@ static int start(const char *why, int counted)
     show_status();
     kit_hud_award(&hud, 3000, "GHIDORAH ATTACKS", "SEVER ALL THREE HEADS");
     show_lit();
-    kit_show_start(&show, "ghidorah start", SHOW_START, N_STEPS(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show, "ghidorah start", SHOW_START, N_STEPS(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %u s, heads %u/%u/%u, lit %s, start %u this game, score %llu", why, p,
            RUN_SECONDS, run.hp[0], run.hp[1], run.hp[2], HEAD[run.lit].name, ran_game[p],
@@ -287,8 +291,10 @@ static void end(const char *why, int won)
     kit_ledger_note(KIT_GHIDORAH, run.player, won);
     sound(CUE_END);
     pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
-    kit_show_start(&show, won ? "ghidorah won" : "ghidorah lost", won ? SHOW_WON : SHOW_LOST,
-                   won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show, won ? "ghidorah won" : "ghidorah lost", won ? SHOW_WON : SHOW_LOST,
+                       won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    }
     pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
     kit_hud_title(&hud, won ? "GHIDORAH DEFEATED" : "GHIDORAH ESCAPES", " ");
     kit_hud_counter(&hud, 0, 0, 0, 0);

@@ -771,8 +771,11 @@ static void magnet_let_go(const char *why);   /* PAD-381: the magnet section */
 static void scoop_let_go(void);               /* PAD-381: the scoop section */
 static void building_let_go(const char *why); /* PAD-393: the building section */
 static void shield_let_go(const char *why);   /* PAD-392: the shield section */
+static const struct pm_mode *show_ended_by;   /* PAD-411: a mode's ending may still start its show */
+static unsigned long show_ended_ms;
 void pm_end(void)
 {
+    if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0;
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
@@ -4301,6 +4304,133 @@ static void building_tick(void)
     bld.putback_until = 0;
 }
 
+/* ---- the game's own light shows (PAD-411) ------------------------------------------------------------
+ * The game's shows are processes: a show's body makes a lamp group (0x3e828c), plays tables of {command,
+ * owner} records through its player (0x1c7a38: each command through the light runner, `site light_run`'s
+ * target, its effect handle kept), sleeps through the show (proc_sleep) and stops every handle (0x1bb744);
+ * an exit hook it registers cleans up if the process is killed (a tilt, the end of a ball). The attract
+ * director (process 296) starts its shows by entry address (0x3f3140: a child with the parent's id); others
+ * are in the process registry by id (213, 299-304, 312-333 on Premium/LE 1.16). So a show is played the
+ * game's own way by starting its body as a process: `site show_<n>` is the body, `value show_proc` the id of
+ * ours it runs under (one the game never uses: no create, exists or kill call names it), started with
+ * `site proc_create` (create-if-absent), its life read with `site proc_exists`. Its parameters, read from the
+ * running process's +0xa0.. by the bodies that have any, are a fresh process's (0): each show's default.
+ * A show's lights belong to its process: the exit hook every body registers (0x1bacdc) takes them out of the
+ * light engine's list (0x7bb68c) when the process ends - so stopping one is the game's kill by id (`site
+ * event_cancel`: every process with that id). Some shows run until stopped (show 8 of Premium/LE 1.16's list,
+ * process 315's body, in the emulator), so the runtime stops one after SHOW_MAX_MS. */
+#define SHOWS_MAX 64
+#define SHOW_MAX_MS 20000ul
+static int shows_n;
+static struct { int n; unsigned long started; } show_now;
+
+int pm_game_shows(void)
+{
+    return (can & PM_CAN_GAME_SHOWS) ? shows_n : 0;
+}
+
+int pm_game_show_playing(void)
+{
+    return (can & PM_CAN_GAME_SHOWS) && proc_alive((unsigned)pm_port_value("show_proc", 0));
+}
+
+/* by the port's name (`text show_name_<n>`, any case): a mode written without knowing its game asks for "Strobe
+ * burst", and a game whose port names no such show plays nothing (0) */
+int pm_game_show_named(const char *name)
+{
+    char key[24];
+    const char *t;
+    int n, k;
+    if (!(can & PM_CAN_GAME_SHOWS) || !name || !*name) return 0;
+    for (n = 1; n <= shows_n; n++) {
+        pm_snprintf(key, sizeof key, "show_name_%d", n);
+        t = pm_port_text(key);
+        for (k = 0; t && name[k] && t[k] && (name[k] | 0x20) == (t[k] | 0x20); k++) ;
+        if (t && !name[k] && !t[k]) return pm_game_show(n);
+    }
+    say("show \"%s\": not one of this game's shows", name);
+    return 0;
+}
+
+static void show_kill(const char *why)
+{
+    unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    if (!proc_alive(id)) return;
+    ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("event_cancel"))(id, 0xffffu);
+    say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
+    show_now.n = 0;
+}
+
+void pm_game_show_stop(void)
+{
+    if (can & PM_CAN_GAME_SHOWS) show_kill("asked");
+}
+
+/* every tick: no show of ours plays longer than SHOW_MAX_MS */
+static void shows_tick(void)
+{
+    if (!show_now.n) return;
+    if (!proc_alive((unsigned)pm_port_value("show_proc", 0))) {
+        show_now.n = 0;
+        return;
+    }
+    if (pm_ms() - show_now.started > SHOW_MAX_MS) show_kill("its 20 s are up");
+}
+
+int pm_game_show(int n)
+{
+    char key[24];
+    const char *name;
+    unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    if (!(can & PM_CAN_GAME_SHOWS)) return 0;
+    pm_snprintf(key, sizeof key, "show_%d", n);
+    if (n < 1 || n >= SHOWS_MAX || !site(key)) {
+        say("show %d: not one of the game's shows the port names (1-%d)", n, shows_n);
+        return 0;
+    }
+    pm_snprintf(key, sizeof key, "show_name_%d", n);
+    name = pm_port_text(key);
+    pm_snprintf(key, sizeof key, "show_%d", n);
+    if (!(pm_running() || (current && current == show_ended_by && pm_ms() - show_ended_ms < 2000ul)) ||
+        !pm_in_game()) {
+        say("show %d: not played - only the running mode (or one in the first 2 s of its ending), in a game, "
+            "plays one", n);
+        return 0;
+    }
+    if (proc_alive(id)) show_kill("another show begins");
+    if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
+            id, (void (*)(void))(unsigned long)fn(key), 0)) {
+        say("show %d: not played - the game would not start its process %u", n, id);
+        return 0;
+    }
+    show_now.n = n;
+    show_now.started = pm_ms();
+    say("show %d (%s): the game's own light show, playing as process %u", n, name ? name : "unnamed", id);
+    return 1;
+}
+
+static void shows_arm(void)
+{
+    static const char *const s[] = { "proc_create", "proc_exists", "event_cancel", 0 };
+    static const char *const v[] = { "show_proc", 0 };
+    char key[24];
+    int n;
+    for (n = 1; n < SHOWS_MAX; n++) {
+        pm_snprintf(key, sizeof key, "show_%d", n);
+        if (!site(key)) break;
+    }
+    shows_n = n - 1;
+    if (!shows_n) return;                               /* a port without show lines: silent */
+    if (!have_sites(s) || !have_values(v)) {
+        say("game shows: off - the port's process lines are incomplete");
+        shows_n = 0;
+        return;
+    }
+    can |= PM_CAN_GAME_SHOWS;
+    say("game shows: %d of the game's own light shows, played as process %ld", shows_n,
+        pm_port_value("show_proc", 0));
+}
+
 static void building_arm(void)
 {
     static const char *const s[] = { "building_move", "building_busy", 0 };
@@ -5481,6 +5611,7 @@ static void on_tick(unsigned *r)
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
     building_tick();                          /* PAD-393: a put-back owed */
+    shows_tick();                             /* PAD-411: no show of ours past its 20 s */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     roster_deferred_tick();
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
@@ -6399,6 +6530,7 @@ static void pad_mode_start(void)
     scoop_arm();                                    /* PAD-381: a ball held in the scoop */
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
     building_arm();                                 /* PAD-393: the Premium's building */
+    shows_arm();                                    /* PAD-411: the game's own light shows */
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
@@ -6407,14 +6539,14 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
         can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
-        can & PM_CAN_BUILDING ? " building" : "");
+        can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

@@ -393,8 +393,11 @@ def gauge_pips(kind, n, colours):
             else:
                 md.polygon([(x + pads, y + pads) for x, y in shape], fill=255)
             if lit:
+                # PAD-416: a tight glow - a wide one made a lit pip look bigger than its unlit outline, its colour
+                # spilling past the gauge (David: "filling up with the colors outside the meter ... looks like a
+                # glitch")
                 glow = Image.new("RGBA", img.size, col + (0,))
-                glow.putalpha(mask.filter(ImageFilter.GaussianBlur(5)).point(lambda v: int(v * 0.9)))
+                glow.putalpha(mask.filter(ImageFilter.GaussianBlur(2)).point(lambda v: int(v * 0.4)))
                 img.alpha_composite(glow)
                 body = Image.new("RGBA", img.size, tuple(min(255, int(c * 0.55 + 115)) for c in col) + (255,))
                 grad = Image.linear_gradient("L").resize(img.size).point(lambda v: 255 - v // 2)

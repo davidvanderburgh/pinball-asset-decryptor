@@ -3291,7 +3291,12 @@ def _changed_radium_text(assets_dir):
     every card built on top of it kept the shift.  :func:`_padded_text` then
     puts the spaces where the line's alignment hides them."""
     from ...core import text_manifest
-    out = text_manifest.changed(assets_dir)
+    out = {}
+    for path, pairs in text_manifest.changed(assets_dir).items():
+        # a replacement read back off such a card (a transfer from it) carries the
+        # padding too: its words are the edit
+        out[path] = [(o, r.strip(" ") if path.endswith(".radium") and _old_padding(r)
+                      else r) for o, r in pairs]
     try:
         rows = text_manifest.load(assets_dir)
     except Exception:                                  # noqa: BLE001
@@ -3301,14 +3306,15 @@ def _changed_radium_text(assets_dir):
         if (r.get("replacement") and r["replacement"] != orig) \
                 or not path.endswith(".radium") or not _old_padding(orig):
             continue
-        out.setdefault(path, []).append((orig, orig.rstrip(" ")))
+        out.setdefault(path, []).append((orig, orig.strip(" ")))
     return out
 
 
 def _old_padding(text):
-    """Does *text* end in the run of spaces an older Write padded a shorter scene line
-    with (3 or more; no stock Godzilla line ends in more than 2)?"""
-    return text.endswith("   ") and bool(text.strip())
+    """Does *text* start or end with the run of spaces a Write padded a shorter scene line
+    with (3 or more: after the words before v1.121.1, then before, after or both by its
+    alignment; no stock Godzilla line has more than 2 at either end)?"""
+    return bool(text.strip()) and (text.endswith("   ") or text.startswith("   "))
 
 
 def _mode_family_on():

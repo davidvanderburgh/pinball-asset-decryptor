@@ -287,3 +287,31 @@ def test_write_recentres_a_card_an_older_write_padded(tmp_path):
     out = T.parse(_apply(buf, writes))
     got = next(o for o in out.objects.values() if o.kind == "Text").body["text"]
     assert got == b" " * 13 + b"GODZILLA VS BATTRA" + b" " * 13
+
+
+# ---------------------------------------------------------------------------------------------
+# round 4 (DragonRR on v1.121.2: "Nope .. the text says.. NO"): the padding was in the EDIT -
+# a replacement read back off a padded card (a transfer from it) is "GODZILLA VS BATTRA" + 26
+# spaces against the stock line, so the preview drew and Write kept the padded string. A card
+# from v1.121.1 on pads before the words too (centred: both ends), so both ends count.
+# ---------------------------------------------------------------------------------------------
+STOCK = "GODZILLA & ANGUIRIS VS KING GHIDORAH & GIGAN"
+SPLIT = " " * 13 + "GODZILLA VS BATTRA" + " " * 13
+
+
+def test_padding_at_either_end_is_an_older_writes():
+    assert engine._old_padding(SPLIT) and engine._old_padding(" " * 26 + "GODZILLA VS BATTRA")
+    assert not engine._old_padding("  TWO LEADING") and not engine._old_padding("   ")
+
+
+def test_a_padded_replacement_is_written_and_drawn_by_its_words(tmp_path, fonts):
+    from tests.test_stern_radium import _write_tsv
+    _write_tsv(tmp_path, [("/g/a.radium", STOCK, PADDED),
+                          ("/g/b.radium", SPLIT, "")])
+    assert engine._changed_radium_text(str(tmp_path)) == {
+        "/g/a.radium": [(STOCK, "GODZILLA VS BATTRA")],
+        "/g/b.radium": [(SPLIT, "GODZILLA VS BATTRA")]}
+    d = _text(STOCK, (-2, -2, 340, 40), 1)
+    want = _draw(tmp_path, dict(d, text="GODZILLA VS BATTRA"), fonts)
+    assert np.array_equal(_draw(tmp_path, d, fonts, {STOCK: PADDED}), want)
+    assert np.array_equal(_draw(tmp_path, dict(d, text=SPLIT), fonts), want)

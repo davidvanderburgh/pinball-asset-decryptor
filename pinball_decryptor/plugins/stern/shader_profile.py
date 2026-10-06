@@ -355,6 +355,22 @@ def extras_glsl(prof, qualified=False, then=None):
     return head + "%svec3 %s(%svec3 c){%s}" % (q, _EXTRAS, q, "".join(body))
 
 
+def screen_glsl(screen):
+    """The Machine screen *screen* as ``highp vec3 pad_cx(highp vec3 c)``
+    (with ``pad_cr`` before it when it has colour ranges), for the
+    emulator's window renderer to draw the finished frame through
+    (``PAD_SCREEN_GLSL``, tools/spike2_emu/padglhost.c), or ``""`` for a
+    screen that changes nothing.
+
+    PAD-408 (DragonRR): the screen used to go into the game program's own
+    shaders (:class:`Shown`), which needed "Apply my replaced assets" for
+    the override set and could not go on a card an earlier Write had
+    already given a profile.  The renderer is ours, on the PC, and draws
+    every frame of every card, so it has neither limit."""
+    from ...core.colour_profile import Profile
+    return extras_glsl(Profile(), qualified=True, then=screen)
+
+
 def _premultiplied(text):
     """Is *text* one of the engine's premultiplied-alpha shaders?"""
     return ("colorTransformAdd" in text) or ("colorTransformFont" in text) \

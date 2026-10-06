@@ -896,11 +896,19 @@ static const char *BLIT_VS =
     "  v_uv = vec2(x, y);\n"
     "  gl_Position = vec4(x * 2.0 - 1.0, y * 2.0 - 1.0, 0.0, 1.0);\n"
     "}\n";
+/* The blit's "#version" line, then what goes before the rest: the Machine
+ * screen's function (PAD_SCREEN_GLSL, below) or the macro that draws without
+ * it. */
+static const char *BLIT_FS_HEAD = "#version 300 es\n";
+static const char *BLIT_FS_PLAIN = "#define PAD_SCR(c) (c)\n";
+static const char *BLIT_FS_SCREEN =
+    "precision highp float;\n"
+    "#define PAD_SCR(c) mix(c, pad_cx(clamp(c, 0.0, 1.0)), u_scr)\n";
 static const char *BLIT_FS =
-    "#version 300 es\n"
     "precision mediump float;\n"
     "uniform sampler2D u_tex;\n"
     "uniform float u_flip;\n"
+    "uniform float u_scr;\n"
     "uniform float u_mirror;\n"
     "uniform float u_rot;\n"
     "in vec2 v_uv;\n"
@@ -924,7 +932,7 @@ static const char *BLIT_FS =
     "  if (u_rot > 225.0)      uv = vec2(uv.y, 1.0 - uv.x);\n"
     "  else if (u_rot > 135.0) uv = vec2(1.0 - uv.x, 1.0 - uv.y);\n"
     "  else if (u_rot > 45.0)  uv = vec2(1.0 - uv.y, uv.x);\n"
-    "  o_col = vec4(texture(u_tex, uv).rgb, 1.0);\n"
+    "  o_col = vec4(PAD_SCR(texture(u_tex, uv).rgb), 1.0);\n"
     "}\n";
 
 /* ---- keyboard -> switches, and the legend window ------------------------
@@ -2468,18 +2476,71 @@ static unsigned blit_shader(unsigned type, const char *src)
     return s;
 }
 
+/* ★ PAD-408, THE MACHINE SCREEN. PAD_SCREEN_GLSL names a file holding
+ * `highp vec3 pad_cx(highp vec3 c)` (core/colour_profile's Machine screen,
+ * written by the Emulate tab's "Show it through the machine's screen" tick:
+ * plugins/stern/shader_profile.py screen_glsl). The finished frame of the
+ * backbox screen goes through it on its way to the window, so the PC shows
+ * what the machine's own LCD will - on any card, PAD-built ones included,
+ * with nothing on the card or in the game program changed. The topper
+ * (display 2) is another screen and is drawn as it is (u_scr 0). */
+static char *screen_glsl(void)
+{
+    const char *path = getenv("PAD_SCREEN_GLSL");
+    FILE *f;
+    char *buf;
+    long n;
+    if (!path || !*path) return 0;
+    f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "[padglhost] machine screen: can't open %s\n", path);
+        return 0;
+    }
+    buf = malloc(1 << 16);
+    n = buf ? (long)fread(buf, 1, (1 << 16) - 1, f) : 0;
+    fclose(f);
+    if (n <= 0) { free(buf); return 0; }
+    buf[n] = 0;
+    return buf;
+}
+
+static unsigned blit_link(const char *pre, const char *func)
+{
+    unsigned prog = p_glCreateProgram();
+    char *fs;
+    int ok = 0;
+    size_t n = strlen(BLIT_FS_HEAD) + strlen(pre) + strlen(func)
+               + strlen(BLIT_FS) + 2;
+    fs = malloc(n);
+    if (!fs) return 0;
+    snprintf(fs, n, "%s%s%s\n%s", BLIT_FS_HEAD, pre, func, BLIT_FS);
+    p_glAttachShader(prog, blit_shader(0x8B31, BLIT_VS));        /* VERTEX   */
+    p_glAttachShader(prog, blit_shader(0x8B30, fs));             /* FRAGMENT */
+    free(fs);
+    p_glLinkProgram(prog);
+    p_glGetProgramiv(prog, 0x8B82, &ok);                         /* LINK_STATUS */
+    return ok ? prog : 0;
+}
+
 /* Builds the one program that copies tex_screen to the window. Must run with
  * the context already current. */
 static void win_init_gl(void)
 {
-    int ok = 0;
+    char *scr;
     if (!win_on) return;
-    blit_prog = p_glCreateProgram();
-    p_glAttachShader(blit_prog, blit_shader(0x8B31, BLIT_VS));   /* VERTEX   */
-    p_glAttachShader(blit_prog, blit_shader(0x8B30, BLIT_FS));   /* FRAGMENT */
-    p_glLinkProgram(blit_prog);
-    p_glGetProgramiv(blit_prog, 0x8B82, &ok);                    /* LINK_STATUS */
-    if (!ok) { fprintf(stderr, "[padglhost] blit program link FAILED\n"); win_on = 0; return; }
+    blit_prog = 0;
+    scr = screen_glsl();
+    if (scr) {
+        blit_prog = blit_link(BLIT_FS_SCREEN, scr);
+        fprintf(stderr, blit_prog
+                ? "[padglhost] machine screen: the game window is drawn "
+                  "through it\n"
+                : "[padglhost] machine screen: its shader did not build; "
+                  "the game window is drawn without it\n");
+        free(scr);
+    }
+    if (!blit_prog) blit_prog = blit_link(BLIT_FS_PLAIN, "");
+    if (!blit_prog) { fprintf(stderr, "[padglhost] blit program link FAILED\n"); win_on = 0; return; }
     blit_tex_loc = p_glGetUniformLocation(blit_prog, "u_tex");
     p_glGenVertexArrays(1, &blit_vao);
 }
@@ -2980,7 +3041,9 @@ static void win_present(void)
         /* The two windows share one program, so this must be cleared here or
          * the game window inherits the topper's quarter turn. */
         fl = p_glGetUniformLocation(blit_prog, "u_rot");
-        if (fl >= 0) p_glUniform1f(fl, 0.f); }        /* the backbox: never */
+        if (fl >= 0) p_glUniform1f(fl, 0.f);          /* the backbox: never */
+        fl = p_glGetUniformLocation(blit_prog, "u_scr");   /* PAD-408 */
+        if (fl >= 0) p_glUniform1f(fl, 1.f); }
     p_glDrawArrays(0x0005, 0, 4);      /* TRIANGLE_STRIP                     */
     /* ★ ITEM 11's PER-SWAP TICK, PAD_GL_TICK=1.
      *
@@ -3282,7 +3345,9 @@ static void win2_present(void)
         fl = p_glGetUniformLocation(blit_prog, "u_mirror");
         if (fl >= 0) p_glUniform1f(fl, d2_mirror > 0 ? 1.f : 0.f); /* item 67 */
         fl = p_glGetUniformLocation(blit_prog, "u_rot");
-        if (fl >= 0) p_glUniform1f(fl, (float)win2_rot); }
+        if (fl >= 0) p_glUniform1f(fl, (float)win2_rot);
+        fl = p_glGetUniformLocation(blit_prog, "u_scr");   /* the topper: never */
+        if (fl >= 0) p_glUniform1f(fl, 0.f); }
     p_glDrawArrays(0x0005, 0, 4);
     /* The d2 window went black while its FBO measured fully lit, with no
      * EGL call reporting failure - so this path checks what nothing else

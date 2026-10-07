@@ -192,7 +192,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | John Wick Pro 1.02 | no | no | not yet | no | never waits |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | all |  |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | all |  |
+| Jurassic Park Pro 1.16 | no | ✓ | not yet | no | never waits |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
+| King Kong Pro 0.97 | no | ✓ | not yet | no | never waits |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | all |  |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
@@ -209,6 +211,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | all |  |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
+| The Mandalorian LE 1.45 | no | ✓ | not yet | no | never waits |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | all |  |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | all |  |
 | Venom LE 1.07 | ✓ | ✓ | not yet | all |  |

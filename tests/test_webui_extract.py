@@ -724,6 +724,31 @@ def test_project_game_is_the_projects_not_the_inputs(tmp_path, monkeypatch):
         assert w.state("extract")["project"]["details"]["game"] == ""
 
 
+def test_this_project_says_when_the_folder_holds_another_cards_extract(tmp_path):
+    """PAD-421: a custom Godzilla card picked over a folder holding the stock card's
+    extract read as if this card were extracted.  "This project" now says the folder holds
+    another card's extract; the card it came from (or a fresh folder) says nothing."""
+    stock = tmp_path / "godzilla_le-1_16_0.raw"
+    stock.write_bytes(b"\0" * 32)
+    custom = tmp_path / "Godzilla Heisei Custom.raw"
+    custom.write_bytes(b"\0" * 48)
+    proj = _anchored_project(tmp_path, "EXTRACTED", stock)
+    (proj / ".checksums.md5").write_text("", encoding="utf-8")
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "extract", "output", str(proj))
+        w.call("ui.set", "extract", "input", str(custom))
+        _settle(w)
+        assert w.state("extract")["project"]["details"]["card_kind"] == "other"
+        w.call("ui.set", "extract", "input", str(stock))
+        _settle(w)
+        assert w.state("extract")["project"]["details"]["card_kind"] == ""
+        # no extract in the folder yet: nothing to compare
+        (proj / ".checksums.md5").unlink()
+        w.call("ui.set", "extract", "input", str(custom))
+        _settle(w)
+        assert w.state("extract")["project"]["details"]["card_kind"] == ""
+
+
 def test_project_game_without_an_anchor_uses_the_current_plugin(
         tmp_path, monkeypatch):
     img = tmp_path / "game.pkg"

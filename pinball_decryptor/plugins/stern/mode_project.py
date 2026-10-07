@@ -2763,7 +2763,14 @@ def copy_modes(src, dest, slugs=None, replace=False):
                 report.modes.append(CopiedMode(slug, spec.name, COPY_TO_FIX, new_slug, words))
             else:
                 save(dest, new_slug, new)
-                report.modes.append(CopiedMode(slug, spec.name, COPY_CARRIED, new_slug, words))
+                # PAD-432: every shot carried, but the card may still not build it (an event its game
+                # does not report, a ball save it has not, a picture or clip the copy lacks)
+                problems = validate(new, mode_folder(dest, new_slug))
+                if problems:
+                    words = "; ".join(w for w in (words, "a build there refuses it until then: "
+                                                  + " ".join(problems)) if w)
+                report.modes.append(CopiedMode(slug, spec.name, COPY_TO_FIX if problems else COPY_CARRIED,
+                                               new_slug, words))
         elif slug in codes:
             try:
                 name = CM.load(src, slug).name
@@ -2863,30 +2870,79 @@ def port_targets(project, folders):
 # ---- a file of modes to share or keep (PAD-281) --------------------------------------
 SHARE_MANIFEST = "pad_modes.json"
 SHARE_KIND = "pad-modes"
+#: PAD-432: that file's name on a card a Write put modes on, beside ``mode.so``
+CARD_BUNDLE = "pad_modes.zip"
 
 
-def export_modes(project, zip_path, slugs=None):
+def card_about(project):
+    """PAD-432: ``{"title", "label", "card"}`` for the manifest of a file of ``project``'s modes:
+    the title key and words of the card it was made from, and that card's file name. ``{}`` when
+    the project names no card the app can read."""
+    try:
+        card, p = project_profile(project)
+    except Exception:                                   # noqa: BLE001
+        return {}
+    out = {}
+    if p is not None:
+        out.update(title=p.key, label=p.label)
+    if card is not None and card.image:
+        out["card"] = os.path.basename(card.image)
+    return out
+
+
+#: PAD-432: the files of a mode folder that are its pictures, clips and sounds - what a file of
+#: modes with a ``media_budget`` leaves out first (everything else is its settings and sources)
+MEDIA_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wav", ".mp3", ".ogg", ".flac",
+              ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp")
+
+
+def export_modes(project, zip_path, slugs=None, about=None, media_budget=None):
     """Write modes of ``project`` (``slugs``; None: every form and code mode) to a zip: each
     mode's whole folder (picture, clip and sounds too) under ``modes/<slug>/``. Anyone loads
-    it with :func:`import_modes`. Returns the slugs written."""
+    it with :func:`import_modes`. ``about`` (PAD-432, :func:`card_about`) goes in its manifest
+    as ``"from"``. ``media_budget`` (PAD-432, bytes): every settings and source file goes in,
+    and the pictures, clips and sounds (:data:`MEDIA_EXTS`) smallest first while they fit in it;
+    the ones that do not are named in the manifest's ``"left_out"`` (``modes/<slug>/<file>``).
+    Returns the slugs written."""
     import zipfile
     from . import code_modes as CM
     have = [s for s, _ in list_modes(project)[0]] + CM.code_slugs(project)
     want = [s for s in (have if slugs is None else slugs) if s in have]
     if not want:
         raise ModeProjectError("there are no modes to save")
+    files = []                                  # (arc name, path, size, is media)
+    for slug in want:
+        top = mode_folder(project, slug)
+        for root, _dirs, names in os.walk(top):
+            for name in sorted(names):
+                if name.endswith(".tmp"):
+                    continue
+                path = os.path.join(root, name)
+                rel = os.path.relpath(path, top).replace(os.sep, "/")
+                files.append(("%s/%s/%s" % (MODES_DIRNAME, slug, rel), path, os.path.getsize(path),
+                              name.lower().endswith(MEDIA_EXTS)))
+    left = []
+    if media_budget is not None:
+        room = media_budget
+        for arc, _p, size, media in sorted(files, key=lambda f: f[2]):
+            if not media:
+                continue
+            if size <= room:
+                room -= size
+            else:
+                left.append(arc)
+        left.sort()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(SHARE_MANIFEST, json.dumps(
-            {"format": FORMAT, "kind": SHARE_KIND, "modes": want}, indent=1))
-        for slug in want:
-            top = mode_folder(project, slug)
-            for root, _dirs, files in os.walk(top):
-                for name in files:
-                    if name.endswith(".tmp"):
-                        continue
-                    path = os.path.join(root, name)
-                    rel = os.path.relpath(path, top).replace(os.sep, "/")
-                    z.write(path, "%s/%s/%s" % (MODES_DIRNAME, slug, rel))
+        head = {"format": FORMAT, "kind": SHARE_KIND, "modes": want}
+        if about:
+            head["from"] = dict(about)
+        if left:
+            head["left_out"] = left
+        z.writestr(SHARE_MANIFEST, json.dumps(head, indent=1))
+        skip = set(left)
+        for arc, path, _size, _media in files:
+            if arc not in skip:
+                z.write(path, arc)
     return want
 
 

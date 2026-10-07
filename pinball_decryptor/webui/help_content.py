@@ -2783,7 +2783,16 @@ PREVIEW_HELP = {
              "other contents is asked about: **Cancel**, **Keep both** (the file's gets "
              "_2), **Skip conflicts**, **Replace all**, or tick the ones to replace. "
              "Before any is replaced, every mode here is saved to a file in the "
-             "project's **Backups** folder (untick that to skip it)."),
+             "project's **Backups** folder (untick that to skip it).\n"
+             "- **Load modes from a card image…** takes the modes straight off a card "
+             "the app wrote modes onto: another version, model or custom image of this "
+             "game too, matched here as a loaded file is. Every card Write builds "
+             "carries its project's modes for this (the pictures, clips and sounds "
+             "only while they are small; the message names any left behind). A card "
+             "built on this PC loads from the project it was built from, whole. An "
+             "older card gives back what it holds, and says what did not come back. "
+             "**Save a card image's modes to a file…** makes the same .zip without "
+             "loading it."),
             ("Five things people ask for", _limits("Examples")),
             ("Why your mode always gives way", _limits("Why your mode always gives way")),
             ("Sizes", _limits("Sizes")),

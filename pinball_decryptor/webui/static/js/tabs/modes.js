@@ -331,6 +331,12 @@ function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
             { label: "Load modes from a file…", icon: "upload",
               title: "Add the modes in a file saved here or by someone else. Each is matched to this card's shots by name, and the app says which need a look.",
               onClick: () => call("modes.load_file") },
+            { label: "Load modes from a card image…", icon: "upload",
+              title: "Add the modes on a card the app wrote modes onto: another version, model or custom image of this game too. Each is matched to this card's shots by name, and the app says what could not carry over.",
+              onClick: () => call("modes.load_card") },
+            { label: "Save a card image's modes to a file…", icon: "download",
+              title: "The modes on a card the app wrote modes onto, in one .zip file to keep or load into another project",
+              onClick: () => call("modes.save_card") },
           ])}>Save / load<//>
         <${Button} size="sm" kind="ghost" icon="trash" disabled=${!s.del_ok} onClick=${() => call("modes.delete")}>Delete<//>
       </div>

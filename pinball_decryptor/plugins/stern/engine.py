@@ -7592,7 +7592,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         raise _MW.ModeWriteError("%s is not on the card" % _rel)
                     grown_files[bytes(_node["i_block"])] = _src
                 mode_payload = _MW.p2_payload(
-                    mode_plan, os.path.join(grow_work, "modes", "p2"))
+                    mode_plan, os.path.join(grow_work, "modes", "p2"), project=assets_dir)
             except _MW.ModeWriteError as e:
                 raise RuntimeError("Modes: %s. Nothing was written." % e) \
                     from None

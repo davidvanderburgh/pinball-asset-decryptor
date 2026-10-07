@@ -395,6 +395,26 @@ def test_card_relation_a_card_from_elsewhere(tmp_path):
     assert rel["source"] == str(src) and rel["build"] == str(built)
 
 
+def test_card_relation_a_renamed_card_is_still_the_source(tmp_path):
+    """PAD-421: a card renamed after its extract is still that card (its
+    old name gone, same size and modified time); a different card of the
+    same size, or a renamed copy while the original is still there, is not."""
+    img = tmp_path / "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
+    _make_image(str(img))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    write_extract_source(str(proj), str(img))
+    copy = tmp_path / "My Godzilla.raw"
+    _make_image(str(copy))
+    st = os.stat(str(img))
+    os.utime(str(copy), (st.st_atime, st.st_mtime))
+    assert card_relation(str(copy), str(proj))["kind"] == "other"   # original still there
+    os.remove(str(img))
+    assert card_relation(str(copy), str(proj))["kind"] == "source"
+    os.utime(str(copy), (st.st_atime, st.st_mtime + 60))
+    assert card_relation(str(copy), str(proj))["kind"] == "other"   # another card
+
+
 def test_card_relation_a_build_of_another_project(tmp_path):
     src, proj, built = _project_with_build(tmp_path)
     rel = card_relation(str(built), str(tmp_path / "Other project"))

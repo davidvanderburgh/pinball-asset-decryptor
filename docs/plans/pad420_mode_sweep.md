@@ -151,10 +151,10 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   `showstrip.py` draws every title on Godzilla's playfield art with only the inserts it can place. Naming a show
   honestly needs, first: each title's own playfield picture and fixture map in the strip, and the game's own lamps
   quieted during a scan (e.g. scan in attract with the lamp test off, or diff against a recorded quiet baseline).
-- **Venom Pro 1.07 multiball**: the game dies about 3 s after Start on every multiball run (a lock call on a null
-  object, LR 0x17d6f4 in the game) and never on its ball-save runs, so something the runtime arms for a multiball
-  mode touches the game too early on this build; its balls_in_play / multiball_serve sites sit 0x17c apart as on
-  Venom LE's. Needs a rig session: which runtime call precedes the crash (gzwatch.log, a padtrace).
+- **Venom Pro 1.07 multiball**: died ~3 s after Start on three runs (a lock call on a null object, LR 0x17d6f4), then
+  passed on the fourth: the same intermittent boot/Start crash the over-committed runs showed, not the port.
+- **Munsters Pro 1.28 multiball**: with KEEP (as Munsters LE needed) the drains went 3-4-3-2-0: the last two balls
+  left together on the third drain. Look at its trough/drain switches (plunge.py drain) before trying again.
 - **In flight at the end of run 6** (detached WSL chains in `C:/tmp/PAD-420`, logs `chainN.log`; each writes a
   rigbatch `results.tsv`; commit passes with `prove_set.py <SET> <results.tsv> "<evidence>"`, then
   `limits_table.py`, the tests, and a commit):

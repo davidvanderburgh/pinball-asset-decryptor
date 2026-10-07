@@ -2305,7 +2305,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                          if about.get("label") else ""))
             for line in notes:
                 self._say("from %s: %s" % (os.path.basename(image), line))
-            return self.load_file(path, _from=image, _notes=notes)
+            return self.load_file(path, _from=image, _notes=notes, _made_for=about.get("label", ""))
 
     @rpc
     def save_card(self, image=None):
@@ -2341,12 +2341,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return dest
 
     @rpc
-    def load_file(self, path=None, _from=None, _notes=()):
+    def load_file(self, path=None, _from=None, _notes=(), _made_for=""):
         """Load from a file... (PAD-281): the modes in a zip Save to a file... wrote are added
         to this project, each matched to this card's shots as Copy to... matches them. A
         message box sums it up. Returns the report, or None. PAD-432: ``_from`` is the card
         image :func:`load_card` read the file from (the words name it), ``_notes`` what did not
-        come back from it."""
+        come back from it, ``_made_for`` the card its modes were made for."""
         project = self.project()
         if not project:
             return None
@@ -2422,8 +2422,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self.refresh(select_code=got[0].new_slug)
         else:
             self.refresh(select=got[0].new_slug if got else None)
-        words = "Loaded %d mode%s from %s." % (len(got), "" if len(got) == 1 else "s",
-                                                shown) + tail
+        words = "Loaded %d mode%s from %s%s." % (len(got), "" if len(got) == 1 else "s", shown,
+                                                  ", made for %s" % _made_for if _made_for else "") + tail
         if _notes:
             words += " " + " ".join(n[0].upper() + n[1:] + "." for n in _notes)
         if report.of(MP.COPY_TO_FIX):

@@ -189,7 +189,7 @@ def test_load_from_a_card_image_in_the_modes_tab(tmp_path, monkeypatch):
         assert got and _modes_on_disk(le) == ["kaiju_rush"]      # dual_strike: a code mode, no mode.json
         assert os.path.isfile(os.path.join(MP.mode_folder(le, "dual_strike"), "dual_strike.c"))
         msg = w.asked[-1]["message"]
-        assert "from Heisei V1.96A.raw" in msg
+        assert "from Heisei V1.96A.raw, made for Godzilla Pro 1.15." in msg
         # Save a card image's modes to a file: the same file, wherever they say
         out = str(tmp_path / "saved.zip")
         w.answers.extend([image, out])

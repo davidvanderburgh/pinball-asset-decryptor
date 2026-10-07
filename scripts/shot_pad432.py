@@ -36,7 +36,7 @@ def main():
     from pinball_decryptor.plugins.stern import mode_project as MP
     scratch = tempfile.mkdtemp(prefix="pad432-")
     mine = p396._project(scratch, "Heisei GZ 1.16 Premium", p396.LE_CARD)
-    spec = MP.ModeSpec(name="KAIJU RUSH", title="godzilla_le_1_16")
+    spec = MP.ModeSpec(name="MOTHRA HUNT", title="godzilla_le_1_16")
     spec.start_shot, spec.start_count = "Right ramp", 2
     spec.scoring_shots = ["Right ramp"]
     MP.new_mode(mine, spec=spec)

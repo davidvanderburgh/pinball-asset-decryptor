@@ -194,3 +194,126 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- PAD-420: the inserts, read from this build's own program (lampmap.port_lines); none tied to a shot ----
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 212          0              BOTTOM BLUE GI  # lamp 3, I/O group 6 index 2, at 0,0
+lamp 215          0              TOP BLUE GI  # lamp 4, I/O group 7 index 2, at 0,0
+lamp 210          0              BOTTOM RED GI  # lamp 5, I/O group 6 index 0, at 0,0
+lamp 213          0              TOP RED GI  # lamp 6, I/O group 7 index 0, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 7, I/O group 5 index 5, at 0,0
+lamp 12,13,14     0              LEFT RETURN LANE-LEFT  # lamp 8, I/O group 6 index 8, at 0,0
+lamp 9,10,11      0              LEFT OUTLANE  # lamp 9, I/O group 6 index 11, at 0,0
+lamp 61,62,63     0              LEFT LANE ARROW  # lamp 10, I/O group 6 index 16, at 0,0
+lamp 15,16,17     0              LEFT RETURN LANE-RIGHT  # lamp 11, I/O group 6 index 19, at 0,0
+lamp 67,68,69     0              LEFT LANE RECTANGLE  # lamp 12, I/O group 6 index 23, at 0,0
+lamp 64,65,66     0              LEFT LANE X  # lamp 13, I/O group 6 index 26, at 0,0
+lamp 176,177,178  0              HADRON ENFORCER 1  # lamp 14, I/O group 6 index 29, at 0,0
+lamp 70,71,72     0              GUARDIANS  # lamp 15, I/O group 6 index 34, at 0,0
+lamp 179,180,181  0              HADRON ENFORCER 2  # lamp 16, I/O group 6 index 37, at 0,0
+lamp 73,74,75     0              LEFT ORBIT ARROW  # lamp 17, I/O group 6 index 40, at 0,0
+lamp 76,77,78     0              LEFT ORBIT X  # lamp 18, I/O group 6 index 43, at 0,0
+lamp 79,80,81     0              LEFT ORBIT RECTANGLE  # lamp 19, I/O group 6 index 46, at 0,0
+lamp 88,89,90     0              ROCKET RECTANGLE  # lamp 20, I/O group 6 index 49, at 0,0
+lamp 182,183,184  0              HADRON ENFORCER 3  # lamp 21, I/O group 6 index 52, at 0,0
+lamp 91,92,93     0              ROCKET RAMPAGE  # lamp 22, I/O group 6 index 55, at 0,0
+lamp 85,86,87     0              ROCKET X  # lamp 23, I/O group 6 index 58, at 0,0
+lamp 82,83,84     0              ROCKET ARROW  # lamp 24, I/O group 6 index 61, at 0,0
+lamp 157,158,159  0              RIGHT ORBIT X  # lamp 25, I/O group 7 index 8, at 0,0
+lamp 154,155,156  0              RIGHT ORBIT ARROW  # lamp 26, I/O group 7 index 15, at 0,0
+lamp 185,186,187  0              HADRON ENFORCER 4  # lamp 27, I/O group 7 index 18, at 0,0
+lamp 160,161,162  0              RIGHT ORBIT RECTANGLE  # lamp 28, I/O group 7 index 21, at 0,0
+lamp 145,146,147  0              RIGHT RAMP ARROW  # lamp 29, I/O group 7 index 24, at 0,0
+lamp 148,149,150  0              RIGHT RAMP X  # lamp 30, I/O group 7 index 27, at 0,0
+lamp 151,152,153  0              RIGHT RAMP RECTANGLE  # lamp 31, I/O group 7 index 30, at 0,0
+lamp 133,134,135  0              ORB ARROW  # lamp 32, I/O group 7 index 33, at 0,0
+lamp 136,137,138  0              ORB X  # lamp 33, I/O group 7 index 36, at 0,0
+lamp 139,140,141  0              ORB RECTANGLE  # lamp 34, I/O group 7 index 39, at 0,0
+lamp 142,143,144  0              ORB MULTIBALL  # lamp 35, I/O group 7 index 42, at 0,0
+lamp 206,207,208  0              ORB  # lamp 36, I/O group 7 index 45, at 0,0
+lamp 169,170,171  0              RIGHT SCOOP RECTANGLE  # lamp 37, I/O group 8 index 0, at 0,0
+lamp 55,56,57     0              RIGHT RETURN LANE  # lamp 38, I/O group 8 index 7, at 0,0
+lamp 58,59,60     0              RIGHT OUTLANE  # lamp 39, I/O group 8 index 10, at 0,0
+lamp 166,167,168  0              RIGHT SCOOP X  # lamp 40, I/O group 8 index 15, at 0,0
+lamp 163,164,165  0              RIGHT SCOOP ARROW  # lamp 41, I/O group 8 index 18, at 0,0
+lamp 188,189,190  0              HADRON ENFORCER 5  # lamp 42, I/O group 8 index 21, at 0,0
+lamp 48,49,50     0              SAVE XANDAR  # lamp 43, I/O group 8 index 24, at 0,0
+lamp 51,52,53     0              GROOT MULTIBALL-BOTTOM  # lamp 44, I/O group 8 index 31, at 0,0
+lamp 27,28,29     0              YAKA ARROW  # lamp 45, I/O group 8 index 34, at 0,0
+lamp 45,46,47     0              ORB MULTIBALL-BOTTOM  # lamp 46, I/O group 8 index 37, at 0,0
+lamp 24,25,26     0              SANCTUARY  # lamp 47, I/O group 8 index 40, at 0,0
+lamp 39,40,41     0              QUILLS QUEST  # lamp 48, I/O group 8 index 43, at 0,0
+lamp 42,43,44     0              IMMOLATION INITIATIVE  # lamp 49, I/O group 8 index 46, at 0,0
+lamp 21,22,23     0              POD CHASE  # lamp 50, I/O group 8 index 49, at 0,0
+lamp 18,19,20     0              ANTIQUITIES SHOP  # lamp 51, I/O group 8 index 52, at 0,0
+lamp 30,31,32     0              SIBLING RIVALRY  # lamp 52, I/O group 8 index 55, at 0,0
+lamp 36,37,38     0              KNOWHERE  # lamp 53, I/O group 8 index 58, at 0,0
+lamp 33,34,35     0              ESCAPE KYLN  # lamp 54, I/O group 8 index 61, at 0,0
+lamp 200,201,202  0              TOP LANE-LEFT  # lamp 55, I/O group 9 index 1, at 0,0
+lamp 203,204,205  0              TOP LANE-RIGHT  # lamp 56, I/O group 9 index 4, at 0,0
+lamp 191,192,193  0              LEFT POP BUMPER  # lamp 57, I/O group 9 index 7, at 0,0
+lamp 194,195,196  0              RIGHT POP BUMPER  # lamp 58, I/O group 9 index 10, at 0,0
+lamp 197,198,199  0              BOTTOM POP BUMPER  # lamp 59, I/O group 9 index 13, at 0,0
+lamp 106,107,108  0              GROOT TARGET-RIGHT  # lamp 60, I/O group 9 index 17, at 0,0
+lamp 109,110,111  0              GROOT MULTIBALL  # lamp 61, I/O group 9 index 20, at 0,0
+lamp 103,104,105  0              GROOT TARGET-LEFT  # lamp 62, I/O group 9 index 23, at 0,0
+lamp 112,113,114  0              GROOT ARROW  # lamp 63, I/O group 9 index 26, at 0,0
+lamp 94,95,96     0              LEFT RAMP ARROW  # lamp 64, I/O group 9 index 29, at 0,0
+lamp 97,98,99     0              LEFT RAMP X  # lamp 65, I/O group 9 index 32, at 0,0
+lamp 100,101,102  0              LEFT RAMP RECTANGLE  # lamp 66, I/O group 9 index 35, at 0,0
+lamp 115,116,117  0              GROOT X  # lamp 67, I/O group 9 index 38, at 0,0
+lamp 118,119,120  0              GROOT RECTANGLE  # lamp 68, I/O group 9 index 41, at 0,0
+lamp 121,122,123  0              LOCK 1  # lamp 69, I/O group 9 index 44, at 0,0
+lamp 124,125,126  0              LOCK 2  # lamp 70, I/O group 9 index 47, at 0,0
+lamp 127,128,129  0              LOCK 3  # lamp 71, I/O group 9 index 50, at 0,0
+lamp 130,131,132  0              LOCK 4  # lamp 72, I/O group 9 index 53, at 0,0
+lamp 230,231,232  0              CENTER 1  # lamp 73, I/O group 10 index 1, at 0,0
+lamp 233,234,235  0              CENTER 2  # lamp 74, I/O group 10 index 4, at 0,0
+lamp 236,237,238  0              CENTER 3  # lamp 75, I/O group 10 index 7, at 0,0
+lamp 239,240,241  0              CENTER 4  # lamp 76, I/O group 10 index 10, at 0,0
+lamp 242,243,244  0              CENTER 5  # lamp 77, I/O group 10 index 13, at 0,0
+lamp 245,246,247  0              RIGHT RGB1  # lamp 78, I/O group 10 index 23, at 0,0
+lamp 248,249,250  0              RIGHT RGB2  # lamp 79, I/O group 10 index 26, at 0,0
+lamp 251,252,253  0              RIGHT RGB3  # lamp 80, I/O group 10 index 29, at 0,0
+lamp 261,262,263  0              LEFT RGB1  # lamp 81, I/O group 10 index 39, at 0,0
+lamp 264,265,266  0              LEFT RGB2  # lamp 82, I/O group 10 index 42, at 0,0
+lamp 267,268,269  0              LEFT RGB3  # lamp 83, I/O group 10 index 45, at 0,0
+lamp 211          0              BOTTOM WHITE GI  # lamp 84, I/O group 6 index 1, at 0,0
+lamp 214          0              TOP WHITE GI  # lamp 85, I/O group 7 index 1, at 0,0
+lamp 216          0              BACKPANEL GI  # lamp 86, I/O group 9 index 0, at 0,0
+lamp 229          0              FRONT LED  # lamp 87, I/O group 10 index 0, at 0,0
+lamp 209          0              COIN DOOR GI  # lamp 88, I/O group 5 index 1, at 0,0
+lamp 4            0              START BUTTON  # lamp 89, I/O group 5 index 2, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 90, I/O group 5 index 3, at 0,0
+lamp 221          0              LEFT RAMP BOTTOM  # lamp 91, I/O group 6 index 3, at 0,0
+lamp 223          0              RIGHT RAMP BOTTOM  # lamp 92, I/O group 6 index 4, at 0,0
+lamp 219          0              YONDU  # lamp 93, I/O group 6 index 5, at 0,0
+lamp 225          0              MAGNET  # lamp 94, I/O group 6 index 14, at 0,0
+lamp 227          0              ROCKET SPOT LIGHT  # lamp 95, I/O group 6 index 33, at 0,0
+lamp 220          0              LEFT RAMP TOP  # lamp 96, I/O group 7 index 3, at 0,0
+lamp 222          0              RIGHT RAMP TOP  # lamp 97, I/O group 7 index 4, at 0,0
+lamp 224          0              POP BUMPER  # lamp 98, I/O group 7 index 5, at 0,0
+lamp 226          0              DROP TARGET  # lamp 99, I/O group 7 index 6, at 0,0
+lamp 172          0              BILLBOARD 1  # lamp 100, I/O group 7 index 11, at 0,0
+lamp 173          0              BILLBOARD 2  # lamp 101, I/O group 7 index 12, at 0,0
+lamp 174          0              BILLBOARD 3  # lamp 102, I/O group 7 index 13, at 0,0
+lamp 175          0              BILLBOARD 4  # lamp 103, I/O group 7 index 14, at 0,0
+lamp 54           0              SHOOT AGAIN (X2)  # lamp 104, I/O group 8 index 28, at 0,0
+lamp 218          0              RIGHT SLING  # lamp 105, I/O group 8 index 29, at 0,0
+lamp 217          0              LEFT SLING  # lamp 106, I/O group 8 index 30, at 0,0
+lamp 228          0              GROOT SPOT LIGHT  # lamp 107, I/O group 9 index 16, at 0,0
+lamp 260          0              RIGHT LED7  # lamp 108, I/O group 10 index 16, at 0,0
+lamp 259          0              RIGHT LED6  # lamp 109, I/O group 10 index 17, at 0,0
+lamp 258          0              RIGHT LED5  # lamp 110, I/O group 10 index 18, at 0,0
+lamp 257          0              RIGHT LED4A/B  # lamp 111, I/O group 10 index 19, at 0,0
+lamp 256          0              RIGHT LED3A/B  # lamp 112, I/O group 10 index 20, at 0,0
+lamp 255          0              RIGHT LED2A/B  # lamp 113, I/O group 10 index 21, at 0,0
+lamp 254          0              RIGHT LED1A/B  # lamp 114, I/O group 10 index 22, at 0,0
+lamp 276          0              LEFT LED7  # lamp 115, I/O group 10 index 32, at 0,0
+lamp 275          0              LEFT LED6  # lamp 116, I/O group 10 index 33, at 0,0
+lamp 274          0              LEFT LED5  # lamp 117, I/O group 10 index 34, at 0,0
+lamp 273          0              LEFT LED4A/B  # lamp 118, I/O group 10 index 35, at 0,0
+lamp 272          0              LEFT LED3A/B  # lamp 119, I/O group 10 index 36, at 0,0
+lamp 271          0              LEFT LED2A/B  # lamp 120, I/O group 10 index 37, at 0,0
+lamp 270          0              LEFT LED1A/B  # lamp 121, I/O group 10 index 38, at 0,0

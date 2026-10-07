@@ -277,3 +277,130 @@ site block_rule_15         0x00112dcc 0xe92d43f0 0xe2028b01  # crule_van_mods::v
 text block_rule_name_15    Van Mods
 site block_rule_16         0x00128b14 0xe92d4ff0 0xe24dd01c  # cskill_shot::v[34]
 text block_rule_name_16    Skill Shot
+
+# ---- PAD-420: the inserts, read from this build's own program (lampmap.port_lines); none tied to a shot ----
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
+lamp 134          0              COIN DOOR GI  # lamp 4, I/O group 5 index 1, at 0,0
+lamp 4            0              START BUTTON  # lamp 5, I/O group 5 index 2, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 6, I/O group 5 index 3, at 0,0
+lamp 24           0              SHOOT AGAIN  # lamp 7, I/O group 7 index 45, at 0,0
+lamp 23           0              POST SAVE  # lamp 8, I/O group 7 index 36, at 0,0
+lamp 135          0              BOTTOM GI-WHT(X14)  # lamp 9, I/O group 7 index 0, at 0,0
+lamp 136          0              BOTTOM GI-RED(X6)  # lamp 10, I/O group 7 index 1, at 0,0
+lamp 137          0              TOP GI-WHT(X10)  # lamp 11, I/O group 8 index 0, at 0,0
+lamp 138          0              TOP GI-RED(X9)  # lamp 12, I/O group 8 index 1, at 0,0
+lamp 28           0              SONIC RADIO-TOP  # lamp 13, I/O group 7 index 30, at 0,0
+lamp 29           0              SONIC RADIO-BOTTOM  # lamp 14, I/O group 7 index 31, at 0,0
+lamp 30           0              SONIC RADIO-RIGHT  # lamp 15, I/O group 7 index 32, at 0,0
+lamp 37,38,39     0              LEFT RAMP  # lamp 16, I/O group 7 index 20, at 0,0
+lamp 40,41,42     0              LEFT RAMP COMBO  # lamp 17, I/O group 7 index 23, at 0,0
+lamp 43           0              START VAN  # lamp 18, I/O group 7 index 26, at 0,0
+lamp 44           0              LEFT RAMP BOLT  # lamp 19, I/O group 7 index 27, at 0,0
+lamp 139          0              VAN FLASH  # lamp 20, I/O group 7 index 16, at 0,0
+lamp 31,32,33     0              LEFT CROSSOVER  # lamp 21, I/O group 7 index 10, at 0,0
+lamp 34,35,36     0              LEFT CROSSOVER COMBO  # lamp 22, I/O group 7 index 13, at 0,0
+lamp 97,98,99     0              CENTER SPINNER  # lamp 23, I/O group 8 index 19, at 0,0
+lamp 100,101,102  0              CENTER SPINNER COMBO  # lamp 24, I/O group 8 index 16, at 0,0
+lamp 143          0              CENTER SPINNER FLASH  # lamp 25, I/O group 8 index 3, at 0,0
+lamp 77,78,79     0              UPPER LEFT LOOP  # lamp 26, I/O group 8 index 33, at 0,0
+lamp 80,81,82     0              UPPER LEFT LOOP COMBO  # lamp 27, I/O group 8 index 37, at 0,0
+lamp 45,46,47     0              MOD 1  # lamp 28, I/O group 8 index 43, at 0,0
+lamp 48,49,50     0              MOD 2  # lamp 29, I/O group 8 index 50, at 0,0
+lamp 51,52,53     0              MOD 3  # lamp 30, I/O group 8 index 54, at 0,0
+lamp 54,55,56     0              MOD 4  # lamp 31, I/O group 8 index 40, at 0,0
+lamp 57,58,59     0              MOD 5  # lamp 32, I/O group 8 index 47, at 0,0
+lamp 60,61,62     0              MOD 6  # lamp 33, I/O group 8 index 57, at 0,0
+lamp 63           0              MOD A  # lamp 34, I/O group 8 index 46, at 0,0
+lamp 0,0,64       0              MOD  # lamp 35, I/O group 8 index 53, at 0,0
+lamp 84,85,86     0              UPPER LEFT RAMP  # lamp 36, I/O group 8 index 27, at 0,0
+lamp 87,88,89     0              UPPER LEFT RAMP COMBO  # lamp 37, I/O group 8 index 30, at 0,0
+lamp 90           0              COMBOTRON  # lamp 38, I/O group 8 index 36, at 0,0
+lamp 83           0              UPPER LEFT RAMP TARGET  # lamp 39, I/O group 8 index 23, at 0,0
+lamp 91           0              UFO  # lamp 40, I/O group 8 index 22, at 0,0
+lamp 92           0              UFO LOOP BOT  # lamp 41, I/O group 8 index 61, at 0,0
+lamp 93           0              UFO LOOP MID  # lamp 42, I/O group 8 index 62, at 0,0
+lamp 94,95,96     0              UFO LOOP TOP  # lamp 43, I/O group 8 index 63, at 0,0
+lamp 103          0              OVERLORD LEFT TARGET  # lamp 44, I/O group 8 index 15, at 0,0
+lamp 104          0              OVERLORD RIGHT TARGET  # lamp 45, I/O group 8 index 10, at 0,0
+lamp 105,106,107  0              OVERLORD  # lamp 46, I/O group 8 index 11, at 0,0
+lamp 108          0              ALL MY LIFE  # lamp 47, I/O group 8 index 14, at 0,0
+lamp 109          0              MONKEY WRENCH  # lamp 48, I/O group 8 index 9, at 0,0
+lamp 110          0              THE PRETENDER  # lamp 49, I/O group 8 index 8, at 0,0
+lamp 141          0              LEFT SPOTLIGHT  # lamp 50, I/O group 7 index 17, at 0,0
+lamp 142          0              RIGHT SPOTLIGHT  # lamp 51, I/O group 7 index 54, at 0,0
+lamp 118          0              RIGHT RAMP LEFT TARGET  # lamp 52, I/O group 8 index 25, at 0,0
+lamp 119          0              RIGHT RAMP RIGHT TARGET  # lamp 53, I/O group 8 index 26, at 0,0
+lamp 120,121,122  0              RIGHT RAMP  # lamp 54, I/O group 7 index 71, at 0,0
+lamp 123,124,125  0              RIGHT RAMP COMBO  # lamp 55, I/O group 7 index 74, at 0,0
+lamp 117          0              RIGHT RAMP BOLT  # lamp 56, I/O group 8 index 24, at 0,0
+lamp 126          0              AREA 51  # lamp 57, I/O group 7 index 77, at 0,0
+lamp 127,128,129  0              RIGHT ORBIT  # lamp 58, I/O group 7 index 64, at 0,0
+lamp 130,131,132  0              RIGHT ORBIT COMBO  # lamp 59, I/O group 7 index 67, at 0,0
+lamp 133          0              RIGHT ORBIT BATTERY  # lamp 60, I/O group 7 index 78, at 0,0
+lamp 74           0              ROCK-O-METER TOP  # lamp 61, I/O group 7 index 51, at 0,0
+lamp 75           0              ROCK-O-METER MID  # lamp 62, I/O group 7 index 52, at 0,0
+lamp 76           0              ROCK-O-METER BOTTOM  # lamp 63, I/O group 7 index 53, at 0,0
+lamp 140          0              KICK TARGET FLASH  # lamp 64, I/O group 7 index 79, at 0,0
+lamp 71           0              BOT TARGET  # lamp 65, I/O group 7 index 61, at 0,0
+lamp 73           0              EXTRA BALL  # lamp 66, I/O group 7 index 63, at 0,0
+lamp 72           0              BOT AWARD  # lamp 67, I/O group 7 index 62, at 0,0
+lamp 12           0              2X  # lamp 68, I/O group 7 index 37, at 0,0
+lamp 13           0              3X  # lamp 69, I/O group 7 index 46, at 0,0
+lamp 17           0              SEATTLE  # lamp 70, I/O group 7 index 8, at 0,0
+lamp 18           0              ROSWELL  # lamp 71, I/O group 7 index 19, at 0,0
+lamp 19           0              LOS ANGELES  # lamp 72, I/O group 7 index 29, at 0,0
+lamp 20           0              NEW ORLEANS  # lamp 73, I/O group 7 index 9, at 0,0
+lamp 21           0              CHICAGO  # lamp 74, I/O group 7 index 28, at 0,0
+lamp 22           0              NEW YORK  # lamp 75, I/O group 7 index 18, at 0,0
+lamp 15           0              OVERLORD  # lamp 76, I/O group 7 index 47, at 0,0
+lamp 14           0              AUSTIN  # lamp 77, I/O group 7 index 55, at 0,0
+lamp 16           0              D.C.  # lamp 78, I/O group 7 index 38, at 0,0
+lamp 9            0              OVERDRIVE  # lamp 79, I/O group 7 index 33, at 0,0
+lamp 10           0              LEFT INLANE  # lamp 80, I/O group 7 index 34, at 0,0
+lamp 25           0              RIGHT INLANE  # lamp 81, I/O group 7 index 48, at 0,0
+lamp 26           0              RIGHT OUTLANE  # lamp 82, I/O group 7 index 49, at 0,0
+lamp 11           0              LEFT INLANE TARGET  # lamp 83, I/O group 7 index 35, at 0,0
+lamp 27           0              RIGHT INLANE TARGET  # lamp 84, I/O group 7 index 50, at 0,0
+lamp 65           0              FOOBOT HEAD  # lamp 85, I/O group 7 index 70, at 0,0
+lamp 66           0              FOOBOT RIGHT ARM  # lamp 86, I/O group 7 index 57, at 0,0
+lamp 67           0              FOOBOT LEFT ARM  # lamp 87, I/O group 7 index 60, at 0,0
+lamp 68           0              FOOBOT TORSO  # lamp 88, I/O group 7 index 56, at 0,0
+lamp 69           0              FOOBOT RIGHT LEG  # lamp 89, I/O group 7 index 58, at 0,0
+lamp 70           0              FOOBOT LEFT LEG  # lamp 90, I/O group 7 index 59, at 0,0
+lamp 111,112,113  0              OVERLORD MECH LEFT  # lamp 91, I/O group 8 index 66, at 0,0
+lamp 114,115,116  0              OVERLORD MECH RIGHT  # lamp 92, I/O group 8 index 69, at 0,0
+lamp 144          0              OVERLORD MECH FLASH  # lamp 93, I/O group 8 index 60, at 0,0
+lamp 145          0              AREA 51 FLASH  # lamp 102, I/O group 8 index 4, at 0,0
+lamp 149,150,151  0              SPEAKER 1  # lamp 201, I/O group 6 index 1, at 0,0
+lamp 152,153,154  0              SPEAKER 2  # lamp 202, I/O group 6 index 4, at 0,0
+lamp 155,156,157  0              SPEAKER 3  # lamp 203, I/O group 6 index 7, at 0,0
+lamp 158,159,160  0              SPEAKER 4  # lamp 204, I/O group 6 index 10, at 0,0
+lamp 161,162,163  0              SPEAKER 5  # lamp 205, I/O group 6 index 13, at 0,0
+lamp 164,165,166  0              SPEAKER 6  # lamp 206, I/O group 6 index 16, at 0,0
+lamp 167,168,169  0              SPEAKER 7  # lamp 207, I/O group 6 index 19, at 0,0
+lamp 170,171,172  0              SPEAKER 8  # lamp 208, I/O group 6 index 22, at 0,0
+lamp 173,174,175  0              SPEAKER 9  # lamp 209, I/O group 6 index 25, at 0,0
+lamp 176,177,178  0              SPEAKER 10  # lamp 210, I/O group 6 index 28, at 0,0
+lamp 179,180,181  0              SPEAKER 11  # lamp 211, I/O group 6 index 31, at 0,0
+lamp 182,183,184  0              SPEAKER 12  # lamp 212, I/O group 6 index 34, at 0,0
+lamp 185,186,187  0              SPEAKER 13  # lamp 213, I/O group 6 index 37, at 0,0
+lamp 188,189,190  0              SPEAKER 14  # lamp 214, I/O group 6 index 40, at 0,0
+lamp 191,192,193  0              SPEAKER 15  # lamp 215, I/O group 6 index 43, at 0,0
+lamp 194,195,196  0              SPEAKER 16  # lamp 216, I/O group 6 index 46, at 0,0
+lamp 197,198,199  0              SPEAKER 17  # lamp 217, I/O group 6 index 49, at 0,0
+lamp 200,201,202  0              SPEAKER 18  # lamp 218, I/O group 6 index 52, at 0,0
+lamp 203,204,205  0              SPEAKER 19  # lamp 219, I/O group 6 index 55, at 0,0
+lamp 206,207,208  0              SPEAKER 20  # lamp 220, I/O group 6 index 58, at 0,0
+lamp 209,210,211  0              SPEAKER 21  # lamp 221, I/O group 6 index 61, at 0,0
+lamp 212,213,214  0              SPEAKER 22  # lamp 222, I/O group 6 index 64, at 0,0
+lamp 215,216,217  0              SPEAKER 23  # lamp 223, I/O group 6 index 67, at 0,0
+lamp 404,405,406  0              TOPPER GLASSES  # lamp 224, I/O group 9 index 1, at 0,0
+lamp 407,408,409  0              TOPPER MOUTH  # lamp 225, I/O group 9 index 4, at 0,0
+lamp 218,219,220  0              TOPPER FRONT RAMI  # lamp 254, I/O group 10 index 130, at 0,0
+lamp 227,228,229  0              TOPPER FRONT TAYLOR  # lamp 255, I/O group 10 index 133, at 0,0
+lamp 236,237,238  0              TOPPER FRONT CHRIS  # lamp 256, I/O group 10 index 136, at 0,0
+lamp 347,348,349  0              TOPPER FRONT PAT  # lamp 257, I/O group 10 index 1, at 0,0
+lamp 356,357,358  0              TOPPER FRONT DAVE  # lamp 258, I/O group 10 index 4, at 0,0
+lamp 365,366,367  0              TOPPER FRONT NATE  # lamp 259, I/O group 10 index 7, at 0,0

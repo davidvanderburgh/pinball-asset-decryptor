@@ -207,3 +207,232 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- PAD-420: the inserts, read from this build's own program (lampmap.port_lines); none tied to a shot ----
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
+lamp 442,443,444  0              SPEAKER 1  # lamp 4, I/O group 6 index 1, at 0,0
+lamp 445,446,447  0              SPEAKER 2  # lamp 5, I/O group 6 index 4, at 0,0
+lamp 448,449,450  0              SPEAKER 3  # lamp 6, I/O group 6 index 7, at 0,0
+lamp 451,452,453  0              SPEAKER 4  # lamp 7, I/O group 6 index 10, at 0,0
+lamp 454,455,456  0              SPEAKER 5  # lamp 8, I/O group 6 index 13, at 0,0
+lamp 457,458,459  0              SPEAKER 6  # lamp 9, I/O group 6 index 16, at 0,0
+lamp 460,461,462  0              SPEAKER 7  # lamp 10, I/O group 6 index 19, at 0,0
+lamp 463,464,465  0              SPEAKER 8  # lamp 11, I/O group 6 index 22, at 0,0
+lamp 466,467,468  0              SPEAKER 9  # lamp 12, I/O group 6 index 25, at 0,0
+lamp 469,470,471  0              SPEAKER 10  # lamp 13, I/O group 6 index 28, at 0,0
+lamp 472,473,474  0              SPEAKER 11  # lamp 14, I/O group 6 index 31, at 0,0
+lamp 475,476,477  0              SPEAKER 12  # lamp 15, I/O group 6 index 34, at 0,0
+lamp 478,479,480  0              SPEAKER 13  # lamp 16, I/O group 6 index 37, at 0,0
+lamp 481,482,483  0              SPEAKER 14  # lamp 17, I/O group 6 index 40, at 0,0
+lamp 484,485,486  0              SPEAKER 15  # lamp 18, I/O group 6 index 43, at 0,0
+lamp 487,488,489  0              SPEAKER 16  # lamp 19, I/O group 6 index 46, at 0,0
+lamp 490,491,492  0              SPEAKER 17  # lamp 20, I/O group 6 index 49, at 0,0
+lamp 493,494,495  0              SPEAKER 18  # lamp 21, I/O group 6 index 52, at 0,0
+lamp 496,497,498  0              SPEAKER 19  # lamp 22, I/O group 6 index 55, at 0,0
+lamp 499,500,501  0              SPEAKER 20  # lamp 23, I/O group 6 index 58, at 0,0
+lamp 502,503,504  0              SPEAKER 21  # lamp 24, I/O group 6 index 61, at 0,0
+lamp 505,506,507  0              SPEAKER 22  # lamp 25, I/O group 6 index 64, at 0,0
+lamp 508,509,510  0              SPEAKER 23  # lamp 26, I/O group 6 index 67, at 0,0
+lamp 127,128,129  0              EXPRESSIVE LIGHTING L 1  # lamp 27, I/O group 1 index 1, at 0,0
+lamp 130,131,132  0              EXPRESSIVE LIGHTING L 2  # lamp 28, I/O group 1 index 4, at 0,0
+lamp 133,134,135  0              EXPRESSIVE LIGHTING L 3  # lamp 29, I/O group 1 index 7, at 0,0
+lamp 136,137,138  0              EXPRESSIVE LIGHTING L 4  # lamp 30, I/O group 1 index 10, at 0,0
+lamp 139,140,141  0              EXPRESSIVE LIGHTING L 5  # lamp 31, I/O group 1 index 13, at 0,0
+lamp 142,143,144  0              EXPRESSIVE LIGHTING L 6  # lamp 32, I/O group 1 index 16, at 0,0
+lamp 145,146,147  0              EXPRESSIVE LIGHTING L 7  # lamp 33, I/O group 1 index 19, at 0,0
+lamp 148,149,150  0              EXPRESSIVE LIGHTING L 8  # lamp 34, I/O group 1 index 22, at 0,0
+lamp 151,152,153  0              EXPRESSIVE LIGHTING L 9  # lamp 35, I/O group 1 index 25, at 0,0
+lamp 154,155,156  0              EXPRESSIVE LIGHTING L 10  # lamp 36, I/O group 1 index 28, at 0,0
+lamp 157,158,159  0              EXPRESSIVE LIGHTING L 11  # lamp 37, I/O group 1 index 31, at 0,0
+lamp 160,161,162  0              EXPRESSIVE LIGHTING L 12  # lamp 38, I/O group 1 index 34, at 0,0
+lamp 163,164,165  0              EXPRESSIVE LIGHTING L 13  # lamp 39, I/O group 1 index 37, at 0,0
+lamp 166,167,168  0              EXPRESSIVE LIGHTING L 14  # lamp 40, I/O group 1 index 40, at 0,0
+lamp 169,170,171  0              EXPRESSIVE LIGHTING L 15  # lamp 41, I/O group 1 index 43, at 0,0
+lamp 172,173,174  0              EXPRESSIVE LIGHTING L 16  # lamp 42, I/O group 1 index 46, at 0,0
+lamp 175,176,177  0              EXPRESSIVE LIGHTING L 17  # lamp 43, I/O group 1 index 49, at 0,0
+lamp 178,179,180  0              EXPRESSIVE LIGHTING L 18  # lamp 44, I/O group 1 index 52, at 0,0
+lamp 181,182,183  0              EXPRESSIVE LIGHTING L 19  # lamp 45, I/O group 1 index 55, at 0,0
+lamp 184,185,186  0              EXPRESSIVE LIGHTING L 20  # lamp 46, I/O group 1 index 58, at 0,0
+lamp 187,188,189  0              EXPRESSIVE LIGHTING L 21  # lamp 47, I/O group 1 index 61, at 0,0
+lamp 190,191,192  0              EXPRESSIVE LIGHTING L 22  # lamp 48, I/O group 1 index 64, at 0,0
+lamp 193,194,195  0              EXPRESSIVE LIGHTING L 23  # lamp 49, I/O group 1 index 67, at 0,0
+lamp 196,197,198  0              EXPRESSIVE LIGHTING L 24  # lamp 50, I/O group 1 index 70, at 0,0
+lamp 199,200,201  0              EXPRESSIVE LIGHTING L 25  # lamp 51, I/O group 1 index 73, at 0,0
+lamp 202,203,204  0              EXPRESSIVE LIGHTING L 26  # lamp 52, I/O group 1 index 76, at 0,0
+lamp 205,206,207  0              EXPRESSIVE LIGHTING L 27  # lamp 53, I/O group 1 index 79, at 0,0
+lamp 208,209,210  0              EXPRESSIVE LIGHTING L 28  # lamp 54, I/O group 1 index 82, at 0,0
+lamp 211,212,213  0              EXPRESSIVE LIGHTING L 29  # lamp 55, I/O group 1 index 85, at 0,0
+lamp 214,215,216  0              EXPRESSIVE LIGHTING L 30  # lamp 56, I/O group 1 index 88, at 0,0
+lamp 217,218,219  0              EXPRESSIVE LIGHTING L 31  # lamp 57, I/O group 1 index 91, at 0,0
+lamp 220,221,222  0              EXPRESSIVE LIGHTING L 32  # lamp 58, I/O group 1 index 94, at 0,0
+lamp 223,224,225  0              EXPRESSIVE LIGHTING L 33  # lamp 59, I/O group 1 index 97, at 0,0
+lamp 226,227,228  0              EXPRESSIVE LIGHTING L 34  # lamp 60, I/O group 1 index 100, at 0,0
+lamp 229,230,231  0              EXPRESSIVE LIGHTING L 35  # lamp 61, I/O group 1 index 103, at 0,0
+lamp 232,233,234  0              EXPRESSIVE LIGHTING L 36  # lamp 62, I/O group 1 index 106, at 0,0
+lamp 235,236,237  0              EXPRESSIVE LIGHTING L 37  # lamp 63, I/O group 1 index 109, at 0,0
+lamp 238,239,240  0              EXPRESSIVE LIGHTING L 38  # lamp 64, I/O group 1 index 112, at 0,0
+lamp 241,242,243  0              EXPRESSIVE LIGHTING L 39  # lamp 65, I/O group 1 index 115, at 0,0
+lamp 244,245,246  0              EXPRESSIVE LIGHTING L 40  # lamp 66, I/O group 1 index 118, at 0,0
+lamp 247,248,249  0              EXPRESSIVE LIGHTING L 41  # lamp 67, I/O group 1 index 121, at 0,0
+lamp 250,251,252  0              EXPRESSIVE LIGHTING L 42  # lamp 68, I/O group 1 index 124, at 0,0
+lamp 253,254,255  0              EXPRESSIVE LIGHTING L 43  # lamp 69, I/O group 1 index 127, at 0,0
+lamp 256,257,258  0              EXPRESSIVE LIGHTING L 44  # lamp 70, I/O group 1 index 130, at 0,0
+lamp 259,260,261  0              EXPRESSIVE LIGHTING L 45  # lamp 71, I/O group 1 index 133, at 0,0
+lamp 262,263,264  0              EXPRESSIVE LIGHTING L 46  # lamp 72, I/O group 1 index 136, at 0,0
+lamp 265,266,267  0              EXPRESSIVE LIGHTING L 47  # lamp 73, I/O group 1 index 139, at 0,0
+lamp 268,269,270  0              EXPRESSIVE LIGHTING L 48  # lamp 74, I/O group 1 index 142, at 0,0
+lamp 271,272,273  0              EXPRESSIVE LIGHTING R 49  # lamp 75, I/O group 1 index 145, at 0,0
+lamp 274,275,276  0              EXPRESSIVE LIGHTING R 50  # lamp 76, I/O group 1 index 148, at 0,0
+lamp 277,278,279  0              EXPRESSIVE LIGHTING R 51  # lamp 77, I/O group 1 index 151, at 0,0
+lamp 280,281,282  0              EXPRESSIVE LIGHTING R 52  # lamp 78, I/O group 1 index 154, at 0,0
+lamp 283,284,285  0              EXPRESSIVE LIGHTING R 53  # lamp 79, I/O group 1 index 157, at 0,0
+lamp 286,287,288  0              EXPRESSIVE LIGHTING R 54  # lamp 80, I/O group 1 index 160, at 0,0
+lamp 289,290,291  0              EXPRESSIVE LIGHTING R 55  # lamp 81, I/O group 1 index 163, at 0,0
+lamp 292,293,294  0              EXPRESSIVE LIGHTING R 56  # lamp 82, I/O group 1 index 166, at 0,0
+lamp 295,296,297  0              EXPRESSIVE LIGHTING R 57  # lamp 83, I/O group 1 index 169, at 0,0
+lamp 298,299,300  0              EXPRESSIVE LIGHTING R 58  # lamp 84, I/O group 1 index 172, at 0,0
+lamp 301,302,303  0              EXPRESSIVE LIGHTING R 59  # lamp 85, I/O group 1 index 175, at 0,0
+lamp 304,305,306  0              EXPRESSIVE LIGHTING R 60  # lamp 86, I/O group 1 index 178, at 0,0
+lamp 307,308,309  0              EXPRESSIVE LIGHTING R 61  # lamp 87, I/O group 1 index 181, at 0,0
+lamp 310,311,312  0              EXPRESSIVE LIGHTING R 62  # lamp 88, I/O group 1 index 184, at 0,0
+lamp 313,314,315  0              EXPRESSIVE LIGHTING R 63  # lamp 89, I/O group 1 index 187, at 0,0
+lamp 316,317,318  0              EXPRESSIVE LIGHTING R 64  # lamp 90, I/O group 1 index 190, at 0,0
+lamp 319,320,321  0              EXPRESSIVE LIGHTING R 65  # lamp 91, I/O group 1 index 193, at 0,0
+lamp 322,323,324  0              EXPRESSIVE LIGHTING R 66  # lamp 92, I/O group 1 index 196, at 0,0
+lamp 325,326,327  0              EXPRESSIVE LIGHTING R 67  # lamp 93, I/O group 1 index 199, at 0,0
+lamp 328,329,330  0              EXPRESSIVE LIGHTING R 68  # lamp 94, I/O group 1 index 202, at 0,0
+lamp 331,332,333  0              EXPRESSIVE LIGHTING R 69  # lamp 95, I/O group 1 index 205, at 0,0
+lamp 334,335,336  0              EXPRESSIVE LIGHTING R 70  # lamp 96, I/O group 1 index 208, at 0,0
+lamp 337,338,339  0              EXPRESSIVE LIGHTING R 71  # lamp 97, I/O group 1 index 211, at 0,0
+lamp 340,341,342  0              EXPRESSIVE LIGHTING R 72  # lamp 98, I/O group 1 index 214, at 0,0
+lamp 343,344,345  0              EXPRESSIVE LIGHTING R 73  # lamp 99, I/O group 1 index 217, at 0,0
+lamp 346,347,348  0              EXPRESSIVE LIGHTING R 74  # lamp 100, I/O group 1 index 220, at 0,0
+lamp 349,350,351  0              EXPRESSIVE LIGHTING R 75  # lamp 101, I/O group 1 index 223, at 0,0
+lamp 352,353,354  0              EXPRESSIVE LIGHTING R 76  # lamp 102, I/O group 1 index 226, at 0,0
+lamp 355,356,357  0              EXPRESSIVE LIGHTING R 77  # lamp 103, I/O group 1 index 229, at 0,0
+lamp 358,359,360  0              EXPRESSIVE LIGHTING R 78  # lamp 104, I/O group 1 index 232, at 0,0
+lamp 361,362,363  0              EXPRESSIVE LIGHTING R 79  # lamp 105, I/O group 1 index 235, at 0,0
+lamp 364,365,366  0              EXPRESSIVE LIGHTING R 80  # lamp 106, I/O group 1 index 238, at 0,0
+lamp 367,368,369  0              EXPRESSIVE LIGHTING R 81  # lamp 107, I/O group 1 index 241, at 0,0
+lamp 370,371,372  0              EXPRESSIVE LIGHTING R 82  # lamp 108, I/O group 1 index 244, at 0,0
+lamp 373,374,375  0              EXPRESSIVE LIGHTING R 83  # lamp 109, I/O group 1 index 247, at 0,0
+lamp 376,377,378  0              EXPRESSIVE LIGHTING R 84  # lamp 110, I/O group 1 index 250, at 0,0
+lamp 379,380,381  0              EXPRESSIVE LIGHTING R 85  # lamp 111, I/O group 1 index 253, at 0,0
+lamp 382,383,384  0              EXPRESSIVE LIGHTING R 86  # lamp 112, I/O group 1 index 256, at 0,0
+lamp 385,386,387  0              EXPRESSIVE LIGHTING R 87  # lamp 113, I/O group 1 index 259, at 0,0
+lamp 388,389,390  0              EXPRESSIVE LIGHTING R 88  # lamp 114, I/O group 1 index 262, at 0,0
+lamp 391,392,393  0              EXPRESSIVE LIGHTING R 89  # lamp 115, I/O group 1 index 265, at 0,0
+lamp 394,395,396  0              EXPRESSIVE LIGHTING R 90  # lamp 116, I/O group 1 index 268, at 0,0
+lamp 397,398,399  0              EXPRESSIVE LIGHTING R 91  # lamp 117, I/O group 1 index 271, at 0,0
+lamp 400,401,402  0              EXPRESSIVE LIGHTING R 92  # lamp 118, I/O group 1 index 274, at 0,0
+lamp 403,404,405  0              EXPRESSIVE LIGHTING R 93  # lamp 119, I/O group 1 index 277, at 0,0
+lamp 406,407,408  0              EXPRESSIVE LIGHTING R 94  # lamp 120, I/O group 1 index 280, at 0,0
+lamp 409,410,411  0              EXPRESSIVE LIGHTING R 95  # lamp 121, I/O group 1 index 283, at 0,0
+lamp 412,413,414  0              EXPRESSIVE LIGHTING R 96  # lamp 122, I/O group 1 index 286, at 0,0
+lamp 30,31,32     0              LEFT POP BUMPER  # lamp 123, I/O group 7 index 29, at 0,0
+lamp 39,40,41     0              SHOOT ME LEFT ORBIT  # lamp 124, I/O group 7 index 32, at 0,0
+lamp 42,43,44     0              RECORD LEFT ORBIT  # lamp 125, I/O group 7 index 35, at 0,0
+lamp 33,34,35     0              RIGHT POP BUMPER  # lamp 126, I/O group 7 index 40, at 0,0
+lamp 36,37,38     0              BOTTOM POP BUMPER  # lamp 127, I/O group 7 index 43, at 0,0
+lamp 48,49,50     0              SHOOT ME SIDE RAMP  # lamp 128, I/O group 8 index 8, at 0,0
+lamp 69,70,71     0              SHOOT ME MINI ORBIT  # lamp 129, I/O group 8 index 11, at 0,0
+lamp 72,73,74     0              RECORD MINI ORBIT  # lamp 130, I/O group 8 index 14, at 0,0
+lamp 53,54,55     0              SHOOT ME UPPER SCOOP  # lamp 131, I/O group 8 index 21, at 0,0
+lamp 77,78,79     0              SHOOT ME TOP TARGET  # lamp 132, I/O group 8 index 24, at 0,0
+lamp 80,81,82     0              RECORD TOP TARGET  # lamp 133, I/O group 8 index 27, at 0,0
+lamp 85,86,87     0              SHOOT ME SPINNER  # lamp 134, I/O group 8 index 34, at 0,0
+lamp 88,89,90     0              RECORD SPINNER  # lamp 135, I/O group 8 index 37, at 0,0
+lamp 61,62,63     0              SHOOT ME RIGHT RAMP  # lamp 136, I/O group 8 index 42, at 0,0
+lamp 64,65,66     0              RECORD RIGHT RAMP  # lamp 137, I/O group 8 index 45, at 0,0
+lamp 93,94,95     0              SHOOT ME RIGHT ORBIT  # lamp 138, I/O group 8 index 64, at 0,0
+lamp 96,97,98     0              RECORD RIGHT ORBIT  # lamp 139, I/O group 8 index 67, at 0,0
+lamp 105,0,0      0              BOTTOM GI  # lamp 140, I/O group 7 index 0, at 0,0
+lamp 107,0,0      0              TOP GI  # lamp 141, I/O group 8 index 0, at 0,0
+lamp 123          0              BACKPANEL FLASH  # lamp 142, I/O group 8 index 3, at 0,0
+lamp 104          0              COIN DOOR GI  # lamp 143, I/O group 5 index 1, at 0,0
+lamp 4            0              START BUTTON  # lamp 144, I/O group 5 index 2, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 145, I/O group 5 index 3, at 0,0
+lamp 125          0              SHOOTER ILLUM. 1 (OPTIONAL)  # lamp 146, I/O group 5 index 9, at 0,0
+lamp 126          0              SHOOTER ILLUM. 2 (OPTIONAL)  # lamp 147, I/O group 5 index 10, at 0,0
+lamp 106          0              BOTTOM GI-WHT  # lamp 148, I/O group 7 index 1, at 0,0
+lamp 9            0              LEFT OUTLANE  # lamp 149, I/O group 7 index 3, at 0,0
+lamp 10           0              LEFT RETURN LANE  # lamp 150, I/O group 7 index 4, at 0,0
+lamp 11           0              RIGHT RETURN LANE INNER  # lamp 151, I/O group 7 index 5, at 0,0
+lamp 12           0              RIGHT RETURN LANE OUTER  # lamp 152, I/O group 7 index 6, at 0,0
+lamp 13           0              RIGHT OUTLANE  # lamp 153, I/O group 7 index 7, at 0,0
+lamp 19           0              LA VILLA STRANGIATO  # lamp 154, I/O group 7 index 8, at 0,0
+lamp 20           0              LIMELIGHT  # lamp 155, I/O group 7 index 9, at 0,0
+lamp 109          0              LEFT SLING FLASH  # lamp 156, I/O group 7 index 10, at 0,0
+lamp 110          0              RIGHT SLING FLASH  # lamp 157, I/O group 7 index 11, at 0,0
+lamp 113          0              2112 FLASH  # lamp 158, I/O group 7 index 15, at 0,0
+lamp 15           0              THE BIG MONEY  # lamp 159, I/O group 7 index 16, at 0,0
+lamp 111          0              CYGNUS X1 BOOK 1 FLASH  # lamp 160, I/O group 7 index 17, at 0,0
+lamp 112          0              CYGNUS X1 BOOK 2 FLASH  # lamp 161, I/O group 7 index 18, at 0,0
+lamp 16           0              THE SPIRIT OF RADIO  # lamp 162, I/O group 7 index 19, at 0,0
+lamp 17           0              WORKING MAN  # lamp 163, I/O group 7 index 21, at 0,0
+lamp 18           0              TOM SAWYER  # lamp 164, I/O group 7 index 22, at 0,0
+lamp 14           0              SHOOT AGAIN (X2)  # lamp 165, I/O group 7 index 23, at 0,0
+lamp 23           0              DRUM DROP  # lamp 166, I/O group 7 index 24, at 0,0
+lamp 22           0              ELECTRIC GUITAR DROP  # lamp 167, I/O group 7 index 25, at 0,0
+lamp 21           0              BASS DROP  # lamp 168, I/O group 7 index 26, at 0,0
+lamp 114          0              UPPER LEFT FLASH  # lamp 169, I/O group 7 index 28, at 0,0
+lamp 45           0              LEFT ORBIT COMBO 2  # lamp 170, I/O group 7 index 38, at 0,0
+lamp 46           0              LEFT ORBIT COMBO 1  # lamp 171, I/O group 7 index 39, at 0,0
+lamp 115          0              LOWER LEFT FLASH  # lamp 172, I/O group 7 index 46, at 0,0
+lamp 120          0              DRUM CLOCK FLASH  # lamp 173, I/O group 7 index 47, at 0,0
+lamp 108          0              TOP GI-WHT  # lamp 174, I/O group 8 index 1, at 0,0
+lamp 75           0              MINI ORBIT COMBO 3  # lamp 175, I/O group 8 index 17, at 0,0
+lamp 76           0              MINI ORBIT COMBO 2  # lamp 176, I/O group 8 index 18, at 0,0
+lamp 51           0              SIDE RAMP COMBO 3  # lamp 177, I/O group 8 index 19, at 0,0
+lamp 52           0              SIDE RAMP COMBO 2  # lamp 178, I/O group 8 index 20, at 0,0
+lamp 83           0              TOP TARGET COMBO 3  # lamp 179, I/O group 8 index 30, at 0,0
+lamp 84           0              TOP TARGET COMBO 1  # lamp 180, I/O group 8 index 31, at 0,0
+lamp 56           0              UPPER SCOOP EXTRA BALL  # lamp 181, I/O group 8 index 32, at 0,0
+lamp 59           0              LITE LOCK LEFT  # lamp 182, I/O group 8 index 33, at 0,0
+lamp 91           0              SPINNER COMBO 2  # lamp 183, I/O group 8 index 40, at 0,0
+lamp 92           0              SPINNER COMBO 1  # lamp 184, I/O group 8 index 41, at 0,0
+lamp 124          0              CENTER RAMP FLASH  # lamp 185, I/O group 8 index 53, at 0,0
+lamp 47           0              SUPER JACKPOT SIDE RAMP  # lamp 186, I/O group 8 index 54, at 0,0
+lamp 60           0              LITE LOCK RIGHT  # lamp 187, I/O group 8 index 55, at 0,0
+lamp 27           0              RUS(H) TARGET  # lamp 188, I/O group 8 index 56, at 0,0
+lamp 26           0              RU(S)H TARGET  # lamp 189, I/O group 8 index 57, at 0,0
+lamp 25           0              R(U)SH TARGET  # lamp 190, I/O group 8 index 58, at 0,0
+lamp 24           0              (R)USH TARGET  # lamp 191, I/O group 8 index 59, at 0,0
+lamp 67           0              RIGHT RAMP COMBO 1  # lamp 192, I/O group 8 index 60, at 0,0
+lamp 68           0              RIGHT RAMP LITE LOCK  # lamp 193, I/O group 8 index 61, at 0,0
+lamp 101          0              TIME MACHINE LEFT  # lamp 194, I/O group 8 index 4, at 0,0
+lamp 102          0              TIME MACHINE CENTER  # lamp 195, I/O group 8 index 5, at 0,0
+lamp 103          0              TIME MACHINE RIGHT  # lamp 196, I/O group 8 index 6, at 0,0
+lamp 28           0              DRUM SOLO UP RIGHT FLIP  # lamp 197, I/O group 8 index 62, at 0,0
+lamp 29           0              EXTRA BALL UP RIGHT FLIP  # lamp 198, I/O group 8 index 63, at 0,0
+lamp 99           0              RIGHT ORBIT COMBO 2  # lamp 199, I/O group 8 index 70, at 0,0
+lamp 100          0              RIGHT ORBIT MULTI BALL  # lamp 200, I/O group 8 index 71, at 0,0
+lamp 117          0              LOWER RIGHT FLASH  # lamp 201, I/O group 8 index 72, at 0,0
+lamp 118          0              LOCK FLASH  # lamp 202, I/O group 8 index 73, at 0,0
+lamp 119          0              MYSTERY FLASH (X2)  # lamp 203, I/O group 8 index 74, at 0,0
+lamp 121          0              TIME MACHINE FLASH  # lamp 204, I/O group 8 index 75, at 0,0
+lamp 122          0              RIGHT RAMP FLASH  # lamp 205, I/O group 8 index 76, at 0,0
+lamp 116          0              UPPER RIGHT FLASH  # lamp 206, I/O group 8 index 77, at 0,0
+lamp 57           0              LOCK UPPER SCOOP  # lamp 207, I/O group 8 index 78, at 0,0
+lamp 58           0              LOCK LOWER SCOOP  # lamp 208, I/O group 8 index 79, at 0,0
+lamp 441          0              BACK GI (X8)  # lamp 209, I/O group 9 index 0, at 0,0
+lamp 415          0              ALBUM 1  # lamp 210, I/O group 9 index 1, at 0,0
+lamp 416          0              ALBUM 2  # lamp 211, I/O group 9 index 2, at 0,0
+lamp 417          0              ALBUM 3  # lamp 212, I/O group 9 index 3, at 0,0
+lamp 418          0              ALBUM 4  # lamp 213, I/O group 9 index 4, at 0,0
+lamp 419          0              ALBUM 5  # lamp 214, I/O group 9 index 5, at 0,0
+lamp 420          0              ALBUM 6  # lamp 215, I/O group 9 index 6, at 0,0
+lamp 421          0              ALBUM 7  # lamp 216, I/O group 9 index 7, at 0,0
+lamp 422          0              ALBUM 8  # lamp 217, I/O group 9 index 8, at 0,0
+lamp 423          0              ALBUM 9  # lamp 218, I/O group 9 index 9, at 0,0
+lamp 424          0              ALBUM 10  # lamp 219, I/O group 9 index 10, at 0,0
+lamp 425          0              MILLIONS (X2)  # lamp 220, I/O group 9 index 13, at 0,0
+lamp 426          0              EXTRA BALL (X2)  # lamp 221, I/O group 9 index 12, at 0,0
+lamp 427          0              FRENZY (X2)  # lamp 222, I/O group 9 index 11, at 0,0
+lamp 428          0              ADVANCE TIME MACHINE (X2)  # lamp 223, I/O group 9 index 14, at 0,0
+lamp 429,430,431  0              GI1  # lamp 224, I/O group 9 index 20, at 0,0
+lamp 432,433,434  0              GI2  # lamp 225, I/O group 9 index 23, at 0,0
+lamp 435,436,437  0              GI3  # lamp 226, I/O group 9 index 26, at 0,0
+lamp 438,439,440  0              GI4  # lamp 227, I/O group 9 index 29, at 0,0

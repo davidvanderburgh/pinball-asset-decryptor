@@ -49,17 +49,20 @@ def _names(rows):
 
 
 # ---------------------------------------------------------------- gating
-@pytest.mark.parametrize("mfr,era,visible", [
-    ("stern", "", True), ("stern", "spike1", False),
-    ("stern", "whitestar", False), ("jjp", "", False), ("spooky", "", False),
-    ("williams", "", False)])
-def test_tabs_follow_the_capabilities(tmp_path, mfr, era, visible):
+# Compare: two card images where the plugin compares them (Stern Spike 2),
+# else two project folders for anyone that extracts (PAD-442).
+@pytest.mark.parametrize("mfr,era,visible,compare", [
+    ("stern", "", True, True), ("stern", "spike1", False, True),
+    ("stern", "whitestar", False, False), ("jjp", "", False, True),
+    ("spooky", "", False, True), ("williams", "", False, True)])
+def test_tabs_follow_the_capabilities(tmp_path, mfr, era, visible, compare):
     with web_app(tmp_path, mfr=mfr, era=era or None) as w:
         if mfr not in {m.key for m in w.window.manufacturers}:
             pytest.skip("no %s plugin" % mfr)
         tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
         assert tabs["partitions"]["visible"] is visible
-        assert tabs["compare"]["visible"] is visible
+        assert tabs["compare"]["visible"] is compare
+        assert w.state("compare")["images_ok"] is visible
         # nothing open, nothing enabled, the report empty
         p = w.state("partitions")
         assert p["rows"] == [] and p["parts"] == [] and not p["can_part"]
@@ -548,12 +551,13 @@ def _run_compare(w, monkeypatch, sections=REPORT, seen=None):
 def test_compare_needs_two_real_images(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         assert w.call("compare.run") is False
-        assert w.asked[-1]["title"] == "Pick two images"
+        # two images, or two project folders (PAD-442)
+        assert w.asked[-1]["title"] == "Pick two to compare"
         a, _b = _cards(tmp_path)
         w.run(lambda: w.window.compare_a_var.set(a))
         w.run(lambda: w.window.compare_b_var.set(str(tmp_path / "gone.raw")))
         assert w.call("compare.run") is False
-        assert w.asked[-1]["title"] == "File not found"
+        assert w.asked[-1]["title"] == "Not found"
         assert w.asked[-1]["message"].startswith("Image B:")
 
 

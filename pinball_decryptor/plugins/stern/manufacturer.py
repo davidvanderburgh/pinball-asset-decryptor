@@ -797,6 +797,15 @@ class SternManufacturer(Manufacturer):
         from .compare import compare_cards
         return compare_cards(path_a, path_b, assets_a, assets_b)
 
+    def compare_folders(self, dir_a, dir_b, progress=None, cancel=None):
+        # The decoded sounds pair by slot and past the codec's lead-in, the
+        # same diff the card report runs on two extracts (PAD-442).
+        from ...core.folder_compare import compare_folders
+        from .compare import folder_sound_rows, owns_sound
+        return compare_folders(
+            dir_a, dir_b, special=("Sounds", owns_sound, folder_sound_rows),
+            progress=progress, cancel=cancel)
+
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games
         # partition, which neither a Whitestar ROM zip nor a Spike 1 card has.

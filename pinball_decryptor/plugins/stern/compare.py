@@ -361,9 +361,14 @@ def _snd_name(rel):
     return rel.split("/", 1)[-1]
 
 
-def _extract_audio_rows(assets_a, assets_b):
+def _extract_audio_rows(assets_a, assets_b, md5_a=None, md5_b=None,
+                        folders=False):
     """The per-sound diff rows, or ``None`` when the two extracts can't
-    supply one (with a row saying which of them was the problem)."""
+    supply one (with a row saying which of them was the problem).
+
+    *folders*: the user picked these two FOLDERS (the folder compare,
+    :func:`folder_sound_rows`), so the rows name them rather than the cards,
+    and *md5_a* / *md5_b* read the sounds as they are on disk now."""
     from ...core import audio_compare
 
     missing = [tag for tag, d in (("A", assets_a), ("B", assets_b)) if not d]
@@ -374,11 +379,20 @@ def _extract_audio_rows(assets_a, assets_b):
                  % ("either card" if len(missing) == 2
                     else "image " + missing[0]))]
 
-    rows = [("Extract A", assets_a), ("Extract B", assets_b)]
-    diff = audio_compare.diff_audio(assets_a, assets_b)
+    rows = [] if folders else [("Extract A", assets_a),
+                               ("Extract B", assets_b)]
+    diff = audio_compare.diff_audio(assets_a, assets_b, md5_a, md5_b)
     if not diff["count_a"] or not diff["count_b"]:
         silent = [tag for tag, n in (("A", diff["count_a"]),
                                      ("B", diff["count_b"])) if not n]
+        if folders:
+            if len(silent) == 2:
+                return [("No changes", "no decoded sounds in either folder")]
+            rows.append((
+                "Per-sound diff",
+                "folder %s holds no decoded sounds — it was extracted with "
+                "Audio switched off" % silent[0]))
+            return rows
         rows.append((
             "Per-sound diff",
             "the extract for %s holds no decoded sounds — that Extract ran "
@@ -445,9 +459,33 @@ def _extract_audio_rows(assets_a, assets_b):
                     ref=lambda rel: disk_ref("A", os.path.join(assets_a, rel)))
     if not (diff["changed"] or diff["moved"] or diff["added"]
             or diff["removed"]):
-        rows.append(("No changes", "every sound decodes identically on both "
+        rows.append(("No changes", "every sound decodes identically in both "
+                                   "folders" if folders else
+                                   "every sound decodes identically on both "
                                    "cards"))
     return rows
+
+
+def owns_sound(rel):
+    """Is project file *rel* one of the decoded sounds the per-sound diff
+    pairs up (``audio/*.wav``, flat, the way an Extract lays them out)?"""
+    from ...core.audio_compare import AUDIO_DIR
+    head, _, name = rel.partition("/")
+    return (head == AUDIO_DIR and bool(name) and "/" not in name
+            and not name.startswith(".") and name.lower().endswith(".wav"))
+
+
+def folder_sound_rows(dir_a, dir_b, dig_a, dig_b):
+    """The Sounds section of a two-FOLDER compare (PAD-442).
+
+    The same per-sound diff the card report gives once both cards are
+    extracted — slots paired by their ``idxNNNN`` token whatever the naming
+    settings, content matched before slots, the codec's lead-in and frame
+    shift stepped over (:mod:`core.audio_compare`) — but on the bytes in the
+    folders NOW: a project's Replace Audio picks were written over its
+    extracted sounds, and its baseline still describes the stock card."""
+    return _extract_audio_rows(dir_a, dir_b, md5_a=dig_a, md5_b=dig_b,
+                               folders=True)
 
 
 def _sound_rows(a, b, cont, a_files, b_files, assets_a, assets_b):

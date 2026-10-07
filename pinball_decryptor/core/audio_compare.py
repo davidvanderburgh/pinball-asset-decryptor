@@ -88,22 +88,27 @@ def _wav_names(folder):
                   if not n.startswith(".") and n.lower().endswith(".wav"))
 
 
-def digests(folder):
+def digests(folder, md5_of=None):
     """``{slot_key: (rel, md5)}`` for every decoded sound in *folder*.
 
     The extract's own baseline answers for almost every file; anything it
     doesn't list (a sound renamed after the baseline was written, a folder
     whose ``.checksums.md5`` is missing) is hashed here, so the result is
     never partly-populated.  A duplicate slot key deterministically keeps the
-    first name — same rule as the mod transfer's scan."""
-    baseline = read_baseline_any(folder)
+    first name — same rule as the mod transfer's scan.
+
+    *md5_of(rel)*, when given, answers instead of the baseline: a PROJECT
+    folder's sounds are the ones its Replace Audio picks were written over,
+    which the baseline (the card it was extracted from) knows nothing about
+    (the folder compare, :mod:`folder_compare`)."""
+    baseline = read_baseline_any(folder) if md5_of is None else {}
     out = {}
     for name in _wav_names(folder):
         key = audio_slot_key(name)
         if key in out:
             continue
         rel = "%s/%s" % (AUDIO_DIR, name)
-        md5 = baseline.get(rel)
+        md5 = md5_of(rel) if md5_of is not None else baseline.get(rel)
         if not md5:
             try:
                 md5 = md5_file(os.path.join(folder, AUDIO_DIR, name))
@@ -245,7 +250,7 @@ def _pair_off(rest_a, rest_b, key_a, key_b):
     return same, moved
 
 
-def diff_audio(folder_a, folder_b):
+def diff_audio(folder_a, folder_b, md5_a=None, md5_b=None):
     """What changed between two extracts' decoded sounds.
 
     Returns a dict:
@@ -270,6 +275,8 @@ def diff_audio(folder_a, folder_b):
         (:func:`shift_digests`) — the same sound, decoded through the codec
         entry that emits its predecessor's word first.
 
+    *md5_a* / *md5_b* are :func:`digests`' ``md5_of`` for each folder.
+
     Order matters: exact bytes first (free, off the baselines), then the same
     passes again past the lead-in for whatever is left, then again a frame
     apart, and only then same-slot-different-audio.  Every reordering of those
@@ -278,7 +285,7 @@ def diff_audio(folder_a, folder_b):
     "changed" consumes any slot that exists on both cards, and would eat the
     very pairs it is there to find.
     """
-    a, b = digests(folder_a), digests(folder_b)
+    a, b = digests(folder_a, md5_a), digests(folder_b, md5_b)
     rest_a, rest_b = dict(a), dict(b)
     md5_a = {k: v[1] for k, v in a.items()}
     md5_b = {k: v[1] for k, v in b.items()}

@@ -392,7 +392,9 @@ class WebWindow:
             "Mod Pack": g("modpack"),
             "Partition Explorer": g("partition_explorer"),
             "Default Settings": g("settings_editor"),
-            "Compare": g("compare"),
+            # two card images (Stern Spike 2), or two project folders for
+            # anyone that extracts (PAD-442)
+            "Compare": g("compare") or g("extract"),
             "Emulate": g("emulate"),
             "Emulate JJP": g("emulate_jjp"),
             "Emulate Spike1": g("emulate_spike1"),

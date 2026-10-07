@@ -1,0 +1,581 @@
+# venom_pro 1.07 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a build check (modes/gamecheck.sh play, the stock card, hidden, muted):
+# the runtime hooked the game, 26 of its 34 shots came from their switches, a drain ended a ball,
+# events seen firing: game_start, ball_start, ball_end.
+# Shots no press made: Left lock 1 opto, Left lock 2 opto, Left lock 3 opto, Left outlane, Right lock 1 opto, Right lock 2 opto, Right lock 3 opto, Right outlane.
+
+game           venom_pro
+version        1.07
+
+# ---- functions ----
+site tick             0x00384e50 0xe92d4038 0xe3a00037
+site ball_end         0x0028cb90 0xe92d4070 0xe1a06000
+site sound_lookup     0x0048f758 0xe92d4038 0xe1a05000
+site score_add        0x00257c68 0xe30c1f92 0xe3401075
+site callout          0x003f6a04 0xe92d4010 0xe302eb08
+site callout_nth      0x003f6bb8 0xe92d4010 0xe302eb08
+site lamp_group       0x001e93a0 0xe92d4038 0xe1a04000
+site award_screen     0x0021949c 0xe92d4070 0xe24dd008
+site string_new       0x00016954 0xe28fc606 0xe28cca6d
+site dynamic_cast     0x00016354 0xe28fc606 0xe28cca6d
+site resource_get     0x002aa5d0 0xe92d43f0 0xe1a04000
+site find_node        0x0052e654 0xe92d4070 0xe24dd008
+site set_text         0x00511e1c 0xe92d47f0 0xe1a06000
+site surface_state    0x00521380 0xe5900550 0xe2800008
+site player_advance   0x00219894 0xe2501000 0x012fff1e
+site display_draw     0x004ade24 0xe3520001 0x812fff1e
+site sound_play       0x003f6a04 0xe92d4010 0xe302eb08
+site sound_nth        0x003f6bb8 0xe92d4010 0xe302eb08
+site sound_active     0x003f7178 0xe59f3034 0xe2831e62
+site sound_stop       0x003f72d0 0xe92d40f8 0xe1a06000
+site sound_worker     0x003f5ff0 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x001f389c 0xe35000cf 0xe92d4038
+site display_effect_start 0x00323708 0xe92d47f0 0xe2516000
+site display_priority_now 0x00323fb0 0xe5d0000e 0xe12fff1e
+site caward_add       0x00041e08 0xe92d41f0 0xe1a04000
+site caward_add_scaled 0x00041ec8 0xe92d4ff8 0xe1a09002
+site game_event       0x003e13cc 0xe92d47f0 0xe1a09000
+site event_post_replacing 0x003183f8 0xe92d4070 0xe1a05001
+site event_cancel     0x00318368 0xe92d40f8 0xe3066f48
+site switch_hit       0x00260f70 0xe2503000 0x012fff1e
+site switch_hit2      0x00261010 0xe92d4010 0xe2504000
+site switch_edge      0x002f7fb8 0xe3063ba0 0xe340307b
+site switch_drain     0x002f8be0 0xe92d4ff0 0xe3049e98
+site surface_find     0x0052e948 0xe92d4070 0xe24dd008
+site surface_set_video 0x0052602c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00523e38 0xe5d030d4 0xe92d43f0
+site surface_stop     0x005235e8 0xe5d030d4 0xe92d40f0
+site find_text        0x0052e0f0 0xe92d4070 0xe24dd008
+site agent_header     0x0057bb98 0xe92d40f8 0xe2505000
+site agent_begin      0x00586504 0xe590c004 0xe1a00001
+site balls_in_play    0x0020e6b4 0xe92d4010 0xe3074960
+site multiball_serve  0x0020e830 0xe92d41f0 0xe30cef92
+site stock_rule_get   0x001744a8 0xe351005d 0xe92d4008
+site scene_show       0x002198c0 0xe92d4070 0xe3064f4c
+site frame_end        0x00219ac8 0xe3500000 0xe92d40f8
+site frame_kick       0x004ad6d8 0xe92d4070 0xe2906008
+site coil_fire        0x00325418 0xe3500000 0xe52de004
+site adjustment       0x003392e4 0xe92d40f0 0xe2504000
+site proc_exists      0x00318718 0xe3062f48 0xe3402076
+site proc_create      0x003180c8 0xe306cf48 0xe340c076
+site proc_sleep       0x00318218 0xe3063f48 0xe3403076
+site live_records     0x00318760 0xe3062f48 0xe3402076
+site layer_add        0x00135c28 0xe306cf4c 0xe1a03002
+site layer_remove     0x00135c40 0xe92d40f8 0xe5913004
+
+# ---- globals ----
+data cur_player             0x0068d165
+data scores                 0x007587b0
+data mode_mask              0x0075cf92
+data event_head             0x00766f48
+data event_current          0x00766f4c
+data resource_manager       0x00755ee0
+data typeinfo_resource      0x005b7478
+data typeinfo_scene_player  0x005ef76c
+data display_holder         0x00755e60
+data award_screen_arg       0x006855d0
+data sound_channels         0x007b2c14
+data sound_queue            0x007b3488
+data sound_requests         0x006cedf8
+data sound_request_count    0x005b4050
+data lamp_layers            0x007b20c0
+data light_count            0x0076fb68
+data score_mult             0x0068d164
+data switch_records         0x00762ea0
+data switch_count           0x007b6ba0
+data stock_mode_table       0x006895e8
+data typeinfo_cmode         0x005d7190
+data typeinfo_cmode_mball   0x005d7584
+data message_count          0x0059a954
+data message_remap          0x00764b70
+data message_table          0x006a6020
+data game_flags             0x007588b4
+data game_flag_count        0x00599b44
+data typeinfo_vmi           0x005ef560
+
+# ---- values ----
+value mode_mask_busy        0x210
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value stock_slot_shot   42
+value stock_slot_active     54
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      47
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_desc_via       0x8
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      94
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+
+# ---- shots from the switch drain ----
+switch 46   0x1                Right lock 1 opto
+switch 47   0x2                Right lock 2 opto
+switch 48   0x4                Right lock 3 opto
+switch 49   0x8                Left target
+switch 50   0x10               Left lock 1 opto
+switch 51   0x20               Left lock 2 opto
+switch 52   0x40               Left lock 3 opto
+switch 54   0x80               Left outlane
+switch 55   0x100              Left return lane
+switch 56   0x200              Right return lane
+switch 57   0x400              Right outlane
+switch 59   0x800              Right target
+switch 63   0x1000             Right slingshot
+switch 64   0x2000             Left slingshot
+switch 74   0x4000             Carnage 50% opto
+switch 75   0x8000             Carnage 75% opto
+switch 77   0x10000            Scoop made opto
+switch 78   0x20000            Vertical kicker opto
+switch 79   0x40000            Subway left opto
+switch 80   0x80000            Right orbit
+switch 81   0x100000           Left mini target
+switch 82   0x200000           Right mini target
+switch 83   0x400000           Left loop enter opto
+switch 84   0x800000           Right loop entrance
+switch 85   0x1000000          Bell tower target
+switch 86   0x2000000          Top post opto
+switch 87   0x4000000          Center ramp made
+switch 88   0x8000000          10 Pt sw
+switch 89   0x10000000         Left ramp made opto
+switch 90   0x20000000         Left orbit
+switch 91   0x40000000         Left pop bumper
+switch 92   0x80000000         Right pop bumper
+switch 93   0x100000000        Top lane-left
+switch 94   0x200000000        Top lane-right
+
+# ---- scenes ----
+scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene hud                  a5a5ca3d705d93c2e9b3e01a7cd075363f5a6319
+
+# ---- callouts and text ----
+callout countdown           1413
+callout ten_seconds         758
+callout time_up             1474
+text example_start_shot     Left target
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47
+
+# ---- lamps ----
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
+lamp 171          0              COIN DOOR GI  # lamp 4, I/O group 5 index 1, at 0,0
+lamp 4            0              START BUTTON  # lamp 5, I/O group 5 index 2, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 6, I/O group 5 index 3, at 0,0
+lamp 172          0              LEFT GI-1  # lamp 7, I/O group 7 index 0, at 0,0
+lamp 173          0              LEFT GI-RED  # lamp 8, I/O group 7 index 1, at 0,0
+lamp 174          0              LEFT GI-2  # lamp 9, I/O group 7 index 2, at 0,0
+lamp 178          0              LOWER LEFT FLASH  # lamp 10, I/O group 7 index 3, at 0,0
+lamp 179          0              LOWER RIGHT FLASH  # lamp 11, I/O group 7 index 4, at 0,0
+lamp 175          0              RIGHT GI-1  # lamp 12, I/O group 8 index 0, at 0,0
+lamp 176          0              RIGHT GI-RED  # lamp 13, I/O group 8 index 1, at 0,0
+lamp 177          0              RIGHT GI-2/BACKPANEL  # lamp 14, I/O group 8 index 2, at 0,0
+lamp 180          0              LEFT POP FLASH  # lamp 15, I/O group 8 index 3, at 0,0
+lamp 181          0              RIGHT POP FLASH  # lamp 16, I/O group 8 index 4, at 0,0
+lamp 182          0              UP LEFT FLASH  # lamp 17, I/O group 8 index 5, at 0,0
+lamp 183          0              UP RIGHT FLASH  # lamp 18, I/O group 8 index 6, at 0,0
+lamp 74           0              1X  # lamp 19, I/O group 7 index 14, at 0,0
+lamp 75           0              2X  # lamp 20, I/O group 7 index 13, at 0,0
+lamp 76           0              4X  # lamp 21, I/O group 7 index 12, at 0,0
+lamp 12           0              RIGHT OUTLANE  # lamp 22, I/O group 7 index 11, at 0,0
+lamp 11           0              RIGHT RETURN LANE  # lamp 23, I/O group 7 index 10, at 0,0
+lamp 50,51,52     0              LASHER  # lamp 24, I/O group 7 index 84, at 0,0
+lamp 53,54,55     0              LASHER 1  # lamp 25, I/O group 7 index 87, at 0,0
+lamp 56,57,58     0              LASHER 2  # lamp 26, I/O group 7 index 90, at 0,0
+lamp 59,60,61     0              LASHER 3  # lamp 27, I/O group 7 index 93, at 0,0
+lamp 13           0              SHOOT AGAIN  # lamp 28, I/O group 7 index 5, at 0,0
+lamp 47,48,49     0              PHAGE 3  # lamp 29, I/O group 7 index 72, at 0,0
+lamp 44,45,46     0              PHAGE 2  # lamp 30, I/O group 7 index 75, at 0,0
+lamp 41,42,43     0              PHAGE 1  # lamp 31, I/O group 7 index 78, at 0,0
+lamp 38,39,40     0              PHAGE  # lamp 32, I/O group 7 index 81, at 0,0
+lamp 26,27,28     0              AGONY  # lamp 33, I/O group 7 index 60, at 0,0
+lamp 29,30,31     0              AGONY 1  # lamp 34, I/O group 7 index 63, at 0,0
+lamp 32,33,34     0              AGONY 2  # lamp 35, I/O group 7 index 66, at 0,0
+lamp 35,36,37     0              AGONY 3  # lamp 36, I/O group 7 index 69, at 0,0
+lamp 23,24,25     0              RIOT 3  # lamp 37, I/O group 7 index 57, at 0,0
+lamp 20,21,22     0              RIOT 2  # lamp 38, I/O group 7 index 54, at 0,0
+lamp 17,18,19     0              RIOT 1  # lamp 39, I/O group 7 index 51, at 0,0
+lamp 14,15,16     0              RIOT  # lamp 40, I/O group 7 index 48, at 0,0
+lamp 9            0              LEFT OUTLANE  # lamp 41, I/O group 7 index 8, at 0,0
+lamp 10           0              LEFT RETURN LANE  # lamp 42, I/O group 7 index 9, at 0,0
+lamp 64           0              MILES  # lamp 43, I/O group 7 index 18, at 0,0
+lamp 63           0              SLEEPER  # lamp 44, I/O group 7 index 17, at 0,0
+lamp 71,72,73     0              GRENDEL  # lamp 45, I/O group 7 index 24, at 0,0
+lamp 68,69,70     0              KNULL  # lamp 46, I/O group 7 index 27, at 0,0
+lamp 151          0              WOLVERINE  # lamp 61, I/O group 7 index 46, at 0,0
+lamp 150          0              CAPTAIN AMERICA  # lamp 60, I/O group 7 index 45, at 0,0
+lamp 149          0              HULK  # lamp 59, I/O group 7 index 44, at 0,0
+lamp 62           0              HYBRID  # lamp 50, I/O group 7 index 16, at 0,0
+lamp 77           0              LEFT TARGET  # lamp 51, I/O group 7 index 19, at 0,0
+lamp 152          0              LEFT BB LOCK 1  # lamp 52, I/O group 8 index 32, at 0,0
+lamp 153          0              LEFT BB LOCK 2  # lamp 53, I/O group 8 index 33, at 0,0
+lamp 154          0              LEFT BB LOCK 3  # lamp 54, I/O group 8 index 34, at 0,0
+lamp 145          0              EDDIE BROCK  # lamp 55, I/O group 7 index 40, at 0,0
+lamp 146          0              FLASH THOMPSON  # lamp 56, I/O group 7 index 41, at 0,0
+lamp 147          0              GWEN STACY  # lamp 57, I/O group 7 index 42, at 0,0
+lamp 148          0              PETER PARKER  # lamp 58, I/O group 7 index 43, at 0,0
+lamp 149          0              HULK  # lamp 59, I/O group 7 index 44, at 0,0
+lamp 150          0              CAPTAIN AMERICA  # lamp 60, I/O group 7 index 45, at 0,0
+lamp 151          0              WOLVERINE  # lamp 61, I/O group 7 index 46, at 0,0
+lamp 78           0              RIGHT TARGET  # lamp 62, I/O group 7 index 15, at 0,0
+lamp 155          0              RIGHT BB LOCK 1  # lamp 63, I/O group 8 index 35, at 0,0
+lamp 156          0              RIGHT BB LOCK 2  # lamp 64, I/O group 8 index 36, at 0,0
+lamp 157          0              RIGHT BB LOCK 3  # lamp 65, I/O group 8 index 37, at 0,0
+lamp 140,141,142  0              RIGHT ORBIT LOCK  # lamp 66, I/O group 8 index 62, at 0,0
+lamp 139          0              RIGHT ORBIT WEB  # lamp 67, I/O group 8 index 48, at 0,0
+lamp 136,137,138  0              RIGHT ORBIT  # lamp 68, I/O group 8 index 59, at 0,0
+lamp 129,130,131  0              RIGHT LOOP  # lamp 69, I/O group 8 index 56, at 0,0
+lamp 119          0              MINI TARGET RIGHT  # lamp 70, I/O group 8 index 50, at 0,0
+lamp 132          0              RIGHT LOOP WEB  # lamp 71, I/O group 8 index 55, at 0,0
+lamp 133,134,135  0              RIGHT LOOP LOCK  # lamp 72, I/O group 8 index 65, at 0,0
+lamp 128          0              EXTRA BALL  # lamp 73, I/O group 8 index 54, at 0,0
+lamp 127          0              SUPER JACKPOT  # lamp 74, I/O group 8 index 53, at 0,0
+lamp 158          0              HOST HURRY UP  # lamp 75, I/O group 8 index 81, at 0,0
+lamp 159          0              SPECIAL ATTACk  # lamp 76, I/O group 8 index 80, at 0,0
+lamp 160          0              MYSTERY  # lamp 77, I/O group 8 index 82, at 0,0
+lamp 161          0              SCREAM  # lamp 78, I/O group 8 index 83, at 0,0
+lamp 162          0              KLYNTAR MULTIBALL  # lamp 79, I/O group 8 index 84, at 0,0
+lamp 163          0              TOXIN - CARNAGE  # lamp 80, I/O group 8 index 85, at 0,0
+lamp 164          0              TOXIN - DOPPELGANGER  # lamp 81, I/O group 8 index 86, at 0,0
+lamp 165          0              TOXIN - MAYHEM  # lamp 82, I/O group 8 index 87, at 0,0
+lamp 166          0              RAVENCORFT RED  # lamp 83, I/O group 8 index 27, at 0,0
+lamp 167          0              RAVENCROFT WHT  # lamp 84, I/O group 8 index 28, at 0,0
+lamp 168          0              RAVENCROFT WHITE FLASH  # lamp 85, I/O group 8 index 38, at 0,0
+lamp 169          0              RAVENCROFT RED FLASH  # lamp 86, I/O group 8 index 39, at 0,0
+lamp 124,125,126  0              SCOOP LOCK  # lamp 88, I/O group 8 index 68, at 0,0
+lamp 123          0              SCOOP WEB  # lamp 89, I/O group 8 index 24, at 0,0
+lamp 120,121,122  0              SCOOP  # lamp 90, I/O group 8 index 21, at 0,0
+lamp 118          0              MINI TARGET LEFT  # lamp 91, I/O group 8 index 49, at 0,0
+lamp 111,112,113  0              LEFT LOOP  # lamp 92, I/O group 8 index 74, at 0,0
+lamp 114          0              LEFT LOOP WEB  # lamp 93, I/O group 8 index 52, at 0,0
+lamp 115,116,117  0              LEFT LOOP LOCK  # lamp 94, I/O group 8 index 71, at 0,0
+lamp 110          0              BELL TOWER INFECTED  # lamp 95, I/O group 8 index 51, at 0,0
+lamp 107,108,109  0              BELL TOWER  # lamp 96, I/O group 8 index 77, at 0,0
+lamp 97,98,99     0              CENTER RAMP  # lamp 97, I/O group 8 index 18, at 0,0
+lamp 100          0              CENTER RAMP WEB  # lamp 98, I/O group 8 index 17, at 0,0
+lamp 101,102,103  0              CENTER RAMP LOCK  # lamp 99, I/O group 8 index 13, at 0,0
+lamp 104,105,106  0              START  # lamp 100, I/O group 8 index 10, at 0,0
+lamp 96           0              CARNAGE INFECTED  # lamp 101, I/O group 8 index 9, at 0,0
+lamp 95           0              BLOOD LUST  # lamp 102, I/O group 8 index 8, at 0,0
+lamp 94           0              HURRY UP  # lamp 103, I/O group 8 index 16, at 0,0
+lamp 91,92,93     0              CARNAGE  # lamp 104, I/O group 8 index 29, at 0,0
+lamp 83,84,85     0              LEFT RAMP  # lamp 105, I/O group 8 index 40, at 0,0
+lamp 86           0              LEFT RAMP WEB  # lamp 106, I/O group 8 index 43, at 0,0
+lamp 87,88,89     0              LEFT RAMP LOCK  # lamp 107, I/O group 8 index 44, at 0,0
+lamp 90           0              CHANGE HOST  # lamp 108, I/O group 8 index 47, at 0,0
+lamp 82           0              LEFT ORBIT WEB  # lamp 109, I/O group 7 index 23, at 0,0
+lamp 79,80,81     0              LEFT ORBIT  # lamp 110, I/O group 7 index 20, at 0,0
+lamp 143          0              TOP LANE LEFT  # lamp 111, I/O group 8 index 25, at 0,0
+lamp 144          0              TOP LANE RIGHT  # lamp 112, I/O group 8 index 26, at 0,0
+lamp 226,227,228  0              GHOST RIDER STANDEE  # lamp 113, I/O group 9 index 1, at 0,0
+lamp 229,230,231  0              TOPPER BACK WHEEL  # lamp 114, I/O group 9 index 4, at 0,0
+lamp 232,233,234  0              TOPPER BIKE  # lamp 115, I/O group 9 index 7, at 0,0
+lamp 235,236,237  0              TOPPER FRONT WHEEL 1  # lamp 116, I/O group 9 index 10, at 0,0
+lamp 238,239,240  0              TOPPER FRONT WHEEL 2  # lamp 117, I/O group 9 index 13, at 0,0
+lamp 214,215,216  0              TOPPER RIGHT BOTTOM 1  # lamp 118, I/O group 9 index 16, at 0,0
+lamp 217,218,219  0              TOPPER RIGHT BOTTOM 2  # lamp 119, I/O group 9 index 19, at 0,0
+lamp 220,221,222  0              TOPPER RIGHT BOTTOM 3  # lamp 120, I/O group 9 index 22, at 0,0
+lamp 223,224,225  0              TOPPER RIGHT BOTTOM 4  # lamp 121, I/O group 9 index 25, at 0,0
+lamp 259,260,261  0              TOPPER HULK  # lamp 122, I/O group 9 index 28, at 0,0
+lamp 262,263,264  0              TOPPER WOLVERINE  # lamp 123, I/O group 9 index 31, at 0,0
+lamp 265,266,267  0              TOPPER CAPTIAN  # lamp 124, I/O group 9 index 34, at 0,0
+lamp 268,269,270  0              TOPPER GHOST RIDER PORTRAIT  # lamp 125, I/O group 9 index 37, at 0,0
+lamp 208,209,210  0              TOPPER LEFT SPOTLIGHT 1  # lamp 126, I/O group 9 index 40, at 0,0
+lamp 211,212,213  0              TOPPER LEFT SPOTLIGHT 2  # lamp 127, I/O group 9 index 43, at 0,0
+lamp 241,242,243  0              TOPPER RIGHT SPOTLIGHT 1  # lamp 128, I/O group 9 index 46, at 0,0
+lamp 247,248,249  0              TOPPER FLASH  # lamp 130, I/O group 9 index 52, at 0,0
+lamp 250,251,252  0              TOPPER GWEN  # lamp 131, I/O group 9 index 55, at 0,0
+lamp 253,254,255  0              TOPPER PETER  # lamp 132, I/O group 9 index 58, at 0,0
+lamp 256,257,258  0              TOPPER EDDIE  # lamp 133, I/O group 9 index 61, at 0,0
+lamp 196,197,198  0              TOPPER LASHER  # lamp 134, I/O group 9 index 64, at 0,0
+lamp 199,200,201  0              TOPPER RIOT  # lamp 135, I/O group 9 index 67, at 0,0
+lamp 202,203,204  0              TOPPER PHAGE  # lamp 136, I/O group 9 index 70, at 0,0
+lamp 205,206,207  0              TOPPER AGONY  # lamp 137, I/O group 9 index 73, at 0,0
+lamp 184,185,186  0              TOPPER LEFT BOTTOM 1  # lamp 138, I/O group 9 index 76, at 0,0
+lamp 187,188,189  0              TOPPER LEFT BOTTOM 2  # lamp 139, I/O group 9 index 79, at 0,0
+lamp 190,191,192  0              TOPPER LEFT BOTTOM 3  # lamp 140, I/O group 9 index 82, at 0,0
+lamp 193,194,195  0              TOPPER LEFT BOTTOM 4  # lamp 141, I/O group 9 index 85, at 0,0
+lamp 271,272,273  0              SPEAKER 1  # lamp 142, I/O group 6 index 1, at 0,0
+lamp 274,275,276  0              SPEAKER 2  # lamp 143, I/O group 6 index 4, at 0,0
+lamp 277,278,279  0              SPEAKER 3  # lamp 144, I/O group 6 index 7, at 0,0
+lamp 280,281,282  0              SPEAKER 4  # lamp 145, I/O group 6 index 10, at 0,0
+lamp 283,284,285  0              SPEAKER 5  # lamp 146, I/O group 6 index 13, at 0,0
+lamp 286,287,288  0              SPEAKER 6  # lamp 147, I/O group 6 index 16, at 0,0
+lamp 289,290,291  0              SPEAKER 7  # lamp 148, I/O group 6 index 19, at 0,0
+lamp 292,293,294  0              SPEAKER 8  # lamp 149, I/O group 6 index 22, at 0,0
+lamp 295,296,297  0              SPEAKER 9  # lamp 150, I/O group 6 index 25, at 0,0
+lamp 298,299,300  0              SPEAKER 10  # lamp 151, I/O group 6 index 28, at 0,0
+lamp 301,302,303  0              SPEAKER 11  # lamp 152, I/O group 6 index 31, at 0,0
+lamp 304,305,306  0              SPEAKER 12  # lamp 153, I/O group 6 index 34, at 0,0
+lamp 307,308,309  0              SPEAKER 13  # lamp 154, I/O group 6 index 37, at 0,0
+lamp 310,311,312  0              SPEAKER 14  # lamp 155, I/O group 6 index 40, at 0,0
+lamp 313,314,315  0              SPEAKER 15  # lamp 156, I/O group 6 index 43, at 0,0
+lamp 316,317,318  0              SPEAKER 16  # lamp 157, I/O group 6 index 46, at 0,0
+lamp 319,320,321  0              SPEAKER 17  # lamp 158, I/O group 6 index 49, at 0,0
+lamp 322,323,324  0              SPEAKER 18  # lamp 159, I/O group 6 index 52, at 0,0
+lamp 325,326,327  0              SPEAKER 19  # lamp 160, I/O group 6 index 55, at 0,0
+lamp 328,329,330  0              SPEAKER 20  # lamp 161, I/O group 6 index 58, at 0,0
+lamp 331,332,333  0              SPEAKER 21  # lamp 162, I/O group 6 index 61, at 0,0
+lamp 334,335,336  0              SPEAKER 22  # lamp 163, I/O group 6 index 64, at 0,0
+lamp 337,338,339  0              SPEAKER 23  # lamp 164, I/O group 6 index 67, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+site block_start_12     0x0006a860 0xe5902000 0xe92d40f8
+data block_obj_12       0x0072e470
+text block_name_12      Riot Mode
+site block_start_13     0x000732d8 0xe5902000 0xe30b323c
+data block_obj_13       0x0072e6b0
+text block_name_13      Agony Mode
+site block_start_14     0x0007bc84 0xe5902000 0xe3033f4c
+data block_obj_14       0x0072e860
+text block_name_14      Phage Mode
+site block_start_15     0x00084c24 0xe5902000 0xe30c3c0c
+data block_obj_15       0x0072ea38
+text block_name_15      Lasher Mode
+site block_start_16     0x0008c134 0xe5902000 0xe92d40f8
+data block_obj_16       0x0072ec08
+text block_name_16      Grendel Mode
+site block_start_17     0x00095828 0xe5902000 0xe30d3a14
+data block_obj_17       0x0072ee30
+text block_name_17      Knull Mode
+site block_start_19     0x00151b9c 0xe92d40d0 0xe1a04000
+data block_obj_19       0x00730e78
+text block_name_19      Mini Mode 01
+site block_start_20     0x00152068 0xe92d40d0 0xe1a04000
+data block_obj_20       0x00730f78
+text block_name_20      Mini Mode 02
+site block_start_21     0x00152534 0xe92d40d0 0xe1a04000
+data block_obj_21       0x00731078
+text block_name_21      Mini Mode 03
+site block_start_22     0x00152a14 0xe92d40d0 0xe1a04000
+data block_obj_22       0x00731178
+text block_name_22      Mini Mode 04
+site block_start_23     0x00152ef4 0xe92d40d0 0xe1a04000
+data block_obj_23       0x00731278
+text block_name_23      Mini Mode 05
+site block_start_24     0x001533c0 0xe92d40d0 0xe1a04000
+data block_obj_24       0x00731378
+text block_name_24      Mini Mode 06
+site block_start_25     0x0015388c 0xe92d40d0 0xe1a04000
+data block_obj_25       0x00731478
+text block_name_25      Mini Mode 07
+site block_start_26     0x00153d58 0xe92d40d0 0xe1a04000
+data block_obj_26       0x00731578
+text block_name_26      Mini Mode 08
+site block_start_27     0x00154224 0xe92d40d0 0xe1a04000
+data block_obj_27       0x00731678
+text block_name_27      Mini Mode 09
+site block_start_28     0x001546f0 0xe92d40d0 0xe1a04000
+data block_obj_28       0x00731778
+text block_name_28      Mini Mode 10
+site block_start_29     0x00154bbc 0xe92d40d0 0xe1a04000
+data block_obj_29       0x00731878
+text block_name_29      Mini Mode 11
+site block_start_30     0x00155088 0xe92d40d0 0xe1a04000
+data block_obj_30       0x00731978
+text block_name_30      Mini Mode 12
+site block_start_31     0x00155554 0xe92d40d0 0xe1a04000
+data block_obj_31       0x00731a78
+text block_name_31      Mini Mode 13
+site block_start_32     0x00155a20 0xe92d40d0 0xe1a04000
+data block_obj_32       0x00731b78
+text block_name_32      Mini Mode 14
+site block_start_33     0x00155eec 0xe92d40d0 0xe1a04000
+data block_obj_33       0x00731c78
+text block_name_33      Mini Mode 15
+site block_start_34     0x001563b8 0xe92d40d0 0xe1a04000
+data block_obj_34       0x00731d78
+text block_name_34      Mini Mode 16
+site block_start_35     0x00156884 0xe92d40d0 0xe1a04000
+data block_obj_35       0x00731e78
+text block_name_35      Mini Mode 17
+site block_start_36     0x00156d50 0xe92d40d0 0xe1a04000
+data block_obj_36       0x00731f78
+text block_name_36      Mini Mode 18
+site block_start_37     0x0015721c 0xe92d40d0 0xe1a04000
+data block_obj_37       0x00732078
+text block_name_37      Mini Mode 19
+site block_start_38     0x001576e8 0xe92d40d0 0xe1a04000
+data block_obj_38       0x00732178
+text block_name_38      Mini Mode 20
+site block_start_39     0x00157bb4 0xe92d40d0 0xe1a04000
+data block_obj_39       0x00732278
+text block_name_39      Mini Mode 21
+site block_start_40     0x00158080 0xe92d40d0 0xe1a04000
+data block_obj_40       0x00732378
+text block_name_40      Mini Mode 22
+site block_start_41     0x0015854c 0xe92d40d0 0xe1a04000
+data block_obj_41       0x00732478
+text block_name_41      Mini Mode 23
+site block_start_42     0x00158a18 0xe92d40d0 0xe1a04000
+data block_obj_42       0x00732578
+text block_name_42      Mini Mode 24
+site block_start_43     0x00158ee4 0xe92d40d0 0xe1a04000
+data block_obj_43       0x00732678
+text block_name_43      Mini Mode 25
+site block_start_44     0x001593b0 0xe92d40d0 0xe1a04000
+data block_obj_44       0x00732778
+text block_name_44      Mini Mode 26
+site block_start_45     0x0015987c 0xe92d40d0 0xe1a04000
+data block_obj_45       0x00732878
+text block_name_45      Mini Mode 27
+site block_start_46     0x00159d48 0xe92d40d0 0xe1a04000
+data block_obj_46       0x00732978
+text block_name_46      Mini Mode 28
+site block_start_47     0x0015a214 0xe92d40d0 0xe1a04000
+data block_obj_47       0x00732a78
+text block_name_47      Mini Mode 29
+site block_start_48     0x0015a6e0 0xe92d40d0 0xe1a04000
+data block_obj_48       0x00732b78
+text block_name_48      Mini Mode 30
+site block_start_50     0x000a0380 0xe92d40f0 0xe24dd014
+data block_obj_50       0x0072fa98
+text block_name_50      Bell Tower Frenzy
+site block_start_56     0x0010cd00 0xe92d4370 0xe3a02000
+data block_obj_56       0x0072f4d8
+text block_name_56      Host Hurry Up
+site block_start_61     0x0014dad8 0xe92d40f8 0xe1a04000
+data block_obj_61       0x007302f8
+text block_name_61      Mayhem Villain
+site block_start_62     0x000a8b40 0xe92d43f0 0xe1a05000
+data block_obj_62       0x00730b10
+text block_name_62      Blood Lust
+site block_start_63     0x000c5030 0xe92d40f0 0xe1a04000
+data block_obj_63       0x00730560
+text block_name_63      Carnage Hurry Up
+site block_start_66     0x00192698 0xe92d43f8 0xe1a05000
+data block_obj_66       0x007306d0
+text block_name_66      Scream
+site block_start_68     0x001739e8 0xe92d43f0 0xe24dd00c
+data block_obj_68       0x00730a08
+text block_name_68      Rampage
+site block_start_70     0x0016e824 0xe92d4010 0xe1a04000
+data block_obj_70       0x00730d08
+text block_name_70      Quick Hurry Up
+site block_start_75     0x000cf048 0xe92d4010 0xe1a04000
+data block_obj_75       0x0072f848
+text block_name_75      Doppel Pro
+site block_start_76     0x000cdf8c 0xe92d4010 0xe1a04000
+data block_obj_76       0x0072f938
+text block_name_76      Doppleganger Mode
+site block_start_79     0x0019d218 0xe92d40d0 0xe1a04000
+data block_obj_79       0x0072f6b8
+text block_name_79      Spider Sense
+site block_start_81     0x00150a6c 0xe92d43f0 0xe1a07000
+data block_obj_81       0x00732fb8
+text block_name_81      Million Plus Pops
+site block_start_83     0x00134d58 0xe92d4010 0xe3a02000
+data block_obj_83       0x00733110
+text block_name_83      Klyntar Ul Hurry Up
+site block_start_84     0x0012ba24 0xe92d4010 0xe3a02000
+data block_obj_84       0x007331f0
+text block_name_84      Klyntar Ll Hurry Up
+site block_start_85     0x00134ec8 0xe92d4010 0xe3a02000
+data block_obj_85       0x007332d0
+text block_name_85      Klyntar Ur Hurry Up
+site block_start_86     0x0012bb94 0xe92d4010 0xe3a02000
+data block_obj_86       0x007333b0
+text block_name_86      Klyntar Lr Hurry Up
+site block_start_88     0x0012d6bc 0xe92d4010 0xe1a04000
+data block_obj_88       0x00733528
+text block_name_88      Klyntar Multiball Ready
+site block_start_90     0x001a4204 0xe92d43f0 0xe1a05000
+data block_obj_90       0x00733828
+text block_name_90      Symbiote Mania
+site block_start_91     0x001a4dc4 0xe92d4010 0xe1a04000
+data block_obj_91       0x00733770
+text block_name_91      Symbiote Mania Ready
+
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x000a0bcc 0xe92d43f0 0xe24dd064  # cbell_tower::v[40]
+text block_rule_name_0     Bell Tower
+site block_rule_1          0x000b94c0 0xe92d40f0 0xe24dd00c  # ccarnage_rule::v[40]
+text block_rule_name_1     Carnage
+site block_rule_2          0x000ce478 0xe92d4010 0xe24dd008  # cdoppleganger_rule::v[40]
+text block_rule_name_2     Doppleganger
+site block_rule_3          0x000e14f0 0xe3530000 0x03520c01  # cextra_ball::v[40]
+text block_rule_name_3     Extra Ball
+site block_rule_4          0x000d2204 0xe92d47f0 0xe24dd010  # cflamethrower::v[40]
+text block_rule_name_4     Flamethrower
+site block_rule_5          0x001033ec 0xe92d4038 0xe1a05003  # chost::v[40]
+text block_rule_name_5     Host
+site block_rule_6          0x001061b0 0xe92d4ff0 0xe1a04000  # chost_combo::v[40]
+text block_rule_name_6     Host Combo
+site block_rule_7          0x0010cf5c 0xe92d4010 0xe24dd008  # chost_combo_rule::v[40]
+text block_rule_name_7     Host Combo Rule
+site block_rule_8          0x0010f35c 0xe92d43f8 0xe1a04000  # cinfected::v[40]
+text block_rule_name_8     Infected
+site block_rule_9          0x001450f0 0xe92d43f0 0xe24dd00c  # cmayhem_rule::v[40]
+text block_rule_name_9     Mayhem
+site block_rule_10         0x00150d4c 0xe5901070 0xe3510000  # cmillion_plus_rule::v[40]
+text block_rule_name_10    Million Plus
+site block_rule_11         0x0015f374 0xe92d4070 0xe24dd008  # cmini_mode_rule::v[40]
+text block_rule_name_11    Mini Mode
+site block_rule_12         0x001635e4 0xe3530000 0x03520040  # cmultipliers::v[40]
+text block_rule_name_12    Multipliers
+site block_rule_13         0x0016517c 0xe92d4030 0xe24dd00c  # cmystery::v[40]
+text block_rule_name_13    Mystery
+site block_rule_14         0x0016e9a0 0xe5901070 0xe3510000  # cquick_post_rule::v[40]
+text block_rule_name_14    Quick Post
+site block_rule_15         0x00192a24 0xe92d4030 0xe24dd00c  # cscream_rule::v[40]
+text block_rule_name_15    Scream
+site block_rule_16         0x00194cac 0xe92d4ff0 0xe24dd014  # cskill_shot::v[40]
+text block_rule_name_16    Skill Shot
+site block_rule_17         0x001a9f1c 0xe92d4010 0xe24dd008  # ctoxin_teamup_rule::v[40]
+text block_rule_name_17    Toxin Teamup
+site block_rule_18         0x001e0ee0 0xe92d47f0 0xe1c066d8  # cweb_combos::v[40]
+text block_rule_name_18    Web Combos

@@ -206,15 +206,18 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
 | Stranger Things LE 1.13 | no | ✓ | not yet | no | never waits |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
+| Sword of Rage LE 1.19 | no | ✓ | not yet | no | never waits |
 | TMNT LE 1.59 | ✓ | ✓ | not yet | all |  |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | all |  |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | no | ✓ | not yet | no | never waits |
+| The Mandalorian Pro 1.45 | no | ✓ | not yet | no | never waits |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | all |  |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | all |  |
 | Venom LE 1.07 | ✓ | ✓ | not yet | all |  |
+| Venom Pro 1.07 | no | ✓ | not yet | no | never waits |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **Ball save not yet:** found in the game, not yet seen working.

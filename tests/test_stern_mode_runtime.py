@@ -63,6 +63,7 @@ PORTS = [
     ("led_zeppelin_pro", "1.22"),
     ("mando_le", "1.44"),
     ("mando_le", "1.45"),
+    ("mando_pro", "1.45"),
     ("metallica_spike", "1.03"),
     ("metallica_spike", "1.04"),
     ("munsters_le", "1.28"),
@@ -73,11 +74,13 @@ PORTS = [
     ("stranger_things_le", "1.12"),
     ("stranger_things_le", "1.13"),
     ("sword_of_rage_le", "1.18"),
+    ("sword_of_rage_le", "1.19"),
     ("turtles_le", "1.59"),
     ("turtles_pro", "1.58"),
     ("turtles_pro", "1.59"),
     ("uncanny_xmen_le", "0.98"),
     ("venom_le", "1.07"),
+    ("venom_pro", "1.07"),
 ]
 
 

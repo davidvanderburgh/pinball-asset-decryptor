@@ -165,6 +165,14 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     runtime's veto hooks leave the game running.
   - chain15/16: checks of Elvira 1.13, TMNT LE 1.59, Venom LE 1.07 (check8), then their ball-save tests
     (`bs/rb_old3`, made by `bs/gen_old.py` from those checks).
+- **Stack on the mode-table titles, run 6 attempt**: `C:/tmp/PAD-420/st2/stack_starter.c` (a code mode built into
+  the runtime with `build_mode.sh mode_file.c stack_starter.c`) reads the port's mode table and block lines from
+  `/dump/game.port`, finds the start slot (where a block line's object's vtable holds its start: 11 on Avengers LE
+  1.10) and starts the first multiball entry (`cmode_mball` by its typeinfo). On Avengers LE 1.10 it started Thor
+  Multiball and the runtime said "a multiball is running", but the game turned it off within 0.5 s (no balls
+  served), before the runtime's next look at the trigger file, so the waiting mode started. Next try: start the
+  multiball from a state where it holds (balls in its lock first, or the game's own qualifying shots), or have the
+  starter and the stack check run in the same tick.
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

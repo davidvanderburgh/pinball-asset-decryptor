@@ -1815,6 +1815,82 @@ arrival), a second move 1.5 s later refused (busy), floor 2 (+2500), floor 9 ref
 the mode's end it was put back on floor 0 (+5000). When the ball drained mid-test, the game sent it to floor
 0 itself and the put-back stood aside. Not machine-tested.
 
+## The shaker (Godzilla Premium/LE, PAD-414)
+
+A Godzilla Premium may have the optional shaker motor in its cabinet (an LE has it fitted). A mode shakes it
+through the game's own shake, for a time at a strength, or with one of the game's own shakes by name:
+
+```c
+pm_shake(500, PM_SHAKE_HARD);             /* half a second, as hard as the game's battle hits */
+pm_shake(3000, PM_SHAKE_SOFT);            /* a long soft rumble */
+pm_shake_game("jackpot");                 /* the game's own super jackpot shake */
+pm_shake_game("multiball_start");         /* the Godzilla Multiball start: five shakes over 4 s */
+if (pm_shake_game("jackpot")) pm_shake_outlast();   /* as the mode ends: left to run out after the end */
+```
+
+The game's own shakes, read from the program (the port's `text shake_<name>` lines, steps of `at:ms:strength`):
+
+| Name | What the game does with it |
+|---|---|
+| `hit` | 200 ms at 0: a battle's or a multiball's shot |
+| `big_hit` | 334 ms at 0: a bigger one (an add-a-ball) |
+| `jackpot` | 500 ms at 0: every super jackpot (Godzilla, Mechagodzilla, Monster Zero), Destruction Jackpot, King of the Monsters' victory |
+| `rumble` | 3000 ms at 3: O2 Destroyer |
+| `multiball_start` | the Godzilla Multiball start: 334, 100, 500, 1000 and 5000 ms at 2, at 0.27, 0.63, 1.6, 2.56 and 4.0 s into its video |
+
+The limits are the runtime's and cannot be raised:
+
+- **Through the game's own call only**, so the operator's SHAKER MOTOR (OPTIONAL) setting always applies: off
+  (0, or no shaker fitted) nothing shakes and the call is refused; settings 1-4 cut every shake to 100, 334,
+  500 or 5000 ms, as they cut the game's own. The board ends each shake by itself when its time is up.
+- **A strength the game uses** (0 hard .. 3 soft) and **never longer than the game's own longest shake at that
+  strength**: 1000 ms at 0 and 1, 5000 ms at 2 and 3. At least 100 ms.
+- Only while your mode runs, in a game (not attract, not tilted); never while one of the game's own shakes
+  runs, or one of yours; at most 20 shakes and 15 s of shaking in any minute (a game shake of several steps
+  is one shake, all its steps counted).
+- **Stopped** (the game's own stop) when your mode ends, the ball ends, or the game ends or tilts, and on
+  `pm_shake_stop` - unless the game has since asked for a shake of its own, which it leaves to run. A shake
+  marked with `pm_shake_outlast` (the mode's ending one) runs out after the mode's end; a ball end, game end or
+  tilt still stops it.
+
+`pm_shake` / `pm_shake_game` return 1 when shaking, 0 when refused (the reason is in mode.log) or on a game
+whose port has no shaker lines (`pm_can(PM_CAN_SHAKER)`; a Pro's program has the call too, not yet ported).
+A mode file says the same with `shake start|shot|end <ms> <strength> [mask]` or `shake start|shot|end game
+<name> [mask]` (MODE_PARAMETERS.md); a blocks mode with *Shake the cabinet for N ms* and *Shake it the game's
+way*; the form with Mode > Shaker. `examples/final_wars.c` starts with the game's multiball start and ends its
+wizard jackpot with the game's jackpot shake; `examples/destoroyah.c` its super jackpot.
+
+**How it works** (Premium/LE 1.16). `shake(ms, strength, force)` (`0x189a54`) is the one call every shake of
+the game's goes through (about 340 of them): it reads adjustment 335 (AD_SHAKER_MOTOR, 0..4; past 4 is error
+317 "Shaker motor shake duration out of range"), cuts the time to that setting's table (`0x6487f4`), does
+nothing unforced while the mode mask has `0x310` (not in a game), nothing when what is left of the running
+shake is longer, and then `coil_fire(7, power, ms)` - drive 7 is the SHAKER MOTOR record, coil 0 of the
+cabinet board, beside the coin and ticket meters - at its strength's power (`0x648808`: 51, 36, 31, 23, 3
+/255). `shake_stop` (`0x189b08`) is `coil_fire(7, 0, 0)`, an OFF. `drive_left` (`0x3e8bcc`) is the ms left of a
+drive's running request; it reads 0 until the game's coil service has sent a new request, so the runtime
+counts its own shake's length from the request (cut to the setting, `text shake_setting_ms`). The port lines:
+
+```
+site shake                 0x00189a54 0xe92d40f0 0xe1a04000
+site shake_stop            0x00189b08 0xe52de004 0xe24dd00c
+site drive_left            0x003e8bcc 0xe3500000 0xe92d4038
+value shake_adj            335
+value shake_drive          7
+text shake_max_ms          1000 1000 5000 5000
+text shake_setting_ms      0 100 334 500 5000
+text shake_jackpot         0:500:0
+```
+
+**Measured (emulator, stock Godzilla LE 1.16, muted, `PAD_COIL_PROBE=1`; `shake_test_mode.c`, then a mode file
+and a blocks mode).** Every shake reached the board as `[coildrive] node 1 coil 0: pulse <power> for <ms>`:
+500 ms at 0 as 51/255 for 500 ms; 3000 ms at 0 as 1000 ms (the hard ceiling); 200 ms at 2 as 31/255; the game's
+jackpot shake as 51/255 for 500 ms; the multiball start's first steps 334 and 100 ms at 31/255 on time, the rest
+dropped by `pm_shake_stop`; 5000 ms at 3 as 23/255, and `pm_end` one second in sent the game's OFF (cmd 4d,
+4001 ms of it left); a shake asked for while one ran was refused; the 15 s a minute cap refused the next. A mode
+file's `shake start 1500 2`, `shake shot game jackpot <left ramp>` and `shake end 1000 3` shook as it started,
+on each left ramp, and as it ended - that one ran its 1000 ms after the END with no OFF. The setting read 4 on
+the stock card; the game itself shook as a game started (334 ms at 0, then 2000-4000 ms at 3). Not yet
+machine-tested (David's Premium has a shaker fitted).
 ## The game's own light shows (Godzilla Premium/LE, PAD-411)
 
 David, after the first machine test of the shield: "i am not seeing any fancy playfield light shows when custom modes

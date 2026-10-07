@@ -52,8 +52,10 @@ one of its own sounds (with a callout of the game's when the card could not carr
 a shot at a pace of its own (any value, in ms) or blinking faster as the clock runs down, and (PAD-395)
 hold one of the game's mechanisms (Godzilla's magnet, and on a Premium/LE the Mechagodzilla magnet
 and the bridge) for a time, hold the next ball (or every ball) in the scoop, and let go, and (PAD-392)
-turn Godzilla Premium/LE's shield targets toward the player or away, kept there while it runs, and (PAD-418)
-play one of the game's own light shows by its port's name (Godzilla Premium/LE's ten). Values: a
+turn Godzilla Premium/LE's shield targets toward the player or away, kept there while it runs, (PAD-418)
+play one of the game's own light shows by its port's name (Godzilla Premium/LE's ten), and (PAD-414)
+shake the cabinet's shaker for N ms at a strength, or with one of the game's own shakes (its jackpot shake...) -
+one in When the mode ends runs out after the mode. Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running,
@@ -158,7 +160,7 @@ SHARED_RESETS = ("ball", "game")
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
-              "hold", "scoop_hold", "let_go", "shield", "game_show")
+              "hold", "scoop_hold", "let_go", "shield", "game_show", "shake", "shake_game")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
@@ -168,6 +170,10 @@ SCOOP_WHICH = {"next": "the next ball", "every": "every ball"}
 #: PAD-392: where a block turns the shield targets (Godzilla Premium/LE's platform), kept there while the mode runs;
 #: "leave" stops keeping them (they stay where they are). The runtime turns them back when the mode ends.
 SHIELD_WHERE = {"toward": "toward the player", "away": "away", "leave": "where they are"}
+#: PAD-414: a shake's strength (the game's own power steps, mode_project.SHAKE_STRENGTHS), and its length: at least
+#: SHAKE_MIN_MS, at most the game's own longest at that strength (the runtime clamps a value worked out while it runs)
+SHAKE_STRENGTH = {v: k for k, v in MP.SHAKE_STRENGTHS.items()}
+SHAKE_MIN_MS, SHAKE_MAX_MS = MP.SHAKE_MIN_MS, 5000
 #: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
 HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus")
 GAUGE_KINDS = ("diamond", "segment", "spike")
@@ -571,7 +577,7 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
-def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None):
+def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -579,7 +585,9 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     and ``scoop`` (whether it may hold a ball in the scoop), when given, are the card's too
     (PAD-395); so is ``shield`` (PAD-392): False where the game has no shield platform a mode may turn,
     else the name of its own shield feature ("" when the port names none); so is ``game_shows`` (PAD-418): the
-    names of the game's own light shows its port names ([] = none on this game). The C is written anyway (a missing shot is 0 to the game, which never matches),
+    names of the game's own light shows its port names ([] = none on this game); so is ``shaker`` (PAD-414): False where the game has no
+    shaker a mode may shake, else ``{"shakes": names of the game's own, "max": its longest per strength}``.
+    The C is written anyway (a missing shot is 0 to the game, which never matches),
     so a half-made program always saves."""
     program = normalize(program)
     out = []
@@ -621,7 +629,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds,
            "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield,
-           "game_shows": list(game_shows) if game_shows is not None else None}
+           "game_shows": list(game_shows) if game_shows is not None else None,
+           "shaker": shaker}
     hud = program["hud"]
     if hud["on"]:
         for k, c in enumerate(hud["counters"]):
@@ -940,6 +949,23 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["shield"] is False:
                 ctx["out"].append("%s turns the shield targets, which a mode cannot do on this card's game."
                                   % where)
+        elif op in ("shake", "shake_game"):                                          # PAD-414
+            shaker = ctx["shaker"]
+            if shaker is False:
+                ctx["out"].append("%s shakes the cabinet, which a mode cannot do on this card's game." % where)
+            elif op == "shake":
+                strength = SHAKE_STRENGTH.get(b.get("strength"))
+                if strength is None:
+                    ctx["out"].append("%s shakes the cabinet: hard, strong, medium or soft." % where)
+                else:
+                    top = ((shaker or {}).get("max") or [0] * 4)[strength] or SHAKE_MAX_MS
+                    _check_ms(b.get("ms"), SHAKE_MIN_MS, top, "%s shakes the cabinet with a %s shake for" % (
+                        where, b.get("strength")), ctx)
+            elif not b.get("shake"):
+                ctx["out"].append("%s plays none of the game's shakes." % where)
+            elif shaker and b.get("shake") not in (shaker.get("shakes") or ()):
+                ctx["out"].append("%s plays the game's %s shake, which this card's game does not have."
+                                  % (where, b.get("shake")))
         elif op == "game_show":                         # PAD-418: by the port's name for it
             name = b.get("name")
             if not name or not isinstance(name, str):
@@ -1349,6 +1375,16 @@ class _Gen:
                 if where:
                     self.mech = True
                     out.append(pad + "shield(%s);" % where)
+            elif op == "shake":                                                       # PAD-414
+                strength = SHAKE_STRENGTH.get(b.get("strength"))
+                if strength is not None:
+                    self.mech = True
+                    out.append(pad + "shake(%s, %d);" % (self.num(b.get("ms")), strength))
+            elif op == "shake_game":
+                name = str(b.get("shake") or "")
+                if HOLD_RE.match(name):
+                    self.mech = True
+                    out.append(pad + "shake_game(%s);" % _c_str(name))
             elif op == "game_show":
                 name = b.get("name")
                 if name and isinstance(name, str):
@@ -2400,6 +2436,25 @@ UNUSED static void shield(int where)
 {
     if (!run.on) return;
     if (!pm_shield_keep(where)) pm_log("shield: no platform on this game");
+}
+
+/* PAD-414: shake the cabinet this many ms at a strength (0 hard .. 3 soft), or with one of the game's own shakes; the
+ * runtime keeps every limit (the operator's setting, the game's own longest, one at a time, 20 and 15 s a minute) and
+ * stops it when the mode ends - unless it was asked for in When the mode ends, which it leaves to run out */
+UNUSED static void shake(long long ms, unsigned strength)
+{
+    if (!run.on) return;
+    if (ms < 0) ms = 0;
+    if (ms > 60000) ms = 60000;
+    if (!pm_shake((unsigned)ms, strength)) pm_log("shake: refused (the runtime's line says why)");
+    else if (ending) pm_shake_outlast();
+}
+
+UNUSED static void shake_game(const char *name)
+{
+    if (!run.on) return;
+    if (!pm_shake_game(name)) pm_log("shake %%s: refused (the runtime's line says why)", name);
+    else if (ending) pm_shake_outlast();
 }
 
 /* every tick while it runs: a hold of the next ball only ends once that ball has been held */

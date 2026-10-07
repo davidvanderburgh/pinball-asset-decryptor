@@ -46,6 +46,7 @@ const T = {
   ballSave: "For this many seconds after the balls are served, a drained ball is served back.",
   startSave: "When the mode starts, the game's own ball saver is on for this many seconds: a ball that drains in that time is served back, and the ball does not end. A multiball uses its own ball save instead.",
   coils: "Holds this mechanism the same way as the magnet: one command at the power the game itself uses for it, for this long (0.1 to 5 seconds), then it is let go. As the mode starts, or on every hit of a shot while it runs. The same limits as the magnet: one hold at a time, 3 seconds between holds, at most 6 a minute, never while the game is using it, and let go when the mode or the ball ends or the game tilts.",
+  shaker: "Shakes the cabinet's shaker motor: as the mode starts, on every hit of a shot while it runs, or as it ends (that one runs out after the mode). A shake is one of the game's own (its jackpot shake, its multiball start...) or one of the mode's own at a strength the game uses, never longer than the game's own longest at that strength (1 second hard or strong, 5 seconds medium or soft). It goes through the game's own shake, so the operator's Shaker Motor setting always applies: switched off (or no shaker fitted), nothing shakes. The limits are the app's and cannot be changed: one shake at a time, never over one of the game's own, at most 20 shakes and 15 seconds of shaking a minute, stopped when the mode, the ball or the game ends.",
   shield: "While the mode runs, the shield targets face the player: the platform turns 1.5 seconds after the mode starts (once the ball that started it is clear of it) and turns back when the mode ends, the ball drains, or the game ends or tilts. The game's ball search swings the platform when no switch closes for a while; it is turned back after that. The limits are the app's and cannot be changed: never while one of the game's own modes or multiballs runs, 1.5 seconds between moves, at most 12 a minute. It stays turned only while the game's modes cannot start and its own shield feature does not keep counting: that feature turns the platform back about 2 seconds after every move. An operator who switched the shield motor off in the game's settings keeps it where it is.",
   scoop: "While the mode runs, a ball that lands in the scoop stays there this long once the game is done with it (its own awards and screens always come first), then the game kicks it out the way it always does, at the kick power the operator set. Your mode never fires the scoop itself. 0.1 to 10 seconds; the ball goes at once when the mode ends or the game tilts.",
   magnet: "While the mode runs, every hit of the shot the magnet sits at (the one that starts the mode too) holds the ball on the magnet for this long, then lets it go. The magnet runs at the power the operator set for it in the game's settings. To keep the coil safe, the app always holds the same limits: 0.1 to 5 seconds a grab, one grab at a time, 3 seconds between grabs, at most 6 a minute, never while the game is using the magnet itself, and it lets go when the mode or the ball ends or the game tilts. A grab it refuses is skipped and the mode carries on.",
@@ -361,6 +362,24 @@ function ModePage({ s, f, off, dis, rs }) {
   const shieldFeature = prof.shield_rule || "shield";
   const shieldLive = (f.game_modes || "block") !== "block" || (!!prof.shield_rule && (s.keep_on || []).includes(prof.shield_rule));
   const shieldOff = off || dis.shield || (shieldLive && !f.shield);
+  // PAD-414: the shaker - a shake of the mode's own at a strength, or one of the game's
+  const shakeOff = off || dis.shaker;
+  const shakeWhat = (v) => withValue(prof.shakes || [], v);
+  const shakeOwn = (v) => !String(v || "").startsWith("game:");
+  const shakeTop = (v) => { const i = ["hard", "strong", "medium", "soft"].indexOf(v); const m = (prof.shake_max || [])[i]; return m ? m / 1000 : 0; };
+  const shakeShots = withValue([{ value: "", label: "(choose a shot)", disabled: true }, ...shots.map((x) => ({ value: x, label: x }))], f.shake_shot);
+  const shakeRow = (when, label, extra) => html`<div>
+    <div class="row wrap">
+      <${Check} label=${label} checked=${f["shake_on_" + when]} disabled=${shakeOff} title=${T.shaker} ns="modes" k=${"f:shake_on_" + when} />
+      ${extra || null}
+    </div>
+    <div class="row wrap" style="padding-left:26px">
+      <${Select} value=${f["shake_what_" + when]} options=${shakeWhat(f["shake_what_" + when])} ns="modes" k=${"f:shake_what_" + when} disabled=${shakeOff || !f["shake_on_" + when]} width=${230} title=${T.shaker} />
+      ${shakeOwn(f["shake_what_" + when]) ? html`<span class="dim nw">for</span>
+        <${Num} k=${"shake_s_" + when} value=${f["shake_s_" + when]} disabled=${shakeOff || !f["shake_on_" + when]} width=${56} title=${T.shaker} />
+        <span class="dim nw">s${shakeTop(f["shake_what_" + when]) ? ` (up to ${shakeTop(f["shake_what_" + when])})` : ""}</span>` : null}
+    </div>
+  </div>`;
   const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
   const ballOpts = f.add_ball_shot && !balls.some((o) => o.value === f.add_ball_shot) ? [{ value: f.add_ball_shot, label: f.add_ball_shot }, ...balls] : balls;
   const mbOnOpts = withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x })), f.mb_on_shot);
@@ -508,6 +527,12 @@ function ModePage({ s, f, off, dis, rs }) {
       <${Sec} title="Shield targets" reason=${rs.shield}>
         <${Check} label="Turn the shield targets toward the player while it runs" checked=${f.shield} disabled=${shieldOff} title=${T.shield} ns="modes" k="f:shield" />
         ${!dis.shield && shieldLive ? html`<div class="small muted" style="padding-left:26px">Only while the game's modes cannot start and ${shieldFeature} does not keep counting: otherwise the game turns them back.</div>` : null}
+      <//>
+      <${Sec} title="Shaker" reason=${rs.shaker}>
+        ${shakeRow("start", "Shake the cabinet as it starts")}
+        ${shakeRow("shot", "Shake it on every hit of", html`<${Select} value=${f.shake_shot || ""} options=${shakeShots} ns="modes" k="f:shake_shot" disabled=${shakeOff || !f.shake_on_shot} width=${170} title=${T.shaker} />`)}
+        ${shakeRow("end", "Shake it as it ends")}
+        ${!dis.shaker ? html`<div class="small muted">The operator's Shaker Motor setting still applies: switched off, or no shaker fitted, nothing shakes.</div>` : null}
       <//>
       <${Sec} title="Multiball" reason=${rs.multiball}>
         <${Check} label="A multiball: the game serves more balls" checked=${f.multiball} disabled=${mbOff} title=${T.multiball} ns="modes" k="f:multiball" />

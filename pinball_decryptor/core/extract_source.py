@@ -231,10 +231,8 @@ def built_card_source(assets_dir: str) -> Optional[str]:
     return rec.get("input_name") or os.path.basename(path)
 
 
-def _build_project(card_path: str) -> Optional[str]:
-    """The project folder the build record beside *card_path* names, or
-    ``None`` when PAD did not build that card (or the build never
-    finished)."""
+def _build_record(card_path: str) -> Optional[dict]:
+    """The finished build record beside *card_path*, or ``None``."""
     try:
         with open(card_path + BUILD_RECORD_SUFFIX, encoding="utf-8") as f:
             rec = json.load(f)
@@ -242,7 +240,38 @@ def _build_project(card_path: str) -> Optional[str]:
         return None
     if not isinstance(rec, dict) or rec.get("building"):
         return None
-    return str(rec.get("assets") or "") or None
+    return rec
+
+
+def _build_project(card_path: str) -> Optional[str]:
+    """The project folder the build record beside *card_path* names, or
+    ``None`` when PAD did not build that card (or the build never
+    finished)."""
+    rec = _build_record(card_path)
+    return (str(rec.get("assets") or "") or None) if rec else None
+
+
+def _built_from_this_source(card_path: str, source_rec: dict) -> bool:
+    """PAD-421: was *card_path* built from a project whose folder is GONE,
+    starting from the very card *source_rec* (a project's sidecar) was
+    extracted from?  That is this project copied or moved before the old
+    folder was deleted (DragonRR built his 1.96 card from one folder, copied
+    the folder next to the card and deleted the first): the build record
+    still names the old folder, and nothing else says the two belong."""
+    rec = _build_record(card_path)
+    if not rec or not source_rec:
+        return False
+    old = str(rec.get("assets") or "")
+    if not old or os.path.exists(old):
+        return False
+    stock = rec.get("stock") or {}
+    if not isinstance(stock, dict):
+        return False
+    name = os.path.basename(str(stock.get("path") or ""))
+    return (bool(name)
+            and os.path.normcase(name) == os.path.normcase(
+                source_rec.get("input_name") or "")
+            and stock.get("size") == source_rec.get("size"))
 
 
 def _same_dir(a: str, b: str) -> bool:
@@ -305,7 +334,8 @@ def card_relation(card_path: str, assets_dir: str) -> Optional[dict]:
     built_from = _build_project(card_path)
     if rec and _names_this_image(rec, card_path):
         kind = "source"
-    elif built_from and _same_dir(built_from, assets_dir):
+    elif built_from and (_same_dir(built_from, assets_dir)
+                         or _built_from_this_source(card_path, rec)):
         kind = "build"
     elif built_from:
         kind = "other_build"

@@ -121,7 +121,7 @@ def _mb(name):
     return (set() if name in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if name in MP.BALL_SAVE_PROVEN else {"ball_save"}) | \
         (set() if name in MP.MAGNET_PROVEN else {"magnet"}) | \
         (set() if name in MP.SCOOP_PROVEN else {"scoop"}) | \
-        (set() if any(b == name for b, _c in MP.HELD_COILS_PROVEN) else {"coils"}) |         (set() if name in MP.SHIELD_PROVEN else {"shield"}) |         (set() if name in GAME_SHOW_PORTS else {"shows"})   # PAD-225; PAD-381 magnet, scoop, coils; PAD-392; PAD-418
+        (set() if any(b == name for b, _c in MP.HELD_COILS_PROVEN) else {"coils"}) |         (set() if name in MP.SHIELD_PROVEN else {"shield"}) |         (set() if name in GAME_SHOW_PORTS else {"shows"}) | (set() if name in MP.SHAKER_PROVEN else {"shaker"})   # PAD-225; PAD-381 magnet, scoop, coils; PAD-392; PAD-418; PAD-414
 
 
 def _check_runtime_file(p, spec, slug):
@@ -157,7 +157,7 @@ def test_a_profile_per_port(name):
     assert p.key == "%s_%s" % (game, version.replace(".", "_"))
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
-    cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shows"}) | _mb(name)
+    cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shaker", "shows"}) | _mb(name)
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)

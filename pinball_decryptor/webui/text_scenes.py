@@ -2009,35 +2009,40 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         return True
 
     def _project_card(self, card, quiet):
-        """PAD-421: the card to re-read, or ``""`` to stop.  DragonRR's Extract tab named a
-        custom Godzilla card over a folder holding the stock card's extract: its scenes are
-        drawn with pictures that card added, which this project does not have, so every one
-        came back empty.  The scenes are read off the card the project came from; when that
-        card is gone, nothing is read and the page says why."""
+        """PAD-421: the card to re-read, or ``""`` to stop.  A scene re-read has to come off
+        the card this project was extracted from: the project's picture list names where
+        each picture sits in THAT card's scenes, and a card built since (or another card
+        altogether) lays them out differently, so every such scene came back empty
+        (DragonRR's 1.96 card over the stock card's extract).  A card built from this
+        project reads its source card without asking; another card asks first; with the
+        source card gone, a built card is read as it is (the engine refuses scenes that do
+        not line up) and another card is refused with the reason."""
         from ..core.extract_source import card_relation
         try:
             rel = card_relation(card, self.assets_dir)
         except Exception:                            # noqa: BLE001
             rel = None
-        if not rel or rel.get("kind") not in ("other", "other_build")                 or not rel.get("source_name"):
+        kind = (rel or {}).get("kind")
+        if kind not in ("build", "other", "other_build") or not rel.get("source_name"):
             return card
         name, src = os.path.basename(card), rel.get("source") or ""
+        if kind == "build":
+            return src or card
         if src:
             if quiet or compat.messagebox.askyesno(
                     "Re-read from card",
-                    "This project folder holds the extract of %s, not of %s (the card on "
-                    "the Extract tab). %s's scenes use pictures this project does not have, "
-                    "so they would come back empty.\n\nRe-read the scenes from %s, the card "
-                    "this project came from?\n\nTo work on %s instead, extract it into a new "
-                    "project folder." % (rel["source_name"], name, name,
-                                         rel["source_name"], name)):
+                    "This project folder was extracted from %s, not from %s (the card picked "
+                    "on the Select card tab). The project's pictures are laid out for %s's "
+                    "scenes, so reading %s's would leave them empty.\n\nRe-read the scenes "
+                    "from %s, the card this project came from?" % (
+                        rel["source_name"], name, rel["source_name"], name,
+                        rel["source_name"])):
                 return src
             return ""
-        msg = ("This project folder holds the extract of %s, not of %s (the card on the "
-               "Extract tab), and %s is not where it was extracted from. Set the Extract "
-               "tab's card back to %s to re-read its scenes, or extract %s into a new "
-               "project folder to work on that card." % (
-                   rel["source_name"], name, rel["source_name"], rel["source_name"], name))
+        msg = ("This project folder was extracted from %s, not from %s (the card picked on "
+               "the Select card tab), and %s is no longer where it was. Pick %s on the Select "
+               "card tab to re-read the scenes." % (
+                   rel["source_name"], name, rel["source_name"], rel["source_name"]))
         if quiet:
             self.set(rebuild_msg=msg)
         else:

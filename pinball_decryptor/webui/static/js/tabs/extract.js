@@ -152,8 +152,12 @@ function projectHint(p) {
   if (!p) return "";
   if (!p.exists) return "A new folder: Extract creates it.";
   const d = p.details || {};
-  // PAD-421: the folder holds another card's extract, and nothing on the page said so
-  if (d.card_kind === "other") return { warn: true, text: `This folder holds the extract of ${d.source_name}, not of the card above: every tab shows that card's files. To work on this card, extract it into a new project folder.` };
+  // PAD-421: the folder was extracted from another card, and nothing on the page said so;
+  // when the picked card has a project folder of its own, offer it
+  const own = d.card_project ? d.card_project.split(/[\\/]/).filter(Boolean).slice(-2).join("\\") : "";
+  if (d.card_kind === "other") return { warn: true, project: own,
+    text: own ? `This folder was extracted from ${d.source_name}, not from the card above. The card above has its own project folder, ${own}.`
+      : `This folder was extracted from ${d.source_name}, not from the card above. To work on the card above, extract it into a new project folder.` };
   if (d.archived) return "This project is archived: extracting into it is the hydrate — your edited files are set aside first and restored over the fresh extraction automatically.";
   if (d.baseline) return "Already holds an extract: extracting again overwrites your edits (after a confirmation). Use a fresh project folder per firmware version.";
   return "";
@@ -272,7 +276,9 @@ function SourceCard({ s, shell }) {
         <${InfoBadge} text=${PROJECT_INFO_TIP} onClick=${() => call("extract.open_project_info")} /></div>
       <${PathCombo} id="x-proj" k="output" value=${s.output} history=${hist.extract_output}
         onBrowse=${() => call("extract.browse_output")} browseTitle=${PROJECT_TIP} />
-      ${hint && hint.warn ? html`<div class="x-badge warn"><${Icon} name="warn" /><span>${hint.text}</span></div>`
+      ${hint && hint.warn ? html`<div class="x-badge warn"><${Icon} name="warn" /><span>${hint.text}</span>
+          ${hint.project ? html`<${Button} size="sm" icon="folder" title=${p.details.card_project}
+            onClick=${() => call("extract.use_card_project")}>Open its project<//>` : null}</div>`
         : hint ? html`<span class="small muted">${hint}</span>` : null}
     </div>
     <${Options} s=${s} />

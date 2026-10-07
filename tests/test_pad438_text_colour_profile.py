@@ -355,3 +355,39 @@ def test_scenes_layers_give_a_line_of_text_a_palette(tmp_path):
         assert _wait(w, lambda: _layer().get("color") == {
             "locked": True, "line": True, "kind": "text"})
         assert cp.asset_settings(d)["text"] == {}
+
+
+# ---------------------------------------------------------------------------------------------
+# save / load edits (PAD-369's file carries the lines too)
+# ---------------------------------------------------------------------------------------------
+def test_a_saved_file_carries_the_lines_switches_and_profiles(tmp_path):
+    import zipfile
+    from pinball_decryptor.plugins.stern import scene_share
+    add = {"op": "add_text", "parent": None, "index": 99, "id": X.FIRST_ADDED_ID,
+           "name": "Mine", "text": "MINE", "x": 0, "y": 0, "like": TITLE, "color": True}
+    a = _project(tmp_path / "a", ops=[add])
+    mine = cp.text_rel(CARD, X.FIRST_ADDED_ID)
+    cp.store_own_profile(a, "text", mine, BW)
+    out = str(tmp_path / "lines.zip")
+    assert scene_share.export_all(a, out, [CARD], {CARD: _man()})[0] == 1
+    with zipfile.ZipFile(out) as z:
+        doc = json.loads(z.read(X.SHARE_MANIFEST))
+    assert doc["lines"] == {CARD: {
+        str(TITLE): {"color": True, "profile": cp._profile_dict(DARK)},
+        str(X.FIRST_ADDED_ID): {"color": True, "profile": cp._profile_dict(BW)}}}
+    # loaded into another project: the game line's switch waits for the unlock box there,
+    # the added line's rides in its edit, and each keeps the profile the file gave it
+    b = _project(tmp_path / "b", prof=None, unlocked=False, slots=())
+    extras = scene_share.read_extras(out)
+    assert scene_share.has_extras(extras)
+    X.import_edits(b, out, [CARD])
+    assert scene_share.import_extras(b, out, extras, cards_here=[CARD]) == ([], [])
+    assert cp.asset_settings(b)["text"] == {cp.text_rel(CARD, TITLE): True}
+    assert cp.text_lines_on(b) == set()
+    assert cp.own_profile(b, "text", cp.text_rel(CARD, TITLE)) == DARK
+    assert cp.own_profile(b, "text", mine) == BW
+    assert X.ops_for(b, CARD)[0]["color"] is True
+    # a scene the project does not have is left out
+    c = _project(tmp_path / "c", prof=None, unlocked=False, slots=())
+    scene_share.import_extras(c, out, extras, cards_here=["/other/scene.radium"])
+    assert cp.asset_settings(c)["text"] == {}

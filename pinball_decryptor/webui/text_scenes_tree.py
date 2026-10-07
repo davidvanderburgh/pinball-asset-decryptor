@@ -1925,6 +1925,7 @@ class TreeEditMixin:
                  if on else "keeps the game's own colors")
         self._tell_colour_tabs()
         self.pictures_changed()
+        self._live_kick()                        # a running game gets the line's new colour
         return True
 
     def _tell_colour_tabs(self):
@@ -2380,7 +2381,8 @@ class TreeEditMixin:
                              if "text:%d" % i not in take}
                 tfits = [(r, new) for r, new in tfits if id(r) not in gone_text]
                 more = scene_share.has_extras(extras) and (
-                    bool(extras["pictures"] or extras["added"]) or overlay)
+                    bool(extras["pictures"] or extras["added"] or extras.get("lines"))
+                    or overlay)
             renamed = {}
             if got:
                 got, missing = scene_edit.import_edits(self.assets_dir, path,
@@ -2397,7 +2399,8 @@ class TreeEditMixin:
                     if k)
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
-                                                       renamed=renamed, overlay=overlay)
+                                                       renamed=renamed, overlay=overlay,
+                                                       cards_here=self._load_trees().keys())
             if tfits:
                 if text_tab is not None:
                     text_tab._set_replacements(

@@ -56,6 +56,22 @@ _EXPORTS = (
 )
 
 
+def _card_kind(card, folder, details):
+    """How the Extract tab's card relates to the extract already in *folder* (PAD-421):
+    ``"other"`` when the folder holds the extract of a different card, so the page can say
+    the project is not this card's; ``""`` when it is (or a build of it), or nothing to
+    compare.  DragonRR picked a custom Godzilla card over a folder holding the stock card's
+    extract, and the page read as if this card were extracted."""
+    if not card or not details.get("baseline") or not details.get("source_name"):
+        return ""
+    from ...core.extract_source import card_relation
+    try:
+        rel = card_relation(card, folder)
+    except Exception:                                   # noqa: BLE001
+        return ""
+    return "other" if rel and rel.get("kind") in ("other", "other_build") else ""
+
+
 def _is_admin():
     from ...core.admin import is_admin
     try:
@@ -410,6 +426,8 @@ class ExtractTab(TabService):
         self._mirror("write_upd_var", self.extract_input_var.get())
         self._refresh_gate()
         self._start_probe()
+        # "This project" says when the folder holds another card's extract (PAD-421)
+        self._schedule_stats()
 
     def _on_output_changed(self):
         # the shared assets folder every other tab reads follows this box
@@ -1218,6 +1236,7 @@ class ExtractTab(TabService):
         # (its anchor) from its own image, never read off the input box
         mfrs = list(self.window.manufacturers)
         mfr = self.mfr
+        card = (self.extract_input_var.get() or "").strip()
 
         def _work():
             try:
@@ -1228,6 +1247,8 @@ class ExtractTab(TabService):
                 details = H.project_details(folder, mfrs, mfr)
             except Exception:                           # noqa: BLE001
                 details = None
+            if details is not None:
+                details["card_kind"] = _card_kind(card, folder, details)
             self.ctx.loop.post(self._apply_stats, seq, folder, name, rows,
                                details)
 

@@ -482,6 +482,14 @@ BALL_SAVE_PROVEN = frozenset({
     "mando_pro-1.45",                    # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 30000000
     "munsters_pro-1.28",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
     "rush_le-1.19",                      # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "rush_pro-1.19",                     # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "star_wars_le-1.31",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "star_wars_pro-1.31",                # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "stranger_things-1.13",              # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "stranger_things_le-1.13",           # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "sword_of_rage_le-1.19",             # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "sword_of_rage_pro-1.19",            # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
 })
 
 

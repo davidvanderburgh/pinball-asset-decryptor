@@ -91,6 +91,12 @@ struct mode_cfg {
     unsigned coil_ms[4];
     uint64_t coil_bits[4];            /* ... on each hit of these shots; 0 = once, when the mode starts */
     unsigned n_coil;
+    /* PAD-414 `shake start|shot|end ...`: the cabinet's shaker, as it starts, on a shot, as it ends */
+    unsigned char shake_when[4];      /* SHAKE_AT_* */
+    unsigned shake_ms[4], shake_strength[4];
+    char shake_name[4][24];           /* one of the game's own shakes; "" = shake_ms at shake_strength */
+    uint64_t shake_bits[4];           /* SHAKE_AT_SHOT: on each hit of these shots */
+    unsigned n_shake;
     /* PAD-227: more than one thing to meet before it starts (their own functions below) */
     uint64_t also_bits[ALSO_MAX];
     unsigned also_count[ALSO_MAX], n_also;
@@ -323,13 +329,86 @@ static void coils_at(struct slot *M, uint64_t mask)   /* mask 0: the mode's star
     }
 }
 
+#define SHAKE_AT_START 0
+#define SHAKE_AT_SHOT  1
+#define SHAKE_AT_END   2
+static int shakes_at(struct slot *M, unsigned when, uint64_t mask);   /* PAD-414: the shaker, below */
+
 /* A shot of the running mode's: the magnet, when it is the magnet's shot */
 static void magnet_shot(struct slot *M, uint64_t mask)
 {
     coils_at(M, mask);                       /* PAD-381: the held coils on their shots, too */
+    shakes_at(M, SHAKE_AT_SHOT, mask);       /* PAD-414: the shaker on its shots */
     if (!cfg.magnet_ms || !(mask & cfg.magnet_bits)) return;
     pm_log("%s: magnet shot %08x_%08x - %s", cfg.name, (unsigned)(mask >> 32), (unsigned)mask,
            pm_magnet_grab(cfg.magnet_ms) ? "holding the ball" : "no grab (the runtime's line says why)");
+}
+
+/* PAD-414: the shaker (MODE_SDK.md "The shaker")
+ *   shake start <ms> <strength>        as the mode starts: the cabinet shakes <ms> at <strength> (0 hardest .. 3
+ *   shake start game <name>            softest), or plays the game's own shake <name> (hit, big_hit, jackpot,
+ *   shake shot <ms> <strength> <mask>  rumble, multiball_start: the port's `text shake_<name>`); `shot` on every
+ *   shake shot game <name> <mask>      hit of <mask> while it runs (the starting hit included); `end` as it ends,
+ *   shake end <ms> <strength>          left to run out after the end (pm_shake_outlast). Every limit is
+ *   shake end game <name>              pm_shake's: the operator's setting, its length per strength, 20 shakes and
+ *                                      15 s a minute. Up to 4 lines. */
+static int shake_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "shake"), *b;
+    unsigned n = cfg.n_shake, k = 0;
+    if (!a) return 0;
+    if (n >= 4) return 1;
+    if ((b = key_is(a, "start"))) cfg.shake_when[n] = SHAKE_AT_START;
+    else if ((b = key_is(a, "shot"))) cfg.shake_when[n] = SHAKE_AT_SHOT;
+    else if ((b = key_is(a, "end"))) cfg.shake_when[n] = SHAKE_AT_END;
+    else {
+        pm_log("shake takes start, shot or end - \"%.40s\" ignored", a);
+        return 1;
+    }
+    cfg.shake_name[n][0] = 0;
+    cfg.shake_ms[n] = cfg.shake_strength[n] = 0;
+    if ((a = key_is(b, "game"))) {
+        while (*a && !is_space(*a) && k + 1 < sizeof cfg.shake_name[n]) cfg.shake_name[n][k++] = *a++;
+        cfg.shake_name[n][k] = 0;
+        while (*a && !is_space(*a)) a++;
+        while (is_space(*a)) a++;
+    } else {
+        a = b;
+        cfg.shake_ms[n] = (unsigned)num(&a);
+        cfg.shake_strength[n] = (unsigned)num(&a);
+    }
+    cfg.shake_bits[n] = (*a >= '0' && *a <= '9') ? num(&a) : 0;
+    if (!k && !cfg.shake_ms[n]) {
+        pm_log("shake needs a time or `game <name>` - \"%.60s\" ignored", line);
+        return 1;
+    }
+    if (cfg.shake_when[n] == SHAKE_AT_SHOT && !cfg.shake_bits[n]) {
+        pm_log("shake shot needs a shot mask - \"%.60s\" ignored", line);
+        return 1;
+    }
+    cfg.n_shake++;
+    return 1;
+}
+
+/* The shakes of `when` (SHAKE_AT_SHOT: those whose mask the hit has); 1 = one of them shook */
+static int shakes_at(struct slot *M, unsigned when, uint64_t mask)
+{
+    unsigned i;
+    int r, any = 0;
+    for (i = 0; i < cfg.n_shake; i++) {
+        if (cfg.shake_when[i] != when || (when == SHAKE_AT_SHOT && !(mask & cfg.shake_bits[i]))) continue;
+        r = cfg.shake_name[i][0] ? pm_shake_game(cfg.shake_name[i]) : pm_shake(cfg.shake_ms[i], cfg.shake_strength[i]);
+        if (cfg.shake_name[i][0])
+            pm_log("%s: the game's %s shake %s - %s", cfg.name, cfg.shake_name[i],
+                   when == SHAKE_AT_START ? "as it starts" : when == SHAKE_AT_SHOT ? "on its shot" : "as it ends",
+                   r ? "shaking" : "no shake (the runtime's line says why)");
+        else
+            pm_log("%s: shake %u ms at %u %s - %s", cfg.name, cfg.shake_ms[i], cfg.shake_strength[i],
+                   when == SHAKE_AT_START ? "as it starts" : when == SHAKE_AT_SHOT ? "on its shot" : "as it ends",
+                   r ? "shaking" : "no shake (the runtime's line says why)");
+        if (r) { any = 1; break; }           /* one at a time: the runtime refuses the next while it runs */
+    }
+    return any;
 }
 
 static int stack_line(struct slot *M, const char *line)
@@ -1773,6 +1852,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (scoop_line(M, line)) return;         /* PAD-381 */
     if (coil_line(M, line)) return;          /* PAD-381 */
     if (shield_line(M, line)) return;        /* PAD-392 */
+    if (shake_line(M, line)) return;         /* PAD-414 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -1840,6 +1920,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.shield)                          /* PAD-392 */
         pm_log("\"%s\": the shield targets face the player while it runs%s", cfg.name,
                pm_can(PM_CAN_SHIELD) ? "" : " - this game has no shield platform: nothing turns");
+    if (cfg.n_shake)                         /* PAD-414 */
+        pm_log("\"%s\": %u shake line(s)%s", cfg.name, cfg.n_shake,
+               pm_can(PM_CAN_SHAKER) ? "" : " - this game's port has no shaker: no shake");
     params_loaded(M);
     more_loaded(M);                          /* PAD-227 */
 }
@@ -2001,6 +2084,7 @@ static void mode_start(struct slot *M, const char *why)
     run.saving = !cfg.mball_balls && cfg.ball_save_s && pm_ball_save(cfg.ball_save_s);   /* no refusal stops the mode */
     if (cfg.scoop_ms) pm_scoop_hold(cfg.scoop_ms);       /* PAD-381: the runtime lets it go when the mode ends */
     coils_at(M, 0);                                      /* PAD-381: held coils with no shot hold as it starts */
+    shakes_at(M, SHAKE_AT_START, 0);                     /* PAD-414 */
     run.shield_due = cfg.shield ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-392 */
     run.no_clock = cfg.seconds == 0;
     run.active = 1;
@@ -2061,6 +2145,7 @@ static void mode_end(const char *why)
     end_pending = 0;
     clip_later_drop("the mode ended");       /* a start clip still waiting never plays after the end */
     if (cfg.display_priority) pm_display_priority(0);   /* item 154 display: the game's display order again */
+    if (shakes_at(M, SHAKE_AT_END, 0)) pm_shake_outlast();   /* PAD-414: before pm_end, which then leaves it to run */
     pm_end();
     roster_ended();
     own_sounds_end(M);

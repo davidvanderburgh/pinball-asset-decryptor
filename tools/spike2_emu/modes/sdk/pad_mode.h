@@ -550,4 +550,37 @@ int pm_shield_keep(int where);
 int pm_building(int floor);
 int pm_building_floor(void);
 
+/* ---- the shaker (PAD-414; MODE_SDK.md "The shaker") ----------------------------------------------
+ * Godzilla Premium/LE can have a shaker motor in the cabinet (optional on a Premium, fitted on an LE).
+ * pm_shake shakes it for `ms` at a `strength` through the game's own shake call - the one every shake of the
+ * game's goes through - so the operator's SHAKER MOTOR setting always applies (off = nothing; a lower
+ * setting cuts every shake shorter) and the board stops each shake by itself when its time is up.
+ * `strength` is one the game uses: PM_SHAKE_HARD (0, its battle hits and jackpots) .. PM_SHAKE_SOFT (3,
+ * its long rumbles). The limits are the runtime's and cannot be raised:
+ *   - `ms` is at least 100 and never longer than the game's own longest shake at that strength: 1000 ms at
+ *     0 and 1, 5000 ms at 2 and 3.
+ *   - only while your mode runs, in a game (not attract, not tilted); never with the shaker set to off (or
+ *     none fitted), while one of the game's own shakes runs, or while one of yours does; at most 20 shakes
+ *     and 15 s of shaking in any minute.
+ *   - the runtime stops your shake when your mode ends, the ball ends, or the game ends or tilts (and on
+ *     pm_shake_stop) - unless the game has since asked for a shake of its own, which it leaves to run.
+ * pm_shake_game plays one of the GAME's own shakes by name, as the program has it (the port's `text
+ * shake_<name>` lines): "hit" (200 ms, hard: a battle's shot), "big_hit" (334 ms), "jackpot" (500 ms, hard:
+ * every super jackpot), "rumble" (3000 ms, soft: O2 Destroyer), "multiball_start" (five shakes over 4 s:
+ * the Godzilla Multiball start). Same limits; its steps count as one shake.
+ * pm_shake / pm_shake_game: 1 = shaking; 0 = refused (the reason is in mode.log) or no shaker on this
+ * game's port (PM_CAN_SHAKER). pm_shaking: 1 while a shake of yours runs. */
+#define PM_CAN_SHAKER       0x800000u /* pm_shake / pm_shake_game / pm_shake_stop / pm_shaking / pm_shake_outlast */
+#define PM_SHAKE_HARD       0
+#define PM_SHAKE_STRONG     1
+#define PM_SHAKE_MEDIUM     2
+#define PM_SHAKE_SOFT       3
+int pm_shake(unsigned ms, unsigned strength);
+int pm_shake_game(const char *name);
+void pm_shake_stop(void);
+int pm_shaking(void);
+/* A shake as your mode ENDS: call pm_shake or pm_shake_game, then pm_shake_outlast, then end the mode - the
+ * end then leaves that one shake to run out (its own length); a ball end, game end or tilt still stops it. */
+void pm_shake_outlast(void);
+
 #endif

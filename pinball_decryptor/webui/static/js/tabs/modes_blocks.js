@@ -34,6 +34,7 @@ const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
 const SCOOP_WHICH = [["next", "the next ball"], ["every", "every ball"]];   // PAD-395
 const SHIELD_WHERE = [["toward", "toward the player"], ["away", "away"], ["leave", "where they are"]];   // PAD-392
+const SHAKE_STRENGTH = [["hard", "a hard"], ["strong", "a strong"], ["medium", "a medium"], ["soft", "a soft"]];   // PAD-414
 const CLIP_WHERE = [["full", "full screen"], ["behind", "behind the HUD, once"], ["loop", "behind the HUD, over and over"]];
 const PRIORITIES = [3, 4, 5, 6, 7].map((p) => [String(p), "priority " + p]);
 const SAVE_MS = 450;
@@ -91,6 +92,8 @@ const TIP = {
   hold: "Holds the mechanism this many ms (100 to 5000) at its own power settings, then lets go. Only while the mode runs, never while the game uses it, 3 s apart and 6 a minute at most; the mode ending, the ball draining or a tilt lets go at once. Any value: a number, a variable, a sum.",
   scoopHold: "A ball that settles in the scoop waits this many ms (100 to 10000), then the game kicks it out as always. The next ball, or every ball while the mode runs. The game's own use of the scoop comes first; the mode ending lets it go.",
   letGo: "Lets go of a held mechanism now, or stops holding balls in the scoop (a ball held there goes).",
+  shake: "Shakes the cabinet's shaker motor for this long, through the game's own shake: the operator's Shaker Motor setting still applies (switched off, or no shaker fitted: nothing). Hard and strong shakes last up to 1 second, medium and soft up to 5 - the game's own longest. One at a time, never over one of the game's own, 20 shakes and 15 seconds of shaking a minute at most; the mode, the ball or the game ending stops it, except a shake in When the mode ends, which runs out.",
+  shakeGame: "Plays one of the game's own shakes, as the game does: its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble, or its multiball start (five shakes over 4 seconds). The same limits as Shake the cabinet.",
   shield: "Turns the platform the shield targets sit on (about a second) and keeps it there while the mode runs: the game's ball search swings it, and it is turned back after. Where they are: stop keeping them. Only while the mode runs, never while one of the game's own modes runs, 1.5 s between moves, 12 a minute at most; the mode ending, the ball draining or a tilt turns them back where they were. They stay turned only while the game's modes cannot start and its own shield feature does not keep counting.",
 };
 
@@ -122,7 +125,8 @@ function stmtTemplates(ch, vars, prog = {}) {
     // PAD-395: the mechanisms the form's Magnet, Scoop and Other mechanisms hold (greyed where the game cannot)
     ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
       { op: "scoop_hold", ms: num(3000), which: "next" }, { op: "let_go", what: "*" },
-      { op: "shield", where: "toward" }]],
+      { op: "shield", where: "toward" }, { op: "shake", ms: num(500), strength: "hard" },
+      { op: "shake_game", shake: ((ch.shakes || [])[0] || {}).name || "jackpot" }]],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
       { op: "change", var: v, by: num(1) }]],
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
@@ -154,7 +158,8 @@ const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: 
 const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", log: "show",
   clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
-  hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech" };
+  hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech",
+  shake: "mech", shake_game: "mech" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
 const GAUGES = [["diamond", "diamonds"], ["segment", "a bar of segments"], ["spike", "spikes"]];
@@ -343,6 +348,10 @@ function StmtBody({ b, path, ed }) {
         options=${[["*", "everything it holds"], ...(ed.ch.mechs || []).map((m) => [m.name, "the " + m.label]), ["scoop", "the scoop"]]}
         missing="(not on this game)" onChange=${(v) => set("what", v)} />`;
     case "shield": return html`<span class="bk-w" ...${tip(TIP.shield)}>Turn the shield targets</span><${Pick} value=${b.where || "toward"} options=${SHIELD_WHERE} onChange=${(v) => set("where", v)} />`;
+    case "shake": return html`<span class="bk-w" ...${tip(TIP.shake)}>Shake the cabinet:</span><${Pick} value=${b.strength || "hard"} options=${SHAKE_STRENGTH} onChange=${(v) => set("strength", v)} />
+      <span class="bk-w">shake for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
+    case "shake_game": return html`<span class="bk-w" ...${tip(TIP.shakeGame)}>Shake the cabinet with</span><${Pick} value=${b.shake}
+        options=${(ed.ch.shakes || []).map((m) => [m.name, m.label])} missing="(not on this game)" onChange=${(v) => set("shake", v)} />`;
     default: return html`<span class="bk-w">${b.op}</span>`;
   }
 }
@@ -480,6 +489,7 @@ function stmtLabel(b) {
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets",
+    shake: "Shake the cabinet for", shake_game: "Shake it the game's way",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 
@@ -489,6 +499,7 @@ function whyOff(t, ch) {
   if (t.op === "scoop_hold") return ch.scoop_off || "";
   if (t.op === "let_go") return ch.mechs_off && ch.scoop_off ? ch.mechs_off : "";
   if (t.op === "shield") return ch.shield_off || "";
+  if (t.op === "shake" || t.op === "shake_game") return ch.shaker_off || "";   // PAD-414
   return "";
 }
 

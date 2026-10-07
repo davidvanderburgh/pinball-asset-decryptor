@@ -405,6 +405,7 @@ static void run_shot(uint64_t shot)
         run.won = 1;
         pm_log("DESTOROYAH DEFEATED: SUPER JACKPOT +%llu (every kill again)", (unsigned long long)got);
         kit_hud_award(&hud, 3000, "SUPER JACKPOT", kit_num(a, sizeof a, got));
+        if (pm_shake_game("jackpot")) pm_shake_outlast();   /* PAD-414: the game's jackpot shake, run out past the end */
         end("the perfect form defeated");
         return;
     }

@@ -48,6 +48,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Hold the Mechagodzilla magnet or the bridge | Godzilla Premium/LE 1.16: up to 5 s, as it starts or on a shot |
 | Turn the shield targets toward the player | Godzilla Premium/LE 1.16: while the mode runs, then back where they were. Only while the game's modes can't start. Tested in the emulator so far |
 | Move the building | Not yet |
+| Shake the cabinet | Godzilla Premium/LE 1.16 with a shaker fitted: as the mode starts, on a shot or as it ends - a shake of its own (up to 1 s hard, 5 s soft) or one of the game's (its jackpot shake, its multiball start). Tested in the emulator so far |
 | Fire a flipper, slingshot, pop bumper, kickback, lock, the trough or any other coil | No |
 | Add a switch or a shot | No. A mode sees the shots the game reports. |
 | Change settings, audits or high scores from a mode | No. Settings are on the Defaults tab. |
@@ -150,7 +151,9 @@ The few mechanisms a mode may hold (Godzilla's magnet and scoop, and on a Premiu
 - The scoop's kick-out is always the game's own.
 - The shield platform turns at most once every 1.5 s and 12 times a minute, never while one of the game's own modes or multiballs runs. It stays toward the player only while the game's own Mechagodzilla Shield feature isn't counting, because that feature turns it back. It turns back where it was when the mode ends, the ball drains, the player tilts or the game ends.
 
-All of it was tested on a real Godzilla Premium, except the shield, so far tested only in the emulator.
+- The shaker shakes only through the game's own shake, so the operator's Shaker Motor setting always applies (off means nothing). One shake at a time, never over one of the game's own, never longer than the game's own longest at that strength, at most 20 shakes and 15 s of shaking a minute. It stops when the mode ends (except a shake as it ends, which runs out), the ball drains, the player tilts or the game ends.
+
+All of it was tested on a real Godzilla Premium, except the shield and the shaker, so far tested only in the emulator.
 
 ## Which games
 
@@ -166,7 +169,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Elvira 1.13 | ✓ | no | not yet | all |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | all |  |
-| Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms, shield, shaker |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
@@ -203,6 +206,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 - **Buttons:** the flipper and Action buttons count as shots.
 - **Magnet, scoop, mechanisms:** what a mode may hold for a moment: the magnet, a ball in the scoop, the Mechagodzilla magnet and the bridge.
 - **Shield:** a mode may turn the shield targets toward the player while it runs.
+- **Shaker:** a mode may shake the cabinet (when the machine has a shaker fitted).
 - **Never waits:** a mode can't be set to wait for the game's modes.
 - **Not listed?** Pick the card anyway. The app works out its hooks; press Check this game (about two minutes) before trusting them.
 

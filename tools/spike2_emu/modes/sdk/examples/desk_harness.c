@@ -282,6 +282,40 @@ int pm_shield_keep(int where)
     if (where == PM_SHIELD_TOWARD || where == PM_SHIELD_AWAY) pm_shield(where);
     return 1;
 }
+/* PAD-414: the shaker - a SHAKE line for each one asked for (the runtime's limits are not modelled here, but one at a
+ * time is: a shake asked for while one runs is refused); HARNESS_SHAKER=none: a game without one */
+static unsigned long shake_until;
+static int shake_none(void)
+{
+    const char *e = getenv("HARNESS_SHAKER");
+    return e && !strcmp(e, "none");
+}
+static int shake_go(const char *what, unsigned ms)
+{
+    if (shake_none()) return 0;
+    if (now_ms < shake_until) {
+        printf("%6lu SHAKE %s - refused, one is running\n", now_ms, what);
+        return 0;
+    }
+    shake_until = now_ms + ms;
+    printf("%6lu SHAKE %s\n", now_ms, what);
+    return 1;
+}
+int pm_shake(unsigned ms, unsigned strength)
+{
+    char w[48];
+    snprintf(w, sizeof w, "%u ms at %u", ms, strength);
+    return strength < 4 && shake_go(w, ms);
+}
+int pm_shake_game(const char *name)
+{
+    char w[48];
+    snprintf(w, sizeof w, "the game's %s", name);
+    return shake_go(w, !strcmp(name, "multiball_start") ? 9000u : !strcmp(name, "rumble") ? 3000u : 500u);
+}
+void pm_shake_stop(void) { if (now_ms < shake_until) printf("%6lu SHAKE stopped\n", now_ms); shake_until = 0; }
+int pm_shaking(void) { return now_ms < shake_until; }
+void pm_shake_outlast(void) { if (now_ms < shake_until) printf("%6lu SHAKE runs out after the end\n", now_ms); }
 static void shield_knock(uint64_t mask)
 {
     if (shield_kind() || shield_at != PM_SHIELD_TOWARD || shield_to != PM_SHIELD_TOWARD ||

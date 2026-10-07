@@ -83,6 +83,8 @@ class TitleProfile:
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
     shield_rule: str = ""            # PAD-392: the game's own shield feature (the port's `text shield_rule`, one of
     #                                  game_rules): it turns the platform back while it counts shots
+    shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
+    shake_max_ms: tuple = ()         # PAD-414: the game's own longest shake at strength 0..3 (`text shake_max_ms`)
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -257,7 +259,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop", "coils", "shield")
+         "magnet", "scoop", "coils", "shield", "shaker")
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -484,6 +486,61 @@ def _shield_cannot(key, label, port=None):
                        "turn it in the emulator, so it cannot here yet." % label),)
 
 
+#: PAD-414: the cabinet's shaker motor (Godzilla Premium/LE: optional on a Premium, fitted on an LE). What
+#: pad_mode_runtime.c's shake_arm needs - (sites, values, texts): the game's own shake and stop, the drive's time
+#: left, the adjustment reader; the SHAKER MOTOR setting and the drive; the game's longest shake per strength and
+#: the longest each setting allows.
+SHAKER_NEEDS = (("shake", "shake_stop", "drive_left", "adjustment"), ("shake_adj", "shake_drive"),
+                ("shake_max_ms", "shake_setting_ms"))
+#: The builds where a mode file's ``shake`` lines were seen reach the board in the emulator.
+SHAKER_PROVEN = frozenset({
+    "godzilla_le-1.16",                # PAD-414 2026-10-06 rig 1, the stock Premium/LE card, PAD_COIL_PROBE=1: shake start 1500 2 -> node 1 coil 0 31/255 for 1500 ms; the game's jackpot shake on each left ramp (51/255, 500 ms), a hit while it ran refused; shake end 1000 3 ran out after the mode (no OFF); pm_end mid-shake sent the game's OFF with 4001 ms left
+})
+#: a shake's strength: the game's own power steps, 0 the hardest (its battle hits and jackpots)
+SHAKE_STRENGTHS = {0: "hard", 1: "strong", 2: "medium", 3: "soft"}
+SHAKE_MIN_MS = 100
+SHAKE_WHEN = {"start": "as it starts", "shot": "on a shot", "end": "as it ends"}
+SHAKES_MAX = 4                                 # mode_file.c holds 4 shake lines
+#: what the app calls the game's own shakes (the port's `text shake_<name>`); one the port names but this does not
+#: is shown by its name
+SHAKE_LABELS = {"hit": "the game's hit shake (0.2 s, hard: a battle's shot)",
+                "big_hit": "the game's big hit (0.33 s, hard)",
+                "jackpot": "the game's jackpot shake (0.5 s, hard: every super jackpot)",
+                "rumble": "the game's rumble (3 s, soft: O2 Destroyer)",
+                "multiball_start": "the game's multiball start (five shakes over 4 s)"}
+
+
+def _shaker_cannot(key, label, port=None):
+    """The ``cannot`` entry for the shaker on build ``key``, or () when it can."""
+    sites, values, texts = SHAKER_NEEDS
+    if not port or not (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
+                        and all(port["text"].get(n) for n in texts)):
+        return (("shaker", "The app has not found how %s shakes its cabinet, so a mode of yours cannot shake it."
+                           % label),)
+    if key in SHAKER_PROVEN:
+        return ()
+    return (("shaker", "The app has found how %s shakes its cabinet but has not yet seen a mode of yours shake it "
+                       "in the emulator, so it cannot here yet." % label),)
+
+
+def _shakes(port):
+    """((name, label), ...) the game's own shakes the port names, in the port's order."""
+    out = []
+    for k in port["text"]:
+        if k.startswith("shake_") and k not in ("shake_max_ms", "shake_setting_ms"):
+            name = k[len("shake_"):]
+            out.append((name, SHAKE_LABELS.get(name, "the game's %s shake" % name.replace("_", " "))))
+    return tuple(out)
+
+
+def _shake_max_ms(port):
+    try:
+        v = tuple(int(x) for x in port["text"].get("shake_max_ms", "").split())
+    except ValueError:
+        return ()
+    return v if len(v) == len(SHAKE_STRENGTHS) else ()
+
+
 #: PAD-381: the port's other HELD COILS (`text held_coils`, besides "magnet", which has its own part): each held
 #: like the magnet - one command at the coil's own powers from a process of the runtime's that controls it, at
 #: most COIL_MAX_MS - by a mode file's ``coil_hold <name> <ms> [mask]``. The (build, coil) pairs seen held in
@@ -548,7 +605,8 @@ GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzill
                             + _magnet_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _scoop_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _coils_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
-                            + _shield_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
+                            + _shield_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _shaker_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
@@ -1147,6 +1205,7 @@ def profile_from_port(path):
     cannot += list(_scoop_cannot(key, label, port))          # PAD-381
     cannot += list(_coils_cannot(key, label, port))          # PAD-381
     cannot += list(_shield_cannot(key, label, port))         # PAD-392
+    cannot += list(_shaker_cannot(key, label, port))         # PAD-414
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1198,6 +1257,8 @@ def profile_from_port(path):
         magnet_shot=_magnet_shot_name(port),                 # PAD-381
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
+        shakes=_shakes(port),                                                # PAD-414
+        shake_max_ms=_shake_max_ms(port),                                    # PAD-414
     )
 
 
@@ -1316,9 +1377,11 @@ try:
         GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
-        cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot if c[0] not in ("magnet", "scoop", "coils", "shield"))
+        cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot if c[0] not in ("magnet", "scoop", "coils", "shield", "shaker"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
-        + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115))
+        + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
+        + _shaker_cannot(_key_115, _label_115, _port_115),
+        shakes=_shakes(_port_115), shake_max_ms=_shake_max_ms(_port_115))
 except OSError:
     pass
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
@@ -1788,6 +1851,10 @@ class ModeSpec:
     # PAD-392: while it runs the shield targets face the player (Godzilla Premium/LE's platform turns 1.5 s after it
     # starts, is kept there, and turns back when it ends) - only while the game's own shield feature sees no shots
     shield: bool = False
+    # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
+    # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
+    # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
+    shakes: list = field(default_factory=list)
     # PAD-396: the mode on the title's OTHER models (the Pro beside the Premium/LE): {model word: {field: value}}
     # of MODEL_FIELDS, as the mode last was on that model, put back when it goes back (:func:`port_model`)
     models: dict = field(default_factory=dict)
@@ -1927,6 +1994,11 @@ def example_specs():
     ]
 
 
+#: PAD-414: the examples' shakes, where the game can shake its cabinet (:func:`examples_for`): MECHAGODZILLA starts big
+#: (the game's own multiball start) and every Godzilla target is a jackpot (the game's jackpot shake)
+EXAMPLE_SHAKES = {"MECHAGODZILLA": [["start", "multiball_start", 0, ""], ["shot", "jackpot", 0, "Godzilla target"]]}
+
+
 def example(name):
     """The example called ``name``, or None."""
     for n, spec in example_specs():
@@ -1958,6 +2030,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.coil_holds = []
     if not p.can("shield"):
         spec.shield = False
+    if not p.can("shaker"):
+        spec.shakes = []
     return spec
 
 
@@ -1985,6 +2059,10 @@ def examples_for(p):
     for name, spec in example_specs():
         if spec.start_shot in names and all(s in names for s in spec.scoring_shots):
             spec.title = p.key
+            games = {n for n, _l in getattr(p, "shakes", ())}
+            shakes = EXAMPLE_SHAKES.get(name, [])                # PAD-414: where the game can shake its cabinet
+            if p.can("shaker") and all(r[1] in games and (not r[3] or r[3] in names) for r in shakes):
+                spec.shakes = [list(r) for r in shakes]
             out.append((name, _switch_off_what_it_cannot(spec, p)))
     if out:
         return out
@@ -2069,7 +2147,7 @@ def retarget(spec, p):
 #: lights - is the same mode on every model.
 MODEL_FIELDS = ("start_shot", "start_also", "start_sequence", "scoring_shots", "shot_award", "end_shot",
                 "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds",
-                "shield")
+                "shield", "shakes")
 #: what each model word is called in the words
 MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "Premium"}
 
@@ -2145,6 +2223,9 @@ def _map_shots(spec, fn):
     if isinstance(spec.coil_holds, list):
         spec.coil_holds = [[r[0], r[1], one(r[2])] if isinstance(r, (list, tuple)) and len(r) == 3 else r
                            for r in spec.coil_holds]
+    if isinstance(spec.shakes, list):                  # PAD-414
+        spec.shakes = [[r[0], r[1], r[2], one(r[3])] if isinstance(r, (list, tuple)) and len(r) == 4 else r
+                       for r in spec.shakes]
 
 
 def _port_model(out, old_key, p):
@@ -2183,6 +2264,8 @@ def _port_model(out, old_key, p):
             out.scoop_hold_ms = 0
         if not p.can("shield"):
             out.shield = False
+        if not p.can("shaker"):
+            out.shakes = []
     return port
 
 
@@ -2222,6 +2305,8 @@ def port_words(old, new, p):
         gone.append("the scoop")
     if old.shield is True and not new.shield:
         gone.append("the shield platform")
+    if old.shakes and not new.shakes:
+        gone.append("the shaker")
     if gone:
         words.append("%s does not hold %s, so %s left out there" % (
             now, " or ".join(gone), "it is" if len(gone) == 1 else "they are"))
@@ -2885,6 +2970,7 @@ def validate(spec, folder=None):
     out += validate_scoop(spec, p)                     # PAD-381
     out += validate_coils(spec, p)                     # PAD-381
     out += validate_shield(spec, p)                    # PAD-392
+    out += validate_shakes(spec, p)                    # PAD-414
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
     return out
@@ -3124,6 +3210,60 @@ def shield_lines(spec, p):
     return ["shield         toward"] if spec.shield is True and p.can("shield") else []
 
 
+# ---- PAD-414: the cabinet's shaker -----------------------------------------------------------
+def shake_max_ms(p, strength):
+    """The longest shake title ``p``'s game itself runs at ``strength`` (0 when it never uses it)."""
+    m = tuple(getattr(p, "shake_max_ms", ()) or ())
+    return m[strength] if isinstance(strength, int) and 0 <= strength < len(m) else 0
+
+
+def validate_shakes(spec, p):
+    """Every reason the shaker part cannot be built; nothing when the mode shakes nothing."""
+    rows = spec.shakes
+    if rows in (None, []):
+        return []
+    if not isinstance(rows, list):
+        return ["The shakes are a list."]
+    if not p.can("shaker"):
+        return ["Shaking the cabinet is not on %s yet (Mode says why)." % p.label]
+    out = []
+    if len(rows) > SHAKES_MAX:
+        out.append("A mode shakes the cabinet at most %d ways." % SHAKES_MAX)
+    games, shots = dict(p.shakes), dict(p.shots)
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 4:
+            out.append("A shake is [when, what, strength, shot].")
+            continue
+        when, what, strength, shot = row
+        if when not in SHAKE_WHEN:
+            out.append("A shake comes as the mode starts, on a shot, or as it ends.")
+        if isinstance(what, str):
+            if what not in games:
+                out.append("%s has no shake of its own called %r." % (p.label, what))
+        else:
+            top = shake_max_ms(p, strength if isinstance(strength, int) and not isinstance(strength, bool) else -1)
+            n = _int_or_none(what)
+            if not top:
+                out.append("A shake's strength is %s." % ", ".join("%d %s" % kv for kv in SHAKE_STRENGTHS.items()))
+            elif n is None or not SHAKE_MIN_MS <= n <= top:
+                out.append("A %s shake lasts %g to %g seconds: the game's own longest at that strength." % (
+                    SHAKE_STRENGTHS[strength], SHAKE_MIN_MS / 1000, top / 1000))
+        if when == "shot" and shot not in shots:
+            out.append("%s has no shot called %r to shake the cabinet on." % (p.label, shot))
+    return out
+
+
+def shake_lines(spec, p):
+    """The runtime lines of the shaker: ``shake start|shot|end <ms> <strength> | game <name> [mask]``."""
+    if not p.can("shaker") or not isinstance(spec.shakes, list):
+        return []
+    out = []
+    for when, what, strength, shot in (r for r in spec.shakes if isinstance(r, (list, tuple)) and len(r) == 4):
+        body = "game %s" % what if isinstance(what, str) else "%d %d" % (int(what), int(strength))
+        out.append("shake          %s %s%s" % (when, body, " 0x%08x" % p.mask([shot]) if when == "shot" else ""))
+    return out
+
+
 # ---- item 142: cuts from a film ------------------------------------------------------
 FILM_CUT_MAX_SECONDS = 30
 
@@ -3299,6 +3439,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += scoop_lines(spec, p)           # PAD-381: nothing unless it holds a ball in the scoop
     lines += coil_lines(spec, p)            # PAD-381: the other mechanisms it holds
     lines += shield_lines(spec, p)          # PAD-392: the shield targets toward the player while it runs
+    lines += shake_lines(spec, p)           # PAD-414: the cabinet's shaker
     if spec.screen and p.can("screen"):
         lines += [
             "screen_scene   %s" % p.hud_scene,

@@ -2653,9 +2653,13 @@ site-event ids.
 of its parts (henchman, villain, Q Branch, gadget). The game keeps each player's parts per
 film at `0x820198` (`[film 0-5][player][5 bytes]`: a count per part, then the total); its
 collect `0x1d0918(film, part)` calls `0x1d49c0(film)` once, as the fourth part comes in.
-The four mini-wizards (Dr. No multiball, Goldfinger, Disco Volante, Ahoy Mr Bond) belong to
-films 0, 2, 3 and 4; From Russia With Love and Diamonds Are Forever have none, so a mode of
-ours started on `film_frwl` or `film_daf` is the mini-wizard those two films never had.
+The four mini-wizards belong to films 0 to 3, each with its insert on the Right ramp: Chaos at Crab
+Key (Dr. No), Ahoy Mr. Bond (From Russia With Love, insert ROSA KLEBB), Goldfinger's Jackpot, Duel on
+the Disco Volante (Thunderball, insert LARGO). You Only Live Twice and Diamonds Are Forever have none,
+so a mode of ours started on `film_yolt` or `film_daf` is the mini-wizard those two films never had,
+and since PAD-436 a mode started on any film can hand the player the game's own ("The game's own
+mini-wizards", above). (PAD-428 first wrote Ahoy Mr. Bond down as You Only Live Twice's: the table's
+insert lamps, read in PAD-436, say From Russia With Love.)
 
 | Event | arg | Film |
 |---|---|---|

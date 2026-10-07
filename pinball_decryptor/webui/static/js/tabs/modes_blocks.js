@@ -95,6 +95,7 @@ const TIP = {
   shake: "Shakes the cabinet's shaker motor for this long, through the game's own shake: the operator's Shaker Motor setting still applies (switched off, or no shaker fitted: nothing). Hard and strong shakes last up to 1 second, medium and soft up to 5 - the game's own longest. One at a time, never over one of the game's own, 20 shakes and 15 seconds of shaking a minute at most; the mode, the ball or the game ending stops it, except a shake in When the mode ends, which runs out.",
   shakeGame: "Plays one of the game's own shakes, as the game does: its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble, or its multiball start (five shakes over 4 seconds). The same limits as Shake the cabinet.",
   gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds; a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
+  gameWizard: "Hands the player one of the game's own mini-wizards, the game's mode itself with its own shots, lights, screens, sounds and award. Light it: it waits for the game's own start shot, as when the game lights one. Start it: it begins at once if the game would start one now (none of its own modes in the way), and is lit otherwise, and lit too while this mode holds the game's modes off. Works whether this mode runs or not: in When the game does an event (a film done) it is a mini-wizard for that event. One the player has played this game plays again.",
   shield: "Turns the platform the shield targets sit on (about a second) and keeps it there while the mode runs: the game's ball search swings it, and it is turned back after. Where they are: stop keeping them. Only while the mode runs, never while one of the game's own modes runs, 1.5 s between moves, 12 a minute at most; the mode ending, the ball draining or a tilt turns them back where they were. They stay turned only while the game's modes cannot start and its own shield feature does not keep counting.",
 };
 
@@ -122,7 +123,8 @@ function stmtTemplates(ch, vars, prog = {}) {
   return [
     ["Mode", [{ op: "start_mode" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
       { op: "set_time", seconds: num(10) },
-      { op: "multiball", balls: 2, save: 10 }]],
+      { op: "multiball", balls: 2, save: 10 },
+      { op: "game_wizard", name: ((ch.game_wizards || [])[0] || {}).name || "", how: "light" }]],
     // PAD-395: the mechanisms the form's Magnet, Scoop and Other mechanisms hold (greyed where the game cannot)
     ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
       { op: "scoop_hold", ms: num(3000), which: "next" }, { op: "let_go", what: "*" },
@@ -157,7 +159,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
   player: "the player up", op: "a sum" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", stock: "a game mode of its own runs" };
-const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
+const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech",
@@ -357,6 +359,14 @@ function StmtBody({ b, path, ed }) {
       return html`<span class="bk-w" ...${tip(TIP.gameShow)}>Play the game's light show</span><${Pick} value=${b.name}
         options=${opts} missing="(not on this game)" width=${200} onChange=${(v) => set("name", v)} />`;
     }
+    case "game_wizard": {
+      // PAD-436: by the port's name; lit for the game's start shot, or started at once
+      const shotWord = ed.ch.wizard_shot ? `the ${ed.ch.wizard_shot} starts it` : "its start shot starts it";
+      return html`<${Pick} value=${b.how || "light"} options=${[["light", "Light"], ["start", "Start"]]} onChange=${(v) => set("how", v)} />
+        <span class="bk-w" ...${tip(TIP.gameWizard)}>the game's mini-wizard</span><${Pick} value=${b.name}
+        options=${(ed.ch.game_wizards || []).map((w) => [w.name, w.film ? `${w.name} (${w.film})` : w.name])} missing="(not on this game)" width=${260}
+        onChange=${(v) => set("name", v)} />${(b.how || "light") === "light" ? html`<span class="bk-w">: ${shotWord}</span>` : null}`;
+    }
     case "shield": return html`<span class="bk-w" ...${tip(TIP.shield)}>Turn the shield targets</span><${Pick} value=${b.where || "toward"} options=${SHIELD_WHERE} onChange=${(v) => set("where", v)} />`;
     case "shake": return html`<span class="bk-w" ...${tip(TIP.shake)}>Shake the cabinet:</span><${Pick} value=${b.strength || "hard"} options=${SHAKE_STRENGTH} onChange=${(v) => set("strength", v)} />
       <span class="bk-w">shake for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
@@ -499,7 +509,7 @@ function stmtLabel(b) {
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets",
-    shake: "Shake the cabinet for", shake_game: "Shake it the game's way",
+    shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 
@@ -511,6 +521,7 @@ function whyOff(t, ch) {
   if (t.op === "shield") return ch.shield_off || "";
   if (t.op === "shake" || t.op === "shake_game") return ch.shaker_off || "";   // PAD-414
   if (t.op === "game_show") return ch.game_shows_off || "";   // PAD-418
+  if (t.op === "game_wizard") return ch.game_wizards_off || "";   // PAD-436
   return "";
 }
 

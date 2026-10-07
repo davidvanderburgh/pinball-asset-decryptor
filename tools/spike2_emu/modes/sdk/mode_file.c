@@ -89,6 +89,9 @@ struct mode_cfg {
     int shield;                       /* PAD-392 `shield toward`: the shield targets face the player while it runs */
     char show_start[40], show_end[40];   /* PAD-418 `show_start <name>` / `show_end <name>`: the game's own light
                                        * show (the port's `text show_name_<n>`) at its start / its end; "" = none */
+    char wizard[40];                  /* PAD-436 `game_wizard light|start <name>`: when it starts, the game's own
+                                       * mini-wizard (the port's `text wizard_name_<n>`) instead; "" = none */
+    int wizard_start;                 /* ... started at once (1), or lit for the game's start shot (0) */
     char coil_name[4][16];            /* PAD-381 `coil_hold <name> <ms> [mask]`: a held coil of the port's */
     unsigned coil_ms[4];
     uint64_t coil_bits[4];            /* ... on each hit of these shots; 0 = once, when the mode starts */
@@ -1787,6 +1790,12 @@ static int trigger_on_line(struct slot *M, const char *line)
 
 /* After a file is parsed: resolve the event names through the port, and let an event start
  * stand in for the trigger count. */
+/* it has something to run: a clock, a multiball (which may have no clock), or the game's mini-wizard (PAD-436) */
+static int runs(const struct slot *M)
+{
+    return cfg.seconds || cfg.mball_balls || cfg.wizard[0];
+}
+
 static void trigger_on_validate(struct slot *M)
 {
     cfg.start_event = cfg.end_event = -1;
@@ -1806,7 +1815,7 @@ static void trigger_on_validate(struct slot *M)
             pm_log("starts_on sequence: the trigger shots are ignored");
             cfg.trigger_bits = 0;
         }
-        cfg.valid = (cfg.seconds || cfg.mball_balls) && cfg.n_seq > 0;
+        cfg.valid = runs(M) && cfg.n_seq > 0;
         pm_log("starts on %u shots in order%s", cfg.n_seq, cfg.valid ? "" : "  - NOT VALID, it needs seconds and a trigger_seq line");
         seq_loaded(M);
         return;
@@ -1817,7 +1826,7 @@ static void trigger_on_validate(struct slot *M)
         pm_log("starts_on event: the trigger shots are ignored");
         cfg.trigger_bits = 0;
     }
-    cfg.valid = (cfg.seconds || cfg.mball_balls) && cfg.start_event >= 0;
+    cfg.valid = runs(M) && cfg.start_event >= 0;
     pm_log("starts on event %s (id %d) x%u, ends on %s%s%s", cfg.start_event_name, cfg.start_event,
            cfg.start_event_count, cfg.end_on == END_CLOCK ? "its clock" : cfg.end_on == END_EVENT ? "event " : "the drain",
            cfg.end_on == END_EVENT ? cfg.end_event_name : "",
@@ -1851,6 +1860,17 @@ static void cfg_line(struct slot *M, const char *line)
     TEXT("clip_end", clip_end)
     TEXT("show_start", show_start)          /* PAD-418 */
     TEXT("show_end", show_end)              /* PAD-418 */
+    if ((a = key_is(line, "game_wizard")) != 0) {   /* PAD-436 */
+        const char *b;
+        if ((b = key_is(a, "start")) != 0) cfg.wizard_start = 1;
+        else if ((b = key_is(a, "light")) != 0) cfg.wizard_start = 0;
+        else {
+            pm_log("game_wizard \"%.40s\" is not light or start - skipped", a);
+            return;
+        }
+        rest_of_line(cfg.wizard, sizeof cfg.wizard, b);
+        return;
+    }
     if (key_is(line, "clip_label") || key_is(line, "clip_layer")) return;   /* see the top */
     if ((a = key_is(line, "sound_key")) != 0) {
         unsigned n = 0;
@@ -1919,7 +1939,7 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
             if (*s && *s != '#') cfg_line(M, s);
         }
     }
-    cfg.valid = (cfg.seconds || cfg.mball_balls) && cfg.trigger_count;   /* a multiball may have no clock */
+    cfg.valid = runs(M) && cfg.trigger_count;   /* a multiball may have no clock */
     trigger_on_validate(M);
     pm_log("loaded \"%s\": trigger %08x_%08x x%u, %u s, shots %08x_%08x, award %llu%s",
            cfg.name, (unsigned)(cfg.trigger_bits >> 32), (unsigned)cfg.trigger_bits, cfg.trigger_count, cfg.seconds,
@@ -1956,6 +1976,10 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.n_shake)                         /* PAD-414 */
         pm_log("\"%s\": %u shake line(s)%s", cfg.name, cfg.n_shake,
                pm_can(PM_CAN_SHAKER) ? "" : " - this game's port has no shaker: no shake");
+    if (cfg.wizard[0])                       /* PAD-436 */
+        pm_log("\"%s\": when it starts, the game's mini-wizard \"%s\" is %s instead - nothing of its own runs%s", cfg.name,
+               cfg.wizard, cfg.wizard_start ? "started" : "lit for its start shot",
+               pm_can(PM_CAN_GAME_WIZARDS) ? "" : " - this game's port names no mini-wizards: nothing happens");
     if (cfg.show_start[0] || cfg.show_end[0])   /* PAD-418 */
         pm_log("\"%s\": the game's light show \"%s\" at its start, \"%s\" at its end%s", cfg.name, cfg.show_start,
                cfg.show_end, pm_can(PM_CAN_GAME_SHOWS) ? "" : " - this game's port names no light shows: none plays");
@@ -2095,9 +2119,42 @@ static void game_show(struct slot *M, const char *name, const char *when)
            pm_game_show_named(name) ? "playing" : "not played (the runtime's line says why)");
 }
 
+/* PAD-436: a mode that is the game's own mini-wizard. When it would start, the player is handed the game's mode
+ * (lit for its start shot, or started) and nothing of this mode's own runs: no clock, screen, lights or sounds. How
+ * often it can start still holds, and the start counts as a run that ended at once (its cooldown runs from now).
+ * Another of this card's modes running does not stop it; while that one holds the game's modes off, the runtime
+ * lights a `start` instead. Refused by the runtime (no game, not this game's), it keeps its trigger count. */
+static void hand_off(struct slot *M, const char *why)
+{
+    unsigned p = pm_player(), k = M->index;
+    int how = cfg.wizard_start ? PM_WIZARD_START : PM_WIZARD_LIGHT, r;
+    if (!starts_allowed(M, why)) return;
+    r = pm_game_wizard_named(cfg.wizard, how);
+    if (!r) {
+        pm_log("%s not started (%s): the game's mini-wizard \"%s\" was not handed over%s", cfg.name, why, cfg.wizard,
+               pm_can(PM_CAN_GAME_WIZARDS) ? " (the runtime's line says why)" : " - this game's port names none");
+        return;
+    }
+    if (!starts_is_file(why) && p >= 1 && p < STARTS_PLAYERS) {
+        starts_n[k].game[p]++;
+        starts_n[k].ball[p]++;
+        starts_n[k].ended[p] = 1;
+        starts_n[k].ended_ms[p] = pm_ms();
+    }
+    if (p <= 4) M->trig[p] = 0;
+    also_clear(M, p);
+    seq_clear(M, p);
+    pm_log("%s START (%s): the game's %s, %s for player %u", cfg.name, why, cfg.wizard,
+           r == PM_WIZARD_STARTED ? "started" : "lit for its start shot", p);
+}
+
 static void mode_start(struct slot *M, const char *why)
 {
     if (!cfg.valid || !pm_in_game()) return;
+    if (cfg.wizard[0]) {                     /* PAD-436: the game's mini-wizard instead */
+        hand_off(M, why);
+        return;
+    }
     if (run.active) {
         if (run.slot != M) pm_log("%s not started (%s): %s is running", cfg.name, why, run.slot->c.name);
         return;

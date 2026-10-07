@@ -24,9 +24,11 @@ follow once it has one. The 60th Anniversary edition (its own rules: Bond multib
   3 Thunderball, 4 You Only Live Twice, 5 Diamonds Are Forever. The emulator run below filled
   the From Russia With Love column of the game's own progress grid for film 1.
 - **Mini-wizards**: table `0x625da0`, 4 entries of 0x20 bytes: `{index, bit, id, start,
-  ready?, can-start?, ...}`. 0 Dr. No multiball (start `0x92bd8`), 1 Ahoy Mr Bond (You Only
-  Live Twice, `0x20530`), 2 Goldfinger wizard mode (`0xbd4dc`), 3 Disco Volante multiball
-  (Thunderball, `0x7e0b0`). Each has READY / ACTIVE / PLAYED game flags (the flag names table
+  ready?, can-start?, ...}`. 0 Dr. No multiball (start `0x92bd8`), 1 Ahoy Mr Bond (From
+  Russia With Love, `0x20530`), 2 Goldfinger wizard mode (`0xbd4dc`), 3 Disco Volante multiball
+  (Thunderball, `0x7e0b0`). (PAD-436: the `id` word is each one's insert on the Right ramp, lamps
+  34 DR. NO, 35 ROSA KLEBB, 36 GOLDFINGER, 43 LARGO: Ahoy is From Russia With Love's, not You Only
+  Live Twice's as first written here. You Only Live Twice and Diamonds Are Forever have none.) Each has READY / ACTIVE / PLAYED game flags (the flag names table
   at `0x7a51a0`, indexed by flag id: Dr. No 78-83, Ahoy 84-89, Goldfinger 90-94, Disco
   Volante 95-101).
 - **Per player** at `0x81c3f4`: `[p-1]` the selected mini-wizard index, `+0x10 + 4(p-1)` the
@@ -49,7 +51,18 @@ follow once it has one. The 60th Anniversary edition (its own rules: Bond multib
   Goldfinger's four parts started only that mode; four more parts of the complete film
   started nothing. Run twice, before and after main's runtime was merged in.
 
-## Left: light the GAME's own mini-wizard from a film
+## Done in PAD-436: the GAME's own mini-wizard from a film
+
+Built as planned below, with these differences: `pm_game_wizard(n, PM_WIZARD_LIGHT | PM_WIZARD_START)`
+(start = the game's own `0x110d98`, which checks `0x110c10` itself, so no `wizard_ready` site), the
+port's `site wizard_start`, `data wizard_state / wizard_table / lamps_dirty`, `text wizard_name_<n>`;
+a mode file's `game_wizard light|start <name>` makes the mode a hand-over (nothing of its own runs);
+the Modes tab's "The game's mini-wizard" and a block. The game's own lighting is left as it is (the
+user, PAD-436: "leaving the existing mini wizard mode logic"). A mode of ours that blocks the game's
+modes vetoes Ahoy's start; the runtime now keeps that wizard lit instead of letting the game mark it
+played. MODE_SDK.md "The game's own mini-wizards" has the proof.
+
+The plan as it was written (PAD-428):
 
 What the user asked first: the game's mini-wizard (its own mode, music and screens) lit
 when its film is complete. The mechanism is mapped above; what a mode would do:

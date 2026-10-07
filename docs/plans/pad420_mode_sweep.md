@@ -104,6 +104,23 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
 - **Jaws Pro 1.02**: the runtime reads in_game 0 with player 1 during a game, so `data mode_mask 0x89e53e` &
   `value mode_mask_busy 0x210` (copied from Jaws LE) stays busy. Needs a memory read in a running Pro game
   (a probe mode logging the mask word before and after Start); desk matching of the LE's derivation sites failed.
+- **Where the proven sets stand (run 5):** ball save 28/30 (D&D Pro: no game ever started, twice; Guardians LE: no
+  shot scored on the saved ball), multiball 26/30 (Munsters Pro, Star Wars LE, Stranger Things Pro, Venom Pro died
+  at boot or Start under an over-committed machine: re-run on one rig, `mb/rb2`), lights 19/30.
+- **Lights on Mandalorian Pro and Munsters Pro (and the other unproven ones)**: the mode held every insert at layer
+  255 and the port's lamp lines are exactly what each program says (`lampmap.port_lines`), yet the shim's LED view
+  shows no change: nothing judge.py can read moved. So the LED view does not decode these builds' insert frames
+  (see memory PAD-311, the LED view's per-title dispatch). That is emulator tooling (hwshim's LED view), not the
+  port; prove these after the view decodes them, or by a glshot of the playfield view.
+- **Stack**: two routes. Ball-count titles (Aerosmith, Batman, Guardians, James Bond, Stranger Things, Uncanny
+  X-Men: their older builds are in STACK_BALLS_PROVEN) are proven by `st/st_job.sh` (our own multiball stopped
+  with its balls in play, a `stack no` mode refused "a multiball is running", then started at one ball; Aerosmith
+  LE 1.16 passed). Mode-table titles (STACK_PROVEN: Avengers, Deadpool, D&D, Foo Fighters, Iron Maiden, Jaws, John
+  Wick, Jurassic Park, King Kong, Mandalorian, Munsters, Rush, Star Wars, Sword of Rage, Venom...) ignore our own
+  multiball (Avengers LE 1.10: WAITER started with three balls in play), so they need one of the GAME's modes
+  running: item 164's `C:/tmp/pad_generic/t5/stack_probe.c` + `stack_e2e.sh` start a table entry through its vtable
+  start slot (`stack.start "<index> <slot>"`); port that probe to this worktree's runtime (build with Ubuntu's
+  arm-linux-gnueabihf-gcc), find each title's start slot as item 164 did, and add a table-route stack job.
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

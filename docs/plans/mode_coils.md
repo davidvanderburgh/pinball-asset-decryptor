@@ -275,6 +275,10 @@ test). This is a last line of defence, not a guardrail of ours.
     start's steps on time; `pm_end` mid-shake sent the game's OFF with 4001 ms left; refusals as designed; a mode
     file's and a blocks mode's start/shot/end shakes, the end one running out after the END with no OFF.
   - Owed: a machine test on David's Premium (how hard each strength feels; that SHAKER MOTOR is on there).
+  - Seen on the rig (PAD-424): the virtual playfield's side panel has a SHAKER MOTOR box - SHAKING/IDLE, a 60 fps
+    scrolling trace of the drive power (padled v5's drive table, `coilmap.drive`), time left, shakes this run - and
+    the playfield picture jiggles while it runs. The coil is the table's SHAKER MOTOR row, else group 5 index 0 when
+    the table has no group 5 at all (godzilla), none on the Home Editions (`coilmap.shaker_address`).
 
 ## Machine test (2026-10-05, David's Godzilla Premium 1.16)
 

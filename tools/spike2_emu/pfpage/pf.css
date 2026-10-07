@@ -210,3 +210,17 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .kp-kv .v { color: #d8d8d8; text-align: right; }
 .kp-kv .n { grid-column: 1 / -1; font-size: 11px; color: #8a93a2; line-height: 15px; margin-bottom: 2px; }
 .kp-kv .r.alarm .v { color: var(--warn); }
+
+/* ---------------------------------------------------------------- shaker */
+/* PAD-424: the cabinet's shaker motor, live - amber while it runs */
+.pf-shaker { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 6px 8px 8px; }
+.pf-shaker .hd { display: flex; align-items: center; justify-content: space-between; }
+.pf-shaker .h { font: 600 11px var(--mono); color: var(--key); letter-spacing: .06em; }
+.pf-shaker .pill { font: 600 10.5px var(--mono); letter-spacing: .06em; padding: 1px 7px; border-radius: 9px; background: var(--panel-2); color: var(--ink-3); }
+.pf-shaker.on .pill { background: var(--accent); color: var(--accent-ink); }
+.pf-shaker .trace { width: 100%; height: 56px; display: block; background: var(--field); border-radius: 4px; }
+.pf-shaker .now { font: 12px var(--mono); color: #d8d8d8; white-space: pre; }
+.pf-shaker.on .now { color: var(--accent); }
+.pf-shaker .note { font-size: 11px; color: #8a93a2; }
+.pf-shaker .opt { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-2); cursor: pointer; }
+.pf-shaker .opt input { accent-color: var(--accent); margin: 0; }

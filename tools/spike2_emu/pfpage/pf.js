@@ -152,6 +152,9 @@ if (typeof document !== "undefined") {
 function startMain() {
   let S = null;              // the snapshot
   let view = null;           // the drawn view's live parts
+  // PAD-424: the artwork jiggles while the shaker runs, unless that is unticked
+  let shakeArt = true;
+  try { shakeArt = localStorage.getItem("pf-shake-art") !== "0"; } catch (e) { /* no storage */ }
   const app = document.getElementById("app");
 
   async function load() {
@@ -208,11 +211,19 @@ function startMain() {
       if (panel) panel.el.prepend(info.el);
       else { const side = el("aside", "pf-panel"); side.append(info.el); body.append(side); }
     }
+    // the cabinet's shaker motor (PAD-424): open under the info, because it
+    // is the one coil the artwork has no place for
+    let shaker = null;
+    if (info && S.view.shaker) {
+      shaker = shakerPanel(S.view.shaker, (S.dyn || {}).shaker);
+      info.el.after(shaker.el);
+    }
     app.append(body, status);
     view = {
       frame(f) {
         if (f.status != null) stxt.textContent = f.status;
         if (f.live && info) info.live(f.live);
+        if (f.shaker && shaker) shaker.update(f.shaker);
         if (v.frame) v.frame(f);
         if (panel && f.panel) panel.update(f.panel);
       },
@@ -373,6 +384,7 @@ function startMain() {
     const made = Object.assign({}, D.sw || {});
     let held = null;      // ["switch"|"coil", k]
     let ripping = null;
+    let shakeLvl = D.shaker ? D.shaker[0] : 0, jiggled = false;
     let scale = 1, dirty = true;
 
     function fit() {
@@ -445,7 +457,20 @@ function startMain() {
         }
       }
     }
-    (function loop() { draw(); requestAnimationFrame(loop); })();
+    // the shaker running moves the picture, a few px at its power: the look of
+    // a cabinet shaking, not a measurement (the panel's trace is that)
+    function jiggle() {
+      const a = shakeArt && shakeLvl > 0 ? 1 + 4 * shakeLvl / 255 : 0;
+      if (a) {
+        const d = () => ((Math.random() * 2 - 1) * a).toFixed(1);
+        stage.style.transform = `translate(${d()}px, ${d()}px)`;
+        jiggled = true;
+      } else if (jiggled) {
+        stage.style.transform = "";
+        jiggled = false;
+      }
+    }
+    (function loop() { draw(); jiggle(); requestAnimationFrame(loop); })();
 
     // Tk's hit test, kept - pfHit() above says how.
     function hit(px, py) { return pfHit(V, fx, scale, px, py); }
@@ -490,6 +515,7 @@ function startMain() {
       frame(f) {
         if (f.fx) { for (const k in f.fx) fx[k] = f.fx[k]; dirty = true; }
         if (f.coil) { Object.assign(coilHot, f.coil); dirty = true; }
+        if (f.shaker) shakeLvl = f.shaker[0];
         if (f.sw) { Object.assign(made, f.sw); dirty = true; }
         if (f.trough && trough) trough.update(f.trough);
       },
@@ -629,6 +655,101 @@ function startMain() {
       el: root,
       live(data) { latest = data; if (l.acc.open) fill(l.rows, data); },
     };
+  }
+
+  // ================================================== the shaker motor (PAD-424)
+  // What the game drives the cabinet's shaker at, live: a trace of the power
+  // (the board's PWM duty, n/255) over the last SPAN ms, redrawn every frame
+  // so it scrolls smoothly however seldom the state changes. The controller
+  // sends [power, ms left, ms long, shakes this run, last shake] on a change.
+  function shakerPanel(spec, dyn) {
+    const SPAN = 6000;
+    const box = el("div", "pf-shaker");
+    const head = el("div", "hd");
+    const pill = el("span", "pill", "IDLE");
+    head.append(el("span", "h", "SHAKER MOTOR"), pill);
+    const cv = el("canvas", "trace");
+    const now = el("div", "now", "");
+    const note = el("div", "note", "");
+    const opt = el("label", "opt");
+    const cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = shakeArt;
+    // never keep the keyboard: a focused box would eat the space bar
+    cb.addEventListener("change", () => {
+      shakeArt = cb.checked;
+      try { localStorage.setItem("pf-shake-art", shakeArt ? "1" : "0"); } catch (e) { /* no storage */ }
+      cb.blur();
+    });
+    opt.append(cb, el("span", null, "Shake the playfield picture with it"));
+    box.title = "What the game drives the cabinet's shaker motor at (" + spec.addr + "), "
+      + "over the last " + SPAN / 1000 + " s: the height is the power, n/255 of the board's PWM duty, "
+      + "up to the scale in the corner";
+    box.append(head, cv, now, note, opt);
+    const hist = [];        // [performance.now(), power] at each change
+    let st = null, peak = 0;
+    function update(d) {
+      if (!d) return;
+      const t = performance.now();
+      if (!st || d[0] !== st[0]) hist.push([t, d[0]]);
+      peak = Math.max(peak, d[0]);
+      while (hist.length > 1 && hist[1][0] < t - SPAN) hist.shift();
+      st = d;
+      const on = d[0] > 0;
+      pill.textContent = on ? "SHAKING" : "IDLE";
+      box.classList.toggle("on", on);
+      now.textContent = on
+        ? `${d[0]}/255 (${Math.round(d[0] * 100 / 255)}%)  ${(d[1] / 1000).toFixed(1)} s left of ${(d[2] / 1000).toFixed(1)} s`
+        : "motor off";
+      note.textContent = d[3]
+        ? `${d[3]} shake${d[3] === 1 ? "" : "s"} this run \u00b7 last ${d[4]}`
+        : "no shake yet this run";
+    }
+    update(dyn || [0, 0, 0, 0, ""]);
+    function draw() {
+      const w = cv.clientWidth, h = cv.clientHeight;
+      if (!w || !h) return;
+      const dpr = window.devicePixelRatio || 1;
+      if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+      const g = cv.getContext("2d");
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, w, h);
+      const t = performance.now(), x = (tt) => w * (1 - (t - tt) / SPAN);
+      // the game's shakes are 3..51/255, so a full-duty scale draws them flat:
+      // the top is 64/255, or the strongest drive seen, and it says which
+      const top = Math.max(64, peak);
+      const y = (p) => h - 1 - (p ? Math.max(2, (h - 12) * Math.min(p, top) / top) : 0);
+      g.strokeStyle = "rgba(255,255,255,.07)";
+      g.lineWidth = 1;
+      for (const q of [0.25, 0.5, 0.75, 1]) { g.beginPath(); g.moveTo(0, Math.round(y(top * q)) + 0.5); g.lineTo(w, Math.round(y(top * q)) + 0.5); g.stroke(); }
+      g.fillStyle = "#6b7178";
+      g.font = "9px " + getComputedStyle(cv).fontFamily;
+      g.textAlign = "right";
+      g.textBaseline = "top";
+      g.fillText(top + "/255", w - 3, 1);
+      for (let s = Math.floor(t / 1000) * 1000; s > t - SPAN; s -= 1000) {
+        g.beginPath(); g.moveTo(Math.round(x(s)) + 0.5, h - 4); g.lineTo(Math.round(x(s)) + 0.5, h); g.stroke();
+      }
+      g.beginPath();
+      g.moveTo(0, h - 1);
+      let level = 0;
+      for (const [tt, p] of hist) {
+        const xx = Math.max(0, x(tt));
+        g.lineTo(xx, y(level));
+        g.lineTo(xx, y(p));
+        level = p;
+      }
+      g.lineTo(w, y(level));
+      g.lineTo(w, h - 1);
+      g.closePath();
+      g.fillStyle = "rgba(232,163,61,.35)";
+      g.fill();
+      g.strokeStyle = "#e8a33d";
+      g.lineWidth = 1.5;
+      g.stroke();
+    }
+    (function loop() { draw(); requestAnimationFrame(loop); })();
+    return { el: box, update };
   }
 
   // ================================================== waiting for tables

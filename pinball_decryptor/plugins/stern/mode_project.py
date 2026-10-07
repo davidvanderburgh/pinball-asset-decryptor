@@ -503,11 +503,9 @@ SHAKE_WHEN = {"start": "as it starts", "shot": "on a shot", "end": "as it ends"}
 SHAKES_MAX = 4                                 # mode_file.c holds 4 shake lines
 #: what the app calls the game's own shakes (the port's `text shake_<name>`); one the port names but this does not
 #: is shown by its name
-SHAKE_LABELS = {"hit": "the game's hit shake (0.2 s, hard: a battle's shot)",
-                "big_hit": "the game's big hit (0.33 s, hard)",
-                "jackpot": "the game's jackpot shake (0.5 s, hard: every super jackpot)",
-                "rumble": "the game's rumble (3 s, soft: O2 Destroyer)",
-                "multiball_start": "the game's multiball start (five shakes over 4 s)"}
+SHAKE_LABELS = {"hit": "the game's hit (0.2 s)", "big_hit": "the game's big hit (0.33 s)",
+                "jackpot": "the game's jackpot (0.5 s)", "rumble": "the game's rumble (3 s)",
+                "multiball_start": "the game's multiball start (4 s)"}
 
 
 def _shaker_cannot(key, label, port=None):

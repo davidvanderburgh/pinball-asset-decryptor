@@ -1518,7 +1518,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                for n, lab in getattr(p, "held_coils", ())[:self.COIL_ROWS]],
                 "shield_rule": getattr(p, "shield_rule", ""),                   # PAD-392
                 # PAD-414: what a shake can be - one of the mode's own at a strength, or one of the game's
-                "shakes": ([{"value": w, "label": "a %s shake of its own" % w} for w in MP.SHAKE_STRENGTHS.values()]
+                "shakes": ([{"value": w, "label": "a %s shake" % w} for w in MP.SHAKE_STRENGTHS.values()]
                            + [{"value": "game:" + n, "label": lab} for n, lab in getattr(p, "shakes", ())]),
                 "shake_max": list(getattr(p, "shake_max_ms", ()) or ())}
 

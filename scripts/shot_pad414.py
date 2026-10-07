@@ -9,7 +9,7 @@ Both on a Godzilla Premium/LE 1.16 project. Writes into <out_dir>:
   shaker (ModeSpec.shakes) its Shaker section, a big shake as it starts and the game's jackpot shake on a
   shot; before it, the same mode with no such section
 - <prefix>_blocks_shaker.png a blocks mode that shakes the cabinet as it starts and on a ramp (on a tree
-  without the block, the same mode without it), its Mechanisms palette group in view
+  without the block, the same mode without it), its start script in view
 """
 
 import json
@@ -78,9 +78,9 @@ def main():
         def blocks(page):
             webui_shot.api(url, "modes.select", bslug, "code")
             time.sleep(3)
-            page.evaluate("""() => { const all = [...document.querySelectorAll('*')].filter((e) =>
-                e.children.length === 0 && /^(Shake the cabinet for|MECHANISMS|Mechanisms)$/.test(e.textContent.trim()));
-                const t = all.find((e) => /^Shake/.test(e.textContent.trim())) || all[0];
+            page.evaluate("""() => { const leaf = [...document.querySelectorAll('*')].filter((e) =>
+                e.children.length === 0 && /^(Shake the cabinet:|When the mode starts)$/.test(e.textContent.trim()));
+                const t = leaf.find((e) => e.textContent.trim() === 'Shake the cabinet:') || leaf[leaf.length - 1];
                 if (t) t.scrollIntoView({ block: 'center' }); }""")
             time.sleep(1)
             out = os.path.join(out_dir, "%s_blocks_shaker.png" % prefix)

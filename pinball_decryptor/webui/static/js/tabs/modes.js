@@ -367,13 +367,17 @@ function ModePage({ s, f, off, dis, rs }) {
   const shakeOwn = (v) => !String(v || "").startsWith("game:");
   const shakeTop = (v) => { const i = ["hard", "strong", "medium", "soft"].indexOf(v); const m = (prof.shake_max || [])[i]; return m ? m / 1000 : 0; };
   const shakeShots = withValue([{ value: "", label: "(choose a shot)", disabled: true }, ...shots.map((x) => ({ value: x, label: x }))], f.shake_shot);
-  const shakeRow = (when, label, extra) => html`<div class="row wrap">
-    <${Check} label=${label} checked=${f["shake_on_" + when]} disabled=${shakeOff} title=${T.shaker} ns="modes" k=${"f:shake_on_" + when} />
-    ${extra || null}
-    <${Select} value=${f["shake_what_" + when]} options=${shakeWhat(f["shake_what_" + when])} ns="modes" k=${"f:shake_what_" + when} disabled=${shakeOff || !f["shake_on_" + when]} width=${300} title=${T.shaker} />
-    ${shakeOwn(f["shake_what_" + when]) ? html`<span class="dim nw">for</span>
-      <${Num} k=${"shake_s_" + when} value=${f["shake_s_" + when]} disabled=${shakeOff || !f["shake_on_" + when]} width=${64} title=${T.shaker} />
-      <span class="dim nw">seconds${shakeTop(f["shake_what_" + when]) ? ` (up to ${shakeTop(f["shake_what_" + when])})` : ""}</span>` : null}
+  const shakeRow = (when, label, extra) => html`<div>
+    <div class="row wrap">
+      <${Check} label=${label} checked=${f["shake_on_" + when]} disabled=${shakeOff} title=${T.shaker} ns="modes" k=${"f:shake_on_" + when} />
+      ${extra || null}
+    </div>
+    <div class="row wrap" style="padding-left:26px">
+      <${Select} value=${f["shake_what_" + when]} options=${shakeWhat(f["shake_what_" + when])} ns="modes" k=${"f:shake_what_" + when} disabled=${shakeOff || !f["shake_on_" + when]} width=${230} title=${T.shaker} />
+      ${shakeOwn(f["shake_what_" + when]) ? html`<span class="dim nw">for</span>
+        <${Num} k=${"shake_s_" + when} value=${f["shake_s_" + when]} disabled=${shakeOff || !f["shake_on_" + when]} width=${56} title=${T.shaker} />
+        <span class="dim nw">s${shakeTop(f["shake_what_" + when]) ? ` (up to ${shakeTop(f["shake_what_" + when])})` : ""}</span>` : null}
+    </div>
   </div>`;
   const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
   const ballOpts = f.add_ball_shot && !balls.some((o) => o.value === f.add_ball_shot) ? [{ value: f.add_ball_shot, label: f.add_ball_shot }, ...balls] : balls;
@@ -524,9 +528,9 @@ function ModePage({ s, f, off, dis, rs }) {
         ${!dis.shield && shieldLive ? html`<div class="small muted" style="padding-left:26px">Only while the game's modes cannot start and ${shieldFeature} does not keep counting: otherwise the game turns them back.</div>` : null}
       <//>
       <${Sec} title="Shaker" reason=${rs.shaker}>
-        ${shakeRow("start", "Shake the cabinet as it starts:")}
-        ${shakeRow("shot", "On every hit of", html`<${Select} value=${f.shake_shot || ""} options=${shakeShots} ns="modes" k="f:shake_shot" disabled=${shakeOff || !f.shake_on_shot} width=${170} title=${T.shaker} />`)}
-        ${shakeRow("end", "As it ends:")}
+        ${shakeRow("start", "Shake the cabinet as it starts")}
+        ${shakeRow("shot", "Shake it on every hit of", html`<${Select} value=${f.shake_shot || ""} options=${shakeShots} ns="modes" k="f:shake_shot" disabled=${shakeOff || !f.shake_on_shot} width=${170} title=${T.shaker} />`)}
+        ${shakeRow("end", "Shake it as it ends")}
         ${!dis.shaker ? html`<div class="small muted">The operator's Shaker Motor setting still applies: switched off, or no shaker fitted, nothing shakes.</div>` : null}
       <//>
       <${Sec} title="Multiball" reason=${rs.multiball}>

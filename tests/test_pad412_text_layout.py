@@ -171,3 +171,147 @@ def test_the_preview_draws_where_the_emulator_did():
         tops = [r[0] for r in np.split(ys, np.where(np.diff(ys) > 1)[0] + 1)]
         assert len(tops) == len(want), (text, tops)
         assert all(abs(a - b) <= 2 for a, b in zip(tops, want)), (text, tops, want)
+
+
+# ---------------------------------------------------------------------------------------------
+# round 2: Write's space padding moved the words (DragonRR: "This text placement is worse than
+# before" - a project re-read from his built card showed "GODZILLA VS BATTRA" well left of its
+# box). The game lays out trailing spaces too (emulator: 26 of them drew the centred title
+# ~170 px left), so the spaces a shorter replacement is padded with go where they don't show.
+# ---------------------------------------------------------------------------------------------
+from pinball_decryptor.plugins.stern import engine  # noqa: E402
+
+W = b"GODZILLA VS BATTRA"
+
+
+@pytest.mark.parametrize("looks, want", [
+    ((), W + b" " * 6),                                         # no layout known: as before
+    ([(0, False, True, False)], W + b" " * 6),                  # left: after the words
+    ([(2, False, True, False)], b" " * 6 + W),                  # right: before them
+    ([(1, False, True, False)], b" " * 3 + W + b" " * 3),       # centred: split
+    ([(1, True, True, False)], b" " * 3 + W + b" " * 3),        # one line: still split
+])
+def test_a_shorter_replacement_is_padded_where_its_alignment_hides_it(looks, want):
+    assert engine._padded_text(W, len(W) + 6, looks) == want
+
+
+def test_a_multiline_centred_text_takes_its_padding_as_a_line_under_it():
+    words = b"GODZILLA\nVS. BATTRA"
+    top = [(1, True, True, False)]
+    assert engine._padded_text(words, len(words) + 6, top) == words + b"\n" + b" " * 5
+    # middle/bottom of its box, or scaled to fit: one more line would move it, so split
+    for looks in ([(1, True, False, False)], [(1, True, True, True)]):
+        assert engine._padded_text(words, len(words) + 6, looks) == \
+            b" " * 3 + words + b" " * 3
+    assert engine._padded_text(words, len(words), top) == words
+
+
+def test_the_scene_says_how_each_string_is_aligned():
+    sc = T.parse(scene())
+    texts = [o for o in sc.objects.values() if o.kind == "Text"]
+    texts[0].body.update(align=2, flags=(1, 1), tail=(1, 2))
+    looks = engine._radium_text_looks(T.serialize(sc))
+    key = texts[0].body["text"].decode("latin1")
+    assert (2, True, False, True) in looks[key]
+    assert engine._radium_text_looks(b"not a scene") == {}
+
+
+def test_write_pads_a_centred_scene_line_on_both_sides(tmp_path):
+    from pinball_decryptor.plugins.stern import radium
+    from tests.test_stern_radium import _FakeReader, _apply, _write_tsv
+    sc = T.parse(scene())
+    text = next(o for o in sc.objects.values() if o.kind == "Text")
+    text.body.update(text=b"GODZILLA AND ANGUIRUS", align=1, flags=(0, 0))
+    buf = T.serialize(sc)
+    if not any(e["text"] == "GODZILLA AND ANGUIRUS" for e in radium.display_texts(buf)):
+        pytest.skip("the test scene's line isn't classed as display text")
+    _write_tsv(tmp_path, [("/g/a.radium", "GODZILLA AND ANGUIRUS", "GODZILLA VS BATTRA")])
+    writes, n, _ov, _fw, _grown = engine._radium_text_writes(
+        _FakeReader({"/g/a.radium": buf}), str(tmp_path), log=lambda *a, **k: None,
+        cancel=lambda: False)
+    assert n == 1 and writes
+    out = T.parse(_apply(buf, writes))
+    got = next(o for o in out.objects.values() if o.kind == "Text").body["text"]
+    assert got == b" GODZILLA VS BATTRA  "
+
+
+# ---------------------------------------------------------------------------------------------
+# round 3: a card an older Write padded (DragonRR on v1.121.1: "Not fixed. the box is large
+# enough the text is off"). A project re-read from such a card holds the padded line as its
+# original with no edit, so nothing rewrote it; Write now repairs it and Scenes draws it so.
+# ---------------------------------------------------------------------------------------------
+PADDED = "GODZILLA VS BATTRA" + " " * 26
+
+
+def test_an_older_writes_padding_is_recognised():
+    assert engine._old_padding(PADDED)
+    assert not engine._old_padding("KING OF THE MONSTERS UNLOCKED AT PWR UP LVL 8  ")  # stock
+    assert not engine._old_padding("POWERLINES ") and not engine._old_padding("     ")
+
+
+def test_write_sets_an_old_padded_line_back_to_its_words(tmp_path):
+    from tests.test_stern_radium import _write_tsv
+    _write_tsv(tmp_path, [
+        ("/g/a.radium", PADDED, ""),                                  # not edited: repaired
+        ("/g/a.radium", "POWERLINES ", ""),                           # stock: left alone
+        ("/g/b.radium", "SHOOT  " + " " * 4, "SHOOT RAMP"),           # edited: the edit wins
+        ("/godzilla_le/game", "TILT" + " " * 4, ""),                  # program text: not a scene
+    ])
+    edits = engine._changed_radium_text(str(tmp_path))
+    assert edits == {"/g/a.radium": [(PADDED, "GODZILLA VS BATTRA")],
+                     "/g/b.radium": [("SHOOT  " + " " * 4, "SHOOT RAMP")]}
+
+
+def test_scenes_draws_an_old_padded_line_by_its_words(tmp_path, fonts):
+    d = _text("GODZILLA VS BATTRA", (-2, -2, 340, 40), 1)
+    want = _draw(tmp_path, d, fonts)
+    assert np.array_equal(_draw(tmp_path, dict(d, text=PADDED), fonts), want)
+    assert not np.array_equal(_draw(tmp_path, dict(d, text="GODZILLA VS BATTRA  "), fonts),
+                              want)                                # two: a stock line's own
+
+
+def test_write_recentres_a_card_an_older_write_padded(tmp_path):
+    from pinball_decryptor.plugins.stern import radium
+    from tests.test_stern_radium import _FakeReader, _apply, _write_tsv
+    sc = T.parse(scene())
+    text = next(o for o in sc.objects.values() if o.kind == "Text")
+    text.body.update(text=PADDED.encode("latin1"), align=1, flags=(0, 0))
+    buf = T.serialize(sc)
+    if not any(e["text"] == PADDED for e in radium.display_texts(buf)):
+        pytest.skip("the test scene's line isn't classed as display text")
+    _write_tsv(tmp_path, [("/g/a.radium", PADDED, "")])
+    writes, n, _ov, _fw, _grown = engine._radium_text_writes(
+        _FakeReader({"/g/a.radium": buf}), str(tmp_path), log=lambda *a, **k: None,
+        cancel=lambda: False)
+    assert n == 1 and writes
+    out = T.parse(_apply(buf, writes))
+    got = next(o for o in out.objects.values() if o.kind == "Text").body["text"]
+    assert got == b" " * 13 + b"GODZILLA VS BATTRA" + b" " * 13
+
+
+# ---------------------------------------------------------------------------------------------
+# round 4 (DragonRR on v1.121.2: "Nope .. the text says.. NO"): the padding was in the EDIT -
+# a replacement read back off a padded card (a transfer from it) is "GODZILLA VS BATTRA" + 26
+# spaces against the stock line, so the preview drew and Write kept the padded string. A card
+# from v1.121.1 on pads before the words too (centred: both ends), so both ends count.
+# ---------------------------------------------------------------------------------------------
+STOCK = "GODZILLA & ANGUIRIS VS KING GHIDORAH & GIGAN"
+SPLIT = " " * 13 + "GODZILLA VS BATTRA" + " " * 13
+
+
+def test_padding_at_either_end_is_an_older_writes():
+    assert engine._old_padding(SPLIT) and engine._old_padding(" " * 26 + "GODZILLA VS BATTRA")
+    assert not engine._old_padding("  TWO LEADING") and not engine._old_padding("   ")
+
+
+def test_a_padded_replacement_is_written_and_drawn_by_its_words(tmp_path, fonts):
+    from tests.test_stern_radium import _write_tsv
+    _write_tsv(tmp_path, [("/g/a.radium", STOCK, PADDED),
+                          ("/g/b.radium", SPLIT, "")])
+    assert engine._changed_radium_text(str(tmp_path)) == {
+        "/g/a.radium": [(STOCK, "GODZILLA VS BATTRA")],
+        "/g/b.radium": [(SPLIT, "GODZILLA VS BATTRA")]}
+    d = _text(STOCK, (-2, -2, 340, 40), 1)
+    want = _draw(tmp_path, dict(d, text="GODZILLA VS BATTRA"), fonts)
+    assert np.array_equal(_draw(tmp_path, d, fonts, {STOCK: PADDED}), want)
+    assert np.array_equal(_draw(tmp_path, dict(d, text=SPLIT), fonts), want)

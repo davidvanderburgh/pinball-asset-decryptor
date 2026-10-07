@@ -42,9 +42,9 @@
  *              place, what to shoot, LOCKS, JACKPOT and SUPER at the edges, the place's clock in the badge,
  *              the locks on the right edge's gauge. A lock plays Godzilla smashing through; BABY FOUND,
  *              the super and the endings are full screen.
- *   INSERTS    Ready: the BUILDING pulsing red. The chase: the place's shots still to make red, the lock
- *              white and blinking, faster as the clock runs out. The multiball: the jackpot shots orange,
- *              BABY green and blinking.
+ *   INSERTS    Ready: the BUILDING pulsing red. The chase: the place's shots still to make flashing red, the
+ *              lock white and blinking, faster as the clock runs out. The multiball: the jackpot shots flashing
+ *              orange, BABY green and blinking fast.
  *   DISPLAY    Priority 180 for the chase, 190 for the multiball.
  *
  * Emulator test triggers: /dump/godzilla_angry.start (the chase now, as if lit), .stop, .light (the meter
@@ -339,7 +339,7 @@ static void show_lamps(void)
     if (run.phase == PHASE_CHASE) {
         if (run.place < N_PLACES) {
             uint64_t todo = place_shots(run.place) & ~run.made_mask;
-            if (!run.lock_lit && todo) kit_lamps_shot(&lamps, todo, GA_RED, PM_LAMP_SOLID, 0);
+            if (!run.lock_lit && todo) kit_lamps_shot(&lamps, todo, GA_RED, PM_LAMP_BLINK, KIT_LIT_MS);
             if (run.lock_lit)
                 kit_lamps_shot(&lamps, pm_shot(PLACE[run.place].lock), KIT_WHITE, PM_LAMP_BLINK,
                                kit_hurry_ms(left, PLACE_SECONDS * 1000u));
@@ -350,7 +350,7 @@ static void show_lamps(void)
         uint64_t rest = 0;
         for (i = 0; i < N_JP; i++)
             if (i != run.baby) rest |= jp_mask[i];
-        kit_lamps_shot(&lamps, rest, KIT_ORANGE, PM_LAMP_SOLID, 0);
+        kit_lamps_shot(&lamps, rest, KIT_ORANGE, PM_LAMP_BLINK, KIT_LIT_MS);
         kit_lamps_shot(&lamps, jp_mask[run.baby], KIT_GREEN, PM_LAMP_BLINK, 200);
     }
     kit_lamps_commit(&lamps);

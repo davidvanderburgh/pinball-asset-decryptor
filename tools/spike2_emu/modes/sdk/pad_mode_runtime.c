@@ -853,6 +853,36 @@ int pm_sound(unsigned request)
     return 1;
 }
 
+/* PAD-415: the game's own hit sounds, a rising run (pad_mode.h) */
+int pm_hit_sounds(void)
+{
+    char key[20];
+    int n;
+    if (!fn("sound_play")) return 0;
+    for (n = 0; n < 32; n++) {
+        pm_snprintf(key, sizeof key, "hit_sound_%d", n + 1);
+        if (pm_port_value(key, 0) <= 0) break;
+    }
+    return n;
+}
+
+int pm_hit_sound(int n)
+{
+    static unsigned long last;
+    static int said;
+    char key[20];
+    int count = pm_hit_sounds();
+    unsigned long now = pm_ms();
+    if (!count || (last && now - last < 100)) return 0;
+    if (n < 1) n = 1;
+    if (n > count) n = count;
+    pm_snprintf(key, sizeof key, "hit_sound_%d", n);
+    if (!pm_sound((unsigned)pm_port_value(key, 0))) return 0;
+    last = now | 1;
+    if (said < 40 && ++said) say("hit sound %d: request %ld%s", n, pm_port_value(key, 0), said == 40 ? " (no more of these lines this boot)" : "");
+    return 1;
+}
+
 int pm_sound_active(unsigned request)
 {
     unsigned f = fn("sound_active");
@@ -1215,6 +1245,9 @@ struct lamp_held {
     unsigned long t0;
     int last[3];                    /* the level last written to each light, -1 = rewrite */
     unsigned on_ms;                 /* a blink's ON time; 0 = half the period (item 160: a rule's 300/200 blink) */
+    unsigned long flash_t0, flash_until;   /* PAD-415: a hit's strobe over the pattern (0 = none) */
+    unsigned flash_rgb;
+    int flash_only;                 /* held for the strobe alone: handed back to the game when it ends */
 };
 static struct lamp_held lamp_held[N_LAMPS];
 static unsigned lamp_hold_on_ms;    /* the on time the next hold takes (set around a call, runtime-internal) */
@@ -1448,6 +1481,8 @@ static void lamp_let_go(int k)
         for (c = 0; c < 3; c++)
             if (lamps[k].light[c]) lamp_slot_put(lamp_layer[h->layer].group, lamps[k].light[c], 0, 0);
     h->owner = 0;
+    h->flash_until = 0;
+    h->flash_only = 0;
 }
 
 static const char *const lamp_pattern_name[] = { "solid", "blink", "pulse", "chase" };
@@ -1479,6 +1514,7 @@ static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned
         h->layer = layer;
         h->last[0] = h->last[1] = h->last[2] = -1;
         h->on_ms = lamp_hold_on_ms < period_ms ? lamp_hold_on_ms : 0;
+        h->flash_only = 0;          /* a strobe still running finishes over the new pattern */
     }
     lamp_say("lamps: %d insert(s) held (%s): %06x %s, %u ms, layer %u", n, what, rgb & 0xffffffu,
              lamp_pattern_name[pattern], period_ms, prio);
@@ -1569,10 +1605,17 @@ int pm_lamp_shot(uint64_t shots, unsigned rgb, int pattern, unsigned period_ms)
 static int lamp_release_list(const int *list, int n, const char *what)
 {
     int j, r = 0;
+    unsigned long now = pm_ms();
     for (j = 0; j < n; j++) {
         struct lamp_held *h = &lamp_held[list[j]];
         if (!h->owner || (current && h->owner != current)) continue;
-        lamp_let_go(list[j]);
+        if (h->flash_until && (long)(h->flash_until - now) > 0) {
+            h->flash_only = 1;      /* PAD-415: a hit's strobe ends first, then the game has it back */
+            h->rgb = 0;
+            h->pattern = PM_LAMP_SOLID;
+        } else {
+            lamp_let_go(list[j]);
+        }
         r++;
     }
     if (r) lamp_say("lamps: %d insert(s) handed back to the game (%s)", r, what);
@@ -1603,6 +1646,43 @@ int pm_lamp_release_all(void)
     for (k = 0; k < n_lamps; k++)
         if (lamp_held[k].owner && (!current || lamp_held[k].owner == current)) list[n++] = k;
     return lamp_release_list(list, n, "all of the mode's");
+}
+
+/* PAD-415: a hit's strobe (pad_mode.h) */
+int pm_lamp_flash(uint64_t shots, unsigned rgb, unsigned ms)
+{
+    int k, n = 0, layer;
+    const struct pm_mode *me = current ? current : (const struct pm_mode *)&lamps;
+    unsigned long now = pm_ms();
+    if (!(can & PM_CAN_LAMPS) || !shots) return 0;
+    if (!ms) ms = 480;
+    if (ms > 2000) ms = 2000;
+    layer = lamp_layer_for(lamp_prio_of(current));
+    if (layer < 0) return 0;
+    for (k = 0; k < n_lamps; k++) {
+        struct lamp_held *h = &lamp_held[k];
+        if (!(lamps[k].shot & shots) || (h->owner && h->owner != me)) continue;   /* another mode's: left alone */
+        if (!h->owner) {
+            h->owner = me;
+            h->layer = layer;
+            h->rgb = 0;
+            h->pattern = PM_LAMP_SOLID;
+            h->period = 500;
+            h->t0 = now;
+            h->chase_i = 0;
+            h->chase_n = 1;
+            h->on_ms = 0;
+            h->flash_only = 1;
+        }
+        h->flash_rgb = rgb;
+        h->flash_t0 = now;
+        h->flash_until = (now + ms) | 1;
+        h->last[0] = h->last[1] = h->last[2] = -1;
+        n++;
+    }
+    if (n) lamp_say("lamps: %d insert(s) strobe %06x for %u ms (a hit, shots %08x_%08x)", n, rgb & 0xffffffu, ms,
+                    (unsigned)(shots >> 32), (unsigned)shots);
+    return n;
 }
 
 int pm_lamp_priority(unsigned priority)
@@ -1703,6 +1783,16 @@ static void lamps_tick(void)
         int f;
         if (!h->owner) continue;
         if (ticks % 30 == 0) h->last[0] = h->last[1] = h->last[2] = -1;   /* re-asserted twice a second */
+        if (h->flash_until) {                               /* PAD-415: a hit's strobe */
+            if ((long)(h->flash_until - now) > 0) {
+                unsigned c = ((now - h->flash_t0) / 60u) % 2u ? 0u : h->flash_rgb;
+                lamp_write(k, (int)((c >> 16) & 255u), (int)((c >> 8) & 255u), (int)(c & 255u));
+                continue;
+            }
+            h->flash_until = 0;
+            if (h->flash_only) { lamp_let_go(k); continue; }
+            h->last[0] = h->last[1] = h->last[2] = -1;
+        }
         f = lamp_level(h, now);
         lamp_write(k, (int)((h->rgb >> 16) & 255u) * f / 255, (int)((h->rgb >> 8) & 255u) * f / 255,
                    (int)(h->rgb & 255u) * f / 255);
@@ -6563,6 +6653,12 @@ static void pad_mode_start(void)
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
     building_arm();                                 /* PAD-393: the Premium's building */
     shows_arm();                                    /* PAD-411: the game's own light shows */
+    if (pm_hit_sounds()) {                          /* PAD-415: the game's own hit sounds */
+        char key[20];
+        pm_snprintf(key, sizeof key, "hit_sound_%d", pm_hit_sounds());
+        say("hit sounds: %d of the game's own, a rising run (requests %ld to %ld)", pm_hit_sounds(),
+            pm_port_value("hit_sound_1", 0), pm_port_value(key, 0));
+    }
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),

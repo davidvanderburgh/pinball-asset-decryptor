@@ -2289,6 +2289,11 @@ static void on_shot(uint64_t mask)
                (unsigned)(mask >> 32), (unsigned)mask, (unsigned long long)got,
                (unsigned long long)asked, run.hits, (unsigned long long)run.total);
         own_sounds_shot(M, run.hits);
+        /* PAD-415: the hit answers at once - while one of ours runs the game's rules see no shots, so none of the
+         * game's own sounds or insert flashes play for it: the shot's inserts strobe white, and the game's own hit
+         * sounds climb a step a hit */
+        pm_lamp_flash(mask & scoring_bits(M), PM_RGB(255, 255, 255), 480);
+        if (pm_hit_sounds()) pm_hit_sound((int)((run.hits - 1) % (unsigned)pm_hit_sounds()) + 1);
     }
     if (run.active && (M = run.slot) != 0 && p == run.player && (mask & penalty_bits(M)) && end_pending != M) {
         uint64_t asked = penalty_value(M, mask), lost = pm_score_sub(p, asked);   /* PAD-314 */

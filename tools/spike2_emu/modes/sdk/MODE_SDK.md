@@ -460,6 +460,35 @@ layers whenever they change), and two raw porting reads, `slots <lists> <output 
 (every layer's slot for one light and the compositor's output record) and `wiremap <board table>
 <board count>` (every light the output stage sends, and the board channel it goes out on).
 
+### A hit answers, and a lit shot flashes (PAD-415)
+
+David after a machine test: "the inserts that are lit for shots should pretty much always be flashing - when they're
+solid, they look broken, especially if i hit the shot and i don't get audible or visual feedback that it registered."
+While one of our modes runs, the game's rules see no shots (PAD-347/PAD-398), so the game plays none of its own sounds
+or insert flashes for them: a hit has to answer from the mode.
+
+```c
+pm_lamp_flash(shot, PM_RGB(255, 255, 255), 480);   /* the hit shot's inserts strobe white, then show the mode's pattern */
+pm_hit_sound(++hits);                               /* the game's own hit sounds, one step higher a hit */
+```
+
+`pm_lamp_flash` strobes the inserts of `shots` (60 ms on, 60 off) for `ms` (480 when 0, 2000 at most) over whatever
+the mode holds them in, then shows that again; an insert the mode does not hold is held for the strobe only and handed
+back after it, and one the mode releases mid-strobe finishes the strobe first. `pm_hit_sound(n)` plays the n-th of a
+rising run of the game's own hit sounds the port names (`value hit_sound_<n>`; past the last, the last), never two
+within 100 ms; `pm_hit_sounds()` says how many (0: none on this game). On Godzilla Premium/LE 1.16 the run is the
+Sound Test's PITCHED HIT ORCH 1 to 8 (requests 367-374): the Sound Test's node id is the request id, and a census of
+the stock game's shots agreed (a shield target played 345 MECHAGODZILLA TARGET 2, the ramps 420 LEFT RAMP and 443
+RIGHT RAMP, the Maser target 436 MASER CANNON TARGET); each holds the effects channel the game's own shot sounds use
+for about 2 s.
+
+The kit does both for every hit that counts while the mode runs (`kit_fresh` -> `kit_hit`), the climb starting again
+at each start; a form-built mode's scoring shots do the same (`mode_file.c`). And the kit's lights speak the game's
+language: a lit shot BLINKS (`KIT_LIT_MS`, 500 ms, with no clock on it; faster with one), pulse is optional or a step
+not next yet, and SOLID means done - never a shot still to make. Emulator: six KIRYU charge hits strobed their inserts
+(the shield left insert's three channels flipped 11 times in the 1.2 s after its hit) and played 367 to 372; on David's
+Premium every scoring hit strobed and sounded.
+
 ### Lights on every title (item 164)
 
 Only Godzilla, Jaws and King Kong carry the game's light language (`blele`), so `pm_lights`

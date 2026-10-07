@@ -1089,16 +1089,16 @@ def test_ghidorah_lights_the_lit_heads_inserts_gold_with_its_health_and_the_regr
     g = "KING GHIDORAH"
     start = _at(out, "[KING GHIDORAH] START")
     assert _at(out, "DISPLAY 180 KING GHIDORAH") <= start
-    assert (start, "ffaa00", "solid", 0) in _lamp(out, "LEFT RAMP", g)          # full health: solid gold
-    assert (start, "ffaa00", "solid", 0) in _lamp(out, "POWERLINE LEFT", g)
+    assert (start, "ffaa00", "blink", 700) in _lamp(out, "LEFT RAMP", g)        # full health: gold, slowly (PAD-415)
+    assert (start, "ffaa00", "blink", 700) in _lamp(out, "POWERLINE LEFT", g)
     hit = _at(out, "[KING GHIDORAH] Left ramp: LEFT HEAD -2")
     assert (hit, "ffaa00", "blink", 180) in _lamp(out, "LEFT RAMP", g)          # 1 health: a fast blink
     moved = _at(out, "[KING GHIDORAH] the lit head moves: LEFT HEAD -> MIDDLE HEAD")
     assert (moved, "00ff3c", "pulse", 1200) in _lamp(out, "LEFT RAMP", g)        # wounded, left alone: green
-    assert (moved, "ffaa00", "solid", 0) in _lamp(out, "BUILDING", g)
-    assert (moved, "ffaa00", "solid", 0) in _lamp(out, "POWERLINE CENTER", g)
+    assert (moved, "ffaa00", "blink", 700) in _lamp(out, "BUILDING", g)
+    assert (moved, "ffaa00", "blink", 700) in _lamp(out, "POWERLINE CENTER", g)
     assert re.search(r"HELD RIGHT RAMP", out) is None                          # a full head not lit: the game's
-    assert has(out, g, "lights: shot 0x10100000 00ff3c pulse 1200; shot 0x20400000 ffaa00 solid")
+    assert has(out, g, "lights: shot 0x10100000 00ff3c pulse 1200; shot 0x20400000 ffaa00 blink 700")
 
 
 def test_ghidorah_final_blow_flashes_the_maser_and_every_insert_goes_back_when_it_ends(harness):
@@ -1161,11 +1161,11 @@ def test_maser_barrage_lights_the_next_shot_bright_the_rest_dim_and_the_window_b
     m = "MASER BARRAGE"
     start = _at(out, "[MASER BARRAGE] START")
     assert _at(out, "DISPLAY 180 MASER BARRAGE") <= start
-    assert (start, "005aff", "solid", 0) in _lamp(out, "LEFT RAMP", m)            # next, no window yet
-    assert (start, "001e5a", "solid", 0) in _lamp(out, "RIGHT RAMP", m)           # the rest of the chain, dim
-    assert (start, "001e5a", "solid", 0) in _lamp(out, "BUILDING", m)
+    assert (start, "005aff", "blink", 500) in _lamp(out, "LEFT RAMP", m)          # next, no window yet
+    assert (start, "001e5a", "pulse", 1600) in _lamp(out, "RIGHT RAMP", m)        # the rest of the chain, dim
+    assert (start, "001e5a", "pulse", 1600) in _lamp(out, "BUILDING", m)
     step = _at(out, "[MASER BARRAGE] step 1 Left ramp")
-    assert (step, "001e5a", "solid", 0) in _lamp(out, "LEFT RAMP", m)
+    assert (step, "001e5a", "pulse", 1600) in _lamp(out, "LEFT RAMP", m)
     blinks = [(t - step, c, p, ms) for t, c, p, ms in _lamp(out, "RIGHT RAMP", m) if p == "blink" and t >= step]
     assert [ms for _c, _p, ms in _changes(blinks)] == [500, 250, 100], blinks      # the 7 s window closing
     first = {}
@@ -1173,8 +1173,8 @@ def test_maser_barrage_lights_the_next_shot_bright_the_rest_dim_and_the_window_b
         first.setdefault(ms, d)
     assert 2700 <= first[250] <= 2900 and 4800 <= first[100] <= 5000
     broken = _at(out, "[MASER BARRAGE] CHAIN BROKEN")
-    assert (broken, "005aff", "solid", 0) in _lamp(out, "LEFT RAMP", m)           # back to the start
-    assert (broken, "001e5a", "solid", 0) in _lamp(out, "RIGHT RAMP", m)
+    assert (broken, "005aff", "blink", 500) in _lamp(out, "LEFT RAMP", m)         # back to the start
+    assert (broken, "001e5a", "pulse", 1600) in _lamp(out, "RIGHT RAMP", m)
 
 
 def test_final_wars_lit_building_pulses_only_while_no_mode_of_ours_runs_and_not_between_balls(harness):
@@ -1839,8 +1839,8 @@ def test_godzilla_angry_chase_five_places_five_locks_baby_found_and_a_six_ball_m
     assert hud_next(out, s, "Title", _at(out, "[GODZILLA ANGRY] END")) == "GODZILLA AND BABY"
     # the lights: the lock white and blinking, the place's shots red, BABY green over the orange jackpots
     assert "[GODZILLA ANGRY] lights: shot 0x80000 ffffff blink 700" in out
-    assert "[GODZILLA ANGRY] lights: shot 0x300000 ff0a00 solid" in out
-    assert re.search(r"\[GODZILLA ANGRY\] lights: shot 0x[0-9a-f]+ ff5000 solid; shot 0x[0-9a-f]+ 00ff3c blink 200", out)
+    assert "[GODZILLA ANGRY] lights: shot 0x300000 ff0a00 blink 500" in out
+    assert re.search(r"\[GODZILLA ANGRY\] lights: shot 0x[0-9a-f]+ ff5000 blink 500; shot 0x[0-9a-f]+ 00ff3c blink 200", out)
 
 
 def test_godzilla_angry_the_clock_running_out_turns_the_locks_into_a_smaller_multiball(harness):
@@ -1924,7 +1924,7 @@ def test_spacegodzilla_towers_fall_the_super_is_the_sum_and_adds_a_ball(harness)
     assert has(out, SG, "END (one ball left): CRYSTAL TOWERS, 7 jackpot(s), 1 super(s), 1 ball(s) added")
     assert hud_said(out, s, "Award", "LEFT RAMP TOWER FALLS") and hud_said(out, s, "Line", "SUPER JACKPOT: SHOOT THE BIG LOOP")
     assert hud_next(out, s, "Title", _at(out, "[SPACEGODZILLA] END")) == "SPACEGODZILLA FALLS"
-    assert "[SPACEGODZILLA] lights: shot 0x100000 be28ff blink 300; shot 0x400000 be28ff solid; shot 0x200000 be28ff solid" in out
+    assert "[SPACEGODZILLA] lights: shot 0x100000 be28ff blink 200; shot 0x400000 be28ff blink 500; shot 0x200000 be28ff blink 500" in out
 
 
 def test_spacegodzilla_moguera_shields_raise_every_jackpot(harness):
@@ -1976,7 +1976,7 @@ def test_kiryu_charges_on_lit_shots_and_fires_at_the_captive_ball(harness):
     assert hud_said(out, s, "Award", "ABSOLUTE ZERO READY") and hud_said(out, s, "Line", "FIRE: THE CAPTIVE BALL  -  OR CHARGE ON")
     assert hud_said(out, s, "C1_Value", "109%") and hud_said(out, s, "C3_Sub", "X2 AT 200%")
     assert hud_next(out, s, "Title", end) == "KIRYU WINS"
-    assert "[KIRYU] lights: shot 0x1388700000 8cdcff solid; shot 0x1000000000080000 ffffff blink 300" in out
+    assert "[KIRYU] lights: shot 0x1388700000 8cdcff blink 500; shot 0x1000000000080000 ffffff blink 300" in out
 
 
 def test_kiryu_overheats_from_two_hundred_percent_and_vents_the_charge(harness):
@@ -2197,3 +2197,32 @@ def test_biollante_lights_the_shield_vines_once_they_face_the_player(harness):
     after = [ln for ln in lines(out, "BIOLLANTE") if " lights: " in ln and int(ln.split()[0]) >= facing]
     assert before and all("shot 0x70000000 " in ln for ln in before), before   # the powerline vines only
     assert any("shot 0x3f0000000 " in ln for ln in after), after[:3]          # and the shield vines
+
+
+# ---- PAD-415: a lit shot flashes; a hit answers ----------------------------------------------------------------------
+GODZILLA_TEN = ["biollante", "destoroyah", "final_wars", "ghidorah_heads", "godzilla_angry", "kiryu", "maser_barrage",
+                "meltdown", "oxygen_destroyer", "spacegodzilla"]
+
+
+@pytest.mark.parametrize("slug", GODZILLA_TEN)
+def test_no_lit_shot_is_held_solid(slug):
+    """David after a machine test (PAD-415): "the inserts that are lit for shots should pretty much always be flashing
+    - when they're solid, they look broken". Solid is the game's word for done; none of the ten lights a shot so."""
+    src = (EX / (slug + ".c")).read_text(encoding="utf-8")
+    calls = re.findall(r"kit_lamps_(?:shot|name)\([^;]*;", src, re.S)
+    assert calls
+    assert not [c for c in calls if "PM_LAMP_SOLID" in c], slug
+
+
+def test_every_hit_of_a_running_mode_strobes_its_insert_and_climbs_the_hit_sounds(harness):
+    """kit_fresh answers a hit that counts while the mode runs (kit_hit): the shot's inserts strobe white for 480 ms
+    and the game's hit sounds climb one a hit. The spins that start KIRYU are not its hits: nothing answers them."""
+    out = play_env(harness, {"HARNESS_HITS": "1"}, *KIRYU_SPINS, "secs", 1, "shot", "Shield target left", "secs", 1,
+                   "shot", "Shield target center", "secs", 1, "shot", "Left ramp", "secs", 1)
+    started = _at(out, "[KIRYU] START")
+    assert started is not None
+    strobes = re.findall(r"^\s*(\d+) STROBE ([0-9a-f]+) ffffff 480$", out, re.M)
+    sounds = re.findall(r"^\s*(\d+) HIT SOUND (\d+)$", out, re.M)
+    assert [s for _t, s in strobes] == ["80000000", "100000000", "100000"]
+    assert [n for _t, n in sounds] == ["1", "2", "3"]
+    assert all(int(t) > started for t, _s in strobes + sounds)

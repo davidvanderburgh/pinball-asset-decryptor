@@ -1025,6 +1025,13 @@ class ImagesTab(TabService):
                      and not self._is_built(r)]
             for r in stock:
                 del self._color[r]
+            # the game's own lines of text in Scenes are locked again too (PAD-438)
+            try:
+                from ...core import colour_profile as cp
+                if self._assets_dir():
+                    cp.drop_text_slots(self._assets_dir())
+            except Exception:                           # noqa: BLE001
+                log.exception("images unlock: text switches")
             if not self._is_running():
                 restored = self._put_back_originals(
                     self._applied_replacement_rels(stock))

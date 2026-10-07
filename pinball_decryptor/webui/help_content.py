@@ -948,6 +948,17 @@ HELP_CONTENT = {
          "file's profile, attached. You are asked first; one Undo puts them all "
          "back.\n"
          "- Hover a file or a Scenes layer to see its Color profile, or None."),
+        ("Lines of text (Scenes)",
+         "A line of text in the Scenes layers has a palette too, and its own "
+         "profile like a file.\n\n"
+         "- A line you add has its own palette. The game's lines show a blue lock "
+         "until **Unlock extracted images and text** (Advanced, beside Preview "
+         "colors) is ticked.\n"
+         "- Most fonts have white letters the scene colors, so the profile goes into "
+         "the color the line is drawn in.\n"
+         "- A font whose letters have colors of their own (Godzilla's orange title "
+         "font) keeps them in its font picture. Its lines show that picture's "
+         "palette, shared by every line in the font, as on the Images tab."),
         ("Machine screen (Spike 2, preview only)",
          "Not a correction but your machine's screen itself. It is never written to "
          "the card, and Revert all leaves it alone.\n\n"

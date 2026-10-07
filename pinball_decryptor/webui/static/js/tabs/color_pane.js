@@ -182,9 +182,11 @@ const ALL_HOSTS = { images: "images", video: "videos" };
 function FileLine({ s, host }) {
   const f = s.file;
   if (!f) return null;
+  // PAD-438: a line of text in Scenes has one too (Apply to all is for the tabs' files)
+  const what = f.kind === "text" ? "This line of text" : "This file";
   const all = ALL_HOSTS[host] === f.kind ? ALL_WORDS[f.kind] : null;
   return html`<div class="cpd-file">
-    <div class="row cpd-file-hd"><span class="eyebrow nw">This file</span>
+    <div class="row cpd-file-hd"><span class="eyebrow nw">${what}</span>
       <span class="mono small ellip" title=${f.rel}>${f.label}</span></div>
     <div class="row cpd-file-own">${f.own
       ? html`<span class="small muted grow">It has a color profile of its own.</span>

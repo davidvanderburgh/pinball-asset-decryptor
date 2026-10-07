@@ -4196,6 +4196,10 @@ def _apply_tree_ops(data, card_path, ops, names, assets_dir, log):
         log("Scene %s: %d of its %d edit(s) from the Scenes window are already on this card's "
             "scene and are not applied again." % (card_path, len(ops) - len(todo), len(ops)),
             "info")
+    # PAD-438: the colour profile on its lines of text (absolute values, so a card built
+    # with them already is set to the same numbers again)
+    lines = _scene_line_colours(assets_dir, card_path, ops, log)
+    todo = list(todo) + lines
     if not todo:
         return data, 0
     n, notes = _scene_edit.apply_scene(sc, todo, assets_dir, names)
@@ -4204,6 +4208,45 @@ def _apply_tree_ops(data, card_path, ops, names, assets_dir, log):
     if not n:
         return data, 0
     return _scene_tree.serialize(sc), n
+
+
+def _scene_line_colours(assets_dir, card_path, ops, log):
+    """PAD-438: the ``line_colour`` edits for the switched-on lines of text of the scene at
+    *card_path* (:mod:`text_colour`), worked out on the project's scene with *ops* (its
+    stored Scenes edits) applied, as the preview draws them; what they write is kept."""
+    if not assets_dir:
+        return []
+    from . import scene_edit as _scene_edit
+    from . import text_colour as _text_colour
+    man = _load_scene_trees(assets_dir).get(card_path)
+    if man is None:
+        return []
+    try:
+        edited, _n = _scene_edit.apply_manifest(
+            man, _scene_edit.to_apply(assets_dir, card_path, man, ops))
+        lines, written = _text_colour.line_ops(assets_dir, card_path, edited, ops)
+    except Exception as e:                             # noqa: BLE001
+        log("Scene %s: the color profile on its text could not be worked out (%s); its "
+            "text keeps its colors." % (card_path, e), "warning")
+        return []
+    if lines:
+        _text_colour.remember(assets_dir, card_path, written)
+        n_on = sum(1 for e in lines if e["node"] in written)
+        msg = "Scene %s: the color profile goes into %d line(s) of text%s." % (
+            card_path, n_on, "" if len(lines) == n_on else
+            "; %d line(s) get their own colors back" % (len(lines) - n_on))
+        # a scene that grows is worked out twice in one Write (planned, then written whole)
+        said = getattr(_LINES_SAID, "v", None)
+        if said is None:
+            said = _LINES_SAID.v = {}
+        now = time.monotonic()
+        if now - said.get(msg, -1e9) > 120:
+            log(msg, "info")
+        said[msg] = now
+    return lines
+
+
+_LINES_SAID = threading.local()
 
 
 def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_overlays):
@@ -4218,6 +4261,9 @@ def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_ove
       image build only, so a direct-SD write says so and leaves the scene alone."""
     from . import scene_edit as _scene_edit
     edits = _scene_edit.load(assets_dir)
+    # PAD-438: a scene whose only change is the colour profile on a line of text
+    for card in _text_line_cards(assets_dir):
+        edits.setdefault(card, [])
     if not edits:
         return [], 0, {}
     trees = _load_scene_trees(assets_dir)
@@ -4274,6 +4320,19 @@ def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_ove
         else:
             whole[card_path] = (node, (ops, names, assets_dir))
     return writes, n_total, whole
+
+
+def _text_line_cards(assets_dir):
+    """PAD-438: the scenes with a line of text the colour profile reaches (or one a Write
+    corrected that may need its colours back), where the project's scenes are known."""
+    if not assets_dir:
+        return set()
+    try:
+        from . import text_colour as _text_colour
+        trees = _load_scene_trees(assets_dir)
+        return {c for c in _text_colour.cards_with_lines(assets_dir) if c in trees}
+    except Exception:                                  # noqa: BLE001
+        return set()
 
 
 def _load_scene_trees(assets_dir):
@@ -6336,6 +6395,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     from . import scene_edit as _scene_edit
     tree_edits = ({} if getattr(_SKIP_SCENE_EDITS, "on", False)
                   else _scene_edit.load(assets_dir))
+    if not getattr(_SKIP_SCENE_EDITS, "on", False):
+        # PAD-438: a line of text with the colour profile on is a scene edit too
+        for card in _text_line_cards(assets_dir):
+            tree_edits.setdefault(card, [])
     # The game's own modes (item 145): staged timers / awards of the modes the
     # game shipped with - word patches in the game ELF, and the table's
     # operator-setting defaults (a battle timer) in the same ELF.
@@ -10077,7 +10140,7 @@ def scene_live_bytes(out_dir, assets_dir, card_path, log=None):
     with open(_lp(src), "rb") as f:
         base = f.read()
     ops = _scene_edit.ops_for(assets_dir, card_path)
-    if not ops:
+    if not ops and card_path not in _text_line_cards(assets_dir):
         return base
     trees = _load_scene_trees(assets_dir)
     names = _scene_edit.names_of(trees[card_path]) if card_path in trees else {}

@@ -46,6 +46,11 @@ Operations (``op`` and its fields)::
                                   its code finds them by their path)
     remove  node                  drop a node an add_* made (stock nodes are hidden instead:
                                   the game's code finds them by name and must still find them)
+    line_colour node[, rgb][, col]
+                                  SET a line of text's colours: its Text's rgb (alpha kept) and
+                                  its node's whole colour track ``[[frame, mul, add], ...]``.
+                                  Never stored: :mod:`text_colour` makes them from the colour
+                                  switches each time the scene is drawn or written (PAD-438)
 
 ``id`` of an added node is the one it has in the preview; the writer gives it a fresh id in
 the card's own id space.
@@ -510,6 +515,8 @@ def describe(op):
         return "box resized" if op.get("wrap") else "box fitted"
     if k == "text_align":
         return "aligned %s %s" % (VALIGN_NAMES[op["valign"]], ALIGN_NAMES[op["align"]])
+    if k == "line_colour":
+        return "colors corrected"
     return k
 
 
@@ -619,7 +626,7 @@ def apply_manifest(man, ops):
         k = op.get("op")
         try:
             if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
-                     "text_rect", "text_align", "parent"):
+                     "text_rect", "text_align", "parent", "line_colour"):
                 got = index.get(op["node"])
                 if got is None:
                     notes.append("%s: node %s is not in this scene" % (k, op["node"]))
@@ -692,6 +699,18 @@ def apply_manifest(man, ops):
                         if not o.get("game_layout"):
                             # (one the game lays out stays in the middle: PAD-433)
                             o["valign"] = int(op["valign"])
+                elif k == "line_colour":
+                    if "col" in op:
+                        n["col"] = [[int(f), [float(v) for v in m], [float(v) for v in a]]
+                                    for f, m, a in op["col"]]
+                    if "rgb" in op:
+                        for o in (man["objects"].get(str(oid)) or {}
+                                  for _s, oid in n["comps"]):
+                            if o.get("kind") == "Text":
+                                rgba = list(o.get("rgba") or (1.0, 1.0, 1.0, 1.0))
+                                o["rgba"] = [float(v) for v in op["rgb"][:3]] + [rgba[3]]
+                                # a Text tab recolour is in it already (PAD-438)
+                                o["profiled"] = True
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:
@@ -830,7 +849,7 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
         index = _tree_index(scene)
         try:
             if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
-                     "text_rect", "text_align", "parent"):
+                     "text_rect", "text_align", "parent", "line_colour"):
                 nid = fresh.get(op["node"], op["node"])
                 got = index.get(nid)
                 want = names.get(op["node"])
@@ -919,6 +938,19 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                         o.body["align"] = int(op["align"])
                         o.body["tail"] = (tuple(o.body.get("tail") or (0, 0))[0],
                                           int(op["valign"]))
+                elif k == "line_colour":
+                    if "col" in op:
+                        n.colors = [(int(f), [float(v) for v in m], [float(v) for v in a])
+                                    for f, m, a in op["col"]]
+                    if "rgb" in op:
+                        texts = [c.obj for c in n.components if c.obj.kind == "Text"]
+                        if not texts:
+                            notes.append("line_colour: node %s draws no text; left alone"
+                                         % op["node"])
+                            continue
+                        for o in texts:
+                            rgba = list(o.body.get("rgba") or (1.0, 1.0, 1.0, 1.0))
+                            o.body["rgba"] = [float(v) for v in op["rgb"][:3]] + [rgba[3]]
                 applied += 1
             elif k in ("add_picture", "add_text"):
                 parent = op.get("parent")

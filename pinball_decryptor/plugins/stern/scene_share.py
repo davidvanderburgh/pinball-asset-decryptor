@@ -96,12 +96,13 @@ def _drawn_image(man, node, frame=None):
     return img if isinstance(img, str) and img else None
 
 
-def _profile_raw(data, rel):
-    """What a switched-on picture *rel* (a sidecar key) has baked in, as stored: its own
-    profile, else the project's individual files profile, else the Recommended one (which
-    follows the screen of the project it is loaded into, as it does here)."""
+def _profile_raw(data, rel, kind="images"):
+    """What a switched-on picture *rel* (a sidecar key; *kind* "text": a line of text's
+    :func:`colour_profile.text_rel`, PAD-438) has baked in, as stored: its own profile, else
+    the project's individual files profile, else the Recommended one (which follows the
+    screen of the project it is loaded into, as it does here)."""
     from ...core import colour_profile as cp
-    own = cp._own_dicts(data, "images").get(rel)
+    own = cp._own_dicts(data, kind).get(rel)
     if isinstance(own, dict):
         return dict(own)
     shared = data.get(cp.ASSET_KEY)
@@ -162,8 +163,28 @@ def gather(assets_dir, cards, trees):
                 continue
             on = cp.asset_applies(settings, "images", img, own=op.get("color"))
             added[img] = {"color": on, "profile": _profile_raw(data, img) if on else None}
+    # PAD-438: the lines of text with the colour profile on, per scene, by node: the game's
+    # own (switched on behind the unlock) and the added ones (their switch rides in their
+    # edit; the profile is what the file carries)
+    lines = {}
+    on_lines = cp.text_lines_on(assets_dir, data)
+    for c in want:
+        per = {}
+        for rel in on_lines:
+            card, _h, node = rel.rpartition("#")
+            if card == c and node.isdigit():
+                per[node] = {"color": True, "profile": _profile_raw(data, rel, "text")}
+        for op in edits.get(c) or ():
+            if op.get("op") == "add_text" and isinstance(op.get("id"), int):
+                on = bool(op.get("color"))
+                per[str(op["id"])] = {
+                    "color": on,
+                    "profile": _profile_raw(data, cp.text_rel(c, op["id"]), "text") if on
+                    else None}
+        if per:
+            lines[c] = per
     overlay = data.get(cp.KEY)
-    extras = {"pictures": pictures, "added": added,
+    extras = {"pictures": pictures, "added": added, "lines": lines,
               "overlay": dict(overlay) if isinstance(overlay, dict) else None,
               "text": text_to_save(assets_dir, cards, trees)}
     return edits, extras
@@ -197,6 +218,8 @@ def export_all(assets_dir, zip_path, cards, trees):
             doc["overlay"] = extras["overlay"]
         if extras["text"]:
             doc["text"] = extras["text"]
+        if extras.get("lines"):
+            doc["lines"] = extras["lines"]       # PAD-438
         states = scene_edit.states_to_save(assets_dir, edits, trees)
         if states:
             doc["states"] = states                   # PAD-403
@@ -237,11 +260,26 @@ def read_extras(zip_path):
             text.append({"path": e["path"], "original": e["original"], "new": e["new"],
                          "nodes": [str(n) for n in nodes if isinstance(n, (str, int))],
                          "near": near})
-    return {"pictures": pictures, "added": added, "overlay": overlay, "text": text}
+    # PAD-438: the lines of text with the colour profile on, ``{card: {node: {"color",
+    # "profile"}}}``
+    lines = {}
+    for card, per in (doc.get("lines") or {}).items() if isinstance(
+            doc.get("lines"), dict) else ():
+        if not (isinstance(card, str) and isinstance(per, dict)):
+            continue
+        good = {str(n): {"color": bool(a.get("color")),
+                         "profile": dict(a["profile"]) if isinstance(a.get("profile"), dict)
+                         else None}
+                for n, a in per.items() if isinstance(a, dict) and str(n).isdigit()}
+        if good:
+            lines[card] = good
+    return {"pictures": pictures, "added": added, "overlay": overlay, "text": text,
+            "lines": lines}
 
 
 def has_extras(extras):
-    return bool(extras["pictures"] or extras["added"] or extras["overlay"])
+    return bool(extras["pictures"] or extras["added"] or extras["overlay"]
+                or extras.get("lines"))
 
 
 def _here(assets_dir, rel):
@@ -391,11 +429,13 @@ def _digest(data):
     return hashlib.sha1(data).hexdigest()
 
 
-def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True):
+def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, cards_here=None):
     """Put *extras* (:func:`read_extras` of *zip_path*) into the project: each replaced
     picture copied into :data:`SHARED_DIR` and picked, with its Keep size tick, color switch
     and profile; each added picture's switch and profile (*renamed*: ``{its rel in the file:
-    its rel here}`` from :func:`scene_edit.import_edits`); the overlay when *overlay*.
+    its rel here}`` from :func:`scene_edit.import_edits`); the overlay when *overlay*; each
+    line of text's switch and profile (PAD-438), on the scenes here (*cards_here*, matched as
+    :func:`scene_edit.match_cards` matches them; None: by path alone).
     A picture this project does not have is left out.  Nothing is deleted or overwritten.  Returns ``(pictures loaded, [picture of the file not here])``."""
     from ...core import colour_profile as cp, staged_changes
     renamed = renamed or {}
@@ -446,9 +486,35 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True):
             loaded.append(rel)
     for rel, a in extras["added"].items():
         _own(renamed.get(rel, rel), a)
+    # PAD-438: the lines of text: a game line's switch (it counts once the unlock box is
+    # ticked here, as a game picture's does) and each line's own profile; an added line's
+    # switch rides in its edit, so only its profile is put here
+    tslots = dict(data.get(cp.TEXT_SLOTS_KEY) or {}) if isinstance(
+        data.get(cp.TEXT_SLOTS_KEY), dict) else {}
+    towns = dict(cp._own_dicts(data, "text"))
+    find = (scene_edit.card_finder(cards_here) if cards_here is not None
+            else (lambda card: card))
+    for card, per in (extras.get("lines") or {}).items():
+        here = find(card)
+        if here is None:
+            continue
+        for node, a in per.items():
+            rel = cp.text_rel(here, int(node))
+            stock = int(node) < scene_edit.FIRST_ADDED_ID
+            if a.get("color"):
+                if stock:
+                    tslots[rel] = True
+                if isinstance(a.get("profile"), dict):
+                    towns[rel] = dict(a["profile"])
+                else:
+                    towns.pop(rel, None)
+            else:
+                tslots.pop(rel, None)
+                towns.pop(rel, None)
     data["image"] = picks
     data["image_keep_size"] = sorted(r for r in keep if r in picks)
-    for key, val in ((cp.IMAGE_SLOTS_KEY, slots_on), (cp.FILE_PROFILES_KEY["images"], owns)):
+    for key, val in ((cp.IMAGE_SLOTS_KEY, slots_on), (cp.FILE_PROFILES_KEY["images"], owns),
+                     (cp.TEXT_SLOTS_KEY, tslots), (cp.FILE_PROFILES_KEY["text"], towns)):
         if val:
             data[key] = val
         else:

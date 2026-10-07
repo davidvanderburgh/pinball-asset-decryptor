@@ -50,7 +50,7 @@ def test_the_chosen_files_profile_starts_from_recommended_and_nothing_is_on(tmp_
     assert cp.asset_stored(d) is False
     assert cp.asset_active(d) == FILES
     assert cp.asset_settings(d) == {"all_images": False, "all_videos": False,
-                                    "images": {}, "videos": {}}
+                                    "images": {}, "videos": {}, "text": {}}
     assert cp.asset_map(d, "images", ["a.png"]) == {}
     # the default profile changes something, so it has a signature even
     # with no switch on; a switch moving is a change the Write tab sees
@@ -93,11 +93,11 @@ def test_counts_name_what_the_profile_reaches(tmp_path):
     data = {"image": {"images/a.png": "x", "images/b.png": "y"},
             "video": {"v.mp4": "z"}}
     staged_changes.save(d, data)
-    assert cp.asset_counts(d) == {"images": 0, "videos": 0, "added": 0}
+    assert cp.asset_counts(d) == {"images": 0, "videos": 0, "added": 0, "text": 0}
     cp.set_asset_all(d, "images", True)
     cp.set_asset_slot(d, "videos", "v.mp4", True)
     cp.set_asset_slot(d, "images", "images/b.png", False)
-    assert cp.asset_counts(d) == {"images": 1, "videos": 1, "added": 0}
+    assert cp.asset_counts(d) == {"images": 1, "videos": 1, "added": 0, "text": 0}
     from pinball_decryptor.plugins.stern import scene_edit
     scene_edit.add(d, "/g/s/scene.radium", {
         "op": "add_picture", "parent": 1, "id": 900, "name": "PAD_x",
@@ -299,7 +299,7 @@ def test_color_tab_has_a_chosen_files_mode_with_its_own_profile_and_boxes(tmp_pa
         assert s["name"] == "Recommended" and s["gamma"] == [1.0, 1.0, 1.0]
         assert s["curves"] and s["follows_screen"] is True
         assert s["asset_active"] is True and s["active"] is False
-        assert s["asset_counts"] == {"images": 0, "videos": 0, "added": 0}
+        assert s["asset_counts"] == {"images": 0, "videos": 0, "added": 0, "text": 0}
         assert w.call("color.set_all", "images", True)
         w.drain()
         s = w.state("color")
@@ -422,7 +422,9 @@ def test_scene_layers_carry_a_colour_switch_for_pictures(tmp_path):
         pics = [l for l in _tv(w)["layers"]
                 if l["kind"] == "Bitmap" and l["pics"] == [rel]]
         assert pics and pics[0]["color"] == {"locked": True}   # Stern's own picture
-        assert not any(l["color"] for l in _tv(w)["layers"] if l["kind"] == "Text")
+        # PAD-438: a game line of text is locked as a game picture is
+        assert all(l["color"] == {"locked": True, "line": True, "kind": "text"}
+                   for l in _tv(w)["layers"] if l["kind"] == "Text")
         nid = pics[0]["id"]
         # a replacement picked on the Images tab unlocks it
         mine = tmp_path / "mine.png"

@@ -37,18 +37,22 @@ This is several runs of work. Each run adds what it proved here.
      game's end. The result per build is in each port's header.
 3. **Each new build's HUD profile, scenes and sound carriers** (7ebbfab3, desk-measured from the cards).
 
-## Where the 32 new ports stand (end of run 2, 2026-10-07 09:45)
+## Where the 32 new ports stand (end of run 3, 2026-10-07 11:00)
 
-- **Shipped, full build check passed (16):** Aerosmith LE 1.16, Avengers LE and Pro 1.10, Deadpool LE 1.16,
-  Dungeons & Dragons LE and Pro 1.10, Foo Fighters Pro 1.04, Guardians Pro and LE 1.15, Iron Maiden LE and Pro 1.18,
-  James Bond Pro 1.06, John Wick LE and Pro 1.02, Star Wars Pro 1.31, Stranger Things LE 1.13.
-- **Still in the emulator when the run ended, or not yet re-run on a quiet machine (12):** Jurassic Park Pro 1.16, King Kong Pro 0.97, Mandalorian LE and Pro 1.45, Venom Pro 1.07, Uncanny X-Men Pro 0.98,
-  Sword of Rage LE and Pro 1.19, Star Wars LE 1.31, Stranger Things Pro 1.13, Munsters Pro 1.28, Aerosmith Pro 1.16.
-  Most of these failed only with the game's 10 s watchdog (exit 5) while the machine was over-committed (below).
-  Their candidate ports are `C:/tmp/PAD-420\clean\<key>.port`; the results land in `C:/tmp/PAD-420\check3\<key>`.
-- **Real faults to look at:** Batman 1.14 (no drain ends a ball on any of its ports: it moved to the newer
-  framework, so its end-of-ball event ids and handler need proving), Jaws Pro 1.02 (no game starts after Guided
-  Setup, twice), Rush LE / Pro 1.19 (stopped or crashed on every quiet-machine try so far; the 191 MB debug program).
+- **Shipped, build check passed in the emulator (30):** every new build but two. Run 2's checks were full games
+  (`play full`); run 3's re-runs on a quiet machine were the standard check (start, every playfield switch, a drain
+  ending a ball). Each port's header says which. King Kong sends each shot with its X1 bit set as well, so its shots
+  count by bit (35 of 55, as on King Kong LE). Star Wars LE 1.31's draft found only 4 switch shots; its switch table
+  is 1.30's machine id for id, so it carries 1.30's 42 (40 came from their switches).
+- **Open (2):**
+  - Batman 1.14: game start and ball start fire, but after each drain a ball comes back and no end of ball ever
+    comes (three tries, two ports). 1.13 had no trough eject coil (the rig served balls by hand); 1.14 has one, so
+    the rig's ball feeder answers the eject. Look at the rig's drain on this title first (`padball.log`, a glshot
+    after a drain), then the derived `site ball_end 0x499e0c` / event 0x34.
+  - Jaws Pro 1.02: the game does start (a glshot shows PLAYER 1, credits taken), but the runtime never sees it:
+    `mode.log` says in_game 0 with player 1, so `data mode_mask 0x89e53e` & `value mode_mask_busy 0x210` (copied
+    from Jaws LE) stays busy. Read the mask in a running Pro game and fix the address or the busy bits.
+  Their candidate ports: `C:/tmp/PAD-420/clean/<key>.port`; check logs `C:/tmp/PAD-420/check3..5/<key>`.
 
 **Lesson for the next run:** the previous run's helper agents left jobs running in WSL after they were stopped (a
 shaker proof, a ball-save pilot, a light-show scan, a mechanisms proof). They held a fourth rig, the machine feeds
@@ -56,7 +60,7 @@ three, and every check on the starved rigs died on the game's own watchdog. Befo
 stop anything not yours; run nothing CPU-heavy (pytest, screenshots, recipes with 4 workers) while rigs run.
 
 Tools (scratch, `C:/tmp/PAD-420`): `jobs/check_job2.sh` (the check per build), `run_check3.sh` (rigbatch),
-`stamp.py <key>...` (the proof header, from check3), `recipes.py` (`RW=1` for one core), `portslist.py` (the test's
+`stamp.py <key>...` (the proof header; `CHECKDIR` names the check folder), `recipes.py` (`RW=1` for one core), `portslist.py` (the test's
 port list), `limits_table.py` (MODE_LIMITS.md's games table), `clean2.py` (how a candidate port is made).
 
 ## Left, per part (the next runs)

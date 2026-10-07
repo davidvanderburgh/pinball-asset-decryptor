@@ -2877,6 +2877,12 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # its number and the values Tech Alerts shows (hwshim val_watch,
         # PAD-178). One line per change, and none on a clean run.
         /\[validation\]/         { print "[event] " $0; fflush(); next }
+        # PAD-441: the GL bridge saying a kind of object name came round, or
+        # that every name of a kind is in use (and a picture will be wrong).
+        # A few lines a session; the graphics-went-to-pieces report would
+        # have named itself with these.
+        /\[bridge\] .*(names came round|name is in use)/ \
+                                 { print "[event] " $0; fflush(); next }
         /SEGV|Segmentation|FATAL/{ print "[event] " $0; fflush(); next }
     ' &
     EVTPG=$!

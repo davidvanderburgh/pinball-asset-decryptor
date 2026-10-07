@@ -437,6 +437,7 @@ MULTIBALL_PROVEN = frozenset({
     "sword_of_rage_le-1.19",             # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "sword_of_rage_pro-1.19",            # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "stranger_things-1.13",              # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
 })
 
 
@@ -523,6 +524,7 @@ BALL_SAVE_PROVEN = frozenset({
     "guardians-1.15",                    # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
     "king_kong_pro-0.97",                # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
     "venom_pro-1.07",                    # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 8 shots, awarded 36000000
+    "dungeons_and_dragons_pro-1.10",     # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
 })
 
 
@@ -731,6 +733,13 @@ STACK_BALLS_PROVEN = frozenset({
     "guardians_le-1.14", "aerosmith_le-1.15", "elvira3-1.13", "jurassic_park_the_pin-1.05",
     "metallica_spike-1.04",           # PAD-306 2026-10-01: the framework's serve asked for two (0x3e3008), the
                                       # stack no mode refused ("a multiball"); one drained, started
+    "aerosmith_le-1.16",                 # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "guardians-1.15",                    # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "guardians_le-1.15",                 # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "james_bond_pro-1.06",               # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "stranger_things-1.13",              # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "stranger_things_le-1.13",           # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
 })
 
 

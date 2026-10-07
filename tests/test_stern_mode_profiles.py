@@ -332,6 +332,8 @@ def test_the_bank_and_hud_live_in_their_measured_lcd_tree():
     trees = {k: v.get("bank_tree", "auto_loaded") for k, v in MP.TITLE_SCENES.items()}
     assert set(trees.values()) <= {"auto_loaded", "demand_loaded"}
     for key, tree in trees.items():
+        if not os.path.exists(os.path.join(MP.PORTS_DIR, key + ".port")):
+            continue                 # PAD-420: a new build measured before its port ships
         p = MP.profile(key.replace("-", "_").replace(".", "_"))
         if p is not None:
             assert p.bank_tree == tree and p.lcd("bank").startswith("assets/lcd/%s/" % tree)
@@ -464,7 +466,10 @@ def test_a_renamed_card_waits_for_the_probe(tmp_path, monkeypatch):
 
 # ---- the build ships the port ---------------------------------------------------------
 # item 164: most titles show a screen now; these are ones that still cannot (none is read here)
-_NO_SCREEN = [k for k in sorted(MP.profiles()) if not MP.profile(k).can("screen")][:3]
+# (shipped ports only: PAD-420's new builds are measured in TITLE_SCENES before their ports ship, and a port
+# derived on this machine comes and goes with its card reads)
+_NO_SCREEN = [k for k in sorted(MP.profiles()) if not os.path.isabs(MP.profiles()[k].port)
+              and not MP.profiles()[k].can("screen")][:3]
 
 
 @pytest.mark.parametrize("key", _NO_SCREEN)
@@ -735,6 +740,8 @@ def test_a_title_with_no_spoken_numbers_says_so():
     number, so the Modes tab says that rather than that the countdown is not found yet."""
     import os
     for key in MP.COUNTDOWN_NO_NUMBERS:
+        if not os.path.exists(os.path.join(MP.PORTS_DIR, key + ".port")):
+            continue                 # PAD-420: a new build's port ships with the integrator's merge
         prof = MP.profile_from_port(os.path.join(MP.PORTS_DIR, key + ".port"))
         assert "never says a number on its own" in prof.why_not("countdown"), key
 

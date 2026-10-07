@@ -197,6 +197,102 @@ _SWAP = {
         (88, 75, 71, 74, 80), "census"),
     ("venom_le", "1.07"): (0xFC0003FF, (943, 928, 937, 881, 882, 942, 939, 1580, 944, 914, 941, 899, 915, 886, 925, 905, 1829, 1775, 916, 880, 875),
         (124, 117, 140, 106, 95), "census"),
+    # PAD-420: aerosmith_le-1.15 carriers matched record for record (lengths, channels); not yet censused
+    ("aerosmith", "1.16"): (0xC0003FDF, (640, 571, 614, 511, 582, 586, 588, 563, 310, 589, 446, 569, 580, 583, 445, 561, 573, 419, 562),
+        (73, 104, 108, 100, 113), "provisional"),
+    # PAD-420: aerosmith_le-1.15 carriers matched record for record (lengths, channels); not yet censused
+    ("aerosmith_le", "1.16"): (0xBFF00003, (640, 571, 614, 511, 582, 586, 588, 563, 310, 589, 446, 569, 580, 583, 445, 561, 573, 419, 562),
+        (73, 104, 108, 100, 113), "provisional"),
+    # PAD-420: avengers_infinity_le-1.09 carriers matched record for record (lengths, channels); not yet censused
+    ("avengers_infinity_le", "1.10"): (0xBFC0003F, (686, 693, 743, 756, 734, 690, 695, 815, 689, 814, 639, 822, 597, 735, 713, 586, 672, 699, 714, 731, 596),
+        (104, 76, 106, 82, 92), "provisional"),
+    # PAD-420: avengers_infinity_le-1.09 carriers matched record for record (lengths, channels); not yet censused
+    ("avengers_infinity_pro", "1.10"): (0xF80001FF, (686, 693, 743, 756, 734, 690, 695, 815, 689, 814, 639, 822, 597, 735, 713, 586, 672, 699, 714, 731, 596),
+        (104, 76, 106, 82, 92), "provisional"),
+    # PAD-420: item 163 static test on its own request table; not yet censused
+    ("batman", "1.14"): (0xF6FF0000, (720, 1227, 1053, 926, 1339, 391, 1049, 1046, 1224, 1385, 1638, 390, 1079, 425, 669, 1018, 1256, 392, 672, 888, 495),
+        (1491, 1164, 1203, 684, 1410), "provisional"),
+    # PAD-420: deadpool_le-1.14 carriers matched record for record (lengths, channels); not yet censused
+    ("deadpool_le", "1.16"): (0xE0001FEF, (864, 868, 588, 592, 869, 545, 590, 544, 577, 585, 570, 591, 866, 561, 556, 566, 558, 867, 549, 846, 557),
+        (), "provisional"),
+    # PAD-420: dungeons_and_dragons_le-1.00 carriers matched record for record (lengths, channels); not yet censused
+    ("dungeons_and_dragons_le", "1.10"): (0xF80007F7, (1139, 1122, 1276, 1137, 846, 1141, 1134, 827, 1102, 1098, 848, 1143, 1079, 855, 1150, 849, 1144, 851, 1146, 1048, 850),
+        (68, 87, 65, 126, 76), "provisional"),
+    # PAD-420: dungeons_and_dragons_le-1.00 carriers matched record for record (lengths, channels); not yet censused
+    ("dungeons_and_dragons_pro", "1.10"): (0xFFFC0003, (1139, 1122, 1276, 1137, 846, 1141, 1134, 827, 1102, 1098, 848, 1143, 1079, 855, 1150, 849, 1144, 851, 1146, 1048, 850),
+        (68, 87, 65, 126, 76), "provisional"),
+    # PAD-420: foo_fighters_le-1.04 carriers matched record for record (lengths, channels); not yet censused
+    ("foo_fighters_pro", "1.04"): (0xFEF80007, (899, 875, 321, 314, 281, 316, 315, 280, 805, 322, 898, 320, 312, 327, 352, 339, 184, 313, 317, 200, 806),
+        (63, 64), "provisional"),
+    # PAD-420: guardians_le-1.14 carriers matched record for record (lengths, channels); not yet censused
+    ("guardians", "1.15"): (0xEF0000FF, (630, 685, 543, 727, 554, 862, 734, 603, 688, 704, 796, 699, 605, 691, 607, 865, 696, 629, 867, 532, 898),
+        (95, 98, 117, 118, 143), "provisional"),
+    # PAD-420: guardians_le-1.14 carriers matched record for record (lengths, channels); not yet censused
+    ("guardians_le", "1.15"): (0xE0001EFF, (630, 685, 543, 727, 554, 862, 734, 603, 688, 704, 796, 699, 605, 691, 607, 865, 696, 629, 867, 532, 898),
+        (95, 98, 117, 118, 143), "provisional"),
+    # PAD-420: iron_maiden_le-1.16 carriers matched record for record (lengths, channels); not yet censused
+    ("iron_maiden_le", "1.18"): (0xBBFC0003, (494, 303, 503, 496, 470, 495, 487, 476, 395, 397, 461, 391, 388, 372, 389, 393, 396, 454, 390, 351, 394),
+        (556, 558, 544, 546, 550), "provisional"),
+    # PAD-420: iron_maiden_le-1.16 carriers matched record for record (lengths, channels); not yet censused
+    ("iron_maiden_pro", "1.18"): (0xF7E0001F, (494, 303, 503, 496, 470, 495, 487, 476, 395, 397, 461, 391, 388, 372, 389, 393, 396, 454, 390, 351, 394),
+        (556, 558, 544, 546, 550), "provisional"),
+    # PAD-420: james_bond_le-1.06 carriers matched record for record (lengths, channels); not yet censused
+    ("james_bond_pro", "1.06"): (0x80005FFF, (1057, 1071, 291, 1060, 1010, 1008, 1058, 1052, 401, 297, 1012, 1013, 1068, 1059, 173, 1054, 394, 1021, 764, 1014, 1018),
+        (94, 66, 168, 72, 95), "provisional"),
+    # PAD-420: jaws_le-1.02 carriers matched record for record (lengths, channels); not yet censused
+    ("jaws_pro", "1.02"): (0xF40003FF, (554, 1215, 1217, 1216, 1222, 1220, 1232, 1229, 1233, 555, 1231, 1228, 1224, 1219, 1225, 1221, 1236, 1377, 1218, 1343, 1316),
+        (130, 129, 77, 124, 109), "provisional"),
+    # PAD-420: john_wick_le-1.01 carriers matched record for record (lengths, channels); not yet censused
+    ("john_wick_le", "1.02"): (0xEFF80007, (454, 383, 451, 450, 462, 452, 415, 448, 426, 380, 391, 427),
+        (62, 97, 74, 73, 84), "provisional"),
+    # PAD-420: john_wick_le-1.01 carriers matched record for record (lengths, channels); not yet censused
+    ("john_wick_pro", "1.02"): (0xFBFF0000, (454, 383, 451, 450, 462, 452, 415, 448, 426, 380, 391, 427),
+        (62, 97, 74, 73, 84), "provisional"),
+    # PAD-420: jurassic_park_le-1.16 carriers matched record for record (lengths, channels); not yet censused
+    ("jurassic_park_pro", "1.16"): (0xFFE0000F, (999, 933, 786, 915, 732, 855, 918, 759, 737, 904, 819, 712, 853, 867, 851, 763, 852, 835, 906, 841, 829),
+        (99, 90, 107, 108, 97), "provisional"),
+    # PAD-420: king_kong_le-0.97 carriers matched record for record (lengths, channels); not yet censused
+    ("king_kong_pro", "0.97"): (0x80007FFF, (721, 722, 720, 725, 724, 718, 726, 723, 711, 739, 710, 709, 742, 963, 968, 706, 896, 888, 943, 693, 700),
+        (67, 68, 84, 65, 71), "provisional"),
+    # PAD-420: mando_le-1.44 carriers matched record for record (lengths, channels); not yet censused
+    ("mando_le", "1.45"): (0x80007FFF, (677, 679, 695, 690, 878, 667, 706, 700, 685, 682, 675, 665, 688, 689, 646, 717, 693, 692, 621, 666, 683),
+        (120, 107, 109, 83, 93), "provisional"),
+    # PAD-420: mando_le-1.44 carriers matched record for record (lengths, channels); not yet censused
+    ("mando_pro", "1.45"): (0xE0001BDF, (677, 679, 695, 690, 878, 667, 706, 700, 685, 682, 675, 665, 688, 689, 646, 717, 693, 692, 621, 666, 683),
+        (120, 107, 109, 83, 93), "provisional"),
+    # PAD-420: munsters_le-1.28 carriers matched record for record (lengths, channels); not yet censused
+    ("munsters_pro", "1.28"): (0xFFFA0001, (426, 565, 417, 422, 421, 423, 436, 184, 420, 434, 428, 425, 433, 431, 435, 429, 418, 424, 432, 430, 419),
+        (70, 71, 69, 79, 73), "provisional"),
+    # PAD-420: rush_le-1.18 carriers matched record for record (lengths, channels); not yet censused
+    ("rush_le", "1.19"): (0xFC0003FF, (262, 314, 253, 313, 351, 355, 310, 296, 284, 311, 309, 306, 282, 305, 329, 283, 261, 276, 315, 357, 260),
+        (76, 65, 77, 75, 68), "provisional"),
+    # PAD-420: rush_le-1.18 carriers matched record for record (lengths, channels); not yet censused
+    ("rush_pro", "1.19"): (0xFC0002FD, (262, 314, 253, 313, 351, 355, 310, 296, 284, 311, 309, 306, 282, 305, 329, 283, 261, 276, 315, 357, 260),
+        (76, 65, 77, 75, 68), "provisional"),
+    # PAD-420: star_wars_le-1.30 carriers matched record for record (lengths, channels); not yet censused
+    ("star_wars_le", "1.31"): (0xFFC0003F, (802, 807, 808, 809, 803, 801, 799, 804, 733, 800, 805),
+        (68, 93, 98, 70, 89), "provisional"),
+    # PAD-420: star_wars_le-1.30 carriers matched record for record (lengths, channels); not yet censused
+    ("star_wars_pro", "1.31"): (0xBFF80007, (802, 807, 808, 809, 803, 801, 799, 804, 733, 800, 805),
+        (68, 93, 98, 70, 89), "provisional"),
+    # PAD-420: stranger_things_le-1.12 carriers matched record for record (lengths, channels); not yet censused
+    ("stranger_things", "1.13"): (0xFFFF0000, (312, 685, 234, 581, 744, 635, 652, 301, 672, 152, 495, 476, 494, 668, 598, 612, 627, 644, 153, 267, 519),
+        (70, 115, 116, 117, 69), "provisional"),
+    # PAD-420: stranger_things_le-1.12 carriers matched record for record (lengths, channels); not yet censused
+    ("stranger_things_le", "1.13"): (0x80007FFF, (312, 685, 234, 581, 744, 635, 652, 301, 672, 152, 495, 476, 494, 668, 598, 612, 627, 644, 153, 267, 519),
+        (70, 115, 116, 117, 69), "provisional"),
+    # PAD-420: sword_of_rage_le-1.18 carriers matched record for record (lengths, channels); not yet censused
+    ("sword_of_rage_le", "1.19"): (0xF0000FFF, (444, 382, 379, 381, 475, 490, 453, 484, 460, 540, 509),
+        (105, 97, 91, 92, 109), "provisional"),
+    # PAD-420: sword_of_rage_le-1.18 carriers matched record for record (lengths, channels); not yet censused
+    ("sword_of_rage_pro", "1.19"): (0xFFFC0003, (444, 382, 379, 381, 475, 490, 453, 484, 460, 540, 509),
+        (105, 97, 91, 92, 109), "provisional"),
+    # PAD-420: uncanny_xmen_le-0.98 carriers matched record for record (lengths, channels); not yet censused
+    ("uncanny_xmen_pro", "0.98"): (0x20001FFF, (729, 677, 116, 705, 115, 691, 652, 706, 738, 578, 544, 728, 543, 542, 653, 725, 541, 698, 762, 550, 693),
+        (88, 75, 71, 74, 80), "provisional"),
+    # PAD-420: venom_le-1.07 carriers matched record for record (lengths, channels); not yet censused
+    ("venom_pro", "1.07"): (0xBFFF0000, (943, 928, 937, 881, 882, 942, 939, 1580, 944, 914, 941, 899, 915, 886, 925, 905, 1829, 1775, 916, 880, 875),
+        (124, 117, 140, 106, 95), "provisional"),
 }
 for (_g, _v), (_m, _c, _mu, _st) in _SWAP.items():
     TITLES[(_g, _v)] = Carriers(key_mask=_m, calls=_c, music=_mu, status=_st, swap=True)

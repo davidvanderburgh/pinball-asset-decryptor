@@ -906,7 +906,11 @@ def core_missing(port):
 #:   bank e0e29301 (84 clips); both walk, and neither port has clip functions.
 #: item 164: titles whose voice never says a lone number - every callout on the card transcribed
 #: (t2/numscan.py, 2026-09-26) - so no countdown can be made of the game's own voice
-COUNTDOWN_NO_NUMBERS = frozenset({"aerosmith_le-1.15", "john_wick_le-1.01", "elvira3-1.13"})
+#: PAD-420: Aerosmith Pro and LE 1.16 and John Wick Pro and LE 1.02 - every short mono clip their requests name
+#: (<= 1.3 s, the ones numscan.py transcribed) is one of 1.15's / 1.01's, length for length (174 and 131 of them,
+#: none new), so their voices say no lone number either
+COUNTDOWN_NO_NUMBERS = frozenset({"aerosmith_le-1.15", "john_wick_le-1.01", "elvira3-1.13",
+                                  "aerosmith-1.16", "aerosmith_le-1.16", "john_wick_le-1.02", "john_wick_pro-1.02"})
 
 TITLE_SCENES = {
     "godzilla_pro-1.15": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,
@@ -949,6 +953,38 @@ TITLE_SCENES = {
     "star_wars_elg-1.10": dict(hud="354935f6d901c89105d1a97edd4a559e", screen_proven=True, bank="895f74e53622cf5acfa55a1df89a8fc8", clip_proven=True),   # item 164: our clip seen on the glass (its bank read with the marked-clips list)
     "batman-1.13": dict(screen_proven=True, hud="322b14238d0351d6e6ddeb6333e07c8a", bank="322b14238d0351d6e6ddeb6333e07c8a", clip_proven=True),   # item 164: our clip seen on the glass, in a Video grafted into the HUD
     "jurassic_park_the_pin-1.05": dict(screen_proven=True, hud="6f3c2dbd6a176794ca54794f41f699fd", bank="6f3c2dbd6a176794ca54794f41f699fd", clip_proven=True),   # item 164: our clip and screen seen on the glass, one scene is both its HUD and its video bank
+    "aerosmith-1.16": dict(screen_proven=False, hud="025316286cba4a960ef130421f7dacdd", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "aerosmith_le-1.16": dict(screen_proven=False, hud="19d3c55effef1206080481e7e7faa16c", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "avengers_infinity_le-1.10": dict(screen_proven=False, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "avengers_infinity_pro-1.10": dict(screen_proven=False, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "batman-1.14": dict(screen_proven=False, hud="e16ea0837bc81a0381884c70d0c29d2e", bank="e16ea0837bc81a0381884c70d0c29d2e", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "deadpool_le-1.16": dict(screen_proven=False, hud="93e0751c2a35c8c46fc31dba43ed5eae", bank="e0e293019ac1e6977049c83dc8485496", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "dungeons_and_dragons_le-1.10": dict(screen_proven=False, hud="e8bbe9670a9a212f18408a602d7b187b", bank="046915f6ff0a53b5608c8e7c4c2a976f", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "dungeons_and_dragons_pro-1.10": dict(screen_proven=False, hud="76ac5e79ac7d5f8f3b916d925041f266", bank="046915f6ff0a53b5608c8e7c4c2a976f", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "foo_fighters_pro-1.04": dict(screen_proven=False, hud="3f34991c6809a039dd47b2086a12937a", bank="469deda43d1ebfe2c5d371d5a800d0a9", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "guardians-1.15": dict(screen_proven=False, hud="987ea6e129780ab93e8c704ac7ac3d1b", bank="a0683942e100705db906181685dd842e", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "guardians_le-1.15": dict(screen_proven=False, hud="a252085d6b75ad25f754abda30430f6d", bank="a0683942e100705db906181685dd842e", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "iron_maiden_le-1.18": dict(screen_proven=False, hud="efbfca7eef8fac5676abf224aa407d30", bank="efbfca7eef8fac5676abf224aa407d30", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "iron_maiden_pro-1.18": dict(screen_proven=False, hud="dd66e6b1892401e2f70c79cfd3372965", bank="dd66e6b1892401e2f70c79cfd3372965", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "james_bond_pro-1.06": dict(screen_proven=False, hud="832c77c669803d557c730a3be09fb9e5", bank="63f6bc13a70ee6f16f24fa6ab6e908fa", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "jaws_pro-1.02": dict(screen_proven=False, hud="ca1567f39874d2cc3496216d132a4645", bank="908389471bb1044c57d8ad25b0471ca8", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "john_wick_le-1.02": dict(screen_proven=False, hud="3987a174e6faee23ca3cc20f1be66a70", bank="89fb64f9687944a2fd1eaeea22acfe01", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "john_wick_pro-1.02": dict(screen_proven=False, hud="b61de78dc2e3379ec56f4922d55b1fc6", bank="89fb64f9687944a2fd1eaeea22acfe01", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "jurassic_park_pro-1.16": dict(screen_proven=False, hud="40102c9e31901712d3534f1389c7666e", bank="3e222871d6c38b6b493fdfe59f788133", bank_tree="demand_loaded", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "king_kong_pro-0.97": dict(screen_proven=False, hud="729b8fa01c630d32c25eecb7d9cf074a", bank="ed379c6514e73bead614fee25e93d862", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "mando_le-1.45": dict(screen_proven=False, hud="35ae0bc3d1a5b4decda4c3717a7c0774", bank="390b28f5b7ef5b5e3f49edcee3088a29", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "mando_pro-1.45": dict(screen_proven=False, hud="987328afe511ff4e5c7030d194ddc806", bank="390b28f5b7ef5b5e3f49edcee3088a29", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "munsters_pro-1.28": dict(screen_proven=False, hud="056ab46ff95f247af8217f23eae382df", bank="056ab46ff95f247af8217f23eae382df", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "rush_le-1.19": dict(screen_proven=False, hud="85f8f187e7bffe0d434076d406d7366c", bank="99a73567ccfa371c44c861579d8362d4", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "rush_pro-1.19": dict(screen_proven=False, hud="4509258cd7d67da57a14d337ae421721", bank="99a73567ccfa371c44c861579d8362d4", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "star_wars_le-1.31": dict(screen_proven=False, hud="9183de0da4e6ed603f16064ec7a8493b", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "star_wars_pro-1.31": dict(screen_proven=False, hud="101c344663e5acdcf0e9e5d42ef0f2ae", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "stranger_things-1.13": dict(screen_proven=False, hud="e3bb429535838471027451e9f6f86950", bank="a6c50224ebf14f37444b84bb632c1b68", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "stranger_things_le-1.13": dict(screen_proven=False, hud="667b28929132f94722c28268ce559de8", bank="a6c50224ebf14f37444b84bb632c1b68", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "sword_of_rage_le-1.19": dict(screen_proven=False, hud="20774409779b6a580c751be1b10f1767", bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "sword_of_rage_pro-1.19": dict(screen_proven=False, hud="d21160f53c007b8147a3d1961efc498d", bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "uncanny_xmen_pro-0.98": dict(screen_proven=False, hud="9d96a539bb3e5fda93d0429f3c7845ad", bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "venom_pro-1.07": dict(screen_proven=False, hud="a9f8dc36cc2d7f144dcb00bd3e1adf71", bank="6a9b1862ee06252a137dacc7bb099d78", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
 }
 
 #: Titles whose callouts ran in the emulator but were never HEARD (the rig is always

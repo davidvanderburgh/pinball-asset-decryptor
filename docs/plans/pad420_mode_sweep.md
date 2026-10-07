@@ -85,6 +85,11 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   1.19 (17/67), Foo Fighters Pro 1.04 (19/47), King Kong Pro 0.97 (0/9; its light_shots IS proven). The runtime
   logs every insert held at layer 255 and the port's lamp lines equal what the program says, so look at judge.py's
   one node offset per build (a board group with another offset?) and at a game layer above ours, before the port.
+  `lights/judge_groups.py` (a fit per I/O group): most of those inserts sit in a group that never changes at any
+  offset (Rush group 1: 96, John Wick group 1: 86, Avengers group 6: 14), likely a light string outside the
+  node-bus LED view (Rush 1.18's proof left its strip out the same way), but some observable groups stay dark too
+  (Avengers group 7: 2/36, Rush group 6: 4/23, Mandalorian group 6: 1/6). Look at those with a glshot of the
+  playfield view and the runtime's lamp layer during the mode before calling them proven or not.
   Mandalorian Pro and Munsters Pro booted to Tech Alerts, which the lights job did not take as booted (fixed;
   `lights/rb2`). Multiball: running (`mb/rb`), the Aerosmith pair passed 3, 4, 3, 2, 1.
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8

@@ -59,7 +59,15 @@ it on the new card (survey gap G1: an event Pro 1.16 does not report, a missing 
   rig and arms its modes with the file beside them.
 - With the build record hidden (so the card itself is read), loaded into a stock Godzilla
   Premium/LE 1.16 project and a project of the Heisei Custom V1.96A image: all three carried
-  (other model and version), written, booted on the rig: see the ticket's report for the result.
+  (other model and version) and were written.
+- Premium/LE 1.16 card: boots, arms them, and on the rig KAIJU RUSH started (its screen up) and
+  ran out its clock, and KING GHIDORAH started with its HUD (heads, lit head moving).
+- Heisei V1.96A card: written and armed, but the game stays on the Stern logo (20-25 min, 30
+  frames a second built) - with the mode runtime held off too (PAD_CARD_MODES=0), and with the
+  two form modes only; the untouched image reaches attract in under 10 min on the same rig.
+  So a modes Write onto this custom image stalls its boot whatever the modes; the one games-
+  partition change is the rewritten HUD scene (943,999 -> 2,805,113 bytes, built from the
+  retheme's own HUD). Not the import; a ticket of its own.
 - A real older card (PAD-301's 6-code-mode LE 1.16 build): path 1 found its project; with that
   off, path 3 restored all six as the app's examples.
 

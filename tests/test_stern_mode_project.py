@@ -484,6 +484,25 @@ def test_an_event_end_is_written_and_events_are_checked_against_the_title():
     assert all(e in MP.EVENT_LABELS for e in MP.GODZILLA_PRO_1_15.events)
 
 
+def test_bond_le_1_06_offers_a_film_completed_event_per_film():
+    """PAD-428: one hook on the game's film-completed call, one event per film by its argument,
+    in the game's film order; each named on the tab and startable."""
+    p = MP.profile("james_bond_le_1_06")
+    films = ["film_dr_no", "film_frwl", "film_goldfinger", "film_thunderball", "film_yolt", "film_daf"]
+    assert [e for e in p.events if e.startswith("film_")] == films
+    assert MP.EVENT_LABELS["film_frwl"] == "From Russia With Love is completed"
+    assert all(e in MP.EVENT_LABELS for e in p.events)
+    with open(os.path.join(MP.PORTS_DIR, "james_bond_le-1.06.port"), encoding="utf-8") as f:
+        lines = [ln.split("#")[0].split() for ln in f]
+    assert ["site", "film_complete", "0x001d49c0", "0xe92d4038", "0xe1a05000"] in lines
+    for n, name in enumerate(films):
+        assert ["event", name, "site", "film_complete", "arg", str(n)] in lines
+    spec = MP.blank_spec(p, "FRWL WIZARD")
+    spec.starts_on = "event film_frwl"
+    assert not MP.validate(spec, p)
+    assert "starts_on      event film_frwl" in MP.runtime_cfg(spec, "frwl_wizard")
+
+
 def test_starts_on_and_ends_on_round_trip_and_default_for_an_older_file():
     spec = MP.ModeSpec(name="X", starts_on="event skill_shot", ends_on="event ball_end")
     back = MP.ModeSpec.from_json(json.loads(json.dumps(spec.to_json())))

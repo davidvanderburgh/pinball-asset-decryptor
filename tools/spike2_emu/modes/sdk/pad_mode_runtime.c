@@ -6431,7 +6431,7 @@ static void on_event_dispatch(unsigned *r)
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
 }
 
-/* one hook per site: the trampoline hands a logger only the registers, so each slot has its own
+/* one counter per site event slot: the trampoline hands a logger only the registers, so each slot has its own
  * logger, and it counts every event on that site whose arg (r0) matches (PAD-428) */
 static void site_event_fire(int k, const unsigned *r)
 {

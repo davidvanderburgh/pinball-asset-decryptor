@@ -1004,6 +1004,16 @@ def carried_game_font(source, font_class, key, base):
     return u32(key) + u32(font_class) + bytes(out), sizes
 
 
+def _free_block(data, start, n, p):
+    """The first id from ``start`` (in steps of ``n``) whose ``n`` ids' FLAG|id words are nowhere in ``data``,
+    kept below the carried font's ids (``FONT_ID_GAP`` past the profile's first free id)."""
+    while any(struct.pack("<I", FLAG | i) in data for i in range(start, start + n)):
+        start += n
+    if start + n > p.first_free_id + FONT_ID_GAP:
+        raise SceneWriteError("%s: no free object ids left for the modes' screens" % p.label)
+    return start
+
+
 def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=None, hud_font_source=None):
     """Splice SEVERAL screens into a profiled stock scene in one pass (item 127: a card
     carries several modes, item 133 - and this refuses any file that is not the measured
@@ -1052,14 +1062,20 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
     groups, infos = [], []
     placed = _order_offsets(p, data, stock, screens)
     under = []                  # (offset, group) of the screens placed by their order
+    next_id = p.first_free_id
     for i, s in enumerate(screens):
         words_name = s.get("words_name") or s["name"] + "_Words"
-        sub = SceneProfile(**{**p.__dict__, "first_free_id": p.first_free_id + 7 * i, **font,
+        # PAD-414: the file's own ids are all below first_free_id, but a byte search for FLAG|id also meets
+        # its data (Godzilla's slide-outs scene holds the bytes of 0x141, so a 10th screen was refused): a
+        # block whose words are found is passed over and the screen takes the next one
+        next_id = _free_block(data, next_id, 7, p)
+        sub = SceneProfile(**{**p.__dict__, "first_free_id": next_id, **font,
                               "new_poly": p.new_poly if i == 0 else ()})       # registered once, by the first
         group, ids = screen(sub, s["name"], s["art_rgba"], s["words"], s.get("x", 360.0),
                             s.get("y", 200.0), s.get("words_at"), art_name=s.get("art_name"),
                             words_name=words_name, scale=s.get("scale", 1.0),
                             words_scale=s.get("words_scale", 1.0))
+        next_id += 7
         for nid in ids:
             if struct.pack("<I", FLAG | nid) in data:
                 raise SceneWriteError("%s: object id 0x%x is already used" % (p.label, nid))
@@ -1075,7 +1091,7 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
             "tree": p.tree, "in_game": p.in_game, "node_bytes": len(group),
         })
     if clips:
-        base = p.first_free_id + 7 * len(screens)
+        base = _free_block(data, next_id, GRAFT_IDS + len(clips), p)
         ids = list(range(base, base + GRAFT_IDS + len(clips)))
         for nid in ids:
             if struct.pack("<I", FLAG | nid) in data:

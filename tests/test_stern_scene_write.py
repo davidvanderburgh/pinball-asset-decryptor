@@ -200,11 +200,26 @@ def test_two_different_profiles_matching_in_place_are_refused(monkeypatch):
         SW.profile_for(data[:300] + b"\x77" + data[301:])
 
 
-def test_add_screen_refuses_an_object_id_the_scene_already_uses(monkeypatch):
+def test_a_screen_passes_over_ids_whose_words_the_scene_already_holds(monkeypatch):
+    """PAD-414: the stock ids are all below first_free_id, but a byte search for FLAG|id also meets the file's data
+    (Godzilla's slide-outs scene holds the bytes of 0x141: a 10th mode screen was refused and the card never built).
+    A screen whose seven ids' words are found takes the next seven instead; the found word is left alone."""
     real = SW.PROFILES["f9daed5a19aafc807bf9eb3c2def6c27"]
-    data, _p = _fake_scene(monkeypatch, used_id=real.first_free_id + 2)
-    with pytest.raises(SW.SceneWriteError, match="already used"):
-        SW.add_screen(data, "X", _art(), "Y")
+    used = real.first_free_id + 2
+    data, _p = _fake_scene(monkeypatch, used_id=used)
+    new, _info = SW.add_screen(data, "X", _art(), "Y")
+    assert new.count(struct.pack("<I", SW.FLAG | used)) == 1                  # only the file's own bytes
+    assert struct.pack("<I", SW.FLAG | (real.first_free_id + 7)) in new        # the screen took the next block
+    assert struct.pack("<I", SW.FLAG | real.first_free_id) not in new
+
+
+def test_no_free_ids_left_is_refused(monkeypatch):
+    real = SW.PROFILES["f9daed5a19aafc807bf9eb3c2def6c27"]
+    data, _p = _fake_scene(monkeypatch)
+    words = b"".join(struct.pack("<I", SW.FLAG | i)
+                     for i in range(real.first_free_id, real.first_free_id + SW.FONT_ID_GAP, 7))
+    with pytest.raises(SW.SceneWriteError, match="no free object ids"):
+        SW._free_block(data + words, real.first_free_id, 7, real)
 
 
 def test_screen_refuses_art_bc3_cannot_hold():

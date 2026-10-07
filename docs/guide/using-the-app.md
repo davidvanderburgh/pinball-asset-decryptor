@@ -28,7 +28,11 @@ cards have pages of their own: [Emulate](emulate.md) and
    Multi-boot tab's own tools, a few seconds the first time). Under it,
    **Card details** lists everything the app can read off the card —
    firmware version, edition, games on it, asset counts, partitions —
-   with Copy for a bug report. Its *What you can do with it* panel sorts
+   with Copy for a bug report. On a Stern Spike 2 card an *Official
+   release* row says whether the card is Stern's own release or one that
+   was changed (built by PAD or another tool); after an extract a deeper
+   check runs in the background and the Extract tab's project card shows
+   the verdict in a *Stock* row. Its *What you can do with it* panel sorts
    the other tabs into what works straight from the card, what needs a
    project folder and what needs an extract. Tabs that need an extract
    (Replace Audio / Video / Images / Text, Mod Pack, and Write on

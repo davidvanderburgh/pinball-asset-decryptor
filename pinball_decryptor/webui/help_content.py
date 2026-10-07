@@ -40,7 +40,8 @@ HELP_CONTENT = {
          "lit (a few seconds the first time; a card in a reader shows the first game's "
          "screen).\n\n"
          "**Card details**, under it, lists firmware, edition, games, asset counts and "
-         "partitions; **Copy** is for bug reports. Nothing on the card is changed."),
+         "partitions; on a Stern card, **Official release** says whether it is Stern's own "
+         "release or a changed one. **Copy** is for bug reports. Nothing on the card is changed."),
         ("What works without an extract",
          "| Tab | Straight from the card |\n"
          "|---|---|\n"

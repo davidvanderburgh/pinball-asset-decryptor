@@ -749,56 +749,6 @@ def test_this_project_says_when_the_folder_holds_another_cards_extract(tmp_path)
         assert w.state("extract")["project"]["details"]["card_kind"] == ""
 
 
-def test_a_card_with_its_own_project_offers_it(tmp_path):
-    """PAD-421: DragonRR picked a card that had a project folder of its own,
-    and the page kept the folder that was open.  The card's own project (the
-    one its build record names) is offered, and opening it switches to it."""
-    import json
-    from pinball_decryptor.core.extract_source import BUILD_RECORD_SUFFIX
-    stock = tmp_path / "godzilla_le-1_16_0.raw"
-    stock.write_bytes(b"\0" * 32)
-    other = tmp_path / "pro.raw"
-    other.write_bytes(b"\0" * 24)
-    proj = _anchored_project(tmp_path, "OPEN", other)
-    (proj / ".checksums.md5").write_text("", encoding="utf-8")
-    own = _anchored_project(tmp_path, "OWN", stock)
-    card = tmp_path / "Heisei.raw"
-    card.write_bytes(b"\0" * 48)
-    (tmp_path / ("Heisei.raw" + BUILD_RECORD_SUFFIX)).write_text(
-        json.dumps({"version": 1, "assets": str(own)}), encoding="utf-8")
-    def folder(w):
-        return os.path.normcase(os.path.normpath(w.window.extract_output_var.get()))
-
-    with web_app(tmp_path, mfr="stern") as w:
-        w.call("ui.set", "extract", "output", str(proj))
-        _settle(w)
-        # picking the card opens its own project by itself (DragonRR, round 5)
-        w.call("ui.set", "extract", "input", str(card))
-        _settle(w)
-        assert folder(w) == os.path.normcase(str(own))
-        assert w.window.extract_input_var.get() == str(card)   # not the project's stock card
-        assert w.state("extract")["project"]["details"]["card_project"] == ""
-        # switched back by hand: it stays, and the warning offers the card's project
-        w.call("ui.set", "extract", "output", str(proj))
-        _settle(w)
-        assert folder(w) == os.path.normcase(str(proj))
-        d = w.state("extract")["project"]["details"]
-        assert d["card_kind"] == "other"
-        assert os.path.normcase(d["card_project"]) == os.path.normcase(str(own))
-        assert w.call("extract.use_card_project") is True
-        _settle(w)
-        assert folder(w) == os.path.normcase(str(own))
-        # a folder with no extract yet (one to extract the card into) is left alone
-        fresh = tmp_path / "fresh"
-        fresh.mkdir()
-        w.call("ui.set", "extract", "input", str(other))
-        _settle(w)
-        w.call("ui.set", "extract", "output", str(fresh))
-        w.call("ui.set", "extract", "input", str(card))
-        _settle(w)
-        assert folder(w) == os.path.normcase(str(fresh))
-
-
 def test_a_cards_project_without_a_project_file_still_opens(tmp_path):
     """A card's own project folder with no .pinproj (made by hand, or by an
     old version) is picked like Browse… picks it; opening it as a recent

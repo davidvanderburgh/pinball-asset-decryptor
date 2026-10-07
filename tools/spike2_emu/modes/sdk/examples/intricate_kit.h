@@ -682,6 +682,16 @@ static KIT_UNUSED void kit_end_after(unsigned long ms)
 
 static KIT_UNUSED void kit_hud_drop_now(void);    /* the HUD section, below */
 
+/* PAD-411: one of the GAME's own light shows, by the port's name for it ("Strobe burst"), in the place of a kit
+ * show: its start's and its end's (David, 2026-10-06: "mode start should be flashy and mode end should be more
+ * subdued"). 1 = the game's plays; 0 = not on this game (a Pro, another title): the caller plays its own. */
+static KIT_UNUSED int kit_game_show(const char *name, const char *why)
+{
+    if (!name || !pm_game_show_named(name)) return 0;
+    pm_log("light show: the game's %s (%s)", name, why);
+    return 1;
+}
+
 static KIT_UNUSED void kit_end_now(void)
 {
     pm_display_priority(0);                /* an ending's hold, given up at once */

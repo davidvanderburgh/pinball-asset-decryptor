@@ -703,6 +703,12 @@ int pm_lamp_release_all(void)
         if (held[k].owner && held[k].owner == current) { lamp_off(k); n++; }
     return n;
 }
+/* PAD-411: the game's own light shows - none on the desk, so the examples play their own kit shows as before */
+int pm_game_show(int n) { (void)n; return 0; }
+int pm_game_show_named(const char *name) { (void)name; return 0; }
+void pm_game_show_stop(void) {}
+int pm_game_show_playing(void) { return 0; }
+int pm_game_shows(void) { return 0; }
 /* hud-layers: the inserts are placed only with HARNESS_PLACES=1 (PAD-376), so the examples' shows
  * paint none unless a test asks. A paint holds the insert solid, quietly: no LAMP line, but every
  * change of colour is counted ("END paints <n>") and "lamps" lists the painted inserts as HELD. */

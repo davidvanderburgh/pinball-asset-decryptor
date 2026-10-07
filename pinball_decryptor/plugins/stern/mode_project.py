@@ -411,6 +411,15 @@ MULTIBALL_PROVEN = frozenset({
     "godzilla_le-1.16",                # 2026-09-26 mb_e2e.sh: the same on the Premium (David's card): served 3, jackpots, add-a-ball to 4, drains to 1, END (one ball left)
     "beatles-1.29",                    # 2026-09-26 mb_e2e.sh: the same on its switch shots (Target 1-4): served 3, jackpots, add-a-ball to 4, drains to 1, END (one ball left)
     "godzilla_pro-1.15",               # 2026-09-26 mb_e2e.sh: served 3 on the start, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left), then the game's own ball end
+    "aerosmith-1.16",                    # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "aerosmith_le-1.16",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "avengers_infinity_le-1.10",         # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "avengers_infinity_pro-1.10",        # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "deadpool_le-1.16",                  # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "dungeons_and_dragons_le-1.10",      # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "foo_fighters_pro-1.04",             # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "dungeons_and_dragons_pro-1.10",     # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "guardians_le-1.15",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
 })
 
 

@@ -63,6 +63,25 @@ Tools (scratch, `C:/tmp/PAD-420`): `jobs/check_job2.sh` (the check per build), `
 `stamp.py <key>...` (the proof header; `CHECKDIR` names the check folder), `recipes.py` (`RW=1` for one core), `portslist.py` (the test's
 port list), `limits_table.py` (MODE_LIMITS.md's games table), `clean2.py` (how a candidate port is made).
 
+## Run 4 (2026-10-07 afternoon): ball save, lights, multiball on the new builds
+
+Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock cards):
+- `bs/` ball save: `gen.py` writes each build's test mode (`bs/<key>/mode.cfg`, `game_modes stack`) and jackpot
+  switches from its own check log (switch -> the shot it made); `bs_job.sh` (item 225's job on this worktree),
+  `bs_verdict.py`; `bs/rb/results.tsv`.
+- `lights/` the lights proof (`light_all ff00ff` / `light_shots`, the shim's LED view): `prep.py`, `lights_job.sh`,
+  `judge.py`; `lights/rb`.
+- `mb/` multiball (item 167's TWIN TERROR, served 3, add-a-ball to 4, drains 4-3-2-1): `mb_job.sh`, `mb_verdict.py`;
+  `mb/rb`.
+- `chain.sh` runs lights then multiball after the ball-save batch. `prove_set.py <SET> <results.tsv> "<why>"` adds
+  the passes to a proven set in mode_project.py with their evidence; then `limits_table.py` and the tests.
+- Gotchas found: a slot that ran Check this game keeps `dump/gamecheck.on`, and the runtime then starts no mode
+  (`tables.sh` clears it); a slot may have no switch table for a title yet (`tables.sh` copies the one read from
+  this exact program from another slot); the C-framework titles (Guardians...) cannot hold off their own modes, so a
+  test mode under the default `game_modes block` gives way and ends when one begins (`game_modes stack` in the tests).
+- Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
+  builds that had none.
+
 ## Left, per part (the next runs)
 
 | part | what is left | how |

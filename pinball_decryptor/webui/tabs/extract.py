@@ -156,6 +156,7 @@ class ExtractTab(TabService):
         self._drives_thread = None
         self._drives_cache = []
         self._stats_seq = 0
+        self._followed_card = ""      # PAD-421: the last card whose project was opened
         self._stats_after = None
         self._stats_thread = None
         self._info_seq = 0
@@ -1302,6 +1303,30 @@ class ExtractTab(TabService):
                           "loading": False,
                           "rows": [[str(a), str(b)] for a, b in rows],
                           "details": details})
+        self._follow_card_project(details)
+
+    def _follow_card_project(self, details):
+        """PAD-421 (DragonRR): a card picked that has a project folder of its own
+        loads that project, once per pick, the way a folder holding a project loads
+        it.  He went back to his 1.96a card after extracting the stock card elsewhere,
+        and the tab kept the stock card's folder open with no obvious way out.  Only
+        when the open folder holds another card's extract; switching back by hand
+        afterwards sticks (the same pick is not followed twice)."""
+        d = details or {}
+        card = (self.extract_input_var.get() or "").strip()
+        target = d.get("card_project") or ""
+        if (not card or not target or d.get("card_kind") != "other"
+                or self._followed_card == card or self.window._is_running()):
+            return
+        self._followed_card = card
+        if self._open_folder(target):
+            # opening a project picks the card its anchor names (for a card PAD built,
+            # the stock card it started from); the card the user picked stays picked
+            if (self.extract_input_var.get() or "").strip() != card:
+                self.extract_input_var.set(card)
+            self.window.append_log(
+                "Opened %s, the project folder of %s." % (target, os.path.basename(card)),
+                "info")
 
     @rpc
     def open_project_info(self):
@@ -1347,7 +1372,24 @@ class ExtractTab(TabService):
         folder = d.get("card_project") or ""
         if not folder or not os.path.isdir(folder):
             return False
-        return self.open_recent(folder)
+        return self._open_folder(folder)
+
+    def _open_folder(self, folder):
+        """Switch to the project in *folder*: opened as a recent project when it has its
+        project file, else picked as the project folder (a folder without one could not
+        be opened at all - "Couldn't read the project in this folder")."""
+        from ...core import project_file
+        if self.window._is_running():
+            return False
+        if project_file.has_anchor(folder):
+            return self.open_recent(folder)
+        # as Browse… picks one
+        self._forget_done()
+        self.extract_output_var.set(folder)
+        cb = self.window.cb.get("on_project_folder_picked")
+        if cb is not None:
+            cb(folder)
+        return True
 
     def _refresh_recents(self):
         from ...core import project_registry

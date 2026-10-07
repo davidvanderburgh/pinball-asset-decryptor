@@ -1292,8 +1292,11 @@ def _shots_with_switches(port):
     port names a switch_edge or switch_hit site (the runtime arms them only through one)."""
     shots = list(port["shot"])
     names = []
+    # PAD-416: `text internal_shots` names switch shots for code only (Godzilla Premium/LE's "Trough": a drain, the
+    # moment it happens) - a mode's code asks for them by name; the tab does not offer them
+    internal = {n.strip() for n in port.get("text", {}).get("internal_shots", "").split(",") if n.strip()}
     if "switch_edge" in port["site"] or any(s.startswith("switch_hit") for s in port["site"]):
-        known = {n for n, _m in shots}
+        known = {n for n, _m in shots} | internal
         for _sw, mask, name in port.get("switch", ()):
             if name not in known:
                 known.add(name)

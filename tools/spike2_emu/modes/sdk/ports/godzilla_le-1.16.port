@@ -696,6 +696,8 @@ switch 68   0x8000000000000000 Trough
 switch 69   0x8000000000000000 Trough
 switch 70   0x8000000000000000 Trough
 switch 71   0x8000000000000000 Trough
+# ... a signal for code, not a shot to score: the Modes tab does not offer it (mode_project reads this line)
+text internal_shots        Trough
 # the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
 # a mode that lights its shots lights the button
 lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front

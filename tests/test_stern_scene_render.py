@@ -1197,8 +1197,11 @@ def _rebuild_card():
     instance."""
     tail = _sprite_scene([]) + _s_instance(
         "Art", 300.0, 200.0, image_ref=_image_ref(40, 20, 7))
-    return _FakeCardReader([("/g/s1/scene.radium",
-                             _radium_with_image(200, 7, 40, 20, tail))])
+    data = bytearray(_radium_with_image(200, 7, 40, 20, tail))
+    # the font atlas at offset 100 too: a card holds every picture its
+    # extract's manifest names (a rebuild refuses one that does not, PAD-421)
+    data[60:116] = _radium_with_image(100, 9, 4, 4)[60:116]
+    return _FakeCardReader([("/g/s1/scene.radium", bytes(data))])
 
 
 def test_rebuild_rewrites_only_the_layout_file(tmp_path):
@@ -1254,6 +1257,30 @@ def test_rebuild_needs_the_image_manifest_and_says_so(tmp_path):
     assert n == 0
     assert any(lvl == "warning" and "radium_images.txt" in m
                for m, lvl in logs)
+
+
+def test_rebuild_refuses_a_card_whose_pictures_moved(tmp_path):
+    """PAD-421: DragonRR re-read the scenes off his built 1.96 card into a
+    project extracted from the stock card.  The built scenes hold their
+    pictures at other offsets, so the trees it wrote drew every such scene
+    without pictures.  A scene that does not line up stops the re-read and
+    nothing is written."""
+    from pinball_decryptor.plugins.stern import engine
+    assets = _seed_preview_extract(tmp_path)
+    path = os.path.join(assets, scene_render.SCENE_LAYOUT_MANIFEST)
+    with open(path, "rb") as f:
+        before = f.read()
+    tail = _sprite_scene([]) + _s_instance(
+        "Art", 300.0, 200.0, image_ref=_image_ref(40, 20, 7))
+    built = _FakeCardReader([("/g/s1/scene.radium",
+                              _radium_with_image(264, 7, 40, 20, tail))])
+    logs = []
+    n = engine.rebuild_scene_layouts(
+        built, assets, log=lambda m, lvl="info": logs.append((m, lvl)))
+    assert n == 0
+    assert any(lvl == "warning" and "Nothing was changed" in m for m, lvl in logs)
+    with open(path, "rb") as f:
+        assert f.read() == before
 
 
 def test_rebuild_stops_on_cancel_without_writing(tmp_path):

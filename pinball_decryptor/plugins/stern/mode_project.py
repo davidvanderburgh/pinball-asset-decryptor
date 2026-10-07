@@ -1414,6 +1414,22 @@ LAMPS_PROVEN = frozenset((
     "aerosmith_le-1.15", "batman-1.13", "guardians_le-1.14", "mando_le-1.44", "rush_le-1.18",
     "avengers_infinity_le-1.09", "sword_of_rage_le-1.18", "iron_maiden_le-1.16",
     "stranger_things_le-1.12",
+    # PAD-420 2026-10-07 (lights/lights_job.sh, stock card, hidden, muted): a mode file's light_all ff00ff held every
+    # insert the port names; the shim's LED view had every addressed insert magenta while it ran and none before:
+    #   aerosmith-1.16: 12/12 RGB, 68/68 single
+    #   aerosmith_le-1.16: 18/18 RGB, 74/74 single
+    #   deadpool_le-1.16: 7/7 RGB, 80/80 single
+    #   dungeons_and_dragons_le-1.10: 36/36 RGB, 54/54 single
+    #   dungeons_and_dragons_pro-1.10: 36/36 RGB, 54/54 single
+    #   guardians-1.15: 10/10 RGB, 75/75 single
+    #   iron_maiden_le-1.18: 42/42 RGB, 150/150 single
+    "aerosmith-1.16",
+    "aerosmith_le-1.16",
+    "deadpool_le-1.16",
+    "dungeons_and_dragons_le-1.10",
+    "dungeons_and_dragons_pro-1.10",
+    "guardians-1.15",
+    "iron_maiden_le-1.18",
 ))
 
 

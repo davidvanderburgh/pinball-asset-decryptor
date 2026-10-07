@@ -1442,6 +1442,22 @@ LAMPS_PROVEN = frozenset((
     "james_bond_pro-1.06",
     "jurassic_park_pro-1.16",
     "star_wars_le-1.31",
+    # PAD-420 2026-10-07 (lights/lights_job.sh, stock card, hidden, muted): a mode file's light_all ff00ff held every
+    # insert the port names; the shim's LED view had every addressed insert magenta while it ran and none before:
+    #   star_wars_pro-1.31: 15/15 RGB, 82/82 single
+    #   stranger_things-1.13: 8/8 RGB, 78/78 single
+    #   stranger_things_le-1.13: 8/8 RGB, 78/78 single
+    #   sword_of_rage_le-1.19: 48/48 RGB, 102/102 single
+    #   sword_of_rage_pro-1.19: 44/44 RGB, 84/84 single
+    #   uncanny_xmen_pro-0.98: 15/15 RGB, 70/70 single
+    #   venom_pro-1.07: 57/57 RGB, 70/70 single
+    "star_wars_pro-1.31",
+    "stranger_things-1.13",
+    "stranger_things_le-1.13",
+    "sword_of_rage_le-1.19",
+    "sword_of_rage_pro-1.19",
+    "uncanny_xmen_pro-0.98",
+    "venom_pro-1.07",
 ))
 
 

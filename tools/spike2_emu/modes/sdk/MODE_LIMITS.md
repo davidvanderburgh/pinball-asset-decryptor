@@ -170,13 +170,19 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.10 | no | ✓ | not yet | no | never waits |
+| Dungeons & Dragons Pro 1.10 | no | ✓ | not yet | no | never waits |
 | Elvira 1.13 | ✓ | no | not yet | all |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | all |  |
+| Foo Fighters Pro 1.04 | no | ✓ | not yet | no | never waits |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
+| Guardians of the Galaxy 1.15 | no | ✓ | not yet | no | never waits |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
+| Guardians of the Galaxy LE 1.15 | no | ✓ | not yet | no | never waits |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
+| Iron Maiden LE 1.18 | no | ✓ | not yet | no | never waits |
+| Iron Maiden Pro 1.18 | no | ✓ | not yet | no | never waits |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all |  |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | all |  |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
@@ -193,6 +199,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars Pro 1.31 | no | ✓ | not yet | no | never waits |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
+| Stranger Things LE 1.13 | no | ✓ | not yet | no | never waits |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | TMNT LE 1.59 | ✓ | ✓ | not yet | all |  |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |

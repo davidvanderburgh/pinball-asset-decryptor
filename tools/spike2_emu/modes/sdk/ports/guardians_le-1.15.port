@@ -1,0 +1,196 @@
+# guardians_le 1.15 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a full build check (modes/gamecheck.sh play full, the stock card, hidden, muted):
+# the runtime hooked the game, 32 of its 34 shots came from their switches, a drain ended a ball,
+# a tilted ball and three balls to the game's end; events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end, tilt_warning, tilt, game_over.
+# Shots no press made: Left outlane, Right outlane.
+
+game           guardians_le
+version        1.15
+
+# ---- functions ----
+site tick             0x002683f4 0xe92d4038 0xe3a00037
+site ball_end         0x00290104 0xe92d4070 0xe1a06000
+site sound_lookup     0x001c1f38 0xe92d4038 0xe1a05000
+site score_add        0x00353f98 0xe30213d6 0xe3401062
+site callout          0x00129480 0xe92d4010 0xe307e6e8
+site callout_nth      0x00129634 0xe92d4010 0xe307e6e8
+site lamp_group       0x002da200 0xe92d4038 0xe1a04000
+site award_screen     0x00291b94 0xe92d4070 0xe24dd008
+site string_new       0x0001679c 0xe28fc605 0xe28cca88
+site dynamic_cast     0x0001619c 0xe28fc605 0xe28cca88
+site resource_get     0x003431b4 0xe92d43f0 0xe1a04000
+site find_node        0x0046d134 0xe92d4070 0xe24dd008
+site find_text        0x0046cbd0 0xe92d4070 0xe24dd008
+site set_text         0x004508fc 0xe92d47f0 0xe1a06000
+site surface_state    0x0045fe60 0xe5900550 0xe2800008
+site player_advance   0x00291f8c 0xe2501000 0x012fff1e
+site display_draw     0x003374bc 0xe3520001 0x812fff1e
+site sound_play       0x00129480 0xe92d4010 0xe307e6e8
+site sound_nth        0x00129634 0xe92d4010 0xe307e6e8
+site sound_active     0x00129bf4 0xe59f3034 0xe2831e62
+site sound_stop       0x00129d4c 0xe92d40f8 0xe1a06000
+site sound_worker     0x00128a6c 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x003e25a4 0xe35000cf 0xe92d4038
+site display_effect_start 0x002c2898 0xe92d47f0 0xe2516000
+site display_effect_next 0x002c2ca0 0xe300381c 0xe3403062
+site display_priority_now 0x002c3128 0xe5d0000e 0xe12fff1e
+site game_event       0x00268088 0xe92d47f0 0xe1a09000
+site event_post_replacing 0x003e1304 0xe92d4070 0xe1a05001
+site event_cancel     0x003e1274 0xe92d40f8 0xe3016788
+site switch_hit       0x0021b930 0xe2503000 0x012fff1e
+site switch_hit2      0x0021b9d0 0xe92d4010 0xe2504000
+site scene_show       0x00291fb8 0xe92d4070 0xe301478c
+site frame_end        0x002921c0 0xe3500000 0xe92d40f8
+site frame_kick       0x00336d70 0xe92d4070 0xe2906008
+site surface_find     0x0046d428 0xe92d4070 0xe24dd008
+site surface_set_video 0x00464b0c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00462918 0xe5d030d4 0xe92d43f0
+site surface_stop     0x004620c8 0xe5d030d4 0xe92d40f0
+site agent_header     0x004ba178 0xe92d40f8 0xe2505000
+site agent_begin      0x004c4ae4 0xe590c004 0xe1a00001
+site balls_in_play    0x002faf14 0xe92d4010 0xe3014eb8
+site multiball_serve  0x002fb090 0xe92d41f0 0xe302e3d6
+site coil_fire        0x002666bc 0xe3500000 0xe52de004
+site adjustment       0x00359560 0xe92d40f0 0xe2504000
+site proc_exists      0x003e1624 0xe3012788 0xe3402067
+site proc_create      0x003e0fd4 0xe301c788 0xe340c067
+site proc_sleep       0x003e1124 0xe3013788 0xe3403067
+site switch_edge      0x003a9b34 0xe30130e0 0xe3403060
+site switch_drain     0x003aa75c 0xe92d4ff0 0xe3099040
+site live_records     0x003e166c 0xe3012788 0xe3402067
+
+# ---- globals ----
+data cur_player             0x005a5448
+data scores                 0x006639e8
+data mode_mask              0x006223d6
+data event_head             0x00671788
+data event_current          0x0067178c
+data resource_manager       0x0061f498
+data typeinfo_resource      0x004f46e8
+data typeinfo_scene_player  0x0054b684
+data display_holder         0x0061f418
+data award_screen_arg       0x005a0508
+data sound_channels         0x005f77f4
+data sound_queue            0x005f8068
+data sound_requests         0x005e1968
+data sound_request_count    0x004f27cc
+data display_effects        0x0062081c
+data lamp_layers            0x00668d90
+data light_count            0x00663ac8
+data score_mult             0x005ac0fa
+data switch_records         0x00667048
+data switch_count           0x006010e0
+data game_flags             0x005f5e3c
+data game_flag_count        0x004d9eb8
+
+# ---- values ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value countdown_first 1
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value surface_playing       2
+value scene_player_scene    0x10
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value node_visible_vfn      0xa8
+value clip_layer            0
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+value stock_slot_shot   42
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value switch_desc_via       0x8
+
+# ---- shots from the switch drain ----
+switch 46   0x1                Right scoop
+switch 47   0x2                Center drop target
+switch 48   0x4                Orb standup target
+switch 49   0x8                Right spinner
+switch 50   0x10               H.e. target 4
+switch 51   0x20               H.e. target 5
+switch 53   0x40               Left outlane
+switch 54   0x80               Left return lane (l)
+switch 55   0x100              Right return lane
+switch 56   0x200              Right outlane
+switch 57   0x400              Left return lane (r)
+switch 61   0x800              Right slingshot
+switch 62   0x1000             Left slingshot
+switch 71   0x2000             Groot opto
+switch 78   0x4000             Left orbit
+switch 79   0x8000             Right orbit
+switch 80   0x10000            Groot target-left
+switch 81   0x20000            Groot target-right
+switch 82   0x40000            Left ramp exit
+switch 83   0x80000            Right ramp exit
+switch 86   0x100000           Top lane-right
+switch 87   0x200000           H.e. target 1
+switch 88   0x400000           H.e. target 2
+switch 89   0x800000           H.e. target 3
+switch 90   0x1000000          Guardians target-top
+switch 91   0x2000000          Guardians target-bottom
+switch 92   0x4000000          Left spinner
+switch 93   0x8000000          Kickback opto
+switch 94   0x10000000         Left lane
+switch 95   0x20000000         Left lane target
+switch 96   0x40000000         Left pop bumper
+switch 97   0x80000000         Right pop bumper
+switch 98   0x100000000        Bottom pop bumper
+switch 99   0x200000000        Top lane-left
+
+# ---- scenes ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene hud                  4853b69e9fd122157772aaac5db81948331def2b
+
+# ---- callouts and text ----
+callout countdown           405
+callout ten_seconds         252
+callout time_up             254
+text example_start_shot     Center drop target
+text mode_records_name_1   Super Scoring
+text mode_records_name_2   Double Scoring
+text mode_records_name_3   Headphone Hurryup
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47

@@ -457,3 +457,51 @@ text left_post_label       left inlane up post
 site right_post_get         0x00050634 0xe92d4030 0xe3044380
 value right_post_dev       13
 text right_post_label      right inlane up post
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x001d0254 0xe92d4ff0 0xe24dd02c  # RuleBarrelLocks::v[27]
+text block_rule_name_0     Barrel Locks
+site block_rule_1          0x001d8f48 0xe92d40f0 0xe24dd00c  # RuleBeaches::v[27]
+text block_rule_name_1     Beaches
+site block_rule_2          0x001def64 0xe92d43f8 0xe1a08002  # RuleBountyHunt::v[27]
+text block_rule_name_2     Bounty Hunt
+site block_rule_3          0x001e1404 0xe92d4ff0 0xe24dd044  # RuleCharacterCombos::v[27]
+text block_rule_name_3     Character Combos
+site block_rule_4          0x001ebf48 0xe92d4ff0 0xe24dd014  # RuleFishFinder::v[27]
+text block_rule_name_4     Fish Finder
+site block_rule_5          0x001ef7f0 0xe92d40d0 0xe1a06002  # RuleFourthOfJuly::v[27]
+text block_rule_name_5     Fourth of July
+site block_rule_6          0x001f8e04 0xe92d4ff0 0xe24dd00c  # RuleGear::v[27]
+text block_rule_name_6     Gear
+site block_rule_7          0x001fb93c 0xe92d40f0 0xe2035501  # RuleLifeRing::v[27]
+text block_rule_name_7     Life Ring
+site block_rule_8          0x001fdd68 0xe92d43f0 0xe24dd014  # RuleLookoutTower::v[27]
+text block_rule_name_8     Lookout Tower
+site block_rule_9          0x001ffffc 0xe92d40f0 0xe1a04002  # RuleMachete::v[27]
+text block_rule_name_9     Machete
+site block_rule_10         0x00205474 0xe92d4ff0 0xe24dd01c  # RulePipit::v[27]
+text block_rule_name_10    Pipit
+site block_rule_11         0x002093e0 0xe92d47f0 0xe24dd018  # RuleQuickshot::v[27]
+text block_rule_name_11    Quickshot
+site block_rule_12         0x0020f3bc 0xe92d4070 0xe1a04002  # RuleQuintsShack::v[27]
+text block_rule_name_12    Quints Shack
+site block_rule_13         0x00210bb4 0xe2033020 0xe3a02000  # RuleRadioTarget::v[27]
+text block_rule_name_13    Radio Target
+site block_rule_14         0x00217bc4 0xe92d47f0 0xe1a06002  # RuleSharkEncounter::v[27]
+text block_rule_name_14    Shark Encounter
+site block_rule_15         0x0021c4dc 0xe92d43f0 0xe2035007  # RuleSharkTowerTargets::v[27]
+text block_rule_name_15    Shark Tower Targets
+site block_rule_16         0x00223e78 0xe92d4ff0 0xe24dd014  # RuleShipWheel::v[27]
+text block_rule_name_16    Ship Wheel
+site block_rule_17         0x00228bb8 0xe590100c 0xe3510001  # RuleSkillShot::v[27]
+text block_rule_name_17    Skill Shot
+site block_rule_18         0x0022e574 0xe3a00001 0xe12fff1e  # RuleTopper::v[27]
+text block_rule_name_18    Topper
+site block_rule_19         0x0023a70c 0xe92d4370 0xe1a04002  # RuleTrickshot::v[27]
+text block_rule_name_19    Trickshot
+site block_rule_20         0x002456d0 0xe92d0030 0xe202433e  # UIBonusScreen::v[27]
+text block_rule_name_20    UI Bonus Screen
+site block_rule_21         0x00275c78 0xe5d01008 0xe3510000  # UIShipWheelSpinSelect::v[27]
+text block_rule_name_21    UI Ship Wheel Spin Select

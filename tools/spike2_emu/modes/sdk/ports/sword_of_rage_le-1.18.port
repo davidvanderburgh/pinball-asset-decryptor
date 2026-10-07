@@ -490,3 +490,35 @@ text block_name_12      War Hurryups
 site block_start_25     0x000c405c 0xe92d4ff0 0xe1a04000
 data block_obj_25       0x005f8e18
 text block_name_25      Last Chance
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x00097d0c 0xe30211e8 0xe340105b  # crule_add_a_ball::v[23]
+text block_rule_name_0     Add a Ball
+site block_rule_1          0x00098d5c 0xe30211e8 0xe340105b  # crule_add_time::v[23]
+text block_rule_name_1     Add Time
+site block_rule_2          0x000995c4 0xe2022080 0xe3a03000  # crule_bonus::v[23]
+text block_rule_name_2     Bonus
+site block_rule_3          0x00099adc 0xe92d40f0 0xe30241e8  # crule_castle_lock::v[23]
+text block_rule_name_3     Castle Lock
+site block_rule_4          0x0009b2c4 0xe2022702 0xe92d4038  # crule_knight_spellout::v[23]
+text block_rule_name_4     Knight Spellout
+site block_rule_5          0x0009c7ac 0xe30211e8 0xe340105b  # crule_magna_save::v[23]
+text block_rule_name_5     Magna Save
+site block_rule_6          0x000a0170 0xe92d43f8 0xe30241e8  # crule_mystery::v[23]
+text block_rule_name_6     Mystery
+site block_rule_7          0x000c4b88 0xe92d41f0 0xe1a04000  # crule_skill_shot::v[23]
+text block_rule_name_7     Skill Shot
+site block_rule_8          0x000a79f8 0xe92d41f0 0xe1a07003  # crule_super_shot::v[23]
+text block_rule_name_8     Super Shot
+site block_rule_9          0x000a8868 0xe92d0030 0xe2024807  # crule_sword_of_rage::v[23]
+text block_rule_name_9     Sword of Rage
+site block_rule_10         0x000a954c 0xe92d47f0 0xe30241e8  # crule_triple_knights_lock::v[23]
+text block_rule_name_10    Triple Knights Lock
+site block_rule_11         0x000aacac 0xe92d4ff0 0xe1a04000  # crule_u_p_loops::v[23]
+text block_rule_name_11    U P Loops
+site block_rule_12         0x000ad3d8 0xe92d4ff0 0xe24dd024  # crule_u_turn_combos::v[23]
+text block_rule_name_12    U Turn Combos
+site block_rule_13         0x000b0608 0xe92d4ff8 0xe1c049d0  # crule_wheel_modes::v[23]
+text block_rule_name_13    Wheel Modes

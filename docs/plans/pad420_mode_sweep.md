@@ -134,6 +134,16 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   X-Men...) have no `callout time_up`, so the Sound page shows "does not know X's time-up callout". Item 163 found
   the callouts it has by hearing them; finding the rest means picking the "time is up" voice line out of each
   title's callouts (the media proof's sound census lists the requests the game makes).
+- **Avengers: Infinity Quest Pro 1.10's sound bank cannot be rewritten**: building its Try it set stopped in
+  `spike2/masterdir.py _crypto_sites` ("this game version's sound-bank directory cipher could not be located in its
+  firmware"). Avengers LE 1.10 builds. So on the Pro a mode's own sounds, and likely anything that rewrites its bank
+  (Replace Audio), fail; worth its own ticket. Its media proof runs without the mode's own sounds (`--no-sound`).
+- **D&D LE 1.10**: the proof mode's own sounds grow its bank past 2 GiB (2,166,683,134 bytes; PAD-176's limit), so
+  its proof set is built without them too.
+- Retries still failing: Aerosmith Pro 1.16 stack (our multiball never started on the retry), Munsters Pro 1.28
+  multiball (the drains count 3-4-3-0 twice: two balls leave at once, look at its trough/drain switches), Star Wars
+  LE 1.31 and Venom Pro 1.07 multiball (the game died at boot or Start on every try so far), Guardians LE 1.15 ball
+  save (no shot scored on the saved ball, twice: its jackpot switches are drop targets the earlier presses left down).
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

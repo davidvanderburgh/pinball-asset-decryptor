@@ -1,0 +1,195 @@
+# aerosmith 1.16 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a build check (modes/gamecheck.sh play, the stock card, hidden, muted):
+# the runtime hooked the game, 32 of its 34 shots came from their switches, a drain ended a ball,
+# events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end.
+# Shots no press made: Left outlane, Right outlane.
+
+game           aerosmith
+version        1.16
+
+# ---- functions ----
+site tick             0x00259074 0xe92d4038 0xe3a00037
+site ball_end         0x0013a22c 0xe92d4070 0xe1a06000
+site sound_lookup     0x00320be0 0xe92d4038 0xe1a05000
+site score_add        0x0013b010 0xe30816b2 0xe3401068
+site callout          0x00287a74 0xe92d4010 0xe301e228
+site callout_nth      0x00287c28 0xe92d4010 0xe301e228
+site lamp_group       0x00136698 0xe92d4038 0xe1a04000
+site award_screen     0x001752ac 0xe92d4070 0xe24dd008
+site string_new       0x000167e0 0xe28fc605 0xe28ccaae
+site dynamic_cast     0x000161e0 0xe28fc605 0xe28ccaae
+site resource_get     0x001bbf60 0xe92d43f0 0xe1a04000
+site find_node        0x0047a36c 0xe92d4070 0xe24dd008
+site find_text        0x00479e08 0xe92d4070 0xe24dd008
+site set_text         0x0045db34 0xe92d47f0 0xe1a06000
+site surface_state    0x0046d098 0xe5900550 0xe2800008
+site player_advance   0x001756a4 0xe2501000 0x012fff1e
+site display_draw     0x001f9ba8 0xe3520001 0x812fff1e
+site sound_play       0x00287a74 0xe92d4010 0xe301e228
+site sound_nth        0x00287c28 0xe92d4010 0xe301e228
+site sound_active     0x002881e8 0xe59f3034 0xe2831e62
+site sound_stop       0x00288340 0xe92d40f8 0xe1a06000
+site sound_worker     0x00287060 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x0027b124 0xe35000cf 0xe92d4038
+site display_effect_start 0x00341268 0xe92d47f0 0xe2516000
+site display_effect_next 0x00341670 0xe3033ee0 0xe3403068
+site display_priority_now 0x00341af8 0xe5d0000e 0xe12fff1e
+site game_event       0x00271830 0xe92d47f0 0xe1a09000
+site event_post_replacing 0x00270230 0xe92d4070 0xe1a05001
+site event_cancel     0x002701a0 0xe92d40f8 0xe30e6720
+site switch_hit       0x0014f070 0xe2503000 0x012fff1e
+site switch_hit2      0x0014f110 0xe92d4010 0xe2504000
+site scene_show       0x001756d0 0xe92d4070 0xe30e4724
+site frame_end        0x001758d8 0xe3500000 0xe92d40f8
+site frame_kick       0x001f945c 0xe92d4070 0xe2906008
+site surface_find     0x0047a660 0xe92d4070 0xe24dd008
+site surface_set_video 0x00471d44 0xe5d030d4 0xe92d4ff0
+site surface_play     0x0046fb50 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0046f300 0xe5d030d4 0xe92d40f0
+site agent_header     0x004c73b0 0xe92d40f8 0xe2505000
+site agent_begin      0x004d1d1c 0xe590c004 0xe1a00001
+site balls_in_play    0x0033726c 0xe92d4010 0xe30241dc
+site multiball_serve  0x003373e8 0xe92d41f0 0xe308e6b2
+site coil_fire        0x0023cd10 0xe3500000 0xe52de004
+site adjustment       0x00394934 0xe92d40f0 0xe2504000
+site proc_exists      0x00270550 0xe30e2720 0xe3402067
+site proc_create      0x0026ff00 0xe30ec720 0xe340c067
+site proc_sleep       0x00270050 0xe30e3720 0xe3403067
+site switch_edge      0x00282c40 0xe30e3718 0xe3403067
+site switch_drain     0x00283868 0xe92d4ff0 0xe3019cdc
+site live_records     0x00270598 0xe30e2720 0xe3402067
+
+# ---- globals ----
+data cur_player             0x005d01d8
+data scores                 0x00617568
+data mode_mask              0x006886b2
+data event_head             0x0067e720
+data event_current          0x0067e724
+data resource_manager       0x006379b8
+data typeinfo_resource      0x0050073c
+data typeinfo_scene_player  0x0052d5d4
+data display_holder         0x00637938
+data award_screen_arg       0x005c6490
+data sound_channels         0x00681334
+data sound_queue            0x00681ba8
+data sound_requests         0x00603560
+data sound_request_count    0x004ff274
+data lamp_layers            0x00681d40
+data light_count            0x00619768
+data score_mult             0x005ca51c
+data switch_records         0x0067fce4
+data switch_count           0x0067e718
+data game_flags             0x0067a408
+data game_flag_count        0x004e6b28
+
+# ---- values ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value surface_playing       2
+value scene_player_scene    0x10
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value node_visible_vfn      0xa8
+value clip_layer            0
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+value stock_slot_shot   42
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value switch_desc_via       0x8
+
+# ---- shots from the switch drain ----
+switch 46   0x1                Spinner
+switch 49   0x2                Top scoop
+switch 50   0x4                Left scoop
+switch 51   0x8                Right ramp exit
+switch 52   0x10               Aerosmit(h) target
+switch 53   0x20               Aerosmi(t)h target
+switch 54   0x40               Aerosm(i)th target
+switch 55   0x80               Aeros(m)ith target
+switch 57   0x100              Left outlane
+switch 58   0x200              Left return lane-l.
+switch 59   0x400              Right return lane
+switch 60   0x800              Right outlane
+switch 61   0x1000             Left return lane-r.
+switch 62   0x2000             A(e)rosmith target
+switch 63   0x4000             Ae(r)osmith target
+switch 66   0x8000             (A)erosmith target
+switch 68   0x10000            Right slingshot
+switch 69   0x20000            Left slingshot
+switch 78   0x40000            Toy box enter 1
+switch 79   0x80000            Toy box enter 2
+switch 80   0x100000           Toy box enter 3
+switch 81   0x200000           Toy box lid
+switch 82   0x400000           Toy box hit
+switch 83   0x800000           Aer(o)smith target
+switch 84   0x1000000          Aero(s)mith target
+switch 85   0x2000000          Right eject
+switch 86   0x4000000          Right orbit
+switch 87   0x8000000          Left ramp exit
+switch 88   0x10000000         Toy box target-left
+switch 89   0x20000000         Toy box target-right
+switch 90   0x40000000         Left pop bumper
+switch 91   0x80000000         Right pop bumper
+switch 92   0x100000000        Top pop bumper
+switch 93   0x200000000        Left orbit
+
+# ---- scenes ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene hud                  11ce95fe13add22617598c5e7afbcc0f8356be9b
+
+# ---- callouts and text ----
+callout ten_seconds         241
+callout time_up             243
+text example_start_shot     Aerosmit(h) target
+text mode_records_name_1   Super Scoring
+text mode_records_name_2   Double Scoring
+text mode_records_name_3   Upper Playfield Orbit Rule
+text mode_records_name_4   Headphone Hurryup
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47

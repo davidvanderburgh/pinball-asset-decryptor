@@ -1,0 +1,347 @@
+# sword_of_rage_pro 1.19 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a build check (modes/gamecheck.sh play, the stock card, hidden, muted):
+# the runtime hooked the game, 27 of its 29 shots came from their switches, a drain ended a ball,
+# events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end.
+# Shots no press made: Left outlane, Right outlane.
+
+game           sword_of_rage_pro
+version        1.19
+
+# ---- functions ----
+site tick             0x00176954 0xe92d4038 0xe3a00037
+site ball_end         0x000c0f54 0xe92d4070 0xe1a06000
+site sound_lookup     0x00172c30 0xe92d4038 0xe1a05000
+site score_add        0x0024e814 0xe305190a 0xe3401066
+site callout          0x000d9f3c 0xe92d4010 0xe30ee398
+site callout_nth      0x000da0f0 0xe92d4010 0xe30ee398
+site lamp_group       0x002c9050 0xe92d4038 0xe1a04000
+site award_screen     0x001c7e88 0xe92d4070 0xe24dd008
+site string_new       0x000167e0 0xe28fc605 0xe28ccac1
+site dynamic_cast     0x000161e0 0xe28fc605 0xe28ccac1
+site resource_get     0x00387c0c 0xe92d43f0 0xe1a04000
+site find_node        0x0040429c 0xe92d4070 0xe24dd008
+site find_text        0x00403d38 0xe92d4070 0xe24dd008
+site set_text         0x003e7a64 0xe92d47f0 0xe1a06000
+site video_player     0x00048310 0xe92d4010 0xe3064e34
+site video_surface    0x00048334 0xe92d4070 0xe3065e34
+site surface_state    0x003f6fc8 0xe5900550 0xe2800008
+site player_advance   0x001c8280 0xe2501000 0x012fff1e
+site display_draw     0x00313aa0 0xe3520001 0x812fff1e
+site sound_play       0x000d9f3c 0xe92d4010 0xe30ee398
+site sound_nth        0x000da0f0 0xe92d4010 0xe30ee398
+site sound_active     0x000da6b0 0xe59f3034 0xe2831e62
+site sound_stop       0x000da808 0xe92d40f8 0xe1a06000
+site sound_worker     0x000d9528 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x001ce734 0xe35000cf 0xe92d4038
+site display_effect_start 0x002ce714 0xe92d47f0 0xe2516000
+site display_effect_next 0x002ceb1c 0xe30432e8 0xe3403066
+site display_priority_now 0x002cefa4 0xe5d0000e 0xe12fff1e
+site stock_rule_get   0x0009c758 0xe3510025 0xe92d4008
+site game_event       0x003319fc 0xe92d47f0 0xe1a09000
+site event_post_replacing 0x00306a8c 0xe92d4070 0xe1a05001
+site event_cancel     0x003069fc 0xe92d40f8 0xe3046d48
+site switch_hit       0x0017ddf8 0xe2503000 0x012fff1e
+site switch_hit2      0x0017de98 0xe92d4010 0xe2504000
+site scene_show       0x001c82ac 0xe92d4070 0xe3044d4c
+site frame_end        0x001c84b4 0xe3500000 0xe92d40f8
+site frame_kick       0x00313354 0xe92d4070 0xe2906008
+site surface_find     0x00404590 0xe92d4070 0xe24dd008
+site surface_set_video 0x003fbc74 0xe5d030d4 0xe92d4ff0
+site surface_play     0x003f9a80 0xe5d030d4 0xe92d43f0
+site surface_stop     0x003f9230 0xe5d030d4 0xe92d40f0
+site agent_header     0x004512e0 0xe92d40f8 0xe2505000
+site agent_begin      0x0045bc4c 0xe590c004 0xe1a00001
+site balls_in_play    0x0026fa9c 0xe92d4010 0xe3024c20
+site multiball_serve  0x0026fc18 0xe92d41f0 0xe305e90a
+site coil_fire        0x002b1a34 0xe3500000 0xe52de004
+site adjustment       0x00249474 0xe92d40f0 0xe2504000
+site proc_exists      0x00306dac 0xe3042d48 0xe3402066
+site proc_create      0x0030675c 0xe304cd48 0xe340c066
+site proc_sleep       0x003068ac 0xe3043d48 0xe3403066
+site switch_edge      0x00230b70 0xe30933bc 0xe3403066
+site switch_drain     0x00231798 0xe92d4ff0 0xe30b9c98
+site live_records     0x00306df4 0xe3042d48 0xe3402066
+site layer_add        0x0004e10c 0xe304cd4c 0xe1a03002
+site layer_remove     0x0004e124 0xe92d40f8 0xe5913004
+
+# ---- globals ----
+data cur_player             0x005e3fed
+data scores                 0x006623f8
+data mode_mask              0x0066590a
+data event_head             0x00664d48
+data event_current          0x00664d4c
+data resource_manager       0x0064fff8
+data typeinfo_resource      0x00553018
+data typeinfo_scene_player  0x0056fcec
+data display_holder         0x0064ff78
+data award_screen_arg       0x005d9608
+data sound_channels         0x0062e4a4
+data sound_queue            0x0062ed18
+data sound_requests         0x00613a78
+data sound_request_count    0x00485e34
+data lamp_layers            0x00668784
+data light_count            0x00665924
+data score_mult             0x005e3e1c
+data switch_records         0x00659ca0
+data switch_count           0x006693bc
+data stock_mode_table       0x005da990
+data typeinfo_cmode         0x00555a74
+data game_flags             0x0065b1f4
+data game_flag_count        0x0046f2c0
+data typeinfo_cmode_mball   0x00558564
+data typeinfo_vmi           0x0056c974
+
+# ---- values ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value countdown_step 1
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value surface_playing       2
+value scene_player_scene    0x10
+value stock_mode_count      38
+value stock_slot_active     37
+value stock_slot_start      31
+value node_visible_vfn      0xa8
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value clip_layer            0
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+value stock_slot_shot   42
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value switch_desc_via       0x8
+
+# ---- shots from the switch drain ----
+switch 47   0x1                Lower left 2 bank target bottom
+switch 48   0x2                Lower left 2 bank target top
+switch 49   0x4                Right 3 bank drop top
+switch 50   0x8                Right 3 bank drop middle
+switch 51   0x10               Right 3 bank drop bottom
+switch 53   0x20               Left outlane
+switch 54   0x40               Left return lane
+switch 55   0x80               Right return lane
+switch 56   0x100              Right outlane
+switch 57   0x200              Shield vuk
+switch 58   0x400              Shield target
+switch 62   0x800              Right slingshot
+switch 63   0x1000             Left slingshot
+switch 72   0x2000             Top lane left
+switch 73   0x4000             Top lane center
+switch 74   0x8000             Top lane right
+switch 77   0x10000            Right orbit
+switch 78   0x20000            Castle spinner
+switch 79   0x40000            Left spinner
+switch 80   0x80000            Left orbit
+switch 81   0x100000           Flail opto enter
+switch 82   0x200000           Flail ramp exit opto
+switch 83   0x400000           Center target
+switch 84   0x800000           Shield opto
+switch 85   0x1000000          Flail opto mid
+switch 86   0x2000000          Left pop bumper
+switch 87   0x4000000          Right pop bumper
+switch 88   0x8000000          Bottom pop bumper
+switch 89   0x10000000         Castle vuk
+
+# ---- scenes ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
+
+# ---- callouts and text ----
+callout countdown           394
+text example_start_shot     Lower left 2 bank target bottom
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47
+
+# ---- lamps ----
+lamp 9            0              LEFT OUTLANE  # lamp 40, I/O group 6 index 56, at 0,0
+lamp 10           0              LEFT RETURN LANE  # lamp 41, I/O group 6 index 57, at 0,0
+lamp 11           0              KICKBACK  # lamp 32, I/O group 6 index 3, at 0,0
+lamp 12           0              SHOOT AGAIN  # lamp 33, I/O group 6 index 4, at 0,0
+lamp 13           0              RIGHT RETURN LANE  # lamp 45, I/O group 6 index 61, at 0,0
+lamp 14           0              RIGHT OUTLANE  # lamp 46, I/O group 6 index 62, at 0,0
+lamp 15           0              (K)NIGHT  # lamp 39, I/O group 6 index 49, at 0,0
+lamp 16           0              K(N)IGHT  # lamp 38, I/O group 6 index 48, at 0,0
+lamp 17           0              KN(I)GHT  # lamp 37, I/O group 6 index 47, at 0,0
+lamp 18           0              KNI(G)HT  # lamp 36, I/O group 6 index 46, at 0,0
+lamp 19           0              KNIG(H)T  # lamp 35, I/O group 6 index 45, at 0,0
+lamp 20           0              KNIGH(T)  # lamp 34, I/O group 6 index 44, at 0,0
+lamp 21           0              MAGNA-SAVE  # lamp 44, I/O group 6 index 60, at 0,0
+lamp 22,23,24     0              LIGHTNING BOLT 1  # lamp 15, I/O group 6 index 41, at 0,0
+lamp 25,26,27     0              LIGHTNING BOLT 2  # lamp 14, I/O group 6 index 38, at 0,0
+lamp 28,29,30     0              LIGHTNING BOLT 3  # lamp 13, I/O group 6 index 35, at 0,0
+lamp 31,32,33     0              LIGHTNING BOLT 4  # lamp 12, I/O group 6 index 32, at 0,0
+lamp 34,35,36     0              LIGHTNING BOLT 5  # lamp 11, I/O group 6 index 29, at 0,0
+lamp 37,38,39     0              LIGHTNING BOLT 6  # lamp 10, I/O group 6 index 26, at 0,0
+lamp 40,41,42     0              LIGHTNING BOLT 7  # lamp 9, I/O group 6 index 23, at 0,0
+lamp 43,44,45     0              LIGHTNING BOLT 8  # lamp 8, I/O group 6 index 20, at 0,0
+lamp 46,47,48     0              LIGHTNING BOLT 9  # lamp 7, I/O group 6 index 17, at 0,0
+lamp 49,50,51     0              LIGHTNING BOLT 10  # lamp 6, I/O group 6 index 14, at 0,0
+lamp 52,53,54     0              LIGHTNING BOLT 11  # lamp 5, I/O group 6 index 11, at 0,0
+lamp 55,56,57     0              LIGHTNING BOLT 12  # lamp 4, I/O group 6 index 8, at 0,0
+lamp 58           0              LEFT 2 BANK TARGET-BOTTOM  # lamp 42, I/O group 6 index 58, at 0,0
+lamp 59           0              LEFT 2 BANK TARGET-TOP  # lamp 43, I/O group 6 index 59, at 0,0
+lamp 60,61,62     0              CASTLE LIGHTNING BOLT  # lamp 67, I/O group 7 index 41, at 0,0
+lamp 63           0              KNIGHT MODE  # lamp 68, I/O group 7 index 44, at 0,0
+lamp 64           0              ADD-A-BALL  # lamp 69, I/O group 7 index 45, at 0,0
+lamp 65,66,67     0              LEFT ORBIT LIGHTNING BOLT 1  # lamp 23, I/O group 7 index 56, at 0,0
+lamp 68,69,70     0              LEFT ORBIT LIGHTNING BOLT 2  # lamp 20, I/O group 7 index 30, at 0,0
+lamp 71,72,73     0              FLAIL LIGHTNING BOLT  # lamp 19, I/O group 7 index 27, at 0,0
+lamp 74           0              FLAIL ARROW 1  # lamp 59, I/O group 7 index 23, at 0,0
+lamp 75           0              FLAIL ARROW 2  # lamp 66, I/O group 7 index 40, at 0,0
+lamp 76,77,78     0              CENTER TARGET LIGHTNING BOLT  # lamp 18, I/O group 7 index 24, at 0,0
+lamp 79           0              CENTER TARGET ARROW 1  # lamp 58, I/O group 7 index 22, at 0,0
+lamp 80           0              CENTER TARGET ARROW 2  # lamp 57, I/O group 7 index 15, at 0,0
+lamp 81,82,83     0              SHIELD LIGHTNING BOLT  # lamp 17, I/O group 7 index 19, at 0,0
+lamp 84           0              RIGHT LOCK  # lamp 54, I/O group 7 index 12, at 0,0
+lamp 85           0              EXTRA BALL  # lamp 55, I/O group 7 index 13, at 0,0
+lamp 86           0              MYSTERY  # lamp 56, I/O group 7 index 14, at 0,0
+lamp 87,88,89     0              SHIELD TARGET LIGHTNING BOLT  # lamp 16, I/O group 7 index 16, at 0,0
+lamp 90           0              LIGHT LOCK  # lamp 53, I/O group 7 index 11, at 0,0
+lamp 91,92,93     0              RIGHT ORBIT LIGHTNING BOLT 1  # lamp 21, I/O group 7 index 48, at 0,0
+lamp 94,95,96     0              RIGHT ORBIT LIGHTNING BOLT 2  # lamp 22, I/O group 7 index 51, at 0,0
+lamp 97           0              RIGHT 3 BANK DROP-TOP  # lamp 52, I/O group 7 index 10, at 0,0
+lamp 98           0              RIGHT 3 BANK DROP-MID  # lamp 51, I/O group 7 index 9, at 0,0
+lamp 99           0              RIGHT 3 BANK DROP-BOTTOM  # lamp 50, I/O group 7 index 8, at 0,0
+lamp 100          0              TOP LANE-(W)AR  # lamp 60, I/O group 7 index 33, at 0,0
+lamp 101          0              TOP LANE-W(A)R  # lamp 61, I/O group 7 index 34, at 0,0
+lamp 102          0              TOP LANE-WA(R)  # lamp 62, I/O group 7 index 35, at 0,0
+lamp 103          0              FLAME PANEL  # lamp 49, I/O group 7 index 2, at 0,0
+lamp 104          0              KNIGHT LEFT EYE  # lamp 72, I/O group 7 index 59, at 0,0
+lamp 105          0              KNIGHT RIGHT EYE  # lamp 73, I/O group 7 index 60, at 0,0
+lamp 106,107,108  0              KNIGHT MASK  # lamp 24, I/O group 7 index 61, at 0,0
+lamp 111          0              BOTTOM GI-WHT  # lamp 30, I/O group 6 index 1, at 0,0
+lamp 113          0              TOP GI-WHT  # lamp 48, I/O group 7 index 1, at 0,0
+lamp 114          0              BOTTOM ARCH FLASH (2X)  # lamp 31, I/O group 6 index 2, at 0,0
+lamp 115          0              CENTER FLASH  # lamp 25, I/O group 6 index 50, at 0,0
+lamp 116          0              LEFT ORBIT FLASH  # lamp 70, I/O group 7 index 46, at 0,0
+lamp 118          0              LEFT POP BUMPER  # lamp 63, I/O group 7 index 36, at 0,0
+lamp 119          0              RIGHT POP BUMPER  # lamp 64, I/O group 7 index 37, at 0,0
+lamp 120          0              BOTTOM POP BUMPER  # lamp 65, I/O group 7 index 38, at 0,0
+lamp 121          0              FLAME PANEL X2  # lamp 83, I/O group 8 index 0, at 0,0
+lamp 122,123,124  0              FACE  # lamp 74, I/O group 8 index 1, at 0,0
+lamp 125          0              LEFT EYE  # lamp 81, I/O group 8 index 7, at 0,0
+lamp 126          0              RIGHT EYE  # lamp 82, I/O group 8 index 8, at 0,0
+lamp 127          0              LEFT SIDE 1  # lamp 75, I/O group 8 index 10, at 0,0
+lamp 128          0              LEFT SIDE 2  # lamp 76, I/O group 8 index 11, at 0,0
+lamp 129          0              LEFT SIDE 3  # lamp 77, I/O group 8 index 12, at 0,0
+lamp 130          0              RIGHT SIDE 1  # lamp 78, I/O group 8 index 13, at 0,0
+lamp 131          0              RIGHT SIDE 2  # lamp 79, I/O group 8 index 14, at 0,0
+lamp 132          0              RIGHT SIDE 3  # lamp 80, I/O group 8 index 15, at 0,0
+lamp 111          0              BOTTOM GI-WHT  # lamp 30, I/O group 6 index 1, at 0,0
+lamp 114          0              BOTTOM ARCH FLASH (2X)  # lamp 31, I/O group 6 index 2, at 0,0
+lamp 11           0              KICKBACK  # lamp 32, I/O group 6 index 3, at 0,0
+lamp 12           0              SHOOT AGAIN  # lamp 33, I/O group 6 index 4, at 0,0
+lamp 55,56,57     0              LIGHTNING BOLT 12  # lamp 4, I/O group 6 index 8, at 0,0
+lamp 52,53,54     0              LIGHTNING BOLT 11  # lamp 5, I/O group 6 index 11, at 0,0
+lamp 49,50,51     0              LIGHTNING BOLT 10  # lamp 6, I/O group 6 index 14, at 0,0
+lamp 46,47,48     0              LIGHTNING BOLT 9  # lamp 7, I/O group 6 index 17, at 0,0
+lamp 43,44,45     0              LIGHTNING BOLT 8  # lamp 8, I/O group 6 index 20, at 0,0
+lamp 40,41,42     0              LIGHTNING BOLT 7  # lamp 9, I/O group 6 index 23, at 0,0
+lamp 37,38,39     0              LIGHTNING BOLT 6  # lamp 10, I/O group 6 index 26, at 0,0
+lamp 34,35,36     0              LIGHTNING BOLT 5  # lamp 11, I/O group 6 index 29, at 0,0
+lamp 31,32,33     0              LIGHTNING BOLT 4  # lamp 12, I/O group 6 index 32, at 0,0
+lamp 28,29,30     0              LIGHTNING BOLT 3  # lamp 13, I/O group 6 index 35, at 0,0
+lamp 25,26,27     0              LIGHTNING BOLT 2  # lamp 14, I/O group 6 index 38, at 0,0
+lamp 22,23,24     0              LIGHTNING BOLT 1  # lamp 15, I/O group 6 index 41, at 0,0
+lamp 20           0              KNIGH(T)  # lamp 34, I/O group 6 index 44, at 0,0
+lamp 19           0              KNIG(H)T  # lamp 35, I/O group 6 index 45, at 0,0
+lamp 18           0              KNI(G)HT  # lamp 36, I/O group 6 index 46, at 0,0
+lamp 17           0              KN(I)GHT  # lamp 37, I/O group 6 index 47, at 0,0
+lamp 16           0              K(N)IGHT  # lamp 38, I/O group 6 index 48, at 0,0
+lamp 15           0              (K)NIGHT  # lamp 39, I/O group 6 index 49, at 0,0
+lamp 115          0              CENTER FLASH  # lamp 25, I/O group 6 index 50, at 0,0
+lamp 9            0              LEFT OUTLANE  # lamp 40, I/O group 6 index 56, at 0,0
+lamp 10           0              LEFT RETURN LANE  # lamp 41, I/O group 6 index 57, at 0,0
+lamp 58           0              LEFT 2 BANK TARGET-BOTTOM  # lamp 42, I/O group 6 index 58, at 0,0
+lamp 59           0              LEFT 2 BANK TARGET-TOP  # lamp 43, I/O group 6 index 59, at 0,0
+lamp 21           0              MAGNA-SAVE  # lamp 44, I/O group 6 index 60, at 0,0
+lamp 13           0              RIGHT RETURN LANE  # lamp 45, I/O group 6 index 61, at 0,0
+lamp 14           0              RIGHT OUTLANE  # lamp 46, I/O group 6 index 62, at 0,0
+lamp 113          0              TOP GI-WHT  # lamp 48, I/O group 7 index 1, at 0,0
+lamp 103          0              FLAME PANEL  # lamp 49, I/O group 7 index 2, at 0,0
+lamp 99           0              RIGHT 3 BANK DROP-BOTTOM  # lamp 50, I/O group 7 index 8, at 0,0
+lamp 98           0              RIGHT 3 BANK DROP-MID  # lamp 51, I/O group 7 index 9, at 0,0
+lamp 97           0              RIGHT 3 BANK DROP-TOP  # lamp 52, I/O group 7 index 10, at 0,0
+lamp 90           0              LIGHT LOCK  # lamp 53, I/O group 7 index 11, at 0,0
+lamp 84           0              RIGHT LOCK  # lamp 54, I/O group 7 index 12, at 0,0
+lamp 85           0              EXTRA BALL  # lamp 55, I/O group 7 index 13, at 0,0
+lamp 86           0              MYSTERY  # lamp 56, I/O group 7 index 14, at 0,0
+lamp 80           0              CENTER TARGET ARROW 2  # lamp 57, I/O group 7 index 15, at 0,0
+lamp 87,88,89     0              SHIELD TARGET LIGHTNING BOLT  # lamp 16, I/O group 7 index 16, at 0,0
+lamp 81,82,83     0              SHIELD LIGHTNING BOLT  # lamp 17, I/O group 7 index 19, at 0,0
+lamp 79           0              CENTER TARGET ARROW 1  # lamp 58, I/O group 7 index 22, at 0,0
+lamp 74           0              FLAIL ARROW 1  # lamp 59, I/O group 7 index 23, at 0,0
+lamp 76,77,78     0              CENTER TARGET LIGHTNING BOLT  # lamp 18, I/O group 7 index 24, at 0,0
+lamp 71,72,73     0              FLAIL LIGHTNING BOLT  # lamp 19, I/O group 7 index 27, at 0,0
+lamp 68,69,70     0              LEFT ORBIT LIGHTNING BOLT 2  # lamp 20, I/O group 7 index 30, at 0,0
+lamp 100          0              TOP LANE-(W)AR  # lamp 60, I/O group 7 index 33, at 0,0
+lamp 101          0              TOP LANE-W(A)R  # lamp 61, I/O group 7 index 34, at 0,0
+lamp 102          0              TOP LANE-WA(R)  # lamp 62, I/O group 7 index 35, at 0,0
+lamp 118          0              LEFT POP BUMPER  # lamp 63, I/O group 7 index 36, at 0,0
+lamp 119          0              RIGHT POP BUMPER  # lamp 64, I/O group 7 index 37, at 0,0
+lamp 120          0              BOTTOM POP BUMPER  # lamp 65, I/O group 7 index 38, at 0,0
+lamp 75           0              FLAIL ARROW 2  # lamp 66, I/O group 7 index 40, at 0,0
+lamp 60,61,62     0              CASTLE LIGHTNING BOLT  # lamp 67, I/O group 7 index 41, at 0,0
+lamp 63           0              KNIGHT MODE  # lamp 68, I/O group 7 index 44, at 0,0
+lamp 64           0              ADD-A-BALL  # lamp 69, I/O group 7 index 45, at 0,0
+lamp 116          0              LEFT ORBIT FLASH  # lamp 70, I/O group 7 index 46, at 0,0
+lamp 91,92,93     0              RIGHT ORBIT LIGHTNING BOLT 1  # lamp 21, I/O group 7 index 48, at 0,0
+lamp 94,95,96     0              RIGHT ORBIT LIGHTNING BOLT 2  # lamp 22, I/O group 7 index 51, at 0,0
+lamp 65,66,67     0              LEFT ORBIT LIGHTNING BOLT 1  # lamp 23, I/O group 7 index 56, at 0,0
+lamp 104          0              KNIGHT LEFT EYE  # lamp 72, I/O group 7 index 59, at 0,0
+lamp 105          0              KNIGHT RIGHT EYE  # lamp 73, I/O group 7 index 60, at 0,0
+lamp 106,107,108  0              KNIGHT MASK  # lamp 24, I/O group 7 index 61, at 0,0
+lamp 121          0              FLAME PANEL X2  # lamp 83, I/O group 8 index 0, at 0,0
+lamp 122,123,124  0              FACE  # lamp 74, I/O group 8 index 1, at 0,0
+lamp 125          0              LEFT EYE  # lamp 81, I/O group 8 index 7, at 0,0
+lamp 126          0              RIGHT EYE  # lamp 82, I/O group 8 index 8, at 0,0
+lamp 127          0              LEFT SIDE 1  # lamp 75, I/O group 8 index 10, at 0,0
+lamp 128          0              LEFT SIDE 2  # lamp 76, I/O group 8 index 11, at 0,0
+lamp 129          0              LEFT SIDE 3  # lamp 77, I/O group 8 index 12, at 0,0
+lamp 130          0              RIGHT SIDE 1  # lamp 78, I/O group 8 index 13, at 0,0
+lamp 131          0              RIGHT SIDE 2  # lamp 79, I/O group 8 index 14, at 0,0
+lamp 132          0              RIGHT SIDE 3  # lamp 80, I/O group 8 index 15, at 0,0

@@ -22,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SDK = os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk")
 
 PORTS = [
+    ("aerosmith", "1.16"),
     ("aerosmith_le", "1.15"),
     ("aerosmith_le", "1.16"),
     ("avengers_infinity_le", "1.09"),
@@ -67,14 +68,17 @@ PORTS = [
     ("metallica_spike", "1.03"),
     ("metallica_spike", "1.04"),
     ("munsters_le", "1.28"),
+    ("munsters_pro", "1.28"),
     ("rush_le", "1.18"),
     ("star_wars_elg", "1.10"),
     ("star_wars_le", "1.30"),
     ("star_wars_pro", "1.31"),
+    ("stranger_things", "1.13"),
     ("stranger_things_le", "1.12"),
     ("stranger_things_le", "1.13"),
     ("sword_of_rage_le", "1.18"),
     ("sword_of_rage_le", "1.19"),
+    ("sword_of_rage_pro", "1.19"),
     ("turtles_le", "1.59"),
     ("turtles_pro", "1.58"),
     ("turtles_pro", "1.59"),

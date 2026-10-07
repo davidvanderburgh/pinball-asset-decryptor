@@ -170,6 +170,13 @@ int pm_sound_sid(unsigned request, unsigned sid);
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms);
 int pm_sound_fade(unsigned request, unsigned ms);
 int pm_sound_playing(unsigned *requests, unsigned *buses, int max);
+/* PAD-415: the game's own hit sounds, a rising run the port names (`value hit_sound_<n>`, n from 1, low to high: on
+ * Godzilla its eight pitched orchestra hits), so every hit of a mode is heard - while one of ours runs the game's
+ * rules see no shots, and play no sound of their own for them. pm_hit_sound(n) plays the n-th (past the last, the
+ * last), so a mode's hits can climb as it goes; never two within 100 ms (a spinner's run is one sound).
+ * 1 = played; 0 = the port names none, or too soon. pm_hit_sounds: how many the port names (0 = none here). */
+int pm_hit_sound(int n);
+int pm_hit_sounds(void);
 
 /* ---- lights -------------------------------------------------------------------------
  * One command in the game's own light language, e.g.
@@ -220,6 +227,11 @@ int pm_lamp_all(unsigned rgb, int pattern, unsigned period_ms);      /* every in
 int pm_lamp_release(const char *names);
 int pm_lamp_release_shot(uint64_t shots);
 int pm_lamp_release_all(void);                             /* every insert THIS mode holds */
+/* PAD-415: a hit answers at once. The inserts of `shots` strobe in `rgb` (60 ms on, 60 off) for `ms` (0 = 480; at
+ * most 2000) over whatever the mode holds them in, then show it again; one the mode does not hold is held for the
+ * strobe only and handed back to the game after it, and one the mode releases while it strobes finishes the strobe
+ * first. Returns how many inserts strobe (0: none tied to those shots, or no PM_CAN_LAMPS). */
+int pm_lamp_flash(uint64_t shots, unsigned rgb, unsigned ms);
 /* This mode's layer priority, 1-255 (255 when never called): a game show above it covers its
  * inserts. The inserts it holds move to the new layer. Returns the priority now in force. */
 int pm_lamp_priority(unsigned priority);

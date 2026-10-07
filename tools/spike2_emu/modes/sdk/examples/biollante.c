@@ -21,7 +21,7 @@
  *              SWITCH, SAP JACKPOT and VINES CUT at the edges, the six vines on the right edge's gauge, the
  *              clock in the badge. A vine cut plays her tendrils burning, a collect the sap spraying; the
  *              beast and the endings are full screen.
- *   INSERTS    The vines still standing green; the BEAST: the BUILDING blinking gold, faster as it runs out.
+ *   INSERTS    The vines still standing flashing green; the BEAST: the BUILDING blinking gold, faster as it runs out.
  *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
  *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
  *   DISPLAY    Priority 180.
@@ -165,7 +165,7 @@ static void show_lamps(void)
             for (i = 0; i < 3; i++)
                 if (!(run.cut[b] & (1u << i)) && (b != SHIELD_BANK || kit_shields_reachable()))
                     standing |= vine_mask[b][i];               /* the shields once they face the player */
-        kit_lamps_shot(&lamps, standing, BI_VINE, PM_LAMP_SOLID, 0);
+        kit_lamps_shot(&lamps, standing, BI_VINE, PM_LAMP_BLINK, KIT_LIT_MS);
     } else {
         kit_lamps_shot(&lamps, final_mask, KIT_GOLD, PM_LAMP_BLINK,
                        kit_hurry_ms((unsigned long)kit_timer_seconds(&run.clock) * 1000u, BEAST_SECONDS * 1000u));

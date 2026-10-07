@@ -637,6 +637,21 @@ text show_name_10          Playfield wave
 text show_kind_10          flashy
 value show_secs_10         10
 
+# ---- PAD-415: the game's own hit sounds ----------------------------------------------------------------------------
+# A rising run for a mode's hits (pm_hit_sound; the kit's kit_hit climbs one a hit): the Sound Test's "SE GZ FX PITCHED
+# HIT ORCH 1" to "8". The Sound Test's node id IS the request id (tools/spike2_emu/modes/sound_map.py), and a census of
+# this build agreed shot for shot (PAD-415, sound_census.c: a shield target played 345 MECHAGODZILLA TARGET 2, the left
+# ramp 420 LEFT RAMP, the right 443 RIGHT RAMP, the Maser target 436 MASER CANNON TARGET); fired, each holds the
+# effects channel the game's own shot sounds use (6) for about 2 s.
+value hit_sound_1          367
+value hit_sound_2          368
+value hit_sound_3          369
+value hit_sound_4          370
+value hit_sound_5          371
+value hit_sound_6          372
+value hit_sound_7          373
+value hit_sound_8          374
+
 # ---- PAD-393: the building (Premium/LE only) -----------------------------------------------------------------------
 # BuildingStepper (vtable 0x64ff88, a StepperMotor the node board runs: node 10 motor 0, BUILDING UP 92 / DOWN 93), one
 # object at 0x7bbe64 (its getter 0x1d7754 returns it). The game moves it by FLOOR: building_move (0x1d79fc: object,

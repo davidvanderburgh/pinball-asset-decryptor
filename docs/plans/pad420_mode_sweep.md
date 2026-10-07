@@ -46,7 +46,7 @@ This is several runs of work. Each run adds what it proved here.
   Jurassic Park Pro 1.16, King Kong Pro 0.97, Mandalorian LE and Pro 1.45, Venom Pro 1.07, Uncanny X-Men Pro 0.98,
   Sword of Rage LE and Pro 1.19, Star Wars LE 1.31, Stranger Things Pro 1.13, Munsters Pro 1.28, Aerosmith Pro 1.16.
   Most of these failed only with the game's 10 s watchdog (exit 5) while the machine was over-committed (below).
-  Their candidate ports are `C:	mp\PAD-420\clean\<key>.port`; the results land in `C:	mp\PAD-420\check3\<key>`.
+  Their candidate ports are `C:/tmp/PAD-420\clean\<key>.port`; the results land in `C:/tmp/PAD-420\check3\<key>`.
 - **Real faults to look at:** Batman 1.14 (no drain ends a ball on any of its ports: it moved to the newer
   framework, so its end-of-ball event ids and handler need proving), Jaws Pro 1.02 (no game starts after Guided
   Setup, twice), Rush LE / Pro 1.19 (stopped or crashed on every quiet-machine try so far; the 191 MB debug program).
@@ -56,7 +56,7 @@ shaker proof, a ball-save pilot, a light-show scan, a mechanisms proof). They he
 three, and every check on the starved rigs died on the game's own watchdog. Before a batch: `riglock.sh list`, and
 stop anything not yours; run nothing CPU-heavy (pytest, screenshots, recipes with 4 workers) while rigs run.
 
-Tools (scratch, `C:	mp\PAD-420`): `jobs/check_job2.sh` (the check per build), `run_check3.sh` (rigbatch),
+Tools (scratch, `C:/tmp/PAD-420`): `jobs/check_job2.sh` (the check per build), `run_check3.sh` (rigbatch),
 `stamp.py <key>...` (the proof header, from check3), `recipes.py` (`RW=1` for one core), `portslist.py` (the test's
 port list), `limits_table.py` (MODE_LIMITS.md's games table), `clean2.py` (how a candidate port is made).
 

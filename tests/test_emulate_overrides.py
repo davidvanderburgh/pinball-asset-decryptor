@@ -842,6 +842,10 @@ def _cards(tmp_path):
     (tmp_path / "out").mkdir()
     built = tmp_path / "out" / "godzilla_le-1_16_0-modified.raw"
     built.write_bytes(b"b" * 64)
+    # A build is written after the card it came from; with the same size AND
+    # mtime it would pass for the stock card renamed (PAD-421).
+    later = os.stat(stock).st_mtime + 60
+    os.utime(built, (later, later))
     assets = tmp_path / "gz"
     assets.mkdir()
     write_extract_source(str(assets), str(stock))

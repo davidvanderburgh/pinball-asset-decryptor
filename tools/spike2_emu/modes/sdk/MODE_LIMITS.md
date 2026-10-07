@@ -205,6 +205,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush Pro 1.19 | no | ✓ | not yet | no | never waits |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
+| Star Wars LE 1.31 | no | ✓ | not yet | no | never waits |
 | Star Wars Pro 1.31 | no | ✓ | not yet | no | never waits |
 | Stranger Things 1.13 | no | ✓ | not yet | no | never waits |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
@@ -222,6 +223,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | all |  |
 | The Munsters Pro 1.28 | no | ✓ | not yet | no | never waits |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | all |  |
+| Uncanny X-Men Pro 0.98 | no | ✓ | not yet | no | never waits |
 | Venom LE 1.07 | ✓ | ✓ | not yet | all |  |
 | Venom Pro 1.07 | no | ✓ | not yet | no | never waits |
 

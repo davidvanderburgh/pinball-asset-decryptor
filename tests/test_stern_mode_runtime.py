@@ -74,6 +74,7 @@ PORTS = [
     ("rush_pro", "1.19"),
     ("star_wars_elg", "1.10"),
     ("star_wars_le", "1.30"),
+    ("star_wars_le", "1.31"),
     ("star_wars_pro", "1.31"),
     ("stranger_things", "1.13"),
     ("stranger_things_le", "1.12"),
@@ -85,6 +86,7 @@ PORTS = [
     ("turtles_pro", "1.58"),
     ("turtles_pro", "1.59"),
     ("uncanny_xmen_le", "0.98"),
+    ("uncanny_xmen_pro", "0.98"),
     ("venom_le", "1.07"),
     ("venom_pro", "1.07"),
 ]

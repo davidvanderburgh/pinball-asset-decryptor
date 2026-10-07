@@ -178,7 +178,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
-| Guardians of the Galaxy 1.15 | no | ✓ | not yet | all | never waits |
+| Guardians of the Galaxy 1.15 | no | ✓ | ✓ | all | never waits |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | no | ✓ | not yet | all | never waits |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
@@ -195,7 +195,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | all |  |
 | Jurassic Park Pro 1.16 | no | ✓ | ✓ | all | never waits |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
-| King Kong Pro 0.97 | no | ✓ | not yet | no | never waits |
+| King Kong Pro 0.97 | no | ✓ | ✓ | no | never waits |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | all |  |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
@@ -225,7 +225,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | all |  |
 | Uncanny X-Men Pro 0.98 | no | ✓ | ✓ | all | never waits |
 | Venom LE 1.07 | ✓ | ✓ | not yet | all |  |
-| Venom Pro 1.07 | no | ✓ | not yet | all | never waits |
+| Venom Pro 1.07 | no | ✓ | ✓ | all | never waits |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **Ball save not yet:** found in the game, not yet seen working.

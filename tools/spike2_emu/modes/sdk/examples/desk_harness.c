@@ -165,12 +165,24 @@ static const struct pm_mode *disp_owner;   /* the display arbitration's state (p
 static unsigned disp_prio;
 static unsigned long disp_linger_until;   /* pm_end_holding: the hold kept for an ending, until then */
 static void disp_linger_release(const char *why);
+static const struct pm_mode *refused[16];   /* PAD-399: as the runtime, a refusal is said once until it changes */
+static void refused_forget(void) { memset(refused, 0, sizeof refused); }
+static int refused_said(const struct pm_mode *m)
+{
+    unsigned i;
+    for (i = 0; i < sizeof refused / sizeof refused[0]; i++) {
+        if (refused[i] == m) return 1;
+        if (!refused[i]) { refused[i] = m; return 0; }
+    }
+    return 0;
+}
 int pm_begin(void)
 {
     if (running && running != current) {
-        pm_log("not started: %s is running", running->name);
+        if (!refused_said(current)) pm_log("not started: %s is running", running->name);
         return 0;
     }
+    if (running != current) refused_forget();
     running = current;
     if (disp_linger_until && disp_owner != current) disp_linger_release("another mode began");
     return 1;
@@ -178,7 +190,7 @@ int pm_begin(void)
 static void mechs_let_go(const char *why);   /* PAD-395: the held mechanisms, below */
 void pm_end(void)
 {
-    if (running == current) running = 0;
+    if (running == current) running = 0, refused_forget();
     if (!running) mechs_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }

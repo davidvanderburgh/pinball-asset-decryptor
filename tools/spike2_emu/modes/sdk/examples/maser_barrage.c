@@ -327,16 +327,18 @@ static void on_event(unsigned id)
     }
 }
 
+static char uncounted;                             /* PAD-399: "not counted" said this ball */
+
 static void qualify_shot(uint64_t shot, unsigned p)
 {
     char line[KIT_WORDS];
     if (!alt_mask || !(shot & alt_mask) || !kit_fresh(&db, alt_mask)) return;
     if (ran_ball[p]) {
-        pm_log("%s: not counted - it already ran this ball", ALT_START_SHOT);
+        if (!uncounted) pm_log("%s: not counted - it already ran this ball", ALT_START_SHOT);
+        uncounted = 1;
         return;
     }
-    if (hits[p] < HITS_TO_START) hits[p]++;
-    pm_log("%s %u of %d (player %u)", ALT_START_SHOT, hits[p], HITS_TO_START, p);
+    if (hits[p] < HITS_TO_START) hits[p]++, pm_log("%s %u of %d (player %u)", ALT_START_SHOT, hits[p], HITS_TO_START, p);
     if (hits[p] >= HITS_TO_START) {
         start("Maser target", 1);
     } else if (!kit_running) {
@@ -377,6 +379,7 @@ static void on_tick(void)
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) hits[p] = ran_ball[p] = 0;
+        uncounted = 0;
         pm_log("new game: counts cleared");
     }
     if (!run.on) return;
@@ -412,6 +415,7 @@ static void on_ball_end(void)
     end("ball ended");
     kit_end_now();
     for (p = 0; p < 5; p++) hits[p] = ran_ball[p] = 0;
+    uncounted = 0;
 }
 
 static const struct pm_mode maser_barrage = {

@@ -350,8 +350,7 @@ static void qualify_shot(uint64_t shot, unsigned p)
         start("a ramp, BIOLLANTE lit");
         return;
     }
-    if (ramps[p] < need) ramps[p]++;
-    pm_log("ramps %u of %u (player %u)", ramps[p], need, p);
+    if (ramps[p] < need) ramps[p]++, pm_log("ramps %u of %u (player %u)", ramps[p], need, p);   /* PAD-399: once */
     if (ramps[p] >= need) {
         start("the ramps");
     } else if (!kit_running) {

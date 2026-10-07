@@ -746,13 +746,32 @@ static const char *mode_name(const struct pm_mode *m, const char *none)
     return m && m->name ? m->name : none;
 }
 
+/* PAD-399: a refused start is said once until it changes. A spinner asks on every spin, so a machine run's
+ * mode.log carried "[DESTOROYAH] not started: BIOLLANTE is running" 12 times in 2 s. Each mode refused is
+ * remembered until the running mode (or the name it runs as) changes; then its next refusal is said again. */
+static const struct pm_mode *refused[16];
+static void refused_forget(void)
+{
+    unsigned i;
+    for (i = 0; i < sizeof refused / sizeof refused[0]; i++) refused[i] = 0;
+}
+static int refused_said(const struct pm_mode *m)    /* 1 = already said for m; else remembers it */
+{
+    unsigned i;
+    for (i = 0; i < sizeof refused / sizeof refused[0]; i++) {
+        if (refused[i] == m) return 1;
+        if (!refused[i]) { refused[i] = m; return 0; }
+    }
+    return 0;                                       /* the table is full: say it */
+}
+
 int pm_begin(void)
 {
     if (running && running != current) {
-        pm_log("not started: %s is running", mode_name(running, "another mode"));
+        if (!refused_said(current)) pm_log("not started: %s is running", mode_name(running, "another mode"));
         return 0;
     }
-    if (running != current) running_as[0] = 0;
+    if (running != current) running_as[0] = 0, refused_forget();
     running = current;
     disp_linger_other_began();
     return 1;
@@ -763,6 +782,7 @@ int pm_begin(void)
 void pm_running_name(const char *name)
 {
     if (!running || running != current) return;
+    refused_forget();
     pm_snprintf(running_as, sizeof running_as, "%s", name ? name : "");
 }
 
@@ -776,7 +796,7 @@ static unsigned long show_ended_ms;
 void pm_end(void)
 {
     if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
-    if (running == current) running = 0, running_as[0] = 0;
+    if (running == current) running = 0, running_as[0] = 0, refused_forget();
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();

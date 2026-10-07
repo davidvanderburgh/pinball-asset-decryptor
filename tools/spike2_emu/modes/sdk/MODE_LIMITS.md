@@ -201,6 +201,8 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots |  |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
+| Rush LE 1.19 | no | ✓ | not yet | no | never waits |
+| Rush Pro 1.19 | no | ✓ | not yet | no | never waits |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars Pro 1.31 | no | ✓ | not yet | no | never waits |

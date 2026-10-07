@@ -70,6 +70,8 @@ PORTS = [
     ("munsters_le", "1.28"),
     ("munsters_pro", "1.28"),
     ("rush_le", "1.18"),
+    ("rush_le", "1.19"),
+    ("rush_pro", "1.19"),
     ("star_wars_elg", "1.10"),
     ("star_wars_le", "1.30"),
     ("star_wars_pro", "1.31"),

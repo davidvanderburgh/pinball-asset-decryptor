@@ -1716,6 +1716,7 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
     trees = {}
     asset_rels = _scene_asset_rels(output_dir)
     matched = 0
+    misaligned = 0
     for ri, (path, node) in enumerate(radiums):
         if cancel():
             return 0
@@ -1731,6 +1732,12 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
         except Exception:
             continue
         imgs = parse_radium_images(data)
+        if not set(off2rel) <= {im["data_off"] for im in imgs}:
+            # PAD-421: the scene's pictures are not where this project's
+            # extract found them - a card built with grown or added pictures
+            # (DragonRR's 1.96 over a project extracted from the stock card)
+            misaligned += 1
+            continue
         tables = _radium.parse_glyph_tables(data, imgs) if imgs else []
         tree = _scene_tree_entry(path, data, imgs, tables, off2rel, asset_rels)
         if tree is not None:
@@ -1750,6 +1757,15 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
             "it looks like a different card (or a different version), so most "
             "previews would be missing. Nothing was changed."
             % (matched, len(rels)), "warning")
+        return 0
+    if misaligned:
+        # one scene that does not line up means another build of the card:
+        # rewriting the trees from it drew every such scene without pictures
+        log("%d of this project's scene(s) are laid out differently on that "
+            "card, so their pictures would not line up with this project's "
+            "files. It looks like a card built from this project, or a "
+            "different card: re-read from the card this project was "
+            "extracted from. Nothing was changed." % misaligned, "warning")
         return 0
     if not layouts and not trees:
         log("No drawable scene layouts were found on this card.", "warning")

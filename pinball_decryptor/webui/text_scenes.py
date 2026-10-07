@@ -697,12 +697,14 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         words, for a scene that shows the same words more than once)."""
         if not self.store.get(self.ns, "tree") or self._tman is None:
             return
-        texts = self._scenes[d]["texts"]
+        # the text list has a layer's lines run together ("START TERROR OF +3 SECONDS")
+        flat = lambda t: " ".join((t or "").split())             # noqa: E731
+        texts = [flat(t) for t in self._scenes[d]["texts"]]
         words = texts[line]
-        nth = sum(1 for t in texts[:line] if t == words)
+        nth = texts[:line].count(words)
         from .text_scenes_tree import _walk_man, _kind_of, _text_of
         same = [n["id"] for n, _p, _d in _walk_man(self._tman)
-                if _text_of(self._tman, n, _kind_of(self._tman, n)) == words]
+                if flat(_text_of(self._tman, n, _kind_of(self._tman, n))) == words]
         if same:
             self.tree_select(same[min(nth, len(same) - 1)])
 

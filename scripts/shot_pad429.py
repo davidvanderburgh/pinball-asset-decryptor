@@ -4,7 +4,7 @@
 
 Copies the project's images/ and text/ to a scratch folder (nothing is written to the real
 one), types WORDS into the Scenes search box and into the Text tab's, and (after) presses
-the search's Next button twice so the shot lands on the third match.  Writes
+the search's Next button (PRESSES times on Scenes, twice on Text).  Writes
 <prefix>_scenes.png and <prefix>_text.png.
 """
 import os
@@ -19,6 +19,8 @@ import webui_shot  # noqa: E402
 import shot_pad251_tab as rig  # noqa: E402
 
 WORDS = os.environ.get("PAD429_WORDS") or "TERROR"
+#: Next presses on Scenes: the 5th TERROR match is the Godzilla Powerup choice scene
+PRESSES = int(os.environ.get("PAD429_PRESSES") or 5)
 
 
 def main():
@@ -56,7 +58,7 @@ def main():
             box.press_sequentially(WORDS, delay=120)
             time.sleep(1.5)
             if prefix == "after":
-                for _ in range(2):
+                for _ in range(PRESSES):
                     page.get_by_label("Next match").first.click()
                     time.sleep(0.8)
             rig._wait(lambda: st("text_scenes").get("frames"), 120)

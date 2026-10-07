@@ -175,7 +175,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Elvira 1.13 | ✓ | no | not yet | all |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | all |  |
 | Foo Fighters Pro 1.04 | no | ✓ | ✓ | no | never waits |
-| Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy 1.15 | no | ✓ | ✓ | all | waits for multiballs only |

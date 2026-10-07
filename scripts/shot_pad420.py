@@ -23,6 +23,7 @@ CARDS = r"D:\Pinball\images\Stern\spike2"
 
 #: screen -> (card file, project name, title key)
 SCREENS = {
+    "rush_le": ("rush_le-1_19_0.Release.16G.sdcard.raw", "Rush LE 1.19 Extract", "rush_le_1_19"),
     "rush_pro": ("rush_pro-1_19_0.Release.16G.sdcard.raw", "Rush Pro 1.19 Extract", "rush_pro_1_19"),
     "jurassic_park_le": ("jurassic_park_le-1_16_0.Release.8G.sdcard.raw", "Jurassic Park LE 1.16 Extract",
                          "jurassic_park_le_1_16"),
@@ -60,7 +61,7 @@ def main():
             def shoot(page):
                 if slug:
                     webui_shot.api(url, "modes.select", slug, "form")
-                time.sleep(4)
+                time.sleep(float(os.environ.get("SHOT_WAIT", "4")))
                 names = page.evaluate(PAGES_JS) if slug else []
                 parts = []
                 for i, n in enumerate(names or [""]):

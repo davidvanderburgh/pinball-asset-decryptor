@@ -1,0 +1,298 @@
+# dungeons_and_dragons_le 1.10 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a full build check (modes/gamecheck.sh play full, the stock card, hidden, muted):
+# the runtime hooked the game, 31 of its 33 shots came from their switches, a drain ended a ball,
+# a tilted ball and three balls to the game's end; events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end, tilt_warning, tilt.
+# Shots no press made: Left outlane, Right outlane.
+
+game           dungeons_and_dragons_le
+version        1.10
+
+# ---- functions ----
+site tick             0x0041d350 0xe92d4038 0xe3a00037
+site sound_lookup     0x003d6498 0xe92d4038 0xe1a05000
+site score_add        0x004c7d20 0xe30e1236 0xe340107e
+site callout          0x0033d858 0xe92d4010 0xe30fe418
+site callout_nth      0x0033da0c 0xe92d4010 0xe30fe418
+site lamp_group       0x002162e4 0xe92d4038 0xe1a04000
+site award_screen     0x004a0d28 0xe92d4070 0xe24dd008
+site string_new       0x0001763c 0xe28fc606 0xe28ccaf5
+site dynamic_cast     0x0001703c 0xe28fc606 0xe28ccaf5
+site resource_get     0x0029972c 0xe92d43f0 0xe1a04000
+site find_node        0x0058ad3c 0xe92d4070 0xe24dd008
+site set_text         0x0056e508 0xe92d47f0 0xe1a06000
+site surface_state    0x0057da68 0xe5900550 0xe2800008
+site player_advance   0x004a1120 0xe2501000 0x012fff1e
+site display_draw     0x0047e840 0xe3520001 0x812fff1e
+site sound_play       0x0033d858 0xe92d4010 0xe30fe418
+site sound_nth        0x0033da0c 0xe92d4010 0xe30fe418
+site sound_active     0x0033dfcc 0xe59f3034 0xe2831e62
+site sound_stop       0x0033e124 0xe92d40f8 0xe1a06000
+site sound_worker     0x0033ce44 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x00445cb4 0xe35000cf 0xe92d4038
+site display_effect_start 0x0053d668 0xe92d47f0 0xe2516000
+site display_effect_next 0x0053da4c 0xe30f3550 0xe3403086
+site display_priority_now 0x0053dee0 0xe5d0000e 0xe12fff1e
+site caward_add       0x000303c8 0xe92d41f0 0xe1a04000
+site caward_add_scaled 0x00030488 0xe92d4ff8 0xe1a09002
+site event_post_replacing 0x00259470 0xe92d4070 0xe1a05001
+site event_cancel     0x002593e0 0xe92d40f8 0xe3006448
+site switch_hit       0x0027390c 0xe2503000 0x012fff1e
+site switch_hit2      0x002739ac 0xe92d4010 0xe2504000
+site switch_edge      0x0041b888 0xe30634d4 0xe3403084
+site switch_drain     0x0041c560 0xe92d4ff0 0xe3039334
+site surface_find     0x0058b030 0xe92d4070 0xe24dd008
+site surface_set_video 0x00582714 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00580520 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0057fcd0 0xe5d030d4 0xe92d40f0
+site find_text        0x0058a7d8 0xe92d4070 0xe24dd008
+site agent_header     0x005ebfe0 0xe92d40f8 0xe2505000
+site agent_begin      0x005f694c 0xe590c004 0xe1a00001
+site balls_in_play    0x0043db18 0xe92d4010 0xe303481c
+site multiball_serve  0x0043dc94 0xe92d41f0 0xe30ee236
+site ball_end         0x001fec34 0xe92d4070 0xe1a06000
+site stock_rule_get   0x001b59cc 0xe351004a 0xe92d4008
+site game_event       0x0032afdc 0xe92d47f0 0xe1a09000
+site scene_show       0x004a114c 0xe92d4070 0xe300444c
+site frame_end        0x004a1354 0xe3500000 0xe92d40f8
+site frame_kick       0x0047e0f4 0xe92d4070 0xe2906008
+site coil_fire        0x00480878 0xe3500000 0xe52de004
+site adjustment       0x0025dde8 0xe92d40f0 0xe2504000
+site proc_exists      0x00259790 0xe3002448 0xe340207f
+site proc_create      0x00259160 0xe300c448 0xe340c07f
+site proc_sleep       0x00259290 0xe3003448 0xe340307f
+site live_records     0x002597d8 0xe3002448 0xe340207f
+site layer_add        0x000fca84 0xe300c44c 0xe1a03002
+site layer_remove     0x000fca9c 0xe92d40f8 0xe5913004
+
+# ---- globals ----
+data cur_player             0x00720968
+data scores                 0x00868e70
+data mode_mask              0x007ee236
+data event_head             0x007f0448
+data event_current          0x007f044c
+data resource_manager       0x00865478
+data typeinfo_resource      0x00632a20
+data typeinfo_scene_player  0x0066ece4
+data display_holder         0x008653f8
+data award_screen_arg       0x0070e674
+data sound_channels         0x007ff524
+data sound_queue            0x007ffd98
+data sound_requests         0x0076205c
+data sound_request_count    0x0062e13c
+data display_effects        0x0086f550
+data lamp_layers            0x007f0810
+data light_count            0x008008a0
+data score_mult             0x00720728
+data switch_records         0x0080133c
+data switch_count           0x008464d4
+data stock_mode_table       0x00717758
+data typeinfo_cmode         0x0065cde0
+data typeinfo_cmode_mball   0x0065d1c4
+data message_count          0x0060da18
+data message_remap          0x007f10d4
+data message_table          0x00734bf4
+data game_flags             0x00845650
+data game_flag_count        0x0060c8b8
+data typeinfo_vmi           0x0066eb10
+
+# ---- values ----
+value mode_mask_busy        0x210
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value stock_slot_shot   42
+value stock_slot_active     56
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      50
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_desc_via       0x8
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      75
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+
+# ---- shots from the switch drain ----
+switch 46   0x1                Dragon target left
+switch 47   0x2                Dragon target center
+switch 48   0x4                Dragon target right
+switch 49   0x8                Left eject
+switch 52   0x10               Left outlane
+switch 53   0x20               Left return lane
+switch 54   0x40               Right return lane
+switch 55   0x80               Right outlane
+switch 56   0x100              Hidden passage
+switch 63   0x200              Right slingshot
+switch 64   0x400              Left slingshot
+switch 73   0x800              Left orbit
+switch 74   0x1000             Left loop
+switch 75   0x2000             Right loop
+switch 76   0x4000             Top right orbit
+switch 77   0x8000             Dungeon left target
+switch 78   0x10000            Dungeon right target
+switch 79   0x20000            Critical hit target
+switch 80   0x40000            Spinner opto
+switch 81   0x80000            Top vuk
+switch 82   0x100000           Dragon jaw
+switch 83   0x200000           Dragon hold stack
+switch 84   0x400000           Dungeon opto-upper
+switch 85   0x800000           Dungeon opto-lower
+switch 86   0x1000000          Cube enter opto
+switch 87   0x2000000          Bottom right orbit opto
+switch 88   0x4000000          Center ramp opto
+switch 89   0x8000000          Right ramp opto
+switch 90   0x10000000         Left ramp opto
+switch 91   0x20000000         Dragon hold 1
+switch 92   0x40000000         Dragon hold 2
+switch 93   0x80000000         Dragon hold 3
+switch 94   0x100000000        Dragon hold 4
+
+# ---- scenes ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
+scene hud                  b237b7288453dee42f8299bea3fb57de90e6e473
+
+# ---- callouts and text ----
+callout countdown           2059
+callout time_up             2058
+text example_start_shot     Dragon target left
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc7
+event tilt           0xc5
+
+# ---- lamps ----
+lamp 106          0              DRAGON HEAD  # lamp 3, I/O group 8 index 68, at 110,306
+lamp 105          0              DRAGON EYES  # lamp 4, I/O group 8 index 67, at 114,317
+lamp 30,31,32     0              WEST GATE  # lamp 29, I/O group 7 index 35, at 126,529
+lamp 27,28,29     0              BLUE 1  # lamp 30, I/O group 7 index 38, at 110,535
+lamp 24,25,26     0              BLUE 2  # lamp 31, I/O group 7 index 11, at 113,473
+lamp 60,61,62     0              BLUE 3  # lamp 32, I/O group 7 index 66, at 132,438
+lamp 21,22,23     0              GREENEST  # lamp 33, I/O group 7 index 44, at 113,490
+lamp 36,37,38     0              ORANGE 1  # lamp 34, I/O group 7 index 17, at 174,479
+lamp 18,19,20     0              ORANGE 2  # lamp 35, I/O group 7 index 8, at 99,481
+lamp 66,67,68     0              ORANGE 3  # lamp 36, I/O group 7 index 58, at 108,438
+lamp 15,16,17     0              WHITE 1  # lamp 37, I/O group 7 index 41, at 105,508
+lamp 39,40,41     0              WHITE 2  # lamp 38, I/O group 7 index 20, at 185,490
+lamp 69,70,71     0              WHITE 3  # lamp 39, I/O group 7 index 88, at 187,459
+lamp 63,64,65     0              DRAGONSPEAR CASTLE  # lamp 40, I/O group 7 index 61, at 119,450
+lamp 51,52,53     0              PURPLE 1  # lamp 41, I/O group 7 index 29, at 178,532
+lamp 45,46,47     0              PURPLE 2  # lamp 42, I/O group 7 index 26, at 178,510
+lamp 75,76,77     0              PURPLE 3  # lamp 43, I/O group 7 index 77, at 188,435
+lamp 72,73,74     0              GAUNTLGRYM  # lamp 44, I/O group 7 index 92, at 176,446
+lamp 33,34,35     0              DARK HOLD  # lamp 45, I/O group 7 index 14, at 146,475
+lamp 42,43,44     0              KOBOLD MINING TOWN  # lamp 46, I/O group 7 index 23, at 168,497
+lamp 48,49,50     0              ARABEL  # lamp 47, I/O group 7 index 32, at 160,528
+lamp 81,82,83     0              CHEST 1  # lamp 48, I/O group 7 index 69, at 64,394
+lamp 84,85,86     0              MIMIC 2  # lamp 49, I/O group 7 index 72, at 74,416
+lamp 110,111,112  0              LEFT LOOP 1  # lamp 51, I/O group 8 index 9, at 129,250
+lamp 113,114,115  0              LEFT LOOP 2  # lamp 52, I/O group 8 index 12, at 146,271
+lamp 126,127,128  0              SPINNER 1  # lamp 53, I/O group 8 index 37, at 180,183
+lamp 129,130,131  0              SPINNER 2  # lamp 54, I/O group 8 index 18, at 180,206
+lamp 148,149,150  0              CUBE (X2)  # lamp 55, I/O group 8 index 21, at 243,210
+lamp 152,153,154  0              RIGHT ORBIT 1  # lamp 56, I/O group 8 index 27, at 248,278
+lamp 155,156,157  0              RIGHT ORBIT 2  # lamp 57, I/O group 8 index 24, at 239,304
+lamp 133,134,135  0              RIGHT LOOP 1  # lamp 58, I/O group 8 index 34, at 207,156
+lamp 136,137,138  0              RIGHT LOOP 2  # lamp 59, I/O group 8 index 31, at 201,179
+lamp 119,120,121  0              CENTER RAMP 1  # lamp 60, I/O group 8 index 41, at 143,206
+lamp 122,123,124  0              CENTER RAMP 2  # lamp 61, I/O group 8 index 45, at 156,227
+lamp 89,90,91     0              LEFT ORBIT 1  # lamp 62, I/O group 8 index 58, at 69,313
+lamp 92,93,94     0              LEFT ORBIT 2  # lamp 63, I/O group 8 index 61, at 76,340
+lamp 139,140,141  0              RIGHT RAMP 1  # lamp 64, I/O group 8 index 69, at 224,227
+lamp 142,143,144  0              RIGHT RAMP 2  # lamp 65, I/O group 8 index 75, at 219,251
+lamp 166          0              LEFT GI-WHT  # lamp 67, I/O group 8 index 0, at 0,0
+lamp 164          0              RIGHT GI-WHT  # lamp 68, I/O group 7 index 0, at 0,0
+lamp 168          0              LEFT GI-BLU  # lamp 69, I/O group 8 index 2, at 0,0
+lamp 165          0              RIGHT GI-BLU  # lamp 70, I/O group 7 index 2, at 0,0
+lamp 9            0              LEFT OUTLANE  # lamp 74, I/O group 7 index 47, at 29,485
+lamp 10           0              LEFT RETURN LANE  # lamp 75, I/O group 7 index 48, at 51,467
+lamp 13           0              SHIELD  # lamp 76, I/O group 7 index 49, at 142,579
+lamp 14           0              SHOOT AGAIN  # lamp 77, I/O group 7 index 50, at 142,616
+lamp 11           0              RIGHT RETURN LANE  # lamp 78, I/O group 7 index 51, at 235,467
+lamp 12           0              RIGHT OUTLANE  # lamp 79, I/O group 7 index 52, at 256,485
+lamp 79           0              SECRET DOOR  # lamp 80, I/O group 7 index 53, at 221,390
+lamp 80           0              DOUBLE SCORING  # lamp 81, I/O group 7 index 54, at 240,427
+lamp 174          0              TREASURE CHEST FLASH  # lamp 82, I/O group 7 index 55, at 44,423
+lamp 175          0              CAVE FLASH  # lamp 83, I/O group 8 index 54, at 96,220
+lamp 54           0              NEW CHARACTER 1  # lamp 84, I/O group 7 index 56, at 119,392
+lamp 57           0              RITUAL  # lamp 85, I/O group 7 index 57, at 119,415
+lamp 55           0              NEW CHARACTER 2  # lamp 86, I/O group 7 index 64, at 151,392
+lamp 58           0              UNDERMOUNTAIN  # lamp 87, I/O group 7 index 65, at 151,415
+lamp 87           0              FIZMO  # lamp 88, I/O group 7 index 75, at 82,432
+lamp 88           0              TREASURE  # lamp 89, I/O group 7 index 76, at 94,415
+lamp 78           0              HIDDEN TEMPLE  # lamp 90, I/O group 7 index 80, at 255,356
+lamp 158          0              DRAGON  # lamp 91, I/O group 7 index 81, at 231,329
+lamp 171          0              LOWER LEFT FLASH  # lamp 92, I/O group 7 index 86, at 38,394
+lamp 172          0              LOWER RIGHT FLASH  # lamp 93, I/O group 7 index 87, at 270,435
+lamp 56           0              NEW CHARACTER 3  # lamp 94, I/O group 7 index 91, at 185,392
+lamp 59           0              RESCUE KING  # lamp 95, I/O group 7 index 95, at 185,415
+lamp 132          0              LIGHT DUNGEON  # lamp 98, I/O group 8 index 8, at 180,224
+lamp 116          0              SUPER JACKPOT  # lamp 99, I/O group 8 index 15, at 162,290
+lamp 117          0              DUNGEON  # lamp 100, I/O group 8 index 16, at 181,280
+lamp 147          0              DUNGEON RIGHT TGT  # lamp 101, I/O group 8 index 17, at 232,269
+lamp 151          0              MAGNET  # lamp 102, I/O group 8 index 30, at 258,248
+lamp 125          0              CRITICAL HIT  # lamp 103, I/O group 8 index 40, at 152,183
+lamp 118          0              DUNGEON LEFT TGT  # lamp 104, I/O group 8 index 44, at 136,228
+lamp 104          0              DRAGO(N)  # lamp 105, I/O group 8 index 48, at 152,341
+lamp 159          0              BB DRAGON  # lamp 106, I/O group 8 index 49, at 177,170
+lamp 160          0              BB DUNGEON  # lamp 107, I/O group 8 index 50, at 177,170
+lamp 161          0              BB CUBE  # lamp 108, I/O group 8 index 51, at 177,170
+lamp 162          0              BB DICE GAME  # lamp 109, I/O group 8 index 52, at 177,170
+lamp 95           0              CUBE  # lamp 110, I/O group 8 index 53, at 81,359
+lamp 103          0              DRAG(O)N  # lamp 111, I/O group 8 index 56, at 141,330
+lamp 102          0              DRA(G)ON  # lamp 112, I/O group 8 index 57, at 124,328
+lamp 98           0              DRAGON TGT RIGHT  # lamp 113, I/O group 8 index 64, at 124,304
+lamp 97           0              DRAGON TGT CENT  # lamp 114, I/O group 8 index 65, at 111,309
+lamp 96           0              DRAGON TGT LEFT  # lamp 115, I/O group 8 index 66, at 96,315
+lamp 101          0              DR(A)GON  # lamp 116, I/O group 8 index 72, at 110,332
+lamp 100          0              D(R)AGON  # lamp 117, I/O group 8 index 73, at 103,346
+lamp 99           0              (D)RAGON  # lamp 118, I/O group 8 index 74, at 102,361
+lamp 145          0              EXTRA BALL  # lamp 119, I/O group 8 index 78, at 212,276
+lamp 146          0              ACTION  # lamp 120, I/O group 8 index 79, at 207,297
+lamp 173          0              DUNGEON FLASH  # lamp 121, I/O group 8 index 5, at 182,256
+lamp 245          0              LOWER LEFT SPOT FLASH  # lamp 122, I/O group 7 index 85, at 49,374
+lamp 246          0              LOWER RIGHT SPOT FLASH  # lamp 123, I/O group 8 index 55, at 254,412

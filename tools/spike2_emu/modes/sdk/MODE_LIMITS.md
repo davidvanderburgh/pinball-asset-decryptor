@@ -160,11 +160,16 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
+| Aerosmith LE 1.16 | no | no | not yet | no | never waits |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
+| Avengers: Infinity Quest LE 1.10 | no | ✓ | not yet | no | never waits |
+| Avengers: Infinity Quest Pro 1.10 | no | ✓ | not yet | no | never waits |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
+| Deadpool LE 1.16 | no | ✓ | not yet | no | never waits |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
+| Dungeons & Dragons LE 1.10 | no | ✓ | not yet | no | never waits |
 | Elvira 1.13 | ✓ | no | not yet | all |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | all |  |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | not yet | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
@@ -184,8 +189,11 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots |  |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
+| Rush LE 1.19 | no | no | not yet | no | never waits, never run |
+| Rush Pro 1.19 | no | no | not yet | no | never waits, never run |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
+| Star Wars Pro 1.31 | no | ✓ | not yet | no | never waits |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | TMNT LE 1.59 | ✓ | ✓ | not yet | all |  |

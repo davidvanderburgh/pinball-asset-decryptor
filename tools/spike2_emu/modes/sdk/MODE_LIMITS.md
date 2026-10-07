@@ -161,10 +161,10 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 |---|---|---|---|---|---|
 | Aerosmith 1.16 | no | no | not yet | no | never waits |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
-| Aerosmith LE 1.16 | no | no | not yet | no | never waits |
+| Aerosmith LE 1.16 | no | no | ✓ | no | never waits |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
-| Avengers: Infinity Quest LE 1.10 | no | ✓ | not yet | no | never waits |
-| Avengers: Infinity Quest Pro 1.10 | no | ✓ | not yet | no | never waits |
+| Avengers: Infinity Quest LE 1.10 | no | ✓ | ✓ | no | never waits |
+| Avengers: Infinity Quest Pro 1.10 | no | ✓ | ✓ | no | never waits |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
 | Deadpool LE 1.16 | no | ✓ | not yet | no | never waits |
@@ -182,7 +182,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | no | ✓ | not yet | no | never waits |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
-| Iron Maiden LE 1.18 | no | ✓ | not yet | no | never waits |
+| Iron Maiden LE 1.18 | no | ✓ | ✓ | no | never waits |
 | Iron Maiden Pro 1.18 | no | ✓ | not yet | no | never waits |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all |  |
 | James Bond 007 Pro 1.06 | no | ✓ | not yet | no | never waits |

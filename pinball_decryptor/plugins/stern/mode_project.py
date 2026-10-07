@@ -469,6 +469,10 @@ BALL_SAVE_PROVEN = frozenset({
     "turtles_pro-1.58",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "turtles_pro-1.59",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "uncanny_xmen_le-0.98",             # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "aerosmith_le-1.16",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 8 shots, awarded 36000000
+    "avengers_infinity_le-1.10",         # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 3 shots, awarded 6000000
+    "avengers_infinity_pro-1.10",        # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "iron_maiden_le-1.18",               # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
 })
 
 

@@ -274,18 +274,85 @@ def test_the_card_copy_keeps_every_source_and_leaves_big_media_out(tmp_path, mon
         assert "left_out" not in json.loads(z.read(MP.SHARE_MANIFEST))
 
 
-def test_a_card_built_here_loads_from_its_own_project_whole(tmp_path, monkeypatch):
+def _built_here(tmp_path, project, name="built.raw"):
+    """A card image path with a build record beside it naming ``project``."""
     from pinball_decryptor.core import extract_source
-    project = _pro115(tmp_path)
-    image = tmp_path / "built.raw"
+    image = tmp_path / name
     image.write_bytes(b"")
     with open(str(image) + extract_source.BUILD_RECORD_SUFFIX, "w", encoding="utf-8") as f:
         json.dump({"assets": project}, f)
-    monkeypatch.setattr(MFC, "read_padmode", lambda image: pytest.fail("the card was read"))
-    path, about, notes = MFC.card_modes_file(str(image), str(tmp_path))
-    assert notes == [] and about["project"] == project and about["title"] == "godzilla_pro_1_15"
+    return str(image)
+
+
+def test_the_cards_own_file_wins_over_its_project_and_the_project_fills_its_big_media(tmp_path, monkeypatch):
+    """What is on the card is the modes as written; the project the card was built from only
+    puts back the media the card's file was too small to carry."""
+    project = _pro115(tmp_path)
+    clip = os.path.join(MP.mode_folder(project, "dual_strike"), "clip.mp4")
+    with open(clip, "wb") as f:
+        f.write(b"\0" * 4096)
+    monkeypatch.setattr(MW, "CARD_BUNDLE_MEDIA", 1000)       # the clip stays off the card
+    data = open(MW.card_bundle(project, str(tmp_path / "b.zip")), "rb").read()
+    # the project moved on after the Write: KAIJU RUSH is 45 s there now, the card says 40
+    spec = dict(MP.list_modes(project)[0])["kaiju_rush"]
+    spec.seconds = 45
+    MP.save(project, "kaiju_rush", spec)
+    image = _built_here(tmp_path, project)
+    monkeypatch.setattr(MFC, "read_padmode", lambda image: {"mode.so": b"x", MP.CARD_BUNDLE: data})
+    os.makedirs(tmp_path / "out")
+    path, about, notes = MFC.card_modes_file(image, str(tmp_path / "out"))
+    assert about["project"] == project and about["title"] == "godzilla_pro_1_15"
+    assert notes == []                                       # the clip came back from the project
+    with zipfile.ZipFile(path) as z:
+        head = json.loads(z.read(MP.SHARE_MANIFEST))
+        assert "left_out" not in head
+        assert "modes/dual_strike/clip.mp4" in z.namelist()
+        assert json.loads(z.read("modes/kaiju_rush/mode.json"))["seconds"] == 40
+    # the project no longer has the clip: it stays left out, and the note says so
+    os.remove(clip)
+    os.makedirs(tmp_path / "out2")
+    path, about, notes = MFC.card_modes_file(image, str(tmp_path / "out2"))
+    assert "project" not in about
+    assert notes == ["DUAL_STRIKE: clip.mp4 was too big to travel on the card; Cut from films makes it again"]
+
+
+def test_an_old_card_built_here_takes_its_projects_modes_and_says_so(tmp_path, monkeypatch):
+    project = _pro115(tmp_path)
+    image = _built_here(tmp_path, project, "old.raw")
+    monkeypatch.setattr(MFC, "read_padmode", lambda image: {
+        "mode.so": b"x", "mode.cfg": b"name KAIJU RUSH\n", "game.port": open(_port115(), "rb").read()})
+    path, about, notes = MFC.card_modes_file(image, str(tmp_path))
+    assert about["project"] == project and about["title"] == "godzilla_pro_1_15"
+    assert len(notes) == 1 and "taken from the project it was built from" in notes[0]
     with zipfile.ZipFile(path) as z:
         assert "modes/kaiju_rush/screen.png" in z.namelist()
+        assert "modes/dual_strike/dual_strike.c" in z.namelist()
+
+
+def test_a_card_with_no_modes_is_refused_even_with_a_build_record(tmp_path, monkeypatch):
+    project = _pro115(tmp_path)
+    image = _built_here(tmp_path, project, "nomodes.raw")
+    monkeypatch.setattr(MFC, "read_padmode", lambda image: {})
+    with pytest.raises(MFC.CardModesError, match="carries no modes"):
+        MFC.card_modes_file(image, str(tmp_path))
+
+
+def test_a_left_out_path_that_leaves_the_modes_folder_is_never_read(tmp_path):
+    """The manifest is the card's, and a card is anyone's."""
+    project = _pro115(tmp_path)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("x")
+    path = str(tmp_path / "f.zip")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr(MP.SHARE_MANIFEST, json.dumps({
+            "format": 1, "kind": MP.SHARE_KIND, "modes": ["kaiju_rush"],
+            "left_out": ["modes/kaiju_rush/../../secret.txt", "../secret.txt", "modes/kaiju_rush/screen.png"]}))
+        z.writestr("modes/kaiju_rush/mode.json", "{}")
+    assert MFC.fill_left_out(path, project) == ["modes/kaiju_rush/screen.png"]
+    with zipfile.ZipFile(path) as z:
+        assert json.loads(z.read(MP.SHARE_MANIFEST))["left_out"] == [
+            "modes/kaiju_rush/../../secret.txt", "../secret.txt"]
+        assert not any("secret" in n for n in z.namelist())
 
 
 def test_a_mode_whose_shots_carry_but_the_card_cannot_build_is_to_fix(tmp_path):

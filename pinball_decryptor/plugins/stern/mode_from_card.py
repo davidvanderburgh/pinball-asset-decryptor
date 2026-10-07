@@ -260,31 +260,91 @@ def left_out_notes(data):
         return []
 
 
+def _arc_parts(arc):
+    """``modes/<slug>/<file...>`` of a manifest's ``left_out`` entry as its parts, or None for
+    anything else (a path that could leave the modes folder included: the manifest is the
+    card's, and a card is anyone's)."""
+    parts = str(arc).replace("\\", "/").split("/")
+    if (len(parts) < 3 or parts[0] != MP.MODES_DIRNAME or ":" in arc
+            or any(p in ("", ".", "..") for p in parts)):
+        return None
+    return parts
+
+
+def fill_left_out(path, project):
+    """The pictures, clips and sounds a card's file of modes (``path``) left out, put back from
+    ``project`` - the project the card was built from - wherever that project still has the
+    file under the same mode folder; the manifest's ``left_out`` then names only what is still
+    missing. Returns the arcs added."""
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        head = json.loads(z.read(MP.SHARE_MANIFEST).decode("utf-8"))
+        left = [a for a in head.get("left_out") or () if isinstance(a, str)]
+        kept = [(i.filename, z.read(i.filename)) for i in z.infolist()
+                if i.filename != MP.SHARE_MANIFEST and not i.is_dir()]
+    still, added = [], []
+    for arc in left:
+        parts = _arc_parts(arc)
+        src = os.path.join(project, *parts) if parts else ""
+        if src and os.path.isfile(src):
+            added.append((arc, src))
+        else:
+            still.append(arc)
+    if not added:
+        return []
+    if still:
+        head["left_out"] = still
+    else:
+        head.pop("left_out", None)
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(MP.SHARE_MANIFEST, json.dumps(head, indent=1))
+        for arc, data in kept:
+            z.writestr(arc, data)
+        for arc, src in added:
+            z.write(src, arc)
+    os.replace(tmp, path)
+    return [a for a, _s in added]
+
+
 def card_modes_file(image, out_dir):
     """The modes on the card image ``image`` as a file :func:`.mode_project.import_modes` loads,
     written into ``out_dir`` as ``<image name> modes.zip``. Returns ``(path, about, notes)``:
     ``about`` the card the modes were made for (``{"title", "label", "card"}``, plus
-    ``"project"`` when they came from the project the card was built from; ``{}`` when not
-    known), and ``notes`` the sentences of what did not come back - ``[]`` when they all did.
-    Raises :class:`CardModesError` when the card has no modes, or none that can be brought
-    back."""
+    ``"project"`` when the project the card was built from, still on this PC, supplied any of
+    it; ``{}`` when not known), and ``notes`` the sentences of what did not come back - ``[]``
+    when they all did. Raises :class:`CardModesError` when the card has no modes, or none that
+    can be brought back.
+
+    What is ON THE CARD comes first: its own file of modes (a Write since PAD-432) is the
+    modes as they were written, and the build-record project only puts back the pictures,
+    clips and sounds that file was too small to carry. A card written before cards carried
+    one takes that project's modes as the project is NOW (said in the notes); with no project
+    either, :func:`recover` rebuilds what the card holds."""
     name = os.path.basename(str(image))
     stem = re.sub(r'[\\/:*?"<>|]+', "_", os.path.splitext(name)[0]).strip(" .") or "card"
     path = os.path.join(out_dir, "%s modes.zip" % stem)
-    project = built_from(image)
-    if project:
-        about = dict(MP.card_about(project), project=project)
-        MP.export_modes(project, path, about=about)
-        return path, about, []
     files = read_padmode(image)
     if not files or "mode.so" not in files:
         raise CardModesError("%s carries no modes: a card the app put modes on has them in "
                              "/usr/local/padmode" % name)
+    project = built_from(image)
     data = files.get(MP.CARD_BUNDLE)
     if data:
         with open(path, "wb") as f:
             f.write(data)
-        return path, bundle_about(data), left_out_notes(data)
+        about = bundle_about(data)
+        if project and fill_left_out(path, project):
+            about = dict(about, project=project)
+        with open(path, "rb") as f:
+            data = f.read()
+        return path, about, left_out_notes(data)
+    if project:
+        about = dict(MP.card_about(project), project=project)
+        MP.export_modes(project, path, about=about)
+        return path, about, [
+            "%s was written before cards carried their modes whole, so its modes are taken from "
+            "the project it was built from (%s), as that project is now" % (name, project)]
     with tempfile.TemporaryDirectory(prefix="pad-card-modes-") as tmp:
         slugs, notes = recover(files, tmp)
         if not slugs:

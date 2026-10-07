@@ -33,17 +33,22 @@ title, words and file (`MP.card_about`).
 - The runtime never reads it.
 
 **Load modes from a card image...** (`modes.load_card`, `mode_from_card.card_modes_file`),
-best source first:
+what is ON THE CARD first:
 
-1. The project the card's build record (`<card>.pad-build.json`) names, when it is still on this
-   PC: exported from there, whole (full-quality media). Path A of the survey.
-2. The card's `pad_modes.zip`, read with the pure-Python ext4 reader (no WSL; 0.03 s on an 8 GB
-   card). Media it left out is named per mode in the message.
-3. A card written before this: form modes rebuilt from `mode*.cfg` through the card's own
-   `game.port` (name, start shot and count, length, scoring shots, award, stacking, starts,
-   cooldown, lights; the Advanced keys it does not carry are named), and code modes whose slug
-   is one of the app's examples restored from the app (as shipped; Cut from films makes their
-   media). Any other code mode cannot come back (its C is not on the card) and the message says so.
+1. The card's `pad_modes.zip`, read with the pure-Python ext4 reader (no WSL; 0.03 s on an 8 GB
+   card, off the UI loop): the modes as they were written. When the card's build record
+   (`<card>.pad-build.json`) names a project still on this PC, that project only puts back the
+   pictures, clips and sounds the file was too small to carry (`fill_left_out`); whatever is
+   still missing is named per mode in the message.
+2. A card written before cards carried that file, built on this PC: the build-record project's
+   modes as the project is NOW, and the message says so.
+3. Otherwise: form modes rebuilt from `mode*.cfg` through the card's own `game.port` (name,
+   start shot and count, length, scoring shots, award, stacking, starts, cooldown, lights; the
+   Advanced keys it does not carry are named), and code modes whose slug is one of the app's
+   examples restored from the app (as shipped; Cut from films makes their media). Any other
+   code mode cannot come back (its C is not on the card) and the message says so.
+
+A card with no `/usr/local/padmode` carries no modes, build record or not.
 
 Then the load runs as Load from a file does (conflicts dialog, backup, retarget, report), and
 the box names the card the modes were made for. **Save a card image's modes to a file...**
@@ -62,14 +67,15 @@ it on the new card (survey gap G1: an event Pro 1.16 does not report, a missing 
   (other model and version) and were written.
 - Premium/LE 1.16 card: boots, arms them, and on the rig KAIJU RUSH started (its screen up) and
   ran out its clock, and KING GHIDORAH started with its HUD (heads, lit head moving).
-- Heisei V1.96A card: written and armed, but the game stays on the Stern logo (20-25 min, 30
-  frames a second built) - with the mode runtime held off too (PAD_CARD_MODES=0), and with the
-  two form modes only; the untouched image reaches attract in under 10 min on the same rig.
-  So a modes Write onto this custom image stalls its boot whatever the modes; the one games-
-  partition change is the rewritten HUD scene (943,999 -> 2,805,113 bytes, built from the
-  retheme's own HUD). Not the import; a ticket of its own.
-- A real older card (PAD-301's 6-code-mode LE 1.16 build): path 1 found its project; with that
-  off, path 3 restored all six as the app's examples.
+- Heisei V1.96A card (the third-party custom image, 16G): written and armed; it boots to
+  attract (the rig log's video sources leave the start-up loop for the champions pages) and
+  the imported modes run on it - see the ticket's report for the game run. An earlier reading
+  of "stays on the Stern logo" was an instrument error: glshot's PNGs are all 3,134,511 bytes
+  at 1360x768, so a frame-size test never told attract from the logo, and only the first run
+  was genuinely starved (0.9 frames a second while two other rigs ran). Main's own Write of the
+  same card behaves the same, so nothing here is this ticket's.
+- A real older card (PAD-301's 6-code-mode LE 1.16 build): with no bundle, its build-record
+  project is taken (note says so); with that off, path 3 restored all six as the app's examples.
 
 ## Left (not in this ticket)
 

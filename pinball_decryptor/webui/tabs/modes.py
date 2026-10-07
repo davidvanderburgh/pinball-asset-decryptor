@@ -2274,10 +2274,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     def _card_file(self, image, tmp, box):
         """``(path, about, notes)`` of :func:`.mode_from_card.card_modes_file`, or None after
-        saying why in a message box titled ``box``."""
+        saying why in a message box titled ``box``. The image is opened OFF the UI loop
+        (:func:`..shellx_common.off_loop`): a card on a sleeping share or a cloud placeholder
+        must not freeze the app while it answers."""
         from pinball_decryptor.plugins.stern import mode_from_card as MFC
+        from ..shellx_common import off_loop
         try:
-            return MFC.card_modes_file(image, tmp)
+            return off_loop(self.ctx, MFC.card_modes_file, image, tmp)
         except (MP.ModeProjectError, OSError) as e:
             compat.messagebox.showinfo(box, str(e).rstrip(".") + ".")
             return None

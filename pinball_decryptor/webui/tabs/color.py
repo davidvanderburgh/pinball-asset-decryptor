@@ -40,6 +40,13 @@ switch was off.  "Same as the other files" drops it again.  With no file
 picked, and always on the Color profile tab itself, Files is the project's
 individual files profile, which every file without its own gets.
 
+APPLY TO ALL (PAD-439, DragonRR).  On the Images and Video tabs the bar's
+file line has "Apply to all images / videos": after an "Are you sure?" every
+file of that kind the tab offers a color profile on (each replaced one, and
+any other already attached) gets what the file on show has, its own profile
+or none, and is attached (``apply_to_all``).  It is one Undo step on the file
+on show, switches and all.
+
 RECOMMENDED FOLLOWS THE SCREEN (PAD-346).  On Spike 2 the overlay's and the
 individual files' Recommended is the Machine screen on show, undone
 (core/colour_profile.py ``recommended``), worked out again whenever the
@@ -65,6 +72,7 @@ import os
 import time
 
 from .base import TabService, rpc
+from .. import compat
 from ...core import colour_profile as cp
 from ...core import config, staged_changes
 
@@ -436,6 +444,8 @@ class ColorTab(TabService):
 
     @staticmethod
     def _raw(data, key):
+        if key.startswith("files\n"):          # PAD-439: every file's own
+            return data.get(cp.FILE_PROFILES_KEY[key.split("\n", 1)[1]])
         if key.startswith("file\n"):
             _f, kind, rel = key.split("\n", 2)
             m = data.get(cp.FILE_PROFILES_KEY[kind])
@@ -444,7 +454,13 @@ class ColorTab(TabService):
 
     @staticmethod
     def _put_raw(data, key, value):
-        if key.startswith("file\n"):
+        if key.startswith("files\n"):
+            k = cp.FILE_PROFILES_KEY[key.split("\n", 1)[1]]
+            if value:
+                data[k] = value
+            else:
+                data.pop(k, None)
+        elif key.startswith("file\n"):
             _f, kind, rel = key.split("\n", 2)
             k = cp.FILE_PROFILES_KEY[kind]
             m = dict(data.get(k) or {}) if isinstance(data.get(k), dict) \
@@ -495,17 +511,27 @@ class ColorTab(TabService):
         steps = (self._redo if redo else self._undo).get(key)
         if not (steps and assets and os.path.isdir(assets)):
             return False
-        back = steps.pop()
-        (self._undo if redo else self._redo).setdefault(key, []).append(
-            self._stored_raw(key))
+        step = steps.pop()
+        where, back, switches = key, step, None
+        if isinstance(step, tuple):
+            # PAD-439: Apply to all's step: every file's own profile of the
+            # kind, and the switches it attached
+            where, back, switches = step
+        now = self._stored_raw(where)
         self._last_move.pop(key, None)
         try:
             data = staged_changes.load(assets)
-            self._put_raw(data, key, None if back is None else json.loads(back))
+            self._put_raw(data, where,
+                          None if back is None else json.loads(back))
             staged_changes.save(assets, data)
         except Exception as e:                          # noqa: BLE001
+            steps.append(step)
             self.set(problems=["could not undo (%s)" % e])
             return False
+        if switches:
+            switches = self._put_switches(where.split("\n", 1)[1], switches)
+        (self._undo if redo else self._redo).setdefault(key, []).append(
+            now if where == key else (where, now, switches))
         self._load()
         self._changed(display=key in (cp.KEY, cp.SCREEN_KEY))
         self._tell_tabs()
@@ -700,6 +726,111 @@ class ColorTab(TabService):
         self._rev += 1
         self._publish(problems=[])
         self._publish_undo()
+        self._changed(display=False)
+        self._tell_tabs()
+        return True
+
+    # -- Apply to all (PAD-439) ---------------------------------------------
+    #: the tab each kind of file is listed on, and its words
+    _ALL_NS = {"images": "images", "videos": "video"}
+    _ALL_WORDS = {"images": ("image", "images"), "videos": ("video", "videos")}
+
+    def _all_service(self, kind):
+        try:
+            return self.window.service(self._ALL_NS[kind])
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile %s tab", kind)
+            return None
+
+    def _put_switches(self, kind, switches):
+        """Replaced files' own switches set on their tab at once; returns
+        what each was (``{rel: True / False / None}``)."""
+        fn = getattr(self._all_service(kind), "put_color_switches", None)
+        if fn is None:
+            return {}
+        try:
+            return fn(switches) or {}
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile switches %s", kind)
+            return {}
+
+    @rpc
+    def apply_to_all(self):
+        """PAD-439 (DragonRR): the file on show's color profile for every file
+        of its kind its tab offers one on (``color_targets``), after an "Are
+        you sure?".  Each gets the same own profile (none, where this file
+        has none, so all get the project's) and is attached.  One Undo step
+        on this file puts all of it back."""
+        fm = self._file_mode()
+        if fm is None:
+            return False
+        kind, rel = fm
+        one, many = self._ALL_WORDS[kind]
+        fn = getattr(self._all_service(kind), "color_targets", None)
+        try:
+            targets = dict(fn() or {}) if fn is not None else {}
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile targets %s", kind)
+            targets = {}
+        if not set(targets) - {rel}:
+            self.toast("There are no other %s to apply it to: choose "
+                       "replacements on the %s tab first."
+                       % (many, "Video" if kind == "videos" else "Images"),
+                       "info")
+            return False
+        assets = self._project
+        mkey = "files\n" + kind
+        owns = self._raw(staged_changes.load(assets), mkey)
+        owns = dict(owns) if isinstance(owns, dict) else {}
+        mine = owns.get(rel)
+        change = [r for r in targets if owns.get(r) != mine]
+        attach = sorted(r for r, on in targets.items() if not on)
+        name = self._shown().label()
+        if not (change or attach):
+            self.toast("All %d %s already have “%s”." % (
+                len(targets), many, name), "info")
+            return False
+        msg = ("Are you sure?\n\nAll %d %s with a replacement or a color "
+               "profile attached get “%s”, this %s's color profile, in place "
+               "of the one each has now." % (len(targets), many, name, one))
+        if attach:
+            msg += (" It is attached to the %d that have none attached."
+                    % len(attach) if len(attach) > 1
+                    else " It is attached to the one that has none attached.")
+        msg += "\n\nUndo in the Colors bar puts them all back."
+        key = self._mode_key()
+        if not compat.messagebox.askyesno("Apply to all %s" % many, msg):
+            return False
+        # read again: the page went on turning while the question was up
+        before = self._stored_raw(mkey)
+        new = self._raw(staged_changes.load(assets), mkey)
+        new = dict(new) if isinstance(new, dict) else {}
+        for r in targets:
+            if mine is None:
+                new.pop(r, None)
+            else:
+                new[r] = json.loads(json.dumps(mine))
+        try:
+            data = staged_changes.load(assets)
+            self._put_raw(data, mkey, new)
+            staged_changes.save(assets, data)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not save the files' profiles (%s)" % e])
+            return False
+        switched = self._put_switches(kind, {r: True for r in attach}) \
+            if attach else {}
+        if rel in switched and self._file_mode() == (kind, rel):
+            self._file["on"] = True
+        self._redo.pop(key, None)
+        self._last_move.pop(key, None)
+        steps = self._undo.setdefault(key, [])
+        steps.append((mkey, before, switched))
+        del steps[:-UNDO_MAX]
+        self.log("Color profile: “%s” applied to all %d %s%s." % (
+            name, len(targets), many,
+            " (attached to %d)" % len(switched) if switched else ""), "info")
+        self._files_preview_on()
+        self._publish(problems=[])
         self._changed(display=False)
         self._tell_tabs()
         return True

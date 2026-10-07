@@ -56,17 +56,30 @@ def test_delete_refuses_unsafe_paths(bad, monkeypatch):
 
 
 def test_delete_accepts_safe_paths(monkeypatch):
-    calls = []
-    monkeypatch.setattr(wsl_disk, "_wsl_bash",
-                        lambda cmd, timeout=120: calls.append(cmd) or "4096\n")
+    scripts = []
+    monkeypatch.setattr(wsl_disk, "_wsl_bash", lambda *a, **k: "4096\n")
+    monkeypatch.setattr(wsl_disk, "_wsl_script",
+                        lambda s, timeout=120: scripts.append(s) or "\n")
     freed = wsl_disk.delete(["/tmp/cgc_stage_pulp_fiction_22680"])
     assert freed == 4096
-    # First call measures, second removes.  The remove must pass the path as a
-    # literal quoted arg (a `for d in …; rm "$d"` loop-variable form silently
-    # no-ops in the wsl bash -c path — the bug this guards against).
-    rm_cmd = next(c for c in calls if "rm -rf" in c)
-    assert "'/tmp/cgc_stage_pulp_fiction_22680'" in rm_cmd
-    assert "$d" not in rm_cmd
+    # The bash call measures, the script removes.  The path crosses as a
+    # literal quoted arg, never a variable wsl.exe's own shell would expand.
+    rm_cmd = scripts[-1]
+    assert "paths=('/tmp/cgc_stage_pulp_fiction_22680')" in rm_cmd
+    assert "rm -rf --one-file-system" in rm_cmd
+
+
+def test_delete_says_what_it_could_not_remove(monkeypatch):
+    """A folder still there after the remove is named in one plain sentence,
+    not rm's line per file (PAD-422)."""
+    monkeypatch.setattr(wsl_disk, "_wsl_bash", lambda *a, **k: "1\n")
+    monkeypatch.setattr(
+        wsl_disk, "_wsl_script",
+        lambda s, timeout=120: "/var/tmp/pad_pbio/cache/os-q\n"
+        if "rm -rf" in s else "\n")
+    with pytest.raises(wsl_disk.WslDiskError, match="still in use") as e:
+        wsl_disk.delete(["/var/tmp/pad_pbio/cache/os-q"])
+    assert "rm:" not in str(e.value)
 
 
 def test_delete_empty_is_noop(monkeypatch):
@@ -196,9 +209,9 @@ def test_delete_refuses_an_emulator_whose_game_runs(monkeypatch):
 
 def test_delete_removes_an_idle_emulators_folder(monkeypatch):
     calls = []
-    monkeypatch.setattr(wsl_disk, "_wsl_script", lambda *a, **k: "\n")
-    monkeypatch.setattr(wsl_disk, "_wsl_bash",
-                        lambda cmd, timeout=120: calls.append(cmd) or "7\n")
+    monkeypatch.setattr(wsl_disk, "_wsl_script",
+                        lambda s, timeout=120: calls.append(s) or "\n")
+    monkeypatch.setattr(wsl_disk, "_wsl_bash", lambda *a, **k: "7\n")
     assert wsl_disk.delete(["/var/tmp/pad_ap/cache/tank_26.07.27B"]) == 7
     assert "'/var/tmp/pad_ap/cache/tank_26.07.27B'" in calls[-1]
     assert "rm -rf" in calls[-1]

@@ -527,6 +527,7 @@ BALL_SAVE_PROVEN = frozenset({
     "venom_pro-1.07",                    # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 8 shots, awarded 36000000
     "dungeons_and_dragons_pro-1.10",     # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
     "godzilla_le-1.16",                  # PAD-420 2026-10-07 bs_job (stock card, hidden, muted; jackpots from its own check): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 3 shots, awarded 6000000
+    "guardians_le-1.15",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted; orbit jackpots, not drop targets): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 2 shots, awarded 3000000
 })
 
 

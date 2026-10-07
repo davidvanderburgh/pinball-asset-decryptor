@@ -81,3 +81,6 @@ html.bp-640 .c-page .c-ikv > .k { margin-top: 5px; }
   .c-page .c-glass.on > img { animation: none; opacity: 1; }
   .c-page .c-skel-t, .c-page .c-skel-row i { animation: none; }
 }
+
+/* PAD-435: the open project is another card's (OtherCardNote) */
+.c-page .c-other { gap: 8px; white-space: normal; }

@@ -42,6 +42,13 @@ HELP_CONTENT = {
          "**Card details**, under it, lists firmware, edition, games, asset counts and "
          "partitions; on a Stern card, **Official release** says whether it is Stern's own "
          "release or a changed one. **Copy** is for bug reports. Nothing on the card is changed."),
+        ("A card for another project",
+         "Pick a card while the open project was extracted from a different one (a James "
+         "Bond card over a Godzilla project) and **New project** comes up, filled in for "
+         "the card you picked: **Create** makes it a project of its own and switches to it; "
+         "**Stay in** keeps the open project. Until you switch, the panel on the right says "
+         "the project is another card's and keeps the button.\n\n"
+         "A card that already has a project of its own opens that project instead."),
         ("What works without an extract",
          "| Tab | Straight from the card |\n"
          "|---|---|\n"

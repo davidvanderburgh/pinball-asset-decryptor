@@ -441,19 +441,21 @@ function newProjectPreview(parent, name, stock) {
   };
 }
 
-function NewProjectDialog({ close }) {
+// PAD-435: opened for the card just picked on Select card (extract.new_card_project), it
+// comes filled in for that card and says why: the open project is another card's.
+function NewProjectDialog({ close, stock: forCard = "", name: suggested = "", parent: near = "", mfr: cardMfr = "", why = null }) {
   const [form, setForm] = useState(null);
   const [parent, setParent] = useState("");
-  const [name, setName] = useState("");
+  const [name, setName] = useState(suggested);
   const [mfr, setMfr] = useState("");
-  const [stock, setStock] = useState("");
+  const [stock, setStock] = useState(forCard);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [uid, onClose] = useWin(close);
   useEffect(() => {
     call("shellx.project_form").then((f) => {
       if (!f || f.running) { close(); return; }
-      setForm(f); setParent(f.parent || ""); setMfr(f.mfr || "");
+      setForm(f); setParent(near || f.parent || ""); setMfr(cardMfr || f.mfr || "");
     });
   }, []);
   if (!form) return null;
@@ -466,8 +468,9 @@ function NewProjectDialog({ close }) {
     if (r.error) { setErr(r.error); return; }
     close();
   };
-  return html`<${Modal} title="New project" icon="plus" wide onClose=${onClose} cls=${uid}
-    footer=${html`<${Button} onClick=${close}>Cancel<//><${Button} kind="primary" busy=${busy} disabled=${busy} onClick=${create}>Create<//>`}>
+  return html`<${Modal} title=${why ? "New project for this card" : "New project"} icon="plus" wide onClose=${onClose} cls=${uid}
+    footer=${html`<${Button} onClick=${close}>${why && why.project ? "Stay in " + why.project : "Cancel"}<//><${Button} kind="primary" busy=${busy} disabled=${busy} onClick=${create}>Create<//>`}>
+    ${why ? html`<${Note} kind="warn">The card you picked, <b>${why.card}</b>, is not the one ${why.project ? html`project <b>${why.project}</b>` : "this project"} was extracted from${why.project_card ? html` (${why.project_card})` : ""}. Make a project of its own for it, so the tabs work on this card's files.<//>` : null}
     <div class="sx-form">
       <${Row} label="Location:"><div class="row">
         <${Field} value=${parent} onChange=${(v) => { setParent(v); setErr(""); }} mono cls="grow" placeholder="The folder the project folder goes in" />

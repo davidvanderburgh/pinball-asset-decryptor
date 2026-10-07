@@ -502,8 +502,47 @@ def test_re_read_from_another_card_stops_when_the_projects_card_is_gone(tmp_path
         text = w.window.service("text")
         assert w.run(text.open_scene_browser, str(folder)) is True
         assert _wait(w, lambda: stock.name in (w.state("text_scenes").get("rebuild_msg") or ""))
-        assert "new project folder" in w.state("text_scenes")["rebuild_msg"]
+        assert "Select card tab" in w.state("text_scenes")["rebuild_msg"]
         assert calls == []
+        w.call("text_scenes.close")
+
+
+def test_re_read_from_a_card_built_from_this_project_reads_its_own_card(tmp_path, monkeypatch):
+    """PAD-421: a card PAD built from this project lays its grown scenes out differently
+    from the extract the project's pictures were listed from, so the scenes are re-read off
+    the project's own card, without a question (the card belongs to this project)."""
+    from pinball_decryptor.core.extract_source import BUILD_RECORD_SUFFIX
+    from pinball_decryptor.plugins.stern import engine
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    tree_path = folder / "images" / "scene_textures" / "scene_tree.json"
+    os.remove(str(tree_path))
+    stock, built = _another_card(tmp_path, folder)
+    (tmp_path / (built.name + BUILD_RECORD_SUFFIX)).write_text(
+        json.dumps({"version": 1, "assets": str(folder)}), encoding="utf-8")
+    calls = []
+
+    def fake_rebuild(image, assets, log=None, progress=None, cancel=None, **kw):
+        calls.append(image)
+        tree_path.write_text(json.dumps({CARD: man}), encoding="utf-8")
+        return 1
+
+    monkeypatch.setattr(engine, "rebuild_scene_layouts_from_card", fake_rebuild)
+    monkeypatch.setattr(engine, "card_title_index", lambda path: ("g-1_16_0.sidx",))
+    with web_app(tmp_path, mfr="stern") as w:
+        def _set():
+            w.window.write_assets_var.set(str(folder))
+            w.window.extract_input_var.set(str(built))
+        w.run(_set)
+        text = w.window.service("text")
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        assert _wait(w, lambda: calls and not w.state("text_scenes")["rebuilding"])
+        n = len(w.asked)
+        assert w.call("text_scenes.rebuild") is True
+        assert _wait(w, lambda: len(calls) == 2 and not w.state("text_scenes")["rebuilding"])
+        assert calls == [str(stock), str(stock)] and len(w.asked) == n
+        assert not w.state("text_scenes").get("card_note")
         w.call("text_scenes.close")
 
 

@@ -83,6 +83,8 @@ class TitleProfile:
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
     shield_rule: str = ""            # PAD-392: the game's own shield feature (the port's `text shield_rule`, one of
     #                                  game_rules): it turns the platform back while it counts shots
+    game_shows: tuple = ()           # PAD-418: ((name, kind, secs), ...) the game's own light shows a mode can play
+    #                                  (the port's show_<n> lines, in number order; kind flashy / subdued / accent)
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -257,7 +259,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop", "coils", "shield")
+         "magnet", "scoop", "coils", "shield", "shows")
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -484,6 +486,42 @@ def _shield_cannot(key, label, port=None):
                        "turn it in the emulator, so it cannot here yet." % label),)
 
 
+#: PAD-418: the game's own light shows (PAD-411, MODE_SDK.md "The game's own light shows"). What pad_mode_runtime.c's
+#: shows_arm needs besides the `site show_<n>` lines before it plays one - (sites, values) - and the kinds a show is.
+SHOWS_NEEDS = (("proc_create", "proc_exists", "event_cancel"), ("show_proc",))
+SHOW_KINDS = ("flashy", "subdued", "accent")
+#: mode_file.c's show_start / show_end hold this many bytes, the end included
+SHOW_NAME_MAX = 40
+
+
+def _game_shows(port):
+    """PAD-418: ``((name, kind, secs), ...)`` in number order: the port's shows as the runtime arms them - `site
+    show_<n>` numbered from 1 with no gaps, each named by `text show_name_<n>` (a show with no name is one a mode
+    file cannot ask for, so it is left out), its kind `text show_kind_<n>`, its length `value show_secs_<n>`. ()
+    when the port lacks the process lines the runtime needs."""
+    if not port:
+        return ()
+    sites, values = SHOWS_NEEDS
+    if not (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)):
+        return ()
+    out, n = [], 1
+    while "show_%d" % n in port["site"]:
+        name = port["text"].get("show_name_%d" % n, "").strip()
+        kind = port["text"].get("show_kind_%d" % n, "").strip().lower()
+        if name and len(name) < SHOW_NAME_MAX:
+            out.append((name, kind if kind in SHOW_KINDS else "accent", port["value"].get("show_secs_%d" % n, 0)))
+        n += 1
+    return tuple(out)
+
+
+def _shows_cannot(label, port=None):
+    """The ``cannot`` entry for the game's own light shows, or () when the port names at least one."""
+    if _game_shows(port):
+        return ()
+    return (("shows", "The app has not found %s's own light shows, so a mode of yours cannot play one at its "
+                      "start or end." % label),)
+
+
 #: PAD-381: the port's other HELD COILS (`text held_coils`, besides "magnet", which has its own part): each held
 #: like the magnet - one command at the coil's own powers from a process of the runtime's that controls it, at
 #: most COIL_MAX_MS - by a mode file's ``coil_hold <name> <ms> [mask]``. The (build, coil) pairs seen held in
@@ -548,7 +586,8 @@ GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzill
                             + _magnet_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _scoop_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _coils_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
-                            + _shield_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
+                            + _shield_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _shows_cannot("Godzilla Pro 1.15"))
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
@@ -1147,6 +1186,7 @@ def profile_from_port(path):
     cannot += list(_scoop_cannot(key, label, port))          # PAD-381
     cannot += list(_coils_cannot(key, label, port))          # PAD-381
     cannot += list(_shield_cannot(key, label, port))         # PAD-392
+    cannot += list(_shows_cannot(label, port))               # PAD-418
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1198,6 +1238,7 @@ def profile_from_port(path):
         magnet_shot=_magnet_shot_name(port),                 # PAD-381
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
+        game_shows=_game_shows(port),                        # PAD-418
     )
 
 
@@ -1319,9 +1360,12 @@ try:
         GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
-        cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot if c[0] not in ("magnet", "scoop", "coils", "shield"))
+        game_shows=_game_shows(_port_115),
+        cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
+                     if c[0] not in ("magnet", "scoop", "coils", "shield", "shows"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
-        + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115))
+        + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
+        + _shows_cannot(_label_115, _port_115))
 except OSError:
     pass
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
@@ -1791,6 +1835,10 @@ class ModeSpec:
     # PAD-392: while it runs the shield targets face the player (Godzilla Premium/LE's platform turns 1.5 s after it
     # starts, is kept there, and turns back when it ends) - only while the game's own shield feature sees no shots
     shield: bool = False
+    # PAD-418: the game's own light show at its start and at its end, by the port's name for it (the profile's
+    # game_shows); "" = none. The end's is skipped when the ball is ending (the game stops every show of its own then)
+    show_start: str = ""
+    show_end: str = ""
     # PAD-396: the mode on the title's OTHER models (the Pro beside the Premium/LE): {model word: {field: value}}
     # of MODEL_FIELDS, as the mode last was on that model, put back when it goes back (:func:`port_model`)
     models: dict = field(default_factory=dict)
@@ -1961,6 +2009,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.coil_holds = []
     if not p.can("shield"):
         spec.shield = False
+    if not p.can("shows"):
+        spec.show_start = spec.show_end = ""
     return spec
 
 
@@ -2072,7 +2122,7 @@ def retarget(spec, p):
 #: lights - is the same mode on every model.
 MODEL_FIELDS = ("start_shot", "start_also", "start_sequence", "scoring_shots", "shot_award", "end_shot",
                 "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds",
-                "shield")
+                "shield", "show_start", "show_end")
 #: what each model word is called in the words
 MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "Premium"}
 
@@ -2225,9 +2275,15 @@ def port_words(old, new, p):
         gone.append("the scoop")
     if old.shield is True and not new.shield:
         gone.append("the shield platform")
+    shows = [s for s in (old.show_start, old.show_end)
+             if isinstance(s, str) and s and s not in (new.show_start, new.show_end)]
     if gone:
         words.append("%s does not hold %s, so %s left out there" % (
             now, " or ".join(gone), "it is" if len(gone) == 1 else "they are"))
+    if shows:                                        # PAD-418
+        words.append("%s does not have the light show%s %s, so %s left out there" % (
+            now, "" if len(shows) == 1 else "s", " or ".join(shows), "it is" if len(shows) == 1 else "they are"))
+    if gone or shows:
         words.append(kept)
     return words
 
@@ -2293,6 +2349,12 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         # PAD-398: kept by name; a feature the other game does not have is dropped
         have = {name for _n, name in getattr(p, "game_rules", ())}
         out.keep_rules = [r for r in out.keep_rules if r in have]
+    if old_key != p.key:
+        # PAD-418: a light show is the game's own, asked for by name: one the other game does not name is dropped
+        have = {name for name, _k, _s in getattr(p, "game_shows", ())}
+        for f in ("show_start", "show_end"):
+            if isinstance(getattr(out, f), str) and getattr(out, f) not in have:
+                setattr(out, f, "")
     if old_key == p.key or not isinstance(out.callout_at, list):
         return
     try:
@@ -2888,6 +2950,7 @@ def validate(spec, folder=None):
     out += validate_scoop(spec, p)                     # PAD-381
     out += validate_coils(spec, p)                     # PAD-381
     out += validate_shield(spec, p)                    # PAD-392
+    out += validate_shows(spec, p)                     # PAD-418
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
     return out
@@ -3127,6 +3190,32 @@ def shield_lines(spec, p):
     return ["shield         toward"] if spec.shield is True and p.can("shield") else []
 
 
+# ---- PAD-418: the game's own light shows at the start and the end ---------------------------
+def validate_shows(spec, p):
+    """Every reason the light-show part cannot be built; nothing when the mode plays none."""
+    out = []
+    have = {name for name, _k, _s in getattr(p, "game_shows", ())}
+    for f, when in (("show_start", "start"), ("show_end", "end")):
+        v = getattr(spec, f)
+        if v in ("", None):
+            continue
+        if not isinstance(v, str):
+            out.append("The light show at its %s is a show's name." % when)
+        elif not p.can("shows"):
+            out.append("A light show of the game's is not on %s (Lights says why)." % p.label)
+        elif v not in have:
+            out.append("%s has no light show called %r to play at the mode's %s." % (p.label, v, when))
+    return out
+
+
+def show_lines(spec, p):
+    """The runtime lines of the light shows: nothing unless the mode plays one, and only where the title can."""
+    if not p.can("shows"):
+        return []
+    have = {name for name, _k, _s in p.game_shows}
+    return ["%-14s %s" % (f, getattr(spec, f)) for f in ("show_start", "show_end") if getattr(spec, f) in have]
+
+
 # ---- item 142: cuts from a film ------------------------------------------------------
 FILM_CUT_MAX_SECONDS = 30
 
@@ -3302,6 +3391,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += scoop_lines(spec, p)           # PAD-381: nothing unless it holds a ball in the scoop
     lines += coil_lines(spec, p)            # PAD-381: the other mechanisms it holds
     lines += shield_lines(spec, p)          # PAD-392: the shield targets toward the player while it runs
+    lines += show_lines(spec, p)            # PAD-418: the game's own light shows at its start and end
     if spec.screen and p.can("screen"):
         lines += [
             "screen_scene   %s" % p.hud_scene,

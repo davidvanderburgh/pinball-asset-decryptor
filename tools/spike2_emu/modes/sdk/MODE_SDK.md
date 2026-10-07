@@ -1867,8 +1867,19 @@ flags}); each candidate was played from a mode by `show_reel_mode.c` (each Actio
 what it did to the playfield measured at the shim's LED view, sampled every 20 ms with the game's own lamps in the
 4 s before it taken out (how many light channels it moved, the most at once, for how long). Two machine tests on
 David's Premium: the first played every start and end show; the second showed the 2 s Colour sweep went unnoticed
-and the endings on a drain were cut, which gave the bigger starts and the ball-end rule above. Picking a show from
-the Modes tab (form and blocks) is PAD-418.
+and the endings on a drain were cut, which gave the bigger starts and the ball-end rule above.
+
+**From the Modes tab (PAD-418).** A form mode picks a show for its start and one for its end on its Lights page ("The
+game's light shows": the port's shows by name, grouped flashy / subdued / accent; none by default). They are written
+as the mode file's `show_start <name>` and `show_end <name>`, which `mode_file.c` plays through `pm_game_show_named`
+as the mode starts (after its start clip) and as it ends (after `pm_end`, inside the ending's 2 s) - never when it
+ended because the ball drained. A blocks mode has "Play the game's light show" (Show and sound), a name picked from
+the port's, in any script; its C calls `pm_game_show_named` through a `game_show(name)` helper, so the runtime's
+limits above still hold (a show in When the ball drains, or in a script for while the mode is not running, plays
+nothing, and the blocks' notes say so). Where the port names no shows (a Pro, every other title) the form's section and
+the block are greyed with the reason (`mode_project._shows_cannot`); a name the title does not have is refused on the
+Lights page; Port to... the Pro leaves both out (kept with the Premium/LE's shots for the way back:
+`MODEL_FIELDS`), and a mode taken to another game drops a show that game does not name.
 
 ## Ports: why your mode runs on any game
 

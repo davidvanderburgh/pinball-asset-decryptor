@@ -460,6 +460,35 @@ layers whenever they change), and two raw porting reads, `slots <lists> <output 
 (every layer's slot for one light and the compositor's output record) and `wiremap <board table>
 <board count>` (every light the output stage sends, and the board channel it goes out on).
 
+### A hit answers, and a lit shot flashes (PAD-415)
+
+David after a machine test: "the inserts that are lit for shots should pretty much always be flashing - when they're
+solid, they look broken, especially if i hit the shot and i don't get audible or visual feedback that it registered."
+While one of our modes runs, the game's rules see no shots (PAD-347/PAD-398), so the game plays none of its own sounds
+or insert flashes for them: a hit has to answer from the mode.
+
+```c
+pm_lamp_flash(shot, PM_RGB(255, 255, 255), 480);   /* the hit shot's inserts strobe white, then show the mode's pattern */
+pm_hit_sound(++hits);                               /* the game's own hit sounds, one step higher a hit */
+```
+
+`pm_lamp_flash` strobes the inserts of `shots` (60 ms on, 60 off) for `ms` (480 when 0, 2000 at most) over whatever
+the mode holds them in, then shows that again; an insert the mode does not hold is held for the strobe only and handed
+back after it, and one the mode releases mid-strobe finishes the strobe first. `pm_hit_sound(n)` plays the n-th of a
+rising run of the game's own hit sounds the port names (`value hit_sound_<n>`; past the last, the last), never two
+within 100 ms; `pm_hit_sounds()` says how many (0: none on this game). On Godzilla Premium/LE 1.16 the run is the
+Sound Test's PITCHED HIT ORCH 1 to 8 (requests 367-374): the Sound Test's node id is the request id, and a census of
+the stock game's shots agreed (a shield target played 345 MECHAGODZILLA TARGET 2, the ramps 420 LEFT RAMP and 443
+RIGHT RAMP, the Maser target 436 MASER CANNON TARGET); each holds the effects channel the game's own shot sounds use
+for about 2 s.
+
+The kit does both for every hit that counts while the mode runs (`kit_fresh` -> `kit_hit`), the climb starting again
+at each start; a form-built mode's scoring shots do the same (`mode_file.c`). And the kit's lights speak the game's
+language: a lit shot BLINKS (`KIT_LIT_MS`, 500 ms, with no clock on it; faster with one), pulse is optional or a step
+not next yet, and SOLID means done - never a shot still to make. Emulator: six KIRYU charge hits strobed their inserts
+(the shield left insert's three channels flipped 11 times in the 1.2 s after its hit) and played 367 to 372; on David's
+Premium every scoring hit strobed and sounded.
+
 ### Lights on every title (item 164)
 
 Only Godzilla, Jaws and King Kong carry the game's light language (`blele`), so `pm_lights`
@@ -1785,6 +1814,61 @@ on floor 0 (-150 steps), and a mode then moved it: floor 3 (-7500 steps, 1.5 s, 
 arrival), a second move 1.5 s later refused (busy), floor 2 (+2500), floor 9 refused (no such floor), and at
 the mode's end it was put back on floor 0 (+5000). When the ball drained mid-test, the game sent it to floor
 0 itself and the put-back stood aside. Not machine-tested.
+
+## The game's own light shows (Godzilla Premium/LE, PAD-411)
+
+David, after the first machine test of the shield: "i am not seeing any fancy playfield light shows when custom modes
+start or end ... think like the 'destruction jackpot' mode or the 'tank multiball start'. can we add in some
+sophisticated light shows like those for our custom modes?" A mode can now play one of the game's OWN playfield shows,
+the way the game plays them:
+
+```c
+pm_game_show_named("Strobe burst");       /* at the start: one of the port's flashy shows */
+...
+pm_game_show_named("Blue fade");          /* at the end (in the first 2 s after pm_end): a subdued one */
+if (pm_game_show_playing()) pm_game_show_stop();
+```
+
+A show is a process of the game's: its body makes a lamp group, plays its tables of light-language commands
+({command, owner} records) through the game's player, sleeps through the show and stops every effect it started; an
+exit hook it registers takes its lights away whenever the process ends. So the runtime plays one by starting that
+body as a process of its own (`proc_create(value show_proc, site show_<n>, 0)`, an id the game never uses), and stops
+one with the game's own kill by id (`site event_cancel`). Its timing, colours, layering and clean-up are the game's.
+
+The limits are the runtime's: only the running mode, or one in the first 2 s after it ended (its ending's show); only
+in a game; one at a time (a new one replaces one still playing); never longer than the port's `value show_secs_<n>`
+(some of the game's shows run until stopped), 20 s at most; and none in the 3 s after a ball ends - the game stops
+every process of its own as the ball ends, so an ending on a drain would lose its show at once (the second machine
+test: KIRYU's and BIOLLANTE's endings on a drain). The kit's `kit_game_show(name, why)` plays one by name and says
+so in mode.log; it returns 0 where the game has no such show (a Pro, another title, a ball ending), and the ten
+Godzilla examples then play their own kit show instead.
+
+**The port lines** (`ports/godzilla_le-1.16.port`, "PAD-411"): `value show_proc`, then a show a block -
+`site show_<n>` (its body), `text show_name_<n>` (the name a mode asks for), `text show_kind_<n>` (`flashy` for a
+start, `subdued` for an end, `accent` for a moment) and `value show_secs_<n>`. The process calls are `site
+proc_create`, `site proc_exists` and `site event_cancel`. PM_CAN_GAME_SHOWS says a port has them all.
+
+| Show | Kind | Length | What it is (measured) |
+|---|---|---|---|
+| Strobe burst | flashy | 6 s | process 312: orange-red strobe bursts over the whole playfield every ~0.6 s; 56 light channels, 41 at once |
+| Strobe storm | flashy | 16 s | process 213: a white strobe over a big light set and green sweeps; 86 channels, 63 at once |
+| Insert chase | flashy | 6 s (runs until stopped) | process 315: the shot inserts in runs chasing up the ramps and lanes; 161 channels, 88 at once |
+| Playfield wave | flashy | 10 s | process 299 (the game's other light path: nothing at the light runner): waves over the whole playfield; 146 channels |
+| Blue fade | subdued | 6 s | process 300: a slow blue fade; 103 channels |
+| Colour fade | subdued | 6 s | process 301: blue, yellow and red fading |
+| Red and blue fade | subdued | 6 s | process 302 |
+| Ember fade | subdued | 6 s | process 304: dim reds and oranges |
+| Colour sweep | accent | 2 s | the attract director's: 18 sweeps at once, 41 channels for 1.3 s - too short for a start |
+| Cyan flick | accent | 1 s | process 330: a 0.6 s flick on one light set |
+
+**How they were found and measured.** The light runner (`site light_run`, a branch to 0x1c6fc8) was hooked to record
+every command; the game's show processes are in its process registry (0x72bc40, 347 entries of {entry, priority,
+flags}); each candidate was played from a mode by `show_reel_mode.c` (each Action button press plays the next) and
+what it did to the playfield measured at the shim's LED view, sampled every 20 ms with the game's own lamps in the
+4 s before it taken out (how many light channels it moved, the most at once, for how long). Two machine tests on
+David's Premium: the first played every start and end show; the second showed the 2 s Colour sweep went unnoticed
+and the endings on a drain were cut, which gave the bigger starts and the ball-end rule above. Picking a show from
+the Modes tab (form and blocks) is PAD-418.
 
 ## Ports: why your mode runs on any game
 

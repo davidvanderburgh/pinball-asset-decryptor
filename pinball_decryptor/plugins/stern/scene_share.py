@@ -43,9 +43,11 @@ import re
 import zipfile
 
 from . import scene_edit
+from ...core.checksums import SHARED_PICTURES_DIR
 
-#: where the pictures of a loaded file are copied, inside the project folder
-SHARED_DIR = "Shared pictures"
+#: where the pictures of a loaded file are copied, inside the project folder (never
+#: scanned as slots: core.checksums.NON_ASSET_DIRS)
+SHARED_DIR = SHARED_PICTURES_DIR
 
 
 def manifest_drawers(man):

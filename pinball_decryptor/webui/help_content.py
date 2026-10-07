@@ -932,6 +932,10 @@ HELP_CONTENT = {
          "gets it as its own (and is attached if it was not).\n\n"
          "- **Same as the other files** drops it: the file then gets the individual "
          "files profile, the one this tab shows.\n"
+         "- **Apply to all images…** / **Apply to all videos…** (Images and Video "
+         "only) gives every file there with a replacement or a profile the shown "
+         "file's profile, attached. You are asked first; one Undo puts them all "
+         "back.\n"
          "- Hover a file or a Scenes layer to see its Color profile, or None."),
         ("Machine screen (Spike 2, preview only)",
          "Not a correction but your machine's screen itself. It is never written to "

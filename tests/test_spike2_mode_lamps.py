@@ -589,3 +589,83 @@ def test_port_tool_carries_the_lamp_lines_to_another_build_by_name(tmp_path):
     out2 = tmp_path / "other.port"
     port_tool.main([pro, str(PORTS["godzilla_pro-1.15"]), le, "-o", str(out2), "--game", "jaws_le", "--version", "9"])
     assert MP.read_port(str(out2))["lamp"] == [] and "another title's insert" in out2.read_text(encoding="utf-8")
+
+
+# ---- PAD-420: every build's inserts read, and its shots tied to them -------------------------------------
+def test_lamp_map_reads_every_colour_name_the_titles_use():
+    """A fixture's three lights are one insert: -R/-G/-B (Godzilla), ` - R` (Venom), -RED/-GRN/-BLU (Aerosmith
+    1.16, Guardians 1.15) and a bare ` R` (Rush 1.19). Before PAD-420 the last two read as no RGB lamp at all, and
+    lamp_map found no lamp table on those four titles."""
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    for name, stem, colour in (("LEFT RAMP-R", "LEFT RAMP", "R"), ("TOPPER BIKE - G", "TOPPER BIKE", "G"),
+                               ("RIGHT ORBIT ARROW-RED", "RIGHT ORBIT ARROW", "R"),
+                               ("RIGHT ORBIT ARROW-GRN", "RIGHT ORBIT ARROW", "G"),
+                               ("RIGHT ORBIT ARROW-BLU", "RIGHT ORBIT ARROW", "B"),
+                               ("LEFT POP BUMPER B", "LEFT POP BUMPER", "B"),
+                               ("MASER", "MASER", None), ("TOP LANE-WA(R)", "TOP LANE-WA(R)", None),
+                               ("4X4 LEFT TARGET", "4X4 LEFT TARGET", None), ("LEFT 3-BANK BOT.", "LEFT 3-BANK BOT.", None)):
+        assert LM._suffix(name) == colour, name
+        assert LM._stem(name) == stem, name
+
+
+def test_lamp_map_reads_a_fixture_a_model_does_not_carry_and_a_curly_quoted_name():
+    """Foo Fighters Pro 1.04 keeps 105 kind-6 places (the Premium/LE's inserts it has not fitted): a lamp with no
+    lights, not a sign the table is not a lamp table. Stranger Things 1.13 names an insert TRAP ‘EM."""
+    import struct as _st
+    from pinball_decryptor.plugins.stern import lampmap as LM
+
+    class Fake:
+        def __init__(self, b):
+            self.b = b
+
+        def off(self, va):
+            return va if 0 <= va < len(self.b) else None
+
+    table = b"".join(_st.pack("<II", 0, 2 if k % 2 else 6) for k in range(40))
+    blob = bytearray(table + _st.pack("<3H", 4, 5, 6) + b"\0\0")
+    for k in range(1, 40, 2):
+        _st.pack_into("<I", blob, 8 * k, len(table))
+    lamps = LM._read_lamps(Fake(bytes(blob)), 0, 40)
+    assert lamps is not None and len(lamps) == 40
+    assert [l["lights"] for l in lamps[1:3]] == [[4, 5, 6], []]
+    assert LM._name(Fake(b"....TRAP \xe2\x80\x98EM\0"), 4) == "TRAP 'EM"
+    assert LM._name(Fake(b"....\x01\x02\0"), 4) is None
+
+
+def _tied_ports():
+    for path in sorted((SDK / "ports").glob("*.port")):
+        if "# shot ties (PAD-420)" in path.read_text(encoding="utf-8"):
+            yield path
+
+
+def test_pad420_ties_are_the_ports_own_shots():
+    """Every tie names a shot of the port itself - a `shot` line, or a `switch` line's shot (the switch-line titles:
+    the runtime's pm_lamp_shot matches a lamp's mask against the scoring bits, whichever line named them)."""
+    paths = list(_tied_ports())
+    assert len(paths) >= 15
+    for path in paths:
+        port = MP.read_port(str(path))
+        own = 0
+        for _n, m in port["shot"]:
+            own |= m
+        for _sw, m, _n in port["switch"]:
+            own |= m
+        tied = [(n, m) for n, _l, m in port["lamp"] if m]
+        assert tied, path.name
+        for name, m in tied:
+            assert m & ~own == 0, (path.name, name, hex(m))
+        assert MP._lit_inserts(port) == len(tied)
+
+
+def test_a_switch_line_titles_shots_light_their_inserts():
+    """Elvira 1.13's shots are all switch lines: its ties are switch-line masks, counted for "Light the shots that
+    score", and the inserts in front of a shot are found by that shot's mask as the runtime finds them."""
+    path = SDK / "ports" / "elvira3-1.13.port"
+    port = MP.read_port(str(path))
+    assert not port["shot"] and port["switch"]
+    masks = {n: m for _sw, m, n in port["switch"]}
+    assert [n for n, _l, m in port["lamp"] if m & masks["Left loop"]] == ["LEFT LOOP ARROW"]
+    lit = sorted(n for n, _l, m in port["lamp"] if m & (masks["Left 3-bank target bot."] | masks["Crypt target left"]))
+    assert lit == ["CRYPT TARGET LEFT", "LEFT 3-BANK BOT."]
+    p = MP.profile_from_port(str(path))
+    assert p.lamps == MP._lit_inserts(port) > 20

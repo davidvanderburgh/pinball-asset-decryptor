@@ -330,13 +330,17 @@ value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
 # ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 # 111 inserts on the  picture; light table 0x6287f4, device table 0x62a52c, lamp table 0x60a6ac (112 lamps)
 # shot masks: the code that builds the cshot objects was not found
 lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
 lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
 lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
-lamp 10,11,12     0              LEFT RETURN LANE LEFT  # lamp 4, I/O group 6 index 6, at 0,0
-lamp 14,15,16     0              RIGHT RETURN LANE  # lamp 5, I/O group 6 index 55, at 0,0
+lamp 10,11,12     0x40000        LEFT RETURN LANE LEFT  # lamp 4, I/O group 6 index 6, at 0,0; tie: Left return lane left
+lamp 14,15,16     0x80000        RIGHT RETURN LANE  # lamp 5, I/O group 6 index 55, at 0,0; tie: Right return lane
 lamp 99,100,101   0              ROCKSTEADY  # lamp 6, I/O group 6 index 48, at 0,0
 lamp 103,104,105  0              RIGHT ORBIT WEAPON  # lamp 7, I/O group 6 index 52, at 0,0
 lamp 18,19,20     0              TEAM UP  # lamp 8, I/O group 6 index 11, at 0,0
@@ -375,10 +379,10 @@ lamp 54           0              APR(I)L  # lamp 40, I/O group 6 index 44, at 0,
 lamp 53           0              AP(R)IL  # lamp 41, I/O group 6 index 45, at 0,0
 lamp 52           0              A(P)RIL  # lamp 42, I/O group 6 index 46, at 0,0
 lamp 51           0              (A)PRIL  # lamp 43, I/O group 6 index 47, at 0,0
-lamp 63           0              LEFT ORBIT TRAINING  # lamp 44, I/O group 7 index 58, at 0,0
+lamp 63           0x8            LEFT ORBIT TRAINING  # lamp 44, I/O group 7 index 58, at 0,0; tie: Left orbit
 lamp 102          0              RIGHT ORBIT TRAINING  # lamp 45, I/O group 6 index 51, at 0,0
-lamp 123          0              LEFT RAMP TRAINING  # lamp 46, I/O group 7 index 49, at 0,0
-lamp 127          0              RIGHT RAMP TRAINING  # lamp 47, I/O group 7 index 62, at 0,0
+lamp 123          0x10           LEFT RAMP TRAINING  # lamp 46, I/O group 7 index 49, at 0,0; tie: Left ramp
+lamp 127          0x200          RIGHT RAMP TRAINING  # lamp 47, I/O group 7 index 62, at 0,0; tie: Right ramp
 lamp 125          0              RIGHT RAMP GLIDER  # lamp 48, I/O group 7 index 63, at 0,0
 lamp 124          0              RIGHT RAMP FLASH  # lamp 49, I/O group 6 index 39, at 0,0
 lamp 59           0              TURTLE LEONARDO  # lamp 50, I/O group 6 index 62, at 0,0
@@ -402,7 +406,7 @@ lamp 34           0              (L)AIR  # lamp 67, I/O group 7 index 16, at 0,0
 lamp 35           0              L(A)IR  # lamp 68, I/O group 7 index 17, at 0,0
 lamp 36           0              LA(I)R  # lamp 69, I/O group 7 index 18, at 0,0
 lamp 37           0              LAI(R)  # lamp 70, I/O group 7 index 19, at 0,0
-lamp 13           0              LEFT RETURN LANE RIGHT  # lamp 71, I/O group 7 index 20, at 0,0
+lamp 13           0x1000         LEFT RETURN LANE RIGHT  # lamp 71, I/O group 7 index 20, at 0,0; tie: Left return lane right
 lamp 128          0              UPPER FLIPPER FLASH  # lamp 72, I/O group 7 index 47, at 0,0
 lamp 121          0              LEFT RAMP FLASH  # lamp 73, I/O group 7 index 30, at 0,0
 lamp 126          0              VAN FLASH  # lamp 74, I/O group 7 index 37, at 0,0
@@ -410,8 +414,8 @@ lamp 130          0              PIZZA FLASH LEFT  # lamp 75, I/O group 6 index 
 lamp 122          0              LEFT RAMP GLIDER  # lamp 76, I/O group 7 index 50, at 0,0
 lamp 60,61,62     0              BEBOP  # lamp 77, I/O group 7 index 55, at 0,0
 lamp 64,65,66     0              LEFT ORBIT WEAPON  # lamp 78, I/O group 7 index 59, at 0,0
-lamp 67           0              LEFT RAMP LEFT X  # lamp 79, I/O group 7 index 21, at 0,0
-lamp 68           0              LEFT RAMP RIGHT X  # lamp 80, I/O group 7 index 25, at 0,0
+lamp 67           0x8000         LEFT RAMP LEFT X  # lamp 79, I/O group 7 index 21, at 0,0; tie: Left ramp left target
+lamp 68           0x10000        LEFT RAMP RIGHT X  # lamp 80, I/O group 7 index 25, at 0,0; tie: Left ramp right target
 lamp 78,79,80     0              START EPISODE  # lamp 81, I/O group 7 index 26, at 0,0
 lamp 81           0              2X PLAYFIELD  # lamp 82, I/O group 7 index 29, at 0,0
 lamp 85           0              FOOT COMBO 2  # lamp 83, I/O group 6 index 32, at 0,0
@@ -425,8 +429,8 @@ lamp 30           0              FINAL BATTLE  # lamp 90, I/O group 7 index 54, 
 lamp 72,73,74     0              MICHAEL  # lamp 91, I/O group 7 index 32, at 0,0
 lamp 75           0              EXTRA BALL  # lamp 92, I/O group 7 index 35, at 0,0
 lamp 77           0              NINJA PIZZA PARLOR  # lamp 93, I/O group 7 index 36, at 0,0
-lamp 106          0              TOP LANE LEFT  # lamp 94, I/O group 7 index 38, at 0,0
-lamp 107          0              TOP LANE RIGHT  # lamp 95, I/O group 7 index 39, at 0,0
+lamp 106          0x100000       TOP LANE LEFT  # lamp 94, I/O group 7 index 38, at 0,0; tie: Left top lane
+lamp 107          0x200000       TOP LANE RIGHT  # lamp 95, I/O group 7 index 39, at 0,0; tie: Right top lane
 lamp 108          0              SPIN DISC CW  # lamp 96, I/O group 7 index 51, at 0,0
 lamp 109          0              SPIN DISC CCW  # lamp 97, I/O group 7 index 52, at 0,0
 lamp 137          0              TOPPER BACK LEFT OUTER  # lamp 98, I/O group 8 index 0, at 0,0

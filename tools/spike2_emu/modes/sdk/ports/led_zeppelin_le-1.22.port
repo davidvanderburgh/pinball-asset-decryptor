@@ -355,6 +355,10 @@ value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
 # ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 # 229 inserts on the  picture; light table 0x4237100, device table 0x423af40, lamp table 0x421c9c4 (231 lamps)
 # shot masks: the code that builds the cshot objects was not found
 lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
@@ -367,16 +371,16 @@ lamp 32,33,34     0              ROBERT PLANT  # lamp 7, I/O group 7 index 29, a
 lamp 29,30,31     0              JOHN BONHAM  # lamp 8, I/O group 7 index 33, at 0,0
 lamp 26,27,28     0              JOHN PAUL JONES  # lamp 9, I/O group 7 index 37, at 0,0
 lamp 23,24,25     0              JIMMY PAGE  # lamp 10, I/O group 7 index 41, at 0,0
-lamp 91,92,93     0              RIGHT RAMP  # lamp 11, I/O group 7 index 50, at 0,0
+lamp 91,92,93     0x400000       RIGHT RAMP  # lamp 11, I/O group 7 index 50, at 0,0; tie: Right ramp exit opto
 lamp 61,62,63     0              ELECTRIC MAGIC ARROW RGB  # lamp 12, I/O group 7 index 59, at 0,0
-lamp 53,54,55     0              LEFT RAMP  # lamp 14, I/O group 8 index 8, at 0,0
-lamp 49,50,51     0              LEFT ORBIT  # lamp 15, I/O group 8 index 12, at 0,0
-lamp 87,88,89     0              ICARUS TARGET  # lamp 16, I/O group 8 index 16, at 0,0
-lamp 80,81,82     0              SIDE RAMP  # lamp 17, I/O group 8 index 19, at 0,0
+lamp 53,54,55     0x80000        LEFT RAMP  # lamp 14, I/O group 8 index 8, at 0,0; tie: Left ramp exit opto
+lamp 49,50,51     0x40000        LEFT ORBIT  # lamp 15, I/O group 8 index 12, at 0,0; tie: Left orbit
+lamp 87,88,89     0x800          ICARUS TARGET  # lamp 16, I/O group 8 index 16, at 0,0; tie: Icarus target
+lamp 80,81,82     0x200000       SIDE RAMP  # lamp 17, I/O group 8 index 19, at 0,0; tie: Side ramp exit opto
 lamp 56           0              LEFT LOCK  # lamp 18, I/O group 8 index 24, at 0,0
-lamp 84,85,86     0              CENTER RAMP  # lamp 19, I/O group 8 index 25, at 0,0
+lamp 84,85,86     0x100000       CENTER RAMP  # lamp 19, I/O group 8 index 25, at 0,0; tie: Center ramp exit opto
 lamp 45,46,47     0              LEFT EJECT  # lamp 20, I/O group 8 index 36, at 0,0
-lamp 96,97,98     0              RIGHT ORBIT  # lamp 21, I/O group 8 index 46, at 0,0
+lamp 96,97,98     0x800000       RIGHT ORBIT  # lamp 21, I/O group 8 index 46, at 0,0; tie: Right orbit
 lamp 431,432,433  0              SPEAKER 1  # lamp 22, I/O group 6 index 1, at 0,0
 lamp 434,435,436  0              SPEAKER 2  # lamp 23, I/O group 6 index 4, at 0,0
 lamp 437,438,439  0              SPEAKER 3  # lamp 24, I/O group 6 index 7, at 0,0
@@ -504,20 +508,20 @@ lamp 5            0              TOURNAMENT START  # lamp 145, I/O group 5 index
 lamp 114          0              BOTTOM GI-WHT  # lamp 146, I/O group 7 index 1, at 0,0
 lamp 122          0              LEFT EJECT FLASH  # lamp 147, I/O group 7 index 6, at 0,0
 lamp 16           0              SONG WIZARD MODE  # lamp 148, I/O group 7 index 8, at 0,0
-lamp 40           0              LEFT 2 BANK LOWER  # lamp 149, I/O group 7 index 9, at 0,0
-lamp 41           0              LEFT 2 BANK UPPER  # lamp 150, I/O group 7 index 10, at 0,0
+lamp 40           0x5            LEFT 2 BANK LOWER  # lamp 149, I/O group 7 index 9, at 0,0; tie: Left 2 bank target bottom, Left 2 bank target bottom 2
+lamp 41           0x2            LEFT 2 BANK UPPER  # lamp 150, I/O group 7 index 10, at 0,0; tie: Left 2 bank target top
 lamp 9            0              LEFT OUTLANE  # lamp 151, I/O group 7 index 11, at 0,0
-lamp 10           0              LEFT RETURN LANE  # lamp 152, I/O group 7 index 12, at 0,0
+lamp 10           0x2000000      LEFT RETURN LANE  # lamp 152, I/O group 7 index 12, at 0,0; tie: Left return lane
 lamp 13           0              LEFT BALL SAVE  # lamp 153, I/O group 7 index 13, at 0,0
 lamp 15           0              FINAL WIZARD MODE  # lamp 154, I/O group 7 index 14, at 0,0
 lamp 14           0              SHOOT AGAIN  # lamp 155, I/O group 7 index 15, at 0,0
 lamp 17           0              TOUR WIZARD MODE  # lamp 156, I/O group 7 index 16, at 0,0
 lamp 19           0              EARLS COURT  # lamp 157, I/O group 7 index 17, at 0,0
-lamp 66           0              (R)OCK  # lamp 158, I/O group 7 index 18, at 0,0
-lamp 67           0              R(O)CK  # lamp 159, I/O group 7 index 19, at 0,0
-lamp 68           0              RO(C)K  # lamp 160, I/O group 7 index 20, at 0,0
-lamp 69           0              ROC(K)  # lamp 161, I/O group 7 index 21, at 0,0
-lamp 11           0              RIGHT RETURN LANE  # lamp 162, I/O group 7 index 22, at 0,0
+lamp 66           0x1000         (R)OCK  # lamp 158, I/O group 7 index 18, at 0,0; tie: Right 4 bank target-r
+lamp 67           0x2000         R(O)CK  # lamp 159, I/O group 7 index 19, at 0,0; tie: Right 4 bank target-o
+lamp 68           0x4000         RO(C)K  # lamp 160, I/O group 7 index 20, at 0,0; tie: Right 4 bank target-c
+lamp 69           0x18000        ROC(K)  # lamp 161, I/O group 7 index 21, at 0,0; tie: Right 4 bank target-k, Right 4 bank target-k 2
+lamp 11           0x4000000      RIGHT RETURN LANE  # lamp 162, I/O group 7 index 22, at 0,0; tie: Right return lane
 lamp 12           0              RIGHT OUTLANE  # lamp 163, I/O group 7 index 23, at 0,0
 lamp 22           0              USA 1975  # lamp 164, I/O group 7 index 24, at 0,0
 lamp 21           0              ELECTRIC MAGIC  # lamp 165, I/O group 7 index 25, at 0,0
@@ -546,16 +550,16 @@ lamp 79           0              SIDE RAMP COMBO  # lamp 187, I/O group 8 index 
 lamp 121          0              BACKPANEL FLASH  # lamp 188, I/O group 8 index 23, at 0,0
 lamp 52           0              LEFT RAMP COMBO  # lamp 189, I/O group 8 index 15, at 0,0
 lamp 83           0              CENTER RAMP COMBO  # lamp 190, I/O group 8 index 28, at 0,0
-lamp 70           0              (L)ED  # lamp 191, I/O group 8 index 31, at 0,0
-lamp 71           0              L(E)D  # lamp 192, I/O group 8 index 30, at 0,0
-lamp 72           0              LE(D)  # lamp 193, I/O group 8 index 29, at 0,0
+lamp 70           0x48           (L)ED  # lamp 191, I/O group 8 index 31, at 0,0; tie: Mid 3 bank target-l, Mid 3 bank target-l 2
+lamp 71           0x10           L(E)D  # lamp 192, I/O group 8 index 30, at 0,0; tie: Mid 3 bank target-e
+lamp 72           0x20           LE(D)  # lamp 193, I/O group 8 index 29, at 0,0; tie: Mid 3 bank target-d
 lamp 48           0              LEFT ORBIT COMBO  # lamp 194, I/O group 8 index 32, at 0,0
 lamp 42           0              EXTRA BALL  # lamp 195, I/O group 8 index 33, at 0,0
 lamp 43           0              TOUR LOCK  # lamp 196, I/O group 8 index 34, at 0,0
 lamp 44           0              LEFT EJECT COMBO  # lamp 197, I/O group 8 index 35, at 0,0
-lamp 73           0              (Z)EP  # lamp 198, I/O group 8 index 43, at 0,0
-lamp 74           0              Z(E)P  # lamp 199, I/O group 8 index 44, at 0,0
-lamp 75           0              ZE(P)  # lamp 200, I/O group 8 index 45, at 0,0
+lamp 73           0x80           (Z)EP  # lamp 198, I/O group 8 index 43, at 0,0; tie: 3 Bank drop-z
+lamp 74           0x100          Z(E)P  # lamp 199, I/O group 8 index 44, at 0,0; tie: 3 Bank drop-e
+lamp 75           0x600          ZE(P)  # lamp 200, I/O group 8 index 45, at 0,0; tie: 3 Bank drop-p, 3 Bank drop-p 2
 lamp 95           0              RIGHT ORBIT COMBO  # lamp 201, I/O group 8 index 49, at 0,0
 lamp 94           0              TOP LOCK  # lamp 202, I/O group 8 index 50, at 0,0
 lamp 118          0              LEFT POP BUMPER  # lamp 203, I/O group 8 index 51, at 0,0

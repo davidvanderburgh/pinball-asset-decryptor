@@ -14,7 +14,7 @@ PAD-421 is the case that showed this: DragonRR's Heisei project was built over a
 
 ## What ships
 
-`pinball_decryptor/plugins/stern/data/stock_prints.json.gz` holds one entry per official Spike 2 release. The key is the card's own sidx name, e.g. `godzilla_le-1_16_0.sidx`. Each entry has:
+`pinball_decryptor/plugins/stern/data/stock_prints.json.xz` holds one entry per official Spike 2 release. The key is the card's own sidx name, e.g. `godzilla_le-1_16_0.sidx`. Each entry has:
 
 - `folder`, `name`, `version`, `edition`, and `card`, the file name it was read from.
 - `files`: `{path: [size, md5[:16]]}` for every file Stern's validation manifest indexes. That covers every `scene.radium` and `scene.assets/*.asset` (pictures and videos), loose pictures, `image.bin` (the sound bank), the `image-scNN.bin` music banks, the `game` program, and the node firmware.
@@ -50,7 +50,7 @@ Caveat: the sound bank is repacked by every build, so "the sound bank differs" m
 
 ## Size: ship in the app
 
-The 53 latest releases come to about TABLE_SIZE gzipped. That is small enough to ship in the app, so there is no fetch, no network dependency and no update channel. Regenerate it when a new Stern build lands: run the script and commit the table. Windows ships it through the installer's recursive copy. Linux and macOS have an explicit `--add-data`.
+The 53 latest releases come to 1,024,164 bytes as xz (2.3 MB as gzip, 14.5 MB of JSON). That is small enough to ship in the app, so there is no fetch, no network dependency and no update channel. Regenerate it when a new Stern build lands: run the script and commit the table. Windows ships it through the installer's recursive copy. Linux and macOS have an explicit `--add-data`.
 
 ## Not done here (step 2)
 

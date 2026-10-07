@@ -28,16 +28,16 @@ its files.  Diffing it against the official one costs one directory walk plus
 reading the radiums of the scenes that changed (to count pictures).
 """
 
-import gzip
 import hashlib
 import json
+import lzma
 import os
 
 from . import sidx as sidx_mod
 
 #: The shipped table, beside this module.
 TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "data", "stock_prints.json.gz")
+                          "data", "stock_prints.json.xz")
 TABLE_FORMAT = 1
 #: Hex digits of each file MD5 kept in the table (64 bits: a collision between
 #: a changed file and its own stock digest is not a real-world event).
@@ -68,13 +68,13 @@ def load_table(path=None):
     if hit and hit[0] == key:
         return hit[1]
     try:
-        with gzip.open(path, "rt", encoding="utf-8") as f:
+        with lzma.open(path, "rt", encoding="utf-8") as f:
             data = json.load(f)
         releases = data.get("releases") if data.get("format") == TABLE_FORMAT \
             else None
         if not isinstance(releases, dict):
             releases = {}
-    except (OSError, ValueError, EOFError, AttributeError):
+    except (OSError, ValueError, EOFError, AttributeError, lzma.LZMAError):
         releases = {}
     _table_cache[path] = (key, releases)
     return releases
@@ -88,12 +88,11 @@ def save_table(releases, path=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     data = {"format": TABLE_FORMAT, "releases": releases}
     raw = json.dumps(data, sort_keys=True, separators=(",", ":"))
-    # No name, mtime=0: the same table always gzips to the same bytes.
+    # xz, not gzip: an LE and a Pro release share most paths, and gzip's
+    # 32 KB window never sees the repeat (1.0 MB vs 2.3 MB for 53 releases).
     with open(path, "wb") as out:
-        with gzip.GzipFile(filename="", fileobj=out, mode="wb",
-                           compresslevel=9,
-                           mtime=0) as gz:
-            gz.write(raw.encode("utf-8"))
+        out.write(lzma.compress(raw.encode("utf-8"),
+                                preset=9 | lzma.PRESET_EXTREME))
 
 
 def release_for(sidx_name, table=None):

@@ -83,7 +83,7 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/qoa_codec.py:pinball_decryptor/plugins/bof" \
     `# the official Stern stock fingerprints (PAD-426): data, not code` \
-    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/data/stock_prints.json.gz:pinball_decryptor/plugins/stern/data" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/data/stock_prints.json.xz:pinball_decryptor/plugins/stern/data" \
     `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
     `# carried. The gear menu's "Install Prerequisites" looks for it beside` \
     `# the package (app.py::_find_prereqs_script_linux) and an AppImage user` \

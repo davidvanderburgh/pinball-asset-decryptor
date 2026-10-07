@@ -4,7 +4,7 @@
 
 Reads every official Spike 2 card in the folder (Stern's own file names:
 ``<title>-<1_16_0>[_spike2].Release.<size>.sdcard.raw``) and writes
-``pinball_decryptor/plugins/stern/data/stock_prints.json.gz``.  Only the
+``pinball_decryptor/plugins/stern/data/stock_prints.json.xz``.  Only the
 LATEST Release build of each title is read unless ``--all`` is given (only
 the newest build of each game is supported).  Each card is checked against
 its own validation manifest first -- every file's size, and the bytes of

@@ -7,9 +7,9 @@ official card must call the official card official, and say what each build
 changed -- the question PAD-421 could not answer (a shared custom Godzilla
 card read as stock Godzilla LE 1.16).
 """
-import gzip
 import hashlib
 import json
+import lzma
 import os
 import struct
 
@@ -68,7 +68,7 @@ def _cards(tmp_path, monkeypatch, **specs):
 
 def _table(tmp_path, monkeypatch, official):
     key, rel = sp.make_release(official)
-    path = str(tmp_path / "stock_prints.json.gz")
+    path = str(tmp_path / "stock_prints.json.xz")
     sp.save_table({key: rel}, path)
     monkeypatch.setattr(sp, "TABLE_PATH", path)
     return key, rel
@@ -292,18 +292,18 @@ def test_project_details_carry_the_manufacturers_stock_answer(tmp_path):
 
 def test_table_round_trip_is_byte_stable(tmp_path):
     rel = _picture_table()
-    a, b = str(tmp_path / "a.json.gz"), str(tmp_path / "b.json.gz")
+    a, b = str(tmp_path / "a.json.xz"), str(tmp_path / "b.json.xz")
     sp.save_table(rel, a)
     sp.save_table(rel, b)
     with open(a, "rb") as fa, open(b, "rb") as fb:
         assert fa.read() == fb.read()
     assert sp.load_table(a) == rel
-    assert sp.load_table(str(tmp_path / "missing.json.gz")) == {}
+    assert sp.load_table(str(tmp_path / "missing.json.xz")) == {}
 
 
 def test_the_shipped_table_covers_the_latest_builds():
     table = sp.load_table()
-    assert table, "pinball_decryptor/plugins/stern/data/stock_prints.json.gz"
+    assert table, "pinball_decryptor/plugins/stern/data/stock_prints.json.xz"
     for key in ("godzilla_le-1_16_0.sidx", "godzilla_pro-1_16_0.sidx",
                 "metallica_spike-1_04_0.sidx", "turtles_pro-1_59_0.sidx"):
         assert key in table, key
@@ -314,5 +314,5 @@ def test_the_shipped_table_covers_the_latest_builds():
         assert set(rel["pictures"]) <= hexd
         for path, (size, md5) in rel["files"].items():
             assert len(md5) == sp.FILE_DIGITS and set(md5) <= hexd, path
-    with gzip.open(sp.TABLE_PATH, "rb") as f:
+    with lzma.open(sp.TABLE_PATH, "rb") as f:
         assert json.loads(f.read())["format"] == sp.TABLE_FORMAT

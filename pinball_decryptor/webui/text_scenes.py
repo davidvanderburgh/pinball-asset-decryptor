@@ -306,6 +306,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._sel = None
         self._listed = []
         self._focus_want = None
+        self._find_at = None          # the search match Previous / Next is on (PAD-429)
         self._token = 0
         self._frames_full = []
         self._preview_full = None
@@ -338,7 +339,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             return ["Black"]
 
     def _reset_state(self):
-        self.set(open=False, alive=False, hint=HINT, search="", scenes=[],
+        self.set(open=False, alive=False, hint=HINT, search="", scenes=[], find=None,
                  sel=None,
                  sort={"col": "#0", "rev": False}, contents=None, item=None,
                  thumb="", detail="", caption="", caption_full="",
@@ -470,7 +471,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._fonts = None
         self._text_changes = None
         self.set(hint=HINT if self._scenes else HINT_EMPTY, card_note="")
-        self._refresh_list(preselect, focus_text)
+        self._refresh_list(preselect, focus_text, jump=True)
         self._auto_trees()
         self._check_card()
 
@@ -611,10 +612,11 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                 + " ".join(n for n, _p in sc["fonts"].values()) + " "
                 + " ".join(sc["texts"])).lower()
 
-    def _refresh_list(self, preselect=None, focus_text=None):
+    def _refresh_list(self, preselect=None, focus_text=None, jump=False):
         q = (self._search or "").strip().lower()
-        # A jump in beats a search left in this window.
-        if q and preselect in self._scenes and q not in self._haystack(
+        # A jump in beats a search left in this window.  Only a jump: typing a search while a
+        # scene it does not match was picked used to wipe the search (DragonRR, PAD-429).
+        if jump and q and preselect in self._scenes and q not in self._haystack(
                 preselect):
             self._search = ""
             q = ""
@@ -634,8 +636,10 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             self._listed[0] if self._listed else None)
         self._focus_want = (want, focus_text) if (want and focus_text) \
             else None
+        self._find_at = None
         self.set(scenes=rows, search=self._search,
-                 sort={"col": self._sort_col, "rev": self._sort_rev})
+                 sort={"col": self._sort_col, "rev": self._sort_rev},
+                 find={"pos": 0, "n": len(self._find_hits())})
         if want != self._sel:
             self._drop_live_edit()
         self._sel = want
@@ -646,6 +650,63 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._search = q or ""
         self._refresh_list(preselect=self._sel)
         return True
+
+    def _find_hits(self):
+        """Every match of the search, in the list's order (DragonRR, PAD-429): each line of
+        on-screen text the words are in, as ``(scene, line index)``; a scene listed for its
+        name or a font only is one match of its own, ``(scene, None)``."""
+        q = (self._search or "").strip().lower()
+        if not q:
+            return []
+        hits = []
+        for d in self._listed:
+            lines = [(d, i) for i, t in enumerate(self._scenes[d]["texts"])
+                     if q in (t or "").lower()]
+            hits.extend(lines or [(d, None)])
+        return hits
+
+    @rpc
+    def find_step(self, delta=1):
+        """Previous / Next beside the search: go to the next match, the scene and the line of
+        text in it, round from the last to the first.  The first press lands on the first
+        match in the scene that is showing."""
+        hits = self._find_hits()
+        if not hits:
+            self.set(find={"pos": 0, "n": 0})
+            return False
+        step = -1 if int(delta or 1) < 0 else 1
+        if self._find_at in hits:
+            pos = (hits.index(self._find_at) + step) % len(hits)
+        else:
+            here = [n for n, h in enumerate(hits) if h[0] == self._sel]
+            pos = (here[0] if step > 0 else here[-1]) if here else (0 if step > 0 else -1)
+            pos %= len(hits)
+        d, line = hits[pos]
+        if d != self._sel:
+            self.select(d)
+        self._find_at = hits[pos]
+        self.set(find={"pos": pos + 1, "n": len(hits)})
+        if line is None:
+            return True
+        self.set(item="txt::%d" % line, thumb="")
+        self._find_layer(d, line)
+        return True
+
+    def _find_layer(self, d, line):
+        """In the scene editor the line is its Text layer: pick it (the n-th layer with these
+        words, for a scene that shows the same words more than once)."""
+        if not self.store.get(self.ns, "tree") or self._tman is None:
+            return
+        # the text list has a layer's lines run together ("START TERROR OF +3 SECONDS")
+        flat = lambda t: " ".join((t or "").split())             # noqa: E731
+        texts = [flat(t) for t in self._scenes[d]["texts"]]
+        words = texts[line]
+        nth = texts[:line].count(words)
+        from .text_scenes_tree import _walk_man, _kind_of, _text_of
+        same = [n["id"] for n, _p, _d in _walk_man(self._tman)
+                if flat(_text_of(self._tman, n, _kind_of(self._tman, n))) == words]
+        if same:
+            self.tree_select(same[min(nth, len(same) - 1)])
 
     @rpc
     def sort_by(self, col):

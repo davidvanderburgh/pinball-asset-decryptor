@@ -36,6 +36,9 @@ const STATE_TIP = {
   edited: "Changed since the last Write: the next Write puts it on the card.",
   written: "Written: the last Write put exactly these edits on the card.",
 };
+// PAD-429 (DragonRR): the search finds the game's on-screen text, not only scene names
+const FIND_TIP = "Finds scenes by name, font or the words they show. Enter (or the down arrow) "
+  + "goes to the next line of text with these words and picks it out; Shift+Enter goes back.";
 // The count columns the scene list has room for: a narrow list keeps the scene NAMES
 // readable and drops the counts, least useful first (Video, Fonts, then Text and Images).
 const COLS_BY_WIDTH = [[470, ["imgs", "fonts", "texts", "vids"]], [330, ["imgs", "texts"]],
@@ -324,6 +327,7 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
     openMenu({ x: e.clientX, y: e.clientY }, items);
   };
   const editor = !!(s.tree && s.tree_view);
+  const find = (s.search || "").trim() && s.find ? s.find : null;
   const stage = editor ? s.tree_view.stage : [1360, 768];
   // PAD-349 (DragonRR): the advanced unlock sits beside Preview colors, not in the Layers head
   const unlock = editor ? s.tree_view.color_unlock : null;
@@ -335,9 +339,17 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
           aria-label="Show the scene list" ...${tip("Show the scene list")}>
         <${Icon} name="right" /><span class="sc-list-tab-txt">Scenes</span><${Icon} name="right" /></button>` : null}
       <div class="scenes-left">
-        <div class="row scenes-search">
-          <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
-            delay=${200} prefix=${html`<${Icon} name="search" />`} />
+        <div class="row scenes-search" onKeyDown=${(e) => {
+            // PAD-429: Enter goes to the next match, Shift+Enter to the previous one
+            if (e.key === "Enter" && find) { e.preventDefault(); call("text_scenes.find_step", e.shiftKey ? -1 : 1); } }}>
+          <${Field} sm value=${s.search} placeholder="Search names and text" onChange=${(v) => call("text_scenes.set_search", v)}
+            delay=${200} prefix=${html`<${Icon} name="search" />`} title=${FIND_TIP}
+            suffix=${find ? html`<span class="small muted nw sc-find-n">${find.n ? (find.pos ? `${find.pos} of ${find.n}` : `${find.n} found`) : "none"}</span>` : null} />
+          ${find ? html`<${Button} size="xs" kind="ghost" icon="up" label="Previous match" disabled=${!find.n}
+              title="Previous match (Shift+Enter)" onClick=${() => call("text_scenes.find_step", -1)} />
+            <${Button} size="xs" kind="ghost" icon="down" label="Next match" disabled=${!find.n}
+              title="Next match (Enter): the next line of text with these words, in this scene or the next one"
+              onClick=${() => call("text_scenes.find_step", 1)} />` : null}
           <${InfoBadge} text=${s.hint} />
           <${Button} size="sm" icon="left" cls="sc-list-hide" label="Hide the scene list"
             title="Hide the scene list: more room for the preview (the Scenes tab on the left brings it back)"

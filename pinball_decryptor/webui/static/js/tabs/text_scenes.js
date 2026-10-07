@@ -1358,7 +1358,10 @@ function TreeSide({ t, play, playFrame }) {
         <span class="lbl">Up/down</span>
         <${Seg} value=${p.valign} onChange=${(v) => call("text_scenes.tree_text_align", p.id, null, v)}
           options=${[["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]].map(([v, l]) => ({ value: v, label: l,
-            title: `The words sit at the ${v} of the box, here and in the game` }))} />
+            disabled: p.game_layout && v !== p.valign,
+            title: p.game_layout
+              ? "The game always puts this line in the middle of its box, and shrinks it to fit. To move it up or down, move or resize the box"
+              : `The words sit at the ${v} of the box, here and in the game` }))} />
       </div>` : null}
       ${p.kind === "Text" ? html`<div class="tree-row">
         <${Button} size="xs" disabled=${p.x == null}

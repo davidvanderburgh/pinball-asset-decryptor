@@ -688,7 +688,10 @@ def apply_manifest(man, ops):
                     if not texts:
                         notes.append("text_align: node %s draws no text" % op["node"])
                     for o in texts:
-                        o["align"], o["valign"] = int(op["align"]), int(op["valign"])
+                        o["align"] = int(op["align"])
+                        if not o.get("game_layout"):
+                            # (one the game lays out stays in the middle: PAD-433)
+                            o["valign"] = int(op["valign"])
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:

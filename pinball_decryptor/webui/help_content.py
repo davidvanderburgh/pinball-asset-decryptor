@@ -512,7 +512,10 @@ HELP_CONTENT = {
             "- Text: a corner or **W px / H px** resizes its box and the words wrap inside "
             "it; **Size %** scales the words.\n"
             "- Text: **Across** (Left / Centre / Right) and **Up/down** (Top / Middle / "
-            "Bottom) place the words in their box, in the preview and in the game.\n"
+            "Bottom) place the words in their box, in the preview and in the game. Lines the "
+            "game fills in itself on Godzilla's mode screens (a battle's title and "
+            "instructions) always sit in the middle of their box and shrink to fit it; the "
+            "preview shows them that way.\n"
             "- Text: **Add a drop shadow** and **Fit box to text**. Most text is a font "
             "with baked-in colours, so **Tint** recolours it.\n"
             "- **Picture…** and **Text…** add new items.",

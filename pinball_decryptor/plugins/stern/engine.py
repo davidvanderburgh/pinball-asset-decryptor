@@ -3857,12 +3857,14 @@ def _game_program_path(reader, cancel):
     return None, None
 
 
-def _radium_text_looks(data, ops=()):
+def _radium_text_looks(data, ops=(), card_path=None):
     """``{text: [(align, multiline, top, fit)]}``: how each Text of the scene in *data*
     lays out its string (horizontal alignment, the Multiline flag byte, VerticalAlignment
     top, ScaleToBounds), keyed as :func:`radium.enumerate_strings` decodes it, with the
     alignments the Scenes window's *ops* set on it (PAD-433: the same Write puts them on the
-    card).  Empty when the scene doesn't parse."""
+    card) and, for the scene at *card_path*, the layout the game itself gives the lines it
+    lays out (:mod:`game_text_layout`: middle, shrunk to fit).  Empty when the scene doesn't
+    parse."""
     from . import scene_tree as _scene_tree
     try:
         scene = _scene_tree.parse(data)
@@ -3872,6 +3874,9 @@ def _radium_text_looks(data, ops=()):
         from . import scene_edit as _scene_edit
         _scene_edit.apply_scene(scene, [op for op in ops if op.get("op") == "text_align"],
                                 None)
+    if card_path:
+        from . import game_text_layout as _gtl
+        _gtl.mark_scene(scene, card_path)
     out = {}
     for o in scene.objects.values():
         if o.kind != "Text":
@@ -4026,7 +4031,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         # a line with line breaks is in the manifest flattened (PAD-382)
         from ...core import text_manifest as _tm
         pairs = _tm.resolve(occ_by_text, pairs)
-        looks = _radium_text_looks(data, _scene_align_ops(assets_dir, card_path))
+        looks = _radium_text_looks(data, _scene_align_ops(assets_dir, card_path), card_path)
         over = [(o, r) for o, r in pairs
                 if len(r.encode("latin1", "replace"))
                 > len(o.encode("latin1", "replace"))]

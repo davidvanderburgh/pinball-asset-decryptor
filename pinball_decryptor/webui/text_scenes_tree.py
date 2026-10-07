@@ -92,6 +92,10 @@ class TreeEditMixin:
                     self._trees = json.load(f)
             except (OSError, ValueError):
                 self._trees = {}
+            # PAD-433: the lines the game lays out itself (middle, shrunk to fit), as it does
+            from ..plugins.stern import game_text_layout
+            for card, man in self._trees.items():
+                game_text_layout.mark(man, card)
         return self._trees
 
     def _tree_card(self, scene_dir=None):
@@ -911,14 +915,17 @@ class TreeEditMixin:
 
     @staticmethod
     def _tree_text_align_of(man, n):
-        """A Text node's alignment as ``{"align": name, "valign": name}`` (PAD-433), else {}."""
+        """A Text node's alignment as ``{"align": name, "valign": name, "game_layout": bool}``
+        (PAD-433; ``game_layout``: the game puts this line in the middle of its box itself,
+        :mod:`game_text_layout`), else {}."""
         from ..plugins.stern import scene_edit
         for _s, oid in n["comps"]:
             o = man["objects"].get(str(oid)) or {}
             if o.get("kind") == "Text":
                 a, v = int(o.get("align", 1) or 0), int(o.get("valign") or 0)
                 return {"align": scene_edit.ALIGN_NAMES[a] if 0 <= a <= 2 else "centre",
-                        "valign": scene_edit.VALIGN_NAMES[v] if 0 <= v <= 2 else "top"}
+                        "valign": scene_edit.VALIGN_NAMES[v] if 0 <= v <= 2 else "top",
+                        "game_layout": bool(o.get("game_layout"))}
         return {}
 
     def _tree_picture(self, nid):
@@ -1513,7 +1520,11 @@ class TreeEditMixin:
         want = {"align": cur["align"] if align is None else str(align).lower(),
                 "valign": cur["valign"] if valign is None else str(valign).lower()}
         want["align"] = {"center": "centre"}.get(want["align"], want["align"])
-        if want["align"] not in scene_edit.ALIGN_NAMES                 or want["valign"] not in scene_edit.VALIGN_NAMES or want == cur:
+        if cur.get("game_layout") and want["valign"] != cur["valign"]:
+            return False                # the game puts this line in the middle whatever it says
+        want["game_layout"] = cur.get("game_layout")
+        if want["align"] not in scene_edit.ALIGN_NAMES \
+                or want["valign"] not in scene_edit.VALIGN_NAMES or want == cur:
             return False
         return self._tree_add({"op": "text_align", "node": node,
                                "align": scene_edit.ALIGN_NAMES.index(want["align"]),

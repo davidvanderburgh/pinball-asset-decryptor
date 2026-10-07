@@ -85,6 +85,8 @@ class TitleProfile:
     #                                  game_rules): it turns the platform back while it counts shots
     game_shows: tuple = ()           # PAD-418: ((name, kind, secs), ...) the game's own light shows a mode can play
     #                                  (the port's show_<n> lines, in number order; kind flashy / subdued / accent)
+    absent: tuple = ()               # PAD-420: HARDWARE_PARTS this machine does not have (machine_absent): the tab
+    #                                  leaves their sections out rather than saying why they cannot be used
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -260,6 +262,83 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
          "magnet", "scoop", "coils", "shield", "shows")
+
+#: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
+HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "shaker")
+
+#: PAD-420: which of HARDWARE_PARTS each model's machine has, by its game directory (the same machine on every
+#: version), from the coil names in each newest build's device table: a magnet that catches the ball (not
+#: Metallica's grave marker or electric chair, which fling it), a scoop / VUK / eject the ball settles in, another
+#: mechanism a mode may hold (a second magnet, a diverter, a gate, an up post; not a lock post), the shield
+#: platform's motor, the shaker motor. Foo Fighters' device table carries no coil names: its parts are its
+#: adjustments' (the Overlord magnet, the upper playfield diverter, the outlane up post). Venom's scoops are named
+#: by its switches and adjustments (the center and 180 scoops), not by a coil. A game directory not listed here
+#: shows every section.
+MACHINE_HARDWARE = {
+    "aerosmith": ("magnet", "scoop", "shaker"),
+    "aerosmith_le": ("magnet", "scoop", "coils", "shaker"),
+    "avengers_infinity_le": ("magnet", "scoop", "coils"),
+    "avengers_infinity_pro": ("magnet", "coils"),
+    "batman": ("magnet", "scoop", "coils"),
+    "beatles": ("magnet", "coils"),
+    "deadpool_le": ("scoop", "coils"),
+    "deadpool_pro": ("scoop", "coils"),
+    "dungeons_and_dragons_le": ("magnet", "scoop", "coils"),
+    "dungeons_and_dragons_pro": ("magnet", "scoop", "coils"),
+    "elvira3": ("scoop", "coils", "shaker"),
+    "foo_fighters_le": ("magnet", "coils"),
+    "foo_fighters_pro": ("magnet", "coils"),
+    "godzilla_le": ("magnet", "scoop", "coils", "shield"),
+    "godzilla_pro": ("magnet", "scoop"),
+    "guardians": ("magnet", "scoop", "coils", "shaker"),
+    "guardians_le": ("magnet", "scoop", "coils", "shaker"),
+    "iron_maiden_le": ("scoop", "coils"),
+    "iron_maiden_pro": ("coils",),
+    "james_bond_60th_le": ("scoop", "coils"),
+    "james_bond_le": ("magnet", "scoop", "coils"),
+    "james_bond_pro": ("scoop", "coils"),
+    "jaws_le": ("coils",),
+    "jaws_pro": ("coils",),
+    "john_wick_le": ("scoop", "coils"),
+    "john_wick_pro": ("scoop",),
+    "jurassic_park_le": ("magnet", "coils"),
+    "jurassic_park_pro": ("coils",),
+    "jurassic_park_the_pin": ("coils",),
+    "king_kong_le": ("magnet", "scoop", "coils"),
+    "king_kong_pro": ("magnet", "scoop", "coils"),
+    "led_zeppelin_le": ("magnet", "scoop", "coils", "shaker"),
+    "led_zeppelin_pro": ("scoop", "coils", "shaker"),
+    "mando_le": ("magnet", "scoop", "coils", "shaker"),
+    "mando_pro": ("scoop", "coils", "shaker"),
+    "metallica_spike": ("magnet", "scoop", "coils"),
+    "munsters_le": ("magnet", "scoop", "coils", "shaker"),
+    "munsters_pro": ("magnet", "scoop", "coils", "shaker"),
+    "rush_le": ("magnet", "scoop", "coils", "shaker"),
+    "rush_pro": ("magnet", "scoop", "coils", "shaker"),
+    "star_wars_elg": ("coils",),
+    "star_wars_le": ("scoop", "coils"),
+    "star_wars_pro": ("scoop", "coils"),
+    "stranger_things": ("scoop", "coils"),
+    "stranger_things_le": ("scoop", "coils"),
+    "sword_of_rage_le": ("magnet", "scoop", "coils", "shaker"),
+    "sword_of_rage_pro": ("magnet", "scoop", "coils", "shaker"),
+    "turtles_le": ("magnet", "coils", "shaker"),
+    "turtles_pro": ("magnet", "coils", "shaker"),
+    "uncanny_xmen_le": ("magnet", "coils"),
+    "uncanny_xmen_pro": ("magnet", "coils"),
+    "venom_le": ("scoop", "coils", "shaker"),
+    "venom_pro": ("scoop", "coils", "shaker"),
+}
+
+
+def machine_absent(game_dir):
+    """PAD-420: the HARDWARE_PARTS game ``game_dir``'s machine does not have, as a tuple; () for a machine not in
+    MACHINE_HARDWARE (every section shows)."""
+    has = MACHINE_HARDWARE.get(game_dir)
+    if has is None:
+        return ()
+    return tuple(p for p in HARDWARE_PARTS if p not in has)
+
 
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
@@ -1239,6 +1318,7 @@ def profile_from_port(path):
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         game_shows=_game_shows(port),                        # PAD-418
+        absent=machine_absent(game),                         # PAD-420
     )
 
 
@@ -1361,6 +1441,7 @@ try:
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),
+        absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
                      if c[0] not in ("magnet", "scoop", "coils", "shield", "shows"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)

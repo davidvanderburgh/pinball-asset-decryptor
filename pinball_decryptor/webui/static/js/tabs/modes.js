@@ -335,6 +335,7 @@ function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
 
 // ------------------------------------------------------------------ the pages
 function ModePage({ s, f, off, dis, rs }) {
+  const hide = s.hide || {};   // PAD-420: the parts this machine has no hardware for
   const prof = s.profile || {};
   const shots = prof.shots || [];
   const on = new Set(s.shots_on || []);
@@ -481,21 +482,21 @@ function ModePage({ s, f, off, dis, rs }) {
         </div>
         ${f.multiball && !dis.ball_save ? html`<div class="small muted">A multiball has its own ball save, below.</div>` : null}
       <//>
-      <${Sec} title="Magnet" reason=${rs.magnet}>
+      ${hide.magnet ? null : html`<${Sec} title="Magnet" reason=${rs.magnet}>
         <${Check} label=${`Hold the ball on the magnet when ${prof.magnet_shot ? `the ${prof.magnet_shot}` : "its shot"} is hit`} checked=${f.magnet} disabled=${magOff} title=${T.magnet} ns="modes" k="f:magnet" />
         <div class="row wrap" style="padding-left:26px">
           <span class="dim nw">for</span>
           <${Num} k="magnet_s" value=${f.magnet_s} disabled=${magOff || !f.magnet} width=${64} title=${T.magnet} /><span class="dim">seconds (up to 5)</span>
         </div>
-      <//>
-      <${Sec} title="Scoop" reason=${rs.scoop}>
+      <//>`}
+      ${hide.scoop ? null : html`<${Sec} title="Scoop" reason=${rs.scoop}>
         <${Check} label="Hold a ball that lands in the scoop" checked=${f.scoop} disabled=${scoopOff} title=${T.scoop} ns="modes" k="f:scoop" />
         <div class="row wrap" style="padding-left:26px">
           <span class="dim nw">for</span>
           <${Num} k="scoop_s" value=${f.scoop_s} disabled=${scoopOff || !f.scoop} width=${64} title=${T.scoop} /><span class="dim">seconds (up to 10), then the game kicks it out</span>
         </div>
-      <//>
-      <${Sec} title="Other mechanisms" reason=${rs.coils}>
+      <//>`}
+      ${hide.coils ? null : html`<${Sec} title="Other mechanisms" reason=${rs.coils}>
         ${(prof.held_coils || []).length ? (prof.held_coils || []).map((c, i) => html`<div key=${c.name || i}>
           <${Check} label=${`Hold the ${c.label}`} checked=${f["coil_on_" + i]} disabled=${coilsOff} title=${T.coils} ns="modes" k=${"f:coil_on_" + i} />
           <div class="row wrap" style="padding-left:26px">
@@ -504,11 +505,11 @@ function ModePage({ s, f, off, dis, rs }) {
             <${Select} value=${f["coil_when_" + i]} options=${withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x === "(when it starts)" ? x : "on " + x })), f["coil_when_" + i])} ns="modes" k=${"f:coil_when_" + i} disabled=${coilsOff || !f["coil_on_" + i]} width=${180} title=${T.coils} />
           </div>
         </div>`) : html`<div class="small muted">This game has no other mechanism a mode can hold.</div>`}
-      <//>
-      <${Sec} title="Shield targets" reason=${rs.shield}>
+      <//>`}
+      ${hide.shield ? null : html`<${Sec} title="Shield targets" reason=${rs.shield}>
         <${Check} label="Turn the shield targets toward the player while it runs" checked=${f.shield} disabled=${shieldOff} title=${T.shield} ns="modes" k="f:shield" />
         ${!dis.shield && shieldLive ? html`<div class="small muted" style="padding-left:26px">Only while the game's modes cannot start and ${shieldFeature} does not keep counting: otherwise the game turns them back.</div>` : null}
-      <//>
+      <//>`}
       <${Sec} title="Multiball" reason=${rs.multiball}>
         <${Check} label="A multiball: the game serves more balls" checked=${f.multiball} disabled=${mbOff} title=${T.multiball} ns="modes" k="f:multiball" />
         <div class="row wrap">

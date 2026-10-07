@@ -144,6 +144,17 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   multiball (the drains count 3-4-3-0 twice: two balls leave at once, look at its trough/drain switches), Star Wars
   LE 1.31 and Venom Pro 1.07 multiball (the game died at boot or Start on every try so far), Guardians LE 1.15 ball
   save (no shot scored on the saved ball, twice: its jackpot switches are drop targets the earlier presses left down).
+- **Light shows, run 6 result: not shippable yet.** A focused scan of the eleven registry-matched Godzilla Pro shows
+  (`shows/runs/gzpro11.20`) and a full one of Jaws LE's 216 candidates (`shows/runs/jaws_le-1.02.3`) ran clean, but
+  the measurements do not hold still between runs (process 312 moved 34 channels on one Pro run, 6 on the next; the
+  game's own lamps move 50-100 channels in the quiet window), only 2 of Jaws's 216 moved 15+ channels, and
+  `showstrip.py` draws every title on Godzilla's playfield art with only the inserts it can place. Naming a show
+  honestly needs, first: each title's own playfield picture and fixture map in the strip, and the game's own lamps
+  quieted during a scan (e.g. scan in attract with the lamp test off, or diff against a recorded quiet baseline).
+- **Venom Pro 1.07 multiball**: the game dies about 3 s after Start on every multiball run (a lock call on a null
+  object, LR 0x17d6f4 in the game) and never on its ball-save runs, so something the runtime arms for a multiball
+  mode touches the game too early on this build; its balls_in_play / multiball_serve sites sit 0x17c apart as on
+  Venom LE's. Needs a rig session: which runtime call precedes the crash (gzwatch.log, a padtrace).
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

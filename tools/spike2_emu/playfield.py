@@ -388,6 +388,9 @@ WIDE_SKIPPED_OFF = WIDE_DECODED_OFF + 4
 #: Kept as its own number because the reader must still work against one.
 PADLED_READ_V3 = SEEN_OFF
 PADLED_READ = WIDE_SKIPPED_OFF + 4
+#: Version 5 appends each coil's drive (coilmap.drive); read through it so the
+#: shaker panel (PAD-424) sees what the cabinet's motor is driven at.
+PADLED_DRIVE_READ = coilmap.DRIVE_READ
 
 #: How long a coil marker stays lit after its fire counter moves. A coil pulse
 #: is ~30 ms and a 50 ms poll would show it for one frame or miss it; this is a
@@ -3041,6 +3044,82 @@ def _mark(dq, t):
     return _rate(dq, t)
 
 
+class ShakerWatch:
+    """The cabinet's shaker motor, live (PAD-424): what the game drives it at
+    and for how long, from padled version 5's drive table.
+
+    Nothing on the artwork can show it - the shaker is a cabinet coil with no
+    place on the playfield - and its fire counter only says THAT it was sent
+    something. The drive table says what: the power (the board's PWM duty,
+    n/255) and the pulse + hold time. The guest's `until` is on a clock this
+    Windows process cannot read, so a command is timed from the frame its
+    entry CHANGES in, which is one 60 fps poll late at worst; an OFF (until
+    back to 0) ends it on the spot. A command already running when the window
+    opens is not shown: its start is unknowable from here.
+    """
+
+    def __init__(self, addr):
+        self.addr = addr
+        self._key = None
+        self._start = self._end = 0.0
+        self._pulse = (0, 0)       # (power, ms)
+        self._hold = 0
+        self.count = 0
+        self.last = ""
+        self.drawn = None
+
+    def level(self, now):
+        """The power the motor is driven at at `now` (ms), 0 when it is off."""
+        if now >= self._end:
+            return 0
+        pwr, ms = self._pulse
+        return pwr if now < self._start + ms else self._hold
+
+    def tick(self, d, now):
+        """Read one frame; the state for the page when it changed, else None."""
+        got = coilmap.drive(d, *self.addr)
+        if got is None:
+            return None
+        key = (got["until"], got["pulse_ms"], got["hold_ms"], got["pulse_pwr"],
+               got["hold_pwr"])
+        if self._key is not None and key != self._key:
+            if not got["until"]:
+                self._end = min(self._end, now)
+            elif got["pulse_pwr"] or got["hold_pwr"]:
+                total = got["pulse_ms"] + got["hold_ms"]
+                self._start, self._end = now, now + total
+                self._pulse = (got["pulse_pwr"], got["pulse_ms"])
+                self._hold = got["hold_pwr"]
+                self.count += 1
+                pwr = got["pulse_pwr"] if got["pulse_ms"] else got["hold_pwr"]
+                self.last = "%d ms at %d/255" % (total, pwr)
+                if got["hold_ms"] and got["pulse_ms"] and got["hold_pwr"] != pwr:
+                    self.last += ", then %d/255" % got["hold_pwr"]
+        self._key = key
+        pwr = self.level(now)
+        left = max(0, int(self._end - now)) if pwr else 0
+        # the countdown in 100 ms steps: the page redraws its trace by itself
+        # at its own frame rate, so a frame need only carry what changed
+        total = int(self._end - self._start)
+        state = [pwr, min(total, (left + 99) // 100 * 100), total, self.count,
+                 self.last]
+        if state == self.drawn:
+            return None
+        self.drawn = state
+        return state
+
+    def spec(self):
+        return {"name": coilmap.SHAKER, "addr": "node %d coil %d" % self.addr}
+
+
+def load_shaker():
+    """A ShakerWatch for this title's shaker, or None when it has none."""
+    if not TDIR:
+        return None
+    addr = coilmap.shaker_address(os.path.join(TDIR, "device_xy.txt"))
+    return ShakerWatch(addr) if addr else None
+
+
 class Field(LedRing):
     """The positional view: the title's layout (on its artwork when the art
     fits the coordinates, on a blank field otherwise), with every insert lit
@@ -3062,6 +3141,7 @@ class Field(LedRing):
         self.switches = load_switches()
         self.leds = load_leds()
         self.coils = load_coils()
+        self.shaker = load_shaker()
         self.last = None
         self.art = layout_art()
         wh = gameinfo.png_size(self.art) if self.art else None
@@ -3127,6 +3207,7 @@ class Field(LedRing):
                          for k, S in enumerate(self.sw_rows)],
             "trough": self.trough.spec() if (
                 self.trough is not None and self.trough.clickable) else None,
+            "shaker": self.shaker.spec() if self.shaker else None,
         }
 
     def dyn(self):
@@ -3138,6 +3219,7 @@ class Field(LedRing):
                 "coil": {"%s:%s" % k: 1 if v else 0
                          for k, v in self.coil_drawn.items()},
                 "sw": {str(s): v for s, v in self._dot_drawn.items()},
+                "shaker": self.shaker.drawn if self.shaker else None,
                 "trough": self.trough.dyn() if (
                     self.trough is not None and self.trough.clickable)
                 else None}
@@ -3235,7 +3317,7 @@ class Field(LedRing):
         emulator is there), d only once the shim has stamped its magic."""
         try:
             with open(LED_PATH, "rb") as f:
-                raw = f.read(PADLED_READ)
+                raw = f.read(PADLED_DRIVE_READ)
         except OSError:
             return None, None
         if len(raw) < LED_HDR or struct.unpack_from("<I", raw, 0)[0] != PADLED_MAGIC:
@@ -3411,6 +3493,10 @@ class Field(LedRing):
                 self._tick_coils(d, time.monotonic() * 1000.0, cf)
                 if cf:
                     frame["coil"] = cf
+                if self.shaker is not None:
+                    shk = self.shaker.tick(d, time.monotonic() * 1000.0)
+                    if shk is not None:
+                        frame["shaker"] = shk
                 live.append(["Coils addressed", str(struct.unpack_from(
                     "<I", d, COIL_GEN_OFF + 4)[0]), "", False])
                 if self.door_open():

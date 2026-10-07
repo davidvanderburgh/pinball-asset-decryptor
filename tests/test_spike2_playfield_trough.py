@@ -259,7 +259,7 @@ def test_made_state_travels_apart_from_the_markers():
         art=None, base=(313, 710), fixtures=[], coils=[], coil_drawn={},
         info=[],
         sw_rows=[dict(id=53, x=250, y=357, name="Right Scoop")],
-        trough=None, _dot_drawn={53: True})
+        trough=None, _dot_drawn={53: True}, shaker=None)
     spec = pf.Field.spec(ns)
     assert spec["switches"] == [[0, 250, 357, 53]]
     assert pf.Field.dyn(ns)["sw"] == {"53": True}

@@ -53,7 +53,7 @@ def test_a_files_own_profile_wins_over_the_projects(tmp_path):
     assert cp.own_profile(d, "images", "portrait.png") is None
     assert cp.own_profile_names(d) == {"images": {"tv.png": "Custom red",
                                                   "grey.png": "Brighter"},
-                                       "videos": {}}
+                                       "videos": {}, "text": {}}
     # the switch still decides: off is off, whatever profile it has
     cp.set_asset_slot(d, "images", "tv.png", False)
     assert "tv.png" not in cp.asset_map(d, "images", rels)

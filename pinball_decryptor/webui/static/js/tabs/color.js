@@ -686,6 +686,8 @@ function countWords(n) {
   if (n.images) parts.push(`${n.images} replaced picture${n.images === 1 ? "" : "s"}`);
   if (n.videos) parts.push(`${n.videos} replaced video${n.videos === 1 ? "" : "s"}`);
   if (n.added) parts.push(`${n.added} picture${n.added === 1 ? "" : "s"} added in Scenes`);
+  // PAD-438: lines of text in Scenes
+  if (n.text) parts.push(`${n.text} line${n.text === 1 ? "" : "s"} of text in Scenes`);
   return parts.join(", ");
 }
 
@@ -811,6 +813,9 @@ export function undoKey(e, flush) {
   return true;
 }
 
+// PAD-438: the Files mode can be on a line of text in Scenes as well as a file
+const fileWord = (f) => (f && f.kind === "text" ? "line of text" : "file");
+
 // The line under the modes: what the profile on show does to this project now.
 export function statusNote(s) {
   const assets = s.per_file && s.mode === "assets";
@@ -824,9 +829,9 @@ export function statusNote(s) {
           : html`<${Note} kind="info">${"Scenes uses the Recommended screen, tuned on a real Spike 2. Move a slider or pick a starting point to set this machine's own screen."}<//>`)
     : assets && s.file
       ? (s.file.on === false
-          ? html`<${Note} kind="info">${"No color profile is attached to this file. Pick a starting point or a saved profile, or move a slider, and it is attached."}<//>`
-          : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into this file when you build; the other files keep their own."}<//>`
-          : html`<${Note} kind="info">${"“" + (s.name || "No change") + "” changes nothing: this file goes onto the card as you made it."}<//>`)
+          ? html`<${Note} kind="info">${"No color profile is attached to this " + fileWord(s.file) + ". Pick a starting point or a saved profile, or move a slider, and it is attached."}<//>`
+          : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into this " + fileWord(s.file) + " when you build; the other files keep their own."}<//>`
+          : html`<${Note} kind="info">${"“" + (s.name || "No change") + "” changes nothing: this " + fileWord(s.file) + " goes onto the card as you made it."}<//>`)
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`

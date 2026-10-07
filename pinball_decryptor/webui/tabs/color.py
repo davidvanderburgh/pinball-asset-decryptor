@@ -168,7 +168,7 @@ class ColorTab(TabService):
                  per_file=False, all_images=False, all_videos=False,
                  asset_counts={"images": 0, "videos": 0, "added": 0},
                  asset_active=False, file=None,
-                 own_names={"images": {}, "videos": {}})
+                 own_names={"images": {}, "videos": {}, "text": {}})
 
     # -- the project ---------------------------------------------------------
     def _assets(self):
@@ -258,7 +258,7 @@ class ColorTab(TabService):
     def _asset_state(self, assets):
         """The chosen-files mode's switches and counts for the page."""
         out = {"all_images": False, "all_videos": False,
-               "asset_counts": {"images": 0, "videos": 0, "added": 0},
+               "asset_counts": {"images": 0, "videos": 0, "added": 0, "text": 0},
                "asset_active": False}
         if not (assets and os.path.isdir(assets)):
             return out
@@ -353,7 +353,7 @@ class ColorTab(TabService):
                 assets if assets and os.path.isdir(assets) else "")
         except Exception:                               # noqa: BLE001
             log.exception("color profile own names")
-            own_names = {"images": {}, "videos": {}}
+            own_names = {"images": {}, "videos": {}, "text": {}}
         if self._screen_mode():
             active = self._screen_stored
         elif fstate is not None:
@@ -664,7 +664,7 @@ class ColorTab(TabService):
         """The Color profiles bar is open beside a clicked file (PAD-368):
         its Files mode shows and changes that file's profile.  No *rel*:
         back to the project's individual files profile."""
-        if kind not in ("images", "videos") or not rel or not self._on_display:
+        if kind not in cp.FILE_PROFILES_KEY or not rel or not self._on_display:
             if self._file is not None:
                 self._file = None
                 self._rev += 1

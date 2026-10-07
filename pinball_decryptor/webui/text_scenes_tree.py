@@ -137,11 +137,21 @@ class TreeEditMixin:
         return scene_edit.ops_for(self.assets_dir, card)
 
     def _tree_edited(self, card, man):
-        from ..plugins.stern import scene_edit
+        from ..plugins.stern import scene_edit, text_colour
         # PAD-403: less the edits the project's scene already shows (its card was built with
         # them), which would otherwise move and size their nodes twice
+        ops = self._tree_ops(card)
         edited, notes = scene_edit.apply_manifest(
-            man, scene_edit.to_apply(self.assets_dir, card, man, self._tree_ops(card)))
+            man, scene_edit.to_apply(self.assets_dir, card, man, ops))
+        # PAD-438: its lines of text with the colour profile on, as the Write sets them
+        try:
+            lines, _w = text_colour.line_ops(self.assets_dir, card, edited, ops,
+                                             bake=self._look_sw()["files"])
+        except Exception:                            # noqa: BLE001
+            log.exception("scene text colours")
+            lines = []
+        if lines:
+            edited, _n = scene_edit.apply_manifest(edited, lines)
         return edited, notes
 
     def _tree_default(self, card):
@@ -824,6 +834,11 @@ class TreeEditMixin:
         picks = self._tree_pictures()
         added_ops = {int(op["id"]): op for op in ops
                      if op.get("op") == "add_picture" and op.get("id") is not None}
+        # PAD-438: a line of text's switch (its own, or its coloured font's picture's)
+        from ..core import staged_changes as _sc
+        from ..plugins.stern import text_colour as _tc
+        sidecar = _sc.load(self.assets_dir) if unlock["offered"] else {}
+        fonts = _tc.fonts_by_key(self.assets_dir) if unlock["offered"] else {}
         for n, parent, depth in _walk_man(man):
             kind = _kind_of(man, n)
             pics = []
@@ -833,14 +848,19 @@ class TreeEditMixin:
                         os.path.join(self.assets_dir, "images", *rel.split("/")))
                 if have[rel]:
                     pics.append(rel)
+            if kind == "Text":
+                color = (_text_switch(self.assets_dir, card, man, n, ops, sidecar, fonts,
+                                      picks, settings, unlock["on"], built)
+                         if unlock["offered"] else None)
+            else:
+                color = _colour_switch(n, kind, pics, picks, settings, added_ops.get(n["id"]),
+                                       unlock["on"], built)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "parent": parent["id"] if parent is not None else None,
                            "group": kind in _GROUP_KINDS,
                            "pics": ["images/" + rel for rel in pics],
                            "text": _text_of(man, n, kind),
-                           "color": _colour_switch(n, kind, pics, picks, settings,
-                                                   added_ops.get(n["id"]), unlock["on"],
-                                                   built),
+                           "color": color,
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
                            "part_off": n["id"] in self._tpart_off,
@@ -1769,6 +1789,9 @@ class TreeEditMixin:
         if not self.assets_dir or not self._colour_unlock()["offered"]:
             return False
         on = bool(on)
+        if not on:
+            # the game's own lines of text are locked again with its pictures (PAD-438)
+            _cp.drop_text_slots(self.assets_dir)
         images = self._images_here()
         if images is not None:
             try:
@@ -1859,13 +1882,69 @@ class TreeEditMixin:
             scene_edit.set_ops(self.assets_dir, card, new)
             self._tree_refresh()
             return True
+        # PAD-438: a line of text (an added one too: the edited scene drawn now has it)
+        tman = getattr(self, "_tman", None) or man
+        tindex = scene_edit._man_index(tman)
+        if node in tindex and _kind_of(tman, tindex[node][0]) == "Text":
+            return self._text_color(card, tman, tindex[node][0], ops, bool(on))
         index = scene_edit._man_index(man)
         if node not in index:
             return False
         pics = _pics_of(man, index[node][0], {})
         if len(pics) != 1:
             return False
-        rel = "images/" + pics[0]
+        return self._picture_color("images/" + pics[0], on)
+
+    def _text_color(self, card, man, n, ops, on):
+        """A line of text's colour switch (PAD-438): its own (an added line's edit, or a game
+        line's behind the unlock), or, for a font with colours of its own, that font
+        picture's."""
+        from ..core import colour_profile as _cp
+        from ..plugins.stern import scene_edit, text_colour
+        if not self._colour_unlock()["offered"]:
+            return False
+        sw = text_colour.line_switch(self.assets_dir, card, man, n, ops)
+        if sw is None or sw.get("locked"):
+            return False
+        if sw.get("font_picture"):
+            return self._picture_color("images/" + sw["font_picture"], on)
+        if sw.get("added"):
+            new = [dict(op) for op in ops]
+            for op in new:
+                if op.get("op") == "add_text" and op.get("id") == n["id"]:
+                    op["color"] = bool(on)
+            scene_edit.set_ops(self.assets_dir, card, new)
+            log.info("Scenes: %s %s", n["name"], "has the color profile attached" if on
+                     else "has no color profile attached")
+            self._tell_colour_tabs()
+            self._tree_refresh()
+            self._publish_look()
+            return True
+        _cp.set_text_slot(self.assets_dir, sw["rel"], bool(on))
+        log.info("Scenes: the game's line %s %s", n["name"], "has the color profile attached"
+                 if on else "keeps the game's own colors")
+        self._tell_colour_tabs()
+        self.pictures_changed()
+        return True
+
+    def _tell_colour_tabs(self):
+        """A line's switch moved here (PAD-438): the Color profile tab's counts and the Write
+        tab's pending list follow, as for a picture's."""
+        for ns, name in (("color", "asset_switches_changed"),
+                         ("write", "_maybe_rescan_write_preview")):
+            try:
+                fn = getattr(self.window.service(ns), name, None)
+            except Exception:                            # noqa: BLE001
+                fn = None
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:                        # noqa: BLE001
+                    log.exception("scene text colour %s.%s", ns, name)
+
+    def _picture_color(self, rel, on):
+        """One picture's colour switch (*rel* under images/), recorded where the Images tab
+        keeps it."""
         images = self.window.service("images")
         here = self._images_here()
         done = False
@@ -2578,6 +2657,26 @@ def _colour_switch(n, kind, pics, picks, settings, added_op, unlocked=False, bui
                     "stock": True}
         return {"locked": True}
     return None
+
+
+def _text_switch(assets_dir, card, man, n, ops, data, fonts, picks, settings, unlocked,
+                 built):
+    """A line of text's colour switch for the Layers list (PAD-438, DragonRR: "exactly like
+    images"): a line added here has its own (``"added"``), a game line is a blue lock until
+    the advanced box unlocks it (``"stock"``), each ``"kind": "text"`` with its
+    :func:`colour_profile.text_rel`.  A line in a font whose letters carry their own colours
+    (Godzilla's orange GameFont_Secondary) shows that font picture's switch instead, the
+    Images tab's, ``"font"`` naming it: the colours are in that picture, shared by every line
+    drawn in the font.  ``None`` for a drop shadow (it takes its line's colour)."""
+    from ..plugins.stern import text_colour
+    sw = text_colour.line_switch(assets_dir, card, man, n, ops, data, fonts)
+    if sw is None:
+        return None
+    if sw.get("font_picture"):
+        rel = sw["font_picture"]
+        c = _colour_switch(n, "Bitmap", [rel], picks, settings, None, unlocked, built)
+        return dict(c, font=sw["font"], kind="images") if c is not None else None
+    return dict(sw, kind="text")
 
 
 def _kept_size(pick, assets_dir, rel, stock=None):

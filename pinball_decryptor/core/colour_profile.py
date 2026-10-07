@@ -63,6 +63,14 @@ The game's own pictures are locked out of it, except on the advanced
 (PAD-335) and above the Scenes Layers list (PAD-344) (:data:`STOCK_IMAGES_KEY`): then a stock picture with its own switch on is
 staged from its pristine bytes with the profile baked in, the way a
 replacement is.  The tab-wide box never reaches a stock picture.
+
+LINES OF TEXT (PAD-438) get the same switches in the Scenes Layers list: a
+line added in Scenes has its own (the ``color`` key of its ``add_text``
+edit), a game line is locked until the same unlock box is ticked
+(:data:`TEXT_SLOTS_KEY`), and each can have a profile of its own (kind
+"text", keyed by :func:`text_rel`).  What is corrected is the colour the
+line is drawn in (plugins/stern/text_colour.py); a font whose letters carry
+their own colours is a picture, and its switch is that picture's.
 """
 
 import contextlib
@@ -95,8 +103,14 @@ STOCK_VIDEOS_KEY = "video_color_stock"
 #: PAD-368 (DragonRR): a file's own individual files profile, ``{rel: profile
 #: dict}`` per kind.  A file with none gets the project's one (ASSET_KEY).
 #: ``{"recommended": True}`` is the Recommended one, following the screen.
+#: PAD-438: "text" is a line of text in a scene, keyed by :func:`text_rel`.
 FILE_PROFILES_KEY = {"images": "image_color_profiles",
-                     "videos": "video_color_profiles"}
+                     "videos": "video_color_profiles",
+                     "text": "text_color_profiles"}
+#: PAD-438 (DragonRR): the game's own lines of text switched on behind the
+#: unlock box, ``{text_rel: True}`` (a line added in Scenes keeps its switch
+#: in its own ``add_text`` edit, as an added picture does).
+TEXT_SLOTS_KEY = "text_color_slots"
 
 #: Rec.601 luma weights: the grey a pixel is desaturated toward.
 _LUMA = (0.299, 0.587, 0.114)
@@ -957,9 +971,10 @@ def _own_from(stored, assets_dir, rec=None):
 
 
 def own_profile(assets_dir, kind, rel):
-    """File *rel*'s own profile (*kind* "images" / "videos"), or ``None``
-    when it has none and gets the project's individual files profile."""
-    _kind_keys(kind)
+    """File *rel*'s own profile (*kind* "images" / "videos" / "text"), or
+    ``None`` when it has none and gets the project's individual files
+    profile."""
+    _profile_kind(kind)
     if not assets_dir or not rel:
         return None
     from . import staged_changes
@@ -980,7 +995,7 @@ def store_own_profile(assets_dir, kind, rel, prof, follow=False):
     """Give file *rel* a profile of its own: *prof*, or with *follow* the
     Recommended one following the screen; neither puts it back on the
     project's individual files profile."""
-    _kind_keys(kind)
+    _profile_kind(kind)
     from . import staged_changes
     data = staged_changes.load(assets_dir)
     key = FILE_PROFILES_KEY[kind]
@@ -1053,9 +1068,10 @@ def any_asset_active(assets_dir):
 
 
 def own_profile_names(assets_dir):
-    """``{"images": {rel: label}, "videos": {rel: label}}``: the files with a
-    profile of their own, by the name their tooltips show."""
-    out = {"images": {}, "videos": {}}
+    """``{"images": {rel: label}, "videos": {rel: label}, "text": {rel:
+    label}}``: the files (and lines of text, PAD-438) with a profile of their
+    own, by the name their tooltips show."""
+    out = {kind: {} for kind in FILE_PROFILES_KEY}
     if not assets_dir:
         return out
     from . import staged_changes
@@ -1085,10 +1101,16 @@ def _kind_keys(kind):
         raise ValueError("kind must be images or videos, not %r" % (kind,))
 
 
+def _profile_kind(kind):
+    if kind not in FILE_PROFILES_KEY:
+        raise ValueError("kind must be images, videos or text, not %r"
+                         % (kind,))
+
+
 def asset_settings(assets_dir):
     """The switches: ``{"all_images", "all_videos", "images": {rel: bool},
-    "videos": {rel: bool}}`` (a file with no switch of its own follows its
-    kind's box)."""
+    "videos": {rel: bool}, "text": {text_rel: bool}}`` (a file with no switch
+    of its own follows its kind's box; a line of text has no box)."""
     from . import staged_changes
     data = staged_changes.load(assets_dir) if assets_dir else {}
 
@@ -1099,7 +1121,8 @@ def asset_settings(assets_dir):
     return {"all_images": bool(data.get(ALL_IMAGES_KEY)),
             "all_videos": bool(data.get(ALL_VIDEOS_KEY)),
             "images": _slots(IMAGE_SLOTS_KEY),
-            "videos": _slots(VIDEO_SLOTS_KEY)}
+            "videos": _slots(VIDEO_SLOTS_KEY),
+            "text": _slots(TEXT_SLOTS_KEY)}
 
 
 def set_asset_all(assets_dir, kind, on):
@@ -1159,6 +1182,55 @@ def asset_map(assets_dir, kind, rels):
             if prof is not None:
                 out[rel] = prof
     return out
+
+
+# -- lines of text in a scene (PAD-438) ----------------------------------------
+
+def text_rel(card, node):
+    """A line of text's key for its switch and its own profile: the card path
+    of its scene and its node there (a line added in Scenes: its edit's id)."""
+    return "%s#%d" % (card, int(node))
+
+
+def set_text_slot(assets_dir, rel, value):
+    """A game line's own switch, *value* True, or False / ``None`` for no
+    switch at all (it has no box to follow, as a game picture has none)."""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    m = data.get(TEXT_SLOTS_KEY)
+    m = dict(m) if isinstance(m, dict) else {}
+    if value:
+        m[str(rel)] = True
+    else:
+        m.pop(str(rel), None)
+    if m:
+        data[TEXT_SLOTS_KEY] = m
+    else:
+        data.pop(TEXT_SLOTS_KEY, None)
+    staged_changes.save(assets_dir, data)
+
+
+def drop_text_slots(assets_dir):
+    """The unlock box went off: the game's own lines are locked again, and
+    none keeps a switch for the next time it is ticked (as its pictures)."""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    if data.pop(TEXT_SLOTS_KEY, None) is not None:
+        staged_changes.save(assets_dir, data)
+
+
+def text_lines_on(assets_dir, data=None):
+    """The game's own lines switched on: their :func:`text_rel` keys, while
+    the unlock box is ticked (only then does a game line's switch count)."""
+    if not assets_dir:
+        return set()
+    if data is None:
+        from . import staged_changes
+        data = staged_changes.load(assets_dir)
+    if not data.get(STOCK_IMAGES_KEY):
+        return set()
+    m = data.get(TEXT_SLOTS_KEY)
+    return {str(r) for r, on in m.items() if on} if isinstance(m, dict) else set()
 
 
 def stock_videos_unlocked(data):
@@ -1671,11 +1743,11 @@ def machine_view(assets_dir, overlay_on=True, screen_on=True):
 
 def asset_counts(assets_dir):
     """How many files the chosen-files profile reaches now: ``{"images",
-    "videos", "added"}`` (replaced pictures, replaced videos, pictures
-    added in Scenes), by the switches alone (the profile may still be No
-    change)."""
+    "videos", "added", "text"}`` (replaced pictures, replaced videos,
+    pictures added in Scenes, lines of text in Scenes: PAD-438), by the
+    switches alone (the profile may still be No change)."""
     from . import staged_changes
-    out = {"images": 0, "videos": 0, "added": 0}
+    out = {"images": 0, "videos": 0, "added": 0, "text": 0}
     if not assets_dir:
         return out
     data = staged_changes.load(assets_dir)
@@ -1690,6 +1762,7 @@ def asset_counts(assets_dir):
     out["images"] += len(stock_image_rels(
         assets_dir, {r for r, src in picks.items() if src}))
     out["images"] += len(built_image_on(assets_dir))
+    out["text"] = len(text_lines_on(assets_dir, data))
     try:
         from ..plugins.stern import scene_edit
         for ops in scene_edit.load(assets_dir).values():
@@ -1699,6 +1772,10 @@ def asset_counts(assets_dir):
                                           op.get("image") or "",
                                           own=op.get("color"))):
                     out["added"] += 1
+                # a line added in Scenes: its own switch only (PAD-438)
+                if (isinstance(op, dict) and op.get("op") == "add_text"
+                        and op.get("color")):
+                    out["text"] += 1
     except Exception:                                   # noqa: BLE001
         pass
     return out
@@ -1741,10 +1818,10 @@ def asset_signature(assets_dir):
     own = sorted((k, rel, (resolve(k, rel) or Profile(name="")).key())
                  for k in FILE_PROFILES_KEY for rel in _own_dicts(data, k))
     s = asset_settings(assets_dir)
-    return "%s|%s|%s|%s|%s|%s%s" % (
+    return "%s|%s|%s|%s|%s|%s|%s%s" % (
         asset_profile(assets_dir).key(), own,
         s["all_images"], s["all_videos"], sorted(s["images"].items()),
-        sorted(s["videos"].items()),
+        sorted(s["videos"].items()), sorted(s["text"].items()),
         "|unlocked" if stock_images_unlocked(assets_dir) else "")
 
 

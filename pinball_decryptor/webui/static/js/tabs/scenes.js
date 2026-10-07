@@ -22,7 +22,9 @@ export default function ScenesTab() {
   const t = s.tree_view;
   const lay = t && t.sel != null ? (t.layers || []).find((l) => l.id === t.sel) : null;
   const c = lay && lay.color;
-  const file = c && !c.locked && c.rel ? { kind: "images", rel: c.rel, label: lay.name, on: !!c.on,
+  // PAD-438: a line of text has one too (kind "text"); a line in a font with colors of its
+  // own shows that font picture's (kind "images")
+  const file = c && !c.locked && c.rel ? { kind: c.kind || "images", rel: c.rel, label: lay.name, on: !!c.on,
     attach: { ns: "scenes", node: lay.id } } : null;
   let body;
   if (p.empty === "no_project") {

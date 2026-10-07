@@ -317,7 +317,7 @@ def chosen_files_rows(mfr, assets_path):
             return []
         prof = colour_profile.asset_profile(assets_path)
         own = colour_profile.own_profile_names(assets_path)
-        n_own = len(own["images"]) + len(own["videos"])
+        n_own = sum(len(v) for v in own.values())
         n = colour_profile.asset_counts(assets_path)
     except Exception:                                   # noqa: BLE001
         return []
@@ -331,6 +331,9 @@ def chosen_files_rows(mfr, assets_path):
     if n["added"]:
         parts.append("%d picture%s added in Scenes"
                      % (n["added"], "" if n["added"] == 1 else "s"))
+    if n.get("text"):
+        # PAD-438: lines of text in Scenes
+        parts.append("%d line%s of text" % (n["text"], "" if n["text"] == 1 else "s"))
     if not parts:
         return []
     # PAD-368: files with a profile of their own say so

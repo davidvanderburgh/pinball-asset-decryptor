@@ -1176,6 +1176,30 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
     return [round(nl, 3), round(nt, 3), round(nr, 3), round(nb, 3)]
 
 
+def font_colour(font, pictures):
+    """The profile baked into *font*'s atlas when its picture's colour switch is on
+    (*pictures*: :func:`pending_pictures`), else None (PAD-438): the letters are cut from it,
+    so a line drawn in that font shows it."""
+    for rel in (font or {}).get("atlas_rels") or ():
+        pic = (pictures or {}).get(str(rel).replace("\\", "/")) or {}
+        if pic.get("colour") is not None:
+            return pic["colour"]
+    return None
+
+
+def _corrected_ink(ink_of, prof, inks, key):
+    """*ink_of* with *prof* applied to the letters (kept in *inks* when given)."""
+    def ink(s):
+        k = (key, s, "cp", prof.key())
+        if inks is not None and k in inks:
+            return inks[k]
+        img = prof.apply_image(ink_of(s))
+        if inks is not None:
+            inks[k] = img
+        return img
+    return ink
+
+
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 background=None, colors=None, text_edits=None, draws=None, cache=None,
                 split=None, pictures=None, sizes=None, inks=None, view=None,
@@ -1272,8 +1296,12 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             if d.get("styled"):
                 rgba = [1.0, 1.0, 1.0, rgba[3]]          # the game ignores it (see scene_eval)
             pick = (colors or {}).get(d["text"])
-            if pick:
+            if pick and not d.get("profiled"):
+                # (a line with its colour profile applied has the recolour in it: PAD-438)
                 rgba = [c / 255.0 for c in pick[:3]] + [rgba[3]]
+            # PAD-438: a font whose letters carry their own colours gets its picture's
+            # profile, as the Write bakes it into that picture
+            art = font_colour(font, pictures)
             if inks is None:
                 ink_of = lambda s, _f=font: fr.render_text(_f, s)[0]     # noqa: E731
             else:
@@ -1281,6 +1309,9 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                     if (_k, s) not in inks:
                         inks[(_k, s)] = fr.render_text(_f, s)[0]
                     return inks[(_k, s)]
+            if art is not None:
+                ink_of = _corrected_ink(ink_of, art, inks,
+                                        (d.get("font") or "", d.get("font_px") or 0))
             mul = tuple(d["mul"][i] * (1.0 if i < 3 else rgba[3]) for i in range(4))
             boxed = d if d.get("rect") else dict(d, rect=[0, 0, w, h])
             # in its rect as the machine lays it out (text_layout: gutter, declared ascent,

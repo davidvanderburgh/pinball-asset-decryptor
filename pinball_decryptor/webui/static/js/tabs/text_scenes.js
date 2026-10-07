@@ -423,7 +423,7 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
           ${unlock && unlock.offered ? html`<div class=${cx("scenes-unlock", unlock.on && "on")} ...${tip(UNLOCK_TIP)}>
             <span class="look-head">Advanced</span>
             <${Check} checked=${!!unlock.on} onChange=${(v) => call("text_scenes.tree_color_unlocked", v)}
-              label="Unlock extracted images" cls="small" /></div>` : null}
+              label="Unlock extracted images and text" cls="small" /></div>` : null}
         </div>
         ${layout ? html`<${LayoutEditor} key=${layout.kind + "\u0000" + layout.text} d=${layout} />` : null}
         ${editor || s.preparing ? null : html`<div class="row scenes-bottom">
@@ -646,10 +646,26 @@ const gameTip = (l) => ({
 // advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
 const colorTip = (l, cs) => {
   const c = l.color || {};
-  if (c.locked) return { head: "Color: the game's own picture", lines: [
+  // PAD-438: a line of text in a font whose letters carry their own colors: the palette is
+  // that font picture's, shared by every line drawn in the font
+  const font = c.font != null ? `Its colors are in its font's own picture (${c.font || "its font"}), which every line in that font shares, in every scene: this palette is that picture's, the same one the Images tab shows.` : null;
+  if (c.locked && c.line) return { head: "Color: the game's own line of text", lines: [
+    "Stern made its colors for the machine's screen, so the individual files profile is not offered on it.",
+    "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too. A line you add has one already." ] };
+  if (c.locked) return { head: font ? "Color: the game's own font picture" : "Color: the game's own picture", lines: [
+    font,
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
-    "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images (Advanced, beside Preview colors)." ] };
+    font ? "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too."
+      : "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images and text (Advanced, beside Preview colors)." ] };
+  if (c.line) return { head: c.on ? "Color profile attached to this line" : "No color profile attached to this line", lines: [
+    layerProfile(l, cs),
+    ["Click", c.on ? "detach the color profile" : "attach the color profile"],
+    c.on ? "Its color profile is baked into the color it is drawn in when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
+      : "It goes on the card in its own colors.",
+    c.stock ? "The game's own line, unlocked: corrected from its own color when you build, so never twice."
+      : "Set for this line." ] };
   return { head: c.on ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
+    font,
     layerProfile(l, cs),
     ["Click", c.on ? "detach the color profile" : "attach the color profile"],
     c.on ? "Its color profile is baked into this picture when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
@@ -657,17 +673,17 @@ const colorTip = (l, cs) => {
     c.stock ? "The game's own picture, unlocked: corrected from its original when you build, so never twice."
       : c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
 };
-const UNLOCK_TIP = { head: "Advanced: unlock extracted images", lines: [
-  "Off: the original extracted images are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added are not locked.",
-  "On: each extracted image gets a red / green palette too, whatever is drawn in it now. A green one has the color profile attached: it is corrected from its original extracted copy when you build.",
-  "The same box as on the Images tab. Turning it off locks them again as they were." ] };
+const UNLOCK_TIP = { head: "Advanced: unlock extracted images and text", lines: [
+  "Off: the original extracted images and the game's own lines of text are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added, and lines you added, are not locked.",
+  "On: each extracted image and line of text gets a red / green palette too, whatever is drawn in it now. A green one has the color profile attached: a picture is corrected from its original extracted copy, a line of text from its own color, when you build.",
+  "The same box as Unlock extracted images on the Images tab. Turning it off locks them again as they were." ] };
 // PAD-368: the profile a layer's picture has (null for a layer with no colour switch);
 // PAD-369: a {profile} line, drawn in the one color every tooltip gives it (core/ui.js)
 export const layerProfile = (l, cs) => {
   const c = l.color;
   if (!c) return null;
   if (c.locked || !c.on) return { profile: "None" };
-  return { profile: ((cs.own_names || {}).images || {})[c.rel] || cs.asset_name || "Recommended" };
+  return { profile: ((cs.own_names || {})[c.kind || "images"] || {})[c.rel] || cs.asset_name || "Recommended" };
 };
 const rowTip = (l, cs) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
@@ -844,7 +860,7 @@ function TreeLayers({ t }) {
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
         <${Icon} name="sd" /></button>
       ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off")}
-        aria-label="Color profile on this picture" aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
+        aria-label=${l.color.line ? "Color profile on this line" : "Color profile on this picture"} aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
         onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on); }}>
         <${Icon} name=${l.color.locked ? "lock" : "palette"} /></button>` : html`<span></span>`}
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"

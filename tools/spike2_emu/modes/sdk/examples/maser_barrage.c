@@ -40,6 +40,10 @@
  * Emulator test triggers: /dump/maser_barrage.start, .stop, .shot "<shot name>".
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued) */
+#define GAME_SHOW_START "Insert chase"
+#define GAME_SHOW_END   "Colour fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -216,7 +220,7 @@ static int start(const char *why, int counted)
     kit_hud_begin(&hud, "MASER BARRAGE", "");
     show();
     kit_hud_award(&hud, 2500, "MASER BARRAGE", "LEFT RAMP  >  RIGHT RAMP  >  BUILDING");
-    kit_show_start(&show_fx, "maser start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "maser start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %u s, sequence %s > %s > %s, window %lu ms, score %llu", why, p, RUN_SECONDS,
            STEP[0].shot, STEP[1].shot, STEP[2].shot, run.window_ms, (unsigned long long)pm_score(p));
@@ -233,8 +237,10 @@ static void end(const char *why)
     kit_ledger_note(KIT_MASER, run.player, run.barrages > 0);
     sound(CUE_END);
     pa_clip_full(&own, run.barrages ? "won" : "lost");          /* the ending, full screen */
-    kit_show_start(&show_fx, run.barrages ? "maser won" : "maser lost", run.barrages ? SHOW_WON : SHOW_LOST,
-                   run.barrages ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, run.barrages ? "maser won" : "maser lost", run.barrages ? SHOW_WON : SHOW_LOST,
+                       run.barrages ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    }
     pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
     pm_snprintf(b, sizeof b, "%u BARRAGE%s  -  BEST X%u", run.barrages, run.barrages == 1 ? "" : "S", run.best_mult);
     kit_hud_title(&hud, "MASER BARRAGE TOTAL", b);

@@ -45,6 +45,10 @@
  * .light (light it for the player up), .heat "<percent>" (set the core).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): a multiball: the long storm; the core cools to embers */
+#define GAME_SHOW_START "Strobe storm"
+#define GAME_SHOW_END   "Ember fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -320,7 +324,7 @@ static int start(const char *why)
     kit_hud_begin(&hud, "BURNING GODZILLA", "");
     show();
     kit_hud_award(&hud, 3000, "MELTDOWN MULTIBALL", "HIS HEART IS A NUCLEAR REACTOR");
-    kit_show_start(&show_fx, "meltdown start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "meltdown start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %d balls, ball save %d s, core %u%%, the heart: %s, score %llu", why, p, BALLS,
            BALL_SAVE_S, run.core, JP[run.heart].shot, (unsigned long long)pm_score(p));
@@ -378,7 +382,9 @@ static void end(const char *why)
     kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     sound(CUE_END);
     pa_clip_full(&own, run.meltdowns ? "won" : "lost");
-    kit_show_start(&show_fx, "meltdown end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, "meltdown end", SHOW_END, N_SHOW(SHOW_END));
+    }
     pm_snprintf(b, sizeof b, "%u JACKPOT%s  -  %u MELTDOWN%s SURVIVED", run.jackpots, run.jackpots == 1 ? "" : "S",
                 run.meltdowns, run.meltdowns == 1 ? "" : "S");
     kit_hud_title(&hud, "MELTDOWN TOTAL", b);

@@ -455,9 +455,18 @@ class ColorTab(TabService):
     @staticmethod
     def _put_raw(data, key, value):
         if key.startswith("files\n"):
+            # PAD-439: *value* is {rel: own profile or None} for some files;
+            # the others keep theirs
             k = cp.FILE_PROFILES_KEY[key.split("\n", 1)[1]]
-            if value:
-                data[k] = value
+            m = dict(data.get(k) or {}) if isinstance(data.get(k), dict) \
+                else {}
+            for rel, v in (value or {}).items():
+                if v is None:
+                    m.pop(rel, None)
+                else:
+                    m[rel] = v
+            if m:
+                data[k] = m
             else:
                 data.pop(k, None)
         elif key.startswith("file\n"):
@@ -481,6 +490,13 @@ class ColorTab(TabService):
     def _stored_raw(self, key):
         d = self._raw(staged_changes.load(self._project), key)
         return json.dumps(d, sort_keys=True) if d is not None else None
+
+    def _files_raw(self, mkey, rels):
+        """PAD-439: ``{rel: own profile as stored, or None}`` of *rels* under
+        *mkey* ("files\\n<kind>"), as an Undo step keeps it."""
+        m = self._raw(staged_changes.load(self._project), mkey)
+        m = m if isinstance(m, dict) else {}
+        return json.dumps({r: m.get(r) for r in rels}, sort_keys=True)
 
     def _remember(self, key, before, group=None):
         """After a change to the profile stored under *key*: *before* (what
@@ -514,10 +530,12 @@ class ColorTab(TabService):
         step = steps.pop()
         where, back, switches = key, step, None
         if isinstance(step, tuple):
-            # PAD-439: Apply to all's step: every file's own profile of the
-            # kind, and the switches it attached
+            # PAD-439: Apply to all's step: the own profiles of the files it
+            # reached, and the switches it attached
             where, back, switches = step
-        now = self._stored_raw(where)
+            now = self._files_raw(where, json.loads(back))
+        else:
+            now = self._stored_raw(key)
         self._last_move.pop(key, None)
         try:
             data = staged_changes.load(assets)
@@ -802,17 +820,11 @@ class ColorTab(TabService):
         if not compat.messagebox.askyesno("Apply to all %s" % many, msg):
             return False
         # read again: the page went on turning while the question was up
-        before = self._stored_raw(mkey)
-        new = self._raw(staged_changes.load(assets), mkey)
-        new = dict(new) if isinstance(new, dict) else {}
-        for r in targets:
-            if mine is None:
-                new.pop(r, None)
-            else:
-                new[r] = json.loads(json.dumps(mine))
+        before = self._files_raw(mkey, targets)
         try:
             data = staged_changes.load(assets)
-            self._put_raw(data, mkey, new)
+            self._put_raw(data, mkey, {r: json.loads(json.dumps(mine))
+                                       for r in targets})
             staged_changes.save(assets, data)
         except Exception as e:                          # noqa: BLE001
             self.set(problems=["could not save the files' profiles (%s)" % e])

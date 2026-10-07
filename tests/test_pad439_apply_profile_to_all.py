@@ -73,10 +73,13 @@ def test_apply_to_all_videos_asks_first_and_undoes_as_one_step(tmp_path):
         n = len(w.asked)
         assert w.call("color.apply_to_all") is False
         assert len(w.asked) == n
+        # a file it never reached, given its own since, is not Undo's business
+        cp.store_own_profile(assets, "videos", "elsewhere.mp4", cp.Profile(name="Else"))
         # Undo: the profiles AND the switches as they were
         assert w.call("color.undo")
         w.drain()
-        assert set(cp.own_profile_names(assets)["videos"]) == {CLIPS[0]}
+        assert set(cp.own_profile_names(assets)["videos"]) == {CLIPS[0], "elsewhere.mp4"}
+        cp.store_own_profile(assets, "videos", "elsewhere.mp4", None)
         assert staged_changes.load(assets)["video_color_slots"] == {CLIPS[0]: True}
         assert {r["rel"]: r["col"] for r in w.state("video")["rows"]} == {
             CLIPS[0]: True, CLIPS[1]: False, CLIPS[2]: False}

@@ -92,6 +92,18 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   playfield view and the runtime's lamp layer during the mode before calling them proven or not.
   Mandalorian Pro and Munsters Pro booted to Tech Alerts, which the lights job did not take as booted (fixed;
   `lights/rb2`). Multiball: running (`mb/rb`), the Aerosmith pair passed 3, 4, 3, 2, 1.
+- **Light shows, Godzilla Pro 1.16 first** (its only yellow left). The game's process registry has the same ids on
+  both models (Pro registry 0x720c14, LE 0x72bc40, 347 entries of 12 bytes), and the LE's registry entries ARE its
+  port's `site show_<n>` lines, so the Pro's bodies for the LE's ten shows are: 312 0x1cb718, 213 0x11532c, 300
+  0x1c8e70, 301 0x1c8f34, 302 0x1c8ff8, 304 0x1c90bc, 330 0x1cd40c, 315 0x1d03b8, 299 0x1c8730, and the attract
+  director's sweep at 0x1cb0f4 by signature (`shows/sigmatch.py`). The helper's Pro scan (`shows/runs/godzilla_pro-1.16.20`)
+  says they look different on the Pro (300 is red, 304 moves nothing), and `shows/calib/res.json` is not in the LE
+  port's order, so do not reuse the LE's names blind: scan just these eleven on the Pro (`mkscan.py` with an
+  entries file, `scan_job.sh`, 20 s each) with a glshot of the playfield view per show, and name them from that.
+  The same registry-id route gives every other title's candidates once one show per title is named by eye.
+- **Jaws Pro 1.02**: the runtime reads in_game 0 with player 1 during a game, so `data mode_mask 0x89e53e` &
+  `value mode_mask_busy 0x210` (copied from Jaws LE) stays busy. Needs a memory read in a running Pro game
+  (a probe mode logging the mask word before and after Start); desk matching of the LE's derivation sites failed.
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

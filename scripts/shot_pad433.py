@@ -4,7 +4,7 @@
 
 Copies the project's images/ and text/ to a scratch folder (nothing is written to the real
 one), opens Scenes on the Gigan battle intro, selects its "BATTLE FOR TOKYO" line
-(Line1_Instance) and makes its box 160 px taller, as DragonRR did.  With ``middle`` (a build
+(Line1_Instance) and sets its box to 340 x 220 (the line wraps), as DragonRR did.  With ``middle`` (a build
 that has the alignment buttons) the line is then set to the middle of its box.
 """
 import os
@@ -64,7 +64,8 @@ def main():
                 return state()["tree_view"]["props"]
             pr = pick()
             print("box:", pr["x"], pr["y"], pr["w"], pr["h"], flush=True)
-            api("text_scenes.tree_set_box", node, pr["x"], pr["y"], pr["w"], pr["h"] + 160)
+            # DragonRR's box: narrow enough to wrap the line, stretched well below it
+            api("text_scenes.tree_set_box", node, 510, pr["y"], 340, 220)
             rig._wait(lambda: not state().get("tree_busy"), 60)
             if middle:
                 api("text_scenes.tree_text_align", node, None, "middle")

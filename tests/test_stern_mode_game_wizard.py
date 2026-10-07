@@ -228,6 +228,141 @@ def test_a_bad_how_is_skipped_and_the_file_is_not_valid(harness_wizard, tmp_path
 
 
 # ---- the runtime -------------------------------------------------------------------------------
+#: the runtime's wizard code, lifted verbatim, over a fake game: the table, the player's words, the refresh byte and a
+#: start that answers as the game's does (it starts the selected one when "ready", unlights them all, marks it played).
+#: Built non-PIE so every address fits the runtime's 32-bit words, as on the machine.
+WIZ_HOST = r'''
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
+#include <stdlib.h>
+#define PM_CAN_GAME_WIZARDS 0x2000000u
+#define PM_WIZARD_LIGHT 0
+#define PM_WIZARD_START 1
+#define PM_WIZARD_LIT 1
+#define PM_WIZARD_STARTED 2
+#define MAP_R 1u
+#define MAP_X 2u
+#define MAP_GAME 4u
+#define pm_snprintf snprintf
+struct pm_mode { int x; };
+static unsigned can = PM_CAN_GAME_WIZARDS;
+static unsigned state[12], table[4][8];
+static unsigned char dirty;
+static int ready = 1, in_game = 1, starts;
+static unsigned player = 1;
+static const struct pm_mode ours = { 1 }, *block_owner, *running;
+static char block_who[40] = "RUSH";
+static int game_start(void) { starts++; return 1; }
+static int wizard_start(void)                 /* the game's 0x110d98 */
+{
+    unsigned p = player, sel = state[p - 1];
+    if (!ready || !state[4 + p - 1]) return 0;
+    starts += 100 * (int)(sel + 1);           /* which one it started */
+    state[4 + p - 1] = 0;
+    state[8 + p - 1] |= table[sel & 3][1];
+    return 1;
+}
+static void say(const char *fmt, ...) { va_list a; va_start(a, fmt); printf("SAY "); vprintf(fmt, a); printf("\n"); va_end(a); }
+static unsigned data(const char *n)
+{
+    return !strcmp(n, "wizard_state") ? (unsigned)(unsigned long)state : !strcmp(n, "wizard_table")
+        ? (unsigned)(unsigned long)table : !strcmp(n, "lamps_dirty") ? (unsigned)(unsigned long)&dirty : 0;
+}
+static unsigned fn(const char *n) { return !strcmp(n, "wizard_start") ? (unsigned)(unsigned long)wizard_start : 0; }
+long pm_port_value(const char *n, long f) { return !strcmp(n, "wizard_entry") ? 32 : f; }
+static const char *const NAMES[] = { "Chaos at Crab Key", "Ahoy Mr. Bond", "Goldfinger's Jackpot", "Duel on the Disco Volante" };
+const char *pm_port_text(const char *n)
+{
+    int k;
+    if (strncmp(n, "wizard_name_", 12)) return 0;
+    k = atoi(n + 12);
+    return k >= 1 && k <= 4 ? NAMES[k - 1] : 0;
+}
+unsigned pm_player(void) { return player; }
+int pm_in_game(void) { return in_game; }
+static int wizards_n = 4;
+static struct { int n; unsigned p, sel, lit, played; } wiz_hold;
+%(lifted)s
+int main(int argc, char **argv)
+{
+    int i, k;
+    for (k = 0; k < 4; k++) { table[k][0] = (unsigned)k; table[k][1] = 1u << k; table[k][3] = 0x1000u + (unsigned)k; }
+    for (i = 1; i < argc; i++) {
+        const char *c = argv[i];
+        if (!strcmp(c, "light") || !strcmp(c, "start")) {
+            int r = pm_game_wizard_named(argv[++i], !strcmp(c, "start") ? PM_WIZARD_START : PM_WIZARD_LIGHT);
+            printf("R %d\n", r);
+        } else if (!strcmp(c, "notready")) ready = 0;
+        else if (!strcmp(c, "ready")) ready = 1;
+        else if (!strcmp(c, "nogame")) in_game = 0;
+        else if (!strcmp(c, "player")) player = (unsigned)atoi(argv[++i]);
+        else if (!strcmp(c, "block")) block_owner = running = &ours;
+        else if (!strcmp(c, "ramp_vetoed")) {    /* the Right ramp while a mode of ours refuses the start */
+            wizard_refused(table[state[player - 1] & 3][3]);
+            state[4 + player - 1] = 0;          /* what the game's start then does anyway */
+            state[8 + player - 1] |= table[state[player - 1] & 3][1];
+        } else if (!strcmp(c, "tick")) wizards_tick();
+        dirty = 0;
+        printf("S p%u sel %u lit %x played %x starts %d\n", player, state[player - 1], state[4 + player - 1],
+               state[8 + player - 1], starts);
+        (void)game_start;
+    }
+    return 0;
+}
+'''
+
+
+def _wiz(tmp_path, *args):
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    from tests.test_spike2_mode_roster import _host_run, _lift
+    lifted = "\n".join(_lift(src, sig) for sig in (
+        "static unsigned *wizard_entry(int n)", "static const char *wizard_name(int n)",
+        "static void wizard_refused(unsigned start)\n{", "static void wizards_tick(void)",
+        "int pm_game_wizard(int n, int how)", "int pm_game_wizard_named(const char *name, int how)"))
+    out = _host_run(tmp_path, WIZ_HOST.replace("%(lifted)s", lifted), flags=("-no-pie", "-fno-pie"), args=args)
+    return out.splitlines()
+
+
+def test_the_runtime_lights_one_as_the_game_does(tmp_path):
+    out = _wiz(tmp_path, "light", "goldfinger's jackpot")
+    assert "R 1" in out and out[-1] == "S p1 sel 2 lit 4 played 0 starts 0"
+    assert any("lit and selected for player 1" in line for line in out)
+
+
+def test_the_runtime_starts_one_through_the_games_own_start(tmp_path):
+    out = _wiz(tmp_path, "start", "Ahoy Mr. Bond")
+    assert "R 2" in out and out[-1] == "S p1 sel 1 lit 0 played 2 starts 200"       # the game started entry 1
+    assert any("the game started it (its own start), player 1" in line for line in out)
+
+
+def test_the_runtime_leaves_it_lit_when_the_game_would_not_start_one(tmp_path):
+    out = _wiz(tmp_path, "notready", "start", "Chaos at Crab Key")
+    assert "R 1" in out and out[-1] == "S p1 sel 0 lit 1 played 0 starts 0"
+    assert any("would not start it now" in line for line in out)
+
+
+def test_the_runtime_lights_instead_of_starting_while_a_mode_of_ours_blocks(tmp_path):
+    out = _wiz(tmp_path, "block", "start", "Ahoy Mr. Bond")
+    assert "R 1" in out and out[-1] == "S p1 sel 1 lit 2 played 0 starts 0"
+    assert any("RUSH holds the game's modes off, so it is lit, not started" in line for line in out)
+
+
+def test_the_runtime_keeps_a_vetoed_start_lit_on_the_next_tick(tmp_path):
+    out = _wiz(tmp_path, "player", "2", "light", "Ahoy Mr. Bond", "ramp_vetoed", "tick")
+    states = [line for line in out if line.startswith("S ")]
+    assert states[-2] == "S p2 sel 1 lit 0 played 2 starts 0"          # the game's start, refused, unlit it
+    assert states[-1] == "S p2 sel 1 lit 2 played 0 starts 0"          # and the tick put it back
+    assert any("its start was refused while RUSH runs - kept lit for player 2" in line for line in out)
+
+
+def test_the_runtime_refuses_with_no_game_or_no_such_wizard(tmp_path):
+    out = _wiz(tmp_path, "nogame", "light", "Ahoy Mr. Bond", "ready", "light", "Nope")
+    assert out.count("R 0") == 2 and out[-1] == "S p1 sel 0 lit 0 played 0 starts 0"
+    assert any("not handed over - no game" in line for line in out)
+    assert any("not one of this game's mini-wizards" in line for line in out)
+
+
 def test_the_runtime_keeps_a_refused_start_lit_and_lights_a_start_while_a_mode_blocks():
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
     veto = src[src.index("static int on_block_start("):]

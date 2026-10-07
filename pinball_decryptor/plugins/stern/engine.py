@@ -4232,10 +4232,21 @@ def _scene_line_colours(assets_dir, card_path, ops, log):
     if lines:
         _text_colour.remember(assets_dir, card_path, written)
         n_on = sum(1 for e in lines if e["node"] in written)
-        log("Scene %s: the color profile goes into %d line(s) of text%s." % (
+        msg = "Scene %s: the color profile goes into %d line(s) of text%s." % (
             card_path, n_on, "" if len(lines) == n_on else
-            "; %d line(s) get their own colors back" % (len(lines) - n_on)), "info")
+            "; %d line(s) get their own colors back" % (len(lines) - n_on))
+        # a scene that grows is worked out twice in one Write (planned, then written whole)
+        said = getattr(_LINES_SAID, "v", None)
+        if said is None:
+            said = _LINES_SAID.v = {}
+        now = time.monotonic()
+        if now - said.get(msg, -1e9) > 120:
+            log(msg, "info")
+        said[msg] = now
     return lines
+
+
+_LINES_SAID = threading.local()
 
 
 def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_overlays):

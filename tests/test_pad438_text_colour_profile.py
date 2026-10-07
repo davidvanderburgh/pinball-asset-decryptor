@@ -231,6 +231,7 @@ def test_the_write_corrects_a_switched_on_line_in_place(tmp_path):
     """A scene whose only change is a switched-on line is written, in place."""
     a = _project(tmp_path)
     data = _data()
+    engine._LINES_SAID.v = {}                  # said once per Write, not once per process
     ov, msgs = {}, []
     writes, n, whole = engine._scene_tree_plan(
         _FakeReader({CARD: data}), a, lambda m, lvl="info": msgs.append((lvl, m)),

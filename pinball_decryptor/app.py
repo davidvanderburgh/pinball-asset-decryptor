@@ -1460,6 +1460,14 @@ class App:
                 pass
             return prev_saved  # cross-mfr path — keep what we had
 
+        def _compare_path(current_var, prev_saved):
+            # The Compare pair may be two extract folders (PAD-442): a
+            # folder is nobody's card image, so detect() can't vouch for it.
+            current = current_var.strip()
+            if current and os.path.isdir(current):
+                return current
+            return _safe_input_path(current, prev_saved)
+
         section[key] = {
             "extract_input": _safe_input_path(
                 self.window.extract_input_var.get(),
@@ -1470,10 +1478,10 @@ class App:
                 existing.get("write_original", "")),
             "write_assets": self.window.write_assets_var.get().strip(),
             "write_output": self.window.write_output_var.get().strip(),
-            "compare_a": _safe_input_path(
+            "compare_a": _compare_path(
                 self.window.compare_a_var.get(),
                 existing.get("compare_a", "")),
-            "compare_b": _safe_input_path(
+            "compare_b": _compare_path(
                 self.window.compare_b_var.get(),
                 existing.get("compare_b", "")),
             "extract_options": self.window.get_extract_options(),

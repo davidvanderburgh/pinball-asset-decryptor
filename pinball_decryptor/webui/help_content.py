@@ -2078,6 +2078,27 @@ HELP_CONTENT = {
          "- the sounds\n"
          "- adjustment defaults and the high-score board\n\n"
          "**Copy Report** puts the whole report on the clipboard as plain text."),
+        ("Two project folders", [
+            "Pick a project folder for A and for B (**Folder…**) to check two versions "
+            "of a mod, or a mod against the stock extract. Every manufacturer has this, "
+            "not only the ones whose cards can be compared.",
+            {"flow": [
+                {"icon": "folder", "title": "Folder A", "text": "say, version 1.0 of your mod"},
+                {"icon": "folder", "title": "Folder B", "text": "and version 1.1"},
+                {"icon": "compare", "title": "Compare",
+                 "text": "added, changed, moved and deleted files"}]},
+            "- Files are compared as they are in the folders now, so a replacement you "
+            "picked counts even though the folder was extracted from the stock card.\n"
+            "- By kind: sounds, videos, images, the Text tab's strings, everything else. "
+            "A file renamed or moved is one **Moved** row.\n"
+            "- **Project settings** lists what a build uses that no file holds: a "
+            "sound's Level, a clip's length or conversion, which files get the color "
+            "profile.\n"
+            "- Stern sounds pair up by slot, whatever names the two extracts gave them.\n"
+            "- The first compare of two big projects reads every file once (a few "
+            "seconds per GB); after that it is quick.\n"
+            "- **Double-click** a file row to open the file straight from its folder.",
+        ]),
         ("Reading the report",
          "Every list is complete: a version that renumbers 4,000 sounds lists 4,000 "
          "rows.\n\n"

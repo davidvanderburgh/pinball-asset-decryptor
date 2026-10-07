@@ -82,6 +82,8 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/qoa_codec.py:pinball_decryptor/plugins/bof" \
+    `# the official Stern stock fingerprints (PAD-426): data, not code` \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/data/stock_prints.json.xz:pinball_decryptor/plugins/stern/data" \
     `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
     `# carried. The gear menu's "Install Prerequisites" looks for it beside` \
     `# the package (app.py::_find_prereqs_script_linux) and an AppImage user` \
@@ -129,6 +131,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.menu_visibility" \
     --hidden-import "pinball_decryptor.plugins.stern.info" \
     --hidden-import "pinball_decryptor.plugins.stern.compare" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_prints" \
     --hidden-import "pinball_decryptor.plugins.stern.multiimage" \
     --hidden-import "pinball_decryptor.plugins.stern.card_size" \
     --hidden-import "pinball_decryptor.core.image_info" \

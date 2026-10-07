@@ -4674,6 +4674,27 @@ class App:
                             amend_extract_source(out_path, card_version=ver)
                     except Exception:
                         pass
+                    # Was this the card Stern released?  The project keeps
+                    # the answer, so its baseline is known to be stock or
+                    # known to be someone's build (PAD-426).  Every file's
+                    # bytes are hashed: a card built elsewhere can keep
+                    # Stern's records for files it replaced.
+                    try:
+                        check = getattr(mfr, "stock_check", None)
+                        stock = check(in_path, deep=True) if check else None
+                        if stock and stock["status"] in ("official",
+                                                         "modified"):
+                            from .core.extract_source import (
+                                amend_extract_source)
+                            amend_extract_source(out_path, stock={
+                                k: stock[k] for k in ("status", "label",
+                                                      "sidx", "text")})
+                            self.window.append_log(
+                                "Source card: " + stock["text"],
+                                "success" if stock["status"] == "official"
+                                else "warning")
+                    except Exception:
+                        pass
                 threading.Thread(target=_stamp, daemon=True).start()
             # The assets folder was pointed at this output dir at extract START
             # (before it held any files), so any Replace-tab scan triggered in

@@ -733,6 +733,26 @@ class SternManufacturer(Manufacturer):
         from .info import card_version_probe
         return card_version_probe(path)
 
+    def stock_check(self, path, deep=False):
+        """Is the card image at *path* the card Stern released, or one built
+        from it?  :func:`stock_prints.check_card`'s verdict dict, or
+        ``None`` for a card that has no official record to check against
+        (Spike 1, Whitestar).  *deep* hashes every file's bytes (minutes on
+        a spinning disk).  Opens the image: call off the UI thread."""
+        if path.lower().endswith(".zip") or detect_spike1_game(path)                 is not None:
+            return None
+        from .stock_prints import check_card
+        return check_card(path, deep=deep)
+
+    def project_stock(self, assets_dir):
+        """``{"status", "label", "text"}``: was the project at *assets_dir*
+        extracted from an official Stern card (see
+        :func:`stock_prints.check_project`)?  ``None`` when there is
+        nothing to go on."""
+        from .stock_prints import check_project
+        got = check_project(assets_dir)
+        return got if got["status"] != "unknown" else None
+
     def compare_images(self, path_a, path_b, assets_a=None, assets_b=None):
         # Spike 2 cards only — a Whitestar MAME zip has no manifest/firmware
         # to diff, and the Spike 1 comparer isn't built yet, so refuse with a

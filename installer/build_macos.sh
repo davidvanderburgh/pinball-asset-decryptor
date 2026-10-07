@@ -100,6 +100,8 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/qoa_codec.py:pinball_decryptor/plugins/bof" \
+    `# the official Stern stock fingerprints (PAD-426): data, not code` \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/data/stock_prints.json.xz:pinball_decryptor/plugins/stern/data" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto_v3.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/filelist.py:pinball_decryptor/plugins/jjp" \
@@ -138,6 +140,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.menu_visibility" \
     --hidden-import "pinball_decryptor.plugins.stern.info" \
     --hidden-import "pinball_decryptor.plugins.stern.compare" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_prints" \
     --hidden-import "pinball_decryptor.plugins.stern.multiimage" \
     --hidden-import "pinball_decryptor.plugins.stern.card_size" \
     --hidden-import "pinball_decryptor.core.image_info" \

@@ -437,6 +437,10 @@ replacements on top, which win on any slot the two share - so a
 working folder that has been built, re-extracted and edited again
 keeps everything without fetching the old card back.
 
+## Compare tab
+
+**Compare** sets two things side by side. Pick two card images with **Image…** to see what changed between two versions of a game, or two project folders with **Folder…** to see what differs between two extracts of your own: the tab lists every sound, video, picture, text file and other file as Added, Modified, Moved or Deleted, plus a **Project settings** section for the tab settings and color profiles that differ. Folders are read as they are now, so a replacement you picked shows as Modified; sizes settle most files and only the rest are read, with an "N of M files read" line while it works. Opening a folder row opens that file itself. Folder compare works for every manufacturer the app extracts, and the last folder pair is remembered.
+
 ## Partition Explorer
 
 And the Partition Explorer browses the raw card image's ext4 filesystem

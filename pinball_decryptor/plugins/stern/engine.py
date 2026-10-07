@@ -3857,16 +3857,21 @@ def _game_program_path(reader, cancel):
     return None, None
 
 
-def _radium_text_looks(data):
+def _radium_text_looks(data, ops=()):
     """``{text: [(align, multiline, top, fit)]}``: how each Text of the scene in *data*
     lays out its string (horizontal alignment, the Multiline flag byte, VerticalAlignment
-    top, ScaleToBounds), keyed as :func:`radium.enumerate_strings` decodes it.  Empty when
-    the scene doesn't parse."""
+    top, ScaleToBounds), keyed as :func:`radium.enumerate_strings` decodes it, with the
+    alignments the Scenes window's *ops* set on it (PAD-433: the same Write puts them on the
+    card).  Empty when the scene doesn't parse."""
     from . import scene_tree as _scene_tree
     try:
         scene = _scene_tree.parse(data)
     except Exception:                                  # noqa: BLE001
         return {}
+    if any(op.get("op") == "text_align" for op in ops or ()):
+        from . import scene_edit as _scene_edit
+        _scene_edit.apply_scene(scene, [op for op in ops if op.get("op") == "text_align"],
+                                None)
     out = {}
     for o in scene.objects.values():
         if o.kind != "Text":
@@ -3877,6 +3882,14 @@ def _radium_text_looks(data):
         out.setdefault(b["text"].decode("latin1"), []).append(
             (int(b.get("align") or 0), bool(flags[0]), not tail[1], bool(tail[0])))
     return out
+
+
+def _scene_align_ops(assets_dir, card_path):
+    """The Scenes window's alignment edits (``text_align``) of the scene at *card_path*."""
+    from . import scene_edit as _scene_edit
+    edits = _scene_edit.load(assets_dir) if assets_dir else {}
+    ops = edits.get(card_path) or edits.get(card_path.rstrip("/") + "/scene.radium") or ()
+    return [op for op in ops if op.get("op") == "text_align"]
 
 
 def _padded_text(new_bytes, orig_len, looks=()):
@@ -4013,7 +4026,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         # a line with line breaks is in the manifest flattened (PAD-382)
         from ...core import text_manifest as _tm
         pairs = _tm.resolve(occ_by_text, pairs)
-        looks = _radium_text_looks(data)
+        looks = _radium_text_looks(data, _scene_align_ops(assets_dir, card_path))
         over = [(o, r) for o, r in pairs
                 if len(r.encode("latin1", "replace"))
                 > len(o.encode("latin1", "replace"))]

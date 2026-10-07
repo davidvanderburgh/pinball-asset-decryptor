@@ -511,6 +511,8 @@ HELP_CONTENT = {
             "- A picture shows its size and scale; **Draw 1:1** draws it pixel for pixel.\n"
             "- Text: a corner or **W px / H px** resizes its box and the words wrap inside "
             "it; **Size %** scales the words.\n"
+            "- Text: **Across** (Left / Centre / Right) and **Up/down** (Top / Middle / "
+            "Bottom) place the words in their box, in the preview and in the game.\n"
             "- Text: **Add a drop shadow** and **Fit box to text**. Most text is a font "
             "with baked-in colours, so **Tint** recolours it.\n"
             "- **Picture…** and **Text…** add new items.",

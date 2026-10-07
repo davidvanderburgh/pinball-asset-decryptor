@@ -61,6 +61,9 @@ RELDIR = ("images", "scene_textures")
 FILENAME = "scene_edits.json"
 BUILT_FILENAME = "scene_edits_built.json"   # the edits as the last successful Write built them
 FIRST_ADDED_ID = 0x7F000000          # preview ids of added nodes (never a stock id)
+#: a Text's alignment word (across) and VerticalAlignment (up and down), by value (PAD-433)
+ALIGN_NAMES = ("left", "centre", "right")
+VALIGN_NAMES = ("top", "middle", "bottom")
 
 
 class SceneEditError(ValueError):
@@ -127,6 +130,8 @@ def add(assets_dir, card, op):
         last["s"] = round(last["s"] * op["s"], 6)
         if abs(last["s"] - 1.0) < 1e-6 and abs(last.get("sy", 1.0) - 1.0) < 1e-6:
             ops.pop()
+    elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_align":
+        last["align"], last["valign"] = op["align"], op["valign"]
     elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_rect":
         last["rect"] = op["rect"]
         if op.get("wrap"):
@@ -503,6 +508,8 @@ def describe(op):
         return "removed"
     if k == "text_rect":
         return "box resized" if op.get("wrap") else "box fitted"
+    if k == "text_align":
+        return "aligned %s %s" % (VALIGN_NAMES[op["valign"]], ALIGN_NAMES[op["align"]])
     return k
 
 
@@ -612,7 +619,7 @@ def apply_manifest(man, ops):
         k = op.get("op")
         try:
             if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
-                     "text_rect", "parent"):
+                     "text_rect", "text_align", "parent"):
                 got = index.get(op["node"])
                 if got is None:
                     notes.append("%s: node %s is not in this scene" % (k, op["node"]))
@@ -675,6 +682,13 @@ def apply_manifest(man, ops):
                             # Multiline and WordWrap: the words re-flow in the box on the
                             # machine too (PAD-412: the first byte alone keeps the breaks)
                             o["flags"] = [1, 1]
+                elif k == "text_align":
+                    texts = [o for o in (man["objects"].get(str(oid)) or {}
+                                         for _s, oid in n["comps"]) if o.get("kind") == "Text"]
+                    if not texts:
+                        notes.append("text_align: node %s draws no text" % op["node"])
+                    for o in texts:
+                        o["align"], o["valign"] = int(op["align"]), int(op["valign"])
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:
@@ -813,7 +827,7 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
         index = _tree_index(scene)
         try:
             if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
-                     "text_rect", "parent"):
+                     "text_rect", "text_align", "parent"):
                 nid = fresh.get(op["node"], op["node"])
                 got = index.get(nid)
                 want = names.get(op["node"])
@@ -891,6 +905,17 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                             # Multiline + WordWrap: the words re-flow at the rect's width
                             # (PAD-412, emulator: the first byte alone only keeps the breaks)
                             o.body["flags"] = (1, 1)
+                elif k == "text_align":
+                    texts = [c.obj for c in n.components if c.obj.kind == "Text"]
+                    if not texts:
+                        notes.append("text_align: node %s draws no text; left alone" % op["node"])
+                        continue
+                    for o in texts:
+                        # the alignment word, and VerticalAlignment: the record's last u32
+                        # (PAD-412, emulator: 0 top, 1 middle, 2 bottom of the rect)
+                        o.body["align"] = int(op["align"])
+                        o.body["tail"] = (tuple(o.body.get("tail") or (0, 0))[0],
+                                          int(op["valign"]))
                 applied += 1
             elif k in ("add_picture", "add_text"):
                 parent = op.get("parent")

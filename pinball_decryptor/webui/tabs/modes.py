@@ -71,7 +71,8 @@ _STR_FIELDS = (
     "game_modes",                                                                     # PAD-363
     "shake_what_start", "shake_what_shot", "shake_what_end",                          # PAD-414
     "shake_s_start", "shake_s_shot", "shake_s_end", "shake_shot",
-    "show_start", "show_end")                                                         # PAD-418
+    "show_start", "show_end",                                                         # PAD-418
+    "game_wizard", "wizard_how")                                                      # PAD-436
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -100,6 +101,7 @@ _DEFAULTS = {
     "seq_reset_any": False,                                                        # PAD-314
     "game_modes": "block",                                                         # PAD-363; PAD-398
     "show_start": "(none)", "show_end": "(none)",                                  # PAD-418
+    "game_wizard": "(none)", "wizard_how": "light",                                # PAD-436
     **{"seq_shot_%d" % i: "(no more shots)" for i in range(8)},
 }
 
@@ -154,6 +156,7 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"other shots?\b|^A mode cannot wait for itself|starts only after|^The mode it starts after", "mode"),
     (r"in order|^Pick at least two shots", "mode"),                                # PAD-314
     (r"game's own modes|modes to hold off|mode the app can hold off", "mode"),       # PAD-363
+    (r"(?i)mini-wizard", "mode"),                                                    # PAD-436
 ))
 
 
@@ -256,7 +259,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     _LIGHT_PATTERN_WORDS = (("solid", "Solid"), ("blink", "Blink"), ("pulse", "Pulse"),
                             ("chase", "Chase"))
     _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save", "magnet", "scoop", "coils", "shield",
-                      "shaker", "shows")
+                      "shaker", "shows", "wizard")
     _TWO_COLUMN_SHOTS = 18
     _PROBE_TRIES = 240
     _FILM_PARTS = (("clip", "clip", "a clip"), ("still", "screen", "a picture for the screen"),
@@ -269,6 +272,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     BALL_NONE = "(none)"
     #: PAD-418: the light-show lists' first entry
     SHOW_NONE = "(none)"
+    #: PAD-436: the mini-wizard list's first entry: a mode of its own
+    WIZARD_NONE = "(none)"
     #: PAD-228: the multiball's balls come when the mode starts, not on a shot
     MB_ON_START = "(when it starts)"
     #: PAD-227: the "and also" shot lists' first entry, the "only after" list's, and the rows shown
@@ -847,6 +852,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._open_advanced(spec)
             self._open_trigger(spec)
             self._open_display_lights(spec)
+            self._open_wizard(spec)                         # PAD-436
             self._open_more_to_start(slug, spec)
         finally:
             self._loading = False
@@ -891,6 +897,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._collect_advanced(spec)
         self._collect_trigger(spec)
         self._collect_display_lights(spec)
+        self._collect_wizard(spec)                          # PAD-436
         self._collect_more_to_start(spec)
         return spec
 
@@ -1350,6 +1357,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             v = str(self.f[k]).strip()
             setattr(spec, k, "" if v in ("", self.SHOW_NONE) else v)
 
+    # PAD-436: the game's own mini-wizard instead of a mode of its own; a name this title does not have is kept as
+    # typed, so validate_wizard names it
+    def _open_wizard(self, spec):
+        v = getattr(spec, "game_wizard", "")
+        self.f["game_wizard"] = v if isinstance(v, str) and v else self.WIZARD_NONE
+        how = getattr(spec, "wizard_how", "light")
+        self.f["wizard_how"] = how if how in MP.WIZARD_HOW else "light"
+
+    def _collect_wizard(self, spec):
+        v = str(self.f["game_wizard"]).strip()
+        spec.game_wizard = "" if v in ("", self.WIZARD_NONE) else v
+        spec.wizard_how = self.f["wizard_how"] if self.f["wizard_how"] in MP.WIZARD_HOW else "light"
+
     # PAD-227: more than one thing to meet before it starts
     def _other_modes(self):
         """``[(slug, ModeSpec)]`` of the project's other form modes."""
@@ -1563,7 +1583,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                     "callouts": [], "callouts_none": "", "events": [],
                     "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
                     "mb_on_shots": [self.MB_ON_START], "game_modes": [], "magnet_shot": "",
-                    "held_coils": [], "shield_rule": "", "game_shows": [], "shakes": [], "shake_max": []}
+                    "held_coils": [], "shield_rule": "", "game_shows": [], "shakes": [], "shake_max": [],
+                    "game_wizards": [], "wizard_shot": ""}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
@@ -1586,7 +1607,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "shakes": ([{"value": w, "label": "a %s shake" % w} for w in MP.SHAKE_STRENGTHS.values()]
                            + [{"value": "game:" + n, "label": lab} for n, lab in getattr(p, "shakes", ())]),
                 "shake_max": list(getattr(p, "shake_max_ms", ()) or ()),
-                "game_shows": self._game_show_rows(p)}                           # PAD-418
+                "game_shows": self._game_show_rows(p),                           # PAD-418
+                # PAD-436: the game's own mini-wizards a mode can hand over, and the shot that starts a lit one
+                "game_wizards": [{"name": n, "film": film} for n, film in getattr(p, "game_wizards", ()) or ()],
+                "wizard_shot": getattr(p, "wizard_shot", "")}
 
     @staticmethod
     def _game_show_rows(p):
@@ -1854,7 +1878,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                      "end_game", "clip_both", "stack", "events", "film_clip",
                                      "film_still", "film_sound", "own_extra", "lit_shots",
                                      "show_order", "multiball", "ball_save", "give_way", "block",
-                                     "magnet", "scoop", "coils", "shield", "shaker", "shows")}
+                                     "magnet", "scoop", "coils", "shield", "shaker", "shows", "wizard")}
             self.set(reasons={}, dis=dis, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
@@ -2603,6 +2627,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "game_shows": self._game_show_rows(p) if p is not None else [],
                 "game_shows_off": ("Not on this game: " + p.why_not("shows")) if p is not None and not p.can("shows")
                                   else "" if p is not None else "No card picked yet.",
+                # PAD-436: the game's own mini-wizards a block may hand over, and why the block is greyed if none
+                "game_wizards": ([{"name": n, "film": film} for n, film in getattr(p, "game_wizards", ())]
+                                 if p is not None and p.can("wizard") else []),
+                "wizard_shot": getattr(p, "wizard_shot", "") if p is not None else "",
+                "game_wizards_off": ("Not on this game: " + p.why_not("wizard")) if p is not None and not p.can("wizard")
+                                    else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else
                               "Not on this game yet: the app has not found where %s starts its own modes, so a "
                               "mode cannot keep them from starting; set to hold them off, it gives way to them "
@@ -2642,7 +2672,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         shaker = ({"shakes": [n for n, _l in p.shakes], "max": list(p.shake_max_ms)} if p.can("shaker") else False) \
             if p is not None else None                                                                          # PAD-414
         shows = [n for n, _k, _s in getattr(p, "game_shows", ())] if p is not None else None   # PAD-418
-        return BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker), BM.notes(program)
+        wizards = ([n for n, _f in getattr(p, "game_wizards", ())] if p.can("wizard") else []) if p is not None else None
+        return (BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards),   # PAD-436
+                BM.notes(program))
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

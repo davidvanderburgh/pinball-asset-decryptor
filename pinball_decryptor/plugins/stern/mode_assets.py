@@ -471,15 +471,18 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
         result.files.append(rel)
         return path
 
+    # PAD-436: a mode that is the game's own mini-wizard runs nothing of its own: no screen, no clip (its mode
+    # file is still written, below)
+    own = [(slug, spec) for slug, spec in found if not spec.game_wizard]
     # the screens, all in one pass over the stock HUD scene
     screens = [with_layout(form_screen(project, slug, spec), spec.screen_layout)
-               for slug, spec in found if spec.screen and prof.can("screen")]
+               for slug, spec in own if spec.screen and prof.can("screen")]
     screens += _code_screens(project, code, prof)
     huds = _code_huds(code, prof, hud_font)
 
     # the clips: made first (side by side, kept between builds), then one after another into
     # the stock bank
-    clips = [(slug, spec) for slug, spec in found if spec.clip != "none" and prof.can("clip")]
+    clips = [(slug, spec) for slug, spec in own if spec.clip != "none" and prof.can("clip")]
     code_clips = [(slug, c) for slug, c in code if c.clip_list() and prof.can("clip")]
     # item 164: a title whose video bank IS the scene its screens go in (JP The Pin 1.05 draws one
     # scene) gets the clips first and then the screens, onto the grown bank - the bank's walk

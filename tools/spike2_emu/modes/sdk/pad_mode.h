@@ -617,4 +617,26 @@ int pm_shaking(void);
  * end then leaves that one shake to run out (its own length); a ball end, game end or tilt still stops it. */
 void pm_shake_outlast(void);
 
+/* ---- the game's own mini-wizards (PAD-436; MODE_SDK.md "The game's own mini-wizards") ---------------------
+ * James Bond LE 1.06 has four, each with its insert on the Right ramp: 1 Chaos at Crab Key (Dr. No), 2 Ahoy
+ * Mr. Bond (From Russia With Love), 3 Goldfinger's Jackpot, 4 Duel on the Disco Volante (Thunderball). The game
+ * lights them when a part (henchman, villain, Q Branch, gadget) is collected in all six films, and the Right
+ * ramp starts the one selected. pm_game_wizard hands the player up one of them, the game's own way:
+ *   PM_WIZARD_LIGHT  select it and light it: the game's start shot (the Right ramp) starts it
+ *   PM_WIZARD_START  the same, then the game's own start of it at once - only if the game would start one now
+ *                    (none running, nothing of its own in the way: its own check); otherwise it stays lit
+ * It runs the game's mode: its shots, lights, screens, sounds and award, as when the game starts it. No mode of
+ * yours has to be running, and one that is keeps running beside it. A wizard the player has played this game
+ * plays again. PM_WIZARD_LIT (1): lit for the start shot; PM_WIZARD_STARTED (2); 0: not on this game, no game,
+ * no such wizard (mode.log says which). pm_game_wizard_named: the same by the port's name for it (`text
+ * wizard_name_<n>`, any case). pm_game_wizards: how many the port names (0 = none on this game). */
+#define PM_CAN_GAME_WIZARDS 0x2000000u /* pm_game_wizard / pm_game_wizard_named / pm_game_wizards */
+#define PM_WIZARD_LIGHT     0
+#define PM_WIZARD_START     1
+#define PM_WIZARD_LIT       1
+#define PM_WIZARD_STARTED   2
+int pm_game_wizard(int n, int how);
+int pm_game_wizard_named(const char *name, int how);
+int pm_game_wizards(void);
+
 #endif

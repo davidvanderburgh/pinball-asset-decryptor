@@ -500,7 +500,10 @@ def title_version(profile_key):
 
 
 def wants(spec):
-    """The :data:`SOUND_KEYS` a mode (a ``mode_project.ModeSpec``) has a WAV for."""
+    """The :data:`SOUND_KEYS` a mode (a ``mode_project.ModeSpec``) has a WAV for. None for a mode that is the
+    game's own mini-wizard (PAD-436): nothing of its own plays."""
+    if getattr(spec, "game_wizard", ""):
+        return ()
     have = {"sound_start": spec.sound_start, "sound_shot": spec.sound_shot,
             "sound_end": spec.end_sound, "music": spec.music}
     return tuple(k for k in SOUND_KEYS if have.get(k))

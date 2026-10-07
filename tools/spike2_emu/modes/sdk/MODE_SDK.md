@@ -1957,6 +1957,111 @@ the block are greyed with the reason (`mode_project._shows_cannot`); a name the 
 Lights page; Port to... the Pro leaves both out (kept with the Premium/LE's shots for the way back:
 `MODEL_FIELDS`), and a mode taken to another game drops a show that game does not name.
 
+## The game's own mini-wizards (PAD-436)
+
+James Bond LE 1.06 has four mini-wizards, each with its insert on the Right ramp: Chaos at Crab Key (Dr. No, insert
+DR. NO), Ahoy Mr. Bond (From Russia With Love, insert ROSA KLEBB), Goldfinger's Jackpot (Goldfinger, insert
+GOLDFINGER) and Duel on the Disco Volante (Thunderball, insert LARGO). You Only Live Twice and Diamonds Are Forever
+have none. The game lights them when one kind of part (every henchman, every villain, every Q Branch mode, every
+gadget) is collected in all six films; a Bond owner asked for the films themselves to hand them out ("a mini wizard
+mode for each movie"), with the existing shots, lights and screens, and modes of his own for the two films without
+one. With PAD-428's film events that is a mode that IS the game's mini-wizard:
+
+```c
+pm_game_wizard_named("Ahoy Mr. Bond", PM_WIZARD_START);   /* or pm_game_wizard(2, PM_WIZARD_LIGHT) */
+```
+
+**How the game keeps them** (read from the game program; addresses are LE 1.06's):
+
+- The table `0x625da0` (`data wizard_table`, 4 entries of `value wizard_entry` 0x20 bytes): its index, its bit
+  (1 << index), its insert (lamps 34, 35, 36, 43), its start (0x92bd8, 0x20530, 0xbd4dc, 0x7e0b0), a running query.
+- Each player's words at `0x81c3f4` (`data wizard_state`): `[p - 1]` the selected one, `+0x10 + 4(p - 1)` the lit
+  mask, `+0x20 + 4(p - 1)` the played mask.
+- Lighting (`0x110cac`, from the collect `0x1d0918` when a part's film count reaches 6, once per kind a game): a
+  random one not played, the next unplayed from there selected, lit = every one not played, and the lamps' refresh
+  byte `0x8268bc` (`data lamps_dirty`) set.
+- The Right ramp's handler (`0x1aee8c`, shot 7) calls `0x110d98` (`site wizard_start`) when one is lit and nothing of
+  the game's is in its way (`0x110c10`: a lit mask, then `0x110b90`'s checks: no other mini-wizard running, and none
+  of the game's other big modes). It starts the selected one through its entry, sets lit to 0 and ORs its bit into
+  played. 1 = started, 0 = not. Another shot cycles the selection among the lit ones (`0x110c38`).
+
+**What `pm_game_wizard(n, how)` does.** Exactly the game's lighting, for one: the player's selected word = n - 1,
+the bit ORed into the lit mask, the refresh byte set. `PM_WIZARD_LIGHT` stops there, and the game's own start shot
+starts it. `PM_WIZARD_START` then calls the game's start (`wizard_start`), so the game's own check decides: started
+(`PM_WIZARD_STARTED`), or left lit (`PM_WIZARD_LIT`) when one of its modes is in the way. Any mode may call it, running
+or not, in a game (the tick thread is the game's own logic thread, as the Right ramp's handler). One the player has
+played this game plays again. The game's own lighting carries on as before (a film hand-out is IN ADDITION, as asked).
+
+**With a mode of yours that holds the game's modes off.** Ahoy Mr. Bond's start (`block_start_6`) is one a mode of
+yours may refuse (PAD-363). The game's start code goes on after a refused start as if it began: it unlights them all
+and marks it played, so the player would lose it. When the veto refuses a mini-wizard's start, the runtime keeps the
+player's three words as they were and puts them back on the next tick (`[pad] game wizard 2 (Ahoy Mr. Bond): its
+start was refused while ... runs - kept lit`), so the Right ramp starts it once your mode ends. And while a mode of
+yours holds the game's modes off, `PM_WIZARD_START` lights instead of starting.
+
+**The port lines** (`james_bond_le-1.06.port`). `wizards_arm` checks each table entry against the build (its index,
+its bit, a start in the game's code) before it offers any (`PM_CAN_GAME_WIZARDS`, logged `[pad] game wizards: 4 of
+the game's mini-wizards a mode may light or start`):
+
+```
+site  wizard_start   0x00110d98 0xe92d4070 0xeb055daa
+data  wizard_state   0x0081c3f4
+data  wizard_table   0x00625da0
+data  lamps_dirty    0x008268bc
+value wizard_entry   0x20
+text  wizard_name_1  Chaos at Crab Key          # ... _2 Ahoy Mr. Bond, _3 Goldfinger's Jackpot,
+text  wizard_film_1  Dr. No                     # _4 Duel on the Disco Volante, with their films
+text  wizard_shot    Right ramp
+```
+
+**From a mode file** (`game_wizard light|start <name>`): the mode IS the game's mini-wizard. When it would start - its
+shot, an event (`starts_on event film_frwl`), shots in order - with `starts`, `cooldown`, `trigger_also` and `after`
+holding as for any mode, `mode_file.c` hands it over through `pm_game_wizard_named` and runs nothing of its own: no
+clock, screen, lights, sounds or points (a file with the key needs no `seconds`). The start counts as a run that
+ended at once. A refused hand-over (no game, a name the game does not have) keeps its trigger count.
+
+```
+name           FRWL WIZARD
+starts_on      event film_frwl
+starts         once_per_game
+game_wizard    start Ahoy Mr. Bond
+```
+
+**From the Modes tab.** The Mode page's last section, "The game's mini-wizard": Hand the player (nothing: this mode
+runs) or one of the four by name and film, and Light it (the Right ramp starts it) or Start it at once. With one
+picked the Mode page keeps only what a hand-over uses (its name, Starts on, the mini-wizard, How often it can start)
+and the other four pages say they are not used; the file written is the lines above (`mode_project.wizard_cfg`).
+Blocks: "The game's mini-wizard" (Mode), Light or Start and a name; in a When the game does something script it is
+a mini-wizard for that event whether the mode runs or not. Greyed with the reason on every title whose port names no
+mini-wizards (`mode_project._wizards_cannot`), and only on a build in `WIZARDS_PROVEN`.
+
+**What is proven.** In the emulator (2026-10-07, rig 2, the stock James Bond LE 1.06 card from D:, muted), with
+PAD-428's instrument calling the game's own collect for a film's parts and one of ours logging the player's words and
+each mini-wizard's running query twice a second:
+
+- `starts_on event film_frwl` + `game_wizard start Ahoy Mr. Bond`: the fourth part of From Russia With Love fired the
+  event, and the runtime's start returned 1 in the same millisecond (`[pad] game wizard 2 (Ahoy Mr. Bond): the game
+  started it (its own start)`). The player's words went to selected 1, lit 0, played 0x2, Ahoy's running query to 1,
+  game flags 85 and 86 up, and the game's own AHOY MR. BOND intro (the boat chase) was on the glass.
+- `starts_on event film_goldfinger` + `game_wizard light Goldfinger's Jackpot`, while Ahoy ran: selected 2, lit 0x4,
+  played still 0x2, and the game's own check said not ready (one running), so it waited lit.
+- A second game: a plain mode of ours (BLOCKER, holding every one of the game's modes off) started by its trigger
+  file, then `game_wizard light Ahoy Mr. Bond` on the film (selected 1, lit 0x2, ready). The Right ramp's switches
+  (Right ramp enter, then exit) made the game call its start; the veto refused Ahoy's (`block: the game's mode 6 (Ahoy
+  Mr Bond Wizard Mode) did not start - BLOCKER is running`), and on the next tick the runtime put the words back
+  (`kept lit for player 1 (lit 0x2, played 0x0)`). With BLOCKER ended, the next Right ramp started it: lit 0, played
+  0x2, running 1, flags 85 86, its intro on the glass.
+
+Not measured: a mini-wizard handed over to player 2-4 (the words are per player, read the same way); the Right ramp
+starting Chaos at Crab Key, Goldfinger's Jackpot or Duel on the Disco Volante (their starts come from the same table and
+the same call); a machine. Bond LE 1.06's own boot crashed at times on the rig that day (a null scene resource at
+0xaa470, then its dispatch watchdog) with no mode object at all, while other rigs loaded the disk: a boot that got to
+attract ran clean.
+
+**Not done.** Bond Pro 1.06 has no port yet; the 60th Anniversary edition (its own rules) was not looked at. The game's
+own lighting by parts was left as it is: stopping it ("instead of", PAD-428's first ask) would hold off `0x110cac`'s two
+calls in the collect, a separate choice.
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in
@@ -2653,9 +2758,13 @@ site-event ids.
 of its parts (henchman, villain, Q Branch, gadget). The game keeps each player's parts per
 film at `0x820198` (`[film 0-5][player][5 bytes]`: a count per part, then the total); its
 collect `0x1d0918(film, part)` calls `0x1d49c0(film)` once, as the fourth part comes in.
-The four mini-wizards (Dr. No multiball, Goldfinger, Disco Volante, Ahoy Mr Bond) belong to
-films 0, 2, 3 and 4; From Russia With Love and Diamonds Are Forever have none, so a mode of
-ours started on `film_frwl` or `film_daf` is the mini-wizard those two films never had.
+The four mini-wizards belong to films 0 to 3, each with its insert on the Right ramp: Chaos at Crab
+Key (Dr. No), Ahoy Mr. Bond (From Russia With Love, insert ROSA KLEBB), Goldfinger's Jackpot, Duel on
+the Disco Volante (Thunderball, insert LARGO). You Only Live Twice and Diamonds Are Forever have none,
+so a mode of ours started on `film_yolt` or `film_daf` is the mini-wizard those two films never had,
+and since PAD-436 a mode started on any film can hand the player the game's own ("The game's own
+mini-wizards", above). (PAD-428 first wrote Ahoy Mr. Bond down as You Only Live Twice's: the table's
+insert lamps, read in PAD-436, say From Russia With Love.)
 
 | Event | arg | Film |
 |---|---|---|

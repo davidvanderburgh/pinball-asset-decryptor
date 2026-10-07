@@ -831,6 +831,140 @@ def test_a_cards_project_without_a_project_file_still_opens(tmp_path):
         assert not [a for a in w.asked[n:] if a.get("title") == "Open project"]
 
 
+def _new_project_dialogs(w, monkeypatch):
+    """The New project windows the service opens on the page, as they are opened."""
+    seen = []
+    real = w.ctx.bus.publish
+
+    def _publish(event, **data):
+        if event == "open_dialog" and data.get("name") == "project_new":
+            seen.append(data.get("props") or {})
+        return real(event, **data)
+    monkeypatch.setattr(w.ctx.bus, "publish", _publish)
+    return seen
+
+
+def test_another_games_card_picked_over_a_project_offers_a_new_one(tmp_path, monkeypatch):
+    """PAD-435 (David): "If I'm in Godzilla and have a Godzilla project, then select a James
+    Bond card, there's no way we should stay in the Godzilla project."  The pick brings up
+    New project filled in for the Bond card, once; the tabs keep offering it; creating it
+    switches to the new project with the Bond card."""
+    stock = tmp_path / "godzilla_le-1_16_0.raw"
+    stock.write_bytes(b"\0" * 32)
+    bond = tmp_path / "james_bond_le-1_06_0.Release.16G.sdcard.raw"
+    bond.write_bytes(b"\0" * 48)
+    proj = _anchored_project(tmp_path, "Godzilla LE", stock)
+    (proj / ".checksums.md5").write_text("", encoding="utf-8")
+
+    def folder(w):
+        return os.path.normcase(os.path.normpath(w.window.extract_output_var.get()))
+
+    with web_app(tmp_path, mfr="stern") as w:
+        offers = _new_project_dialogs(w, monkeypatch)
+        w.call("ui.set", "extract", "output", str(proj))
+        w.call("ui.set", "extract", "input", str(stock))
+        _settle(w)
+        assert offers == []                         # the project's own card
+        w.call("extract.use_recent", "input", str(bond))
+        _settle(w)
+        assert len(offers) == 1
+        props = offers[0]
+        assert props["stock"] == str(bond)
+        assert props["mfr"] == "stern"
+        assert props["name"] == "james_bond_le-1_06_0.Release.16G.sdcard"
+        assert os.path.normcase(props["parent"]) == os.path.normcase(str(tmp_path))
+        assert props["why"]["project"] == "Godzilla LE"
+        assert props["why"]["card"] == bond.name
+        assert props["why"]["project_card"] == stock.name
+        # the project stays open until the user says otherwise
+        assert folder(w) == os.path.normcase(str(proj))
+        # asked once per card and folder: reading the project again, or picking the
+        # card again after going back, does not bring it up again...
+        w.call("extract.refresh_project")
+        _settle(w)
+        w.call("extract.use_recent", "input", str(stock))
+        _settle(w)
+        w.call("extract.use_recent", "input", str(bond))
+        _settle(w)
+        assert len(offers) == 1
+        # ...but the tabs' button does
+        assert w.call("extract.new_card_project") is True
+        assert len(offers) == 2 and offers[1]["stock"] == str(bond)
+        # Create: a project of its own, holding the Bond card, and nothing offered there
+        r = w.call("shellx.project_new_create", props["parent"], props["name"],
+                   props["mfr"], props["stock"])
+        assert r.get("ok"), r
+        _settle(w)
+        assert folder(w) == os.path.normcase(str(tmp_path / props["name"]))
+        assert w.window.extract_input_var.get() == str(bond)
+        assert len(offers) == 2
+        # the Godzilla project still names its own card
+        from pinball_decryptor.core import project_file
+        assert project_file.load_anchor(str(proj))["stock_image"] == str(stock)
+
+
+def test_no_new_project_offer_without_a_pick(tmp_path, monkeypatch):
+    """PAD-435: the offer answers a card picked while a project is open.  The app opening
+    with another card's project (its last state), a folder with no extract yet, and a card
+    with a project of its own (PAD-421 opens that one) bring nothing up."""
+    import json
+    from pinball_decryptor.core.extract_source import BUILD_RECORD_SUFFIX
+    stock = tmp_path / "godzilla_le-1_16_0.raw"
+    stock.write_bytes(b"\0" * 32)
+    bond = tmp_path / "james_bond_le-1_06_0.raw"
+    bond.write_bytes(b"\0" * 48)
+    proj = _anchored_project(tmp_path, "GZ", stock)
+    (proj / ".checksums.md5").write_text("", encoding="utf-8")
+    settings = {"last_manufacturer": "stern",
+                "manufacturers": {"stern": {"extract_input": str(bond),
+                                            "extract_output": str(proj),
+                                            "write_assets": str(proj)}}}
+    with web_app(tmp_path, settings=settings) as w:
+        offers = _new_project_dialogs(w, monkeypatch)
+        w.call("ui.pick_manufacturer", "stern")
+        _settle(w)
+        assert w.state("extract")["project"]["details"]["card_kind"] == "other"
+        assert offers == []
+        # a folder with no extract: the card is to be extracted into it
+        fresh = tmp_path / "fresh"
+        fresh.mkdir()
+        w.call("ui.set", "extract", "output", str(fresh))
+        w.call("ui.set", "extract", "input", str(stock))
+        _settle(w)
+        w.call("extract.use_recent", "input", str(bond))
+        _settle(w)
+        assert offers == []
+        # a card with a project of its own: that project opens instead
+        own = _anchored_project(tmp_path, "OWN", bond)
+        built = tmp_path / "Bond custom.raw"
+        built.write_bytes(b"\0" * 56)
+        (tmp_path / ("Bond custom.raw" + BUILD_RECORD_SUFFIX)).write_text(
+            json.dumps({"version": 1, "assets": str(own)}), encoding="utf-8")
+        w.call("ui.set", "extract", "output", str(proj))
+        w.call("ui.set", "extract", "input", str(stock))
+        _settle(w)
+        w.call("extract.use_recent", "input", str(built))
+        _settle(w)
+        assert os.path.normcase(os.path.normpath(w.window.extract_output_var.get())) \
+            == os.path.normcase(str(own))
+        assert offers == []
+
+
+def test_new_project_name_for_a_card(tmp_path):
+    """PAD-435: the name New project suggests is the card's game as the title bar names it,
+    made a usable folder name, else the card file's name, never a folder already there."""
+    from pinball_decryptor.webui.tabs.extract import _project_name_for
+    card = str(tmp_path / "james_bond_le-1_06_0.Release.16G.sdcard.raw")
+    assert _project_name_for("James Bond 007 v1.06.0 LE", card, str(tmp_path)) \
+        == "James Bond 007 v1.06.0 LE"
+    assert _project_name_for("AC/DC v1.00 Pro", card, "") == "AC-DC v1.00 Pro"
+    assert _project_name_for("", card, "") == "james_bond_le-1_06_0.Release.16G.sdcard"
+    (tmp_path / "James Bond 007 v1.06.0 LE").mkdir()
+    (tmp_path / "James Bond 007 v1.06.0 LE (2)").mkdir()
+    assert _project_name_for("James Bond 007 v1.06.0 LE", card, str(tmp_path)) \
+        == "James Bond 007 v1.06.0 LE (3)"
+
+
 def test_project_game_without_an_anchor_uses_the_current_plugin(
         tmp_path, monkeypatch):
     img = tmp_path / "game.pkg"

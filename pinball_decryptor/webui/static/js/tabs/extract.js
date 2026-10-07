@@ -278,7 +278,9 @@ function SourceCard({ s, shell }) {
         onBrowse=${() => call("extract.browse_output")} browseTitle=${PROJECT_TIP} />
       ${hint && hint.warn ? html`<div class="x-badge warn"><${Icon} name="warn" /><span>${hint.text}</span>
           ${hint.project ? html`<${Button} size="sm" icon="folder" title=${p.details.card_project}
-            onClick=${() => call("extract.use_card_project")}>Open its project<//>` : null}</div>`
+            onClick=${() => call("extract.use_card_project")}>Open its project<//>`
+            : html`<${Button} size="sm" icon="plus" title="Make a project folder for the card above and switch to it"
+            onClick=${() => call("extract.new_card_project")}>New project…<//>`}</div>`
         : hint ? html`<span class="small muted">${hint}</span>` : null}
     </div>
     <${Options} s=${s} />

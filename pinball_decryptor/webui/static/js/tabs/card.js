@@ -26,7 +26,21 @@ function TabRow({ t, lock }) {
   </button>`;
 }
 
-function WhatCard({ shell }) {
+// PAD-435 (David): a James Bond card picked over an open Godzilla project read "Project
+// Godzilla holds an extract, so every tab is ready".  The open project is another card's:
+// say so, and offer the card a project of its own (or the one it already has, PAD-421).
+function OtherCardNote({ ps, d }) {
+  const own = d.card_project ? d.card_project.split(/[\\/]/).filter(Boolean).pop() : "";
+  return html`<div class="note warn"><${Icon} name="warn" /><div class="body-text stack c-other">
+    <span>Project <${Chip} kind="acc" title=${ps.folder}>${ps.name}<//> was extracted from another card, ${d.game || d.source_name}, so the tabs that read the project show that card's files, not this one's.${own ? ` This card has its own project, ${own}.` : ""}</span>
+    <div class="row wrap">${own
+      ? html`<${Button} size="sm" kind="primary" icon="folder" title=${d.card_project} onClick=${() => call("extract.use_card_project")}>Open its project<//>`
+      : html`<${Button} size="sm" kind="primary" icon="plus" title="Make a project folder for this card and switch to it"
+          onClick=${() => call("extract.new_card_project")}>New project for this card…<//>`}</div>
+  </div></div>`;
+}
+
+function WhatCard({ shell, s }) {
   const ps = shell.project_state;
   const tabs = (shell.tabs || []).filter((t) => t.visible && !HIDE.has(t.ns));
   const direct = tabs.filter((t) => !needOf(t));
@@ -34,13 +48,14 @@ function WhatCard({ shell }) {
   const needs = tabs.filter((t) => needOf(t) === "extract");
   const anyLocked = folder.concat(needs).some((t) => tabLock(t, ps));
   const project = ps ? html`<${Chip} kind="acc" title=${ps.folder}>${ps.name}<//>` : null;
+  const d = (s.project && s.project.details) || {};
   return html`<${Card} cls="c-what-card" title="What you can do with it">
-    <div class="note"><${Icon} name=${anyLocked ? "lock" : "info"} /><div class="body-text">
+    ${ps && d.card_kind === "other" ? html`<${OtherCardNote} ps=${ps} d=${d} />` : html`<div class="note"><${Icon} name=${anyLocked ? "lock" : "info"} /><div class="body-text">
       ${!ps ? html`There is no project folder yet. Extract the card into one to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
         : anyLocked && ps.archived ? html`Project ${project} is archived. Extract into it again to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
         : anyLocked ? html`Project ${project} has no extract yet. Extract the card into it to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
         : html`Project ${project} holds an extract, so every tab is ready.`}
-    </div></div>
+    </div></div>`}
     ${direct.length ? html`<div class="stack c-sec">
         <span class="lbl">Works straight from the card, no extract needed</span>
         ${direct.map((t) => html`<${TabRow} t=${t} lock=${null} />`)}
@@ -144,7 +159,7 @@ export default function CardTab() {
         ${have && c.info ? html`<${Details} info=${c.info} />` : null}
       </div>
       <div class="stack x-col">
-        <${WhatCard} shell=${shell} />
+        <${WhatCard} shell=${shell} s=${s} />
       </div>
     </div>
     <${ExtractOverlays} s=${s} />

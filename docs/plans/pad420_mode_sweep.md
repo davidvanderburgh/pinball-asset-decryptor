@@ -155,6 +155,16 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   object, LR 0x17d6f4 in the game) and never on its ball-save runs, so something the runtime arms for a multiball
   mode touches the game too early on this build; its balls_in_play / multiball_serve sites sit 0x17c apart as on
   Venom LE's. Needs a rig session: which runtime call precedes the crash (gzwatch.log, a padtrace).
+- **In flight at the end of run 6** (detached WSL chains in `C:/tmp/PAD-420`, logs `chainN.log`; each writes a
+  rigbatch `results.tsv`; commit passes with `prove_set.py <SET> <results.tsv> "<evidence>"`, then
+  `limits_table.py`, the tests, and a commit):
+  - chain10: the media proofs (`media/rb`) once `media/BUILT2` exists (the sets are built by the detached
+    `media/build_all.py` + `build_retry.py`); judge with `media_verdict.py <key>...`, then `scenes_prove.py`.
+  - chain13: Munsters Pro multiball with KEEP (`mb/rb4`), Venom Pro multiball, Aerosmith Pro stack (`st/rb3`).
+  - chain14: Check this game on the 15 ports that got block lines (`rb_blocks`, check7): a pass means the
+    runtime's veto hooks leave the game running.
+  - chain15/16: checks of Elvira 1.13, TMNT LE 1.59, Venom LE 1.07 (check8), then their ball-save tests
+    (`bs/rb_old3`, made by `bs/gen_old.py` from those checks).
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

@@ -204,11 +204,11 @@ lamp 5            0              TOURNAMENT START  # lamp 6, I/O group 5 index 3
 lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 7, I/O group 5 index 5, at 0,0
 lamp 91           0              PLAYFIELD GI-1  # lamp 8, I/O group 6 index 0, at 0,0
 lamp 92           0              PLAYFIELD GI-2  # lamp 9, I/O group 6 index 1, at 0,0
-lamp 9            0              LEFT OUTLANE  # lamp 10, I/O group 6 index 3, at 0,0
-lamp 110          0              LEFT RETURN LANE-LEFT  # lamp 11, I/O group 6 index 4, at 0,0
-lamp 112          0              RIGHT RETURN LANE  # lamp 12, I/O group 6 index 5, at 0,0
-lamp 22           0              RIGHT OUTLANE  # lamp 13, I/O group 6 index 6, at 0,0
-lamp 111          0              LEFT RETURN LANE-RIGHT  # lamp 14, I/O group 6 index 7, at 0,0
+lamp 9            0x100          LEFT OUTLANE  # lamp 10, I/O group 6 index 3, at 0,0; tie: Left outlane
+lamp 110          0x200          LEFT RETURN LANE-LEFT  # lamp 11, I/O group 6 index 4, at 0,0; tie: Left return lane-l.
+lamp 112          0x400          RIGHT RETURN LANE  # lamp 12, I/O group 6 index 5, at 0,0; tie: Right return lane
+lamp 22           0x800          RIGHT OUTLANE  # lamp 13, I/O group 6 index 6, at 0,0; tie: Right outlane
+lamp 111          0x1000         LEFT RETURN LANE-RIGHT  # lamp 14, I/O group 6 index 7, at 0,0; tie: Left return lane-r.
 lamp 18           0              TOYS IN THE ATTIC  # lamp 15, I/O group 6 index 8, at 0,0
 lamp 52           0              LEFT ORBIT-ELEVATOR  # lamp 16, I/O group 6 index 9, at 0,0
 lamp 17           0              RATS IN THE CELLAR  # lamp 17, I/O group 6 index 10, at 0,0
@@ -223,19 +223,19 @@ lamp 95           0              LEFT SLING FLASH  # lamp 25, I/O group 6 index 
 lamp 10           0              SHOOT AGAIN  # lamp 26, I/O group 6 index 19, at 0,0
 lamp 88           0              RIGHT ORBIT-ELEVATOR  # lamp 27, I/O group 6 index 20, at 0,0
 lamp 19,20,21     0              LOVE IN AN ELEVATOR  # lamp 28, I/O group 6 index 23, at 0,0
-lamp 35           0              AEROSMIT(H)  # lamp 29, I/O group 6 index 24, at 0,0
-lamp 36           0              AEROSMI(T)H  # lamp 30, I/O group 6 index 25, at 0,0
-lamp 37           0              AEROSM(I)TH  # lamp 31, I/O group 6 index 26, at 0,0
-lamp 38           0              AEROS(M)ITH  # lamp 32, I/O group 6 index 27, at 0,0
+lamp 35           0x10           AEROSMIT(H)  # lamp 29, I/O group 6 index 24, at 0,0; tie: Aerosmit(h) target
+lamp 36           0x20           AEROSMI(T)H  # lamp 30, I/O group 6 index 25, at 0,0; tie: Aerosmi(t)h target
+lamp 37           0x40           AEROSM(I)TH  # lamp 31, I/O group 6 index 26, at 0,0; tie: Aerosm(i)th target
+lamp 38           0x80           AEROS(M)ITH  # lamp 32, I/O group 6 index 27, at 0,0; tie: Aeros(m)ith target
 lamp 99           0              RIGHT ORBIT FLASH  # lamp 33, I/O group 6 index 28, at 0,0
-lamp 100          0              SPINNER FLASH  # lamp 34, I/O group 6 index 29, at 0,0
+lamp 100          0x1            SPINNER FLASH  # lamp 34, I/O group 6 index 29, at 0,0; tie: Spinner
 lamp 39           0              RIGHT RAMP X  # lamp 35, I/O group 6 index 30, at 0,0
 lamp 101          0              RIGHT RAMP FLASH  # lamp 36, I/O group 6 index 31, at 0,0
-lamp 29,30,31     0              LEFT SCOOP ARROW  # lamp 37, I/O group 6 index 34, at 0,0
+lamp 29,30,31     0x4            LEFT SCOOP ARROW  # lamp 37, I/O group 6 index 34, at 0,0; tie: Left scoop
 lamp 32           0              LEFT SCOOP-RECT  # lamp 38, I/O group 6 index 35, at 0,0
-lamp 25           0              AE(R)OSMITH  # lamp 39, I/O group 6 index 36, at 0,0
-lamp 24           0              A(E)ROSMITH  # lamp 40, I/O group 6 index 37, at 0,0
-lamp 23           0              (A)EROSMITH  # lamp 41, I/O group 6 index 38, at 0,0
+lamp 25           0x4000         AE(R)OSMITH  # lamp 39, I/O group 6 index 36, at 0,0; tie: Ae(r)osmith target
+lamp 24           0x2000         A(E)ROSMITH  # lamp 40, I/O group 6 index 37, at 0,0; tie: A(e)rosmith target
+lamp 23           0x8000         (A)EROSMITH  # lamp 41, I/O group 6 index 38, at 0,0; tie: (A)erosmith target
 lamp 28           0              LEFT SCOOP-3  # lamp 42, I/O group 6 index 39, at 0,0
 lamp 27           0              EXTRA BALL  # lamp 43, I/O group 6 index 40, at 0,0
 lamp 26           0              LEFT SCOOP X  # lamp 44, I/O group 6 index 41, at 0,0
@@ -246,11 +246,11 @@ lamp 34           0              BILBOARD-2  # lamp 48, I/O group 6 index 45, at
 lamp 93           0              PLAYFIELD GI-3  # lamp 49, I/O group 7 index 0, at 0,0
 lamp 94           0              GI-BACKPANEL  # lamp 50, I/O group 7 index 1, at 0,0
 lamp 113          0              UPPER RAMP FLASH (X2)  # lamp 51, I/O group 7 index 2, at 0,0
-lamp 85,86,87     0              RIGHT ORBIT ARROW  # lamp 52, I/O group 7 index 3, at 0,0
+lamp 85,86,87     0x4000000      RIGHT ORBIT ARROW  # lamp 52, I/O group 7 index 3, at 0,0; tie: Right orbit
 lamp 109          0              R ORBIT-RECT  # lamp 53, I/O group 7 index 6, at 0,0
 lamp 89           0              RIGHT ORBIT X  # lamp 54, I/O group 7 index 7, at 0,0
-lamp 54           0              AER(O)SMITH  # lamp 55, I/O group 7 index 8, at 0,0
-lamp 55           0              AERO(S)MITH  # lamp 56, I/O group 7 index 9, at 0,0
+lamp 54           0x800000       AER(O)SMITH  # lamp 55, I/O group 7 index 8, at 0,0; tie: Aer(o)smith target
+lamp 55           0x1000000      AERO(S)MITH  # lamp 56, I/O group 7 index 9, at 0,0; tie: Aero(s)mith target
 lamp 67           0              TOY BOX X  # lamp 57, I/O group 7 index 10, at 0,0
 lamp 81           0              RIGHT EJECT X  # lamp 58, I/O group 7 index 11, at 0,0
 lamp 80           0              R EJECT-2  # lamp 59, I/O group 7 index 12, at 0,0
@@ -263,23 +263,23 @@ lamp 59           0              LOCK 2  # lamp 65, I/O group 7 index 18, at 0,0
 lamp 60           0              LOCK 3  # lamp 66, I/O group 7 index 19, at 0,0
 lamp 61           0              LOCK 4  # lamp 67, I/O group 7 index 20, at 0,0
 lamp 62           0              LOCK 5  # lamp 68, I/O group 7 index 21, at 0,0
-lamp 57           0              TOY BOX TARGET-RIGHT  # lamp 69, I/O group 7 index 22, at 0,0
+lamp 57           0x20000000     TOY BOX TARGET-RIGHT  # lamp 69, I/O group 7 index 22, at 0,0; tie: Toy box target-right
 lamp 107          0              LEFT RAMP FLASH  # lamp 70, I/O group 7 index 23, at 0,0
-lamp 82,83,84     0              RIGHT RAMP ARROW  # lamp 71, I/O group 7 index 26, at 0,0
-lamp 77,78,79     0              RIGHT EJECT ARROW  # lamp 72, I/O group 7 index 29, at 0,0
-lamp 64,65,66     0              TOY BOX ARROW  # lamp 73, I/O group 7 index 32, at 0,0
-lamp 72,73,74     0              TOP SCOOP ARROW  # lamp 74, I/O group 7 index 35, at 0,0
-lamp 68,69,70     0              LEFT RAMP ARROW  # lamp 75, I/O group 7 index 38, at 0,0
-lamp 105          0              TOY BOX FLASH (X2)  # lamp 76, I/O group 7 index 39, at 0,0
-lamp 40,41,42     0              LEFT POP BUMPER  # lamp 77, I/O group 7 index 42, at 0,0
-lamp 43,44,45     0              RIGHT POP BUMPER  # lamp 78, I/O group 7 index 45, at 0,0
-lamp 46,47,48     0              TOP POP BUMPER  # lamp 79, I/O group 7 index 48, at 0,0
-lamp 56           0              TOY BOX TARGET-LEFT  # lamp 80, I/O group 7 index 49, at 0,0
+lamp 82,83,84     0x8            RIGHT RAMP ARROW  # lamp 71, I/O group 7 index 26, at 0,0; tie: Right ramp exit
+lamp 77,78,79     0x2000000      RIGHT EJECT ARROW  # lamp 72, I/O group 7 index 29, at 0,0; tie: Right eject
+lamp 64,65,66     0x1c0000       TOY BOX ARROW  # lamp 73, I/O group 7 index 32, at 0,0; tie: Toy box enter 1, Toy box enter 2, Toy box enter 3
+lamp 72,73,74     0x2            TOP SCOOP ARROW  # lamp 74, I/O group 7 index 35, at 0,0; tie: Top scoop
+lamp 68,69,70     0x8000000      LEFT RAMP ARROW  # lamp 75, I/O group 7 index 38, at 0,0; tie: Left ramp exit
+lamp 105          0x400000       TOY BOX FLASH (X2)  # lamp 76, I/O group 7 index 39, at 0,0; tie: Toy box hit
+lamp 40,41,42     0x40000000     LEFT POP BUMPER  # lamp 77, I/O group 7 index 42, at 0,0; tie: Left pop bumper
+lamp 43,44,45     0x80000000     RIGHT POP BUMPER  # lamp 78, I/O group 7 index 45, at 0,0; tie: Right pop bumper
+lamp 46,47,48     0x100000000    TOP POP BUMPER  # lamp 79, I/O group 7 index 48, at 0,0; tie: Top pop bumper
+lamp 56           0x10000000     TOY BOX TARGET-LEFT  # lamp 80, I/O group 7 index 49, at 0,0; tie: Toy box target-left
 lamp 53           0              LEFT ORBIT X  # lamp 81, I/O group 7 index 50, at 0,0
 lamp 108          0              L ORBIT-RECT  # lamp 82, I/O group 7 index 51, at 0,0
-lamp 49,50,51     0              LEFT ORBIT ARROW  # lamp 83, I/O group 7 index 54, at 0,0
+lamp 49,50,51     0x200000000    LEFT ORBIT ARROW  # lamp 83, I/O group 7 index 54, at 0,0; tie: Left orbit
 lamp 102          0              POP BUMPERS FLASH  # lamp 84, I/O group 7 index 55, at 0,0
-lamp 103          0              TOY BOX LID FLASH  # lamp 85, I/O group 7 index 56, at 0,0
+lamp 103          0x200000       TOY BOX LID FLASH  # lamp 85, I/O group 7 index 56, at 0,0; tie: Toy box lid
 lamp 104          0              TOY BOX ENTER FLASH (X2)  # lamp 86, I/O group 7 index 57, at 0,0
 lamp 106          0              TOP SCOOP FLASH  # lamp 87, I/O group 7 index 58, at 0,0
 lamp 129,130,131  0              WING RIGHT 1  # lamp 88, I/O group 8 index 0, at 0,0

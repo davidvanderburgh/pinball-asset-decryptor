@@ -159,33 +159,33 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
-| Aerosmith 1.16 | no | no | ✓ | all | never waits |
+| Aerosmith 1.16 | no | no | ✓ | shots | never waits |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
-| Aerosmith LE 1.16 | no | no | ✓ | all | waits for multiballs only |
+| Aerosmith LE 1.16 | no | no | ✓ | shots | waits for multiballs only |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
 | Avengers: Infinity Quest LE 1.10 | no | ✓ | ✓ | no | never waits |
 | Avengers: Infinity Quest Pro 1.10 | no | ✓ | ✓ | no | never waits |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
-| Deadpool LE 1.16 | no | ✓ | ✓ | all | never waits |
+| Deadpool LE 1.16 | no | ✓ | ✓ | shots | never waits |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots |  |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
-| Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | all | never waits |
-| Dungeons & Dragons Pro 1.10 | no | ✓ | ✓ | all | never waits |
+| Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | shots | never waits |
+| Dungeons & Dragons Pro 1.10 | no | ✓ | ✓ | shots | never waits |
 | Elvira 1.13 | ✓ | no | not yet | shots |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots |  |
 | Foo Fighters Pro 1.04 | no | ✓ | ✓ | no | never waits |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
-| Guardians of the Galaxy 1.15 | no | ✓ | ✓ | all | waits for multiballs only |
+| Guardians of the Galaxy 1.15 | no | ✓ | ✓ | shots | waits for multiballs only |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
-| Guardians of the Galaxy LE 1.15 | no | ✓ | not yet | all | waits for multiballs only |
+| Guardians of the Galaxy LE 1.15 | no | ✓ | not yet | shots | waits for multiballs only |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
-| Iron Maiden LE 1.18 | no | ✓ | ✓ | all | never waits |
-| Iron Maiden Pro 1.18 | no | ✓ | ✓ | all | never waits |
+| Iron Maiden LE 1.18 | no | ✓ | ✓ | shots | never waits |
+| Iron Maiden Pro 1.18 | no | ✓ | ✓ | shots | never waits |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots |  |
-| James Bond 007 Pro 1.06 | no | ✓ | ✓ | all | waits for multiballs only |
+| James Bond 007 Pro 1.06 | no | ✓ | ✓ | shots | waits for multiballs only |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots |  |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
@@ -193,7 +193,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | John Wick Pro 1.02 | no | no | ✓ | no | never waits |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots |  |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots |  |
-| Jurassic Park Pro 1.16 | no | ✓ | ✓ | all | never waits |
+| Jurassic Park Pro 1.16 | no | ✓ | ✓ | shots | never waits |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
 | King Kong Pro 0.97 | no | ✓ | ✓ | no | never waits |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots |  |
@@ -205,14 +205,14 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush Pro 1.19 | no | ✓ | ✓ | no | never waits |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots |  |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
-| Star Wars LE 1.31 | no | ✓ | ✓ | all | never waits |
-| Star Wars Pro 1.31 | no | ✓ | ✓ | all | never waits |
-| Stranger Things 1.13 | no | ✓ | ✓ | all | waits for multiballs only |
+| Star Wars LE 1.31 | no | ✓ | ✓ | shots | never waits |
+| Star Wars Pro 1.31 | no | ✓ | ✓ | shots | never waits |
+| Stranger Things 1.13 | no | ✓ | ✓ | shots | waits for multiballs only |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
-| Stranger Things LE 1.13 | no | ✓ | ✓ | all | waits for multiballs only |
+| Stranger Things LE 1.13 | no | ✓ | ✓ | shots | waits for multiballs only |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
-| Sword of Rage LE 1.19 | no | ✓ | ✓ | all | never waits |
-| Sword of Rage Pro 1.19 | no | ✓ | ✓ | all | never waits |
+| Sword of Rage LE 1.19 | no | ✓ | ✓ | shots | never waits |
+| Sword of Rage Pro 1.19 | no | ✓ | ✓ | shots | never waits |
 | TMNT LE 1.59 | ✓ | ✓ | not yet | shots |  |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots |  |
@@ -223,9 +223,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots |  |
 | The Munsters Pro 1.28 | no | ✓ | ✓ | no | never waits |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots |  |
-| Uncanny X-Men Pro 0.98 | no | ✓ | ✓ | all | waits for multiballs only |
+| Uncanny X-Men Pro 0.98 | no | ✓ | ✓ | shots | waits for multiballs only |
 | Venom LE 1.07 | ✓ | ✓ | not yet | shots |  |
-| Venom Pro 1.07 | no | ✓ | ✓ | all | never waits |
+| Venom Pro 1.07 | no | ✓ | ✓ | shots | never waits |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **Ball save not yet:** found in the game, not yet seen working.

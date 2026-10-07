@@ -234,7 +234,11 @@ event tilt_warning   0xc8
 event tilt           0xc6
 
 # ---- lamps ----
-lamp 9            0x80           CLIFFHANGER  # lamp 6, I/O group 7 index 24, at 58,446
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
+lamp 9            0x80           CLIFFHANGER  # lamp 6, I/O group 7 index 24, at 58,446; tie: Shot 0x80
 lamp 10           0              LEFT RETURN 2  # lamp 7, I/O group 7 index 8, at 66,547
 lamp 11           0              LEFT RETURN 2X  # lamp 8, I/O group 7 index 9, at 76,553
 lamp 12           0              LEFT RETURN 1  # lamp 9, I/O group 7 index 10, at 86,561
@@ -262,7 +266,7 @@ lamp 33           0              GIANT SPIDER  # lamp 30, I/O group 7 index 71, 
 lamp 34           0              OCTOPUS INSECT  # lamp 31, I/O group 7 index 70, at 117,418
 lamp 35           0              2 LEGGED LIZARD  # lamp 32, I/O group 7 index 66, at 119,403
 lamp 36           0              THE PIT!  # lamp 33, I/O group 7 index 61, at 122,386
-lamp 37,38,39     0x12000000000000 KONG CAVE  # lamp 34, I/O group 7 index 25, at 227,427
+lamp 37,38,39     0x12000000000000 KONG CAVE  # lamp 34, I/O group 7 index 25, at 227,427; tie: Kong cave made, Shot 0x10000000000000
 lamp 40           0              KONG CAVE MYSTERY  # lamp 35, I/O group 7 index 28, at 243,404
 lamp 41           0              EXTRA BALL  # lamp 36, I/O group 7 index 30, at 256,383
 lamp 42           0              100FT  # lamp 37, I/O group 7 index 69, at 137,416
@@ -284,46 +288,46 @@ lamp 57           0              BIPLANE 2  # lamp 52, I/O group 7 index 58, at 
 lamp 58           0              BIPLANE 3  # lamp 53, I/O group 7 index 55, at 181,360
 lamp 59           0              BIPLANE 4  # lamp 54, I/O group 7 index 44, at 182,341
 lamp 60           0              ATTACK  # lamp 55, I/O group 7 index 41, at 171,323
-lamp 61           0x70000        SWEEP BONUS  # lamp 56, I/O group 7 index 43, at 119,340
-lamp 62           0x100000000    POWERUP  # lamp 57, I/O group 7 index 40, at 138,314
+lamp 61           0x70000        SWEEP BONUS  # lamp 56, I/O group 7 index 43, at 119,340; tie: Shot 0x10000, Shot 0x20000, Shot 0x40000
+lamp 62           0x100000000    POWERUP  # lamp 57, I/O group 7 index 40, at 138,314; tie: Powerup target
 lamp 63           0              LIGHT LOCK  # lamp 58, I/O group 7 index 47, at 58,266
 lamp 64           0              LIGHT COMBOS  # lamp 59, I/O group 7 index 48, at 68,287
 lamp 65           0              LIGHT JACKPOT  # lamp 60, I/O group 7 index 49, at 80,310
-lamp 66           0x800          4 BANK DROP 1- TOP  # lamp 61, I/O group 7 index 53, at 73,256
-lamp 67           0x1000         4 BANK DROP 2  # lamp 62, I/O group 7 index 52, at 80,272
-lamp 68           0x2000         4 BANK DROP 3  # lamp 63, I/O group 7 index 51, at 88,286
-lamp 69           0x4000         4 BANK DROP 4- BOT  # lamp 64, I/O group 7 index 50, at 97,302
+lamp 66           0x800          4 BANK DROP 1- TOP  # lamp 61, I/O group 7 index 53, at 73,256; tie: 4 Bank drop 1-top
+lamp 67           0x1000         4 BANK DROP 2  # lamp 62, I/O group 7 index 52, at 80,272; tie: 4 Bank drop 2
+lamp 68           0x2000         4 BANK DROP 3  # lamp 63, I/O group 7 index 51, at 88,286; tie: 4 Bank drop 3
+lamp 69           0x4000         4 BANK DROP 4- BOT  # lamp 64, I/O group 7 index 50, at 97,302; tie: 4 Bank drop 4-bot
 lamp 70           0              LOG BRIDGE  # lamp 65, I/O group 8 index 12, at 30,232
-lamp 71           0x1000000000   ISLAND TREASURE  # lamp 66, I/O group 8 index 13, at 50,243
-lamp 72,73,74     0x60000000000  LEFT ORBIT  # lamp 67, I/O group 8 index 8, at 38,187
+lamp 71           0x1000000000   ISLAND TREASURE  # lamp 66, I/O group 8 index 13, at 50,243; tie: Shot 0x1000000000
+lamp 72,73,74     0x60000000000  LEFT ORBIT  # lamp 67, I/O group 8 index 8, at 38,187; tie: Shot 0x20000000000, Shot 0x40000000000
 lamp 75           0              LEFT ORBIT CLIMB  # lamp 68, I/O group 8 index 11, at 42,205
-lamp 76           0x80000000     X1  # lamp 69, I/O group 8 index 18, at 59,190
-lamp 77,78,79     0x2000000000   LEFT RAMP  # lamp 70, I/O group 8 index 15, at 71,198
+lamp 76           0x80000001     X1  # lamp 69, I/O group 8 index 18, at 59,190; tie: X1, X1 2
+lamp 77,78,79     0x2000000000   LEFT RAMP  # lamp 70, I/O group 8 index 15, at 71,198; tie: Left ramp made opto
 lamp 80           0              LEFT RAMP CLIMB  # lamp 71, I/O group 8 index 14, at 70,216
-lamp 81           0x400000000000 2.42 MILLION BANANAS  # lamp 72, I/O group 8 index 42, at 212,104
-lamp 82,83,84     0x8000000000   BIPLANE  # lamp 73, I/O group 8 index 32, at 163,280
+lamp 81           0x400000000000 2.42 MILLION BANANAS  # lamp 72, I/O group 8 index 42, at 212,104; tie: 2.42 Million bananas
+lamp 82,83,84     0x8000000000   BIPLANE  # lamp 73, I/O group 8 index 32, at 163,280; tie: Biplane ramp made opto
 lamp 85           0              BIPLANE CLIMB  # lamp 74, I/O group 8 index 31, at 78,289
-lamp 86,87,88     0x1000000000000 U-TURN  # lamp 75, I/O group 8 index 36, at 172,262
+lamp 86,87,88     0x1000000000000 U-TURN  # lamp 75, I/O group 8 index 36, at 172,262; tie: U-turn rollover
 lamp 89           0              U-TURN CLIMB  # lamp 76, I/O group 8 index 35, at 184,273
-lamp 90,91,92     0x4000000000   CENTER RAMP  # lamp 77, I/O group 8 index 52, at 153,216
+lamp 90,91,92     0x4000000000   CENTER RAMP  # lamp 77, I/O group 8 index 52, at 153,216; tie: Train enter opto
 lamp 93           0              CENTER RAMP CLIMB  # lamp 78, I/O group 8 index 55, at 153,236
-lamp 94           0x200000000    X2  # lamp 79, I/O group 8 index 50, at 175,215
-lamp 95,96,97     0x80000000000  CENTER LANE  # lamp 80, I/O group 8 index 46, at 189,204
+lamp 94           0x200000000    X2  # lamp 79, I/O group 8 index 50, at 175,215; tie: X2
+lamp 95,96,97     0x80000000000  CENTER LANE  # lamp 80, I/O group 8 index 46, at 189,204; tie: Shot 0x80000000000
 lamp 98           0              CENTER LANE CLIMB  # lamp 81, I/O group 8 index 45, at 189,221
 lamp 99           0              LOST TEMPLE  # lamp 82, I/O group 8 index 44, at 189,245
-lamp 100          0x400000000    X3  # lamp 83, I/O group 8 index 59, at 230,275
+lamp 100          0x400000000    X3  # lamp 83, I/O group 8 index 59, at 230,275; tie: X3
 lamp 101          0              ISLAND SCENE  # lamp 84, I/O group 8 index 57, at 222,261
 lamp 102          0              BANG GONG  # lamp 85, I/O group 8 index 58, at 219,274
-lamp 103,104,105  0x4800000000000 KONG GONG  # lamp 86, I/O group 8 index 60, at 213,297
-lamp 106          0x800000000    X4  # lamp 87, I/O group 8 index 63, at 236,293
+lamp 103,104,105  0x4800000000000 KONG GONG  # lamp 86, I/O group 8 index 60, at 213,297; tie: Gong hit opto, Shot 0x4000000000000
+lamp 106          0x800000000    X4  # lamp 87, I/O group 8 index 63, at 236,293; tie: X4
 lamp 107          0              NYC EVENT  # lamp 88, I/O group 8 index 71, at 267,244
 lamp 108          0              ISLAND LOCK  # lamp 89, I/O group 8 index 70, at 262,260
-lamp 109,110,111  0x8300000000000 RIGHT ORBIT  # lamp 90, I/O group 8 index 67, at 255,284
+lamp 109,110,111  0x8300000000000 RIGHT ORBIT  # lamp 90, I/O group 8 index 67, at 255,284; tie: Kick target, Shot 0x200000000000, Shot 0x8000000000000
 lamp 112          0              RIGHT ORBIT CLIMB  # lamp 91, I/O group 8 index 64, at 250,302
 lamp 113          0              LEFT RAMP BB  # lamp 92, I/O group 8 index 21, at 60,174
 lamp 114          0              BIPLANE BB SUPER JACKPOT  # lamp 93, I/O group 8 index 20, at 165,80
 lamp 115          0              BIPLANE BB ADVANCE BIPLANE  # lamp 94, I/O group 8 index 19, at 145,80
-lamp 116          0              TRAIN LOCK 3  # lamp 95, I/O group 8 index 25, at 152,128
+lamp 116          0x10000000000  TRAIN LOCK 3  # lamp 95, I/O group 8 index 25, at 152,128; tie: Train lock opto
 lamp 117          0              TRAIN LOCK 2  # lamp 96, I/O group 8 index 26, at 152,146
 lamp 118          0              TRAIN LOCK 1  # lamp 97, I/O group 8 index 27, at 152,164
 lamp 119          0              GONG LEFT  # lamp 98, I/O group 8 index 3, at 206,253
@@ -331,12 +335,12 @@ lamp 120          0              GONG RIGHT  # lamp 99, I/O group 8 index 4, at 
 lamp 122          0              BOTTOM GI-WHT  # lamp 101, I/O group 7 index 0, at 0,0
 lamp 123          0              ARCH GI-WHT  # lamp 102, I/O group 7 index 1, at 0,0
 lamp 124          0              TOP GI-WHT  # lamp 103, I/O group 8 index 0, at 0,0
-lamp 126          0x2            LOWER LEFT SPOT  # lamp 105, I/O group 7 index 22, at 98,506
-lamp 127          0x4            LOWER RIGHT SPOT  # lamp 106, I/O group 7 index 23, at 208,506
+lamp 126          0x2            LOWER LEFT SPOT  # lamp 105, I/O group 7 index 22, at 98,506; tie: Left slingshot
+lamp 127          0x4            LOWER RIGHT SPOT  # lamp 106, I/O group 7 index 23, at 208,506; tie: Right slingshot
 lamp 128          0              TEMPLE FLASH  # lamp 107, I/O group 8 index 40, at 39,294
-lamp 129          0x70000000     PIT FLASH  # lamp 108, I/O group 8 index 41, at 70,354
-lamp 130          0x780000       LEFT SPINNER FLASH  # lamp 109, I/O group 8 index 22, at 39,146
-lamp 131          0x7800000      RIGHT SPINNER FLASH  # lamp 110, I/O group 8 index 49, at 189,177
+lamp 129          0x70000000     PIT FLASH  # lamp 108, I/O group 8 index 41, at 70,354; tie: Pit target-bot, Pit target-mid, Pit target-top
+lamp 130          0x780000       LEFT SPINNER FLASH  # lamp 109, I/O group 8 index 22, at 39,146; tie: Left orbit spinner opto, Shot 0x100000, Left orbit spinner opto 2, Left orbit spinner opto 3
+lamp 131          0x7800000      RIGHT SPINNER FLASH  # lamp 110, I/O group 8 index 49, at 189,177; tie: Right spinner opto, Shot 0x1000000, Right spinner opto 2, Right spinner opto 3
 lamp 132          0              GONG FLASH  # lamp 111, I/O group 8 index 56, at 230,228
 lamp 133          0              KONG CAVE FLASHER  # lamp 112, I/O group 8 index 39, at 281,371
 lamp 136          0              TRAIN FLASH  # lamp 115, I/O group 8 index 65, at 221,261

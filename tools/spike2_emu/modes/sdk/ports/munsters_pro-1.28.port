@@ -195,6 +195,10 @@ event tilt           0xc6
 event game_over      0x47
 
 # ---- lamps ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
 lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
 lamp 50           0              EXTRA BALL  # lamp 68, I/O group 7 index 41, at 0,0
@@ -205,10 +209,10 @@ lamp 101          0              BOTTOM GI-GRN  # lamp 3, I/O group 6 index 1, a
 lamp 103          0              TOP GI-GRN  # lamp 4, I/O group 7 index 1, at 0,0
 lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 5, I/O group 5 index 5, at 0,0
 lamp 57,58,59     0              RIGHT ORBIT JACKPOT  # lamp 6, I/O group 7 index 27, at 0,0
-lamp 53,54,55     0              RIGHT RAMP JACKPOT  # lamp 7, I/O group 7 index 34, at 0,0
-lamp 44,45,46     0              HERMAN JACKPOT  # lamp 8, I/O group 7 index 50, at 0,0
-lamp 41,42,43     0              LEFT RAMP JACKPOT  # lamp 9, I/O group 7 index 57, at 0,0
-lamp 38,39,40     0              LEFT ORBIT JACKPOT  # lamp 10, I/O group 6 index 27, at 0,0
+lamp 53,54,55     0x8            RIGHT RAMP JACKPOT  # lamp 7, I/O group 7 index 34, at 0,0; tie: Right ramp made
+lamp 44,45,46     0x40000        HERMAN JACKPOT  # lamp 8, I/O group 7 index 50, at 0,0; tie: Herman opto
+lamp 41,42,43     0x4            LEFT RAMP JACKPOT  # lamp 9, I/O group 7 index 57, at 0,0; tie: Left ramp made
+lamp 38,39,40     0x1            LEFT ORBIT JACKPOT  # lamp 10, I/O group 6 index 27, at 0,0; tie: Left orbit
 lamp 99           0              COIN DOOR GI  # lamp 11, I/O group 5 index 1, at 0,0
 lamp 4            0              START BUTTON  # lamp 12, I/O group 5 index 2, at 0,0
 lamp 5            0              TOURNAMENT START  # lamp 13, I/O group 5 index 3, at 0,0
@@ -224,21 +228,21 @@ lamp 15           0              HERMAN COMPLETE  # lamp 20, I/O group 6 index 1
 lamp 16           0              RAVEN COMPLETE  # lamp 25, I/O group 6 index 15, at 0,0
 lamp 17           0              LILY COMPLETE  # lamp 18, I/O group 6 index 8, at 0,0
 lamp 19           0              GRANDPA COMPLETE  # lamp 24, I/O group 6 index 14, at 0,0
-lamp 18           0              SPOT COMPLETE  # lamp 21, I/O group 6 index 11, at 0,0
+lamp 18           0x800000       SPOT COMPLETE  # lamp 21, I/O group 6 index 11, at 0,0; tie: Spot opto
 lamp 20           0              2X  # lamp 22, I/O group 6 index 12, at 0,0
 lamp 21           0              3X  # lamp 23, I/O group 6 index 13, at 0,0
 lamp 22           0              SHOOT AGAIN  # lamp 15, I/O group 6 index 3, at 0,0
-lamp 64           0              TARGET 4  # lamp 61, I/O group 7 index 31, at 0,0
+lamp 64           0x10000        TARGET 4  # lamp 61, I/O group 7 index 31, at 0,0; tie: Target 4
 lamp 102          0              TOP GI-WHT  # lamp 45, I/O group 7 index 0, at 0,0
 lamp 113          0              BOTTOM POP FLASH  # lamp 56, I/O group 7 index 21, at 0,0
-lamp 62           0              KITTY  # lamp 58, I/O group 7 index 23, at 0,0
-lamp 63           0              TARGET 3  # lamp 64, I/O group 7 index 37, at 0,0
+lamp 62           0x20000        KITTY  # lamp 58, I/O group 7 index 23, at 0,0; tie: Kitty target
+lamp 63           0x8000         TARGET 3  # lamp 64, I/O group 7 index 37, at 0,0; tie: Target 3
 lamp 47           0              HERMAN 1  # lamp 78, I/O group 7 index 53, at 0,0
 lamp 48           0              HERMAN 2  # lamp 80, I/O group 7 index 54, at 0,0
 lamp 49           0              HERMAN 3  # lamp 81, I/O group 7 index 55, at 0,0
-lamp 61           0              TARGET 2  # lamp 79, I/O group 7 index 56, at 0,0
-lamp 65           0              TOP LANE LEFT  # lamp 43, I/O group 6 index 54, at 0,0
-lamp 66           0              TOP LANE RIGHT  # lamp 44, I/O group 6 index 55, at 0,0
+lamp 61           0x4000         TARGET 2  # lamp 79, I/O group 7 index 56, at 0,0; tie: Target 2
+lamp 65           0x40           TOP LANE LEFT  # lamp 43, I/O group 6 index 54, at 0,0; tie: Left top lane
+lamp 66           0x80           TOP LANE RIGHT  # lamp 44, I/O group 6 index 55, at 0,0; tie: Right top lane
 lamp 75           0              RIGHT RAMP SPOT  # lamp 63, I/O group 7 index 33, at 0,0
 lamp 76           0              RIGHT RAMP MARILYN  # lamp 62, I/O group 7 index 32, at 0,0
 lamp 114          0              POP FLASH  # lamp 57, I/O group 7 index 22, at 0,0
@@ -247,15 +251,15 @@ lamp 112          0              RIGHT POP FLASH  # lamp 55, I/O group 7 index 2
 lamp 37           0              EDDIE LEFT ORBIT  # lamp 36, I/O group 6 index 26, at 0,0
 lamp 56           0              EDDIE RIGHT ORBIT  # lamp 60, I/O group 7 index 30, at 0,0
 lamp 106          0              SPOT RAMP FLASH  # lamp 42, I/O group 6 index 49, at 0,0
-lamp 104          0              DRAGULA FLASH  # lamp 46, I/O group 7 index 3, at 0,0
-lamp 105          0              LILY FLASH  # lamp 47, I/O group 7 index 4, at 0,0
+lamp 104          0x100000       DRAGULA FLASH  # lamp 46, I/O group 7 index 3, at 0,0; tie: Dragula target (x2)
+lamp 105          0x400000       LILY FLASH  # lamp 47, I/O group 7 index 4, at 0,0; tie: Lily target (x2)
 lamp 109          0              HERMAN FLASH  # lamp 48, I/O group 7 index 5, at 0,0
 lamp 107          0              GRANDPA FLASH  # lamp 49, I/O group 7 index 6, at 0,0
 lamp 108          0              GRANDPA EJECT FLASH  # lamp 59, I/O group 7 index 24, at 0,0
 lamp 110          0              HERMAN SPOTLIGHT FLASH  # lamp 41, I/O group 6 index 48, at 0,0
 lamp 24           0              5X DRAGULA  # lamp 37, I/O group 6 index 30, at 0,0
 lamp 25           0              SUPER JACKPOT  # lamp 26, I/O group 6 index 16, at 0,0
-lamp 60           0              TARGET 1  # lamp 35, I/O group 6 index 25, at 0,0
+lamp 60           0x2000         TARGET 1  # lamp 35, I/O group 6 index 25, at 0,0; tie: Target 1
 lamp 26           0              (D)RAGULA  # lamp 27, I/O group 6 index 17, at 0,0
 lamp 27           0              D(R)AGULA  # lamp 28, I/O group 6 index 18, at 0,0
 lamp 28           0              DR(A)GULA  # lamp 29, I/O group 6 index 19, at 0,0

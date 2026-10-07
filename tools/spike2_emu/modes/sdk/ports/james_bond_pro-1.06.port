@@ -200,22 +200,26 @@ event tilt           0xc6
 event game_over      0x47
 
 # ---- lamps ----
-lamp 59,60,61     0              LEFT LANE ARROW  # lamp 6, I/O group 7 index 3, at 117,356
-lamp 86,87,88     0              SIDE RAMP ARROW  # lamp 7, I/O group 8 index 37, at 232,401
-lamp 95,96,97     0              RIGHT ORBIT ARROW  # lamp 8, I/O group 7 index 55, at 360,348
-lamp 16,17,18     0              LEFT EJECT ARROW  # lamp 9, I/O group 7 index 16, at 104,606
-lamp 53,54,55     0              LEFT ORBIT ARROW  # lamp 10, I/O group 8 index 10, at 46,232
-lamp 77,78,79     0              SIDE LOOP ARROW  # lamp 11, I/O group 8 index 53, at 271,326
-lamp 71,72,73     0              CENTER LANE ARROW  # lamp 12, I/O group 8 index 29, at 208,229
-lamp 29,30,31     0              RIGHT RAMP ARROW  # lamp 13, I/O group 7 index 52, at 338,506
-lamp 38,39,40     0              RIGHT VUK ARROW  # lamp 14, I/O group 7 index 48, at 340,596
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
+lamp 59,60,61     0x40           LEFT LANE ARROW  # lamp 6, I/O group 7 index 3, at 117,356; tie: Left lane
+lamp 86,87,88     0x2            SIDE RAMP ARROW  # lamp 7, I/O group 8 index 37, at 232,401; tie: Side ramp enter opto
+lamp 95,96,97     0x4000000000   RIGHT ORBIT ARROW  # lamp 8, I/O group 7 index 55, at 360,348; tie: Right orbit
+lamp 16,17,18     0x20           LEFT EJECT ARROW  # lamp 9, I/O group 7 index 16, at 104,606; tie: Left eject
+lamp 53,54,55     0x400000       LEFT ORBIT ARROW  # lamp 10, I/O group 8 index 10, at 46,232; tie: Left orbit
+lamp 77,78,79     0x800000       SIDE LOOP ARROW  # lamp 11, I/O group 8 index 53, at 271,326; tie: Side loop
+lamp 71,72,73     0x200000       CENTER LANE ARROW  # lamp 12, I/O group 8 index 29, at 208,229; tie: Center lane
+lamp 29,30,31     0x5            RIGHT RAMP ARROW  # lamp 13, I/O group 7 index 52, at 338,506; tie: Right ramp enter opto, Right ramp exit opto
+lamp 38,39,40     0x80000000     RIGHT VUK ARROW  # lamp 14, I/O group 7 index 48, at 340,596; tie: Right vuk opto
 lamp 41,42,43     0              Q BRANCH  # lamp 15, I/O group 7 index 43, at 315,631
-lamp 65           0              ROCKET 1  # lamp 16, I/O group 8 index 20, at 95,201
-lamp 66           0              ROCKET 2  # lamp 17, I/O group 8 index 21, at 102,234
-lamp 67           0              ROCKET 3  # lamp 18, I/O group 8 index 22, at 136,247
-lamp 68           0              ROCKET 4  # lamp 19, I/O group 8 index 23, at 162,222
-lamp 69           0              ROCKET 5  # lamp 20, I/O group 8 index 24, at 157,191
-lamp 70           0              ROCKET 6  # lamp 21, I/O group 8 index 25, at 121,178
+lamp 65           0x1000000      ROCKET 1  # lamp 16, I/O group 8 index 20, at 95,201; tie: Rocket target 1
+lamp 66           0x2000000      ROCKET 2  # lamp 17, I/O group 8 index 21, at 102,234; tie: Rocket target 2
+lamp 67           0x4000000      ROCKET 3  # lamp 18, I/O group 8 index 22, at 136,247; tie: Rocket target 3
+lamp 68           0x8000000      ROCKET 4  # lamp 19, I/O group 8 index 23, at 162,222; tie: Rocket target 4
+lamp 69           0x10000000     ROCKET 5  # lamp 20, I/O group 8 index 24, at 157,191; tie: Rocket target 5
+lamp 70           0x20000000     ROCKET 6  # lamp 21, I/O group 8 index 25, at 121,178; tie: Rocket target 6
 lamp 105          0              LOWER GI  # lamp 25, I/O group 7 index 0, at 0,0
 lamp 106          0              LOWER MID GI  # lamp 26, I/O group 7 index 1, at 0,0
 lamp 23           0              Y.O.L.T.  # lamp 27, I/O group 7 index 14, at 211,631
@@ -231,14 +235,14 @@ lamp 35           0              GOLDFINGER-RIGHT RAMP  # lamp 36, I/O group 7 i
 lamp 22           0              DIAMONDS ARE FOREVER  # lamp 37, I/O group 7 index 15, at 211,597
 lamp 20           0              EXTRA BALL  # lamp 38, I/O group 7 index 20, at 127,667
 lamp 19           0              MYSTERY  # lamp 39, I/O group 7 index 19, at 116,638
-lamp 10           0              LEFT RETURN LANE  # lamp 40, I/O group 7 index 22, at 75,641
-lamp 9            0              LEFT OUTLANE  # lamp 41, I/O group 7 index 21, at 43,641
+lamp 10           0x400          LEFT RETURN LANE  # lamp 40, I/O group 7 index 22, at 75,641; tie: Left return lane
+lamp 9            0x200          LEFT OUTLANE  # lamp 41, I/O group 7 index 21, at 43,641; tie: Left outlane
 lamp 11           0              LEFT BALL SAVE  # lamp 42, I/O group 7 index 23, at 43,681
 lamp 34           0              LARGO  # lamp 43, I/O group 7 index 46, at 295,601
 lamp 33           0              BLOFELD  # lamp 44, I/O group 7 index 47, at 310,569
 lamp 32           0              MR. HENDERSON  # lamp 45, I/O group 7 index 51, at 324,537
-lamp 12           0              RIGHT RETURN LANE  # lamp 46, I/O group 7 index 29, at 347,641
-lamp 13           0              RIGHT OUTLANE  # lamp 47, I/O group 7 index 30, at 378,641
+lamp 12           0x800          RIGHT RETURN LANE  # lamp 46, I/O group 7 index 29, at 347,641; tie: Right return lane
+lamp 13           0x1000         RIGHT OUTLANE  # lamp 47, I/O group 7 index 30, at 378,641; tie: Right outlane
 lamp 14           0              RIGHT BALL SAVE  # lamp 48, I/O group 7 index 31, at 378,681
 lamp 52           0              TARANTULA  # lamp 49, I/O group 7 index 39, at 241,454
 lamp 46           0              KNIFE SHOE  # lamp 50, I/O group 7 index 33, at 269,469
@@ -253,7 +257,7 @@ lamp 94           0              PROF. DENT  # lamp 59, I/O group 8 index 17, at
 lamp 92           0              ODDJOB  # lamp 60, I/O group 8 index 9, at 134,422
 lamp 85           0              HONEY RYDER  # lamp 61, I/O group 8 index 63, at 118,401
 lamp 84           0              TATIANA ROMANOVA  # lamp 62, I/O group 8 index 62, at 143,389
-lamp 115          0              DAF SPINNER FLASH  # lamp 63, I/O group 8 index 16, at 78,387
+lamp 115          0x80           DAF SPINNER FLASH  # lamp 63, I/O group 8 index 16, at 78,387; tie: Left spinner opto
 lamp 58           0              LEFT ORBIT-T-BALL 3  # lamp 64, I/O group 8 index 15, at 65,326
 lamp 57           0              LEFT ORBIT-T-BALL 2  # lamp 65, I/O group 8 index 14, at 57,296
 lamp 93           0              GRANT  # lamp 66, I/O group 8 index 8, at 119,449
@@ -261,30 +265,30 @@ lamp 91           0              FIONA VOLPE  # lamp 67, I/O group 8 index 18, a
 lamp 90           0              MR. OSATO  # lamp 68, I/O group 8 index 19, at 178,409
 lamp 89           0              MR. WINT MR. KIDD  # lamp 69, I/O group 8 index 28, at 206,420
 lamp 51           0              GUN BARREL  # lamp 70, I/O group 7 index 38, at 234,490
-lamp 45           0              RAMP TARGET  # lamp 71, I/O group 7 index 32, at 272,447
+lamp 45           0x8            RAMP TARGET  # lamp 71, I/O group 7 index 32, at 272,447; tie: Side ramp target
 lamp 100          0              RIGHT ORBIT-3  # lamp 72, I/O group 7 index 60, at 326,419
 lamp 99           0              RIGHT ORBIT-2  # lamp 73, I/O group 7 index 59, at 338,396
-lamp 62           0              CENTER 3 BANK DROP LEFT  # lamp 74, I/O group 8 index 40, at 134,292
-lamp 63           0              CENTER 3 BANK DROP CENTER  # lamp 75, I/O group 8 index 41, at 158,280
-lamp 64           0              CENTER 3 BANK DROP RIGHT  # lamp 76, I/O group 8 index 42, at 181,267
+lamp 62           0x10000        CENTER 3 BANK DROP LEFT  # lamp 74, I/O group 8 index 40, at 134,292; tie: Center 3 bank drop left opto
+lamp 63           0x20000        CENTER 3 BANK DROP CENTER  # lamp 75, I/O group 8 index 41, at 158,280; tie: Center 3 bank drop center opto
+lamp 64           0x40000        CENTER 3 BANK DROP RIGHT  # lamp 76, I/O group 8 index 42, at 181,267; tie: Center 3 bank drop right opto
 lamp 56           0              LEFT ORBIT-T-BALL 1  # lamp 77, I/O group 8 index 13, at 51,265
 lamp 83           0              PUSSY GALORE  # lamp 78, I/O group 8 index 61, at 168,377
 lamp 82           0              DOMINO  # lamp 79, I/O group 8 index 60, at 194,364
 lamp 81           0              KISSY  # lamp 80, I/O group 8 index 56, at 219,352
 lamp 80           0              TIFFANY CASE  # lamp 81, I/O group 8 index 57, at 244,340
-lamp 76           0              POP EXIT  # lamp 82, I/O group 8 index 33, at 241,311
-lamp 75           0              TANK  # lamp 83, I/O group 7 index 7, at 248,191
+lamp 76           0x2000000000   POP EXIT  # lamp 82, I/O group 8 index 33, at 241,311; tie: Pop bumper exit
+lamp 75           0x100          TANK  # lamp 83, I/O group 7 index 7, at 248,191; tie: Tank target
 lamp 74           0              LOCK  # lamp 84, I/O group 8 index 32, at 202,285
 lamp 107          0              UPPER MID GI  # lamp 85, I/O group 8 index 0, at 0,0
 lamp 108          0              UPPER GI  # lamp 86, I/O group 8 index 1, at 0,0
 lamp 116          0              GANTRY FLASH-TOP  # lamp 88, I/O group 8 index 26, at 108,110
-lamp 117          0              LEFT POP BUMPER  # lamp 89, I/O group 8 index 43, at 305,263
-lamp 118          0              RIGHT POP BUMPER  # lamp 90, I/O group 8 index 44, at 352,208
+lamp 117          0x800000000    LEFT POP BUMPER  # lamp 89, I/O group 8 index 43, at 305,263; tie: Left pop bumper
+lamp 118          0x1000000000   RIGHT POP BUMPER  # lamp 90, I/O group 8 index 44, at 352,208; tie: Right pop bumper
 lamp 119          0              POP FLASH  # lamp 91, I/O group 8 index 27, at 284,210
 lamp 114          0              RIGHT RAMP FLASH  # lamp 92, I/O group 7 index 61, at 382,262
-lamp 101          0              TOP LANE-LEFT  # lamp 93, I/O group 8 index 34, at 277,86
-lamp 102          0              TOP LANE-CENTER  # lamp 94, I/O group 8 index 35, at 308,91
-lamp 103          0              TOP LANE-RIGHT  # lamp 95, I/O group 8 index 36, at 338,96
-lamp 44           0              DB5 UNDER  # lamp 96, I/O group 7 index 2, at 378,612
+lamp 101          0x100000000    TOP LANE-LEFT  # lamp 93, I/O group 8 index 34, at 277,86; tie: Top lane left
+lamp 102          0x200000000    TOP LANE-CENTER  # lamp 94, I/O group 8 index 35, at 308,91; tie: Top lane center
+lamp 103          0x400000000    TOP LANE-RIGHT  # lamp 95, I/O group 8 index 36, at 338,96; tie: Top lane right
+lamp 44           0x10           DB5 UNDER  # lamp 96, I/O group 7 index 2, at 378,612; tie: Db5 roof
 lamp 110          0              LEFT SLING FLASH  # lamp 105, I/O group 7 index 24, at 104,715
 lamp 111          0              RIGHT SLING FLASH  # lamp 106, I/O group 7 index 25, at 317,715

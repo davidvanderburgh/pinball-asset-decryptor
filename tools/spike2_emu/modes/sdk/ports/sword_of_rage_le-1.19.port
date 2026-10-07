@@ -203,12 +203,16 @@ event tilt           0xc6
 event game_over      0x47
 
 # ---- lamps ----
-lamp 9            0              LEFT OUTLANE  # lamp 47, I/O group 6 index 56, at 0,0
-lamp 10           0              LEFT RETURN LANE  # lamp 48, I/O group 6 index 57, at 0,0
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
+lamp 9            0x20           LEFT OUTLANE  # lamp 47, I/O group 6 index 56, at 0,0; tie: Left outlane
+lamp 10           0x40           LEFT RETURN LANE  # lamp 48, I/O group 6 index 57, at 0,0; tie: Left return lane
 lamp 11           0              KICKBACK  # lamp 39, I/O group 6 index 3, at 0,0
 lamp 12           0              SHOOT AGAIN  # lamp 40, I/O group 6 index 4, at 0,0
-lamp 13           0              RIGHT RETURN LANE  # lamp 52, I/O group 6 index 61, at 0,0
-lamp 14           0              RIGHT OUTLANE  # lamp 53, I/O group 6 index 62, at 0,0
+lamp 13           0x80           RIGHT RETURN LANE  # lamp 52, I/O group 6 index 61, at 0,0; tie: Right return lane
+lamp 14           0x100          RIGHT OUTLANE  # lamp 53, I/O group 6 index 62, at 0,0; tie: Right outlane
 lamp 15           0              (K)NIGHT  # lamp 46, I/O group 6 index 49, at 0,0
 lamp 16           0              K(N)IGHT  # lamp 45, I/O group 6 index 48, at 0,0
 lamp 17           0              KN(I)GHT  # lamp 44, I/O group 6 index 47, at 0,0
@@ -228,33 +232,33 @@ lamp 46,47,48     0              LIGHTNING BOLT 9  # lamp 8, I/O group 6 index 1
 lamp 49,50,51     0              LIGHTNING BOLT 10  # lamp 7, I/O group 6 index 14, at 0,0
 lamp 52,53,54     0              LIGHTNING BOLT 11  # lamp 6, I/O group 6 index 11, at 0,0
 lamp 55,56,57     0              LIGHTNING BOLT 12  # lamp 5, I/O group 6 index 8, at 0,0
-lamp 58           0              LEFT 2 BANK TARGET-BOTTOM  # lamp 49, I/O group 6 index 58, at 0,0
-lamp 59           0              LEFT 2 BANK TARGET-TOP  # lamp 50, I/O group 6 index 59, at 0,0
-lamp 60,61,62     0              CASTLE LIGHTNING BOLT  # lamp 74, I/O group 7 index 41, at 0,0
+lamp 58           0x1            LEFT 2 BANK TARGET-BOTTOM  # lamp 49, I/O group 6 index 58, at 0,0; tie: Lower left 2 bank target bottom
+lamp 59           0x2            LEFT 2 BANK TARGET-TOP  # lamp 50, I/O group 6 index 59, at 0,0; tie: Lower left 2 bank target top
+lamp 60,61,62     0x400000000    CASTLE LIGHTNING BOLT  # lamp 74, I/O group 7 index 41, at 0,0; tie: Castle vuk
 lamp 63           0              KNIGHT MODE  # lamp 75, I/O group 7 index 44, at 0,0
 lamp 64           0              ADD-A-BALL  # lamp 76, I/O group 7 index 45, at 0,0
-lamp 65,66,67     0              LEFT ORBIT LIGHTNING BOLT 1  # lamp 25, I/O group 7 index 56, at 0,0
-lamp 68,69,70     0              LEFT ORBIT LIGHTNING BOLT 2  # lamp 22, I/O group 7 index 30, at 0,0
+lamp 65,66,67     0x1000000      LEFT ORBIT LIGHTNING BOLT 1  # lamp 25, I/O group 7 index 56, at 0,0; tie: Left orbit
+lamp 68,69,70     0x1000000      LEFT ORBIT LIGHTNING BOLT 2  # lamp 22, I/O group 7 index 30, at 0,0; tie: Left orbit
 lamp 71,72,73     0              FLAIL LIGHTNING BOLT  # lamp 21, I/O group 7 index 27, at 0,0
-lamp 74           0              FLAIL ARROW 1  # lamp 66, I/O group 7 index 23, at 0,0
-lamp 75           0              FLAIL ARROW 2  # lamp 73, I/O group 7 index 40, at 0,0
+lamp 74           0x46000000     FLAIL ARROW 1  # lamp 66, I/O group 7 index 23, at 0,0; tie: Flail opto enter, Flail exit, Flail opto mid
+lamp 75           0x46000000     FLAIL ARROW 2  # lamp 73, I/O group 7 index 40, at 0,0; tie: Flail opto enter, Flail exit, Flail opto mid
 lamp 76,77,78     0              CENTER TARGET LIGHTNING BOLT  # lamp 20, I/O group 7 index 24, at 0,0
-lamp 79           0              CENTER TARGET ARROW 1  # lamp 65, I/O group 7 index 22, at 0,0
-lamp 80           0              CENTER TARGET ARROW 2  # lamp 64, I/O group 7 index 15, at 0,0
-lamp 81,82,83     0              SHIELD LIGHTNING BOLT  # lamp 19, I/O group 7 index 19, at 0,0
+lamp 79           0x8000000      CENTER TARGET ARROW 1  # lamp 65, I/O group 7 index 22, at 0,0; tie: Center target
+lamp 80           0x8000000      CENTER TARGET ARROW 2  # lamp 64, I/O group 7 index 15, at 0,0; tie: Center target
+lamp 81,82,83     0x10000000     SHIELD LIGHTNING BOLT  # lamp 19, I/O group 7 index 19, at 0,0; tie: Shield opto
 lamp 84           0              RIGHT LOCK  # lamp 61, I/O group 7 index 12, at 0,0
 lamp 85           0              EXTRA BALL  # lamp 62, I/O group 7 index 13, at 0,0
 lamp 86           0              MYSTERY  # lamp 63, I/O group 7 index 14, at 0,0
-lamp 87,88,89     0              SHIELD TARGET LIGHTNING BOLT  # lamp 18, I/O group 7 index 16, at 0,0
+lamp 87,88,89     0x400          SHIELD TARGET LIGHTNING BOLT  # lamp 18, I/O group 7 index 16, at 0,0; tie: Shield target
 lamp 90           0              LIGHT LOCK  # lamp 60, I/O group 7 index 11, at 0,0
-lamp 91,92,93     0              RIGHT ORBIT LIGHTNING BOLT 1  # lamp 23, I/O group 7 index 48, at 0,0
-lamp 94,95,96     0              RIGHT ORBIT LIGHTNING BOLT 2  # lamp 24, I/O group 7 index 51, at 0,0
-lamp 97           0              RIGHT 3 BANK DROP-TOP  # lamp 59, I/O group 7 index 10, at 0,0
-lamp 98           0              RIGHT 3 BANK DROP-MID  # lamp 58, I/O group 7 index 9, at 0,0
-lamp 99           0              RIGHT 3 BANK DROP-BOTTOM  # lamp 57, I/O group 7 index 8, at 0,0
-lamp 100          0              TOP LANE-(W)AR  # lamp 67, I/O group 7 index 33, at 0,0
-lamp 101          0              TOP LANE-W(A)R  # lamp 68, I/O group 7 index 34, at 0,0
-lamp 102          0              TOP LANE-WA(R)  # lamp 69, I/O group 7 index 35, at 0,0
+lamp 91,92,93     0x400000       RIGHT ORBIT LIGHTNING BOLT 1  # lamp 23, I/O group 7 index 48, at 0,0; tie: Right orbit
+lamp 94,95,96     0x400000       RIGHT ORBIT LIGHTNING BOLT 2  # lamp 24, I/O group 7 index 51, at 0,0; tie: Right orbit
+lamp 97           0x4            RIGHT 3 BANK DROP-TOP  # lamp 59, I/O group 7 index 10, at 0,0; tie: Right 3 bank drop top
+lamp 98           0x8            RIGHT 3 BANK DROP-MID  # lamp 58, I/O group 7 index 9, at 0,0; tie: Right 3 bank drop middle
+lamp 99           0x10           RIGHT 3 BANK DROP-BOTTOM  # lamp 57, I/O group 7 index 8, at 0,0; tie: Right 3 bank drop bottom
+lamp 100          0x80000        TOP LANE-(W)AR  # lamp 67, I/O group 7 index 33, at 0,0; tie: Top lane left
+lamp 101          0x100000       TOP LANE-W(A)R  # lamp 68, I/O group 7 index 34, at 0,0; tie: Top lane center
+lamp 102          0x200000       TOP LANE-WA(R)  # lamp 69, I/O group 7 index 35, at 0,0; tie: Top lane right
 lamp 103          0              FLAME PANEL  # lamp 56, I/O group 7 index 2, at 0,0
 lamp 104          0              KNIGHT LEFT EYE  # lamp 79, I/O group 7 index 59, at 0,0
 lamp 105          0              KNIGHT RIGHT EYE  # lamp 80, I/O group 7 index 60, at 0,0
@@ -269,10 +273,10 @@ lamp 122          0              TOP GI-WHT  # lamp 55, I/O group 7 index 1, at 
 lamp 123          0              BOTTOM ARCH FLASH (2X)  # lamp 38, I/O group 6 index 2, at 0,0
 lamp 124          0              CENTER FLASH  # lamp 27, I/O group 6 index 50, at 0,0
 lamp 125          0              LEFT ORBIT FLASH  # lamp 77, I/O group 7 index 46, at 0,0
-lamp 126          0              SHIELD VUK FLASH  # lamp 78, I/O group 7 index 54, at 0,0
-lamp 127          0              LEFT POP BUMPER  # lamp 70, I/O group 7 index 36, at 0,0
-lamp 128          0              RIGHT POP BUMPER  # lamp 71, I/O group 7 index 37, at 0,0
-lamp 129          0              BOTTOM POP BUMPER  # lamp 72, I/O group 7 index 38, at 0,0
+lamp 126          0x200          SHIELD VUK FLASH  # lamp 78, I/O group 7 index 54, at 0,0; tie: Shield vuk
+lamp 127          0x80000000     LEFT POP BUMPER  # lamp 70, I/O group 7 index 36, at 0,0; tie: Left pop bumper
+lamp 128          0x100000000    RIGHT POP BUMPER  # lamp 71, I/O group 7 index 37, at 0,0; tie: Right pop bumper
+lamp 129          0x200000000    BOTTOM POP BUMPER  # lamp 72, I/O group 7 index 38, at 0,0; tie: Bottom pop bumper
 lamp 130          0              FLAIL FLASH 1 (2X)  # lamp 28, I/O group 6 index 51, at 0,0
 lamp 131          0              FLAIL FLASH 2 (2X)  # lamp 29, I/O group 6 index 52, at 0,0
 lamp 132          0              FLAIL FLASH 3 (2X)  # lamp 30, I/O group 6 index 53, at 0,0
@@ -317,49 +321,49 @@ lamp 131          0              FLAIL FLASH 2 (2X)  # lamp 29, I/O group 6 inde
 lamp 132          0              FLAIL FLASH 3 (2X)  # lamp 30, I/O group 6 index 53, at 0,0
 lamp 133          0              FLAIL FLASH 4 (2X)  # lamp 31, I/O group 6 index 54, at 0,0
 lamp 134          0              FLAIL FLASH 5 (2X)  # lamp 32, I/O group 6 index 55, at 0,0
-lamp 9            0              LEFT OUTLANE  # lamp 47, I/O group 6 index 56, at 0,0
-lamp 10           0              LEFT RETURN LANE  # lamp 48, I/O group 6 index 57, at 0,0
-lamp 58           0              LEFT 2 BANK TARGET-BOTTOM  # lamp 49, I/O group 6 index 58, at 0,0
-lamp 59           0              LEFT 2 BANK TARGET-TOP  # lamp 50, I/O group 6 index 59, at 0,0
+lamp 9            0x20           LEFT OUTLANE  # lamp 47, I/O group 6 index 56, at 0,0; tie: Left outlane
+lamp 10           0x40           LEFT RETURN LANE  # lamp 48, I/O group 6 index 57, at 0,0; tie: Left return lane
+lamp 58           0x1            LEFT 2 BANK TARGET-BOTTOM  # lamp 49, I/O group 6 index 58, at 0,0; tie: Lower left 2 bank target bottom
+lamp 59           0x2            LEFT 2 BANK TARGET-TOP  # lamp 50, I/O group 6 index 59, at 0,0; tie: Lower left 2 bank target top
 lamp 21           0              MAGNA-SAVE  # lamp 51, I/O group 6 index 60, at 0,0
-lamp 13           0              RIGHT RETURN LANE  # lamp 52, I/O group 6 index 61, at 0,0
-lamp 14           0              RIGHT OUTLANE  # lamp 53, I/O group 6 index 62, at 0,0
+lamp 13           0x80           RIGHT RETURN LANE  # lamp 52, I/O group 6 index 61, at 0,0; tie: Right return lane
+lamp 14           0x100          RIGHT OUTLANE  # lamp 53, I/O group 6 index 62, at 0,0; tie: Right outlane
 lamp 122          0              TOP GI-WHT  # lamp 55, I/O group 7 index 1, at 0,0
 lamp 103          0              FLAME PANEL  # lamp 56, I/O group 7 index 2, at 0,0
 lamp 115,116,117  0              RIGHT FLOOD  # lamp 17, I/O group 7 index 5, at 0,0
-lamp 99           0              RIGHT 3 BANK DROP-BOTTOM  # lamp 57, I/O group 7 index 8, at 0,0
-lamp 98           0              RIGHT 3 BANK DROP-MID  # lamp 58, I/O group 7 index 9, at 0,0
-lamp 97           0              RIGHT 3 BANK DROP-TOP  # lamp 59, I/O group 7 index 10, at 0,0
+lamp 99           0x10           RIGHT 3 BANK DROP-BOTTOM  # lamp 57, I/O group 7 index 8, at 0,0; tie: Right 3 bank drop bottom
+lamp 98           0x8            RIGHT 3 BANK DROP-MID  # lamp 58, I/O group 7 index 9, at 0,0; tie: Right 3 bank drop middle
+lamp 97           0x4            RIGHT 3 BANK DROP-TOP  # lamp 59, I/O group 7 index 10, at 0,0; tie: Right 3 bank drop top
 lamp 90           0              LIGHT LOCK  # lamp 60, I/O group 7 index 11, at 0,0
 lamp 84           0              RIGHT LOCK  # lamp 61, I/O group 7 index 12, at 0,0
 lamp 85           0              EXTRA BALL  # lamp 62, I/O group 7 index 13, at 0,0
 lamp 86           0              MYSTERY  # lamp 63, I/O group 7 index 14, at 0,0
-lamp 80           0              CENTER TARGET ARROW 2  # lamp 64, I/O group 7 index 15, at 0,0
-lamp 87,88,89     0              SHIELD TARGET LIGHTNING BOLT  # lamp 18, I/O group 7 index 16, at 0,0
-lamp 81,82,83     0              SHIELD LIGHTNING BOLT  # lamp 19, I/O group 7 index 19, at 0,0
-lamp 79           0              CENTER TARGET ARROW 1  # lamp 65, I/O group 7 index 22, at 0,0
-lamp 74           0              FLAIL ARROW 1  # lamp 66, I/O group 7 index 23, at 0,0
+lamp 80           0x8000000      CENTER TARGET ARROW 2  # lamp 64, I/O group 7 index 15, at 0,0; tie: Center target
+lamp 87,88,89     0x400          SHIELD TARGET LIGHTNING BOLT  # lamp 18, I/O group 7 index 16, at 0,0; tie: Shield target
+lamp 81,82,83     0x10000000     SHIELD LIGHTNING BOLT  # lamp 19, I/O group 7 index 19, at 0,0; tie: Shield opto
+lamp 79           0x8000000      CENTER TARGET ARROW 1  # lamp 65, I/O group 7 index 22, at 0,0; tie: Center target
+lamp 74           0x46000000     FLAIL ARROW 1  # lamp 66, I/O group 7 index 23, at 0,0; tie: Flail opto enter, Flail exit, Flail opto mid
 lamp 76,77,78     0              CENTER TARGET LIGHTNING BOLT  # lamp 20, I/O group 7 index 24, at 0,0
 lamp 71,72,73     0              FLAIL LIGHTNING BOLT  # lamp 21, I/O group 7 index 27, at 0,0
-lamp 68,69,70     0              LEFT ORBIT LIGHTNING BOLT 2  # lamp 22, I/O group 7 index 30, at 0,0
-lamp 100          0              TOP LANE-(W)AR  # lamp 67, I/O group 7 index 33, at 0,0
-lamp 101          0              TOP LANE-W(A)R  # lamp 68, I/O group 7 index 34, at 0,0
-lamp 102          0              TOP LANE-WA(R)  # lamp 69, I/O group 7 index 35, at 0,0
-lamp 127          0              LEFT POP BUMPER  # lamp 70, I/O group 7 index 36, at 0,0
-lamp 128          0              RIGHT POP BUMPER  # lamp 71, I/O group 7 index 37, at 0,0
-lamp 129          0              BOTTOM POP BUMPER  # lamp 72, I/O group 7 index 38, at 0,0
+lamp 68,69,70     0x1000000      LEFT ORBIT LIGHTNING BOLT 2  # lamp 22, I/O group 7 index 30, at 0,0; tie: Left orbit
+lamp 100          0x80000        TOP LANE-(W)AR  # lamp 67, I/O group 7 index 33, at 0,0; tie: Top lane left
+lamp 101          0x100000       TOP LANE-W(A)R  # lamp 68, I/O group 7 index 34, at 0,0; tie: Top lane center
+lamp 102          0x200000       TOP LANE-WA(R)  # lamp 69, I/O group 7 index 35, at 0,0; tie: Top lane right
+lamp 127          0x80000000     LEFT POP BUMPER  # lamp 70, I/O group 7 index 36, at 0,0; tie: Left pop bumper
+lamp 128          0x100000000    RIGHT POP BUMPER  # lamp 71, I/O group 7 index 37, at 0,0; tie: Right pop bumper
+lamp 129          0x200000000    BOTTOM POP BUMPER  # lamp 72, I/O group 7 index 38, at 0,0; tie: Bottom pop bumper
 lamp 109          0              LOCK 1  # lamp 81, I/O group 7 index 39, at 0,0
-lamp 75           0              FLAIL ARROW 2  # lamp 73, I/O group 7 index 40, at 0,0
-lamp 60,61,62     0              CASTLE LIGHTNING BOLT  # lamp 74, I/O group 7 index 41, at 0,0
+lamp 75           0x46000000     FLAIL ARROW 2  # lamp 73, I/O group 7 index 40, at 0,0; tie: Flail opto enter, Flail exit, Flail opto mid
+lamp 60,61,62     0x400000000    CASTLE LIGHTNING BOLT  # lamp 74, I/O group 7 index 41, at 0,0; tie: Castle vuk
 lamp 63           0              KNIGHT MODE  # lamp 75, I/O group 7 index 44, at 0,0
 lamp 64           0              ADD-A-BALL  # lamp 76, I/O group 7 index 45, at 0,0
 lamp 125          0              LEFT ORBIT FLASH  # lamp 77, I/O group 7 index 46, at 0,0
 lamp 110          0              LOCK 2  # lamp 82, I/O group 7 index 47, at 0,0
-lamp 91,92,93     0              RIGHT ORBIT LIGHTNING BOLT 1  # lamp 23, I/O group 7 index 48, at 0,0
-lamp 94,95,96     0              RIGHT ORBIT LIGHTNING BOLT 2  # lamp 24, I/O group 7 index 51, at 0,0
-lamp 126          0              SHIELD VUK FLASH  # lamp 78, I/O group 7 index 54, at 0,0
+lamp 91,92,93     0x400000       RIGHT ORBIT LIGHTNING BOLT 1  # lamp 23, I/O group 7 index 48, at 0,0; tie: Right orbit
+lamp 94,95,96     0x400000       RIGHT ORBIT LIGHTNING BOLT 2  # lamp 24, I/O group 7 index 51, at 0,0; tie: Right orbit
+lamp 126          0x200          SHIELD VUK FLASH  # lamp 78, I/O group 7 index 54, at 0,0; tie: Shield vuk
 lamp 111          0              LOCK 3  # lamp 83, I/O group 7 index 55, at 0,0
-lamp 65,66,67     0              LEFT ORBIT LIGHTNING BOLT 1  # lamp 25, I/O group 7 index 56, at 0,0
+lamp 65,66,67     0x1000000      LEFT ORBIT LIGHTNING BOLT 1  # lamp 25, I/O group 7 index 56, at 0,0; tie: Left orbit
 lamp 104          0              KNIGHT LEFT EYE  # lamp 79, I/O group 7 index 59, at 0,0
 lamp 105          0              KNIGHT RIGHT EYE  # lamp 80, I/O group 7 index 60, at 0,0
 lamp 106,107,108  0              KNIGHT MASK  # lamp 26, I/O group 7 index 61, at 0,0

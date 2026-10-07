@@ -217,34 +217,34 @@ lamp 126,0,128    0              TOP GI  # lamp 4+26, I/O group 8 index 2, at 0,
 lamp 116          0              TIME MACHINE RAMP 1  # lamp 5, I/O group 8 index 48, at 0,0
 lamp 121          0              TIME MACHINE RAMP 6  # lamp 6, I/O group 8 index 53, at 0,0
 lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 7, I/O group 5 index 5, at 0,0
-lamp 30,31,32     0              LEFT POP BUMPER  # lamp 8, I/O group 7 index 29, at 0,0
-lamp 39,40,41     0              SHOOT ME LEFT ORBIT  # lamp 9, I/O group 7 index 32, at 0,0
-lamp 42,43,44     0              RECORD LEFT ORBIT  # lamp 10, I/O group 7 index 35, at 0,0
-lamp 33,34,35     0              RIGHT POP BUMPER  # lamp 11, I/O group 7 index 40, at 0,0
-lamp 36,37,38     0              BOTTOM POP BUMPER  # lamp 12, I/O group 7 index 43, at 0,0
-lamp 48,49,50     0              SHOOT ME SIDE RAMP  # lamp 13, I/O group 8 index 8, at 0,0
-lamp 69,70,71     0              SHOOT ME MINI ORBIT  # lamp 14, I/O group 8 index 11, at 0,0
-lamp 72,73,74     0              RECORD MINI ORBIT  # lamp 15, I/O group 8 index 14, at 0,0
+lamp 30,31,32     0x40000000     LEFT POP BUMPER  # lamp 8, I/O group 7 index 29, at 0,0; tie: Left pop bumper
+lamp 39,40,41     0x10000000     SHOOT ME LEFT ORBIT  # lamp 9, I/O group 7 index 32, at 0,0; tie: Left orbit
+lamp 42,43,44     0x10000000     RECORD LEFT ORBIT  # lamp 10, I/O group 7 index 35, at 0,0; tie: Left orbit
+lamp 33,34,35     0x80000000     RIGHT POP BUMPER  # lamp 11, I/O group 7 index 40, at 0,0; tie: Right pop bumper
+lamp 36,37,38     0x100000000    BOTTOM POP BUMPER  # lamp 12, I/O group 7 index 43, at 0,0; tie: Bottom pop bumper
+lamp 48,49,50     0x8100000      SHOOT ME SIDE RAMP  # lamp 13, I/O group 8 index 8, at 0,0; tie: Left ramp enter, L ramp exit opto
+lamp 69,70,71     0x20000000     SHOOT ME MINI ORBIT  # lamp 14, I/O group 8 index 11, at 0,0; tie: Inner loop
+lamp 72,73,74     0x20000000     RECORD MINI ORBIT  # lamp 15, I/O group 8 index 14, at 0,0; tie: Inner loop
 lamp 53,54,55     0              SHOOT ME UPPER SCOOP  # lamp 16, I/O group 8 index 21, at 0,0
-lamp 77,78,79     0              SHOOT ME VUK  # lamp 17, I/O group 8 index 24, at 0,0
-lamp 80,81,82     0              RECORD VUK  # lamp 18, I/O group 8 index 27, at 0,0
-lamp 85,86,87     0              SHOOT ME SPINNER  # lamp 19, I/O group 8 index 34, at 0,0
-lamp 88,89,90     0              RECORD SPINNER  # lamp 20, I/O group 8 index 37, at 0,0
-lamp 61,62,63     0              SHOOT ME RIGHT RAMP  # lamp 21, I/O group 8 index 42, at 0,0
-lamp 64,65,66     0              RECORD RIGHT RAMP  # lamp 22, I/O group 8 index 45, at 0,0
-lamp 93,94,95     0              SHOOT ME RIGHT ORBIT  # lamp 23, I/O group 8 index 64, at 0,0
-lamp 96,97,98     0              RECORD RIGHT ORBIT  # lamp 24, I/O group 8 index 67, at 0,0
+lamp 77,78,79     0x80000        SHOOT ME VUK  # lamp 17, I/O group 8 index 24, at 0,0; tie: Vuk
+lamp 80,81,82     0x80000        RECORD VUK  # lamp 18, I/O group 8 index 27, at 0,0; tie: Vuk
+lamp 85,86,87     0x800000       SHOOT ME SPINNER  # lamp 19, I/O group 8 index 34, at 0,0; tie: Spinner
+lamp 88,89,90     0x800000       RECORD SPINNER  # lamp 20, I/O group 8 index 37, at 0,0; tie: Spinner
+lamp 61,62,63     0x4200000      SHOOT ME RIGHT RAMP  # lamp 21, I/O group 8 index 42, at 0,0; tie: Right ramp exit opto, R ramp enter opto
+lamp 64,65,66     0x4200000      RECORD RIGHT RAMP  # lamp 22, I/O group 8 index 45, at 0,0; tie: Right ramp exit opto, R ramp enter opto
+lamp 93,94,95     0x1000000      SHOOT ME RIGHT ORBIT  # lamp 23, I/O group 8 index 64, at 0,0; tie: Right orbit
+lamp 96,97,98     0x1000000      RECORD RIGHT ORBIT  # lamp 24, I/O group 8 index 67, at 0,0; tie: Right orbit
 lamp 122          0              COIN DOOR GI  # lamp 27, I/O group 5 index 1, at 0,0
 lamp 4            0              START BUTTON  # lamp 28, I/O group 5 index 2, at 0,0
 lamp 5            0              TOURNAMENT START  # lamp 29, I/O group 5 index 3, at 0,0
 lamp 144          0              SHOOTER ILLUM. 1 (OPTIONAL)  # lamp 30, I/O group 5 index 9, at 0,0
 lamp 145          0              SHOOTER ILLUM. 2 (OPTIONAL)  # lamp 31, I/O group 5 index 10, at 0,0
 lamp 124          0              BOTTOM GI-WHT  # lamp 32, I/O group 7 index 1, at 0,0
-lamp 9            0              LEFT OUTLANE  # lamp 33, I/O group 7 index 3, at 0,0
-lamp 10           0              LEFT RETURN LANE  # lamp 34, I/O group 7 index 4, at 0,0
-lamp 11           0              RIGHT RETURN LANE INNER  # lamp 35, I/O group 7 index 5, at 0,0
-lamp 12           0              RIGHT RETURN LANE OUTER  # lamp 36, I/O group 7 index 6, at 0,0
-lamp 13           0              RIGHT OUTLANE  # lamp 37, I/O group 7 index 7, at 0,0
+lamp 9            0x800          LEFT OUTLANE  # lamp 33, I/O group 7 index 3, at 0,0; tie: Left outlane
+lamp 10           0x1000         LEFT RETURN LANE  # lamp 34, I/O group 7 index 4, at 0,0; tie: Left return lane
+lamp 11           0x8000         RIGHT RETURN LANE INNER  # lamp 35, I/O group 7 index 5, at 0,0; tie: Right return lane-inner
+lamp 12           0x2000         RIGHT RETURN LANE OUTER  # lamp 36, I/O group 7 index 6, at 0,0; tie: Right return lane
+lamp 13           0x4000         RIGHT OUTLANE  # lamp 37, I/O group 7 index 7, at 0,0; tie: Right outlane
 lamp 19           0              LA VILLA STRANGIATO  # lamp 38, I/O group 7 index 8, at 0,0
 lamp 20           0              LIMELIGHT  # lamp 39, I/O group 7 index 9, at 0,0
 lamp 129          0              LEFT SLING FLASH  # lamp 40, I/O group 7 index 10, at 0,0
@@ -257,9 +257,9 @@ lamp 16           0              THE SPIRIT OF RADIO  # lamp 46, I/O group 7 ind
 lamp 17           0              WORKING MAN  # lamp 47, I/O group 7 index 21, at 0,0
 lamp 18           0              TOM SAWYER  # lamp 48, I/O group 7 index 22, at 0,0
 lamp 14           0              SHOOT AGAIN (X2)  # lamp 49, I/O group 7 index 23, at 0,0
-lamp 23           0              DRUMSTICKS DROP  # lamp 50, I/O group 7 index 24, at 0,0
-lamp 22           0              ELECTRIC GUITAR DROP  # lamp 51, I/O group 7 index 25, at 0,0
-lamp 21           0              BASS DROP  # lamp 52, I/O group 7 index 26, at 0,0
+lamp 23           0xe            DRUMSTICKS DROP  # lamp 50, I/O group 7 index 24, at 0,0; tie: 3 Bank drop left, 3 Bank drop cent, 3 Bank drop right
+lamp 22           0xe            ELECTRIC GUITAR DROP  # lamp 51, I/O group 7 index 25, at 0,0; tie: 3 Bank drop left, 3 Bank drop cent, 3 Bank drop right
+lamp 21           0xe            BASS DROP  # lamp 52, I/O group 7 index 26, at 0,0; tie: 3 Bank drop left, 3 Bank drop cent, 3 Bank drop right
 lamp 134          0              UPPER LEFT FLASH  # lamp 53, I/O group 7 index 28, at 0,0
 lamp 45           0              LEFT ORBIT COMBO 2  # lamp 54, I/O group 7 index 38, at 0,0
 lamp 46           0              LEFT ORBIT COMBO 1  # lamp 55, I/O group 7 index 39, at 0,0
@@ -295,10 +295,10 @@ lamp 119          0              TIME MACHINE RAMP 4  # lamp 84, I/O group 8 ind
 lamp 120          0              TIME MACHINE RAMP 5  # lamp 85, I/O group 8 index 52, at 0,0
 lamp 47           0              SUPER JACKPOT SIDE RAMP  # lamp 86, I/O group 8 index 54, at 0,0
 lamp 60           0              LITE LOCK RIGHT  # lamp 87, I/O group 8 index 55, at 0,0
-lamp 27           0              RUS(H) TARGET  # lamp 88, I/O group 8 index 56, at 0,0
-lamp 26           0              RU(S)H TARGET  # lamp 89, I/O group 8 index 57, at 0,0
-lamp 25           0              R(U)SH TARGET  # lamp 90, I/O group 8 index 58, at 0,0
-lamp 24           0              (R)USH TARGET  # lamp 91, I/O group 8 index 59, at 0,0
+lamp 27           0x400          RUS(H) TARGET  # lamp 88, I/O group 8 index 56, at 0,0; tie: Rus(h) target
+lamp 26           0x200          RU(S)H TARGET  # lamp 89, I/O group 8 index 57, at 0,0; tie: Ru(s)h target
+lamp 25           0x100          R(U)SH TARGET  # lamp 90, I/O group 8 index 58, at 0,0; tie: R(u)sh target
+lamp 24           0x80           (R)USH TARGET  # lamp 91, I/O group 8 index 59, at 0,0; tie: (R)ush target
 lamp 57           0              LOCK UPPER SCOOP  # lamp 92, I/O group 8 index 78, at 0,0
 lamp 58           0              LOCK LOWER SCOOP  # lamp 93, I/O group 8 index 79, at 0,0
 lamp 28           0              DRUM SOLO UP RIGHT FLIP  # lamp 94, I/O group 8 index 62, at 0,0
@@ -327,10 +327,10 @@ lamp 440          0              ALBUM 7  # lamp 116, I/O group 10 index 7, at 0
 lamp 441          0              ALBUM 8  # lamp 117, I/O group 10 index 8, at 0,0
 lamp 442          0              ALBUM 9  # lamp 118, I/O group 10 index 9, at 0,0
 lamp 443          0              ALBUM 10  # lamp 119, I/O group 10 index 10, at 0,0
-lamp 444          0              MILLIONS (X2)  # lamp 120, I/O group 10 index 13, at 0,0
-lamp 445          0              EXTRA BALL (X2)  # lamp 121, I/O group 10 index 12, at 0,0
-lamp 446          0              FRENZY (X2)  # lamp 122, I/O group 10 index 11, at 0,0
-lamp 447          0              ADVANCE TIME MACHINE (X2)  # lamp 123, I/O group 10 index 14, at 0,0
+lamp 444          0x2000000000   MILLIONS (X2)  # lamp 120, I/O group 10 index 13, at 0,0; tie: Millions (back right) switch
+lamp 445          0x400000000    EXTRA BALL (X2)  # lamp 121, I/O group 10 index 12, at 0,0; tie: Extra ball (front left) switch
+lamp 446          0x1000000000   FRENZY (X2)  # lamp 122, I/O group 10 index 11, at 0,0; tie: Frenzy (front right) switch
+lamp 447          0x800000000    ADVANCE TIME MACHINE (X2)  # lamp 123, I/O group 10 index 14, at 0,0; tie: Advance time machine (back left) switch
 lamp 448,449,450  0              GI1  # lamp 124, I/O group 10 index 20, at 0,0
 lamp 451,452,453  0              GI2  # lamp 125, I/O group 10 index 23, at 0,0
 lamp 454,455,456  0              GI3  # lamp 126, I/O group 10 index 26, at 0,0

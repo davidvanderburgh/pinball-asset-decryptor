@@ -197,28 +197,28 @@ event tilt           0xc6
 event game_over      0x47
 
 # ---- PAD-420: the inserts, read from this build's own program (lampmap.port_lines); none tied to a shot ----
-lamp 46,47,48     0              CENTER LANE ARROW  # lamp 4, I/O group 6 index 32, at 167,294
-lamp 54,55,56     0              RIGHT LANE ARROW  # lamp 5, I/O group 6 index 51, at 205,301
-lamp 64,65,66     0              RIGHT ORBIT ARROW  # lamp 6, I/O group 6 index 57, at 266,312
-lamp 58,59,60     0              RIGHT RAMP ARROW  # lamp 7, I/O group 6 index 61, at 233,315
-lamp 40,41,42     0              LEFT LANE ARROW  # lamp 8, I/O group 7 index 15, at 129,301
-lamp 33,34,35     0              LEFT RAMP ARROW  # lamp 9, I/O group 7 index 19, at 98,302
-lamp 27,28,29     0              LEFT ORBIT ARROW  # lamp 10, I/O group 7 index 44, at 62,308
-lamp 23,24,25     0              LEFT EJECT ARROW  # lamp 11, I/O group 7 index 50, at 61,394
+lamp 46,47,48     0x40000        CENTER LANE ARROW  # lamp 4, I/O group 6 index 32, at 167,294; tie: Center lane opto
+lamp 54,55,56     0x80000        RIGHT LANE ARROW  # lamp 5, I/O group 6 index 51, at 205,301; tie: Right lane rollover
+lamp 64,65,66     0x1000000000   RIGHT ORBIT ARROW  # lamp 6, I/O group 6 index 57, at 266,312; tie: Right orbit
+lamp 58,59,60     0x80000000     RIGHT RAMP ARROW  # lamp 7, I/O group 6 index 61, at 233,315; tie: Right ramp exit
+lamp 40,41,42     0x1000000      LEFT LANE ARROW  # lamp 8, I/O group 7 index 15, at 129,301; tie: Left lane target
+lamp 33,34,35     0xc00000       LEFT RAMP ARROW  # lamp 9, I/O group 7 index 19, at 98,302; tie: Left ramp enter, Left ramp exit
+lamp 27,28,29     0x8000         LEFT ORBIT ARROW  # lamp 10, I/O group 7 index 44, at 62,308; tie: Left orbit
+lamp 23,24,25     0x1            LEFT EJECT ARROW  # lamp 11, I/O group 7 index 50, at 61,394; tie: Left eject
 lamp 111          0              DEMOGORGON BODY FLASH  # lamp 14, I/O group 7 index 36, at 166,159
 lamp 106          0              BOTTOM GI-VIO(X9)  # lamp 15, I/O group 6 index 1, at 0,0
 lamp 108          0              TOP GI-VIO(X5)  # lamp 16, I/O group 7 index 1, at 0,0
 lamp 105          0              BOTTOM GI-WHT(X9)  # lamp 20, I/O group 6 index 0, at 0,0
-lamp 9            0              LEFT OUTLANE  # lamp 21, I/O group 6 index 3, at 36,490
-lamp 10           0              LEFT RETURN LANE  # lamp 22, I/O group 6 index 4, at 57,476
+lamp 9            0x100          LEFT OUTLANE  # lamp 21, I/O group 6 index 3, at 36,490; tie: Left outlane
+lamp 10           0x200          LEFT RETURN LANE  # lamp 22, I/O group 6 index 4, at 57,476; tie: Left return lane
 lamp 11           0              SPELL OF PROTECTION  # lamp 23, I/O group 6 index 5, at 36,550
-lamp 12           0              RIGHT RETURN LANE  # lamp 24, I/O group 6 index 6, at 237,476
-lamp 13           0              RIGHT OUTLANE  # lamp 25, I/O group 6 index 7, at 258,490
+lamp 12           0x400          RIGHT RETURN LANE  # lamp 24, I/O group 6 index 6, at 237,476; tie: Right return lane
+lamp 13           0x800          RIGHT OUTLANE  # lamp 25, I/O group 6 index 7, at 258,490; tie: Right outlane
 lamp 20           0              FINAL SHOWDOWN  # lamp 26, I/O group 6 index 8, at 147,501
 lamp 14           0              5-WAY COMBO  # lamp 27, I/O group 6 index 9, at 128,517
 lamp 15           0              SEND IT BACK  # lamp 28, I/O group 6 index 10, at 123,495
 lamp 16           0              DEMODOG  # lamp 29, I/O group 6 index 11, at 136,480
-lamp 17           0              DEMOGORGON  # lamp 30, I/O group 6 index 12, at 157,480
+lamp 17           0x2000000      DEMOGORGON  # lamp 30, I/O group 6 index 12, at 157,480; tie: Demogorgon opto
 lamp 18           0              LIGHT THE FIRE  # lamp 31, I/O group 6 index 13, at 170,495
 lamp 19           0              TK MULTIBALL  # lamp 32, I/O group 6 index 14, at 166,517
 lamp 81           0              TURN UP THE HEAT!  # lamp 33, I/O group 6 index 15, at 181,477
@@ -227,15 +227,15 @@ lamp 79           0              MORSE CODE!  # lamp 35, I/O group 6 index 17, a
 lamp 78           0              WHAT MAMA SAYS  # lamp 36, I/O group 6 index 18, at 214,434
 lamp 77           0              SAVE WILL!  # lamp 37, I/O group 6 index 19, at 203,414
 lamp 76           0              QUARTER HUNT!  # lamp 38, I/O group 6 index 20, at 222,405
-lamp 93           0              DEMODO(G)  # lamp 39, I/O group 6 index 21, at 250,399
+lamp 93           0x4000         DEMODO(G)  # lamp 39, I/O group 6 index 21, at 250,399; tie: Demodog target 7 right
 lamp 21           0              2X PLAYFIELD MULTIPLIER  # lamp 40, I/O group 6 index 22, at 147,547
 lamp 22           0              SHOOT AGAIN  # lamp 41, I/O group 6 index 23, at 147,597
 lamp 63           0              RIGHT RAMP MODE START 1  # lamp 42, I/O group 6 index 24, at 221,381
 lamp 69           0              RIGHT ORBIT MODE START 1  # lamp 43, I/O group 6 index 25, at 250,379
-lamp 94           0              4 BANK DROP 1 LEFT  # lamp 44, I/O group 6 index 26, at 140,249
-lamp 95           0              4 BANK DROP 2  # lamp 45, I/O group 6 index 27, at 157,249
-lamp 96           0              4 BANK DROP 3  # lamp 46, I/O group 6 index 28, at 175,249
-lamp 97           0              4 BANK DROP 4 RIGHT  # lamp 47, I/O group 6 index 29, at 192,249
+lamp 94           0x8000000      4 BANK DROP 1 LEFT  # lamp 44, I/O group 6 index 26, at 140,249; tie: Center 4 bank drop 1 left
+lamp 95           0x10000000     4 BANK DROP 2  # lamp 45, I/O group 6 index 27, at 157,249; tie: Center 4 bank drop 2
+lamp 96           0x20000000     4 BANK DROP 3  # lamp 46, I/O group 6 index 28, at 175,249; tie: Center 4 bank drop 3
+lamp 97           0x40000000     4 BANK DROP 4 RIGHT  # lamp 47, I/O group 6 index 29, at 192,249; tie: Center 4 bank drop 4 right
 lamp 68           0              RIGHT ORBIT MODE START 2  # lamp 48, I/O group 6 index 30, at 255,358
 lamp 62           0              RIGHT RAMP MODE START 2  # lamp 49, I/O group 6 index 31, at 225,369
 lamp 49           0              BUST OUT!  # lamp 50, I/O group 6 index 35, at 167,324
@@ -245,10 +245,10 @@ lamp 52           0              RUN WILL!  # lamp 53, I/O group 6 index 38, at 
 lamp 53           0              CAN'T STOP THIS!  # lamp 54, I/O group 6 index 39, at 167,402
 lamp 61           0              RIGHT RAMP MODE START 3  # lamp 55, I/O group 6 index 48, at 229,339
 lamp 118          0              LOWER RIGHT RAMP FLASH  # lamp 56, I/O group 6 index 49, at 284,319
-lamp 91           0              DEMO(D)OG  # lamp 57, I/O group 6 index 50, at 221,282
+lamp 91           0x1000         DEMO(D)OG  # lamp 57, I/O group 6 index 50, at 221,282; tie: Demodog target 5
 lamp 57           0              BURN IT BACK  # lamp 58, I/O group 6 index 54, at 202,324
 lamp 67           0              RIGHT ORBIT MODE START 3  # lamp 59, I/O group 6 index 56, at 260,337
-lamp 92           0              DEMOD(O)G  # lamp 60, I/O group 6 index 60, at 251,307
+lamp 92           0x2000         DEMOD(O)G  # lamp 60, I/O group 6 index 60, at 251,307; tie: Demodog target 6
 lamp 107          0              TOP GI-WHT(X5)  # lamp 61, I/O group 7 index 0, at 0,0
 lamp 45           0              MYSTERY  # lamp 62, I/O group 7 index 8, at 141,360
 lamp 44           0              DEMODOG ATTACK  # lamp 63, I/O group 7 index 9, at 138,342
@@ -256,25 +256,25 @@ lamp 43           0              EXTRA BALL  # lamp 64, I/O group 7 index 10, at
 lamp 36           0              LOCK  # lamp 69, I/O group 7 index 18, at 105,326
 lamp 31           0              LEFT ORBIT MODE START 2  # lamp 70, I/O group 7 index 22, at 77,352
 lamp 37           0              LEFT RAMP MODE START 3  # lamp 71, I/O group 7 index 23, at 111,346
-lamp 87           0              LITE LOCK LEFT  # lamp 72, I/O group 7 index 24, at 76,291
-lamp 88           0              LITE LOCK RIGHT  # lamp 73, I/O group 7 index 25, at 110,280
+lamp 87           0x8            LITE LOCK LEFT  # lamp 72, I/O group 7 index 24, at 76,291; tie: Left ramp target left
+lamp 88           0x10           LITE LOCK RIGHT  # lamp 73, I/O group 7 index 25, at 110,280; tie: Left ramp target right
 lamp 112          0              EJECT FLASH  # lamp 74, I/O group 7 index 26, at 40,331
 lamp 113          0              LEFT ORBIT FLASH  # lamp 75, I/O group 7 index 27, at 45,192
 lamp 38           0              LEFT RAMP MODE START 2  # lamp 76, I/O group 7 index 30, at 117,367
 lamp 32           0              LEFT ORBIT MODE START 1  # lamp 77, I/O group 7 index 31, at 84,373
-lamp 89           0              DE(M)ODOG  # lamp 78, I/O group 7 index 32, at 158,191
-lamp 90           0              DEM(O)DOG  # lamp 79, I/O group 7 index 33, at 179,191
+lamp 89           0x100000       DE(M)ODOG  # lamp 78, I/O group 7 index 32, at 158,191; tie: Demodog target 3
+lamp 90           0x200000       DEM(O)DOG  # lamp 79, I/O group 7 index 33, at 179,191; tie: Demodog target 4
 lamp 109          0              DEMOGORGON LEFT FLASH  # lamp 80, I/O group 7 index 34, at 142,177
 lamp 110          0              DEMOGORGON FRONT FLASH  # lamp 81, I/O group 7 index 35, at 189,177
 lamp 115          0              UPPER RIGHT RAMP FLASH  # lamp 83, I/O group 7 index 38, at 243,83
-lamp 116          0              LEFT POP BUMPER  # lamp 84, I/O group 7 index 39, at 208,107
-lamp 117          0              RIGHT POP BUMPER  # lamp 85, I/O group 7 index 40, at 249,122
+lamp 116          0x200000000    LEFT POP BUMPER  # lamp 84, I/O group 7 index 39, at 208,107; tie: Left pop bumper
+lamp 117          0x400000000    RIGHT POP BUMPER  # lamp 85, I/O group 7 index 40, at 249,122; tie: Right pop bumper
 lamp 30           0              LEFT ORBIT MODE START 3  # lamp 86, I/O group 7 index 47, at 71,332
 lamp 70           0              WHERE'S BARB?  # lamp 87, I/O group 7 index 48, at 91,395
 lamp 71           0              MONSTER HUNTING!  # lamp 88, I/O group 7 index 49, at 95,416
 lamp 26           0              2X SCORING  # lamp 89, I/O group 7 index 53, at 73,410
-lamp 85           0              (D)EMODOG  # lamp 90, I/O group 7 index 54, at 66,428
-lamp 86           0              D(E)MODOG  # lamp 91, I/O group 7 index 55, at 57,348
+lamp 85           0x2            (D)EMODOG  # lamp 90, I/O group 7 index 54, at 66,428; tie: Demodog target 1 left
+lamp 86           0x4            D(E)MODOG  # lamp 91, I/O group 7 index 55, at 57,348; tie: Demodog target 2
 lamp 39           0              LEFT RAMP MODE START 1  # lamp 92, I/O group 7 index 56, at 123,388
 lamp 72           0              BULLIES!  # lamp 93, I/O group 7 index 57, at 120,411
 lamp 73           0              GET ME OUT!  # lamp 94, I/O group 7 index 58, at 111,432

@@ -168,10 +168,14 @@ event tilt           0xc6
 event game_over      0x47
 
 # ---- lamps ----
-lamp 9            0x4            LEFT OUTLANE  # lamp 6, I/O group 6 index 22, at 31,464
-lamp 10           0x2            LEFT RETURN LANE  # lamp 7, I/O group 6 index 23, at 53,457
-lamp 11           0x8            RIGHT RETURN LANE  # lamp 8, I/O group 6 index 9, at 246,457
-lamp 12           0x10           RIGHT OUTLANE  # lamp 9, I/O group 6 index 10, at 268,464
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
+lamp 9            0x4            LEFT OUTLANE  # lamp 6, I/O group 6 index 22, at 31,464; tie: Left outlane
+lamp 10           0x2            LEFT RETURN LANE  # lamp 7, I/O group 6 index 23, at 53,457; tie: Left return lane
+lamp 11           0x8            RIGHT RETURN LANE  # lamp 8, I/O group 6 index 9, at 246,457; tie: Right return lane
+lamp 12           0x10           RIGHT OUTLANE  # lamp 9, I/O group 6 index 10, at 268,464; tie: Right outlane
 lamp 13           0              SHOOT AGAIN  # lamp 10, I/O group 6 index 3, at 150,614
 lamp 14,15,16     0              DROPS GEM  # lamp 11, I/O group 6 index 19, at 74,438
 lamp 17           0              HULK-COLLECT  # lamp 12, I/O group 6 index 18, at 99,457
@@ -180,9 +184,9 @@ lamp 19           0              CAPTAIN AMERICA-COLLECT  # lamp 14, I/O group 6
 lamp 20           0              BLACK WIDOW-COLLECT  # lamp 15, I/O group 6 index 15, at 162,447
 lamp 21           0              THOR-COLLECT  # lamp 16, I/O group 6 index 14, at 182,451
 lamp 22           0              BLACK PANTHER-COLLECT  # lamp 17, I/O group 6 index 8, at 202,457
-lamp 23           0x40           DROP TARGET GRID 1  # lamp 18, I/O group 6 index 67, at 56,397
-lamp 24           0x80           DROP TARGET GRID 2  # lamp 19, I/O group 6 index 65, at 60,380
-lamp 25           0x100          DROP TARGET GRID 3  # lamp 20, I/O group 6 index 63, at 63,362
+lamp 23           0x40           DROP TARGET GRID 1  # lamp 18, I/O group 6 index 67, at 56,397; tie: Drop target grid 1
+lamp 24           0x80           DROP TARGET GRID 2  # lamp 19, I/O group 6 index 65, at 60,380; tie: Drop target grid 2
+lamp 25           0x100          DROP TARGET GRID 3  # lamp 20, I/O group 6 index 63, at 63,362; tie: Drop target grid 3
 lamp 26           0              DROP TARGET GRID 4  # lamp 21, I/O group 6 index 66, at 75,401
 lamp 27           0              DROP TARGET GRID 5  # lamp 22, I/O group 6 index 64, at 79,384
 lamp 28           0              DROP TARGET GRID 6  # lamp 23, I/O group 6 index 62, at 82,366
@@ -193,19 +197,19 @@ lamp 32           0              SOUL GEM  # lamp 27, I/O group 6 index 34, at 1
 lamp 33           0              BLACK ORDER  # lamp 28, I/O group 6 index 35, at 162,400
 lamp 34           0              THANOS BATTLE  # lamp 29, I/O group 6 index 43, at 151,379
 lamp 35           0              RIGHT BULLSEYE  # lamp 30, I/O group 6 index 11, at 236,396
-lamp 36           0x20000000000  SCOOP ARROW  # lamp 31, I/O group 6 index 12, at 245,420
+lamp 36           0x20000000000  SCOOP ARROW  # lamp 31, I/O group 6 index 12, at 245,420; tie: Scoop arrow
 lamp 37           0              CHANGE GEM  # lamp 32, I/O group 6 index 13, at 231,435
-lamp 38,39,40     0x1000000000   LEFT SPINNER  # lamp 33, I/O group 6 index 59, at 68,343
+lamp 38,39,40     0x1000000000   LEFT SPINNER  # lamp 33, I/O group 6 index 59, at 68,343; tie: Left spinner
 lamp 41,42,43     0              LEFT ORBIT GEM  # lamp 34, I/O group 7 index 19, at 32,238
 lamp 44           0              HULK  # lamp 35, I/O group 7 index 22, at 32,211
-lamp 45,46,47     0xf00000000    TOWER  # lamp 36, I/O group 7 index 23, at 70,250
+lamp 45,46,47     0xf00000000    TOWER  # lamp 36, I/O group 7 index 23, at 70,250; tie: Tower (0x100000000), Tower (0x200000000), Tower (0x400000000), Tower (0x800000000)
 lamp 48           0              HAWKEYE CHALLENGE  # lamp 37, I/O group 7 index 26, at 60,219
 lamp 49           0              IRON MAN  # lamp 38, I/O group 7 index 27, at 56,173
 lamp 50           0              TOWER LOCK 1  # lamp 39, I/O group 7 index 7, at 41,141
 lamp 51           0              TOWER LOCK 2  # lamp 40, I/O group 7 index 6, at 41,141
 lamp 52           0              TOWER LOCK 3  # lamp 41, I/O group 7 index 5, at 41,141
 lamp 53           0              DISC SPIN CCW  # lamp 42, I/O group 7 index 84, at 103,272
-lamp 54,55,56     0x40000000000  DISC  # lamp 43, I/O group 7 index 73, at 120,270
+lamp 54,55,56     0x40000000000  DISC  # lamp 43, I/O group 7 index 73, at 120,270; tie: Disc
 lamp 57           0              DISC SPIN CW  # lamp 44, I/O group 7 index 79, at 134,259
 lamp 58,59,60     0              (S)TRANGE  # lamp 45, I/O group 7 index 93, at 90,290
 lamp 61,62,63     0              S(T)RANGE  # lamp 46, I/O group 7 index 81, at 105,291
@@ -218,31 +222,31 @@ lamp 79           0              OPEN PORTAL  # lamp 52, I/O group 7 index 88, a
 lamp 80           0              PORTAL LOCK  # lamp 53, I/O group 7 index 80, at 133,302
 lamp 81           0              EYE OF AGAMOTTO  # lamp 54, I/O group 7 index 72, at 155,288
 lamp 82,83,84     0              LEFT RAMP GEM  # lamp 55, I/O group 7 index 29, at 145,232
-lamp 85,86,87     0x10000000000  INNER LOOP  # lamp 56, I/O group 7 index 36, at 170,226
-lamp 88           0x800000       CENTER BULLSEYE  # lamp 57, I/O group 7 index 39, at 181,236
+lamp 85,86,87     0x10000000000  INNER LOOP  # lamp 56, I/O group 7 index 36, at 170,226; tie: Inner loop
+lamp 88           0x800000       CENTER BULLSEYE  # lamp 57, I/O group 7 index 39, at 181,236; tie: Center bullseye
 lamp 89           0              BLACK WIDOW  # lamp 58, I/O group 7 index 28, at 145,210
-lamp 90,91,92     0x40000000     LEFT RAMP  # lamp 59, I/O group 7 index 16, at 145,190
-lamp 93,94,95     0x80000000     RIGHT RAMP  # lamp 60, I/O group 7 index 33, at 177,202
+lamp 90,91,92     0x40000000     LEFT RAMP  # lamp 59, I/O group 7 index 16, at 145,190; tie: Left ramp
+lamp 93,94,95     0x80000000     RIGHT RAMP  # lamp 60, I/O group 7 index 33, at 177,202; tie: Right ramp
 lamp 96           0              COLLECT GEM  # lamp 61, I/O group 7 index 32, at 184,175
-lamp 97           0x400000       LEFT BULLSEYE  # lamp 62, I/O group 7 index 8, at 166,177
+lamp 97           0x400000       LEFT BULLSEYE  # lamp 62, I/O group 7 index 8, at 166,177; tie: Left bullseye
 lamp 98           0              EXTRA BALL  # lamp 63, I/O group 7 index 45, at 89,183
 lamp 99           0              ADD-A-BALL  # lamp 64, I/O group 7 index 46, at 89,183
 lamp 100          0              SPOT IRON  # lamp 65, I/O group 7 index 47, at 89,183
 lamp 101,102,103  0              POPS GEM  # lamp 66, I/O group 7 index 9, at 108,138
 lamp 104          0              CAPTAIN AMERICA  # lamp 67, I/O group 7 index 12, at 105,115
-lamp 105,106,107  0x10000000     POPS  # lamp 68, I/O group 7 index 13, at 101,94
-lamp 108          0x20000000     SKILL SHOT ROLLOVER  # lamp 69, I/O group 7 index 3, at 166,98
+lamp 105,106,107  0x10000000     POPS  # lamp 68, I/O group 7 index 13, at 101,94; tie: Pops
+lamp 108          0x20000000     SKILL SHOT ROLLOVER  # lamp 69, I/O group 7 index 3, at 166,98; tie: Skill shot rollover
 lamp 109,110,111  0              MARVEL GEM  # lamp 70, I/O group 6 index 36, at 201,307
 lamp 112          0              (T)HOR  # lamp 71, I/O group 7 index 51, at 259,189
 lamp 113          0              T(H)OR  # lamp 72, I/O group 7 index 52, at 254,212
 lamp 114          0              TH(O)R  # lamp 73, I/O group 7 index 53, at 248,236
 lamp 115          0              THO(R)  # lamp 74, I/O group 7 index 54, at 243,259
-lamp 116,117,118  0x6000         MARVEL  # lamp 75, I/O group 6 index 44, at 208,281
+lamp 116,117,118  0x6000         MARVEL  # lamp 75, I/O group 6 index 44, at 208,281; tie: Marvel (0x2000), Marvel (0x4000)
 lamp 119          0              THOR POWER UP  # lamp 76, I/O group 6 index 39, at 223,312
 lamp 120          0              THOR MULTIBALL  # lamp 77, I/O group 6 index 40, at 217,329
 lamp 121,122,123  0              RIGHT ORBIT GEM  # lamp 78, I/O group 7 index 56, at 246,314
 lamp 124          0              BLACK PANTHER  # lamp 79, I/O group 7 index 59, at 254,292
-lamp 125,126,127  0x6000000000   RIGHT ORBIT  # lamp 80, I/O group 7 index 60, at 260,273
+lamp 125,126,127  0x6000000000   RIGHT ORBIT  # lamp 80, I/O group 7 index 60, at 260,273; tie: Right orbit (0x2000000000), Right orbit (0x4000000000)
 lamp 128,129,130  0              LEFT SUBWAY  # lamp 81, I/O group 6 index 47, at 144,324
 lamp 131,132,133  0              CENTER SUBWAY  # lamp 82, I/O group 6 index 50, at 183,339
 lamp 134,135,136  0              RIGHT SUBWAY  # lamp 83, I/O group 6 index 53, at 222,354
@@ -265,10 +269,10 @@ lamp 13           0              SHOOT AGAIN  # lamp 10, I/O group 6 index 3, at
 lamp 152          0              LEFT SPINNER FLASH  # lamp 95, I/O group 6 index 4, at 27,354
 lamp 153          0              VUK FLASH  # lamp 96, I/O group 6 index 5, at 267,418
 lamp 22           0              BLACK PANTHER-COLLECT  # lamp 17, I/O group 6 index 8, at 202,457
-lamp 11           0x8            RIGHT RETURN LANE  # lamp 8, I/O group 6 index 9, at 246,457
-lamp 12           0x10           RIGHT OUTLANE  # lamp 9, I/O group 6 index 10, at 268,464
+lamp 11           0x8            RIGHT RETURN LANE  # lamp 8, I/O group 6 index 9, at 246,457; tie: Right return lane
+lamp 12           0x10           RIGHT OUTLANE  # lamp 9, I/O group 6 index 10, at 268,464; tie: Right outlane
 lamp 35           0              RIGHT BULLSEYE  # lamp 30, I/O group 6 index 11, at 236,396
-lamp 36           0x20000000000  SCOOP ARROW  # lamp 31, I/O group 6 index 12, at 245,420
+lamp 36           0x20000000000  SCOOP ARROW  # lamp 31, I/O group 6 index 12, at 245,420; tie: Scoop arrow
 lamp 37           0              CHANGE GEM  # lamp 32, I/O group 6 index 13, at 231,435
 lamp 21           0              THOR-COLLECT  # lamp 16, I/O group 6 index 14, at 182,451
 lamp 20           0              BLACK WIDOW-COLLECT  # lamp 15, I/O group 6 index 15, at 162,447
@@ -276,50 +280,50 @@ lamp 19           0              CAPTAIN AMERICA-COLLECT  # lamp 14, I/O group 6
 lamp 18           0              IRON MAN-COLLECT  # lamp 13, I/O group 6 index 17, at 120,451
 lamp 17           0              HULK-COLLECT  # lamp 12, I/O group 6 index 18, at 99,457
 lamp 14,15,16     0              DROPS GEM  # lamp 11, I/O group 6 index 19, at 74,438
-lamp 9            0x4            LEFT OUTLANE  # lamp 6, I/O group 6 index 22, at 31,464
-lamp 10           0x2            LEFT RETURN LANE  # lamp 7, I/O group 6 index 23, at 53,457
+lamp 9            0x4            LEFT OUTLANE  # lamp 6, I/O group 6 index 22, at 31,464; tie: Left outlane
+lamp 10           0x2            LEFT RETURN LANE  # lamp 7, I/O group 6 index 23, at 53,457; tie: Left return lane
 lamp 32           0              SOUL GEM  # lamp 27, I/O group 6 index 34, at 140,400
 lamp 33           0              BLACK ORDER  # lamp 28, I/O group 6 index 35, at 162,400
 lamp 109,110,111  0              MARVEL GEM  # lamp 70, I/O group 6 index 36, at 201,307
 lamp 119          0              THOR POWER UP  # lamp 76, I/O group 6 index 39, at 223,312
 lamp 120          0              THOR MULTIBALL  # lamp 77, I/O group 6 index 40, at 217,329
 lamp 34           0              THANOS BATTLE  # lamp 29, I/O group 6 index 43, at 151,379
-lamp 116,117,118  0x6000         MARVEL  # lamp 75, I/O group 6 index 44, at 208,281
+lamp 116,117,118  0x6000         MARVEL  # lamp 75, I/O group 6 index 44, at 208,281; tie: Marvel (0x2000), Marvel (0x4000)
 lamp 128,129,130  0              LEFT SUBWAY  # lamp 81, I/O group 6 index 47, at 144,324
 lamp 131,132,133  0              CENTER SUBWAY  # lamp 82, I/O group 6 index 50, at 183,339
 lamp 134,135,136  0              RIGHT SUBWAY  # lamp 83, I/O group 6 index 53, at 222,354
 lamp 31           0              DROP TARGET GRID 9  # lamp 26, I/O group 6 index 56, at 101,370
 lamp 30           0              DROP TARGET GRID 8  # lamp 25, I/O group 6 index 57, at 98,388
 lamp 29           0              DROP TARGET GRID 7  # lamp 24, I/O group 6 index 58, at 94,405
-lamp 38,39,40     0x1000000000   LEFT SPINNER  # lamp 33, I/O group 6 index 59, at 68,343
+lamp 38,39,40     0x1000000000   LEFT SPINNER  # lamp 33, I/O group 6 index 59, at 68,343; tie: Left spinner
 lamp 28           0              DROP TARGET GRID 6  # lamp 23, I/O group 6 index 62, at 82,366
-lamp 25           0x100          DROP TARGET GRID 3  # lamp 20, I/O group 6 index 63, at 63,362
+lamp 25           0x100          DROP TARGET GRID 3  # lamp 20, I/O group 6 index 63, at 63,362; tie: Drop target grid 3
 lamp 27           0              DROP TARGET GRID 5  # lamp 22, I/O group 6 index 64, at 79,384
-lamp 24           0x80           DROP TARGET GRID 2  # lamp 19, I/O group 6 index 65, at 60,380
+lamp 24           0x80           DROP TARGET GRID 2  # lamp 19, I/O group 6 index 65, at 60,380; tie: Drop target grid 2
 lamp 26           0              DROP TARGET GRID 4  # lamp 21, I/O group 6 index 66, at 75,401
-lamp 23           0x40           DROP TARGET GRID 1  # lamp 18, I/O group 6 index 67, at 56,397
+lamp 23           0x40           DROP TARGET GRID 1  # lamp 18, I/O group 6 index 67, at 56,397; tie: Drop target grid 1
 lamp 150          0              TOP GI-LEFT (X6)  # lamp 93, I/O group 7 index 0, at 0,0
 lamp 151          0              TOP GI-RIGHT (X6)  # lamp 94, I/O group 7 index 1, at 0,0
-lamp 108          0x20000000     SKILL SHOT ROLLOVER  # lamp 69, I/O group 7 index 3, at 166,98
+lamp 108          0x20000000     SKILL SHOT ROLLOVER  # lamp 69, I/O group 7 index 3, at 166,98; tie: Skill shot rollover
 lamp 52           0              TOWER LOCK 3  # lamp 41, I/O group 7 index 5, at 41,141
 lamp 51           0              TOWER LOCK 2  # lamp 40, I/O group 7 index 6, at 41,141
 lamp 50           0              TOWER LOCK 1  # lamp 39, I/O group 7 index 7, at 41,141
-lamp 97           0x400000       LEFT BULLSEYE  # lamp 62, I/O group 7 index 8, at 166,177
+lamp 97           0x400000       LEFT BULLSEYE  # lamp 62, I/O group 7 index 8, at 166,177; tie: Left bullseye
 lamp 101,102,103  0              POPS GEM  # lamp 66, I/O group 7 index 9, at 108,138
 lamp 104          0              CAPTAIN AMERICA  # lamp 67, I/O group 7 index 12, at 105,115
-lamp 105,106,107  0x10000000     POPS  # lamp 68, I/O group 7 index 13, at 101,94
-lamp 90,91,92     0x40000000     LEFT RAMP  # lamp 59, I/O group 7 index 16, at 145,190
+lamp 105,106,107  0x10000000     POPS  # lamp 68, I/O group 7 index 13, at 101,94; tie: Pops
+lamp 90,91,92     0x40000000     LEFT RAMP  # lamp 59, I/O group 7 index 16, at 145,190; tie: Left ramp
 lamp 41,42,43     0              LEFT ORBIT GEM  # lamp 34, I/O group 7 index 19, at 32,238
 lamp 44           0              HULK  # lamp 35, I/O group 7 index 22, at 32,211
-lamp 45,46,47     0xf00000000    TOWER  # lamp 36, I/O group 7 index 23, at 70,250
+lamp 45,46,47     0xf00000000    TOWER  # lamp 36, I/O group 7 index 23, at 70,250; tie: Tower (0x100000000), Tower (0x200000000), Tower (0x400000000), Tower (0x800000000)
 lamp 48           0              HAWKEYE CHALLENGE  # lamp 37, I/O group 7 index 26, at 60,219
 lamp 49           0              IRON MAN  # lamp 38, I/O group 7 index 27, at 56,173
 lamp 89           0              BLACK WIDOW  # lamp 58, I/O group 7 index 28, at 145,210
 lamp 82,83,84     0              LEFT RAMP GEM  # lamp 55, I/O group 7 index 29, at 145,232
 lamp 96           0              COLLECT GEM  # lamp 61, I/O group 7 index 32, at 184,175
-lamp 93,94,95     0x80000000     RIGHT RAMP  # lamp 60, I/O group 7 index 33, at 177,202
-lamp 85,86,87     0x10000000000  INNER LOOP  # lamp 56, I/O group 7 index 36, at 170,226
-lamp 88           0x800000       CENTER BULLSEYE  # lamp 57, I/O group 7 index 39, at 181,236
+lamp 93,94,95     0x80000000     RIGHT RAMP  # lamp 60, I/O group 7 index 33, at 177,202; tie: Right ramp
+lamp 85,86,87     0x10000000000  INNER LOOP  # lamp 56, I/O group 7 index 36, at 170,226; tie: Inner loop
+lamp 88           0x800000       CENTER BULLSEYE  # lamp 57, I/O group 7 index 39, at 181,236; tie: Center bullseye
 lamp 155          0              LEFT POP BUMPER  # lamp 98, I/O group 7 index 40, at 68,96
 lamp 156          0              RIGHT POP BUMPER  # lamp 99, I/O group 7 index 41, at 131,93
 lamp 157          0              BOTTOM POP BUMPER  # lamp 100, I/O group 7 index 42, at 83,159
@@ -335,12 +339,12 @@ lamp 115          0              THO(R)  # lamp 74, I/O group 7 index 54, at 243
 lamp 158          0              GLOVE SPOTLIGHT  # lamp 101, I/O group 7 index 55, at 243,181
 lamp 121,122,123  0              RIGHT ORBIT GEM  # lamp 78, I/O group 7 index 56, at 246,314
 lamp 124          0              BLACK PANTHER  # lamp 79, I/O group 7 index 59, at 254,292
-lamp 125,126,127  0x6000000000   RIGHT ORBIT  # lamp 80, I/O group 7 index 60, at 260,273
+lamp 125,126,127  0x6000000000   RIGHT ORBIT  # lamp 80, I/O group 7 index 60, at 260,273; tie: Right orbit (0x2000000000), Right orbit (0x4000000000)
 lamp 76,77,78     0              STRANG(E)  # lamp 51, I/O group 7 index 63, at 163,247
 lamp 70,71,72     0              STRA(N)GE  # lamp 49, I/O group 7 index 66, at 147,273
 lamp 73,74,75     0              STRAN(G)E  # lamp 50, I/O group 7 index 69, at 157,161
 lamp 81           0              EYE OF AGAMOTTO  # lamp 54, I/O group 7 index 72, at 155,288
-lamp 54,55,56     0x40000000000  DISC  # lamp 43, I/O group 7 index 73, at 120,270
+lamp 54,55,56     0x40000000000  DISC  # lamp 43, I/O group 7 index 73, at 120,270; tie: Disc
 lamp 67,68,69     0              STR(A)NGE  # lamp 48, I/O group 7 index 76, at 135,283
 lamp 57           0              DISC SPIN CW  # lamp 44, I/O group 7 index 79, at 134,259
 lamp 80           0              PORTAL LOCK  # lamp 53, I/O group 7 index 80, at 133,302

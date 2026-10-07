@@ -196,16 +196,16 @@ event game_over      0x47
 lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
 lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
 lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
-lamp 79,80,81     0              RIGHT SCOOP ARROW  # lamp 4, I/O group 6 index 25, at 0,0
-lamp 74,75,76     0              RIGHT ORBIT ARROW  # lamp 5, I/O group 6 index 37, at 0,0
-lamp 69,70,71     0              RIGHT RAMP ARROW  # lamp 6, I/O group 6 index 42, at 0,0
+lamp 79,80,81     0x1            RIGHT SCOOP ARROW  # lamp 4, I/O group 6 index 25, at 0,0; tie: Right scoop
+lamp 74,75,76     0x4000         RIGHT ORBIT ARROW  # lamp 5, I/O group 6 index 37, at 0,0; tie: Right orbit
+lamp 69,70,71     0x40000        RIGHT RAMP ARROW  # lamp 6, I/O group 6 index 42, at 0,0; tie: Right ramp exit
 lamp 63,64,65     0              ORB ARROW  # lamp 7, I/O group 6 index 45, at 0,0
-lamp 98,99,100    0              ORB  # lamp 8, I/O group 6 index 53, at 0,0
-lamp 54,55,56     0              GROOT ARROW  # lamp 9, I/O group 7 index 17, at 0,0
-lamp 46,47,48     0              LEFT RAMP ARROW  # lamp 10, I/O group 7 index 21, at 0,0
-lamp 35,36,37     0              LEFT ORBIT ARROW  # lamp 11, I/O group 7 index 33, at 0,0
+lamp 98,99,100    0x4            ORB  # lamp 8, I/O group 6 index 53, at 0,0; tie: Orb standup target
+lamp 54,55,56     0x1000         GROOT ARROW  # lamp 9, I/O group 7 index 17, at 0,0; tie: Groot opto
+lamp 46,47,48     0x20000        LEFT RAMP ARROW  # lamp 10, I/O group 7 index 21, at 0,0; tie: Left ramp exit
+lamp 35,36,37     0x2000         LEFT ORBIT ARROW  # lamp 11, I/O group 7 index 33, at 0,0; tie: Left orbit
 lamp 40,41,42     0              ROCKET ARROW  # lamp 12, I/O group 7 index 43, at 0,0
-lamp 27,28,29     0              LEFT LANE ARROW  # lamp 13, I/O group 7 index 57, at 0,0
+lamp 27,28,29     0xc000000      LEFT LANE ARROW  # lamp 13, I/O group 7 index 57, at 0,0; tie: Left lane, Left lane target
 lamp 116,117,118  0              CENTER 1  # lamp 14, I/O group 8 index 1, at 0,0
 lamp 119,120,121  0              CENTER 2  # lamp 15, I/O group 8 index 4, at 0,0
 lamp 122,123,124  0              CENTER 3  # lamp 16, I/O group 8 index 7, at 0,0
@@ -242,18 +242,18 @@ lamp 12           0              ANTIQUITIES SHOP  # lamp 46, I/O group 6 index 
 lamp 13           0              POD CHASE  # lamp 47, I/O group 6 index 21, at 0,0
 lamp 20           0              IMMOLATION INITIATIVE  # lamp 48, I/O group 6 index 22, at 0,0
 lamp 14           0              SANCTUARY  # lamp 49, I/O group 6 index 23, at 0,0
-lamp 25           0              RIGHT RETURN LANE  # lamp 50, I/O group 6 index 24, at 0,0
-lamp 92           0              HADRON ENFORCER 5  # lamp 51, I/O group 6 index 28, at 0,0
+lamp 25           0x80           RIGHT RETURN LANE  # lamp 50, I/O group 6 index 24, at 0,0; tie: Right return lane
+lamp 92           0x10           HADRON ENFORCER 5  # lamp 51, I/O group 6 index 28, at 0,0; tie: H.e. target 5
 lamp 83           0              RIGHT SCOOP RECTANGLE  # lamp 52, I/O group 6 index 29, at 0,0
 lamp 82           0              RIGHT SCOOP X  # lamp 53, I/O group 6 index 30, at 0,0
-lamp 26           0              RIGHT OUTLANE  # lamp 54, I/O group 6 index 31, at 0,0
+lamp 26           0x100          RIGHT OUTLANE  # lamp 54, I/O group 6 index 31, at 0,0; tie: Right outlane
 lamp 77           0              RIGHT ORBIT X  # lamp 55, I/O group 6 index 32, at 0,0
 lamp 84           0              BILLBOARD 1  # lamp 56, I/O group 6 index 33, at 0,0
 lamp 85           0              BILLBOARD 2  # lamp 57, I/O group 6 index 34, at 0,0
 lamp 86           0              BILLBOARD 3  # lamp 58, I/O group 6 index 35, at 0,0
 lamp 87           0              BILLBOARD 4  # lamp 59, I/O group 6 index 36, at 0,0
 lamp 78           0              RIGHT ORBIT RECTANGLE  # lamp 60, I/O group 6 index 40, at 0,0
-lamp 91           0              HADRON ENFORCER 4  # lamp 61, I/O group 6 index 41, at 0,0
+lamp 91           0x8            HADRON ENFORCER 4  # lamp 61, I/O group 6 index 41, at 0,0; tie: H.e. target 4
 lamp 68           0              ORB MULTIBALL  # lamp 62, I/O group 6 index 48, at 0,0
 lamp 67           0              ORB RECTANGLE  # lamp 63, I/O group 6 index 49, at 0,0
 lamp 73           0              RIGHT RAMP RECTANGLE  # lamp 64, I/O group 6 index 50, at 0,0
@@ -262,15 +262,15 @@ lamp 72           0              RIGHT RAMP X  # lamp 66, I/O group 6 index 52, 
 lamp 108          0              LEFT RAMP TOP  # lamp 67, I/O group 7 index 3, at 0,0
 lamp 110          0              RIGHT RAMP TOP  # lamp 68, I/O group 7 index 4, at 0,0
 lamp 112          0              POP BUMPER  # lamp 69, I/O group 7 index 5, at 0,0
-lamp 114          0              DROP TARGET  # lamp 70, I/O group 7 index 6, at 0,0
-lamp 52           0              GROOT TARGET-RIGHT  # lamp 71, I/O group 7 index 8, at 0,0
-lamp 93           0              LEFT POP BUMPER  # lamp 72, I/O group 7 index 9, at 0,0
-lamp 94           0              RIGHT POP BUMPER  # lamp 73, I/O group 7 index 10, at 0,0
-lamp 95           0              BOTTOM POP BUMPER  # lamp 74, I/O group 7 index 11, at 0,0
-lamp 96           0              TOP LANE-LEFT  # lamp 75, I/O group 7 index 12, at 0,0
-lamp 97           0              TOP LANE-RIGHT  # lamp 76, I/O group 7 index 13, at 0,0
+lamp 114          0x2            DROP TARGET  # lamp 70, I/O group 7 index 6, at 0,0; tie: Center drop target
+lamp 52           0x10000        GROOT TARGET-RIGHT  # lamp 71, I/O group 7 index 8, at 0,0; tie: Groot target-right
+lamp 93           0x10000000     LEFT POP BUMPER  # lamp 72, I/O group 7 index 9, at 0,0; tie: Left pop bumper
+lamp 94           0x20000000     RIGHT POP BUMPER  # lamp 73, I/O group 7 index 10, at 0,0; tie: Right pop bumper
+lamp 95           0x40000000     BOTTOM POP BUMPER  # lamp 74, I/O group 7 index 11, at 0,0; tie: Bottom pop bumper
+lamp 96           0x80000000     TOP LANE-LEFT  # lamp 75, I/O group 7 index 12, at 0,0; tie: Top lane-left
+lamp 97           0x80000        TOP LANE-RIGHT  # lamp 76, I/O group 7 index 13, at 0,0; tie: Top lane-right
 lamp 53           0              GROOT MULTIBALL  # lamp 77, I/O group 7 index 16, at 0,0
-lamp 51           0              GROOT TARGET-LEFT  # lamp 78, I/O group 7 index 20, at 0,0
+lamp 51           0x8000         GROOT TARGET-LEFT  # lamp 78, I/O group 7 index 20, at 0,0; tie: Groot target-left
 lamp 49           0              LEFT RAMP X  # lamp 79, I/O group 7 index 24, at 0,0
 lamp 50           0              LEFT RAMP RECTANGLE  # lamp 80, I/O group 7 index 25, at 0,0
 lamp 59           0              LOCK 1  # lamp 81, I/O group 7 index 26, at 0,0
@@ -285,15 +285,15 @@ lamp 32           0              GUARDIANS-LEFT  # lamp 89, I/O group 7 index 37
 lamp 33           0              GUARDIANS-CENTER  # lamp 90, I/O group 7 index 38, at 0,0
 lamp 34           0              GUARDIANS-RIGHT  # lamp 91, I/O group 7 index 39, at 0,0
 lamp 44           0              ROCKET RECTANGLE  # lamp 92, I/O group 7 index 40, at 0,0
-lamp 90           0              HADRON ENFORCER 3  # lamp 93, I/O group 7 index 41, at 0,0
+lamp 90           0x400000       HADRON ENFORCER 3  # lamp 93, I/O group 7 index 41, at 0,0; tie: H.e. target 3
 lamp 43           0              ROCKET X  # lamp 94, I/O group 7 index 42, at 0,0
-lamp 89           0              HADRON ENFORCER 2  # lamp 95, I/O group 7 index 46, at 0,0
+lamp 89           0x200000       HADRON ENFORCER 2  # lamp 95, I/O group 7 index 46, at 0,0; tie: H.e. target 2
 lamp 45           0              ROCKET RAMPAGE  # lamp 96, I/O group 7 index 47, at 0,0
-lamp 9            0              LEFT OUTLANE  # lamp 97, I/O group 7 index 51, at 0,0
-lamp 10           0              LEFT RETURN LANE-LEFT  # lamp 98, I/O group 7 index 52, at 0,0
-lamp 11           0              LEFT RETURN LANE-RIGHT  # lamp 99, I/O group 7 index 53, at 0,0
+lamp 9            0x20           LEFT OUTLANE  # lamp 97, I/O group 7 index 51, at 0,0; tie: Left outlane
+lamp 10           0x40           LEFT RETURN LANE-LEFT  # lamp 98, I/O group 7 index 52, at 0,0; tie: Left return lane (l)
+lamp 11           0x200          LEFT RETURN LANE-RIGHT  # lamp 99, I/O group 7 index 53, at 0,0; tie: Left return lane (r)
 lamp 113          0              MAGNET  # lamp 100, I/O group 7 index 54, at 0,0
-lamp 88           0              HADRON ENFORCER 1  # lamp 101, I/O group 7 index 55, at 0,0
+lamp 88           0x100000       HADRON ENFORCER 1  # lamp 101, I/O group 7 index 55, at 0,0; tie: H.e. target 1
 lamp 31           0              LEFT LANE RECTANGLE  # lamp 102, I/O group 7 index 56, at 0,0
 lamp 30           0              LEFT LANE X  # lamp 103, I/O group 7 index 63, at 0,0
 lamp 146          0              RIGHT LED7  # lamp 104, I/O group 8 index 16, at 0,0

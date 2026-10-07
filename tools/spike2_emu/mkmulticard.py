@@ -277,6 +277,9 @@ SELECTOR_VERSION_RE = re.compile(rb"codeselect (\d+(?:\.\d+)+)")
 SELECTOR_GROUP_VERSION = (3, 0)
 SELECTOR_VERSION_MAX = 8 << 20                # do not read a huge file just to sniff a version
 MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+#: PAD-432: the modes' project copy a Write leaves in PADMODE_DIR (mode_install.BUNDLE_FILE); the
+#: runtime never reads it, so a multi-boot card does not carry it into its other images' sets
+PADMODE_BUNDLE = "pad_modes.zip"
 #: The whole set on p2 (194 MB free on a stock rootfs; inject_p2 refuses against
 #: the REAL free space).  These four agree with selectmedia.py's contract - a
 #: test pins them together.  5 s at 30 fps is 150 frames, ~7.7 MB for a busy
@@ -3005,6 +3008,8 @@ def read_mode_set(path):
             name = e[4]
             if name in (".", "..") or statmod.S_ISDIR(e[1]) or not MEDIA_NAME_RE.match(name):
                 continue
+            if name == PADMODE_BUNDLE:
+                continue                    # PAD-432: the project's copy, never read on the machine
             out[name] = (debugfs_cat(ref, PADMODE_DIR + "/" + name), 0o755 if name.endswith(".so") else 0o644)
         return out
     except Exception as e:

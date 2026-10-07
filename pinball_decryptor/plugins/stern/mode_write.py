@@ -1184,9 +1184,11 @@ def p2_offset(disk_f):
 
 
 # ---- the system partition ---------------------------------------------------------------------
-def p2_payload(result, out_dir):
+def p2_payload(result, out_dir, project=None):
     """Stage what goes in ``/usr/local/padmode``: the pinned object as ``mode.so``, the mode
-    files in slot order, the port as ``game.port``. Returns ``{"so", "cfgs", "port"}``."""
+    files in slot order, the port as ``game.port``. Returns ``{"so", "cfgs", "port"}``.
+    PAD-432: with ``project``, its modes as Save to a file saves them too (``"bundle"``,
+    :func:`card_bundle`), for another project to load them from the card."""
     os.makedirs(out_dir, exist_ok=True)
     so = os.path.join(out_dir, "mode.so")
     # A missing file here is a broken install or staging, never "nothing to write":
@@ -1215,7 +1217,30 @@ def p2_payload(result, out_dir):
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"
                              % e) from None
-    return {"so": so, "cfgs": cfgs, "port": port, "assets": assets, "extras": extras}
+    out = {"so": so, "cfgs": cfgs, "port": port, "assets": assets, "extras": extras}
+    if project:
+        out["bundle"] = card_bundle(project, os.path.join(out_dir, MP.CARD_BUNDLE))
+    return out
+
+
+#: PAD-432: the most of the modes' pictures, clips and sounds the card's copy of them carries. The
+#: system partition's free space is shared with a multi-boot card's selector media, and the
+#: emulator pulls the whole folder out of the card on every boot, so the settings and sources
+#: always go and the media only while they stay this small (a film-cut set runs to 80 MB and more)
+CARD_BUNDLE_MEDIA = 8 << 20
+
+
+def card_bundle(project, path):
+    """PAD-432: every mode of ``project`` (form and code: settings, sources, and the pictures,
+    clips and sounds that fit :data:`CARD_BUNDLE_MEDIA`) in the file Save to a file writes, at
+    ``path``, naming the card they were made for; the Write puts it beside ``mode.so`` so Load
+    from a card image brings them into another project. "" when it cannot be made: the card is
+    written without it (it only matters to a later load)."""
+    try:
+        MP.export_modes(project, path, about=MP.card_about(project), media_budget=CARD_BUNDLE_MEDIA)
+    except (MP.ModeProjectError, OSError):
+        return ""
+    return path
 
 
 def stock_plan(project, result, tree):
@@ -1259,6 +1284,8 @@ def install_command(ex, image_path, payload, epoch):
     for a in payload.get("extras") or ():
         args += ["--file", ex.to_exec_path(ab(a))]       # item 160: stock.cfg
     args += ["--port", ex.to_exec_path(ab(payload["port"]))]
+    if payload.get("bundle"):
+        args += ["--bundle", ex.to_exec_path(ab(payload["bundle"]))]    # PAD-432
     # PAD-314: run as a plain Linux user, debugfs and e2fsck sit in /sbin, off the PATH
     return ("cd %s && PATH=\"$PATH:/sbin:/usr/sbin\" E2FSPROGS_FAKE_TIME=%d python3 mode_install.py %s"
             % (q(ex.to_exec_path(tools_dir())), int(epoch), " ".join(q(a) for a in args)))

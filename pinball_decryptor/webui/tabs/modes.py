@@ -2266,11 +2266,87 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._say("saved %s to %s" % (", ".join("modes/" + s for s in done), path))
         return path
 
+    def _card_image(self, key, title):
+        """A card image picked for Load from / Save from a card image (PAD-432), or ""."""
+        path = self.window.ask_open(key, title, [("Card images", "*.raw *.img"),
+                                                 ("All files", "*.*")])
+        return os.path.normpath(path) if path else ""
+
+    def _card_file(self, image, tmp, box):
+        """``(path, about, notes)`` of :func:`.mode_from_card.card_modes_file`, or None after
+        saying why in a message box titled ``box``."""
+        from pinball_decryptor.plugins.stern import mode_from_card as MFC
+        try:
+            return MFC.card_modes_file(image, tmp)
+        except (MP.ModeProjectError, OSError) as e:
+            compat.messagebox.showinfo(box, str(e).rstrip(".") + ".")
+            return None
+
     @rpc
-    def load_file(self, path=None):
+    def load_card(self, image=None):
+        """Load from a card image... (PAD-432): the modes of a card the app put modes on, straight
+        into this project - another version, model or custom image of the game included - as Load
+        from a file loads them, each matched to this card's shots. A card written since PAD-432
+        carries them whole; an older one gives back what its mode files hold, and the message
+        says what did not come back. Returns the report, or None."""
+        if not self.project():
+            return None
+        image = os.path.normpath(str(image)) if image else self._card_image(
+            "modes_card", "Load modes from a card image")
+        if not image:
+            return None
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="pad-card-modes-") as tmp:
+            got = self._card_file(image, tmp, "Load modes")
+            if got is None:
+                return None
+            path, about, notes = got
+            self._say("modes on %s%s" % (os.path.basename(image), ", made for %s" % about["label"]
+                                         if about.get("label") else ""))
+            for line in notes:
+                self._say("from %s: %s" % (os.path.basename(image), line))
+            return self.load_file(path, _from=image, _notes=notes)
+
+    @rpc
+    def save_card(self, image=None):
+        """Save a card image's modes to a file... (PAD-432): the modes on a card the app put modes
+        on, as one file Load from a file brings into any project (:func:`load_card` without
+        loading). Returns the file's path, or None."""
+        image = os.path.normpath(str(image)) if image else self._card_image(
+            "modes_card", "Save the modes of a card image to a file")
+        if not image:
+            return None
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="pad-card-modes-") as tmp:
+            got = self._card_file(image, tmp, "Save modes")
+            if got is None:
+                return None
+            path, about, notes = got
+            dest = self.window.ask_save(
+                "modes_file", "Save the modes of %s to a file" % os.path.basename(image),
+                initialfile=os.path.basename(path), filetypes=[("PAD modes", "*.zip")],
+                defaultextension=".zip")
+            if not dest:
+                return None
+            try:
+                shutil.copyfile(path, dest)
+            except OSError as e:
+                compat.messagebox.showinfo("Save modes", str(e))
+                return None
+        self._say("saved the modes of %s to %s" % (os.path.basename(image), dest))
+        if notes:
+            compat.messagebox.showinfo("Save modes", "Saved to %s.\n\n%s" % (
+                os.path.basename(dest), "\n".join(n[0].upper() + n[1:] + "." for n in notes)))
+        return dest
+
+    @rpc
+    def load_file(self, path=None, _from=None, _notes=()):
         """Load from a file... (PAD-281): the modes in a zip Save to a file... wrote are added
         to this project, each matched to this card's shots as Copy to... matches them. A
-        message box sums it up. Returns the report, or None."""
+        message box sums it up. Returns the report, or None. PAD-432: ``_from`` is the card
+        image :func:`load_card` read the file from (the words name it), ``_notes`` what did not
+        come back from it."""
         project = self.project()
         if not project:
             return None
@@ -2280,6 +2356,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                         filetypes=[("PAD modes", "*.zip"), ("All files", "*.*")])
         if not path:
             return None
+        shown = os.path.basename(_from or path)
         # PAD-402 (DragonRR): a mode of the file named as one here with other contents is a
         # collaborator's version of it: asked about, each one replacing or not, mine saved first
         conflicts, same = MP.share_conflicts(path, project)
@@ -2290,7 +2367,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "Load modes", "%d mode%s in %s %s the folder name of a mode here, with other "
                 "contents. Tick the ones the file's should replace, or answer for all of them. "
                 "Keep both loads the file's beside yours under a new name."
-                % (n, "" if n == 1 else "s", os.path.basename(path), "has" if n == 1 else "have"),
+                % (n, "" if n == 1 else "s", shown, "has" if n == 1 else "have"),
                 [{"id": c["slug"], "what": "%s (modes/%s)" % (c["file"], c["slug"]),
                   "mine": "%s, changed %s" % (c["here"], c["changed"]) if c["changed"]
                   else c["here"],
@@ -2316,7 +2393,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                                "a backup file, so nothing was loaded: %s" % e)
                     return None
                 self._say("saved every mode to %s before loading %s"
-                          % (backup, os.path.basename(path)))
+                          % (backup, shown))
         try:
             report = MP.import_modes(path, project, replace=replace, skip=skip)
         except (MP.ModeProjectError, OSError) as e:
@@ -2336,17 +2413,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 MP.BACKUP_DIR, os.path.basename(backup))
         if report is None:
             compat.messagebox.showinfo("Load modes", "Nothing was loaded from %s.%s"
-                                       % (os.path.basename(path), tail))
+                                       % (shown, tail))
             return None
         for line in report.lines():
-            self._say("loaded from %s: %s" % (os.path.basename(path), line))
+            self._say("loaded from %s: %s" % (shown, line))
         got = [m for m in report.modes if m.new_slug]
         if got and got[0].state == MP.COPY_CODE:
             self.refresh(select_code=got[0].new_slug)
         else:
             self.refresh(select=got[0].new_slug if got else None)
         words = "Loaded %d mode%s from %s." % (len(got), "" if len(got) == 1 else "s",
-                                                os.path.basename(path)) + tail
+                                                shown) + tail
+        if _notes:
+            words += " " + " ".join(n[0].upper() + n[1:] + "." for n in _notes)
         if report.of(MP.COPY_TO_FIX):
             words += (" Open each one marked below and pick again what %s does not have."
                       % report.label)

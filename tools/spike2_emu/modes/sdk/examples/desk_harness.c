@@ -165,16 +165,25 @@ static const struct pm_mode *disp_owner;   /* the display arbitration's state (p
 static unsigned disp_prio;
 static unsigned long disp_linger_until;   /* pm_end_holding: the hold kept for an ending, until then */
 static void disp_linger_release(const char *why);
+static unsigned begun;                     /* PAD-413: pm_begun */
+static int clip_on;                        /* PAD-413: our full-screen clip plays (until it is stopped) */
+static const struct pm_mode *clip_owner;
 int pm_begin(void)
 {
     if (running && running != current) {
         pm_log("not started: %s is running", running->name);
         return 0;
     }
+    if (running != current) begun++;
     running = current;
     if (disp_linger_until && disp_owner != current) disp_linger_release("another mode began");
+    if (clip_on && clip_owner != current) {    /* as the runtime: the last one's ending clip gives way */
+        printf("%6lu CLIP STOPPED %s (another mode began)\n", now_ms, clip_owner ? clip_owner->name : "-");
+        clip_on = 0;
+    }
     return 1;
 }
+unsigned pm_begun(void) { return begun; }
 static void mechs_let_go(const char *why);   /* PAD-395: the held mechanisms, below */
 void pm_end(void)
 {
@@ -199,9 +208,19 @@ void pm_set_text(void *text, const char *words)
     const char *n = ((struct fake_node *)text)->name, *dot = strrchr(n, '.');
     printf("%6lu WORDS %s: %s\n", now_ms, dot ? dot + 1 : n, words);
 }
-int pm_clip(const char *name) { printf("%6lu CLIP %s\n", now_ms, name); return 1; }
-int pm_clip_playing(void) { return 0; }
-void pm_clip_stop(void) {}
+int pm_clip(const char *name)
+{
+    printf("%6lu CLIP %s\n", now_ms, name);
+    clip_on = 1;
+    clip_owner = current;
+    return 1;
+}
+int pm_clip_playing(void) { return clip_on; }
+void pm_clip_stop(void)
+{
+    if (clip_on) printf("%6lu CLIP STOPPED\n", now_ms);
+    clip_on = 0;
+}
 /* hud-layers: the backdrop (a clip behind the HUD) */
 static char backdrop_now[96];
 int pm_backdrop(const char *name)

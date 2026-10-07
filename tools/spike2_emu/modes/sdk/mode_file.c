@@ -112,6 +112,7 @@ struct slot {
     unsigned trig[5];
     void *node, *text;
     unsigned hide_ticks;
+    unsigned ended_begun;                 /* PAD-413: pm_begun() at its end, while its total shows */
     int aside;                            /* PAD-347: its screen is stepped aside for a game mode */
     char said[96];                        /* PAD-390: the screen's last words, written again on a fresh copy */
     unsigned ev_trig[5], ev_pending;      /* item 147: event start counts; a start waiting for pm_in_game */
@@ -1556,6 +1557,8 @@ static void own_lights_end(struct slot *M)
  * mode ends) is dropped, with a log line, and never plays over the newer one. */
 #define CLIP_AFTER_SHOT_TICKS 30    /* half a second */
 static struct { char name[96]; const char *when; unsigned ticks, watch; char watching[96]; } clip_later;
+static int ending_clip;                 /* PAD-413: the last end played (or waits to play) its clip */
+static unsigned ending_clip_begun;      /* pm_begun() then */
 
 static void clip_copy(char *dst, unsigned cap, const char *src)
 {
@@ -1576,6 +1579,32 @@ static void clip_now(const char *name, const char *when)
 {
     clip_later_drop("a newer clip played at once");
     pm_log("clip \"%.80s\" %s (%s)", name, pm_clip(name) ? "played" : "NOT played", when);
+}
+
+/* PAD-413: the last mode's ENDING gives way once another of our modes began - a mode file's, or one in C (David's
+ * Premium, 2026-10-06: BIOLLANTE began 4.8 s into KIRYU's 10 s ending and their words shared the glass). Its own
+ * screen's TOTAL is hidden at once, an end clip still waiting never plays, and - when it is one of ours that began
+ * (`starting`) - an end clip still playing stops (the runtime stops it itself when a mode in C began). */
+static void ending_gives_way(int starting)
+{
+    unsigned k, now = pm_begun();
+    struct slot *M;
+    if (ending_clip && now != ending_clip_begun) {
+        ending_clip = 0;
+        clip_later_drop("another mode began");
+        if (starting && pm_clip_playing()) {
+            pm_clip_stop();
+            pm_log("the last mode's ending clip stopped - another mode began");
+        }
+    }
+    for (k = 0; k < MODES_MAX; k++) {
+        M = &slots[k];
+        if (!M->hide_ticks || running(M) || M->ended_begun == now) continue;
+        M->hide_ticks = 0;
+        M->aside = 0;
+        if (M->node && !(run.active && run.slot && run.slot->node == M->node)) pm_show(M->node, 0);
+        pm_log("%s: its total gives way - another mode began", cfg.name);
+    }
 }
 
 static int clip_after_shot(const char *name, const char *when, const char *why)
@@ -1981,6 +2010,7 @@ static void mode_start(struct slot *M, const char *why)
     }
     if (!pm_begin()) return;                 /* a mode written in C is running */
     pm_running_name(cfg.name);               /* PAD-363: the runtime's lines say this mode, not "mode" */
+    ending_gives_way(1);                     /* PAD-413: before its own screen and clip */
     if (cfg.game_modes == GM_BLOCK) {        /* PAD-363: the listed game's modes cannot start while it runs */
         pm_block_list(cfg.block_ids, cfg.block_n);
         pm_block_rules_keep(cfg.keep_rules, cfg.keep_n);   /* PAD-398 */
@@ -2067,11 +2097,16 @@ static void mode_end(const char *why)
     own_lights_end(M);                       /* item mode-leds: the game has its inserts back */
     if (cfg.light_off[0]) lights(M, cfg.light_off);
     if (cfg.clip_end[0] && !clip_after_shot(cfg.clip_end, "mode end", why)) clip_now(cfg.clip_end, "mode end");
+    if (cfg.clip_end[0]) {                   /* PAD-413: an ending, until another mode begins */
+        ending_clip = 1;
+        ending_clip_begun = pm_begun();
+    }
     /* PAD-314 (Ales): the total is NET of the penalty shots - "TOTAL -500,000" when they took more */
     net = run.total >= run.lost ? run.total - run.lost : run.lost - run.total;
     if (own_screen(M)) {
         words(M, run.total >= run.lost ? "TOTAL " : "TOTAL -", net, "");
         M->hide_ticks = (cfg.restore_after ? cfg.restore_after : 4) * TICKS_PER_S;
+        M->ended_begun = pm_begun();         /* PAD-413: hidden at once if another mode begins */
     } else {
         if (cfg.total_msg) pm_award_screen(cfg.screen_type, cfg.total_msg, run.total >= run.lost ? net : 0);
         run.restore_ticks = cfg.restore_after * TICKS_PER_S;
@@ -2487,6 +2522,7 @@ static void on_tick(void)
     if (check_on && pm_trigger_text("census.mark", name, sizeof name))
         pm_log("check mark %s", name);
     starts_watch_game();                     /* item 139: what marks a new game */
+    ending_gives_way(0);                     /* PAD-413: a mode in C began during the last one's ending */
     clip_later_tick();                       /* item 141: a clip a shot started */
     ++ticks;
     events_tick();

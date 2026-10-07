@@ -1515,6 +1515,7 @@ def to_c(program, slug):
     L.append("static int sec_changed, was_in_game, ending;")
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
+    L.append("static unsigned ended_begun;          /* PAD-413: pm_begun() at its end, while its total shows */")
     if watch:
         L.append("static int screen_away;                /* its screen hidden: a game display or mode has the middle */")
     if has_hud:
@@ -1818,6 +1819,7 @@ def to_c(program, slug):
     L.append("    if (screen) {")
     L.append('        words("TOTAL", (long long)run.total, 1);')
     L.append("        hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
+    L.append("        ended_begun = pm_begun();")
     if watch:
         L.append("        if (screen_away) pm_show(screen, 1);")
         L.append("        screen_away = 0;")
@@ -1931,6 +1933,11 @@ def to_c(program, slug):
     L.append("    if (++poll % 30 == 0) {            /* the tab's Start mode now / End mode */")
     L.append('        if (pm_trigger("%s.start")) start("trigger file", 0);' % slug)
     L.append('        if (pm_trigger("%s.stop")) end("trigger file");' % slug)
+    L.append("    }")
+    L.append("    if (hide_ticks && !run.on && pm_begun() != ended_begun) {   /* PAD-413: another mode began */")
+    L.append("        hide_ticks = 0;")
+    L.append("        if (screen) pm_show(screen, 0);")
+    L.append('        pm_log("its total gives way - another mode began");')
     L.append("    }")
     L.append("    if (hide_ticks && --hide_ticks == 0 && !run.on && screen) pm_show(screen, 0);")
     timer_scripts = scripts_of("timer_done")

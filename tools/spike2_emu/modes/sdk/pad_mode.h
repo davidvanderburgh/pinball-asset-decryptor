@@ -104,6 +104,9 @@ void pm_end(void);         /* your mode stopped running */
 int pm_running(void);      /* your mode is the one running */
 void pm_running_name(const char *name);   /* PAD-363: after pm_begin, the name the runtime's own lines give
                                              your mode while it runs (one object running several modes) */
+unsigned pm_begun(void);   /* PAD-413: how many times one of our modes has begun. Remember it at your end: when it
+                              moves, another mode has the screen, so drop your ending (total, own screen) at once.
+                              A full-screen clip of yours still playing is stopped by the runtime then. */
 
 /* ---- scoring ------------------------------------------------------------------------
  * Through the game's own scoring, so its playfield multiplier and its rules about when a

@@ -354,6 +354,16 @@ def _data_partition_probe(card):
     image_bin = found["image_bin"]
 
     rows = []
+    # Is this the card Stern released, or one built from it (PAD-426)?  The
+    # version above comes from the update index, which a built card keeps,
+    # so a custom card read as the stock build until this row.
+    try:
+        from .stock_prints import check_walked
+        stock = check_walked(reader, found)
+    except Exception:                                   # noqa: BLE001
+        stock = None
+    if stock and stock["status"] != "unreadable":
+        rows.append(("Official release", stock["text"]))
     recs, fmt = {}, None
     if sidx_node is not None:
         try:

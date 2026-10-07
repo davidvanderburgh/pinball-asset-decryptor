@@ -355,7 +355,7 @@ def project_details(folder, manufacturers=(), current=None):
     """
     from ..core import extract_source, project_file
     out = {"is_project": False, "archived": False, "baseline": False,
-           "source_name": "", "extracted": "", "game": ""}
+           "source_name": "", "extracted": "", "game": "", "stock": None}
     anchor = None
     try:
         out["is_project"] = bool(project_file.has_anchor(folder))
@@ -385,6 +385,16 @@ def project_details(folder, manufacturers=(), current=None):
     sources = [rec.get("input_path"), (anchor or {}).get("stock_image")]
     out["game"] = project_game(mfr, [s for s in sources
                                      if isinstance(s, str) and s])
+    # Was the extract taken from the card the manufacturer released, or
+    # from someone's build of it (PAD-426)?  Only a manufacturer with an
+    # official record to check against answers.
+    out["stock"] = None
+    check = getattr(mfr, "project_stock", None)
+    if check is not None and out["baseline"]:
+        try:
+            out["stock"] = check(folder)
+        except Exception:                               # noqa: BLE001
+            out["stock"] = None
     return out
 
 

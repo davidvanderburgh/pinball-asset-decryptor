@@ -331,6 +331,7 @@ function ProjectCard({ s, shell }) {
     body = html`<div class="kv x-kv">
         ${caption ? html`<span class="k">Game</span><span>${caption}</span>` : null}
         ${d.extracted ? html`<span class="k">Extracted</span><span>${d.extracted}${d.source_name ? html` · from <span class="mono">${d.source_name}</span>` : null}</span>` : null}
+        ${d.stock ? html`<span class="k">Stock</span><span class=${d.stock.status === "official" ? "ok-ink" : "warn-ink"}>${d.stock.text}</span>` : null}
         ${rows.map(([k, v]) => html`<span class="k">${k}</span><span class=${k === "Changed" && v !== "nothing changed yet" ? "acc-ink" : ""}>${v}</span>`)}
       </div>
       ${p.loading && !rows.length ? html`<div class="row small muted"><${Spinner} />Collecting…</div>` : null}

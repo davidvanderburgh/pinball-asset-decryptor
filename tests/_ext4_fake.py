@@ -91,6 +91,12 @@ class FakeExt4Reader:
     def read_file_bytes(self, node):
         return node.get("_data", b"")
 
+    def read_file_chunks(self, node, chunk=1 << 20):
+        """``(file_offset, bytes)`` pieces, like Ext4Reader.read_file_chunks."""
+        data = node.get("_data", b"")
+        for off in range(0, len(data), chunk):
+            yield off, data[off:off + chunk]
+
     def read_range(self, node, file_off, length):
         """Bytes out of the middle of a file, clamped like the real reader's
         (a container probe walks box headers and reads past the end)."""

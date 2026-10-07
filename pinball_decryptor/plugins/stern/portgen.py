@@ -52,7 +52,12 @@ HOOKED = ("tick", "shot_dispatch", "ball_end", "sound_lookup", "hook_dispatch", 
 # light owner and light set, and its powerline-tower award screen. PAD-394: a held coil's device and
 # the magnet's shot and process id are one title's machine too (Godzilla's magnet is device 11 on a Pro)
 TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type", "magnet_shot", "magnet_dev", "magnet_proc",
-                "mg_magnet_dev", "bridge_dev")
+                "mg_magnet_dev", "bridge_dev",
+                # PAD-420: how the title's countdown request holds its numbers, whether its clips go in a
+                # Video grafted into its HUD, and Deadpool's video layer - the title's, never a framework
+                # offset (a derived port of another title had Deadpool's stride 5 and a grafted bank's hide)
+                "countdown_first", "countdown_step", "countdown_stride", "clip_surface_hide",
+                "clip_layer_priority", "layer_video_at")
 #: values that are a shot mask, not an address, however large: copied within a title
 SHOT_VALUES = ("magnet_shot",)
 MIN_N, MAX_N = 8, 48

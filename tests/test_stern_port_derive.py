@@ -184,6 +184,17 @@ def test_the_merge_keeps_what_the_references_agree_on():
     assert "shot 0x1 Left ramp" in text and "version        1.16" in text
 
 
+def test_a_title_s_countdown_and_clip_values_never_reach_another_title():
+    """PAD-420: the derived drafts of 32 new builds carried Deadpool's countdown stride 5, another title's
+    countdown step and a grafted bank's clip_surface_hide 1 - each a title's own, and each broke the
+    countdown or the clip there. They are title values now; the scene graph's offsets stay the framework's."""
+    for n in ("countdown_first", "countdown_step", "countdown_stride", "clip_surface_hide",
+              "clip_layer_priority", "layer_video_at"):
+        assert not D.framework_value(n), n
+    for n in ("scene_player_scene", "node_visible_vfn", "surface_playing", "sound_channel_count"):
+        assert D.framework_value(n), n
+
+
 def test_a_fallback_placement_gives_way_to_a_references_own(monkeypatch):
     monkeypatch.setattr(D, "framework_core", lambda *a: dict(values=[], mapped=[], switch_lines=[], example="", notes=[]))
     refs = [_ref("a-1.0", "godzilla_pro", "1.15"), _ref("b-1.0", "godzilla_pro", "1.14")]

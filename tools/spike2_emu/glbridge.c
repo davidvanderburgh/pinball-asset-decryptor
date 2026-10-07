@@ -156,7 +156,6 @@ static void emit_u(unsigned int op, const unsigned int *v, unsigned int count)
 typedef struct { char name[40]; } Uni;
 static struct { Uni u[MAXUNI]; int n; } prog_uni[MAXPROG];
 
-static int id_tex = 1, id_buf = 1, id_fbo = 1, id_vao = 1, id_obj = 1;
 static int blend_src = 1, blend_dst = 0;          /* shadowed: read back per frame */
 static int fb_w = 1920, fb_h = 1080;
 static int frame_no;
@@ -288,21 +287,99 @@ int glBlendEquation(unsigned int m) { const unsigned int op_ = PADGL_BLENDEQ; U(
 int glBlendEquationSeparate(unsigned int r, unsigned int a)
 { const unsigned int op_ = PADGL_BLENDEQSEP; U(r,a); return 0; }
 
-/* ---- textures ---- */
-static int next_of(int *c, int max) { int v = *c; if (++(*c) >= max) *c = 1; return v; }
+/* ★ PAD-441: OBJECT NAMES GO ROUND, BUT NEVER ONTO ONE STILL IN USE.
+ *
+ * Every kind of name used to come off a bare counter that went back to 1 at
+ * its limit (4096 textures, buffers and shader objects, 1024 VAOs, 256 FBOs)
+ * and handed out whatever came next, live or not. The host keeps ONE object
+ * per guest name, so a name handed out again while the game still drew with
+ * its first owner re-pointed that owner at the newcomer: a long enough
+ * session of a game that builds and drops scene textures as it plays (James
+ * Bond LE 1.06, luvthatapex) came round, and the screen went to pieces -
+ * pictures showing other pictures, a font page where a picture belonged.
+ *
+ * So each kind remembers which of its names are live. The counter still walks
+ * round, which keeps a just-deleted name the LAST to come back (the host's
+ * graveyards rely on that for save states); it steps over live names; and
+ * only a kind with every name live hands one out again, loudly, because that
+ * picture will be wrong. Shaders, programs and FBOs are never released: the
+ * bridge's deletes for them are no-ops, and the host's save-state journal
+ * rebuilds a program from its shaders' guest names, so those must never be
+ * re-used. PAD_GL_NAME_CAP=n shrinks every kind to n names so a rig run comes
+ * round in minutes instead of half an hour. */
+struct name_pool {
+    const char *what;
+    int next, max, live_n;
+    unsigned rounds, full;
+    unsigned char *live;
+};
+static unsigned char live_tex[4096], live_buf[4096], live_obj[4096];
+static unsigned char live_vao[1024], live_fbo[256];
+static struct name_pool pool_tex = { "texture", 1, 4096, 0, 0, 0, live_tex };
+static struct name_pool pool_buf = { "buffer", 1, 4096, 0, 0, 0, live_buf };
+static struct name_pool pool_obj = { "shader/program", 1, 4096, 0, 0, 0, live_obj };
+static struct name_pool pool_vao = { "vertex array", 1, 1024, 0, 0, 0, live_vao };
+static struct name_pool pool_fbo = { "framebuffer", 1, 256, 0, 0, 0, live_fbo };
 
+static int name_limit(const struct name_pool *p)
+{
+    static int cap = -1;
+    if (cap < 0) cap = envint("PAD_GL_NAME_CAP", 0);
+    return cap > 1 && cap < p->max ? cap : p->max;
+}
+
+static void name_step(struct name_pool *p, int lim)
+{
+    char m[160];
+    if (++p->next < lim) return;
+    p->next = 1;
+    if (++p->rounds > 8) return;
+    snprintf(m, sizeof m, "[bridge] %s names came round (round %u, %d of %d "
+             "live, frame %d); live ones are stepped over\n",
+             p->what, p->rounds, p->live_n, lim - 1, frame_no);
+    say(m);
+}
+
+static unsigned name_take(struct name_pool *p)
+{
+    int lim = name_limit(p), i, v;
+    if (p->next >= lim) p->next = 1;
+    for (i = 1; i < lim; i++) {
+        v = p->next;
+        name_step(p, lim);
+        if (!p->live[v]) { p->live[v] = 1; p->live_n++; return (unsigned)v; }
+    }
+    v = p->next;
+    name_step(p, lim);
+    if (p->full++ < 4) {
+        char m[160];
+        snprintf(m, sizeof m, "[bridge] every %s name is in use (%d) - handing "
+                 "out %d AGAIN; whatever still uses it will draw wrong\n",
+                 p->what, lim - 1, v);
+        say(m);
+    }
+    return (unsigned)v;
+}
+
+static void name_drop(struct name_pool *p, unsigned v)
+{
+    if (v && v < (unsigned)p->max && p->live[v]) { p->live[v] = 0; p->live_n--; }
+}
+
+/* ---- textures ---- */
 int glGenTextures(int n, unsigned int *ids)
 {
     int i;
     for (i = 0; i < n; i++) {
         const unsigned int op_ = PADGL_GENTEX;
-        ids[i] = (unsigned int)next_of(&id_tex, 4096);
+        ids[i] = name_take(&pool_tex);
         U(ids[i]);
     }
     return 0;
 }
 int glDeleteTextures(int n, const unsigned int *ids)
-{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_DELTEX; U(ids[i]); } return 0; }
+{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_DELTEX;
+    name_drop(&pool_tex, ids[i]); U(ids[i]); } return 0; }
 
 /* ★ ITEM 43: WHICH TEXTURE THE VIVANTE DIRECT-TEXTURE CALLS MEAN.
  *
@@ -473,9 +550,10 @@ int glCompressedTexSubImage2D(unsigned int t, int l, int x, int y, int w, int h,
 /* ---- buffers / vertex arrays ---- */
 int glGenBuffers(int n, unsigned int *ids)
 { int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_GENBUF;
-    ids[i] = (unsigned int)next_of(&id_buf, 4096); U(ids[i]); } return 0; }
+    ids[i] = name_take(&pool_buf); U(ids[i]); } return 0; }
 int glDeleteBuffers(int n, const unsigned int *ids)
-{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_DELBUF; U(ids[i]); } return 0; }
+{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_DELBUF;
+    name_drop(&pool_buf, ids[i]); U(ids[i]); } return 0; }
 /* Which buffer is bound to GL_ARRAY_BUFFER, guest-side. Only glVertexAttribPointer
  * needs it, and only to tell an OFFSET from a POINTER - see below. */
 static unsigned array_buffer_bound;
@@ -503,8 +581,10 @@ int glBufferSubData(unsigned int target, long off, long size, const void *data)
 
 int glGenVertexArrays(int n, unsigned int *ids)
 { int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_GENVAO;
-    ids[i] = (unsigned int)next_of(&id_vao, 1024); U(ids[i]); } return 0; }
-int glDeleteVertexArrays(int n, const unsigned int *ids) { (void)n; (void)ids; return 0; }
+    ids[i] = name_take(&pool_vao); U(ids[i]); } return 0; }
+/* Nothing to send: the host re-makes the VAO when the name is genned again. */
+int glDeleteVertexArrays(int n, const unsigned int *ids)
+{ int i; for (i = 0; i < n; i++) name_drop(&pool_vao, ids[i]); return 0; }
 int glBindVertexArray(unsigned int id)
 { const unsigned int op_ = PADGL_BINDVAO; U(id); return 0; }
 
@@ -547,14 +627,14 @@ int glDisableVertexAttribArray(unsigned int i)
 int glCreateShader(unsigned int type)
 {
     const unsigned int op_ = PADGL_CREATESHADER;
-    unsigned int id = (unsigned int)next_of(&id_obj, 4096);
+    unsigned int id = name_take(&pool_obj);
     U(id, type);
     return (int)id;
 }
 int glCreateProgram(void)
 {
     const unsigned int op_ = PADGL_CREATEPROGRAM;
-    unsigned int id = (unsigned int)next_of(&id_obj, 4096);
+    unsigned int id = name_take(&pool_obj);
     U(id);
     if (id < MAXPROG) prog_uni[id].n = 0;
     return (int)id;
@@ -656,7 +736,7 @@ int glUniformMatrix4fv(int l, int n, unsigned char tr, const float *v)
 /* ---- framebuffer objects ---- */
 int glGenFramebuffers(int n, unsigned int *ids)
 { int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_GENFBO;
-    ids[i] = (unsigned int)next_of(&id_fbo, 256); U(ids[i]); } return 0; }
+    ids[i] = name_take(&pool_fbo); U(ids[i]); } return 0; }
 int glBindFramebuffer(unsigned int t, unsigned int id)
 { const unsigned int op_ = PADGL_BINDFBO; cur_fbo_shadow = id; U(t,id); return 0; }
 int glFramebufferTexture2D(unsigned int t, unsigned int att, unsigned int tt,

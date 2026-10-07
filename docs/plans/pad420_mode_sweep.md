@@ -39,11 +39,10 @@ This is several runs of work. Each run adds what it proved here.
 
 ## Where the 32 new ports stand (end of run 2, 2026-10-07 09:45)
 
-- **Shipped, full build check passed (15):** Aerosmith LE 1.16, Avengers LE and Pro 1.10, Deadpool LE 1.16,
+- **Shipped, full build check passed (16):** Aerosmith LE 1.16, Avengers LE and Pro 1.10, Deadpool LE 1.16,
   Dungeons & Dragons LE and Pro 1.10, Foo Fighters Pro 1.04, Guardians Pro and LE 1.15, Iron Maiden LE and Pro 1.18,
-  James Bond Pro 1.06, John Wick LE 1.02, Star Wars Pro 1.31, Stranger Things LE 1.13.
-- **Still in the emulator when the run ended, or not yet re-run on a quiet machine (13):** John Wick Pro 1.02,
-  Jurassic Park Pro 1.16, King Kong Pro 0.97, Mandalorian LE and Pro 1.45, Venom Pro 1.07, Uncanny X-Men Pro 0.98,
+  James Bond Pro 1.06, John Wick LE and Pro 1.02, Star Wars Pro 1.31, Stranger Things LE 1.13.
+- **Still in the emulator when the run ended, or not yet re-run on a quiet machine (12):** Jurassic Park Pro 1.16, King Kong Pro 0.97, Mandalorian LE and Pro 1.45, Venom Pro 1.07, Uncanny X-Men Pro 0.98,
   Sword of Rage LE and Pro 1.19, Star Wars LE 1.31, Stranger Things Pro 1.13, Munsters Pro 1.28, Aerosmith Pro 1.16.
   Most of these failed only with the game's 10 s watchdog (exit 5) while the machine was over-committed (below).
   Their candidate ports are `C:/tmp/PAD-420\clean\<key>.port`; the results land in `C:/tmp/PAD-420\check3\<key>`.

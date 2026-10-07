@@ -576,3 +576,53 @@ text block_name_23      Super Gauntlet
 site block_start_24     0x000cf8d4 0xe92d43f8 0xe3034388
 data block_obj_24       0x006780b8
 text block_name_24      Super Targets
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x000e6500 0xe92d4ff0 0xe3034388  # RuleArcReactor::v[28]
+text block_rule_name_0     Arc Reactor
+site block_rule_1          0x000e6f58 0xe92d4070 0xe1a04002  # RuleAssembleAvengers::v[28]
+text block_rule_name_1     Assemble Avengers
+site block_rule_2          0x000eb2bc 0xe5d01038 0xe92d43f0  # RuleAvengerBlackPantherOrbit::v[28]
+text block_rule_name_2     Avenger Black Panther Orbit
+site block_rule_3          0x000eb51c 0xe5d01038 0xe92d43f0  # RuleAvengerBlackWidowRamp::v[28]
+text block_rule_name_3     Avenger Black Widow Ramp
+site block_rule_4          0x000eb8f8 0xe92d47f0 0xe24dd008  # RuleAvengerCaptainAmericaPops::v[28]
+text block_rule_name_4     Avenger Captain America Pops
+site block_rule_5          0x000ebf70 0xe590c000 0xe30a1ec8  # RuleAvengerHulkSpinner::v[28]
+text block_rule_name_5     Avenger Hulk Spinner
+site block_rule_6          0x000efc88 0xe92d41f0 0xe24dd008  # RuleAvengerIronManLanes::v[28]
+text block_rule_name_6     Avenger Iron Man Lanes
+site block_rule_7          0x000f3a88 0xe92d41f0 0xe24dd008  # RuleAvengerThorCaptiveBall::v[28]
+text block_rule_name_7     Avenger Thor Captive Ball
+site block_rule_8          0x000f5a54 0xe92d4ff0 0xe1a07003  # RuleBullseyeTargets::v[28]
+text block_rule_name_8     Bullseye Targets
+site block_rule_9          0x000fc478 0xe92d47f0 0xe24dd008  # RuleCaptainMarvel::v[28]
+text block_rule_name_9     Captain Marvel
+site block_rule_10         0x000ff6d4 0xe92d43f0 0xe2035040  # RuleCombos::v[28]
+text block_rule_name_10    Combos
+site block_rule_11         0x00108ccc 0xe92d4ff0 0xe3036388  # RuleComputerGrid::v[28]
+text block_rule_name_11    Computer Grid
+site block_rule_12         0x0010a728 0xe92d4ff0 0xe24dd024  # RuleFlankAttack::v[28]
+text block_rule_name_12    Flank Attack
+site block_rule_13         0x00111eb0 0xe92d4ff0 0xe24dd034  # RuleGems::v[28]
+text block_rule_name_13    Gems
+site block_rule_14         0x00114a20 0xe92d41f0 0xe24dd028  # RuleHawkeyeCombo::v[28]
+text block_rule_name_14    Hawkeye Combo
+site block_rule_15         0x00116c1c 0xe92d4070 0xe1a04002  # RuleMystery::v[28]
+text block_rule_name_15    Mystery
+site block_rule_16         0x00119198 0xe92d41f0 0xe24dd018  # RulePortalLocks::v[28]
+text block_rule_name_16    Portal Locks
+site block_rule_17         0x0011c5b0 0xe92d4ff0 0xe24dd00c  # RuleShieldBonus::v[28]
+text block_rule_name_17    Shield Bonus
+site block_rule_18         0x0011e010 0xe5901010 0xe3510001  # RuleSkillShot::v[28]
+text block_rule_name_18    Skill Shot
+site block_rule_19         0x0011fcc0 0xe2022001 0xe92d4008  # RuleSlingshots::v[28]
+text block_rule_name_19    Slingshots
+site block_rule_20         0x00122da8 0xe92d40f8 0xe1a06002  # RuleStrangeSpellout::v[28]
+text block_rule_name_20    Strange Spellout
+site block_rule_21         0x00124db8 0xe3021440 0xe3401067  # RuleTimeBank::v[28]
+text block_rule_name_21    Time Bank
+site block_rule_22         0x0012e8b0 0xe92d40f8 0xe2035001  # RuleTower::v[28]
+text block_rule_name_22    Tower

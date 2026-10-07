@@ -683,3 +683,47 @@ text block_name_25      Location Catacombs
 site block_start_26     0x000b8570 0xe92d4010 0xe1a04000
 data block_obj_26       0x0068a470
 text block_name_26      Location John Wicks House
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x000d0d8c 0xe92d4070 0xe1a04002  # crule_adversary_battles::v[40]
+text block_rule_name_0     Adversary Battles
+site block_rule_1          0x000d5668 0xe92d47f0 0xe24dd010  # crule_allies::v[40]
+text block_rule_name_1     Allies
+site block_rule_2          0x000d981c 0xe92d00f0 0xe2026b02  # crule_bonus::v[40]
+text block_rule_name_2     Bonus
+site block_rule_3          0x000da394 0xe92d4070 0xe1a04002  # crule_bottom_lanes::v[40]
+text block_rule_name_3     Bottom Lanes
+site block_rule_4          0x000dee40 0xe590c000 0xe30d1e80  # crule_car::v[40]
+text block_rule_name_4     Car
+site block_rule_5          0x000e26c8 0xe92d43f0 0xe24dd00c  # crule_coin_collect::v[40]
+text block_rule_name_5     Coin Collect
+site block_rule_6          0x000e3c80 0xe2022803 0xe92d4008  # crule_coin_target_bank::v[40]
+text block_rule_name_6     Coin Target Bank
+site block_rule_7          0x000e3f40 0xe92d47f0 0xe24dd008  # crule_combos::v[40]
+text block_rule_name_7     Combos
+site block_rule_8          0x000e490c 0xe92d4070 0xe3084008  # crule_dance_club::v[40]
+text block_rule_name_8     Dance Club
+site block_rule_9          0x000e4bb8 0xe2022080 0xe3a03000  # crule_dog::v[40]
+text block_rule_name_9     Dog
+site block_rule_10         0x000e7720 0xe92d4ff0 0xe24dd01c  # crule_enemies::v[40]
+text block_rule_name_10    Enemies
+site block_rule_11         0x000e875c 0xe92d47f0 0xe1a07003  # crule_excommunicado_lock::v[40]
+text block_rule_name_11    Excommunicado Lock
+site block_rule_12         0x000e946c 0xe92d41f0 0xe1a07003  # crule_extra_ball::v[40]
+text block_rule_name_12    Extra Ball
+site block_rule_13         0x000ea95c 0xe92d41f0 0xe1a06002  # crule_jobs::v[40]
+text block_rule_name_13    Jobs
+site block_rule_14         0x000f22ec 0xe92d4370 0xe24dd008  # crule_marker_target_bank::v[40]
+text block_rule_name_14    Marker Target Bank
+site block_rule_15         0x000f2d1c 0xe92d4ff0 0xe24dd004  # crule_ramp_targets::v[40]
+text block_rule_name_15    Ramp Targets
+site block_rule_16         0x000f51d8 0xe92d4070 0xe1a05003  # crule_skill_shot::v[40]
+text block_rule_name_16    Skill Shot
+site block_rule_17         0x000f7500 0xe2022201 0xe3a03000  # crule_spinner::v[40]
+text block_rule_name_17    Spinner
+site block_rule_18         0x000f8290 0xe92d41f0 0xe1a04000  # crule_winston_collect::v[40]
+text block_rule_name_18    Winston Collect
+site block_rule_19         0x000f9928 0xe92d4070 0xe3084008  # crule_wizard_modes::v[40]
+text block_rule_name_19    Wizard Modes

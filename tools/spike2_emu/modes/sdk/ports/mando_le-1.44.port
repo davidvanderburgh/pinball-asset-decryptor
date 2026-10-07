@@ -442,3 +442,31 @@ text block_name_56      Scope Feature
 site block_start_58     0x001b71a0 0xe92d4df0 0xe30e5080
 data block_obj_58       0x006b27f8
 text block_name_58      Titw Wizard Ready
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x0001be04 0xe2522080 0xe2c33000  # cambushed_rule::v[31]
+text block_rule_name_0     Ambushed
+site block_rule_1          0x0004b21c 0xe92d41f0 0xe1a06000  # cbattleground_progress::v[31]
+text block_rule_name_1     Battleground Progress
+site block_rule_2          0x0004c128 0xe92d4070 0xe1a04002  # cbattleground_rule::v[31]
+text block_rule_name_2     Battleground
+site block_rule_3          0x0007d05c 0xe3530000 0x03520002  # cbononza::v[31]
+text block_rule_name_3     Bononza
+site block_rule_4          0x0007ddb0 0xe92d4070 0xe1a04002  # cbounty_hunter_rule::v[31]
+text block_rule_name_4     Bounty Hunter
+site block_rule_5          0x0008e7c8 0xe92d43f8 0xe1a06002  # cchapter_rule::v[31]
+text block_rule_name_5     Chapter
+site block_rule_6          0x000efd10 0xe3530000 0x03520002  # cextra_ball::v[31]
+text block_rule_name_6     Extra Ball
+site block_rule_7          0x000cef7c 0xe3530000 0x03520002  # cfoundry::v[31]
+text block_rule_name_7     Foundry
+site block_rule_8          0x0014937c 0xe30e1080 0xe3401065  # coutlanes_rule::v[31]
+text block_rule_name_8     Outlanes
+site block_rule_9          0x00194188 0xe92d4370 0xe1a06000  # cscope_rule::v[31]
+text block_rule_name_9     Scope
+site block_rule_10         0x001a1f68 0xe92d41f0 0xe1a06002  # cskill_shot::v[31]
+text block_rule_name_10    Skill Shot
+site block_rule_11         0x001b3a30 0xe92d43f0 0xe1a04000  # cthe_child_rule::v[31]
+text block_rule_name_11    The Child

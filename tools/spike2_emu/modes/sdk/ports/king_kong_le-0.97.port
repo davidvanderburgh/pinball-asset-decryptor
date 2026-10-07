@@ -703,3 +703,49 @@ text log_diverter_label    log diverter
 site ramp_diverter_get     0x002a5348 0xe92d4070 0xe3034160
 value ramp_diverter_dev    15
 text ramp_diverter_label   center ramp diverter
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x001dc8e4 0xe92d4ff0 0xe24dd03c  # RuleBananaCombos::v[27]
+text block_rule_name_0     Banana Combos
+site block_rule_1          0x001e24cc 0xe92d4ff0 0xe24dd01c  # RuleBiplaneRamp::v[27]
+text block_rule_name_1     Biplane Ramp
+site block_rule_2          0x001ea22c 0xe92d40f0 0xe24dd00c  # RuleBuildingClimb::v[27]
+text block_rule_name_2     Building Climb
+site block_rule_3          0x001ee9f4 0xe92d47f0 0xe1a06002  # RuleDeadeye::v[27]
+text block_rule_name_3     Deadeye
+site block_rule_4          0x001f70e0 0xe92d4ff0 0xe24dd014  # RuleDropTargets::v[27]
+text block_rule_name_4     Drop Targets
+site block_rule_5          0x00202748 0xe92d41f0 0xe1a05000  # RuleIslandScenes::v[27]
+text block_rule_name_5     Island Scenes
+site block_rule_6          0x0020b010 0xe92d4ff8 0xe1a06002  # RuleKongLetters::v[27]
+text block_rule_name_6     Kong Letters
+site block_rule_7          0x00210e38 0xe92d4ff8 0xe1a04002  # RuleKongLocks::v[27]
+text block_rule_name_7     Kong Locks
+site block_rule_8          0x002153d8 0xe30113b8 0xe340108a  # RuleLeapOfFaith::v[27]
+text block_rule_name_8     Leap of Faith
+site block_rule_9          0x002174c0 0xe92d4038 0xe3a000a6  # RuleLogBridge::v[27]
+text block_rule_name_9     Log Bridge
+site block_rule_10         0x0021fc5c 0xe92d47f0 0xe2037010  # RuleLostTemple::v[27]
+text block_rule_name_10    Lost Temple
+site block_rule_11         0x00226428 0xe2033601 0xe3a02000  # RuleMapSegments::v[27]
+text block_rule_name_11    Map Segments
+site block_rule_12         0x0022a424 0xe2033901 0xe3a02000  # RuleMillionBananas::v[27]
+text block_rule_name_12    Million Bananas
+site block_rule_13         0x0022fb58 0xe92d4030 0xe2024102  # RuleMultipliers::v[27]
+text block_rule_name_13    Multipliers
+site block_rule_14         0x00235bec 0xe92d4070 0xe1a04002  # RuleMystery::v[27]
+text block_rule_name_14    Mystery
+site block_rule_15         0x002384c0 0xe92d4370 0xe1a04002  # RuleRicochet::v[27]
+text block_rule_name_15    Ricochet
+site block_rule_16         0x0023ee10 0xe92d4ff0 0xe24dd00c  # RuleRiver::v[27]
+text block_rule_name_16    River
+site block_rule_17         0x00244f3c 0xe92d40f8 0xe1a05003  # RuleSkillShot::v[27]
+text block_rule_name_17    Skill Shot
+site block_rule_18         0x0024cf94 0xe92d4ff0 0xe24dd01c  # RuleTheCliffs::v[27]
+text block_rule_name_18    The Cliffs
+site block_rule_19         0x002528c8 0xe92d4ff0 0xe1a08002  # RuleThePit::v[27]
+text block_rule_name_19    The Pit
+site block_rule_20         0x0026d838 0xe2022001 0xe3a03000  # UIBonusScreen::v[27]
+text block_rule_name_20    UI Bonus Screen

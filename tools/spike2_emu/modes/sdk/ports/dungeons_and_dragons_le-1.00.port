@@ -603,3 +603,43 @@ text block_name_69      Map Undermountain Hurry Up
 site block_start_70     0x001eab2c 0xe92d41f0 0xe1a04000
 data block_obj_70       0x007d8fb0
 text block_name_70      Traveling
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x00046638 0xe92d40f0 0xe1a01000  # cbelongings::v[43]
+text block_rule_name_0     Belongings
+site block_rule_1          0x0006faac 0xe92d40f8 0xe1c066d8  # ccrit_hit_rule::v[43]
+text block_rule_name_1     Crit Hit
+site block_rule_2          0x00082734 0xe92d40f0 0xe24dd014  # cdragon_rule::v[43]
+text block_rule_name_2     Dragon
+site block_rule_3          0x000962a0 0xe92d40f8 0xe1a06002  # cdungeon_rule::v[43]
+text block_rule_name_3     Dungeon
+site block_rule_4          0x000b3a6c 0xe3530000 0x03520701  # cextra_ball::v[43]
+text block_rule_name_4     Extra Ball
+site block_rule_5          0x000a6d20 0xe92d4070 0xe1a04002  # cfizmo::v[43]
+text block_rule_name_5     Fizmo
+site block_rule_6          0x000e4dfc 0xe92d40f0 0xe24dd00c  # cgel_cube_rule::v[43]
+text block_rule_name_6     Gel Cube
+site block_rule_7          0x000ffe3c 0xe92d4ff0 0xe24dd004  # clooting::v[43]
+text block_rule_name_7     Looting
+site block_rule_8          0x001aff10 0xe92d4070 0xe1a04002  # cmimic_mania_rule::v[43]
+text block_rule_name_8     Mimic Mania
+site block_rule_9          0x001b1a40 0xe92d4038 0xe1c045d8  # cranged_attack::v[43]
+text block_rule_name_9     Ranged Attack
+site block_rule_10         0x001c4cb8 0xe92d41f0 0xe1c048d0  # csecret_door::v[43]
+text block_rule_name_10    Secret Door
+site block_rule_11         0x001c6480 0xe92d4ff0 0xe1a04000  # cskill_shot::v[43]
+text block_rule_name_11    Skill Shot
+site block_rule_12         0x001c9eb8 0xe2022901 0xe92d4008  # cspinner::v[43]
+text block_rule_name_12    Spinner
+site block_rule_13         0x001e7ad8 0xe2022801 0xe3a03000  # ctavern_brawl_rule::v[43]
+text block_rule_name_13    Tavern Brawl
+site block_rule_14         0x001ef4c0 0xe2022801 0xe3a03000  # ctinys_dice_game_rule::v[43]
+text block_rule_name_14    Tinys Dice Game
+site block_rule_15         0x001dc954 0xe92d4070 0xe1a04002  # ctown::v[43]
+text block_rule_name_15    Town
+site block_rule_16         0x001e07f4 0xe92d4ff0 0xe30551b0  # ctrap::v[43]
+text block_rule_name_16    Trap
+site block_rule_17         0x001efe0c 0xe59012b0 0xe351001e  # ctreasure::v[43]
+text block_rule_name_17    Treasure

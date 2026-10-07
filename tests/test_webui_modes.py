@@ -1579,7 +1579,8 @@ def test_pad363_the_game_modes_lever_holds_off_the_ticked_modes(tmp_path, previe
         assert st["form"]["game_modes"] == "block" and st["block_on"] == sorted(rows)
         assert rows[21] == "Chimichanga" and (rows[6], rows[7]) == ("Quest (6)", "Quest (7)") and 8 not in rows
         assert not st["dis"]["block"] and "block" not in st["reasons"]
-        assert st["profile"]["game_rules"] == []                 # Deadpool's port names no rules
+        rules = [r["label"] if isinstance(r, dict) else r for r in st["profile"]["game_rules"]]
+        assert len(rules) == 12 and "Team Up Shot" in str(rules)   # PAD-400: Deadpool's own features
         path = proj / "modes" / slug / "mode.json"
         w.call("ui.set", "modes", "f:game_modes", "stack")
         assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("game_modes") == "stack")

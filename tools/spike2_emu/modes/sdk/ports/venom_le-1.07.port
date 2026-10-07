@@ -762,3 +762,45 @@ text block_name_90      Symbiote Mania
 site block_start_91     0x001a8f78 0xe92d4010 0xe1a04000
 data block_obj_91       0x0073d340
 text block_name_91      Symbiote Mania Ready
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x000a0c84 0xe92d43f0 0xe24dd064  # cbell_tower::v[40]
+text block_rule_name_0     Bell Tower
+site block_rule_1          0x000b9578 0xe92d40f0 0xe24dd00c  # ccarnage_rule::v[40]
+text block_rule_name_1     Carnage
+site block_rule_2          0x000cef5c 0xe92d4010 0xe24dd008  # cdoppleganger_rule::v[40]
+text block_rule_name_2     Doppleganger
+site block_rule_3          0x000e2060 0xe3530000 0x03520c01  # cextra_ball::v[40]
+text block_rule_name_3     Extra Ball
+site block_rule_4          0x000d2d50 0xe92d47f0 0xe24dd010  # cflamethrower::v[40]
+text block_rule_name_4     Flamethrower
+site block_rule_5          0x00103f7c 0xe92d4038 0xe1a05003  # chost::v[40]
+text block_rule_name_5     Host
+site block_rule_6          0x00106d40 0xe92d4ff0 0xe1a04000  # chost_combo::v[40]
+text block_rule_name_6     Host Combo
+site block_rule_7          0x0010daec 0xe92d4010 0xe24dd008  # chost_combo_rule::v[40]
+text block_rule_name_7     Host Combo Rule
+site block_rule_8          0x0010feec 0xe92d43f8 0xe1a04000  # cinfected::v[40]
+text block_rule_name_8     Infected
+site block_rule_9          0x00146040 0xe92d43f0 0xe24dd00c  # cmayhem_rule::v[40]
+text block_rule_name_9     Mayhem
+site block_rule_10         0x001520bc 0xe92d4070 0xe5905070  # cmillion_plus_rule::v[40]
+text block_rule_name_10    Million Plus
+site block_rule_11         0x001604c4 0xe92d4070 0xe24dd008  # cmini_mode_rule::v[40]
+text block_rule_name_11    Mini Mode
+site block_rule_12         0x00164734 0xe3530000 0x03520040  # cmultipliers::v[40]
+text block_rule_name_12    Multipliers
+site block_rule_13         0x001662cc 0xe92d4030 0xe24dd00c  # cmystery::v[40]
+text block_rule_name_13    Mystery
+site block_rule_14         0x00170e8c 0xe92d4070 0xe5905070  # cquick_post_rule::v[40]
+text block_rule_name_14    Quick Post
+site block_rule_15         0x00196880 0xe92d4030 0xe24dd00c  # cscream_rule::v[40]
+text block_rule_name_15    Scream
+site block_rule_16         0x00198b28 0xe92d4ff0 0xe24dd014  # cskill_shot::v[40]
+text block_rule_name_16    Skill Shot
+site block_rule_17         0x001ae0d0 0xe92d4010 0xe24dd008  # ctoxin_teamup_rule::v[40]
+text block_rule_name_17    Toxin Teamup
+site block_rule_18         0x001e5800 0xe92d47f0 0xe1c066d8  # cweb_combos::v[40]
+text block_rule_name_18    Web Combos

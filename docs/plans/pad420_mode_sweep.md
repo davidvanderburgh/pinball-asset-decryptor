@@ -37,6 +37,29 @@ This is several runs of work. Each run adds what it proved here.
      game's end. The result per build is in each port's header.
 3. **Each new build's HUD profile, scenes and sound carriers** (7ebbfab3, desk-measured from the cards).
 
+## Where the 32 new ports stand (end of run 2, 2026-10-07 09:45)
+
+- **Shipped, full build check passed (15):** Aerosmith LE 1.16, Avengers LE and Pro 1.10, Deadpool LE 1.16,
+  Dungeons & Dragons LE and Pro 1.10, Foo Fighters Pro 1.04, Guardians Pro and LE 1.15, Iron Maiden LE and Pro 1.18,
+  James Bond Pro 1.06, John Wick LE 1.02, Star Wars Pro 1.31, Stranger Things LE 1.13.
+- **Still in the emulator when the run ended, or not yet re-run on a quiet machine (13):** John Wick Pro 1.02,
+  Jurassic Park Pro 1.16, King Kong Pro 0.97, Mandalorian LE and Pro 1.45, Venom Pro 1.07, Uncanny X-Men Pro 0.98,
+  Sword of Rage LE and Pro 1.19, Star Wars LE 1.31, Stranger Things Pro 1.13, Munsters Pro 1.28, Aerosmith Pro 1.16.
+  Most of these failed only with the game's 10 s watchdog (exit 5) while the machine was over-committed (below).
+  Their candidate ports are `C:	mp\PAD-420\clean\<key>.port`; the results land in `C:	mp\PAD-420\check3\<key>`.
+- **Real faults to look at:** Batman 1.14 (no drain ends a ball on any of its ports: it moved to the newer
+  framework, so its end-of-ball event ids and handler need proving), Jaws Pro 1.02 (no game starts after Guided
+  Setup, twice), Rush LE / Pro 1.19 (stopped or crashed on every quiet-machine try so far; the 191 MB debug program).
+
+**Lesson for the next run:** the previous run's helper agents left jobs running in WSL after they were stopped (a
+shaker proof, a ball-save pilot, a light-show scan, a mechanisms proof). They held a fourth rig, the machine feeds
+three, and every check on the starved rigs died on the game's own watchdog. Before a batch: `riglock.sh list`, and
+stop anything not yours; run nothing CPU-heavy (pytest, screenshots, recipes with 4 workers) while rigs run.
+
+Tools (scratch, `C:	mp\PAD-420`): `jobs/check_job2.sh` (the check per build), `run_check3.sh` (rigbatch),
+`stamp.py <key>...` (the proof header, from check3), `recipes.py` (`RW=1` for one core), `portslist.py` (the test's
+port list), `limits_table.py` (MODE_LIMITS.md's games table), `clean2.py` (how a candidate port is made).
+
 ## Left, per part (the next runs)
 
 | part | what is left | how |

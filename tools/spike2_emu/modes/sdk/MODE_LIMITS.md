@@ -184,9 +184,11 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Iron Maiden LE 1.18 | no | ✓ | not yet | no | never waits |
 | Iron Maiden Pro 1.18 | no | ✓ | not yet | no | never waits |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all |  |
+| James Bond 007 Pro 1.06 | no | ✓ | not yet | no | never waits |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | all |  |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
+| John Wick LE 1.02 | no | no | not yet | no | never waits |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | all |  |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | all |  |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |

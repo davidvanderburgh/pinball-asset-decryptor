@@ -23,6 +23,7 @@ CARDS = r"D:\Pinball\images\Stern\spike2"
 
 #: screen -> (card file, project name, title key)
 SCREENS = {
+    "james_bond_pro": ("james_bond_pro-1_06_0.Release.16G.sdcard.raw", "James Bond Pro 1.06 Extract", "james_bond_pro_1_06"),
     "rush_le": ("rush_le-1_19_0.Release.16G.sdcard.raw", "Rush LE 1.19 Extract", "rush_le_1_19"),
     "rush_pro": ("rush_pro-1_19_0.Release.16G.sdcard.raw", "Rush Pro 1.19 Extract", "rush_pro_1_19"),
     "jurassic_park_le": ("jurassic_park_le-1_16_0.Release.8G.sdcard.raw", "Jurassic Park LE 1.16 Extract",

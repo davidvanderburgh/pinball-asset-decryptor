@@ -32,6 +32,7 @@ import threading
 import time
 
 from .. import compat
+from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
 
 #: The tail the count line wears while the change diff runs.
@@ -120,7 +121,7 @@ class _ProfileButton:
     pack_forget = pack
 
 
-class AudioTab(TabService):
+class AudioTab(FindOriginalsMixin, TabService):
     ns = "audio"
     key = "Replace Audio"
     label = "Audio"
@@ -131,6 +132,8 @@ class AudioTab(TabService):
         "audio_loop_basenames", "audio_trim_var", "_audio_grow_active",
         "_audio_profile_btn",
     )
+    _orig_kind = "sound"
+    _orig_label = "Replace Audio"
 
     def __init__(self, window):
         super().__init__(window)
@@ -2193,6 +2196,47 @@ class AudioTab(TabService):
             self._load_rep_pane(self._current_rel)
         self._update_clear_all()
         return True
+
+    # -- Find originals… (webui/find_originals.py, PAD-443) ------------------
+    def _orig_picks(self):
+        return {rel: rep for rel, rep in self._assign.items()
+                if rep and rel in self._by_rel}
+
+    def _orig_changed(self):
+        return {rel for rel in self._changed
+                if rel in self._by_rel and rel not in self._foreign}
+
+    def _orig_slot_path(self, rel):
+        slot = self._by_rel.get(rel)
+        return slot.abs_path if slot is not None else ""
+
+    def _orig_project(self):
+        assets = self._assets()
+        if assets and self._scan_dir and \
+                self._norm(assets) == self._norm(self._scan_dir):
+            return assets
+        return ""
+
+    def _orig_busy(self):
+        return self._running()
+
+    def _orig_trim(self):
+        return bool(self.get("trim_visible")), bool(self.audio_trim_var.get())
+
+    def _orig_set_trim(self):
+        self.audio_trim_var.set(True)
+        self._save_staged_changes()
+
+    def _orig_use(self, pairs):
+        changed = sum(1 for rel, path in pairs.items()
+                      if self._assign.get(rel) != path)
+        self._assign.update(pairs)
+        self._save_staged_changes()
+        self._refresh_list()
+        if self._current_rel in pairs:
+            self._load_rep_pane(self._current_rel)
+        self._update_clear_all()
+        return changed
 
     # ------------------------------------------------------------------
     # the row menu

@@ -26,6 +26,7 @@ import threading
 import time
 
 from .. import compat
+from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
 
 #: Tk's iid prefix for a "Group by scene" header row; the page's id for one.
@@ -221,7 +222,7 @@ def _plural(n, word):
 
 
 # ---------------------------------------------------------------------------
-class ImagesTab(TabService):
+class ImagesTab(FindOriginalsMixin, TabService):
     ns = "images"
     key = "Replace Images"
     label = "Images"
@@ -233,6 +234,8 @@ class ImagesTab(TabService):
         "image_change_filter_var", "image_group_by_scene_var",
         "image_keep_size_var", "image_status_var",
     )
+    _orig_kind = "picture"
+    _orig_label = LABEL
 
     def __init__(self, window):
         super().__init__(window)
@@ -1934,6 +1937,43 @@ class ImagesTab(TabService):
             self._render_preview(self._current_rel)
         self._update_clear_all()
         return n
+
+    # ------------------------------------------------------------------
+    # Find originals… (webui/find_originals.py, PAD-443)
+    # ------------------------------------------------------------------
+    def _orig_picks(self):
+        return {rel: rep for rel, rep in self._assignments.items()
+                if rep and rel in self._by_rel}
+
+    def _orig_changed(self):
+        return {rel for rel in self._changed_on_disk
+                if rel in self._by_rel and rel not in self._foreign_rels}
+
+    def _orig_slot_path(self, rel):
+        slot = self._by_rel.get(rel)
+        return slot.abs_path if slot is not None else ""
+
+    def _orig_project(self):
+        assets = self._assets_dir()
+        return assets if assets and self._live(assets) else ""
+
+    def _orig_busy(self):
+        return self._is_running()
+
+    def _orig_keep_size(self, rel):
+        return rel in self._keep_size
+
+    def _orig_use(self, pairs):
+        changed = sum(1 for rel, path in pairs.items()
+                      if self._assignments.get(rel) != path)
+        self._assignments.update(pairs)
+        self._keep_grown(list(pairs))
+        self._save_staged_changes()
+        self._refresh_image_list()
+        if self._current_rel in pairs:
+            self._render_preview(self._current_rel)
+        self._update_clear_all()
+        return changed
 
     # ------------------------------------------------------------------
     # Save settings to a file / Load settings from a file (PAD-300)

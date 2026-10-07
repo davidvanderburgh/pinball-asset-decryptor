@@ -741,6 +741,12 @@ def test_keyboard_moves_from_the_focus_row(tmp_path):
         (tmp_path / "core" / (mod + ".js")).write_text(
             "".join("export const %s = () => null;\n" % n for n in names),
             encoding="utf-8")
+    # ...and for the tab's own sibling modules (originals.js, PAD-443)
+    for m in re.finditer(r"import \{([^}]*)\} from \"\./(\w+)\.js\"", src):
+        names = [n.strip() for n in m.group(1).split(",") if n.strip()]
+        (tmp_path / "tabs" / (m.group(2) + ".js")).write_text(
+            "".join("export const %s = () => null;\n" % n for n in names),
+            encoding="utf-8")
     (tmp_path / "package.json").write_text('{"type": "module"}',
                                            encoding="utf-8")
     (tmp_path / "cases.js").write_text(_KEYNAV_CASES, encoding="utf-8")

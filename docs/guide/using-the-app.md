@@ -303,6 +303,20 @@ was meant for. Scene pictures and font glyphs are named with a
 fingerprint of the card they came off, so copies from another card's
 extract never pair by name; **Transfer Mods to New Version** carries
 those over by content.
+**Find originals…**, beside it on the Audio and Images tabs, is the
+same search by content for your own files. Carrying a built card's
+mods into a project with *Transfer Mods to New Version* picks the
+card's own copy of every replaced sound and picture, which the build
+that made that card had already converted once. Point Find originals
+at the folder your own files are in and every pick on the tab is
+compared with every file in it by how it sounds or looks, so names,
+levels, sample rates, sizes and file types don't matter; where the
+folder has the same file twice, the better copy wins, and files that
+are part of an extract (copies off a card) are never offered. Each
+row shows the copy and the file found side by side (▶ for a sound, a
+thumbnail for a picture) and amber rows are worth a look. Tick what
+you want and *Use these files*: the next Write converts from your
+originals.
 
 ## Mod Pack tab
 

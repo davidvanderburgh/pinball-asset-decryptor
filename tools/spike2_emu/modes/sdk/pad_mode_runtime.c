@@ -6350,6 +6350,9 @@ static void on_roster_start(unsigned *r)
  *   event <name> site <site name>             a CALL of a port site is the event: for what a
  *                                             title does without a broadcast (its skill shot
  *                                             award, a multiball mode's start)
+ *   event <name> site <site name> arg <n>     PAD-428: only a call with r0 = n (Bond 1.06's film
+ *                                             completed, r0 the film): one site, one event per n.
+ *                                             Every event on one site shares the site's one hook
  * The hooks only COUNT, lock-free, on whichever thread runs them; the tick hands each new
  * firing to every mode's .event. So a mode never runs inside the game's broadcast, and its
  * callbacks keep to the tick thread. A dispatch is counted whether or not one of the game's
@@ -6360,7 +6363,8 @@ static void on_roster_start(unsigned *r)
 #define N_SITE_EVENTS 8
 #define N_EVENT_IDS   (N_BUS_IDS + N_SITE_EVENTS)
 
-static struct { char name[40]; unsigned id; char site[40]; int armed; } event_names[N_EVENTS];
+/* arg: the r0 a site event wants (-1 any); hook: the site-event slot whose hook counts it */
+static struct { char name[40]; unsigned id; char site[40]; int armed, arg, hook; } event_names[N_EVENTS];
 static int n_event_names, n_site_events;
 static volatile unsigned event_fired[N_EVENT_IDS];
 static unsigned event_delivered[N_EVENT_IDS];
@@ -6377,8 +6381,14 @@ static void event_line(const char *s)
     t = word(s, how, sizeof how);
     if (str_eq(how, "site")) {
         if (n_site_events >= N_SITE_EVENTS) return;
-        word(t, event_names[n_event_names].site, sizeof event_names[n_event_names].site);
+        t = word(t, event_names[n_event_names].site, sizeof event_names[n_event_names].site);
         if (!event_names[n_event_names].name[0] || !event_names[n_event_names].site[0]) return;
+        event_names[n_event_names].arg = -1;
+        t = word(t, how, sizeof how);
+        if (str_eq(how, "arg")) {
+            event_names[n_event_names].arg = (int)number(&t, &ok);
+            if (!ok || event_names[n_event_names].arg < 0) return;
+        }
         event_names[n_event_names].id = N_BUS_IDS + (unsigned)n_site_events++;
         n_event_names++;
         return;
@@ -6421,8 +6431,17 @@ static void on_event_dispatch(unsigned *r)
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
 }
 
-/* one counter per site event: the trampoline hands a logger only the registers */
-#define SITE_EVENT(k) static void on_site_event##k(unsigned *r) { (void)r; __sync_fetch_and_add(&event_fired[N_BUS_IDS + k], 1u); }
+/* one counter per site event slot: the trampoline hands a logger only the registers, so each slot has its own
+ * logger, and it counts every event on that site whose arg (r0) matches (PAD-428) */
+static void site_event_fire(int k, const unsigned *r)
+{
+    int i;
+    for (i = 0; i < n_event_names; i++)
+        if (event_names[i].site[0] && event_names[i].hook == k
+            && (event_names[i].arg < 0 || r[0] == (unsigned)event_names[i].arg))
+            __sync_fetch_and_add(&event_fired[event_names[i].id], 1u);
+}
+#define SITE_EVENT(k) static void on_site_event##k(unsigned *r) { site_event_fire(k, r); }
 SITE_EVENT(0) SITE_EVENT(1) SITE_EVENT(2) SITE_EVENT(3) SITE_EVENT(4) SITE_EVENT(5) SITE_EVENT(6) SITE_EVENT(7)
 static const hook_fn site_event_hooks[N_SITE_EVENTS] = {
     on_site_event0, on_site_event1, on_site_event2, on_site_event3,
@@ -6469,13 +6488,22 @@ static void events_arm(void)
     }
     for (i = 0; i < n_event_names; i++) {
         struct site *x;
+        int j;
         if (!event_names[i].site[0]) continue;
+        /* PAD-428: an earlier event on the same site already hooked it; this one rides that hook */
+        for (j = 0; j < i && !(event_names[j].site[0] && str_eq(event_names[j].site, event_names[i].site)); j++) ;
+        if (j < i) {
+            event_names[i].hook = event_names[j].hook;
+            if (event_names[j].armed) { event_names[i].armed = 1; armed++; }
+            continue;
+        }
+        event_names[i].hook = (int)(event_names[i].id - N_BUS_IDS);
         x = site(event_names[i].site);
         if (!x || !x->ok) {
             say("event %s off: site %s is %s", event_names[i].name, event_names[i].site, !x ? "not in the port" : "wrong for this build");
             continue;
         }
-        if (hook(x->addr, site_event_hooks[event_names[i].id - N_BUS_IDS])) { event_names[i].armed = 1; armed++; }
+        if (hook(x->addr, site_event_hooks[event_names[i].hook])) { event_names[i].armed = 1; armed++; }
     }
     if (armed) can |= PM_CAN_EVENTS;
     say("events: %d of %d named events armed%s", armed, n_event_names,

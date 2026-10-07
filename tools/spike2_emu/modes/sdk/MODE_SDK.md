@@ -3106,6 +3106,13 @@ While your mode holds priority P (`pm_display_priority(P)`, or `priority P` in a
   the total. The kept hold goes when the time is up, another mode begins (`pm_begin`: the new mode takes
   over at once), the ball or the game ends, or the mode calls `pm_display_priority(0)` (a drain or a
   tilt: the display back at the same tick). The examples' `kit_end_after(ms)` and `kit_end_now()`.
+- **An ending gives way to another of our modes** (PAD-413). `pm_begun()` counts our modes' starts; a mode
+  remembers it at its end and, when it moves while its ending is still on the glass, drops the ending at once
+  (its TOTAL, its own screen, a qualification note). The runtime stops a full-screen clip another mode played
+  in `pm_begin` itself. The examples' kit does it in `kit_hud_tick` / `kit_screen_tick`; mode files and blocks
+  modes hide their own screen's total. David's Premium, 2026-10-06: BIOLLANTE began 4.8 s into KIRYU's 10 s
+  ending. A total shown through a borrowed game message (`total_msg`) is the game's own award screen and plays
+  its length.
 - A display of the game's that is ALREADY on the screen when the mode starts plays to its end; the
   hold applies to everything asked for after.
 

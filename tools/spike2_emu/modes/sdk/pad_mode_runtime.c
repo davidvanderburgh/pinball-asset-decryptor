@@ -737,7 +737,9 @@ const char *pm_shot_at(int i, uint64_t *mask)
 /* ---- one mode at a time ---------------------------------------------------------------- */
 static const struct pm_mode *running;
 static char running_as[40];      /* PAD-363: pm_running_name - the running mode's own name ("" = its .name) */
+static unsigned begun;           /* PAD-413: pm_begun - how many times one of ours has begun */
 static void disp_linger_other_began(void);
+static void clip_other_began(void);
 
 /* the name the runtime's lines give mode m: what pm_running_name said while it runs, else its .name */
 static const char *mode_name(const struct pm_mode *m, const char *none)
@@ -771,11 +773,21 @@ int pm_begin(void)
         if (!refused_said(current)) pm_log("not started: %s is running", mode_name(running, "another mode"));
         return 0;
     }
-    if (running != current) running_as[0] = 0, refused_forget();
+    if (running != current) {
+        running_as[0] = 0;
+        refused_forget();
+        begun++;
+    }
     running = current;
     disp_linger_other_began();
+    clip_other_began();
     return 1;
 }
+
+/* PAD-413: one of ours began this many times. A mode whose ENDING is still on the glass (its total, its
+ * own screen) remembers it at its end and drops the ending at once when it moves: another of our modes
+ * has the screen now (David's Premium, 2026-10-06: BIOLLANTE began 4.8 s into KIRYU's 10 s ending). */
+unsigned pm_begun(void) { return begun; }
 
 /* PAD-363: one mode object that runs several modes (mode_file.c: every mode file) names the one it began, so
  * the runtime's own lines ("block: ... - BLOCKTEST is running") say which. Only while it runs; pm_end forgets. */
@@ -1957,6 +1969,7 @@ void pm_set_text(void *text, const char *words)
  * the display is immediate-mode, so the runtime advances and draws the video player every
  * tick while the surface plays, as the game's own clip loop does. Proven: item 132. */
 static struct { int on, seen; unsigned long started, last; } clip;
+static const struct pm_mode *clip_owner;  /* PAD-413: the mode that played it (0 = a trigger file's) */
 /* item 164: CLIP V2 - the newer builds have no clip_play / video_player / video_surface function
  * (the lookup is inlined at every call site: Venom 1.07 has 22), so the runtime does what their
  * code does: the video bank scene (`scene video_bank`, 60ed7e50... on 28 of 30 latest builds), its
@@ -2044,6 +2057,7 @@ int pm_clip(const char *name)
         clip.on = 1;
         clip.seen = 0;
         clip.started = clip.last = pm_ms();
+        clip_owner = current;
         return 1;
     }
     if (clip_v2) {
@@ -2060,6 +2074,7 @@ int pm_clip(const char *name)
         clip.on = 1;
         clip.seen = 0;
         clip.started = clip.last = pm_ms();
+        clip_owner = current;
         return 1;
     }
     for (i = 0; name[i] && i + 1 < sizeof disp_clip_name; i++) disp_clip_name[i] = name[i];
@@ -2071,10 +2086,20 @@ int pm_clip(const char *name)
     clip.on = 1;
     clip.seen = 0;
     clip.started = clip.last = pm_ms();
+    clip_owner = current;
     return 1;
 }
 
 int pm_clip_playing(void) { return clip.on; }
+
+/* PAD-413: a full-screen clip still playing when another of our modes begins is the last one's ENDING (KIRYU
+ * WINS over BIOLLANTE's start): it stops, so the new mode has the glass from its first frame */
+static void clip_other_began(void)
+{
+    if (!clip.on || clip_owner == current) return;
+    say("clip: the full-screen clip %s played stopped - another mode began", clip_owner && clip_owner->name ? clip_owner->name : "a trigger file");
+    pm_clip_stop();
+}
 
 void pm_clip_stop(void)
 {

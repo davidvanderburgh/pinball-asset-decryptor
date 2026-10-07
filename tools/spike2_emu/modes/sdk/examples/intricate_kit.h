@@ -104,6 +104,21 @@ static KIT_UNUSED int kit_fresh(struct kit_db *db, uint64_t bit)
     return 1;
 }
 
+/* PAD-413: an ENDING gives way to another of our modes. A mode's words still up after it ended (its TOTAL for
+ * TOTAL_SHOWN_MS, a qualification note) are dropped the tick after another mode of ours begins, whatever kind it
+ * is - a pack mode's HUD would take the place anyway, a mode file's or a blocks mode's screen would not (David's
+ * Premium, 2026-10-06: "on kiryu it was overlapping text at one point", BIOLLANTE beginning 4.8 s into KIRYU's 10 s
+ * ending). `up`: the words are on the glass; `*begun`: pm_begun() as last seen while they were down or the mode
+ * ran. 1 = drop them now. Its full-screen ending clip the runtime stops itself (pm_begin). */
+static KIT_UNUSED int kit_gives_way(int up, unsigned *begun)
+{
+    if (!up || pm_running()) {
+        *begun = pm_begun();
+        return 0;
+    }
+    return pm_begun() != *begun;
+}
+
 /* ---- the mode's own screen -----------------------------------------------------------------
  * A screen the card build added to the HUD scene for modes/<folder>/: the node
  * PadMode_<folder>_Screen and its words PadMode_<folder>_Screen.PadMode_<folder>_Screen_Words
@@ -119,6 +134,7 @@ struct kit_screen {
     unsigned long flash_until, hide_at;    /* pm_ms() */
     char written[KIT_WORDS];               /* what the text node holds now */
     unsigned long seen;                    /* pm_ms() of the last tick (item 157: covered time) */
+    unsigned begun;                        /* PAD-413: pm_begun() when its mode last ran, or it was last down */
 };
 
 static KIT_UNUSED void kit_screen_write(struct kit_screen *s, const char *words)
@@ -216,6 +232,12 @@ static KIT_UNUSED void kit_screen_tick(struct kit_screen *s)
     }
     s->seen = now;
     kit_screen_find(s);
+    if (kit_gives_way(s->up, &s->begun)) {
+        pm_log("screen %s: another mode began - its words give way", s->node_name);
+        s->flash[0] = 0;
+        kit_screen_show(s, 0);
+        return;
+    }
     if (s->hide_at && now >= s->hide_at) {
         s->flash[0] = 0;
         kit_screen_show(s, 0);
@@ -910,6 +932,7 @@ struct kit_hud {
     int metering;                          /* PAD-379: up only for a meter (kit_hud_meter) */
     int off;                               /* PAD-353: its words wait for a display of the game's */
     unsigned long checked_at;              /* PAD-390: the last look at the scene's HUD group */
+    unsigned begun;                        /* PAD-413: pm_begun() when its mode last ran, or it was last down */
 };
 
 /* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
@@ -1189,6 +1212,11 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     const char *title, *line, *award, *awardsub;
     kit_hud_find(h);
     kit_hud_recheck(h);
+    if (kit_gives_way(h->up && !h->metering, &h->begun)) {   /* a meter waits its turn by itself */
+        pm_log("hud %s: another mode began - its %s gives way", h->slug, h->noting ? "note" : "ending");
+        kit_hud_show(h, 0);
+        return;
+    }
     if (h->hide_at && pm_ms() >= h->hide_at) {
         kit_hud_show(h, 0);
         return;

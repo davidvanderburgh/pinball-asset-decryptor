@@ -1284,3 +1284,38 @@ def test_holding_every_ball_in_the_scoop_and_a_game_with_no_mechanisms(tmp_path,
     out = play(tmp_path, _coil_prog(), "shot", "Slingshot", "scoop", "shot", "Godzilla target")
     assert "hold magnet: refused" in out and "scoop: no hold on this game" in out
     assert "HOLD magnet" not in out and "SCOOP KICK at once (no hold)" in out
+
+
+# ---- PAD-413: its total gives way when another of our modes begins ------------------------------------------------
+def test_its_screens_total_gives_way_when_another_mode_begins(tmp_path):
+    """David's Premium, 2026-10-06: another mode began during an ending and both modes' words shared the glass.
+    A blocks mode's own screen keeps its TOTAL a few seconds after the end; another of our modes beginning
+    (here one in C with no screen of its own) hides it on the next tick."""
+    from tests.test_spike2_intricate_modes import PLAIN_MODE
+    cc = _cc()
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
+             seconds=2, screen=True, priority=180)
+    (tmp_path / "blk.c").write_text(BM.to_c(p, "blk"), encoding="utf-8")
+    (tmp_path / "plain.c").write_text(PLAIN_MODE, encoding="utf-8")
+    exe = tmp_path / "harness"
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", SDK,
+                        "-I", os.path.join(SDK, "examples"), "-o", str(exe), os.path.join(SDK, "examples", "desk_harness.c"),
+                        str(tmp_path / "blk.c"), str(tmp_path / "plain.c")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+    def run(*args):
+        r = subprocess.run([str(exe), "new_game"] + [str(a) for a in args], capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    def hides(out, after):
+        return [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Screen 0$", out, re.M) if int(t) >= after]
+
+    alone = run("shot", "Left ramp", "secs", 3, "secs", 5)
+    end = _at_any(alone, r"END \(time ran out\)")
+    assert "gives way" not in alone and hides(alone, end)[0] - end >= 2900       # its total stays its time
+    out = run("shot", "Left ramp", "secs", 3, "trigger", "plain.start", "secs", 1)
+    began = _at_any(out, r"\[PLAIN\] START")
+    assert _at_any(out, r"END \(time ran out\)") < began
+    assert "[TEST MODE] its total gives way - another mode began" in out
+    assert hides(out, began) and hides(out, began)[0] - began <= 40              # the next tick

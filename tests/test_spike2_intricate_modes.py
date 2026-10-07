@@ -2199,6 +2199,80 @@ def test_biollante_lights_the_shield_vines_once_they_face_the_player(harness):
     assert any("shot 0x3f0000000 " in ln for ln in after), after[:3]          # and the shield vines
 
 
+# ---- PAD-413: an ending gives way when another of our modes begins ------------------------------------------------
+# David's Premium, 2026-10-06: "on kiryu it was overlapping text at one point" - BIOLLANTE began 4.8 s into KIRYU's
+# 10 s ending. A pack mode's HUD takes the place of the one up; a mode with no HUD (a mode file, a blocks mode with
+# its own screen, a mode in C) took nothing, so the total stayed. PLAIN is such a mode.
+PLAIN_MODE = r"""
+#include "pad_mode.h"
+static int on;
+static void on_tick(void)
+{
+    if (!on && pm_trigger("plain.start") && pm_begin()) { on = 1; pm_log("START"); }
+    if (on && pm_trigger("plain.stop")) { on = 0; pm_end(); pm_log("END"); }
+}
+static const struct pm_mode plain = { .name = "PLAIN", .tick = on_tick };
+PM_REGISTER(plain);
+"""
+KIRYU_FIRES = ["trigger", "kiryu.start", "secs", 1, "trigger", "kiryu.charge=150", "secs", 1,
+               "raw", "0x1000000000000000", "secs", 7]          # fired; it ends 4 s later: 3 s into its 10 s ending
+
+
+@pytest.fixture(scope="module")
+def harness_plain(tmp_path_factory):
+    cc = _cc()
+    d = tmp_path_factory.mktemp("plain")
+    exe = d / "harness"
+    (d / "desk_harness.c").write_text(_harness_source(), encoding="utf-8")
+    (d / "plain.c").write_text(PLAIN_MODE, encoding="utf-8")
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", str(SDK), "-o", str(exe),
+                        str(d / "desk_harness.c"), str(d / "plain.c")] + [str(EX / (s + ".c")) for s in MODES],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return exe
+
+
+def _shown_before(out, slug, t):
+    """the last SHOW of the mode's HUD group before `t` (1 up, 0 down), or None"""
+    v = [(int(ms), on) for ms, on in re.findall(r"^\s*(\d+) SHOW PadMode_%s_Hud (\d)$" % re.escape(slug), out, re.M)
+         if int(ms) < t]
+    return v[-1][1] if v else None
+
+
+def test_the_total_stays_its_time_when_nothing_else_begins(harness_plain):
+    out = play(harness_plain, *KIRYU_FIRES, "secs", 10)
+    end = _at(out, "[KIRYU] END (fired)")
+    assert end is not None and "gives way" not in out
+    assert [t for t in _hid(out, "kiryu") if t > end][0] - end >= 10000 - 40     # its 10 s on the glass
+
+
+def test_a_mode_without_a_hud_beginning_drops_the_last_ones_total_at_once(harness_plain):
+    out = play(harness_plain, *KIRYU_FIRES, "trigger", "plain.start", "secs", 1)
+    began = _at(out, "[PLAIN] START")
+    assert began is not None and _at(out, "[KIRYU] END (fired)") < began
+    assert _shown_before(out, "kiryu", began) == "1"                            # KIRYU WINS and its total were up
+    assert has(out, "KIRYU", "hud kiryu: another mode began - its ending gives way")
+    assert _soon([t for t in _hid(out, "kiryu") if t >= began][0], began)       # the next tick, not 7 s later
+    assert not [t for t, _w in hud(out, "kiryu", "Title") if t > began]         # and nothing written after
+
+
+def test_a_pack_mode_beginning_takes_the_glass_and_stops_the_last_ones_ending_clip(harness, dump_clips):
+    out = play_own(harness, dump_clips, *KIRYU_FIRES, "trigger", "biollante.start", "secs", 1)
+    began = _at(out, "[BIOLLANTE] START")
+    assert began is not None and "CLIP PadMode_kiryu_Won" in out
+    assert _at(out, "CLIP STOPPED KIRYU (another mode began)") == began          # the runtime, in pm_begin
+    assert began in _hid(out, "kiryu")                                          # its HUD gives BIOLLANTE's the place
+    assert not [t for t, _w in hud(out, "kiryu", "Title") if t > began]
+
+
+def test_a_qualification_note_gives_way_to_a_mode_beginning(harness_plain):
+    out = play(harness_plain, *(["raw", "0x20000", "tick", 1] * 3), "ms", 100, "trigger", "plain.start", "secs", 1)
+    began = _at(out, "[PLAIN] START")
+    assert hud_said(out, "kiryu", "Award", "27 SPINS TO KIRYU")
+    assert has(out, "KIRYU", "hud kiryu: another mode began - its note gives way")
+    assert _soon([t for t in _hid(out, "kiryu") if t >= began][0], began)
+
+
 # ---- PAD-415: a lit shot flashes; a hit answers ----------------------------------------------------------------------
 GODZILLA_TEN = ["biollante", "destoroyah", "final_wars", "ghidorah_heads", "godzilla_angry", "kiryu", "maser_barrage",
                 "meltdown", "oxygen_destroyer", "spacegodzilla"]

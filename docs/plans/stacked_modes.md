@@ -182,4 +182,41 @@ how they like."
   while the rest stood still.
 - **Not measured.** A lock lit before ours began and a ball arriving in it while ours runs (the game's multiball
   start is still not refused: theirs would start and end ours); every Godzilla feature shot by shot; the other
-  C++ rule titles (their ports have no rule lines yet - a follow-up ticket).
+  C++ rule titles (PAD-400, below).
+
+## Our modes run alone on the other titles too (PAD-400)
+
+The open item from PAD-398: the rule lines existed only on the three Godzilla ports, because the reader took
+Godzilla's shot handler (`Rule::v[25]`) as every title's.
+
+- **What is generic.** Every C++ rule title's rules are singletons of one rule base - `Rule` (Godzilla, Avengers,
+  Deadpool, Jaws, King Kong), `crule` (Venom, Mandalorian, D&D, John Wick, Foo Fighters, Sword of Rage, where the
+  game's modes are crules too and are left out: their starts are refused already) - and each hears a shot in ONE
+  virtual of that base, the 64-bit shot mask in r2:r3. Only the slot differs: Godzilla 25, Avengers 28, Deadpool LE
+  31 / Pro 32, Jaws and King Kong 27, and on every crule title its base's second-last (Venom and John Wick 40, D&D
+  43, Mandalorian 31, Sword of Rage 23, Foo Fighters 34). `game_mode_blocks.shot_slot` reads it from the program:
+  the base virtual most rule classes override with a function that reads r2 and r3 before writing them (three or
+  more, a fifth of the rules, and more than any other slot). The runtime needed nothing.
+- **What is hooked.** A rule's own handler (not the base's, not a no-op), when the runtime's plain hook can move
+  its first two words (`hookable`: a literal load is relocated; a `push; bl` start is refused, which the veto test
+  `movable` let through). A handler several rules share is listed once, named for the class that defines it
+  (Deadpool's four team-ups: Team Up Shot; an abstract base when every rule under it shares it). Names read as
+  features: cdragon_rule -> Dragon, ctinys_dice_game_rule -> Tinys Dice Game, AtticAttackMultiballRule -> Attic
+  Attack Multiball; two of one name are told apart (Venom: Host Combo, Host Combo Rule).
+- **Ports.** Avengers 23, Deadpool LE / Pro 12, D&D 18, Foo Fighters 17, Jaws 22, John Wick 20, King Kong 21,
+  Mandalorian 12, Sword of Rage 14, Venom 19 (sdk/rule_lines.py); the three Godzilla ports read back identical.
+  A drafted port gets its own the same way (portgen block_section). Recipes rebuilt: unchanged (no rule lines).
+- **Not covered.** Iron Maiden, Jurassic Park, Elvira, TMNT, Star Wars: their rule base has no virtual that takes a
+  shot mask (Iron Maiden's and Jurassic Park's rules are HookListeners - they hear switches; Elvira's base has 15
+  virtuals) - nothing is guessed, they get no rule lines; that needs a switch-hook route. X-Men's `Rule_*` classes
+  have no base. Led Zeppelin, Munsters, Rush (crule) show no mask handler either. Plain-C titles: sdk/cstarts.
+- **Proof (emulator, stock cards, rigs 1-3, muted, hidden; C:/tmp/PAD-400, rigbatch + job400.sh).** A form mode
+  with the default on each title, started by trigger as soon as the ball was in play, every safe playfield switch
+  worked (swexercise) during and after it. 11 of 12 pass: every rule the port names hooked (none refused), the
+  mode started, and the runtime said the rules saw no shots, each first one a shot bit (Avengers Hawkeye Combo
+  0x01000000, Venom Multipliers 0x1000, Jaws Pipit 0x00200000_00000001, King Kong Banana Combos...). On the HUD:
+  Avengers' 80 spins / 50 pops / 3 shots stood still during and the same switches locked a ball after; Venom
+  stayed at Level 2 and 1,113,980 during, and reached Level 5, ball 2 locked, 6,354,790 after. Godzilla Pro 1.16
+  passed as the control. Deadpool LE 1.14: its 12 sites hooked, but no game starts on this rig (the same with
+  main's port, no rule lines - a rig matter); Deadpool Pro 1.16, the same code, passed.
+

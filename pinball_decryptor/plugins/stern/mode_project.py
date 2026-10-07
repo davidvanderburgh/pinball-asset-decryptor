@@ -438,6 +438,7 @@ MULTIBALL_PROVEN = frozenset({
     "sword_of_rage_pro-1.19",            # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "stranger_things-1.13",              # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "star_wars_le-1.31",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
 })
 
 

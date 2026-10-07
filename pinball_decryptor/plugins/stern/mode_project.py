@@ -427,6 +427,11 @@ MULTIBALL_PROVEN = frozenset({
     "john_wick_le-1.02",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "john_wick_pro-1.02",                # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "jurassic_park_pro-1.16",            # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "king_kong_pro-0.97",                # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "mando_le-1.45",                     # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "mando_pro-1.45",                    # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "rush_le-1.19",                      # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "rush_pro-1.19",                     # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
 })
 
 

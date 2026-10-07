@@ -1763,9 +1763,11 @@ def test_godzilla_angry_every_switch_fills_the_rage_meter_and_level_five_lights_
     lit = _at(out, "[GODZILLA ANGRY] GODZILLA IS ANGRY for player 1: the Building starts the chase")
     assert lit > _at(out, "[GODZILLA ANGRY] RAGE LEVEL 4 of 5")              # the 750th switch (100+125+150+175+200)
     assert len(re.findall(r"SCORE \+", out)) == 5
-    # the meter on the glass: RAGE n/5 on the right edge's gauge, then ANGRY! full, notes in the award line
-    for lv in range(1, 6):
-        assert hud_said(out, s, "Gauge_Label", "RAGE %d/5" % lv), lv
+    # PAD-416: ONE meter to the mode, its percent beside it (100, 225, 375 and 550 of 750 hits at the levels' ends),
+    # never a level's n/5; then ANGRY! full, notes in the award line
+    for pct in ("13%", "30%", "50%", "73%"):
+        assert hud_said(out, s, "Gauge_Label", pct) and hud_said(out, s, "Award", "RAGE " + pct), pct
+    assert not hud_said(out, s, "Gauge_Label", "RAGE 1/5")
     assert hud_said(out, s, "Gauge_Label", "ANGRY!") and hud_said(out, s, "Award", "GODZILLA IS ANGRY!")
     assert hud_said(out, s, "AwardSub", "SHOOT THE BUILDING")
     # the BUILDING pulses red once the light show of GODZILLA IS ANGRY is over
@@ -1777,24 +1779,30 @@ def test_godzilla_angry_the_meter_counts_a_quarter_at_a_time_on_the_award_line(h
     s = "godzilla_angry"
     out = play(harness, "secs", 1, *(["raw", "0x1", "ms", 20] * 51), "secs", 3)
     assert has(out, GA, "rage 1: 25 of 100 switch hits (player 1)") and has(out, GA, "rage 1: 50 of 100")
-    assert hud_said(out, s, "Award", "75 MORE FOR RAGE 1") and hud_said(out, s, "Award", "50 MORE FOR RAGE 1")
+    assert hud_said(out, s, "Award", "725 MORE TO GODZILLA ANGRY") and hud_said(out, s, "Award", "700 MORE TO GODZILLA ANGRY")
     assert hud_said(out, s, "AwardSub", "GODZILLA IS GETTING ANGRY")
-    # the gauge fills a pip at a time: 12 pips for the level's 100 hits
+    # PAD-416: the bar fills a slice at a time toward the MODE: 40 slices for its 750 hits
     on = re.findall(r"SHOW PadMode_godzilla_angry_Hud\.PadMode_godzilla_angry_Hud_Gauge\.PadMode_godzilla_angry_Hud_G(\d+)_On 1",
                     out)
-    assert {int(k) for k in on} == set(range(1, 7))                       # 51 of 100: six of twelve
+    assert {int(k) for k in on} == {1, 2}                                   # 51 of 750: two of forty
+    assert hud_said(out, s, "Gauge_Label", "6%")
 
 
 @pytest.mark.parametrize("busy,on,off", [("balls", 2, 1), ("multiball", 1, 0)], ids=["two_balls", "games_multiball"])
-def test_godzilla_angry_rage_does_not_count_in_a_multiball(harness, busy, on, off):
+def test_godzilla_angry_rage_counts_quietly_in_a_multiball(harness, busy, on, off):
+    """PAD-416, David: "make sure the rage meter accumulates throughout the game (even during other modes)". A
+    multiball's hits count too, quietly: the meter off the glass, a level paid without its note."""
     out = play(harness, "secs", 1, busy, on, "secs", 1, *(["raw", "0x1"] * 150), "secs", 1, busy, off, "secs", 1,
                *(["raw", "0x1"] * 100), "secs", 1)
+    over = _at(out, ">> %s %s" % ("balls in play" if busy == "balls" else busy, off))
     level = _at(out, "[GODZILLA ANGRY] RAGE LEVEL 1 of 5")
-    assert level is not None and level > _at(out, ">> %s %s" % ("balls in play" if busy == "balls" else busy, off))
-    assert not has(out, GA, "RAGE LEVEL 2")
+    assert level is not None and level < over
+    assert has(out, GA, "(in a multiball: said quietly)")
+    assert not [ln for ln in lines(out, GA) if "MORE FOR RAGE" in ln and int(ln.split()[0]) < over]
     hidden = [t for t in _hid(out, "godzilla_angry") if t > _at(out, ">> %s %s" % (
         "balls in play" if busy == "balls" else busy, on))]
     assert hidden, "the meter stays on the glass during a multiball"
+    assert _at(out, "[GODZILLA ANGRY] RAGE LEVEL 2 of 5") > over
 
 
 def test_godzilla_angry_rage_does_not_count_after_a_tilt_until_the_next_ball(harness):
@@ -1835,7 +1843,9 @@ def test_godzilla_angry_chase_five_places_five_locks_baby_found_and_a_six_ball_m
     assert hud_said(out, s, "Line", "SHOOT THE BUILDING: BABY IS THERE")
     assert hud_said(out, s, "C1_Value", "5/5") and hud_said(out, s, "C3_Label", "SUPER")
     assert hud_said(out, s, "Award", "SUPER JACKPOT") and hud_said(out, s, "Title", "ANGRY MULTIBALL")
-    assert hud_said(out, s, "Gauge_Label", "LOCKS") and hud_said(out, s, "Gauge_Label", "MULTIPLIER")
+    # PAD-416: the bar is the RAGE meter's alone - the locks and the multiplier are the counters'
+    assert not hud_said(out, s, "Gauge_Label", "LOCKS") and not hud_said(out, s, "Gauge_Label", "MULTIPLIER")
+    assert hud_said(out, s, "C1_Label", "MULTIPLIER")
     assert hud_next(out, s, "Title", _at(out, "[GODZILLA ANGRY] END")) == "GODZILLA AND BABY"
     # the lights: the lock white and blinking, the place's shots red, BABY green over the orange jackpots
     assert "[GODZILLA ANGRY] lights: shot 0x80000 ffffff blink 700" in out
@@ -2300,3 +2310,39 @@ def test_every_hit_of_a_running_mode_strobes_its_insert_and_climbs_the_hit_sound
     assert [s for _t, s in strobes] == ["80000000", "100000000", "100000"]
     assert [n for _t, n in sounds] == ["1", "2", "3"]
     assert all(int(t) > started for t, _s in strobes + sounds)
+
+
+@pytest.mark.parametrize("locks,balls", [(1, 2), (3, 3)])
+def test_godzilla_angry_a_drain_with_locks_starts_the_multiball(harness, locks, balls):
+    """PAD-416, David: "when you drain a ball if there are locks, it should NOT end the ball ... go straight to the
+    multi-ball ... count of how many I locked". From the first lock the chase keeps a ball save; the trough's switch
+    (the port's "Trough") is the drain, and the locked balls break loose - two at least, a multiball."""
+    shots = {1: ["shot", "Godzilla target", "secs", 1],
+             3: GA_CHASE[4:28]}[locks]
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 1, *shots, "secs", 11, "shot", "Trough", "secs", 2)
+    assert has(out, GA, "LOCK %d at" % locks)
+    saved = [int(t) for t in re.findall(r"^\s*(\d+) BALL SAVE 15 s$", out, re.M)]
+    drain = _at(out, "[GODZILLA ANGRY] a drain at")
+    assert saved and min(saved) < drain                                   # a save of its own from the first lock
+    assert has(out, GA, "with %d lock(s): the locked balls break loose, a %d-ball multiball" % (locks, balls))
+    assert _at(out, "MULTIBALL %d balls, save 15 s" % balls) == drain
+    assert not has(out, GA, "END (")
+
+
+def test_godzilla_angry_a_drain_without_a_lock_is_not_a_multiball(harness):
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 7, "shot", "Trough", "secs", 1, "ball_end", "secs", 1)
+    assert not has(out, GA, "a drain at") and "MULTIBALL" not in out
+    assert has(out, GA, "END (ball ended): the chase, 0 lock(s)")
+
+
+def test_godzilla_angry_the_meter_is_back_when_the_next_ball_starts(harness):
+    """PAD-416, David at the machine: "the rage bar wasn't always shown on the hud (like when starting a game and the
+    ball is in the shooter lane)". The bonus has the glass after a drain; the next ball's start brings the meter back,
+    the ball still in the shooter lane - it used to wait for the first switch."""
+    out = play(harness, "secs", 1, *(["raw", "0x1"] * 10), "secs", 1, "ball_end", "secs", 3, "event", "ball_start",
+               "secs", 2)
+    ended, started = _at(out, ">> ball_end"), _at(out, ">> event ball_start")
+    shown = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_godzilla_angry_Hud 1$", out, re.M)]
+    assert [t for t in _hid(out, "godzilla_angry") if ended <= t < started]       # off for the bonus
+    assert [t for t in shown if started <= t <= started + 100]                     # back with the new ball
+    assert not [t for t in shown if ended <= t < started]

@@ -41,7 +41,8 @@ def test_the_buttons_are_switch_shots_on_bits_no_shot_uses(name):
     port = MP.read_port(str(SDK / "ports" / (name + ".port")))
     assert {"switch_edge", "switch_drain"} <= set(port["site"])
     assert {"switch_records", "switch_count", "mode_mask"} <= set(port["data"])
-    mapped = {sw: (mask, n) for sw, mask, n in port["switch"]}
+    internal = {n.strip() for n in port["text"].get("internal_shots", "").split(",") if n.strip()}
+    mapped = {sw: (mask, n) for sw, mask, n in port["switch"] if n not in internal}
     assert {sw: n for sw, (_m, n) in mapped.items()} == BUTTONS
     masks = [m for m, _n in mapped.values()]
     assert all(m and not m & (m - 1) for m in masks) and len(set(masks)) == 3
@@ -53,6 +54,7 @@ def test_the_buttons_are_switch_shots_on_bits_no_shot_uses(name):
     p = MP.profile_from_port(str(SDK / "ports" / (name + ".port")))
     assert set(BUTTONS.values()) <= {n for n, _m in p.shots}
     assert set(p.switch_shots) == set(BUTTONS.values())
+    assert not internal & {n for n, _m in p.shots}                      # PAD-416: the trough is code's, not the tab's
     assert bool(p.switch_shots_note) == (name not in MP.SWITCH_EDGE_PROVEN)
 
 

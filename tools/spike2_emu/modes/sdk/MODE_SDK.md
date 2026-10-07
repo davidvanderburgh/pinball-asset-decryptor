@@ -3503,7 +3503,16 @@ kerning, carried in from the Ebirah battle scene) and hidden until the mode show
   icon (`bolt`, `oxygen`, `maser`, `xilien`, `anguirus`, `radiation`), in the BATTLE badge's slot (y 267),
   the seconds in its window;
 - `gauge`: pips on the right edge (`spike`, `segment` - filled from the bottom - or `diamond`), each a lit
-  and a dark picture.
+  and a dark picture; or (`"kind": "bar"`, PAD-416) ONE meter in the stock POWERUP meter's manner at the
+  glass's top-right corner - a metal frame with the mode's `icon` in a diamond, a glass tube in five cells and
+  `count` (up to 40) slices of liquid in `colours` filling it from the left, `words` (two lines) and the label
+  (the mode writes it: its percent) beside it, as the stock meter's are beside it in the top-left. GODZILLA
+  ANGRY's RAGE meter is one (David: "the whole meter should be 100% towards the mode"). It is drawn, not taken:
+  the stock meter is no picture in any of the card's scenes.
+
+Every picture of a HUD goes on the card PREMULTIPLIED, as the game's own are (a half-transparent pixel of the
+game's has no channel above its alpha): in plain alpha, whatever fades (a pip's glow, a glass's shine) was
+drawn as solid colour - the "colors outside the meter" David took for a glitch (PAD-416).
 
 In C, `intricate_kit.h`'s `struct kit_hud` drives it (`kit_hud_begin`, `kit_hud_title`, `kit_hud_counter`,
 `kit_hud_timer`, `kit_hud_gauge`, `kit_hud_award`, `kit_hud_note`, `kit_hud_hide_in`, `kit_hud_tick` every

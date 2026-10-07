@@ -910,7 +910,7 @@ static KIT_UNUSED int kit_isolate_list(int give_way, const unsigned char *ids, i
  * Sprite may be shown or hidden (a Text's visibility slot is another virtual), so every piece that comes
  * and goes (the badge, the gauge, each pip's lit and dark picture) is its own Sprite group. A mode that
  * finds no HUD (another title, an older card) runs the same with nothing on the glass. */
-#define KIT_HUD_PIPS   12
+#define KIT_HUD_PIPS   40             /* a bar gauge's slices (PAD-416); a pip gauge has up to 12 */
 #define KIT_HUD_WORDS  48
 
 struct kit_hud {

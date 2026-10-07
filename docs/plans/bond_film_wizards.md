@@ -40,8 +40,8 @@ follow once it has one. The 60th Anniversary edition (its own rules: Bond multib
 - **Runtime**: a site event can ask for one argument value, `event <name> site <site> arg <n>`
   (r0 = n). Every event on one site shares the site's one hook.
 - **Port**: `site film_complete 0x001d49c0` and six events, `film_dr_no` .. `film_daf`, args 0-5.
-- **App**: the Modes tab's Starts on / Ends on lists offer "Dr. No is completed" ..
-  "Diamonds Are Forever is completed" on this title; a blocks mode's event hat gets them too.
+- **App**: the Modes tab's Starts on / Ends on lists offer "Dr. No done" ..
+  "Diamonds Are Forever done" on this title; a blocks mode's event hat gets them too.
   So the two missing mini-wizards are modes of ours, started on `film_frwl` and `film_daf`.
 - **Proof** (emulator, rig 3, 2026-10-07; a test instrument called the game's own collect):
   three parts of From Russia With Love started nothing; the fourth marked the film complete

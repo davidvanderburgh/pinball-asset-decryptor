@@ -490,7 +490,7 @@ def test_bond_le_1_06_offers_a_film_completed_event_per_film():
     p = MP.profile("james_bond_le_1_06")
     films = ["film_dr_no", "film_frwl", "film_goldfinger", "film_thunderball", "film_yolt", "film_daf"]
     assert [e for e in p.events if e.startswith("film_")] == films
-    assert MP.EVENT_LABELS["film_frwl"] == "From Russia With Love is completed"
+    assert MP.EVENT_LABELS["film_frwl"] == "From Russia With Love done"
     assert all(e in MP.EVENT_LABELS for e in p.events)
     with open(os.path.join(MP.PORTS_DIR, "james_bond_le-1.06.port"), encoding="utf-8") as f:
         lines = [ln.split("#")[0].split() for ln in f]

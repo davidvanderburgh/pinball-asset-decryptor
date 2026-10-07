@@ -336,7 +336,105 @@ def _unreadable(text, sidx_name=""):
             "sidx": sidx_name, "stale": 0, "deep": False, "text": text}
 
 
-def card_files(reader, manifest, paths, deep=False, cancel=None):
+def _file_nodes(reader):
+    """``{path: inode}`` for every regular file on the partition (one
+    metadata walk; no file bytes are read)."""
+    return {fp.lstrip("/"): nd for fp, _i, nd in
+            reader.iter_regular_files(min_size=0, max_depth=20)}
+
+
+# ---------------------------------------------------------------------------
+# The card's fingerprint (PAD-427: a project finds its cards by this)
+# ---------------------------------------------------------------------------
+
+#: Hex digits of a card fingerprint.
+PRINT_DIGITS = 32
+
+
+def print_of(sidx_name, files):
+    """The fingerprint of a card whose release index is *sidx_name* and
+    whose files are *files* (``{path: (size, md5 or "-")}``).
+
+    Deterministic, and cheap to take from a card: one metadata walk plus its
+    ``.sidx``.  Each file contributes its REAL size (from the inode) and its
+    manifest MD5 only while the manifest's size for it still agrees; a file
+    whose size moved is "-" (changed, bytes not hashed).  PAD rewrites the
+    records of every file it builds (:mod:`.sidx`), so two of PAD's builds
+    that differ in any file have different prints; a card built elsewhere
+    that swapped a file for one of exactly the same size and left Stern's
+    record alone can't be told apart this way (the deep stock check can)."""
+    h = hashlib.sha1((os.path.basename(sidx_name or "").lower() + "\n")
+                     .encode("utf-8"))
+    for p in sorted(files):
+        size, md5 = files[p]
+        h.update(("%s\t%d\t%s\n" % (p, int(size), (md5 or "-")[:FILE_DIGITS]))
+                 .encode("utf-8"))
+    return h.hexdigest()[:PRINT_DIGITS]
+
+
+def release_print(sidx_name, release):
+    """The fingerprint the official card of *release* has (no card needed:
+    the table holds every file's size and MD5)."""
+    return print_of(sidx_name, {p: (int(v[0]), v[1]) for p, v in
+                                (release.get("files") or {}).items()})
+
+
+def _print_files(nodes, manifest, paths):
+    out = {}
+    for p in paths:
+        node = nodes.get(p)
+        if node is None:
+            continue                      # not on the card
+        rec = manifest.get(p)
+        size = node["size"]
+        out[p] = (size, rec[1] if rec is not None and rec[0] == size else "-")
+    return out
+
+
+def card_print(card_path, table=None):
+    """``{"print", "sidx", "label", "official"}`` for the card at
+    *card_path*, or ``None`` when it has no readable Stern manifest.
+
+    One metadata walk of the data partition (no video sniffing, unlike the
+    Image Info probe) plus the ``.sidx``.  ``label`` names the release the
+    card's index claims ("Godzilla LE 1.16", ``""`` when the table has no
+    record of it) and ``official`` is True when the print is that release's
+    own.  Opens the image: call off the UI thread."""
+    from .explorer import CardImage
+    table = load_table() if table is None else table
+    with CardImage(card_path) as card:
+        parts = [pt for pt in card.partitions() if pt.browsable]
+        parts.sort(key=lambda pt: pt.size, reverse=True)
+        for pt in parts:
+            reader = card.reader(pt.index)
+            nodes = _file_nodes(reader)
+            sidx_path = next((p for p in nodes if p.endswith(".sidx")
+                              and p.startswith("spk/index/")), None)
+            if sidx_path is None:
+                continue
+            try:
+                manifest = sidx_mod.manifest_files(
+                    reader.read_file_bytes(nodes[sidx_path]))
+            except Exception:                             # noqa: BLE001
+                manifest = {}
+            if not manifest:
+                return None
+            return _print_answer(sidx_path, nodes, manifest, table)
+    return None
+
+
+def _print_answer(sidx_path, nodes, manifest, table):
+    sidx_name = os.path.basename(sidx_path).lower()
+    release = release_for(sidx_name, table)
+    paths = set(manifest) | set((release or {}).get("files") or {})
+    pr = print_of(sidx_name, _print_files(nodes, manifest, paths))
+    return {"print": pr, "sidx": sidx_name,
+            "label": release_label(release) if release else "",
+            "official": bool(release) and pr == release_print(sidx_name,
+                                                              release)}
+
+
+def card_files(reader, manifest, paths, deep=False, cancel=None, nodes=None):
     """``({path: (size, md5)}, stale)``: what the card really holds at each
     of *paths*, and how many of its own manifest records are out of date.
 
@@ -349,9 +447,8 @@ def card_files(reader, manifest, paths, deep=False, cancel=None):
     bytes of every file whose size still agrees are hashed as well, which
     also catches a same-size replacement (minutes on a spinning disk)."""
     cancel = cancel or (lambda: False)
-    nodes = {}
-    for fp, _i, nd in reader.iter_regular_files(min_size=0, max_depth=20):
-        nodes[fp.lstrip("/")] = nd
+    if nodes is None:
+        nodes = _file_nodes(reader)
     out, stale = {}, 0
     for p in paths:
         node = nodes.get(p)
@@ -407,17 +504,13 @@ def check_walked(reader, found, table=None, deep=False, cancel=None):
                           % sidx_name, sidx_name)
         out["status"] = "unknown"
         return out
+    nodes = _file_nodes(reader)
     files, stale = card_files(reader, manifest,
                               set(manifest) | set(release.get("files") or {}),
-                              deep=deep, cancel=cancel)
-    nodes = {}
+                              deep=deep, cancel=cancel, nodes=nodes)
+    printed = _print_answer(sidx_name, nodes, manifest, table)
 
     def read_radium(rel):
-        if not nodes:
-            for fp, _i, nd in reader.iter_regular_files(min_size=1,
-                                                        max_depth=20):
-                if fp.endswith(_SCENE):
-                    nodes[fp.lstrip("/")] = nd
         return reader.read_file_bytes(nodes[rel])
 
     label = release_label(release)
@@ -433,7 +526,7 @@ def check_walked(reader, found, table=None, deep=False, cancel=None):
                 "(by the card's manifest and file sizes)." % label)
     return {"status": status, "label": label, "diff": diff,
             "sidx": sidx_name, "stale": stale, "deep": bool(deep),
-            "text": text}
+            "text": text, "print": printed["print"]}
 
 
 def _plural(n, word):
@@ -555,3 +648,138 @@ def check_project(assets_dir, table=None):
             "text": "Extracted from a modified %s card: %s." % (
                 label, "1 picture is not the official one" if extra == 1
                 else "%d pictures are not the official ones" % extra)}
+
+
+# ---------------------------------------------------------------------------
+# What a project's extract holds that the official card doesn't (PAD-427)
+# ---------------------------------------------------------------------------
+
+def project_release(assets_dir, table=None):
+    """``(sidx_name, release)`` the project at *assets_dir* is of, or
+    ``(None, None)``: its lineage's release, else the extract's stock
+    stamp, else the picture folder at the stamped ``card_version``."""
+    from ...core.extract_source import read_extract_source
+    from ...core import lineage
+    table = load_table() if table is None else table
+    names = [((lineage.read_lineage(assets_dir) or {}).get("stock")
+              or {}).get("sidx")]
+    rec = read_extract_source(assets_dir) or {}
+    names.append((rec.get("stock") or {}).get("sidx")
+                 if isinstance(rec.get("stock"), dict) else None)
+    got = project_pictures(assets_dir)
+    if got and got[0] and rec.get("card_version"):
+        names.append(sidx_for(got[0], rec["card_version"]))
+    for name in names:
+        release = release_for(name, table)
+        if release is not None:
+            return os.path.basename(name).lower(), release
+    # No version recorded (an extract older than the stamps, or a custom
+    # card's name): the table holds one release per title, the latest, so
+    # the title folder names it -- unless the card's file name says it is
+    # another version.
+    folder = (got or ("", ()))[0] or next(
+        (card.split("/", 1)[0] for rel_manifest in (
+            "video/manifest.txt", "images/manifest.txt")
+         for _o, card, _s in _manifest_rows(assets_dir, rel_manifest)
+         if "/" in card), "")
+    from ...core.extract_source import version_hint_from_name
+    hint = (version_hint_from_name(rec.get("input_name")) or "").split(" ")[0]
+    for name, release in table.items():
+        if folder and release.get("folder") == folder and (
+                not hint or hint == release.get("version")):
+            return name, release
+    return None, None
+
+
+def _manifest_rows(assets_dir, rel_manifest):
+    """``[(output, card path without the leading /, bytes or None)]``."""
+    path = os.path.join(assets_dir, *rel_manifest.split("/"))
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                cols = line.rstrip("\n").split("\t")
+                if not line.strip() or line.startswith("#") or len(cols) < 2:
+                    continue
+                try:
+                    size = int(cols[2]) if len(cols) > 2 else None
+                except ValueError:
+                    size = None
+                out.append((cols[0].strip(), cols[1].strip().lstrip("/"),
+                            size))
+    except (OSError, UnicodeDecodeError):
+        return []
+    return out
+
+
+def project_off_stock(assets_dir, table=None):
+    """Which of the project's EXTRACTED files are not the official card's:
+    what the card it was extracted from already carried, measured against
+    the release Stern shipped rather than against that card.
+
+    Reads nothing but the project's own sidecars: each clip and loose
+    picture is a byte copy of its card file, so its baseline MD5
+    (``.checksums.md5``, taken at extract) is compared with the release's
+    record; a scene texture is decoded, so its card size (the extract's
+    manifest) is compared; a radium picture is named by its digest.
+
+    Returns ``{"label", "videos", "pictures", "files"}`` -- counts, and the
+    project-relative paths that differ -- or ``None`` when there is no
+    official record to measure against."""
+    from ...core.checksums import read_baseline_any
+    sidx_name, release = project_release(assets_dir, table)
+    if release is None:
+        return None
+    stock = release.get("files") or {}
+    base = read_baseline_any(assets_dir) or {}
+    files = []
+
+    def by_md5(rel, card):
+        rec, md5 = stock.get(card), base.get(rel)
+        return rec is not None and md5 is not None and \
+            md5[:FILE_DIGITS] != rec[1]
+
+    n_vid = 0
+    for name, card, _size in _manifest_rows(assets_dir, "video/manifest.txt"):
+        if by_md5("video/" + name, card):
+            n_vid += 1
+            files.append("video/" + name)
+    n_pic = 0
+    for out, card, _size in _manifest_rows(assets_dir, "images/manifest.txt"):
+        if by_md5("images/" + out, card):
+            n_pic += 1
+            files.append("images/" + out)
+    for out, card, size in _manifest_rows(
+            assets_dir, "images/scene_textures/manifest.txt"):
+        rec = stock.get(card)
+        if rec is not None and size is not None and size != int(rec[0]):
+            n_pic += 1
+            files.append("images/" + out)
+    stock_pics = picture_set(release)
+    for out, _card, _size in _manifest_rows(
+            assets_dir, "images/scene_textures/radium_images.txt"):
+        stem = os.path.splitext(out.rsplit("/", 1)[-1])[0]
+        tail = stem.rsplit("_", 1)[-1]
+        if len(tail) == PICTURE_DIGITS and tail not in stock_pics:
+            n_pic += 1
+            files.append("images/" + out)
+    return {"label": release_label(release), "videos": n_vid,
+            "pictures": n_pic, "files": sorted(set(files))}
+
+
+def off_stock_words(got):
+    """``"533 videos and 26 pictures differ from the official Godzilla LE
+    1.16 card"``, or ``""`` when nothing does."""
+    if not got:
+        return ""
+    bits = []
+    if got["videos"]:
+        bits.append(_plural(got["videos"], "video"))
+    if got["pictures"]:
+        bits.append(_plural(got["pictures"], "picture"))
+    if not bits:
+        return ""
+    return "%s %s from the official %s card" % (
+        " and ".join(bits), "differs" if sum(
+            (got["videos"], got["pictures"])) == 1 else "differ",
+        got["label"])

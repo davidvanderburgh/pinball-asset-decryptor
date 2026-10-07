@@ -4694,6 +4694,17 @@ class App:
                                 "success" if stock["status"] == "official"
                                 else "warning")
                     except Exception:
+                        stock = None
+                    # The project's revision history starts (or carries on)
+                    # from this card's fingerprint (PAD-427).
+                    try:
+                        from .core import lineage
+                        info = lineage.card_print(in_path, measure=True)
+                        if info:
+                            lineage.note_extract(
+                                out_path, os.path.basename(in_path), info,
+                                (stock or {}).get("status") or "")
+                    except Exception:
                         pass
                 threading.Thread(target=_stamp, daemon=True).start()
             # The assets folder was pointed at this output dir at extract START

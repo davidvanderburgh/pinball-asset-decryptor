@@ -367,6 +367,38 @@ class SternExtractPipeline(BasePipeline):
         self._done(True, _extract_summary(n, self.output_dir, flags))
 
 
+def _note_build_lineage(original_path, assets_dir, output_path, record, log):
+    """Add the card just built to the project's revision history (PAD-427):
+    its fingerprint, the fingerprint of the card it was built over, and
+    which revision that one was.  The build record beside the card gets the
+    same so the card names its project and revision.  Best-effort: a card
+    that can't be fingerprinted builds as before, unrecorded."""
+    from ...core import lineage
+    from ... import __version__
+    try:
+        out = lineage.card_print(output_path, measure=True)
+        parent = lineage.card_print(original_path, measure=True)
+        entry = lineage.note_build(assets_dir, os.path.basename(output_path),
+                                   out, parent, __version__)
+    except Exception:                                     # noqa: BLE001
+        return None
+    if not entry:
+        return None
+    lin = lineage.read_lineage(assets_dir) or {}
+    try:
+        record = dict(record)
+        record["lineage"] = {"id": lin.get("id") or "", "rev": entry["rev"],
+                             "print": entry["print"],
+                             "parent": entry.get("parent") or "",
+                             "parent_rev": entry.get("parent_rev")}
+        engine._write_build_manifest(output_path, record)
+    except Exception:                                     # noqa: BLE001
+        pass
+    log("This card is rev %d of %s." % (entry["rev"],
+                                        lineage.base_words(lin)), "info")
+    return entry
+
+
 class SternWritePipeline(BasePipeline):
     """Re-encode edited WAVs back into a copy of the card image (size-neutral)."""
 
@@ -432,6 +464,9 @@ class SternWritePipeline(BasePipeline):
             modes = after.get("modes")
         except Exception:
             after, modes = {}, None
+        if after and not self._cancelled:
+            _note_build_lineage(self.original_path, self.assets_dir,
+                                self.output_path, after, self._log)
         summary = _write_summary_with_modes(counts, modes)
         if (had_modes and not modes and not any(counts) and not self._cancelled
                 and after.get("complete")):

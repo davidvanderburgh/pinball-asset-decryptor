@@ -66,7 +66,7 @@ def _card_kind(card, folder, details):
         return ""
     from ...core.extract_source import card_relation
     try:
-        rel = card_relation(card, folder)
+        rel = card_relation(card, folder, measure=True)
     except Exception:                                   # noqa: BLE001
         return ""
     return "other" if rel and rel.get("kind") in ("other", "other_build") else ""
@@ -88,7 +88,7 @@ def _card_project(card, folder, candidates):
         if not cand or _same_dir(cand, folder) or not os.path.isdir(cand):
             continue
         try:
-            rel = card_relation(card, cand)
+            rel = card_relation(card, cand, measure=True)
         except Exception:                               # noqa: BLE001
             continue
         if rel and rel.get("kind") in ("source", "build"):

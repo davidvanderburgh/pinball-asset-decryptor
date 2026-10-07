@@ -313,6 +313,69 @@ export function projectGame(s) {
   return d.game || "";
 }
 
+// ------------------------------------------------- revision history graph
+// PAD-427: every card built from the project, newest at the top, each joined to the card it
+// was built over (git-log style: a build over an older revision branches into its own lane).
+// Dots are coloured by the computer the revision was built on; the root is the official card
+// (green ring) or the modified card the project was extracted from (amber).
+const RG_ROW = 40, RG_LANE = 18, RG_R = 5;
+const RG_HOST = ["var(--accent)", "var(--info)", "var(--cp-ink)", "var(--ok)", "var(--err)"];
+const RG_MAX = 7;
+
+function RevisionGraph({ g }) {
+  const [all, setAll] = useState(false);
+  const rows = all || g.rows.length <= RG_MAX ? g.rows
+    // the newest revisions and the root; the lines of the rest are drawn to the "more" gap
+    : g.rows.slice(0, RG_MAX - 2).concat([{ key: "__more", kind: "more", lane: 0 }], g.rows.slice(-1));
+  const at = {}; rows.forEach((r, i) => { at[r.key] = i; });
+  const lanes = Math.max(1, ...rows.map((r) => (r.lane || 0) + 1));
+  const w = lanes * RG_LANE + 6, h = rows.length * RG_ROW;
+  const x = (lane) => 9 + lane * RG_LANE, y = (i) => i * RG_ROW + RG_ROW / 2;
+  const hostInk = (host) => RG_HOST[Math.max(0, g.hosts.indexOf(host)) % RG_HOST.length];
+  const ink = (r) => r.kind === "rev" ? hostInk(r.host) : r.kind === "stock" ? "var(--ok)"
+    : r.kind === "modified" ? "var(--warn)" : "var(--ink-3)";
+  const edges = [];
+  rows.forEach((r, i) => {
+    if (r.kind === "more") return;
+    let j = at[r.parent];
+    if (j === undefined && r.parent) j = at.__more;       // its parent is folded away
+    if (j === undefined) return;
+    const cx = x(r.lane), cy = y(i), px = x(rows[j].lane), py = y(j);
+    const end = cy + RG_R + 2;                              // the arrow tip stops at the dot
+    const d = cx === px ? `M${px},${py - RG_R} L${cx},${end}`
+      : `M${px},${py - RG_R} C${px},${py - RG_ROW * 0.55} ${cx},${py - RG_ROW * 0.45} ${cx},${py - RG_ROW * 0.85} L${cx},${end}`;
+    edges.push(html`<path d=${d} stroke=${ink(r)} marker-end="url(#rg-arrow)" />`);
+  });
+  return html`<div class="x-rg">
+    <div class="x-rg-head"><span class="h3">Revision history</span>
+      ${g.hosts.length > 1 ? html`<span class="x-rg-hosts">${g.hosts.map((hn) =>
+        html`<span class="x-rg-host"><i style=${`background:${hostInk(hn)}`}></i>${hn}</span>`)}</span>` : null}</div>
+    <div class="x-rg-body" style=${`min-height:${h}px`}>
+      <svg class="x-rg-svg" width=${w} height=${h} viewBox=${`0 0 ${w} ${h}`} aria-hidden="true">
+        <defs><marker id="rg-arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" fill="context-stroke" /></marker></defs>
+        <g fill="none" stroke-width="1.6">${edges}</g>
+        ${rows.map((r, i) => r.kind === "more" ? html`<text x=${x(0) - 3} y=${y(i) + 4} class="x-rg-dots">⋮</text>`
+          : r.kind === "rev" ? html`<circle cx=${x(r.lane)} cy=${y(i)} r=${RG_R} fill=${ink(r)} />`
+          : html`<circle cx=${x(r.lane)} cy=${y(i)} r=${RG_R} fill="var(--panel)" stroke=${ink(r)} stroke-width="2"
+              stroke-dasharray=${r.kind === "other" ? "2 2" : null} />`)}
+      </svg>
+      <div class="x-rg-rows" style=${`margin-left:${w + 6}px`}>
+        ${rows.map((r) => r.kind === "more"
+          ? html`<div class="x-rg-row"><button type="button" class="x-rg-more" onClick=${() => setAll(true)}>
+              Show all ${g.rows.length - 1} revisions</button></div>`
+          : html`<div class="x-rg-row" ...${tip(r.sub ? { head: r.title, lines: [r.sub] } : r.title)}>
+              <div class="x-rg-title"><b>${r.title}</b>${r.tags.map((t) =>
+                html` <${Chip} sm kind=${t === "latest" ? "acc" : "info"}>${t}<//>`)}</div>
+              <div class="x-rg-sub">${r.sub}</div></div>`)}
+      </div>
+    </div>
+    ${all && g.rows.length > RG_MAX ? html`<button type="button" class="x-rg-more" onClick=${() => setAll(false)}>Show fewer</button>` : null}
+    ${(g.imported || []).length ? html`<div class="x-rg-imp">${g.imported.map((m) => html`<div class="small muted">
+      Mod pack <span class="mono">${m.pack}</span>${m.rev ? ` (rev ${m.rev} of another project, ${m.from || "unknown card"})` : ""} brought in${m.at ? ` ${m.at}` : ""}</div>`)}</div>` : null}
+  </div>`;
+}
+
 function ProjectCard({ s, shell }) {
   const p = s.project;
   const d = (p && p.details) || {};
@@ -338,9 +401,12 @@ function ProjectCard({ s, shell }) {
         ${caption ? html`<span class="k">Game</span><span>${caption}</span>` : null}
         ${d.extracted ? html`<span class="k">Extracted</span><span>${d.extracted}${d.source_name ? html` · from <span class="mono">${d.source_name}</span>` : null}</span>` : null}
         ${d.stock ? html`<span class="k">Stock</span><span class=${d.stock.status === "official" ? "ok-ink" : "warn-ink"}>${d.stock.text}</span>` : null}
-        ${rows.map(([k, v]) => html`<span class="k">${k}</span><span class=${k === "Changed" && v !== "nothing changed yet" ? "acc-ink" : ""}>${v}</span>`)}
+        ${d.revisions ? html`<span class="k">Revisions</span><span>${d.revisions.text}</span>` : null}
+        ${rows.map(([k, v]) => html`<span class="k">${k}</span><span class=${k === "Changed" && v !== "nothing changed yet" ? "acc-ink" : ""}>${v}</span>
+          ${k === "Changed" && d.off_stock ? html`<span class="k">Off stock</span><span class="warn-ink">${d.off_stock}</span>` : null}`)}
       </div>
       ${p.loading && !rows.length ? html`<div class="row small muted"><${Spinner} />Collecting…</div>` : null}
+      ${d.revisions && d.revisions.graph ? html`<${RevisionGraph} g=${d.revisions.graph} />` : null}
       <div class="note"><${Icon} name="info" /><div class="body-text">${PROJECT_TIP}</div></div>`;
   }
   return html`<${Card} cls="x-project" head=${head}

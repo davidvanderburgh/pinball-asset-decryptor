@@ -191,6 +191,23 @@ class ModPackTab(TabService):
         self.transfer_dst_ver_var.set(_dir_ver(dst))
         self.transfer_oldstock_ver_var.set(_dir_ver(oldstock))
 
+        # PAD-427: an old extract that came off a modified card needs a stock
+        # extract of its release to carry what that card already had; when
+        # one taken from the official card is on disk, fill it in (once per
+        # old extract, so clearing it sticks).
+        if src and not oldstock and src != getattr(self, "_oldstock_auto", ""):
+            self._oldstock_auto = src
+            found = self._official_extract_for(src)
+            if found:
+                self.window.append_log(
+                    "Old extract %s came off a modified card; using %s, an "
+                    "extract of the official card of the same release, as "
+                    "its stock extract." % (os.path.basename(src),
+                                            os.path.basename(found)), "info")
+                # re-enters this method through the field's trace
+                self.transfer_oldstock_var.set(found)
+                return
+
         # Auto-fill the base image from the new extract's recorded source,
         # unless the user has typed their own path.
         if dst and not (self.transfer_newimg_var.get() or "").strip():
@@ -221,6 +238,21 @@ class ModPackTab(TabService):
                 % (stem, suffix, ext))
         else:
             self.transfer_output_var.set("")
+
+    def _official_extract_for(self, src):
+        """An extract of *src*'s release taken from the official card, when
+        *src* itself came off a modified one; ``""`` otherwise.  Sidecars
+        only (recent projects and the folders beside *src*)."""
+        from ...core import extract_source, lineage, project_registry
+        try:
+            if not extract_source.built_card_source(src):
+                return ""
+            settings = getattr(self.app, "_settings", None) or {}
+            recent = [e.get("folder") or "" for e in
+                      project_registry.recent(settings, 40)]
+            return lineage.find_official_extract(src, recent)
+        except Exception:                            # noqa: BLE001
+            return ""
 
     def _transfer_probe_img_version(self, img):
         """Upgrade field 4's version chip from the instant filename guess to

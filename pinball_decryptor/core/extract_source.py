@@ -202,7 +202,41 @@ def other_card_recorded(assets_dir: str, image_path: str) -> Optional[str]:
             or os.path.basename(rec.get("input_path") or ""))
     if not name or not image_path:
         return None
+    # PAD-427: by fingerprint when the card's is known.  The card the folder
+    # was extracted from, under any name on any computer, or a revision
+    # built from this very project, carries everything the folder's
+    # baseline does; any other card (stock included, when the project came
+    # off a modified one) does not.
+    hit = _lineage_hit(assets_dir, image_path)
+    if hit is not None:
+        return None if hit[0] in ("source", "rev") else name
     return None if _names_this_image(rec, image_path) else name
+
+
+def _lineage_hit(assets_dir: str, card_path: str, measure: bool = False):
+    """``where`` the card sits in the project's lineage (``("rev", n)``,
+    ``("source", n)``, ``("stock", 0)``), ``("none", None)`` when both
+    are known and unrelated, or ``None`` when either is unknown (no lineage
+    record, or the card's fingerprint isn't cached and *measure* is off)."""
+    from . import lineage
+    lin = lineage.read_lineage(assets_dir)
+    if not lin:
+        return None
+    src = lin.get("source") or {}
+    if not src.get("print") and not lin.get("revs"):
+        return None
+    info = lineage.card_print(card_path, measure=measure)
+    if not info:
+        return None
+    w = lineage.where(lin, info["print"])
+    if w is not None and w[0] == "stock" and src.get("status") == "official":
+        # an identical official card IS the card it was extracted from
+        w = ("source", 0)
+    if (w is None or w[0] == "stock") and not src.get("print"):
+        # a project from before lineage: its source card's print was never
+        # taken, so "not one of its builds" is all this can say
+        return None
+    return w or ("none", None)
 
 
 #: Mirrors ``plugins.stern.engine.BUILD_MANIFEST_SUFFIX``: the record a Build
@@ -226,9 +260,16 @@ def built_card_source(assets_dir: str) -> Optional[str]:
     if not rec:
         return None
     path = rec.get("input_path") or ""
+    name = rec.get("input_name") or os.path.basename(path)
+    # PAD-427: the extract's own verdict against the official release says
+    # it wherever the card was built (a shared custom card, or a build from
+    # another computer whose record never came along).
+    stock = rec.get("stock")
+    if isinstance(stock, dict) and stock.get("status") == "modified":
+        return name or None
     if not path or not os.path.isfile(path + BUILD_RECORD_SUFFIX):
         return None
-    return rec.get("input_name") or os.path.basename(path)
+    return name
 
 
 def _build_record(card_path: str) -> Optional[dict]:
@@ -305,7 +346,8 @@ def latest_build(assets_dir: str) -> Optional[str]:
     return best
 
 
-def card_relation(card_path: str, assets_dir: str) -> Optional[dict]:
+def card_relation(card_path: str, assets_dir: str,
+                  measure: bool = False) -> Optional[dict]:
     """How the card picked to run relates to the project folder (PAD-199).
 
     The Emulate tab runs whatever card is picked, while the header and the
@@ -323,16 +365,28 @@ def card_relation(card_path: str, assets_dir: str) -> Optional[dict]:
     - ``source_name``: the recorded source card's file name, even when the
       file is gone.
 
-    File reads only (a sidecar, a build record, one folder listing); the
-    card itself is never opened, but the caller still keeps it off the UI
-    loop because a card on a sleeping share can stall a ``stat``.
+    - ``rev``: the card's revision of this project when its fingerprint
+      places it in the project's lineage (PAD-427): 0 for the official card,
+      ``None`` when not known.
+
+    The project's lineage decides first when the card's fingerprint is
+    known: it holds wherever the folder and the card have moved to.  The
+    recorded paths, names and sizes answer otherwise.  File reads only (a
+    sidecar, a build record, one folder listing, the print cache) unless
+    *measure*, which fingerprints the card (opens it); either way the caller
+    keeps it off the UI loop because a card on a sleeping share can stall a
+    ``stat``.
     """
     if not card_path or not assets_dir:
         return None
     rec = read_extract_source(assets_dir) or {}
     src = str(rec.get("input_path") or "")
     built_from = _build_project(card_path)
-    if rec and _names_this_image(rec, card_path):
+    hit = _lineage_hit(assets_dir, card_path, measure=measure)
+    rev = hit[1] if hit else None
+    if hit is not None and hit[0] in ("source", "rev"):
+        kind = "source" if hit[0] == "source" else "build"
+    elif rec and _names_this_image(rec, card_path) and hit is None:
         kind = "source"
     elif built_from and (_same_dir(built_from, assets_dir)
                          or _built_from_this_source(card_path, rec)):
@@ -351,6 +405,7 @@ def card_relation(card_path: str, assets_dir: str) -> Optional[dict]:
         "source_name": (rec.get("input_name") or os.path.basename(src)
                         if rec else ""),
         "build": build,
+        "rev": rev,
     }
 
 

@@ -80,6 +80,7 @@ PART_KEYS = {
     "lights": ("light_owner", "light_on", "light_off"),
     "countdown": ("callout_at", "callout_count"),
     "own_sound": ("sound_key", "sound_callout"),
+    "wizard": ("game_wizard",),                              # PAD-436
 }
 
 
@@ -121,7 +122,8 @@ def _mb(name):
     return (set() if name in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if name in MP.BALL_SAVE_PROVEN else {"ball_save"}) | \
         (set() if name in MP.MAGNET_PROVEN else {"magnet"}) | \
         (set() if name in MP.SCOOP_PROVEN else {"scoop"}) | \
-        (set() if any(b == name for b, _c in MP.HELD_COILS_PROVEN) else {"coils"}) |         (set() if name in MP.SHIELD_PROVEN else {"shield"}) |         (set() if name in GAME_SHOW_PORTS else {"shows"}) | (set() if name in MP.SHAKER_PROVEN else {"shaker"})   # PAD-225; PAD-381 magnet, scoop, coils; PAD-392; PAD-418; PAD-414
+        (set() if any(b == name for b, _c in MP.HELD_COILS_PROVEN) else {"coils"}) |         (set() if name in MP.SHIELD_PROVEN else {"shield"}) |         (set() if name in GAME_SHOW_PORTS else {"shows"}) | (set() if name in MP.SHAKER_PROVEN else {"shaker"}) | \
+        (set() if name in MP.WIZARDS_PROVEN else {"wizard"})   # PAD-225; PAD-381 magnet, scoop, coils; PAD-392; PAD-418; PAD-414; PAD-436
 
 
 def _check_runtime_file(p, spec, slug):
@@ -157,7 +159,8 @@ def test_a_profile_per_port(name):
     assert p.key == "%s_%s" % (game, version.replace(".", "_"))
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
-    cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shaker", "shows"}) | _mb(name)
+    cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shaker", "shows",
+                             "wizard"}) | _mb(name)
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)
@@ -204,7 +207,7 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
     assert not p.can("stack") and "tells that one of its own modes is running" in p.why_not("stack")
     assert [part for part in MP.PARTS if not p.can(part)] == ["stack", "multiball", "ball_save"] + \
-        ([] if "godzilla_le-1.16" in MP.MAGNET_PROVEN else ["magnet"])   # no count: no multiball, no ball save
+        ([] if "godzilla_le-1.16" in MP.MAGNET_PROVEN else ["magnet"]) + ["wizard"]   # no count: no multiball, no ball save; PAD-436: no mini-wizards
     # with the count alone it is the balls route, greyed until seen (item 164's STACK_BALLS_PROVEN)
     only = "\n".join(line for line in text.splitlines() if "stock_" not in line)
     (tmp_path / "godzilla_le-1.16.port").write_text(only, encoding="utf-8")

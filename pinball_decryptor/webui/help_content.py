@@ -495,6 +495,17 @@ HELP_CONTENT = {
                 {"icon": "eye", "title": "Machine screen",
                  "text": "every clip, unless the gear menu lets unattached files skip it"}]},
         ]),
+        ("Compare clips", [
+            "Select up to four rows (Ctrl-click, Shift-click) and press **Compare**: "
+            "they play side by side, big, beside the **Colors** bar. One clip shows its "
+            "Original beside its Replacement.",
+            "- Click a clip: the Colors bar changes that clip's profile, and you see it "
+            "against the others as you move a slider or pick a profile (Spike 2).\n"
+            "- The clip you clicked is the one you hear; the others are muted.\n"
+            "- **Play all**, **From the start** (every clip from its first frame, in "
+            "step) and **Loop**. Each clip can switch between Original and Replacement.\n"
+            "- **Close** or Esc goes back to the list.",
+        ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "
          "**Load settings from a file…** puts them back, on this card or another. Slots "
@@ -932,6 +943,10 @@ HELP_CONTENT = {
          "gets it as its own (and is attached if it was not).\n\n"
          "- **Same as the other files** drops it: the file then gets the individual "
          "files profile, the one this tab shows.\n"
+         "- **Apply to all images…** / **Apply to all videos…** (Images and Video "
+         "only) gives every file there with a replacement or a profile the shown "
+         "file's profile, attached. You are asked first; one Undo puts them all "
+         "back.\n"
          "- Hover a file or a Scenes layer to see its Color profile, or None."),
         ("Lines of text (Scenes)",
          "A line of text in the Scenes layers has a palette too, and its own "
@@ -2504,7 +2519,7 @@ def modes_games_rows(ports=None):
         if any("button" in n.lower() for n, _m in p.shots):
             also.append("buttons")
         also += [w for k, w in (("magnet", "magnet"), ("scoop", "scoop"), ("coils", "mechanisms"),
-                                ("shield", "shield"), ("shaker", "shaker"))
+                                ("shield", "shield"), ("shaker", "shaker"), ("wizard", "mini-wizards"))
                  if p.can(k)]                                       # PAD-381: what a mode may hold; PAD-392
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")

@@ -52,6 +52,7 @@ const T = {
   magnet: "While the mode runs, every hit of the shot the magnet sits at (the one that starts the mode too) holds the ball on the magnet for this long, then lets it go. The magnet runs at the power the operator set for it in the game's settings. To keep the coil safe, the app always holds the same limits: 0.1 to 5 seconds a grab, one grab at a time, 3 seconds between grabs, at most 6 a minute, never while the game is using the magnet itself, and it lets go when the mode or the ball ends or the game tilts. A grab it refuses is skipped and the mode carries on.",
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
+  wizard: "Make this mode the game's own mini-wizard: when it starts (on its shot, an event such as a film done, or shots in order), the player gets the game's mode itself, with its own shots, lights, screens, sounds and award. Lit, it waits for the game's own start shot, as when the game lights one; started, it begins at once if the game would start one now (none of its own modes in the way), and is lit otherwise. The game's own way of lighting its mini-wizards carries on as before. A mini-wizard the player has already played this game plays again.",
   gameShows: "One of the game's own playfield light shows as the mode starts, and another as it ends: flashy ones suit a start, subdued ones an end. Each plays for its own few seconds, one at a time (a new one takes the place of one still playing). The one at the end is skipped when the mode ends because the ball drained: the game stops its own shows then.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
   priority: "Kept for modes made before it changed: it no longer holds the game's displays back. A mode never makes the game's screens wait (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off), so the game's awards, starts and jackpots always come through, and the mode's screen is back when they end. 0 = none.",
@@ -81,6 +82,9 @@ const T = {
 const LAYOUT_TIP = "Opens the Scenes editor on the game's HUD with this screen in it: drag it, size it, move its words on their own, or send it to the back to put it under the HUD's own pictures. Saved into the mode as you go; without it the app places the screen itself.";
 const PAGES = [["mode", "Mode"], ["show", "Show"], ["lights", "Lights"], ["sounds", "Sounds"], ["scoring", "Scoring"]];
 const PATTERNS = ["Solid", "Blink", "Pulse", "Chase"];
+// PAD-436: a mode that is the game's own mini-wizard runs nothing of its own, so only its Mode page is used
+const WIZ_NONE = "(none)";
+const handsOver = (f, dis) => !dis.wizard && !!f.game_wizard && f.game_wizard !== WIZ_NONE;
 const STATE_WORDS = { preflight: "Preparing", building: "Building", installing: "Installing", starting: "Starting",
                       live: "Live", ended: "Ended", failed: "Failed" };
 
@@ -401,16 +405,27 @@ function ModePage({ s, f, off, dis, rs }) {
   const gmOpts = [{ value: "stack", label: "may start (this one moves aside)" },
     { value: "give_way", label: "may start, and end this one", disabled: !!dis.give_way },
     { value: "block", label: "cannot start (the ones ticked)", disabled: !!dis.block && f.game_modes !== "block" }];
-  return html`<div class="modes-grid2">
-      <div class="stack">
+  // PAD-436: the game's own mini-wizard instead of a mode of its own
+  const wizOff = off || dis.wizard;
+  const handOff = handsOver(f, dis);
+  const wizOpts = withValue([{ value: WIZ_NONE, label: "(nothing: this mode runs)" },
+    ...(prof.game_wizards || []).map((w) => ({ value: w.name, label: w.film ? `${w.name} (${w.film})` : w.name }))], f.game_wizard);
+  const nameRow = html`<div class="stack">
         <label class="lbl" for="m-name">Name</label>
         <${Field} id="m-name" ns="modes" k="f:name" value=${f.name} disabled=${off} title=${T.name} />
-      </div>
-      <div class="stack">
-        <span class="lbl">Runs for</span>
-        <div class="row"><${Num} k="seconds" value=${f.seconds} disabled=${off} width=${84} /><span class="dim">seconds${f.multiball ? " (0 = until one ball is left)" : ""}</span></div>
-      </div>
-      <${Sec} title="Starts on" reason=${rs.events}>
+      </div>`;
+  const wizSec = html`<${Sec} title="The game's mini-wizard" tipText=${T.wizard} reason=${rs.wizard}>
+        <div class="row wrap">
+          <span class="dim nw">Hand the player</span>
+          <${Select} value=${f.game_wizard || WIZ_NONE} options=${wizOpts} ns="modes" k="f:game_wizard" disabled=${wizOff} width=${320} title=${T.wizard} />
+        </div>
+        <div class="row wrap" style="padding-left:26px">
+          <${Radio} name="m-wiz" value="light" label=${`Light it: the ${prof.wizard_shot || "game's start shot"} starts it`} checked=${f.wizard_how !== "start"} disabled=${wizOff || !handOff} title=${T.wizard} onChange=${(v) => setF("wizard_how", v, true)} />
+          <${Radio} name="m-wiz" value="start" label="Start it at once" checked=${f.wizard_how === "start"} disabled=${wizOff || !handOff} title=${T.wizard} onChange=${(v) => setF("wizard_how", v, true)} />
+        </div>
+        ${handOff ? html`<div class="small muted wrap">When it starts, the player gets the game's own ${f.game_wizard}, with its shots, lights, screens and sounds. Nothing of this mode's own runs, so the other pages are not used.</div>` : null}
+      <//>`;
+  const startsSec = html`<${Sec} title="Starts on" reason=${rs.events}>
         <div class="row wrap">
           <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event" && !seqOn} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_shot} options=${shotOpts} ns="modes" k="f:start_shot" disabled=${off || !shots.length} width=${180} title=${T.startShot} />
@@ -440,7 +455,41 @@ function ModePage({ s, f, off, dis, rs }) {
           <span class="dim nw">has run this</span>
           <${Select} value=${f.after_when} options=${[{ value: "ball", label: "ball" }, { value: "game", label: "game" }]} ns="modes" k="f:after_when" disabled=${afterOff} width=${80} title=${T.afterMode} />
         </div>
-      <//>
+      <//>`;
+  const oftenSec = html`<${Sec} title="How often it can start" tipText=${T.starts}>
+        <div class="row wrap" style="gap:4px 16px">
+          ${[["once_per_game", "once a game"], ["once_per_ball", "once a ball"], ["unlimited", "any number of times"]].map(([v, l]) =>
+            html`<${Radio} name="m-often" value=${v} label=${l} checked=${f.starts_policy === v} disabled=${off} onChange=${(x) => setF("starts_policy", x, true)} />`)}
+        </div>
+        <div class="row wrap">
+          <${Radio} name="m-often" value="count" label="up to" checked=${f.starts_policy === "count"} disabled=${off} onChange=${(x) => setF("starts_policy", x, true)} />
+          <${Num} k="starts_count" value=${f.starts_count} disabled=${off} width=${64} /><span class="dim nw">times a game</span>
+        </div>
+        <div class="row">
+          <span class="dim nw">Wait</span><${Num} k="cooldown" value=${f.cooldown} disabled=${off} width=${76} title=${T.cooldown} />
+          <span class="dim">seconds after it ends before it can start again</span>
+        </div>
+        <div class="small muted">${s.starts_words}</div>
+      <//>`;
+  if (handOff) {
+    return html`<div class="modes-grid2">
+      ${nameRow}
+      <div class="stack">
+        <span class="lbl">Runs</span>
+        <div class="row"><span class="dim">the game's own ${f.game_wizard}</span></div>
+      </div>
+      ${startsSec}
+      ${wizSec}
+      ${oftenSec}
+    </div>`;
+  }
+  return html`<div class="modes-grid2">
+      ${nameRow}
+      <div class="stack">
+        <span class="lbl">Runs for</span>
+        <div class="row"><${Num} k="seconds" value=${f.seconds} disabled=${off} width=${84} /><span class="dim">seconds${f.multiball ? " (0 = until one ball is left)" : ""}</span></div>
+      </div>
+      ${startsSec}
       <${Sec} title="Ends on">
         <div class="row wrap">
           <${Radio} name="m-ends" value="drain" label="its clock, or the ball draining" checked=${f.ends_kind === "drain"} disabled=${off} title=${T.drain} onChange=${(v) => setF("ends_kind", v, true)} />
@@ -459,21 +508,7 @@ function ModePage({ s, f, off, dis, rs }) {
               onChange=${(v) => setField("modes", "endshot:" + n, v, { flush: true })} />`)}
         </div>` : null}
       <//>
-      <${Sec} title="How often it can start" tipText=${T.starts}>
-        <div class="row wrap" style="gap:4px 16px">
-          ${[["once_per_game", "once a game"], ["once_per_ball", "once a ball"], ["unlimited", "any number of times"]].map(([v, l]) =>
-            html`<${Radio} name="m-often" value=${v} label=${l} checked=${f.starts_policy === v} disabled=${off} onChange=${(x) => setF("starts_policy", x, true)} />`)}
-        </div>
-        <div class="row wrap">
-          <${Radio} name="m-often" value="count" label="up to" checked=${f.starts_policy === "count"} disabled=${off} onChange=${(x) => setF("starts_policy", x, true)} />
-          <${Num} k="starts_count" value=${f.starts_count} disabled=${off} width=${64} /><span class="dim nw">times a game</span>
-        </div>
-        <div class="row">
-          <span class="dim nw">Wait</span><${Num} k="cooldown" value=${f.cooldown} disabled=${off} width=${76} title=${T.cooldown} />
-          <span class="dim">seconds after it ends before it can start again</span>
-        </div>
-        <div class="small muted">${s.starts_words}</div>
-      <//>
+      ${oftenSec}
       <${Sec} title="The game's own modes" reason=${rs.stack}>
         <div class="row wrap">
           <span class="dim nw">While it runs, the game's modes</span>
@@ -550,6 +585,7 @@ function ModePage({ s, f, off, dis, rs }) {
           <span class="dim nw">up to</span><${Num} k="add_ball_max" value=${f.add_ball_max} disabled=${mbIn} width=${56} title=${T.addBall} /><span class="dim nw">times</span>
         </div>
       <//>
+      ${wizSec}
     </div>
     <${Sec} title="Shots that score while it runs"
       extra=${html`<span class="muted small">${on.size} of ${shots.length}</span>
@@ -807,9 +843,12 @@ function Editor({ s, showClip }) {
   const fixPages = new Set(s.fix_pages || []);
   const saveWords = s.no_port ? "" : s.save_state === "editing" ? "Saving…"
     : s.save_state === "saved" ? (s.write_waits ? "Saved · Write carries it after a Try it" : "Saved · put on the card by Write") : "";
-  const offPages = new Set(dis.show_order ? ["show"] : []);
+  const handOff = handsOver(f, dis);                                           // PAD-436
+  const offPages = new Set(handOff ? ["show", "lights", "sounds", "scoring"] : dis.show_order ? ["show"] : []);
   const props = { s, f, off, dis, rs, labels, files, showClip };
   const P = { mode: ModePage, show: ShowPage, lights: LightsPage, sounds: SoundsPage, scoring: ScoringPage }[page] || ModePage;
+  const offTip = handOff ? "This mode is the game's own mini-wizard: nothing on this page is used."
+    : "Nothing on this page works on this game yet: the page says why.";
   return html`<section class="card modes-editor">
     <div class="hd">
       <span class="h2 ellip">${f.name || "—"}</span>
@@ -820,9 +859,11 @@ function Editor({ s, showClip }) {
     ${s.status && s.status !== "Ready to build." ? html`<div class=${cx("modes-status", s.no_port || ready ? "info" : "warn")} role="status">${s.status}</div>` : null}
     <div class="pages" role="tablist">
       ${PAGES.map(([k, l]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${cx(page === k && "on", offPages.has(k) && "off")} onClick=${() => setPage(k)}
-        ...${tip(fixPages.has(k) ? "What the line above says to fix is on this page." : offPages.has(k) ? "Nothing on this page works on this game yet: the page says why." : "")}>${l}${fixPages.has(k) ? html`<span class="m" aria-label="to fix">•</span>` : null}</button>`)}
+        ...${tip(fixPages.has(k) ? "What the line above says to fix is on this page." : offPages.has(k) ? offTip : "")}>${l}${fixPages.has(k) ? html`<span class="m" aria-label="to fix">•</span>` : null}</button>`)}
     </div>
-    <div class="bd modes-editor-bd"><${P} ...${props} /></div>
+    <div class="bd modes-editor-bd">${handOff && page !== "mode"
+      ? html`<div class="modes-show-off"><${Reason} text=${`This mode is the game's own ${f.game_wizard}: when it starts, the player gets the game's mode, with its own screens, lights, sounds and award, so nothing on this page is used. The Mode page sets it.`} /></div>`
+      : html`<${P} ...${props} />`}</div>
   </section>`;
 }
 

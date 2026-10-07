@@ -21,6 +21,9 @@
 // the bar open, or the bar opened with one clicked, turns the bar to Files on THAT file: it
 // shows the profile baked into it now, and a change gives it a profile of its own.  "Same as
 // the other files" puts it back on the project's individual files profile.
+// PAD-439 (DragonRR): on the Images and Video tabs, "Apply to all images / videos" gives
+// every file there the profile of the one on show, attached, after an "Are you sure?"
+// (color.py apply_to_all); Undo / Redo take the whole of it back as one step.
 
 import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -171,12 +174,17 @@ function CopyPaste({ p, update, mode, name }) {
   </div>`;
 }
 
+// PAD-439: the words of Apply to all, by the kind of file, on the hosts that list them
+const ALL_WORDS = { images: ["image's", "images"], videos: ["video's", "videos"] };
+const ALL_HOSTS = { images: "images", video: "videos" };
+
 // The file the bar is on (PAD-368): its name, and whether it has a profile of its own.
-function FileLine({ s }) {
+function FileLine({ s, host }) {
   const f = s.file;
   if (!f) return null;
-  // PAD-438: a line of text in Scenes has one too
+  // PAD-438: a line of text in Scenes has one too (Apply to all is for the tabs' files)
   const what = f.kind === "text" ? "This line of text" : "This file";
+  const all = ALL_HOSTS[host] === f.kind ? ALL_WORDS[f.kind] : null;
   return html`<div class="cpd-file">
     <div class="row cpd-file-hd"><span class="eyebrow nw">${what}</span>
       <span class="mono small ellip" title=${f.rel}>${f.label}</span></div>
@@ -185,6 +193,13 @@ function FileLine({ s }) {
         <${Button} size="xs" onClick=${() => call("color.file_shared")}
           title=${`Drop this file's own profile: it gets the individual files profile every other file gets (“${s.asset_name || "Recommended"}”)`}>Same as the other files<//>`
       : html`<span class="small muted">${`Same as the other files (“${s.asset_name || "Recommended"}”). A change here gives it a profile of its own.`}</span>`}</div>
+    ${all ? html`<div class="row cpd-file-all">
+      <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all")}
+        title=${{ head: `Apply this ${all[0]} color profile to all ${all[1]}`, lines: [
+          { profile: s.name || "Recommended" },
+          `Every ${all[1].slice(0, -1)} on this tab with a replacement or a color profile attached gets it, in place of the one it has now, and has it attached.`,
+          "You are asked first. Undo puts them all back."] }}>Apply to all ${all[1]}…<//>
+    </div>` : null}
   </div>`;
 }
 
@@ -257,7 +272,7 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
         <div class="row cpd-show"><${ShowHere} mode=${mode} look=${look} host=${host} /><span class="sp"></span>
           <${UndoRedo} s=${s} flush=${flush} size="xs" />
           <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div>
-        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} />` : null}
+        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} host=${host} />` : null}
         <div class="cpd-status">${statusNote(s)}</div>
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
         ${s.per_file && mode === "assets" && !s.file ? html`<${WhichFiles} s=${s} />` : null}

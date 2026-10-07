@@ -161,7 +161,12 @@ The same idea
 for video: assign a replacement clip and it's re-encoded to the
 original's container / codec / resolution (transparency preserved
 where the original has it). Original and replacement preview
-side by side, each in its own embedded player. The Big Lebowski's colour-DMD `.cdmd` clips are supported
+side by side, each in its own embedded player. To color grade
+several clips against each other, **Compare** (in the page head, or
+a row's menu) opens up to four players in a grid beside the Colors
+bar: each shows its Original or Replacement with its own color
+switch, the one you click is the bar's target and the only one with
+sound, and Play all / From the start / Loop keep them in step. The Big Lebowski's colour-DMD `.cdmd` clips are supported
 too — they're re-encoded back into `.cdmd` at the original frame
 count so they stay in sync with their sound. If you would rather
 encode your own clips than let the app convert, right-click a slot

@@ -25,6 +25,8 @@ Store namespace ``video``:
   best       the "Best quality…" window (webui/video_best.py)
   widths     {column key: px} the columns the user dragged (settings.json
              column_widths["video_web"]); the rest fit their content
+  compare    {open, max, tiles: [{id, rel, side, sides, pane, look}]}: the
+             Compare view's players (PAD-440), each with its colour steps
 """
 
 import csv
@@ -60,6 +62,7 @@ def _length_key(choice):
 _SCAN_LABEL = "Video"             # MainWindow._SCAN_LABELS["video"]
 
 NO_PROJECT_TEXT = "Set the project folder on the Extract tab, then click Scan."
+COMPARE_MAX = 4                   # clips side by side in Compare (PAD-440)
 NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
 
 
@@ -119,6 +122,9 @@ class VideoTab(BestQualityMixin, TabService):
         self._index = {}                 # rel -> index in _rows
         self._restoring = False
         self._pane_seq = 0
+        self._cmp = []                   # the Compare players (PAD-440)
+        self._cmp_open = False
+        self._cmp_ids = 0
         self._play_seq = 0
         self._stop_seq = 0
         self._sel_seq = 0
@@ -143,6 +149,7 @@ class VideoTab(BestQualityMixin, TabService):
                  quality=self._quality_state(open_=False),
                  best_tip=BEST_TIP, best_supported=False,
                  color_offered=False, color_stock=False,
+                 compare={"open": False, "max": COMPARE_MAX, "tiles": []},
                  widths=self._saved_widths())
         threading.Thread(target=vh.prune_cache, daemon=True,
                          name="video-cache-prune").start()
@@ -226,20 +233,28 @@ class VideoTab(BestQualityMixin, TabService):
         if offered and look["on"] and folder and os.path.isdir(folder):
             rel = self._current
             switch = self._color_state(rel) if rel else None
-            var = getattr(self.window, "scenes_own_colours_var", None)
-            try:
-                own = False if var is None else bool(var.get())
-            except Exception:                           # noqa: BLE001
-                own = False
             try:
                 from ...core import colour_profile
                 look.update(colour_profile.video_look(
-                    folder, switch, own, overlay_on=sw["overlay"],
-                    files_on=sw["files"], screen_on=sw["screen"], rel=rel))
+                    folder, switch, self._own_colours(),
+                    overlay_on=sw["overlay"], files_on=sw["files"],
+                    screen_on=sw["screen"], rel=rel))
             except Exception:                           # noqa: BLE001
                 log.exception("video machine look")
         if look != self.get("look"):
             self.set(look=look)
+        if self._cmp_open:
+            self._cmp_steps()
+            self._cmp_publish()
+
+    def _own_colours(self):
+        """The Scenes gear menu's setting: a clip with no color profile
+        attached passes the machine screen by."""
+        var = getattr(self.window, "scenes_own_colours_var", None)
+        try:
+            return False if var is None else bool(var.get())
+        except Exception:                               # noqa: BLE001
+            return False
 
     @rpc
     def set_look_part(self, part, on):
@@ -1127,6 +1142,39 @@ class VideoTab(BestQualityMixin, TabService):
         self.publish_look()
         return True
 
+    def color_targets(self):
+        """PAD-439: the clips the Colors bar's "Apply to all videos" gives
+        its profile, ``{rel: attached}``: every replaced clip, and the game's
+        own clips attached with Advanced ticked."""
+        if not self._per_file_colour():
+            return {}
+        out = {}
+        for rel in set(self._assign) | self._stock_on:
+            on = self._color_state(rel) if rel in self._by_rel else None
+            if on is not None and (on or self._assign.get(rel)):
+                out[rel] = on
+        return out
+
+    def put_color_switches(self, switches):
+        """PAD-439: replaced clips' own switches set at once (``True`` /
+        ``False``, ``None`` = follow the box again), one save and one redraw.
+        Returns what each was, the same way (Apply to all's Undo)."""
+        before = {}
+        for rel, value in (switches or {}).items():
+            if not (rel in self._by_rel and self._assign.get(rel)):
+                continue
+            before[rel] = self._color.get(rel)
+            if value is None:
+                self._color.pop(rel, None)
+            else:
+                self._color[rel] = bool(value)
+        if before:
+            self._save_staged()
+            self._refresh_list()
+            self._color_changed()
+            self.publish_look()
+        return before
+
     def _put_row(self, i, row):
         if 0 <= i < len(self._rows) and self._rows[i] != row:
             self._rows[i] = row
@@ -1232,6 +1280,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._update_clear_all()
         self._probe_conv_async()
         self._update_note()
+        self._cmp_sync()
 
     # ---- Convert column (MainWindow._video_probe_conv_async) -----------
     def _probe_conv_async(self):
@@ -2046,6 +2095,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._current = None
         self._pane_seq += 1
         self.set(preview=self._empty_preview())
+        self._cmp_reset()
 
     @rpc
     def select(self, rel, autoplay=None):
@@ -2083,12 +2133,10 @@ class VideoTab(BestQualityMixin, TabService):
         self._load_track(rel, side)
         return True
 
-    def _load_track(self, rel, autoplay=None):
-        """MainWindow._video_load_track."""
-        if rel not in self._by_rel:
-            return
+    def _orig_pane(self, rel):
+        """The Original pane of *rel*: the stock clip (its snapshot when a
+        build already changed the slot on disk)."""
         from ...core import staged_originals
-        self._current = rel
         slot = self._by_rel.get(rel)
         opath = slot.abs_path if slot else None
         snap_used = False
@@ -2108,6 +2156,14 @@ class VideoTab(BestQualityMixin, TabService):
         else:
             orig = self._pane("orig", title)
         orig["seq"] = self._pane_seq
+        return orig
+
+    def _load_track(self, rel, autoplay=None):
+        """MainWindow._video_load_track."""
+        if rel not in self._by_rel:
+            return
+        self._current = rel
+        orig = self._orig_pane(rel)
         pv = dict(self.get("preview") or self._empty_preview())
         pv["rel"] = rel
         pv["orig"] = orig
@@ -2174,23 +2230,26 @@ class VideoTab(BestQualityMixin, TabService):
         """_VideoPreviewPane.load: probe the clip and render its
         representative still on a worker, then hand both to the page."""
         path, side, seq = pane.get("path"), pane["side"], pane["seq"]
-        if not path:
-            return
+        if path:
+            self._probe_async(path, lambda fields: self.ctx.loop.post(
+                self._pane_update, side, seq, fields))
 
+    @staticmethod
+    def _probe_async(path, post):
+        """Probe *path* and render its representative still on a worker,
+        handing each to *post(fields)* (called on the worker)."""
         def _work():
             try:
                 info, facts = vh.media_facts(path)
             except Exception:                               # noqa: BLE001
                 info, facts = None, {"dur": 0.0}
-            self.ctx.loop.post(self._pane_update, side, seq,
-                               {"facts": facts})
+            post({"facts": facts})
             try:
                 poster, note = vh.representative_poster(
                     path, info, facts.get("dur") or 0.0)
             except Exception as e:                          # noqa: BLE001
                 poster, note = None, "Couldn't show this frame: %s" % e
-            self.ctx.loop.post(self._pane_update, side, seq,
-                               {"poster": poster, "poster_note": note})
+            post({"poster": poster, "poster_note": note})
 
         threading.Thread(target=_work, daemon=True,
                          name="video-pane").start()
@@ -2216,20 +2275,219 @@ class VideoTab(BestQualityMixin, TabService):
             return False
         if pane.get("proxy") or pane.get("proxy_busy"):
             return True
-        path = pane["path"]
         self._pane_update(side, seq, {"proxy_busy": True, "proxy_err": ""})
+        self._proxy_async(pane["path"], fmt, lambda fields: self.ctx.loop.post(
+            self._pane_update, side, seq, fields))
+        return True
 
+    @staticmethod
+    def _proxy_async(path, fmt, post):
+        """Make a copy of *path* the page's engine can play, on a worker;
+        *post(fields)* gets ``proxy`` / ``proxy_err``."""
         def _work():
             try:
                 out, err = vh.browser_proxy(path, fmt), ""
             except Exception as e:                          # noqa: BLE001
                 out, err = None, str(e) or e.__class__.__name__
-            self.ctx.loop.post(self._pane_update, side, seq,
-                               {"proxy": out, "proxy_err": err,
-                                "proxy_busy": False})
+            post({"proxy": out, "proxy_err": err, "proxy_busy": False})
 
         threading.Thread(target=_work, daemon=True,
                          name="video-proxy").start()
+
+    # ==================================================================
+    # Compare (PAD-440, DragonRR): several clips side by side, big, each
+    # drawn through its own colors beside the Color profiles bar, so a
+    # profile picked or a slider moved for one is seen against the others
+    # ==================================================================
+    def _cmp_sides(self, rel):
+        """What a Compare player can show of *rel*: ``[[side, label]]``."""
+        if self._rep_pane(rel).get("path"):
+            return [["orig", "Original"], ["rep", "Replacement"]]
+        if self._color_state(rel):
+            # a game's own clip with the profile attached (Advanced,
+            # PAD-336): the card gets the original through its profile
+            return [["orig", "Original"], ["rep", "With its color profile"]]
+        return [["orig", "Original"]]
+
+    def _cmp_pane(self, rel, side):
+        if side != "rep":
+            return self._orig_pane(rel)
+        pane = self._rep_pane(rel)
+        if pane.get("path") or not self._color_state(rel):
+            return pane
+        pane = self._orig_pane(rel)
+        pane.update(side="rep", title="With its color profile")
+        return pane
+
+    def _cmp_tile(self, tid):
+        return next((t for t in self._cmp if t["id"] == tid), None)
+
+    def _cmp_add(self, rel, side):
+        self._cmp_ids += 1
+        tile = {"id": self._cmp_ids, "rel": rel, "side": side,
+                "sides": self._cmp_sides(rel),
+                "pane": self._cmp_pane(rel, side), "look": []}
+        self._cmp.append(tile)
+        self._cmp_load(tile)
+
+    def _cmp_load(self, tile):
+        pane = tile["pane"]
+        if pane.get("path"):
+            tid, seq = tile["id"], pane["seq"]
+            self._probe_async(pane["path"], lambda fields: self.ctx.loop.post(
+                self._cmp_update, tid, seq, fields))
+
+    def _cmp_update(self, tid, seq, fields):
+        tile = self._cmp_tile(tid)
+        if tile is None or tile["pane"].get("seq") != seq:
+            return
+        tile["pane"] = dict(tile["pane"], **fields)
+        self._cmp_publish()
+
+    def _cmp_steps(self):
+        """Each tile's colour steps: the players' (publish_look), worked
+        out for the tile's own clip and side."""
+        look = self.get("look") or {}
+        folder = self._assets_path()
+        if not (look.get("offered") and look.get("on") and folder
+                and os.path.isdir(folder)):
+            for t in self._cmp:
+                t["look"] = []
+            return
+        from ...core import colour_profile
+        sw, own, done = self._lsw, self._own_colours(), {}
+        for t in self._cmp:
+            rel = t["rel"]
+            if rel not in done:
+                try:
+                    done[rel] = colour_profile.video_look(
+                        folder, self._color_state(rel), own,
+                        overlay_on=sw["overlay"], files_on=sw["files"],
+                        screen_on=sw["screen"], rel=rel)
+                except Exception:                       # noqa: BLE001
+                    log.exception("video compare look")
+                    done[rel] = {}
+            t["look"] = done[rel].get(t["side"]) or []
+
+    def _cmp_publish(self):
+        st = {"open": self._cmp_open, "max": COMPARE_MAX, "tiles": [
+            {k: t[k] for k in ("id", "rel", "side", "sides", "pane", "look")}
+            for t in self._cmp] if self._cmp_open else []}
+        if st != self.get("compare"):
+            self.set(compare=st)
+
+    def _cmp_sync(self):
+        """The list changed (a pick, a clear, a switch, a scan): each tile
+        follows its clip, and a clip no longer listed leaves."""
+        if not self._cmp_open:
+            return
+        keep = []
+        moved = False
+        for t in self._cmp:
+            rel = t["rel"]
+            if rel not in self._by_rel:
+                moved = True
+                continue
+            sides = self._cmp_sides(rel)
+            side = t["side"] if any(k == t["side"] for k, _l in sides) \
+                else "orig"
+            pane = self._cmp_pane(rel, side)
+            moved = moved or side != t["side"] or sides != t["sides"]
+            t["sides"] = sides
+            t["side"] = side
+            if pane.get("path") != t["pane"].get("path"):
+                moved = True
+                t["pane"] = pane
+                self._cmp_load(t)
+            else:
+                t["pane"] = dict(t["pane"], **{k: pane[k] for k in (
+                    "side", "title", "label", "hint")})
+            keep.append(t)
+        self._cmp = keep
+        if not keep:
+            self._cmp_open = False
+        if moved:
+            self._cmp_steps()
+        self._cmp_publish()
+
+    def _cmp_reset(self):
+        self._cmp_open = False
+        self._cmp = []
+        self._cmp_publish()
+
+    @rpc
+    def compare_open(self, rels):
+        """Compare: the clips selected, side by side.  One clip: its
+        Original beside its Replacement.  Several: each one's Replacement
+        where it has one, else its Original, the first COMPARE_MAX of them.
+        Returns how many players it opened with."""
+        seen = set()
+        rels = [r for r in (rels or []) if r in self._by_rel
+                and not (r in seen or seen.add(r))]
+        if not rels:
+            return 0
+        if len(rels) > COMPARE_MAX:
+            self.toast("Compare shows %d clips at a time: the first %d "
+                       "selected are in it." % (COMPARE_MAX, COMPARE_MAX))
+            rels = rels[:COMPARE_MAX]
+        sides = self._cmp_sides(rels[0])
+        if len(rels) == 1 and len(sides) > 1:
+            want = [(rels[0], "orig"), (rels[0], "rep")]
+        else:
+            want = [(r, self._cmp_sides(r)[-1][0]) for r in rels]
+        self._cmp = []
+        for rel, side in want:
+            self._cmp_add(rel, side)
+        self._cmp_open = True
+        self.stop_all_preview_playback()
+        self._cmp_steps()
+        self._cmp_publish()
+        return len(self._cmp)
+
+    @rpc
+    def compare_close(self):
+        if not self._cmp_open:
+            return False
+        self._cmp_reset()
+        return True
+
+    @rpc
+    def compare_side(self, tid, side):
+        """One player shows the other side of its clip (Original /
+        Replacement)."""
+        tile = self._cmp_tile(tid)
+        if tile is None or side == tile["side"] or not any(
+                k == side for k, _l in tile["sides"]):
+            return False
+        tile["side"] = side
+        tile["pane"] = self._cmp_pane(tile["rel"], side)
+        self._cmp_load(tile)
+        self._cmp_steps()
+        self._cmp_publish()
+        return True
+
+    @rpc
+    def compare_remove(self, tid):
+        """A player's ×: the clip leaves Compare (the last one stays)."""
+        tile = self._cmp_tile(tid)
+        if tile is None or len(self._cmp) < 2:
+            return False
+        self._cmp.remove(tile)
+        self._cmp_publish()
+        return True
+
+    @rpc
+    def compare_make_proxy(self, tid, seq, fmt="mp4"):
+        """make_proxy for a Compare player."""
+        tile = self._cmp_tile(tid)
+        pane = tile["pane"] if tile else {}
+        if pane.get("seq") != seq or not pane.get("path"):
+            return False
+        if pane.get("proxy") or pane.get("proxy_busy"):
+            return True
+        self._cmp_update(tid, seq, {"proxy_busy": True, "proxy_err": ""})
+        self._proxy_async(pane["path"], fmt, lambda fields: self.ctx.loop.post(
+            self._cmp_update, tid, seq, fields))
         return True
 
     def _update_note(self, rel=None):

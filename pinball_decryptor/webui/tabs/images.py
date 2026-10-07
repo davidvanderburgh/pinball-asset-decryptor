@@ -1141,6 +1141,42 @@ class ImagesTab(TabService):
         self._color_changed()
         return True
 
+    def color_targets(self):
+        """PAD-439: the pictures the Colors bar's "Apply to all images" gives
+        its profile, ``{rel: attached}``: every replaced picture, and any
+        other with the color profile attached (one built earlier, or a game
+        picture unlocked)."""
+        if not self._per_file_colour():
+            return {}
+        out = {}
+        for rel in set(self._assignments) | {
+                r for r, v in self._color.items() if v}:
+            on = self._color_state(rel) if rel in self._by_rel else None
+            if on is not None and (on or self._assignments.get(rel)):
+                out[rel] = on
+        return out
+
+    def put_color_switches(self, switches):
+        """PAD-439: replaced pictures' own switches set at once (``True`` /
+        ``False``, ``None`` = follow the box again), one save and one redraw.
+        Returns what each was, the same way (Apply to all's Undo)."""
+        before = {}
+        for rel, value in (switches or {}).items():
+            if not (rel in self._by_rel and self._assignments.get(rel)):
+                continue
+            before[rel] = self._color.get(rel)
+            if value is None:
+                self._color.pop(rel, None)
+            else:
+                self._color[rel] = bool(value)
+        if before:
+            self._save_staged_changes()
+            self._publish_chunks()
+            if self._current_rel:
+                self._render_preview(self._current_rel)
+            self._color_changed()
+        return before
+
     def _offers_keep_size(self):
         cache = self._keep_col_cache
         if cache is None or cache[0] is not self._slots:

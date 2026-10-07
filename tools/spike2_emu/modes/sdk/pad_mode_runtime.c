@@ -3186,6 +3186,8 @@ static void block_defaults(unsigned *m)
     for (i = 0; i < BLOCK_WORDS; i++) m[i] = block_named[i];
 }
 
+static void wizard_refused(unsigned start);   /* PAD-436: the game's mini-wizards, below */
+
 static int on_block_start(unsigned *r, unsigned hook_n)
 {
     unsigned id;
@@ -3201,6 +3203,7 @@ static int on_block_start(unsigned *r, unsigned hook_n)
         nm = pm_port_text(key);
         say("block: the game's mode %u (%s) did not start - %s is running", id, nm ? nm : "?", block_who);
     }
+    wizard_refused(block_hooked[hook_n]);      /* PAD-436: a mini-wizard's start stays lit */
     return 1;                                  /* refused: the mode's start never runs */
 }
 
@@ -4884,6 +4887,169 @@ static void shake_arm(void)
         shk.max_ms[2], shk.max_ms[3], SHAKE_PER_MIN, SHAKE_ON_MS / 1000);
 }
 
+/* ---- the game's own mini-wizards (PAD-436) --------------------------------------------------------
+ * James Bond LE 1.06 keeps its four mini-wizards in a table (`data wizard_table`, `value wizard_entry` bytes
+ * each: its index, its bit, its insert, its start, ...) and each player's state in three arrays of words
+ * (`data wizard_state`: [player - 1] the selected one, +0x10 the lit mask, +0x20 the played mask). The game
+ * lights them when a part is collected in all six films: every one not played this game, one of them
+ * selected, and its lamps' refresh byte (`data lamps_dirty`) set. Its start shot (the Right ramp) calls
+ * `site wizard_start`, which starts the selected one when nothing of the game's is in its way (its own
+ * check), unlights them all and marks it played; 0 = it started nothing.
+ * pm_game_wizard does what the game's lighting does, for one: select it, OR its bit into the lit mask, set the
+ * refresh byte; PM_WIZARD_START then calls the game's start itself. Never a write the table does not vouch for:
+ * the arm checks every entry's index and bit and that its start is in the game's code.
+ * A mini-wizard's start is also one a mode of ours may hold off (`block_start_<id>`: Ahoy Mr. Bond's on Bond LE
+ * 1.06). The game's start goes on after a refused one as if it began: it unlights them all and marks it played,
+ * so the player would lose it. The runtime puts the player's three words back as they were on the next tick,
+ * and the start shot starts it once our mode has ended. */
+#define WIZARDS_MAX 8
+static int wizards_n;
+static struct { int n; unsigned p, sel, lit, played; } wiz_hold;   /* a refused start, put back on the next tick */
+
+int pm_game_wizards(void)
+{
+    return (can & PM_CAN_GAME_WIZARDS) ? wizards_n : 0;
+}
+
+static unsigned *wizard_entry(int n)
+{
+    return (unsigned *)(unsigned long)(data("wizard_table") + (unsigned)(n - 1) * (unsigned)pm_port_value("wizard_entry", 0x20));
+}
+
+static const char *wizard_name(int n)
+{
+    char key[24];
+    const char *t;
+    pm_snprintf(key, sizeof key, "wizard_name_%d", n);
+    t = pm_port_text(key);
+    return t ? t : "?";
+}
+
+/* the block refused the start at `start`: when it is a mini-wizard's, keep the player's words as they are now (the
+ * game's start has not touched them yet) */
+static void wizard_refused(unsigned start)
+{
+    unsigned p = pm_player(), *st;
+    int n;
+    if (!(can & PM_CAN_GAME_WIZARDS) || p < 1 || p > 4) return;
+    for (n = 1; n <= wizards_n && wizard_entry(n)[3] != start; n++) ;
+    if (n > wizards_n) return;
+    st = (unsigned *)(unsigned long)data("wizard_state");
+    wiz_hold.n = n;
+    wiz_hold.p = p;
+    wiz_hold.sel = st[p - 1];
+    wiz_hold.lit = st[4 + p - 1];
+    wiz_hold.played = st[8 + p - 1];
+}
+
+/* every tick: a refused start's words put back */
+static void wizards_tick(void)
+{
+    unsigned *st, p = wiz_hold.p;
+    if (!wiz_hold.n) return;
+    st = (unsigned *)(unsigned long)data("wizard_state");
+    st[p - 1] = wiz_hold.sel;
+    st[4 + p - 1] = wiz_hold.lit;
+    st[8 + p - 1] = wiz_hold.played;
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    say("game wizard %d (%s): its start was refused while %s runs - kept lit for player %u (lit 0x%x, played 0x%x), "
+        "so the game's start shot starts it once that mode ends", wiz_hold.n, wizard_name(wiz_hold.n), block_who, p,
+        wiz_hold.lit, wiz_hold.played);
+    wiz_hold.n = 0;
+}
+
+int pm_game_wizard(int n, int how)
+{
+    const char *name;
+    unsigned p, bit, *st;
+    int r;
+    if (!(can & PM_CAN_GAME_WIZARDS)) return 0;
+    if (n < 1 || n > wizards_n) {
+        say("game wizard %d: not one of the game's mini-wizards the port names (1-%d)", n, wizards_n);
+        return 0;
+    }
+    name = wizard_name(n);
+    p = pm_player();
+    if (!pm_in_game() || p < 1 || p > 4) {
+        say("game wizard %d (%s): not handed over - no game", n, name);
+        return 0;
+    }
+    st = (unsigned *)(unsigned long)data("wizard_state");
+    bit = wizard_entry(n)[1];
+    say("game wizard %d (%s): player %u had selected %u, lit 0x%x, played 0x%x%s", n, name, p, st[p - 1],
+        st[4 + p - 1], st[8 + p - 1], st[8 + p - 1] & bit ? " - played this game already: it plays again" : "");
+    st[p - 1] = (unsigned)(n - 1);
+    st[4 + p - 1] |= bit;
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    if (how == PM_WIZARD_START && block_owner && running == block_owner) {
+        say("game wizard %d (%s): %s holds the game's modes off, so it is lit, not started", n, name, block_who);
+        how = PM_WIZARD_LIGHT;
+    }
+    if (how == PM_WIZARD_START) {
+        r = ((int (*)(void))(unsigned long)fn("wizard_start"))();
+        *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+        if (r) {
+            say("game wizard %d (%s): the game started it (its own start), player %u", n, name, p);
+            return PM_WIZARD_STARTED;
+        }
+        say("game wizard %d (%s): the game would not start it now (one of its own modes is in the way) - lit instead",
+            n, name);
+    }
+    say("game wizard %d (%s): lit and selected for player %u - the game's start shot starts it", n, name, p);
+    return PM_WIZARD_LIT;
+}
+
+/* by the port's name (`text wizard_name_<n>`, any case) */
+int pm_game_wizard_named(const char *name, int how)
+{
+    char key[24];
+    const char *t;
+    int n, k;
+    if (!(can & PM_CAN_GAME_WIZARDS) || !name || !*name) return 0;
+    for (n = 1; n <= wizards_n; n++) {
+        pm_snprintf(key, sizeof key, "wizard_name_%d", n);
+        t = pm_port_text(key);
+        for (k = 0; t && name[k] && t[k] && (name[k] | 0x20) == (t[k] | 0x20); k++) ;
+        if (t && !name[k] && !t[k]) return pm_game_wizard(n, how);
+    }
+    say("game wizard \"%s\": not one of this game's mini-wizards", name);
+    return 0;
+}
+
+static void wizards_arm(void)
+{
+    static const char *const s[] = { "wizard_start", 0 };
+    static const char *const d[] = { "wizard_state", "wizard_table", "lamps_dirty", 0 };
+    unsigned size = (unsigned)pm_port_value("wizard_entry", 0x20), *e;
+    char key[24];
+    int n;
+    if (!site("wizard_start")) return;                  /* a port without mini-wizard lines: silent */
+    for (n = 1; n <= WIZARDS_MAX; n++) {
+        pm_snprintf(key, sizeof key, "wizard_name_%d", n);
+        if (!pm_port_text(key)) break;
+    }
+    wizards_n = n - 1;
+    if (!have_sites(s) || !have_data(d) || !wizards_n || size < 16 ||
+        !maps_has(data("wizard_state"), 0x30, MAP_R) || !maps_has(data("lamps_dirty"), 1, MAP_R) ||
+        !maps_has(data("wizard_table"), size * (unsigned)wizards_n, MAP_R)) {
+        say("game wizards: off - the port's mini-wizard lines are incomplete or do not match this build");
+        wizards_n = 0;
+        return;
+    }
+    for (n = 1; n <= wizards_n; n++) {
+        e = wizard_entry(n);
+        if (e[0] != (unsigned)(n - 1) || e[1] != 1u << (n - 1) || !maps_has(e[3], 8, MAP_R | MAP_X | MAP_GAME)) {
+            say("game wizards: off - entry %d of the table at 0x%08x is not this build's (%u 0x%x 0x%08x)", n,
+                data("wizard_table"), e[0], e[1], e[3]);
+            wizards_n = 0;
+            return;
+        }
+    }
+    can |= PM_CAN_GAME_WIZARDS;
+    say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08x, start 0x%08x)", wizards_n,
+        data("wizard_state"), fn("wizard_start"));
+}
+
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
  * A rule the game shipped with (a battle, a multiball) is a compiled object with a vtable, and
  * its SHOT HANDLER (one vtable slot) tests the RAW shot mask against fixed bits: Godzilla's
@@ -6049,6 +6215,7 @@ static void on_tick(unsigned *r)
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
     building_tick();                          /* PAD-393: a put-back owed */
     shows_tick();                             /* PAD-411: no show of ours past its 20 s */
+    wizards_tick();                           /* PAD-436: a mini-wizard's refused start, kept lit */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
@@ -7000,6 +7167,7 @@ static void pad_mode_start(void)
     building_arm();                                 /* PAD-393: the Premium's building */
     shake_arm();                                    /* PAD-414: the shaker motor */
     shows_arm();                                    /* PAD-411: the game's own light shows */
+    wizards_arm();                                  /* PAD-436: the game's own mini-wizards */
     if (pm_hit_sounds()) {                          /* PAD-415: the game's own hit sounds */
         char key[20];
         pm_snprintf(key, sizeof key, "hit_sound_%d", pm_hit_sounds());
@@ -7014,7 +7182,7 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
@@ -7022,7 +7190,7 @@ static void pad_mode_start(void)
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
         can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
-        can & PM_CAN_SHAKER ? " shaker" : "");
+        can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

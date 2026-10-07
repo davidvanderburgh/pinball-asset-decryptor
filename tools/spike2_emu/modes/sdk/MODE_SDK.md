@@ -2560,6 +2560,45 @@ with no event lines and no mode files did the same, so the event hooks are not t
 1.16 boot that night did end balls on drains after about 46 switch hits per ball (item 150,
 run1), so to measure these events, play that switch pass before each drain.
 
+### An event for one argument: Bond's films (PAD-428)
+
+A site event can ask for one value of the call's first argument:
+
+```
+site  film_complete     0x001d49c0 0xe92d4038 0xe1a05000
+event film_frwl         site film_complete arg 1        # only a call with r0 = 1
+```
+
+Every event on one site shares the site's one hook, which counts each event whose `arg`
+matches r0 (an event without `arg` counts every call). Each still takes one of the eight
+site-event ids.
+
+**James Bond 007 LE 1.06** (`james_bond_le-1.06.port`) names six: a FILM completed, all four
+of its parts (henchman, villain, Q Branch, gadget). The game keeps each player's parts per
+film at `0x820198` (`[film 0-5][player][5 bytes]`: a count per part, then the total); its
+collect `0x1d0918(film, part)` calls `0x1d49c0(film)` once, as the fourth part comes in.
+The four mini-wizards (Dr. No multiball, Goldfinger, Disco Volante, Ahoy Mr Bond) belong to
+films 0, 2, 3 and 4; From Russia With Love and Diamonds Are Forever have none, so a mode of
+ours started on `film_frwl` or `film_daf` is the mini-wizard those two films never had.
+
+| Event | arg | Film |
+|---|---|---|
+| `film_dr_no` | 0 | Dr. No |
+| `film_frwl` | 1 | From Russia With Love |
+| `film_goldfinger` | 2 | Goldfinger |
+| `film_thunderball` | 3 | Thunderball |
+| `film_yolt` | 4 | You Only Live Twice |
+| `film_daf` | 5 | Diamonds Are Forever |
+
+Proven in the emulator (PAD-428, 2026-10-07): an instrument called the game's own collect for
+From Russia With Love's parts one at a time. Three parts started nothing; the fourth marked
+the film complete in the game's table and on its progress screen, and a mode file with
+`starts_on event film_frwl` started 16 ms later while one on `film_goldfinger` did not.
+Goldfinger's four parts then started only the Goldfinger mode, and four more parts of the
+already-complete From Russia With Love started nothing. The film order is the game's gadget
+table's (`0x62f168`: Geiger counter, attache case, DB5, powerpack, Little Nellie, ring), and
+the From Russia With Love column filled on the game's own grid.
+
 ### Measuring events on another game
 
 1. Write a sites file for `event_probe.c`: the bus (search the game for `cmp r1, #207;

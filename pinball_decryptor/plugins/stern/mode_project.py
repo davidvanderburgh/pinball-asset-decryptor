@@ -168,6 +168,13 @@ EVENT_LABELS = {
     "skill_shot": "the skill shot is made",
     "multiball_start": "a multiball starts",
     "multiball_end": "a multiball ends",
+    # PAD-428: James Bond 007 (LE/Pro 1.06): a film's four parts (henchman, villain, Q Branch, gadget) all done
+    "film_dr_no": "Dr. No is completed",
+    "film_frwl": "From Russia With Love is completed",
+    "film_goldfinger": "Goldfinger is completed",
+    "film_thunderball": "Thunderball is completed",
+    "film_yolt": "You Only Live Twice is completed",
+    "film_daf": "Diamonds Are Forever is completed",
 }
 
 #: Godzilla Pro 1.15's events, each one proven by a marked game in the emulator

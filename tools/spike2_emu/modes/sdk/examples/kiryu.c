@@ -356,8 +356,10 @@ static void qualify_shot(uint64_t shot, unsigned p)
         start("the Mechagodzilla spinner, KIRYU lit");
         return;
     }
-    if (spins[p] < need) spins[p]++;
-    if (spins[p] % 5 == 0 || spins[p] >= need) pm_log("%s %u of %u (player %u)", SPIN_SHOT, spins[p], need, p);
+    if (spins[p] < need) {                              /* PAD-399: a count is said once, when reached */
+        spins[p]++;
+        if (spins[p] % 5 == 0 || spins[p] >= need) pm_log("%s %u of %u (player %u)", SPIN_SHOT, spins[p], need, p);
+    }
     if (spins[p] >= need) {
         start("the Mechagodzilla spinner");
     } else if (!kit_running) {

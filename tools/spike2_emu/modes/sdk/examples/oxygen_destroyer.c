@@ -268,24 +268,33 @@ static void on_init(void)
            (unsigned long long)start_mask, (unsigned long long)collect_mask, (unsigned long long)super_mask);
 }
 
+/* PAD-399: a spin that is not counted says why once until the reason changes; "" = nothing said */
+static char uncounted[16];
+
 static void qualify_shot(uint64_t shot, unsigned p)
 {
     char line[KIT_WORDS];
     unsigned long since;
+    unsigned was;
     if (!spin_mask || !(shot & spin_mask)) return;        /* every spin counts: no debounce */
     if (ran_game[p] >= STARTS_PER_GAME) {
-        if (hits[p] == 0) pm_log("%s: not counted - it already ran %d times this game", SPIN_SHOT, STARTS_PER_GAME);
+        if (kit_once(uncounted, sizeof uncounted, "ran"))
+            pm_log("%s: not counted - it already ran %d times this game", SPIN_SHOT, STARTS_PER_GAME);
         return;
     }
     if (ended_at[p]) {
         since = pm_ms() - (ended_at[p] - 1);
         if (since < COOLDOWN_MS) {
-            pm_log("%s: not counted - cooling down, %lu s left", SPIN_SHOT, (COOLDOWN_MS - since + 999) / 1000);
+            if (kit_once(uncounted, sizeof uncounted, "cooling"))
+                pm_log("%s: not counted - cooling down, %lu s left", SPIN_SHOT, (COOLDOWN_MS - since + 999) / 1000);
             return;
         }
     }
+    uncounted[0] = 0;
+    was = hits[p];
     if (hits[p] < HITS_TO_START) hits[p]++;
-    if (hits[p] % 5 == 0 || hits[p] >= HITS_TO_START) pm_log("%s %u of %d (player %u)", SPIN_SHOT, hits[p], HITS_TO_START, p);
+    if (hits[p] != was && (hits[p] % 5 == 0 || hits[p] >= HITS_TO_START))   /* PAD-399: a count once, when reached */
+        pm_log("%s %u of %d (player %u)", SPIN_SHOT, hits[p], HITS_TO_START, p);
     if (hits[p] >= HITS_TO_START) {
         start("the left spinner", 1);
     } else if (!kit_running) {

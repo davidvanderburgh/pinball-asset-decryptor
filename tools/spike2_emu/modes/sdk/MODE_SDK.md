@@ -2597,7 +2597,7 @@ lines:
 | `[pad] scores: 32-bit (...)` | the port's scoring pair is the 32-bit one |
 | `[pad] switch shots: ...` / `switch shots off: ...` | the port's `switch` lines, and whether a `switch_hit` site was hooked |
 | `[TARGET RUSH] ...` | your `pm_log` lines |
-| `[TARGET RUSH] not started: X is running` | `pm_begin()` refused; another mode is up |
+| `[TARGET RUSH] not started: X is running` | `pm_begin()` refused; another mode is up (said once per mode until the running one changes, PAD-399) |
 | `[mode] <name> not started (trigger shot): a battle is running` | a `stack no` mode file waited for the game's own battle (or multiball) |
 | `[pad] stock modes: can tell battle multiball any` | the first stock-mode question; which kinds this port can answer |
 | `[pad] lamps: 88 named inserts (24 tied to a shot)...` | the port's `lamp` lines were read; `the game counts 592 lights` once the game has counted them |

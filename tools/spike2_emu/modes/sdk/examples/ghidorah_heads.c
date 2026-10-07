@@ -424,20 +424,26 @@ static void on_init(void)
            (unsigned long long)final_mask);
 }
 
+/* PAD-399: a powerline that is not counted says why once until the reason changes; "" = nothing said */
+static char uncounted[8];
+
 static void qualify_shot(uint64_t shot, unsigned p)
 {
     char line[KIT_WORDS];
-    unsigned i, n = 0;
+    unsigned i, n = 0, had;
     for (i = 0; i < N_HEADS; i++) {
         if (!small_mask[i] || !(shot & small_mask[i]) || !kit_fresh(&db, small_mask[i])) continue;
         if (ran_ball[p] || ran_game[p] >= STARTS_PER_GAME) {
-            pm_log("%s: not counted - %s", HEAD[i].small,
-                   ran_ball[p] ? "it already ran this ball" : "it already ran twice this game");
+            if (kit_once(uncounted, sizeof uncounted, ran_ball[p] ? "ball" : "game"))
+                pm_log("%s: not counted - %s", HEAD[i].small,
+                       ran_ball[p] ? "it already ran this ball" : "it already ran twice this game");
             return;
         }
+        uncounted[0] = 0;
+        had = qual[p];
         qual[p] |= 1u << i;
         for (n = 0, i = 0; i < N_HEADS; i++) n += (qual[p] >> i) & 1u;
-        pm_log("powerlines %u of %d (player %u)", n, N_HEADS, p);
+        if (qual[p] != had) pm_log("powerlines %u of %d (player %u)", n, N_HEADS, p);   /* PAD-399: once, when reached */
         if (n == N_HEADS) {
             start("three powerlines", 1);
         } else if (!kit_running) {
@@ -522,6 +528,7 @@ static void on_tick(void)
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) qual[p] = ran_ball[p] = ran_game[p] = 0;
+        uncounted[0] = 0;
         pm_log("new game: counts cleared");
     }
     if (!run.on) return;
@@ -543,6 +550,7 @@ static void on_ball_end(void)
     end("ball ended", 0);
     kit_end_now();
     for (p = 0; p < 5; p++) qual[p] = ran_ball[p] = 0;
+    uncounted[0] = 0;
 }
 
 static void on_event(unsigned id)

@@ -400,3 +400,111 @@ def find_official_extract(assets_dir, candidates=()):
                 os.path.join(cand, ".checksums.md5")):
             return os.path.normpath(cand)
     return ""
+
+
+# ---------------------------------------------------------------------------
+# The history as a graph (the "This project" card draws it)
+# ---------------------------------------------------------------------------
+
+def graph(lin):
+    """The project's history laid out for drawing, newest first, the way
+    ``git log --graph`` lays out commits: ``{"rows": [...], "lanes": n,
+    "hosts": [...], "imported": [...]}`` or ``None`` with no revision yet.
+
+    Each row is ``{"key", "parent", "lane", "kind", "title", "sub",
+    "host", "tags"}``.  ``kind`` is ``"rev"``, ``"stock"`` (the official
+    card), ``"modified"`` (somebody's build the project was extracted from)
+    or ``"other"`` (a card a revision was built over that the history does
+    not know).  A child keeps its lane until its parent's row, so a build
+    over an older revision (a branch) gets a lane of its own and lines
+    never cross a node.  ``hosts`` is the computers in order of first build,
+    for colouring each revision by where it was built."""
+    revs = sorted((r for r in (lin or {}).get("revs") or []
+                   if r.get("rev")), key=lambda r: -int(r["rev"]))
+    if not revs:
+        return None
+    src = lin.get("source") or {}
+    stock = lin.get("stock") or {}
+    label = stock.get("label") or src.get("label") or "the card"
+    by_print = {r.get("print"): r for r in revs}
+    src_rev = src.get("rev")
+    root_kind = ("modified" if src.get("print") and src.get("status")
+                 not in ("", "official") and not src_rev else "stock")
+    rows, extra = [], {}
+
+    def parent_key(r):
+        pr = r.get("parent_rev")
+        if pr == 0:
+            return "stock"
+        if pr and any(int(x["rev"]) == int(pr) for x in revs):
+            return "rev%d" % int(pr)
+        parent = r.get("parent") or ""
+        if parent and parent in by_print:
+            return "rev%d" % int(by_print[parent]["rev"])
+        if parent and parent == src.get("print"):
+            return "source" if root_kind == "modified" else "stock"
+        key = "other:" + (parent[:8] or "?")
+        extra.setdefault(key, {"key": key, "parent": None, "kind": "other",
+                               "title": "Another card",
+                               "sub": "not in this project's history",
+                               "host": "", "tags": []})
+        return key
+
+    newest = int(revs[0]["rev"])
+    for r in revs:
+        n = int(r["rev"])
+        tags = []
+        if n == newest:
+            tags.append("latest")
+        if src_rev and int(src_rev) == n:
+            tags.append("extracted")
+        sub = " · ".join(x for x in (r.get("name"), r.get("built"),
+                                     r.get("host")) if x)
+        rows.append({"key": "rev%d" % n, "parent": parent_key(r),
+                     "kind": "rev", "title": "Rev %d" % n, "sub": sub,
+                     "host": r.get("host") or "", "tags": tags})
+    rows += list(extra.values())
+    when = src.get("at") or ""
+    if root_kind == "modified":
+        rows.append({"key": "source", "parent": None, "kind": "modified",
+                     "title": "A modified %s card" % label,
+                     "sub": " · ".join(x for x in (
+                         "extracted from " + (src.get("name") or "?"),
+                         when) if x),
+                     "host": "", "tags": ["extracted"]})
+    else:
+        from_card = (src.get("name") if src.get("print") and not src_rev
+                     else "")
+        rows.append({"key": "stock", "parent": None, "kind": "stock",
+                     "title": "Official %s" % label,
+                     "sub": " · ".join(x for x in (
+                         ("extracted from " + from_card) if from_card else
+                         "as Stern released it", when if from_card else "")
+                         if x),
+                     "host": "", "tags": ["extracted"] if from_card else []})
+    # lanes: each slot holds the key of the row it is waiting for
+    slots = []
+    for row in rows:
+        mine = [i for i, k in enumerate(slots) if k == row["key"]]
+        if mine:
+            lane = mine[0]
+            for i in mine[1:]:
+                slots[i] = None
+        elif None in slots:
+            lane = slots.index(None)
+        else:
+            slots.append(None)
+            lane = len(slots) - 1
+        slots[lane] = row["parent"]
+        row["lane"] = lane
+        while slots and slots[-1] is None:
+            slots.pop()
+    hosts = []
+    for r in sorted(revs, key=lambda r: int(r["rev"])):
+        if r.get("host") and r["host"] not in hosts:
+            hosts.append(r["host"])
+    imported = [{"pack": i.get("pack") or "?", "from": i.get("from") or "",
+                 "rev": i.get("rev"), "at": i.get("at") or ""}
+                for i in (lin.get("imported") or [])]
+    return {"rows": rows, "lanes": 1 + max(r["lane"] for r in rows),
+            "hosts": hosts, "imported": imported}

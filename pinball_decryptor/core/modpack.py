@@ -577,7 +577,8 @@ def _note_imported(assets_folder, pack_lin, zip_path):
         "from": lineage_mod.base_words(pack_lin),
         "rev": last["rev"] if last else None,
         "print": last["print"] if last else "",
-        "pack": os.path.basename(zip_path)})
+        "pack": os.path.basename(zip_path),
+        "at": __import__("time").strftime("%Y-%m-%d %H:%M")})
     lineage_mod.write_lineage(assets_folder, lin)
 
 

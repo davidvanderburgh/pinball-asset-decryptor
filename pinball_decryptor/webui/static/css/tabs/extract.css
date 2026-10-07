@@ -106,3 +106,20 @@ html.bp-640 .scrim .x-rcgrid { grid-template-columns: minmax(0, 1fr); }
 html.bp-640 .x-float .x-ikv { grid-template-columns: minmax(0, 1fr); gap: 0 14px; }
 html.bp-640 .x-float .x-ikv > .k { margin-top: 5px; }
 .x-page .x-kv > span, .x-float .x-kv > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* PAD-427: the project's revision history graph */
+.x-rg { margin: 10px 0 2px; padding-top: 10px; border-top: 1px solid var(--line); }
+.x-rg-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.x-rg-hosts { display: inline-flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--ink-3); }
+.x-rg-host { display: inline-flex; align-items: center; gap: 5px; }
+.x-rg-host i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.x-rg-body { position: relative; }
+.x-rg-svg { position: absolute; left: 0; top: 0; overflow: visible; }
+.x-rg-dots { fill: var(--ink-3); font-size: 14px; }
+.x-rg-row { height: 40px; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.x-rg-title { font-size: 13px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.x-rg-title b { font-weight: 600; color: var(--ink); }
+.x-rg-title .chip { vertical-align: 1px; }
+.x-rg-sub { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.x-rg-more { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: 0; font: inherit; font-size: 12.5px; text-align: left; }
+.x-rg-imp { margin-top: 6px; display: grid; gap: 2px; }

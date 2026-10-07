@@ -485,3 +485,77 @@ def test_the_official_extract_of_the_release_is_found(tmp_path, monkeypatch):
     _spike2_extract(beside, "godzilla_le-1_16_0.raw", stamp=off)
     assert lineage.find_official_extract(heisei) == os.path.normpath(beside)
     assert es.built_card_source(heisei) == "Heisei.raw"
+
+
+# ---------------------------------------------------------------------------
+# The history drawn as a graph
+# ---------------------------------------------------------------------------
+
+def _lin(revs, source=None):
+    s = "s" * 32
+    return {"format": 1, "stock": {"label": "Turtles Pro 1.59", "print": s},
+            "source": source or {"print": s, "status": "official", "rev": 0,
+                                 "name": "t.raw", "at": "2026-10-05 10:00"},
+            "revs": revs}
+
+
+def _rev(n, parent_rev, host="PC", parent=""):
+    return {"rev": n, "print": "p%d" % n, "parent": parent or "p%d" % parent_rev,
+            "parent_rev": parent_rev, "name": "c%d.raw" % n,
+            "built": "2026-10-0%d 12:00" % n, "host": host}
+
+
+def test_graph_lays_a_branch_in_its_own_lane():
+    g = lineage.graph(_lin([_rev(1, 0, "GARAGE"), _rev(2, 1, "GARAGE"),
+                            _rev(3, 1, "LAPTOP"), _rev(4, 3, "LAPTOP")]))
+    got = [(r["key"], r["parent"], r["lane"]) for r in g["rows"]]
+    assert got == [("rev4", "rev3", 0), ("rev3", "rev1", 0),
+                   ("rev2", "rev1", 1), ("rev1", "stock", 0),
+                   ("stock", None, 0)]
+    assert g["lanes"] == 2 and g["hosts"] == ["GARAGE", "LAPTOP"]
+    assert g["rows"][0]["tags"] == ["latest"]
+    assert g["rows"][0]["sub"] == "c4.raw · 2026-10-04 12:00 · LAPTOP"
+    root = g["rows"][-1]
+    assert (root["kind"], root["title"]) == ("stock", "Official Turtles Pro 1.59")
+    assert root["sub"] == "extracted from t.raw · 2026-10-05 10:00"
+
+
+def test_graph_roots_a_modified_source_and_an_unknown_parent():
+    src = {"print": "m" * 32, "status": "modified", "rev": None,
+           "name": "custom.raw", "at": "2026-10-01 09:00"}
+    lin = _lin([_rev(1, None, parent="m" * 32), _rev(2, None, parent="x" * 32)],
+               source=src)
+    lin["stock"]["print"] = ""
+    g = lineage.graph(lin)
+    kinds = [(r["key"], r["kind"], r["parent"]) for r in g["rows"]]
+    assert kinds == [("rev2", "rev", "other:xxxxxxxx"), ("rev1", "rev", "source"),
+                     ("other:xxxxxxxx", "other", None),
+                     ("source", "modified", None)]
+    assert g["rows"][-1]["title"] == "A modified Turtles Pro 1.59 card"
+    # rev 1's line waits in its own lane past the unknown card's row
+    assert {r["key"]: r["lane"] for r in g["rows"]}["other:xxxxxxxx"] == 0
+    assert {r["key"]: r["lane"] for r in g["rows"]}["rev1"] == 1
+
+
+def test_graph_marks_a_reextracted_revision_and_lists_imports():
+    lin = _lin([_rev(1, 0), _rev(2, 1)],
+               source={"print": "p1", "status": "", "rev": 1, "name": "c1.raw"})
+    lin["imported"] = [{"pack": "lights.zip", "from": "official Turtles Pro 1.59",
+                        "rev": 6, "at": "2026-10-08 17:50"}]
+    g = lineage.graph(lin)
+    assert [r["tags"] for r in g["rows"]][:2] == [["latest"], ["extracted"]]
+    assert g["rows"][-1]["sub"] == "as Stern released it"
+    assert g["imported"] == [{"pack": "lights.zip", "from": "official Turtles Pro 1.59",
+                              "rev": 6, "at": "2026-10-08 17:50"}]
+    assert lineage.graph(_lin([])) is None
+
+
+def test_project_details_carries_the_graph(tmp_path):
+    from pinball_decryptor.webui.extract_helpers import project_details
+    stock = _card(tmp_path / "turtles.raw", STOCK)
+    proj = str(tmp_path / "proj")
+    _extract(proj, stock)
+    assert project_details(proj)["revisions"] is None   # nothing built yet
+    _build(proj, stock, str(tmp_path / "rev1.raw"), b"rev one")
+    rev = project_details(proj)["revisions"]
+    assert [r["key"] for r in rev["graph"]["rows"]] == ["rev1", "stock"]

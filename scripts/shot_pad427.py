@@ -60,6 +60,19 @@ def main():
                {"rev": 2, "print": "b" * 40, "parent": "a" * 40, "parent_rev": 1,
                 "name": "Godzilla mods.raw", "built": "2026-10-07 09:40",
                 "host": "GARAGE-PC", "app": "1.129.0"}]}
+    if os.environ.get("PAD427_RICH"):
+        # a longer history: rev 3 went back to rev 1 on a laptop, rev 4 built on it,
+        # and a mod pack from another project came in
+        lin["revs"] += [
+            {"rev": 3, "print": "c" * 40, "parent": "a" * 40, "parent_rev": 1,
+             "name": "Godzilla louder callouts.raw", "built": "2026-10-08 18:05",
+             "host": "LAPTOP", "app": "1.130.0"},
+            {"rev": 4, "print": "d" * 40, "parent": "c" * 40, "parent_rev": 3,
+             "name": "Godzilla louder callouts.raw", "built": "2026-10-09 20:31",
+             "host": "LAPTOP", "app": "1.130.0"}]
+        lin["imported"] = [{"id": "9" * 32, "from": "official Godzilla Pro 1.16",
+                            "rev": 6, "print": "e" * 40, "pack": "kaiju lights.zip",
+                            "at": "2026-10-08 17:50"}]
     with open(os.path.join(project, ".pad-lineage.json"), "w", encoding="utf-8") as f:
         json.dump(lin, f)
     with open(os.path.join(project, ".checksums.md5"), "w", encoding="utf-8") as f:

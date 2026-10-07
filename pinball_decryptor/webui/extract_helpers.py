@@ -404,6 +404,12 @@ def project_details(folder, manufacturers=(), current=None):
         line, history = "", []
     if line:
         out["revisions"] = {"text": line, "history": history}
+        try:
+            from ..core import lineage
+            out["revisions"]["graph"] = lineage.graph(
+                lineage.read_lineage(folder))
+        except Exception:                               # noqa: BLE001
+            pass
     # The extract itself measured against the official card, not against
     # the card it came from (PAD-427): what a modified card already carried.
     if out["baseline"]:

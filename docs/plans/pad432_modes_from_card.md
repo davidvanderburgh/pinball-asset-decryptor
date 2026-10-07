@@ -67,9 +67,11 @@ it on the new card (survey gap G1: an event Pro 1.16 does not report, a missing 
   (other model and version) and were written.
 - Premium/LE 1.16 card: boots, arms them, and on the rig KAIJU RUSH started (its screen up) and
   ran out its clock, and KING GHIDORAH started with its HUD (heads, lit head moving).
-- Heisei V1.96A card (the third-party custom image, 16G): written and armed; it boots to
-  attract (the rig log's video sources leave the start-up loop for the champions pages) and
-  the imported modes run on it - see the ticket's report for the game run. An earlier reading
+- Heisei V1.96A card (the third-party custom image, 16G): written and armed; on rig 2 it
+  reached the retheme's own attract page in 290 s, a game started, KAIJU RUSH started (its
+  screen over the Heisei playfield) and ran out its clock, and KING GHIDORAH started with its
+  HUD, the lit head moving LEFT -> MIDDLE -> RIGHT (`C:\tmp\PAD-432\heisei_proof\`, driven by
+  `playwait432.sh`, which waits for attract by the rig log's video sources). An earlier reading
   of "stays on the Stern logo" was an instrument error: glshot's PNGs are all 3,134,511 bytes
   at 1360x768, so a frame-size test never told attract from the logo, and only the first run
   was genuinely starved (0.9 frames a second while two other rigs ran). Main's own Write of the

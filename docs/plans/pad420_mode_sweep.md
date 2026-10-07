@@ -161,8 +161,8 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   - chain10: the media proofs (`media/rb`) once `media/BUILT2` exists (the sets are built by the detached
     `media/build_all.py` + `build_retry.py`); judge with `media_verdict.py <key>...`, then `scenes_prove.py`.
   - chain13: Munsters Pro multiball with KEEP (`mb/rb4`), Venom Pro multiball, Aerosmith Pro stack (`st/rb3`).
-  - chain14: Check this game on the 15 ports that got block lines (`rb_blocks`, check7): a pass means the
-    runtime's veto hooks leave the game running.
+  - chain14 DONE: Check this game passed on all 15 ports that got block lines (`rb_blocks`, check7), the runtime
+    logging each title's starts hooked ("block: on - a mode keeps N of the game's modes from starting").
   - chain15/16: checks of Elvira 1.13, TMNT LE 1.59, Venom LE 1.07 (check8), then their ball-save tests
     (`bs/rb_old3`, made by `bs/gen_old.py` from those checks).
 - **Stack on the mode-table titles, run 6 attempt**: `C:/tmp/PAD-420/st2/stack_starter.c` (a code mode built into

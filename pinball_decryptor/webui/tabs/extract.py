@@ -72,6 +72,30 @@ def _card_kind(card, folder, details):
     return "other" if rel and rel.get("kind") in ("other", "other_build") else ""
 
 
+def _card_project(card, folder, candidates):
+    """The project folder *card* belongs to when it is not *folder*: the one a build
+    record beside it names (a card PAD built), else a recent project extracted from it or
+    built into it; ``""`` when there is none on disk.  PAD-421: DragonRR picked a card that
+    already had a project of its own, and the page kept showing the folder that was open,
+    never offering his."""
+    from ...core.extract_source import _build_project, card_relation, _same_dir
+    if not card or not os.path.isfile(card):
+        return ""
+    built = _build_project(card)
+    if built and os.path.isdir(built) and not _same_dir(built, folder):
+        return os.path.normpath(built)
+    for cand in candidates:
+        if not cand or _same_dir(cand, folder) or not os.path.isdir(cand):
+            continue
+        try:
+            rel = card_relation(card, cand)
+        except Exception:                               # noqa: BLE001
+            continue
+        if rel and rel.get("kind") in ("source", "build"):
+            return os.path.normpath(cand)
+    return ""
+
+
 def _is_admin():
     from ...core.admin import is_admin
     try:
@@ -1237,6 +1261,7 @@ class ExtractTab(TabService):
         mfrs = list(self.window.manufacturers)
         mfr = self.mfr
         card = (self.extract_input_var.get() or "").strip()
+        candidates = self._recent_folders()
 
         def _work():
             try:
@@ -1249,6 +1274,10 @@ class ExtractTab(TabService):
                 details = None
             if details is not None:
                 details["card_kind"] = _card_kind(card, folder, details)
+                try:
+                    details["card_project"] = _card_project(card, folder, candidates)
+                except Exception:                       # noqa: BLE001
+                    details["card_project"] = ""
             self.ctx.loop.post(self._apply_stats, seq, folder, name, rows,
                                details)
 
@@ -1301,6 +1330,24 @@ class ExtractTab(TabService):
         from ...core import desktop
         desktop.open_path(folder)
         return True
+
+    def _recent_folders(self, n=20):
+        from ...core import project_registry
+        settings = getattr(self.app, "_settings", None) or {}
+        try:
+            return [e.get("folder") or "" for e in project_registry.recent(settings, n)]
+        except Exception:                               # noqa: BLE001
+            return []
+
+    @rpc
+    def use_card_project(self):
+        """The Extract tab's "Open its project": the picked card's own project folder
+        (PAD-421), opened the way a recent project is."""
+        d = (self.get("project") or {}).get("details") or {}
+        folder = d.get("card_project") or ""
+        if not folder or not os.path.isdir(folder):
+            return False
+        return self.open_recent(folder)
 
     def _refresh_recents(self):
         from ...core import project_registry

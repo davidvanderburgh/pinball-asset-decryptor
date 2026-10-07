@@ -21,6 +21,13 @@ worth failing on:
   * The wiring: every glGen/glCreate takes from its own pool; texture, buffer
     and VAO deletes free the name; shader and program deletes do NOT (the
     host's save-state journal rebuilds a program from its shaders' names).
+  * Coming round, and running out, reach the log the user sends.
+
+Rig proof (2026-10-07, Bond LE 1.06 attract, PAD_GL_NAME_CAP=128): main's
+counter re-issued 15 live textures and 18 live buffers on its first lap and
+the attract screens broke the way the report showed; this allocator came round
+five times with none re-issued and the screens stayed whole. Uncapped, attract
+alone hands out ~1.5 texture names a second while holding 30-70.
 """
 import os
 import re
@@ -29,10 +36,13 @@ import subprocess
 
 import pytest
 
+from tests._watch_event_filter import event_filter
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRIDGE = os.path.join(ROOT, "tools", "spike2_emu", "glbridge.c")
 
 CC = shutil.which("gcc") or shutil.which("cc") or shutil.which("clang")
+AWK = shutil.which("awk")
 
 pytestmark = [
     pytest.mark.skipif(not os.path.isfile(BRIDGE), reason="rig not present"),
@@ -185,3 +195,23 @@ def test_deletes_free_names_only_where_the_host_allows_it():
     # the save-state journal rebuilds programs from their shaders' guest names
     for fn in ("glDeleteShader", "glDeleteProgram"):
         assert "name_drop" not in _public(fn, src), fn
+
+
+@pytest.mark.skipif(not AWK, reason="no awk")
+def test_the_bridge_says_so_in_the_log_the_user_sends():
+    """luvthatapex's log was 4000 lines of video events and not one that said
+    what broke. The allocator's two loud lines reach the app's log pane through
+    watch.sh's real [event] filter; the bridge's other chatter still does not."""
+    lines = [
+        "[bridge] texture names came round (round 1, 53 of 4095 live, frame "
+        "47110); live ones are stepped over",
+        "[bridge] every texture name is in use (4095) - handing out 12 AGAIN; "
+        "whatever still uses it will draw wrong",
+        "[bridge] item67: draw from 0x5bdc44 (fbo 0 tex 1 arg 6)",
+        "[bridge] attached, ring 64 MB, host target 1360x768",
+    ]
+    out = subprocess.run([AWK, event_filter()], input="\n".join(lines) + "\n",
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    got = out.stdout.splitlines()
+    assert got == ["[event] " + l for l in lines[:2]]

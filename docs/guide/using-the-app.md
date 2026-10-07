@@ -41,7 +41,13 @@ cards have pages of their own: [Emulate](emulate.md) and
    stays open on Stern, JJP and CGC, whose Build / flash dialog can
    write an existing card image onto an SD card with no project at all.
    A multi-boot card picked here is read into the Multi-boot tab when
-   you open it.
+   you open it. Picking a different card while a project holding
+   another card's extract is open (and the new card has no project of
+   its own) opens the **New project** window filled in for that card —
+   a folder named after its game, beside the open project — so its
+   work does not land in the other card's folder; *Stay in <project>*
+   keeps the open one. The panel shows the same warning with a **New
+   project for this card…** button until you choose.
 4. **Extract tab** — shows the picked card; choose an output folder and
    click *Extract*. The output folder gets the decrypted assets plus a
    `.checksums.md5` baseline used by the Write tab.

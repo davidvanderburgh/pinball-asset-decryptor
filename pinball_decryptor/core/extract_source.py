@@ -116,7 +116,9 @@ def _names_this_image(rec: dict, image_path: str) -> bool:
     card it plainly came from would put the report back on "run an Extract"
     for a user who already has.  The mtime is deliberately NOT part of this:
     that is :func:`stale_source_message`'s job, and a stale extract is still
-    the extract of this card.
+    the extract of this card.  The one place it counts is a card RENAMED
+    since: another name only matches with the recorded file gone and the
+    same size and mtime.
     """
     if not rec:
         return False
@@ -124,13 +126,20 @@ def _names_this_image(rec: dict, image_path: str) -> bool:
     if recorded and os.path.normcase(os.path.abspath(recorded)) == \
             os.path.normcase(os.path.abspath(image_path)):
         return True
-    if os.path.normcase(rec.get("input_name") or "") != \
-            os.path.normcase(os.path.basename(image_path)):
-        return False
     try:
-        return rec.get("size") == os.path.getsize(image_path)
+        st = os.stat(image_path)
     except OSError:
         return False
+    if os.path.normcase(rec.get("input_name") or "") != \
+            os.path.normcase(os.path.basename(image_path)):
+        # Renamed since (PAD-421): the recorded file is gone and this one has
+        # its size AND modified time.  Size alone is no answer here: every
+        # card built for one machine is the same size.
+        return (bool(recorded) and not os.path.exists(recorded)
+                and rec.get("size") == st.st_size
+                and rec.get("mtime") is not None
+                and rec.get("mtime") == int(st.st_mtime))
+    return rec.get("size") == st.st_size
 
 
 def find_extract_for(image_path: str, roots) -> Optional[str]:

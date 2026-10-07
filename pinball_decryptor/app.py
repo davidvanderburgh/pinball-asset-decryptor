@@ -4676,10 +4676,12 @@ class App:
                         pass
                     # Was this the card Stern released?  The project keeps
                     # the answer, so its baseline is known to be stock or
-                    # known to be someone's build (PAD-426).
+                    # known to be someone's build (PAD-426).  Every file's
+                    # bytes are hashed: a card built elsewhere can keep
+                    # Stern's records for files it replaced.
                     try:
                         check = getattr(mfr, "stock_check", None)
-                        stock = check(in_path) if check else None
+                        stock = check(in_path, deep=True) if check else None
                         if stock and stock["status"] in ("official",
                                                          "modified"):
                             from .core.extract_source import (

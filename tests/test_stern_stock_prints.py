@@ -316,3 +316,38 @@ def test_the_shipped_table_covers_the_latest_builds():
             assert len(md5) == sp.FILE_DIGITS and set(md5) <= hexd, path
     with lzma.open(sp.TABLE_PATH, "rb") as f:
         assert json.loads(f.read())["format"] == sp.TABLE_FORMAT
+
+
+def _stale_card(tmp_path, monkeypatch, new_clip):
+    """An official card plus a build that replaced the scene clip but kept
+    Stern's manifest record for it (DragonRR's Heisei card did this to 541
+    videos)."""
+    from tests._ext4_fake import write_fake_card
+    official = str(write_fake_card(tmp_path / CARD))
+    built = str(write_fake_card(tmp_path / "Heisei.raw"))
+    spec = _card_spec(FOLDER, SIDX, _official_files())
+    spec[FOLDER]["assets"]["aa11"]["scene.assets"]["0.asset"] = new_clip
+    _install_readers_by_card(monkeypatch, {
+        CARD: _card_spec(FOLDER, SIDX, _official_files()),
+        "Heisei.raw": spec})
+    _table(tmp_path, monkeypatch, official)
+    return built
+
+
+def test_a_replaced_file_its_manifest_still_calls_stock_is_caught(
+        tmp_path, monkeypatch):
+    built = _stale_card(tmp_path, monkeypatch,
+                        _FAKE_MP4 + b"a much longer replacement clip")
+    got = sp.check_card(built)                 # sizes only: still caught
+    assert got["status"] == "modified"
+    assert got["diff"]["videos"] == 1 and got["stale"] == 1
+    assert "not built by PAD" in got["text"]
+
+
+def test_a_same_size_replacement_needs_the_deep_check(tmp_path, monkeypatch):
+    clip = _official_files()["assets/aa11/scene.assets/0.asset"]
+    built = _stale_card(tmp_path, monkeypatch, clip[:-4] + b"XXXX")
+    assert sp.check_card(built)["status"] == "official"   # can't tell
+    got = sp.check_card(built, deep=True)
+    assert got["status"] == "modified" and got["deep"]
+    assert got["diff"]["videos"] == 1 and got["stale"] == 1

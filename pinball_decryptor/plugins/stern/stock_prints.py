@@ -308,12 +308,12 @@ def diff_manifest(release, card_files, video_paths=(), radium_reader=None):
     return out
 
 
-def check_card(card_path, table=None):
+def check_card(card_path, table=None, deep=False, cancel=None):
     """Is the card at *card_path* an official Stern release?
 
     One metadata walk of the card's data partition (the walk the Image Info
-    probe does) plus its ``.sidx``; see :func:`check_walked` for the
-    answer's shape."""
+    probe does) plus its ``.sidx``; with *deep* every file whose size still
+    matches is hashed too.  See :func:`check_walked` for the answer."""
     from .explorer import CardImage
     from .info import _walk_partition
     try:
@@ -324,7 +324,8 @@ def check_card(card_path, table=None):
                 reader = card.reader(pt.index)
                 found = _walk_partition(reader)
                 if found["sidx_node"] is not None:
-                    return check_walked(reader, found, table)
+                    return check_walked(reader, found, table, deep=deep,
+                                        cancel=cancel)
     except Exception as e:                                # noqa: BLE001
         return _unreadable("Could not read the card (%s)." % e)
     return check_walked(None, {"sidx_node": None}, table)
@@ -332,39 +333,83 @@ def check_card(card_path, table=None):
 
 def _unreadable(text, sidx_name=""):
     return {"status": "unreadable", "label": "", "diff": None,
-            "sidx": sidx_name, "text": text}
+            "sidx": sidx_name, "stale": 0, "deep": False, "text": text}
 
 
-def check_walked(reader, found, table=None):
+def card_files(reader, manifest, paths, deep=False, cancel=None):
+    """``({path: (size, md5)}, stale)``: what the card really holds at each
+    of *paths*, and how many of its own manifest records are out of date.
+
+    The manifest is NOT the whole truth.  PAD rewrites the records of the
+    files it changes, but a card built elsewhere can leave them as Stern
+    wrote them: DragonRR's Heisei card replaced 541 videos and kept every
+    one's stock size and MD5 in its manifest.  So each file's size is taken
+    from the filesystem (free: the walk already read the inodes), and a size
+    that disagrees with the record marks the file changed.  With *deep*, the
+    bytes of every file whose size still agrees are hashed as well, which
+    also catches a same-size replacement (minutes on a spinning disk)."""
+    cancel = cancel or (lambda: False)
+    nodes = {}
+    for fp, _i, nd in reader.iter_regular_files(min_size=0, max_depth=20):
+        nodes[fp.lstrip("/")] = nd
+    out, stale = {}, 0
+    for p in paths:
+        node = nodes.get(p)
+        rec = manifest.get(p)
+        if node is None:
+            continue                      # not on the card: deleted
+        size = node["size"]
+        if rec is not None and rec[0] == size and not deep:
+            out[p] = rec
+            continue
+        if cancel():
+            raise RuntimeError("cancelled")
+        if rec is not None and rec[0] == size or deep:
+            md5 = _md5_node(reader, node)
+        else:
+            md5 = "?" * 32                # another size: changed, unhashed
+        out[p] = (size, md5)
+        if rec is not None and (rec[0] != size or rec[1] != md5):
+            stale += 1
+    return out, stale
+
+
+def check_walked(reader, found, table=None, deep=False, cancel=None):
     """The stock verdict for a partition already walked by
     ``info._walk_partition`` (*found*), read through *reader*.
 
-    Returns a dict: ``status`` is ``"official"`` (every indexed file matches
-    the release Stern shipped), ``"modified"`` (it names an official release
-    but files differ -- ``diff`` holds :func:`diff_manifest`'s counts),
+    Returns a dict: ``status`` is ``"official"`` (every file matches the
+    release Stern shipped), ``"modified"`` (it names an official release but
+    files differ -- ``diff`` holds :func:`diff_manifest`'s counts),
     ``"unknown"`` (a release the table has no record of) or ``"unreadable"``
-    (no manifest).  ``label`` is the release ("Godzilla LE 1.16") and
-    ``text`` the one line the app shows."""
+    (no manifest).  ``label`` is the release ("Godzilla LE 1.16"), ``stale``
+    how many of the card's own manifest records disagree with its files,
+    ``deep`` whether every file's bytes were hashed, and ``text`` the line
+    the app shows."""
     node = found.get("sidx_node")
     if reader is None or node is None:
         return _unreadable("No Stern validation manifest on this card, so it "
                            "can't be checked against the official release.")
     sidx_name = os.path.basename(found.get("sidx_path") or "")
     try:
-        files = sidx_mod.manifest_files(reader.read_file_bytes(node))
+        manifest = sidx_mod.manifest_files(reader.read_file_bytes(node))
     except Exception:                                     # noqa: BLE001
-        files = {}
-    if not files:
+        manifest = {}
+    if not manifest:
         return _unreadable("The card's validation manifest can't be read, so "
                            "it can't be checked against the official "
                            "release.", sidx_name)
     table = load_table() if table is None else table
     release = release_for(sidx_name, table)
     if release is None:
-        return {"status": "unknown", "label": "", "diff": None,
-                "sidx": sidx_name,
-                "text": "%s is not a release PAD has an official record of, "
-                        "so it can't be checked against stock." % sidx_name}
+        out = _unreadable("%s is not a release PAD has an official record "
+                          "of, so it can't be checked against stock."
+                          % sidx_name, sidx_name)
+        out["status"] = "unknown"
+        return out
+    files, stale = card_files(reader, manifest,
+                              set(manifest) | set(release.get("files") or {}),
+                              deep=deep, cancel=cancel)
     nodes = {}
 
     def read_radium(rel):
@@ -379,8 +424,16 @@ def check_walked(reader, found, table=None):
     diff = diff_manifest(release, files, found.get("video_paths") or (),
                          radium_reader=read_radium)
     status = "official" if not diff["changed"] else "modified"
+    text = describe(status, label, diff)
+    if stale:
+        text += (" Its own manifest still lists %s as Stern's, so it was "
+                 "not built by PAD." % _plural(stale, "changed file"))
+    if status == "official" and not deep:
+        text = ("Official %s - every file matches the card Stern released "
+                "(by the card's manifest and file sizes)." % label)
     return {"status": status, "label": label, "diff": diff,
-            "sidx": sidx_name, "text": describe(status, label, diff)}
+            "sidx": sidx_name, "stale": stale, "deep": bool(deep),
+            "text": text}
 
 
 def _plural(n, word):

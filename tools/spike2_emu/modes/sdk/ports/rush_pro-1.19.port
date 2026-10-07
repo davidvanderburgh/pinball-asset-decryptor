@@ -436,3 +436,144 @@ lamp 429,430,431  0              GI1  # lamp 224, I/O group 9 index 20, at 0,0
 lamp 432,433,434  0              GI2  # lamp 225, I/O group 9 index 23, at 0,0
 lamp 435,436,437  0              GI3  # lamp 226, I/O group 9 index 26, at 0,0
 lamp 438,439,440  0              GI4  # lamp 227, I/O group 9 index 29, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# #
+#  
+# P
+# A
+# D
+# -
+# 4
+# 2
+# 0
+# :
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# r
+# e
+# a
+# d
+#  
+# f
+# r
+# o
+# m
+#  
+# t
+# h
+# i
+# s
+#  
+# p
+# r
+# o
+# g
+# r
+# a
+# m
+#  
+# w
+# i
+# t
+# h
+#  
+# t
+# h
+# e
+#  
+# v
+# t
+# a
+# b
+# l
+# e
+#  
+# s
+# l
+# o
+# t
+#  
+# r
+# u
+# s
+# h
+# _
+# l
+# e
+# -
+# 1
+# .
+# 1
+# 8
+# '
+# s
+#  
+# o
+# w
+# n
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# p
+# o
+# i
+# n
+# t
+#  
+# a
+# t
+#  
+# (
+# 4
+# 0
+# )
+site block_start_2      0x000b0974 0xe92d43f0 0xe1a04000
+data block_obj_2        0x0b646a80
+text block_name_2       La Villa Strangiato
+site block_start_3      0x000b7620 0xe92d4ff0 0xe1a04000
+data block_obj_3        0x0b646b50
+text block_name_3       Tom Sawyer
+site block_start_4      0x000ba150 0xe92d4ff0 0xe1a04000
+data block_obj_4        0x0b646c08
+text block_name_4       Working Man
+site block_start_5      0x000b4bb0 0xe92d47f0 0xe1a04000
+data block_obj_5        0x0b646cf8
+text block_name_5       The Big Money
+site block_start_6      0x000b61b0 0xe92d41f0 0xe1a04000
+data block_obj_6        0x0b646dd8
+text block_name_6       The Spirit of Radio
+site block_start_7      0x000b2c84 0xe92d47f0 0xe1a04000
+data block_obj_7        0x0b646ea0
+text block_name_7       Limelight
+site block_start_15     0x000f72f8 0xe92d47f0 0xe1a04000
+data block_obj_15       0x0b647378
+text block_name_15      Bastille Day Hurry Up
+site block_start_16     0x0010cca8 0xe92d43f0 0xe1a07000
+data block_obj_16       0x0b647430
+text block_name_16      Topper Frenzy
+site block_start_35     0x000f5ca0 0xe92d4ff0 0xe1a05000
+data block_obj_35       0x0b6481c0
+text block_name_35      2112 Wizard

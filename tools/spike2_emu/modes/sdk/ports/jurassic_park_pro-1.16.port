@@ -301,3 +301,141 @@ lamp 30           0x8000000      CONTROL ROOM  # lamp 99, I/O group 8 index 50, 
 lamp 112          0              RAPTOR PIT FLASH  # lamp 100, I/O group 8 index 51, at 38,302
 lamp 113          0              LEFT HALFPIPE SPOTLIGHT  # lamp 101, I/O group 8 index 52, at 34,190
 lamp 47           0              SUPPLY DROP  # lamp 102, I/O group 8 index 53, at 111,297
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# #
+#  
+# P
+# A
+# D
+# -
+# 4
+# 2
+# 0
+# :
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# r
+# e
+# a
+# d
+#  
+# f
+# r
+# o
+# m
+#  
+# t
+# h
+# i
+# s
+#  
+# p
+# r
+# o
+# g
+# r
+# a
+# m
+#  
+# w
+# i
+# t
+# h
+#  
+# t
+# h
+# e
+#  
+# v
+# t
+# a
+# b
+# l
+# e
+#  
+# s
+# l
+# o
+# t
+#  
+# j
+# u
+# r
+# a
+# s
+# s
+# i
+# c
+# _
+# p
+# a
+# r
+# k
+# _
+# l
+# e
+# -
+# 1
+# .
+# 1
+# 6
+# '
+# s
+#  
+# o
+# w
+# n
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# p
+# o
+# i
+# n
+# t
+#  
+# a
+# t
+#  
+# (
+# 2
+# 1
+# )
+site block_start_119    0x0014cd1c 0xe92d4070 0xe24dd008
+data block_obj_119      0x0072835c
+text block_name_119     Trex Chase
+site block_start_120    0x00155378 0xe92d4070 0xe24dd008
+data block_obj_120      0x007285e4
+text block_name_120     Trex Rampage
+site block_start_121    0x001154d0 0xe92d40f0 0xe24dd00c
+data block_obj_121      0x00728730
+text block_name_121     Ctrl Room Virus Attack
+site block_start_122    0x00110670 0xe92d4070 0xe24dd008
+data block_obj_122      0x00728874
+text block_name_122     Ctrl Room Restore Power
+site block_start_127    0x00119674 0xe92d41f0 0xe1a04000
+data block_obj_127      0x0072964c
+text block_name_127     Escape Nublar

@@ -319,3 +319,175 @@ lamp 411          0              LEFT WHITE GI  # lamp 194, I/O group 7 index 1,
 lamp 413          0              RIGHT RED GI  # lamp 195, I/O group 8 index 0, at 0,0
 lamp 415          0              RIGHT BLUE GI  # lamp 196, I/O group 8 index 2, at 0,0
 lamp 414          0              RIGHT WHITE GI  # lamp 197, I/O group 8 index 1, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# #
+#  
+# P
+# A
+# D
+# -
+# 4
+# 2
+# 0
+# :
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# r
+# e
+# a
+# d
+#  
+# f
+# r
+# o
+# m
+#  
+# t
+# h
+# i
+# s
+#  
+# p
+# r
+# o
+# g
+# r
+# a
+# m
+#  
+# w
+# i
+# t
+# h
+#  
+# s
+# t
+# a
+# r
+# _
+# w
+# a
+# r
+# s
+# _
+# l
+# e
+# -
+# 1
+# .
+# 3
+# 0
+# '
+# s
+#  
+# s
+# t
+# a
+# r
+# t
+#  
+# s
+# l
+# o
+# t
+#  
+# (
+# 8
+# )
+site block_start_0      0x000b7ad8 0xe92d4070 0xe1a04000
+data block_obj_0        0x00675208
+text block_name_0       Hoth I
+site block_start_1      0x000b85c8 0xe92d4038 0xe1a04000
+data block_obj_1        0x006752b4
+text block_name_1       Hoth II a
+site block_start_2      0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_2        0x00675394
+text block_name_2       Hoth II B
+site block_start_3      0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_3        0x00675494
+text block_name_3       Hoth III a
+site block_start_4      0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_4        0x00675558
+text block_name_4       Hoth III B
+site block_start_6      0x000a9f98 0xe92d4038 0xebffc583
+data block_obj_6        0x006756f4
+text block_name_6       Deathstar I
+site block_start_7      0x000aab44 0xe92d4010 0xe1a04000
+data block_obj_7        0x006757a0
+text block_name_7       Deathstar II a
+site block_start_8      0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_8        0x00675884
+text block_name_8       Deathstar II B
+site block_start_9      0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_9        0x0067594c
+text block_name_9       Deathstar III
+site block_start_11     0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_11       0x00675b04
+text block_name_11      Endor I
+site block_start_12     0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_12       0x00675bec
+text block_name_12      Endor II
+site block_start_13     0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_13       0x00675ce4
+text block_name_13      Endor III
+site block_start_15     0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_15       0x00675ecc
+text block_name_15      Tatooine I
+site block_start_16     0x000c00b4 0xe92d4010 0xe1a04000
+data block_obj_16       0x00675f90
+text block_name_16      Tatooine II
+site block_start_17     0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_17       0x00676078
+text block_name_17      Tatooine III
+site block_start_21     0x0009ce94 0xe92d4010 0xe1a04000
+data block_obj_21       0x00676278
+text block_name_21      Rescue Leia Hurry Up
+site block_start_22     0x0009ce94 0xe92d4010 0xe1a04000
+data block_obj_22       0x00676340
+text block_name_22      Rescue Leia Hurry Up
+site block_start_23     0x0009ce94 0xe92d4010 0xe1a04000
+data block_obj_23       0x00676408
+text block_name_23      Rescue Leia Hurry Up
+site block_start_24     0x0009ce94 0xe92d4010 0xe1a04000
+data block_obj_24       0x006764d0
+text block_name_24      Rescue Leia Hurry Up
+site block_start_25     0x000bf28c 0xe92d4010 0xe1a04000
+data block_obj_25       0x00676598
+text block_name_25      Rescue Luke Hurry Up
+site block_start_26     0x000b7934 0xe92d4010 0xe1a04000
+data block_obj_26       0x00676668
+text block_name_26      Hoth Hyperspace Hurry Up
+site block_start_28     0x000c9b0c 0xe92d4010 0xe1a04000
+data block_obj_28       0x00676838
+text block_name_28      Hspace Hurry Up
+site block_start_29     0x000d90b8 0xe5903000 0xe92d41f0
+data block_obj_29       0x00676908
+text block_name_29      Shooting Gallery
+site block_start_30     0x000ed864 0xe92d4010 0xe1a04000
+data block_obj_30       0x006769b8
+text block_name_30      Tie Hurry Up
+site block_start_32     0x0004aa70 0xe92d40f8 0xe1a04000
+data block_obj_32       0x00676ba0
+text block_name_32      Escape Boba Fett
+site block_start_33     0x00090c10 0xe92d47f0 0xe1a04000
+data block_obj_33       0x00676d00
+text block_name_33      Lightsaber Duel
+site block_start_34     0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_34       0x00676e7c
+text block_name_34      Lightsaber Duel Ready
+site block_start_35     0x0009b5b0 0xe5902000 0xe92d4038
+data block_obj_35       0x0067708c
+text block_name_35      Jedi Wizard Mball Ready

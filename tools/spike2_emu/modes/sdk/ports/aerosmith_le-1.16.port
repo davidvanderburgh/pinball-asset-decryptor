@@ -281,3 +281,13 @@ lamp 171,172,173      0              LOGO 2  # node/channel 12/19 12/20 12/21
 lamp 174,175,176      0              LOGO 3  # node/channel 12/23 12/24 12/25
 lamp 177,178,179      0              LOGO 4  # node/channel 12/26 12/27 12/28
 lamp 180,181,182      0              LOGO 5  # node/channel 12/29 12/30 12/31
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x000fa4d0 0xe92d4038 0xe3a000f3
+text block_name_0       Super Scoring
+site block_start_1      0x0003b724 0xe92d4038 0xe3a000f1
+text block_name_1       Double Scoring
+site block_start_2      0x001308e0 0xe92d4070 0xe3a000f6
+text block_name_2       Upper Playfield Orbit Rule

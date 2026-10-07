@@ -349,3 +349,160 @@ lamp 129          0              LEFT SIDE 3  # lamp 77, I/O group 8 index 12, a
 lamp 130          0              RIGHT SIDE 1  # lamp 78, I/O group 8 index 13, at 0,0
 lamp 131          0              RIGHT SIDE 2  # lamp 79, I/O group 8 index 14, at 0,0
 lamp 132          0              RIGHT SIDE 3  # lamp 80, I/O group 8 index 15, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# #
+#  
+# P
+# A
+# D
+# -
+# 4
+# 2
+# 0
+# :
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# r
+# e
+# a
+# d
+#  
+# f
+# r
+# o
+# m
+#  
+# t
+# h
+# i
+# s
+#  
+# p
+# r
+# o
+# g
+# r
+# a
+# m
+#  
+# w
+# i
+# t
+# h
+#  
+# s
+# w
+# o
+# r
+# d
+# _
+# o
+# f
+# _
+# r
+# a
+# g
+# e
+# _
+# l
+# e
+# -
+# 1
+# .
+# 1
+# 8
+# '
+# s
+#  
+# s
+# t
+# a
+# r
+# t
+#  
+# s
+# l
+# o
+# t
+#  
+# (
+# 3
+# 1
+# )
+site block_start_0      0x0008511c 0xe92d4ff0 0xe1a04000
+data block_obj_0        0x006296a8
+text block_name_0       Sand Worm
+site block_start_1      0x00073f94 0xe92d4ff0 0xe1a04000
+data block_obj_1        0x00629830
+text block_name_1       Hydra
+site block_start_2      0x000694fc 0xe92d47f0 0xe1a04000
+data block_obj_2        0x006299d8
+text block_name_2       Fire Elemental
+site block_start_3      0x0006e9f4 0xe92d4ff0 0xe1a04000
+data block_obj_3        0x00629b40
+text block_name_3       Handholder
+site block_start_4      0x00079874 0xe92d4ff0 0xe1a0b000
+data block_obj_4        0x00629ca0
+text block_name_4       Lich
+site block_start_5      0x000592e4 0xe92d4ff0 0xe1a0a000
+data block_obj_5        0x00629e70
+text block_name_5       Black Castle
+site block_start_8      0x0006f8c8 0xe92d4010 0xe1a04000
+data block_obj_8        0x0062a838
+text block_name_8       Knight Hurryup
+site block_start_9      0x0006f8c8 0xe92d4010 0xe1a04000
+data block_obj_9        0x0062a590
+text block_name_9       Flail Hurryup
+site block_start_10     0x0008b0b0 0xe92d4010 0xe1a04000
+data block_obj_10       0x0062a678
+text block_name_10      Target Hurryup
+site block_start_11     0x0006f8c8 0xe92d4010 0xe1a04000
+data block_obj_11       0x0062a758
+text block_name_11      Shield Hurryup
+site block_start_12     0x00093cb4 0xe92d43f8 0xe1a04000
+data block_obj_12       0x0062a458
+text block_name_12      War Hurryups
+
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x00096614 0xe92d4370 0xe24dd010  # crule_add_a_ball::v[23]
+text block_rule_name_0     Add a Ball
+site block_rule_1          0x000977ac 0xe92d41f0 0xe1a07003  # crule_add_time::v[23]
+text block_rule_name_1     Add Time
+site block_rule_2          0x00098004 0xe2022080 0xe3a03000  # crule_bonus::v[23]
+text block_rule_name_2     Bonus
+site block_rule_3          0x0009851c 0xe92d4070 0xe1a04002  # crule_castle_lock::v[23]
+text block_rule_name_3     Castle Lock
+site block_rule_4          0x00099824 0xe2022702 0xe3a03000  # crule_knight_spellout::v[23]
+text block_rule_name_4     Knight Spellout
+site block_rule_5          0x0009ad1c 0xe92d41f0 0xe1a07003  # crule_magna_save::v[23]
+text block_rule_name_5     Magna Save
+site block_rule_6          0x000bef20 0xe92d40f0 0xe1a04000  # crule_skill_shot::v[23]
+text block_rule_name_6     Skill Shot
+site block_rule_7          0x000a5fbc 0xe92d41f0 0xe1a07003  # crule_super_shot::v[23]
+text block_rule_name_7     Super Shot
+site block_rule_8          0x000a6edc 0xe92d0030 0xe2024807  # crule_sword_of_rage::v[23]
+text block_rule_name_8     Sword of Rage
+site block_rule_9          0x000a7c58 0xe92d41f0 0xe1a07003  # crule_triple_knights_lock::v[23]
+text block_rule_name_9     Triple Knights Lock
+site block_rule_10         0x000a9460 0xe92d4ff0 0xe1a04000  # crule_u_p_loops::v[23]
+text block_rule_name_10    U P Loops
+site block_rule_11         0x000abb30 0xe92d4ff0 0xe24dd01c  # crule_u_turn_combos::v[23]
+text block_rule_name_11    U Turn Combos
+site block_rule_12         0x000aed14 0xe92d47f0 0xe1c049d0  # crule_wheel_modes::v[23]
+text block_rule_name_12    Wheel Modes

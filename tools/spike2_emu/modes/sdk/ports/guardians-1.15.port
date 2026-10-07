@@ -310,3 +310,15 @@ lamp 159          0              LEFT LED4A/B  # lamp 114, I/O group 8 index 35,
 lamp 158          0              LEFT LED3A/B  # lamp 115, I/O group 8 index 36, at 0,0
 lamp 157          0              LEFT LED2A/B  # lamp 116, I/O group 8 index 37, at 0,0
 lamp 156          0              LEFT LED1A/B  # lamp 117, I/O group 8 index 38, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x00103810 0xe92d4038 0xe3a000ee
+text block_name_0       Super Scoring
+site block_start_1      0x000665bc 0xe92d40d0 0xe30612c0
+text block_name_1       Headphone Hurryup
+site block_start_2      0x0003d248 0xe92d4008 0xe3a000ec
+text block_name_2       Double Scoring
+site block_start_3      0x0003d6b0 0xe92d4038 0xe3a000ec
+text block_name_3       Double Scoring

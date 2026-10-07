@@ -300,3 +300,228 @@ lamp 146          0              ACTION  # lamp 120, I/O group 8 index 79, at 20
 lamp 173          0              DUNGEON FLASH  # lamp 121, I/O group 8 index 5, at 182,256
 lamp 245          0              LOWER LEFT SPOT FLASH  # lamp 122, I/O group 7 index 85, at 49,374
 lamp 246          0              LOWER RIGHT SPOT FLASH  # lamp 123, I/O group 8 index 55, at 254,412
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# #
+#  
+# P
+# A
+# D
+# -
+# 4
+# 2
+# 0
+# :
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# r
+# e
+# a
+# d
+#  
+# f
+# r
+# o
+# m
+#  
+# t
+# h
+# i
+# s
+#  
+# p
+# r
+# o
+# g
+# r
+# a
+# m
+#  
+# w
+# i
+# t
+# h
+#  
+# d
+# u
+# n
+# g
+# e
+# o
+# n
+# s
+# _
+# a
+# n
+# d
+# _
+# d
+# r
+# a
+# g
+# o
+# n
+# s
+# _
+# l
+# e
+# -
+# 1
+# .
+# 0
+# 0
+# '
+# s
+#  
+# s
+# t
+# a
+# r
+# t
+#  
+# s
+# l
+# o
+# t
+#  
+# (
+# 5
+# 0
+# )
+site block_start_12     0x001a8460 0xe3a01000 0xe30e3674
+data block_obj_12       0x007ea030
+text block_name_12      Mimic Hurry Up
+site block_start_34     0x00092b94 0xe92d4ff0 0xe1a04000
+data block_obj_34       0x007e7330
+text block_name_34      Dungeon Crawl
+site block_start_36     0x000e4b44 0xe92d4010 0xe1a04000
+data block_obj_36       0x007e7ea8
+text block_name_36      Gel Cube Hurry Up
+site block_start_39     0x001f4104 0xe92d4ff0 0xe1a05000
+data block_obj_39       0x007ea5a0
+text block_name_39      Tinys Dice Game
+site block_start_42     0x00109550 0xe92d4010 0xe1a04000
+data block_obj_42       0x007e7f60
+text block_name_42      Map Arabel Hurry Up
+site block_start_43     0x00107580 0xe92d41f0 0xe1a04000
+data block_obj_43       0x007e8038
+text block_name_43      Map Arabel
+site block_start_44     0x0010e998 0xe92d43f0 0xe1a05000
+data block_obj_44       0x007e81a0
+text block_name_44      Map Kobold Town
+site block_start_45     0x00114c04 0xe92d43f0 0xe1a05000
+data block_obj_45       0x007e8318
+text block_name_45      Map West Gate
+site block_start_46     0x0011c334 0xe92d43f0 0xe1a05000
+data block_obj_46       0x007e8440
+text block_name_46      Map Greenest
+site block_start_47     0x001284e0 0xe92d43f8 0xe1a04000
+data block_obj_47       0x007e85c0
+text block_name_47      Map Dragonspear
+site block_start_49     0x00135714 0xe92d43f0 0xe1a05000
+data block_obj_49       0x007e8890
+text block_name_49      Map Dark Hold
+site block_start_50     0x00140128 0xe92d47f0 0xe1a04000
+data block_obj_50       0x007e8990
+text block_name_50      Map Undermountain
+site block_start_51     0x0014cbac 0xe92d43f0 0xe24dd014
+data block_obj_51       0x007e8b58
+text block_name_51      Map Rescue King
+site block_start_53     0x0015b598 0xe92d47f0 0xe1a04000
+data block_obj_53       0x007e8dc8
+text block_name_53      Map Choosen Ritual Singleball
+site block_start_54     0x0015e0b8 0xe92d41f0 0xe1a06000
+data block_obj_54       0x007e8e80
+text block_name_54      Map Purple 1
+site block_start_55     0x001646c0 0xe92d43f0 0xe1a05000
+data block_obj_55       0x007e8f80
+text block_name_55      Map Purple 2
+site block_start_56     0x0016a8d8 0xe92d43f0 0xe1a05000
+data block_obj_56       0x007e90a0
+text block_name_56      Map Purple 3
+site block_start_57     0x00170400 0xe92d4010 0xe1a04000
+data block_obj_57       0x007e91d0
+text block_name_57      Map White 1a
+site block_start_58     0x00170a30 0xe92d4010 0xe1a04000
+data block_obj_58       0x007e92d0
+text block_name_58      Map White 1b
+site block_start_59     0x001744b4 0xe92d47f0 0xe1a04000
+data block_obj_59       0x007e93d0
+text block_name_59      Map White 2
+site block_start_60     0x00178e2c 0xe92d43f8 0xe1a04000
+data block_obj_60       0x007e9510
+text block_name_60      Map White 3
+site block_start_61     0x0017bc10 0xe92d41f0 0xe1a04000
+data block_obj_61       0x007e9628
+text block_name_61      Map Blue 1
+site block_start_62     0x0017ffd0 0xe92d43f0 0xe1a05000
+data block_obj_62       0x007e9720
+text block_name_62      Map Blue 2
+site block_start_63     0x00185384 0xe92d43f0 0xe1a05000
+data block_obj_63       0x007e9838
+text block_name_63      Map Blue 3
+site block_start_64     0x00189388 0xe92d43f0 0xe1a05000
+data block_obj_64       0x007e9958
+text block_name_64      Map Orange 1
+site block_start_67     0x0019614c 0xe92d43f0 0xe1a05000
+data block_obj_67       0x007e9d30
+text block_name_67      Map Orange 3
+site block_start_69     0x00142890 0xe92d43f8 0xe1a05000
+data block_obj_69       0x007e9f68
+text block_name_69      Map Undermountain Hurry Up
+site block_start_70     0x001efcfc 0xe92d41f0 0xe1a04000
+data block_obj_70       0x007ea3a0
+text block_name_70      Traveling
+
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x000468c0 0xe92d40f0 0xe24dd00c  # cbelongings::v[43]
+text block_rule_name_0     Belongings
+site block_rule_1          0x0006f060 0xe92d40f0 0xe24dd014  # ccrit_hit_rule::v[43]
+text block_rule_name_1     Crit Hit
+site block_rule_2          0x00081c40 0xe92d40f0 0xe24dd014  # cdragon_rule::v[43]
+text block_rule_name_2     Dragon
+site block_rule_3          0x00096228 0xe92d40f8 0xe1a06002  # cdungeon_rule::v[43]
+text block_rule_name_3     Dungeon
+site block_rule_4          0x000b3fec 0xe3530000 0x03520701  # cextra_ball::v[43]
+text block_rule_name_4     Extra Ball
+site block_rule_5          0x000a7158 0xe92d4070 0xe1a04002  # cfizmo::v[43]
+text block_rule_name_5     Fizmo
+site block_rule_6          0x000e5840 0xe92d40f0 0xe24dd00c  # cgel_cube_rule::v[43]
+text block_rule_name_6     Gel Cube
+site block_rule_7          0x00100c24 0xe92d4ff0 0xe24dd004  # clooting::v[43]
+text block_rule_name_7     Looting
+site block_rule_8          0x001b235c 0xe92d4070 0xe1a04002  # cmimic_mania_rule::v[43]
+text block_rule_name_8     Mimic Mania
+site block_rule_9          0x001b3e10 0xe92d4038 0xe1c045d8  # cranged_attack::v[43]
+text block_rule_name_9     Ranged Attack
+site block_rule_10         0x001c7240 0xe92d41f0 0xe1c048d0  # csecret_door::v[43]
+text block_rule_name_10    Secret Door
+site block_rule_11         0x001c8b64 0xe92d4ff0 0xe1a04000  # cskill_shot::v[43]
+text block_rule_name_11    Skill Shot
+site block_rule_12         0x001cc700 0xe2022901 0xe92d4008  # cspinner::v[43]
+text block_rule_name_12    Spinner
+site block_rule_13         0x001eccc8 0xe2022801 0xe3a03000  # ctavern_brawl_rule::v[43]
+text block_rule_name_13    Tavern Brawl
+site block_rule_14         0x001f4824 0xe2022801 0xe3a03000  # ctinys_dice_game_rule::v[43]
+text block_rule_name_14    Tinys Dice Game
+site block_rule_15         0x001e19b4 0xe92d4070 0xe1a04002  # ctown::v[43]
+text block_rule_name_15    Town
+site block_rule_16         0x001e5984 0xe92d4ff0 0xe30758b0  # ctrap::v[43]
+text block_rule_name_16    Trap
+site block_rule_17         0x001f51ec 0xe59012b0 0xe351001e  # ctreasure::v[43]
+text block_rule_name_17    Treasure

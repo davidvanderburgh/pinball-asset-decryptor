@@ -1,0 +1,383 @@
+{
+ "key": "james_bond_pro-1.06",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Bullshit Scoring",
+   "start": "0x5be58",
+   "words": [
+    "0xe92d4010",
+    "0xe30001ad"
+   ],
+   "how": "counts AUD_BULLSHIT_SCORING_STARTED (id 208) at 0x5bf70; sets game flag 141,175; creates record(s) 429 (body 0x5ae58); reached by tail b 0x5bfc8 (fn 0x5bfb4); a caller uses the result (0x5bfc8: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Geiger Counter",
+   "start": "0xb1978",
+   "words": [
+    "0xe3011430",
+    "0xe300019f"
+   ],
+   "how": "counts AUD_GEIGER_COUNTER_STARTED (id 209) at 0xb1ad0; creates record(s) 415 (body 0xb1430),239 (body 0xb1408); reached by table word 0x62b104",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Attache Case",
+   "start": "0x33cb8",
+   "words": [
+    "0xe30316b4",
+    "0xe30001a1"
+   ],
+   "how": "counts AUD_ATTACHE_CASE_STARTED (id 210) at 0x33d94; creates record(s) 417 (body 0x336b4),240 (body 0x3368c); reached by table word 0x62b138",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "Aston Martin",
+   "start": "0x2a860",
+   "words": [
+    "0xe92d40f8",
+    "0xe30a1268"
+   ],
+   "how": "counts AUD_ASTON_MARTIN_STARTED (id 211) at 0x2a944; creates record(s) 419 (body 0x2a268),242 (body 0x2a240); reached by table word 0x62b16c",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 4,
+   "name": "Under Water Powerpack",
+   "start": "0x1c0f8c",
+   "words": [
+    "0xe300195c",
+    "0xe30001a5"
+   ],
+   "how": "counts AUD_UNDER_WATER_POWERPACK_STARTED (id 212) at 0x1c105c; creates record(s) 421 (body 0x1c095c),244 (body 0x1c0934); reached by table word 0x62b1a0",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 5,
+   "name": "Little Nellie",
+   "start": "0xff164",
+   "words": [
+    "0xe30e1a70",
+    "0xe30001a7"
+   ],
+   "how": "counts AUD_LITTLE_NELLIE_STARTED (id 213) at 0xff240; creates record(s) 423 (body 0xfea70),246 (body 0xfea48); reached by table word 0x62b1d4",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 6,
+   "name": "Ahoy Mr Bond Wizard Mode",
+   "start": "0x20530",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "how": "counts AUD_AHOY_MR_BOND_WIZARD_MODE_STARTED (id 276) at 0x20740; sets game flag 85,86; creates record(s) 211 (body 0x1cd54),378 (body 0x1cc50),381 (body 0x1cbcc); reached by bl 0x2081c (fn 0x207f0); table word 0x621d64; ball calls: serve(1) (no ball served)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 7,
+   "name": "Upside Down Hurryup",
+   "start": "0x1c6564",
+   "words": [
+    "0xe92d40f8",
+    "0xe3051550"
+   ],
+   "how": "counts AUD_UPSIDE_DOWN_HURRYUP_STARTED (id 290) at 0x1c6628; sets game flag 42; creates record(s) 398 (body 0x1c5550),230 (body 0x1c547c); reached by table word 0x63b868",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 8,
+   "name": "Upside Down 2 Hurryup",
+   "start": "0x1c86d4",
+   "words": [
+    "0xe92d40f8",
+    "0xe307163c"
+   ],
+   "how": "counts AUD_UPSIDE_DOWN_2_HURRYUP_STARTED (id 292) at 0x1c8798; sets game flag 42; creates record(s) 400 (body 0x1c763c),231 (body 0x1c7560); reached by table word 0x63b870",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 9,
+   "name": "Tarantula Hurryup",
+   "start": "0x1b0dac",
+   "words": [
+    "0xe92d40f8",
+    "0xe30e1dc4"
+   ],
+   "how": "counts AUD_TARANTULA_HURRYUP_STARTED (id 294) at 0x1b0e44; creates record(s) 402 (body 0x1aedc4),232 (body 0x1aec38); reached by table word 0x639268",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 10,
+   "name": "Knife Shoe Hurryup",
+   "start": "0xf249c",
+   "words": [
+    "0xe92d40f8",
+    "0xe30115c0"
+   ],
+   "how": "counts AUD_KNIFE_SHOE_HURRYUP_STARTED (id 296) at 0xf253c; creates record(s) 405 (body 0xf15c0),233 (body 0xf1434); reached by table word 0x63929c",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 11,
+   "name": "Oddjob Hat Hurryup",
+   "start": "0x144324",
+   "words": [
+    "0xe92d40f8",
+    "0xe30312ac"
+   ],
+   "how": "counts AUD_ODDJOB_HAT_HURRYUP_STARTED (id 298) at 0x1443b8; creates record(s) 407 (body 0x1432ac),234 (body 0x143120); reached by table word 0x6392d0",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 12,
+   "name": "Shark Hurryup",
+   "start": "0x18acec",
+   "words": [
+    "0xe92d43f8",
+    "0xe3004178"
+   ],
+   "how": "counts AUD_SHARK_HURRYUP_STARTED (id 300) at 0x18add4; creates record(s) 409 (body 0x18a7bc),235 (body 0x186898); reached by table word 0x639304",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 13,
+   "name": "Bird One Hurryup",
+   "start": "0x496d8",
+   "words": [
+    "0xe92d40f8",
+    "0xe3081eb4"
+   ],
+   "how": "counts AUD_BIRD_ONE_HURRYUP_STARTED (id 302) at 0x49770; creates record(s) 411 (body 0x48eb4),236 (body 0x48bb8); reached by table word 0x639338",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 14,
+   "name": "Bath O Sub Hurryup",
+   "start": "0x47ff4",
+   "words": [
+    "0xe92d43f8",
+    "0xe3041d2c"
+   ],
+   "how": "counts AUD_BATH_O_SUB_HURRYUP_STARTED (id 304) at 0x480c8; creates record(s) 413 (body 0x44d2c),237 (body 0x44ba0); reached by table word 0x63936c",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 15,
+   "name": "Double Scoring",
+   "start": "0x8ca40",
+   "words": [
+    "0xe92d4008",
+    "0xe30001ab"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 310) at 0x8ca90; sets game flag 175; creates record(s) 427 (body 0x8c444); reached by bl 0x5e75c (fn 0x5e758); bl 0x65270 (fn 0x6526c); bl 0x6abdc (fn 0x6abd8); bl 0xc631c (fn 0xc6318); bl 0x155474 (fn 0x155470)",
+   "confidence": "high",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Mystery Villain Mode",
+   "why": "no function counts AUD_MYSTERY_VILLAIN_MODE_START (id 331) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Mystery Henchman Mode",
+   "why": "no function counts AUD_MYSTERY_HENCHMAN_MODE_START (id 332) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Dr Nos Lair",
+   "why": "no function counts AUD_DR_NOS_LAIR_STARTED (id 339) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Orient Express",
+   "why": "no function counts AUD_ORIENT_EXPRESS_STARTED (id 342) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Oddjob Battles Bond",
+   "why": "no function counts AUD_ODDJOB_BATTLES_BOND_STARTED (id 345) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Cut Bond in Half",
+   "why": "no function counts AUD_CUT_BOND_IN_HALF_STARTED (id 348) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Mr Osato",
+   "why": "no function counts AUD_MR_OSATO_STARTED (id 351) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Professor Dent",
+   "why": "no function counts AUD_PROFESSOR_DENT_STARTED (id 354) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Mr Wint Mr Kidd",
+   "why": "no function counts AUD_MR_WINT_MR_KIDD_STARTED (id 357) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Feeding Frenzy",
+   "why": "no function counts AUD_FEEDING_FRENZY_STARTED (id 360) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Fiona Volpe",
+   "why": "no function counts AUD_FIONA_VOLPE_STARTED (id 363) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Under Water Fight",
+   "why": "no function counts AUD_UNDER_WATER_FIGHT_STARTED (id 366) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Training Grounds",
+   "why": "no function counts AUD_TRAINING_GROUNDS_STARTED (id 369) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Diamond Death Ray",
+   "why": "no function counts AUD_DIAMOND_DEATH_RAY_STARTED (id 372) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Bust Out",
+   "start": "0x620c4",
+   "words": [
+    "0xe92d40d0",
+    "0xebffffc0"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Whats That",
+   "start": "0x1cd2b4",
+   "words": [
+    "0xe92d40d0",
+    "0xebffffc6"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Dr No Multiball",
+   "start": "0x92a90",
+   "words": [
+    "0xe92d47f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_DR_NO_MULTIBALL_STARTED; serves balls via 0x92a90 -> 0x2645e0 (count 3)"
+  },
+  {
+   "name": "Story Mode",
+   "start": "0x1356dc",
+   "words": [
+    "0xe3500001",
+    "0xe59fc154"
+   ],
+   "why": "entry not movable (words 0xe3500001 0xe59fc154: a branch or a pc-relative load)"
+  },
+  {
+   "name": "Little Nellie Multiball",
+   "start": "0x102d28",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_LITTLE_NELLIE_MULTIBALL_STARTED; serves balls via 0x102d28 -> 0x2645e0 (count 2)"
+  },
+  {
+   "name": "Hunted By Helicopter Multiball",
+   "start": "0xc9bc8",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_HUNTED_BY_HELICOPTER_MULTIBALL_STARTED; serves balls via 0xc9bc8 -> 0x2645e0 (count 2)"
+  },
+  {
+   "name": "Powerpack Multiball",
+   "start": "0x1588f8",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_POWERPACK_MULTIBALL_STARTED; serves balls via 0x1588f8 -> 0x2645e0 (count 2)"
+  },
+  {
+   "name": "Aston Martin Multiball",
+   "start": "0x2e050",
+   "words": [
+    "0xe92d41f0",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_ASTON_MARTIN_MULTIBALL_STARTED; serves balls via 0x2e050 -> 0x2645e0 (count 2)"
+  },
+  {
+   "name": "James Bond Multiball",
+   "start": "0xdd824",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_JAMES_BOND_MULTIBALL_STARTED; serves balls via 0xdd824 -> 0x2645e0 (count 2)"
+  },
+  {
+   "name": "Victory Laps",
+   "start": "0x1ca3a0",
+   "words": [
+    "0xe92d4010",
+    "0xebffffdb"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Rocket Multiball",
+   "start": "0x164f2c",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_ROCKET_MULTIBALL_STARTED; serves balls via 0x164f2c -> 0x2645e0 (count None)"
+  },
+  {
+   "name": "Double Scoring",
+   "start": "0x8d388",
+   "words": [
+    "0xe92d4070",
+    "0xe30001ab"
+   ],
+   "why": "multiball: adds balls via 0x8d388 -> 0x264720 (count None)"
+  },
+  {
+   "name": "Jetpack Multiball",
+   "start": "0xe6058",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_JETPACK_MULTIBALL_STARTED; serves balls via 0xe6058 -> 0x2645e0 (count 2)"
+  },
+  {
+   "name": "Wizard Mode Multiball",
+   "start": "0x1d7f54",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_WIZARD_MODE_MULTIBALL_STARTED; serves balls via 0x1d7f54 -> 0x2645e0 (count None)"
+  }
+ ],
+ "notes": "engine: audit_add 0x456ad0, flag set 0x261418, create-process 0x206a28, live_records 0x206d90, multiball_serve 0x2645e0. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). "
+}

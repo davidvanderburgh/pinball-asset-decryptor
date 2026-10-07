@@ -297,3 +297,11 @@ lamp 117,118,119  0              WING LEFT 2  # lamp 99, I/O group 8 index 35, a
 lamp 120,121,122  0              WING LEFT 3  # lamp 100, I/O group 8 index 39, at 0,0
 lamp 123,124,125  0              WING LEFT 4  # lamp 101, I/O group 8 index 42, at 0,0
 lamp 126,127,128  0              WING LEFT 5  # lamp 102, I/O group 8 index 45, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x000fa5d0 0xe92d4038 0xe3a000f3
+text block_name_0       Super Scoring
+site block_start_1      0x0003b6d4 0xe92d4038 0xe3a000f1
+text block_name_1       Double Scoring

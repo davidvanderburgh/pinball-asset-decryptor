@@ -454,3 +454,144 @@ lamp 422,423,424  0              EXPRESSIVE LIGHTING R 93  # lamp 243, I/O group
 lamp 425,426,427  0              EXPRESSIVE LIGHTING R 94  # lamp 244, I/O group 1 index 280, at 0,0
 lamp 428,429,430  0              EXPRESSIVE LIGHTING R 95  # lamp 245, I/O group 1 index 283, at 0,0
 lamp 431,432,433  0              EXPRESSIVE LIGHTING R 96  # lamp 246, I/O group 1 index 286, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# #
+#  
+# P
+# A
+# D
+# -
+# 4
+# 2
+# 0
+# :
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# r
+# e
+# a
+# d
+#  
+# f
+# r
+# o
+# m
+#  
+# t
+# h
+# i
+# s
+#  
+# p
+# r
+# o
+# g
+# r
+# a
+# m
+#  
+# w
+# i
+# t
+# h
+#  
+# t
+# h
+# e
+#  
+# v
+# t
+# a
+# b
+# l
+# e
+#  
+# s
+# l
+# o
+# t
+#  
+# r
+# u
+# s
+# h
+# _
+# l
+# e
+# -
+# 1
+# .
+# 1
+# 8
+# '
+# s
+#  
+# o
+# w
+# n
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# p
+# o
+# i
+# n
+# t
+#  
+# a
+# t
+#  
+# (
+# 4
+# 0
+# )
+site block_start_2      0x000b0a84 0xe92d43f0 0xe1a04000
+data block_obj_2        0x0b651bc0
+text block_name_2       La Villa Strangiato
+site block_start_3      0x000b7730 0xe92d4ff0 0xe1a04000
+data block_obj_3        0x0b651c90
+text block_name_3       Tom Sawyer
+site block_start_4      0x000ba2e4 0xe92d4ff0 0xe1a04000
+data block_obj_4        0x0b651d48
+text block_name_4       Working Man
+site block_start_5      0x000b4cc0 0xe92d47f0 0xe1a04000
+data block_obj_5        0x0b651e38
+text block_name_5       The Big Money
+site block_start_6      0x000b62c0 0xe92d41f0 0xe1a04000
+data block_obj_6        0x0b651f18
+text block_name_6       The Spirit of Radio
+site block_start_7      0x000b2d94 0xe92d47f0 0xe1a04000
+data block_obj_7        0x0b651fe0
+text block_name_7       Limelight
+site block_start_15     0x000f7b50 0xe92d47f0 0xe1a04000
+data block_obj_15       0x0b6524b8
+text block_name_15      Bastille Day Hurry Up
+site block_start_16     0x0010d530 0xe92d43f0 0xe1a07000
+data block_obj_16       0x0b652570
+text block_name_16      Topper Frenzy
+site block_start_35     0x000f64f8 0xe92d4ff0 0xe1a05000
+data block_obj_35       0x0b653300
+text block_name_35      2112 Wizard

@@ -280,3 +280,29 @@ lamp 75           0              FOLLOW THE COMPASS!  # lamp 96, I/O group 7 ind
 lamp 84           0              IT'S A TRAP!  # lamp 97, I/O group 7 index 61, at 139,458
 lamp 83           0              JUNK YARD  # lamp 98, I/O group 7 index 62, at 143,440
 lamp 82           0              BREAK OUT!  # lamp 99, I/O group 7 index 63, at 148,421
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x000359d0 0xe92d4010 0xe3000143
+text block_name_0       Bullshit Scoring
+site block_start_1      0x00032338 0xe92d40f8 0xebffff93
+text block_name_1       Break Out
+site block_start_2      0x000a7cd4 0xe3061520 0xe3000132
+text block_name_2       Its a Trap
+site block_start_3      0x000ad014 0xe30c1cf4 0xe3a00e13
+text block_name_3       Junk Yard
+site block_start_4      0x0003e10c 0xe92d40d0 0xebffffd1
+text block_name_4       Bust Out
+site block_start_5      0x00190a5c 0xe92d40d0 0xebffffcc
+text block_name_5       Whats That
+site block_start_6      0x00188624 0xe92d40f8 0xe306165c
+text block_name_6       Upside Down Hurryup
+site block_start_7      0x0018c5f4 0xe92d40f8 0xe30a162c
+text block_name_7       Upside Down 2 Hurryup
+site block_start_8      0x0007aa60 0xe92d4008 0xe3000141
+text block_name_8       Double Scoring
+site block_start_9      0x0007aaf4 0xe92d4038 0xe3000141
+text block_name_9       Double Scoring
+site block_start_10     0x0018e7d8 0xe92d4010 0xebffffdb
+text block_name_10      Victory Laps

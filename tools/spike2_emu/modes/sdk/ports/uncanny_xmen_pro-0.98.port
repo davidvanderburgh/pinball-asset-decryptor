@@ -296,3 +296,35 @@ lamp 121          0              WOLVERINE FLASH  # lamp 116, I/O group 8 index 
 lamp 91           0              RIGHT RAMP BB-CEREBRO  # lamp 117, I/O group 8 index 53, at 268,187
 lamp 127          0              LEFT SENTINEL SPOT  # lamp 118, I/O group 8 index 54, at 98,284
 lamp 89           0              RT CENTER COMBO  # lamp 119, I/O group 8 index 62, at 230,236
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x000e3ac8 0xe92d4038 0xe1a05000
+text block_name_0       Fastball Special
+site block_start_1      0x000a2600 0xe92d47f0 0xe1a07000
+text block_name_1       Sentinel Hurry Up
+site block_start_2      0x0006c38c 0xe5903000 0xe92d40f0
+text block_name_2       Future Hurry Up
+site block_start_3      0x00059bcc 0xe92d40f0 0xe2805008
+text block_name_3       A Fiery Assault
+site block_start_4      0x0008c438 0xe92d40f0 0xe2805008
+text block_name_4       Mayhem in Midtown
+site block_start_5      0x00061be8 0xe92d40f0 0xe2805008
+text block_name_5       Bitter Rivalry
+site block_start_6      0x0007becc 0xe92d40f0 0xe1a04000
+text block_name_6       Genosha Under Siege
+site block_start_7      0x000918e4 0xe92d40f0 0xe1a04000
+text block_name_7       Rescue the Innocent
+site block_start_8      0x0009e7e8 0xe92d41f0 0xe2805008
+text block_name_8       Sentinel Facility Raid
+site block_start_9      0x000a71d0 0xe92d40f0 0xe2805008
+text block_name_9       Smuggled Cargo
+site block_start_10     0x000abcbc 0xe92d40f0 0xe2805008
+text block_name_10      Stopping a Juggernaut
+site block_start_11     0x00075b5c 0xe92d4370 0xe24dd010
+text block_name_11      Future
+site block_start_12     0x00066398 0xe92d43f0 0xe30a6228
+text block_name_12      Escape Nimrod
+site block_start_13     0x00095928 0xe92d40f0 0xe24dd014
+text block_name_13      Save Senator Kelly Wizard

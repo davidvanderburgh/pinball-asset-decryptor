@@ -1127,6 +1127,39 @@ class VideoTab(BestQualityMixin, TabService):
         self.publish_look()
         return True
 
+    def color_targets(self):
+        """PAD-439: the clips the Colors bar's "Apply to all videos" gives
+        its profile, ``{rel: attached}``: every replaced clip, and the game's
+        own clips attached with Advanced ticked."""
+        if not self._per_file_colour():
+            return {}
+        out = {}
+        for rel in set(self._assign) | self._stock_on:
+            on = self._color_state(rel) if rel in self._by_rel else None
+            if on is not None and (on or self._assign.get(rel)):
+                out[rel] = on
+        return out
+
+    def put_color_switches(self, switches):
+        """PAD-439: replaced clips' own switches set at once (``True`` /
+        ``False``, ``None`` = follow the box again), one save and one redraw.
+        Returns what each was, the same way (Apply to all's Undo)."""
+        before = {}
+        for rel, value in (switches or {}).items():
+            if not (rel in self._by_rel and self._assign.get(rel)):
+                continue
+            before[rel] = self._color.get(rel)
+            if value is None:
+                self._color.pop(rel, None)
+            else:
+                self._color[rel] = bool(value)
+        if before:
+            self._save_staged()
+            self._refresh_list()
+            self._color_changed()
+            self.publish_look()
+        return before
+
     def _put_row(self, i, row):
         if 0 <= i < len(self._rows) and self._rows[i] != row:
             self._rows[i] = row

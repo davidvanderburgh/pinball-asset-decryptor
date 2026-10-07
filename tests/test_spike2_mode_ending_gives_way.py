@@ -136,6 +136,8 @@ static const char *mode_name(const struct pm_mode *m, const char *none) { return
 static void say(const char *fmt, const char *a) { printf(fmt, a); putchar('\n'); }
 static void pm_log(const char *fmt, const char *a) { say(fmt, a); }
 static void disp_linger_other_began(void) {}
+static int refused_said(const struct pm_mode *m) { return 0; }      /* PAD-399's, not under test here */
+static void refused_forget(void) {}
 void pm_clip_stop(void) { printf("STOP\n"); clip.on = 0; }
 """ + _lift(src, "static void clip_other_began(void)\n{") + "\n" + _lift(src, "int pm_begin(void)\n{") + "\n" + \
         _lift(src, "unsigned pm_begun(void)") + r"""

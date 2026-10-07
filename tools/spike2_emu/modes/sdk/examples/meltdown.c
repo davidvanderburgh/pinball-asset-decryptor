@@ -449,8 +449,7 @@ static void on_shot(uint64_t shot)
             start("the captive ball, MELTDOWN ready");
             return;
         }
-        if (hits[p] < HITS_TO_LIGHT) hits[p]++;
-        pm_log("captive ball %u of %d (player %u)", hits[p], HITS_TO_LIGHT, p);
+        if (hits[p] < HITS_TO_LIGHT) hits[p]++, pm_log("captive ball %u of %d (player %u)", hits[p], HITS_TO_LIGHT, p);
         if (hits[p] >= HITS_TO_LIGHT) {
             ready[p] = 1;
             pm_log("MELTDOWN IS READY for player %u: the captive ball starts it", p);

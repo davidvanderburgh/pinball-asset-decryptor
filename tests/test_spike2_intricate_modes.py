@@ -597,6 +597,36 @@ def test_one_pack_mode_at_a_time_and_a_new_hud_replaces_the_last_total(harness):
     assert not any(first_spin <= t < start for t, _w in hud(out, "oxygen_destroyer", "Award"))
 
 
+def _count(out, mode, text):
+    return sum(text in ln for ln in lines(out, mode))
+
+
+def test_a_refused_start_and_a_reached_count_are_said_once(harness):
+    # PAD-399: a machine run's mode.log carried "[DESTOROYAH] not started: BIOLLANTE is running" 12 times in 2 s
+    # and "Left spinner 25 of 25" 191 times: every spin retried the start. Each is said once until it changes.
+    o, g = "OXYGEN DESTROYER", "KING GHIDORAH"
+    out = play(harness, *POWERLINES, "secs", 1, *SPINS, *SPINS, "trigger", "ghidorah_heads.stop", "ms", 500,
+               "shot", "Left spinner")
+    assert _count(out, o, "not started: KING GHIDORAH is running") == 1
+    assert _count(out, o, "Left spinner 25 of 25") == 1
+    assert has(out, o, "START (the left spinner)")
+    # the game's own multiball: one "not started" for it however often the spinner asks, again once it changed
+    out = play(harness, "multiball", 1, *SPINS, *SPINS, "battle", 1, "multiball", 0, *SPINS[:10], "battle", 0,
+               "shot", "Left spinner", "secs", 1)
+    assert _count(out, o, "a multiball is running") == 1
+    assert _count(out, o, "a battle is running") == 1
+    assert _count(out, o, "Left spinner 25 of 25") == 1
+    assert has(out, o, "START (the left spinner)")
+    # the powerlines: a count once when it is reached, "not counted" once a ball
+    lines3 = [w for i in range(3) for w in ("shot", "Powerline " + ("left", "center", "right")[i], "ms", 300)]
+    out = play(harness, "battle", 1, *lines3, *lines3, *lines3, "battle", 0, "secs", 5, "shot", "Powerline left",
+               "secs", 1, "trigger", "ghidorah_heads.stop", "secs", 1, *lines3, *lines3, "secs", 1)
+    assert _count(out, g, "powerlines 3 of 3") == 1
+    assert _count(out, g, "not started (three powerlines): a battle is running") == 1
+    assert has(out, g, "START (three powerlines)")
+    assert _count(out, g, "not counted - it already ran this ball") == 1
+
+
 @pytest.mark.parametrize("start", [POWERLINES, [*MASER3], ["trigger", "final_wars.light", "secs", 8,
                                                                               "shot", "Building"], MELTDOWN_START])
 def test_a_drain_ends_the_mode_with_its_total(harness, start):

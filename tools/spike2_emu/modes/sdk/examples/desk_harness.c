@@ -168,13 +168,27 @@ static void disp_linger_release(const char *why);
 static unsigned begun;                     /* PAD-413: pm_begun */
 static int clip_on;                        /* PAD-413: our full-screen clip plays (until it is stopped) */
 static const struct pm_mode *clip_owner;
+static const struct pm_mode *refused[16];   /* PAD-399: as the runtime, a refusal is said once until it changes */
+static void refused_forget(void) { memset(refused, 0, sizeof refused); }
+static int refused_said(const struct pm_mode *m)
+{
+    unsigned i;
+    for (i = 0; i < sizeof refused / sizeof refused[0]; i++) {
+        if (refused[i] == m) return 1;
+        if (!refused[i]) { refused[i] = m; return 0; }
+    }
+    return 0;
+}
 int pm_begin(void)
 {
     if (running && running != current) {
-        pm_log("not started: %s is running", running->name);
+        if (!refused_said(current)) pm_log("not started: %s is running", running->name);
         return 0;
     }
-    if (running != current) begun++;
+    if (running != current) {
+        refused_forget();
+        begun++;
+    }
     running = current;
     if (disp_linger_until && disp_owner != current) disp_linger_release("another mode began");
     if (clip_on && clip_owner != current) {    /* as the runtime: the last one's ending clip gives way */
@@ -187,7 +201,7 @@ unsigned pm_begun(void) { return begun; }
 static void mechs_let_go(const char *why);   /* PAD-395: the held mechanisms, below */
 void pm_end(void)
 {
-    if (running == current) running = 0;
+    if (running == current) running = 0, refused_forget();
     if (!running) mechs_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }

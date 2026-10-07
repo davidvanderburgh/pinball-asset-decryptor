@@ -50,6 +50,7 @@ PRINT_CACHE = os.path.join(os.path.dirname(config.SETTINGS_FILE),
 _MAX_CACHED = 400
 
 _printers = []
+_off_stock = []
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +136,28 @@ def card_print(card_path, measure=False):
             remember_print(card_path, info)
             return info
     return None
+
+
+def register_off_stock(fn):
+    """*fn(assets_dir)* returns ``(words, files)`` -- what the project's
+    extract holds that the official card doesn't, in words, and those
+    files' project-relative paths -- or ``None`` when it has no official
+    record to measure against."""
+    if fn not in _off_stock:
+        _off_stock.append(fn)
+
+
+def off_stock(assets_dir):
+    """``(words, files)`` from the first registered measure that answers
+    (see :func:`register_off_stock`), or ``("", [])``."""
+    for fn in list(_off_stock):
+        try:
+            got = fn(assets_dir)
+        except Exception:                                 # noqa: BLE001
+            got = None
+        if got is not None:
+            return got
+    return "", []
 
 
 # ---------------------------------------------------------------------------
@@ -323,3 +346,57 @@ def describe_card(lin, pr):
         return "the card this project was extracted from"
     return "the official %s card" % ((lin.get("stock") or {}).get("label")
                                      or "stock")
+
+
+# ---------------------------------------------------------------------------
+# Finding the official extract of a project's release
+# ---------------------------------------------------------------------------
+
+def _release_of(folder):
+    """``(sidx, official)`` for the extract in *folder*: the release it is
+    of and whether it was extracted from the official card, from its
+    lineage, else the extract's stock verdict (PAD-426)."""
+    from .extract_source import read_extract_source
+    lin = read_lineage(folder) or {}
+    sidx = (lin.get("stock") or {}).get("sidx") or ""
+    src = lin.get("source") or {}
+    if sidx and src.get("print"):
+        return sidx, src.get("status") == "official" or src.get("rev") == 0
+    stock = (read_extract_source(folder) or {}).get("stock")
+    if isinstance(stock, dict) and stock.get("sidx"):
+        return stock["sidx"], stock.get("status") == "official"
+    return sidx, False
+
+
+def find_official_extract(assets_dir, candidates=()):
+    """An extract of the same release as *assets_dir* that was taken from
+    the official card, or ``""``.
+
+    Transfer mods needs one to tell a modified card's own content from
+    stock (PAD-176), and the user had to know to supply it.  The project
+    knows which release it is of, and an extract records whether its card
+    was the official one, so a folder already on disk can be found: the
+    *candidates* (recent project folders) and the folders beside
+    *assets_dir* are looked at, sidecars only."""
+    sidx, _official = _release_of(assets_dir)
+    if not sidx:
+        return ""
+    roots = list(candidates or ())
+    parent = os.path.dirname(os.path.normpath(assets_dir))
+    try:
+        roots += [os.path.join(parent, n) for n in sorted(os.listdir(parent))]
+    except OSError:
+        pass
+    seen = {os.path.normcase(os.path.abspath(assets_dir))}
+    for cand in roots:
+        if not cand:
+            continue
+        key = os.path.normcase(os.path.abspath(cand))
+        if key in seen or not os.path.isdir(cand):
+            continue
+        seen.add(key)
+        got_sidx, official = _release_of(cand)
+        if official and got_sidx == sidx and os.path.isfile(
+                os.path.join(cand, ".checksums.md5")):
+            return os.path.normpath(cand)
+    return ""

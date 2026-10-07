@@ -339,7 +339,8 @@ function ProjectCard({ s, shell }) {
         ${d.extracted ? html`<span class="k">Extracted</span><span>${d.extracted}${d.source_name ? html` · from <span class="mono">${d.source_name}</span>` : null}</span>` : null}
         ${d.stock ? html`<span class="k">Stock</span><span class=${d.stock.status === "official" ? "ok-ink" : "warn-ink"}>${d.stock.text}</span>` : null}
         ${d.revisions ? html`<span class="k">Revisions</span><span ...${tip({ head: "Every card built from this project", lines: d.revisions.history })}>${d.revisions.text}</span>` : null}
-        ${rows.map(([k, v]) => html`<span class="k">${k}</span><span class=${k === "Changed" && v !== "nothing changed yet" ? "acc-ink" : ""}>${v}</span>`)}
+        ${rows.map(([k, v]) => html`<span class="k">${k}</span><span class=${k === "Changed" && v !== "nothing changed yet" ? "acc-ink" : ""}>${v}</span>
+          ${k === "Changed" && d.off_stock ? html`<span class="k">Off stock</span><span class="warn-ink">${d.off_stock}</span>` : null}`)}
       </div>
       ${p.loading && !rows.length ? html`<div class="row small muted"><${Spinner} />Collecting…</div>` : null}
       <div class="note"><${Icon} name="info" /><div class="body-text">${PROJECT_TIP}</div></div>`;

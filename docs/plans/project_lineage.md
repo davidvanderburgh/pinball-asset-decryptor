@@ -76,9 +76,27 @@ Everything that tied a project to its cards was a recorded path. `extract_source
   - the build pipeline's record.
 - Real cards, through the registered Stern printer: official Godzilla Pro 1.16 as the source, and a Heisei custom card as rev 1 with the project folder copied elsewhere and the original deleted. The results were `source` rev 0, `build` rev 1, and Aerosmith `other` with the warning. Each print took 0.15 s.
 
-## Left for the next run
+## The extract measured against the official card (run 2)
 
-- **Changed against the official card.** The project's Changed row and the mod-pack export still diff against `.checksums.md5`, which is the extracted card. For a project off a modified card, the official table can still say which pictures and videos differ from stock:
-  - pictures by their `radimg_..._<md5[:8]>` names;
-  - videos by their file MD5 against the release's `.asset` records.
-- **Transfer mods against the official card.** Find the official card for the project's release on this machine by print (recent paths and the folders cards were picked from), and offer it as the stock card the baked-in mods are compared against. Today the user has to supply a stock extract.
+`stock_prints.project_off_stock(project)` says which of the project's EXTRACTED files are not the official card's. That is what the card it came off already carried, measured against Stern's release rather than against that card. It reads only the project's own sidecars, with no card and no hashing (0.0-0.1 s):
+
+- **Clips and loose pictures** are byte copies of their card files. Each one's baseline MD5 (`.checksums.md5`, taken at extract) is compared with the release's record, via `video/manifest.txt` / `images/manifest.txt` (output -> card path).
+- **Scene textures** (`scene.assets/N.asset`) are decoded, so only their card size (the manifest's bytes column) is compared. A same-size swap is missed.
+- **Radium pictures** carry their digest in the file name.
+- **The release** comes from the project's lineage, else the extract's stock stamp, else the picture folder at `card_version`. Failing those, it comes from the title folder: the table holds one release per title, the latest. That is refused when the card's file name names another version, so a stock 1.13 extract is never called modified against 1.16.
+
+Real extracts:
+
+| Extract | Videos differing from official |
+|---|---|
+| official Godzilla LE 1.16 | 0 of 658 |
+| Heisei 1.5 | 533 (the same 533 the card check counts) |
+| `Desktop\gzho` | 0, pictures included |
+
+Where it shows (core reaches it through `lineage.register_off_stock`, which the Stern manufacturer module registers):
+
+- **Extract / This project**: an "Off stock" row under Changed, e.g. "In the extract itself: 533 videos differ from the official Godzilla LE 1.16 card. Changed above counts only what was changed since the extract."
+- **Mod-pack export** logs how many of those files are NOT in the pack, because they are the folder's baseline rather than changes, and points to Transfer mods.
+- **Transfer mods**: when the old extract came off a modified card (`built_card_source`, which now includes the PAD-426 verdict) and field 3 is empty, `lineage.find_official_extract` looks through the recent projects and the folders beside it. It looks for an extract of the same release taken from the official card (lineage source official, or stock stamp official, with a baseline). It fills field 3 and logs it. It fills the field once per old extract, so clearing it sticks.
+
+Not done, on purpose: the pack does not ADD the baked-in files. 533 videos is GBs, and Transfer mods is the route for a modified card's own content.

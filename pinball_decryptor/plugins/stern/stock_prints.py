@@ -648,3 +648,138 @@ def check_project(assets_dir, table=None):
             "text": "Extracted from a modified %s card: %s." % (
                 label, "1 picture is not the official one" if extra == 1
                 else "%d pictures are not the official ones" % extra)}
+
+
+# ---------------------------------------------------------------------------
+# What a project's extract holds that the official card doesn't (PAD-427)
+# ---------------------------------------------------------------------------
+
+def project_release(assets_dir, table=None):
+    """``(sidx_name, release)`` the project at *assets_dir* is of, or
+    ``(None, None)``: its lineage's release, else the extract's stock
+    stamp, else the picture folder at the stamped ``card_version``."""
+    from ...core.extract_source import read_extract_source
+    from ...core import lineage
+    table = load_table() if table is None else table
+    names = [((lineage.read_lineage(assets_dir) or {}).get("stock")
+              or {}).get("sidx")]
+    rec = read_extract_source(assets_dir) or {}
+    names.append((rec.get("stock") or {}).get("sidx")
+                 if isinstance(rec.get("stock"), dict) else None)
+    got = project_pictures(assets_dir)
+    if got and got[0] and rec.get("card_version"):
+        names.append(sidx_for(got[0], rec["card_version"]))
+    for name in names:
+        release = release_for(name, table)
+        if release is not None:
+            return os.path.basename(name).lower(), release
+    # No version recorded (an extract older than the stamps, or a custom
+    # card's name): the table holds one release per title, the latest, so
+    # the title folder names it -- unless the card's file name says it is
+    # another version.
+    folder = (got or ("", ()))[0] or next(
+        (card.split("/", 1)[0] for rel_manifest in (
+            "video/manifest.txt", "images/manifest.txt")
+         for _o, card, _s in _manifest_rows(assets_dir, rel_manifest)
+         if "/" in card), "")
+    from ...core.extract_source import version_hint_from_name
+    hint = (version_hint_from_name(rec.get("input_name")) or "").split(" ")[0]
+    for name, release in table.items():
+        if folder and release.get("folder") == folder and (
+                not hint or hint == release.get("version")):
+            return name, release
+    return None, None
+
+
+def _manifest_rows(assets_dir, rel_manifest):
+    """``[(output, card path without the leading /, bytes or None)]``."""
+    path = os.path.join(assets_dir, *rel_manifest.split("/"))
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                cols = line.rstrip("\n").split("\t")
+                if not line.strip() or line.startswith("#") or len(cols) < 2:
+                    continue
+                try:
+                    size = int(cols[2]) if len(cols) > 2 else None
+                except ValueError:
+                    size = None
+                out.append((cols[0].strip(), cols[1].strip().lstrip("/"),
+                            size))
+    except (OSError, UnicodeDecodeError):
+        return []
+    return out
+
+
+def project_off_stock(assets_dir, table=None):
+    """Which of the project's EXTRACTED files are not the official card's:
+    what the card it was extracted from already carried, measured against
+    the release Stern shipped rather than against that card.
+
+    Reads nothing but the project's own sidecars: each clip and loose
+    picture is a byte copy of its card file, so its baseline MD5
+    (``.checksums.md5``, taken at extract) is compared with the release's
+    record; a scene texture is decoded, so its card size (the extract's
+    manifest) is compared; a radium picture is named by its digest.
+
+    Returns ``{"label", "videos", "pictures", "files"}`` -- counts, and the
+    project-relative paths that differ -- or ``None`` when there is no
+    official record to measure against."""
+    from ...core.checksums import read_baseline_any
+    sidx_name, release = project_release(assets_dir, table)
+    if release is None:
+        return None
+    stock = release.get("files") or {}
+    base = read_baseline_any(assets_dir) or {}
+    files = []
+
+    def by_md5(rel, card):
+        rec, md5 = stock.get(card), base.get(rel)
+        return rec is not None and md5 is not None and \
+            md5[:FILE_DIGITS] != rec[1]
+
+    n_vid = 0
+    for name, card, _size in _manifest_rows(assets_dir, "video/manifest.txt"):
+        if by_md5("video/" + name, card):
+            n_vid += 1
+            files.append("video/" + name)
+    n_pic = 0
+    for out, card, _size in _manifest_rows(assets_dir, "images/manifest.txt"):
+        if by_md5("images/" + out, card):
+            n_pic += 1
+            files.append("images/" + out)
+    for out, card, size in _manifest_rows(
+            assets_dir, "images/scene_textures/manifest.txt"):
+        rec = stock.get(card)
+        if rec is not None and size is not None and size != int(rec[0]):
+            n_pic += 1
+            files.append("images/" + out)
+    stock_pics = picture_set(release)
+    for out, _card, _size in _manifest_rows(
+            assets_dir, "images/scene_textures/radium_images.txt"):
+        stem = os.path.splitext(out.rsplit("/", 1)[-1])[0]
+        tail = stem.rsplit("_", 1)[-1]
+        if len(tail) == PICTURE_DIGITS and tail not in stock_pics:
+            n_pic += 1
+            files.append("images/" + out)
+    return {"label": release_label(release), "videos": n_vid,
+            "pictures": n_pic, "files": sorted(set(files))}
+
+
+def off_stock_words(got):
+    """``"533 videos and 26 pictures differ from the official Godzilla LE
+    1.16 card"``, or ``""`` when nothing does."""
+    if not got:
+        return ""
+    bits = []
+    if got["videos"]:
+        bits.append(_plural(got["videos"], "video"))
+    if got["pictures"]:
+        bits.append(_plural(got["pictures"], "picture"))
+    if not bits:
+        return ""
+    return "%s %s from the official %s card" % (
+        " and ".join(bits), "differs" if sum(
+            (got["videos"], got["pictures"])) == 1 else "differ",
+        got["label"])

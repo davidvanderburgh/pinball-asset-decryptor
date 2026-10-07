@@ -13,6 +13,7 @@ Set PAD427_CARD to another official card image to point the shot at it.
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -24,6 +25,9 @@ import webui_shot  # noqa: E402
 
 CARD = os.environ.get("PAD427_CARD") or \
     r"D:\Pinball\images\Stern\spike2\godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw"
+
+HEISEI = os.environ.get("PAD427_HEISEI") or \
+    r"C:\tmp\pad167\Godzilla Premium 1.16 Heisei Custom V1.5 Orchestral Edition"
 
 
 def main():
@@ -79,6 +83,20 @@ def main():
             time.sleep(6)
             page.locator(".x-project").screenshot(path=os.path.join(out_dir, "extract.png"))
             print("shot extract", flush=True)
+            if os.path.isdir(HEISEI):
+                # the real Heisei extract's sidecars: what its card already carried
+                heisei = os.path.join(scratch, "Heisei 1.5")
+                os.makedirs(os.path.join(heisei, "video"))
+                for rel in (".extract_source.json", ".checksums.md5",
+                            os.path.join("video", "manifest.txt")):
+                    shutil.copy(os.path.join(HEISEI, rel), os.path.join(heisei, rel))
+                webui_shot.api(url, "extract.use_recent", "output", heisei)
+                time.sleep(2)
+                webui_shot.api(url, "extract.refresh_project")
+                time.sleep(6)
+                page.locator(".x-project").screenshot(
+                    path=os.path.join(out_dir, "extract_offstock.png"))
+                print("shot extract_offstock", flush=True)
             browser.close()
             if errors:
                 print("PAGE ERRORS:", errors, flush=True)

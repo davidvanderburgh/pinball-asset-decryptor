@@ -337,6 +337,19 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         log_cb("These are all the changes in this folder since its last "
                "extract (%d baselined file(s) compared), not just this "
                "session's." % n_base, "info")
+        # PAD-427: measured against the OFFICIAL card, the extract itself may
+        # already differ (it came off someone's build).  Those files are its
+        # baseline, so the pack leaves them out; say so, by count.
+        words, baked = lineage_mod.off_stock(assets_folder)
+        baked = [r for r in baked if r not in set(changed)]
+        if baked:
+            log_cb("NOT in the pack: %d file(s) the extract itself holds that "
+                   "are not the official card's (%s). They were already on the "
+                   "card this folder was extracted from, so they are its "
+                   "starting point, not changes; a project extracted from the "
+                   "official card won't get them from this pack. Use "
+                   "\"Transfer Mods to New Version\" to carry a modified "
+                   "card's own content." % (len(baked), words), "warning")
 
     src = read_extract_source(assets_folder) or {}
     extras = project_extras(assets_folder)

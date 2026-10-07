@@ -339,3 +339,149 @@ def test_the_build_pipeline_records_the_revision_beside_the_card(tmp_path):
                                  "parent_rev": 0}
     assert beside["complete"] is True
     assert logged == ["This card is rev 1 of official Turtles Pro 1.59."]
+
+
+# ---------------------------------------------------------------------------
+# The extract measured against the official card, not the card it came off
+# ---------------------------------------------------------------------------
+
+def _md5(b):
+    return hashlib.md5(b).hexdigest()
+
+
+GZ = "godzilla_le"
+VID_A, VID_B = b"stock clip A", b"stock clip B"
+LOGO = b"stock logo png"
+PIC_STOCK = "3ce3aba2"
+
+
+def _release_table(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import stock_prints as sp
+    rel = {"folder": GZ, "name": "Godzilla LE", "version": "1.16.0",
+           "files": {GZ + "/assets/x/scene.assets/0.asset": [len(VID_A), _md5(VID_A)[:16]],
+                     GZ + "/assets/x/scene.assets/1.asset": [len(VID_B), _md5(VID_B)[:16]],
+                     GZ + "/gfx/logo.png": [len(LOGO), _md5(LOGO)[:16]],
+                     GZ + "/assets/y/scene.assets/16.asset": [95632, "0" * 16]},
+           "pictures": PIC_STOCK}
+    path = str(tmp_path / "table.json.xz")
+    sp.save_table({"godzilla_le-1_16_0.sidx": rel}, path)
+    monkeypatch.setattr(sp, "TABLE_PATH", path)
+
+
+def _spike2_extract(folder, name, vid_a=VID_A, logo=LOGO, tex_size=95632,
+                    pic=PIC_STOCK, stamp=None):
+    """The sidecars a Spike 2 extract leaves, with the baseline's MD5s."""
+    os.makedirs(os.path.join(folder, "video"))
+    os.makedirs(os.path.join(folder, "images", "scene_textures"))
+    with open(os.path.join(folder, ".extract_source.json"), "w") as f:
+        json.dump({"input_path": "X:/gone/" + name, "input_name": name,
+                   "size": 1, "mtime": 1, **({"stock": stamp} if stamp else {})}, f)
+    with open(os.path.join(folder, "video", "manifest.txt"), "w") as f:
+        f.write("# output\tcard path\tbytes\n"
+                "A.mp4\t/%s/assets/x/scene.assets/0.asset\t%d\n"
+                "B.mp4\t/%s/assets/x/scene.assets/1.asset\t%d\n"
+                % (GZ, len(vid_a), GZ, len(VID_B)))
+    with open(os.path.join(folder, "images", "manifest.txt"), "w") as f:
+        f.write("# output\tcard path\tbytes\n%s/gfx/logo.png\t/%s/gfx/logo.png\t%d\n"
+                % (GZ, GZ, len(logo)))
+    with open(os.path.join(folder, "images", "scene_textures", "manifest.txt"), "w") as f:
+        f.write("# output\tcard path\tbytes\twidth\theight\tformat\n"
+                "scene_textures/t_16.png\t/%s/assets/y/scene.assets/16.asset\t%d\t1\t1\t5\n"
+                % (GZ, tex_size))
+    with open(os.path.join(folder, "images", "scene_textures", "radium_images.txt"), "w") as f:
+        f.write("# output\tradium card path\n"
+                "scene_textures/radimg_512x512_%s.png\t/%s/assets/x/scene.radium\n"
+                % (pic, GZ))
+    with open(os.path.join(folder, ".checksums.md5"), "w") as f:
+        f.write("video/A.mp4\t%s\nvideo/B.mp4\t%s\nimages/%s/gfx/logo.png\t%s\n"
+                % (_md5(vid_a), _md5(VID_B), GZ, _md5(logo)))
+
+
+def test_an_official_extract_has_nothing_off_stock(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import stock_prints as sp
+    _release_table(tmp_path, monkeypatch)
+    proj = str(tmp_path / "gz")
+    _spike2_extract(proj, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
+    got = sp.project_off_stock(proj)
+    assert got == {"label": "Godzilla LE 1.16", "videos": 0, "pictures": 0,
+                   "files": []}
+    assert sp.off_stock_words(got) == ""
+
+
+def test_a_custom_card_extract_says_what_is_not_official(tmp_path, monkeypatch):
+    """A Heisei-style card: no version in its name, a clip, the loose logo,
+    a scene texture and a radium picture of its own."""
+    from pinball_decryptor.plugins.stern import stock_prints as sp
+    import pinball_decryptor.plugins.stern.manufacturer  # noqa: F401  registers
+    _release_table(tmp_path, monkeypatch)
+    proj = str(tmp_path / "heisei")
+    _spike2_extract(proj, "Godzilla Premium 1.16 Heisei Custom V1.5.raw",
+                    vid_a=b"custom clip, longer", logo=b"custom logo",
+                    tex_size=99000, pic="0badc0de")
+    got = sp.project_off_stock(proj)
+    assert (got["videos"], got["pictures"]) == (1, 3)
+    assert got["files"] == sorted([
+        "video/A.mp4", "images/%s/gfx/logo.png" % GZ,
+        "images/scene_textures/t_16.png",
+        "images/scene_textures/radimg_512x512_0badc0de.png"])
+    words = sp.off_stock_words(got)
+    assert words == ("1 video and 3 pictures differ from the official "
+                     "Godzilla LE 1.16 card")
+    assert lineage.off_stock(proj)[0] == words
+    from pinball_decryptor.webui.extract_helpers import project_details
+    assert project_details(proj)["off_stock"].startswith(
+        "In the extract itself: 1 video and 3 pictures differ")
+
+
+def test_another_version_by_name_is_not_measured_against_the_latest(
+        tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import stock_prints as sp
+    _release_table(tmp_path, monkeypatch)
+    proj = str(tmp_path / "old")
+    _spike2_extract(proj, "godzilla_le-1_13_0.Release.8G.sdcard.raw",
+                    vid_a=b"1.13 clip")
+    assert sp.project_off_stock(proj) is None
+
+
+def test_mod_pack_export_names_what_the_extract_already_carried(
+        tmp_path, monkeypatch):
+    from pinball_decryptor.core import modpack
+    import pinball_decryptor.plugins.stern.manufacturer  # noqa: F401
+    _release_table(tmp_path, monkeypatch)
+    proj = str(tmp_path / "heisei")
+    _spike2_extract(proj, "Heisei.raw", vid_a=b"custom clip")
+    with open(os.path.join(proj, "video", "A.mp4"), "wb") as f:
+        f.write(b"custom clip")
+    with open(os.path.join(proj, "video", "B.mp4"), "wb") as f:
+        f.write(b"my own new clip")             # changed since the extract
+    logged = []
+    modpack.export_mod_pack(proj, str(tmp_path / "p.zip"),
+                            log_cb=lambda m, lvl="": logged.append((lvl, m)))
+    warn = [m for lvl, m in logged if lvl == "warning"]
+    assert any(m.startswith("NOT in the pack: 1 file(s) the extract itself "
+                            "holds that are not the official card's (1 video "
+                            "differs from the official Godzilla LE 1.16 card)")
+               for m in warn), warn
+
+
+def test_the_official_extract_of_the_release_is_found(tmp_path, monkeypatch):
+    """Transfer mods' stock extract, found from what the extracts recorded
+    rather than asked for."""
+    _release_table(tmp_path, monkeypatch)
+    off = {"status": "official", "sidx": "godzilla_le-1_16_0.sidx"}
+    mod = {"status": "modified", "sidx": "godzilla_le-1_16_0.sidx"}
+    heisei = str(tmp_path / "work" / "heisei")
+    _spike2_extract(heisei, "Heisei.raw", stamp=mod)
+    # another modified extract and another release do not count
+    _spike2_extract(str(tmp_path / "work" / "other custom"), "c.raw", stamp=mod)
+    _spike2_extract(str(tmp_path / "work" / "pro"), "p.raw",
+                    stamp={"status": "official", "sidx": "godzilla_pro-1_16_0.sidx"})
+    assert lineage.find_official_extract(heisei) == ""
+    stock = str(tmp_path / "elsewhere" / "Godzilla stock")
+    _spike2_extract(stock, "godzilla_le-1_16_0.raw", stamp=off)
+    assert lineage.find_official_extract(heisei, [stock]) == os.path.normpath(stock)
+    # beside it is found without being a recent project
+    beside = str(tmp_path / "work" / "stock beside")
+    _spike2_extract(beside, "godzilla_le-1_16_0.raw", stamp=off)
+    assert lineage.find_official_extract(heisei) == os.path.normpath(beside)
+    assert es.built_card_source(heisei) == "Heisei.raw"

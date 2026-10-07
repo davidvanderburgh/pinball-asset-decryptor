@@ -60,8 +60,17 @@ def _spike2_print(path):
     return card_print(path)
 
 
+def _spike2_off_stock(assets_dir):
+    """What a Spike 2 project's extract holds that the official card
+    doesn't (PAD-427), as ``(words, files)``; ``None`` without a record."""
+    from .stock_prints import off_stock_words, project_off_stock
+    got = project_off_stock(assets_dir)
+    return None if got is None else (off_stock_words(got), got["files"])
+
+
 from ...core import lineage as _lineage  # noqa: E402
 _lineage.register_printer(_spike2_print)
+_lineage.register_off_stock(_spike2_off_stock)
 
 _SPIKE2_GAMES = tuple(
     Game(key=k, display=info["display"], manufacturer_key="stern",

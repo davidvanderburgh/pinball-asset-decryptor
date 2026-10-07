@@ -356,7 +356,7 @@ def project_details(folder, manufacturers=(), current=None):
     from ..core import extract_source, project_file
     out = {"is_project": False, "archived": False, "baseline": False,
            "source_name": "", "extracted": "", "game": "", "stock": None,
-           "revisions": None}
+           "revisions": None, "off_stock": ""}
     anchor = None
     try:
         out["is_project"] = bool(project_file.has_anchor(folder))
@@ -404,6 +404,18 @@ def project_details(folder, manufacturers=(), current=None):
         line, history = "", []
     if line:
         out["revisions"] = {"text": line, "history": history}
+    # The extract itself measured against the official card, not against
+    # the card it came from (PAD-427): what a modified card already carried.
+    if out["baseline"]:
+        try:
+            from ..core import lineage
+            words = lineage.off_stock(folder)[0]
+        except Exception:                               # noqa: BLE001
+            words = ""
+        if words:
+            out["off_stock"] = ("In the extract itself: %s. Changed above "
+                                "counts only what was changed since the "
+                                "extract." % words)
     return out
 
 

@@ -1353,6 +1353,38 @@ def test_a_project_with_no_card_knows_no_game(tmp_path, preview_on):
         assert not any(CM.NO_TITLE in ln for ln in MW.pending_lines(str(proj)))
 
 
+def test_pad434_a_card_saved_into_the_same_project_is_picked_up(tmp_path, preview_on):
+    """PAD-434: a project made bare, then given its card and saved, keeps its folder, so
+    nothing that watched the folder noticed and "names no card" stayed up until a restart.
+    The tab now re-reads the card when it comes forward, and while it is up."""
+    from pinball_decryptor.core import project_file
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    def save(card):
+        project_file.save(project_file.anchor_path(str(proj)), manufacturer_key="stern",
+                          paths={"extract_input": os.path.join(str(tmp_path), card)},
+                          extract_options={})
+
+    proj = tmp_path / "bare"
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj, card=None)
+        w.call("ui.select_tab", "modes")
+        assert w.state("modes")["no_card"]
+        # Select card + Project > Save on another tab, then back to Modes
+        w.call("ui.select_tab", "extract")
+        save(GODZILLA_CARD)
+        w.call("ui.select_tab", "modes")
+        w.drain()
+        st = w.state("modes")
+        assert not st["no_card"] and st["title_note"] != MP.NO_CARD_HELP
+        assert st["profile"]["label"] == "Godzilla Pro 1.15" and st["new_ok"]
+        assert st["title_via"] == "project"
+        # saved again with another card while the tab is up: the ticker sees the anchor change
+        # (its size differs too, so a coarse file clock cannot hide it)
+        save("jaws_le-1_02_0.raw")
+        assert _wait(w, lambda: w.state("modes")["profile"]["label"] == "Jaws LE 1.02")
+
+
 def test_a_port_worked_out_earlier_shows_unproven_before_the_read(tmp_path, preview_on,
                                                                    beatles):
     """A port derived on this machine in an earlier session is used at once, while the card

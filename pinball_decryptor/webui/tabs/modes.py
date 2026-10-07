@@ -353,6 +353,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._stock_order = []
         self._game_mode = None         # the game's own mode shown instead (its id), or None
         self._title_read = None        # the finished read of the shown card, or None
+        self._title_key = None         # PAD-434: the card the shown title came from (_card_key)
+        self._title_files = None       # PAD-434: what that card was read from (_title_files_sig)
         self._init_tryit()
         self._init_check()
         self._init_reading()
@@ -421,12 +423,58 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         """The Emulate tab's card changed: the footer's verdict, and, for a project that
         names no card of its own, which game its modes are for (_title_card)."""
         self._show_emu()
+        self._refresh_if_title_stale()
+
+    def _refresh_if_title_stale(self, quick=False):
+        """PAD-434: refresh when the card the modes are for is no longer the one the title
+        shows. A project made bare and then given its card (Select card, Project > Save)
+        keeps its PATH, so nothing else here notices, and "This project names no card"
+        stayed up until a restart. ``quick`` (the ticker) first asks the files' size and
+        time whether anything was written. True when it refreshed."""
         project = self.project()
         if (project and getattr(self, "_visible", False) and self._preview_on()
-                and MP.project_card(project) is None):
+                and self._title_stale(project, quick)):
             self._save_if_edited()
             self.refresh()
             self.refresh_stock_modes()
+            return True
+        return False
+
+    @staticmethod
+    def _card_key(card, via):
+        """What a title is told apart by: the card's role, image and build."""
+        if card is None:
+            return None
+        image = os.path.normcase(os.path.abspath(card.image)) if card.image else ""
+        return via, image, card.game_dir, card.version
+
+    def _title_files_sig(self, project):
+        """The files _title_card reads (the anchor, the extract's record) by size and time,
+        and the "Try it on" path. Only stats them: safe on the loop every tick."""
+        from ...core import extract_source, project_file
+        var = self._export("emulate_card_var")
+        sig = [project or "", ((var.get() if var is not None else "") or "").strip()]
+        for name in (project_file.ANCHOR_NAME, extract_source.SIDE_CAR):
+            try:
+                st = os.stat(os.path.join(project, name)) if project else None
+            except OSError:
+                st = None
+            sig.append((st.st_size, st.st_mtime_ns) if st is not None else None)
+        return tuple(sig)
+
+    def _title_stale(self, project, quick=False):
+        """True when _title_card answers another card than the shown title's. It reads the
+        project's JSON, never an image."""
+        sig = self._title_files_sig(project)
+        if quick and sig == self._title_files:
+            return False
+        try:
+            stale = self._card_key(*self._title_card(project)) != self._title_key
+        except Exception:                                   # noqa: BLE001 - a check, never a failure
+            return False
+        if not stale:
+            self._title_files = sig
+        return stale
 
     def _post(self, fn, *args):
         if self._on_loop():
@@ -455,11 +503,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     def on_show(self):
         """The tab came forward: the list, the code modes and the stock table read again
         (another tab or the person may have changed the modes folder); the open mode is
-        reopened only when the project changed or it is gone."""
+        reopened only when the project changed or it is gone, or the card the modes are for
+        changed (PAD-434: a card saved into the same folder)."""
         self._hook_vars()
         if self.project() != (self.get("project") or "") or (
                 self._slug is not None and not os.path.isfile(
-                    os.path.join(MP.mode_folder(self._open_project, self._slug), MP.MODE_FILE))):
+                    os.path.join(MP.mode_folder(self._open_project, self._slug), MP.MODE_FILE))
+                ) or self._title_stale(self.project()):
             self._save_if_edited()
             self.refresh()
         else:
@@ -534,6 +584,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._tryit_tick()
             self._check_tick()
             self._show_emu(quiet=True)
+            if shown and not working:
+                self._refresh_if_title_stale(quick=True)   # PAD-434: a Save while the tab is up
         except Exception:                                   # noqa: BLE001
             pass
         self._ticker_job = self.ctx.loop.after(150 if working else 1000, self._tick)
@@ -1629,6 +1681,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         no default game: a project with no card, a card that cannot be read and a build with
         no port all leave the form greyed with the reason in words."""
         card, via = self._title_card(project)
+        self._title_key = self._card_key(card, via)          # PAD-434: _title_stale
+        self._title_files = self._title_files_sig(project)
         profile, text, note, no_port = None, "", "", ""
         self._title_read = None
         origin = ""

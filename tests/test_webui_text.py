@@ -514,6 +514,39 @@ def test_show_in_scenes_lands_on_the_line_and_jumps_back(tmp_path):
         assert not w.state("text_scenes")["open"]
 
 
+def test_scenes_search_keeps_and_steps_through_text(tmp_path):
+    """PAD-429 (DragonRR): a search a picked scene does not match narrows the list instead of
+    wiping itself, and Previous / Next walk every line of text with the words, round."""
+    folder = _scene_extract(tmp_path / "proj")
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        w.call("text.select", _row_index(w, "CLOCK NOT SET"))
+        w.call("text.show_in_scene")
+        assert w.state("text_scenes")["sel"] == "/g/scene1"
+        w.call("text_scenes.set_search", "ball")
+        sc = w.state("text_scenes")
+        assert sc["search"] == "ball"
+        assert [r["d"] for r in sc["scenes"]] == ["/g/scene2"]
+        assert sc["find"] == {"pos": 0, "n": 1}
+        # "o" is in both lines, and in scene9's name (no text of its own: one stop of its
+        # own); Next goes in the list's order and back round to the first
+        w.call("text_scenes.set_search", "o")
+        assert [r["d"] for r in w.state("text_scenes")["scenes"]] ==             ["/g/scene2", "/g/scene1", "/g/scene9"]
+        assert w.state("text_scenes")["find"]["n"] == 3
+        seen = []
+        for _ in range(4):
+            assert w.call("text_scenes.find_step", 1) is True
+            sc = w.state("text_scenes")
+            seen.append((sc["sel"], sc["item"], sc["find"]["pos"]))
+        assert seen == [("/g/scene2", "txt::0", 1), ("/g/scene1", "txt::0", 2),
+                        ("/g/scene9", None, 3), ("/g/scene2", "txt::0", 1)]
+        assert w.call("text_scenes.find_step", -1) is True
+        assert w.state("text_scenes")["sel"] == "/g/scene9"
+        w.call("text_scenes.set_search", "nothing like it")
+        assert w.call("text_scenes.find_step", 1) is False
+        assert w.state("text_scenes")["find"] == {"pos": 0, "n": 0}
+
+
 def test_scenes_recolour_move_and_preview(tmp_path):
     from pinball_decryptor.plugins.stern import text_colors, text_layout
     folder = _scene_extract(tmp_path / "proj")

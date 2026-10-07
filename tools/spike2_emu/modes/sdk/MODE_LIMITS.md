@@ -180,12 +180,12 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy 1.15 | no | ✓ | not yet | all | never waits |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
-| Guardians of the Galaxy LE 1.15 | no | ✓ | not yet | no | never waits |
+| Guardians of the Galaxy LE 1.15 | no | ✓ | not yet | all | never waits |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
 | Iron Maiden LE 1.18 | no | ✓ | ✓ | all | never waits |
-| Iron Maiden Pro 1.18 | no | ✓ | ✓ | no | never waits |
+| Iron Maiden Pro 1.18 | no | ✓ | ✓ | all | never waits |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all |  |
-| James Bond 007 Pro 1.06 | no | ✓ | ✓ | no | never waits |
+| James Bond 007 Pro 1.06 | no | ✓ | ✓ | all | never waits |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | all |  |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
@@ -193,7 +193,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | John Wick Pro 1.02 | no | no | ✓ | no | never waits |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | all |  |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | all |  |
-| Jurassic Park Pro 1.16 | no | ✓ | ✓ | no | never waits |
+| Jurassic Park Pro 1.16 | no | ✓ | ✓ | all | never waits |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
 | King Kong Pro 0.97 | no | ✓ | not yet | no | never waits |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | all |  |
@@ -205,7 +205,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush Pro 1.19 | no | ✓ | ✓ | no | never waits |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
-| Star Wars LE 1.31 | no | ✓ | ✓ | no | never waits |
+| Star Wars LE 1.31 | no | ✓ | ✓ | all | never waits |
 | Star Wars Pro 1.31 | no | ✓ | ✓ | no | never waits |
 | Stranger Things 1.13 | no | ✓ | ✓ | no | never waits |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |

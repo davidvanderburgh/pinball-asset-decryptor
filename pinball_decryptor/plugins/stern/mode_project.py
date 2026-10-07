@@ -1430,6 +1430,18 @@ LAMPS_PROVEN = frozenset((
     "dungeons_and_dragons_pro-1.10",
     "guardians-1.15",
     "iron_maiden_le-1.18",
+    # PAD-420 2026-10-07 (lights/lights_job.sh, stock card, hidden, muted): a mode file's light_all ff00ff held every
+    # insert the port names; the shim's LED view had every addressed insert magenta while it ran and none before:
+    #   guardians_le-1.15: 76/76 RGB, 39/39 single
+    #   iron_maiden_pro-1.18: 16/16 RGB, 138/138 single
+    #   james_bond_pro-1.06: 10/10 RGB, 78/78 single
+    #   jurassic_park_pro-1.16: 9/9 RGB, 76/76 single
+    #   star_wars_le-1.31: 15/15 RGB, 85/85 single
+    "guardians_le-1.15",
+    "iron_maiden_pro-1.18",
+    "james_bond_pro-1.06",
+    "jurassic_park_pro-1.16",
+    "star_wars_le-1.31",
 ))
 
 

@@ -29,6 +29,7 @@ const T = {
   specCmd: "To encode your own, start from this and tune whatever you like around it (bitrate, preset, and the key-frame interval unless Key frames is listed above) — the flags below are the parts that have to match:",
   specAn: "The -an is deliberate: this slot's clip has no audio track, and one you add will be played.",
   best: "Convert every replaced clip at full quality from your own files, for a card built with room to spare (Write tab → SD card size). If this project doesn't know which files your clips came from, it finds them: point it at a card built with your videos and the folder they are in.",
+  compare: "Play the selected clips side by side, big, beside the Color profiles bar: up to 4 (Ctrl-click or Shift-click rows to select them). One clip shows its Original beside its Replacement.\n\nClick a clip there and the bar changes its colors, so you see a profile or a slider on it against the others as you go.",
   qTitle: "Check the videos already on a card",
   qIntro: "Measures every clip on a built card image and lists the ones whose bitrate is low enough to look blocky — the same test a Write applies to a replacement, applied after the fact to what is actually on the card. This reads the card image only; nothing is written and nothing is extracted.",
 };
@@ -319,6 +320,150 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   </div>`;
 }
 
+// ----------------------------------------------------------------- Compare
+// PAD-440 (DragonRR): up to four clips side by side, big, beside the Color profiles bar.
+// Each player draws through its own clip's colour steps (video.py _cmp_steps), so a
+// profile picked or a slider moved shows on the clip clicked, against the others, as it
+// is made.  The clip clicked is the one the bar changes and the one heard.
+const cmpPlayers = new Map();          // tile id -> <video>
+const LOOP_KEY = "pad.video.compare.loop";
+const loopAtStart = () => { try { return localStorage.getItem(LOOP_KEY) !== "0"; } catch (e) { return true; } };
+
+function CmpColor({ t, row, cs }) {
+  if (!row || (row.col == null && !row.col_lock)) return null;
+  if (t.side !== "rep") return html`<div class="row vcm-color"><span class="small muted">The original, as it is now.</span></div>`;
+  const line = profileLine(row, cs);
+  return html`<div class="row vcm-color">
+    ${row.col_lock ? html`<span class="vid-color locked" ...${tip(colorTip(row, cs))}><${Icon} name="lock" /></span>`
+      : html`<button type="button" class=${cx("vid-color", row.col ? "on" : "off", row.col_own && "own")}
+        aria-pressed=${row.col ? "true" : "false"} aria-label="Attach or detach this clip's color profile" ...${tip(colorTip(row, cs))}
+        onClick=${(e) => { e.stopPropagation(); call("video.set_color", row.rel, !row.col); }}><${Icon} name="palette" /></button>`}
+    <span class="small ellip">${row.col ? html`Color profile: <span class="vcm-cp">${line ? line.profile : ""}</span>`
+      : "No color profile attached"}</span>
+  </div>`;
+}
+
+function CmpTile({ t, row, cs, active, onPick, stopSeq, loop, canRemove, onState }) {
+  const vref = useRef(null);
+  const pane = t.pane || {};
+  const [playing, setPlaying] = useState(false);
+  const [pos, setPos] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const asked = useRef(0);
+  const facts = pane.facts;
+  const dur = (facts && facts.dur) || 0;
+  const direct = !!(pane.path && facts && enginePlays(facts) && !failed);
+  const src = pane.proxy || (direct ? pane.path : null);
+
+  useEffect(() => { setFailed(false); setPos(0); setPlaying(false); }, [pane.seq]);
+  useEffect(() => {
+    if (!pane.path || !facts || pane.proxy || pane.proxy_busy || pane.proxy_err || direct) return;
+    if (asked.current === pane.seq) return;
+    asked.current = pane.seq;
+    call("video.compare_make_proxy", t.id, pane.seq, proxyFormat());
+  }, [pane.seq, !!facts, direct, pane.proxy, pane.proxy_busy]);
+  useEffect(() => {
+    const v = vref.current;
+    if (v) cmpPlayers.set(t.id, v);
+    return () => { if (cmpPlayers.get(t.id) === v) cmpPlayers.delete(t.id); };
+  });
+  useEffect(() => { const v = vref.current; if (v && !v.paused) v.pause(); }, [stopSeq]);
+
+  const toggle = (e) => {
+    e.stopPropagation();
+    onPick();
+    const v = vref.current;
+    if (!v || !src) return;
+    if (v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => {}); } else v.pause();
+  };
+  const seen = (on) => { setPlaying(on); onState(); };
+
+  let overlay = null;
+  if (!pane.path) overlay = html`<div class="hint">${pane.hint || "nothing to show"}</div>`;
+  else if (pane.proxy_busy && !src) overlay = html`<div class="hint"><${Spinner} /><span>Preparing a preview copy…</span></div>`;
+  else if (pane.proxy_err && !src) overlay = html`<div class="hint err-ink">${pane.proxy_err}</div>`;
+  else if (!facts) overlay = html`<div class="hint">loading frame…</div>`;
+
+  const steps = t.look || [];
+  const fid = "vcm-look-" + t.id;
+  const fstyle = steps.length ? `filter: url(#${fid})` : undefined;
+  const sides = (t.sides || []).map(([value, label]) => ({ value, label }));
+  const name = (row && row.name) || t.rel.split("/").pop();
+  return html`<div class=${cx("vcm-tile", active && "on")}>
+    <div class="row vcm-tilehd">
+      <span class="mono small ellip vcm-name" ...${tip({ head: t.rel, lines: [pane.label ? `${pane.title}: ${pane.label}` : pane.title] })}>${name}</span>
+      <span class="grow"></span>
+      ${sides.length > 1 ? html`<${Seg} value=${t.side} options=${sides} onChange=${(v) => call("video.compare_side", t.id, v)} />`
+        : html`<span class="small muted nw">${pane.title || "Original"}</span>`}
+      <${Button} size="xs" kind="ghost" icon="x" title="Take this clip out of Compare" disabled=${!canRemove}
+        onClick=${() => call("video.compare_remove", t.id)} />
+    </div>
+    <${LookFilter} id=${fid} steps=${steps} />
+    <div class="vid-screen vcm-screen" role="button" tabindex="0" aria-pressed=${active ? "true" : "false"}
+        aria-label=${"Pick " + name + " for the Color profiles bar"}
+        onClick=${onPick} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
+        ...${tip(active ? "The clip the Color profiles bar changes, and the one you hear." : "Click: the Color profiles bar changes this clip's colors, and it is the one you hear.")}>
+      ${pane.path && src ? html`<video key=${pane.seq + ":" + src} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
+          poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="auto" playsinline loop=${loop} muted=${!active}
+          onPlay=${() => seen(true)} onPause=${() => seen(false)} onEnded=${() => seen(false)}
+          onTimeUpdate=${(e) => setPos(e.currentTarget.currentTime)} onSeeked=${(e) => setPos(e.currentTarget.currentTime)}
+          onError=${() => { if (!pane.proxy && src) { setFailed(true); asked.current = 0; } }}></video>`
+        : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" style=${fstyle} />` : null}
+      ${overlay}
+    </div>
+    <div class="row vid-transport">
+      <${Button} size="sm" icon=${playing ? "pause" : "play"} onClick=${toggle} disabled=${!src}>${playing ? "Pause" : "Play"}<//>
+      <input type="range" class="vid-seek" min="0" max=${dur || 0} step="0.01" value=${Math.min(pos, dur || 0)}
+        disabled=${!src || !(dur > 0)} aria-label=${"Seek " + name}
+        onInput=${(e) => { const v = vref.current; const x = Number(e.target.value); setPos(x); if (v) v.currentTime = x; }} />
+      <span class="mono small muted nw">${clock(pos, pane.path ? dur : 0)}</span>
+    </div>
+    <${CmpColor} t=${t} row=${row} cs=${cs} />
+  </div>`;
+}
+
+function CompareView({ cmp, byRel, cs, look, active, setActive, stopSeq, onOpenColors }) {
+  const tiles = cmp.tiles || [];
+  const [loop, setLoopState] = useState(loopAtStart);
+  const [anyPlaying, setAnyPlaying] = useState(false);
+  const ref = useRef(null);
+  const setLoop = (v) => { setLoopState(v); try { localStorage.setItem(LOOP_KEY, v ? "1" : "0"); } catch (e) { /* kept for this page */ } };
+  const onState = () => setAnyPlaying([...cmpPlayers.values()].some((v) => v && !v.paused && !v.ended));
+  useEffect(() => { if (ref.current) ref.current.focus({ preventScroll: true }); }, []);
+  useEffect(() => () => { for (const v of cmpPlayers.values()) if (v && !v.paused) v.pause(); }, []);
+  const each = (fn) => { for (const t of tiles) { const v = cmpPlayers.get(t.id); if (v) fn(v); } };
+  const play = (v) => { const p = v.play(); if (p && p.catch) p.catch(() => {}); };
+  const playAll = () => (anyPlaying ? each((v) => v.pause()) : each(play));
+  // every clip from its first frame at once, so they keep in step
+  const fromStart = () => each((v) => { v.currentTime = 0; play(v); });
+  const close = () => call("video.compare_close");
+  const onKey = (e) => { if (e.key === "Escape" && !menuOpen()) { e.stopPropagation(); close(); } };
+  const n = tiles.length;
+  return html`<div class="page fill vid-page vcm-page" ref=${ref} tabindex="-1" onKeyDown=${onKey}>
+    <section class="card vcm" aria-label="Compare clips">
+      <div class="vcm-hd">
+        <div class="row vcm-hdrow">
+          <${Icon} name="compare" cls="lg" />
+          <span class="h2">Compare</span>
+          <span class="grow"></span>
+          <${Button} icon=${anyPlaying ? "pause" : "play"} onClick=${playAll}>${anyPlaying ? "Pause all" : "Play all"}<//>
+          <${Button} icon="refresh" onClick=${fromStart} title="Play every clip from its first frame at once, so they keep in step">From the start<//>
+          <${Check} checked=${loop} label="Loop" cls="small" title="Play each clip over and over" onChange=${setLoop} />
+          <${Button} kind="ghost" icon="x" onClick=${close} title="Back to the list (Esc)">Close<//>
+        </div>
+        <div class="small muted">${look.offered
+          ? "Click a clip: the Color profiles bar changes its colors while you watch the others. It is the one you hear."
+          : "Click a clip to hear it."}</div>
+      </div>
+      ${look.offered ? html`<div class="vcm-look"><${LookRow} look=${look} ns="video" onOpen=${onOpenColors} /></div>` : null}
+      <div class=${cx("vcm-grid", "n" + Math.min(n, 4))}>
+        ${tiles.map((t) => html`<${CmpTile} key=${t.id} t=${t} row=${byRel.get(t.rel)} cs=${cs} active=${t.id === active}
+          onPick=${() => setActive(t.id)} stopSeq=${stopSeq} loop=${loop} canRemove=${n > 1} onState=${onState} />`)}
+      </div>
+    </section>
+  </div>`;
+}
+
 // ----------------------------------------------------------------- dialogs
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall through */ }
@@ -539,14 +684,22 @@ export default function VideoTab() {
   // view; the players draw through it.  It opens on Files the first time: the profile
   // that column attaches.  A name under Preview colors opens the bar on that profile.
   const colorNs = useNs("color");
+  const cmp = s.compare || {};
+  const cmpOpen = !!cmp.open;
+  const byRel = useMemo(() => new Map(allRows.map((r) => [r.rel, r])), [s.rows]);
+  const [cmpActive, setCmpActive] = useState(null);
+  const cmpTiles = cmp.tiles || [];
+  const activeTile = cmpTiles.find((t) => t.id === cmpActive) || cmpTiles[0] || null;
   const [colors, setColorsState] = useState(() => barOpenAtStart("video"));
   const setColors = (v) => { setColorsState(v); rememberBarOpen(v, "video"); };
   const openColors = async (mode) => { await call("color.set_mode", mode); setColors(true); };
   // the first highlighted row in list order (Tk: tree.selection()[0])
   const firstOf = (set) => { const f = rows.find((x) => set.has(x.rel)); return f ? f.rel : null; };
   const firstSel = useMemo(() => firstOf(sel), [rows, sel]);
-  // PAD-368: the clip clicked, whose own profile the Color profiles bar shows
-  const selRow = firstSel ? rows.find((x) => x.rel === firstSel) : null;
+  // PAD-368: the clip clicked, whose own profile the Color profiles bar shows (PAD-440: in
+  // Compare, the clip clicked there)
+  const selRow = cmpOpen ? (activeTile ? byRel.get(activeTile.rel) : null)
+    : firstSel ? rows.find((x) => x.rel === firstSel) : null;
   const colorFile = selRow && selRow.col != null
     ? { kind: "videos", rel: selRow.rel, label: selRow.name, on: !!selRow.col, attach: { ns: "video" } } : null;
 
@@ -600,6 +753,19 @@ export default function VideoTab() {
   };
   // the row the panes' buttons act on: the highlighted one, as Tk's did
   const currentRel = firstSel || pv.rel || null;
+  // PAD-440: the selected rows, in list order, side by side; the Colors bar opens beside them
+  const openCompare = async (rels) => {
+    clearTimeout(selectJob.current);
+    pauseAll();
+    const n = await call("video.compare_open", rels);
+    if (!n) return;
+    setCmpActive(null);
+    if (look.offered && colorNs.has_project && !colors) setColors(true);
+  };
+  const compareRels = () => {
+    const picked = rows.filter((x) => sel.has(x.rel)).map((x) => x.rel);
+    return picked.length ? picked : currentRel ? [currentRel] : [];
+  };
 
   const onContext = async (r, i, e) => {
     let rels;
@@ -617,6 +783,8 @@ export default function VideoTab() {
       openMenu(at, [
         { label: `${info.rows} slot${info.rows === 1 ? "" : "s"} selected`, disabled: true },
         { sep: true },
+        { label: `Compare ${Math.min(info.rows, cmp.max || 4)} clips side by side`, onClick: () => openCompare(rels) },
+        { sep: true },
         info.targets
           ? { label: `Clear ${info.targets} replacement${info.targets === 1 ? "" : "s"} in this selection`, onClick: () => call("video.clear", rels) }
           : { label: "No replacements in this selection", disabled: true },
@@ -628,6 +796,7 @@ export default function VideoTab() {
       { label: "▶  Play original", onClick: () => playRow(rel, "orig") },
       { label: "Choose replacement…", onClick: () => choose(rel) },
       info.has_pick && { label: "▶  Play replacement", onClick: () => playRow(rel, "rep") },
+      { label: "Compare side by side", onClick: () => openCompare([rel]) },
       info.can_clear && { sep: true },
       info.can_clear && { label: "Clear replacement", onClick: () => call("video.clear", [rel]) },
       info.stern && info.scenes && { sep: true },
@@ -765,7 +934,7 @@ export default function VideoTab() {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [cmpOpen]);
 
   // PAD-369: the replacement's name over its player tells its color profile too
   const curRow = currentRel ? rows.find((x) => x.rel === currentRel) : null;
@@ -785,12 +954,21 @@ export default function VideoTab() {
   // ▶ on an empty pane: load the highlighted row and play that pane
   const emptyPlay = (side) => { if (currentRel) call("video.activate_pane", currentRel, side); };
 
-  return html`<div class="cpd-shell"><div class="page vid-page">
+  const withBar = (page) => html`<div class="cpd-shell">${page}${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets"
+    open=${colors} setOpen=${setColors} file=${colorFile} />` : null}</div>`;
+  if (cmpOpen) {
+    return withBar(html`<${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
+      active=${activeTile ? activeTile.id : null} setActive=${setCmpActive} stopSeq=${s.stop_seq}
+      onOpenColors=${colorNs.has_project ? openColors : undefined} />`);
+  }
+  return withBar(html`<div class="page vid-page">
     <${PageHead} title="Video" sub=${html`${T.intro}<span class="vid-project small"><span class="lbl0">Project folder:</span>
         <button type="button" class=${cx("vid-link", !s.project && "none")} onClick=${() => call("video.open_project_folder")}
           ...${tip(T.project)}>${s.project_text}</button></span>`}>
       ${s.status ? html`<${Chip} kind="acc">${s.status}<//>` : null}
       <${Button} icon=${s.scanning ? "x" : "refresh"} onClick=${() => call(s.scanning ? "video.cancel_scan" : "video.scan")}>${s.scanning ? "Cancel scan" : "Scan"}<//>
+      <${Button} icon="compare" cls="vid-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!currentRel}
+        title=${T.compare}>Compare<//>
       <${Button} icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
       ${s.best_supported ? html`<${Button} kind="ghost" icon="star" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
       <${Button} kind="ghost" icon="more" label="More"
@@ -850,6 +1028,5 @@ export default function VideoTab() {
     ${spec ? html`<${SpecDialog} spec=${spec} onClose=${() => setSpec(null)} />` : null}
     ${q.open ? html`<${QualityWindow} q=${q} />` : null}
     ${best.open ? html`<${BestWindow} b=${best} />` : null}
-  </div>${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets" open=${colors} setOpen=${setColors}
-    file=${colorFile} />` : null}</div>`;
+  </div>`);
 }

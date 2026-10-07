@@ -495,6 +495,17 @@ HELP_CONTENT = {
                 {"icon": "eye", "title": "Machine screen",
                  "text": "every clip, unless the gear menu lets unattached files skip it"}]},
         ]),
+        ("Compare clips", [
+            "Select up to four rows (Ctrl-click, Shift-click) and press **Compare**: "
+            "they play side by side, big, beside the **Colors** bar. One clip shows its "
+            "Original beside its Replacement.",
+            "- Click a clip: the Colors bar changes that clip's profile, and you see it "
+            "against the others as you move a slider or pick a profile (Spike 2).\n"
+            "- The clip you clicked is the one you hear; the others are muted.\n"
+            "- **Play all**, **From the start** (every clip from its first frame, in "
+            "step) and **Loop**. Each clip can switch between Original and Replacement.\n"
+            "- **Close** or Esc goes back to the list.",
+        ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "
          "**Load settings from a file…** puts them back, on this card or another. Slots "

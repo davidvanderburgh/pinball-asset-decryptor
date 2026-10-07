@@ -22,7 +22,7 @@
  *              ZERO and MULTIPLIER at the edges, the charge on the right edge's gauge, the clock in the badge
  *              (the overheat's seconds while it overheats). Each 100% plays the cannon charging, an overheat
  *              Kiryu sparking; the shot and the endings are full screen.
- *   INSERTS    The charging shots ice blue; ready: the CAPTIVE BALL (MAGNA GRAB) and the ACTION BUTTON
+ *   INSERTS    The charging shots flashing ice blue; ready: the CAPTIVE BALL (MAGNA GRAB) and the ACTION BUTTON
  *              flashing white; overheating: flashing red, faster as the seconds run out.
  *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
  *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
@@ -31,6 +31,10 @@
  * Emulator test triggers: /dump/kiryu.start, .stop, .shot "<shot name>", .charge "<percent>" (set the charge).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): Absolute Zero: an ice-blue fade */
+#define GAME_SHOW_START "Strobe burst"
+#define GAME_SHOW_END   "Blue fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -160,7 +164,7 @@ static void show_lamps(void)
 {
     kit_lamps_begin(&lamps);
     if (run.phase == PHASE_CHARGE) {
-        if (run.charge < CHARGE_MAX) kit_lamps_shot(&lamps, all_charge, KY_ICE, PM_LAMP_SOLID, 0);
+        if (run.charge < CHARGE_MAX) kit_lamps_shot(&lamps, all_charge, KY_ICE, PM_LAMP_BLINK, KIT_LIT_MS);
         if (run.mult) {
             uint64_t fire = fire_mask | button_mask;
             if (run.heat.ticks)
@@ -226,7 +230,7 @@ static int start(const char *why)
     kit_hud_pips(&hud, 10);
     show();
     kit_hud_award(&hud, 3000, "KIRYU ONLINE", "CHARGE THE ABSOLUTE ZERO");
-    kit_show_start(&show_fx, "kiryu start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "kiryu start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %d s, fire at %s or the %s from 100%%; next time %u spins, score %llu", why, p,
            RUN_SECONDS, FIRE_SHOT, BUTTON_SHOT, spins_needed(p), (unsigned long long)pm_score(p));
@@ -245,7 +249,8 @@ static void end(const char *why)
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.fired ? "won" : "lost");
-    kit_show_start(&show_fx, "kiryu end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end"))
+        kit_show_start(&show_fx, "kiryu end", SHOW_END, N_SHOW(SHOW_END));
     if (run.fired) pm_snprintf(b, sizeof b, "ABSOLUTE ZERO X%u  -  %s", run.mult ? run.mult : 1, kit_num(a, sizeof a, run.shot_paid));
     else pm_snprintf(b, sizeof b, "THE CANNON NEVER FIRED");
     kit_hud_title(&hud, run.fired ? "KIRYU WINS" : "KIRYU IS DOWN", b);
@@ -351,8 +356,10 @@ static void qualify_shot(uint64_t shot, unsigned p)
         start("the Mechagodzilla spinner, KIRYU lit");
         return;
     }
-    if (spins[p] < need) spins[p]++;
-    if (spins[p] % 5 == 0 || spins[p] >= need) pm_log("%s %u of %u (player %u)", SPIN_SHOT, spins[p], need, p);
+    if (spins[p] < need) {                              /* PAD-399: a count is said once, when reached */
+        spins[p]++;
+        if (spins[p] % 5 == 0 || spins[p] >= need) pm_log("%s %u of %u (player %u)", SPIN_SHOT, spins[p], need, p);
+    }
     if (spins[p] >= need) {
         start("the Mechagodzilla spinner");
     } else if (!kit_running) {

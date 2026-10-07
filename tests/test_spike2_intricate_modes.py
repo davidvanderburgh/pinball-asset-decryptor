@@ -597,6 +597,36 @@ def test_one_pack_mode_at_a_time_and_a_new_hud_replaces_the_last_total(harness):
     assert not any(first_spin <= t < start for t, _w in hud(out, "oxygen_destroyer", "Award"))
 
 
+def _count(out, mode, text):
+    return sum(text in ln for ln in lines(out, mode))
+
+
+def test_a_refused_start_and_a_reached_count_are_said_once(harness):
+    # PAD-399: a machine run's mode.log carried "[DESTOROYAH] not started: BIOLLANTE is running" 12 times in 2 s
+    # and "Left spinner 25 of 25" 191 times: every spin retried the start. Each is said once until it changes.
+    o, g = "OXYGEN DESTROYER", "KING GHIDORAH"
+    out = play(harness, *POWERLINES, "secs", 1, *SPINS, *SPINS, "trigger", "ghidorah_heads.stop", "ms", 500,
+               "shot", "Left spinner")
+    assert _count(out, o, "not started: KING GHIDORAH is running") == 1
+    assert _count(out, o, "Left spinner 25 of 25") == 1
+    assert has(out, o, "START (the left spinner)")
+    # the game's own multiball: one "not started" for it however often the spinner asks, again once it changed
+    out = play(harness, "multiball", 1, *SPINS, *SPINS, "battle", 1, "multiball", 0, *SPINS[:10], "battle", 0,
+               "shot", "Left spinner", "secs", 1)
+    assert _count(out, o, "a multiball is running") == 1
+    assert _count(out, o, "a battle is running") == 1
+    assert _count(out, o, "Left spinner 25 of 25") == 1
+    assert has(out, o, "START (the left spinner)")
+    # the powerlines: a count once when it is reached, "not counted" once a ball
+    lines3 = [w for i in range(3) for w in ("shot", "Powerline " + ("left", "center", "right")[i], "ms", 300)]
+    out = play(harness, "battle", 1, *lines3, *lines3, *lines3, "battle", 0, "secs", 5, "shot", "Powerline left",
+               "secs", 1, "trigger", "ghidorah_heads.stop", "secs", 1, *lines3, *lines3, "secs", 1)
+    assert _count(out, g, "powerlines 3 of 3") == 1
+    assert _count(out, g, "not started (three powerlines): a battle is running") == 1
+    assert has(out, g, "START (three powerlines)")
+    assert _count(out, g, "not counted - it already ran this ball") == 1
+
+
 @pytest.mark.parametrize("start", [POWERLINES, [*MASER3], ["trigger", "final_wars.light", "secs", 8,
                                                                               "shot", "Building"], MELTDOWN_START])
 def test_a_drain_ends_the_mode_with_its_total(harness, start):
@@ -1059,16 +1089,16 @@ def test_ghidorah_lights_the_lit_heads_inserts_gold_with_its_health_and_the_regr
     g = "KING GHIDORAH"
     start = _at(out, "[KING GHIDORAH] START")
     assert _at(out, "DISPLAY 180 KING GHIDORAH") <= start
-    assert (start, "ffaa00", "solid", 0) in _lamp(out, "LEFT RAMP", g)          # full health: solid gold
-    assert (start, "ffaa00", "solid", 0) in _lamp(out, "POWERLINE LEFT", g)
+    assert (start, "ffaa00", "blink", 700) in _lamp(out, "LEFT RAMP", g)        # full health: gold, slowly (PAD-415)
+    assert (start, "ffaa00", "blink", 700) in _lamp(out, "POWERLINE LEFT", g)
     hit = _at(out, "[KING GHIDORAH] Left ramp: LEFT HEAD -2")
     assert (hit, "ffaa00", "blink", 180) in _lamp(out, "LEFT RAMP", g)          # 1 health: a fast blink
     moved = _at(out, "[KING GHIDORAH] the lit head moves: LEFT HEAD -> MIDDLE HEAD")
     assert (moved, "00ff3c", "pulse", 1200) in _lamp(out, "LEFT RAMP", g)        # wounded, left alone: green
-    assert (moved, "ffaa00", "solid", 0) in _lamp(out, "BUILDING", g)
-    assert (moved, "ffaa00", "solid", 0) in _lamp(out, "POWERLINE CENTER", g)
+    assert (moved, "ffaa00", "blink", 700) in _lamp(out, "BUILDING", g)
+    assert (moved, "ffaa00", "blink", 700) in _lamp(out, "POWERLINE CENTER", g)
     assert re.search(r"HELD RIGHT RAMP", out) is None                          # a full head not lit: the game's
-    assert has(out, g, "lights: shot 0x10100000 00ff3c pulse 1200; shot 0x20400000 ffaa00 solid")
+    assert has(out, g, "lights: shot 0x10100000 00ff3c pulse 1200; shot 0x20400000 ffaa00 blink 700")
 
 
 def test_ghidorah_final_blow_flashes_the_maser_and_every_insert_goes_back_when_it_ends(harness):
@@ -1131,11 +1161,11 @@ def test_maser_barrage_lights_the_next_shot_bright_the_rest_dim_and_the_window_b
     m = "MASER BARRAGE"
     start = _at(out, "[MASER BARRAGE] START")
     assert _at(out, "DISPLAY 180 MASER BARRAGE") <= start
-    assert (start, "005aff", "solid", 0) in _lamp(out, "LEFT RAMP", m)            # next, no window yet
-    assert (start, "001e5a", "solid", 0) in _lamp(out, "RIGHT RAMP", m)           # the rest of the chain, dim
-    assert (start, "001e5a", "solid", 0) in _lamp(out, "BUILDING", m)
+    assert (start, "005aff", "blink", 500) in _lamp(out, "LEFT RAMP", m)          # next, no window yet
+    assert (start, "001e5a", "pulse", 1600) in _lamp(out, "RIGHT RAMP", m)        # the rest of the chain, dim
+    assert (start, "001e5a", "pulse", 1600) in _lamp(out, "BUILDING", m)
     step = _at(out, "[MASER BARRAGE] step 1 Left ramp")
-    assert (step, "001e5a", "solid", 0) in _lamp(out, "LEFT RAMP", m)
+    assert (step, "001e5a", "pulse", 1600) in _lamp(out, "LEFT RAMP", m)
     blinks = [(t - step, c, p, ms) for t, c, p, ms in _lamp(out, "RIGHT RAMP", m) if p == "blink" and t >= step]
     assert [ms for _c, _p, ms in _changes(blinks)] == [500, 250, 100], blinks      # the 7 s window closing
     first = {}
@@ -1143,8 +1173,8 @@ def test_maser_barrage_lights_the_next_shot_bright_the_rest_dim_and_the_window_b
         first.setdefault(ms, d)
     assert 2700 <= first[250] <= 2900 and 4800 <= first[100] <= 5000
     broken = _at(out, "[MASER BARRAGE] CHAIN BROKEN")
-    assert (broken, "005aff", "solid", 0) in _lamp(out, "LEFT RAMP", m)           # back to the start
-    assert (broken, "001e5a", "solid", 0) in _lamp(out, "RIGHT RAMP", m)
+    assert (broken, "005aff", "blink", 500) in _lamp(out, "LEFT RAMP", m)         # back to the start
+    assert (broken, "001e5a", "pulse", 1600) in _lamp(out, "RIGHT RAMP", m)
 
 
 def test_final_wars_lit_building_pulses_only_while_no_mode_of_ours_runs_and_not_between_balls(harness):
@@ -1733,9 +1763,11 @@ def test_godzilla_angry_every_switch_fills_the_rage_meter_and_level_five_lights_
     lit = _at(out, "[GODZILLA ANGRY] GODZILLA IS ANGRY for player 1: the Building starts the chase")
     assert lit > _at(out, "[GODZILLA ANGRY] RAGE LEVEL 4 of 5")              # the 750th switch (100+125+150+175+200)
     assert len(re.findall(r"SCORE \+", out)) == 5
-    # the meter on the glass: RAGE n/5 on the right edge's gauge, then ANGRY! full, notes in the award line
-    for lv in range(1, 6):
-        assert hud_said(out, s, "Gauge_Label", "RAGE %d/5" % lv), lv
+    # PAD-416: ONE meter to the mode, its percent beside it (100, 225, 375 and 550 of 750 hits at the levels' ends),
+    # never a level's n/5; then ANGRY! full, notes in the award line
+    for pct in ("13%", "30%", "50%", "73%"):
+        assert hud_said(out, s, "Gauge_Label", pct) and hud_said(out, s, "Award", "RAGE " + pct), pct
+    assert not hud_said(out, s, "Gauge_Label", "RAGE 1/5")
     assert hud_said(out, s, "Gauge_Label", "ANGRY!") and hud_said(out, s, "Award", "GODZILLA IS ANGRY!")
     assert hud_said(out, s, "AwardSub", "SHOOT THE BUILDING")
     # the BUILDING pulses red once the light show of GODZILLA IS ANGRY is over
@@ -1747,24 +1779,30 @@ def test_godzilla_angry_the_meter_counts_a_quarter_at_a_time_on_the_award_line(h
     s = "godzilla_angry"
     out = play(harness, "secs", 1, *(["raw", "0x1", "ms", 20] * 51), "secs", 3)
     assert has(out, GA, "rage 1: 25 of 100 switch hits (player 1)") and has(out, GA, "rage 1: 50 of 100")
-    assert hud_said(out, s, "Award", "75 MORE FOR RAGE 1") and hud_said(out, s, "Award", "50 MORE FOR RAGE 1")
+    assert hud_said(out, s, "Award", "725 MORE TO GODZILLA ANGRY") and hud_said(out, s, "Award", "700 MORE TO GODZILLA ANGRY")
     assert hud_said(out, s, "AwardSub", "GODZILLA IS GETTING ANGRY")
-    # the gauge fills a pip at a time: 12 pips for the level's 100 hits
+    # PAD-416: the bar fills a slice at a time toward the MODE: 40 slices for its 750 hits
     on = re.findall(r"SHOW PadMode_godzilla_angry_Hud\.PadMode_godzilla_angry_Hud_Gauge\.PadMode_godzilla_angry_Hud_G(\d+)_On 1",
                     out)
-    assert {int(k) for k in on} == set(range(1, 7))                       # 51 of 100: six of twelve
+    assert {int(k) for k in on} == {1, 2}                                   # 51 of 750: two of forty
+    assert hud_said(out, s, "Gauge_Label", "6%")
 
 
 @pytest.mark.parametrize("busy,on,off", [("balls", 2, 1), ("multiball", 1, 0)], ids=["two_balls", "games_multiball"])
-def test_godzilla_angry_rage_does_not_count_in_a_multiball(harness, busy, on, off):
+def test_godzilla_angry_rage_counts_quietly_in_a_multiball(harness, busy, on, off):
+    """PAD-416, David: "make sure the rage meter accumulates throughout the game (even during other modes)". A
+    multiball's hits count too, quietly: the meter off the glass, a level paid without its note."""
     out = play(harness, "secs", 1, busy, on, "secs", 1, *(["raw", "0x1"] * 150), "secs", 1, busy, off, "secs", 1,
                *(["raw", "0x1"] * 100), "secs", 1)
+    over = _at(out, ">> %s %s" % ("balls in play" if busy == "balls" else busy, off))
     level = _at(out, "[GODZILLA ANGRY] RAGE LEVEL 1 of 5")
-    assert level is not None and level > _at(out, ">> %s %s" % ("balls in play" if busy == "balls" else busy, off))
-    assert not has(out, GA, "RAGE LEVEL 2")
+    assert level is not None and level < over
+    assert has(out, GA, "(in a multiball: said quietly)")
+    assert not [ln for ln in lines(out, GA) if "MORE FOR RAGE" in ln and int(ln.split()[0]) < over]
     hidden = [t for t in _hid(out, "godzilla_angry") if t > _at(out, ">> %s %s" % (
         "balls in play" if busy == "balls" else busy, on))]
     assert hidden, "the meter stays on the glass during a multiball"
+    assert _at(out, "[GODZILLA ANGRY] RAGE LEVEL 2 of 5") > over
 
 
 def test_godzilla_angry_rage_does_not_count_after_a_tilt_until_the_next_ball(harness):
@@ -1805,12 +1843,14 @@ def test_godzilla_angry_chase_five_places_five_locks_baby_found_and_a_six_ball_m
     assert hud_said(out, s, "Line", "SHOOT THE BUILDING: BABY IS THERE")
     assert hud_said(out, s, "C1_Value", "5/5") and hud_said(out, s, "C3_Label", "SUPER")
     assert hud_said(out, s, "Award", "SUPER JACKPOT") and hud_said(out, s, "Title", "ANGRY MULTIBALL")
-    assert hud_said(out, s, "Gauge_Label", "LOCKS") and hud_said(out, s, "Gauge_Label", "MULTIPLIER")
+    # PAD-416: the bar is the RAGE meter's alone - the locks and the multiplier are the counters'
+    assert not hud_said(out, s, "Gauge_Label", "LOCKS") and not hud_said(out, s, "Gauge_Label", "MULTIPLIER")
+    assert hud_said(out, s, "C1_Label", "MULTIPLIER")
     assert hud_next(out, s, "Title", _at(out, "[GODZILLA ANGRY] END")) == "GODZILLA AND BABY"
     # the lights: the lock white and blinking, the place's shots red, BABY green over the orange jackpots
     assert "[GODZILLA ANGRY] lights: shot 0x80000 ffffff blink 700" in out
-    assert "[GODZILLA ANGRY] lights: shot 0x300000 ff0a00 solid" in out
-    assert re.search(r"\[GODZILLA ANGRY\] lights: shot 0x[0-9a-f]+ ff5000 solid; shot 0x[0-9a-f]+ 00ff3c blink 200", out)
+    assert "[GODZILLA ANGRY] lights: shot 0x300000 ff0a00 blink 500" in out
+    assert re.search(r"\[GODZILLA ANGRY\] lights: shot 0x[0-9a-f]+ ff5000 blink 500; shot 0x[0-9a-f]+ 00ff3c blink 200", out)
 
 
 def test_godzilla_angry_the_clock_running_out_turns_the_locks_into_a_smaller_multiball(harness):
@@ -1894,7 +1934,7 @@ def test_spacegodzilla_towers_fall_the_super_is_the_sum_and_adds_a_ball(harness)
     assert has(out, SG, "END (one ball left): CRYSTAL TOWERS, 7 jackpot(s), 1 super(s), 1 ball(s) added")
     assert hud_said(out, s, "Award", "LEFT RAMP TOWER FALLS") and hud_said(out, s, "Line", "SUPER JACKPOT: SHOOT THE BIG LOOP")
     assert hud_next(out, s, "Title", _at(out, "[SPACEGODZILLA] END")) == "SPACEGODZILLA FALLS"
-    assert "[SPACEGODZILLA] lights: shot 0x100000 be28ff blink 300; shot 0x400000 be28ff solid; shot 0x200000 be28ff solid" in out
+    assert "[SPACEGODZILLA] lights: shot 0x100000 be28ff blink 200; shot 0x400000 be28ff blink 500; shot 0x200000 be28ff blink 500" in out
 
 
 def test_spacegodzilla_moguera_shields_raise_every_jackpot(harness):
@@ -1946,7 +1986,7 @@ def test_kiryu_charges_on_lit_shots_and_fires_at_the_captive_ball(harness):
     assert hud_said(out, s, "Award", "ABSOLUTE ZERO READY") and hud_said(out, s, "Line", "FIRE: THE CAPTIVE BALL  -  OR CHARGE ON")
     assert hud_said(out, s, "C1_Value", "109%") and hud_said(out, s, "C3_Sub", "X2 AT 200%")
     assert hud_next(out, s, "Title", end) == "KIRYU WINS"
-    assert "[KIRYU] lights: shot 0x1388700000 8cdcff solid; shot 0x1000000000080000 ffffff blink 300" in out
+    assert "[KIRYU] lights: shot 0x1388700000 8cdcff blink 500; shot 0x1000000000080000 ffffff blink 300" in out
 
 
 def test_kiryu_overheats_from_two_hundred_percent_and_vents_the_charge(harness):
@@ -2167,3 +2207,142 @@ def test_biollante_lights_the_shield_vines_once_they_face_the_player(harness):
     after = [ln for ln in lines(out, "BIOLLANTE") if " lights: " in ln and int(ln.split()[0]) >= facing]
     assert before and all("shot 0x70000000 " in ln for ln in before), before   # the powerline vines only
     assert any("shot 0x3f0000000 " in ln for ln in after), after[:3]          # and the shield vines
+
+
+# ---- PAD-413: an ending gives way when another of our modes begins ------------------------------------------------
+# David's Premium, 2026-10-06: "on kiryu it was overlapping text at one point" - BIOLLANTE began 4.8 s into KIRYU's
+# 10 s ending. A pack mode's HUD takes the place of the one up; a mode with no HUD (a mode file, a blocks mode with
+# its own screen, a mode in C) took nothing, so the total stayed. PLAIN is such a mode.
+PLAIN_MODE = r"""
+#include "pad_mode.h"
+static int on;
+static void on_tick(void)
+{
+    if (!on && pm_trigger("plain.start") && pm_begin()) { on = 1; pm_log("START"); }
+    if (on && pm_trigger("plain.stop")) { on = 0; pm_end(); pm_log("END"); }
+}
+static const struct pm_mode plain = { .name = "PLAIN", .tick = on_tick };
+PM_REGISTER(plain);
+"""
+KIRYU_FIRES = ["trigger", "kiryu.start", "secs", 1, "trigger", "kiryu.charge=150", "secs", 1,
+               "raw", "0x1000000000000000", "secs", 7]          # fired; it ends 4 s later: 3 s into its 10 s ending
+
+
+@pytest.fixture(scope="module")
+def harness_plain(tmp_path_factory):
+    cc = _cc()
+    d = tmp_path_factory.mktemp("plain")
+    exe = d / "harness"
+    (d / "desk_harness.c").write_text(_harness_source(), encoding="utf-8")
+    (d / "plain.c").write_text(PLAIN_MODE, encoding="utf-8")
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", str(SDK), "-o", str(exe),
+                        str(d / "desk_harness.c"), str(d / "plain.c")] + [str(EX / (s + ".c")) for s in MODES],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return exe
+
+
+def _shown_before(out, slug, t):
+    """the last SHOW of the mode's HUD group before `t` (1 up, 0 down), or None"""
+    v = [(int(ms), on) for ms, on in re.findall(r"^\s*(\d+) SHOW PadMode_%s_Hud (\d)$" % re.escape(slug), out, re.M)
+         if int(ms) < t]
+    return v[-1][1] if v else None
+
+
+def test_the_total_stays_its_time_when_nothing_else_begins(harness_plain):
+    out = play(harness_plain, *KIRYU_FIRES, "secs", 10)
+    end = _at(out, "[KIRYU] END (fired)")
+    assert end is not None and "gives way" not in out
+    assert [t for t in _hid(out, "kiryu") if t > end][0] - end >= 10000 - 40     # its 10 s on the glass
+
+
+def test_a_mode_without_a_hud_beginning_drops_the_last_ones_total_at_once(harness_plain):
+    out = play(harness_plain, *KIRYU_FIRES, "trigger", "plain.start", "secs", 1)
+    began = _at(out, "[PLAIN] START")
+    assert began is not None and _at(out, "[KIRYU] END (fired)") < began
+    assert _shown_before(out, "kiryu", began) == "1"                            # KIRYU WINS and its total were up
+    assert has(out, "KIRYU", "hud kiryu: another mode began - its ending gives way")
+    assert _soon([t for t in _hid(out, "kiryu") if t >= began][0], began)       # the next tick, not 7 s later
+    assert not [t for t, _w in hud(out, "kiryu", "Title") if t > began]         # and nothing written after
+
+
+def test_a_pack_mode_beginning_takes_the_glass_and_stops_the_last_ones_ending_clip(harness, dump_clips):
+    out = play_own(harness, dump_clips, *KIRYU_FIRES, "trigger", "biollante.start", "secs", 1)
+    began = _at(out, "[BIOLLANTE] START")
+    assert began is not None and "CLIP PadMode_kiryu_Won" in out
+    assert _at(out, "CLIP STOPPED KIRYU (another mode began)") == began          # the runtime, in pm_begin
+    assert began in _hid(out, "kiryu")                                          # its HUD gives BIOLLANTE's the place
+    assert not [t for t, _w in hud(out, "kiryu", "Title") if t > began]
+
+
+def test_a_qualification_note_gives_way_to_a_mode_beginning(harness_plain):
+    out = play(harness_plain, *(["raw", "0x20000", "tick", 1] * 3), "ms", 100, "trigger", "plain.start", "secs", 1)
+    began = _at(out, "[PLAIN] START")
+    assert hud_said(out, "kiryu", "Award", "27 SPINS TO KIRYU")
+    assert has(out, "KIRYU", "hud kiryu: another mode began - its note gives way")
+    assert _soon([t for t in _hid(out, "kiryu") if t >= began][0], began)
+
+
+# ---- PAD-415: a lit shot flashes; a hit answers ----------------------------------------------------------------------
+GODZILLA_TEN = ["biollante", "destoroyah", "final_wars", "ghidorah_heads", "godzilla_angry", "kiryu", "maser_barrage",
+                "meltdown", "oxygen_destroyer", "spacegodzilla"]
+
+
+@pytest.mark.parametrize("slug", GODZILLA_TEN)
+def test_no_lit_shot_is_held_solid(slug):
+    """David after a machine test (PAD-415): "the inserts that are lit for shots should pretty much always be flashing
+    - when they're solid, they look broken". Solid is the game's word for done; none of the ten lights a shot so."""
+    src = (EX / (slug + ".c")).read_text(encoding="utf-8")
+    calls = re.findall(r"kit_lamps_(?:shot|name)\([^;]*;", src, re.S)
+    assert calls
+    assert not [c for c in calls if "PM_LAMP_SOLID" in c], slug
+
+
+def test_every_hit_of_a_running_mode_strobes_its_insert_and_climbs_the_hit_sounds(harness):
+    """kit_fresh answers a hit that counts while the mode runs (kit_hit): the shot's inserts strobe white for 480 ms
+    and the game's hit sounds climb one a hit. The spins that start KIRYU are not its hits: nothing answers them."""
+    out = play_env(harness, {"HARNESS_HITS": "1"}, *KIRYU_SPINS, "secs", 1, "shot", "Shield target left", "secs", 1,
+                   "shot", "Shield target center", "secs", 1, "shot", "Left ramp", "secs", 1)
+    started = _at(out, "[KIRYU] START")
+    assert started is not None
+    strobes = re.findall(r"^\s*(\d+) STROBE ([0-9a-f]+) ffffff 480$", out, re.M)
+    sounds = re.findall(r"^\s*(\d+) HIT SOUND (\d+)$", out, re.M)
+    assert [s for _t, s in strobes] == ["80000000", "100000000", "100000"]
+    assert [n for _t, n in sounds] == ["1", "2", "3"]
+    assert all(int(t) > started for t, _s in strobes + sounds)
+
+
+@pytest.mark.parametrize("locks,balls", [(1, 2), (3, 3)])
+def test_godzilla_angry_a_drain_with_locks_starts_the_multiball(harness, locks, balls):
+    """PAD-416, David: "when you drain a ball if there are locks, it should NOT end the ball ... go straight to the
+    multi-ball ... count of how many I locked". From the first lock the chase keeps a ball save; the trough's switch
+    (the port's "Trough") is the drain, and the locked balls break loose - two at least, a multiball."""
+    shots = {1: ["shot", "Godzilla target", "secs", 1],
+             3: GA_CHASE[4:28]}[locks]
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 1, *shots, "secs", 11, "shot", "Trough", "secs", 2)
+    assert has(out, GA, "LOCK %d at" % locks)
+    saved = [int(t) for t in re.findall(r"^\s*(\d+) BALL SAVE 15 s$", out, re.M)]
+    drain = _at(out, "[GODZILLA ANGRY] a drain at")
+    assert saved and min(saved) < drain                                   # a save of its own from the first lock
+    assert has(out, GA, "with %d lock(s): the locked balls break loose, a %d-ball multiball" % (locks, balls))
+    assert _at(out, "MULTIBALL %d balls, save 15 s" % balls) == drain
+    assert not has(out, GA, "END (")
+
+
+def test_godzilla_angry_a_drain_without_a_lock_is_not_a_multiball(harness):
+    out = play(harness, *GA_LIGHT, "shot", "Building", "secs", 7, "shot", "Trough", "secs", 1, "ball_end", "secs", 1)
+    assert not has(out, GA, "a drain at") and "MULTIBALL" not in out
+    assert has(out, GA, "END (ball ended): the chase, 0 lock(s)")
+
+
+def test_godzilla_angry_the_meter_is_back_when_the_next_ball_starts(harness):
+    """PAD-416, David at the machine: "the rage bar wasn't always shown on the hud (like when starting a game and the
+    ball is in the shooter lane)". The bonus has the glass after a drain; the next ball's start brings the meter back,
+    the ball still in the shooter lane - it used to wait for the first switch."""
+    out = play(harness, "secs", 1, *(["raw", "0x1"] * 10), "secs", 1, "ball_end", "secs", 3, "event", "ball_start",
+               "secs", 2)
+    ended, started = _at(out, ">> ball_end"), _at(out, ">> event ball_start")
+    shown = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_godzilla_angry_Hud 1$", out, re.M)]
+    assert [t for t in _hid(out, "godzilla_angry") if ended <= t < started]       # off for the bonus
+    assert [t for t in shown if started <= t <= started + 100]                     # back with the new ball
+    assert not [t for t in shown if ended <= t < started]

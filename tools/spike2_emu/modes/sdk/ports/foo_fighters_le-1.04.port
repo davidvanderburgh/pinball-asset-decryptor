@@ -713,3 +713,41 @@ text block_name_32      Lightning
 site block_start_39     0x000f87c4 0xe92d4010 0xe1a04000
 data block_obj_39       0x03bb8ab8
 text block_name_39      Super Modulator
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x000bb25c 0xe3530000 0x03520302  # cextra_ball::v[34]
+text block_rule_name_0     Extra Ball
+site block_rule_1          0x0010dfcc 0xe92d4070 0xe1a04000  # cmultipliers::v[34]
+text block_rule_name_1     Multipliers
+site block_rule_2          0x0010fc34 0xe92d4ff0 0xe24dd01c  # crule_area_51::v[34]
+text block_rule_name_2     Area 51
+site block_rule_3          0x0011171c 0xe92d43f0 0xe1a07003  # crule_bot_targets::v[34]
+text block_rule_name_3     Bot Targets
+site block_rule_4          0x00119d44 0xe92d43f0 0xe1a07003  # crule_combotron::v[34]
+text block_rule_name_4     Combotron
+site block_rule_5          0x0011c7b4 0xe2022010 0xe3a03000  # crule_foo_bot::v[34]
+text block_rule_name_5     Foo Bot
+site block_rule_6          0x0011de68 0xe92d43f0 0xe1a05003  # crule_lightning_kicker::v[34]
+text block_rule_name_6     Lightning Kicker
+site block_rule_7          0x001123b4 0xe92d43f0 0xe1a06002  # crule_loops::v[34]
+text block_rule_name_7     Loops
+site block_rule_8          0x00121220 0xe92d47f0 0xe1a07003  # crule_outlanes::v[34]
+text block_rule_name_8     Outlanes
+site block_rule_9          0x0012386c 0xe92d4ff0 0xe24dd00c  # crule_overlord::v[34]
+text block_rule_name_9     Overlord
+site block_rule_10         0x001250f0 0xe92d41f0 0xe24dd010  # crule_radio_targets::v[34]
+text block_rule_name_10    Radio Targets
+site block_rule_11         0x001260dc 0xe92d43f0 0xe2031020  # crule_spinner::v[34]
+text block_rule_name_11    Spinner
+site block_rule_12         0x00127160 0xe92d4070 0xe24dd008  # crule_topper::v[34]
+text block_rule_name_12    Topper
+site block_rule_13         0x00127ac4 0xe92d47f0 0xe1a04002  # crule_ufo_captive_ball::v[34]
+text block_rule_name_13    Ufo Captive Ball
+site block_rule_14         0x00128710 0xe92d43f8 0xe1a07003  # crule_van::v[34]
+text block_rule_name_14    Van
+site block_rule_15         0x001141fc 0xe92d43f0 0xe2028b01  # crule_van_mods::v[34]
+text block_rule_name_15    Van Mods
+site block_rule_16         0x0012a40c 0xe92d4ff0 0xe24dd01c  # cskill_shot::v[34]
+text block_rule_name_16    Skill Shot

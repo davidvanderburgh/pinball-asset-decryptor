@@ -584,6 +584,74 @@ text shield_rule           Mechagodzilla Shield
 # one pass while a mode of ours has the shield; nothing else of the game's is held.
 site shield_update         0x001da978 0xe301316a 0xe340307d
 
+# ---- PAD-411: the game's own light shows -------------------------------------------------------------------------
+# Each is a show process's body (pad_mode_runtime.c "the game's own light shows"): it makes a lamp group, plays its
+# tables of {light-language command, owner} records through the player 0x1c7a38, sleeps through the show and stops
+# every effect; pm_game_show(n) / pm_game_show_named(name) runs it as process show_proc (an id the game never uses).
+# Measured in the emulator (PAD-411): every command each one sent, recorded at the light runner, and what each did
+# to the playfield's LEDs (the shim's LED view sampled every 20 ms, the game's own lamps in the 4 s before it taken
+# out): how many light channels it moved, the most at once, for how long. show_kind_<n>: flashy (a mode's start),
+# subdued (its end), accent (a moment); show_secs_<n>: how long the runtime lets it play - one that runs until
+# stopped (process 315's body) is stopped there. Left out: 326's body (67 channels for under 2 s), 332's and 333's
+# (next to nothing), and the attract director's 0x1cf458 and 0x1d47a8 (they run until stopped, and 0x1d47a8 throws
+# 137 channels at once in under 3 s: a flash, not a show).
+value show_proc            13200
+site show_1                0x001cfccc 0xe92d41f0 0xeb008e97   # process 312: 142 commands, orange-red strobe bursts every ~0.6 s over the whole playfield; 56 channels, 41 at once, 6 s
+text show_name_1           Strobe burst
+text show_kind_1           flashy
+value show_secs_1          6
+site show_2                0x00117bdc 0xe92d4038 0xeb036ed3   # process 213: 119 commands, a white strobe over a big light set and green sweeps; 86 channels, 63 at once, 17 s
+text show_name_2           Strobe storm
+text show_kind_2           flashy
+value show_secs_2          16
+site show_3                0x001cf6a8 0xe92d47f0 0xe24dd010   # the attract director's: 18 sweeps at once over every lamp group, many colours; 41 channels for 1.3 s - too short to see as a start (the second machine test)
+text show_name_3           Colour sweep
+text show_kind_3           accent
+value show_secs_3          2
+site show_4                0x001cd424 0xe92d4010 0xeb0098c1   # process 300: a slow blue fade; 103 channels, 55 at once, 7 s
+text show_name_4           Blue fade
+text show_kind_4           subdued
+value show_secs_4          6
+site show_5                0x001cd4e8 0xe92d4010 0xeb009890   # process 301: blue, yellow and red fading
+text show_name_5           Colour fade
+text show_kind_5           subdued
+value show_secs_5          6
+site show_6                0x001cd5ac 0xe92d4010 0xeb00985f   # process 302: red, blue and orange fading
+text show_name_6           Red and blue fade
+text show_kind_6           subdued
+value show_secs_6          6
+site show_7                0x001cd670 0xe92d4010 0xeb00982e   # process 304: dim reds and oranges fading
+text show_name_7           Ember fade
+text show_kind_7           subdued
+value show_secs_7          6
+site show_8                0x001d19c0 0xe92d4038 0xeb00875a   # process 330: a 0.6 s cyan flick on one light set
+text show_name_8           Cyan flick
+text show_kind_8           accent
+value show_secs_8          1
+site show_9                0x001d496c 0xe52de004 0xe3a03000   # process 315: the shot inserts lit in runs that chase up the ramps and lanes, round and round until stopped; 161 channels, 88 at once - the biggest
+text show_name_9           Insert chase
+text show_kind_9           flashy
+value show_secs_9          6
+site show_10               0x001ccce4 0xe92d4ff0 0xe24dd04c   # process 299: a 34-command table (0x64b5e8) that lights through the game's other light path (nothing at the light runner), waves of inserts over the whole playfield; 146 channels, 59 at once, 10 s
+text show_name_10          Playfield wave
+text show_kind_10          flashy
+value show_secs_10         10
+
+# ---- PAD-415: the game's own hit sounds ----------------------------------------------------------------------------
+# A rising run for a mode's hits (pm_hit_sound; the kit's kit_hit climbs one a hit): the Sound Test's "SE GZ FX PITCHED
+# HIT ORCH 1" to "8". The Sound Test's node id IS the request id (tools/spike2_emu/modes/sound_map.py), and a census of
+# this build agreed shot for shot (PAD-415, sound_census.c: a shield target played 345 MECHAGODZILLA TARGET 2, the left
+# ramp 420 LEFT RAMP, the right 443 RIGHT RAMP, the Maser target 436 MASER CANNON TARGET); fired, each holds the
+# effects channel the game's own shot sounds use (6) for about 2 s.
+value hit_sound_1          367
+value hit_sound_2          368
+value hit_sound_3          369
+value hit_sound_4          370
+value hit_sound_5          371
+value hit_sound_6          372
+value hit_sound_7          373
+value hit_sound_8          374
+
 # ---- PAD-393: the building (Premium/LE only) -----------------------------------------------------------------------
 # BuildingStepper (vtable 0x64ff88, a StepperMotor the node board runs: node 10 motor 0, BUILDING UP 92 / DOWN 93), one
 # object at 0x7bbe64 (its getter 0x1d7754 returns it). The game moves it by FLOOR: building_move (0x1d79fc: object,
@@ -647,6 +715,18 @@ value switch_polarity_at    28
 switch 34   0x1000000000000000 Action button
 switch 60   0x2000000000000000 Left flipper button
 switch 59   0x4000000000000000 Right flipper button
+# PAD-416: the trough's six positions as one shot, "Trough". A ball draining home closes one of them (and the stack
+# rolling down after an eject closes the next), so a mode that keeps a ball save of its own knows the moment its ball
+# drained - the framework's count of the balls in play does not move while the save serves it back (measured: it
+# stayed 1 through a saved drain). GODZILLA ANGRY sends its locked balls into the multiball on it.
+switch 66   0x8000000000000000 Trough
+switch 67   0x8000000000000000 Trough
+switch 68   0x8000000000000000 Trough
+switch 69   0x8000000000000000 Trough
+switch 70   0x8000000000000000 Trough
+switch 71   0x8000000000000000 Trough
+# ... a signal for code, not a shot to score: the Modes tab does not offer it (mode_project reads this line)
+text internal_shots        Trough
 # the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
 # a mode that lights its shots lights the button
 lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front

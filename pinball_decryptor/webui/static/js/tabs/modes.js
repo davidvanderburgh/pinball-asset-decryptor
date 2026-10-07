@@ -52,6 +52,7 @@ const T = {
   magnet: "While the mode runs, every hit of the shot the magnet sits at (the one that starts the mode too) holds the ball on the magnet for this long, then lets it go. The magnet runs at the power the operator set for it in the game's settings. To keep the coil safe, the app always holds the same limits: 0.1 to 5 seconds a grab, one grab at a time, 3 seconds between grabs, at most 6 a minute, never while the game is using the magnet itself, and it lets go when the mode or the ball ends or the game tilts. A grab it refuses is skipped and the mode carries on.",
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
+  gameShows: "One of the game's own playfield light shows as the mode starts, and another as it ends: flashy ones suit a start, subdued ones an end. Each plays for its own few seconds, one at a time (a new one takes the place of one still playing). The one at the end is skipped when the mode ends because the ball drained: the game stops its own shows then.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
   priority: "Kept for modes made before it changed: it no longer holds the game's displays back. A mode never makes the game's screens wait (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off), so the game's awards, starts and jackpots always come through, and the mode's screen is back when they end. 0 = none.",
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
@@ -665,8 +666,21 @@ function FilmSec({ off, dis, rs, labels, only }) {
   <//>`;
 }
 
+// PAD-418: the game's own light shows, grouped by the port's kind for them, for a pick list (none first; a name
+// the title does not have stays shown as it is, so the problem line can name it)
+const SHOW_KINDS = [["flashy", "Flashy (a start)"], ["subdued", "Subdued (an end)"], ["accent", "Accent (a moment)"]];
+function showOptions(shows, value) {
+  const out = [{ value: "(none)", label: "(none)" }];
+  for (const [kind, words] of SHOW_KINDS)
+    for (const x of shows.filter((y) => y.kind === kind)) out.push({ value: x.name, label: `${x.name} (${x.secs} s)`, group: words });
+  if (value && value !== "(none)" && !shows.some((x) => x.name === value)) out.push({ value, label: `${value} (not on this game)` });
+  return out;
+}
+
 function LightsPage({ s, f, off, dis, rs }) {
   const lOff = off || dis.lights;
+  const shows = (s.profile || {}).game_shows || [];
+  const sOff = off || dis.shows;
   return html`<div class="modes-grid2">
     <${Sec} title="Sweep the playfield" reason=${rs.lights}>
       <${Check} label="Sweep the playfield in a colour while it runs" checked=${f.lights} disabled=${lOff} ns="modes" k="f:lights" />
@@ -686,6 +700,15 @@ function LightsPage({ s, f, off, dis, rs }) {
           ns="modes" k="f:light_shots_pattern" disabled=${off || dis.lit_shots} width=${110} sm />
       </div>
       ${dis.lit_shots ? null : html`<div class="small muted wrap">${T.lit}</div>`}
+    <//>
+    <${Sec} title="The game's light shows" tipText=${T.gameShows} reason=${rs.shows}>
+      <div class="modes-kv">
+        <span class="lbl">When it starts</span><${Select} value=${f.show_start} options=${showOptions(shows, f.show_start)}
+          ns="modes" k="f:show_start" disabled=${sOff} width=${240} sm />
+        <span class="lbl">When it ends</span><${Select} value=${f.show_end} options=${showOptions(shows, f.show_end)}
+          ns="modes" k="f:show_end" disabled=${sOff} width=${240} sm />
+      </div>
+      ${dis.shows ? null : html`<div class="small muted wrap">${T.gameShows}</div>`}
     <//>
   </div>`;
 }

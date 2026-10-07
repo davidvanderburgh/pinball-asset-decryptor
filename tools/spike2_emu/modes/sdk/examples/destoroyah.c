@@ -22,7 +22,7 @@
  *              form's clock in the badge. A kill plays an aggregate blown apart (every few seconds), a city
  *              hit an aggregate's attack, a cleared wave the swarm merging; the perfect form and the endings
  *              are full screen.
- *   INSERTS    Each aggregate's shot: far yellow and solid, near orange and blinking, close red and
+ *   INSERTS    Each aggregate's shot: far yellow and blinking slowly, near orange and blinking, close red and
  *              flickering. The perfect form: the BUILDING blinking red, faster as its clock runs out.
  *   SHIELDS    On Godzilla Premium/LE the shield platform turns toward the player as it starts and back away
  *              when it ends (the game's own mode beginning keeps it as that mode left it). A Pro's shields are fixed.
@@ -32,6 +32,10 @@
  * Emulator test triggers: /dump/destoroyah.start, .stop, .shot "<shot name>", .boss (the perfect form now).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the city burns down to embers */
+#define GAME_SHOW_START "Strobe burst"
+#define GAME_SHOW_END   "Ember fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -197,8 +201,8 @@ static void show_lamps(void)
 {
     unsigned i;
     static const unsigned RGB[RINGS] = { KIT_YELLOW, KIT_ORANGE, KIT_RED };
-    static const int PAT[RINGS] = { PM_LAMP_SOLID, PM_LAMP_BLINK, PM_LAMP_BLINK };
-    static const unsigned MS[RINGS] = { 0, 400, 120 };
+    static const int PAT[RINGS] = { PM_LAMP_BLINK, PM_LAMP_BLINK, PM_LAMP_BLINK };
+    static const unsigned MS[RINGS] = { 700, 400, 120 };
     kit_lamps_begin(&lamps);
     if (run.phase == PHASE_BOSS) {
         kit_lamps_shot(&lamps, boss_mask, KIT_RED, PM_LAMP_BLINK,
@@ -301,7 +305,7 @@ static int start(const char *why)
     kit_hud_begin(&hud, "DESTOROYAH", "");
     show();
     kit_hud_award(&hud, 3000, "DESTOROYAH", "THE AGGREGATES ARE COMING");
-    kit_show_start(&show_fx, "destoroyah start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "destoroyah start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %d waves, %d city hits allowed; next time %u spins, score %llu", why, p, WAVES,
            CITY_HITS, spins_needed(p), (unsigned long long)pm_score(p));
@@ -320,8 +324,10 @@ static void end(const char *why)
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.won ? "won" : "lost");
-    if (run.won) kit_show_start(&show_fx, "destoroyah won", SHOW_WON, N_SHOW(SHOW_WON));
-    else kit_show_start(&show_fx, "destoroyah end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        if (run.won) kit_show_start(&show_fx, "destoroyah won", SHOW_WON, N_SHOW(SHOW_WON));
+        else kit_show_start(&show_fx, "destoroyah end", SHOW_END, N_SHOW(SHOW_END));
+    }
     pm_snprintf(b, sizeof b, "%u KILL%s  -  WAVE %u", run.all_kills, run.all_kills == 1 ? "" : "S", run.wave);
     kit_hud_title(&hud, run.won ? "DESTOROYAH DEFEATED" : "DESTOROYAH WINS", b);
     kit_hud_counter(&hud, 0, 0, 0, 0);
@@ -475,8 +481,10 @@ static void qualify_shot(uint64_t shot, unsigned p)
         start("the center spinner, DESTOROYAH lit");
         return;
     }
-    if (spins[p] < need) spins[p]++;
-    if (spins[p] % 5 == 0 || spins[p] >= need) pm_log("%s %u of %u (player %u)", SPIN_SHOT, spins[p], need, p);
+    if (spins[p] < need) {                              /* PAD-399: a count is said once, when reached */
+        spins[p]++;
+        if (spins[p] % 5 == 0 || spins[p] >= need) pm_log("%s %u of %u (player %u)", SPIN_SHOT, spins[p], need, p);
+    }
     if (spins[p] >= need) {
         start("the center spinner");
     } else if (!kit_running && spins[p] % 2 == 0) {

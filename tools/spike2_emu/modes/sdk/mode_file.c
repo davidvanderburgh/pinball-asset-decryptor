@@ -87,6 +87,8 @@ struct mode_cfg {
     uint64_t magnet_bits;
     unsigned scoop_ms;                /* PAD-381 `scoop_hold <ms>`: a ball landing in the scoop is held; 0 = none */
     int shield;                       /* PAD-392 `shield toward`: the shield targets face the player while it runs */
+    char show_start[40], show_end[40];   /* PAD-418 `show_start <name>` / `show_end <name>`: the game's own light
+                                       * show (the port's `text show_name_<n>`) at its start / its end; "" = none */
     char coil_name[4][16];            /* PAD-381 `coil_hold <name> <ms> [mask]`: a held coil of the port's */
     unsigned coil_ms[4];
     uint64_t coil_bits[4];            /* ... on each hit of these shots; 0 = once, when the mode starts */
@@ -118,6 +120,7 @@ struct slot {
     unsigned trig[5];
     void *node, *text;
     unsigned hide_ticks;
+    unsigned ended_begun;                 /* PAD-413: pm_begun() at its end, while its total shows */
     int aside;                            /* PAD-347: its screen is stepped aside for a game mode */
     char said[96];                        /* PAD-390: the screen's last words, written again on a fresh copy */
     unsigned ev_trig[5], ev_pending;      /* item 147: event start counts; a start waiting for pm_in_game */
@@ -1635,6 +1638,8 @@ static void own_lights_end(struct slot *M)
  * mode ends) is dropped, with a log line, and never plays over the newer one. */
 #define CLIP_AFTER_SHOT_TICKS 30    /* half a second */
 static struct { char name[96]; const char *when; unsigned ticks, watch; char watching[96]; } clip_later;
+static int ending_clip;                 /* PAD-413: the last end played (or waits to play) its clip */
+static unsigned ending_clip_begun;      /* pm_begun() then */
 
 static void clip_copy(char *dst, unsigned cap, const char *src)
 {
@@ -1655,6 +1660,32 @@ static void clip_now(const char *name, const char *when)
 {
     clip_later_drop("a newer clip played at once");
     pm_log("clip \"%.80s\" %s (%s)", name, pm_clip(name) ? "played" : "NOT played", when);
+}
+
+/* PAD-413: the last mode's ENDING gives way once another of our modes began - a mode file's, or one in C (David's
+ * Premium, 2026-10-06: BIOLLANTE began 4.8 s into KIRYU's 10 s ending and their words shared the glass). Its own
+ * screen's TOTAL is hidden at once, an end clip still waiting never plays, and - when it is one of ours that began
+ * (`starting`) - an end clip still playing stops (the runtime stops it itself when a mode in C began). */
+static void ending_gives_way(int starting)
+{
+    unsigned k, now = pm_begun();
+    struct slot *M;
+    if (ending_clip && now != ending_clip_begun) {
+        ending_clip = 0;
+        clip_later_drop("another mode began");
+        if (starting && pm_clip_playing()) {
+            pm_clip_stop();
+            pm_log("the last mode's ending clip stopped - another mode began");
+        }
+    }
+    for (k = 0; k < MODES_MAX; k++) {
+        M = &slots[k];
+        if (!M->hide_ticks || running(M) || M->ended_begun == now) continue;
+        M->hide_ticks = 0;
+        M->aside = 0;
+        if (M->node && !(run.active && run.slot && run.slot->node == M->node)) pm_show(M->node, 0);
+        pm_log("%s: its total gives way - another mode began", cfg.name);
+    }
 }
 
 static int clip_after_shot(const char *name, const char *when, const char *why)
@@ -1818,6 +1849,8 @@ static void cfg_line(struct slot *M, const char *line)
     TEXT("screen_text", screen_text)
     TEXT("clip_start", clip_start)
     TEXT("clip_end", clip_end)
+    TEXT("show_start", show_start)          /* PAD-418 */
+    TEXT("show_end", show_end)              /* PAD-418 */
     if (key_is(line, "clip_label") || key_is(line, "clip_layer")) return;   /* see the top */
     if ((a = key_is(line, "sound_key")) != 0) {
         unsigned n = 0;
@@ -1923,6 +1956,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.n_shake)                         /* PAD-414 */
         pm_log("\"%s\": %u shake line(s)%s", cfg.name, cfg.n_shake,
                pm_can(PM_CAN_SHAKER) ? "" : " - this game's port has no shaker: no shake");
+    if (cfg.show_start[0] || cfg.show_end[0])   /* PAD-418 */
+        pm_log("\"%s\": the game's light show \"%s\" at its start, \"%s\" at its end%s", cfg.name, cfg.show_start,
+               cfg.show_end, pm_can(PM_CAN_GAME_SHOWS) ? "" : " - this game's port names no light shows: none plays");
     params_loaded(M);
     more_loaded(M);                          /* PAD-227 */
 }
@@ -2049,6 +2085,16 @@ static void multiball_served(struct slot *M)
     run.add_balls_left = cfg.add_ball_bits ? cfg.add_ball_max : 0;
 }
 
+/* PAD-418: the game's own light show by the port's name (MODE_SDK.md "The game's own light shows"): at the start,
+ * and in the first 2 s of the end (pm_end keeps that open). Never as the ball ends - the game stops every show of
+ * its own then; the runtime refuses those too, and logs every refusal. */
+static void game_show(struct slot *M, const char *name, const char *when)
+{
+    if (!name[0]) return;
+    pm_log("%s: the game's light show \"%s\" at %s - %s", cfg.name, name, when,
+           pm_game_show_named(name) ? "playing" : "not played (the runtime's line says why)");
+}
+
 static void mode_start(struct slot *M, const char *why)
 {
     if (!cfg.valid || !pm_in_game()) return;
@@ -2064,6 +2110,7 @@ static void mode_start(struct slot *M, const char *why)
     }
     if (!pm_begin()) return;                 /* a mode written in C is running */
     pm_running_name(cfg.name);               /* PAD-363: the runtime's lines say this mode, not "mode" */
+    ending_gives_way(1);                     /* PAD-413: before its own screen and clip */
     if (cfg.game_modes == GM_BLOCK) {        /* PAD-363: the listed game's modes cannot start while it runs */
         pm_block_list(cfg.block_ids, cfg.block_n);
         pm_block_rules_keep(cfg.keep_rules, cfg.keep_n);   /* PAD-398 */
@@ -2118,6 +2165,7 @@ static void mode_start(struct slot *M, const char *why)
     }
     if (cfg.light_on[0]) pm_log("lights on: %s", lights(M, cfg.light_on) ? "ran under a live show" : "did not run (no live show, or no lights on this game)");
     if (cfg.clip_start[0] && !clip_after_shot(cfg.clip_start, "mode start", why)) clip_now(cfg.clip_start, "mode start");
+    game_show(M, cfg.show_start, "its start");          /* PAD-418 */
     if (!own_screen(M) && cfg.title_msg) pm_award_screen(cfg.screen_type, cfg.title_msg, cfg.award);
     starts_count(M, why);
     pm_log("%s START (%s): slot %u, player %u, %u s, score %llu", cfg.name, why, M->index,
@@ -2152,11 +2200,17 @@ static void mode_end(const char *why)
     own_lights_end(M);                       /* item mode-leds: the game has its inserts back */
     if (cfg.light_off[0]) lights(M, cfg.light_off);
     if (cfg.clip_end[0] && !clip_after_shot(cfg.clip_end, "mode end", why)) clip_now(cfg.clip_end, "mode end");
+    if (!name_is(why, "ball ended")) game_show(M, cfg.show_end, "its end");   /* PAD-418: none as the ball ends */
+    if (cfg.clip_end[0]) {                   /* PAD-413: an ending, until another mode begins */
+        ending_clip = 1;
+        ending_clip_begun = pm_begun();
+    }
     /* PAD-314 (Ales): the total is NET of the penalty shots - "TOTAL -500,000" when they took more */
     net = run.total >= run.lost ? run.total - run.lost : run.lost - run.total;
     if (own_screen(M)) {
         words(M, run.total >= run.lost ? "TOTAL " : "TOTAL -", net, "");
         M->hide_ticks = (cfg.restore_after ? cfg.restore_after : 4) * TICKS_PER_S;
+        M->ended_begun = pm_begun();         /* PAD-413: hidden at once if another mode begins */
     } else {
         if (cfg.total_msg) pm_award_screen(cfg.screen_type, cfg.total_msg, run.total >= run.lost ? net : 0);
         run.restore_ticks = cfg.restore_after * TICKS_PER_S;
@@ -2374,6 +2428,11 @@ static void on_shot(uint64_t mask)
                (unsigned)(mask >> 32), (unsigned)mask, (unsigned long long)got,
                (unsigned long long)asked, run.hits, (unsigned long long)run.total);
         own_sounds_shot(M, run.hits);
+        /* PAD-415: the hit answers at once - while one of ours runs the game's rules see no shots, so none of the
+         * game's own sounds or insert flashes play for it: the shot's inserts strobe white, and the game's own hit
+         * sounds climb a step a hit */
+        pm_lamp_flash(mask & scoring_bits(M), PM_RGB(255, 255, 255), 480);
+        if (pm_hit_sounds()) pm_hit_sound((int)((run.hits - 1) % (unsigned)pm_hit_sounds()) + 1);
     }
     if (run.active && (M = run.slot) != 0 && p == run.player && (mask & penalty_bits(M)) && end_pending != M) {
         uint64_t asked = penalty_value(M, mask), lost = pm_score_sub(p, asked);   /* PAD-314 */
@@ -2572,6 +2631,7 @@ static void on_tick(void)
     if (check_on && pm_trigger_text("census.mark", name, sizeof name))
         pm_log("check mark %s", name);
     starts_watch_game();                     /* item 139: what marks a new game */
+    ending_gives_way(0);                     /* PAD-413: a mode in C began during the last one's ending */
     clip_later_tick();                       /* item 141: a clip a shot started */
     ++ticks;
     events_tick();

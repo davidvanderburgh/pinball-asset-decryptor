@@ -344,3 +344,31 @@ text block_name_25      Trex Hurryup
 site block_start_127    0x000edd14 0xe92d40d0 0xe1a04000
 data block_obj_127      0x006b1bd8
 text block_name_127     Battle Juggernaut
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x0011a5b8 0xe92d4070 0xe1a05003  # RuleBashpool::v[32]
+text block_rule_name_0     Bashpool
+site block_rule_1          0x0011cfb0 0xe92d41f0 0xe1a06002  # RuleColossalJackpot::v[32]
+text block_rule_name_1     Colossal Jackpot
+site block_rule_2          0x0011e3d8 0xe30c18ec 0xe340106a  # RuleDazzlerSpinner::v[32]
+text block_rule_name_2     Dazzler Spinner
+site block_rule_3          0x0011ebc4 0xe3530000 0x03520602  # RuleDeadpoolTargets::v[32]
+text block_rule_name_3     Deadpool Targets
+site block_rule_4          0x0011f76c 0xe92d43f0 0xe1a07003  # RuleKatanaGems::v[32]
+text block_rule_name_4     Katana Gems
+site block_rule_5          0x00124e6c 0xe92d4ff0 0xe1a06002  # RuleNinjapocalypse::v[32]
+text block_rule_name_5     Ninjapocalypse
+site block_rule_6          0x00125cd4 0xe2033a02 0xe3a02000  # RulePlayfieldMultiplier::v[32]
+text block_rule_name_6     Playfield Multiplier
+site block_rule_7          0x00126424 0xe3530c01 0x03520000  # RuleRegenerate::v[32]
+text block_rule_name_7     Regenerate
+site block_rule_8          0x00126e58 0xe3a00001 0xe12fff1e  # RuleSniktTarget::v[32]
+text block_rule_name_8     Snikt Target
+site block_rule_9          0x00127e3c 0xe92d43f0 0xe1a07003  # RuleTeamUpShot::v[32]
+text block_rule_name_9     Team Up Shot
+site block_rule_10         0x001292dc 0xe590c000 0xe30811ac  # RuleWeapons::v[32]
+text block_rule_name_10    Weapons
+site block_rule_11         0x0012a1b0 0xe2022010 0xe3a03000  # RuleWolverineSpinner::v[32]
+text block_rule_name_11    Wolverine Spinner

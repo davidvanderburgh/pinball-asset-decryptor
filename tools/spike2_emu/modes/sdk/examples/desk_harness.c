@@ -68,6 +68,7 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Mecha exit bottom", 0x10000000000ull }, { "Left spinner", 0x200ull },
     { "Top spinner", 0x2000ull }, { "Shield ramp spinner", 0x20000ull },
     { "Action button", 0x1000000000000000ull },         /* a `switch` line of the port (PAD-228) */
+    { "Trough", 0x8000000000000000ull },                /* the trough's switches (PAD-416): a drain */
 };
 #define N_SHOTS (int)(sizeof SHOTS / sizeof SHOTS[0])
 static const struct { const char *name; int id; } EVENTS[] = {
@@ -85,7 +86,7 @@ static const struct pm_mode *current, *running;
 static char trigger_file[64], trigger_text[128];
 
 struct fake_node { char name[160]; };
-static struct fake_node nodes[1024];   /* six modes' HUDs: ~42 nodes each */
+static struct fake_node nodes[4096];   /* every mode's HUD: ~42 nodes, and 80 more for 40 gauge slices (PAD-416) */
 static int n_nodes;
 
 static void *fake(const char *path)
@@ -93,7 +94,7 @@ static void *fake(const char *path)
     int i;
     for (i = 0; i < n_nodes; i++)
         if (!strcmp(nodes[i].name, path)) return &nodes[i];
-    if (n_nodes == 1024) return 0;
+    if (n_nodes == 4096) return 0;
     snprintf(nodes[n_nodes].name, sizeof nodes[n_nodes].name, "%s", path);
     return &nodes[n_nodes++];
 }
@@ -165,20 +166,43 @@ static const struct pm_mode *disp_owner;   /* the display arbitration's state (p
 static unsigned disp_prio;
 static unsigned long disp_linger_until;   /* pm_end_holding: the hold kept for an ending, until then */
 static void disp_linger_release(const char *why);
+static unsigned begun;                     /* PAD-413: pm_begun */
+static int clip_on;                        /* PAD-413: our full-screen clip plays (until it is stopped) */
+static const struct pm_mode *clip_owner;
+static const struct pm_mode *refused[16];   /* PAD-399: as the runtime, a refusal is said once until it changes */
+static void refused_forget(void) { memset(refused, 0, sizeof refused); }
+static int refused_said(const struct pm_mode *m)
+{
+    unsigned i;
+    for (i = 0; i < sizeof refused / sizeof refused[0]; i++) {
+        if (refused[i] == m) return 1;
+        if (!refused[i]) { refused[i] = m; return 0; }
+    }
+    return 0;
+}
 int pm_begin(void)
 {
     if (running && running != current) {
-        pm_log("not started: %s is running", running->name);
+        if (!refused_said(current)) pm_log("not started: %s is running", running->name);
         return 0;
+    }
+    if (running != current) {
+        refused_forget();
+        begun++;
     }
     running = current;
     if (disp_linger_until && disp_owner != current) disp_linger_release("another mode began");
+    if (clip_on && clip_owner != current) {    /* as the runtime: the last one's ending clip gives way */
+        printf("%6lu CLIP STOPPED %s (another mode began)\n", now_ms, clip_owner ? clip_owner->name : "-");
+        clip_on = 0;
+    }
     return 1;
 }
+unsigned pm_begun(void) { return begun; }
 static void mechs_let_go(const char *why);   /* PAD-395: the held mechanisms, below */
 void pm_end(void)
 {
-    if (running == current) running = 0;
+    if (running == current) running = 0, refused_forget();
     if (!running) mechs_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }
@@ -199,9 +223,19 @@ void pm_set_text(void *text, const char *words)
     const char *n = ((struct fake_node *)text)->name, *dot = strrchr(n, '.');
     printf("%6lu WORDS %s: %s\n", now_ms, dot ? dot + 1 : n, words);
 }
-int pm_clip(const char *name) { printf("%6lu CLIP %s\n", now_ms, name); return 1; }
-int pm_clip_playing(void) { return 0; }
-void pm_clip_stop(void) {}
+int pm_clip(const char *name)
+{
+    printf("%6lu CLIP %s\n", now_ms, name);
+    clip_on = 1;
+    clip_owner = current;
+    return 1;
+}
+int pm_clip_playing(void) { return clip_on; }
+void pm_clip_stop(void)
+{
+    if (clip_on) printf("%6lu CLIP STOPPED\n", now_ms);
+    clip_on = 0;
+}
 /* hud-layers: the backdrop (a clip behind the HUD) */
 static char backdrop_now[96];
 int pm_backdrop(const char *name)
@@ -704,6 +738,36 @@ int pm_lamp_release_all(void)
         if (held[k].owner && held[k].owner == current) { lamp_off(k); n++; }
     return n;
 }
+/* PAD-415: a hit's strobe and the game's hit sounds. Off unless HARNESS_HITS=1 (the examples' own tests count every
+ * line), on: "STROBE <shots>" and "HIT SOUND <n>", and a port with eight of them. */
+static int hits_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("HARNESS_HITS"); on = e && e[0] == '1'; }
+    return on;
+}
+int pm_lamp_flash(uint64_t shots, unsigned rgb, unsigned ms)
+{
+    int k, n = 0;
+    if (!hits_on()) return 0;
+    for (k = 0; k < N_LAMPS; k++)
+        if (LAMPS[k].shot & shots) n++;
+    if (n) printf("%6lu STROBE %llx %06x %u\n", now_ms, (unsigned long long)shots, rgb & 0xffffffu, ms);
+    return n;
+}
+int pm_hit_sounds(void) { return hits_on() ? 8 : 0; }
+int pm_hit_sound(int n)
+{
+    if (!hits_on()) return 0;
+    printf("%6lu HIT SOUND %d\n", now_ms, n);
+    return 1;
+}
+/* PAD-411: the game's own light shows - none on the desk, so the examples play their own kit shows as before */
+int pm_game_show(int n) { (void)n; return 0; }
+int pm_game_show_named(const char *name) { (void)name; return 0; }
+void pm_game_show_stop(void) {}
+int pm_game_show_playing(void) { return 0; }
+int pm_game_shows(void) { return 0; }
 /* hud-layers: the inserts are placed only with HARNESS_PLACES=1 (PAD-376), so the examples' shows
  * paint none unless a test asks. A paint holds the insert solid, quietly: no LAMP line, but every
  * change of colour is counted ("END paints <n>") and "lamps" lists the painted inserts as HELD. */

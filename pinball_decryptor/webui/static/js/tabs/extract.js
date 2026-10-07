@@ -152,6 +152,8 @@ function projectHint(p) {
   if (!p) return "";
   if (!p.exists) return "A new folder: Extract creates it.";
   const d = p.details || {};
+  // PAD-421: the folder holds another card's extract, and nothing on the page said so
+  if (d.card_kind === "other") return { warn: true, text: `This folder holds the extract of ${d.source_name}, not of the card above: every tab shows that card's files. To work on this card, extract it into a new project folder.` };
   if (d.archived) return "This project is archived: extracting into it is the hydrate — your edited files are set aside first and restored over the fresh extraction automatically.";
   if (d.baseline) return "Already holds an extract: extracting again overwrites your edits (after a confirmation). Use a fresh project folder per firmware version.";
   return "";
@@ -270,7 +272,8 @@ function SourceCard({ s, shell }) {
         <${InfoBadge} text=${PROJECT_INFO_TIP} onClick=${() => call("extract.open_project_info")} /></div>
       <${PathCombo} id="x-proj" k="output" value=${s.output} history=${hist.extract_output}
         onBrowse=${() => call("extract.browse_output")} browseTitle=${PROJECT_TIP} />
-      ${hint ? html`<span class="small muted">${hint}</span>` : null}
+      ${hint && hint.warn ? html`<div class="x-badge warn"><${Icon} name="warn" /><span>${hint.text}</span></div>`
+        : hint ? html`<span class="small muted">${hint}</span>` : null}
     </div>
     <${Options} s=${s} />
   <//>`;

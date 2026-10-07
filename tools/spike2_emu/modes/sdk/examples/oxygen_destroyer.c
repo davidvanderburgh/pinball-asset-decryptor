@@ -35,6 +35,10 @@
  * Emulator test triggers: /dump/oxygen_destroyer.start, .stop, .shot "<shot name>".
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the Oxygen Destroyer sinks: an ocean-blue fade */
+#define GAME_SHOW_START "Playfield wave"
+#define GAME_SHOW_END   "Blue fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -212,7 +216,7 @@ static int start(const char *why, int counted)
     kit_hud_begin(&hud, "OXYGEN DESTROYER", "");
     show();
     kit_hud_award(&hud, 2500, "OXYGEN DESTROYER", "COLLECT IT BEFORE IT IS GONE");
-    kit_show_start(&show_fx, "oxygen start", SHOW_START, N_STEPS(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "oxygen start", SHOW_START, N_STEPS(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, the value %llu falls %llu a second; collect at %s; start %u this game, "
            "score %llu", why, p, (unsigned long long)VALUE_START, (unsigned long long)VALUE_PER_SECOND,
@@ -231,8 +235,10 @@ static void end(const char *why, int won)
     kit_ledger_note(KIT_OXYGEN, run.player, won);
     sound(CUE_END);
     pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
-    kit_show_start(&show_fx, won ? "oxygen won" : "oxygen lost", won ? SHOW_WON : SHOW_LOST,
-                   won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, won ? "oxygen won" : "oxygen lost", won ? SHOW_WON : SHOW_LOST,
+                       won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    }
     pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
     kit_hud_title(&hud, won ? "GODZILLA IS GONE" : run.collected ? "OXYGEN DESTROYER" : "THE OXYGEN IS GONE", " ");
     kit_hud_counter(&hud, 0, 0, 0, 0);
@@ -262,24 +268,33 @@ static void on_init(void)
            (unsigned long long)start_mask, (unsigned long long)collect_mask, (unsigned long long)super_mask);
 }
 
+/* PAD-399: a spin that is not counted says why once until the reason changes; "" = nothing said */
+static char uncounted[16];
+
 static void qualify_shot(uint64_t shot, unsigned p)
 {
     char line[KIT_WORDS];
     unsigned long since;
+    unsigned was;
     if (!spin_mask || !(shot & spin_mask)) return;        /* every spin counts: no debounce */
     if (ran_game[p] >= STARTS_PER_GAME) {
-        if (hits[p] == 0) pm_log("%s: not counted - it already ran %d times this game", SPIN_SHOT, STARTS_PER_GAME);
+        if (kit_once(uncounted, sizeof uncounted, "ran"))
+            pm_log("%s: not counted - it already ran %d times this game", SPIN_SHOT, STARTS_PER_GAME);
         return;
     }
     if (ended_at[p]) {
         since = pm_ms() - (ended_at[p] - 1);
         if (since < COOLDOWN_MS) {
-            pm_log("%s: not counted - cooling down, %lu s left", SPIN_SHOT, (COOLDOWN_MS - since + 999) / 1000);
+            if (kit_once(uncounted, sizeof uncounted, "cooling"))
+                pm_log("%s: not counted - cooling down, %lu s left", SPIN_SHOT, (COOLDOWN_MS - since + 999) / 1000);
             return;
         }
     }
+    uncounted[0] = 0;
+    was = hits[p];
     if (hits[p] < HITS_TO_START) hits[p]++;
-    if (hits[p] % 5 == 0 || hits[p] >= HITS_TO_START) pm_log("%s %u of %d (player %u)", SPIN_SHOT, hits[p], HITS_TO_START, p);
+    if (hits[p] != was && (hits[p] % 5 == 0 || hits[p] >= HITS_TO_START))   /* PAD-399: a count once, when reached */
+        pm_log("%s %u of %d (player %u)", SPIN_SHOT, hits[p], HITS_TO_START, p);
     if (hits[p] >= HITS_TO_START) {
         start("the left spinner", 1);
     } else if (!kit_running) {

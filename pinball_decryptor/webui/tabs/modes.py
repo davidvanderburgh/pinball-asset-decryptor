@@ -70,7 +70,8 @@ _STR_FIELDS = (
     "seq_shot_4", "seq_shot_5", "seq_shot_6", "seq_shot_7",
     "game_modes",                                                                     # PAD-363
     "shake_what_start", "shake_what_shot", "shake_what_end",                          # PAD-414
-    "shake_s_start", "shake_s_shot", "shake_s_end", "shake_shot")
+    "shake_s_start", "shake_s_shot", "shake_s_end", "shake_shot",
+    "show_start", "show_end")                                                         # PAD-418
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -98,6 +99,7 @@ _DEFAULTS = {
     "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
     "seq_reset_any": False,                                                        # PAD-314
     "game_modes": "block",                                                         # PAD-363; PAD-398
+    "show_start": "(none)", "show_end": "(none)",                                  # PAD-418
     **{"seq_shot_%d" % i: "(no more shots)" for i in range(8)},
 }
 
@@ -136,8 +138,9 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"^The shot sound plays", "sounds"),
     (r"^The sound's time in the film|^A sound cut from a film", "sounds"),
     (r"(?i)callout", "sounds"),
-    # Lights: the sweep's colour, the lit shots
+    # Lights: the sweep's colour, the lit shots, the game's own light shows (PAD-418)
     (r"^The light colour|lit shots", "lights"),
+    (r"(?i)light show", "lights"),
     # Show: the screen, its colours and picture, both clips, the screen's time, priority
     (r"^The (panel|title) colour|^The screen art file|^The picture's", "show"),
     (r"clip", "show"),
@@ -253,7 +256,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     _LIGHT_PATTERN_WORDS = (("solid", "Solid"), ("blink", "Blink"), ("pulse", "Pulse"),
                             ("chase", "Chase"))
     _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save", "magnet", "scoop", "coils", "shield",
-                      "shaker")
+                      "shaker", "shows")
     _TWO_COLUMN_SHOTS = 18
     _PROBE_TRIES = 240
     _FILM_PARTS = (("clip", "clip", "a clip"), ("still", "screen", "a picture for the screen"),
@@ -264,6 +267,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     END_PICK = "(these shots)"
     #: item 167: the add-a-ball list's first entry
     BALL_NONE = "(none)"
+    #: PAD-418: the light-show lists' first entry
+    SHOW_NONE = "(none)"
     #: PAD-228: the multiball's balls come when the mode starts, not on a shot
     MB_ON_START = "(when it starts)"
     #: PAD-227: the "and also" shot lists' first entry, the "only after" list's, and the rows shown
@@ -1276,6 +1281,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         words = dict(self._LIGHT_PATTERN_WORDS)
         self.f["light_shots_pattern"] = words.get(spec.light_shots_pattern, spec.light_shots_pattern)
         self.f["priority"] = str(spec.priority)
+        # PAD-418: the game's own light shows, by name; a name this title does not have is kept as typed, so
+        # validate_shows names it
+        for k in ("show_start", "show_end"):
+            v = getattr(spec, k, "")
+            self.f[k] = v if isinstance(v, str) and v else self.SHOW_NONE
 
     def _collect_display_lights(self, spec):
         keys = {w: k for k, w in self._LIGHT_PATTERN_WORDS}
@@ -1284,6 +1294,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.light_shots_pattern = keys.get(shown, shown)
         text = str(self.f["priority"]).strip()
         spec.priority = int(text) if text.isdigit() else (text or 0)
+        for k in ("show_start", "show_end"):                                            # PAD-418
+            v = str(self.f[k]).strip()
+            setattr(spec, k, "" if v in ("", self.SHOW_NONE) else v)
 
     # PAD-227: more than one thing to meet before it starts
     def _other_modes(self):
@@ -1498,7 +1511,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                     "callouts": [], "callouts_none": "", "events": [],
                     "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
                     "mb_on_shots": [self.MB_ON_START], "game_modes": [], "magnet_shot": "",
-                    "held_coils": [], "shield_rule": "", "shakes": [], "shake_max": []}
+                    "held_coils": [], "shield_rule": "", "game_shows": [], "shakes": [], "shake_max": []}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
@@ -1520,7 +1533,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 # PAD-414: what a shake can be - one of the mode's own at a strength, or one of the game's
                 "shakes": ([{"value": w, "label": "a %s shake" % w} for w in MP.SHAKE_STRENGTHS.values()]
                            + [{"value": "game:" + n, "label": lab} for n, lab in getattr(p, "shakes", ())]),
-                "shake_max": list(getattr(p, "shake_max_ms", ()) or ())}
+                "shake_max": list(getattr(p, "shake_max_ms", ()) or ()),
+                "game_shows": self._game_show_rows(p)}                           # PAD-418
+
+    @staticmethod
+    def _game_show_rows(p):
+        """PAD-418: the title's own light shows a mode can play, ``[{name, kind, secs}]`` in the port's order."""
+        return [{"name": n, "kind": k, "secs": secs} for n, k, secs in getattr(p, "game_shows", ()) or ()]
 
     @staticmethod
     def _game_mode_rows(p):
@@ -1781,7 +1800,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                      "end_game", "clip_both", "stack", "events", "film_clip",
                                      "film_still", "film_sound", "own_extra", "lit_shots",
                                      "show_order", "multiball", "ball_save", "give_way", "block",
-                                     "magnet", "scoop", "coils", "shield", "shaker")}
+                                     "magnet", "scoop", "coils", "shield", "shaker", "shows")}
             self.set(reasons={}, dis=dis, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
@@ -2526,6 +2545,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "shaker_off": ("Not on this game: " + p.why_not("shaker")) if p is not None and not p.can("shaker")
                               else "" if p is not None else "No card picked yet.",
                 "shakes": [{"name": n, "label": lab} for n, lab in getattr(p, "shakes", ())] if p is not None else [],
+                # PAD-418: the game's own light shows a block may play, and why the block is greyed if none
+                "game_shows": self._game_show_rows(p) if p is not None else [],
+                "game_shows_off": ("Not on this game: " + p.why_not("shows")) if p is not None and not p.can("shows")
+                                  else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else
                               "Not on this game yet: the app has not found where %s starts its own modes, so a "
                               "mode cannot keep them from starting; set to hold them off, it gives way to them "
@@ -2564,7 +2587,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         shield = (getattr(p, "shield_rule", "") if p.can("shield") else False) if p is not None else None   # PAD-392
         shaker = ({"shakes": [n for n, _l in p.shakes], "max": list(p.shake_max_ms)} if p.can("shaker") else False) \
             if p is not None else None                                                                          # PAD-414
-        return BM.problems(program, shots, events, folder, mechs, scoop, shield, shaker), BM.notes(program)
+        shows = [n for n, _k, _s in getattr(p, "game_shows", ())] if p is not None else None   # PAD-418
+        return BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker), BM.notes(program)
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

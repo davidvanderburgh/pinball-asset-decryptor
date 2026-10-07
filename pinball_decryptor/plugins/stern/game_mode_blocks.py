@@ -130,10 +130,11 @@ def port_lines(modes, defaults=(), header=None):
 
 # ---- PAD-398: the game's RULES, which see no shots while a mode of ours runs -----------------------------------
 #: David, 2026-10-05: "when our custom modes start, we should ONLY be in those modes unless explicitly noted."
-#: A C++ rule title's rules (Godzilla's Destruction Jackpot, building locks, bridge, cities...) are `Rule*`
-#: singletons; each reads a shot in its v[25] (vtable + 8 + 100, the mask in r2:r3), which the runtime hooks and
-#: clears while a mode of ours blocks, unless the mode keeps that rule counting (pm_block_rules_keep).
-RULE_V25 = 8 + 4 * 25
+#: A C++ rule title's rules (Godzilla's Destruction Jackpot, building locks, bridge, cities...) are singletons of
+#: one rule base (`Rule`; `crule` on Venom, Mandalorian, D&D, John Wick...); each reads a shot in one virtual of
+#: that base, the shot mask in r2:r3, which the runtime hooks and clears while a mode of ours blocks, unless the
+#: mode keeps that rule counting (pm_block_rules_keep). The virtual's slot is the title's own (PAD-400: Godzilla
+#: 25, Avengers 28, Deadpool 31 / 32, Jaws and King Kong 27...): :func:`shot_slot` reads it from the program.
 #: the battle rule is the port's `site block_battle_shots` already (two hooks on one entry are not possible)
 RULE_SKIP = ("RuleBattle",)
 #: written first, at number 0, where PAD-363 put it
@@ -142,44 +143,169 @@ RULE_FIRST = ("RuleSaucerAttack",)
 MAX_RULES = 32
 #: `mov r0, #0; bx lr`: a handler that reads nothing
 _NO_OP = (0xE3A00000, 0xE12FFF1E)
+_BX_LR = 0xE12FFF1E
+#: how far into a function :func:`reads_mask` looks
+_MASK_WORDS = 24
 
 
 @dataclass
 class GameRule:
     cls: str            # RuleDestructionJackpot
     name: str           # Destruction Jackpot: what the port and the Modes tab call it
-    v25: int            # its shot handler
+    v25: int            # its shot handler (Godzilla's v[25]; the title's own slot elsewhere)
     words: tuple        # the handler's first two words
+    slot: int = 25      # the virtual it is
 
 
-def rule_name(cls):
-    """RuleKingOfTheMonsters -> King of the Monsters"""
+def rule_name(cls, whole=False):
+    """A rule class's readable name: RuleKingOfTheMonsters -> King of the Monsters, AtticAttackMultiballRule ->
+    Attic Attack Multiball, GargoylesGoneWild_Rule -> Gargoyles Gone Wild, cdragon_rule -> Dragon,
+    ctinys_dice_game_rule -> Tinys Dice Game, rule_drop_targets -> Drop Targets. *whole* keeps a trailing
+    "Rule" (chost_combo_rule -> Host Combo Rule, beside chost_combo's Host Combo)."""
     import re
-    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", cls[len("Rule"):]).split()
-    return " ".join(w if i == 0 or w.lower() not in ("of", "the", "and") else w.lower()
-                    for i, w in enumerate(words))
+    n = cls
+    if re.match(r"c[a-z0-9]+(_[A-Za-z0-9]+)*$", n):       # the crule family: c<words>_rule
+        n = n[1:]
+    n = re.sub(r"^(Rule_?|rule_)(?=[A-Za-z0-9])", "", n)
+    if not whole:
+        n = re.sub(r"(?<=[A-Za-z0-9])_?(Rule|rule)$", "", n)
+    n = re.sub(r"(?<=[a-z])(?=[A-Z0-9])|(?<=[A-Z])(?=[A-Z][a-z])", " ", n.replace("_", " "))
+    out = []
+    for i, w in enumerate(n.split()):
+        if i and w.lower() in ("of", "the", "and", "a", "in", "on", "to"):
+            out.append(w.lower())
+        elif w.islower():
+            out.append(w[0].upper() + w[1:])
+        else:
+            out.append(w)
+    return " ".join(out) or cls
+
+
+def hookable(words):
+    """The runtime's plain hook (pad_mode_runtime.c hook) moves a handler's first two words into its trampoline
+    and runs them there, relocating a literal load: neither may otherwise read or write the pc (a branch, a
+    bl, an add from pc, a pop into pc), and the first may not end the function."""
+    if len(words) != 2 or any(w is None for w in words):
+        return False
+    if words[0] & 0x0FFFFFF0 == 0x012FFF10:                # bx as the first word
+        return False
+    if words[1] & 0xFF000000 == 0xEB000000:              # a bl is copied as it is, so it would land wrong
+        return False
+    lit = [w & 0xFF7F0000 == 0xE51F0000 and (w >> 12) & 0xF != 15 for w in words]
+    return movable(tuple(0xE320F000 if lit[i] else w for i, w in enumerate(words)))
+
+
+def reads_mask(prog, fn):
+    """Does the function at *fn* read both r2 and r3 before writing either (a 64-bit argument: the shot mask)?
+    Straight-line, from its entry to its first call, branch or return."""
+    from . import stock_scan as S
+    seen, wrote = set(), set()
+    va = fn
+    for _ in range(_MASK_WORDS):
+        w = _word(prog, va)
+        regs = S._regs_at(prog, va) if w is not None else None
+        if regs is None:
+            return False
+        r, wr = regs
+        seen |= {x for x in (2, 3) if x in r and x not in wrote}
+        if seen == {2, 3}:
+            return True
+        wrote |= set(wr)
+        if wrote >= {2, 3} or w & 0x0E000000 == 0x0A000000 or w & 0x0FFFFFF0 in (0x012FFF10, 0x012FFF30):
+            return False
+        va += 4
+    return False
+
+
+def rule_family(model):
+    """(root, [classes]): the program's rule base - the rule-named class most rule-named classes derive from
+    (`Rule`, `crule`; never a per-player `...RuleState`) - and every class with a vtable that derives from it,
+    less its managers, its null twin and the game's MODES (on the crule titles a `cmode` is a crule too; a mode's
+    start is refused already, `block_start_<id>`)."""
+    from collections import Counter
+    from . import stock_scan as S
+
+    def ruleish(c):
+        return "rule" in c.lower() and not c.startswith("Singleton<") and not c.lower().endswith("state")
+    roots = Counter()
+    for c in model:
+        if ruleish(c):
+            tops = [b for b in S.chain_of(model, c) if ruleish(b)]
+            if tops:
+                roots[tops[-1]] += 1
+    if not roots:
+        return None, []
+    root = roots.most_common(1)[0][0]
+    out = [c for c in sorted(model) if c != root and model[c].get("vtable") and S.derives(model, c, root)
+           and not c.lower().endswith(("manager", "_null"))
+           and not any(b == "cmode" for b in [c] + S.chain_of(model, c))]
+    return root, out
+
+
+def shot_slot(prog, model, root, classes):
+    """The rule base's shot handler: the virtual of the base the most rule classes override with a function that
+    reads the shot mask (:func:`reads_mask`). None unless three or more do, a fifth of the rules, and more than
+    for any other slot. (A title whose base has none - Iron Maiden, Jurassic Park, Elvira: their rules hear
+    shots as switch hooks - has a slot only a sub-family adds, past the base's own; that is not it.)"""
+    from collections import Counter
+    from . import stock_scan as S
+    bound = (model.get(root) or {}).get("nvirt") or 0
+    votes = Counter()
+    for c in classes:
+        for k, f in S.own_slots(prog, model, c)[1]:
+            if k < bound and reads_mask(prog, f):
+                votes[k] += 1
+    best = votes.most_common(2)
+    if not best or best[0][1] < max(3, len(classes) // 5) or (len(best) > 1 and best[1][1] >= best[0][1]):
+        return None                                      # TMNT: 2 of 23, chance
+    return best[0][0]
 
 
 def read_rules(elf):
-    """[:class:`GameRule`] of a C++ rule title's program (bytes): every `Rule*` class whose shot handler reads
-    shots, the battle rule left out, Saucer Attack first, then by class name. [] when it has none."""
+    """[:class:`GameRule`] of a C++ rule title's program (bytes): every rule class whose shot handler (the
+    title's :func:`shot_slot`) is its own, the battle rule left out, Saucer Attack first, then by class name; a
+    handler rules share is listed once, named for the class that defines it. [] when it has none."""
     from . import stock_scan as S
     prog = S.Program(elf)
     model = S.class_model(prog)
-    base = model.get("Rule", {}).get("vtable")
-    base_v25 = _word(prog, base + RULE_V25) if base else None
-    out = []
-    for cls in sorted(model):
-        rec = model[cls]
-        if cls == "Rule" or cls in RULE_SKIP or not rec.get("vtable") or not S.derives(model, cls, "Rule"):
+    root, classes = rule_family(model)
+    slot = shot_slot(prog, model, root, classes) if classes else None
+    if slot is None:
+        return []
+    base = model.get(root, {}).get("vtable")
+    base_fn = _word(prog, base + 8 + 4 * slot) if base else None
+    singles = {c[len("Singleton<"):-1] for c in model if c.startswith("Singleton<")}
+    out, seen, names = [], set(), set()
+    for cls in sorted(classes, key=lambda c: (c not in singles, c)):
+        if cls in RULE_SKIP:
             continue
-        v25 = _word(prog, rec["vtable"] + RULE_V25)
-        if not v25 or v25 == base_v25:
+        fn = _word(prog, model[cls]["vtable"] + 8 + 4 * slot)
+        if not fn or fn == base_fn or fn in seen or not prog.in_text(fn):
             continue
-        words = (_word(prog, v25), _word(prog, v25 + 4))
-        if words == _NO_OP or not movable(words):
+        words = (_word(prog, fn), _word(prog, fn + 4))
+        if words[0] == _BX_LR or words == _NO_OP or not hookable(words):
             continue
-        out.append(GameRule(cls, rule_name(cls), v25, words))
+        seen.add(fn)
+        # a handler rules inherit is the class's that defines it (Deadpool's four team-ups: RuleTeamUpShot)
+        # (an abstract one - no vtable - when every rule under it shares the handler)
+        for b in S.chain_of(model, cls):
+            if b == root:
+                break
+            if (model.get(b) or {}).get("vtable"):
+                if _word(prog, model[b]["vtable"] + 8 + 4 * slot) != fn:
+                    break
+            elif any(_word(prog, model[c]["vtable"] + 8 + 4 * slot) != fn
+                     for c in classes if c != b and S.derives(model, c, b)):
+                break
+            cls = b
+        name = rule_name(cls)
+        if name.lower() in names:                          # Venom's chost_combo and chost_combo_rule
+            name = rule_name(cls, whole=True)
+        n = 2
+        while name.lower() in names:
+            name, n = "%s %d" % (rule_name(cls), n), n + 1
+        names.add(name.lower())
+        out.append(GameRule(cls, name, fn, words, slot))
     out.sort(key=lambda r: (r.cls not in RULE_FIRST, r.cls))
     return out[:MAX_RULES]
 
@@ -194,6 +320,7 @@ def rule_lines(rules):
            "# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`",
            "# is what the Modes tab lists."]
     for n, r in enumerate(rules):
-        out.append("site block_rule_%-10d 0x%08x 0x%08x 0x%08x  # %s::v[25]" % (n, r.v25, r.words[0], r.words[1], r.cls))
+        out.append("site block_rule_%-10d 0x%08x 0x%08x 0x%08x  # %s::v[%d]"
+                   % (n, r.v25, r.words[0], r.words[1], r.cls, r.slot))
         out.append("text block_rule_name_%-5d %s" % (n, r.name))
     return out

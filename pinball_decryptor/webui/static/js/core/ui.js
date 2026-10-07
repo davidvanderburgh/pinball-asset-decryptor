@@ -324,10 +324,18 @@ export function Select({ value, options, onChange, ns, k, sm, disabled, width, c
     if (onChange) onChange(v);
     else if (ns && k) setField(ns, k, v, { flush: true });
   };
+  const one = (o) => html`<option value=${o.value} disabled=${o.disabled}>${o.label}</option>`;
+  // an option with a `group` goes under that heading (an <optgroup>), with the ones next to it in the same group
+  const runs = [];
+  for (const o of opts) {
+    const last = runs[runs.length - 1];
+    if (last && o.group && last.group === o.group) last.items.push(o);
+    else runs.push({ group: o.group, items: [o] });
+  }
   return html`<div class=${cx("field", sm && "sm", disabled && "disabled", cls)}
       style=${width ? `width:${typeof width === "number" ? width + "px" : width}` : undefined} ...${tip(title)}>
     <select id=${id} value=${value ?? ""} onChange=${change} disabled=${!!disabled}>
-      ${opts.map((o) => html`<option value=${o.value} disabled=${o.disabled}>${o.label}</option>`)}
+      ${runs.map((r) => (r.group ? html`<optgroup label=${r.group}>${r.items.map(one)}</optgroup>` : r.items.map(one)))}
     </select>
     <span class="caret">▾</span>
   </div>`;

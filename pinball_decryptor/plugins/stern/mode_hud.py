@@ -28,7 +28,9 @@ name (:func:`hud_names`):
   shown instead while one of the game's battles has its BATTLE badge up (PAD-347: a mode keeps running
   beside the game's own, its words aside);
 * ``_Gauge`` - a label and N pips on the right edge, each an ``_On`` and an ``_Off`` picture
-  (``_G1_On`` ...): ANGUIRUS's spikes, a meltdown's temperature.
+  (``_G1_On`` ...): ANGUIRUS's spikes, a meltdown's temperature. Or (kind ``bar``, PAD-416) a meter in the
+  stock POWERUP meter's manner at the glass's top-right corner: a frame, N slices of liquid (the pips) and
+  the tube's glass, its words beside it (GODZILLA ANGRY's RAGE).
 
 The texts use the game's own font, carried into the HUD scene from the battle scene
 (:func:`scene_write.carried_game_font`); the badge's panel is the stock BATTLE panel with the mode's own
@@ -181,6 +183,30 @@ def _pad4(a):
     return out
 
 
+# ---- the game's textures are PREMULTIPLIED (PAD-416) ---------------------------------------------------------
+# A half-transparent pixel of the game's own carries its colour already multiplied by its alpha (the BATTLE badge:
+# 96% of its half-transparent pixels have no channel above their alpha; a font page 100%), and the engine draws
+# them so: colour + what is behind x (1 - alpha). A picture of ours with plain alpha was drawn far too bright where
+# it fades - the gauge pips' soft glow came out as solid blocks of colour round each pip ("filling up with the
+# colors outside the meter ... looks like a glitch", David), a glass's faint shine as white bars. So our art is
+# drawn with plain alpha (PIL's alpha_composite), stock art read back to plain alpha (straight_alpha), and every
+# Bitmap premultiplied as it is encoded (_bitmap_node).
+def straight_alpha(a):
+    """A premultiplied RGBA array (the game's) as plain alpha."""
+    a = np.asarray(a, dtype=np.uint8).copy()
+    al = a[..., 3:4].astype(np.float32)
+    rgb = np.where(al > 0, a[..., :3].astype(np.float32) * 255.0 / np.maximum(al, 1.0), 0.0)
+    a[..., :3] = np.clip(np.round(rgb), 0, 255).astype(np.uint8)
+    return a
+
+
+def premultiplied(a):
+    """A plain-alpha RGBA array as the game draws its own: each channel times its alpha."""
+    a = np.asarray(a, dtype=np.uint8).copy()
+    a[..., :3] = np.round(a[..., :3].astype(np.float32) * a[..., 3:4].astype(np.float32) / 255.0).astype(np.uint8)
+    return a
+
+
 def stock_badge(hud_data):
     """(panel, disc) RGBA arrays of the stock BATTLE badge in ``32e6ae28`` (its first two textures)."""
     from .engine import parse_radium_images
@@ -191,7 +217,7 @@ def stock_badge(hud_data):
     for im in imgs[:2]:
         raw = hud_data[im["data_off"]:im["data_off"] + im["length"]]
         dec = _dds.decode_bc3 if im["fmt"] == SW.BC3 else _dds.decode_bc1
-        out.append(np.asarray(dec(raw, im["tex_w"], im["tex_h"]), dtype=np.uint8))
+        out.append(straight_alpha(np.asarray(dec(raw, im["tex_w"], im["tex_h"]), dtype=np.uint8)))
     if out[0].shape[:2] != (90, 94) or out[1].shape[:2] != (104, 212):
         raise HudError("the HUD scene's first textures are not the BATTLE badge (%s, %s)"
                        % (out[0].shape[:2], out[1].shape[:2]))
@@ -391,8 +417,11 @@ def gauge_pips(kind, n, colours):
             else:
                 md.polygon([(x + pads, y + pads) for x, y in shape], fill=255)
             if lit:
+                # PAD-416: a tight glow - a wide one made a lit pip look bigger than its unlit outline, its colour
+                # spilling past the gauge (David: "filling up with the colors outside the meter ... looks like a
+                # glitch")
                 glow = Image.new("RGBA", img.size, col + (0,))
-                glow.putalpha(mask.filter(ImageFilter.GaussianBlur(5)).point(lambda v: int(v * 0.9)))
+                glow.putalpha(mask.filter(ImageFilter.GaussianBlur(2)).point(lambda v: int(v * 0.4)))
                 img.alpha_composite(glow)
                 body = Image.new("RGBA", img.size, tuple(min(255, int(c * 0.55 + 115)) for c in col) + (255,))
                 grad = Image.linear_gradient("L").resize(img.size).point(lambda v: 255 - v // 2)
@@ -409,6 +438,141 @@ def gauge_pips(kind, n, colours):
             img.alpha_composite(black)
         out.append((_pad4(np.asarray(on)), _pad4(np.asarray(off))))
     return out
+
+
+# ---- PAD-416: a "bar" gauge, a meter in the manner of the stock POWERUP meter --------------------------------
+#: David, 2026-10-06, on GODZILLA ANGRY's RAGE pips down the right edge: "can we make this meter look more stock like
+#: the meter in the top left? It can still say Rage somehow, but it shouldn't cycle 1/5 over and over again. the whole
+#: meter should be 100% towards the mode". The stock meter (GODZILLA POWERUP, the glass's top-left corner) is a metal
+#: frame holding the feature's icon in a diamond and a glass tube in cells that a liquid fills from the left, its
+#: words beside it. It is no picture of any scene on the card (every auto- and demand-loaded scene's textures were
+#: searched, PAD-416), so this draws one in its manner - not a stock pixel - for the glass's top-right corner, its
+#: words to its left as the stock meter's are to its right. The liquid is ``count`` slices, each a Sprite the mode
+#: shows (the gauge's pips), between the tube's dark inside (the frame) and its glass (drawn over them).
+BAR_W, BAR_H = 286, 78                  # the frame (the stock one is 284 x 76 on the glass)
+BAR_X, BAR_Y = 1066.0, 8.0              # its place: the top-right corner, as the stock one is in the top-left
+BAR_TUBE = (80, 22, 266, 56)            # the tube's inside, frame px
+BAR_CELLS = 5                           # rings: a cell a level
+BAR_SLICES_MAX = 40
+
+
+def _ss(w, h, k=4):
+    from PIL import Image
+    return Image.new("RGBA", (w * k, h * k), (0, 0, 0, 0)), k
+
+
+def _down(im, w, h):
+    from PIL import Image
+    return im.resize((w, h), Image.LANCZOS)
+
+
+def _vgrad(w, h, top, bottom):
+    t = np.linspace(0.0, 1.0, h)[:, None, None]
+    a = np.asarray(top, dtype=np.float32) * (1 - t) + np.asarray(bottom, dtype=np.float32) * t
+    return np.repeat(a, w, axis=1)
+
+
+def bar_frame(icon_l, k=4):
+    """The meter's frame (RGBA, BAR_W x BAR_H): metal, a dark recess, the icon in a diamond, the tube's inside."""
+    from PIL import Image, ImageDraw
+    W, H = BAR_W * k, BAR_H * k
+    im, _ = _ss(BAR_W, BAR_H, k)
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=13 * k, fill=255)
+    metal = _vgrad(W, H, (176, 174, 146, 255), (88, 86, 68, 255)).astype(np.uint8)
+    base = Image.fromarray(metal, "RGBA")
+    base.putalpha(mask)
+    im.alpha_composite(base)
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, W - 1, H - 1), radius=13 * k, outline=(28, 28, 22, 255), width=2 * k)
+    d.rounded_rectangle((3 * k, 3 * k, W - 1 - 3 * k, H - 1 - 3 * k), radius=10 * k, outline=(214, 212, 182, 150),
+                        width=k)                                                     # the bevel's light edge
+    side = _vgrad(12 * k, H - 8 * k, (214, 212, 186, 255), (120, 118, 96, 255)).astype(np.uint8)
+    sm = Image.new("L", (12 * k, H - 8 * k), 0)
+    ImageDraw.Draw(sm).rounded_rectangle((0, 0, 12 * k - 1, H - 8 * k - 1), radius=5 * k, fill=255)
+    si = Image.fromarray(side, "RGBA")
+    si.putalpha(sm)
+    im.alpha_composite(si, (W - 16 * k, 4 * k))                                  # the frame's lit right side
+    d.rounded_rectangle((9 * k, 9 * k, W - 1 - 21 * k, H - 1 - 9 * k), radius=5 * k, fill=(22, 20, 16, 255),
+                        outline=(58, 56, 44, 255), width=k)                          # the recess
+    d.line((12 * k, 11 * k, W - 24 * k, 11 * k), fill=(92, 22, 12, 255), width=2 * k)   # its dark red top band
+    # the icon's window and its diamond
+    d.rectangle((14 * k, 14 * k, 66 * k, 63 * k), fill=(6, 6, 6, 255))
+    cx, cy, r = 40 * k, 38.5 * k, 23 * k
+    d.polygon([(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)], fill=(255, 128, 0, 255))
+    r2 = r - 3 * k
+    d.polygon([(cx, cy - r2), (cx + r2, cy), (cx, cy + r2), (cx - r2, cy)], fill=(214, 28, 18, 255))
+    r3 = r2 - 2.5 * k
+    d.polygon([(cx, cy - r3), (cx + r3, cy), (cx, cy + r3), (cx - r3, cy)], fill=(10, 8, 8, 255))
+    ic = Image.fromarray(np.asarray(icon_l, dtype=np.uint8), "L").resize((int(30 * k), int(30 * k)), Image.LANCZOS)
+    fire = _vgrad(ic.width, ic.height, (255, 236, 90, 255), (255, 60, 10, 255)).astype(np.uint8)
+    fi = Image.fromarray(fire, "RGBA")
+    fi.putalpha(ic)
+    im.alpha_composite(fi, (int(cx - ic.width / 2), int(cy - ic.height / 2)))
+    # the tube's inside
+    x0, y0, x1, y1 = (v * k for v in BAR_TUBE)
+    d.rounded_rectangle((x0 - 3 * k, y0 - 3 * k, x1 + 3 * k, y1 + 3 * k), radius=(y1 - y0) // 2 + 3 * k,
+                        fill=(4, 4, 6, 255), outline=(120, 120, 112, 255), width=k)
+    shade = _vgrad(x1 - x0, y1 - y0, (34, 30, 34, 255), (6, 6, 8, 255)).astype(np.uint8)
+    tm = Image.new("L", (x1 - x0, y1 - y0), 0)
+    ImageDraw.Draw(tm).rounded_rectangle((0, 0, x1 - x0 - 1, y1 - y0 - 1), radius=(y1 - y0) // 2, fill=255)
+    ts = Image.fromarray(shade, "RGBA")
+    ts.putalpha(tm)
+    im.alpha_composite(ts, (x0, y0))
+    return np.asarray(_down(im, BAR_W, BAR_H))
+
+
+def bar_glass(k=4):
+    """What is drawn over the liquid (RGBA, BAR_W x BAR_H): the cells' rings and the glass's shine."""
+    from PIL import Image, ImageDraw
+    W, H = BAR_W * k, BAR_H * k
+    im, _ = _ss(BAR_W, BAR_H, k)
+    d = ImageDraw.Draw(im)
+    x0, y0, x1, y1 = (v * k for v in BAR_TUBE)
+    cw = (x1 - x0) / BAR_CELLS
+    for c in range(1, BAR_CELLS):
+        x = x0 + c * cw
+        d.arc((x - 5 * k, y0 + k, x + 5 * k, y1 - k), -78, 78, fill=(236, 236, 236, 235), width=int(1.6 * k))
+        d.arc((x - 6 * k, y0 + k, x + 4 * k, y1 - k), -70, 70, fill=(40, 40, 44, 160), width=k)
+    d.arc((x1 - 9 * k, y0, x1 + 3 * k, y1), -82, 82, fill=(238, 238, 238, 240), width=2 * k)   # the far end
+    shine = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shine)
+    sd.rounded_rectangle((x0 + 8 * k, y0 + 3 * k, x1 - 10 * k, y0 + 9 * k), radius=3 * k, fill=(255, 255, 255, 70))
+    sd.rounded_rectangle((x0 + 12 * k, y1 - 6 * k, x1 - 14 * k, y1 - 4 * k), radius=k, fill=(255, 255, 255, 26))
+    im.alpha_composite(shine)
+    return np.asarray(_down(im, BAR_W, BAR_H))
+
+
+def bar_liquid(colours, k=4):
+    """The tube full (RGBA, the tube's size): ``colours`` along it, from its empty end, shaded round."""
+    from PIL import Image, ImageDraw
+    x0, y0, x1, y1 = BAR_TUBE
+    w, h = x1 - x0, y1 - y0
+    cols = np.asarray(colours or [(220, 20, 20)], dtype=np.float32)
+    t = np.linspace(0.0, 1.0, w * k)
+    pos = t * (len(cols) - 1)
+    i0 = np.floor(pos).astype(int)
+    i1 = np.minimum(i0 + 1, len(cols) - 1)
+    f = (pos - i0)[:, None]
+    along = cols[i0] * (1 - f) + cols[i1] * f                                       # (w*k, 3)
+    yy = np.linspace(0.0, 1.0, h * k)
+    lum = 0.45 + 0.55 * np.sin(np.pi * np.clip(yy * 1.05, 0, 1)) ** 0.7              # round: dark edges
+    spec = np.exp(-((yy - 0.28) / 0.08) ** 2) * 0.55                                 # a highlight along its top
+    rgb = along[None, :, :] * lum[:, None, None] + 255.0 * spec[:, None, None]
+    a = np.dstack([np.clip(rgb, 0, 255), np.full((h * k, w * k), 255.0)]).astype(np.uint8)
+    im = Image.fromarray(a, "RGBA")
+    m = Image.new("L", im.size, 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, im.width - 1, im.height - 1), radius=im.height // 2, fill=255)
+    im.putalpha(m)
+    return np.asarray(_down(im, w, h))
+
+
+def bar_slices(colours, n):
+    """[(RGBA, x)] the liquid in ``n`` slices left to right (x: the slice's left edge in the tube)."""
+    liquid = bar_liquid(colours)
+    w = liquid.shape[1]
+    edges = [round(i * w / n) for i in range(n + 1)]
+    return [(_pad4(np.ascontiguousarray(liquid[:, edges[i]:edges[i + 1]])), edges[i]) for i in range(n)]
 
 
 # ---- the scene nodes -----------------------------------------------------------------------------------
@@ -444,8 +608,9 @@ def _text_node(p, ids, name, words, font, x, y, ltrb, rgba=(1.0, 1.0, 1.0, 1.0),
 
 
 def _bitmap_node(p, ids, name, rgba, x, y, textures):
-    """A Bitmap node; the same pixels already used in this HUD are referenced, not copied."""
-    a = np.asarray(rgba, dtype=np.uint8)
+    """A Bitmap node; the same pixels already used in this HUD are referenced, not copied. ``rgba`` is plain
+    alpha; it goes on the card premultiplied, as the game's own pictures are (PAD-416)."""
+    a = premultiplied(rgba)
     h, w = a.shape[:2]
     key = (w, h, a.tobytes())
     pn, po = ids.take(2)
@@ -508,7 +673,9 @@ def hud_group(p, ids, slug, spec, fonts, art, textures):
                           (18.0, -2.0, 98.0, 67.2), tail=tuple(p.text_tail))]
         kids.append(_group_node(p, ids, names["Timer2"], tk2, 0.0, TIMER2_DY))
     gauge = spec.get("gauge")
-    if gauge:
+    if gauge and (gauge.get("kind") or "spike") == "bar":
+        kids.append(_group_node(p, ids, names["Gauge"], bar_gauge(p, ids, g, gauge, sec, textures)))
+    elif gauge:
         n = max(1, min(12, int(gauge.get("count") or 3)))
         kind = gauge.get("kind") or "spike"
         cols = [tuple(c) for c in (gauge.get("colours") or [(255, 120, 0)])]
@@ -529,6 +696,34 @@ def hud_group(p, ids, slug, spec, fonts, art, textures):
                                   [_bitmap_node(p, ids, "%s_G%d_OnArt" % (g, i + 1), on, 0.0, 0.0, textures)], x, y))
         kids.append(_group_node(p, ids, names["Gauge"], gk))
     return _group_node(p, ids, g, kids)
+
+
+def bar_gauge(p, ids, g, gauge, sec, textures):
+    """The ``_Gauge`` group's children for kind ``bar`` (PAD-416): the frame, ``count`` (up to 40) slices of
+    liquid as the pips (``_G<k>_On``; each ``_Off`` an empty picture: the tube's own dark shows), the glass over
+    them, and the words to the frame's left - ``words`` (["GODZILLA", "RAGE"]) and the label under them, which
+    the mode writes (its percent)."""
+    n = max(1, min(BAR_SLICES_MAX, int(gauge.get("count") or 20)))
+    cols = [tuple(c) for c in (gauge.get("colours") or [(150, 0, 0), (230, 20, 10), (255, 90, 0), (255, 170, 20)])]
+    blank = np.zeros((4, 4, 4), dtype=np.uint8)
+    tx, ty = BAR_X + BAR_TUBE[0], BAR_Y + BAR_TUBE[1]
+    gk = [_bitmap_node(p, ids, g + "_Gauge_Frame", _pad4(bar_frame(icon(gauge.get("icon") or "rage"))), BAR_X, BAR_Y,
+                       textures)]
+    for i, (sl, x) in enumerate(bar_slices(cols, n)):
+        gk.append(_group_node(p, ids, "%s_G%d_Off" % (g, i + 1),
+                              [_bitmap_node(p, ids, "%s_G%d_OffArt" % (g, i + 1), blank, 0.0, 0.0, textures)], tx + x, ty))
+        gk.append(_group_node(p, ids, "%s_G%d_On" % (g, i + 1),
+                              [_bitmap_node(p, ids, "%s_G%d_OnArt" % (g, i + 1), sl, 0.0, 0.0, textures)], tx + x, ty))
+    gk.append(_bitmap_node(p, ids, g + "_Gauge_Glass", _pad4(bar_glass()), BAR_X, BAR_Y, textures))
+    # the words, three lines centred to the frame's left as the stock meter's are to its right
+    s, cx = 0.4, BAR_X - 78.0                         # the stock meter's words are about 22 px high
+    words = list(gauge.get("words") or ["GODZILLA", "RAGE"])[:2]
+    for k, w in enumerate(words):
+        gk.append(_text_node(p, ids, "%s_Gauge_Word%d" % (g, k + 1), w, sec(0), cx, BAR_Y - 1.0 + 27.0 * k,
+                             (-230.0, -2.0, 230.0, 80.0), flags=(1, 0), scale=s))
+    gk.append(_text_node(p, ids, "%s_Gauge_Label" % g, gauge.get("label") or " ", sec(0), cx,
+                         BAR_Y - 1.0 + 27.0 * len(words), (-230.0, -2.0, 230.0, 80.0), flags=(1, 0), scale=s))
+    return gk
 
 
 def build_huds(p, data, huds, font_scene):

@@ -31,8 +31,8 @@
  *              white-hot, BURNING GODZILLA and what to do above the score panel; during MELTDOWN the
  *              MELTDOWN badge counts its 20 s. Jackpots play the spiral ray behind the HUD, cadmium
  *              the freezing mist, crossing into CRITICAL the veins glowing; MELTDOWN is full screen.
- *   INSERTS    The four jackpot shots in the heat's colour (yellow, orange, red, white flashing), the
- *              HEART blinking; the shields pulsing ice blue while the core is above 40%; MELTDOWN:
+ *   INSERTS    The four jackpot shots flashing in the heat's colour (yellow, orange, red, white and fast), the
+ *              HEART blinking faster; the shields pulsing ice blue while the core is above 40%; MELTDOWN:
  *              only the BUILDING, strobing white. Everything back to the game at the end.
  *   LIGHTS     Its own shows: at the start, the playfield dark and a red fire rising from the
  *              flippers into a white-hot strobe; MELTDOWN, a white implosion into the Building;
@@ -45,6 +45,10 @@
  * .light (light it for the player up), .heat "<percent>" (set the core).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): a multiball: the long storm; the core cools to embers */
+#define GAME_SHOW_START "Strobe storm"
+#define GAME_SHOW_END   "Ember fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -227,7 +231,7 @@ static void show_lamps(void)
         uint64_t rest = 0;
         for (i = 0; i < N_JP; i++)
             if (i != run.heart) rest |= jp_mask[i];
-        kit_lamps_shot(&lamps, rest, rgb, run.heat_level == 3 ? PM_LAMP_BLINK : PM_LAMP_SOLID, 150);
+        kit_lamps_shot(&lamps, rest, rgb, PM_LAMP_BLINK, run.heat_level == 3 ? 150 : KIT_LIT_MS);
         kit_lamps_shot(&lamps, jp_mask[run.heart], rgb, PM_LAMP_BLINK, run.heat_level >= 2 ? 100 : 250);  /* the heart */
         if (run.core >= 40) kit_lamps_shot(&lamps, shield_mask, MD_ICE, PM_LAMP_PULSE, 900);
         if (!run.add_used && run.jackpots >= ADD_BALL_AFTER)
@@ -320,7 +324,7 @@ static int start(const char *why)
     kit_hud_begin(&hud, "BURNING GODZILLA", "");
     show();
     kit_hud_award(&hud, 3000, "MELTDOWN MULTIBALL", "HIS HEART IS A NUCLEAR REACTOR");
-    kit_show_start(&show_fx, "meltdown start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "meltdown start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %d balls, ball save %d s, core %u%%, the heart: %s, score %llu", why, p, BALLS,
            BALL_SAVE_S, run.core, JP[run.heart].shot, (unsigned long long)pm_score(p));
@@ -378,7 +382,9 @@ static void end(const char *why)
     kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     sound(CUE_END);
     pa_clip_full(&own, run.meltdowns ? "won" : "lost");
-    kit_show_start(&show_fx, "meltdown end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, "meltdown end", SHOW_END, N_SHOW(SHOW_END));
+    }
     pm_snprintf(b, sizeof b, "%u JACKPOT%s  -  %u MELTDOWN%s SURVIVED", run.jackpots, run.jackpots == 1 ? "" : "S",
                 run.meltdowns, run.meltdowns == 1 ? "" : "S");
     kit_hud_title(&hud, "MELTDOWN TOTAL", b);
@@ -449,8 +455,7 @@ static void on_shot(uint64_t shot)
             start("the captive ball, MELTDOWN ready");
             return;
         }
-        if (hits[p] < HITS_TO_LIGHT) hits[p]++;
-        pm_log("captive ball %u of %d (player %u)", hits[p], HITS_TO_LIGHT, p);
+        if (hits[p] < HITS_TO_LIGHT) hits[p]++, pm_log("captive ball %u of %d (player %u)", hits[p], HITS_TO_LIGHT, p);
         if (hits[p] >= HITS_TO_LIGHT) {
             ready[p] = 1;
             pm_log("MELTDOWN IS READY for player %u: the captive ball starts it", p);

@@ -460,6 +460,35 @@ layers whenever they change), and two raw porting reads, `slots <lists> <output 
 (every layer's slot for one light and the compositor's output record) and `wiremap <board table>
 <board count>` (every light the output stage sends, and the board channel it goes out on).
 
+### A hit answers, and a lit shot flashes (PAD-415)
+
+David after a machine test: "the inserts that are lit for shots should pretty much always be flashing - when they're
+solid, they look broken, especially if i hit the shot and i don't get audible or visual feedback that it registered."
+While one of our modes runs, the game's rules see no shots (PAD-347/PAD-398), so the game plays none of its own sounds
+or insert flashes for them: a hit has to answer from the mode.
+
+```c
+pm_lamp_flash(shot, PM_RGB(255, 255, 255), 480);   /* the hit shot's inserts strobe white, then show the mode's pattern */
+pm_hit_sound(++hits);                               /* the game's own hit sounds, one step higher a hit */
+```
+
+`pm_lamp_flash` strobes the inserts of `shots` (60 ms on, 60 off) for `ms` (480 when 0, 2000 at most) over whatever
+the mode holds them in, then shows that again; an insert the mode does not hold is held for the strobe only and handed
+back after it, and one the mode releases mid-strobe finishes the strobe first. `pm_hit_sound(n)` plays the n-th of a
+rising run of the game's own hit sounds the port names (`value hit_sound_<n>`; past the last, the last), never two
+within 100 ms; `pm_hit_sounds()` says how many (0: none on this game). On Godzilla Premium/LE 1.16 the run is the
+Sound Test's PITCHED HIT ORCH 1 to 8 (requests 367-374): the Sound Test's node id is the request id, and a census of
+the stock game's shots agreed (a shield target played 345 MECHAGODZILLA TARGET 2, the ramps 420 LEFT RAMP and 443
+RIGHT RAMP, the Maser target 436 MASER CANNON TARGET); each holds the effects channel the game's own shot sounds use
+for about 2 s.
+
+The kit does both for every hit that counts while the mode runs (`kit_fresh` -> `kit_hit`), the climb starting again
+at each start; a form-built mode's scoring shots do the same (`mode_file.c`). And the kit's lights speak the game's
+language: a lit shot BLINKS (`KIT_LIT_MS`, 500 ms, with no clock on it; faster with one), pulse is optional or a step
+not next yet, and SOLID means done - never a shot still to make. Emulator: six KIRYU charge hits strobed their inserts
+(the shield left insert's three channels flipped 11 times in the 1.2 s after its hit) and played 367 to 372; on David's
+Premium every scoring hit strobed and sounded.
+
 ### Lights on every title (item 164)
 
 Only Godzilla, Jaws and King Kong carry the game's light language (`blele`), so `pm_lights`
@@ -1862,6 +1891,71 @@ file's `shake start 1500 2`, `shake shot game jackpot <left ramp>` and `shake en
 on each left ramp, and as it ended - that one ran its 1000 ms after the END with no OFF. The setting read 4 on
 the stock card; the game itself shook as a game started (334 ms at 0, then 2000-4000 ms at 3). Not yet
 machine-tested (David's Premium has a shaker fitted).
+## The game's own light shows (Godzilla Premium/LE, PAD-411)
+
+David, after the first machine test of the shield: "i am not seeing any fancy playfield light shows when custom modes
+start or end ... think like the 'destruction jackpot' mode or the 'tank multiball start'. can we add in some
+sophisticated light shows like those for our custom modes?" A mode can now play one of the game's OWN playfield shows,
+the way the game plays them:
+
+```c
+pm_game_show_named("Strobe burst");       /* at the start: one of the port's flashy shows */
+...
+pm_game_show_named("Blue fade");          /* at the end (in the first 2 s after pm_end): a subdued one */
+if (pm_game_show_playing()) pm_game_show_stop();
+```
+
+A show is a process of the game's: its body makes a lamp group, plays its tables of light-language commands
+({command, owner} records) through the game's player, sleeps through the show and stops every effect it started; an
+exit hook it registers takes its lights away whenever the process ends. So the runtime plays one by starting that
+body as a process of its own (`proc_create(value show_proc, site show_<n>, 0)`, an id the game never uses), and stops
+one with the game's own kill by id (`site event_cancel`). Its timing, colours, layering and clean-up are the game's.
+
+The limits are the runtime's: only the running mode, or one in the first 2 s after it ended (its ending's show); only
+in a game; one at a time (a new one replaces one still playing); never longer than the port's `value show_secs_<n>`
+(some of the game's shows run until stopped), 20 s at most; and none in the 3 s after a ball ends - the game stops
+every process of its own as the ball ends, so an ending on a drain would lose its show at once (the second machine
+test: KIRYU's and BIOLLANTE's endings on a drain). The kit's `kit_game_show(name, why)` plays one by name and says
+so in mode.log; it returns 0 where the game has no such show (a Pro, another title, a ball ending), and the ten
+Godzilla examples then play their own kit show instead.
+
+**The port lines** (`ports/godzilla_le-1.16.port`, "PAD-411"): `value show_proc`, then a show a block -
+`site show_<n>` (its body), `text show_name_<n>` (the name a mode asks for), `text show_kind_<n>` (`flashy` for a
+start, `subdued` for an end, `accent` for a moment) and `value show_secs_<n>`. The process calls are `site
+proc_create`, `site proc_exists` and `site event_cancel`. PM_CAN_GAME_SHOWS says a port has them all.
+
+| Show | Kind | Length | What it is (measured) |
+|---|---|---|---|
+| Strobe burst | flashy | 6 s | process 312: orange-red strobe bursts over the whole playfield every ~0.6 s; 56 light channels, 41 at once |
+| Strobe storm | flashy | 16 s | process 213: a white strobe over a big light set and green sweeps; 86 channels, 63 at once |
+| Insert chase | flashy | 6 s (runs until stopped) | process 315: the shot inserts in runs chasing up the ramps and lanes; 161 channels, 88 at once |
+| Playfield wave | flashy | 10 s | process 299 (the game's other light path: nothing at the light runner): waves over the whole playfield; 146 channels |
+| Blue fade | subdued | 6 s | process 300: a slow blue fade; 103 channels |
+| Colour fade | subdued | 6 s | process 301: blue, yellow and red fading |
+| Red and blue fade | subdued | 6 s | process 302 |
+| Ember fade | subdued | 6 s | process 304: dim reds and oranges |
+| Colour sweep | accent | 2 s | the attract director's: 18 sweeps at once, 41 channels for 1.3 s - too short for a start |
+| Cyan flick | accent | 1 s | process 330: a 0.6 s flick on one light set |
+
+**How they were found and measured.** The light runner (`site light_run`, a branch to 0x1c6fc8) was hooked to record
+every command; the game's show processes are in its process registry (0x72bc40, 347 entries of {entry, priority,
+flags}); each candidate was played from a mode by `show_reel_mode.c` (each Action button press plays the next) and
+what it did to the playfield measured at the shim's LED view, sampled every 20 ms with the game's own lamps in the
+4 s before it taken out (how many light channels it moved, the most at once, for how long). Two machine tests on
+David's Premium: the first played every start and end show; the second showed the 2 s Colour sweep went unnoticed
+and the endings on a drain were cut, which gave the bigger starts and the ball-end rule above.
+
+**From the Modes tab (PAD-418).** A form mode picks a show for its start and one for its end on its Lights page ("The
+game's light shows": the port's shows by name, grouped flashy / subdued / accent; none by default). They are written
+as the mode file's `show_start <name>` and `show_end <name>`, which `mode_file.c` plays through `pm_game_show_named`
+as the mode starts (after its start clip) and as it ends (after `pm_end`, inside the ending's 2 s) - never when it
+ended because the ball drained. A blocks mode has "Play the game's light show" (Show and sound), a name picked from
+the port's, in any script; its C calls `pm_game_show_named` through a `game_show(name)` helper, so the runtime's
+limits above still hold (a show in When the ball drains, or in a script for while the mode is not running, plays
+nothing, and the blocks' notes say so). Where the port names no shows (a Pro, every other title) the form's section and
+the block are greyed with the reason (`mode_project._shows_cannot`); a name the title does not have is refused on the
+Lights page; Port to... the Pro leaves both out (kept with the Premium/LE's shots for the way back:
+`MODEL_FIELDS`), and a mode taken to another game drops a show that game does not name.
 
 ## Ports: why your mode runs on any game
 
@@ -2590,7 +2684,7 @@ lines:
 | `[pad] scores: 32-bit (...)` | the port's scoring pair is the 32-bit one |
 | `[pad] switch shots: ...` / `switch shots off: ...` | the port's `switch` lines, and whether a `switch_hit` site was hooked |
 | `[TARGET RUSH] ...` | your `pm_log` lines |
-| `[TARGET RUSH] not started: X is running` | `pm_begin()` refused; another mode is up |
+| `[TARGET RUSH] not started: X is running` | `pm_begin()` refused; another mode is up (said once per mode until the running one changes, PAD-399) |
 | `[mode] <name> not started (trigger shot): a battle is running` | a `stack no` mode file waited for the game's own battle (or multiball) |
 | `[pad] stock modes: can tell battle multiball any` | the first stock-mode question; which kinds this port can answer |
 | `[pad] lamps: 88 named inserts (24 tied to a shot)...` | the port's `lamp` lines were read; `the game counts 592 lights` once the game has counted them |
@@ -3099,6 +3193,13 @@ While your mode holds priority P (`pm_display_priority(P)`, or `priority P` in a
   the total. The kept hold goes when the time is up, another mode begins (`pm_begin`: the new mode takes
   over at once), the ball or the game ends, or the mode calls `pm_display_priority(0)` (a drain or a
   tilt: the display back at the same tick). The examples' `kit_end_after(ms)` and `kit_end_now()`.
+- **An ending gives way to another of our modes** (PAD-413). `pm_begun()` counts our modes' starts; a mode
+  remembers it at its end and, when it moves while its ending is still on the glass, drops the ending at once
+  (its TOTAL, its own screen, a qualification note). The runtime stops a full-screen clip another mode played
+  in `pm_begin` itself. The examples' kit does it in `kit_hud_tick` / `kit_screen_tick`; mode files and blocks
+  modes hide their own screen's total. David's Premium, 2026-10-06: BIOLLANTE began 4.8 s into KIRYU's 10 s
+  ending. A total shown through a borrowed game message (`total_msg`) is the game's own award screen and plays
+  its length.
 - A display of the game's that is ALREADY on the screen when the mode starts plays to its end; the
   hold applies to everything asked for after.
 
@@ -3489,7 +3590,16 @@ kerning, carried in from the Ebirah battle scene) and hidden until the mode show
   icon (`bolt`, `oxygen`, `maser`, `xilien`, `anguirus`, `radiation`), in the BATTLE badge's slot (y 267),
   the seconds in its window;
 - `gauge`: pips on the right edge (`spike`, `segment` - filled from the bottom - or `diamond`), each a lit
-  and a dark picture.
+  and a dark picture; or (`"kind": "bar"`, PAD-416) ONE meter in the stock POWERUP meter's manner at the
+  glass's top-right corner - a metal frame with the mode's `icon` in a diamond, a glass tube in five cells and
+  `count` (up to 40) slices of liquid in `colours` filling it from the left, `words` (two lines) and the label
+  (the mode writes it: its percent) beside it, as the stock meter's are beside it in the top-left. GODZILLA
+  ANGRY's RAGE meter is one (David: "the whole meter should be 100% towards the mode"). It is drawn, not taken:
+  the stock meter is no picture in any of the card's scenes.
+
+Every picture of a HUD goes on the card PREMULTIPLIED, as the game's own are (a half-transparent pixel of the
+game's has no channel above its alpha): in plain alpha, whatever fades (a pip's glow, a glass's shine) was
+drawn as solid colour - the "colors outside the meter" David took for a glitch (PAD-416).
 
 In C, `intricate_kit.h`'s `struct kit_hud` drives it (`kit_hud_begin`, `kit_hud_title`, `kit_hud_counter`,
 `kit_hud_timer`, `kit_hud_gauge`, `kit_hud_award`, `kit_hud_note`, `kit_hud_hide_in`, `kit_hud_tick` every

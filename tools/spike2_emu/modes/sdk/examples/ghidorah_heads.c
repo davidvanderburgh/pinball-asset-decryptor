@@ -26,8 +26,8 @@
  *   ENDS       Won (the super jackpot), or GHIDORAH ESCAPES (the clock or the final blow
  *              runs out), or the ball drains, or the ball is tilted. The screen shows the total.
  *   INSERTS    The lit head's two inserts (its ramp or the Building, and its powerline) are
- *              GOLD, and their pattern is its health: solid at full health, blinking at 2,
- *              blinking fast at 1. A wounded head that is not lit PULSES GREEN: it is growing
+ *              GOLD, and their pattern is its health: blinking slowly at full health, faster at 2,
+ *              fast at 1. A wounded head that is not lit PULSES GREEN: it is growing
  *              back. A full head that is not lit, and a severed one, are the game's own again.
  *              The final blow: MASER and MASER READY flash white (faster in its last 5 s).
  *              Everything is handed back the moment the mode ends, however it ends.
@@ -52,6 +52,10 @@
  *   echo "Left ramp" > /dump/ghidorah_heads.shot   act as if the game dispatched that shot
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the three heads' gold, red and blue */
+#define GAME_SHOW_START "Strobe burst"
+#define GAME_SHOW_END   "Colour fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs -------------------------------------------------------------------------- */
@@ -82,7 +86,8 @@ static const struct {
 };
 #define FINAL_SHOT "Maser target"
 #define FINAL_INSERTS_TOO "MASER READY"   /* the insert beside MASER, tied to no shot by the game */
-#define HURT_BLINK_MS      500            /* the lit head at 2 health */
+#define FULL_BLINK_MS      700            /* the lit head at full health */
+#define HURT_BLINK_MS      400            /* ... at 2 */
 #define DYING_BLINK_MS     180            /* ... at 1 */
 #define REGROW_PULSE_MS    1200
 
@@ -195,8 +200,8 @@ static void show_lit(void)
             uint64_t m = big_mask[i] | small_mask[i];
             if (!run.hp[i]) continue;                          /* severed: the game's own again */
             if (i == run.lit)
-                kit_lamps_shot(&lamps, m, KIT_GOLD, run.hp[i] >= HEAD_HP ? PM_LAMP_SOLID : PM_LAMP_BLINK,
-                               run.hp[i] >= 2 ? HURT_BLINK_MS : DYING_BLINK_MS);
+                kit_lamps_shot(&lamps, m, KIT_GOLD, PM_LAMP_BLINK, run.hp[i] >= HEAD_HP ? FULL_BLINK_MS
+                               : run.hp[i] >= 2 ? HURT_BLINK_MS : DYING_BLINK_MS);
             else if (run.hp[i] < HEAD_HP)
                 kit_lamps_shot(&lamps, m, KIT_GREEN, PM_LAMP_PULSE, REGROW_PULSE_MS);   /* growing back */
         }
@@ -269,7 +274,7 @@ static int start(const char *why, int counted)
     show_status();
     kit_hud_award(&hud, 3000, "GHIDORAH ATTACKS", "SEVER ALL THREE HEADS");
     show_lit();
-    kit_show_start(&show, "ghidorah start", SHOW_START, N_STEPS(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show, "ghidorah start", SHOW_START, N_STEPS(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %u s, heads %u/%u/%u, lit %s, start %u this game, score %llu", why, p,
            RUN_SECONDS, run.hp[0], run.hp[1], run.hp[2], HEAD[run.lit].name, ran_game[p],
@@ -287,8 +292,10 @@ static void end(const char *why, int won)
     kit_ledger_note(KIT_GHIDORAH, run.player, won);
     sound(CUE_END);
     pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
-    kit_show_start(&show, won ? "ghidorah won" : "ghidorah lost", won ? SHOW_WON : SHOW_LOST,
-                   won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show, won ? "ghidorah won" : "ghidorah lost", won ? SHOW_WON : SHOW_LOST,
+                       won ? N_STEPS(SHOW_WON) : N_STEPS(SHOW_LOST));
+    }
     pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
     kit_hud_title(&hud, won ? "GHIDORAH DEFEATED" : "GHIDORAH ESCAPES", " ");
     kit_hud_counter(&hud, 0, 0, 0, 0);
@@ -417,20 +424,26 @@ static void on_init(void)
            (unsigned long long)final_mask);
 }
 
+/* PAD-399: a powerline that is not counted says why once until the reason changes; "" = nothing said */
+static char uncounted[8];
+
 static void qualify_shot(uint64_t shot, unsigned p)
 {
     char line[KIT_WORDS];
-    unsigned i, n = 0;
+    unsigned i, n = 0, had;
     for (i = 0; i < N_HEADS; i++) {
         if (!small_mask[i] || !(shot & small_mask[i]) || !kit_fresh(&db, small_mask[i])) continue;
         if (ran_ball[p] || ran_game[p] >= STARTS_PER_GAME) {
-            pm_log("%s: not counted - %s", HEAD[i].small,
-                   ran_ball[p] ? "it already ran this ball" : "it already ran twice this game");
+            if (kit_once(uncounted, sizeof uncounted, ran_ball[p] ? "ball" : "game"))
+                pm_log("%s: not counted - %s", HEAD[i].small,
+                       ran_ball[p] ? "it already ran this ball" : "it already ran twice this game");
             return;
         }
+        uncounted[0] = 0;
+        had = qual[p];
         qual[p] |= 1u << i;
         for (n = 0, i = 0; i < N_HEADS; i++) n += (qual[p] >> i) & 1u;
-        pm_log("powerlines %u of %d (player %u)", n, N_HEADS, p);
+        if (qual[p] != had) pm_log("powerlines %u of %d (player %u)", n, N_HEADS, p);   /* PAD-399: once, when reached */
         if (n == N_HEADS) {
             start("three powerlines", 1);
         } else if (!kit_running) {
@@ -515,6 +528,7 @@ static void on_tick(void)
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) qual[p] = ran_ball[p] = ran_game[p] = 0;
+        uncounted[0] = 0;
         pm_log("new game: counts cleared");
     }
     if (!run.on) return;
@@ -536,6 +550,7 @@ static void on_ball_end(void)
     end("ball ended", 0);
     kit_end_now();
     for (p = 0; p < 5; p++) qual[p] = ran_ball[p] = 0;
+    uncounted[0] = 0;
 }
 
 static void on_event(unsigned id)

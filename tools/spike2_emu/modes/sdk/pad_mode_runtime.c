@@ -737,7 +737,9 @@ const char *pm_shot_at(int i, uint64_t *mask)
 /* ---- one mode at a time ---------------------------------------------------------------- */
 static const struct pm_mode *running;
 static char running_as[40];      /* PAD-363: pm_running_name - the running mode's own name ("" = its .name) */
+static unsigned begun;           /* PAD-413: pm_begun - how many times one of ours has begun */
 static void disp_linger_other_began(void);
+static void clip_other_began(void);
 
 /* the name the runtime's lines give mode m: what pm_running_name said while it runs, else its .name */
 static const char *mode_name(const struct pm_mode *m, const char *none)
@@ -746,23 +748,53 @@ static const char *mode_name(const struct pm_mode *m, const char *none)
     return m && m->name ? m->name : none;
 }
 
+/* PAD-399: a refused start is said once until it changes. A spinner asks on every spin, so a machine run's
+ * mode.log carried "[DESTOROYAH] not started: BIOLLANTE is running" 12 times in 2 s. Each mode refused is
+ * remembered until the running mode (or the name it runs as) changes; then its next refusal is said again. */
+static const struct pm_mode *refused[16];
+static void refused_forget(void)
+{
+    unsigned i;
+    for (i = 0; i < sizeof refused / sizeof refused[0]; i++) refused[i] = 0;
+}
+static int refused_said(const struct pm_mode *m)    /* 1 = already said for m; else remembers it */
+{
+    unsigned i;
+    for (i = 0; i < sizeof refused / sizeof refused[0]; i++) {
+        if (refused[i] == m) return 1;
+        if (!refused[i]) { refused[i] = m; return 0; }
+    }
+    return 0;                                       /* the table is full: say it */
+}
+
 int pm_begin(void)
 {
     if (running && running != current) {
-        pm_log("not started: %s is running", mode_name(running, "another mode"));
+        if (!refused_said(current)) pm_log("not started: %s is running", mode_name(running, "another mode"));
         return 0;
     }
-    if (running != current) running_as[0] = 0;
+    if (running != current) {
+        running_as[0] = 0;
+        refused_forget();
+        begun++;
+    }
     running = current;
     disp_linger_other_began();
+    clip_other_began();
     return 1;
 }
+
+/* PAD-413: one of ours began this many times. A mode whose ENDING is still on the glass (its total, its
+ * own screen) remembers it at its end and drops the ending at once when it moves: another of our modes
+ * has the screen now (David's Premium, 2026-10-06: BIOLLANTE began 4.8 s into KIRYU's 10 s ending). */
+unsigned pm_begun(void) { return begun; }
 
 /* PAD-363: one mode object that runs several modes (mode_file.c: every mode file) names the one it began, so
  * the runtime's own lines ("block: ... - BLOCKTEST is running") say which. Only while it runs; pm_end forgets. */
 void pm_running_name(const char *name)
 {
     if (!running || running != current) return;
+    refused_forget();
     pm_snprintf(running_as, sizeof running_as, "%s", name ? name : "");
 }
 
@@ -773,9 +805,12 @@ static void building_let_go(const char *why); /* PAD-393: the building section *
 static void shield_let_go(const char *why);   /* PAD-392: the shield section */
 static void shake_mode_ended(void);           /* PAD-414: the shaker section */
 static void shake_let_go(const char *why);
+static const struct pm_mode *show_ended_by;   /* PAD-411: a mode's ending may still start its show */
+static unsigned long show_ended_ms;
 void pm_end(void)
 {
-    if (running == current) running = 0, running_as[0] = 0;
+    if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
+    if (running == current) running = 0, running_as[0] = 0, refused_forget();
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();
@@ -830,6 +865,36 @@ int pm_sound(unsigned request)
     if (!f || !request) return 0;
     sound_fade_finish(request);      /* a fade still running on this request ends first */
     ((int (*)(unsigned))(unsigned long)f)(request);
+    return 1;
+}
+
+/* PAD-415: the game's own hit sounds, a rising run (pad_mode.h) */
+int pm_hit_sounds(void)
+{
+    char key[20];
+    int n;
+    if (!fn("sound_play")) return 0;
+    for (n = 0; n < 32; n++) {
+        pm_snprintf(key, sizeof key, "hit_sound_%d", n + 1);
+        if (pm_port_value(key, 0) <= 0) break;
+    }
+    return n;
+}
+
+int pm_hit_sound(int n)
+{
+    static unsigned long last;
+    static int said;
+    char key[20];
+    int count = pm_hit_sounds();
+    unsigned long now = pm_ms();
+    if (!count || (last && now - last < 100)) return 0;
+    if (n < 1) n = 1;
+    if (n > count) n = count;
+    pm_snprintf(key, sizeof key, "hit_sound_%d", n);
+    if (!pm_sound((unsigned)pm_port_value(key, 0))) return 0;
+    last = now | 1;
+    if (said < 40 && ++said) say("hit sound %d: request %ld%s", n, pm_port_value(key, 0), said == 40 ? " (no more of these lines this boot)" : "");
     return 1;
 }
 
@@ -1195,6 +1260,9 @@ struct lamp_held {
     unsigned long t0;
     int last[3];                    /* the level last written to each light, -1 = rewrite */
     unsigned on_ms;                 /* a blink's ON time; 0 = half the period (item 160: a rule's 300/200 blink) */
+    unsigned long flash_t0, flash_until;   /* PAD-415: a hit's strobe over the pattern (0 = none) */
+    unsigned flash_rgb;
+    int flash_only;                 /* held for the strobe alone: handed back to the game when it ends */
 };
 static struct lamp_held lamp_held[N_LAMPS];
 static unsigned lamp_hold_on_ms;    /* the on time the next hold takes (set around a call, runtime-internal) */
@@ -1428,6 +1496,8 @@ static void lamp_let_go(int k)
         for (c = 0; c < 3; c++)
             if (lamps[k].light[c]) lamp_slot_put(lamp_layer[h->layer].group, lamps[k].light[c], 0, 0);
     h->owner = 0;
+    h->flash_until = 0;
+    h->flash_only = 0;
 }
 
 static const char *const lamp_pattern_name[] = { "solid", "blink", "pulse", "chase" };
@@ -1459,6 +1529,7 @@ static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned
         h->layer = layer;
         h->last[0] = h->last[1] = h->last[2] = -1;
         h->on_ms = lamp_hold_on_ms < period_ms ? lamp_hold_on_ms : 0;
+        h->flash_only = 0;          /* a strobe still running finishes over the new pattern */
     }
     lamp_say("lamps: %d insert(s) held (%s): %06x %s, %u ms, layer %u", n, what, rgb & 0xffffffu,
              lamp_pattern_name[pattern], period_ms, prio);
@@ -1549,10 +1620,17 @@ int pm_lamp_shot(uint64_t shots, unsigned rgb, int pattern, unsigned period_ms)
 static int lamp_release_list(const int *list, int n, const char *what)
 {
     int j, r = 0;
+    unsigned long now = pm_ms();
     for (j = 0; j < n; j++) {
         struct lamp_held *h = &lamp_held[list[j]];
         if (!h->owner || (current && h->owner != current)) continue;
-        lamp_let_go(list[j]);
+        if (h->flash_until && (long)(h->flash_until - now) > 0) {
+            h->flash_only = 1;      /* PAD-415: a hit's strobe ends first, then the game has it back */
+            h->rgb = 0;
+            h->pattern = PM_LAMP_SOLID;
+        } else {
+            lamp_let_go(list[j]);
+        }
         r++;
     }
     if (r) lamp_say("lamps: %d insert(s) handed back to the game (%s)", r, what);
@@ -1583,6 +1661,43 @@ int pm_lamp_release_all(void)
     for (k = 0; k < n_lamps; k++)
         if (lamp_held[k].owner && (!current || lamp_held[k].owner == current)) list[n++] = k;
     return lamp_release_list(list, n, "all of the mode's");
+}
+
+/* PAD-415: a hit's strobe (pad_mode.h) */
+int pm_lamp_flash(uint64_t shots, unsigned rgb, unsigned ms)
+{
+    int k, n = 0, layer;
+    const struct pm_mode *me = current ? current : (const struct pm_mode *)&lamps;
+    unsigned long now = pm_ms();
+    if (!(can & PM_CAN_LAMPS) || !shots) return 0;
+    if (!ms) ms = 480;
+    if (ms > 2000) ms = 2000;
+    layer = lamp_layer_for(lamp_prio_of(current));
+    if (layer < 0) return 0;
+    for (k = 0; k < n_lamps; k++) {
+        struct lamp_held *h = &lamp_held[k];
+        if (!(lamps[k].shot & shots) || (h->owner && h->owner != me)) continue;   /* another mode's: left alone */
+        if (!h->owner) {
+            h->owner = me;
+            h->layer = layer;
+            h->rgb = 0;
+            h->pattern = PM_LAMP_SOLID;
+            h->period = 500;
+            h->t0 = now;
+            h->chase_i = 0;
+            h->chase_n = 1;
+            h->on_ms = 0;
+            h->flash_only = 1;
+        }
+        h->flash_rgb = rgb;
+        h->flash_t0 = now;
+        h->flash_until = (now + ms) | 1;
+        h->last[0] = h->last[1] = h->last[2] = -1;
+        n++;
+    }
+    if (n) lamp_say("lamps: %d insert(s) strobe %06x for %u ms (a hit, shots %08x_%08x)", n, rgb & 0xffffffu, ms,
+                    (unsigned)(shots >> 32), (unsigned)shots);
+    return n;
 }
 
 int pm_lamp_priority(unsigned priority)
@@ -1683,6 +1798,16 @@ static void lamps_tick(void)
         int f;
         if (!h->owner) continue;
         if (ticks % 30 == 0) h->last[0] = h->last[1] = h->last[2] = -1;   /* re-asserted twice a second */
+        if (h->flash_until) {                               /* PAD-415: a hit's strobe */
+            if ((long)(h->flash_until - now) > 0) {
+                unsigned c = ((now - h->flash_t0) / 60u) % 2u ? 0u : h->flash_rgb;
+                lamp_write(k, (int)((c >> 16) & 255u), (int)((c >> 8) & 255u), (int)(c & 255u));
+                continue;
+            }
+            h->flash_until = 0;
+            if (h->flash_only) { lamp_let_go(k); continue; }
+            h->last[0] = h->last[1] = h->last[2] = -1;
+        }
         f = lamp_level(h, now);
         lamp_write(k, (int)((h->rgb >> 16) & 255u) * f / 255, (int)((h->rgb >> 8) & 255u) * f / 255,
                    (int)(h->rgb & 255u) * f / 255);
@@ -1847,6 +1972,7 @@ void pm_set_text(void *text, const char *words)
  * the display is immediate-mode, so the runtime advances and draws the video player every
  * tick while the surface plays, as the game's own clip loop does. Proven: item 132. */
 static struct { int on, seen; unsigned long started, last; } clip;
+static const struct pm_mode *clip_owner;  /* PAD-413: the mode that played it (0 = a trigger file's) */
 /* item 164: CLIP V2 - the newer builds have no clip_play / video_player / video_surface function
  * (the lookup is inlined at every call site: Venom 1.07 has 22), so the runtime does what their
  * code does: the video bank scene (`scene video_bank`, 60ed7e50... on 28 of 30 latest builds), its
@@ -1934,6 +2060,7 @@ int pm_clip(const char *name)
         clip.on = 1;
         clip.seen = 0;
         clip.started = clip.last = pm_ms();
+        clip_owner = current;
         return 1;
     }
     if (clip_v2) {
@@ -1950,6 +2077,7 @@ int pm_clip(const char *name)
         clip.on = 1;
         clip.seen = 0;
         clip.started = clip.last = pm_ms();
+        clip_owner = current;
         return 1;
     }
     for (i = 0; name[i] && i + 1 < sizeof disp_clip_name; i++) disp_clip_name[i] = name[i];
@@ -1961,10 +2089,20 @@ int pm_clip(const char *name)
     clip.on = 1;
     clip.seen = 0;
     clip.started = clip.last = pm_ms();
+    clip_owner = current;
     return 1;
 }
 
 int pm_clip_playing(void) { return clip.on; }
+
+/* PAD-413: a full-screen clip still playing when another of our modes begins is the last one's ENDING (KIRYU
+ * WINS over BIOLLANTE's start): it stops, so the new mode has the glass from its first frame */
+static void clip_other_began(void)
+{
+    if (!clip.on || clip_owner == current) return;
+    say("clip: the full-screen clip %s played stopped - another mode began", clip_owner && clip_owner->name ? clip_owner->name : "a trigger file");
+    pm_clip_stop();
+}
 
 void pm_clip_stop(void)
 {
@@ -4304,6 +4442,144 @@ static void building_tick(void)
     bld.putback_until = 0;
 }
 
+/* ---- the game's own light shows (PAD-411) ------------------------------------------------------------
+ * The game's shows are processes: a show's body makes a lamp group (0x3e828c), plays tables of {command,
+ * owner} records through its player (0x1c7a38: each command through the light runner, `site light_run`'s
+ * target, its effect handle kept), sleeps through the show (proc_sleep) and stops every handle (0x1bb744);
+ * an exit hook it registers cleans up if the process is killed (a tilt, the end of a ball). The attract
+ * director (process 296) starts its shows by entry address (0x3f3140: a child with the parent's id); others
+ * are in the process registry by id (213, 299-304, 312-333 on Premium/LE 1.16). So a show is played the
+ * game's own way by starting its body as a process: `site show_<n>` is the body, `value show_proc` the id of
+ * ours it runs under (one the game never uses: no create, exists or kill call names it), started with
+ * `site proc_create` (create-if-absent), its life read with `site proc_exists`. Its parameters, read from the
+ * running process's +0xa0.. by the bodies that have any, are a fresh process's (0): each show's default.
+ * A show's lights belong to its process: the exit hook every body registers (0x1bacdc) takes them out of the
+ * light engine's list (0x7bb68c) when the process ends - so stopping one is the game's kill by id (`site
+ * event_cancel`: every process with that id). Some shows run until stopped (process 315's body, Premium/LE 1.16's
+ * Insert chase), so the runtime stops one after the port's `value show_secs_<n>` (a moment more than that), and
+ * never later than SHOW_MAX_MS. And none starts while the ball ends: the game stops every process of its own then
+ * (the second machine test: two modes that ended on a drain started their ending's show, and it was gone at once). */
+#define SHOWS_MAX 64
+#define SHOW_MAX_MS 20000ul
+static int shows_n;
+static struct { int n; unsigned long started, limit; } show_now;
+static unsigned long ball_end_at;                    /* when the last ball ended (on_ball_end), 0 = not yet */
+
+int pm_game_shows(void)
+{
+    return (can & PM_CAN_GAME_SHOWS) ? shows_n : 0;
+}
+
+int pm_game_show_playing(void)
+{
+    return (can & PM_CAN_GAME_SHOWS) && proc_alive((unsigned)pm_port_value("show_proc", 0));
+}
+
+/* by the port's name (`text show_name_<n>`, any case): a mode written without knowing its game asks for "Strobe
+ * burst", and a game whose port names no such show plays nothing (0) */
+int pm_game_show_named(const char *name)
+{
+    char key[24];
+    const char *t;
+    int n, k;
+    if (!(can & PM_CAN_GAME_SHOWS) || !name || !*name) return 0;
+    for (n = 1; n <= shows_n; n++) {
+        pm_snprintf(key, sizeof key, "show_name_%d", n);
+        t = pm_port_text(key);
+        for (k = 0; t && name[k] && t[k] && (name[k] | 0x20) == (t[k] | 0x20); k++) ;
+        if (t && !name[k] && !t[k]) return pm_game_show(n);
+    }
+    say("show \"%s\": not one of this game's shows", name);
+    return 0;
+}
+
+static void show_kill(const char *why)
+{
+    unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    if (!proc_alive(id)) return;
+    ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("event_cancel"))(id, 0xffffu);
+    say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
+    show_now.n = 0;
+}
+
+void pm_game_show_stop(void)
+{
+    if (can & PM_CAN_GAME_SHOWS) show_kill("asked");
+}
+
+/* every tick: no show of ours plays longer than its show_secs (SHOW_MAX_MS at most) */
+static void shows_tick(void)
+{
+    if (!show_now.n) return;
+    if (!proc_alive((unsigned)pm_port_value("show_proc", 0))) {
+        show_now.n = 0;
+        return;
+    }
+    if (pm_ms() - show_now.started > show_now.limit)
+        show_kill(show_now.limit < SHOW_MAX_MS ? "its time is up" : "its 20 s are up");
+}
+
+int pm_game_show(int n)
+{
+    char key[24];
+    const char *name;
+    unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    if (!(can & PM_CAN_GAME_SHOWS)) return 0;
+    pm_snprintf(key, sizeof key, "show_%d", n);
+    if (n < 1 || n >= SHOWS_MAX || !site(key)) {
+        say("show %d: not one of the game's shows the port names (1-%d)", n, shows_n);
+        return 0;
+    }
+    pm_snprintf(key, sizeof key, "show_name_%d", n);
+    name = pm_port_text(key);
+    pm_snprintf(key, sizeof key, "show_%d", n);
+    if (!(pm_running() || (current && current == show_ended_by && pm_ms() - show_ended_ms < 2000ul)) ||
+        !pm_in_game()) {
+        say("show %d: not played - only the running mode (or one in the first 2 s of its ending), in a game, "
+            "plays one", n);
+        return 0;
+    }
+    if (ball_end_at && pm_ms() - ball_end_at < 3000ul) {
+        say("show %d: not played - the ball is ending, and the game stops every show of its own with it", n);
+        return 0;
+    }
+    if (proc_alive(id)) show_kill("another show begins");
+    if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
+            id, (void (*)(void))(unsigned long)fn(key), 0)) {
+        say("show %d: not played - the game would not start its process %u", n, id);
+        return 0;
+    }
+    show_now.n = n;
+    show_now.started = pm_ms();
+    pm_snprintf(key, sizeof key, "show_secs_%d", n);
+    show_now.limit = pm_port_value(key, 0) > 0 ? (unsigned long)pm_port_value(key, 0) * 1000ul + 500ul : SHOW_MAX_MS;
+    if (show_now.limit > SHOW_MAX_MS) show_now.limit = SHOW_MAX_MS;
+    say("show %d (%s): the game's own light show, playing as process %u", n, name ? name : "unnamed", id);
+    return 1;
+}
+
+static void shows_arm(void)
+{
+    static const char *const s[] = { "proc_create", "proc_exists", "event_cancel", 0 };
+    static const char *const v[] = { "show_proc", 0 };
+    char key[24];
+    int n;
+    for (n = 1; n < SHOWS_MAX; n++) {
+        pm_snprintf(key, sizeof key, "show_%d", n);
+        if (!site(key)) break;
+    }
+    shows_n = n - 1;
+    if (!shows_n) return;                               /* a port without show lines: silent */
+    if (!have_sites(s) || !have_values(v)) {
+        say("game shows: off - the port's process lines are incomplete");
+        shows_n = 0;
+        return;
+    }
+    can |= PM_CAN_GAME_SHOWS;
+    say("game shows: %d of the game's own light shows, played as process %ld", shows_n,
+        pm_port_value("show_proc", 0));
+}
+
 static void building_arm(void)
 {
     static const char *const s[] = { "building_move", "building_busy", 0 };
@@ -5772,6 +6048,7 @@ static void on_tick(unsigned *r)
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
     building_tick();                          /* PAD-393: a put-back owed */
+    shows_tick();                             /* PAD-411: no show of ours past its 20 s */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
@@ -5803,6 +6080,7 @@ static void on_ball_end(unsigned *r)
     (void)r;
     note_thread("ball_end", &said);
     stock_ball_ends++;
+    ball_end_at = pm_ms() | 1;                /* PAD-411: no show of the game's starts now */
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
     if (disp_linger_until) disp_release("the ball ended");
@@ -6693,6 +6971,13 @@ static void pad_mode_start(void)
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
     building_arm();                                 /* PAD-393: the Premium's building */
     shake_arm();                                    /* PAD-414: the shaker motor */
+    shows_arm();                                    /* PAD-411: the game's own light shows */
+    if (pm_hit_sounds()) {                          /* PAD-415: the game's own hit sounds */
+        char key[20];
+        pm_snprintf(key, sizeof key, "hit_sound_%d", pm_hit_sounds());
+        say("hit sounds: %d of the game's own, a rising run (requests %ld to %ld)", pm_hit_sounds(),
+            pm_port_value("hit_sound_1", 0), pm_port_value(key, 0));
+    }
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
@@ -6701,14 +6986,15 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
         can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
-        can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_SHAKER ? " shaker" : "");
+        can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
+        can & PM_CAN_SHAKER ? " shaker" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

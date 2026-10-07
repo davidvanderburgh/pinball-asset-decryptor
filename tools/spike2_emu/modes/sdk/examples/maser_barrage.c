@@ -22,9 +22,9 @@
  *   ENDS       When the clock runs out, or the ball drains, or the ball is tilted. It counts
  *              as WON with at least one barrage (for FINAL WARS). The screen shows the total.
  *   INSERTS    The NEXT shot's insert is bright Maser blue; the other two shots of the sequence
- *              are a dim blue, so the whole chain is on the playfield. The next shot is solid
- *              while no window runs (the first step), and BLINKS while the window runs, faster
- *              as it closes. Everything is handed back the moment the mode ends.
+ *              pulse a dim blue, so the whole chain is on the playfield. The next shot blinks
+ *              steadily while no window runs (the first step), and faster while the window runs,
+ *              faster still as it closes. Everything is handed back the moment the mode ends.
  *   DISPLAY    Priority 180 (the game's full-screen shot awards are not shown over it; its
  *              jackpots, starts and the tilt warning come through).
  *   THE GLASS  (hud-layers) The Maser tanks rolling up and firing, full screen, then the night
@@ -40,6 +40,10 @@
  * Emulator test triggers: /dump/maser_barrage.start, .stop, .shot "<shot name>".
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued) */
+#define GAME_SHOW_START "Insert chase"
+#define GAME_SHOW_END   "Colour fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -150,9 +154,9 @@ static void show_lamps(void)
     kit_lamps_begin(&lamps);
     for (i = 0; i < N_STEPS; i++) {
         if (i != run.step) {
-            kit_lamps_shot(&lamps, step_mask[i], KIT_BLUE_DIM, PM_LAMP_SOLID, 0);
+            kit_lamps_shot(&lamps, step_mask[i], KIT_BLUE_DIM, PM_LAMP_PULSE, 1600);   /* not next yet */
         } else if (run.step == 0) {
-            kit_lamps_shot(&lamps, step_mask[i], KIT_BLUE, PM_LAMP_SOLID, 0);     /* no window runs yet */
+            kit_lamps_shot(&lamps, step_mask[i], KIT_BLUE, PM_LAMP_BLINK, KIT_LIT_MS);  /* no window runs yet */
         } else {
             unsigned long used = pm_ms() - run.step_at;
             unsigned long left = used >= run.window_ms ? 0 : run.window_ms - used;
@@ -216,7 +220,7 @@ static int start(const char *why, int counted)
     kit_hud_begin(&hud, "MASER BARRAGE", "");
     show();
     kit_hud_award(&hud, 2500, "MASER BARRAGE", "LEFT RAMP  >  RIGHT RAMP  >  BUILDING");
-    kit_show_start(&show_fx, "maser start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "maser start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %u s, sequence %s > %s > %s, window %lu ms, score %llu", why, p, RUN_SECONDS,
            STEP[0].shot, STEP[1].shot, STEP[2].shot, run.window_ms, (unsigned long long)pm_score(p));
@@ -233,8 +237,10 @@ static void end(const char *why)
     kit_ledger_note(KIT_MASER, run.player, run.barrages > 0);
     sound(CUE_END);
     pa_clip_full(&own, run.barrages ? "won" : "lost");          /* the ending, full screen */
-    kit_show_start(&show_fx, run.barrages ? "maser won" : "maser lost", run.barrages ? SHOW_WON : SHOW_LOST,
-                   run.barrages ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, run.barrages ? "maser won" : "maser lost", run.barrages ? SHOW_WON : SHOW_LOST,
+                       run.barrages ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    }
     pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
     pm_snprintf(b, sizeof b, "%u BARRAGE%s  -  BEST X%u", run.barrages, run.barrages == 1 ? "" : "S", run.best_mult);
     kit_hud_title(&hud, "MASER BARRAGE TOTAL", b);
@@ -321,16 +327,18 @@ static void on_event(unsigned id)
     }
 }
 
+static char uncounted;                             /* PAD-399: "not counted" said this ball */
+
 static void qualify_shot(uint64_t shot, unsigned p)
 {
     char line[KIT_WORDS];
     if (!alt_mask || !(shot & alt_mask) || !kit_fresh(&db, alt_mask)) return;
     if (ran_ball[p]) {
-        pm_log("%s: not counted - it already ran this ball", ALT_START_SHOT);
+        if (!uncounted) pm_log("%s: not counted - it already ran this ball", ALT_START_SHOT);
+        uncounted = 1;
         return;
     }
-    if (hits[p] < HITS_TO_START) hits[p]++;
-    pm_log("%s %u of %d (player %u)", ALT_START_SHOT, hits[p], HITS_TO_START, p);
+    if (hits[p] < HITS_TO_START) hits[p]++, pm_log("%s %u of %d (player %u)", ALT_START_SHOT, hits[p], HITS_TO_START, p);
     if (hits[p] >= HITS_TO_START) {
         start("Maser target", 1);
     } else if (!kit_running) {
@@ -371,6 +379,7 @@ static void on_tick(void)
     if (++poll % KIT_POLL == 0) check_triggers();
     if (kit_new_game(&game)) {
         for (p = 0; p < 5; p++) hits[p] = ran_ball[p] = 0;
+        uncounted = 0;
         pm_log("new game: counts cleared");
     }
     if (!run.on) return;
@@ -406,6 +415,7 @@ static void on_ball_end(void)
     end("ball ended");
     kit_end_now();
     for (p = 0; p < 5; p++) hits[p] = ran_ball[p] = 0;
+    uncounted = 0;
 }
 
 static const struct pm_mode maser_barrage = {

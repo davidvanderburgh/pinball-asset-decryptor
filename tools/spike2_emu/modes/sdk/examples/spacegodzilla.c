@@ -32,8 +32,8 @@
  *                  panel; TOWERS, JACKPOT and SUPER at the edges, the towers' strength on the right edge's
  *                  gauge, the super's window in the badge. A jackpot plays a tower cracking, a fallen tower
  *                  its collapse; the super and the endings are full screen.
- *   INSERTS        A lit lock: the BIG LOOP blinking purple. The towers purple (solid while strong, blinking on
- *                  their last jackpot); the super: the BIG LOOP flashing white; M.O.G.U.E.R.A.'s shields
+ *   INSERTS        A lit lock: the BIG LOOP blinking purple. The towers flashing purple (fast on their last
+ *                  jackpot); the super: the BIG LOOP flashing white; M.O.G.U.E.R.A.'s shields
  *                  pulsing cyan.
  *   DISPLAY        Priority 190 (a multiball of ours).
  *
@@ -41,6 +41,10 @@
  * .lock (plant a crystal), .shot "<shot name>".
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): a multiball: the long storm; the crystals fade blue */
+#define GAME_SHOW_START "Strobe storm"
+#define GAME_SHOW_END   "Blue fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -190,7 +194,7 @@ static void show_lamps(void)
     unsigned i;
     kit_lamps_begin(&lamps);
     for (i = 0; i < N_TOWERS; i++)
-        if (run.hp[i]) kit_lamps_shot(&lamps, tower_mask[i], SG_PURPLE, run.hp[i] == 1 ? PM_LAMP_BLINK : PM_LAMP_SOLID, 300);
+        if (run.hp[i]) kit_lamps_shot(&lamps, tower_mask[i], SG_PURPLE, PM_LAMP_BLINK, run.hp[i] == 1 ? 200 : KIT_LIT_MS);
     if (run.super_lit)
         kit_lamps_shot(&lamps, lock_mask, KIT_WHITE, PM_LAMP_BLINK,
                        kit_hurry_ms((unsigned long)kit_timer_seconds(&run.clock) * 1000u, SUPER_SECONDS * 1000u));
@@ -263,7 +267,7 @@ static int start(const char *why)
     kit_hud_begin(&hud, "SPACEGODZILLA", "");
     show();
     kit_hud_award(&hud, 3000, KIND[run.kind].name, "MULTIBALL");
-    kit_show_start(&show_fx, "spacegodzilla start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "spacegodzilla start", SHOW_START, N_SHOW(SHOW_START));
     sound(CUE_START);
     pm_log("START (%s): player %u, %s, %d balls, towers %u jackpots each, jackpots from %llu, score %llu", why, p,
            KIND[run.kind].name, BALLS, run.hp[0], (unsigned long long)run.base, (unsigned long long)pm_score(p));
@@ -282,7 +286,9 @@ static void end(const char *why)
         pm_callout(pm_callout_id("time_up"));          /* its own ending call, else the game's time-up */
     sound(CUE_END);
     pa_clip_full(&own, run.supers ? "won" : "lost");
-    kit_show_start(&show_fx, "spacegodzilla end", SHOW_END, N_SHOW(SHOW_END));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, "spacegodzilla end", SHOW_END, N_SHOW(SHOW_END));
+    }
     pm_snprintf(b, sizeof b, "%u JACKPOT%s  -  %u SUPER%s", run.jackpots, run.jackpots == 1 ? "" : "S", run.supers,
                 run.supers == 1 ? "" : "S");
     kit_hud_title(&hud, run.supers ? "SPACEGODZILLA FALLS" : "SPACEGODZILLA ESCAPES", b);

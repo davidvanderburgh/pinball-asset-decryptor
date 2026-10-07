@@ -49,8 +49,10 @@ def _lift(src, signature):
 
 
 def _section(src):
+    """The scoop's own section: to the next section's header (PAD-411's light shows, which start processes of the
+    runtime's, came to sit between it and the stock rules)."""
     a = src.index("/* ---- the scoop: a ball held there for the mode")
-    return src[a:src.index("/* ---- the game's own rules: a shot that COUNTS AS", a)]
+    return src[a:src.index("\n/* ---- ", a + 1)]
 
 
 # ---- the runtime ---------------------------------------------------------------------------

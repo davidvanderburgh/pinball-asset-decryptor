@@ -52,6 +52,10 @@
  * .light (light it for the player up, as if qualified).
  */
 #include "intricate_kit.h"
+
+/* PAD-411: the game's own light shows at its start (flashy) and its end (subdued): the wizard mode: the long storm */
+#define GAME_SHOW_START "Strobe storm"
+#define GAME_SHOW_END   "Red and blue fade"
 #include "pad_mode_assets.h"
 
 /* ---- the knobs ------------------------------------------------------------------------------ */
@@ -322,7 +326,7 @@ static int start(const char *why)
     lit_note_at = 0;
     for (k = 0; k < KIT_LEDGER_MODES; k++) kit_ledger.played[p][k] = kit_ledger.won[p][k] = 0;
     kit_hud_begin(&hud, "GODZILLA: FINAL WARS", "");
-    kit_show_start(&show_fx, "final wars start", SHOW_START, N_SHOW(SHOW_START));
+    if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "final wars start", SHOW_START, N_SHOW(SHOW_START));
     pm_shake_game("multiball_start");           /* PAD-414: a big start - the game's own multiball start shake */
     sound(CUE_START);
     pm_log("START (%s): player %u, score %llu - the qualification is used up", why, p, (unsigned long long)pm_score(p));
@@ -340,8 +344,10 @@ static void end(const char *why, int won)
     kit_end_after(TOTAL_SHOWN_MS);      /* the ending clip and the total keep the screen */
     sound(CUE_END);
     pa_clip_full(&own, won ? "won" : "lost");      /* the ending, full screen */
-    kit_show_start(&show_fx, won ? "final wars won" : "final wars lost", won ? SHOW_WON : SHOW_LOST,
-                   won ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    if (!kit_game_show(GAME_SHOW_END, "its end")) {
+        kit_show_start(&show_fx, won ? "final wars won" : "final wars lost", won ? SHOW_WON : SHOW_LOST,
+                       won ? N_SHOW(SHOW_WON) : N_SHOW(SHOW_LOST));
+    }
     pm_snprintf(a, sizeof a, "%s", kit_num(n, sizeof n, run.total));
     kit_hud_title(&hud, won ? "GODZILLA WINS" : "THE XILIENS WIN", " ");
     kit_hud_counter(&hud, 0, 0, 0, 0);

@@ -94,6 +94,7 @@ const TIP = {
   letGo: "Lets go of a held mechanism now, or stops holding balls in the scoop (a ball held there goes).",
   shake: "Shakes the cabinet's shaker motor for this long, through the game's own shake: the operator's Shaker Motor setting still applies (switched off, or no shaker fitted: nothing). Hard and strong shakes last up to 1 second, medium and soft up to 5 - the game's own longest. One at a time, never over one of the game's own, 20 shakes and 15 seconds of shaking a minute at most; the mode, the ball or the game ending stops it, except a shake in When the mode ends, which runs out.",
   shakeGame: "Plays one of the game's own shakes, as the game does: its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble, or its multiball start (five shakes over 4 seconds). The same limits as Shake the cabinet.",
+  gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds; a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
   shield: "Turns the platform the shield targets sit on (about a second) and keeps it there while the mode runs: the game's ball search swings it, and it is turned back after. Where they are: stop keeping them. Only while the mode runs, never while one of the game's own modes runs, 1.5 s between moves, 12 a minute at most; the mode ending, the ball draining or a tilt turns them back where they were. They stay turned only while the game's modes cannot start and its own shield feature does not keep counting.",
 };
 
@@ -133,7 +134,8 @@ function stmtTemplates(ch, vars, prog = {}) {
     ["Control", [{ op: "if", cond: null, then: [], else: null }, { op: "if", cond: null, then: [], else: [] }]],
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
       { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" },
-      { op: "show", show: "burst" }, { op: "log", text: "" }]],
+      { op: "show", show: "burst" }, { op: "game_show", name: (ch.game_shows || []).find((x) => x.kind === "flashy")?.name || ((ch.game_shows || [])[0] || {}).name || "" },
+      { op: "log", text: "" }]],
     ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null }]],
     ["HUD", [{ op: "hud_text", which: "line", text: "SHOOT THE LIT SHOT", value: null },
       { op: "hud_counter", counter: 1, value: num(0), sub: null }, { op: "hud_gauge", value: num(1) },
@@ -156,7 +158,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", stock: "a game mode of its own runs" };
 const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", score: "score",
-  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", log: "show",
+  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech",
   shake: "mech", shake_game: "mech" };
@@ -347,6 +349,14 @@ function StmtBody({ b, path, ed }) {
     case "let_go": return html`<span class="bk-w" ...${tip(TIP.letGo)}>Let go of</span><${Pick} value=${b.what}
         options=${[["*", "everything it holds"], ...(ed.ch.mechs || []).map((m) => [m.name, "the " + m.label]), ["scoop", "the scoop"]]}
         missing="(not on this game)" onChange=${(v) => set("what", v)} />`;
+    case "game_show": {
+      // PAD-418: by the port's name, grouped by its kind for it
+      const groups = { flashy: "Flashy (a start)", subdued: "Subdued (an end)", accent: "Accent (a moment)" };
+      const opts = Object.keys(groups).flatMap((k) => (ed.ch.game_shows || []).filter((x) => x.kind === k)
+        .map((x) => ({ value: x.name, label: `${x.name} (${x.secs} s)`, group: groups[k] })));
+      return html`<span class="bk-w" ...${tip(TIP.gameShow)}>Play the game's light show</span><${Pick} value=${b.name}
+        options=${opts} missing="(not on this game)" width=${200} onChange=${(v) => set("name", v)} />`;
+    }
     case "shield": return html`<span class="bk-w" ...${tip(TIP.shield)}>Turn the shield targets</span><${Pick} value=${b.where || "toward"} options=${SHIELD_WHERE} onChange=${(v) => set("where", v)} />`;
     case "shake": return html`<span class="bk-w" ...${tip(TIP.shake)}>Shake the cabinet:</span><${Pick} value=${b.strength || "hard"} options=${SHAKE_STRENGTH} onChange=${(v) => set("strength", v)} />
       <span class="bk-w">shake for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
@@ -484,7 +494,7 @@ function hatLabel(h) {
 function stmtLabel(b) {
   return { start_mode: "Start the mode", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
-    words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", log: "Write in the log",
+    words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
@@ -500,6 +510,7 @@ function whyOff(t, ch) {
   if (t.op === "let_go") return ch.mechs_off && ch.scoop_off ? ch.mechs_off : "";
   if (t.op === "shield") return ch.shield_off || "";
   if (t.op === "shake" || t.op === "shake_game") return ch.shaker_off || "";   // PAD-414
+  if (t.op === "game_show") return ch.game_shows_off || "";   // PAD-418
   return "";
 }
 

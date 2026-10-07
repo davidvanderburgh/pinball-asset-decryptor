@@ -77,7 +77,10 @@ static KIT_UNUSED const char *kit_short(char *buf, unsigned cap, uint64_t v)
 #define KIT_DB_SLOTS 24
 struct kit_db { uint64_t bit[KIT_DB_SLOTS]; unsigned long at[KIT_DB_SLOTS]; unsigned next; };
 
-/* 1 if this shot (one bit, or a mask treated as one shot) counts now; it is then remembered */
+static KIT_UNUSED void kit_hit(uint64_t shot);    /* the lights section, below */
+
+/* 1 if this shot (one bit, or a mask treated as one shot) counts now; it is then remembered. A hit that counts
+ * while this mode runs also answers at once (kit_hit, PAD-415): every scoring shot of the pack passes here. */
 static KIT_UNUSED int kit_fresh(struct kit_db *db, uint64_t bit)
 {
     unsigned long now = pm_ms();
@@ -91,12 +94,29 @@ static KIT_UNUSED int kit_fresh(struct kit_db *db, uint64_t bit)
                 return 0;
             }
             db->at[i] = now;
+            if (pm_running()) kit_hit(bit);
             return 1;
         }
     i = db->next++ % KIT_DB_SLOTS;
     db->bit[i] = bit;
     db->at[i] = now;
+    if (pm_running()) kit_hit(bit);
     return 1;
+}
+
+/* PAD-413: an ENDING gives way to another of our modes. A mode's words still up after it ended (its TOTAL for
+ * TOTAL_SHOWN_MS, a qualification note) are dropped the tick after another mode of ours begins, whatever kind it
+ * is - a pack mode's HUD would take the place anyway, a mode file's or a blocks mode's screen would not (David's
+ * Premium, 2026-10-06: "on kiryu it was overlapping text at one point", BIOLLANTE beginning 4.8 s into KIRYU's 10 s
+ * ending). `up`: the words are on the glass; `*begun`: pm_begun() as last seen while they were down or the mode
+ * ran. 1 = drop them now. Its full-screen ending clip the runtime stops itself (pm_begin). */
+static KIT_UNUSED int kit_gives_way(int up, unsigned *begun)
+{
+    if (!up || pm_running()) {
+        *begun = pm_begun();
+        return 0;
+    }
+    return pm_begun() != *begun;
 }
 
 /* ---- the mode's own screen -----------------------------------------------------------------
@@ -114,6 +134,7 @@ struct kit_screen {
     unsigned long flash_until, hide_at;    /* pm_ms() */
     char written[KIT_WORDS];               /* what the text node holds now */
     unsigned long seen;                    /* pm_ms() of the last tick (item 157: covered time) */
+    unsigned begun;                        /* PAD-413: pm_begun() when its mode last ran, or it was last down */
 };
 
 static KIT_UNUSED void kit_screen_write(struct kit_screen *s, const char *words)
@@ -211,6 +232,12 @@ static KIT_UNUSED void kit_screen_tick(struct kit_screen *s)
     }
     s->seen = now;
     kit_screen_find(s);
+    if (kit_gives_way(s->up, &s->begun)) {
+        pm_log("screen %s: another mode began - its words give way", s->node_name);
+        s->flash[0] = 0;
+        kit_screen_show(s, 0);
+        return;
+    }
     if (s->hide_at && now >= s->hide_at) {
         s->flash[0] = 0;
         kit_screen_show(s, 0);
@@ -321,13 +348,17 @@ static KIT_UNUSED void kit_lights_off(struct kit_lights *l)
  * runs (1 to 145), so a lit shot of ours is never hidden by a show of the game's, and below 255,
  * where a mode file's inserts sit by default.
  *
- * How the pack speaks with lights (so the five read as one game):
- *   solid      lit and worth shooting, no clock on it
- *   blink      lit with a clock: the faster, the less time is left (kit_hurry_ms)
- *   pulse      optional: adds time, or a head that is growing back
- *   dim solid  part of the sequence, not next yet (MASER BARRAGE) */
+ * How the pack speaks with lights - the game's own language, so a lit shot never looks broken (PAD-415, David after
+ * a machine test: "the inserts that are lit for shots should pretty much always be flashing - when they're solid,
+ * they look broken"):
+ *   blink KIT_LIT_MS  lit and worth shooting, no clock on it (slower for one far off, faster as it gets close)
+ *   blink faster      lit with a clock: the faster, the less time is left (kit_hurry_ms)
+ *   pulse             optional: adds time, a head growing back; dim, a step of a sequence not next yet
+ *   solid             done (a spike charged): never a shot still to make
+ * And a hit answers: the hit shot's inserts strobe white for a moment over all of this (kit_hit). */
 #define KIT_LAMP_PRIORITY 200
 #define KIT_LAMP_GROUPS   8
+#define KIT_LIT_MS        500      /* a lit shot's blink with no clock on it */
 #define KIT_GOLD          PM_RGB(255, 170, 0)
 #define KIT_ORANGE        PM_RGB(255, 80, 0)
 #define KIT_GREEN         PM_RGB(0, 255, 60)
@@ -472,6 +503,24 @@ static KIT_UNUSED void kit_lamps_off(struct kit_lamps *l)
     pm_log("lights: all handed back to the game");
 }
 
+/* ---- a hit answers (PAD-415) ----------------------------------------------------------------------
+ * While one of ours runs the game's rules see no shots, so the game plays none of its own sounds or insert flashes
+ * for them: a hit has to answer from here. Every hit that counts (kit_fresh) strobes the shot's inserts white for
+ * KIT_HIT_FLASH_MS over whatever the mode lights them in (pm_lamp_flash), and plays one of the game's own hit
+ * sounds, a step higher each hit (pm_hit_sound: on Godzilla its eight pitched orchestra hits, so a run of hits
+ * climbs, and starts low again after the eighth). kit_hit_reset() starts the climb again (kit_begin does).
+ * Nothing plays on a port without them. */
+#define KIT_HIT_FLASH_MS 480
+static unsigned kit_hits;
+static KIT_UNUSED void kit_hit_reset(void) { kit_hits = 0; }
+static KIT_UNUSED void kit_hit(uint64_t shot)
+{
+    int n = pm_hit_sounds();
+    if (pm_can(PM_CAN_LAMPS)) pm_lamp_flash(shot, KIT_WHITE, KIT_HIT_FLASH_MS);
+    if (n) pm_hit_sound((int)(kit_hits % (unsigned)n) + 1);
+    kit_hits++;
+}
+
 /* A blink's period for a clock: slow with most of the time left, faster as it runs down, a flicker
  * in the last three seconds. Four steps only, so the inserts change a handful of times a mode. */
 static KIT_UNUSED unsigned kit_hurry_ms(unsigned long left_ms, unsigned long total_ms)
@@ -605,6 +654,7 @@ static KIT_UNUSED int kit_begin(const char *name)
     }
     kit_running = name;
     kit_asked = 0;
+    kit_hit_reset();                       /* PAD-415: its hits climb from the bottom */
     return 1;
 }
 
@@ -660,6 +710,16 @@ static KIT_UNUSED void kit_end_after(unsigned long ms)
 
 static KIT_UNUSED void kit_hud_drop_now(void);    /* the HUD section, below */
 
+/* PAD-411: one of the GAME's own light shows, by the port's name for it ("Strobe burst"), in the place of a kit
+ * show: its start's and its end's (David, 2026-10-06: "mode start should be flashy and mode end should be more
+ * subdued"). 1 = the game's plays; 0 = not on this game (a Pro, another title): the caller plays its own. */
+static KIT_UNUSED int kit_game_show(const char *name, const char *why)
+{
+    if (!name || !pm_game_show_named(name)) return 0;
+    pm_log("light show: the game's %s (%s)", name, why);
+    return 1;
+}
+
 static KIT_UNUSED void kit_end_now(void)
 {
     pm_display_priority(0);                /* an ending's hold, given up at once */
@@ -703,16 +763,27 @@ static KIT_UNUSED int kit_game_busy(const char *who, const char **what)
     return 1;
 }
 
-/* 1 = wait: logged at most every 10 s (a spinner asks on every spin); `then` says what starts it after */
+/* PAD-399: 1 = `key` differs from what `last` (cap bytes) held, now remembered: say it. A line a shot can repeat
+ * (a spinner asks on every spin) is said once until its reason changes; "" in `last` forgets. */
+static KIT_UNUSED int kit_once(char *last, unsigned long cap, const char *key)
+{
+    if (kit_same(last, key)) return 0;
+    pm_snprintf(last, cap, "%s", key);
+    return 1;
+}
+
+/* 1 = wait: said once until the reason changes (PAD-399: a machine run's mode.log carried 107 of these, a
+ * spinner asking on every spin); `then` says what starts it after. The game's mode ending forgets it. */
 static KIT_UNUSED int kit_wait_game(const char *who, const char *why, const char *then)
 {
-    static unsigned long said_at;
+    static char said[64];                                     /* the reason said: what is running */
     const char *what = 0;
-    if (!kit_game_busy(who, &what)) return 0;
+    if (!kit_game_busy(who, &what)) {
+        said[0] = 0;
+        return 0;
+    }
     if (!what || !what[0]) what = "one of the game's modes";
-    if (!said_at || pm_ms() - said_at >= 10000)
-        pm_log("not started (%s): %s is running - still ready, %s", why, what, then);
-    said_at = pm_ms() ? pm_ms() : 1;
+    if (kit_once(said, sizeof said, what)) pm_log("not started (%s): %s is running - still ready, %s", why, what, then);
     return 1;
 }
 
@@ -839,7 +910,7 @@ static KIT_UNUSED int kit_isolate_list(int give_way, const unsigned char *ids, i
  * Sprite may be shown or hidden (a Text's visibility slot is another virtual), so every piece that comes
  * and goes (the badge, the gauge, each pip's lit and dark picture) is its own Sprite group. A mode that
  * finds no HUD (another title, an older card) runs the same with nothing on the glass. */
-#define KIT_HUD_PIPS   12
+#define KIT_HUD_PIPS   40             /* a bar gauge's slices (PAD-416); a pip gauge has up to 12 */
 #define KIT_HUD_WORDS  48
 
 struct kit_hud {
@@ -861,6 +932,7 @@ struct kit_hud {
     int metering;                          /* PAD-379: up only for a meter (kit_hud_meter) */
     int off;                               /* PAD-353: its words wait for a display of the game's */
     unsigned long checked_at;              /* PAD-390: the last look at the scene's HUD group */
+    unsigned begun;                        /* PAD-413: pm_begun() when its mode last ran, or it was last down */
 };
 
 /* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
@@ -1140,6 +1212,11 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     const char *title, *line, *award, *awardsub;
     kit_hud_find(h);
     kit_hud_recheck(h);
+    if (kit_gives_way(h->up && !h->metering, &h->begun)) {   /* a meter waits its turn by itself */
+        pm_log("hud %s: another mode began - its %s gives way", h->slug, h->noting ? "note" : "ending");
+        kit_hud_show(h, 0);
+        return;
+    }
     if (h->hide_at && pm_ms() >= h->hide_at) {
         kit_hud_show(h, 0);
         return;

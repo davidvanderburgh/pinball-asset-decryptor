@@ -47,6 +47,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Hold a ball in the scoop | Godzilla 1.16: up to 10 s, then the game kicks it out as usual |
 | Hold the Mechagodzilla magnet or the bridge | Godzilla Premium/LE 1.16: up to 5 s, as it starts or on a shot |
 | Turn the shield targets toward the player | Godzilla Premium/LE 1.16: while the mode runs, then back where they were. Only while the game's modes can't start. Tested in the emulator so far |
+| Play one of the game's own light shows as it starts or ends | Godzilla Premium/LE 1.16: ten shows by name (flashy, subdued, accent), a few seconds each; none as the ball drains |
 | Move the building | Not yet |
 | Shake the cabinet | Godzilla Premium/LE 1.16 with a shaker fitted: as the mode starts, on a shot or as it ends - a shake of its own (up to 1 s hard, 5 s soft) or one of the game's (its jackpot shake, its multiball start). Tested in the emulator so far |
 | Fire a flipper, slingshot, pop bumper, kickback, lock, the trough or any other coil | No |

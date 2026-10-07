@@ -703,16 +703,27 @@ static KIT_UNUSED int kit_game_busy(const char *who, const char **what)
     return 1;
 }
 
-/* 1 = wait: logged at most every 10 s (a spinner asks on every spin); `then` says what starts it after */
+/* PAD-399: 1 = `key` differs from what `last` (cap bytes) held, now remembered: say it. A line a shot can repeat
+ * (a spinner asks on every spin) is said once until its reason changes; "" in `last` forgets. */
+static KIT_UNUSED int kit_once(char *last, unsigned long cap, const char *key)
+{
+    if (kit_same(last, key)) return 0;
+    pm_snprintf(last, cap, "%s", key);
+    return 1;
+}
+
+/* 1 = wait: said once until the reason changes (PAD-399: a machine run's mode.log carried 107 of these, a
+ * spinner asking on every spin); `then` says what starts it after. The game's mode ending forgets it. */
 static KIT_UNUSED int kit_wait_game(const char *who, const char *why, const char *then)
 {
-    static unsigned long said_at;
+    static char said[64];                                     /* the reason said: what is running */
     const char *what = 0;
-    if (!kit_game_busy(who, &what)) return 0;
+    if (!kit_game_busy(who, &what)) {
+        said[0] = 0;
+        return 0;
+    }
     if (!what || !what[0]) what = "one of the game's modes";
-    if (!said_at || pm_ms() - said_at >= 10000)
-        pm_log("not started (%s): %s is running - still ready, %s", why, what, then);
-    said_at = pm_ms() ? pm_ms() : 1;
+    if (kit_once(said, sizeof said, what)) pm_log("not started (%s): %s is running - still ready, %s", why, what, then);
     return 1;
 }
 

@@ -472,7 +472,7 @@ class EmulateTab(TabService):
         def run():
             from ...core.extract_source import card_relation
             try:
-                rel = card_relation(card, assets)
+                rel = card_relation(card, assets, measure=True)
             except Exception:                            # noqa: BLE001
                 rel = None
             self._post(self._which_apply, token, rel)

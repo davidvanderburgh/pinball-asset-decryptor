@@ -355,7 +355,8 @@ def project_details(folder, manufacturers=(), current=None):
     """
     from ..core import extract_source, project_file
     out = {"is_project": False, "archived": False, "baseline": False,
-           "source_name": "", "extracted": "", "game": "", "stock": None}
+           "source_name": "", "extracted": "", "game": "", "stock": None,
+           "revisions": None}
     anchor = None
     try:
         out["is_project"] = bool(project_file.has_anchor(folder))
@@ -395,7 +396,21 @@ def project_details(folder, manufacturers=(), current=None):
             out["stock"] = check(folder)
         except Exception:                               # noqa: BLE001
             out["stock"] = None
+    # Which revision of which official card this project has built, from
+    # the history it carries with it (PAD-427).
+    try:
+        line, history = extract_source_lineage(folder)
+    except Exception:                                   # noqa: BLE001
+        line, history = "", []
+    if line:
+        out["revisions"] = {"text": line, "history": history}
     return out
+
+
+def extract_source_lineage(folder):
+    """``(line, history)`` for the project's revision row."""
+    from ..core import lineage
+    return lineage.describe(lineage.read_lineage(folder))
 
 
 _GAME_CACHE = {}

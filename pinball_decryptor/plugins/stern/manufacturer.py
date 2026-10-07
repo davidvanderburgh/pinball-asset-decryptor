@@ -50,6 +50,19 @@ from .pipeline import (Spike1ExtractPipeline, Spike1RevertPipeline,
 _WHITESTAR_DB = {k: v for k, v in _PMC_GAME_DB.items()
                  if v["manufacturer"] == "Stern"}
 
+
+def _spike2_print(path):
+    """A Spike 2 card's fingerprint for project lineage (PAD-427); ``None``
+    for anything else."""
+    if path.lower().endswith(".zip") or detect_spike1_game(path) is not None:
+        return None
+    from .stock_prints import card_print
+    return card_print(path)
+
+
+from ...core import lineage as _lineage  # noqa: E402
+_lineage.register_printer(_spike2_print)
+
 _SPIKE2_GAMES = tuple(
     Game(key=k, display=info["display"], manufacturer_key="stern",
          era="spike2")
@@ -742,7 +755,15 @@ class SternManufacturer(Manufacturer):
         if path.lower().endswith(".zip") or detect_spike1_game(path)                 is not None:
             return None
         from .stock_prints import check_card
-        return check_card(path, deep=deep)
+        got = check_card(path, deep=deep)
+        if got.get("print"):
+            # the walk took the card's fingerprint too: projects find their
+            # cards by it (PAD-427)
+            _lineage.remember_print(path, {
+                "print": got["print"], "sidx": got["sidx"],
+                "label": got["label"],
+                "official": got["status"] == "official"})
+        return got
 
     def project_stock(self, assets_dir):
         """``{"status", "label", "text"}``: was the project at *assets_dir*

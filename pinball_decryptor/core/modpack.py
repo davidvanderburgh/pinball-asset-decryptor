@@ -11,6 +11,7 @@ import zipfile
 from . import hashcache
 from . import staged_originals
 from .checksums import CHECKSUMS_FILE, TRACKING_SIDECARS, read_baseline_any
+from . import lineage as lineage_mod
 from .extract_source import read_extract_source, version_hint_from_name
 
 # Manifest written into every pack, naming the extract it was built from so
@@ -351,6 +352,11 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         "extras": extras,
         "card_files": carried_card + named_card,
     }
+    # The project's revision history travels with its mods (PAD-427): which
+    # official card it is of, what it was extracted from, every revision.
+    lin = lineage_mod.read_lineage(assets_folder)
+    if lin:
+        manifest["lineage"] = lin
 
     if log_cb:
         n_set = len(extras.get("settings") or {})
@@ -462,7 +468,10 @@ def inspect_mod_pack(zip_path, assets_folder):
 
     pack_card = (manifest or {}).get("source_name") or ""
     here_card = (read_extract_source(assets_folder) or {}).get("input_name") or ""
+    pack_lin = (manifest or {}).get("lineage")
     return {
+        "pack_lineage": pack_lin if isinstance(pack_lin, dict) else None,
+        "here_lineage": lineage_mod.read_lineage(assets_folder),
         "names": names,
         "manifest": manifest,
         "applicable": applicable,
@@ -483,15 +492,32 @@ def mismatch_lines(plan):
     hint = (plan.get("manifest") or {}).get("version_hint") or ""
     here_hint = version_hint_from_name(here_card)
     made_from = hint or pack_card
-    if made_from:
+    same = _same_card(plan.get("pack_lineage"), plan.get("here_lineage"))
+    if same is not None:
+        # Both carry their history (PAD-427): the cards are compared by what
+        # they hold, not by file names that differ from one computer to the
+        # next.
+        pl = plan["pack_lineage"]
+        last = lineage_mod.latest(pl)
+        out.append(("info", "This pack was made from %s%s." % (
+            lineage_mod.base_words(pl),
+            " (its project's rev %d)" % last["rev"] if last else "")))
+        if not same:
+            out.append(("warning",
+                        "This pack was made from %s, and this extract is %s. "
+                        "Use \"Transfer Mods to New Version\" on the Mod Pack "
+                        "tab to carry mods between two different cards."
+                        % (lineage_mod.base_words(pl),
+                           lineage_mod.base_words(plan["here_lineage"]))))
+    elif made_from:
         out.append(("info", "This pack was made from %s." % made_from))
-    if here_hint and hint and here_hint != hint:
+    if same is None and here_hint and hint and here_hint != hint:
         out.append(("warning",
                     "This extract is %s — the pack was built against %s. "
                     "Importing across versions can produce a card that won't "
                     "boot; use \"Transfer Mods to New Version\" instead."
                     % (here_hint, hint)))
-    elif (pack_card and here_card
+    elif (same is None and pack_card and here_card
             and pack_card.strip().lower() != here_card.strip().lower()):
         # Same firmware version, different card: an LE pack on a Pro extract.
         # The version check can't see this, and it is the one that silently
@@ -521,6 +547,35 @@ def mismatch_lines(plan):
                     "in the pack is being written without that check."
                     % CHECKSUMS_FILE))
     return out
+
+
+def _note_imported(assets_folder, pack_lin, zip_path):
+    """Remember in this project's history which project's revision a pack
+    brought in (PAD-427).  This project's own baseline is unchanged: it is
+    still its own extract."""
+    if not pack_lin:
+        return
+    lin = lineage_mod.read_lineage(assets_folder)
+    if lin is None:
+        return
+    last = lineage_mod.latest(pack_lin)
+    lin.setdefault("imported", []).append({
+        "id": pack_lin.get("id") or "",
+        "from": lineage_mod.base_words(pack_lin),
+        "rev": last["rev"] if last else None,
+        "print": last["print"] if last else "",
+        "pack": os.path.basename(zip_path)})
+    lineage_mod.write_lineage(assets_folder, lin)
+
+
+def _same_card(pack_lin, here_lin):
+    """Were the pack's project and this one extracted from the same card,
+    by fingerprint?  ``None`` when either lacks the record to say."""
+    ps = (pack_lin or {}).get("source") or {}
+    hs = (here_lin or {}).get("source") or {}
+    if not ps.get("print") or not hs.get("print"):
+        return None
+    return ps["print"] == hs["print"]
 
 
 def skipped_rows(plan):
@@ -677,6 +732,7 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
                    "info")
 
     extras = apply_extras(assets_folder, manifest.get("extras"), log_cb=log_cb)
+    _note_imported(assets_folder, plan.get("pack_lineage"), zip_path)
     card_files = manifest.get("card_files") or []
     card_saved = _unpack_card_files(zip_path, assets_folder, card_files,
                                     log_cb=log_cb)

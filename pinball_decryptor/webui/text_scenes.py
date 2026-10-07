@@ -500,7 +500,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             titles = {n.lower().rsplit(".", 1)[0].split("-")[0] for n in names}
             try:
                 from ..core.extract_source import card_relation
-                rel = card_relation(card, assets) or {}
+                rel = card_relation(card, assets, measure=True) or {}
             except Exception:                        # noqa: BLE001
                 rel = {}
             self.ctx.loop.post(self._card_checked, assets, card, games, titles, rel)

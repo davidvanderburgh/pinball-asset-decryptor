@@ -336,7 +336,105 @@ def _unreadable(text, sidx_name=""):
             "sidx": sidx_name, "stale": 0, "deep": False, "text": text}
 
 
-def card_files(reader, manifest, paths, deep=False, cancel=None):
+def _file_nodes(reader):
+    """``{path: inode}`` for every regular file on the partition (one
+    metadata walk; no file bytes are read)."""
+    return {fp.lstrip("/"): nd for fp, _i, nd in
+            reader.iter_regular_files(min_size=0, max_depth=20)}
+
+
+# ---------------------------------------------------------------------------
+# The card's fingerprint (PAD-427: a project finds its cards by this)
+# ---------------------------------------------------------------------------
+
+#: Hex digits of a card fingerprint.
+PRINT_DIGITS = 32
+
+
+def print_of(sidx_name, files):
+    """The fingerprint of a card whose release index is *sidx_name* and
+    whose files are *files* (``{path: (size, md5 or "-")}``).
+
+    Deterministic, and cheap to take from a card: one metadata walk plus its
+    ``.sidx``.  Each file contributes its REAL size (from the inode) and its
+    manifest MD5 only while the manifest's size for it still agrees; a file
+    whose size moved is "-" (changed, bytes not hashed).  PAD rewrites the
+    records of every file it builds (:mod:`.sidx`), so two of PAD's builds
+    that differ in any file have different prints; a card built elsewhere
+    that swapped a file for one of exactly the same size and left Stern's
+    record alone can't be told apart this way (the deep stock check can)."""
+    h = hashlib.sha1((os.path.basename(sidx_name or "").lower() + "\n")
+                     .encode("utf-8"))
+    for p in sorted(files):
+        size, md5 = files[p]
+        h.update(("%s\t%d\t%s\n" % (p, int(size), (md5 or "-")[:FILE_DIGITS]))
+                 .encode("utf-8"))
+    return h.hexdigest()[:PRINT_DIGITS]
+
+
+def release_print(sidx_name, release):
+    """The fingerprint the official card of *release* has (no card needed:
+    the table holds every file's size and MD5)."""
+    return print_of(sidx_name, {p: (int(v[0]), v[1]) for p, v in
+                                (release.get("files") or {}).items()})
+
+
+def _print_files(nodes, manifest, paths):
+    out = {}
+    for p in paths:
+        node = nodes.get(p)
+        if node is None:
+            continue                      # not on the card
+        rec = manifest.get(p)
+        size = node["size"]
+        out[p] = (size, rec[1] if rec is not None and rec[0] == size else "-")
+    return out
+
+
+def card_print(card_path, table=None):
+    """``{"print", "sidx", "label", "official"}`` for the card at
+    *card_path*, or ``None`` when it has no readable Stern manifest.
+
+    One metadata walk of the data partition (no video sniffing, unlike the
+    Image Info probe) plus the ``.sidx``.  ``label`` names the release the
+    card's index claims ("Godzilla LE 1.16", ``""`` when the table has no
+    record of it) and ``official`` is True when the print is that release's
+    own.  Opens the image: call off the UI thread."""
+    from .explorer import CardImage
+    table = load_table() if table is None else table
+    with CardImage(card_path) as card:
+        parts = [pt for pt in card.partitions() if pt.browsable]
+        parts.sort(key=lambda pt: pt.size, reverse=True)
+        for pt in parts:
+            reader = card.reader(pt.index)
+            nodes = _file_nodes(reader)
+            sidx_path = next((p for p in nodes if p.endswith(".sidx")
+                              and p.startswith("spk/index/")), None)
+            if sidx_path is None:
+                continue
+            try:
+                manifest = sidx_mod.manifest_files(
+                    reader.read_file_bytes(nodes[sidx_path]))
+            except Exception:                             # noqa: BLE001
+                manifest = {}
+            if not manifest:
+                return None
+            return _print_answer(sidx_path, nodes, manifest, table)
+    return None
+
+
+def _print_answer(sidx_path, nodes, manifest, table):
+    sidx_name = os.path.basename(sidx_path).lower()
+    release = release_for(sidx_name, table)
+    paths = set(manifest) | set((release or {}).get("files") or {})
+    pr = print_of(sidx_name, _print_files(nodes, manifest, paths))
+    return {"print": pr, "sidx": sidx_name,
+            "label": release_label(release) if release else "",
+            "official": bool(release) and pr == release_print(sidx_name,
+                                                              release)}
+
+
+def card_files(reader, manifest, paths, deep=False, cancel=None, nodes=None):
     """``({path: (size, md5)}, stale)``: what the card really holds at each
     of *paths*, and how many of its own manifest records are out of date.
 
@@ -349,9 +447,8 @@ def card_files(reader, manifest, paths, deep=False, cancel=None):
     bytes of every file whose size still agrees are hashed as well, which
     also catches a same-size replacement (minutes on a spinning disk)."""
     cancel = cancel or (lambda: False)
-    nodes = {}
-    for fp, _i, nd in reader.iter_regular_files(min_size=0, max_depth=20):
-        nodes[fp.lstrip("/")] = nd
+    if nodes is None:
+        nodes = _file_nodes(reader)
     out, stale = {}, 0
     for p in paths:
         node = nodes.get(p)
@@ -407,17 +504,13 @@ def check_walked(reader, found, table=None, deep=False, cancel=None):
                           % sidx_name, sidx_name)
         out["status"] = "unknown"
         return out
+    nodes = _file_nodes(reader)
     files, stale = card_files(reader, manifest,
                               set(manifest) | set(release.get("files") or {}),
-                              deep=deep, cancel=cancel)
-    nodes = {}
+                              deep=deep, cancel=cancel, nodes=nodes)
+    printed = _print_answer(sidx_name, nodes, manifest, table)
 
     def read_radium(rel):
-        if not nodes:
-            for fp, _i, nd in reader.iter_regular_files(min_size=1,
-                                                        max_depth=20):
-                if fp.endswith(_SCENE):
-                    nodes[fp.lstrip("/")] = nd
         return reader.read_file_bytes(nodes[rel])
 
     label = release_label(release)
@@ -433,7 +526,7 @@ def check_walked(reader, found, table=None, deep=False, cancel=None):
                 "(by the card's manifest and file sizes)." % label)
     return {"status": status, "label": label, "diff": diff,
             "sidx": sidx_name, "stale": stale, "deep": bool(deep),
-            "text": text}
+            "text": text, "print": printed["print"]}
 
 
 def _plural(n, word):

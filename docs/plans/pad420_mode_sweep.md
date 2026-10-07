@@ -121,6 +121,19 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   running: item 164's `C:/tmp/pad_generic/t5/stack_probe.c` + `stack_e2e.sh` start a table entry through its vtable
   start slot (`stack.start "<index> <slot>"`); port that probe to this worktree's runtime (build with Ubuntu's
   arm-linux-gnueabihf-gcc), find each title's start slot as item 164 did, and add a table-route stack job.
+- **Run 6: the full yellow list** (`C:/tmp/PAD-420/yellow.py` runs the tab's own `_grey_what_the_title_cannot` on
+  every newest build and lists every reason line; use it to measure progress, not `TitleProfile.cannot` alone).
+  On the new builds screen and clip drag six lines each (screen, clip, show_all, show_order, clip_both, film), so the
+  media proof is next: `media/build_all.py` (detached Windows process) builds every new build's Try it set against
+  its SHIPPED port (`build2.py`: a mode with its own magenta screen, a 4 s title-card clip, its own sounds and
+  music), then `chain10.sh` runs `media/proof_job2.sh` per build on two rigs (it now leaves Check this game before
+  the mode's game). `media_verdict.py` judges the frames (clip: a clip frame >= 50% magenta; screen: a screen frame
+  1-50% magenta, before and after < 0.5%), `scenes_prove.py` flips TITLE_SCENES' proven flags.
+- **Time-up callouts**: 36 newest builds (20 of them older proven ones: Beatles, Deadpool, Elvira, Foo Fighters,
+  Iron Maiden, John Wick, Jurassic Park, Led Zeppelin, Mandalorian, Star Wars, Sword of Rage, TMNT, Uncanny
+  X-Men...) have no `callout time_up`, so the Sound page shows "does not know X's time-up callout". Item 163 found
+  the callouts it has by hearing them; finding the rest means picking the "time is up" voice line out of each
+  title's callouts (the media proof's sound census lists the requests the game makes).
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

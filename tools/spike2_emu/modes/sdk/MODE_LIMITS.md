@@ -176,7 +176,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
-| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all |  |
+| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | all | mini-wizards |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | all |  |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |

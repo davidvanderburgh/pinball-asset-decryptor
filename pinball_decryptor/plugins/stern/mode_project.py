@@ -589,7 +589,13 @@ def _shows_cannot(label, port=None):
 #: pad_mode_runtime.c's wizards_arm needs besides the `text wizard_name_<n>` lines - (sites, data).
 WIZARD_NEEDS = (("wizard_start",), ("wizard_state", "wizard_table", "lamps_dirty"))
 #: The builds where a mode file's ``game_wizard`` line was seen hand the player the game's own mode in the emulator.
-WIZARDS_PROVEN = frozenset()
+WIZARDS_PROVEN = frozenset({
+    # PAD-436 2026-10-07 rig 2, the stock card: From Russia With Love completed through the game's own collect fired
+    # film_frwl and a `game_wizard start Ahoy Mr. Bond` file started the game's Ahoy Mr. Bond (its start, played 0x2, its
+    # running query 1, flags 85 86, its intro on the glass); Goldfinger then `light`ed Goldfinger's Jackpot (selected 2,
+    # lit 0x4) while Ahoy ran
+    "james_bond_le-1.06",
+})
 #: how a mode hands one over: lit for the game's start shot, or started at once
 WIZARD_HOW = ("light", "start")
 #: mode_file.c's wizard name holds this many bytes, the end included

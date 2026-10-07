@@ -327,6 +327,7 @@ static int start(const char *why)
     for (k = 0; k < KIT_LEDGER_MODES; k++) kit_ledger.played[p][k] = kit_ledger.won[p][k] = 0;
     kit_hud_begin(&hud, "GODZILLA: FINAL WARS", "");
     if (!kit_game_show(GAME_SHOW_START, "its start")) kit_show_start(&show_fx, "final wars start", SHOW_START, N_SHOW(SHOW_START));
+    pm_shake_game("multiball_start");           /* PAD-414: a big start - the game's own multiball start shake */
     sound(CUE_START);
     pm_log("START (%s): player %u, score %llu - the qualification is used up", why, p, (unsigned long long)pm_score(p));
     phase(1);
@@ -443,6 +444,7 @@ static void war_shot(uint64_t shot)
         (void)line;
         (void)n;
         sound(CUE_WIZARD);
+        if (pm_shake_game("jackpot")) pm_shake_outlast();   /* PAD-414: the game's jackpot shake, run out past the end */
         end("wizard jackpot", 1);
     }
 }

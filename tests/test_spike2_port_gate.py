@@ -378,7 +378,7 @@ def test_the_beatles_profile():
     # item 164: its screen was seen; with no time-up call known, a mode's own end sound rides a carrier
     # (heard at time-up in the emulator), so nothing is left out
     # item 167: a multiball of the mode's own is greyed until the build is emulator-proven
-    assert cannot == (set() if "beatles-1.29" in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if "beatles-1.29" in MP.BALL_SAVE_PROVEN else {"ball_save"}) | {"magnet", "scoop", "coils", "shield", "shows"}     # PAD-225; PAD-381: no magnet, scoop or held coils in its port; PAD-392: no shield platform; PAD-418: no light shows named
+    assert cannot == (set() if "beatles-1.29" in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if "beatles-1.29" in MP.BALL_SAVE_PROVEN else {"ball_save"}) | {"magnet", "scoop", "coils", "shield", "shaker", "shows"}     # PAD-225; PAD-381: no magnet, scoop or held coils in its port; PAD-392: no shield platform; PAD-418: no light shows named; PAD-414: no shaker
     assert p.light_route == "inserts"
     assert "multiballs" in p.stack_note          # item 164: the framework's balls in play, multiballs only
     for part in cannot:

@@ -1348,6 +1348,21 @@ function TreeSide({ t, play, playFrame }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "back")}>To back<//>
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
+      ${p.kind === "Text" && p.align ? html`<div class="tree-row">
+        <span class="lbl">Across</span>
+        <${Seg} value=${p.align} onChange=${(v) => call("text_scenes.tree_text_align", p.id, v, null)}
+          options=${[["left", "Left"], ["centre", "Centre"], ["right", "Right"]].map(([v, l]) => ({ value: v, label: l,
+            title: `The words sit on the ${v === "centre" ? "middle" : v + " edge"} of the box, here and in the game` }))} />
+      </div>
+      <div class="tree-row">
+        <span class="lbl">Up/down</span>
+        <${Seg} value=${p.valign} onChange=${(v) => call("text_scenes.tree_text_align", p.id, null, v)}
+          options=${[["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]].map(([v, l]) => ({ value: v, label: l,
+            disabled: p.game_layout && v !== p.valign,
+            title: p.game_layout
+              ? "The game always puts this line in the middle of its box, and shrinks it to fit. To move it up or down, move or resize the box"
+              : `The words sit at the ${v} of the box, here and in the game` }))} />
+      </div>` : null}
       ${p.kind === "Text" ? html`<div class="tree-row">
         <${Button} size="xs" disabled=${p.x == null}
           title="Shrink or grow this text's box to go round its words, with a small border. The words stay where they are. Words the game puts in while it plays can be longer than these."

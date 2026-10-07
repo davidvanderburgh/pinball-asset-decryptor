@@ -92,6 +92,10 @@ class TreeEditMixin:
                     self._trees = json.load(f)
             except (OSError, ValueError):
                 self._trees = {}
+            # PAD-433: the lines the game lays out itself (middle, shrunk to fit), as it does
+            from ..plugins.stern import game_text_layout
+            for card, man in self._trees.items():
+                game_text_layout.mark(man, card)
         return self._trees
 
     def _tree_card(self, scene_dir=None):
@@ -907,7 +911,22 @@ class TreeEditMixin:
                 "view_off": nid in self._tree_view_hidden(card),
                 "hid_in": self._tree_hidden_in(man, nid, self._tree_hidden(card)),
                 "view_in": self._tree_hidden_in(man, nid, self._tree_view_hidden(card)),
-                "pic": self._tree_pic_props(nid)}
+                "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n)}
+
+    @staticmethod
+    def _tree_text_align_of(man, n):
+        """A Text node's alignment as ``{"align": name, "valign": name, "game_layout": bool}``
+        (PAD-433; ``game_layout``: the game puts this line in the middle of its box itself,
+        :mod:`game_text_layout`), else {}."""
+        from ..plugins.stern import scene_edit
+        for _s, oid in n["comps"]:
+            o = man["objects"].get(str(oid)) or {}
+            if o.get("kind") == "Text":
+                a, v = int(o.get("align", 1) or 0), int(o.get("valign") or 0)
+                return {"align": scene_edit.ALIGN_NAMES[a] if 0 <= a <= 2 else "centre",
+                        "valign": scene_edit.VALIGN_NAMES[v] if 0 <= v <= 2 else "top",
+                        "game_layout": bool(o.get("game_layout"))}
+        return {}
 
     def _tree_picture(self, nid):
         """``(draw, (w, h))``: the one picture node *nid* itself draws now and the picture's
@@ -1482,6 +1501,34 @@ class TreeEditMixin:
                 and list(d.get("flags") or (0, 0))[:2] == [1, 1]:
             return False
         return self._tree_add({"op": "text_rect", "node": node, "rect": rect, "wrap": True})
+
+    @rpc
+    def tree_text_align(self, node, align=None, valign=None):
+        """Where a line of text's words sit in its box (DragonRR, PAD-433: "left and right,
+        top and bottom and centre"): *align* ``left``/``centre``/``right`` across, *valign*
+        ``top``/``middle``/``bottom`` up and down, ``None`` keeping that one as it is.  The
+        Text's own alignment word and VerticalAlignment, so the machine puts them there too."""
+        from ..plugins.stern import scene_edit
+        card, man = self._tree_card()
+        if card is None or self._tman is None:
+            return False
+        node = int(node)
+        got = scene_edit._man_index(self._tman).get(node)
+        cur = self._tree_text_align_of(self._tman, got[0]) if got else {}
+        if not cur:
+            return False
+        want = {"align": cur["align"] if align is None else str(align).lower(),
+                "valign": cur["valign"] if valign is None else str(valign).lower()}
+        want["align"] = {"center": "centre"}.get(want["align"], want["align"])
+        if cur.get("game_layout") and want["valign"] != cur["valign"]:
+            return False                # the game puts this line in the middle whatever it says
+        want["game_layout"] = cur.get("game_layout")
+        if want["align"] not in scene_edit.ALIGN_NAMES \
+                or want["valign"] not in scene_edit.VALIGN_NAMES or want == cur:
+            return False
+        return self._tree_add({"op": "text_align", "node": node,
+                               "align": scene_edit.ALIGN_NAMES.index(want["align"]),
+                               "valign": scene_edit.VALIGN_NAMES.index(want["valign"])})
 
     def _tree_set_text_pixels(self, node, w, h):
         """W px / H px on a line of text: its box, not its words.  The box keeps the edges

@@ -79,6 +79,14 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   (`tables.sh` clears it); a slot may have no switch table for a title yet (`tables.sh` copies the one read from
   this exact program from another slot); the C-framework titles (Guardians...) cannot hold off their own modes, so a
   test mode under the default `game_modes block` gives way and ends when one begins (`game_modes stack` in the tests).
+- **Results so far.** Ball save: 22 of 30 proven (`bs/rb`); 9 re-run with the fixes (`bs/rb2`; Venom Pro with
+  `NOPF=1`: pressing every switch started the game's own multiball). Lights: 19 of 30 proven (`lights/rb`). Not proven:
+  Avengers LE/Pro 1.10 (2/40 RGB magenta), John Wick LE/Pro 1.02 (3/40), Mandalorian LE 1.45 (10/15), Rush LE/Pro
+  1.19 (17/67), Foo Fighters Pro 1.04 (19/47), King Kong Pro 0.97 (0/9; its light_shots IS proven). The runtime
+  logs every insert held at layer 255 and the port's lamp lines equal what the program says, so look at judge.py's
+  one node offset per build (a board group with another offset?) and at a game layer above ours, before the port.
+  Mandalorian Pro and Munsters Pro booted to Tech Alerts, which the lights job did not take as booted (fixed;
+  `lights/rb2`). Multiball: running (`mb/rb`), the Aerosmith pair passed 3, 4, 3, 2, 1.
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

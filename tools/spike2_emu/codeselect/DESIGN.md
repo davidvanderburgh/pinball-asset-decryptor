@@ -803,8 +803,12 @@ hardware and one header defends the build:
   `/dev/i2c-1` of its own and the SGTL5000 code must never be let near it.
 - **`jjp_glibc.h`**, force-included: the host's glibc 2.39 headers redirect
   `strtol`/`sscanf` to `__isoc23_*` under `_GNU_SOURCE`, which a 2.34 card
-  lacks (`tools/jjp_emu/build.sh` met it first).  And `STBTT_fmod` is a local
-  one-liner because 2.38 gave `fmod` a new symbol version.
+  lacks (`tools/jjp_emu/build.sh` met it first).  It defines `_GNU_SOURCE`
+  itself, before `features.h`: being first, it is where features.h runs, so
+  each file's own define came too late and a glibc older than 2.39 (a Mac's
+  Debian 12 toolbox) hid `memmem` from `colour.c` (PAD-449).  And
+  `STBTT_fmod` is a local one-liner because 2.38 gave `fmod` a new symbol
+  version.
 
 `JJPROOT=<a mounted card image's root>` links against the card's own
 libraries (every symbol version pinned) and lets `test/check_elf_jjp.sh`

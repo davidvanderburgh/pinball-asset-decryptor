@@ -417,6 +417,49 @@ def test_ensurejjpselect_prints_both_lines():
     assert '-o "$tmp"' in mount and 'mv -f "$tmp" "$dest"' in mount
 
 
+# ------------------------------------------------------------- the menu's glibc
+def _codeselect(name):
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "tools", "spike2_emu", "codeselect", name)
+
+
+def test_the_forced_header_turns_gnu_on_before_features_h():
+    """PAD-449: a Mac could not build the JJP menu program at all.
+
+    jjp_glibc.h is force-included, so features.h runs inside it, first and
+    once.  It used to run there with no _GNU_SOURCE yet, and every file's own
+    ``#define _GNU_SOURCE`` came too late to change anything: the whole JJP
+    build compiled without __USE_GNU.  WSL's glibc 2.39 declares memmem anyway;
+    the Mac toolbox's Debian 12 (2.36) does not, so colour.c's memmem was an
+    implicit declaration there and -Werror stopped the build.
+    """
+    path = _codeselect("jjp_glibc.h")
+    if not os.path.isfile(path):
+        pytest.skip("jjp_glibc.h not present")
+    with open(path, encoding="utf-8") as f:
+        lines = [ln.strip() for ln in f if ln.lstrip().startswith("#")]
+    assert lines.index("#define _GNU_SOURCE") < lines.index("#include <features.h>")
+    # ...and the 2.38+ __isoc23_ redirect the header exists for is still off
+    assert lines.index("#include <features.h>") < lines.index("#define __GLIBC_USE_C2X_STRTOL 0")
+    with open(_codeselect("Makefile"), encoding="utf-8") as f:
+        assert "-include jjp_glibc.h" in f.read()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux") or not shutil.which("gcc"),
+                    reason="needs glibc's features.h and a gcc")
+def test_the_jjp_flags_see_gnu_declarations_and_no_isoc23(tmp_path):
+    src = tmp_path / "probe.c"
+    src.write_text('#define _GNU_SOURCE\n#include <string.h>\n'
+                   'void *probe(const void *h, size_t n) { return memmem(h, n, "x", 1); }\n'
+                   '#ifndef __USE_GNU\n#error no __USE_GNU\n#endif\n'
+                   '#if __GLIBC_USE (C2X_STRTOL) || __GLIBC_USE (C23_STRTOL)\n'
+                   '#error the __isoc23_ redirect is on\n#endif\n')
+    r = subprocess.run(["gcc", "-std=gnu17", "-Werror=implicit-function-declaration",
+                        "-include", _codeselect("jjp_glibc.h"),
+                        "-c", str(src), "-o", str(tmp_path / "probe.o")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
 
 # ------------------------------------------------------------- the menu's font
 def _ensurejjpselect():

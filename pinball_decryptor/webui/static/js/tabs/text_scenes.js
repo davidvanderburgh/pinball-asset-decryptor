@@ -233,8 +233,9 @@ export function ScenesActions() {
 }
 
 // colorsOpen / openColors(mode): the Color profiles bar on the page's edge (PAD-350,
-// scenes.js); while it is open the scene list steps aside unless shown again
-export function ScenesPage({ colorsOpen = false, openColors } = {}) {
+// scenes.js); while it (or the Font bar) is open the scene list steps aside unless shown
+// again.  openFont(): the Font bar (PAD-452), from a line of text's Selected panel
+export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
   const [wideOwn, setWideOwn] = useState(false); // the scene editor without the scene list
@@ -435,7 +436,7 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
       <div class="scenes-inspector" ref=${inspRef}>
         ${editor ? html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
             style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
-            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} /></div>
+            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} openFont=${openFont} /></div>
           <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
           <${TreeTop} s=${s} onMenu=${itemMenu} />`
           : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
@@ -1267,7 +1268,7 @@ function TreeCanvas({ s }) {
   </div>`;
 }
 
-function TreeSide({ t, play, playFrame }) {
+function TreeSide({ t, play, playFrame, openFont }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
   const [keepShape, setKeepShape] = useState(true);
@@ -1380,20 +1381,11 @@ function TreeSide({ t, play, playFrame }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "back")}>To back<//>
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
-      ${p.kind === "Text" && p.align ? html`<div class="tree-row">
-        <span class="lbl">Across</span>
-        <${Seg} value=${p.align} onChange=${(v) => call("text_scenes.tree_text_align", p.id, v, null)}
-          options=${[["left", "Left"], ["centre", "Centre"], ["right", "Right"]].map(([v, l]) => ({ value: v, label: l,
-            title: `The words sit on the ${v === "centre" ? "middle" : v + " edge"} of the box, here and in the game` }))} />
-      </div>
-      <div class="tree-row">
-        <span class="lbl">Up/down</span>
-        <${Seg} value=${p.valign} onChange=${(v) => call("text_scenes.tree_text_align", p.id, null, v)}
-          options=${[["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]].map(([v, l]) => ({ value: v, label: l,
-            disabled: p.game_layout && v !== p.valign,
-            title: p.game_layout
-              ? "The game always puts this line in the middle of its box, and shrinks it to fit. To move it up or down, move or resize the box"
-              : `The words sit at the ${v} of the box, here and in the game` }))} />
+      ${p.kind === "Text" && p.font && openFont ? html`<div class="tree-row">
+        <${Button} size="xs" icon="text" title=${{ head: "Font, size and spacing", lines: [
+          "Opens the Font bar on the right edge: this line's font, size, letter and line spacing, wrapping and where its words sit in its box (across and up and down)."] }}
+          onClick=${openFont}>Font, size and spacing…<//>
+        <span class="small muted ellip">${p.font.style ? `${p.font.style}, ${p.font.size} px` : `${p.font.size} px`}</span>
       </div>` : null}
       ${p.kind === "Text" ? html`<div class="tree-row">
         <${Button} size="xs" disabled=${p.x == null}

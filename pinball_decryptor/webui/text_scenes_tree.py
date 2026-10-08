@@ -931,7 +931,8 @@ class TreeEditMixin:
                 "view_off": nid in self._tree_view_hidden(card),
                 "hid_in": self._tree_hidden_in(man, nid, self._tree_hidden(card)),
                 "view_in": self._tree_hidden_in(man, nid, self._tree_view_hidden(card)),
-                "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n)}
+                "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n),
+                "font": self._tree_font_of(man, n, ops)}
 
     @staticmethod
     def _tree_text_align_of(man, n):
@@ -1549,6 +1550,200 @@ class TreeEditMixin:
         return self._tree_add({"op": "text_align", "node": node,
                                "align": scene_edit.ALIGN_NAMES.index(want["align"]),
                                "valign": scene_edit.VALIGN_NAMES.index(want["valign"])})
+
+    # -- the Font bar (PAD-452) ---------------------------------------------
+    # A Spike 2 line of text names one of the font SIZES its scene carries (each a style -
+    # GameFont_Primary, a typeface's plain letters - baked at one size) and has no size of its
+    # own: the game scales a line as it scales its node.  So the bar's font is a style the scene
+    # carries, its size is the baked size nearest to it, scaled the rest of the way with its
+    # box kept (scene_edit's text_font), and its spacings are the Text's own two numbers.
+    #: the edits the Font bar makes, which "Font as shipped" takes off a line
+    _FONT_OPS = ("text_font", "text_spacing", "text_flow", "text_align")
+
+    @staticmethod
+    def _font_styles(man):
+        """``[(style name, [(size id, declared size), ...] smallest first)]``: the fonts the
+        scene carries, by style (its own name, else its typeface's, else its picture's)."""
+        from ..plugins.stern import scene_edit
+        styles = {}
+        for sid, f in scene_edit.font_table(man).items():
+            name = f.get("variant") or f.get("face") or _font_label(f.get("font") or "") \
+                or "Font %d" % sid
+            size = float(f.get("line") or 0) or float(f.get("font_px") or 0)
+            if size > 0:
+                styles.setdefault(name, []).append((sid, size))
+        return sorted((name, sorted(sizes, key=lambda x: x[1]))
+                      for name, sizes in styles.items())
+
+    def _tree_text_scale(self, nid):
+        """How many glass pixels one of the line's own pixels is, up and down, now."""
+        d = self._tree_text_draw(nid)
+        m = d["m"] if d is not None else (self._tworlds.get(nid) or (None, None))[1]
+        if not m:
+            return 1.0
+        k = math.hypot(m[2], m[3])
+        return k if k > 1e-6 else 1.0
+
+    def _tree_text_obj(self, man, n):
+        for _s, oid in n["comps"]:
+            o = man["objects"].get(str(oid)) or {}
+            if o.get("kind") == "Text":
+                return o
+        return None
+
+    def _tree_font_of(self, man, n, ops):
+        """A Text node's font, size, spacing and wrapping as the Font bar shows them (sizes and
+        spacings in glass pixels, as the line is drawn now), else None."""
+        o = self._tree_text_obj(man, n)
+        if o is None:
+            return None
+        k = self._tree_text_scale(n["id"])
+        # the scale the line had before its own size edits: the sizes its scene's fonts were
+        # made at, as they show here (at 1, drawn as made)
+        made = k
+        for op in ops:
+            if op.get("node") == n["id"] and op["op"] == "text_font":
+                made /= float(op.get("s") or 1.0)
+        styles = self._font_styles(man)
+        style, own = "", 0.0
+        for name, sizes in styles:
+            for sid, size in sizes:
+                if sid == o.get("font_id"):
+                    style, own = name, size
+        own = own or float(o.get("line") or 0) or float(o.get("font_px") or 0)
+        sp = list(o.get("spacing") or (0, 0)) + [0, 0]
+        flags = list(o.get("flags") or (0, 0)) + [0, 0]
+        return {"style": style,
+                "styles": [{"value": name, "label": name,
+                            "sizes": [round(size * made, 1) for _sid, size in sizes]}
+                           for name, sizes in styles],
+                "size": round(own * k, 1),
+                "letter": round(float(sp[1] or 0) * k, 1),
+                "line": round(float(sp[0] or 0) * k, 1),
+                "multiline": bool(flags[0]), "wrap": bool(flags[1]),
+                "fit": bool(o.get("fit")), "game_layout": bool(o.get("game_layout")),
+                "edited": any(op.get("node") == n["id"] and op["op"] in self._FONT_OPS
+                              for op in ops)}
+
+    def _tree_font_target(self, node):
+        """``(text object, glass scale, [(style, sizes)], style, own size)`` of a Text node."""
+        if self._tman is None:
+            return None
+        from ..plugins.stern import scene_edit
+        got = scene_edit._man_index(self._tman).get(int(node))
+        o = self._tree_text_obj(self._tman, got[0]) if got else None
+        if o is None:
+            return None
+        styles = self._font_styles(self._tman)
+        for name, sizes in styles:
+            for sid, size in sizes:
+                if sid == o.get("font_id"):
+                    return o, self._tree_text_scale(int(node)), styles, name, size
+        return None
+
+    def _tree_font_add(self, node, sizes, sid_now, want, **say):
+        """Draw a line *want* of its own pixels tall in one of *sizes* (a style's): the baked
+        size nearest to that, the words scaled the rest of the way (a ``text_font``; *say*,
+        ``style`` / ``px``, names it in Layers)."""
+        sid, size = min(sizes, key=lambda x: abs(math.log(want / x[1])))
+        s = want / size
+        if sid == sid_now and abs(s - 1.0) < 1e-4:
+            return False
+        return self._tree_add(dict({"op": "text_font", "node": int(node),
+                                    "font": sid if sid != sid_now else None, "s": round(s, 6)},
+                                   **say))
+
+    @rpc
+    def tree_text_font(self, node, style):
+        """Draw a line of text in another of the fonts its scene carries (DragonRR, PAD-452),
+        at the size it is now.  Its box stays where it is; the words re-flow in it."""
+        got = self._tree_font_target(node)
+        if got is None:
+            return False
+        o, _k, styles, now, own = got
+        sizes = dict(styles).get(str(style))
+        if not sizes or str(style) == now:
+            return False
+        return self._tree_font_add(node, sizes, o.get("font_id"), own, style=str(style))
+
+    @rpc
+    def tree_text_size(self, node, px):
+        """A line of text's size in glass pixels (its font's declared height, as drawn now).
+        Its box stays where it is, so bigger words wrap sooner, or shrink to fit, as the box
+        says."""
+        got = self._tree_font_target(node)
+        if got is None:
+            return False
+        o, k, styles, style, _own = got
+        try:
+            want = float(px) / k
+        except (TypeError, ValueError):
+            return False
+        if not 2 <= want <= 4000:
+            return False
+        return self._tree_font_add(node, dict(styles)[style], o.get("font_id"), want,
+                                   px=round(float(px), 1))
+
+    @rpc
+    def tree_text_spacing(self, node, letter=None, line=None):
+        """LetterSpacing / LineSpacing in glass pixels: the Text's own two numbers, set so the
+        line shows that much more after each letter / between its lines as drawn now."""
+        got = self._tree_font_target(node)
+        if got is None:
+            return False
+        o, k = got[0], got[1]
+        sp = list(o.get("spacing") or (0, 0)) + [0, 0]
+        op = {"op": "text_spacing", "node": int(node)}
+        try:
+            if letter not in (None, ""):
+                op["letter"] = round(float(letter) / k, 3)
+                op["letter_px"] = round(float(letter), 1)
+            if line not in (None, ""):
+                op["line"] = round(float(line) / k, 3)
+                op["line_px"] = round(float(line), 1)
+        except (TypeError, ValueError):
+            return False
+        if all(abs(op[f] - float(sp[i] or 0)) < 1e-3 for f, i in (("line", 0), ("letter", 1))
+               if f in op):
+            return False
+        return self._tree_add(op)
+
+    @rpc
+    def tree_text_flow(self, node, multiline=None, wrap=None, fit=None):
+        """The Text's Multiline and WordWrap bytes and ScaleToBounds (PAD-412): line breaks
+        kept, words wrapped at the box's width, words shrunk to fit the box."""
+        got = self._tree_font_target(node)
+        if got is None:
+            return False
+        o = got[0]
+        flags = list(o.get("flags") or (0, 0)) + [0, 0]
+        cur = {"multiline": bool(flags[0]), "wrap": bool(flags[1]), "fit": bool(o.get("fit"))}
+        op = {"op": "text_flow", "node": int(node)}
+        for f, v in (("multiline", multiline), ("wrap", wrap), ("fit", fit)):
+            if v is not None and bool(v) != cur[f]:
+                op[f] = bool(v)
+        if "fit" in op and o.get("game_layout"):
+            del op["fit"]                       # the game shrinks this line to fit (PAD-433)
+        if len(op) == 2:
+            return False
+        return self._tree_add(op)
+
+    @rpc
+    def tree_text_font_reset(self, node):
+        """Font as shipped: the line's font, size, spacing, wrapping and alignment edits
+        taken off (one undo step)."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        ops = self._tree_ops(card)
+        keep = [op for op in ops if not (op.get("node") == node and op["op"] in self._FONT_OPS)]
+        if len(keep) == len(ops):
+            return False
+        scene_edit.set_ops(self.assets_dir, card, keep)
+        self._tree_refresh()
+        return True
 
     def _tree_set_text_pixels(self, node, w, h):
         """W px / H px on a line of text: its box, not its words.  The box keeps the edges
@@ -2761,5 +2956,13 @@ def _kind_of(man, n):
     kinds = [(man["objects"].get(str(oid)) or {}).get("kind") for _s, oid in n["comps"]]
     kinds = [k for k in kinds if k]
     return kinds[0] if kinds else "Group"
+
+
+def _font_label(key):
+    """A font's name from its picture's (``radimg_STERN_HelveticaNeueBlack_MONO_512x512_c2..``
+    -> ``STERN_HelveticaNeueBlack_MONO``), "" when the picture has none of its own."""
+    name = re.sub(r"^radimg_", "", str(key or ""))
+    name = re.sub(r"_?\d+x\d+(_[0-9a-f]{6,})?$", "", name)
+    return name
 
 

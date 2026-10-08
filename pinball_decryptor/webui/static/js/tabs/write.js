@@ -217,6 +217,7 @@ function Destination({ s }) {
     ${s.text_grow_cap ? html`<${Check} ns="write" k="text_grow" checked=${s.text_grow} wrap
         label=${s.text_grow_label} title=${s.text_grow_tip} disabled=${s.running} />` : null}
     ${s.card_size_cap && !direct ? html`<${CardSize} s=${s} />` : null}
+    ${s.card_fit_cap && !direct ? html`<${CardFit} s=${s} />` : null}
   <//>`;
 }
 
@@ -231,6 +232,17 @@ function CardSize({ s }) {
     <${Select} id="wr-cardsize" ns="write" k="card_size" value=${s.card_size_shown}
       options=${s.card_size_options || []} width=${240} title=${s.card_size_tip} disabled=${s.running} />
     ${s.card_size_note ? html`<span class=${cx("small", s.card_size_note_kind === "err" ? "err-ink" : "muted")}>${s.card_size_note}</span>` : null}
+  </div>`;
+}
+
+// PAD-467: the finished image cut down to what is on it (an image build
+// only, like the SD card size).  The note says about how big this original
+// comes out that way, or, in red, why its image keeps its size.
+function CardFit({ s }) {
+  return html`<div class="stack wr-build">
+    <${Check} ns="write" k="card_fit" checked=${s.card_fit} wrap
+      label=${s.card_fit_label} title=${s.card_fit_tip} disabled=${s.running} />
+    ${s.card_fit_note ? html`<span class=${cx("small", s.card_fit_note_kind === "err" ? "err-ink" : "muted")}>${s.card_fit_note}</span>` : null}
   </div>`;
 }
 

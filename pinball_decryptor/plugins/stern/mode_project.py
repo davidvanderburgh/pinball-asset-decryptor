@@ -664,6 +664,7 @@ SCOOP_PROVEN = frozenset({
     "venom_le-1.07",                   # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 830 ms after landing; scoop_hold 4000, 5695 ms (held 4000); a mode stop 2.5 s into a hold, kicked 1038 ms later; after the mode, 1710 ms ([coildrive] node 9 coil 4, 225 for 30 ms); no abort
     "venom_pro-1.07",                  # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1709 ms after landing; scoop_hold 4000, 5694 ms (held 4000); a mode stop 2.5 s into a hold, kicked 934 ms later; after the mode, 1710 ms ([coildrive] node 9 coil 4, 225 for 30 ms); no abort
     "dungeons_and_dragons_pro-1.10",   # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1713 ms after landing; scoop_hold 4000, 5700 ms (held 4000); a mode stop 2.5 s into a hold, kicked 935 ms later; after the mode, 1712 ms ([coildrive] node 8 coil 8, 140 for 60 ms); no abort
+    "guardians-1.15",                  # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 4299 ms after landing; scoop_hold 4000, 5694 ms (held 4000); a mode stop 2.5 s into a hold, kicked 1040 ms later; after the mode, 1709 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
 })
 
 

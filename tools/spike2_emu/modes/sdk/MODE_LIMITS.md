@@ -183,7 +183,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, waits for multiballs only |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
 | Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Iron Maiden Pro 1.18 | no | ✓ | ✓ | shots | mechanisms |
+| Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots |  |
 | James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots |  |

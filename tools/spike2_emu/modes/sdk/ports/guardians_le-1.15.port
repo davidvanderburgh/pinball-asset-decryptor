@@ -177,9 +177,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  4853b69e9fd122157772aaac5db81948331def2b
 
 # ---- callouts and text ----
-callout countdown           405
-callout ten_seconds         252
-callout time_up             254
 text example_start_shot     Center drop target
 text mode_records_name_1   Super Scoring
 text mode_records_name_2   Double Scoring
@@ -336,3 +333,8 @@ text block_name_3       Double Scoring
 value scoop_event          2
 site scoop_handler         0x00081084 0xe2400002 0xe92d40f0
 data scoop_slot           0x005bebf4
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         410   # Your time is up, Hughme! / 1
+callout ten_seconds       257   # You are running out of time. / Hurry up boy! Time is running out! (the Pro's pick; this build's own variants are the same lines, its first one transcribed short)
+callout time_up           259   # Time's up. / You have run out of time.

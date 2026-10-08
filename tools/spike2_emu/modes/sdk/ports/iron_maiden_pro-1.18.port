@@ -182,7 +182,6 @@ scene video_bank           7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a
 scene hud                  7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a
 
 # ---- callouts and text ----
-callout countdown           351
 text example_start_shot     Super jackpot target
 
 # ---- events ----
@@ -404,3 +403,6 @@ site right_post_get       0x000b20dc 0xe92d4010 0xe30f410c
 text left_post_drive      9 5 200 64 64
 text right_post_drive     9 0 200 64 64
 text held_coils            left_post right_post
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         356   # One.

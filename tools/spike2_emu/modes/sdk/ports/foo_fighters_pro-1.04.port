@@ -192,7 +192,6 @@ scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
 scene hud                  2c8ffcac48035d12ef91df61fb7a796ec391f1e7
 
 # ---- callouts and text ----
-callout countdown           163
 text example_start_shot     Lower right target
 
 # ---- events ----
@@ -405,3 +404,7 @@ lamp 236,237,238  0              TOPPER FRONT CHRIS  # lamp 256, I/O group 10 in
 lamp 347,348,349  0              TOPPER FRONT PAT  # lamp 257, I/O group 10 index 1, at 0,0
 lamp 356,357,358  0              TOPPER FRONT DAVE  # lamp 258, I/O group 10 index 4, at 0,0
 lamp 365,366,367  0              TOPPER FRONT NATE  # lamp 259, I/O group 10 index 7, at 0,0
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         163   # Uh oh! / One!
+callout ten_seconds       160   # Hurry up man! / Only a few seconds left!

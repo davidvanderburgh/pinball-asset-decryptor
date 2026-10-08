@@ -203,7 +203,6 @@ scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
 scene video_bank           08a4e1ca48f4991791de79f1cd36294b247488cc
 
 # ---- callouts and text ----
-callout ten_seconds         345
 text example_start_shot     Left ramp left tgt
 
 # ---- events ----
@@ -513,3 +512,6 @@ site block_rule_19         0x000fe62c 0xe92d41f0 0xe1a04000  # crule_winston_col
 text block_rule_name_19    Winston Collect
 site block_rule_20         0x000ffcb8 0xe92d4070 0xe3084008  # crule_wizard_modes::v[40]
 text block_rule_name_20    Wizard Modes
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout ten_seconds       354   # Lace, there's still time! / The clock is ticking.

@@ -221,8 +221,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
 
 # ---- callouts and text ----
-callout countdown           668
-callout time_up             670
 text example_start_shot     Pit target-bot
 
 # ---- events ----
@@ -559,3 +557,7 @@ site block_rule_19         0x002514bc 0xe92d4ff0 0xe1a08002  # RuleThePit::v[27]
 text block_rule_name_19    The Pit
 site block_rule_20         0x0026c310 0xe2022001 0xe3a03000  # UIBonusScreen::v[27]
 text block_rule_name_20    UI Bonus Screen
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         666   # One. / Two!
+callout time_up           670   # T / i

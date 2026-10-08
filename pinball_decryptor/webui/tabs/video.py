@@ -2927,10 +2927,12 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
                 note = {"kind": "info", "text": self._variants_words(rel)}
         pv = self.get("preview") or {}
         modes = self._m_preview(rel)
-        if pv.get("note") != note or pv.get("modes") != modes:
+        sounds = self._m_sounds(rel)
+        if pv.get("note") != note or pv.get("modes") != modes or pv.get("sounds") != sounds:
             pv = dict(pv)
             pv["note"] = note
             pv["modes"] = modes
+            pv["sounds"] = sounds
             self.set(preview=pv)
 
     def _reselect(self, rels):

@@ -1153,6 +1153,13 @@ export default function VideoTab() {
           <${Note} kind="info" action=${pv.modes.back ? html`<${Button} size="sm" onClick=${() => call("video.shared_again", pv.modes.rel)}
             disabled=${running}>Use the same clip as ${pv.modes.back} again…<//>` : null}>${pv.modes.text}<//>
         </div>` : null}
+        ${pv.sounds && pv.sounds.rel === currentRel ? html`<div class="vid-sounds">
+          <${Note} kind="info"><span>${pv.sounds.head}</span>
+            ${(pv.sounds.items || []).length ? html`<ul class="vid-sound-list">${pv.sounds.items.map((it) => html`
+              <li ...${tip(it.tip)}><b>${it.text}</b> <span class="muted">${it.how}</span></li>`)}</ul>` : null}
+            ${pv.sounds.more ? html`<div class="small muted">${pv.sounds.more}</div>` : null}
+            ${pv.sounds.foot ? html`<div class="small muted">${pv.sounds.foot}</div>` : null}<//>
+        </div>` : null}
         ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
         <div class="vid-panes">
           <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />

@@ -261,6 +261,20 @@ replacement in it, and then only that mode plays yours. That mode's
 clip goes on the card as a new clip, so it takes an image build (not
 a direct SD write); clear the replacement and the row follows the
 first again.
+**Sounds with a clip (Stern Spike 2, a first version).** A clip and its
+sound are separate files on a Spike 2 card, named differently, and
+nothing on the card links them: the game's code asks for both. Under
+the panes, the tab lists the sounds that the code naming the selected
+clip asks for, best match first: *right after the clip* (asked for
+next to it), *in the same code*, or *in the code that reads the clip's
+table*, plus a count of the other sounds its mode plays. Each sound is
+named by its file in the project's `audio` folder once the card has
+been extracted with this version (the extract writes
+`sound_requests.tsv`); before that, by its Sound Test name or its
+request number. It is read from the game program, not watched on the
+machine, so treat it as a lead: a sound the code picks at random or
+from a table, or one a clip carries in its own audio track, is not
+listed.
 **Undo and Redo.** The *Undo* and *Redo* buttons at the top of the
 tab (Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z) take back, or make again, your
 last changes one step at a time: a pick, a clear, Replace from

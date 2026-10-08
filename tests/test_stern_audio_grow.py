@@ -722,6 +722,89 @@ def test_grow_priority_read_from_the_sidecar_in_order(tmp_path):
     assert engine._grow_priority_idxs(str(tmp_path)) == [1145, 220]
 
 
+def _counted_bank(tmp_path, fragments, sounds):
+    """An image.bin header the container probe reads: its size word, then the
+    fragment word @0x5c and the sounds word @0x60."""
+    p = tmp_path / "image.bin"
+    h = bytearray(0x100)
+    struct.pack_into("<Q", h, 0, 0xB0)
+    struct.pack_into("<II", h, 0x5C, fragments, sounds)
+    p.write_bytes(bytes(h))
+    return str(p)
+
+
+def _grows_of(idxs, want=3 * 44100):
+    return {i: (2 * 44100, want) for i in idxs}
+
+
+def test_grows_within_the_bank_record_room_are_all_kept(tmp_path, monkeypatch):
+    """PAD-445: Godzilla 1.16 takes 65 more records (2599 fragments, 2534
+    sounds), and 65 grows fit with nothing said."""
+    monkeypatch.delenv(engine.PAST_FRAGMENTS_ENV, raising=False)
+    img = _counted_bank(tmp_path, 2599, 2534)
+    grows = _grows_of(range(65))
+    msgs, log = _capture()
+    assert engine._grows_within_record_room(grows, {}, img, log) == grows
+    assert msgs == []
+    # A header the probe can't read limits nothing.
+    assert engine._grows_within_record_room(
+        _grows_of(range(500)), {}, _bank_header(tmp_path, 0x1000, 2534),
+        log) == _grows_of(range(500))
+
+
+def test_modes_sounds_past_the_record_room_are_refused_up_front(tmp_path,
+                                                                monkeypatch):
+    """The Heisei card's 11 code modes: 69 own sounds over room for 65 used
+    to fail twenty minutes in, at the music carrier; now the Write stops
+    before anything is staged, saying how many to take out."""
+    monkeypatch.delenv(engine.PAST_FRAGMENTS_ENV, raising=False)
+    img = _counted_bank(tmp_path, 2599, 2534)
+    msgs, log = _capture()
+    with pytest.raises(RuntimeError) as e:
+        engine._grows_within_record_room(_grows_of(range(69)), {}, img, log)
+    msg = str(e.value)
+    assert "these modes need 69 new sound(s)" in msg
+    assert "room for 65 more" in msg
+    assert "it holds 2534 of the 2599 sounds its game was built for" in msg
+    assert "Take 4 of the modes' own sounds out" in msg
+
+
+def test_longer_sounds_past_the_record_room_are_trimmed_modes_first(
+        tmp_path, monkeypatch):
+    """The modes' own sounds can't be trimmed, so they take the room first;
+    the user's longer sounds share the rest in the keep-whole order (the
+    marked ones first, then slot order) and the others are trimmed."""
+    monkeypatch.delenv(engine.PAST_FRAGMENTS_ENV, raising=False)
+    img = _counted_bank(tmp_path, 2599, 2595)          # room for 4
+    user = _grows_of((5, 9, 12, 40))
+    grows = dict(user)
+    grows.update(_grows_of((700, 701)))                # the modes' own
+    msgs, log = _capture()
+    kept = engine._grows_within_record_room(grows, user, img, log,
+                                            priority=[40])
+    assert set(kept) == {700, 701, 40, 5}
+    assert set(_grows_cut(msgs)) == {9, 12}
+    [line] = _said(msgs, "trimmed to fit")
+    assert ("this card's sound bank has room for only 4 more sound(s) (it "
+            "holds 2595 of the 2599 sounds its game was built for), and 2 of "
+            "them are the modes' own") in line
+
+
+def test_the_record_room_can_be_lifted_for_a_machine_test(tmp_path,
+                                                         monkeypatch):
+    """PAD_STERN_PAST_FRAGMENTS=1 builds the card that proves a bank past its
+    fragments on a machine, and says so in the log."""
+    monkeypatch.setenv(engine.PAST_FRAGMENTS_ENV, "1")
+    img = _counted_bank(tmp_path, 2599, 2534)
+    grows = _grows_of(range(69))
+    msgs, log = _capture()
+    assert engine._grows_within_record_room(grows, {}, img, log) == grows
+    [(lvl, line)] = msgs
+    assert lvl == "warning"
+    assert "it comes to 2603 with these 69 new sound(s)" in line
+    assert "no machine has booted such a card yet" in line
+
+
 def test_the_limit_is_the_largest_file_the_game_can_open():
     from pinball_decryptor.plugins.stern.spike2 import emulator as EM
     assert EM.MAX_IMAGE_BYTES == 2 ** 31 - 1

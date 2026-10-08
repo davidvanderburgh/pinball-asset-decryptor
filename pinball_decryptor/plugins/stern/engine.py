@@ -6878,6 +6878,16 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites, audio_edits,
                             grows, mode_own, os.path.join(grow_work, "own_sounds"),
                             log)
+                    # PAD-445: one record per grow, and the bank stays within
+                    # the sounds its game was built for - refused here, before
+                    # anything is staged or encoded, when the modes' own
+                    # sounds alone pass it.
+                    grows = _grows_within_record_room(
+                        grows, _user_grows, img_path, log,
+                        priority=(_grow_priority_idxs(assets_dir)
+                                  if _user_grows else None))
+                    _user_grows = {i: g for i, g in _user_grows.items()
+                                   if i in grows}
                     if _user_grows:
                         # The bank's budget: the game's 2 GB, and the room on
                         # the games partition beside the full-size videos,
@@ -14278,6 +14288,79 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
                       % len(kept) if kept else "", left_min))
         log(*_trimmed_notice(cut, why))
     return kept
+
+
+#: Set to 1 to let a Write take the sound bank past its fragment count (see
+#: :func:`_grows_within_record_room`) - for building the card that proves it
+#: on a machine.
+PAST_FRAGMENTS_ENV = "PAD_STERN_PAST_FRAGMENTS"
+
+
+def _bank_record_room(img_path):
+    """``(room, fragments, sounds)``: how many more records the sound bank
+    takes before its sounds word passes its fragment word, from the
+    ``image.bin`` header; ``None`` when the header doesn't say."""
+    from .info import container_counts
+    with open(_lp(img_path), "rb") as f:
+        fragments, sounds = container_counts(f.read(0x100))
+    if not fragments:
+        return None
+    return max(0, fragments - sounds), fragments, sounds
+
+
+def _grows_within_record_room(grows, user_grows, img_path, log, priority=None):
+    """*grows* held to the sound bank's RECORD room (PAD-445): every grow
+    appends one record, and a bank whose sounds pass its fragments (header
+    words @0x60 and @0x5c, :func:`.info.container_counts`) has never been
+    booted on a machine.  The game reads the fragment word as the size of its
+    sound-id space, which a grow never extends (a grown sound is reached
+    through a re-pointed id or the modes' key swap), and the emulator plays
+    records past it; until a machine has too, a Write stays inside it.
+    Godzilla 1.16 has room for 65 (2599 fragments, 2534 sounds); 11 code
+    modes' own sounds are 69.
+
+    The grows not in *user_grows* (the modes' own sounds, which can't be
+    trimmed) go first; when they alone don't fit, the Write is refused HERE,
+    seconds in, with how many to take out - it used to fail twenty minutes
+    later, at the music carrier.  The user's longer replacements share what is
+    left in the keep-whole order (*priority* first, :func:`_grow_order`) and
+    the rest are trimmed to their slots, named in one log line.
+
+    :data:`PAST_FRAGMENTS_ENV` set to 1 lifts the limit, saying so."""
+    if not grows:
+        return grows
+    room = _bank_record_room(img_path)
+    if room is None:
+        return grows
+    room, fragments, sounds = room
+    if len(grows) <= room:
+        return grows
+    if os.environ.get(PAST_FRAGMENTS_ENV) == "1":
+        log("The sound bank goes past the %d sounds its game was built for: it "
+            "comes to %d with these %d new sound(s) (%s=1). The emulator plays "
+            "sounds past that; no machine has booted such a card yet."
+            % (fragments, sounds + len(grows), len(grows), PAST_FRAGMENTS_ENV),
+            "warning")
+        return grows
+    forced = {i: g for i, g in grows.items() if i not in user_grows}
+    if len(forced) > room:
+        raise RuntimeError(
+            "Modes: these modes need %d new sound(s), and this card's sound "
+            "bank has room for %d more (it holds %d of the %d sounds its game "
+            "was built for). Take %d of the modes' own sounds out (a call, a "
+            "music bed or a whole mode) and write again."
+            % (len(forced), room, sounds, fragments, len(forced) - room))
+    order = _grow_order({i: g for i, g in grows.items() if i not in forced},
+                        priority)
+    keep = set(order[:room - len(forced)])
+    cut = {i: grows[i] for i in order if i not in keep}
+    log(*_trimmed_notice(cut, (
+        "this card's sound bank has room for only %d more sound(s) (it holds "
+        "%d of the %d sounds its game was built for)%s"
+        % (room, sounds, fragments,
+           ", and %d of them are the modes' own" % len(forced) if forced
+           else ""))))
+    return {i: g for i, g in grows.items() if i not in cut}
 
 
 def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):

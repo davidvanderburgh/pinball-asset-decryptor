@@ -331,6 +331,21 @@ def test_the_music_carrier_is_found_on_a_bank_grown_past_its_fragments():
     assert MW.request_sids(elf, _bank_head(2599, 2603), 125) == stock
 
 
+def test_a_bank_with_no_room_left_still_takes_every_new_sound(monkeypatch, tmp_path):
+    """PAD-445, no limit: a bank whose header has as many sounds as fragments still takes the
+    mode's own sound - nothing in a Write counts the records it appends."""
+    card, staged, project, encoded, _h = _mode_card(monkeypatch, tmp_path)
+    img = bytearray(card.data["img"])
+    img[:0xB0] = _bank_head(4, 4)                  # the card's 4 sounds, 4 fragments: room 0
+    card.data["img"] = card.img_node["_data"] = bytes(img)
+    msgs, log = _capture()
+    _writes, _counts, plan, _m, _v = _compute(project, log)
+    assert list(encoded) == [0] and staged["path"]
+    assert plan["modes"]["end_sound"] == {"name": "KAIJU RUSH", "request": 1295, "idx": 0}
+    assert not [m for lvl, m in msgs if lvl == "error"]
+    engine._rmtree_grow_plan(plan)
+
+
 @pytest.mark.parametrize("device,env,needle", [
     (True, None, "direct-SD write cannot add files"),
     (False, "0", "PAD_STERN_MODES=0"),

@@ -43,33 +43,32 @@ A grow never extends the sound-id space anyway: a grown sound is reached by
 re-pointing an existing id's play table at the appended record (the modes'
 music beds, a longer replacement) or by the modes' key swap (their calls).
 
-## The change
+## The change: no limit
 
-1. `container_counts` accepts a grown bank: the sounds word only has to be a
-   record count a bank can hold (1 << 16). The fragment word is still the
-   card's own. The music carrier is found on a 2603-record bank
-   (`test_the_music_carrier_is_found_on_a_bank_grown_past_its_fragments`).
-2. **The Write keeps the bank within its fragment count until a machine has
-   booted one past it** (`engine._grows_within_record_room`). It checks the
-   moment its grows are settled, before anything is staged or encoded (about
-   20 s into the Write):
-   * the modes' own sounds past the room refuse the Write with how many to
-     take out: *"Modes: these modes need 69 new sound(s), and this card's sound
-     bank has room for 65 more (it holds 2534 of the 2599 sounds its game was
-     built for). Take 4 of the modes' own sounds out (a call, a music bed or a
-     whole mode) and write again."* - an answer in the Write Failed dialog
-     (`BankRecordRoomError`, handled like the SD card size refusal), not an
-     unexpected error;
-   * the user's longer replacements share what is left in the keep-whole
-     order (marked songs first, then slot order); the rest are trimmed to
-     their slots and named in one log line, as the 2 GB budget does.
-3. `PAD_STERN_PAST_FRAGMENTS=1` lifts it, with a warning in the log, to build
-   the card that proves it on a machine.
+`container_counts` accepts a grown bank: the sounds word only has to be a
+record count a bank can hold (1 << 16). The fragment word is still the card's
+own, so the request table is found and the music carrier resolves on a
+2603-record bank
+(`test_the_music_carrier_is_found_on_a_bank_grown_past_its_fragments`).
+
+**Nothing in a Write counts the records it appends** (David, 2026-10-07: "We
+need to be unlimited"). A first pass of this ticket held the bank to
+`fragments - sounds` until a machine had proven more - refusing the modes'
+own sounds past it, trimming longer replacements - and David lifted it after
+the emulator proof below. `test_a_bank_with_no_room_left_still_takes_every_new_sound`
+pins it: a bank whose header has no room left still takes a mode's own
+sound. The one ceiling left on the bank is its size: the 2 GB the game can
+open (`_grows_within_bank_limit`, PAD-175/176).
+
+A different ceiling is not this one: each mode's own music bed rides on a
+spare sound id no request plays (`mode_sounds` carriers' `beds`), and
+Godzilla LE 1.16 has 12. A 13th mode with music of its own is refused by
+`mode_sounds.assign` before any record is counted.
 
 ## Proof on the emulator (2026-10-07)
 
 The 11 examples on stock Godzilla LE 1.16, built into Try it's set by Write's
-own code (`mode_write.build_tryit_set`, before the limit was added): 69
+own code (`mode_write.build_tryit_set`, with no limit - as it is now): 69
 appended records, `image.bin` 2599 fragments / 2603 sounds, the build's
 integrity check passed, and the firmware's own decode chain (the unicorn
 derive) encoded records 2599-2602 like any other. The records past the line:
@@ -97,7 +96,8 @@ against each WAV by normalised cross-correlation (`match.py`, PAD-445 scratch):
 | four WAVs no mode played | - | 0.05-0.13 | | |
 
 So the game plays sounds on records past its fragment count, through both
-ways a grow is reached. What is left is a machine.
+ways a grow is reached. No machine has booted such a card yet: the first
+card built past its fragments is that test.
 
 Three runs of this bank. The cached one above played all four. A second,
 booted straight off the card on D: like the first, played 2599 (0.77), 2601
@@ -110,9 +110,10 @@ watch logs other sessions left in C:\tmp, stock Godzilla Pro 1.16 straight
 off D: (PAD-373) and stock LE 1.16 (PAD-412) among them, and at Start nothing
 reads a record past the line.
 
-## Lifting the limit
+## If a machine disagrees
 
-Once a machine has booted a card past its fragments and played a sound on a
-record past them (build it with `PAD_STERN_PAST_FRAGMENTS=1`), drop the record
-room check from `_grows_within_record_room` (or make the switch the default)
-and say so here. Every title's room is its own `fragments - sounds`.
+Should a card past its fragments misbehave on a machine (a sound past the
+line silent, a reboot when one plays), the bank's own header says how far
+past it is: Image Info shows both counts. The fix would then be the room
+`fragments - sounds` per title, held at the moment a Write's grows are
+settled (`_compute_patches`, beside `_grows_within_bank_limit`).

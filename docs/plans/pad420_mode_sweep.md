@@ -701,6 +701,36 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         title the registry's candidates (`shows/cands`, `mkscan.py`) scanned with it, each named from what it sends
         (colours, how many lamps, how long) as PAD-411 named Godzilla LE's, and landed as `site show_<n>` + name /
         kind / secs lines.
+      - **Light shows, run 23: the instrument, and the route for every build.** `C:/tmp/PAD-420/shows/rt` is a
+        scratch copy of the runtime (never committed: SHOWS_MAX 400, N_SITES 1024 so a scan port can name every
+        candidate) with two recorders, built as `shows/scanlog.so` / `scanlog2.so`: (a) a hook on the light
+        runner (`site light_runner`, the target of `light_run`'s branch) logging each command the show process
+        sends (`lightlog:`), and (b) a walk of the game's lamp groups every 3 ticks logging the levels of the
+        groups the show process owns (a group's +16 is the process record that made it; `lampshow:`). The light
+        language exists only on Godzilla 1.16, Jaws 1.02 and King Kong 0.97; the other 47 builds light their shows
+        through lamp groups alone (Aerosmith's candidate 1: `lamp_group(0x60, ...)`, then 33 on/off steps 2 ticks
+        apart). `shows/scan_job3.sh` plays every candidate (`mklog.py` ports, coins one at a time after attract,
+        a candidate silent for 1.5 s stopped); `showname.py` (commands), `lampname.py` (lamp groups) and
+        `finalname.py` (both) name each from its colours, strobe / fade / sweep / chase and length; on Godzilla
+        LE's ten the kinds agree with PAD-411's. `landshows.py <key>` writes the port's block (at most 12 shows,
+        one per name, flashy first). On the older framework the first recorder logged nothing: their process
+        records are on the heap, outside the memory map the recorder read at load, so every group's owner looked
+        unreadable; scanlog2.so re-reads the map once per walk (Aerosmith's candidate 1, silent before: a 24-light
+        strobe in its own group). LE / Pro pairs share too little show code to scan one for both (`pairmap.py`:
+        25-70% of candidates the same code), so every build is scanned.
+      - **A leak in every show the runtime plays (since PAD-411), fixed: 072a46d4.** Every scan went dead 24-33
+        candidates in (every show "over after 16 ms"); King Kong LE's candidate 22 played 120 times
+        (`logports/kkle_rep22.port`, LAMPLOG 2 counting the groups) died after 26 plays as the game's lamp groups
+        went 22 -> 48. A show the game starts itself is flagged 0x20 in its process record, and the game's exit
+        (Godzilla LE 0x3f2d0c) then frees the groups it owns (0x1f3a68 -> 0x3a619c); the runtime's proc_create
+        process is not flagged, so its groups stayed. The runtime now puts an exit hook in a free slot of the show's
+        record (the game does the same for its own processes, e.g. 0x3f3e18) calling the game's free-by-owner;
+        `shows/procexit.py` found both on all 55 builds. Proven: King Kong LE's rescan matches the old one for the
+        first 23 and plays on past them.
+      - Scans now: `shows/lane.sh` x3 (chainL1-3, `lane1-3.keys`, scanlog3.so = recorders + the fix, WAIT 10 s: a
+        show still going at 10 s is offered for 8 s) over all 52 builds, the five light-language ones first. Then
+        per build: `showname.py` (light-language builds), `lampname.py`, `finalname.py`, `landshows.py`, recipes,
+        tests, commit.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

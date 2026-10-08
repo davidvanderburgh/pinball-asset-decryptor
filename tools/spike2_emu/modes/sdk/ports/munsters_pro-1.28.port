@@ -305,3 +305,15 @@ callout time_up           616   # I apologize, but you run out of time! / I'm so
 value scoop_event          2
 site scoop_handler         0x0009aed4 0xe2400002 0xe92d4030
 data scoop_slot           0x0056d834
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x005ec808
+data coil_table            0x005a8cc8
+value magnet_proc          13185
+text up_post_label        Up post
+text magnet_hold_label    Magnet
+text up_post_drive        9 0 255 150 64
+text magnet_hold_drive    9 7 255 1200 18
+text held_coils            up_post magnet_hold

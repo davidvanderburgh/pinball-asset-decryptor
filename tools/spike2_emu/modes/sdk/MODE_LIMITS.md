@@ -203,7 +203,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Rush LE 1.19 | no | ✓ | ✓ | no | never waits |
 | Rush Pro 1.19 | no | ✓ | ✓ | no | never waits |
-| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots |  |
+| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | no | ✓ | ✓ | shots | never waits |
 | Star Wars Pro 1.31 | no | ✓ | ✓ | shots | never waits |

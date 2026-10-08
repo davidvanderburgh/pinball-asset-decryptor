@@ -720,6 +720,7 @@ HELD_COILS_PROVEN = frozenset({
     ("jaws_le-1.02", "left_post"),
     ("jaws_le-1.02", "right_post"),
     ("led_zeppelin_pro-1.22", "control_gates"),  # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("star_wars_elg-1.10", "right_gate"),        # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 8 coil 2, 255 for 60 ms then 128 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
 })
 
 

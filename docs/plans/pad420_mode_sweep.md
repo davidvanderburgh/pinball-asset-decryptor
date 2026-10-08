@@ -327,6 +327,20 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       (the collision): coil_job_c.sh now waits 8 s after the plunge, and c_verdict.py finds OUR commands from the
       runtime's "HOLD for" lines (a ControlGate's drive is the game's own chunk, so powers cannot tell them apart).
       chain36 re-runs every C build with nothing proven once the batch is done.
+    * Guardians LE 1.15's orbit gates PROVEN (7779f74d): a full 1480 ms hold, and when the game raised the gates 32 ms
+      into a second hold (it does so as a mode starts) the hold let go with no OFF of its own and the game's
+      activation ran untouched. c_verdict.py counts that (TAKEN) or a mode stop's OFF (STOP) as the let-go evidence.
+    * King Kong Pro 0.97 dies in its scoop runs even on the staged card: a segv in a game listener (0x79de8, `ldrb r3,
+      [r0,#0x3c]` with r0 null from a table) called from hook_dispatch (0x378ef0, which the runtime hooks for its
+      events) - its media runs played games with the same port minus the scoop lines. Open: compare the scoop stage's
+      lines (the handler wrap, the slot) with a media run's.
+    * Queue at run 13's end (each one rig, --stage): chain30 (C coils, rig 3, 25 builds) -> chain36 (C re-runs:
+      nothing proven yet, staging/boot failures); chain27 (stack re-runs, 12) -> chain28 (media round 3, 2 rigs);
+      chain32 (scoop probes: KK Pro, LZ LE, LZ Pro with scoop_log) -> chain33 (mask probe: Jaws Pro, Metallica) ->
+      chain34 (Batman probe 2) -> chain35 (B/A' coil re-runs: Avengers Pro, JP Pro). Notes per build in
+      C:/tmp/PAD-420/RERUNS.txt. Land: scoop `scoop_verdict.py --write`, C coils `c_verdict.py` + `c_land.py --write`,
+      B coils `coil_verdict.py` + `coil_land.py --write`, stack `st3_verdict.py` + prove_set, media `land_all.sh`;
+      scoop handler events: `scoop/scoop_events.py <key>` on outp/.
     * Metallica 1.04: a game IS on screen (PLAYER 1, credits taken) but mode.log never sees in_game - the port's
       `data mode_mask 0x07000012` / busy 0x210 stays busy, as on Jaws Pro. Added to chain33's mask probe (its port
       copied to C:/tmp/PAD-420/clean/). Every Metallica mode feature waits on this.

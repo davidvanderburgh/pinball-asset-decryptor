@@ -359,6 +359,7 @@ STACK_PROVEN = frozenset({
     "venom_le-1.07", "dungeons_and_dragons_le-1.00", "king_kong_le-0.97", "mando_le-1.44",
     "iron_maiden_le-1.16", "sword_of_rage_le-1.18", "rush_le-1.18", "star_wars_le-1.30",
     "john_wick_le-1.01", "led_zeppelin_pro-1.22", "foo_fighters_le-1.04", "turtles_le-1.59",
+    "deadpool_le-1.16",                  # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's battles started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Battle Mystique: the runtime says one of the game's modes (cbattle_mystique) is running | WAITER not started (trigger file): one of the game's modes (cbattle_mystique) is running
 })
 
 

@@ -734,6 +734,8 @@ HELD_COILS_PROVEN = frozenset({
     ("iron_maiden_le-1.18", "right_post"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
     ("iron_maiden_pro-1.18", "left_post"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
     ("iron_maiden_pro-1.18", "right_post"),      # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("avengers_infinity_le-1.10", "tower_magnet"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 300 ms then 100 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("avengers_infinity_le-1.10", "tower_post"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 120 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
 })
 
 

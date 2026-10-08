@@ -206,8 +206,9 @@ function FileLine({ s, host }) {
 // host: "scenes" (the default), "images" or "video" (PAD-364).  startMode: the profile the
 // bar opens on the first time it is opened here (Images and Video: "assets", the one their
 // Color column attaches); after that it opens where it was left.  file (PAD-368): the file
-// clicked on the host, {kind, rel, label, on, attach}, or null.
-export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null }) {
+// clicked on the host, {kind, rel, label, on, attach}, or null.  cls: more classes for the bar
+// (Scenes: "cpd-beside" while its Font bar is open, PAD-452, so this tab hangs from that one).
+export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null, cls = "" }) {
   const s = useNs("color");
   const h = HOSTS[host] || HOSTS.scenes;
   const lookState = useNs(h.lookNs || "color");
@@ -234,7 +235,7 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
   const mode = s.per_file ? (s.mode || "display") : "display";
   // the dots: the host's Preview colors row where it has one, else the profiles' own word
   const parts = (look && look.parts) || s.parts || {};
-  return html`<div class=${cx("cpd", open && "open")} ref=${barRef}
+  return html`<div class=${cx("cpd", open && "open", cls)} ref=${barRef}
       style=${width ? `--cpd-w:${clampWidth(width)}px` : ""}>
     <button type="button" class="cpd-handle" aria-expanded=${open ? "true" : "false"} aria-controls="cpd-panel"
         aria-label="Color profiles" onClick=${() => setOpen(!open)}

@@ -48,6 +48,7 @@ from .. import look_switches
 from .. import video_helpers as vh
 from ..video_best import BEST_TIP, BestQualityMixin
 from ..video_modes import ModesMixin
+from ..video_undo import UndoMixin, undoable
 from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
 STOCK_COLOURED = "With its color profile"
 
 
-class VideoTab(ModesMixin, BestQualityMixin, TabService):
+class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
     ns = "video"
     key = "Replace Video"
     label = "Video"
@@ -127,6 +128,13 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         # the preview's three switches on the players (PAD-329, PAD-330), as
         # they were left last time (PAD-348)
         self._lsw = look_switches.initial(window, "video")
+        # PAD-454 (DragonRR): what each of the two players shows, as a Compare
+        # player does: "plain" (its Original / Replacement as it is) or
+        # "profile" (With its color profile); None = as the clip is set (the
+        # Replacement with its profile when one is attached).  Back to None
+        # for another clip, and the Replacement's when its switch moves
+        self._pview = {"orig": None, "rep": None}
+        self._pview_key = None
         self._color_all = False          # the Color profile tab's "every replaced video"
         self._scan_id = 0
         self._scan_dir = ""
@@ -168,6 +176,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._q_clips = []
         self._q_card = ""
         self._m_init()                  # PAD-444: Played in (video_modes.py)
+        self._u_init()                  # PAD-453: Undo / Redo (video_undo.py)
         self._m_select_after = []
         for v in (self.video_search_var, self.video_change_filter_var):
             v.trace_add("write", lambda *_a: self._refresh_list())
@@ -219,6 +228,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._set_scan_ui(False, log_it=False)
         self._clear_preview()
         self._m_reset()
+        self._u_reset()
         try:
             note = (mfr.video_length_note() or "").strip()
         except Exception:                                   # noqa: BLE001
@@ -258,30 +268,37 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         offered = self._per_file_colour()
         sw = dict(self._lsw)
         look = {"offered": offered, "on": any(sw.values()), "sw": sw, "parts": None,
-                "orig": [], "rep": [], "lut": {"orig": None, "rep": None}}
+                "orig": [], "rep": [], "lut": {"orig": None, "rep": None},
+                "views": {"orig": None, "rep": None}}
         with self._lut_lock:
             self._lut_want.clear()
         folder = self._assets_path()
+        rel = self._current
+        switch = self._color_state(rel) if rel else None
         if offered and folder and os.path.isdir(folder):
             try:
                 from ...core import colour_profile
                 look["parts"] = colour_profile.preview_parts(folder)
             except Exception:                           # noqa: BLE001
                 log.exception("preview parts")
+            look["views"] = self._pane_views(folder, rel, switch)
         if offered and look["on"] and folder and os.path.isdir(folder):
-            rel = self._current
-            switch = self._color_state(rel) if rel else None
             try:
                 from ...core import colour_profile
                 kw = dict(overlay_on=sw["overlay"], files_on=sw["files"],
                           screen_on=sw["screen"], rel=rel)
-                look.update(colour_profile.video_look(
-                    folder, switch, self._own_colours(), **kw))
-                exact = colour_profile.video_look_exact(
-                    folder, switch, self._own_colours(), **kw)
+                own, done = self._own_colours(), {}
                 prev = (self.get("look") or {}).get("lut") or {}
-                look["lut"] = {side: self._lut(exact[side], prev.get(side))
-                               for side in ("orig", "rep")}
+                for side, (part, on) in self._pane_sources(
+                        switch, look["views"]).items():
+                    if on not in done:
+                        done[on] = (
+                            colour_profile.video_look(folder, on, own, **kw),
+                            colour_profile.video_look_exact(folder, on, own,
+                                                            **kw))
+                    steps, exact = done[on]
+                    look[side] = steps[part]
+                    look["lut"][side] = self._lut(exact[part], prev.get(side))
             except Exception:                           # noqa: BLE001
                 log.exception("video machine look")
         if look != self.get("look"):
@@ -289,6 +306,73 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         if self._cmp_open:
             self._cmp_steps()
             self._cmp_publish()
+
+    def _pane_views(self, folder, rel, switch):
+        """Each player's Original / With its color profile switch (PAD-454):
+        ``{side: {"plain", "view", "name", "on", "stock"} or None}``.  On a
+        player with a clip when the clip has a color profile to show (its
+        own, else the project's individual files one), attached or not:
+        "plain" is the word for the player as it is, "view" which of the
+        two is on show, "name" the profile's, "on" whether it is attached,
+        "stock" a game's own clip on the Replacement player."""
+        key = (rel, switch, self._assign.get(rel) if rel else None)
+        if key != self._pview_key:
+            if self._pview_key is None or self._pview_key[0] != rel:
+                self._pview["orig"] = None
+            self._pview["rep"] = None
+            self._pview_key = key
+        out = {"orig": None, "rep": None}
+        if not rel:
+            return out
+        try:
+            from ...core import colour_profile
+            prof = colour_profile.asset_resolver(folder)("videos", rel)
+        except Exception:                               # noqa: BLE001
+            log.exception("video player views")
+            prof = None
+        pv = self.get("preview") or {}
+        if prof is None or pv.get("rel") != rel:
+            return out
+        stock = self._stock_coloured(rel)
+        for side in ("orig", "rep"):
+            pane = pv.get(side) or {}
+            if not pane.get("path"):
+                continue
+            plain = ("Original" if side == "rep" and stock
+                     else pane.get("title") or "Original")
+            out[side] = {"plain": plain, "name": prof.name or "",
+                         "on": bool(switch), "stock": side == "rep" and stock,
+                         "view": self._pview[side] or (
+                             "profile" if side == "rep" and switch
+                             else "plain")}
+        return out
+
+    @staticmethod
+    def _pane_sources(switch, views):
+        """Which of :func:`colour_profile.video_look`'s lists each player
+        draws through, and for which Color switch: ``{side: (list,
+        switch)}``.  With its color profile is the clip's list with the
+        switch on; a Replacement shown as it is, the one with it off; a game's
+        own clip shown as it is, its Original's."""
+        out = {"orig": ("orig", switch), "rep": ("rep", switch)}
+        for side, v in (views or {}).items():
+            if not v:
+                continue
+            if v["view"] == "profile":
+                out[side] = ("rep", True)
+            elif side == "rep":
+                out[side] = ("orig", switch) if v.get("stock")                     else ("rep", False)
+        return out
+
+    @rpc
+    def set_pane_view(self, side, view):
+        """One player's Original / With its color profile switch (PAD-454).
+        Only that player changes: nothing is attached or detached."""
+        if side not in self._pview or view not in ("plain", "profile"):
+            return False
+        self._pview[side] = view
+        self.publish_look()
+        return True
 
     def _own_colours(self):
         """The Scenes gear menu's setting: a clip with no color profile
@@ -518,6 +602,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         except Exception:                                   # noqa: BLE001
             kept = {}
         staged_changes.save(assets_dir, kept)
+        self._u_reset()
 
     def refresh_after_revert(self):
         """The video part of MainWindow.refresh_after_revert."""
@@ -709,6 +794,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         if folder_changed:
             self._clear_preview()
             self._m_reset()
+            self._u_reset()
         # the modes the card's program names (read once per card; a card read
         # before publishes now, so the rows below carry them)
         self._m_kick(scan_dir)
@@ -1166,6 +1252,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                     and not self._color_stock and self._per_file_colour())
 
     @rpc
+    @undoable("Advanced")
     def set_color_stock(self, on):
         """The Advanced box (PAD-336): unlock the Color switch on the game's
         own clips.  Unticked, they lock again and any of them already built
@@ -1217,6 +1304,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                     log.exception("video colour %s.%s", ns, name)
 
     @rpc
+    @undoable("the colors of %s")
     def set_color(self, rel, value):
         """This clip's own colour switch (PAD-312): True / False, or None
         to follow the Color profile tab's box again."""
@@ -1479,6 +1567,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("Trim / pad")
     def set_trim(self, value):
         """MainWindow._on_video_trim_toggle."""
         self.video_trim_var.set(bool(value))
@@ -1487,6 +1576,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("Use my files as-is")
     def set_no_conversion(self, value):
         """MainWindow._video_on_no_conversion_toggle."""
         self.video_no_conversion_var.set(bool(value))
@@ -1592,6 +1682,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
     # picking a replacement
     # ==================================================================
     @rpc
+    @undoable("the pick for %s")
     def choose(self, rel):
         """MainWindow._video_assign_rel: the picker, the as-is gate, the
         pick, its log line."""
@@ -1652,6 +1743,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the conversion of %s")
     def set_asis(self, rel, value):
         """MainWindow._video_set_asis: this clip's own conversion setting
         (None = follow the box)."""
@@ -1677,6 +1769,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the length of %s")
     def set_length(self, rel, value):
         """This clip's own length (PAD-215): None follows the Trim / pad
         box, "stock" cuts or pads to the stock clip, "full" keeps the
@@ -1825,6 +1918,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                    "it goes" if one else "they go"))
 
     @rpc
+    @undoable("clearing %s", "clearing %d replacements")
     def clear(self, rels):
         """The row menu's "Clear replacement(s)": one row, or the selected
         rows (MainWindow._video_clear_selected /
@@ -1844,6 +1938,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return self._clear_picks(rels)
 
     @rpc
+    @undoable("Clear replacements")
     def clear_all(self):
         """The Clear replacements… button (MainWindow._clear_all_
         replacements("video"))."""
@@ -1873,6 +1968,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
 
     # ---- Replace from folder… (MainWindow._replace_from_folder) --------
     @rpc
+    @undoable("Replace from folder")
     def replace_from_folder(self):
         from ...core import folder_match
         if self._is_running():
@@ -2162,6 +2258,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._reselect([rel])
 
     @rpc
+    @undoable("the random clips of %s")
     def add_variants(self, rel):
         """PAD-446: more clips the game may play in this slot's place, one
         of them at random each time (the file picker takes several)."""
@@ -2209,6 +2306,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the random clips of %s")
     def remove_variant(self, rel, index):
         """PAD-446: take one random clip off the slot."""
         files = list(self._variants.get(rel) or [])
@@ -2226,6 +2324,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the random clips of %s")
     def clear_variants(self, rel):
         """PAD-446: the slot plays its one clip again."""
         if not self._variants.pop(rel, None):
@@ -2512,6 +2611,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self.set(preview=pv)
         if new.get("facts") is None:
             self._load_pane_async(new)
+        # PAD-454: its Original / With its color profile switch follows it
+        self.publish_look()
 
     def _load_pane_async(self, pane):
         """_VideoPreviewPane.load: probe the clip and render its

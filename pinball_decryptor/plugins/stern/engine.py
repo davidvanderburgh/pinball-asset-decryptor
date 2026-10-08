@@ -4017,18 +4017,18 @@ def _radium_text_looks(data, ops=(), card_path=None):
     """``{text: [(align, multiline, top, fit)]}``: how each Text of the scene in *data*
     lays out its string (horizontal alignment, the Multiline flag byte, VerticalAlignment
     top, ScaleToBounds), keyed as :func:`radium.enumerate_strings` decodes it, with the
-    alignments the Scenes window's *ops* set on it (PAD-433: the same Write puts them on the
-    card) and, for the scene at *card_path*, the layout the game itself gives the lines it
-    lays out (:mod:`game_text_layout`: middle, shrunk to fit).  Empty when the scene doesn't
-    parse."""
+    alignments, line breaks and shrinking to fit the Scenes window's *ops* set on it (PAD-433,
+    PAD-452: the same Write puts them on the card) and, for the scene at *card_path*, the
+    layout the game itself gives the lines it lays out (:mod:`game_text_layout`: middle,
+    shrunk to fit).  Empty when the scene doesn't parse."""
     from . import scene_tree as _scene_tree
     try:
         scene = _scene_tree.parse(data)
     except Exception:                                  # noqa: BLE001
         return {}
-    if any(op.get("op") == "text_align" for op in ops or ()):
+    if any(op.get("op") in _LAYOUT_OPS for op in ops or ()):
         from . import scene_edit as _scene_edit
-        _scene_edit.apply_scene(scene, [op for op in ops if op.get("op") == "text_align"],
+        _scene_edit.apply_scene(scene, [op for op in ops if op.get("op") in _LAYOUT_OPS],
                                 None)
     if card_path:
         from . import game_text_layout as _gtl
@@ -4045,12 +4045,18 @@ def _radium_text_looks(data, ops=(), card_path=None):
     return out
 
 
+#: the Scenes window's edits that change where a line's padding hides (its alignment;
+#: PAD-452: its line breaks and shrinking to fit)
+_LAYOUT_OPS = ("text_align", "text_flow")
+
+
 def _scene_align_ops(assets_dir, card_path):
-    """The Scenes window's alignment edits (``text_align``) of the scene at *card_path*."""
+    """The Scenes window's alignment and layout edits (``text_align``, ``text_flow``) of the
+    scene at *card_path*."""
     from . import scene_edit as _scene_edit
     edits = _scene_edit.load(assets_dir) if assets_dir else {}
     ops = edits.get(card_path) or edits.get(card_path.rstrip("/") + "/scene.radium") or ()
-    return [op for op in ops if op.get("op") == "text_align"]
+    return [op for op in ops if op.get("op") in _LAYOUT_OPS]
 
 
 def _padded_text(new_bytes, orig_len, looks=()):

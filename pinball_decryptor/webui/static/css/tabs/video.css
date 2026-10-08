@@ -61,6 +61,9 @@
 .vid-screen .hint.err-ink { color: #f0705f; }
 .vid-seek { flex: 1 1 auto; min-width: 60px; margin: 0; accent-color: var(--accent); }
 .vid-transport { gap: 8px; flex-wrap: nowrap; }
+/* PAD-454: each player's Original / With its color profile switch, under its transport */
+.vid-view { gap: 10px; min-height: 28px; flex-wrap: nowrap; min-width: 0; }
+.vid-view .seg button { padding: 4px 10px; font-size: 12.5px; }
 .vid-cmd { width: 100%; min-height: 70px; resize: vertical; }
 
 /* "Check card…": a window over the tab, not a modal (no scrim) */

@@ -48,6 +48,12 @@ fixed-length pulse could never play one (REMAINING item 24). Press closes,
 release opens, and SwitchDriver serialises the two so a fast click cannot
 deliver them out of order and latch a switch on for good.
 
+...EXCEPT A VUK, SCOOP OR EJECT, WHICH NOW KEEPS ITS BALL PAST THE MOUSE-UP
+(PAD-450): a click drops a ball in and the switch stays made until the game
+fires that device's own coil, because the game will not count a ball that
+leaves before it kicks (James Bond LE's right VUK, the Q modes' start). See
+Field.kicker.
+
 WHAT THE COLOURS MEAN, honestly. Blue rings are switches, hold one to close it.
 Red squares are coils, which flash when the game fires them and play their
 switch when clicked (see coilact.py for why a click cannot be a real fire).
@@ -399,6 +405,11 @@ PADLED_DRIVE_READ = coilmap.DRIVE_READ
 #: comfortably visible, and it is twice as close to the real pulse - two
 #: slingshot hits 150 ms apart now read as two flashes rather than one long one.
 COIL_FLASH_MS = 130
+
+#: PAD-450: how long a ball dropped into a VUK/scoop/eject ignores its coil -
+#: the press is still crossing wsl.exe (~200 ms, item 24), and a fire before it
+#: lands kicked out a ball that was not there yet. See Field.latch_tick.
+LATCH_ARM_S = 0.4
 
 #: The pulse length for SwitchDriver.pulse(), which a mouse click no longer
 #: uses - a click is now a real press and release (REMAINING item 24), so its
@@ -3129,7 +3140,8 @@ class Field(LedRing):
     Markers keep the Tk window's semantics and colours: blue rings are
     switches (hold one to close it, right-hold to RIP it), red squares are
     coils (flash magenta when fired; a click holds the switch the coil
-    follows, or runs coilact.py where the coil MOVES a ball), dots are inserts
+    follows - found by name, PAD-450 - drops a ball into a VUK / scoop /
+    eject, or runs coilact.py where the coil MOVES a ball), dots are inserts
     at a size and opacity that follow their duty cycle. A made switch shows a
     green dot inside its ring. The page draws them; this computes them.
     """
@@ -3175,6 +3187,10 @@ class Field(LedRing):
                 self.chan_fix.setdefault(key, []).append(F)
 
         self.sw_rows = list(self.switches)
+        self._sw_named = None
+        self._kick_map = None
+        self._kick_n = 0
+        self.latched = {}       # switch id -> the ball dropped in (PAD-450)
         self._dot_drawn = {}
         self.trough = None
         self.sw = SwitchWatch(self.switches)
@@ -3260,6 +3276,12 @@ class Field(LedRing):
     def describe(self, kind, k):
         if kind == "switch":
             d = self.sw_rows[k]
+            C = self.kicker(d["id"])
+            if C is not None:
+                return ("SWITCH  %s\nid %d   node %d  bit %d\n"
+                        "click: a ball drops in and stays until the game\n"
+                        "fires %s; click again to take it out"
+                        % (d["name"], d["id"], d["node"], d["bit"], C["name"]))
             return ("SWITCH  %s\nid %d   node %d  bit %d\n"
                     "hold to keep it closed\nright-hold to RIP it (spinners)"
                     % (d["name"], d["id"], d["node"], d["bit"]))
@@ -3273,8 +3295,10 @@ class Field(LedRing):
             live = ("\nfired %d time%s, drive %d"
                     % (fires, "" if fires == 1 else "s", lvl)
                     if fires is not None else "\nno coil data")
-            act = coilact.describe(d["name"])
-            how = "hold" if coilact.hold_switch(d["name"]) is not None else "click"
+            act = coilact.describe(d["name"], self.named_switches())
+            how = ("hold" if coilact.hold_switch(d["name"], self.named_switches())
+                   is not None and not coilact.holds_ball(d["name"])
+                   else "click")
             return "COIL  %s\n%s%s\n%s: %s" % (
                 d["name"], where, live, how, act or "nothing wired")
         d = self.fixtures[k]
@@ -3304,12 +3328,99 @@ class Field(LedRing):
         the coil follows a switch, hold that switch; where it MOVES a ball
         there is nothing to hold and it stays a click. Returns the held id."""
         name = self.coils[k]["name"]
-        sw = coilact.hold_switch(name)
+        sw = coilact.hold_switch(name, self.named_switches())
         if sw is not None:
             return sw
-        if coilact.describe(name):
+        if coilact.describe(name, self.named_switches()):
             self.ctl.drv.run_script("coilact.py", name)
         return None
+
+    def named_switches(self):
+        """The title's WHOLE switch list, which coilact searches for the switch
+        a coil follows by NAME (PAD-450) - the unpositioned ones too, since
+        Godzilla's magnets read back on virtual switches with no place on the
+        artwork. Read once it exists; until then the positioned rows."""
+        if not self._sw_named:
+            self._sw_named = load_switch_list()
+        return self._sw_named or self.switches
+
+    # ---- a ball in a VUK, scoop or eject (PAD-450) --------------------------
+    def kicker(self, sw_id):
+        """The coil row that kicks a ball OUT of the device this switch reads
+        (a VUK, scoop, eject, saucer), or None.
+
+        ★ A PRESS ON ONE IS A BALL DROPPED IN, NOT A HOLD. A real ball sits on
+        the switch until the game fires the device's coil, and the game counts
+        on that: measured on James Bond LE 1.06 (PAD-450), a 170 ms click on
+        RIGHT VUK OPTO - one mouse click - scored nothing and the game only
+        cleared the VUK, while the same switch held made scored 35,070 and the
+        game kicked the ball 3.8 s later. Nobody can tell from the window how
+        long to hold, so the switch stays made until the coil fires (see
+        latch_tick), which is the machine's own answer to "how long"."""
+        named = self.named_switches()
+        if self._kick_map is None or self._kick_n != len(named):
+            self._kick_n = len(named)
+            self._kick_map = {}
+            for C in self.coils:
+                if C["node"] is None or not coilact.holds_ball(C["name"]):
+                    continue
+                sw = coilact.hold_switch(C["name"], named)
+                if sw is not None:
+                    self._kick_map.setdefault(sw, C)
+        return self._kick_map.get(int(sw_id))
+
+    def _coil_count(self, C, d=None):
+        d = self.last if d is None else d
+        if not d or len(d) < PADLED_READ or struct.unpack_from("<I", d, 4)[0] < 2:
+            return None
+        return d[COIL_OFF + C["node"] * COIL_N + C["index"]]
+
+    def latch(self, sw_id):
+        """Drop a ball into this switch's device: True when it is now LATCHED
+        (the caller presses it and does not release it on mouse-up), False
+        when there is no coil to watch and it stays an ordinary hold."""
+        C = self.kicker(sw_id)
+        if C is None or self._coil_count(C) is None:
+            return False
+        self.latched[int(sw_id)] = dict(coil=C, count=self._coil_count(C),
+                                        at=time.monotonic())
+        return True
+
+    def latch_tick(self, d):
+        """Open every latched switch whose coil has fired: the ball left.
+
+        The first LATCH_ARM_S re-seeds the count instead, because the press
+        is still on its way through wsl.exe (~200 ms): a fire in that window -
+        a ball search, the game clearing the device - happened before the ball
+        was there and must not take it back out. A latched switch that went
+        open some other way (the keyboard, a script) is let go as well."""
+        now = time.monotonic()
+        for sw, L in list(self.latched.items()):
+            c = self._coil_count(L["coil"], d)
+            if c is None:
+                continue
+            if now - L["at"] < LATCH_ARM_S:
+                L["count"] = c
+                continue
+            made = self.sw.is_made(sw)
+            if c != L["count"]:
+                del self.latched[sw]
+                self.ctl.drv.release(sw)
+                self.ctl.flash("%s fired - the ball left %s"
+                               % (L["coil"]["name"], self._sw_name(sw)))
+            elif made:
+                L["seen"] = True
+            elif made is False and L.get("seen"):
+                # only once the press has been SEEN made: before that it may
+                # simply not have crossed wsl.exe yet
+                del self.latched[sw]
+                self.ctl.flash("%s opened" % self._sw_name(sw))
+
+    def _sw_name(self, sw_id):
+        for r in self.named_switches():
+            if r["id"] == sw_id:
+                return r["name"]
+        return "switch %d" % sw_id
 
     # ---- live LED and coil state --------------------------------------------
     def read_leds(self):
@@ -3493,6 +3604,8 @@ class Field(LedRing):
                 self._tick_coils(d, time.monotonic() * 1000.0, cf)
                 if cf:
                     frame["coil"] = cf
+                if self.latched:
+                    self.latch_tick(d)
                 if self.shaker is not None:
                     shk = self.shaker.tick(d, time.monotonic() * 1000.0)
                     if shk is not None:
@@ -4240,9 +4353,27 @@ class Playfield:
     # page's release, and the release opens what was HELD (a drag off the
     # marker before letting go must not leave the switch made)
     def api_hold(self, sw_id):
+        sw_id = int(sw_id)
         if self.holding is not None:
             self.drv.release(self.holding)
-        self.holding = int(sw_id)
+            self.holding = None
+        # PAD-450: a VUK, scoop or eject switch is a ball dropped in. It stays
+        # made past the mouse-up until the game fires the device's coil
+        # (Field.latch_tick); a second click takes the ball back out by hand.
+        view = self.view
+        if isinstance(view, Field) and view.kicker(sw_id) is not None:
+            if sw_id in view.latched:
+                del view.latched[sw_id]
+                self.drv.release(sw_id)
+                self.flash("ball taken out of %s by hand" % view._sw_name(sw_id))
+                return True
+            if view.latch(sw_id):
+                self.drv.press(sw_id)
+                self.flash("ball in %s - it stays until the game fires %s"
+                           % (view._sw_name(sw_id), view.kicker(sw_id)["name"]),
+                           secs=60.0)
+                return True
+        self.holding = sw_id
         self.drv.press(self.holding)
         return True
 

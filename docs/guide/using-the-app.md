@@ -170,7 +170,10 @@ sound, and Play all / From the start / Loop keep them in step. A game's
 own clip is marked **Locked** on its player, and the **Advanced** box at
 the top of Compare unlocks it there as on the list; with its color
 profile attached it shows **With its color profile** (on the list too,
-in the right-hand player). On Spike 2 every player draws its clip
+in the right-hand player). Under each of the list's two players,
+**Original** (or **Replacement**) and **With its color profile** switch
+that player between the clip as it is and the clip through its color
+profile, attached or not; only the player changes. On Spike 2 every player draws its clip
 through its colors the way Scenes draws a picture, color ranges and
 curves included, frame by frame as it plays. The Big Lebowski's colour-DMD `.cdmd` clips are supported
 too — they're re-encoded back into `.cdmd` at the original frame
@@ -258,6 +261,12 @@ replacement in it, and then only that mode plays yours. That mode's
 clip goes on the card as a new clip, so it takes an image build (not
 a direct SD write); clear the replacement and the row follows the
 first again.
+**Undo and Redo.** The *Undo* and *Redo* buttons at the top of the
+tab (Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z) take back, or make again, your
+last changes one step at a time: a pick, a clear, Replace from
+folder, a clip's own conversion, length, colors or random clips, and
+the boxes over the list. The history lasts until the app closes or
+another project opens.
 
 ## Write tab
 

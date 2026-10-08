@@ -586,6 +586,21 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         Mandalorian LE / Pro. **Lights and lit shots are yellow on no newest build now.**
       - Batman 1.14 media PROVEN (NOCENSUS: screen, and the clip in its HUD graft) and landed; Deadpool Pro's
         scoop too (as the LE). Star Wars LE: the flippers drive its ball-start choice but nothing ends it.
+    * Run 20 (2026-10-08 11:40-):
+      - **Harness**: coins one at a time, 1 s apart (`coils/coil_job_c2.sh`, as PAD-306) - Metallica had counted 3
+        of 8 dropped 0.7 s apart; its loop up post PROVEN (cdevice_loop_diverter, device 22: 170/32 then 68, 1032
+        ms), landed. TMNT LE starts a game on FRESH NVRAM (not on the one a run leaves): pizza magnet PROVEN,
+        landed; its check (check_job4) scored 25 shots, so its ball save runs through `jobs/wipe_then.sh JOB=bs_job.sh`.
+        Jaws Pro: `jobs/check_job4.sh` leaves Guided Setup (`bs/guided.sh` after the tables, then a second boot) -
+        but Jaws Pro's Guided Setup opens with the cursor in the language VALUES (English in cyan, the left row
+        blinking), where `menurow.py` sees no menu and BACK does not leave it; `jobs/guided_probe.sh` walks it with
+        SELECT, a frame per press (gprobe/).
+      - **Clips grafted into the HUD** (the Pros / Rush draw no video bank in play, or draw it under the song
+        video): each HUD's Video class and key read off the scene with `scene_tree.parse` - a free class id, one
+        past the library's highest symbol key (the same reading gives Iron Maiden's measured (6, 103)): Stranger
+        Things Pro (5, 56), Venom Pro (5, 21), Rush LE / Pro (6, 26); TITLE_SCENES bank = the HUD, the port's
+        `scene video_bank` = the HUD scene, `value clip_surface_hide 1`. All four PROVEN (magenta 72-84%), landed.
+        Clips are yellow only on Star Wars LE now (its ball-start choice screen never ends on the rig).
       - Harness, next: TMNT LE's stage A game runs, its stage B boot (same NVRAM) shows CREDITS 10 1/2 and ignores
         Start (balls the game still counts in the van?); Metallica counts 3 of 8 coins after Guided Setup (coins
         120 ms closed, 0.7 s apart); Elvira has no game on the direct harness.

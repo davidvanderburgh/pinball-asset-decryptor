@@ -822,6 +822,7 @@ HELD_COILS_PROVEN = frozenset({
     ("james_bond_le-1.06", "gate"),              # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("james_bond_pro-1.06", "gate"),             # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("aerosmith_le-1.16", "upper_gate"),         # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 10 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; when the game raised it mid-hold, let go with no OFF of its own; no abort
+    ("guardians-1.15", "orbit_gates"),           # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 

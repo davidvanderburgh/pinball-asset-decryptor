@@ -331,3 +331,16 @@ callout time_up           259   # Time's up. / You
 value scoop_event          2
 site scoop_handler         0x00080fe8 0xe2400002 0xe92d40f0
 data scoop_slot           0x005bfaa0
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x0062e734
+data coil_table            0x0062e684
+value magnet_proc          13185
+text orbit_gates_label    Orbit control gates left/right
+text orbit_gates_drive    9 0 255 250 255 1488
+data orbit_gates_obj     0x005f19b0
+value orbit_gates_ctl     12
+value orbit_gates_off_slot 5
+text held_coils            orbit_gates

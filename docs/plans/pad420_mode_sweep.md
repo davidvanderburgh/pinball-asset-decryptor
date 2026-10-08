@@ -503,6 +503,30 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         `/init /mnt/c/Windows/...` wrapper lets a batch go on (that build then fails staging and is re-run).
       - `tests/test_spike2_rig_slots.py::test_rigbatch_boots_staged_copies_and_reuses_them` fails under Git Bash
         (rigbatch.sh needs setsid); it passes in WSL - not a regression.
+    * Run 18 (2026-10-08 08:50-): one rig until David's 09:00 "you can use more rigs now", then three (slots 2-4;
+      slot 1 is PAD-455's). chain59/60 (waiting behind the serial chain) were replaced by chain61/62 at once.
+      - Landed: Aerosmith Pro/LE 1.16 and Guardians LE 1.15 stack records (each start's ids + 4: Super Scoring
+        named and the waiting mode refused), X-Men Pro's magnet (255 for adj 182 = 1000 ms, then 82).
+      - **Mode flags moved by 5 on the newer framework**: Batman 1.14's (1.13's 58 / 71 -> 63 / 76) and Stranger
+        Things 1.13's (1.12's 78 / 80 / 32 / 131 / 111 / 99 / 109 -> + 5). Each build's own set / clear / get are
+        found by `coils/flagfuncs.py <key> <game_flags holder>` (Batman 1.14: set 0x488e90, clear 0x488e48, get
+        0x488f28 - the 0x488ee0 of run 17 was inside the write function; ST 1.13: 0x2840ac / 0x284064 / 0x284144,
+        ST LE 1.13: 0x4836e8 / 0x4836a0 / 0x483780) and `coils/flagwrites.py <key> <fn> [lo hi]` reads the flag
+        each start sets. Batman 1.14's draft 86 / 88 were wrong; its episodes have flags too (51-60, each start
+        asks first, sets, its stop clears), so its test port lists 12 (st3/ports16, Batphone Hurry Up's start left
+        out of the test: it takes r0-r3 and sets none). Runs: chain63 (Batman, `STARTER=stack5.so`: the starts
+        called with r1-r3 0), chain65 (ST, ST LE, Guardians Pro again - a multiball was on at its first ask).
+      - X-Men Pro's block starts are METHODS: called with no object its Fastball Special segv'd. stack4.so now
+        skips object-less starts on a title whose block lines name objects; its test port has `data block_obj_N`
+        for the eight battles (running_objs.py's objects).
+      - **D&D LE/Pro held coils**: their posts, diverter and magnet are objects of `cup_post` (device 11),
+        `cdiverter` (14), `cmagnet` (13) - each constructor hardcodes its device at +8, and processes spawned with
+        the object drive it: 255 for 64 ms then 128 to 1500 ms (posts, diverter: Mandalorian's proven gate's
+        command), the magnet's grab 255 for 64 then 128 to 800 ms. `coils/cgen.py` PRESET stages them; chain64.
+      - Magnet part (27 builds "has not found how X drives its magnet"): the held-coil alias works where a magnet
+        coil is proven (X-Men LE/Pro, Munsters LE/Pro, TMNT Pro) but each also needs the shot its magnet sits at;
+        Munsters' and TMNT's magnets have no place on the playfield map and X-Men's nearest switch is 67 px away,
+        so their shot has to come from the switch the game's own magnet rule answers.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

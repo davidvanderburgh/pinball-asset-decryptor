@@ -982,6 +982,7 @@ STACK_BYTES_PROVEN = frozenset({
     "uncanny_xmen_le-0.98",           # 2026-09-26: nothing running -> started; A Fiery Assault's start called ->
                                       # "one of the game's modes (A Fiery Assault)", refused; its own stop called
                                       # -> nothing, started (the score shows Fiery Assault's 500,000 had paid)
+    "uncanny_xmen_pro-0.98",          # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; each battle's object through its own class's constructor, as on X-Men LE 0.98): with nothing running a stack no mode started; A Fiery Assault's start, called with its object, was named running from its byte (object + 0x74) and the mode refused
 })
 
 

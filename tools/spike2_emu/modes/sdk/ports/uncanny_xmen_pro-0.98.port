@@ -183,17 +183,6 @@ scene hud                  0da52941985fea0ac31857f47794e990638156bb
 
 # ---- callouts and text ----
 text example_start_shot     X mansion tgt
-text mode_running_name_1   A Fiery Assault
-text mode_running_name_2   Bitter Rivalry
-text mode_running_name_3   Escape Nimrod
-text mode_running_name_4   Genosha Under Siege
-text mode_running_name_5   Mayhem in Midtown
-text mode_running_name_6   Rescue the Innocent
-text mode_running_name_7   Sentinel Facility Raid
-text mode_running_name_8   Smuggled Cargo
-text mode_running_name_9   Stopping a Juggernaut
-text mode_running_name_10  Future Hurry Up
-text mode_running_name_11  Surrender Mutants
 
 # ---- events ----
 event game_start     0x4d
@@ -342,3 +331,26 @@ text magnet_hold_label    Magnet
 text right_return_up_drive 8 7 a169 0 a169 1250
 text magnet_hold_drive    9 0 255 a182 82 1200
 text held_coils            right_return_up magnet_hold
+
+# PAD-420: its modes' running bytes (object + 0x74), each object found through its own class's constructor as on
+# X-Men LE 0.98's proven port (coils/running_objs.py; Escape Nimrod's object not reached that way - left out)
+data mode_running_1        0x0063badc      # A Fiery Assault at 0x0063ba68 + 0x74 (class Mode_A_Fiery_Assault, as on uncanny_xmen_le-0.98)
+text mode_running_name_1   A Fiery Assault
+data mode_running_2        0x0063b97c      # Bitter Rivalry at 0x0063b908 + 0x74 (class Mode_Bitter_Rivalry, as on uncanny_xmen_le-0.98)
+text mode_running_name_2   Bitter Rivalry
+data mode_running_3        0x0063b86c      # Genosha Under Siege at 0x0063b7f8 + 0x74 (class Mode_Genosha_Under_Siege, as on uncanny_xmen_le-0.98)
+text mode_running_name_3   Genosha Under Siege
+data mode_running_4        0x0063b794      # Mayhem in Midtown at 0x0063b720 + 0x74 (class Mode_Mayhem_In_Midtown, as on uncanny_xmen_le-0.98)
+text mode_running_name_4   Mayhem in Midtown
+data mode_running_5        0x0063b694      # Rescue the Innocent at 0x0063b620 + 0x74 (class Mode_Rescue_The_Innocent, as on uncanny_xmen_le-0.98)
+text mode_running_name_5   Rescue the Innocent
+data mode_running_6        0x0063b574      # Sentinel Facility Raid at 0x0063b500 + 0x74 (class Mode_Sentinel_Facility_Raid, as on uncanny_xmen_le-0.98)
+text mode_running_name_6   Sentinel Facility Raid
+data mode_running_7        0x0063b44c      # Smuggled Cargo at 0x0063b3d8 + 0x74 (class Mode_Smuggled_Cargo, as on uncanny_xmen_le-0.98)
+text mode_running_name_7   Smuggled Cargo
+data mode_running_8        0x0063b36c      # Stopping a Juggernaut at 0x0063b2f8 + 0x74 (class Mode_Stopping_A_Juggernaut, as on uncanny_xmen_le-0.98)
+text mode_running_name_8   Stopping a Juggernaut
+data mode_running_9        0x0063a5ac      # Future Hurry Up at 0x0063a538 + 0x74 (class Future_Hurry_Up, as on uncanny_xmen_le-0.98)
+text mode_running_name_9   Future Hurry Up
+data mode_running_10       0x0063c634      # Surrender Mutants at 0x0063c5c0 + 0x74 (class Surrender_Mutants, as on uncanny_xmen_le-0.98)
+text mode_running_name_10  Surrender Mutants

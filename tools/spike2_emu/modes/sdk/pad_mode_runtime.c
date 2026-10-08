@@ -639,15 +639,11 @@ unsigned pm_player(void)
     return p >= 1 && p <= 4 ? p : 0;
 }
 
-/* In a game: a player, none of the mode mask's busy bits set (attract, the menus), and - PAD-420, where a title's
- * mask marks a game by a bit it SETS (Jaws Pro 1.02: 0x0010 in attract, 0x0110 in a game; its bit 4 never clears) -
- * every one of `value mode_mask_game`'s bits set (default none). */
 int pm_in_game(void)
 {
     unsigned busy = (unsigned)pm_port_value("mode_mask_busy", 0);
-    unsigned game = (unsigned)pm_port_value("mode_mask_game", 0);
     unsigned mask = data("mode_mask") ? *(unsigned short *)(unsigned long)data("mode_mask") : 0;
-    return pm_player() != 0 && (mask & busy) == 0 && (mask & game) == game;
+    return pm_player() != 0 && (mask & busy) == 0;
 }
 
 /* A title with 32-bit scores (The Beatles 1.29: score_add(u8 player, u32 points) -> u32, the scores

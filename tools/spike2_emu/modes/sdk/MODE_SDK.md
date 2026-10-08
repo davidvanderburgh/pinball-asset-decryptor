@@ -802,8 +802,7 @@ Emulator-proven on Godzilla Premium 1.16 (the showcase card, 2026-09-18).
   it does on a multiball drain or a ball save is not measured.
 - **`pm_in_game()`:** a player is up, and the game's mode mask shows none of the port's
   `mode_mask_busy` bits. Those bits are set at game over and in menus; they are not fully
-  decoded. A title whose mask marks a game by a bit it SETS names it `value mode_mask_game`
-  (Jaws Pro 1.02: 0x0010 in attract, 0x0110 in a game, so busy 0x200 and game 0x100).
+  decoded.
 - **Repeated shot bits:** on Godzilla a switch dispatches `0x1` and then its shot bit; on
   Jaws both come in one dispatch; TMNT Pro sends only the shot bit. Whether one shot
   can repeat its own bit (a loop, a spinner) is not measured for every shot. Spinners

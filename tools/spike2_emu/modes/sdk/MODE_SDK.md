@@ -1992,12 +1992,35 @@ starts it. `PM_WIZARD_START` then calls the game's start (`wizard_start`), so th
 or not, in a game (the tick thread is the game's own logic thread, as the Right ramp's handler). One the player has
 played this game plays again. The game's own lighting carries on as before (a film hand-out is IN ADDITION, as asked).
 
+**The one handed over is the one that starts (PAD-457).** A Bond owner set each film to start its mini-wizard,
+finished From Russia With Love, saw the Right ramp's inserts cycle as the game's own do, and the ramp started Duel on
+the Disco Volante. Two things in the game's program did it. Its own lighting (`0x110cac`) lights EVERY one not
+played and its selection shots (`0x110c38`, from three switch handlers) cycle among the lit ones, so lighting ours
+beside the game's left the choice open. And its check (`0x110b90`) counts the henchman, villain and Q Branch modes
+as in the way (`0x1360d4`, `0x15f410`, `0x19ea7c`: the same modules call the collect `0x1d0918`), so a film's last
+part, collected as one of those modes is won, arrives while that mode still runs: `start` was lit instead, for
+good. Now, per player, the runtime keeps a list of the ones handed over and not started:
+
+- The first is the only one lit and the one selected, checked every tick. What the game lit itself meanwhile is
+  owed (`[pad] game wizard 2 (Ahoy Mr. Bond): the game lit 0xd for player 1 as well - those wait until this one
+  has started`) and lit again once it has started, so the game's own award is not lost.
+- It has started when its lit mask goes to 0 (only the game's start unlights them all; its lighting always lights
+  one) or, lit otherwise, when its running query (the entry's fifth word) answers. Then the next one handed over
+  is lit, or the owed ones.
+- A `start` the game would not start yet calls the game's start again, 250 ms apart, while that player's ball lasts
+  and no mode of ours holds the game's modes off (calling it when not ready writes nothing: `0x110d98` returns at
+  its check). If the ball ends first it stays lit for the start shot.
+- A new game (`event game_start`, or the game's player set-up: selected -1, lit and played 0) drops the list.
+
+`wizards_arm` now also checks each entry's running query is in the game's code.
+
 **With a mode of yours that holds the game's modes off.** Ahoy Mr. Bond's start (`block_start_6`) is one a mode of
 yours may refuse (PAD-363). The game's start code goes on after a refused start as if it began: it unlights them all
 and marks it played, so the player would lose it. When the veto refuses a mini-wizard's start, the runtime keeps the
 player's three words as they were and puts them back on the next tick (`[pad] game wizard 2 (Ahoy Mr. Bond): its
 start was refused while ... runs - kept lit`), so the Right ramp starts it once your mode ends. And while a mode of
-yours holds the game's modes off, `PM_WIZARD_START` lights instead of starting.
+yours holds the game's modes off, `PM_WIZARD_START` lights instead of starting, and starts it once that mode ends
+(that ball).
 
 **The port lines** (`james_bond_le-1.06.port`). `wizards_arm` checks each table entry against the build (its index,
 its bit, a start in the game's code) before it offers any (`PM_CAN_GAME_WIZARDS`, logged `[pad] game wizards: 4 of

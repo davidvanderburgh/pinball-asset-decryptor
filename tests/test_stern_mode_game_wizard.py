@@ -13,6 +13,11 @@ What is worth failing on:
   * THE BLOCK hands one over by name, refused where the game has none.
   * THE RUNTIME keeps a refused start lit: a mode of ours that holds the game's modes off vetoes Ahoy Mr. Bond's
     start, and the game's start would otherwise unlight it and mark it played.
+  * THE ONE HANDED OVER IS THE ONE THAT STARTS (PAD-457): the game's own lighting lights every one not played and its
+    selection shots cycle among the lit ones, so a Bond owner who finished From Russia With Love got Duel on the
+    Disco Volante off the Right ramp. Until the game starts it, it is the only one lit and the one selected; the
+    game's own are lit again after. A start the game refuses (the film's last part comes from a mode still running)
+    starts the moment the game would, that ball; two handed over start in order; a new game drops them.
 """
 import json
 import os
@@ -249,20 +254,30 @@ struct pm_mode { int x; };
 static unsigned can = PM_CAN_GAME_WIZARDS;
 static unsigned state[12], table[4][8];
 static unsigned char dirty;
-static int ready = 1, in_game = 1, starts;
-static unsigned player = 1;
+static int ready = 1, in_game = 1, starts, run[4];
+static unsigned player = 1, stock_ball_ends, games;
+static unsigned long now = 10000;
 static const struct pm_mode ours = { 1 }, *block_owner, *running;
 static char block_who[40] = "RUSH";
 static int game_start(void) { starts++; return 1; }
-static int wizard_start(void)                 /* the game's 0x110d98 */
+static int run0(void) { return run[0]; }
+static int run1(void) { return run[1]; }
+static int run2(void) { return run[2]; }
+static int run3(void) { return run[3]; }
+static int (*const RUN[4])(void) = { run0, run1, run2, run3 };
+static int wizard_start(void)                 /* the game's 0x110d98: ready = nothing of its own in the way */
 {
     unsigned p = player, sel = state[p - 1];
-    if (!ready || !state[4 + p - 1]) return 0;
+    if (!ready || !state[4 + p - 1] || run[0] || run[1] || run[2] || run[3]) return 0;
     starts += 100 * (int)(sel + 1);           /* which one it started */
+    run[sel & 3] = 1;
     state[4 + p - 1] = 0;
     state[8 + p - 1] |= table[sel & 3][1];
     return 1;
 }
+unsigned long pm_ms(void) { return now; }
+int pm_event(const char *n) { return !strcmp(n, "game_start") ? 7 : -1; }
+static unsigned event_count(int id) { return id == 7 ? games : 0; }
 static void say(const char *fmt, ...) { va_list a; va_start(a, fmt); printf("SAY "); vprintf(fmt, a); printf("\n"); va_end(a); }
 static unsigned data(const char *n)
 {
@@ -283,11 +298,15 @@ unsigned pm_player(void) { return player; }
 int pm_in_game(void) { return in_game; }
 static int wizards_n = 4;
 static struct { int n; unsigned p, sel, lit, played; } wiz_hold;
+%(due)s
 %(lifted)s
 int main(int argc, char **argv)
 {
     int i, k;
-    for (k = 0; k < 4; k++) { table[k][0] = (unsigned)k; table[k][1] = 1u << k; table[k][3] = 0x1000u + (unsigned)k; }
+    for (k = 0; k < 4; k++) {
+        table[k][0] = (unsigned)k; table[k][1] = 1u << k; table[k][3] = 0x1000u + (unsigned)k;
+        table[k][4] = (unsigned)(unsigned long)RUN[k];
+    }
     for (i = 1; i < argc; i++) {
         const char *c = argv[i];
         if (!strcmp(c, "light") || !strcmp(c, "start")) {
@@ -298,10 +317,24 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "nogame")) in_game = 0;
         else if (!strcmp(c, "player")) player = (unsigned)atoi(argv[++i]);
         else if (!strcmp(c, "block")) block_owner = running = &ours;
+        else if (!strcmp(c, "unblock")) running = 0;
         else if (!strcmp(c, "ramp_vetoed")) {    /* the Right ramp while a mode of ours refuses the start */
             wizard_refused(table[state[player - 1] & 3][3]);
             state[4 + player - 1] = 0;          /* what the game's start then does anyway */
             state[8 + player - 1] |= table[state[player - 1] & 3][1];
+        } else if (!strcmp(c, "light_all")) {   /* the game's 0x110cac: every one not played, one selected */
+            state[4 + player - 1] = ~state[8 + player - 1] & 0xfu;
+            state[player - 1] = (unsigned)atoi(argv[++i]);
+        } else if (!strcmp(c, "cycle")) {       /* the game's 0x110c38: the next lit one selected */
+            unsigned s = state[player - 1] & 3, t = s;
+            do t = (t + 1) & 3; while (t != s && !(state[4 + player - 1] & (1u << t)));
+            state[player - 1] = t;
+        } else if (!strcmp(c, "ramp")) wizard_start();   /* the Right ramp's handler */
+        else if (!strcmp(c, "ends")) run[0] = run[1] = run[2] = run[3] = 0;   /* the running one ends */
+        else if (!strcmp(c, "ball_end")) stock_ball_ends++;
+        else if (!strcmp(c, "wait")) now += 300;
+        else if (!strcmp(c, "new_game")) {      /* the game's player set-up (0x1109dc), then its game_start event */
+            state[player - 1] = ~0u; state[4 + player - 1] = state[8 + player - 1] = 0; games++;
         } else if (!strcmp(c, "tick")) wizards_tick();
         dirty = 0;
         printf("S p%u sel %u lit %x played %x starts %d\n", player, state[player - 1], state[4 + player - 1],
@@ -318,10 +351,20 @@ def _wiz(tmp_path, *args):
     from tests.test_spike2_mode_roster import _host_run, _lift
     lifted = "\n".join(_lift(src, sig) for sig in (
         "static unsigned *wizard_entry(int n)", "static const char *wizard_name(int n)",
-        "static void wizard_refused(unsigned start)\n{", "static void wizards_tick(void)",
+        "static void wizard_refused(unsigned start)\n{", "static int wizard_running(int n)",
+        "static void wizard_pin(unsigned p)", "static void wizard_due_next(unsigned p)",
+        "static void wizard_due_start(unsigned p)", "static void wizards_tick(void)",
         "int pm_game_wizard(int n, int how)", "int pm_game_wizard_named(const char *name, int how)"))
-    out = _host_run(tmp_path, WIZ_HOST.replace("%(lifted)s", lifted), flags=("-no-pie", "-fno-pie"), args=args)
+    due = re.search(r"#define WIZ_DUE_MAX \d+\n", src).group(0) + re.search(
+        r"static struct \{\n    unsigned char n\[WIZ_DUE_MAX\];.*?\} wiz_due\[4\];\nstatic unsigned wiz_game;", src,
+        re.S).group(0)
+    code = WIZ_HOST.replace("%(due)s", due).replace("%(lifted)s", lifted)
+    out = _host_run(tmp_path, code, flags=("-no-pie", "-fno-pie"), args=args)
     return out.splitlines()
+
+
+def _states(out):
+    return [line for line in out if line.startswith("S ")]
 
 
 def test_the_runtime_lights_one_as_the_game_does(tmp_path):
@@ -354,6 +397,72 @@ def test_the_runtime_keeps_a_vetoed_start_lit_on_the_next_tick(tmp_path):
     assert states[-2] == "S p2 sel 1 lit 0 played 2 starts 0"          # the game's start, refused, unlit it
     assert states[-1] == "S p2 sel 1 lit 2 played 0 starts 0"          # and the tick put it back
     assert any("its start was refused while RUSH runs - kept lit for player 2" in line for line in out)
+
+
+def test_the_one_handed_over_is_the_one_the_ramp_starts_when_the_game_lit_them_all(tmp_path):
+    """PAD-457, the report: From Russia With Love done (Ahoy Mr. Bond handed over) on top of the game's own lighting
+    (every one not played), a selection shot, and the Right ramp started Duel on the Disco Volante."""
+    out = _wiz(tmp_path, "light_all", "3", "light", "Ahoy Mr. Bond", "cycle", "tick", "light_all", "0", "tick",
+               "ramp", "tick")
+    s = _states(out)
+    assert s[1] == "S p1 sel 1 lit 2 played 0 starts 0"        # handed over: the only one lit, and selected
+    assert s[2] == "S p1 sel 1 lit 2 played 0 starts 0"        # the selection shot has nowhere else to go
+    assert s[5] == "S p1 sel 1 lit 2 played 0 starts 0"        # the game lit them all again: pinned back
+    assert s[6] == "S p1 sel 1 lit 0 played 2 starts 200"      # the Right ramp started Ahoy Mr. Bond
+    assert s[7] == "S p1 sel 1 lit d played 2 starts 200"      # and the game's own three are lit again
+    assert any("the game lit 0xd for player 1 as well" in line for line in out)
+    assert any("the ones the game lit itself (0xd) are lit again for player 1" in line for line in out)
+
+
+def test_a_start_the_game_refuses_starts_the_moment_it_would(tmp_path):
+    """The film's last part comes from a henchman, villain or Q Branch mode still running, which the game's own check
+    counts as in the way: "Start it at once" then starts it as soon as that mode is done, not only off the ramp."""
+    out = _wiz(tmp_path, "light_all", "3", "notready", "start", "Ahoy Mr. Bond", "tick", "wait", "tick", "ready",
+               "tick", "wait", "tick", "tick")
+    s = _states(out)
+    assert "R 1" in out and s[2] == "S p1 sel 1 lit 2 played 0 starts 0"
+    assert s[5] == "S p1 sel 1 lit 2 played 0 starts 0"        # in the way: still waiting, still the one lit
+    assert s[7] == "S p1 sel 1 lit 2 played 0 starts 0"        # tried no more than every 250 ms
+    assert s[9] == "S p1 sel 1 lit d played 2 starts 200"      # started, and the game's own lit again
+    assert s[10] == s[9]
+    assert any("started the moment the game would, this ball" in line for line in out)
+    assert any("now that nothing is in its way, player 1" in line for line in out)
+
+
+def test_a_refused_start_waits_for_the_ramp_once_its_ball_has_ended(tmp_path):
+    out = _wiz(tmp_path, "notready", "start", "Ahoy Mr. Bond", "ball_end", "ready", "wait", "tick", "wait", "tick",
+               "ramp", "tick")
+    s = _states(out)
+    assert s[7] == "S p1 sel 1 lit 2 played 0 starts 0"        # not started on the next ball by itself
+    assert s[8] == "S p1 sel 1 lit 0 played 2 starts 200"      # the Right ramp starts it
+    assert sum("the ball ended before the game would start it" in line for line in out) == 1
+
+
+def test_a_start_held_off_by_a_mode_of_ours_starts_when_it_ends(tmp_path):
+    out = _wiz(tmp_path, "block", "start", "Ahoy Mr. Bond", "wait", "tick", "unblock", "wait", "tick")
+    s = _states(out)
+    assert s[3] == "S p1 sel 1 lit 2 played 0 starts 0"
+    assert s[-1] == "S p1 sel 1 lit 0 played 2 starts 200"
+
+
+def test_two_handed_over_start_in_order(tmp_path):
+    out = _wiz(tmp_path, "light", "Ahoy Mr. Bond", "light", "Duel on the Disco Volante", "cycle", "ramp", "tick",
+               "ramp", "ends", "ramp", "tick")
+    s = _states(out)
+    assert s[1] == s[2] == "S p1 sel 1 lit 2 played 0 starts 0"   # Disco Volante waits its turn
+    assert s[3] == "S p1 sel 1 lit 0 played 2 starts 200"
+    assert s[4] == "S p1 sel 3 lit 8 played 2 starts 200"         # then it is the one lit
+    assert s[5] == s[4]                                           # not while Ahoy Mr. Bond runs
+    assert s[7] == "S p1 sel 3 lit 0 played a starts 600"
+    assert s[8] == s[7]
+    assert any("after Ahoy Mr. Bond, which was handed over first" in line for line in out)
+
+
+def test_a_new_game_drops_what_was_handed_over(tmp_path):
+    out = _wiz(tmp_path, "light", "Ahoy Mr. Bond", "new_game", "tick", "tick", "light_all", "0", "tick")
+    s = _states(out)
+    assert s[2] == s[3] == "S p1 sel 4294967295 lit 0 played 0 starts 0"
+    assert s[5] == "S p1 sel 0 lit f played 0 starts 0"           # the game's own lighting, left alone
 
 
 def test_the_runtime_refuses_with_no_game_or_no_such_wizard(tmp_path):

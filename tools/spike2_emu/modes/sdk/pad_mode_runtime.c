@@ -4901,10 +4901,26 @@ static void shake_arm(void)
  * A mini-wizard's start is also one a mode of ours may hold off (`block_start_<id>`: Ahoy Mr. Bond's on Bond LE
  * 1.06). The game's start goes on after a refused one as if it began: it unlights them all and marks it played,
  * so the player would lose it. The runtime puts the player's three words back as they were on the next tick,
- * and the start shot starts it once our mode has ended. */
+ * and the start shot starts it once our mode has ended.
+ * PAD-457: one handed over stays THE one until the game starts it. The game's own lighting lights every one not
+ * played and its selection shots cycle among the lit ones, so the start shot could start another (a Bond owner
+ * finished From Russia With Love and the Right ramp gave Duel on the Disco Volante). Until it starts, it is the
+ * only one lit and the one selected; what the game lit itself meanwhile is owed, and given back once it has
+ * started. A `start` the game would not start then (a film's last part comes from a henchman, villain or Q
+ * Branch mode that is still running, and those are in its way) is started the moment the game would, that ball. */
 #define WIZARDS_MAX 8
+#define WIZ_DUE_MAX 4
 static int wizards_n;
 static struct { int n; unsigned p, sel, lit, played; } wiz_hold;   /* a refused start, put back on the next tick */
+static struct {
+    unsigned char n[WIZ_DUE_MAX];     /* handed over and not started yet, in order: n[0] is the one lit */
+    unsigned char start[WIZ_DUE_MAX]; /* ... to be started at once (as soon as the game would), not only lit */
+    int count;
+    unsigned owed;                    /* the game's own lit ones, unlit while ours waits */
+    unsigned ball;                    /* the ball n[0] was handed over on (stock_ball_ends) */
+    unsigned long tried;              /* n[0]'s last start (pm_ms) */
+} wiz_due[4];
+static unsigned wiz_game;             /* the game the hand-overs belong to (its game_start events) */
 
 int pm_game_wizards(void)
 {
@@ -4942,27 +4958,122 @@ static void wizard_refused(unsigned start)
     wiz_hold.played = st[8 + p - 1];
 }
 
-/* every tick: a refused start's words put back */
+/* the game's own running query for one (its table entry's fifth word: Ahoy Mr. Bond's tests its ACTIVE flag) */
+static int wizard_running(int n)
+{
+    return ((int (*)(void))(unsigned long)wizard_entry(n)[4])() != 0;
+}
+
+/* PAD-457: player p's first one handed over is the only one lit and the one selected, so the game's selection shots
+ * cannot move off it and its start shot starts it; what the game lit itself meanwhile is owed until it has started */
+static void wizard_pin(unsigned p)
+{
+    unsigned *st = (unsigned *)(unsigned long)data("wizard_state"), n = wiz_due[p - 1].n[0];
+    unsigned bit = wizard_entry((int)n)[1], extra = st[4 + p - 1] & ~bit;
+    if (!extra && (st[4 + p - 1] & bit) && st[p - 1] == n - 1) return;
+    if (extra) {
+        wiz_due[p - 1].owed |= extra;
+        say("game wizard %u (%s): the game lit 0x%x for player %u as well - those wait until this one has started", n,
+            wizard_name((int)n), extra, p);
+    }
+    st[4 + p - 1] = bit;
+    st[p - 1] = n - 1;
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+}
+
+/* player p's first one has started: the next one handed over is lit, or what the game lit itself is lit again */
+static void wizard_due_next(unsigned p)
+{
+    unsigned *st = (unsigned *)(unsigned long)data("wizard_state"), back;
+    int k;
+    for (k = 1; k < wiz_due[p - 1].count; k++) {
+        wiz_due[p - 1].n[k - 1] = wiz_due[p - 1].n[k];
+        wiz_due[p - 1].start[k - 1] = wiz_due[p - 1].start[k];
+    }
+    wiz_due[p - 1].ball = stock_ball_ends;
+    wiz_due[p - 1].tried = 0;
+    if (--wiz_due[p - 1].count > 0) {
+        wizard_pin(p);
+        return;
+    }
+    back = wiz_due[p - 1].owed & ~st[8 + p - 1];
+    wiz_due[p - 1].owed = 0;
+    if (!back) return;
+    st[4 + p - 1] |= back;
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    say("game wizards: the ones the game lit itself (0x%x) are lit again for player %u", back, p);
+}
+
+/* player p's first one is to start at once: the game's own start, as its start shot would call it, tried until the
+ * game starts it (none of its modes in the way any more) while the ball it was handed over on lasts */
+static void wizard_due_start(unsigned p)
+{
+    int n = wiz_due[p - 1].n[0];
+    if (wiz_due[p - 1].ball != stock_ball_ends) {
+        wiz_due[p - 1].start[0] = 0;
+        say("game wizard %d (%s): the ball ended before the game would start it - lit for player %u, the game's start "
+            "shot starts it", n, wizard_name(n), p);
+        return;
+    }
+    if (p != pm_player() || !pm_in_game() || wiz_hold.n) return;
+    if (block_owner && running == block_owner) return;      /* a mode of ours holds the game's modes off */
+    if (pm_ms() - wiz_due[p - 1].tried < 250) return;
+    wiz_due[p - 1].tried = pm_ms();
+    if (!((int (*)(void))(unsigned long)fn("wizard_start"))()) return;   /* one of its modes is still in the way */
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    say("game wizard %d (%s): the game started it (its own start) now that nothing is in its way, player %u", n,
+        wizard_name(n), p);
+    wizard_due_next(p);
+}
+
+/* every tick: a refused start's words put back; each player's hand-overs kept lit until the game starts them */
 static void wizards_tick(void)
 {
-    unsigned *st, p = wiz_hold.p;
-    if (!wiz_hold.n) return;
+    unsigned *st, p = wiz_hold.p, game;
+    int ev, n;
+    if (!(can & PM_CAN_GAME_WIZARDS)) return;
     st = (unsigned *)(unsigned long)data("wizard_state");
-    st[p - 1] = wiz_hold.sel;
-    st[4 + p - 1] = wiz_hold.lit;
-    st[8 + p - 1] = wiz_hold.played;
-    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
-    say("game wizard %d (%s): its start was refused while %s runs - kept lit for player %u (lit 0x%x, played 0x%x), "
-        "so the game's start shot starts it once that mode ends", wiz_hold.n, wizard_name(wiz_hold.n), block_who, p,
-        wiz_hold.lit, wiz_hold.played);
-    wiz_hold.n = 0;
+    if (wiz_hold.n) {
+        st[p - 1] = wiz_hold.sel;
+        st[4 + p - 1] = wiz_hold.lit;
+        st[8 + p - 1] = wiz_hold.played;
+        *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+        say("game wizard %d (%s): its start was refused while %s runs - kept lit for player %u (lit 0x%x, played 0x%x), "
+            "so the game's start shot starts it once that mode ends", wiz_hold.n, wizard_name(wiz_hold.n), block_who, p,
+            wiz_hold.lit, wiz_hold.played);
+        wiz_hold.n = 0;
+    }
+    ev = pm_event("game_start");
+    game = ev >= 0 ? event_count(ev) : 0;
+    if (game != wiz_game || !pm_player()) {       /* a new game, or none: nothing handed over carries on */
+        wiz_game = game;
+        for (p = 0; p < 4; p++) wiz_due[p].count = 0, wiz_due[p].owed = 0;
+        return;
+    }
+    for (p = 1; p <= 4; p++) {
+        if (!wiz_due[p - 1].count) continue;
+        n = wiz_due[p - 1].n[0];
+        if (st[p - 1] == ~0u && !st[4 + p - 1] && !st[8 + p - 1]) {     /* the game set the player up anew */
+            wiz_due[p - 1].count = 0;
+            wiz_due[p - 1].owed = 0;
+            continue;
+        }
+        /* the game's start ran: only it unlights them all (the game's lighting lights at least one), or ours runs */
+        if (!st[4 + p - 1] || (!(st[4 + p - 1] & wizard_entry(n)[1]) && wizard_running(n))) {
+            say("game wizard %d (%s): the game started it for player %u", n, wizard_name(n), p);
+            wizard_due_next(p);
+            continue;
+        }
+        wizard_pin(p);
+        if (wiz_due[p - 1].start[0]) wizard_due_start(p);
+    }
 }
 
 int pm_game_wizard(int n, int how)
 {
     const char *name;
     unsigned p, bit, *st;
-    int r;
+    int r, k;
     if (!(can & PM_CAN_GAME_WIZARDS)) return 0;
     if (n < 1 || n > wizards_n) {
         say("game wizard %d: not one of the game's mini-wizards the port names (1-%d)", n, wizards_n);
@@ -4978,22 +5089,37 @@ int pm_game_wizard(int n, int how)
     bit = wizard_entry(n)[1];
     say("game wizard %d (%s): player %u had selected %u, lit 0x%x, played 0x%x%s", n, name, p, st[p - 1],
         st[4 + p - 1], st[8 + p - 1], st[8 + p - 1] & bit ? " - played this game already: it plays again" : "");
-    st[p - 1] = (unsigned)(n - 1);
-    st[4 + p - 1] |= bit;
-    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    for (k = 0; k < wiz_due[p - 1].count && wiz_due[p - 1].n[k] != n; k++) ;
+    if (k == wiz_due[p - 1].count) {               /* each one is listed once, so there is room (WIZ_DUE_MAX) */
+        wiz_due[p - 1].n[k] = (unsigned char)n;
+        wiz_due[p - 1].start[k] = 0;
+        wiz_due[p - 1].count++;
+    }
+    if (how == PM_WIZARD_START) wiz_due[p - 1].start[k] = 1;
+    if (k) {
+        say("game wizard %d (%s): lit for player %u after %s, which was handed over first and has not started yet", n,
+            name, p, wizard_name(wiz_due[p - 1].n[0]));
+        return PM_WIZARD_LIT;
+    }
+    wiz_due[p - 1].ball = stock_ball_ends;
+    wizard_pin(p);
     if (how == PM_WIZARD_START && block_owner && running == block_owner) {
-        say("game wizard %d (%s): %s holds the game's modes off, so it is lit, not started", n, name, block_who);
+        say("game wizard %d (%s): %s holds the game's modes off, so it is lit, not started - started once that mode "
+            "ends, this ball", n, name, block_who);
         how = PM_WIZARD_LIGHT;
     }
     if (how == PM_WIZARD_START) {
+        wiz_due[p - 1].tried = pm_ms();
         r = ((int (*)(void))(unsigned long)fn("wizard_start"))();
         *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
         if (r) {
             say("game wizard %d (%s): the game started it (its own start), player %u", n, name, p);
+            wizard_due_next(p);
             return PM_WIZARD_STARTED;
         }
-        say("game wizard %d (%s): the game would not start it now (one of its own modes is in the way) - lit instead",
-            n, name);
+        say("game wizard %d (%s): the game would not start it now (one of its own modes is in the way) - lit, and "
+            "started the moment the game would, this ball", n, name);
+        return PM_WIZARD_LIT;
     }
     say("game wizard %d (%s): lit and selected for player %u - the game's start shot starts it", n, name, p);
     return PM_WIZARD_LIT;
@@ -5029,7 +5155,7 @@ static void wizards_arm(void)
         if (!pm_port_text(key)) break;
     }
     wizards_n = n - 1;
-    if (!have_sites(s) || !have_data(d) || !wizards_n || size < 16 ||
+    if (!have_sites(s) || !have_data(d) || !wizards_n || size < 20 ||
         !maps_has(data("wizard_state"), 0x30, MAP_R) || !maps_has(data("lamps_dirty"), 1, MAP_R) ||
         !maps_has(data("wizard_table"), size * (unsigned)wizards_n, MAP_R)) {
         say("game wizards: off - the port's mini-wizard lines are incomplete or do not match this build");
@@ -5038,7 +5164,8 @@ static void wizards_arm(void)
     }
     for (n = 1; n <= wizards_n; n++) {
         e = wizard_entry(n);
-        if (e[0] != (unsigned)(n - 1) || e[1] != 1u << (n - 1) || !maps_has(e[3], 8, MAP_R | MAP_X | MAP_GAME)) {
+        if (e[0] != (unsigned)(n - 1) || e[1] != 1u << (n - 1) || !maps_has(e[3], 8, MAP_R | MAP_X | MAP_GAME) ||
+            !maps_has(e[4], 8, MAP_R | MAP_X | MAP_GAME)) {
             say("game wizards: off - entry %d of the table at 0x%08x is not this build's (%u 0x%x 0x%08x)", n,
                 data("wizard_table"), e[0], e[1], e[3]);
             wizards_n = 0;

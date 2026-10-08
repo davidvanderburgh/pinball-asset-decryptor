@@ -129,6 +129,9 @@ drain_until_end() {
         done
         [ "$n" -ge 2 ] || continue
         say "the ball saver gave it back: playing past it"
+        # PAD-420: launch the ball it served back first (a title with no auto launch leaves it in the shooter lane,
+        # and a drain then is not that ball's; plunge moves nothing with the lane empty)
+        python3 "$RIG/plunge.py" plunge > /dev/null 2>&1; sleep 2
         for id in "${ids[@]:0:3}"; do press "$id"; done
         # PAD-420: longer each time - Batman 1.14's saver outlasts 15 s after the first switch (every drain was given
         # back); 30 s ended its ball

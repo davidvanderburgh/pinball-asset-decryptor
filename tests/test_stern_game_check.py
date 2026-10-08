@@ -114,3 +114,5 @@ def test_a_saver_that_keeps_giving_the_ball_back_is_waited_out_longer_each_time(
     body = sh[sh.index("drain_until_end() {"):]
     body = body[:body.index("\n}\n")]
     assert "sleep $(( 10 * n + 10 ))" in body and "sleep 15\n" not in body
+    # and the ball it served back is launched first (Batman's shooter lane: no auto launch)
+    assert body.index('plunge.py" plunge') < body.index('for id in "${ids[@]:0:3}"; do press "$id"; done')

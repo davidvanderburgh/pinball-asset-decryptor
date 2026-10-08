@@ -244,6 +244,21 @@ def test_stage_names_the_clip_that_could_not_be_made(tmp_path, monkeypatch):
         CV.stage(str(project), "video/Delta.mov", [str(tmp_path / "gone.mp4")])
 
 
+def test_the_write_tab_lists_each_slot_with_random_clips(tmp_path):
+    from pinball_decryptor.webui import write_scan
+    project = _project(tmp_path, {"video/Delta.mov": ["a.mp4", "b.mp4"]}, [])
+
+    class Stern:
+        key = "stern"
+
+    class Jjp:
+        key = "jjp"
+    assert write_scan.variant_rows(Stern(), project) == [
+        ("video/Delta.mov  —  one of 3 clips at random", "mov", "Pending (random clips)",
+         "pending")]
+    assert write_scan.variant_rows(Jjp(), project) == []
+
+
 # ---- the engine ----------------------------------------------------------------------------
 pytest.importorskip("numpy")
 

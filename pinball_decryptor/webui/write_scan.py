@@ -276,10 +276,26 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
             rows.append(("scene %s  —  %d edit(s) from the Scenes tab" % (scene, len(ops)),
                          "image", "Pending (scene edit)", "pending"))
     rows.extend(mode_rows(mfr, assets_path, direct=direct))
+    rows.extend(variant_rows(mfr, assets_path))
     rows.extend(stock_mode_rows(mfr, assets_path))
     rows.extend(colour_rows(mfr, assets_path))
     rows.extend(chosen_files_rows(mfr, assets_path))
     return rows
+
+
+def variant_rows(mfr, assets_path):
+    """PAD-446: each Video slot given random clips, as one pending row."""
+    if not assets_path or mfr is None or getattr(mfr, "key", "") != "stern":
+        return []
+    try:
+        from ..plugins.stern import clip_variants
+        variants = clip_variants.load(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return []
+    return [("%s  —  one of %d clips at random" % (rel, 1 + len(files)),
+             os.path.splitext(rel)[1].lstrip(".") or "?",
+             "Pending (random clips)", "pending")
+            for rel, files in sorted(variants.items())]
 
 
 def colour_rows(mfr, assets_path):
@@ -484,6 +500,13 @@ def fingerprint(window, assets_path, epoch, grow_on):
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     parts.append(_modes_fingerprint(assets_path))
+    try:
+        # PAD-446: the Video tab's random clips
+        from ..plugins.stern import clip_variants
+        parts.append(sorted((r, tuple(f)) for r, f
+                            in clip_variants.load(assets_path).items()))
+    except Exception:                                   # noqa: BLE001
+        parts.append(None)
     try:
         # PAD-305: the project's color profile (the Color profile tab)
         from ..core import colour_profile

@@ -888,3 +888,95 @@ def test_advanced_unlocks_the_games_own_clips(tmp_path):
                           .read_text(encoding="utf-8"))
         assert "video_color_stock" not in side
         assert not colour_profile.stock_video_rels(side)
+
+
+# ------------------------------------------------------- random clips (PAD-446)
+def _offer(monkeypatch, why="", slots=None):
+    """The Stern plugin's answer for which slots can play clips at random,
+    without a card: *slots* {rel: why not} ("" = can)."""
+    from pinball_decryptor.plugins.stern import clip_variants as CV
+    monkeypatch.setattr(CV, "offer", lambda project, rels, probe=True: (
+        why, {rel: (slots or {}).get(rel, "") for rel in rels}))
+
+
+def test_a_slot_the_game_plays_by_name_takes_random_clips(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import clip_variants as CV
+    _offer(monkeypatch, slots={"video/attract.mp4": CV.NOT_BANK})
+    proj = _project(tmp_path)
+    one, two, three = (_mine(tmp_path, n) for n in ("b.mp4", "c.mp4", "d.mp4"))
+    rel = "video/intro.mp4"
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        info = w.call("video.row_menu", [rel])["variants"]
+        assert info == {"why": "", "n": 0, "max": CV.MAX_EXTRA, "files": []}
+        w.answers.append([str(one), str(two)])
+        assert w.call("video.add_variants", rel) is True
+        assert w.asked[-1]["multiple"] is True
+        assert w.asked[-1]["title"] == ("Choose clips the game can play at random "
+                                        "in place of video/intro.mp4")
+        st = w.state("video")
+        r = _row(st, rel)
+        assert r["var"] == 2 and r["rep"] == "Choose…"
+        # a slot given random clips is a change the build makes
+        assert st["status"].startswith("1 of 3 slots changed")
+        w.call("video.set_change_filter", "Changed")
+        assert _rels(w.state("video")) == [rel]
+        w.call("video.set_change_filter", "All")
+        assert r["var_tip"] == ("Plays one of 3 clips at random each time, never "
+                                "the same one twice in a row: the game's own "
+                                "clip, b.mp4, c.mp4.")
+        side = json.loads((proj / ".staged_changes.json").read_text(encoding="utf-8"))
+        assert side["video_variants"] == {rel: [str(one), str(two)]}
+        assert any(l["text"].startswith("Replace Video: video/intro.mp4 ← b.mp4, "
+                                        "c.mp4, played at random (3 clips")
+                   for l in w.run(w.window.log_history))
+        # the note under the panes says it on the selected row
+        w.call("video.select", rel)
+        st = _wait(w, lambda s: (s["preview"].get("note") or {}).get("kind") == "info")
+        assert st["preview"]["note"]["text"] == r["var_tip"]
+        # a replacement is the slot's own clip in the turn
+        w.answers.append(str(three))
+        w.call("video.choose", rel)
+        assert "d.mp4, b.mp4, c.mp4." in _row(w.state("video"), rel)["var_tip"]
+        info = w.call("video.row_menu", [rel])["variants"]
+        assert [f["name"] for f in info["files"]] == ["b.mp4", "c.mp4"]
+        assert w.call("video.remove_variant", rel, 0) is True
+        side = json.loads((proj / ".staged_changes.json").read_text(encoding="utf-8"))
+        assert side["video_variants"] == {rel: [str(two)]}
+    # a fresh session has them back
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        st = _scan(w, proj)
+        assert _row(st, rel)["var"] == 1
+        assert w.call("video.clear_variants", rel) is True
+        assert _row(w.state("video"), rel)["var"] == 0
+        side = json.loads((proj / ".staged_changes.json").read_text(encoding="utf-8"))
+        assert "video_variants" not in side
+
+
+def test_a_slot_that_cannot_vary_says_why(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import clip_variants as CV
+    _offer(monkeypatch, slots={"video/attract.mp4": CV.NOT_BANK})
+    proj = _project(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        info = w.call("video.row_menu", ["video/attract.mp4"])["variants"]
+        assert info["why"] == CV.NOT_BANK and info["n"] == 0
+        w.answers.append([str(_mine(tmp_path))])
+        assert w.call("video.add_variants", "video/attract.mp4") is False
+        assert w.call("video.variants_why", "video/attract.mp4") is True
+        assert w.asked[-1]["title"] == "Random clips"
+        assert not (proj / ".staged_changes.json").exists()
+    # the whole title refused: every slot says the title's reason
+    _offer(monkeypatch, why=CV.NO_TITLE)
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        _scan(w, proj)
+        assert w.call("video.row_menu", ["video/intro.mp4"])["variants"]["why"] == CV.NO_TITLE
+
+
+def test_random_clips_are_not_offered_where_the_plugin_has_none(tmp_path):
+    proj = _project(tmp_path)
+    with web_app(tmp_path, mfr="jjp") as w:
+        _scan(w, proj)
+        assert w.call("video.row_menu", ["video/intro.mp4"])["variants"] is None
+        assert w.call("video.add_variants", "video/intro.mp4") is False
+        assert _row(w.state("video"), "video/intro.mp4")["var"] == 0

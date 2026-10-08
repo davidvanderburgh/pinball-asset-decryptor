@@ -428,6 +428,29 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         hero); proof_job2.sh takes PRE_PRESS=pf (two playfield switches first) - chain49 round 4.
       - test_stern_mode_ball_save had been red since 10-07 (Munsters Pro's ball save proven, its multiball not):
         now a named exception (6a2c155a). All 40 mode-related test files: 819 passed.
+    * Run 16 (2026-10-08 07:30-):
+      - **Lights on 11 builds was the TEST, not the LED map**: King Kong Pro's light_all held its 205 inserts while a
+        layer of the game's own sat at priority 255 (the ball still in the shooter lane - the ball-start show), and
+        nothing of ours showed; light_shots 7.5 s later lit every tied insert. lights_job.sh launches the ball and
+        waits LIGHTS_SETTLE (15 s for these); chain54 re-runs the 11 on two rigs.
+      - Batman 1.14's shots tied (33/43, autotie + 1.13's hand ties): 285861a8; chain55 proves light_shots.
+      - Landed coils the C batch had proven but nobody landed: Foo Fighters LE (3), JP Pin gate, TMNT Pro pizza
+        magnet (17f63898). Every PROVEN coil is in HELD_COILS_PROVEN now (checked).
+      - **Coils the game drives only through objects of their own classes** (fill: "no constant hold command"):
+        each class's constructor stores the DEVICE at +4 (`coils/classdev.py`), its coil_fire has the game's own
+        powers - Batman LeftControlGate dev 16 (255/64, 96), TurntableDiverter dev 13 (255/64, 16), Rush LE
+        DoubleUpPost dev 10 (adj 171/64, adj 172), John Wick LE RampDiverter dev 16 (adj 209/150, adj 210); X-Men
+        LE's magnet / diverter / return post from constant-device commands the fill passed over (`preset_drives.py`
+        into info.json). chain57 runs them (coil_job_c.sh).
+      - **Stack's other modes on the ball-count titles**: the newest ports name the records and the flag table but
+        left the ids out; st3/ports16 carries the older sibling's record ids (Aerosmith, Guardians) / mode flags
+        (James Bond, Stranger Things) - NOT in the worktree until a stack run on each proves them (chain56,
+        st3_job16.sh). X-Men Pro needs its mode objects' addresses (build-specific), Batman 1.14 its flags.
+      - **Jaws Pro**: its 56 playfield switches had no names (35a2ab26: Jaws LE's names by the wire, each checked
+        against Jaws Pro's own device table); its dispatch runs but none of Jaws LE's event ids come -
+        `value event_census 1` (ed389422) logs the ids it does fire; check13 runs it.
+      - Media round 3 landed Sword of Rage LE, Stranger Things LE (both), Rush Pro (screen); round 4 (chain49) has
+        Rush, Star Wars (PRE_PRESS=pf), Batman 1.14, Venom Pro, Stranger Things Pro.
       - cardstage.sh stages a card only whole (1b52e9b1): a refused rename out of .inflight had left an EMPTY card
         that Munsters Pro's multiball job booted. chain43 re-runs that job with TAKE=2 (four balls home): its two
         runs went 2 -> 0 in play with four balls home, a four-ball game on the rig's six?

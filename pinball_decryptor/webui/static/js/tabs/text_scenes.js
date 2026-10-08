@@ -1393,17 +1393,10 @@ function TreeSide({ t, play, playFrame, openFont }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
       ${p.kind === "Text" && p.font && openFont ? html`<div class="tree-row">
-        <${Button} size="xs" icon="text" title=${{ head: "Font, size and spacing", lines: [
-          "Opens the Font bar on the right edge: this line's font, size, letter and line spacing, wrapping and where its words sit in its box (across and up and down)."] }}
-          onClick=${openFont}>Font, size and spacing…<//>
+        <${Button} size="xs" icon="text" title=${{ head: "Font controls", lines: [
+          "Opens the Font bar on the right edge: this line's font, size, italic, letter width, spacing, wrapping, where its words sit in its box, Fit box to text and its drop shadow."] }}
+          onClick=${openFont}>Font controls<//>
         <span class="small muted ellip">${p.font.style ? `${p.font.style}, ${p.font.size} px` : `${p.font.size} px`}</span>
-      </div>` : null}
-      ${p.kind === "Text" ? html`<div class="tree-row">
-        <${Button} size="xs" disabled=${p.x == null}
-          title="Shrink or grow this text's box to go round its words, with a small border. The words stay where they are. Words the game puts in while it plays can be longer than these."
-          onClick=${() => call("text_scenes.tree_fit_text", p.id)}>Fit box to text<//>
-        <${Button} size="xs" title="A dark copy of this text just beneath it, a few pixels down and right. It is selected after, to move, tint or remove."
-          onClick=${() => call("text_scenes.tree_shadow", p.id)}>Add a drop shadow<//>
       </div>` : null}
     </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers. Ctrl-click (or Shift-click) to pick several and move them together.</div>`}
     ${(t.notes || []).length ? html`<div class="small warn-ink">${t.notes.join("; ")}</div>` : null}

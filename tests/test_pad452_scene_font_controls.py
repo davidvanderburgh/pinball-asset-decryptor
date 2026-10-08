@@ -337,3 +337,117 @@ def test_a_line_is_as_wide_as_its_letters_reach_not_its_last_spacing():
     w0 = fr.render_text(font, "AAA", slice_loader=cell)[0].size[0]
     w5 = fr.render_text(font, "AAA", slice_loader=cell, tracking=5)[0].size[0]
     assert (w0, w5) == (30, 40)                                  # two gaps, not three letters
+
+
+# ---------------------------------------------------------------------------------------------
+# round 2 (DragonRR: "Italics/Underline etc."): Italic is a slant of the line's own matrix (the
+# fonts have none), the letters' width a scale across with the box kept, both on every node
+# drawing the Text; the drop shadow's Add and Remove sit on the Font bar
+# ---------------------------------------------------------------------------------------------
+def _corners(man, nid):
+    d = next(d for d in E.draw_list(man, 1) if d["node"] == nid)
+    return [tuple(round(v, 3) for v in p) for p in E.outline(d)]
+
+
+def test_italic_leans_the_letters_about_the_middle_of_the_box():
+    man = _man()
+    L, T_, R_, B = _texts(man, TITLE)[0]["rect"]
+    t = math.tan(math.radians(12))
+    op = {"op": "text_slant", "node": TITLE, "t": round(t, 6), "py": (T_ + B) / 2.0}
+    got, notes = X.apply_manifest(man, [op])
+    assert notes == []
+    before, after = _corners(man, TITLE), _corners(got, TITLE)
+    # the tops lean right, the bottoms left, by the same amount; heights stay
+    assert after[0][0] - before[0][0] > 4 and after[3][0] - before[3][0] < -4
+    assert abs((after[0][0] - before[0][0]) + (after[3][0] - before[3][0])) < 1e-3
+    assert [p[1] for p in after] == [p[1] for p in before]
+    assert _texts(got, TITLE)[0]["rect"] == _texts(man, TITLE)[0]["rect"]
+    # the outline drawing the same Text leans with it
+    o0, o1 = _corners(man, OUTLINE), _corners(got, OUTLINE)
+    assert [round(a[0] - b[0], 3) for a, b in zip(o1, after)] == \
+        [round(a[0] - b[0], 3) for a, b in zip(o0, before)]
+    # the card gets the same matrix
+    sc = T.parse(font_scene())
+    assert X.apply_scene(sc, [op]) == (1, [])
+    back = E.manifest(T.parse(T.serialize(sc)))
+    assert _corners(back, TITLE) == after and _corners(back, OUTLINE) == o1
+
+
+def test_letter_width_keeps_the_box_on_the_glass():
+    man = _man()
+    op = {"op": "text_stretch", "node": TITLE, "sx": 0.8}
+    got, notes = X.apply_manifest(man, [op])
+    assert notes == []
+    assert _glass_box(got, TITLE) == _glass_box(man, TITLE)
+    assert _glass_box(got, OUTLINE) == _glass_box(man, OUTLINE)
+    d = next(d for d in E.draw_list(got, 1) if d["node"] == TITLE)
+    assert (round(d["m"][0], 6), round(d["m"][3], 6)) == (0.8, 1.0)
+    sc = T.parse(font_scene())
+    assert X.apply_scene(sc, [op]) == (1, [])
+    back = E.manifest(T.parse(T.serialize(sc)))
+    assert _glass_box(back, TITLE) == _glass_box(got, TITLE)
+    assert _texts(back, TITLE)[0]["rect"] == _texts(got, TITLE)[0]["rect"]
+
+
+def test_slants_and_widths_fold_and_say_what_they_did(tmp_path):
+    a = str(tmp_path)
+    X.add(a, "/c", {"op": "text_slant", "node": TITLE, "t": 0.1, "py": 19})
+    X.add(a, "/c", {"op": "text_slant", "node": TITLE, "t": 0.1, "py": 19})
+    X.add(a, "/c", {"op": "text_stretch", "node": TITLE, "sx": 0.5})
+    X.add(a, "/c", {"op": "text_stretch", "node": TITLE, "sx": 1.5})
+    ops = X.ops_for(a, "/c")
+    assert ops == [{"op": "text_slant", "node": TITLE, "t": 0.2, "py": 19},
+                   {"op": "text_stretch", "node": TITLE, "sx": 0.75}]
+    assert X.describe(ops[0]) == "slanted +11.3°"
+    assert X.describe(ops[1]) == "letters 75 % wide"
+    X.add(a, "/c", {"op": "text_stretch", "node": TITLE, "sx": 1 / 0.75})
+    assert [o["op"] for o in X.ops_for(a, "/c")] == ["text_slant"]       # back to as shipped
+
+
+def test_the_font_bar_italic_width_and_drop_shadow(tmp_path):
+    from tests.test_gui_scene_editor import _seed, _open, _tv, _ops
+    from tests.webui_harness import web_app
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, font_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        assert w.call("text_scenes.tree_select", TITLE)
+        f = _tv(w)["props"]["font"]
+        assert (f["italic"], f["slant"], f["width"]) == (False, 0.0, 100.0)
+        assert f["shadow"] == {"has": False, "is": False}
+        assert w.call("text_scenes.tree_text_italic", TITLE, True)
+        f = _tv(w)["props"]["font"]
+        assert (f["italic"], f["slant"], f["size"]) == (True, 12.0, 30.0)   # size unchanged
+        assert w.call("text_scenes.tree_text_slant", TITLE, 20)
+        assert _tv(w)["props"]["font"]["slant"] == 20.0
+        assert [o["op"] for o in _ops(folder)] == ["text_slant"]           # one edit
+        assert w.call("text_scenes.tree_text_width", TITLE, 80)
+        f = _tv(w)["props"]["font"]
+        assert (f["width"], f["size"]) == (80.0, 30.0)
+        # letter spacing along the narrowed line: 8 px on the glass is 10 of its own
+        assert w.call("text_scenes.tree_text_spacing", TITLE, 8, None)
+        assert abs(_ops(folder)[-1]["letter"] - 10.0) < 1e-3
+        assert _tv(w)["props"]["font"]["letter"] == 8.0
+        # Add a drop shadow: it is selected after, and knows it is one
+        assert w.call("text_scenes.tree_shadow", TITLE)
+        shadow = _tv(w)["sel"]
+        assert shadow != TITLE
+        assert _tv(w)["props"]["font"]["shadow"] == {"has": False, "is": True}
+        assert w.call("text_scenes.tree_move", shadow, 3, 3)
+        assert w.call("text_scenes.tree_select", TITLE)
+        assert _tv(w)["props"]["font"]["shadow"] == {"has": True, "is": False}
+        # Remove drop shadow: the shadow and its move go, in one step
+        assert w.call("text_scenes.tree_shadow_remove", TITLE)
+        assert [o["op"] for o in _ops(folder)] == ["text_slant", "text_stretch", "text_spacing"]
+        assert _tv(w)["props"]["font"]["shadow"] == {"has": False, "is": False}
+        assert not w.call("text_scenes.tree_shadow_remove", TITLE)
+        # from the shadow itself, the line is selected after
+        assert w.call("text_scenes.tree_shadow", TITLE)
+        assert w.call("text_scenes.tree_shadow_remove", _tv(w)["sel"])
+        assert _tv(w)["sel"] == TITLE
+        assert w.call("text_scenes.tree_text_italic", TITLE, False)
+        assert _tv(w)["props"]["font"]["slant"] == 0.0
+        assert w.call("text_scenes.tree_text_font_reset", TITLE)
+        assert _ops(folder) == []
+        w.call("text_scenes.close")

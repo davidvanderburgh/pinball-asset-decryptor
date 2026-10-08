@@ -29,6 +29,7 @@ PORTS = [
     ("avengers_infinity_le", "1.10"),
     ("avengers_infinity_pro", "1.10"),
     ("batman", "1.13"),
+    ("batman", "1.14"),
     ("beatles", "1.29"),
     ("deadpool_le", "1.14"),
     ("deadpool_le", "1.16"),

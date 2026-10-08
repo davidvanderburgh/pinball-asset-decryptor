@@ -1,0 +1,264 @@
+# batman 1.14 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-08 by a build check (modes/gamecheck.sh play, the stock card, hidden, muted):
+# the runtime hooked the game, 35 of its 43 shots came from their switches, a drain ended a ball,
+# events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end.
+# Shots no press made: (G)adget target, Crane hit, Left outlane, Right outlane, Top eject, Turntable lock 1, Turntable lock 2, Turntable lock 3.
+
+game           batman
+version        1.14
+
+# ---- functions ----
+site tick             0x00449854 0xe92d4038 0xe3a00037
+site ball_end         0x00499e0c 0xe92d4070 0xe1a06000
+site sound_lookup     0x003ee690 0xe92d4038 0xe1a05000
+site score_add        0x004d9810 0xe30d14da 0xe3401086
+site callout          0x003550c8 0xe92d4010 0xe304e678
+site callout_nth      0x0035527c 0xe92d4010 0xe304e678
+site lamp_group       0x002c0e14 0xe92d4038 0xe1a04000
+site show_priority    0x00488878 0xe30033bc 0xe3403087
+site award_screen     0x00208db8 0xe92d4070 0xe24dd008
+site string_new       0x0001693c 0xe28fc607 0xe28cca64
+site dynamic_cast     0x0001633c 0xe28fc607 0xe28cca64
+site resource_get     0x005079e4 0xe92d43f0 0xe1a04000
+site find_node        0x00581274 0xe92d4070 0xe24dd008
+site find_text        0x00580d10 0xe92d4070 0xe24dd008
+site set_text         0x00564a3c 0xe92d47f0 0xe1a06000
+site surface_state    0x00573fa0 0xe5900550 0xe2800008
+site player_advance   0x002091b0 0xe2501000 0x012fff1e
+site display_draw     0x0028495c 0xe3520001 0x812fff1e
+site sound_play       0x003550c8 0xe92d4010 0xe304e678
+site sound_nth        0x0035527c 0xe92d4010 0xe304e678
+site sound_active     0x0035583c 0xe59f3034 0xe2831e62
+site sound_stop       0x00355994 0xe92d40f8 0xe1a06000
+site sound_worker     0x003546b4 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x0042c7d0 0xe35000cf 0xe92d4038
+site surface_find     0x00581568 0xe92d4070 0xe24dd008
+site surface_set_video 0x00578c4c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00576a58 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00576208 0xe5d030d4 0xe92d40f0
+site agent_header     0x005ce308 0xe92d40f8 0xe2505000
+site agent_begin      0x005d8c74 0xe590c004 0xe1a00001
+site balls_in_play    0x004d4d58 0xe92d4010 0xe3024de8
+site multiball_serve  0x004d4ed4 0xe92d41f0 0xe30de4da
+site switch_edge      0x0044aa70 0xe3043670 0xe3403082
+site switch_drain     0x0044b750 0xe92d4ff0 0xe300935c
+
+# ---- globals ----
+data cur_player             0x007852b0
+data scores                 0x00873028
+data mode_mask              0x0086d4da
+data event_head             0x008703b8
+data event_current          0x008703bc
+data resource_manager       0x00814620
+data typeinfo_resource      0x00616b7c
+data typeinfo_scene_player  0x006541e4
+data display_holder         0x008145a0
+data award_screen_arg       0x0077da00
+data sound_channels         0x00824784
+data sound_queue            0x00824ff8
+data sound_requests         0x007c9a20
+data sound_request_count    0x00614c20
+data lamp_layers            0x007f61fc
+data light_count            0x0081ae3c
+data switch_records         0x0086e364
+data switch_count           0x00824670
+data game_flags             0x00871194
+data game_flag_count        0x005fb9c0
+
+# ---- values ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value countdown_step -1
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value surface_playing       2
+value clip_surface_hide     1
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value node_visible_vfn      0xa8
+value scene_player_scene    0x10
+value game_flags_at         4
+value mode_flag_1           86
+value mode_flag_2           88
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+
+# ---- shots from the switch drain ----
+switch 46   0x1                (G)adget target
+switch 47   0x2                G(a)dget target
+switch 48   0x4                Ga(d)get target
+switch 49   0x8                Gad(g)et target
+switch 50   0x10               Gadg(e)t target
+switch 51   0x20               Gadge(t) target
+switch 52   0x40               Penguin vuk
+switch 54   0x80               Left outlane
+switch 55   0x100              Left return lane
+switch 56   0x200              Right return lane
+switch 57   0x400              Right outlane
+switch 58   0x800              Tv target-mid
+switch 59   0x1000             Tv target-top
+switch 62   0x2000             Skill shot
+switch 63   0x4000             Tv target-bot
+switch 65   0x8000             Right slingshot
+switch 66   0x10000            Left slingshot
+switch 75   0x20000            Top eject
+switch 80   0x40000            Left loop
+switch 81   0x80000            Left ramp exit
+switch 88   0x100000           Crane hit
+switch 89   0x200000           Spinner
+switch 90   0x400000           Left top lane
+switch 91   0x800000           Center top lane
+switch 92   0x1000000          Right top lane
+switch 93   0x2000000          Right loop
+switch 94   0x4000000          Crane target
+switch 95   0x8000000          Right ramp exit
+switch 96   0x10000000         Left pop bumper
+switch 97   0x20000000         Right pop bumper
+switch 98   0x40000000         Bottom pop bumper
+switch 99   0x80000000         Pop bumper target
+switch 100  0x100000000        Turntable lock 1
+switch 101  0x200000000        Turntable lock 2
+switch 102  0x400000000        Turntable lock 3
+switch 103  0x800000000        Bat computer target
+switch 104  0x1000000000       Crime analyzer target
+switch 105  0x2000000000       Bat spinner opto 1
+switch 106  0x4000000000       Bat spinner opto 2
+switch 107  0x8000000000       Bat phone target (x2)
+switch 108  0x10000000000      Bat hit target
+switch 109  0x20000000000      Joker target 1
+switch 110  0x40000000000      Joker target 2
+
+# ---- scenes ----
+scene video_bank           b59deafd663e85b406a4d490cd2b2bdf8efcf13a
+scene hud                  b59deafd663e85b406a4d490cd2b2bdf8efcf13a
+
+# ---- callouts and text ----
+callout countdown           1061
+callout time_up             1495
+text example_start_shot     (G)adget target
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47
+
+# ---- lamps ----
+lamp 9            0              LEFT OUTLANE  # lamp 6, I/O group 6 index 13, at 37,482
+lamp 10           0              LEFT RETURN LANE  # lamp 7, I/O group 6 index 14, at 60,464
+lamp 11           0              RIGHT RETURN LANE  # lamp 8, I/O group 6 index 18, at 243,466
+lamp 12           0              RIGHT OUTLANE  # lamp 9, I/O group 6 index 17, at 266,483
+lamp 13           0              SHOOT AGAIN  # lamp 10, I/O group 6 index 22, at 152,599
+lamp 14           0              CATWOMAN STATUS  # lamp 11, I/O group 6 index 12, at 120,463
+lamp 15           0              JOKER STATUS  # lamp 12, I/O group 6 index 11, at 139,444
+lamp 16           0              PENGUIN STATUS  # lamp 13, I/O group 6 index 10, at 165,444
+lamp 17           0              RIDDLER STATUS  # lamp 14, I/O group 6 index 9, at 183,463
+lamp 18           0              BATMAN  # lamp 15, I/O group 6 index 16, at 152,506
+lamp 19           0              SEASON 1  # lamp 16, I/O group 6 index 8, at 131,530
+lamp 20           0              SEASON 2  # lamp 17, I/O group 6 index 23, at 152,530
+lamp 21           0              SEASON 3  # lamp 18, I/O group 6 index 21, at 173,530
+lamp 22           0              (G)ADGET TARGET  # lamp 19, I/O group 7 index 8, at 59,426
+lamp 23           0              G(A)DGET TARGET  # lamp 20, I/O group 7 index 9, at 59,406
+lamp 24           0              GA(D)GET TARGET  # lamp 21, I/O group 7 index 10, at 59,386
+lamp 25           0              GAD(G)ET TARGET  # lamp 22, I/O group 7 index 11, at 59,366
+lamp 26           0              GADG(E)T TARGET  # lamp 23, I/O group 7 index 12, at 59,346
+lamp 27           0              GADGE(T) TARGET  # lamp 24, I/O group 7 index 13, at 59,326
+lamp 28,29,30     0              LEFT LOOP ARROW  # lamp 25, I/O group 7 index 28, at 41,225
+lamp 31           0              LEFT LOOP RIDDLER  # lamp 26, I/O group 7 index 31, at 45,248
+lamp 32           0              MYSTERY  # lamp 27, I/O group 7 index 19, at 49,268
+lamp 33           0              SEASONS  # lamp 28, I/O group 7 index 21, at 51,286
+lamp 34           0              EXTRA BALL  # lamp 29, I/O group 7 index 22, at 55,304
+lamp 35,36,37     0              LEFT RAMP ARROW  # lamp 30, I/O group 7 index 25, at 77,250
+lamp 41           0              BAT COMPUTER TARGET  # lamp 34, I/O group 7 index 34, at 90,203
+lamp 42           0              CRIME ANALYZER TARGET  # lamp 35, I/O group 7 index 35, at 152,194
+lamp 43           0              (J)OKER  # lamp 36, I/O group 7 index 36, at 100,229
+lamp 44           0              J(O)KER  # lamp 37, I/O group 7 index 33, at 113,239
+lamp 45           0              JO(K)ER  # lamp 38, I/O group 7 index 32, at 128,241
+lamp 46           0              JOK(E)R  # lamp 39, I/O group 7 index 41, at 141,236
+lamp 47           0              JOKE(R)  # lamp 40, I/O group 7 index 40, at 152,225
+lamp 48,49,50     0              TURNTABLE ARROW  # lamp 41, I/O group 7 index 45, at 130,269
+lamp 51,52,53     0              RIGHT RAMP ARROW  # lamp 42, I/O group 6 index 42, at 168,246
+lamp 57           0              SPINNER ARROW  # lamp 46, I/O group 6 index 46, at 195,265
+lamp 58           0              COMMISSIONER GORDON  # lamp 47, I/O group 6 index 47, at 210,276
+lamp 60,61,62     0              PENGUIN ARROW  # lamp 49, I/O group 6 index 49, at 229,292
+lamp 63           0              SUPER JACKPOT  # lamp 50, I/O group 6 index 52, at 217,322
+lamp 64           0              THE PENGUIN  # lamp 51, I/O group 6 index 41, at 208,344
+lamp 65,66,67     0              RIGHT LOOP ARROW  # lamp 52, I/O group 6 index 61, at 267,269
+lamp 68           0              RIGHT LOOP RIDDLER  # lamp 53, I/O group 6 index 54, at 260,290
+lamp 69           0              LOCK 3  # lamp 54, I/O group 6 index 53, at 252,310
+lamp 70           0              LOCK 2  # lamp 55, I/O group 6 index 48, at 245,328
+lamp 71           0              LOCK 1  # lamp 56, I/O group 6 index 40, at 238,347
+lamp 72           0              TV TARGET-TOP  # lamp 57, I/O group 6 index 33, at 237,393
+lamp 73           0              TV TARGET-MID  # lamp 58, I/O group 6 index 34, at 239,413
+lamp 74           0              TV TARGET-BOT  # lamp 59, I/O group 6 index 35, at 242,431
+lamp 75           0              SKILL SHOT 1  # lamp 60, I/O group 6 index 3, at 292,408
+lamp 76           0              SKILL SHOT 2  # lamp 61, I/O group 6 index 4, at 292,382
+lamp 77           0              SKILL SHOT 3  # lamp 62, I/O group 6 index 5, at 292,356
+lamp 78           0              CRANE POS.#2  # lamp 63, I/O group 6 index 32, at 230,369
+lamp 79           0              CRANE POS.#2 MULT.  # lamp 64, I/O group 6 index 38, at 223,387
+lamp 80           0              CRANE POS.#3  # lamp 65, I/O group 6 index 36, at 199,367
+lamp 81           0              CRANE POS.#3 MULT.  # lamp 66, I/O group 6 index 37, at 191,385
+lamp 82           0              CRANE POS.#4  # lamp 67, I/O group 6 index 28, at 169,359
+lamp 83           0              CRANE POS.#4 MULT.  # lamp 68, I/O group 6 index 31, at 167,378
+lamp 84           0              CRANE POS.#5  # lamp 69, I/O group 6 index 29, at 137,340
+lamp 85           0              CRANE POS.#5 MULT.  # lamp 70, I/O group 6 index 30, at 138,359
+lamp 86           0              CRANE POS.#6 AWAY  # lamp 71, I/O group 7 index 16, at 93,280
+lamp 87           0              CRANE POS.#6 MULT.  # lamp 72, I/O group 7 index 23, at 97,299
+lamp 91           0              LEFT POP BUMPER  # lamp 76, I/O group 6 index 55, at 68,96
+lamp 92           0              RIGHT POP BUMPER  # lamp 77, I/O group 6 index 56, at 131,93
+lamp 93           0              BOTTOM POP BUMPER  # lamp 78, I/O group 6 index 57, at 83,159
+lamp 94           0              POP BUMPER TARGET  # lamp 79, I/O group 6 index 58, at 213,187
+lamp 95           0              BAT SPINNER 1  # lamp 80, I/O group 8 index 0, at 129,100
+lamp 96           0              BAT SPINNER 2  # lamp 81, I/O group 8 index 1, at 129,100
+lamp 97           0              BAT SPINNER 3  # lamp 82, I/O group 8 index 2, at 129,100
+lamp 98           0              BAT SPINNER 4  # lamp 83, I/O group 8 index 3, at 129,100
+lamp 99           0              BAT SPINNER 5  # lamp 84, I/O group 8 index 4, at 129,100
+lamp 100          0              BAT COMPUTER 1  # lamp 85, I/O group 8 index 5, at 156,130
+lamp 101          0              BAT COMPUTER 2  # lamp 86, I/O group 8 index 6, at 156,130
+lamp 102          0              BAT COMPUTER 3  # lamp 87, I/O group 8 index 7, at 156,130
+lamp 103          0              CRIME ANALYZER 1  # lamp 88, I/O group 8 index 8, at 89,94
+lamp 104          0              CRIME ANALYZER 2  # lamp 89, I/O group 8 index 9, at 89,94
+lamp 105          0              CRIME ANALYZER 3  # lamp 90, I/O group 8 index 10, at 89,94
+lamp 106          0              TURNTABLE BATPHONE  # lamp 91, I/O group 8 index 12, at 147,151
+lamp 107          0              BAT SIGNAL (OPTIONAL)  # lamp 92, I/O group 6 index 59, at 279,68
+lamp 109          0              PLAYFIELD GI-LOWER  # lamp 145, I/O group 6 index 0, at 0,0
+lamp 110          0              PLAYFIELD GI-SHOOTER  # lamp 146, I/O group 6 index 1, at 0,0
+lamp 111          0              PLAYFIELD GI-GADGET  # lamp 147, I/O group 6 index 2, at 0,0
+lamp 113          0              PLAYFIELD GI-TOP  # lamp 149, I/O group 7 index 1, at 0,0
+lamp 114          0              LEFT SLINGSHOT FLASH  # lamp 150, I/O group 6 index 15, at 79,505
+lamp 115          0              RIGHT SLINGSHOT FLASH  # lamp 151, I/O group 6 index 19, at 225,505
+lamp 116          0              BAT SYMBOL FLASH  # lamp 152, I/O group 6 index 20, at 152,476
+lamp 117          0              CRANE POS.#1 HOME  # lamp 153, I/O group 6 index 6, at 266,361
+lamp 118          0              POP BUMPER FLASH  # lamp 154, I/O group 6 index 60, at 231,172
+lamp 120          0              CRANE FLASH  # lamp 156, I/O group 7 index 6, at 222,241
+lamp 121          0              TURNTABLE REACTOR FLASH  # lamp 157, I/O group 8 index 11, at 113,132
+
+# ---- PAD-420: placed by port_tool.py from batman-1.13.port (the same title), unverified ----
+value switch_level_before   0x1
+value switch_level_via      0x0

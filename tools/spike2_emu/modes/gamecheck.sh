@@ -47,9 +47,11 @@ press() {   # press <id>: a mark the object logs, then a 150 ms press
     python3 "$RIG/swpoke.py" "$1" 150 > /dev/null 2>&1 || say "swpoke $1 failed"
     sleep 1.1
 }
-#: a switch the check leaves alone, by its name in the switch list
+#: a switch the check leaves alone, by its name in the switch list. A mechanism's position sensor is one
+#: (POSITION, HOME, and Batman 66's "Turntable Pos. #2" / "Crane Pos. #5": PAD-420, pressed they left its
+#: ball in play for ever - a drain with the trough full again neither ended the ball nor served one)
 skipped() {
-    echo "$1" | grep -qiE 'TROUGH|FLIPPER|SHOOTER|COIN|SERVICE|^DIP|START|TILT|DOOR|VOLUME|HEADPHONE|ENCODER|QR SCANNER|MOTOR|LOCKDOWN|LOCK [0-9]|TICKET|OUTLANE|OUT LANE|EOS|DETECT|BUTTON|POSITION|HOME|INTERLOCK|OPTO BOARD|JAM'
+    echo "$1" | grep -qiE 'TROUGH|FLIPPER|SHOOTER|COIN|SERVICE|^DIP|START|TILT|DOOR|VOLUME|HEADPHONE|ENCODER|QR SCANNER|MOTOR|LOCKDOWN|LOCK [0-9]|TICKET|OUTLANE|OUT LANE|EOS|DETECT|BUTTON|POSITION|POS\.|HOME|INTERLOCK|OPTO BOARD|JAM'
 }
 
 #: the rig's ball feeder answers the game's trough eject; on a title whose device table has no
@@ -120,8 +122,9 @@ drain_until_end() {
     before=$(count "check ball end")
     for n in 1 2 3 4 5; do
         game_up || return 1
-        say "drain $n"
-        python3 "$RIG/plunge.py" drain > /dev/null 2>&1
+        # PAD-420: the drain's own answer goes on the line - "the ball saver gave it back" was said after a drain the
+        # rig refused (the trough already full: no ball in play to drain), which is a game that kept no ball out
+        say "drain $n: $(python3 "$RIG/plunge.py" drain 2>&1 | head -n 1)"
         end=$(( $(date +%s) + 7 ))
         while [ "$(date +%s)" -lt "$end" ]; do
             [ "$(count "check ball end")" -gt "$before" ] && return 0

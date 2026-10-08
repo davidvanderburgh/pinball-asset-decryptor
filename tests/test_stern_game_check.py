@@ -116,3 +116,17 @@ def test_a_saver_that_keeps_giving_the_ball_back_is_waited_out_longer_each_time(
     assert "sleep $(( 10 * n + 10 ))" in body and "sleep 15\n" not in body
     # and the ball it served back is launched first (Batman's shooter lane: no auto launch)
     assert body.index('plunge.py" plunge') < body.index('for id in "${ids[@]:0:3}"; do press "$id"; done')
+
+
+def test_a_mechanism_s_position_sensors_are_left_alone_and_each_drain_says_what_it_did():
+    """PAD-420: Batman 66 1.14 names its mechanism sensors "Turntable Pos. #2" and "Crane Pos. #5" - past the POSITION
+    rule - and pressed they left its ball in play for ever: a drain filled the trough and the game neither ended the
+    ball nor served one (two checks failed so). Skipped, the first drain ended the ball. And a drain's own answer goes
+    on its line: the check had said "the ball saver gave it back" after drains the rig refused (the trough full)."""
+    sh = (SDK.parent / "gamecheck.sh").read_text(encoding="utf-8")
+    rule = sh[sh.index("skipped() {"):]
+    rule = rule[:rule.index("\n}\n")]
+    assert "|POSITION|POS\.|HOME|" in rule
+    body = sh[sh.index("drain_until_end() {"):]
+    body = body[:body.index("\n}\n")]
+    assert 'say "drain $n: $(python3 "$RIG/plunge.py" drain 2>&1 | head -n 1)"' in body

@@ -486,3 +486,20 @@ site multiball_serve       0x0016bbe8 0xe92d41f0 0xe306e49e
 site block_start_0      0x0009bb10 0xe5903038 0xe92d4070
 data block_obj_0        0x005f20e0
 text block_name_0       Villain Mode
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site proc_exists          0x0011db5c 0xe3082708 0xe340205f
+site proc_create          0x0011d50c 0xe308c708 0xe340c05f
+site proc_sleep           0x0011d65c 0xe3083708 0xe340305f
+site adjustment           0x00367460 0xe92d40f0 0xe2504000
+site coil_fire             0x00372978 0xe3500000 0xe52de004
+data coil_count            0x005fe2a4
+data coil_table            0x00626ec8
+value magnet_proc          13185
+text left_gate_label      Left control gate
+text right_gate_label     Right control gate
+text left_gate_drive      9 0 255 40 96 940
+text right_gate_drive     9 5 255 40 96 940
+text held_coils            left_gate right_gate

@@ -148,7 +148,8 @@ def _rows(assets_dir, *parts):
 def _collect_scenes(assets_dir):
     """``scene_browser.collect_scenes`` verbatim (see there for the why of
     every step): ``{scene_dir: {"label", "images": [(order, rel)],
-    "fonts": {table: (name, px)}, "texts": [str], "videos": [rel]}}``."""
+    "fonts": {table: (name, px)}, "texts": [str], "videos": [rel]}}``, and
+    ``"program": True`` on the game program's strings (PAD-468)."""
     scenes = {}
 
     def scene_for(d):
@@ -223,8 +224,12 @@ def _collect_scenes(assets_dir):
         for row in text_manifest.load(assets_dir):
             p = (row.get("path") or "").replace("\\", "/")
             if p:
-                scene_for(p.rsplit("/", 1)[0])["texts"].append(
-                    row.get("original") or "")
+                sc = scene_for(p.rsplit("/", 1)[0])
+                sc["texts"].append(row.get("original") or "")
+                if not p.lower().endswith(".radium"):
+                    # the game program's own strings (/godzilla_le/game): listed as one
+                    # "scene", but no scene draws them as they are (PAD-468)
+                    sc["program"] = True
     except Exception:                                # noqa: BLE001
         pass
     scene_font_px = {}
@@ -307,6 +312,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._listed = []
         self._focus_want = None
         self._find_at = None          # the search match Previous / Next is on (PAD-429)
+        self._find_stepping = False   # Previous / Next is picking its line (PAD-468)
         self._token = 0
         self._frames_full = []
         self._preview_full = None
@@ -606,25 +612,51 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             out.reverse()
         return out
 
-    def _haystack(self, d):
+    def _line_extras(self):
+        """The words the scenes' lines show besides the card's own (PAD-468), as
+        ``({scene dir: {original: new words}}, {scene dir: [(node, words)]})``: the edits made
+        to their lines (on the Text tab or in the Words box) and the lines added in the scene
+        editor, so a search finds a line by the words it shows now too."""
+        reps = {}
+        for path, pairs in (self._load_text_changes() or {}).items():
+            p = (path or "").replace("\\", "/")
+            if p.lower().endswith(".radium"):
+                reps.setdefault(p.rsplit("/", 1)[0], {}).update(pairs)
+        added = {}
+        try:
+            from ..plugins.stern import scene_edit
+            for card, ops in scene_edit.load(self.assets_dir).items():
+                d = card.replace("\\", "/").rsplit("/", 1)[0]
+                for op in ops:
+                    if op.get("op") == "add_text" and op.get("id") is not None:
+                        added.setdefault(d, []).append((int(op["id"]), op.get("text") or ""))
+        except Exception:                            # noqa: BLE001
+            pass
+        return reps, added
+
+    def _haystack(self, d, extras=None):
         sc = self._scenes[d]
+        reps, added = extras if extras is not None else self._line_extras()
         return (sc["label"] + " " + d + " "
                 + " ".join(n for n, _p in sc["fonts"].values()) + " "
-                + " ".join(sc["texts"])).lower()
+                + " ".join(sc["texts"]) + " "
+                + " ".join((reps.get(d) or {}).values()) + " "
+                + " ".join(t for _n, t in added.get(d) or ())).lower()
 
     def _refresh_list(self, preselect=None, focus_text=None, jump=False):
         q = (self._search or "").strip().lower()
+        extras = self._line_extras() if q else None
         # A jump in beats a search left in this window.  Only a jump: typing a search while a
         # scene it does not match was picked used to wipe the search (DragonRR, PAD-429).
         if jump and q and preselect in self._scenes and q not in self._haystack(
-                preselect):
+                preselect, extras):
             self._search = ""
             q = ""
         rows = []
         states = self._scene_states()
         for d in self._sorted_dirs():
             sc = self._scenes[d]
-            if q and q not in self._haystack(d):
+            if q and q not in self._haystack(d, extras):
                 continue
             rows.append({"d": d, "label": sc["label"],
                          "imgs": len(sc["images"]), "fonts": len(sc["fonts"]),
@@ -638,12 +670,12 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             else None
         self._find_at = None
         self.set(scenes=rows, search=self._search,
-                 sort={"col": self._sort_col, "rev": self._sort_rev},
-                 find={"pos": 0, "n": len(self._find_hits())})
+                 sort={"col": self._sort_col, "rev": self._sort_rev})
         if want != self._sel:
             self._drop_live_edit()
         self._sel = want
         self._on_select()
+        self._find_sync()
 
     @rpc
     def set_search(self, q):
@@ -653,23 +685,75 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
 
     def _find_hits(self):
         """Every match of the search, in the list's order (DragonRR, PAD-429): each line of
-        on-screen text the words are in, as ``(scene, line index)``; a scene listed for its
-        name or a font only is one match of its own, ``(scene, None)``."""
+        on-screen text the words are in, as ``(scene, line)``, *line* the index of one of the
+        scene's own lines or ``("add", node)`` for a line added in the scene editor; a line
+        is found by the card's words or the words it shows now.  A scene listed for its name
+        or a font only is one match of its own, ``(scene, None)``.
+
+        With nothing typed, every line of text of every scene, in turn (DragonRR, PAD-468:
+        proof-read them all without the game); the game program's own strings are not a
+        scene's, so they are left to the Text tab."""
         q = (self._search or "").strip().lower()
-        if not q:
-            return []
+        reps, added = self._line_extras()
         hits = []
         for d in self._listed:
-            lines = [(d, i) for i, t in enumerate(self._scenes[d]["texts"])
-                     if q in (t or "").lower()]
-            hits.extend(lines or [(d, None)])
+            sc = self._scenes[d]
+            if not q and sc.get("program"):
+                continue
+            rep = reps.get(d) or {}
+            lines = [(d, i) for i, t in enumerate(sc["texts"])
+                     if (t or "").strip() and (not q or q in t.lower()
+                                               or q in (rep.get(t) or "").lower())]
+            lines += [(d, ("add", n)) for n, t in added.get(d) or ()
+                      if not q or q in t.lower()]
+            hits.extend(lines or ([(d, None)] if q else []))
         return hits
+
+    def _line_of_node(self, node):
+        """The line of text (a :meth:`_find_hits` entry) that layer *node* of the scene
+        showing draws, or None for a layer that is not a line of text: :meth:`_find_layer`
+        the other way round."""
+        d = self._sel
+        if node is None or d not in self._scenes or self._tman is None \
+                or not self.store.get(self.ns, "tree"):
+            return None
+        from .text_scenes_tree import _walk_man, _kind_of, _text_of
+        walk = [n for n, _p, _d in _walk_man(self._tman)]
+        n = next((x for x in walk if x["id"] == node), None)
+        if n is None or _kind_of(self._tman, n) != "Text":
+            return None
+        if n.get("added"):
+            return (d, ("add", node))
+        flat = lambda t: " ".join((t or "").split())             # noqa: E731
+        words = flat(_text_of(self._tman, n, "Text"))
+        same = [x["id"] for x in walk if flat(_text_of(self._tman, x, _kind_of(self._tman, x)))
+                == words]
+        lines = [i for i, t in enumerate(self._scenes[d]["texts"]) if flat(t) == words]
+        if not words or not lines or node not in same:
+            return None
+        return (d, lines[min(same.index(node), len(lines) - 1)])
+
+    def _find_sync(self):
+        """Say where Previous / Next stand ("3 of 40").  A line of text picked in the scene
+        editor is where they go on from (PAD-468): picked by hand, or by a step."""
+        hits = self._find_hits()
+        here = self._line_of_node(self._tsel)
+        if here is not None:
+            self._find_at = here if here in hits else None
+        pos = hits.index(self._find_at) + 1 if self._find_at in hits else 0
+        self.set(find={"pos": pos, "n": len(hits)})
+
+    def _find_follow(self, node):
+        """A layer was picked in the scene editor (the mixin's ``tree_select``): a line of text
+        picked by hand moves Previous / Next to it; a picture leaves them where they were."""
+        if not self._find_stepping and self._line_of_node(node) is not None:
+            self._find_sync()
 
     @rpc
     def find_step(self, delta=1):
-        """Previous / Next beside the search: go to the next match, the scene and the line of
-        text in it, round from the last to the first.  The first press lands on the first
-        match in the scene that is showing."""
+        """Previous / Next beside the search (and beside a line's Words): go to the next
+        match, the scene and the line of text in it, round from the last to the first.  The
+        first press lands on the first match in the scene that is showing."""
         hits = self._find_hits()
         if not hits:
             self.set(find={"pos": 0, "n": 0})
@@ -682,14 +766,24 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             pos = (here[0] if step > 0 else here[-1]) if here else (0 if step > 0 else -1)
             pos %= len(hits)
         d, line = hits[pos]
-        if d != self._sel:
-            self.select(d)
-        self._find_at = hits[pos]
-        self.set(find={"pos": pos + 1, "n": len(hits)})
-        if line is None:
-            return True
-        self.set(item="txt::%d" % line, thumb="")
-        self._find_layer(d, line)
+        self._find_stepping = True
+        try:
+            if d != self._sel:
+                self.select(d)
+            self._find_at = hits[pos]
+            self.set(find={"pos": pos + 1, "n": len(hits)})
+            if line is None:
+                return True
+            if isinstance(line, tuple):
+                # a line added here is a layer of the scene editor only
+                self.set(item=None, thumb="")
+                if self.store.get(self.ns, "tree"):
+                    self.tree_select(line[1])
+                return True
+            self.set(item="txt::%d" % line, thumb="")
+            self._find_layer(d, line)
+        finally:
+            self._find_stepping = False
         return True
 
     def _find_layer(self, d, line):
@@ -731,6 +825,10 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._tree_unselect()
         self._sel = d
         self._on_select()
+        if not self._find_stepping and self._find_at and self._find_at[0] != d:
+            # another scene picked by hand: Next goes to its first line (PAD-468)
+            self._find_at = None
+            self._find_sync()
         return True
 
     def _drop_live_edit(self):
@@ -843,6 +941,13 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             if os.path.isfile(path):
                 thumb = path
         self.set(item=iid, thumb=thumb)
+        if iid and iid.startswith("txt::") and self._item_text(iid) is not None:
+            # a line picked by hand: Previous / Next go on from it (PAD-468)
+            hits = self._find_hits()
+            hit = (self._sel, int(iid[5:]))
+            if hit in hits:
+                self._find_at = hit
+                self.set(find={"pos": hits.index(hit) + 1, "n": len(hits)})
         return True
 
     # ------------------------------------------------------------------

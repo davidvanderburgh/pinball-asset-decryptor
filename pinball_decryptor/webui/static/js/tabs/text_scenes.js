@@ -36,9 +36,12 @@ const STATE_TIP = {
   edited: "Changed since the last Write: the next Write puts it on the card.",
   written: "Written: the last Write put exactly these edits on the card.",
 };
-// PAD-429 (DragonRR): the search finds the game's on-screen text, not only scene names
+// PAD-429 (DragonRR): the search finds the game's on-screen text, not only scene names;
+// PAD-468: with nothing typed, the arrows go through every line of text of every scene
 const FIND_TIP = "Finds scenes by name, font or the words they show. Enter (or the down arrow) "
-  + "goes to the next line of text with these words and picks it out; Shift+Enter goes back.";
+  + "goes to the next line of text with these words and picks it out; Shift+Enter goes back. "
+  + "With nothing typed, the arrows go through every line of text in every scene, one after "
+  + "another: see each where it sits and fix its words under Selected.";
 // The count columns the scene list has room for: a narrow list keeps the scene NAMES
 // readable and drops the counts, least useful first (Video, Fonts, then Text and Images).
 const COLS_BY_WIDTH = [[470, ["imgs", "fonts", "texts", "vids"]], [330, ["imgs", "texts"]],
@@ -328,7 +331,9 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
     openMenu({ x: e.clientX, y: e.clientY }, items);
   };
   const editor = !!(s.tree && s.tree_view);
-  const find = (s.search || "").trim() && s.find ? s.find : null;
+  // PAD-468: the arrows stay with nothing typed (every line of text, in turn)
+  const searching = !!(s.search || "").trim();
+  const find = s.find && (searching || s.find.n) ? s.find : null;
   const stage = editor ? s.tree_view.stage : [1360, 768];
   // PAD-349 (DragonRR): the advanced unlock sits beside Preview colors, not in the Layers head
   const unlock = editor ? s.tree_view.color_unlock : null;
@@ -343,13 +348,16 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
         <div class="row scenes-search" onKeyDown=${(e) => {
             // PAD-429: Enter goes to the next match, Shift+Enter to the previous one
             if (e.key === "Enter" && find) { e.preventDefault(); call("text_scenes.find_step", e.shiftKey ? -1 : 1); } }}>
-          <${Field} sm value=${s.search} placeholder="Search names and text" onChange=${(v) => call("text_scenes.set_search", v)}
+          <${Field} sm value=${s.search} placeholder="Search text" onChange=${(v) => call("text_scenes.set_search", v)}
             delay=${200} prefix=${html`<${Icon} name="search" />`} title=${FIND_TIP}
-            suffix=${find ? html`<span class="small muted nw sc-find-n">${find.n ? (find.pos ? `${find.pos} of ${find.n}` : `${find.n} found`) : "none"}</span>` : null} />
+            suffix=${find && searching ? html`<span class="small muted nw sc-find-n">${find.n ? (find.pos ? `${find.pos} of ${find.n}` : `${find.n} found`) : "none"}</span>` : null} />
           ${find ? html`<${Button} size="xs" kind="ghost" icon="up" label="Previous match" disabled=${!find.n}
-              title="Previous match (Shift+Enter)" onClick=${() => call("text_scenes.find_step", -1)} />
+              title=${searching ? "Previous match (Shift+Enter)"
+                : `Previous line of text (Shift+Enter): every line of every scene in turn (${find.n} lines)`}
+              onClick=${() => call("text_scenes.find_step", -1)} />
             <${Button} size="xs" kind="ghost" icon="down" label="Next match" disabled=${!find.n}
-              title="Next match (Enter): the next line of text with these words, in this scene or the next one"
+              title=${searching ? "Next match (Enter): the next line of text with these words, in this scene or the next one"
+                : `Next line of text (Enter): every line of every scene in turn (${find.n} lines). Type words to go through only the lines with them.`}
               onClick=${() => call("text_scenes.find_step", 1)} />` : null}
           <${InfoBadge} text=${s.hint} />
           <${Button} size="sm" icon="left" cls="sc-list-hide" label="Hide the scene list"
@@ -436,7 +444,8 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
       <div class="scenes-inspector" ref=${inspRef}>
         ${editor ? html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
             style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
-            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} openFont=${openFont} /></div>
+            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} openFont=${openFont}
+              find=${s.find} searching=${searching} /></div>
           <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
           <${TreeTop} s=${s} onMenu=${itemMenu} />`
           : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
@@ -1279,7 +1288,49 @@ function TreeCanvas({ s }) {
   </div>`;
 }
 
-function TreeSide({ t, play, playFrame, openFont }) {
+// PAD-468 (DragonRR): a line's words, fixed where it sits, and Previous / Next through every
+// line of text of every scene (the lines the search finds, while it has words in it), so
+// spelling and placement are checked here instead of in the game
+const WORDS_TIP = { head: "Words", lines: [
+  "The words this line shows. Change them and press Enter (or click away): the preview draws them at once, and Write puts them on the card.",
+  "A line of the game's is the same edit as on the Text tab, which lists it too. A line you added keeps its words in this scene (Undo takes a change back).",
+  "Type \\n for a line break." ] };
+function Words({ p, find, searching }) {
+  const w = p.words;
+  const [draft, setDraft] = useState(w.text);
+  useEffect(() => { setDraft(w.text); }, [p.id, w.text]);
+  const len = [...draft].length;
+  const over = w.limit != null && len > w.limit;
+  const apply = (v) => { if (v !== w.text && v.trim()) call("text_scenes.tree_words", p.id, v); };
+  const where = find && find.pos ? `${find.pos} of ${find.n}` : "";
+  const what = searching ? "line with the words searched for" : "line of text, in this scene or the next";
+  return html`<div class="tree-words">
+    <div class="tree-row">
+      <span class="lbl" ...${tip(WORDS_TIP)}>Words</span>
+      <${Field} key=${p.id} sm cls="grow" value=${w.text} onChange=${setDraft} onCommit=${apply} bad=${over}
+        title=${WORDS_TIP} />
+      <${Button} size="xs" kind="ghost" icon="up" label="Previous line" disabled=${!(find && find.n)}
+        title=${`Previous ${what.replace("next", "one before")} (Shift+Enter in the search box)`}
+        onClick=${() => call("text_scenes.find_step", -1)} />
+      <${Button} size="xs" kind="ghost" icon="down" label="Next line" disabled=${!(find && find.n)}
+        title=${`Next ${what} (Enter in the search box)`}
+        onClick=${() => call("text_scenes.find_step", 1)} />
+    </div>
+    <div class="tree-row">
+      ${w.limit != null ? html`<span class=${cx("small nw", over ? "err-ink" : "muted")}
+        ...${tip(over ? "Too long: a line of a scene can take this many bytes at most." : "Its length, and the most a line of a scene can take.")}>
+        ${len} / ${w.limit} bytes</span>` : null}
+      ${w.limit != null && where ? html`<span class="small muted">·</span>` : null}
+      ${where ? html`<span class="small muted nw" ...${tip(searching ? "Where this line is among the lines the search finds"
+        : "Where this line is among every line of text in every scene listed")}>${searching ? `match ${where}` : `line ${where}`}</span>` : null}
+      <span class="grow"></span>
+      ${w.edited ? html`<${Button} size="xs" icon="undo" title=${`Back to the game's words: "${w.game}"`}
+        onClick=${() => call("text_scenes.tree_words", p.id, null)}>Game's words<//>` : null}
+    </div>
+  </div>`;
+}
+
+function TreeSide({ t, play, playFrame, openFont, find, searching }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
   const [keepShape, setKeepShape] = useState(true);
@@ -1338,6 +1389,7 @@ function TreeSide({ t, play, playFrame, openFont }) {
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.hidden ? html`<div class="small in-game">Hidden in the game: Write leaves it out of the card.${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
       : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
+      ${p.words ? html`<${Words} p=${p} find=${find} searching=${searching} />` : null}
       ${p.pic ? html`<div class="tree-row">
         <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>
           Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%</span>

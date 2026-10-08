@@ -303,3 +303,18 @@ site proc_sleep       0x0034b888 0xe30f3b50 0xe3403064
 value scoop_event          2
 site scoop_handler         0x00087430 0xe2400002 0xe92d41f0
 data scoop_slot           0x005eac4c
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x0068ff90
+data coil_table            0x0064b6d8
+value magnet_proc          13185
+site coil_fire        0x002e3ac4 0xe3500000 0xe52de004
+site adjustment       0x00233ba4 0xe92d40f0 0xe2504000
+text upper_gate_label     Upper control gate
+text upper_gate_drive     10 0 255 250 255 1488
+data upper_gate_obj      0x0061eb38
+value upper_gate_ctl      12
+value upper_gate_off_slot 5
+text held_coils            upper_gate

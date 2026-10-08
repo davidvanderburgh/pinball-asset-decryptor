@@ -161,7 +161,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 |---|---|---|---|---|---|
 | Aerosmith 1.16 | ✓ | no | ✓ | shots | waits for multiballs only |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
-| Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, waits for multiballs only |
+| Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms, waits for multiballs only |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | no | scoop, mechanisms |
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | no | mechanisms |

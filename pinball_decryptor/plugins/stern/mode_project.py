@@ -556,6 +556,7 @@ BALL_SAVE_PROVEN = frozenset({
     "godzilla_le-1.16",                  # PAD-420 2026-10-07 bs_job (stock card, hidden, muted; jackpots from its own check): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 3 shots, awarded 6000000
     "guardians_le-1.15",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted; orbit jackpots, not drop targets): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 2 shots, awarded 3000000
     "venom_le-1.07",                     # PAD-420 2026-10-07 bs_job (stock card, hidden, muted; jackpots from its own check, NOPF: pressing every switch starts its own multiball): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 8 shots, awarded 36000000
+    "batman-1.14",                       # PAD-420 2026-10-08 bs_job (stock card, hidden, muted; jackpot presses only, NOPF - its VUK and eject switches left alone): the save taken, the drain inside it served back (auto-launched), shots scored on it, the next drain ended the ball: END (ball ended): 14 shots, awarded 105000000
 })
 
 

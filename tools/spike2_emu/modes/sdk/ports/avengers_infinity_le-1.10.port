@@ -154,8 +154,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  6cd5668f1f8189d6aa5e79203f12a0d0a4c90038
 
 # ---- callouts and text ----
-callout countdown           559
-callout ten_seconds         561
 
 # ---- events ----
 event game_start     0x4d
@@ -451,3 +449,7 @@ value switch_level_before   0x1
 value switch_level_via      0x0
 value switch_polarity_at    0x20
 value switch_record_size    0x2c
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         569   # One! / Two!
+callout ten_seconds       571   # You are almost out of time. / Time is running out.

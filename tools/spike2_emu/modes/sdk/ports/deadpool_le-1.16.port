@@ -138,7 +138,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  c3328c39b0e29f78e9ff45db674248b1d245887d/0d167902e97be9e342b1950754601e41c79f615e
 
 # ---- callouts and text ----
-callout countdown           962
 text example_start_shot     Lil Deadpool target
 
 # ---- events ----
@@ -332,3 +331,6 @@ site block_rule_10         0x00129a64 0xe590c000 0xe3081934  # RuleWeapons::v[32
 text block_rule_name_10    Weapons
 site block_rule_11         0x0012a938 0xe2022010 0xe3a03000  # RuleWolverineSpinner::v[32]
 text block_rule_name_11    Wolverine Spinner
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         967   # 10 / 10; deadpool_le-1.14's 962 says the same lines

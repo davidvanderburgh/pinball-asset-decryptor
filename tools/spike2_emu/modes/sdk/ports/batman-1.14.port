@@ -262,3 +262,51 @@ lamp 121          0              TURNTABLE REACTOR FLASH  # lamp 157, I/O group 
 # ---- PAD-420: placed by port_tool.py from batman-1.13.port (the same title), unverified ----
 value switch_level_before   0x1
 value switch_level_via      0x0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x0002f1e4 0xe3500003 0xe92d47f0
+text block_name_0       Batphone Hurry Up
+site block_start_1      0x0004e968 0xe92d4ff8 0xe3a00033
+text block_name_1       Catwoman (episodes 19-20)
+site block_start_2      0x00074664 0xe92d4ff8 0xe3a00035
+text block_name_2       Catwoman (episode 108)
+site block_start_3      0x000b1b30 0xe92d47f0 0xe3a00036
+text block_name_3       Joker (episodes 5-6)
+site block_start_4      0x000c0eec 0xe92d47f0 0xe3a00037
+text block_name_4       Joker (episode 104)
+site block_start_5      0x00158b6c 0xe92d4ff8 0xe3a00039
+text block_name_5       Penguin (episodes 3-4)
+site block_start_6      0x0016bfcc 0xe92d4ff8 0xe3a0003a
+text block_name_6       Penguin (episode 95)
+site block_start_7      0x0018ad88 0xe92d47f0 0xe3a0003b
+text block_name_7       Riddler (episodes 1-2)
+site block_start_8      0x00199374 0xe92d47f0 0xe3a0003c
+text block_name_8       Riddler (episode 96)
+site block_start_9      0x00042210 0xe92d40f8 0xe1a05000
+text block_name_9       Bookworm (episodes 29-30)
+site block_start_10     0x00096938 0xe92d40f8 0xe1a05000
+text block_name_10      Egghead (episodes 47-48)
+site block_start_11     0x00086218 0xe92d40f8 0xe1a05000
+text block_name_11      Egghead (episodes 102-103)
+site block_start_12     0x0008e3e8 0xe92d4370 0xe1a05000
+text block_name_12      Egghead (episode 109)
+site block_start_13     0x000dcd68 0xe92d40f8 0xe1a05000
+text block_name_13      King Tut (episodes 27-28)
+site block_start_14     0x000e5048 0xe92d40f8 0xe1a05000
+text block_name_14      King Tut (episodes 41-42)
+site block_start_15     0x000ed158 0xe92d40f8 0xe1a05000
+text block_name_15      King Tut (episodes 87-88)
+site block_start_16     0x000f598c 0xe92d40f8 0xe1a05000
+text block_name_16      King Tut (episode 100)
+site block_start_17     0x000fd208 0xe92d40f8 0xe1a05000
+text block_name_17      King Tut (episode 117)
+site block_start_18     0x00109300 0xe92d40f8 0xe1a05000
+text block_name_18      Mad Hatter (episodes 13-14)
+site block_start_19     0x00111534 0xe92d40f8 0xe1a05000
+text block_name_19      Mad Hatter (episodes 69-70)
+site block_start_20     0x0014aee8 0xe92d40f8 0xe1a05000
+text block_name_20      Mr Freeze (episodes 53-54)
+site block_start_21     0x00035a10 0xe92d40f8 0xebffffdf
+text block_name_21      Batturn Mania

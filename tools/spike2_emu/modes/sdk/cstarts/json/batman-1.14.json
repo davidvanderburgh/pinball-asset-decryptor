@@ -1,0 +1,358 @@
+{
+ "key": "batman-1.14",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Batphone Hurry Up",
+   "start": "0x2f1e4",
+   "words": [
+    "0xe3500003",
+    "0xe92d47f0"
+   ],
+   "how": "counts AUD_BATPHONE_HURRY_UP_STARTED (id 225) at 0x2f340; sets game flag 48; creates record(s) 152 (body 0x2ec20),264 (body 0x2ebc0); reached by bl 0x4c510 (fn 0x4c3dc); bl 0xafc30 (fn 0xafa48); bl 0x1561c8 (fn 0x1560f8); bl 0x188e8c (fn 0x188da8); tail b 0x1c47b4 (fn 0x1c477c) +3 more; takes the hurry-up kind in r0 (as on 1.13: its callers count a hurry-up on a non-zero result, bookkeeping only)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Catwoman (episodes 19-20)",
+   "start": "0x4e968",
+   "words": [
+    "0xe92d4ff8",
+    "0xe3a00033"
+   ],
+   "how": "counts AUD_CATWOMAN_MODE_EP_19_20_STARTS (id 229) at 0x4ebe0; sets game flag 51; reached by table word 0x61f0b4; a major villain's episode start, called through the villain's episode table by the villain's start wrapper, which on a non-zero result marks the episode played and counts it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not re-read)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Catwoman (episode 108)",
+   "start": "0x74664",
+   "words": [
+    "0xe92d4ff8",
+    "0xe3a00035"
+   ],
+   "how": "counts AUD_CATWOMAN_MODE_EP_108_STARTS (id 255) at 0x748dc; sets game flag 53; reached by table word 0x61f12c; a major villain's episode start, called through the villain's episode table by the villain's start wrapper, which on a non-zero result marks the episode played and counts it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not re-read)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "Joker (episodes 5-6)",
+   "start": "0xb1b30",
+   "words": [
+    "0xe92d47f0",
+    "0xe3a00036"
+   ],
+   "how": "counts AUD_JOKER_MODE_EP_5_6_STARTS (id 266) at 0xb1d20; sets game flag 54; reached by table word 0x625d14; a major villain's episode start, called through the villain's episode table by the villain's start wrapper, which on a non-zero result marks the episode played and counts it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not re-read)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 4,
+   "name": "Joker (episode 104)",
+   "start": "0xc0eec",
+   "words": [
+    "0xe92d47f0",
+    "0xe3a00037"
+   ],
+   "how": "counts AUD_JOKER_MODE_EP_104_STARTS (id 277) at 0xc10f4; sets game flag 55; reached by table word 0x625d8c; a major villain's episode start, called through the villain's episode table by the villain's start wrapper, which on a non-zero result marks the episode played and counts it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not re-read)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 5,
+   "name": "Penguin (episodes 3-4)",
+   "start": "0x158b6c",
+   "words": [
+    "0xe92d4ff8",
+    "0xe3a00039"
+   ],
+   "how": "counts AUD_PENGUIN_MODE_EP_3_4_STARTS (id 295) at 0x158e08; sets game flag 57; reached by table word 0x63faa4; a major villain's episode start, called through the villain's episode table by the villain's start wrapper, which on a non-zero result marks the episode played and counts it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not re-read)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 6,
+   "name": "Penguin (episode 95)",
+   "start": "0x16bfcc",
+   "words": [
+    "0xe92d4ff8",
+    "0xe3a0003a"
+   ],
+   "how": "counts AUD_PENGUIN_MODE_EP_95_STARTS (id 310) at 0x16c260; sets game flag 58; reached by table word 0x63fb1c; a major villain's episode start, called through the villain's episode table by the villain's start wrapper, which on a non-zero result marks the episode played and counts it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not re-read)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 7,
+   "name": "Riddler (episodes 1-2)",
+   "start": "0x18ad88",
+   "words": [
+    "0xe92d47f0",
+    "0xe3a0003b"
+   ],
+   "how": "counts AUD_RIDDLER_MODE_EP_1_2_STARTS (id 323) at 0x18afe0; sets game flag 59; reached by table word 0x6434c8; a major villain's episode start, called through the villain's episode table by the villain's start wrapper, which on a non-zero result marks the episode played and counts it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not re-read)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 8,
+   "name": "Riddler (episode 96)",
+   "start": "0x199374",
+   "words": [
+    "0xe92d47f0",
+    "0xe3a0003c"
+   ],
+   "how": "counts AUD_RIDDLER_MODE_EP_96_STARTS (id 334) at 0x1995d4; sets game flag 60; reached by table word 0x643540; a major villain's episode start, called through the villain's episode table by the villain's start wrapper, which on a non-zero result marks the episode played and counts it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not re-read)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 9,
+   "name": "Bookworm (episodes 29-30)",
+   "start": "0x42210",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_BOOKWORM_MODE_EP_29_30_STARTS (id 352) at 0x42308; creates record(s) 206 (body 0x41f60),347 (body 0x41060); reached by tail b 0x4b1a0 (fn 0x4b184); table word 0x63bc7c; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 10,
+   "name": "Egghead (episodes 47-48)",
+   "start": "0x96938",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_EGGHEAD_MODE_EP_47_48_STARTS (id 359) at 0x96a5c; creates record(s) 208 (body 0x966a4),352 (body 0x960a8); reached by tail b 0x9d204 (fn 0x9d1e8); table word 0x6213dc; table word 0x63bcdc; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 11,
+   "name": "Egghead (episodes 102-103)",
+   "start": "0x86218",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_EGGHEAD_MODE_EP_102_103_STARTS (id 363) at 0x8633c; creates record(s) 210 (body 0x85f84),355 (body 0x85638); reached by table word 0x62141c; table word 0x63bd3c; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 12,
+   "name": "Egghead (episode 109)",
+   "start": "0x8e3e8",
+   "words": [
+    "0xe92d4370",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_EGGHEAD_MODE_EP_109_STARTS (id 368) at 0x8e510; creates record(s) 212 (body 0x8e184),358 (body 0x8d848); reached by table word 0x62145c; table word 0x63bd9c; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 13,
+   "name": "King Tut (episodes 27-28)",
+   "start": "0xdcd68",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_KING_TUT_MODE_EP_27_28_STARTS (id 374) at 0xdce94; creates record(s) 214 (body 0xdcab4),362 (body 0xdc01c); reached by tail b 0x1040dc (fn 0x1040c0); table word 0x63934c; table word 0x63bdfc; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 14,
+   "name": "King Tut (episodes 41-42)",
+   "start": "0xe5048",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_KING_TUT_MODE_EP_41_42_STARTS (id 380) at 0xe5164; creates record(s) 216 (body 0xe4d98),366 (body 0xe4074); reached by table word 0x63938c; table word 0x63be5c; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 15,
+   "name": "King Tut (episodes 87-88)",
+   "start": "0xed158",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_KING_TUT_MODE_EP_87_88_STARTS (id 386) at 0xed24c; creates record(s) 218 (body 0xecea8),370 (body 0xebc94); reached by table word 0x6393cc; table word 0x63bebc; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 16,
+   "name": "King Tut (episode 100)",
+   "start": "0xf598c",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_KING_TUT_MODE_EP_100_STARTS (id 392) at 0xf5a80; creates record(s) 220 (body 0xf5718),374 (body 0xf4b5c); reached by table word 0x63940c; table word 0x63bf1c; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 17,
+   "name": "King Tut (episode 117)",
+   "start": "0xfd208",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_KING_TUT_MODE_EP_117_STARTS (id 398) at 0xfd2fc; creates record(s) 222 (body 0xfcf98),378 (body 0xfc8e4); reached by table word 0x63944c; table word 0x63bf7c; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 18,
+   "name": "Mad Hatter (episodes 13-14)",
+   "start": "0x109300",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_MAD_HATTER_MODE_EP_13_14_STARTS (id 404) at 0x109404; creates record(s) 224 (body 0x108e30),382 (body 0x1085a8); reached by tail b 0x119b70 (fn 0x119b54); table word 0x63a57c; table word 0x63bfdc; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 19,
+   "name": "Mad Hatter (episodes 69-70)",
+   "start": "0x111534",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_MAD_HATTER_MODE_EP_69_70_STARTS (id 409) at 0x11162c; creates record(s) 226 (body 0x111268),385 (body 0x110368); reached by table word 0x63a5bc; table word 0x63c03c; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 20,
+   "name": "Mr Freeze (episodes 53-54)",
+   "start": "0x14aee8",
+   "words": [
+    "0xe92d40f8",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_MR_FREEZE_MODE_EP_53_54_STARTS (id 415) at 0x14afe0; creates record(s) 228 (body 0x14abf4),389 (body 0x14a55c); reached by tail b 0x154498 (fn 0x15447c); table word 0x63c09c; a minor villain's episode start from the episode table (as on 1.13: the dispatch site was not located statically, so how a non-zero result is used is unchecked)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 21,
+   "name": "Batturn Mania",
+   "start": "0x35a10",
+   "words": [
+    "0xe92d40f8",
+    "0xebffffdf"
+   ],
+   "how": "counts AUD_BATTURN_MANIA_STARTED (id 442) at 0x35bb0; creates record(s) 243 (body 0x36f6c),403 (body 0x353dc); reached by bl 0x1ca7f8 (fn 0x1ca7a0)",
+   "confidence": "high",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Mystery Multiball",
+   "why": "multiball (AUD_MYSTERY_MULTIBALL); its count is not a constant anywhere"
+  },
+  {
+   "name": "Catwoman (episodes 83-84)",
+   "start": "0x60bc4",
+   "words": [
+    "0xe92d4ff8",
+    "0xe3a00034"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Joker (episode 118)",
+   "start": "0xcd030",
+   "words": [
+    "0xe92d47f0",
+    "0xe3a00038"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Major Villain Wizard Mode",
+   "start": "0x127c4c",
+   "words": [
+    "0xe92d43f8",
+    "0xe1a04000"
+   ],
+   "why": "multiball: adds balls via 0x127c4c -> 0x1270d8 -> 0x126fc4 (count None)"
+  },
+  {
+   "name": "Shame (episodes 59-60)",
+   "start": "0x1baabc",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: serves balls via 0x1baabc -> 0x4d4ed4 (count None)"
+  },
+  {
+   "name": "Shame (episodes 115-116)",
+   "start": "0x1b2d4c",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: serves balls via 0x1b2d4c -> 0x4d4ed4 (count None)"
+  },
+  {
+   "name": "Minor Villain Wizard Mode 1",
+   "start": "0x1368ec",
+   "words": [
+    "0xe92d4f70",
+    "0xe24dd008"
+   ],
+   "why": "multiball: serves balls via 0x1368ec -> 0x4d4ed4 (count None)"
+  },
+  {
+   "name": "Minor Villain Wizard Mode 2",
+   "start": "0x13b050",
+   "words": [
+    "0xe92d4ff0",
+    "0xe3a00056"
+   ],
+   "why": "multiball: serves balls via 0x13b050 -> 0x4d4ed4 (count None)"
+  },
+  {
+   "name": "Minor Villain Wizard Mode 3",
+   "start": "0x141f08",
+   "words": [
+    "0xe92d4ff0",
+    "0xe3a00057"
+   ],
+   "why": "multiball: serves balls via 0x141f08 -> 0x4d4ed4 (count None)"
+  },
+  {
+   "name": "Main Multiball",
+   "start": "0x11a3cc",
+   "words": [
+    "0xe92d4ff0",
+    "0xe3a00058"
+   ],
+   "why": "multiball: named AUD_MAIN_MULTIBALL_STARTED; serves balls via 0x11a3cc -> 0x4d4ed4 (count None)"
+  }
+ ],
+ "notes": "engine: audit_add 0x4314a8, flag set 0x488e90, create-process 0x46755c, multiball_serve 0x4d4ed4. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). PAD-420: the same 22 starts as 1.13 (Batman 66 1.14), found by the generic audit witness and named from the audits; the confidence notes are 1.13's, by name."
+}

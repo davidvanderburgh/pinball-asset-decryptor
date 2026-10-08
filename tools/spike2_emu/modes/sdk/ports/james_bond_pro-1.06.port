@@ -328,3 +328,17 @@ site block_start_14     0x00047ff4 0xe92d43f8 0xe3041d2c
 text block_name_14      Bath O Sub Hurryup
 site block_start_15     0x0008ca40 0xe92d4008 0xe30001ab
 text block_name_15      Double Scoring
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x008939a8
+data coil_table            0x00826980
+value magnet_proc          13185
+text gate_label           Control gate
+text gate_drive           9 6 255 64 96
+data gate_obj            0x00821318
+value gate_ctl            28
+value gate_off_slot       3
+value gate_devoff         18
+text held_coils            gate

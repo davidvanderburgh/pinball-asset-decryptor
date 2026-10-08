@@ -576,3 +576,24 @@ value block_ret_24          0
 value block_ret_25          0
 value block_ret_26          0
 value block_ret_27          0
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site proc_exists          0x002fc92c 0xe3062df8 0xe3402082
+site proc_create          0x002fc2dc 0xe306cdf8 0xe340c082
+site proc_sleep           0x002fc42c 0xe3063df8 0xe3403082
+site adjustment           0x0042be18 0xe92d40f0 0xe2504000
+site coil_fire             0x002eab14 0xe3500000 0xe52de004
+data coil_count            0x00824e40
+data coil_table            0x0082642c
+value magnet_proc          13185
+text jet_pack_magnet_label Jet pack magnet
+text gate_label           Control gate
+text jet_pack_magnet_drive 9 0 255 1000 15
+text gate_drive           9 6 255 64 96
+data gate_obj            0x0081fad8
+value gate_ctl            28
+value gate_off_slot       3
+value gate_devoff         18
+text held_coils            jet_pack_magnet gate

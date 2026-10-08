@@ -456,3 +456,64 @@ text right_post_label      right inlane up post
 site lamp_free_owner      0x002f3804 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0x120
 value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x00056f58 0xe92d4ff0 0xe24dd01c   # jaws_le-1.02's Strobe: its lit lights 78% alike; 253 lights in its lamp groups, 0 light-runner commands, no colour given, 11.7 s
+text show_name_1          Strobe
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x00134fa8 0xe92d4ff0 0xe24dd01c   # jaws_le-1.02's Green and cyan strobe: its lit lights 87% alike; 222 lights in its lamp groups, 0 light-runner commands, green, cyan, 11.8 s
+text show_name_2          Green and cyan strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x0009fb90 0xe92d4010 0xeb0da56f   # jaws_le-1.02's White strobe: its lit lights 91% alike; 144 lights in its lamp groups, 0 light-runner commands, white, 11.7 s
+text show_name_3          White strobe
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x0001d1d0 0xe92d4ff0 0xe24dd03c   # 373 lights in its lamp groups, 2 light-runner commands, cyan, 11.7 s
+text show_name_4          Wide cyan strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x000cb3a8 0xe92d4ff0 0xe24dd01c   # 174 lights in its lamp groups, 0 light-runner commands, no colour given, 6.3 s
+text show_name_5          Chase
+text show_kind_5          flashy
+value show_secs_5         6
+site show_6               0x000ff254 0xe92d4ff0 0xe24ddf4d   # 130 lights in its lamp groups, 12 light-runner commands, red, white, 11.3 s
+text show_name_6          Red and white strobe
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x0022e134 0xe92d4010 0xe24dd0b0   # jaws_le-1.02's Slow red and yellow fade: its light-runner commands 100% alike; 198 lights in its lamp groups, 22 light-runner commands, red, yellow, 11.5 s
+text show_name_7          Slow red and yellow fade
+text show_kind_7          subdued
+value show_secs_7         8
+site show_8               0x0022e0a0 0xe92d4010 0xe24dd030   # jaws_le-1.02's Slow white fade: its light-runner commands 100% alike; 198 lights in its lamp groups, 6 light-runner commands, white, 11.7 s
+text show_name_8          Slow white fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x0022e00c 0xe92d4010 0xe24dd028   # jaws_le-1.02's Slow yellow fade: its light-runner commands 100% alike; 198 lights in its lamp groups, 5 light-runner commands, yellow, 11.7 s
+text show_name_9          Slow yellow fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x0022f664 0xe92d4010 0xe3000129   # jaws_le-1.02's Slow orange and white fade: its light-runner commands 100% alike; 198 lights in its lamp groups, 2 light-runner commands, orange, white, 11.7 s
+text show_name_10         Slow orange and white fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x002371e8 0xe92d4ff0 0xe30d4eac   # jaws_le-1.02's Glow: its light-runner commands 100% alike; 46 lights in its lamp groups, 10 light-runner commands, no colour given, 2.1 s
+text show_name_11         Glow
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x0007be74 0xe92d4070 0xe30d5eac   # 199 lights in its lamp groups, 2 light-runner commands, no colour given, 0.6 s
+text show_name_12         Fade
+text show_kind_12         accent
+value show_secs_12        1

@@ -42,10 +42,12 @@ def _lift(src, signature):
 # ---- the runtime ---------------------------------------------------------------------------
 def test_every_held_coil_is_the_magnets_code():
     src = RUNTIME.read_text(encoding="utf-8")
-    for api, body in (("int pm_magnet_grab(", 'pm_coil_hold("magnet", ms)'),
-                      ("void pm_magnet_release(", 'pm_coil_release("magnet")'),
-                      ("int pm_magnet_holding(", 'pm_coil_holding("magnet")')):
+    # PAD-420: the coil is the port's `text magnet_coil` (one of its held coils), "magnet" when there is none
+    for api, body in (("int pm_magnet_grab(", "pm_coil_hold(magnet_coil_name(), ms)"),
+                      ("void pm_magnet_release(", "pm_coil_release(magnet_coil_name())"),
+                      ("int pm_magnet_holding(", "pm_coil_holding(magnet_coil_name())")):
         assert body in _lift(src, api)
+    assert 'return t && *t ? t : "magnet";' in _lift(src, "static const char *magnet_coil_name(void)")
     arm = _lift(src, "static void coils_arm(void)")
     assert 'pm_port_text("held_coils")' in arm and 't = "magnet";' in arm      # a port without the line: the magnet
     assert "c->id = base + (unsigned)n_coils;" in arm                        # a process id each

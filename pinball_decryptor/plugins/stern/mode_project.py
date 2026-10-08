@@ -620,9 +620,13 @@ def _drive_ok(port, name):
 
 def _magnet_ports(port):
     """Does the port name the magnet the runtime can hold: Godzilla's ControlCoil route, or by its board address
-    (PAD-420)?"""
+    (PAD-420), or (PAD-420) one of its held coils, `text magnet_coil <name>` (King Kong's spider_magnet: one coil,
+    one set of limits, for Magnet and Mechanisms alike)?"""
     if not port:
         return False
+    alias = port["text"].get("magnet_coil", "").split("#")[0].strip()
+    if alias:
+        return any(name == alias for name, _l in _held_coils(port))
     sites, values, texts = MAGNET_NEEDS
     route0 = (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
               and all(port["text"].get(n) for n in texts))

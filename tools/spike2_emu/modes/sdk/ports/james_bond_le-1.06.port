@@ -597,3 +597,7 @@ value gate_ctl            28
 value gate_off_slot       3
 value gate_devoff         18
 text held_coils            jet_pack_magnet gate
+# PAD-420: Mode > Magnet holds the ball with the held coil jet_pack_magnet, on a hit of the shot nearest it on the
+# playfield picture (Tank hood target, 17 px from the jet pack magnet)
+text magnet_coil           jet_pack_magnet
+value magnet_shot          0x20

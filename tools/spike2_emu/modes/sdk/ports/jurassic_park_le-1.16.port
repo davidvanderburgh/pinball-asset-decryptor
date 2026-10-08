@@ -618,6 +618,10 @@ text raptor_post_drive    9 5 255 128 64
 text orbit_post_drive     9 8 255 64 64
 text room_post_drive      9 6 255 64 64
 text held_coils            trex_magnet raptor_post orbit_post room_post
+# PAD-420: Mode > Magnet holds the ball with the held coil trex_magnet, on a hit of the shot nearest it on the
+# playfield picture (Left ramp enter opto, 12 px from the T-Rex mouth magnet)
+text magnet_coil           trex_magnet
+value magnet_shot          0x800000
 
 # PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
 # build's own transcribed voice lines, tu_wide.py)

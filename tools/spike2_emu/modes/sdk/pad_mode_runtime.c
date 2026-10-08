@@ -4065,9 +4065,17 @@ int pm_coil_known(const char *name)
     return (can & PM_CAN_COILS) && c && c->checked >= 0;
 }
 
-int pm_magnet_grab(unsigned ms) { return pm_coil_hold("magnet", ms); }
-void pm_magnet_release(void) { pm_coil_release("magnet"); }
-int pm_magnet_holding(void) { return pm_coil_holding("magnet"); }
+/* PAD-420: a title whose magnet is one of its held coils (`text magnet_coil spider_magnet`) grabs with that coil -
+ * one coil, one set of limits, whichever part of a mode asks for it; otherwise the coil named "magnet" */
+static const char *magnet_coil_name(void)
+{
+    const char *t = pm_port_text("magnet_coil");
+    return t && *t ? t : "magnet";
+}
+
+int pm_magnet_grab(unsigned ms) { return pm_coil_hold(magnet_coil_name(), ms); }
+void pm_magnet_release(void) { pm_coil_release(magnet_coil_name()); }
+int pm_magnet_holding(void) { return pm_coil_holding(magnet_coil_name()); }
 
 /* Every tick, each coil: the game taking over, ending or killing the hold, and the deadline (the process
  * checks that too). A hold whose process is gone was ended by the game (a tilt or the end of a ball kills

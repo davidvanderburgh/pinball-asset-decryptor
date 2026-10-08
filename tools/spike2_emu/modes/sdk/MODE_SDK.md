@@ -1489,6 +1489,13 @@ command instead. The process calls: create-if-absent (id, entry, flags 0) `0x3ab
 take control `0x5079c` (coil, wait ticks), give control back `0x50860` (coil, 1); the coil's update
 `0x4ffc8`, its controller at +44.
 
+**A magnet that is one of the title's held coils** (PAD-420): `text magnet_coil spider_magnet` makes that held
+coil (its `_drive` or `_get` lines, below) the one `pm_magnet_grab` holds - one coil, one set of limits, whether a
+mode's `magnet` line or its `coil_hold` asks. `value magnet_shot` is then the shot whose switch is nearest the
+magnet on the playfield picture, as on Godzilla: King Kong's Pit target-bot (23 px from the spider pit magnet),
+Avengers' Tower (every tower opto makes it, 1.4 px), Jurassic Park LE's Left ramp enter opto (12 px from the
+T-Rex mouth magnet), James Bond LE's Tank hood target (17 px from the jet pack magnet).
+
 **From a mode file, and the Modes tab.** `magnet <ms> [mask]`: while the mode runs, every hit of the shot the
 magnet sits at holds the ball there for `<ms>`, the hit that starts the mode included, through `pm_magnet_grab`
 with all of the limits above (a refused hit is logged as `magnet shot ... - no grab` and the mode carries on).

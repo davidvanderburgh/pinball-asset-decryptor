@@ -168,7 +168,8 @@ def test_one_command_per_grab_and_it_is_never_resent():
     grab = _lift(src, "int pm_coil_hold(")                 # PAD-381: pm_magnet_grab is pm_coil_hold("magnet")
     let_go = _lift(src, "static void coil_let_go(")
     tick = _lift(src, "static void magnet_tick(")
-    assert 'return pm_coil_hold("magnet", ms);' in _lift(src, "int pm_magnet_grab(")
+    assert "return pm_coil_hold(magnet_coil_name(), ms);" in _lift(src, "int pm_magnet_grab(")   # PAD-420: "magnet"
+    assert 'return t && *t ? t : "magnet";' in _lift(src, "static const char *magnet_coil_name(void)")  # by default
     assert proc.count("magnet_send(") == 1
     # the one send comes after control is taken, and the process gives control back on its way out
     assert proc.index('coil_call(c, "take")') < proc.index("magnet_send(") < proc.rindex('coil_call(c, "give")')

@@ -152,3 +152,34 @@ def test_the_docs_name_the_key_and_the_field():
         assert re.search(r"`%s(?:[ (][^`]*)?`" % re.escape(name), doc), name
     assert "**From a mode file, and the Modes tab.** `magnet <ms> [mask]`" in (
         SDK / "MODE_SDK.md").read_text(encoding="utf-8")
+
+
+#: PAD-420: the builds whose magnet is one of their PROVEN held coils, and the shot nearest it on the playfield picture
+MAGNET_COILS = {
+    "king_kong_pro-0.97": ("spider_magnet", "Pit target-bot"),
+    "king_kong_le-0.97": ("spider_magnet", "Pit target-bot"),
+    "avengers_infinity_le-1.10": ("tower_magnet", "Tower (0x100000000)"),
+    "avengers_infinity_pro-1.10": ("tower_magnet", "Tower (0x100000000)"),
+    "jurassic_park_le-1.16": ("trex_magnet", "Left ramp enter opto"),
+    "james_bond_le-1.06": ("jet_pack_magnet", "Tank hood target"),
+}
+
+
+@pytest.mark.parametrize("key", sorted(MAGNET_COILS))
+def test_a_magnet_that_is_a_held_coil_is_the_magnet_part_s_coil(key):
+    """PAD-420: `text magnet_coil <name>` makes one of the port's held coils the magnet a mode's `magnet` line grabs
+    with - one coil, one set of limits, whichever part asks - and only a held coil the port can drive counts."""
+    coil, shot = MAGNET_COILS[key]
+    port = MP.read_port(str(SDK / "ports" / (key + ".port")))
+    assert port["text"]["magnet_coil"] == coil and (key, coil) in MP.HELD_COILS_PROVEN
+    assert MP._magnet_ports(port) and MP._magnet_shot_name(port) == shot
+    bad = dict(port, text=dict(port["text"], magnet_coil="no_such_coil"))
+    assert not MP._magnet_ports(bad)
+
+
+def test_the_runtime_grabs_with_the_port_s_magnet_coil():
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    body = src[src.index("static const char *magnet_coil_name(void)"):]
+    body = body[:body.index("\n}\n") + 3]
+    assert 'pm_port_text("magnet_coil")' in body and 'return t && *t ? t : "magnet";' in body
+    assert "int pm_magnet_grab(unsigned ms) { return pm_coil_hold(magnet_coil_name(), ms); }" in src

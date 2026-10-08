@@ -495,3 +495,10 @@ data gates_obj           0x0068dedc
 value gates_ctl           12
 value gates_off_slot      5
 text held_coils            gates
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+value scoop_event          2
+site scoop_handler         0x00098dfc 0xe3003c82 0xe2400002
+data scoop_slot           0x00628f18

@@ -690,6 +690,17 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         record (coils/coilrec_probe.c: the 0x68-byte records carry no default) nor the boot configuration frames
         (coils/bootcfg_job.sh, PAD_NB_TRACE: node 9 coil 0's is power 255, time 0) holds the 1000 ms, so the draw is
         not read here for the others - each needs its feature run on the rig, or David's word on where the magnet sits.
+      - **Light shows, run 22 pilot** (the last big yellow, 52 builds): `shows/scan_job2.sh` + `showbus_job.sh` play
+        each candidate (pm_game_show) with the node bus traced; `shows/busshow.py` measures each from the bus. On
+        Godzilla LE 1.16's ten NAMED shows: its lamps go out on node 14 (cmds 0x72 / 0x84-0x92 / 0xa6), not 8-11, and
+        with every node decoded each show "moves" 140-190 channels against the 3.5 s before it - the game's own lamp
+        animation never stops, so a before/after window cannot tell a show from the game (run 6's finding, now on
+        exact data). PAD-411 measured its shows at the LIGHT RUNNER (`site light_run`): the commands the show's own
+        process (show_proc) sends, which no other lamp of the game's touches. Next: that instrument (a hook on
+        light_run logging the commands whose process is show_proc - not in the repo, PAD-411's was scratch), then per
+        title the registry's candidates (`shows/cands`, `mkscan.py`) scanned with it, each named from what it sends
+        (colours, how many lamps, how long) as PAD-411 named Godzilla LE's, and landed as `site show_<n>` + name /
+        kind / secs lines.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

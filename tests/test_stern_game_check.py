@@ -105,3 +105,12 @@ def test_the_object_logs_the_lines_the_reader_reads():
     assert 'say "switch $id $name"' in sh and '"$DUMP/census.mark"' in sh
     tryit = (SDK.parent / "tryit.sh").read_text(encoding="utf-8")
     assert '"$S/%s"' % GC.FLAG_NAME in tryit and '"$DUMP/%s"' % GC.FLAG_NAME in tryit
+
+
+def test_a_saver_that_keeps_giving_the_ball_back_is_waited_out_longer_each_time():
+    """PAD-420: Batman 1.14's saver outlasted the 15 s after the three switches, so every drain was given back and the
+    check never saw a ball end; the wait grows with each saved drain (30, 40, 50 s), and 30 s ended its ball."""
+    sh = (SDK.parent / "gamecheck.sh").read_text(encoding="utf-8")
+    body = sh[sh.index("drain_until_end() {"):]
+    body = body[:body.index("\n}\n")]
+    assert "sleep $(( 10 * n + 10 ))" in body and "sleep 15\n" not in body

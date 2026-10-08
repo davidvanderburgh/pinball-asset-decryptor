@@ -111,7 +111,7 @@ guided_setup() {
 }
 #: drain until the object logs one more end of ball: 0 when one did. A drain inside the ball saver
 #: comes back as a new ball, and a ball drained before any playfield switch since its launch is given
-#: back every time (John Wick, Venom), so after a saved drain three switches are hit and the saver
+#: back every time (John Wick, Venom), so after a saved drain three switches are hit and the saver (30, 40, 50 s)
 #: is waited out before the next one
 drain_until_end() {
     local before n end id
@@ -130,7 +130,9 @@ drain_until_end() {
         [ "$n" -ge 2 ] || continue
         say "the ball saver gave it back: playing past it"
         for id in "${ids[@]:0:3}"; do press "$id"; done
-        sleep 15
+        # PAD-420: longer each time - Batman 1.14's saver outlasts 15 s after the first switch (every drain was given
+        # back); 30 s ended its ball
+        sleep $(( 10 * n + 10 ))
         echo drain > "$DUMP/census.mark"
     done
     return 1

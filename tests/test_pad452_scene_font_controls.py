@@ -322,3 +322,18 @@ def test_a_shorter_line_is_padded_where_its_new_layout_hides_it():
     off = [{"op": "text_flow", "node": TITLE, "multiline": False}]
     looks = engine._radium_text_looks(data, off)["KAI\nJU"]
     assert engine._padded_text(b"A\nB", 7, looks) == b"  A\nB  "
+
+
+def test_a_line_is_as_wide_as_its_letters_reach_not_its_last_spacing():
+    """Emulator (Godzilla LE 1.16, language screen): "December 19, 1965" centred with
+    LetterSpacing 20 grew by 20 px per GAP between its 17 letters (320 px), not per letter:
+    the game centres it where its letters reach.  Drawn so, the preview put every letter
+    where the game did, within the 2 px an unedited line shows."""
+    from PIL import Image
+    from pinball_decryptor.plugins.stern import fontrender as fr
+    g = {"adv": 10.0, "bx": 0.0, "by": 8.0, "lw": 10.0, "lh": 10.0, "kern": {}, "rot": 0}
+    font = {"glyphs": {ord("A"): g}, "has_metrics": True, "ascent": 8, "descent": 2}
+    cell = lambda _g: Image.new("RGBA", (10, 10), (255, 255, 255, 255))      # noqa: E731
+    w0 = fr.render_text(font, "AAA", slice_loader=cell)[0].size[0]
+    w5 = fr.render_text(font, "AAA", slice_loader=cell, tracking=5)[0].size[0]
+    assert (w0, w5) == (30, 40)                                  # two gaps, not three letters

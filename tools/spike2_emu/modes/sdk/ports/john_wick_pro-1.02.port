@@ -56,7 +56,8 @@ site agent_header     0x0051aab8 0xe92d40f8 0xe2505000
 site agent_begin      0x00525424 0xe590c004 0xe1a00001
 site balls_in_play    0x002a6b80 0xe92d4010 0xe30f4ff0
 site multiball_serve  0x002a6cfc 0xe92d41f0 0xe307e74a
-site video_surface    0x0004d4a8 0xe92d4070 0xe3055a84
+# site video_surface: left off (PAD-420) - as on John Wick LE 1.01 (item 164), the game's own getter answers
+# 60ed7e50's surface, not the bank this title's clips go in (video_bank below), so set_video finds no clip
 site stock_rule_get   0x000f2f64 0xe3510035 0xe92d4008
 site backdrop_draw    0x00037730 0xe5903054 0xe92d4010
 site scene_show       0x0033acf0 0xe92d4070 0xe30348b4

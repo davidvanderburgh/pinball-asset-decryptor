@@ -221,6 +221,34 @@ function LookFilter({ id, steps }) {
   </svg>`;
 }
 
+// PAD-454 (DragonRR): Compare's Original / With its color profile switch, on each of the two
+// players: the clip as it is, or drawn through its color profile, attached or not.  Only the
+// player changes (video.py set_pane_view); the palette is what attaches it.
+const PROFILE_WORDS = "With its color profile";
+function PaneView({ side, view, look }) {
+  if (!view) return null;
+  const filesOn = !!(look.on && (look.sw || {}).files);
+  const plainTip = side === "orig" ? "The game's clip without its color profile."
+    : view.stock ? "The game's clip as it shipped, without its color profile."
+    : "Your replacement as you made it, without its color profile.";
+  const options = [
+    { value: "plain", label: view.plain, title: { head: view.plain, lines: [plainTip,
+      "The other Preview colors switches still apply."] } },
+    { value: "profile", label: PROFILE_WORDS, disabled: !filesOn, title: { head: PROFILE_WORDS, lines: [
+      { profile: view.name },
+      filesOn ? (view.on ? "The clip drawn through the color profile attached to it, as the card gets it."
+        : "The clip drawn through its color profile as it would be attached. It is not attached: click its palette for that.")
+        : "Tick Individual files under Preview colors to see it.",
+      "Only this player changes: nothing is attached or changed."] } },
+  ];
+  return html`<div class="row vid-view">
+    <${Seg} value=${view.view} options=${options} onChange=${(v) => call("video.set_pane_view", side, v)} />
+    <span class="small ellip">${!filesOn ? html`<span class="muted">Individual files is off under Preview colors.</span>`
+      : html`Color profile: <span class="vcm-cp">${view.name}</span>${view.on ? null
+        : html`<span class="muted">, not attached</span>`}`}</span>
+  </div>`;
+}
+
 function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const vref = useRef(null);
   const [glLive, setGlLive] = useState(false);
@@ -332,6 +360,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
         onInput=${(e) => { const v = vref.current; const t = Number(e.target.value); setPos(t); if (v) v.currentTime = t; }} />
       <span class="mono small muted nw">${clock(pos, pane.path ? dur : 0)}</span>
     </div>
+    ${look && look.offered && pane.path ? html`<${PaneView} side=${side} view=${(look.views || {})[side]} look=${look} />` : null}
   </div>`;
 }
 
@@ -1005,8 +1034,11 @@ export default function VideoTab() {
   // PAD-369: the replacement's name over its player tells its color profile too
   const curRow = currentRel ? rows.find((x) => x.rel === currentRel) : null;
   const repLine = curRow ? profileLine(curRow, colorNs) : null;
+  // PAD-454: a game's own clip turned to Original on this player says so
+  const repView = look.offered && rep.path ? (look.views || {}).rep : null;
+  const repTitle = repView && repView.stock && repView.view === "plain" ? repView.plain : rep.title;
   const repHead = html`<div class="row vid-panehead">
-    <span class="eyebrow">${rep.title || "Replacement"}</span>
+    <span class="eyebrow">${repTitle || "Replacement"}</span>
     ${rep.path ? html`<span class="mono small nw ellip acc-ink" ...${tip(repLine
       ? { head: rep.path, lines: [repLine] } : rep.path)}>— ${rep.label}</span>` : null}
     <span class="grow"></span>

@@ -127,6 +127,13 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         # the preview's three switches on the players (PAD-329, PAD-330), as
         # they were left last time (PAD-348)
         self._lsw = look_switches.initial(window, "video")
+        # PAD-454 (DragonRR): what each of the two players shows, as a Compare
+        # player does: "plain" (its Original / Replacement as it is) or
+        # "profile" (With its color profile); None = as the clip is set (the
+        # Replacement with its profile when one is attached).  Back to None
+        # for another clip, and the Replacement's when its switch moves
+        self._pview = {"orig": None, "rep": None}
+        self._pview_key = None
         self._color_all = False          # the Color profile tab's "every replaced video"
         self._scan_id = 0
         self._scan_dir = ""
@@ -258,30 +265,37 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         offered = self._per_file_colour()
         sw = dict(self._lsw)
         look = {"offered": offered, "on": any(sw.values()), "sw": sw, "parts": None,
-                "orig": [], "rep": [], "lut": {"orig": None, "rep": None}}
+                "orig": [], "rep": [], "lut": {"orig": None, "rep": None},
+                "views": {"orig": None, "rep": None}}
         with self._lut_lock:
             self._lut_want.clear()
         folder = self._assets_path()
+        rel = self._current
+        switch = self._color_state(rel) if rel else None
         if offered and folder and os.path.isdir(folder):
             try:
                 from ...core import colour_profile
                 look["parts"] = colour_profile.preview_parts(folder)
             except Exception:                           # noqa: BLE001
                 log.exception("preview parts")
+            look["views"] = self._pane_views(folder, rel, switch)
         if offered and look["on"] and folder and os.path.isdir(folder):
-            rel = self._current
-            switch = self._color_state(rel) if rel else None
             try:
                 from ...core import colour_profile
                 kw = dict(overlay_on=sw["overlay"], files_on=sw["files"],
                           screen_on=sw["screen"], rel=rel)
-                look.update(colour_profile.video_look(
-                    folder, switch, self._own_colours(), **kw))
-                exact = colour_profile.video_look_exact(
-                    folder, switch, self._own_colours(), **kw)
+                own, done = self._own_colours(), {}
                 prev = (self.get("look") or {}).get("lut") or {}
-                look["lut"] = {side: self._lut(exact[side], prev.get(side))
-                               for side in ("orig", "rep")}
+                for side, (part, on) in self._pane_sources(
+                        switch, look["views"]).items():
+                    if on not in done:
+                        done[on] = (
+                            colour_profile.video_look(folder, on, own, **kw),
+                            colour_profile.video_look_exact(folder, on, own,
+                                                            **kw))
+                    steps, exact = done[on]
+                    look[side] = steps[part]
+                    look["lut"][side] = self._lut(exact[part], prev.get(side))
             except Exception:                           # noqa: BLE001
                 log.exception("video machine look")
         if look != self.get("look"):
@@ -289,6 +303,73 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         if self._cmp_open:
             self._cmp_steps()
             self._cmp_publish()
+
+    def _pane_views(self, folder, rel, switch):
+        """Each player's Original / With its color profile switch (PAD-454):
+        ``{side: {"plain", "view", "name", "on", "stock"} or None}``.  On a
+        player with a clip when the clip has a color profile to show (its
+        own, else the project's individual files one), attached or not:
+        "plain" is the word for the player as it is, "view" which of the
+        two is on show, "name" the profile's, "on" whether it is attached,
+        "stock" a game's own clip on the Replacement player."""
+        key = (rel, switch, self._assign.get(rel) if rel else None)
+        if key != self._pview_key:
+            if self._pview_key is None or self._pview_key[0] != rel:
+                self._pview["orig"] = None
+            self._pview["rep"] = None
+            self._pview_key = key
+        out = {"orig": None, "rep": None}
+        if not rel:
+            return out
+        try:
+            from ...core import colour_profile
+            prof = colour_profile.asset_resolver(folder)("videos", rel)
+        except Exception:                               # noqa: BLE001
+            log.exception("video player views")
+            prof = None
+        pv = self.get("preview") or {}
+        if prof is None or pv.get("rel") != rel:
+            return out
+        stock = self._stock_coloured(rel)
+        for side in ("orig", "rep"):
+            pane = pv.get(side) or {}
+            if not pane.get("path"):
+                continue
+            plain = ("Original" if side == "rep" and stock
+                     else pane.get("title") or "Original")
+            out[side] = {"plain": plain, "name": prof.name or "",
+                         "on": bool(switch), "stock": side == "rep" and stock,
+                         "view": self._pview[side] or (
+                             "profile" if side == "rep" and switch
+                             else "plain")}
+        return out
+
+    @staticmethod
+    def _pane_sources(switch, views):
+        """Which of :func:`colour_profile.video_look`'s lists each player
+        draws through, and for which Color switch: ``{side: (list,
+        switch)}``.  With its color profile is the clip's list with the
+        switch on; a Replacement shown as it is, the one with it off; a game's
+        own clip shown as it is, its Original's."""
+        out = {"orig": ("orig", switch), "rep": ("rep", switch)}
+        for side, v in (views or {}).items():
+            if not v:
+                continue
+            if v["view"] == "profile":
+                out[side] = ("rep", True)
+            elif side == "rep":
+                out[side] = ("orig", switch) if v.get("stock")                     else ("rep", False)
+        return out
+
+    @rpc
+    def set_pane_view(self, side, view):
+        """One player's Original / With its color profile switch (PAD-454).
+        Only that player changes: nothing is attached or detached."""
+        if side not in self._pview or view not in ("plain", "profile"):
+            return False
+        self._pview[side] = view
+        self.publish_look()
+        return True
 
     def _own_colours(self):
         """The Scenes gear menu's setting: a clip with no color profile
@@ -2512,6 +2593,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self.set(preview=pv)
         if new.get("facts") is None:
             self._load_pane_async(new)
+        # PAD-454: its Original / With its color profile switch follows it
+        self.publish_look()
 
     def _load_pane_async(self, pane):
         """_VideoPreviewPane.load: probe the clip and render its

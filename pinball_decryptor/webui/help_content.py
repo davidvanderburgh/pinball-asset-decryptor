@@ -516,6 +516,10 @@ HELP_CONTENT = {
                          "gives it a palette; detaching puts the original back."}]},
             "A game's own clip with its color profile attached shows it on the right-hand "
             "player, **With its color profile**: the original as the card will get it.",
+            "Under each player, **Original** (or **Replacement**) and **With its color "
+            "profile** switch that player between the clip as it is and the clip through "
+            "its color profile, attached or not, as a Compare player does. Only the "
+            "player changes; the palette is what attaches it.",
             "### Preview colors\n"
             "Switches above the players show the clips as the machine will (preview "
             "only; no re-encode), drawn the same way Scenes draws a picture, color ranges "

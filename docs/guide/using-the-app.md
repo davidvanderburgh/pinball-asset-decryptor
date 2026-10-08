@@ -170,7 +170,10 @@ sound, and Play all / From the start / Loop keep them in step. A game's
 own clip is marked **Locked** on its player, and the **Advanced** box at
 the top of Compare unlocks it there as on the list; with its color
 profile attached it shows **With its color profile** (on the list too,
-in the right-hand player). On Spike 2 every player draws its clip
+in the right-hand player). Under each of the list's two players,
+**Original** (or **Replacement**) and **With its color profile** switch
+that player between the clip as it is and the clip through its color
+profile, attached or not; only the player changes. On Spike 2 every player draws its clip
 through its colors the way Scenes draws a picture, color ranges and
 curves included, frame by frame as it plays. The Big Lebowski's colour-DMD `.cdmd` clips are supported
 too — they're re-encoded back into `.cdmd` at the original frame

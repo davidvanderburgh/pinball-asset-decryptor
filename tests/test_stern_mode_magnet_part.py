@@ -171,6 +171,7 @@ def test_a_magnet_that_is_a_held_coil_is_the_magnet_part_s_coil(key):
     port = MP.read_port(str(SDK / "ports" / (key + ".port")))
     assert port["text"]["magnet_coil"] == coil and (key, coil) in MP.HELD_COILS_PROVEN
     assert MP._magnet_ports(port) and MP._magnet_shot_name(port) == shot
+    assert key in MP.MAGNET_PROVEN                     # two grabs on the rig, nothing else of the game's on the coil
     bad = dict(port, text=dict(port["text"], magnet_coil="no_such_coil"))
     assert not MP._magnet_ports(bad)
 

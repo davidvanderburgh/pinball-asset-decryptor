@@ -162,3 +162,28 @@ a byte at +4, a time and a callback - run 9: that is a 40-slot TIMER service at 
 
 Its magnets do call `coil_fire` (Aerosmith LE's toy box magnet: 255
 for 1 s, then 16).
+
+**C, run 12 (2026-10-08): what each kind of Device-framework coil needs on the board-address route.**
+- Posts, diverters and magnets whose `coil_fire` call names a CONSTANT device (mechs/holds: Mandalorian's posts 255
+  for 64 ms then 128 for 1.5 s, Munsters' magnet 255 for 1.2 s then 18, Venom LE's post 255/32 then 48 for 1 s, Foo
+  Fighters LE's van up post 255/32 then 128): the drive is that command, its pulse + hold the line's last word when
+  under 5 s; no object. The coil is found by its NAME in the rig's tables (coilmap), never by the inventory's node
+  numbers (a derived ladder, wrong on some builds), and its device from the runtime's coil list: a flipper's device
+  also has a hold command (Foo Fighters LE device 3, 128/40 then 48), so a device is never picked by its command.
+- **ControlGate, 30 virtuals** (Aerosmith LE `UpperOrbitControlGate`, Guardians/LE `OrbitControlGates`, JP the Pin
+  `LeftControlGate`, Star Wars LE/Pro `TopLaneControlGates`): ONE static object per build (`gatecalls.py`: Aerosmith
+  LE 0x61eb38, Guardians LE 0x5f391c, Guardians 0x5f19b0, JP 0x59300c, Star Wars LE 0x68f014, Pro 0x68dedc). The game
+  raises it with v[0](ticks), capped at 0xbb ticks of 16 ms, through a 40-slot DRIVER (0x332c7c on Aerosmith LE) that
+  sends the board 255 for 250 ms + 255 for 250 ms every 250 ms ([coildrive], Aerosmith LE node 10 coil 0, Guardians
+  LE node 9 coil 0) and never touches the coil records. Every constant activation the game makes is 93 ticks (1488
+  ms; Guardians also 77). So: drive `255 250 255 1488`, `data <name>_obj`, `value <name>_ctl 12` (its active flag:
+  the "game wants it" word, as the records cannot say so), `value <name>_off_slot 5` (v[5]: the operator's
+  adjustment at +6 == 1). The runtime sends no OFF of its own when the game takes such a coil (commit 51cf2624).
+- **ControlGate, 24 virtuals** (James Bond LE/Pro `TopControlGate`, Elvira `LeftControlGate`): v[21] raises it with
+  the game's own `coil_fire(device at +0x12, 255, 64 ms, 96, 20000 ms)` - through the coil records; v[7] sets a
+  countdown at +0x1c (0xbb cap), v[3] the operator's "disabled" (adjustment at +4). So: drive `255 64 96`, the
+  object, `_ctl 28`, `_off_slot 3`, `_devoff 18`. Objects: JB Pro 0x821318, JB LE 0x81fad8, Elvira 0x87ed84.
+- Not yet: the toy box magnet and the Guardians magnets (their commands come from object fields, no constant
+  device), Star Wars LE's `ExitDiverter`, Elvira (no game starts on the direct harness), Beatles (no constant hold).
+Scratch: `C:/tmp/PAD-420/coils` cgen.py (stages, GATES), fill_c.py (rig side), coil_job_c.sh, c_verdict.py,
+gatecalls.py; chain30 runs 25 builds.

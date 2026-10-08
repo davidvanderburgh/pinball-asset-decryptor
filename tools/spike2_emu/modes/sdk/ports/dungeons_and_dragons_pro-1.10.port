@@ -185,8 +185,6 @@ scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
 scene hud                  b237b7288453dee42f8299bea3fb57de90e6e473
 
 # ---- callouts and text ----
-callout countdown           2059
-callout time_up             2058
 text example_start_shot     Dragon target left
 
 # ---- events ----
@@ -424,3 +422,8 @@ site block_rule_16         0x001d7ff8 0xe92d4ff0 0xe3055ce0  # ctrap::v[43]
 text block_rule_name_16    Trap
 site block_rule_17         0x001e77e0 0xe59012b0 0xe351001e  # ctreasure::v[43]
 text block_rule_name_17    Treasure
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         2078   # One. / 2.
+callout ten_seconds       650   # Hurry up!
+callout time_up           2077   # Your time ran out. / Your time ran out.

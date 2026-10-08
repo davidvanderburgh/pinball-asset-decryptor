@@ -407,10 +407,27 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - **John Wick's locations are base play** (440aecb0, `text stack_base_names cmode_location_`): one runs for
         nearly all of a ball, so a stack-no mode waiting for it would hardly ever start. LE and Pro re-proven on it
         (Tick Tock refused the mode; the runtime named John Wick's House as base play).
-      - **Mode > Magnet by a held coil** (2b2ca35f, `text magnet_coil <coil>`, `value magnet_shot`): King Kong LE/Pro,
-        Avengers LE/Pro, Jurassic Park LE, James Bond LE - the shot nearest the magnet on the playfield picture
-        (`magnet/near.py`, lights/dxy). chain47 runs `magnet/magnet_job.sh` (two grabs and a stop mid-grab); land
-        each into MAGNET_PROVEN. Munsters' devices have no picture positions (its magnet shot is not picked yet).
+      - **Mode > Magnet by a held coil** (2b2ca35f, `text magnet_coil <coil>`, `value magnet_shot` = the shot nearest the
+        magnet on the playfield picture, `magnet/near.py` over lights/dxy): PROVEN on Jurassic Park LE (T-Rex mouth
+        magnet, Left ramp enter opto) and James Bond LE (jet pack magnet, Tank hood target) - `magnet/magnet_job.sh`,
+        `magnet_verdict.py` (two grabs, a stop mid-grab, and NOTHING else of the game's on the coil's address while
+        it held). Taken back out of King Kong (the game pulses its spider magnet 4 x 20 ms on a pit target hit - each
+        ends a hold, mode.log still said held) and Avengers (a tower opto makes the game grab the ball in its tower;
+        our grab gives way): 021b504b. Most other magnets have no picture position; where a name gives the shot away
+        ("... MAGNET OPTO") the game likely uses the magnet there itself - a question for David.
+      - Batman 66 1.14 after its port: block lines (the plain-C start finder: the same 22 starts as 1.13; Check this
+        game passed again with them hooked), multiball, ball save (bs_job.sh skips `Pos.` and plunges a saved ball;
+        Batman passed only with NOPF - pressing its Penguin VUK / Top Eject over and over left a drain that never
+        ended the ball), stack by its ball count, lights (6/6 RGB, 82/82). Left on it: screen/clip (round 4, the
+        census no longer presses `Pos.`), coils (chain36), scoop (Penguin VUK not derived), lit shots, shows, the
+        flags route (its draft's mode flags 86/88 unchecked; 1.13's were 58/71).
+      - James Bond LE's scoop with a 10 s hold (scoop_job4.sh, STOP_AFTER=9): its game reports a ball settled ~3 s in
+        and keeps it ~5 s itself; a hold replaces that keep (landed by hand, `scoop/land_jb10.py`). Aerosmith LE's
+        upper gate, Guardians 1.15's orbit gates landed from the C batch.
+      - Media: a ball-start selection screen covers a mode's screen and clip on Rush (song) and Star Wars (path and
+        hero); proof_job2.sh takes PRE_PRESS=pf (two playfield switches first) - chain49 round 4.
+      - test_stern_mode_ball_save had been red since 10-07 (Munsters Pro's ball save proven, its multiball not):
+        now a named exception (6a2c155a). All 40 mode-related test files: 819 passed.
       - cardstage.sh stages a card only whole (1b52e9b1): a refused rename out of .inflight had left an EMPTY card
         that Munsters Pro's multiball job booted. chain43 re-runs that job with TAKE=2 (four balls home): its two
         runs went 2 -> 0 in play with four balls home, a four-ball game on the rig's six?

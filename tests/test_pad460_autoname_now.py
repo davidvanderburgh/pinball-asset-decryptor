@@ -8,7 +8,9 @@ the ⚙ menu at all.
 
 import csv
 import os
+import sys
 import time
+import types
 import wave
 
 from tests.webui_harness import web_app
@@ -204,8 +206,13 @@ def test_callouts_csv_keeps_the_rows_of_files_named_before(tmp_path):
     assert T._keep_earlier_rows(str(other), new) is new
 
 
-def test_a_folder_named_already_is_not_an_error(tmp_path):
+def test_a_folder_named_already_is_not_an_error(tmp_path, monkeypatch):
     from pinball_decryptor.core import transcribe as T
+    # The pipeline probes for faster-whisper before it looks at the folder;
+    # the Linux and macOS CI runners do not install it.  Nothing is
+    # transcribed here, so a stand-in module is enough.
+    monkeypatch.setitem(sys.modules, "faster_whisper",
+                        types.SimpleNamespace(WhisperModel=object))
     (tmp_path / "audio").mkdir()
     _wav(tmp_path / "audio" / "idx0001 - Super jackpot.wav")
     assert T._find_wavs(str(tmp_path)) == []

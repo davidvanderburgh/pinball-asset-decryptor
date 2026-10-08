@@ -12,8 +12,9 @@ node's colour track.  So what a line looks like comes from one of two places:
   a Write onto a card built with them changes nothing;
 * a font whose letters carry their own colours (Godzilla's orange GameFont_Secondary) has
   them in its atlas, a picture shared by every line drawn in that font, in every scene.  Its
-  switch IS that picture's (the Images tab's, with its lock and unlock): a line's colour
-  cannot reach colours that live in the letters (:func:`font_picture`).
+  switch IS that picture's (the Images tab's, with its lock and unlock; every one of the
+  font's pictures, when its letters fill several): a line's colour cannot reach colours that
+  live in the letters (:func:`font_pictures`).
 
 A line's corrected colour is a number in the scene, so a project read again off a card
 built with it would see the corrected number and correct it twice.  The Write keeps what it
@@ -70,8 +71,15 @@ def fonts_by_key(assets_dir):
 
 
 def atlas_rels(font):
-    """The pictures (rels under ``images/``) *font*'s letters are cut from."""
-    return [str(r).replace("\\", "/") for r in (font or {}).get("atlas_rels") or ()]
+    """The pictures (rels under ``images/``) *font*'s letters are cut from, at every size
+    it is drawn at."""
+    out = []
+    for f in [font or {}] + list(((font or {}).get("sizes") or {}).values()):
+        for r in f.get("atlas_rels") or ():
+            r = str(r).replace("\\", "/")
+            if r not in out:
+                out.append(r)
+    return out
 
 
 def _art_coloured(assets_dir, rel):
@@ -111,10 +119,53 @@ def _art_coloured(assets_dir, rel):
 def font_picture(assets_dir, font):
     """The atlas (rel under ``images/``) of a font whose letters carry their own colours, or
     ``None`` for a font of white letters the scene colours."""
+    rels = font_pictures(assets_dir, font)
+    return rels[0] if rels else None
+
+
+def font_pictures(assets_dir, font):
+    """EVERY picture (rels under ``images/``) a font whose letters carry their own colours
+    cuts them from, or ``[]`` for a font of white letters.  A big font fills several:
+    Godzilla's GameFont_Secondary keeps A-F on one, G, H, K and M-Z on the next and most of
+    the small letters on a third (PAD-451), so a line's colours are in all of them."""
     rels = atlas_rels(font)
     if rels and any(_art_coloured(assets_dir, r) for r in rels):
-        return rels[0]
-    return None
+        return rels
+    return []
+
+
+_SCENES = {}       # assets_dir -> ((mtime, size), {atlas rel: number of scenes})
+
+
+def font_scenes(assets_dir, rels):
+    """How many of the card's scenes draw from any of the pictures *rels* (rels under
+    ``images/``): every line in that font, in each, shares their colours (PAD-451).  From
+    the extract's ``radium_images.txt``, one row per picture per scene; 0 without it."""
+    path = os.path.join(assets_dir or "", "images", "scene_textures", "radium_images.txt")
+    try:
+        st = os.stat(path)
+    except OSError:
+        return 0
+    stamp = (st.st_mtime_ns, st.st_size)
+    with _LOCK:
+        got = _SCENES.get(assets_dir)
+    if got is None or got[0] != stamp:
+        by = {}
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    cols = line.rstrip("\r\n").split("\t")
+                    if len(cols) >= 2 and cols[0] and not cols[0].startswith("#"):
+                        by.setdefault(cols[0], set()).add(cols[1])
+        except OSError:
+            return 0
+        got = (stamp, by)
+        with _LOCK:
+            _SCENES[assets_dir] = got
+    cards = set()
+    for r in rels or ():
+        cards |= got[1].get(r) or set()
+    return len(cards)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -212,18 +263,20 @@ def _walk(man):
 def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
     """A line's colour switch, for the Layers list: ``{"line": True, "on", "own", "rel",
     "added" | "stock"}``; ``{"locked": True, "line": True}`` for a game line with the unlock
-    box off; ``{"font_picture": rel, "font": name}`` for a line in a font with colours of its
-    own (its switch is that picture's); ``None`` for a node that draws no line of its own (a
-    drop shadow, which takes the colour of the line it copies)."""
+    box off; ``{"font_picture": rel, "font_pictures": [rel, ...], "font": name}`` for a line
+    in a font with colours of its own (its switch is those pictures', every one of them:
+    :func:`font_pictures`); ``None`` for a node that draws no line of its own (a drop shadow,
+    which takes the colour of the line it copies)."""
     from ...core import colour_profile as cp
     oid, o = _text_of(man, n)
     if o is None:
         return None
     fonts = fonts if fonts is not None else fonts_by_key(assets_dir)
     font = fonts.get(o.get("font") or "")
-    pic = font_picture(assets_dir, font) if font is not None else None
-    if pic is not None:
-        return {"font_picture": pic, "font": font.get("name") or o.get("font_name") or ""}
+    pics = font_pictures(assets_dir, font) if font is not None else []
+    if pics:
+        return {"font_picture": pics[0], "font_pictures": list(pics),
+                "font": font.get("name") or o.get("font_name") or ""}
     rel = cp.text_rel(card, n["id"])
     if n.get("added"):
         op = next((op for op in ops or () if op.get("op") == "add_text"

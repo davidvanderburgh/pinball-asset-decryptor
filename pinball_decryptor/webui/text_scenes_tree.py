@@ -870,6 +870,15 @@ class TreeEditMixin:
                                          for op in ops),
                            "view_off": n["id"] in view,
                            "edits": "; ".join(edited_nodes.get(n["id"], []))})
+        # PAD-451: a font's palette says how many lines in this scene it switches with it
+        shared = {}
+        for l in layers:
+            if l["color"] and l["color"].get("shared"):
+                key = l["color"]["pages"][0]
+                shared[key] = shared.get(key, 0) + 1
+        for l in layers:
+            if l["color"] and l["color"].get("shared"):
+                l["color"]["lines"] = shared[l["color"]["pages"][0]]
         sel = self._tsel if self._tsel in index else None
         self._tsel = sel
         sels = self._tree_sels()
@@ -1907,7 +1916,19 @@ class TreeEditMixin:
         if sw is None or sw.get("locked"):
             return False
         if sw.get("font_picture"):
-            return self._picture_color("images/" + sw["font_picture"], on)
+            # PAD-451: every picture the font's letters are cut from, and it is said that
+            # every line in the font goes with it
+            rels = sw.get("font_pictures") or [sw["font_picture"]]
+            if not self._picture_color(["images/" + r for r in rels], on):
+                return False
+            n_sc = text_colour.font_scenes(self.assets_dir, rels)
+            log.info("Scenes: the font %s %s, so every line drawn in it does too%s (its "
+                     "letters' colors are in %s, which all its lines share)",
+                     sw["font"] or "of this line",
+                     "has the color profile attached" if on else "keeps the game's own colors",
+                     ", in %d scene%s" % (n_sc, "" if n_sc == 1 else "s") if n_sc else "",
+                     "its %d pictures" % len(rels) if len(rels) > 1 else "its picture")
+            return True
         if sw.get("added"):
             new = [dict(op) for op in ops]
             for op in new:
@@ -1945,7 +1966,19 @@ class TreeEditMixin:
 
     def _picture_color(self, rel, on):
         """One picture's colour switch (*rel* under images/), recorded where the Images tab
-        keeps it."""
+        keeps it; a list of rels switches each (PAD-451: a font's pictures), drawn once."""
+        if isinstance(rel, (list, tuple)):
+            done = [self._picture_color_one(r, on) for r in rel]
+            if not any(done):
+                return False
+        elif not self._picture_color_one(rel, on):
+            return False
+        # drawn again here, whichever way the switch was recorded (DragonRR: the palette and
+        # the picture only changed after a tab switch)
+        self.pictures_changed()
+        return True
+
+    def _picture_color_one(self, rel, on):
         images = self.window.service("images")
         here = self._images_here()
         done = False
@@ -1974,9 +2007,6 @@ class TreeEditMixin:
                 images.color_all_changed()
             except Exception:                            # noqa: BLE001
                 pass
-        # drawn again here, whichever way the switch was recorded (DragonRR: the palette and
-        # the picture only changed after a tab switch)
-        self.pictures_changed()
         return True
 
     def pictures_changed(self):
@@ -2670,15 +2700,32 @@ def _text_switch(assets_dir, card, man, n, ops, data, fonts, picks, settings, un
     :func:`colour_profile.text_rel`.  A line in a font whose letters carry their own colours
     (Godzilla's orange GameFont_Secondary) shows that font picture's switch instead, the
     Images tab's, ``"font"`` naming it: the colours are in that picture, shared by every line
-    drawn in the font.  ``None`` for a drop shadow (it takes its line's colour)."""
+    drawn in the font.  ``None`` for a drop shadow (it takes its line's colour).
+
+    PAD-451 (DragonRR: "make this clear to the user"): that switch is ``"shared"``, and it
+    is EVERY picture of the font's (``"pages"``, rels under images/), for a big font's letters
+    fill several: on only when all of them are, ``"part"`` when only some are.  ``"scenes"``
+    counts the scenes drawing from them (the Layers list adds ``"lines"``, this scene's)."""
     from ..plugins.stern import text_colour
     sw = text_colour.line_switch(assets_dir, card, man, n, ops, data, fonts)
     if sw is None:
         return None
     if sw.get("font_picture"):
-        rel = sw["font_picture"]
-        c = _colour_switch(n, "Bitmap", [rel], picks, settings, None, unlocked, built)
-        return dict(c, font=sw["font"], kind="images") if c is not None else None
+        rels = sw.get("font_pictures") or [sw["font_picture"]]
+        cs = [_colour_switch(n, "Bitmap", [r], picks, settings, None, unlocked, built)
+              for r in rels]
+        c = cs[0]
+        if c is None:
+            return None
+        out = dict(c, font=sw["font"], kind="images", shared=True,
+                   pages=["images/" + r for r in rels],
+                   scenes=text_colour.font_scenes(assets_dir, rels))
+        if not c.get("locked"):
+            ons = [bool(x and x.get("on")) for x in cs]
+            out["on"] = all(ons)
+            if any(ons) and not all(ons):
+                out["part"] = sum(ons)
+        return out
     return dict(sw, kind="text")
 
 

@@ -1176,15 +1176,40 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
     return [round(nl, 3), round(nt, 3), round(nr, 3), round(nb, 3)]
 
 
-def font_colour(font, pictures):
-    """The profile baked into *font*'s atlas when its picture's colour switch is on
-    (*pictures*: :func:`pending_pictures`), else None (PAD-438): the letters are cut from it,
-    so a line drawn in that font shows it."""
+def font_colours(font, pictures):
+    """``{atlas rel: profile}``: each of *font*'s pictures whose colour switch is on (PAD-451:
+    a big font's letters fill several pictures, each with its own switch on the Images tab),
+    whose profile the Write bakes into it (PAD-438): a line drawn in the font shows them."""
+    out = {}
     for rel in (font or {}).get("atlas_rels") or ():
-        pic = (pictures or {}).get(str(rel).replace("\\", "/")) or {}
+        rel = str(rel).replace("\\", "/")
+        pic = (pictures or {}).get(rel) or {}
         if pic.get("colour") is not None:
-            return pic["colour"]
-    return None
+            out[rel] = pic["colour"]
+    return out
+
+
+def _paged_ink(font, cols, inks, key):
+    """A line in *font* with each letter through ITS picture's profile (*cols*,
+    :func:`font_colours`), as the Write bakes each picture: for a font whose pictures are not
+    all switched on with the one profile (PAD-451)."""
+    from . import fontrender as fr
+    tag = tuple(sorted((rel, prof.key()) for rel, prof in cols.items()))
+
+    def loader(g):
+        img = fr.load_slice(g)
+        prof = cols.get(str(g.get("atlas_rel") or "").replace("\\", "/"))
+        return prof.apply_image(img) if prof is not None else img
+
+    def ink(s):
+        k = (key, s, "cp", tag)
+        if inks is not None and k in inks:
+            return inks[k]
+        img = fr.render_text(font, s, slice_loader=loader)[0]
+        if inks is not None:
+            inks[k] = img
+        return img
+    return ink
 
 
 def _corrected_ink(ink_of, prof, inks, key):
@@ -1300,18 +1325,23 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 # (a line with its colour profile applied has the recolour in it: PAD-438)
                 rgba = [c / 255.0 for c in pick[:3]] + [rgba[3]]
             # PAD-438: a font whose letters carry their own colours gets its picture's
-            # profile, as the Write bakes it into that picture
-            art = font_colour(font, pictures)
+            # profile, as the Write bakes it into that picture; PAD-451: each letter its
+            # own picture's, where the font's pictures differ
+            key = (d.get("font") or "", d.get("font_px") or 0)
+            cols = font_colours(font, pictures)
+            paged = cols and (len(cols) < len(font.get("atlas_rels") or ())
+                              or len({p.key() for p in cols.values()}) > 1)
             if inks is None:
                 ink_of = lambda s, _f=font: fr.render_text(_f, s)[0]     # noqa: E731
             else:
-                def ink_of(s, _f=font, _k=(d.get("font") or "", d.get("font_px") or 0)):
+                def ink_of(s, _f=font, _k=key):
                     if (_k, s) not in inks:
                         inks[(_k, s)] = fr.render_text(_f, s)[0]
                     return inks[(_k, s)]
-            if art is not None:
-                ink_of = _corrected_ink(ink_of, art, inks,
-                                        (d.get("font") or "", d.get("font_px") or 0))
+            if paged:
+                ink_of = _paged_ink(font, cols, inks, key)
+            elif cols:
+                ink_of = _corrected_ink(ink_of, next(iter(cols.values())), inks, key)
             mul = tuple(d["mul"][i] * (1.0 if i < 3 else rgba[3]) for i in range(4))
             boxed = d if d.get("rect") else dict(d, rect=[0, 0, w, h])
             # in its rect as the machine lays it out (text_layout: gutter, declared ascent,

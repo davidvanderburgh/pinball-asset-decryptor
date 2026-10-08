@@ -659,19 +659,33 @@ const gameTip = (l) => ({
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
 // own colours (red), or the game's own picture, which has no switch (blue lock) until the
 // advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
+// PAD-451 (DragonRR): a line in a font whose letters carry their own colors shares its palette
+// with every line in that font, everywhere: said, and counted (c.lines here, c.scenes in all)
+const fontReach = (c) => {
+  const here = `${c.lines || 1} line${c.lines === 1 ? "" : "s"} in this scene`;
+  return c.scenes > 1 ? `${here}, in ${c.scenes} scenes` : here;
+};
+const fontPics = (c) => ((c.pages || []).length > 1 ? `its ${c.pages.length} pictures` : "its picture");
 const colorTip = (l, cs) => {
   const c = l.color || {};
-  // PAD-438: a line of text in a font whose letters carry their own colors: the palette is
-  // that font picture's, shared by every line drawn in the font
-  const font = c.font != null ? `Its colors are in its font's own picture (${c.font || "its font"}), which every line in that font shares, in every scene: this palette is that picture's, the same one the Images tab shows.` : null;
+  const name = c.font || "its font";
   if (c.locked && c.line) return { head: "Color: the game's own line of text", lines: [
     "Stern made its colors for the machine's screen, so the individual files profile is not offered on it.",
     "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too. A line you add has one already." ] };
-  if (c.locked) return { head: font ? "Color: the game's own font picture" : "Color: the game's own picture", lines: [
-    font,
+  if (c.locked && c.shared) return { head: `Color: the game's own font, ${name}`, lines: [
+    `This line's colors are in ${fontPics(c)}, shared by every line drawn in ${name}: ${fontReach(c)}.`,
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
-    font ? "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too."
-      : "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images and text (Advanced, beside Preview colors)." ] };
+    "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too." ] };
+  if (c.locked) return { head: "Color: the game's own picture", lines: [
+    "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
+    "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images and text (Advanced, beside Preview colors)." ] };
+  if (c.shared) return { head: c.on ? `Shared: color profile attached to the font ${name}` : `Shared: no color profile on the font ${name}`, lines: [
+    `This line's colors are in ${fontPics(c)}, and every line drawn in ${name} shares them: ${fontReach(c)}. A line in this font cannot have a color profile of its own.`,
+    c.part ? `Only ${c.part} of its ${(c.pages || []).length} pictures have it attached now: a click attaches it to all of them.` : null,
+    layerProfile(l, cs),
+    ["Click", c.on ? `detach it from every line in ${name}` : `attach it to every line in ${name}`],
+    "The lines in this scene that share it are lit up in the list, and all turn green or red with this one.",
+    c.on ? "Open Colors with the line selected to give the font a profile of its own." : null ] };
   if (c.line) return { head: c.on ? "Color profile attached to this line" : "No color profile attached to this line", lines: [
     layerProfile(l, cs),
     ["Click", c.on ? "detach the color profile" : "attach the color profile"],
@@ -680,7 +694,6 @@ const colorTip = (l, cs) => {
     c.stock ? "The game's own line, unlocked: corrected from its own color when you build, so never twice."
       : "Set for this line." ] };
   return { head: c.on ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
-    font,
     layerProfile(l, cs),
     ["Click", c.on ? "detach the color profile" : "attach the color profile"],
     c.on ? "Its color profile is baked into this picture when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
@@ -801,6 +814,7 @@ function TreeLayers({ t }) {
   const sels = t.sels || [];
   const [drag, setDrag] = useState(null);           // the row being dragged
   const [over, setOver] = useState(null);           // { id, where, ok } of the drop
+  const [hotFont, setHotFont] = useState(null);     // PAD-451: the shared font palette pointed at
   const scroll = useDragScroll(listRef);
   const endDrag = () => { scroll.stop(); setDrag(null); setOver(null); };
   const dropOk = (l, where) => drag.added || (where === "into" ? l.id : l.parent) === drag.parent;
@@ -855,7 +869,8 @@ function TreeLayers({ t }) {
         onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
         class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game",
-          drag && drag.id === l.id && "ly-dragging", over && over.id === l.id && `ly-drop-${over.where}`, over && over.id === l.id && !over.ok && "ly-drop-no")}
+          drag && drag.id === l.id && "ly-dragging", over && over.id === l.id && `ly-drop-${over.where}`, over && over.id === l.id && !over.ok && "ly-drop-no",
+          hotFont && l.color && l.color.shared && l.color.pages[0] === hotFont && "ly-font-hot")}
         style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l, cs))}
         draggable="true"
         onDragStart=${(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", l.name); setDrag(l); scroll.start(); }}
@@ -874,10 +889,13 @@ function TreeLayers({ t }) {
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
         <${Icon} name="sd" /></button>
-      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off")}
-        aria-label=${l.color.line ? "Color profile on this line" : "Color profile on this picture"} aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
+      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off", l.color.shared && "shared")}
+        aria-label=${l.color.shared ? `Color profile on the font ${l.color.font || ""}, shared by every line in it` : l.color.line ? "Color profile on this line" : "Color profile on this picture"}
+        aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
+        onMouseEnter=${l.color.shared ? () => setHotFont(l.color.pages[0]) : null}
+        onMouseLeave=${l.color.shared ? () => setHotFont(null) : null}
         onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on); }}>
-        <${Icon} name=${l.color.locked ? "lock" : "palette"} /></button>` : html`<span></span>`}
+        <${Icon} name=${l.color.locked ? "lock" : "palette"} />${l.color.shared ? html`<${Icon} name="link" cls="ly-share" />` : null}</button>` : html`<span></span>`}
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}

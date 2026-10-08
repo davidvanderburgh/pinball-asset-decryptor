@@ -23,9 +23,11 @@ export default function ScenesTab() {
   const lay = t && t.sel != null ? (t.layers || []).find((l) => l.id === t.sel) : null;
   const c = lay && lay.color;
   // PAD-438: a line of text has one too (kind "text"); a line in a font with colors of its
-  // own shows that font picture's (kind "images")
-  const file = c && !c.locked && c.rel ? { kind: c.kind || "images", rel: c.rel, label: lay.name, on: !!c.on,
-    attach: { ns: "scenes", node: lay.id } } : null;
+  // own shows that font picture's (kind "images"); PAD-451: the font's, on all its pictures
+  const file = c && !c.locked && c.rel ? { kind: c.kind || "images", rel: c.rel,
+    label: c.shared ? c.font || lay.name : lay.name, on: !!c.on,
+    attach: { ns: "scenes", node: lay.id }, font: c.shared ? c.font || "its font" : null,
+    pages: c.shared ? c.pages || null : null } : null;
   let body;
   if (p.empty === "no_project") {
     body = html`<${Empty} title="No project folder yet" icon="folder">Extract a Stern Spike 2 card on the Extract tab (or open a project) and its scenes show here.<//>`;

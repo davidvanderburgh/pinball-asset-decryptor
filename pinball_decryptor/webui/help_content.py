@@ -1034,8 +1034,10 @@ HELP_CONTENT = {
          "- Most fonts have white letters the scene colors, so the profile goes into "
          "the color the line is drawn in.\n"
          "- A font whose letters have colors of their own (Godzilla's orange title "
-         "font) keeps them in its font picture. Its lines show that picture's "
-         "palette, shared by every line in the font, as on the Images tab."),
+         "font) keeps them in its font pictures, which every line in that font "
+         "shares, in every scene. Its lines' palettes carry a link mark: switching "
+         "one switches them all, and pointing at it lights up the lines that share "
+         "it. One line in such a font cannot have a profile of its own."),
         ("Machine screen (Spike 2, preview only)",
          "Not a correction but your machine's screen itself. It is never written to "
          "the card, and Revert all leaves it alone.\n\n"

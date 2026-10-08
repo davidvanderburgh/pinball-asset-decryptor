@@ -183,11 +183,12 @@ function FileLine({ s, host }) {
   const f = s.file;
   if (!f) return null;
   // PAD-438: a line of text in Scenes has one too (Apply to all is for the tabs' files)
-  const what = f.kind === "text" ? "This line of text" : "This file";
+  const what = f.kind === "text" ? "This line of text" : f.font ? "This font" : "This file";
   const all = ALL_HOSTS[host] === f.kind ? ALL_WORDS[f.kind] : null;
   return html`<div class="cpd-file">
     <div class="row cpd-file-hd"><span class="eyebrow nw">${what}</span>
       <span class="mono small ellip" title=${f.rel}>${f.label}</span></div>
+    ${f.font ? html`<div class="small muted cpd-file-font">${`Shared: every line drawn in ${f.label} takes its colors from ${f.pages > 1 ? `the font's ${f.pages} pictures` : "the font's picture"}, so a profile set here goes on every one of those lines. A line in this font cannot have one of its own.`}</div>` : null}
     <div class="row cpd-file-own">${f.own
       ? html`<span class="small muted grow">It has a color profile of its own.</span>
         <${Button} size="xs" onClick=${() => call("color.file_shared")}
@@ -227,7 +228,8 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
   const fileKey = file ? `${file.kind}\n${file.rel}\n${file.on}` : "";
   useEffect(() => {
     if (!open || !s.per_file) return;
-    if (file) call("color.set_file", file.kind, file.rel, file.label || "", file.on, file.attach || null);
+    if (file) call("color.set_file", file.kind, file.rel, file.label || "", file.on, file.attach || null,
+      file.font || null, file.pages || null);
     else call("color.set_file");
   }, [open, fileKey, s.per_file]);
   useEffect(() => () => { call("color.set_file"); }, []);

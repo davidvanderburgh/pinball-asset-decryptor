@@ -347,8 +347,17 @@ class ColorTab(TabService):
         f = self._file
         if not f or self._file_mode() is None:
             return None
-        return {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
-                "on": f.get("on"), "own": self._own() is not None}
+        out = {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
+               "on": f.get("on"), "own": self._own() is not None}
+        if f.get("font"):
+            out.update(font=f["font"], pages=1 + len(f.get("pages") or ()))
+        return out
+
+    def _store_file(self, kind, rel, prof, follow=False):
+        """The file on show's own profile, on each picture of its font too
+        (PAD-451: they all carry the letters of every line in it)."""
+        for r in [rel] + list((self._file or {}).get("pages") or ()):
+            cp.store_own_profile(self._project, kind, r, prof, follow=follow)
 
     def _publish(self, problems=None):
         p = self._shown()
@@ -541,6 +550,12 @@ class ColorTab(TabService):
             data = staged_changes.load(assets)
             self._put_raw(data, where,
                           None if back is None else json.loads(back))
+            if where == key and key.startswith("file\n"):
+                # PAD-451: a font's other pictures go back with its first
+                kind = key.split("\n", 2)[1]
+                for r in (self._file or {}).get("pages") or ():
+                    self._put_raw(data, "file\n%s\n%s" % (kind, r),
+                                  None if back is None else json.loads(back))
             staged_changes.save(assets, data)
         except Exception as e:                          # noqa: BLE001
             steps.append(step)
@@ -639,7 +654,7 @@ class ColorTab(TabService):
         Recommended one), and the profile is attached to it."""
         kind, rel = self._file_mode()
         try:
-            cp.store_own_profile(self._project, kind, rel, prof, follow=follow)
+            self._store_file(kind, rel, prof, follow=follow)
         except Exception as e:                          # noqa: BLE001
             self.set(problems=["could not save the file's profile (%s)" % e])
             return False
@@ -704,10 +719,14 @@ class ColorTab(TabService):
                 log.exception("color profile preview switch %s", where)
 
     @rpc
-    def set_file(self, kind=None, rel=None, label="", on=None, attach=None):
+    def set_file(self, kind=None, rel=None, label="", on=None, attach=None,
+                 font=None, pages=None):
         """The Color profiles bar is open beside a clicked file (PAD-368):
         its Files mode shows and changes that file's profile.  No *rel*:
-        back to the project's individual files profile."""
+        back to the project's individual files profile.  *font* (PAD-451):
+        a line of text in a font with colours of its own, whose pictures
+        (*pages*, *rel* first) every line in it shares: a profile of its own
+        goes on all of them."""
         if kind not in cp.FILE_PROFILES_KEY or not rel or not self._on_display:
             if self._file is not None:
                 self._file = None
@@ -716,7 +735,10 @@ class ColorTab(TabService):
             return False
         f = {"kind": kind, "rel": str(rel), "label": str(label or "")[:120]
              or os.path.basename(str(rel)), "on": on,
-             "attach": attach if isinstance(attach, dict) else None}
+             "attach": attach if isinstance(attach, dict) else None,
+             "font": str(font)[:120] if font else None,
+             "pages": [str(r) for r in pages or () if r and str(r) != str(rel)]
+             if isinstance(pages, (list, tuple)) else []}
         same = (self._file is not None and self._file["kind"] == kind
                 and self._file["rel"] == f["rel"])
         self._file = f
@@ -736,7 +758,7 @@ class ColorTab(TabService):
         key = self._mode_key()
         before = self._stored_raw(key)
         try:
-            cp.store_own_profile(self._project, fm[0], fm[1], None)
+            self._store_file(fm[0], fm[1], None)
         except Exception as e:                          # noqa: BLE001
             self.set(problems=["could not save the file's profile (%s)" % e])
             return False

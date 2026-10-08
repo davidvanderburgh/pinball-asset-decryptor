@@ -683,7 +683,9 @@ value control_gates_devoff 4
 value control_gates_off_slot 30
 data control_gates_obj   0x04259760
 text control_gates_drive  9 5 255 64 96
-text held_coils            control_gates
+text electric_magic_label Electric magic magnet
+text electric_magic_drive 9 7 255 2000 64 2500
+text held_coils            control_gates electric_magic
 
 # ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
 # calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the

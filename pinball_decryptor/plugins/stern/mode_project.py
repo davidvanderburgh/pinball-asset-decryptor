@@ -850,6 +850,7 @@ HELD_COILS_PROVEN = frozenset({
     ("dungeons_and_dragons_le-1.10", "up_post"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 128 (the game's own, its cup_post's - device 11 by its constructor), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("dungeons_and_dragons_le-1.10", "magnet_hold"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 2, 255 for 64 ms then 128 (the game's own, its cmagnet's grab - device 13 by its constructor), at most 864 ms; held 860 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("venom_pro-1.07", "top_post"),              # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 64 ms then 128 (the game's own, its ctop_post_device's - device 13 by its constructor), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("led_zeppelin_le-1.22", "electric_magic"),  # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 2000 ms then 64 (the game's own, its ElectricMagicMagnet's grab - device 17 by its static object), at most 2500 ms; held 2000 ms to its end (the draw alone: the board's hold phase empty); a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 

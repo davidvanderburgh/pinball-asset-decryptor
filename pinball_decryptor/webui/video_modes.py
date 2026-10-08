@@ -1,38 +1,63 @@
-"""PAD-444: the Video tab's "Played in": which of the game's own modes plays each clip, a
-filter to list one mode's clips, and a mode's own copy of a clip it shares with another.
+"""PAD-444: the Video tab's "Played in": which of the game's modes plays each clip, the clips
+the game never plays, a filter to list one mode's clips, and a ROW FOR EACH MODE of a clip two
+modes share.
 
 The reading is :mod:`..plugins.stern.clip_modes`' (the card's game program, read once per card
-off the UI thread and cached on disk); this mixin is the tab's side: the rows' ``modes`` cell,
-the ``modes`` namespace key the toolbar and the callout under the panes read, and the two
-actions. A copy is a new file in the project's ``video`` folder - the shared clip's file,
-copied - recorded in ``.staged_changes.json`` (``own_clips``), so it is a slot like any other:
-a replacement is picked for it on this tab, and Write makes it a clip of its own on the card.
+off the UI thread and cached on disk); this mixin is the tab's side.
+
+A CLIP TWO MODES SHARE (Godzilla's battle vs Gigan and the Ghidorah and Gigan tag team play two
+of the same clips) is listed once per mode. The first mode's row is the clip itself; each other
+mode's row is a FOLLOWER: it plays the same clip ("Same clip as <mode>") until a replacement is
+chosen for it. Choosing one makes the follower a clip of its own - the shared clip's file copied
+to ``video/<clip>_<mode slug>.<ext>`` and recorded in ``.staged_changes.json`` (``own_clips``),
+which Write turns into a new clip on the card and that mode alone plays. Clearing that
+replacement makes it a follower again (the copy and its record go). A follower has no file of
+its own until then: its row reads the shared clip's slot (the Original pane plays that clip).
+
+A copy an earlier build put on the card, extracted again, is a real slot recognised by its name;
+"Use the same clip as <mode> again" (row menu, and the callout) points its mode back at the
+shared clip on the next Write (a ``state: "shared"`` record), and choosing a replacement for it
+undoes that.
 
 Store keys (namespace ``video``):
-  modes        {ready, busy, note, list: [{id, label, n}], filter}
-  rows[i]      + modes (labels), shared (bool), copy (the mode whose copy the row is, a label)
-  preview      + modes: {rel, shared: [{id, label}], copy: {label, of, on_card}} or None
+  modes        {ready, busy, note, list: [{id, label, n}], filter}; filter ids are mode classes,
+               OTHER (code that is no one mode's) and UNPLAYED (nothing plays it)
+  rows[i]      + modes (labels), pair (a row of a shared clip), follow (the lead mode's label: a
+               follower), copy (a mode's own clip), unplayed, other
+  preview      + modes: {rel, kind: lead|follow|copy|unplayed, text, back} or None
 """
 
 import os
 import shutil
 import threading
+from dataclasses import replace
 
 from . import compat
 from .tabs.base import rpc
 
-#: what the callout under the panes says, and the confirmation (one place, for the tests)
-SHARED_TEXT = ("Played in %s. Give one of them its own copy, then choose a replacement for "
-               "that copy: only that mode changes.")
-COPY_TEXT = ("%s's own copy of %s. Choose a replacement for it like any clip: %s plays it "
-             "and %s keeps the shared clip. The card gets it as a new clip on an image build "
-             "(a direct SD write leaves it out).")
-CONFIRM = ("Give %s its own copy of %s?\n\nThe copy starts as the same footage, as a new row "
-           "on this tab (%s). Choose a replacement for that row and only %s plays it; %s keeps "
-           "%s.\n\nWrite puts the copy on the card as a new clip, so it needs an image build, "
-           "not a direct SD write.")
-NOT_HERE = ("Played in: the card the project was extracted from is needed to tell which "
-            "mode plays which clip")
+#: the filter's two lists beside the modes
+OTHER = "__other__"
+UNPLAYED = "__unplayed__"
+OTHER_LABEL = "Other parts of the game"
+UNPLAYED_LABEL = "Not played by the game"
+
+#: what the callout under the panes says (one place, for the tests)
+LEAD_TEXT = "%s play this clip, so it has a row for each. This row is %s's. %s"
+LEAD_ONE = ("%s's row below plays whatever this row plays until you choose a replacement "
+            "in it.")
+LEAD_MANY = ("The rows of %s below play whatever this row plays until you choose a "
+             "replacement in them.")
+FOLLOW_TEXT = ("%s plays the same clip as %s until you choose a replacement in this row. Then "
+               "only %s plays your clip: the card gets it as a new clip of its own on an image "
+               "build (a direct SD write leaves it out).")
+COPY_TEXT = ("%s has a clip of its own: only it plays this replacement (the card gets it as a "
+             "new clip on an image build). Clear the replacement and it plays the same clip as "
+             "%s again.")
+CARD_COPY_TEXT = ("%s plays a clip of its own that an earlier build gave it; %s plays %s.")
+BACK_TEXT = ("%s plays the same clip as %s again after the next Write. Choose a replacement in "
+             "this row to keep a clip of its own.")
+UNPLAYED_TEXT = ("The game never plays this clip: nothing in its program asks for it by name, "
+                 "so a replacement here changes nothing on the machine.")
 
 
 def _and(words):
@@ -49,18 +74,27 @@ class ModesMixin:
         self._m_clips = None          # clip_modes.CardClips of the project's card
         self._m_key = None            # (project, card, its size and time) it was read for
         self._m_run = 0
-        self._m_filter = ""           # a mode class, "" for every clip
-        self._m_modes = {}            # rel -> [mode class], copies counted
-        self._m_copy = {}             # rel -> the record of the copy the row is
+        self._m_filter = ""           # a mode class, OTHER, UNPLAYED, or "" for every clip
+        self._m_clear_state()
         self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": ""})
+
+    def _m_clear_state(self):
+        self._m_modes = {}            # rel -> [mode class] the row stands for
+        self._m_lead = {}             # rel of a shared clip -> [follower mode classes]
+        self._m_follow = {}           # rel -> the mode whose clip it plays (a follower)
+        self._m_virtual = {}          # follower rel with no file yet -> its record-to-be
+        self._m_copy = {}             # rel -> the record of a mode's own clip
+        self._m_unplayed = set()
+        self._m_other = set()
+        self._m_of = {}               # follower / copy rel -> the shared clip's rel
 
     def _m_reset(self):
         self._m_run += 1
         self._m_clips = None
         self._m_key = None
-        self._m_modes = {}
-        self._m_copy = {}
         self._m_filter = ""
+        self._m_drop_virtual()
+        self._m_clear_state()
         self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": ""})
 
     # -- reading the card ------------------------------------------------------------------
@@ -118,20 +152,35 @@ class ModesMixin:
         from ..plugins.stern import clip_modes as CM
         return CM.records(self._scan_dir) if self._scan_dir else []
 
-    def _m_publish(self):
-        """Each row's modes (the copies the project holds counted as they will be on the
-        card after the next Write) and the toolbar's list."""
+    def _m_label(self, mode):
         clips = self._m_clips
-        self._m_modes, self._m_copy = {}, {}
+        if clips is not None:
+            return clips.reading.label(mode)
+        from ..plugins.stern import clip_modes as CM
+        return CM.mode_label(mode)
+
+    def _m_sorted(self, modes):
+        return sorted(set(modes), key=lambda m: (self._m_label(m).lower(), m))
+
+    def _m_publish(self):
+        """Each row's modes - the project's copies counted as they will be on the card after
+        the next Write - the followers of each shared clip, and the toolbar's list."""
+        from ..plugins.stern import clip_modes as CM
+        clips = self._m_clips
+        self._m_drop_virtual()
+        self._m_clear_state()
         if clips is None:
             return
         reading = clips.reading
+        real = set(s.rel_path for s in self._slots)
+        by_name = {n: rel for rel, n in clips.name_of.items()}
         for rel, name in clips.name_of.items():
             ms = reading.modes_of(name)
             if ms:
                 self._m_modes[rel] = list(ms)
-        by_name = {n: rel for rel, n in clips.name_of.items()}
-        from ..plugins.stern import clip_modes as CM
+            if reading.elsewhere(name):
+                self._m_other.add(rel)
+        self._m_unplayed = {by_name[n] for n in clips.unplayed if n in by_name}
         recs = self._m_records()
         named = {r["name"] for r in recs}
         for rel, name in clips.name_of.items():
@@ -140,76 +189,184 @@ class ModesMixin:
             if got and got[1] in self._m_modes.get(rel, ()):
                 self._m_copy[rel] = {"name": name, "clip": got[0], "mode": got[1], "rel": rel,
                                      "of": by_name.get(got[0], ""), "state": "own"}
+        back = {}                                   # (shared rel, mode) -> on-card copy rel
         for rec in recs:
             of = rec.get("of") or by_name.get(rec["clip"])
             mine = rec.get("rel") or by_name.get(rec["name"])
             if rec.get("state") == "shared":
-                if of and rec["mode"] not in self._m_modes.get(of, []):
-                    self._m_modes.setdefault(of, []).append(rec["mode"])
+                if of:
+                    self._m_modes[of] = self._m_sorted(self._m_modes.get(of, []) + [rec["mode"]])
                 if mine:
-                    self._m_modes[mine] = [m for m in self._m_modes.get(mine, [])
-                                           if m != rec["mode"]]
+                    self._m_modes[mine] = [rec["mode"]]
+                    self._m_unplayed.discard(mine)
+                    back[(of, rec["mode"])] = mine
                 continue
             if of in self._m_modes:
                 self._m_modes[of] = [m for m in self._m_modes[of] if m != rec["mode"]]
             if mine:
                 self._m_modes[mine] = [rec["mode"]]
                 self._m_copy[mine] = rec
+        for rel, rec in self._m_copy.items():
+            self._m_of[rel] = rec.get("of") or by_name.get(rec["clip"], "")
+        # a shared clip: its first mode's row is the clip, every other mode follows it
+        taken = set(clips.bank_of) | named
+        for rel in sorted(self._m_modes):
+            ms = self._m_sorted(self._m_modes[rel])
+            if len(ms) < 2 or rel in self._m_copy or rel not in real:
+                continue
+            # the first mode leads; a mode the project pointed back here from a clip of its
+            # own on the card follows, in that clip's row
+            lead = ([m for m in ms if (rel, m) not in back] or ms)[0]
+            ms = [lead] + [m for m in ms if m != lead]
+            self._m_modes[rel] = [lead]
+            self._m_lead[rel] = ms[1:]
+            clip = clips.name_of.get(rel)
+            for mode in ms[1:]:
+                mine = back.get((rel, mode))
+                if mine is None:
+                    name = CM.own_name(clip, mode, taken)
+                    taken.add(name)
+                    mine = "%s/%s%s" % (os.path.dirname(rel) or "video", name,
+                                        os.path.splitext(rel)[1])
+                    if mine in real:            # its file is in the folder already
+                        continue
+                    self._m_virtual[mine] = {"name": name, "clip": clip, "mode": mode,
+                                             "rel": mine, "of": rel, "state": "own"}
+                self._m_follow[mine] = ms[0]
+                self._m_modes[mine] = [mode]
+                self._m_of[mine] = rel
+        self._m_sync_virtual()
         counts = {}
         for rel, ms in self._m_modes.items():
             if rel in self._by_rel:
                 for m in ms:
                     counts[m] = counts.get(m, 0) + 1
         modes = sorted(counts, key=lambda m: (reading.label(m).lower(), m))
-        if self._m_filter and self._m_filter not in counts:
+        extra = []
+        n_other = sum(1 for r in self._m_other if r in real and not self._m_modes.get(r))
+        n_un = sum(1 for r in self._m_unplayed if r in real)
+        if n_other:
+            extra.append({"id": OTHER, "label": OTHER_LABEL, "n": n_other})
+        if n_un:
+            extra.append({"id": UNPLAYED, "label": UNPLAYED_LABEL, "n": n_un})
+        ids = set(counts) | {e["id"] for e in extra}
+        if self._m_filter and self._m_filter not in ids:
             self._m_filter = ""
         note = clips.note or ("" if modes else "no clip of this card is one of its modes'")
         self.set(modes={"ready": True, "busy": False, "note": note,
                         "list": [{"id": m, "label": reading.label(m), "n": counts[m]}
-                                 for m in modes],
+                                 for m in modes] + extra,
                         "filter": self._m_filter})
 
-    def _m_label(self, mode):
-        clips = self._m_clips
-        if clips is not None:
-            return clips.reading.label(mode)
-        from ..plugins.stern import clip_modes as CM
-        return CM.mode_label(mode)
+    # -- the followers' rows ---------------------------------------------------------------
+    def _m_drop_virtual(self):
+        for rel in list(getattr(self, "_m_virtual", {}) or {}):
+            slot = self._by_rel.get(rel)
+            if slot is not None and getattr(slot, "_pad_virtual", False):
+                del self._by_rel[rel]
+
+    def _m_sync_virtual(self):
+        """A follower with no file yet reads its shared clip's slot (the metadata the probe
+        filled in since included)."""
+        for rel, rec in self._m_virtual.items():
+            orig = self._by_rel.get(rec["of"])
+            if orig is None or getattr(orig, "_pad_virtual", False):
+                continue
+            slot = replace(orig, rel_path=rel)
+            slot._pad_virtual = True
+            self._by_rel[rel] = slot
+
+    def _m_slots(self):
+        """The list's slots: the scanned ones and each follower that has no file yet."""
+        self._m_sync_virtual()
+        return list(self._slots) + [self._by_rel[r] for r in self._m_virtual
+                                    if r in self._by_rel]
+
+    def _m_meta(self, rel):
+        """The shared clip *rel* was probed: its followers' rows show the same."""
+        for vrel, rec in self._m_virtual.items():
+            if rec["of"] == rel:
+                self._m_sync_virtual()
+                i = self._index.get(vrel)
+                if i is not None:
+                    self._put_row(i, self._row(self._by_rel[vrel]))
+
+    def _m_real(self, rels):
+        """*rels* less the followers that have no file (no pick can be made for those)."""
+        return [r for r in rels if r not in self._m_virtual]
 
     def _m_row(self, rel):
-        """The row's Played in cells."""
+        """The row's Played in cells (they override the slot's own where a follower shows
+        its shared clip's name and the clip it follows)."""
         ms = self._m_modes.get(rel) or []
-        copy = self._m_copy.get(rel)
-        return {"modes": [self._m_label(m) for m in ms], "shared": len(ms) > 1,
-                "copy": self._m_label(copy["mode"]) if copy else ""}
+        out = {"modes": [self._m_label(m) for m in ms],
+               "pair": bool(rel in self._m_lead or rel in self._m_follow or rel in self._m_copy),
+               "follow": "", "copy": bool(rel in self._m_copy),
+               "unplayed": rel in self._m_unplayed and not ms,
+               "other": rel in self._m_other and not ms}
+        of = self._m_of.get(rel)
+        if of:
+            out["name"] = os.path.basename(of)
+        lead = self._m_follow.get(rel)
+        if lead and not self._assign.get(rel):
+            out["follow"] = self._m_label(lead)
+            out["rep"] = "Same clip as %s" % self._m_label(lead)
+            out["rep_cls"] = "follow"
+        return out
 
     def _m_keep(self, rel):
         """Whether the mode filter keeps *rel* in the list."""
-        return not self._m_filter or self._m_filter in (self._m_modes.get(rel) or ())
+        f = self._m_filter
+        if not f:
+            return True
+        ms = self._m_modes.get(rel) or ()
+        if f == OTHER:
+            return rel in self._m_other and not ms
+        if f == UNPLAYED:
+            return rel in self._m_unplayed and not ms
+        return f in ms
+
+    def _m_follow_text(self, rel):
+        """The Replacement pane's words on a follower with no replacement, or None."""
+        lead = self._m_follow.get(rel)
+        if not lead or self._assign.get(rel):
+            return None
+        return "same clip as %s until you choose one for this row" % self._m_label(lead)
 
     def _m_preview(self, rel):
         """The callout's Played in part for the row on show, or None."""
         if not rel or self._m_clips is None:
             return None
+        ms = self._m_modes.get(rel) or []
+        if rel in self._m_lead:
+            mine = self._m_label(ms[0]) if ms else ""
+            others = [self._m_label(m) for m in self._m_lead[rel]]
+            tail = LEAD_ONE % others[0] if len(others) == 1 else LEAD_MANY % _and(others)
+            return {"rel": rel, "kind": "lead", "back": "",
+                    "text": LEAD_TEXT % (_and([mine] + others), mine, tail)}
+        lead = self._m_follow.get(rel)
+        if lead and not self._assign.get(rel):
+            label = self._m_label(ms[0]) if ms else ""
+            if rel in self._m_virtual:
+                return {"rel": rel, "kind": "follow", "back": "",
+                        "text": FOLLOW_TEXT % (label, self._m_label(lead), label)}
+            return {"rel": rel, "kind": "follow", "back": "",
+                    "text": BACK_TEXT % (label, self._m_label(lead))}
         copy = self._m_copy.get(rel)
         if copy is not None:
-            of = copy.get("of") or ""
-            on_card = rel in (self._m_clips.name_of or {})
-            others = [self._m_label(m) for m in self._m_modes.get(of, ())
-                      if m != copy["mode"]]
             label = self._m_label(copy["mode"])
-            return {"rel": rel, "shared": [],
-                    "copy": {"label": label, "of": os.path.basename(of) or copy["clip"],
-                             "on_card": on_card,
-                             "text": COPY_TEXT % (label, copy["clip"], label,
-                                                  _and(others) or "every other mode")}}
-        ms = self._m_modes.get(rel) or []
-        if len(ms) < 2:
-            return None
-        labels = [self._m_label(m) for m in ms]
-        return {"rel": rel, "copy": None,
-                "shared": [{"id": m, "label": lab} for m, lab in zip(ms, labels)],
-                "text": SHARED_TEXT % _and(labels)}
+            of = self._m_of.get(rel) or ""
+            others = [self._m_label(m) for m in self._m_modes.get(of, ()) if m != copy["mode"]]
+            on_card = rel in ((self._m_clips.name_of or {}))
+            if on_card:
+                return {"rel": rel, "kind": "copy", "back": _and(others) or "",
+                        "text": CARD_COPY_TEXT % (label, _and(others) or "every other mode",
+                                                  copy["clip"])}
+            return {"rel": rel, "kind": "copy", "back": "",
+                    "text": COPY_TEXT % (label, _and(others) or "the other modes")}
+        if rel in self._m_unplayed and not ms:
+            return {"rel": rel, "kind": "unplayed", "back": "", "text": UNPLAYED_TEXT}
+        return None
 
     # -- the filter ------------------------------------------------------------------------
     @rpc
@@ -221,111 +378,115 @@ class ModesMixin:
         self._refresh_list()
         return True
 
-    # -- a mode's own copy -----------------------------------------------------------------
-    @rpc
-    def own_copy(self, rel, mode, confirm=True):
-        """Give *mode* its own copy of the clip *rel* (which it shares). Returns the copy's
-        rel, or "" when nothing was made."""
+    # -- a follower gets a clip of its own, and gives it back --------------------------------
+    def _m_materialize(self, rel):
+        """A replacement was chosen for the follower *rel*: make its clip its own (the shared
+        clip's file copied under its own name, and the record Write reads). A copy the card
+        already has that the project had pointed back at the shared clip keeps its file and
+        only loses that record. Returns whether *rel* is now a clip of its own."""
         from ..plugins.stern import clip_modes as CM
-        clips = self._m_clips
         project = self._scan_dir
-        if (clips is None or not project or self._is_running()
-                or mode not in (self._m_modes.get(rel) or ())
-                or len(self._m_modes.get(rel) or ()) < 2 or rel in self._m_copy):
-            return ""
-        clip = clips.name_of.get(rel)
-        if not clip:
-            return ""
         recs = self._m_records()
-        back = next((r for r in recs if r["clip"] == clip and r["mode"] == mode
-                     and r.get("state") == "shared"), None)
-        if back is not None:
-            # the card already has this mode's copy and the project had put it back: the
-            # card's copy again, nothing new to make
-            CM.save_records(project, [r for r in recs if r is not back])
-            self._m_history("video  %s plays its copy %s again" % (self._m_label(mode),
-                                                                  back["name"]))
-            self._m_after_change([back.get("rel") or ""])
-            return back.get("rel") or ""
-        taken = set(clips.bank_of) | {r["name"] for r in recs}
-        name = CM.own_name(clip, mode, taken)
-        ext = os.path.splitext(rel)[1]
-        new_rel = "%s/%s%s" % (os.path.dirname(rel) or "video", name, ext)
-        src = os.path.join(project, *rel.split("/"))
-        dst = os.path.join(project, *new_rel.split("/"))
-        label = self._m_label(mode)
-        others = [self._m_label(m) for m in self._m_modes.get(rel, ()) if m != mode]
-        if confirm:
-            answer = compat.ctx().dialogs.message(
-                "question", "Give %s its own copy" % label,
-                CONFIRM % (label, clip, os.path.basename(new_rel), label,
-                           _and(others), clip),
-                [{"id": "copy", "label": "Make the copy", "style": "primary"},
-                 {"id": "cancel", "label": "Cancel"}], default="copy")
-            if answer != "copy":
-                return ""
+        rec = self._m_virtual.get(rel)
+        if rec is None:
+            if rel not in self._m_follow:
+                return True
+            # an on-card copy pointed back: keep it
+            CM.save_records(project, [r for r in recs if not (
+                r.get("state") == "shared" and (r.get("rel") == rel))])
+            self._m_history("video  %s plays its own clip %s again"
+                            % (self._m_label(self._m_modes[rel][0]), os.path.basename(rel)))
+            return True
+        src = os.path.join(project, *rec["of"].split("/"))
+        dst = os.path.join(project, *rel.split("/"))
+        label = self._m_label(rec["mode"])
         if os.path.exists(dst):
             compat.messagebox.showerror(
-                "Give %s its own copy" % label,
-                "%s is already in the project folder, so the copy can't be made under that "
-                "name. Move it out of the video folder and try again." % new_rel)
-            return ""
+                "A clip of its own for %s" % label,
+                "%s is already in the project folder, so %s's own clip can't be made under "
+                "that name. Move it out of the video folder and try again." % (rel, label))
+            return False
         try:
             shutil.copy2(src, dst)
         except OSError as e:
-            compat.messagebox.showerror("Give %s its own copy" % label,
-                                        "The copy could not be made: %s" % e)
-            return ""
-        recs = [r for r in recs if not (r["clip"] == clip and r["mode"] == mode)]
-        recs.append({"name": name, "clip": clip, "mode": mode, "rel": new_rel, "of": rel,
-                     "state": "own"})
-        CM.save_records(project, recs)
-        self._m_history("video  %s gets its own copy %s of %s" % (label, name, clip))
-        self.log("%s now has its own copy of %s: %s. Choose a replacement for it; "
-                        "the next image build puts it on the card as a new clip."
-                        % (label, clip, new_rel), "success")
-        self._m_after_change([new_rel])
-        return new_rel
-
-    @rpc
-    def shared_again(self, rel, confirm=True):
-        """Back to the shared clip: the copy *rel* is dropped (or, when the card already has
-        it, its mode is pointed at the shared clip again by the next Write)."""
-        from ..plugins.stern import clip_modes as CM
-        copy = self._m_copy.get(rel)
-        project = self._scan_dir
-        if copy is None or not project or self._is_running():
+            compat.messagebox.showerror("A clip of its own for %s" % label,
+                                        "%s's own clip could not be made: %s" % (label, e))
             return False
-        label = self._m_label(copy["mode"])
-        on_card = rel in ((self._m_clips.name_of if self._m_clips else {}) or {})
-        picked = bool(self._assign.get(rel))
-        if confirm:
-            text = ("%s plays %s again, as the game shipped." % (label, copy["clip"]))
-            if not on_card:
-                text += (" The copy (%s) is deleted from the project folder%s."
-                         % (os.path.basename(rel),
-                            " and its replacement pick is dropped (your own file is "
-                            "untouched)" if picked else ""))
-            else:
-                text += (" The card keeps the copy as a clip nothing plays; the next Write "
-                         "points %s back at the shared clip." % label)
-            if not compat.messagebox.askyesno("Back to the shared clip", text):
-                return False
-        recs = [r for r in self._m_records()
-                if not (r["name"] == copy["name"] and r["mode"] == copy["mode"])]
-        if on_card:
-            recs.append(dict(copy, state="shared", rel=rel))
-        elif picked:
-            self._assign.pop(rel, None)
-            self._save_staged()
+        recs = [r for r in recs if not (r["clip"] == rec["clip"] and r["mode"] == rec["mode"])]
+        recs.append(dict(rec))
         CM.save_records(project, recs)
-        if not on_card:
+        # the row is a slot with a file of its own now, not its shared clip's
+        slot = replace(self._by_rel[rel], rel_path=rel, abs_path=dst,
+                       size=os.path.getsize(dst))
+        self._by_rel[rel] = slot
+        self._slots.append(slot)
+        self._slots.sort(key=lambda s: s.rel_path.lower())
+        del self._m_virtual[rel]
+        self._m_copy[rel] = dict(rec)
+        self._m_history("video  %s gets a clip of its own (%s) instead of %s"
+                        % (label, rec["name"], rec["clip"]))
+        self.log("%s gets a clip of its own (%s) instead of sharing %s: the next image build "
+                 "puts it on the card as a new clip." % (label, rec["name"], rec["clip"]),
+                 "info")
+        return True
+
+    def _m_after_clear(self, rels):
+        """Replacements were cleared: a mode's own clip that only this project made follows
+        its shared clip again (its file and record go)."""
+        from ..plugins.stern import clip_modes as CM
+        project = self._scan_dir
+        on_card = (self._m_clips.name_of if self._m_clips else {}) or {}
+        gone = [r for r in rels if r in self._m_copy and r not in on_card
+                and not self._assign.get(r)]
+        if not gone or not project:
+            return
+        drop = {self._m_copy[r]["name"] for r in gone}
+        CM.save_records(project, [r for r in self._m_records() if r["name"] not in drop])
+        for rel in gone:
             try:
                 os.remove(os.path.join(project, *rel.split("/")))
             except OSError:
                 pass
+            self._m_history("video  %s plays the shared clip %s again"
+                            % (self._m_label(self._m_copy[rel]["mode"]),
+                               self._m_copy[rel]["clip"]))
+        self._m_after_change(gone)
+
+    @rpc
+    def shared_again(self, rel, confirm=True):
+        """"Use the same clip as <mode> again" on a mode's own clip an earlier build put on the
+        card: the next Write points its mode back at the shared clip (the card keeps the file,
+        unplayed). A copy only this project made goes back by clearing its replacement."""
+        from ..plugins.stern import clip_modes as CM
+        copy = self._m_copy.get(rel)
+        project = self._scan_dir
+        on_card = rel in ((self._m_clips.name_of if self._m_clips else {}) or {})
+        if copy is None or not project or self._is_running():
+            return False
+        if not on_card:
+            # a clip of its own only this project made: clearing it is the way back
+            if self._assign.get(rel):
+                self._clear_picks([rel])
+            else:
+                self._m_after_clear([rel])
+            return True
+        label = self._m_label(copy["mode"])
+        of = self._m_of.get(rel) or ""
+        lead = _and([self._m_label(m) for m in self._m_modes.get(of, ())
+                     if m != copy["mode"]]) or "the other modes"
+        if confirm and not compat.messagebox.askyesno(
+                "Use the same clip again",
+                "%s plays the same clip as %s (%s) again after the next Write. The card keeps "
+                "its own clip, unplayed." % (label, lead, copy["clip"])):
+            return False
+        recs = [r for r in self._m_records()
+                if not (r["name"] == copy["name"] and r["mode"] == copy["mode"])]
+        recs.append(dict(copy, state="shared", rel=rel))
+        if self._assign.pop(rel, None):
+            self._save_staged()
+        CM.save_records(project, recs)
         self._m_history("video  %s plays the shared clip %s again" % (label, copy["clip"]))
-        self._m_after_change([copy.get("of") or ""])
+        self._m_after_change([rel])
         return True
 
     def _m_history(self, line):
@@ -336,6 +497,6 @@ class ModesMixin:
             pass
 
     def _m_after_change(self, select):
-        """A copy made or dropped: rescan, then show *select*."""
+        """A clip of its own made or dropped: rescan, then show *select*."""
         self._m_select_after = [r for r in select if r]
         self.scan()

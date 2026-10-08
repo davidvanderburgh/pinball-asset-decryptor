@@ -383,8 +383,9 @@ PENDING_OWN_CLIP = "Pending (a mode's own clip)"
 
 
 def own_clip_rows(mfr, assets_path, *, direct):
-    """PAD-444: each copy the Video tab gave a mode, and each one put back, as a row; a
-    Direct-SD write says it leaves them out (a copy is a file the card never had)."""
+    """PAD-444: each mode the Video tab gave a clip of its own, and each one put back on its
+    shared clip, as a row; a Direct-SD write says it leaves them out (a mode's own clip is a
+    file the card never had)."""
     if not assets_path or mfr is None or getattr(mfr, "key", "") != "stern":
         return []
     try:
@@ -397,10 +398,11 @@ def own_clip_rows(mfr, assets_path, *, direct):
     for r in recs:
         label = clip_modes.mode_label(r["mode"])
         if r.get("state") == "shared":
-            line = "%s plays %s again (its copy %s is left unplayed)" % (
-                label, r["clip"], r["name"])
+            line = "%s plays the shared clip %s again (its own clip %s stays on the card, " \
+                   "unplayed)" % (label, r["clip"], r["name"])
         else:
-            line = "%s gets its own copy of %s (%s)" % (label, r["clip"], r.get("rel") or r["name"])
+            line = "%s gets a clip of its own instead of sharing %s (%s)" % (
+                label, r["clip"], r.get("rel") or r["name"])
             if dest_device:
                 line += (" — left out of a Direct-SD write: it adds a clip to the card "
                          "(build an image file)")

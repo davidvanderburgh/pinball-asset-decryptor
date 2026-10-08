@@ -28,8 +28,8 @@ that builds its global objects, often holding clip names - is at the end of the 
 reference belongs to a mode when its function is
 
 * ``own``: one of the mode's or its display layers' own virtual functions;
-* ``init``: a static initialiser (``.init_array``) whose nearest own virtual BEFORE it is the
-  mode's (the file it ends);
+* ``init``: a static initialiser (``.init_array``) right after a run of the mode's own
+  virtuals (the file it ends);
 * ``unit``: anything else whose nearest own virtuals before and after it are both the mode's.
 
 A pointer in a table belongs to a mode (``table``) when every function that loads the table's
@@ -53,11 +53,17 @@ import struct
 from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes; older cached readings are read again
-READ_REV = 1
+READ_REV = 2
 #: the most clip-name characters a project file keeps (engine._sanitize_title's cap)
 NAME_MAX = 64
 #: how far back from a table's pointer the table's start is looked for (words)
 TABLE_BACK = 256
+#: how many of one mode's own virtuals in a row before a static initialiser make it that
+#: mode's file's (a mode's file has dozens; a stray one in another file stands alone)
+INIT_RUN = 3
+#: the longest string a clip name is looked for at the end of: the linker keeps one copy of
+#: a name that ends a longer string (Godzilla's "tilt" is "Avertisseur de tilt" + 16)
+HOST_MAX = 256
 #: the most scene directories :func:`read_card` reads for a bank, most clips first (the
 #: in-game bank holds most of a title's clips; a title with a clip in every scene is not
 #: read scene by scene)
@@ -99,6 +105,11 @@ class Reading:
 
     def refs_of(self, name, mode):
         return [r for r in self.refs.get(name, ()) if r.mode == mode]
+
+    def elsewhere(self, name):
+        """Whether code that is no one mode's (main play, attract, the battle select screen)
+        names *name* too."""
+        return any(not r.mode for r in self.refs.get(name, ()))
 
     def label(self, mode):
         return self.labels.get(mode) or mode_label(mode)
@@ -211,7 +222,13 @@ class _Owners:
         # a prologue can start a few instructions before the push (0xa3b9c on LE 1.16)
         j = bisect.bisect_left(self.inits, fn - 16)
         if j < len(self.inits) and self.inits[j] <= fn:
-            return (prev, "init") if prev else ("", "")
+            # the file it ends: the run of one mode's own virtuals right before it, and a
+            # run, not a stray one (main play's initialiser follows a tiny virtual of the
+            # Mechagodzilla multiball that lives in its file, Pro 1.16 0x475fc)
+            run = 0
+            while i - run >= 0 and self.anchors[self.avas[i - run]] == prev:
+                run += 1
+            return (prev, "init") if prev and run >= INIT_RUN else ("", "")
         if prev and prev == nxt:
             return prev, "unit"
         return "", ""
@@ -238,18 +255,24 @@ class _Owners:
 
 
 def _spans(raw, names):
-    """``[(file offset, name)]`` of every whole C string equal to one of *names*."""
-    out = []
+    """``([(file offset, text)], {(file offset, delta): name})``: the C strings that hold one
+    of *names*, whole or as their tail (the reference census reads each string once), and
+    which name each place in them is."""
+    hosts, at = {}, {}
     for n in names:
         try:
-            key = b"\0" + n.encode("latin1") + b"\0"
+            key = n.encode("latin1") + b"\0"
         except UnicodeEncodeError:
             continue
         o = raw.find(key)
         while o >= 0:
-            out.append((o + 1, n))
+            z = raw.rfind(b"\0", max(0, o - HOST_MAX), o)
+            host = raw[z + 1:o + len(key) - 1] if z >= 0 else b""
+            if z >= 0 and host and all(0x20 <= c <= 0x7E for c in host):
+                hosts[z + 1] = host.decode("latin1")
+                at[(z + 1, o - z - 1)] = n
             o = raw.find(key, o + 1)
-    return out
+    return sorted(hosts.items()), at
 
 
 def analyse(elf, names):
@@ -268,17 +291,14 @@ def analyse(elf, names):
         return out
     layers = _layers(model, modes)
     owners = _Owners(S, prog, _anchors(S, prog, model, modes, layers), _inits(S, prog))
-    spans = _spans(elf, sorted(set(names)))
-    by_off = dict(spans)
+    spans, at_name = _spans(elf, sorted(set(names)))
     census = progreloc.reference_census(elf, spans)
     text_hi = prog.code_end
     for off, refs in census.items():
-        name = by_off.get(off)
-        if name is None:
-            continue
         for ref in refs:
-            if ref["delta"] != 0:
-                continue                 # a tail of the name is another string
+            name = at_name.get((off, ref["delta"]))
+            if name is None:
+                continue                 # another part of the string, not a clip's name
             first = ref["offs"][0]
             at = prog.off2va(first)
             if at is None:
@@ -401,7 +421,8 @@ def program_plan(elf, records, names, base_va, reading=None):
         plan.lines.append(
             "%s plays %s again (%d place(s) in the game program)" % (label, clip, len(moving))
             if back else
-            "%s plays its own copy %s instead of %s (%d place(s) in the game program)"
+            "%s plays a clip of its own, %s, instead of sharing %s (%d place(s) in the "
+            "game program)"
             % (label, name, clip, len(moving)))
     plan.blob = bytes(blob)
     return plan
@@ -521,7 +542,7 @@ class WriteJob:
                 continue
             src = os.path.join(project, *(rec.get("rel") or "").split("/"))
             if not rec.get("rel") or not os.path.isfile(src):
-                raise ClipModesError("the file of %s's own copy (%s) is not in the project"
+                raise ClipModesError("the file of %s's own clip (%s) is not in the project"
                                      % (mode_label(rec["mode"]), rec.get("rel") or rec["name"]))
             if source_of is not None:
                 src = source_of(rec, src) or src
@@ -529,7 +550,7 @@ class WriteJob:
                 card = "%s/scene.assets/%s" % (self.bank_of[rec["name"]].strip("/"),
                                                self.path_of[rec["name"]])
                 replaced.append((card, src))
-                lines.append("%s's own copy %s is on this card already; the project's file "
+                lines.append("%s's own clip %s is on this card already; the project's file "
                              "goes over it (%s)" % (mode_label(rec["mode"]), rec["name"], card))
                 continue
             wanted.setdefault(self.bank_dir(rec), []).append((rec, src))
@@ -545,7 +566,7 @@ class WriteJob:
             for rec, src in items:
                 card = "%s/scene.assets/%s" % (d.strip("/"), paths[rec["name"]])
                 new.append((card, src))
-                lines.append("%s's own copy %s is a new clip in the video bank (%s)"
+                lines.append("%s's own clip %s is a new clip in the video bank (%s)"
                              % (mode_label(rec["mode"]), rec["name"], card))
         return replaced, new, lines
 
@@ -608,6 +629,8 @@ class CardClips:
     name_of: dict = field(default_factory=dict)    # project rel -> clip name
     bank_of: dict = field(default_factory=dict)    # clip name -> its bank's directory
     note: str = ""                                  # why there is nothing, in words
+    #: clips of a bank the game plays by name that nothing in the program names: never shown
+    unplayed: list = field(default_factory=list)
 
     def modes_of_rel(self, rel):
         n = self.name_of.get(rel)
@@ -616,13 +639,15 @@ class CardClips:
     def to_json(self):
         return {"rev": READ_REV, "card": self.card, "game": self.game, "version": self.version,
                 "reading": self.reading.to_json(), "name_of": dict(self.name_of),
-                "bank_of": dict(self.bank_of), "note": self.note}
+                "bank_of": dict(self.bank_of), "note": self.note,
+                "unplayed": list(self.unplayed)}
 
     @classmethod
     def from_json(cls, d):
         return cls(d.get("card", ""), d.get("game", ""), d.get("version", ""),
                    Reading.from_json(d.get("reading") or {}), dict(d.get("name_of") or {}),
-                   dict(d.get("bank_of") or {}), d.get("note", ""))
+                   dict(d.get("bank_of") or {}), d.get("note", ""),
+                   list(d.get("unplayed") or ()))
 
 
 def manifest_rows(project):
@@ -717,6 +742,7 @@ def read_card(card, rows, cancel=None):
         return out
     out.reading = analyse(elf, names)
     out.bank_of = {n: v for n, v in banks.items()}
+    out.unplayed = unplayed(out.reading, banks)
     if not out.reading.labels:
         out.note = "the app can't tell this game's modes apart in its program"
     out.name_of = _names_of(rows, out.bank_of, out)
@@ -729,6 +755,22 @@ def read_card(card, rows, cancel=None):
         except OSError:
             pass
     return out
+
+
+def unplayed(reading, bank_of):
+    """The clips nothing in the game program names, in the banks the game plays BY NAME (a
+    bank a third of whose clips the program names: Godzilla's in-game bank, 443 of 598).
+    Such a bank is only ever asked for a clip by its name, so these never show. A scene's own
+    clips (an attract scene's) play with the scene and are never in this list."""
+    by_dir = {}
+    for name, v in bank_of.items():
+        by_dir.setdefault(v[0], []).append(name)
+    out = []
+    for _d, names in by_dir.items():
+        named = [n for n in names if reading.refs.get(n)]
+        if names and len(named) * 3 >= len(names):
+            out += [n for n in names if not reading.refs.get(n)]
+    return sorted(out)
 
 
 def _names_of(rows, bank_of, clips):

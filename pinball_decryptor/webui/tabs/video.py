@@ -372,7 +372,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
             return None
         if not vh.same_dir(assets_dir, self._scan_dir or ""):
             return None
-        by_rel = dict(self._by_rel)
+        by_rel = {rel: s for rel, s in self._by_rel.items()
+                  if rel not in self._m_virtual}
         assignments = {rel: rep for rel, rep in dict(self._assign).items()
                        if rep and rel in by_rel}
         if not assignments:
@@ -769,6 +770,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         i = self._index.get(rel)
         if i is not None:
             self._put_row(i, self._row(slot))
+        self._m_meta(rel)
         if self._assign.get(rel) and not self._conv_kick:
             # its Convert answer can be worked out properly now
             self._conv_kick = True
@@ -900,6 +902,9 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
     def _rep_pane_empty_text(self, rel, default):
         """MainWindow._rep_pane_empty_text("video", rel, default)."""
         from ...core import staged_originals
+        follow = self._m_follow_text(rel)
+        if follow:
+            return follow
         if rel is None or not self._slot_changed_on_disk(rel):
             return default
         if rel in self._foreign:
@@ -1261,10 +1266,12 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         the callout under the preview."""
         if self._restoring:
             return
-        self._publish_rows([self._row(s) for s in self._slots])
+        listed = self._m_slots()            # PAD-444: + the followers' rows
+        self._publish_rows([self._row(s) for s in listed])
         query = (self.video_search_var.get() or "").strip().lower()
-        slots = [s for s in self._slots
-                 if not query or query in s.rel_path.lower()]
+        slots = [s for s in listed
+                 if not query or query in s.rel_path.lower()
+                 or query in self._m_of.get(s.rel_path, "").lower()]
         ok = self._change_pred()
         if ok is not None:
             slots = [s for s in slots if ok(s.rel_path)]
@@ -1511,6 +1518,11 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                         "Replace Video: %s — %s; it goes on the card as it "
                         "is. Right-click the row → This clip's conversion to "
                         "change just this one." % (rel, why), "error")
+        if rel in self._m_follow:
+            # PAD-444: a mode that played its shared clip gets a clip of its own
+            if not self._m_materialize(rel):
+                return False
+            self._m_publish()
         self._assign[rel] = path
         self._save_staged()
         note = vh.conversion_note(self._by_rel.get(rel), rel, path,
@@ -1684,6 +1696,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
             if alive:
                 self._reselect(alive)
         self._update_clear_all()
+        self._m_after_clear(gone)
         return len(gone)
 
     def _clear_confirm_text(self, targets, question):
@@ -1753,7 +1766,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         from ...core import folder_match
         if self._is_running():
             return False
-        slot_rels = [rel for rel in self._by_rel if rel not in self._foreign]
+        slot_rels = [rel for rel in self._by_rel if rel not in self._foreign
+                     and rel not in self._m_virtual]
         if not slot_rels:
             compat.messagebox.showinfo(
                 "Replace from folder",
@@ -1900,7 +1914,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         into this project and re-scan."""
         from .. import tab_settings_ui
         return tab_settings_ui.load_media(
-            self, "video", self._settings_dir(), set(self._by_rel),
+            self, "video", self._settings_dir(),
+            set(self._by_rel) - set(self._m_virtual),
             self._is_running(), self._save_staged_changes,
             self._scan_async, path)
 
@@ -1985,9 +2000,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
             "partition": bool(self.window.tab_visible("Partition Explorer")
                               and getattr(self.window, "find_in_partition",
                                           None) is not None),
-            # PAD-444: a shared clip's modes, each can have its own copy; a copy goes back
-            "modes": (self._m_preview(rel) or {}).get("shared") or [],
-            "copy": bool(self._m_copy.get(rel)),
+            # PAD-444: a mode's own clip an earlier build made plays the shared one again
+            "back": (self._m_preview(rel) or {}).get("back") or "",
         }
 
     def _scene_browser(self):

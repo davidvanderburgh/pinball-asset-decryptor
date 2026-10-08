@@ -512,18 +512,21 @@ HELP_CONTENT = {
             "whose modes the app can tell apart, such as Godzilla). The list beside "
             "**All / Changed / Unchanged** shows one mode's clips only.",
             "Some modes share a clip: on Godzilla, the battle vs Gigan and the Ghidorah and "
-            "Gigan tag team play two of the same clips, so new footage in one shows in both.",
+            "Gigan tag team play two of the same clips. Such a clip has a **row for each "
+            "mode**: the second row (marked ↳) says **Same clip as** the first until you "
+            "choose a replacement in it.",
             {"flow": [
-                {"icon": "film", "title": "Select",
-                 "text": "the shared clip (its modes show in bold)"},
-                {"icon": "copy", "title": "Own copy",
-                 "text": "for the mode to change, under the list"},
-                {"icon": "check", "title": "Replace",
-                 "text": "the new row: only that mode plays it"}]},
-            "- The copy goes on the card as a new clip, so it needs an **image file** build "
-            "(a direct-SD write leaves it out); the other mode keeps the shared clip.\n"
-            "- **Back to the shared clip…** (under the list, or right-click the copy) undoes "
-            "it.",
+                {"icon": "film", "title": "Find",
+                 "text": "the mode's own row of the clip (↳)"},
+                {"icon": "check", "title": "Choose",
+                 "text": "a replacement in that row"},
+                {"icon": "copy", "title": "Build",
+                 "text": "only that mode plays it"}]},
+            "- That mode's clip goes on the card as a new clip, so it needs an **image file** "
+            "build (a direct-SD write leaves it out); the other mode keeps the clip it had.\n"
+            "- Clear the replacement and the row is the **Same clip as** the first again.\n"
+            "- **Not played**: nothing in the game asks for the clip, so the machine never "
+            "shows it; a replacement there changes nothing.",
         ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "

@@ -127,12 +127,14 @@ html.bph-760 .vid-tbl { min-height: 150px; }
 .vcm-cp { color: var(--cp-ink); font-weight: 600; }
 html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 { grid-template-columns: minmax(0, 1fr); }
 
-/* PAD-444: Played in - which of the game's own modes plays a clip, the mode filter, and the
-   callout that gives one mode its own copy of a clip two share */
+/* PAD-444: Played in - which of the game's modes plays a clip, the mode filter, a row for
+   each mode of a clip two modes share, and the clips the game never plays */
 .vid-card .toolbar .vid-modefilter { flex: 0 1 230px; width: 230px; min-width: 150px; }
 .vid-modes-busy { display: inline-flex; align-items: center; gap: 6px; }
 .vid-modes-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-.vid-modes-cell.shared { color: var(--accent); font-weight: 600; }
-.vid-modes-cell.copy { color: var(--ok); }
+.vid-modes-cell.pair { color: var(--accent); }
+.vid-modes-cell.unplayed, .vid-modes-cell.other { color: var(--ink-3); font-style: italic; }
 .vid-modes .note { align-items: center; }
-.vid-modes-btns { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+/* a mode's own row of a clip another mode plays too, under that mode's row */
+.vid-pairmark { color: var(--accent); margin-right: 6px; }
+.vid-rep.follow { color: var(--ink-3); font-style: italic; }

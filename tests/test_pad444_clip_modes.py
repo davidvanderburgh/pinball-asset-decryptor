@@ -63,13 +63,15 @@ class _Prog:
 
 
 def test_a_function_is_a_modes_by_its_virtuals_its_files_initialiser_or_its_neighbours():
-    anchors = {0x1000: GIGAN, 0x1400: GIGAN, 0x2000: TAG, 0x2800: TAG}
-    own = CM._Owners(None, _Prog(), anchors, inits=[0x1ff0, 0x2a00])
+    anchors = {0x1000: GIGAN, 0x1200: GIGAN, 0x1400: GIGAN,
+               0x2000: TAG, 0x2400: TAG, 0x2800: TAG, 0x3000: "cmode_hedorah"}
+    own = CM._Owners(None, _Prog(), anchors, inits=[0x1ff0, 0x2a00, 0x3100])
     assert own.of_function(0x1000) == (GIGAN, "own")
-    assert own.of_function(0x1200) == (GIGAN, "unit")         # between two of its own
+    assert own.of_function(0x1300) == (GIGAN, "unit")         # between two of its own
     assert own.of_function(0x1800) == ("", "")                # between two modes' files
     assert own.of_function(0x1ff8) == (GIGAN, "init")         # a prologue before the push
     assert own.of_function(0x2a00) == (TAG, "init")           # ends the tag team's file
+    assert own.of_function(0x3100) == ("", "")                # one stray virtual is no file
     assert own.of_function(0x0800) == ("", "")                # before every mode
 
 
@@ -136,7 +138,9 @@ def test_only_the_modes_own_references_move_to_its_copys_new_name():
     assert progreloc.reference_value(bytes(buf), {"kind": "movw_a32", "offs": [0x100, 0x104]}) == name_va
     assert progreloc.reference_value(bytes(buf), {"kind": "movw_a32", "offs": [0x200, 0x204]}) == 0x90000
     assert struct.unpack_from("<I", buf, 0x280)[0] == 0x90000
-    assert plan.done == [_rec()] and "Battle vs Ghidorah and Gigan plays its own copy" in plan.lines[0]
+    assert plan.done == [_rec()]
+    assert plan.lines[0].startswith("Battle vs Ghidorah and Gigan plays a clip of its own, "
+                                    "shared_clip_battle_vs_ghidorah_and_gigan, instead of sharing")
 
 
 def test_a_copy_the_program_already_names_needs_no_write_and_one_put_back_moves_back():
@@ -195,7 +199,7 @@ def test_a_copy_becomes_a_new_clip_file_beside_its_banks_clips(tmp_path):
     assert entry.path == "2.asset/3.asset" and entry.size == len(b"copy bytes")
     assert new == [("g/%s/scene.assets/2.asset/3.asset" % BANK_DIR,
                     str(proj / rec["rel"]))]
-    assert "Battle vs Gigan's own copy Alpha_battle_vs_gigan is a new clip" in lines[0]
+    assert "Battle vs Gigan's own clip Alpha_battle_vs_gigan is a new clip" in lines[0]
     # put back, or a program part that did not happen: nothing in the bank
     job.done = [dict(rec, state="shared")]
     assert job.bank_files(str(proj), str(tmp_path / "s2")) == ([], [], [])
@@ -288,138 +292,6 @@ def test_a_copy_on_the_real_program_moves_one_battle_and_comes_back(tmp_path):
     assert r2.modes_of(clip) == [TAG, GIGAN] and r2.modes_of(rec["name"]) == []
 
 
-# ---- the Video tab ---------------------------------------------------------------------------
-SHARED, SOLO, OTHER = "video/shared.mp4", "video/solo.mp4", "video/other.mp4"
-
-
-def _stub_reading(monkeypatch, tmp_path, proj):
-    card = tmp_path / "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw"
-    card.write_bytes(b"\0" * 16)
-    (proj / ".extract_source.json").write_text(json.dumps(
-        {"input_path": str(card), "input_name": card.name}), encoding="utf-8")
-    reading = CM.Reading(labels={GIGAN: "Battle vs Gigan", TAG: "Battle vs Ghidorah and Gigan"}, refs={
-        "shared": [CM.Ref("movw_a32", [1, 2], 1, GIGAN, "init"), CM.Ref("movw_a32", [3, 4], 3, TAG, "init")],
-        "solo": [CM.Ref("movw_a32", [5, 6], 5, GIGAN, "own")]})
-    bank = {"shared": ["/g/" + BANK_DIR, "2.asset/0.asset"], "solo": ["/g/" + BANK_DIR, "2.asset/1.asset"],
-            "other": ["/g/" + BANK_DIR, "2.asset/2.asset"]}
-    reads = []
-
-    def fake(card_path, rows, cancel=None):
-        reads.append(card_path)
-        return CM.CardClips(card=card_path, game="godzilla_pro", version="1.16.0", reading=reading,
-                            name_of={SHARED: "shared", SOLO: "solo", OTHER: "other"}, bank_of=bank)
-    monkeypatch.setattr(CM, "read_card", fake)
-    return reads
-
-
-def test_the_tab_lists_each_clips_modes_and_filters_by_one(tmp_path, monkeypatch):
-    proj = _project(tmp_path, names=(SHARED, SOLO, OTHER))
-    reads = _stub_reading(monkeypatch, tmp_path, proj)
-    with web_app(tmp_path, mfr="stern") as w:
-        _scan(w, proj)
-        st = _wait(w, lambda st: st["modes"]["ready"])
-        assert st["modes"]["list"] == [
-            {"id": TAG, "label": "Battle vs Ghidorah and Gigan", "n": 1},
-            {"id": GIGAN, "label": "Battle vs Gigan", "n": 2}]
-        assert _row(st, SHARED)["modes"] == ["Battle vs Ghidorah and Gigan", "Battle vs Gigan"]
-        assert _row(st, SHARED)["shared"] is True and _row(st, SOLO)["shared"] is False
-        assert _row(st, OTHER)["modes"] == []
-        assert w.call("video.set_mode_filter", TAG) is True
-        assert _rels(w.state("video")) == [SHARED]
-        assert w.call("video.set_mode_filter", "") is True
-        assert len(_rels(w.state("video"))) == 3
-        # the row menu offers each of the shared clip's modes its own copy
-        info = w.call("video.row_menu", [SHARED])
-        assert [m["id"] for m in info["modes"]] == [TAG, GIGAN] and info["copy"] is False
-        assert w.call("video.row_menu", [SOLO])["modes"] == []
-        # a second scan of the same card does not read it again
-        _scan(w, proj)
-        _wait(w, lambda st: st["modes"]["ready"])
-        assert len(reads) == 1
-
-
-def test_a_modes_own_copy_is_a_new_row_and_goes_back_to_the_shared_clip(tmp_path, monkeypatch):
-    proj = _project(tmp_path, names=(SHARED, SOLO, OTHER))
-    _stub_reading(monkeypatch, tmp_path, proj)
-    copy = "video/shared_battle_vs_ghidorah_and_gigan.mp4"
-    with web_app(tmp_path, mfr="stern") as w:
-        _scan(w, proj)
-        _wait(w, lambda st: st["modes"]["ready"])
-        w.call("video.select", SHARED)
-        st = _wait(w, lambda st: (st.get("preview") or {}).get("modes"))
-        m = st["preview"]["modes"]
-        assert [x["id"] for x in m["shared"]] == [TAG, GIGAN]
-        assert m["text"].startswith("Played in Battle vs Ghidorah and Gigan and Battle vs Gigan.")
-        assert w.call("video.own_copy", SOLO, GIGAN) == ""            # not shared: no copy
-        w.answers.append("cancel")
-        assert w.call("video.own_copy", SHARED, TAG) == ""            # cancelled: nothing made
-        assert not (proj / copy).exists()
-        w.answers.append("copy")
-        assert w.call("video.own_copy", SHARED, TAG) == copy
-        st = _wait(w, lambda st: any(r["rel"] == copy and r.get("copy") for r in st["rows"])
-                   and st["modes"]["ready"] and not st.get("scanning"))
-        assert (proj / copy).read_bytes() == (proj / SHARED).read_bytes()
-        assert CM.records(str(proj)) == [{"name": "shared_battle_vs_ghidorah_and_gigan", "clip": "shared",
-                                          "mode": TAG, "rel": copy, "of": SHARED, "state": "own"}]
-        assert _row(st, copy)["copy"] == "Battle vs Ghidorah and Gigan"
-        assert _row(st, copy)["rep_cls"] == ""                         # not "changed", not foreign
-        assert _row(st, SHARED)["modes"] == ["Battle vs Gigan"] and _row(st, SHARED)["shared"] is False
-        st = _wait(w, lambda st: (st.get("preview") or {}).get("rel") == copy
-                   and (st["preview"].get("modes") or {}).get("copy"))
-        assert "Battle vs Gigan keeps the shared clip" in st["preview"]["modes"]["copy"]["text"]
-        assert w.call("video.row_menu", [copy])["copy"] is True
-        w.answers.append("yes")
-        assert w.call("video.shared_again", copy) is True
-        st = _wait(w, lambda st: st["rows"] and st["modes"]["ready"] and not st.get("scanning")
-                   and not any(r["rel"] == copy for r in st["rows"])
-                   and _row(st, SHARED)["shared"])
-        assert not (proj / copy).exists() and CM.records(str(proj)) == []
-        assert _row(st, SHARED)["shared"] is True
-
-
-def test_the_page_draws_played_in_the_filter_and_the_copy_buttons():
-    js = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui",
-                           "static", "js", "tabs", "video.js"), encoding="utf-8").read()
-    for bit in ('key: "modes", label: "Played in"', 'call("video.set_mode_filter", v)',
-                'call("video.own_copy", pv.modes.rel, m.id)', 'call("video.shared_again", pv.modes.rel)',
-                "Give ${m.label} its own copy…", "Back to the shared clip…"):
-        assert bit in js, bit
-
-
-def test_a_copy_an_earlier_build_put_on_the_card_is_still_a_copy(tmp_path, monkeypatch):
-    built = "video/shared_battle_vs_ghidorah_and_gigan.mp4"
-    proj = _project(tmp_path, names=(SHARED, SOLO, built))
-    card = tmp_path / "built.raw"
-    card.write_bytes(b"\0" * 16)
-    (proj / ".extract_source.json").write_text(json.dumps({"input_path": str(card)}),
-                                               encoding="utf-8")
-    reading = CM.Reading(labels={GIGAN: "Battle vs Gigan", TAG: "Battle vs Ghidorah and Gigan"}, refs={
-        "shared": [CM.Ref("movw_a32", [1, 2], 1, GIGAN, "init")],
-        "shared_battle_vs_ghidorah_and_gigan": [CM.Ref("movw_a32", [3, 4], 3, TAG, "init")],
-        "solo": [CM.Ref("movw_a32", [5, 6], 5, GIGAN, "own")]})
-    names = {SHARED: "shared", SOLO: "solo", built: "shared_battle_vs_ghidorah_and_gigan"}
-    monkeypatch.setattr(CM, "read_card", lambda card_path, rows, cancel=None: CM.CardClips(
-        card=card_path, reading=reading, name_of=dict(names),
-        bank_of={n: ["/g/" + BANK_DIR, "2.asset/%d.asset" % i] for i, n in enumerate(names.values())}))
-    with web_app(tmp_path, mfr="stern") as w:
-        _scan(w, proj)
-        st = _wait(w, lambda st: st["modes"]["ready"])
-        assert _row(st, built)["copy"] == "Battle vs Ghidorah and Gigan"
-        assert _row(st, SHARED)["modes"] == ["Battle vs Gigan"]
-        # put back: the card's file stays, the next Write points the battle back
-        w.answers.append("yes")
-        assert w.call("video.shared_again", built) is True
-        st = _wait(w, lambda st: st["rows"] and st["modes"]["ready"] and not st.get("scanning")
-                   and _row(st, SHARED)["shared"])
-        assert (proj / built).exists()
-        rec, = CM.records(str(proj))
-        assert (rec["state"], rec["mode"], rec["of"]) == ("shared", TAG, SHARED)
-        assert _row(st, built)["copy"] == "" and _row(st, built)["modes"] == []
-        # and own again: the card's copy, nothing new made
-        assert w.call("video.own_copy", SHARED, TAG) == built
-        st = _wait(w, lambda st: st["rows"] and st["modes"]["ready"] and not st.get("scanning")
-                   and _row(st, built)["copy"])
-        assert CM.records(str(proj)) == [] and len(st["rows"]) == 3
 
 
 def test_a_copy_the_card_already_has_takes_the_projects_file_over_its_own(tmp_path):
@@ -434,3 +306,171 @@ def test_a_copy_the_card_already_has_takes_the_projects_file_over_its_own(tmp_pa
     # an extract of that card: the copy is the extract's own slot, written as any other
     job.rows["video/Delta_mine.mp4"] = "/g/%s/scene.assets/2.asset/1.asset" % BANK_DIR
     assert job.bank_files(str(proj), str(tmp_path / "s2")) == ([], [], [])
+
+
+def test_a_name_kept_as_the_tail_of_a_longer_string_is_still_found():
+    raw, _va = _elf()
+    raw = bytearray(raw)
+    raw[0x340:0x350] = b"\0Alt clip_x\0\0\0\0\0"            # "clip_x" is "Alt clip_x" + 4
+    spans, at = CM._spans(bytes(raw), ["clip_x", "shared_clip"])
+    assert (0x341, "Alt clip_x") in spans and at[(0x341, 4)] == "clip_x"
+    assert at[(0x301, 0)] == "shared_clip"
+
+
+def test_a_bank_played_by_name_lists_the_clips_nothing_names():
+    reading = CM.Reading(refs={"a": [CM.Ref("lone", [1], 1)], "b": [CM.Ref("lone", [2], 2)]})
+    bank_of = {"a": ["/in_game", "0"], "b": ["/in_game", "1"], "c": ["/in_game", "2"],
+               "d": ["/in_game", "3"], "e": ["/attract", "0"], "f": ["/attract", "1"],
+               "g": ["/attract", "2"], "h": ["/attract", "3"]}
+    # the in-game bank: half its clips are named, so the others are never shown; the attract
+    # scene's clips play with their scene, and none of them is named
+    assert CM.unplayed(reading, bank_of) == ["c", "d"]
+
+
+# ---- the Video tab ---------------------------------------------------------------------------
+SHARED, SOLO, OTHER, MAIN = "video/shared.mp4", "video/solo.mp4", "video/other.mp4", "video/main.mp4"
+FOLLOW = "video/shared_battle_vs_gigan.mp4"        # Battle vs Gigan's row of the shared clip
+
+
+def _stub_reading(monkeypatch, tmp_path, proj, names=None, reading=None):
+    card = tmp_path / "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw"
+    card.write_bytes(b"\0" * 16)
+    (proj / ".extract_source.json").write_text(json.dumps(
+        {"input_path": str(card), "input_name": card.name}), encoding="utf-8")
+    reading = reading or CM.Reading(
+        labels={GIGAN: "Battle vs Gigan", TAG: "Battle vs Ghidorah and Gigan"}, refs={
+            "shared": [CM.Ref("movw_a32", [1, 2], 1, GIGAN, "init"),
+                       CM.Ref("movw_a32", [3, 4], 3, TAG, "init")],
+            "solo": [CM.Ref("movw_a32", [5, 6], 5, GIGAN, "own")],
+            "main": [CM.Ref("movw_a32", [7, 8], 7, "", "")]})
+    names = names or {SHARED: "shared", SOLO: "solo", OTHER: "other", MAIN: "main"}
+    reads = []
+
+    def fake(card_path, rows, cancel=None):
+        reads.append(card_path)
+        return CM.CardClips(card=card_path, game="godzilla_pro", version="1.16.0", reading=reading,
+                            name_of=dict(names),
+                            bank_of={n: ["/g/" + BANK_DIR, "2.asset/%d.asset" % i]
+                                     for i, n in enumerate(names.values())},
+                            unplayed=["other"] if "other" in names.values() else [])
+    monkeypatch.setattr(CM, "read_card", fake)
+    return reads
+
+
+def _ready(w, pred=lambda st: True):
+    return _wait(w, lambda st: st["rows"] and st["modes"]["ready"] and not st.get("scanning")
+                 and pred(st))
+
+
+def test_a_shared_clip_has_a_row_for_each_mode_and_the_list_filters_by_mode(tmp_path, monkeypatch):
+    proj = _project(tmp_path, names=(SHARED, SOLO, OTHER, MAIN))
+    reads = _stub_reading(monkeypatch, tmp_path, proj)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        st = _ready(w)
+        assert st["modes"]["list"] == [
+            {"id": TAG, "label": "Battle vs Ghidorah and Gigan", "n": 1},
+            {"id": GIGAN, "label": "Battle vs Gigan", "n": 2},
+            {"id": "__other__", "label": "Other parts of the game", "n": 1},
+            {"id": "__unplayed__", "label": "Not played by the game", "n": 1}]
+        lead, follow = _row(st, SHARED), _row(st, FOLLOW)
+        assert lead["modes"] == ["Battle vs Ghidorah and Gigan"] and lead["pair"] and not lead["follow"]
+        assert follow["modes"] == ["Battle vs Gigan"] and follow["follow"] == "Battle vs Ghidorah and Gigan"
+        assert follow["name"] == "shared.mp4" and follow["rep"] == "Same clip as Battle vs Ghidorah and Gigan"
+        assert follow["rep_cls"] == "follow"
+        assert _rels(st).index(FOLLOW) == _rels(st).index(SHARED) + 1     # right under it
+        assert not (proj / FOLLOW).exists()                                # no file until it is picked
+        assert _row(st, OTHER)["unplayed"] is True and _row(st, MAIN)["other"] is True
+        for mode, want in ((TAG, [SHARED]), (GIGAN, [FOLLOW, SOLO]), ("__other__", [MAIN]),
+                           ("__unplayed__", [OTHER])):
+            assert w.call("video.set_mode_filter", mode) is True
+            assert sorted(_rels(w.state("video"))) == sorted(want), mode
+        assert w.call("video.set_mode_filter", "") is True
+        assert len(_rels(w.state("video"))) == 5
+        # the callout says what the rows are
+        w.call("video.select", FOLLOW)
+        st = _wait(w, lambda st: ((st.get("preview") or {}).get("modes") or {}).get("rel") == FOLLOW)
+        assert st["preview"]["modes"]["text"].startswith(
+            "Battle vs Gigan plays the same clip as Battle vs Ghidorah and Gigan until you choose")
+        assert "same clip as Battle vs Ghidorah and Gigan" in st["preview"]["rep"]["hint"]
+        w.call("video.select", OTHER)
+        st = _wait(w, lambda st: ((st.get("preview") or {}).get("modes") or {}).get("rel") == OTHER)
+        assert st["preview"]["modes"]["text"].startswith("The game never plays this clip")
+        # nothing is staged for a row with no file, and a second scan does not read the card again
+        assert w.call("video.row_menu", [FOLLOW])["back"] == ""
+        _scan(w, proj)
+        _ready(w)
+        assert len(reads) == 1
+
+
+def test_a_replacement_in_a_modes_row_gives_it_a_clip_of_its_own(tmp_path, monkeypatch):
+    proj = _project(tmp_path, names=(SHARED, SOLO, OTHER, MAIN))
+    _stub_reading(monkeypatch, tmp_path, proj)
+    mine = tmp_path / "battra.mp4"
+    mine.write_bytes(b"\1" * 40)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        _ready(w)
+        w.answers.append(str(mine))
+        assert w.call("video.choose", FOLLOW) is True
+        st = _ready(w, lambda st: _row(st, FOLLOW)["rep"] == "battra.mp4")
+        assert (proj / FOLLOW).read_bytes() == (proj / SHARED).read_bytes()
+        assert CM.records(str(proj)) == [{"name": "shared_battle_vs_gigan", "clip": "shared",
+                                          "mode": GIGAN, "rel": FOLLOW, "of": SHARED, "state": "own"}]
+        row = _row(st, FOLLOW)
+        assert row["copy"] is True and row["modes"] == ["Battle vs Gigan"] and row["name"] == "shared.mp4"
+        assert row["rep_cls"] == "picked"                      # an ordinary pick, not "changed"
+        assert _row(st, SHARED)["modes"] == ["Battle vs Ghidorah and Gigan"]
+        assert _row(st, SHARED)["pair"] is False               # nothing follows it any more
+        pend = w.run(lambda: w.window.service("video").pending_video_assignments(str(proj)))
+        assert pend[1] == {FOLLOW: os.path.normpath(str(mine))}
+        assert pend[0][FOLLOW].abs_path == str(proj / FOLLOW)  # staged into its own file
+        # clearing it: the same clip as the tag team again, its file and record gone
+        assert w.call("video.clear", [FOLLOW]) == 1
+        st = _ready(w, lambda st: _row(st, FOLLOW)["follow"])
+        assert not (proj / FOLLOW).exists() and CM.records(str(proj)) == []
+        assert _row(st, SHARED)["pair"] is True
+
+
+def test_a_clip_of_its_own_an_earlier_build_made_can_follow_again_and_back(tmp_path, monkeypatch):
+    built = "video/shared_battle_vs_ghidorah_and_gigan.mp4"
+    proj = _project(tmp_path, names=(SHARED, SOLO, built))
+    reading = CM.Reading(labels={GIGAN: "Battle vs Gigan", TAG: "Battle vs Ghidorah and Gigan"}, refs={
+        "shared": [CM.Ref("movw_a32", [1, 2], 1, GIGAN, "init")],
+        "shared_battle_vs_ghidorah_and_gigan": [CM.Ref("movw_a32", [3, 4], 3, TAG, "init")],
+        "solo": [CM.Ref("movw_a32", [5, 6], 5, GIGAN, "own")]})
+    _stub_reading(monkeypatch, tmp_path, proj, reading=reading,
+                  names={SHARED: "shared", SOLO: "solo", built: "shared_battle_vs_ghidorah_and_gigan"})
+    mine = tmp_path / "mine.mp4"
+    mine.write_bytes(b"\2" * 30)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        st = _ready(w)
+        assert _row(st, built)["copy"] is True and _row(st, built)["modes"] == ["Battle vs Ghidorah and Gigan"]
+        assert _row(st, SHARED)["modes"] == ["Battle vs Gigan"] and _row(st, SHARED)["pair"] is False
+        assert w.call("video.row_menu", [built])["back"] == "Battle vs Gigan"
+        # the same clip as the Gigan battle again: the card's file stays, the next Write points back
+        w.answers.append("yes")
+        assert w.call("video.shared_again", built) is True
+        st = _ready(w, lambda st: _row(st, built)["follow"])
+        assert (proj / built).exists()
+        rec, = CM.records(str(proj))
+        assert (rec["state"], rec["mode"], rec["of"]) == ("shared", TAG, SHARED)
+        assert _row(st, built)["rep"] == "Same clip as Battle vs Gigan"
+        assert _row(st, SHARED)["modes"] == ["Battle vs Gigan"] and _row(st, SHARED)["pair"] is True
+        assert len(st["rows"]) == 3                             # no second row for the tag team
+        # a replacement in its row: a clip of its own again, nothing new made
+        w.answers.append(str(mine))
+        assert w.call("video.choose", built) is True
+        st = _ready(w, lambda st: _row(st, built)["copy"])
+        assert CM.records(str(proj)) == [] and len(st["rows"]) == 3
+
+
+def test_the_page_draws_played_in_the_filter_and_the_mode_rows():
+    js = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui",
+                           "static", "js", "tabs", "video.js"), encoding="utf-8").read()
+    for bit in ('key: "modes", label: "Played in"', 'call("video.set_mode_filter", v)',
+                'call("video.shared_again", pv.modes.rel)', "Use the same clip as ${info.back} again…",
+                '"Not played"', '"Other parts of the game"', "vid-pairmark"):
+        assert bit in js, bit
+    assert "own_copy" not in js and "Own copy" not in js

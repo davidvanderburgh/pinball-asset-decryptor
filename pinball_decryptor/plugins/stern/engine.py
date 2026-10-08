@@ -3630,10 +3630,11 @@ def _own_clip_job(reader, assets_dir, records, log):
             continue
         banks[d] = data
     if not banks:
-        log("Own clips: %d cop%s left out of this write: the video bank the "
-            "shared clips are in isn't on this card, or can't be read."
-            % (len(records), "y is" if len(records) == 1 else "ies are"),
-            "warning")
+        log("Own clips: %d mode%s left sharing %s clip%s on this write: the "
+            "video bank the shared clips are in isn't on this card, or can't be "
+            "read." % (len(records), "" if len(records) == 1 else "s",
+                       "its" if len(records) == 1 else "their",
+                       "" if len(records) == 1 else "s"), "warning")
         return None
     try:
         return clip_modes.WriteJob(records, rows, banks)
@@ -3653,14 +3654,15 @@ def _own_clip_files(reader, job, assets_dir, scratch, mode_plan,
     landed can't be finished: the game would name a clip its bank lacks."""
     from . import clip_modes
     for rec, why in job.skipped:
-        log("Own clips: %s's copy %s is left out: %s."
+        log("Own clips: %s's own clip %s is left out: %s."
             % (clip_modes.mode_label(rec["mode"]), rec["name"], why), "warning")
     if not job.done:
         if job.why:
-            log("Own clips: %d cop%s left out of this write (%s); every mode "
-                "plays the clips it shares, as the game shipped."
-                % (len(job.records), "y is" if len(job.records) == 1 else "ies are",
-                   job.why), "warning")
+            log("Own clips: %d mode%s left sharing %s clip%s on this write (%s); "
+                "every mode plays the clips it shares, as the game shipped."
+                % (len(job.records), "" if len(job.records) == 1 else "s",
+                   "its" if len(job.records) == 1 else "their",
+                   "" if len(job.records) == 1 else "s", job.why), "warning")
         return None
     staged_banks, mode_src = {}, {}
     if mode_plan is not None:
@@ -6835,11 +6837,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             % (sum(len(v) for v in layout_edits.values()),
                len(layout_edits)), "info")
     if own_clips:
-        log("Found %d mode clip cop%s to write (Video tab, Played in): %s."
-            % (len(own_clips), "y" if len(own_clips) == 1 else "ies",
+        log("Found %d mode%s to give a clip of its own or put back on a shared "
+            "clip (Video tab, Played in): %s."
+            % (len(own_clips), "" if len(own_clips) == 1 else "s",
                "; ".join("%s %s %s" % (
                    _clip_modes.mode_label(r["mode"]),
-                   "plays" if r.get("state") == "shared" else "gets its own copy of",
+                   "plays the shared clip again:" if r.get("state") == "shared"
+                   else "gets a clip of its own instead of",
                    r["clip"]) for r in own_clips)), "info")
 
     # PAD-176: what this build copies on whole, against the room on the games

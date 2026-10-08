@@ -3670,6 +3670,7 @@ struct held_coil {
     struct magnet_cmd cmd;                  /* what the process sends */
     int proc;                               /* our process holds control of the coil */
     int release;                            /* the runtime asked it to let go */
+    int game_took;                          /* PAD-420: ... because the game wants the coil (it sends its own) */
     int checked;                            /* the device check: 0 not yet, 1 matches, -1 does not */
     const char *why;                        /* ... and why */
     /* PAD-420: the coil by its board address (route 1) */
@@ -3795,6 +3796,7 @@ static void magnet_done(struct held_coil *c)
 {
     c->proc = 0;
     c->release = 0;
+    c->game_took = 0;
     c->until = 0;
     c->ended = pm_ms();
 }
@@ -3810,6 +3812,14 @@ static unsigned coil_call(const struct held_coil *c, const char *what)
     return fn(key);
 }
 
+/* Does a hold of ours CONTROL the coil (take it, then give it back - its exit hook gives it back if the game ends
+ * the process): an object, its take and give, and (route 1) where it keeps its controlling process. Otherwise the
+ * hold only drives it: its command runs out on the board, or the runtime sends the game's OFF. */
+static int coil_controlled(const struct held_coil *c)
+{
+    return c->obj && coil_call(c, "take") && coil_call(c, "give") && (!c->route || c->ctl);
+}
+
 /* THE HOLD, as a game process (the game's scheduler runs it on its own stack, like the game's own magnet
  * processes; it ends by returning). It takes control (when the coil has an object), sends the ONE bounded
  * command, waits a tick at a time, and gives control back - the game's coil update then switches the coil
@@ -3818,7 +3828,7 @@ static void magnet_proc(struct held_coil *c)
 {
     unsigned long sent;
     unsigned total = c->cmd.draw_ms + c->cmd.hold_ms, id;
-    int has_obj = c->obj && coil_call(c, "take") && coil_call(c, "give") && (!c->route || c->ctl);
+    int has_obj = coil_controlled(c);
     const char *end = "its time ran out";
     if (!c->until || c->release) {
         say("%s: let go before the hold began (%s)", c->name, c->why ? c->why : "asked to");
@@ -3856,9 +3866,11 @@ static void magnet_proc(struct held_coil *c)
         say("%s: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
             "game's coil update switches it off", c->name, end, pm_ms() - sent, (long)(c->until - pm_ms()));
     } else {
-        if (c->release) coil_off(c, end);
-        say("%s: let go - %s, after %lu ms (%ld ms before the command's own end)", c->name, end, pm_ms() - sent,
-            (long)(c->until - pm_ms()));
+        if (c->release && !c->game_took) coil_off(c, end);   /* PAD-420: the game's own command replaces ours, no OFF
+                                                              * of ours first (a gate it drives outside the coil
+                                                              * records would drop for a moment) */
+        say("%s: let go - %s, after %lu ms (%ld ms before the command's own end)%s", c->name, end, pm_ms() - sent,
+            (long)(c->until - pm_ms()), c->release && c->game_took ? "; no OFF of ours, the game drives it" : "");
     }
     magnet_done(c);
 }
@@ -3988,6 +4000,7 @@ int pm_coil_hold(const char *name, unsigned ms)
     }
     c->cmd = cmd;
     c->release = 0;
+    c->game_took = 0;
     c->why = 0;
     c->started = now;
     c->until = now + cmd.draw_ms + cmd.hold_ms;
@@ -4071,14 +4084,14 @@ static void magnet_tick(void)
         if (!proc_alive(c->id)) {
             if (c->proc || pm_ms() - c->started > 1000ul) {
                 say("%s: the hold's process is gone (the game ended it) - %s", c->name,
-                    c->route && !c->ctl ? "the tick lets go" : "its exit gave control back");
-                if (c->route && !c->ctl && pm_ms() < c->until) coil_off(c, "the hold's process is gone");
+                    c->route && !coil_controlled(c) ? "the tick lets go" : "its exit gave control back");
+                if (c->route && !coil_controlled(c) && pm_ms() < c->until) coil_off(c, "the hold's process is gone");
                 magnet_done(c);
             }
             continue;
         }
         if (c->release) continue;           /* the process is letting go */
-        if (coil_game_busy(c)) coil_let_go(c, "the game wants it");
+        if (coil_game_busy(c)) { c->game_took = 1; coil_let_go(c, "the game wants it"); }
         else if (pm_ms() >= c->until) coil_let_go(c, "its time ran out");
         else if (!pm_in_game()) coil_let_go(c, "the game ended or tilted");
         else if (!running) coil_let_go(c, "no mode is running");

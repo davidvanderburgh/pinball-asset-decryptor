@@ -86,6 +86,21 @@ def test_a_statically_built_coil_object_is_named_not_built_again():
     assert "if (obj && !maps_has(obj, 4, MAP_R)) obj = 0;" in ok
 
 
+def test_a_coil_the_game_takes_gets_no_off_of_ours_and_a_killed_hold_one():
+    """PAD-420: a coil a hold only DRIVES (no take/give - the Device framework's gates, which the game raises through a
+    driver outside the coil records): when the game wants it mid-hold the runtime lets go WITHOUT its own OFF (the
+    game's command replaces ours; an OFF first would drop its gate for a moment), and when the game kills the hold's
+    process (a drain, a tilt) the tick sends the OFF, as no exit hook gives such a coil back."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    proc = _lift(src, "static void magnet_proc(")
+    tick = _lift(src, "static void magnet_tick(")
+    assert "int has_obj = coil_controlled(c);" in proc
+    assert "if (c->release && !c->game_took) coil_off(c, end);" in proc
+    assert '{ c->game_took = 1; coil_let_go(c, "the game wants it"); }' in tick
+    assert "c->route && !coil_controlled(c) && pm_ms() < c->until) coil_off(c, \"the hold's process is gone\")" in tick
+    assert "c->game_took = 0;" in _lift(src, "int pm_coil_hold(") and "c->game_took = 0;" in _lift(src, "static void magnet_done(")
+
+
 def test_a_hold_is_never_longer_than_the_games_own_command(tmp_path):
     """PAD-420: a `_drive` line's optional last word is the longest ONE command of the game's own on that coil (a
     Mandalorian post: 128 for 1500 ms at most); the hold asked for is cut to it before it is planned, and a line

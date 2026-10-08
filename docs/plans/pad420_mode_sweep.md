@@ -162,6 +162,9 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     runtime logged our clip played and a clip frame is 25%+ magenta, as a clip plays inside the HUD's frame; screen:
     logged found, the mode started, magenta while it ran and none before or after), then `scenes_prove.py`, tests,
     commit. Aerosmith Pro 1.16 landed (frames looked at: the clip's title card and the boxed screen both up).
+  - Order, so nothing starves the rigs (faster-whisper on several cores beside two rigs made the games hit their
+    10 s watchdog): chain10's media batch, then chain18 (re-runs every build whose media verdict is not both
+    PROVEN, then writes media/RETRIES_DONE), then `t2/voices_after_media.py` starts the transcription.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

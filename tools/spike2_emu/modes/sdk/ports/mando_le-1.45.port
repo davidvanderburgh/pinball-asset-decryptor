@@ -391,3 +391,10 @@ callout ten_seconds       718   # Hurry up! Your time is running out! / You need
 # PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
 # build's own transcribed voice lines, tu_wide.py)
 callout time_up           768   # Time to go kid! / Time's up kid, we gotta get out of here.
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+value scoop_event          2
+site scoop_handler         0x001365c8 0xe30a367a 0xe2402002
+data scoop_slot           0x006a77c0

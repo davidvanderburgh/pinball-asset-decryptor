@@ -189,12 +189,12 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots |  |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
-| John Wick LE 1.02 | no | no | ✓ | no | never waits |
+| John Wick LE 1.02 | no | no | ✓ | no | scoop, never waits |
 | John Wick Pro 1.02 | no | no | ✓ | no |  |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots |  |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | never waits |
-| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
+| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | King Kong Pro 0.97 | no | ✓ | ✓ | no | never waits |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | mechanisms |
@@ -218,9 +218,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots |  |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
-| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | no | never waits |
-| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | no | never waits |
-| The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots |  |
+| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | no | scoop, never waits |
+| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | no | scoop, never waits |
+| The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | no |  |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots |  |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | waits for multiballs only |

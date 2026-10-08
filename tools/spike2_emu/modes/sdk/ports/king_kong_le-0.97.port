@@ -749,3 +749,10 @@ site block_rule_19         0x002528c8 0xe92d4ff0 0xe1a08002  # RuleThePit::v[27]
 text block_rule_name_19    The Pit
 site block_rule_20         0x0026d838 0xe2022001 0xe3a03000  # UIBonusScreen::v[27]
 text block_rule_name_20    UI Bonus Screen
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+site scoop_handler         0x000acea0 0xe30837fe 0xe2401002
+data scoop_slot           0x008566d0
+value scoop_event          2

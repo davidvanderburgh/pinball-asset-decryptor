@@ -898,6 +898,7 @@ STACK_BALLS_PROVEN = frozenset({
     "stranger_things_le-1.13",           # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
     "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
     "aerosmith-1.16",                    # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "batman-1.14",                       # PAD-420 2026-10-08 st_job (stock card, hidden, muted; the port's 22 block lines in): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
 })
 
 

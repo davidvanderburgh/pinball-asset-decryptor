@@ -672,6 +672,7 @@ SCOOP_PROVEN = frozenset({
     "guardians-1.15",                  # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 4299 ms after landing; scoop_hold 4000, 5694 ms (held 4000); a mode stop 2.5 s into a hold, kicked 1040 ms later; after the mode, 1709 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
     "john_wick_pro-1.02",              # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1451 ms after landing; scoop_hold 4000, 5336 ms (held 4000); a mode stop 2.5 s into a hold, kicked 623 ms later; after the mode, 1296 ms ([coildrive] node 8 coil 8, 200 for 60 ms); no abort
     "led_zeppelin_le-1.22",            # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 14070 ms after landing; scoop_hold 4000, 5349 ms (held 4016); a mode stop 2.5 s into a hold, kicked 884 ms later; after the mode, 1298 ms ([coildrive] node 8 coil 8, 100 for 60 ms); no abort
+    "led_zeppelin_pro-1.22",           # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 14072 ms after landing; scoop_hold 4000, 5302 ms (held 4000); a mode stop 2.5 s into a hold, kicked 732 ms later; after the mode, 1300 ms ([coildrive] node 8 coil 8, 100 for 60 ms); no abort
 })
 
 

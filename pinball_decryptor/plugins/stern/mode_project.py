@@ -1756,6 +1756,10 @@ LAMPS_PROVEN = frozenset((
     "king_kong_pro-0.97",
     "mando_le-1.45",
     "mando_pro-1.45",
+    # PAD-420 2026-10-08 (lights/lights_job4.sh with PAD_NB_TRACE=1, past Guided Setup; stock card, hidden, muted): light_all
+    # in the LED view AND on the node bus - 13/13 RGB magenta, 94/94 single lit, none before or after; light_shots on
+    # the bus only (the LED view showed none: the bulk frames it misses), 6/6 tied RGB inserts cyan, no untied one
+    "jaws_pro-1.02",
 ))
 
 

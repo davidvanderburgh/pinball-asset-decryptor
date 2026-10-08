@@ -189,7 +189,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
-| Jaws Pro 1.02 | ✓ | ✓ | ✓ | no | mechanisms |
+| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
 | John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop |

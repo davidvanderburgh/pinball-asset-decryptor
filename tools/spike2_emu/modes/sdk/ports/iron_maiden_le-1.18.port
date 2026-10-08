@@ -428,3 +428,26 @@ text block_name_14      Number of the Beast
 value scoop_event          2
 site scoop_handler         0x0005f644 0xe92d40f0 0xe30d467a
 data scoop_slot           0x005f3244
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+data coil_count            0x00631ddc
+data coil_table            0x00657d7c
+value magnet_proc          13185
+site coil_take            0x000f4d58 0xe92d40f8 0xe3087c1c
+site coil_give            0x000f4e1c 0xe3510000 0xe92d4038
+text left_post_label      Left up post
+value left_post_dev       14
+value left_post_ctl       28
+value left_post_devoff    4
+value left_post_off_slot  30
+site left_post_get        0x0005d790 0xe92d4010 0xe3044808
+text right_post_label     Right up post
+value right_post_dev      13
+value right_post_ctl      28
+value right_post_devoff   4
+value right_post_off_slot 30
+site right_post_get       0x000b3b48 0xe92d4010 0xe3054c50
+text left_post_drive      9 5 200 64 64
+text right_post_drive     9 0 200 64 64
+text held_coils            left_post right_post

@@ -730,6 +730,10 @@ HELD_COILS_PROVEN = frozenset({
     ("jurassic_park_le-1.16", "raptor_post"),    # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 120 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
     ("jurassic_park_le-1.16", "orbit_post"),     # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 8, 255 for 60 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
     ("jurassic_park_le-1.16", "room_post"),      # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("iron_maiden_le-1.18", "left_post"),        # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
+    ("iron_maiden_le-1.18", "right_post"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
+    ("iron_maiden_pro-1.18", "left_post"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("iron_maiden_pro-1.18", "right_post"),      # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
 })
 
 
@@ -1075,7 +1079,7 @@ TITLE_SCENES = {
     "jurassic_park_the_pin-1.05": dict(screen_proven=True, hud="6f3c2dbd6a176794ca54794f41f699fd", bank="6f3c2dbd6a176794ca54794f41f699fd", clip_proven=True),   # item 164: our clip and screen seen on the glass, one scene is both its HUD and its video bank
     "aerosmith-1.16": dict(screen_proven=True, hud="025316286cba4a960ef130421f7dacdd", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 48% clip, 47.7% screen, 0.0% before)
     "aerosmith_le-1.16": dict(screen_proven=False, hud="19d3c55effef1206080481e7e7faa16c", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
-    "avengers_infinity_le-1.10": dict(screen_proven=False, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "avengers_infinity_le-1.10": dict(screen_proven=True, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 55% clip, 6.5% screen, 0.0% before)
     "avengers_infinity_pro-1.10": dict(screen_proven=False, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
     "batman-1.14": dict(screen_proven=False, hud="e16ea0837bc81a0381884c70d0c29d2e", bank="e16ea0837bc81a0381884c70d0c29d2e", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
     "deadpool_le-1.16": dict(screen_proven=True, hud="93e0751c2a35c8c46fc31dba43ed5eae", bank="e0e293019ac1e6977049c83dc8485496", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 65% clip, 6.5% screen, 0.0% before)

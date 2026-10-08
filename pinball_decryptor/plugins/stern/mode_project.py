@@ -803,6 +803,7 @@ HELD_COILS_PROVEN = frozenset({
     ("star_wars_pro-1.31", "gates"),             # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 5, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("stranger_things-1.13", "left_down_post"),  # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 6, 255 for 16 ms then 95 (the game's own), at most 416 ms; held 410 ms to its end (the game's own longest, 416 ms, ends before a stop could); no abort
     ("stranger_things_le-1.13", "left_down_post"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 6, 255 for 16 ms then 95 (the game's own), at most 416 ms; held 410 ms to its end; the game's own longest ends before a mode stop could; no abort
+    ("venom_le-1.07", "up_post"),                # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 1, 255 for 32 ms then 48 (the game's own), at most 1032 ms; held 1030 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 

@@ -41,6 +41,7 @@ from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
 from .. import look_switches
 from .. import video_helpers as vh
 from ..video_best import BEST_TIP, BestQualityMixin
+from ..video_modes import ModesMixin
 from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ COMPARE_MAX = 4                   # clips side by side in Compare (PAD-440)
 NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
 
 
-class VideoTab(BestQualityMixin, TabService):
+class VideoTab(ModesMixin, BestQualityMixin, TabService):
     ns = "video"
     key = "Replace Video"
     label = "Video"
@@ -134,6 +135,8 @@ class VideoTab(BestQualityMixin, TabService):
         self._q_cancel = False
         self._q_clips = []
         self._q_card = ""
+        self._m_init()                  # PAD-444: Played in (video_modes.py)
+        self._m_select_after = []
         for v in (self.video_search_var, self.video_change_filter_var):
             v.trace_add("write", lambda *_a: self._refresh_list())
         for v in (self.video_trim_var, self.video_no_conversion_var):
@@ -183,6 +186,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._q_clips = []
         self._set_scan_ui(False, log_it=False)
         self._clear_preview()
+        self._m_reset()
         try:
             note = (mfr.video_length_note() or "").strip()
         except Exception:                                   # noqa: BLE001
@@ -613,10 +617,25 @@ class VideoTab(BestQualityMixin, TabService):
         self._foreign = set()
         if folder_changed:
             self._clear_preview()
+            self._m_reset()
+        # the modes the card's program names (read once per card; a card read
+        # before publishes now, so the rows below carry them)
+        self._m_kick(scan_dir)
         self._refresh_list()
-        # Default to the first clip so a poster frame shows on a fresh scan.
+        # Default to the first clip so a poster frame shows on a fresh scan
+        # (PAD-444: the row a copy was just made or dropped for, when it is listed)
         view = self.get("view") or []
-        if view:
+        after = [r for r in self._m_select_after if r in self._index]
+        self._m_select_after = []
+        if after and self._index[after[0]] not in view:
+            self.video_search_var.set("")
+            self._m_filter = ""
+            self._refresh_list()
+            view = self.get("view") or []
+        if after:
+            self._reselect(after[:1])
+            self._load_track(after[0])
+        elif view:
             first = self._rows[view[0]]["rel"]
             self._reselect([first])
             self._load_track(first)
@@ -788,6 +807,8 @@ class VideoTab(BestQualityMixin, TabService):
             self._mark_change_scan(False)
             return
         self._mark_change_scan(True)
+        # PAD-444: a mode's own copy is the project's file, not the card's
+        copies = {r.get("rel") for r in self._m_records() if r.get("state") != "shared"}
 
         def _work():
             from ...core import folder_match
@@ -799,10 +820,11 @@ class VideoTab(BestQualityMixin, TabService):
                          if r in rel_set}
                 to_hash = [r for r in rels if r not in snaps]
                 changed = snaps | checksums.changed_rels(
-                    path, to_hash, baseline=baseline)
+                    path, [r for r in to_hash if r not in copies],
+                    baseline=baseline)
                 if baseline:
-                    foreign, twins = folder_match.foreign_twins(rels,
-                                                                baseline)
+                    foreign, twins = folder_match.foreign_twins(
+                        [r for r in rels if r not in copies], baseline)
             except Exception:                               # noqa: BLE001
                 changed = set()
 
@@ -1016,7 +1038,8 @@ class VideoTab(BestQualityMixin, TabService):
                 "col": self._color_state(rel), "col_own": rel in self._color,
                 "col_lock": self._color_locked(rel),
                 "col_stock": bool(self._color_stock
-                                  and not self._assign.get(rel))}
+                                  and not self._assign.get(rel)),
+                **self._m_row(rel)}
 
     # -- the chosen-files colour profile (PAD-312) ------------------------
     def _per_file_colour(self):
@@ -1245,6 +1268,7 @@ class VideoTab(BestQualityMixin, TabService):
         ok = self._change_pred()
         if ok is not None:
             slots = [s for s in slots if ok(s.rel_path)]
+        slots = [s for s in slots if self._m_keep(s.rel_path)]
         col, desc = self._sort
         slots.sort(key=self._sort_key(col), reverse=desc)
         view = [self._index[s.rel_path] for s in slots
@@ -1265,8 +1289,10 @@ class VideoTab(BestQualityMixin, TabService):
                                 % (changed_total, total, extra)
                                 + (vh.CHANGE_SCAN_NOTE if self._change_running
                                    else ""))
-            values["empty"] = "" if shown else \
-                "No slots match the search and the Show filter."
+            values["empty"] = "" if shown else (
+                "No slots match the search, the Show filter and the mode."
+                if self._m_filter else
+                "No slots match the search and the Show filter.")
         values["counts"] = {"changed": changed_total, "total": total,
                             "shown": len(view)}
         values["color_offered"] = bool(total and self._per_file_colour())
@@ -1959,6 +1985,9 @@ class VideoTab(BestQualityMixin, TabService):
             "partition": bool(self.window.tab_visible("Partition Explorer")
                               and getattr(self.window, "find_in_partition",
                                           None) is not None),
+            # PAD-444: a shared clip's modes, each can have its own copy; a copy goes back
+            "modes": (self._m_preview(rel) or {}).get("shared") or [],
+            "copy": bool(self._m_copy.get(rel)),
         }
 
     def _scene_browser(self):
@@ -2532,9 +2561,11 @@ class VideoTab(BestQualityMixin, TabService):
                         % (conflict or ("%s can't play on the machine "
                                         "as it is" % os.path.basename(rep))))}
         pv = self.get("preview") or {}
-        if pv.get("note") != note:
+        modes = self._m_preview(rel)
+        if pv.get("note") != note or pv.get("modes") != modes:
             pv = dict(pv)
             pv["note"] = note
+            pv["modes"] = modes
             self.set(preview=pv)
 
     def _reselect(self, rels):

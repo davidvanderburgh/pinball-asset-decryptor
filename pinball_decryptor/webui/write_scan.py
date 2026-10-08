@@ -277,6 +277,7 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
                          "image", "Pending (scene edit)", "pending"))
     rows.extend(mode_rows(mfr, assets_path, direct=direct))
     rows.extend(stock_mode_rows(mfr, assets_path))
+    rows.extend(own_clip_rows(mfr, assets_path, direct=direct))
     rows.extend(colour_rows(mfr, assets_path))
     rows.extend(chosen_files_rows(mfr, assets_path))
     return rows
@@ -374,6 +375,36 @@ def stock_mode_rows(mfr, assets_path):
                 if other else ""),
             "setting" if num.is_adjustment else "program",
             PENDING_STOCK_MODES, "pending"))
+    return out
+
+
+#: PAD-444: a mode's own copy of a clip it shares (the Video tab's Played in)
+PENDING_OWN_CLIP = "Pending (a mode's own clip)"
+
+
+def own_clip_rows(mfr, assets_path, *, direct):
+    """PAD-444: each copy the Video tab gave a mode, and each one put back, as a row; a
+    Direct-SD write says it leaves them out (a copy is a file the card never had)."""
+    if not assets_path or mfr is None or getattr(mfr, "key", "") != "stern":
+        return []
+    try:
+        from ..plugins.stern import clip_modes
+        recs = clip_modes.records(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return []
+    dest_device = bool(getattr(mfr.capabilities, "direct_ssd", False) and direct)
+    out = []
+    for r in recs:
+        label = clip_modes.mode_label(r["mode"])
+        if r.get("state") == "shared":
+            line = "%s plays %s again (its copy %s is left unplayed)" % (
+                label, r["clip"], r["name"])
+        else:
+            line = "%s gets its own copy of %s (%s)" % (label, r["clip"], r.get("rel") or r["name"])
+            if dest_device:
+                line += (" — left out of a Direct-SD write: it adds a clip to the card "
+                         "(build an image file)")
+        out.append((line, "video", PENDING_OWN_CLIP, "pending"))
     return out
 
 
@@ -484,6 +515,12 @@ def fingerprint(window, assets_path, epoch, grow_on):
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     parts.append(_modes_fingerprint(assets_path))
+    try:
+        # PAD-444: the modes' own copies of clips
+        from ..plugins.stern import clip_modes
+        parts.append([sorted(r.items()) for r in clip_modes.records(assets_path)])
+    except Exception:                                   # noqa: BLE001
+        parts.append(None)
     try:
         # PAD-305: the project's color profile (the Color profile tab)
         from ..core import colour_profile

@@ -506,6 +506,25 @@ HELP_CONTENT = {
             "step) and **Loop**. Each clip can switch between Original and Replacement.\n"
             "- **Close** or Esc goes back to the list.",
         ]),
+        ("Which mode plays a clip (Spike 2)", [
+            "The **Played in** column names the battles, multiballs and other modes of the "
+            "game that play each clip, read from the card's game program (Stern titles "
+            "whose modes the app can tell apart, such as Godzilla). The list beside "
+            "**All / Changed / Unchanged** shows one mode's clips only.",
+            "Some modes share a clip: on Godzilla, the battle vs Gigan and the Ghidorah and "
+            "Gigan tag team play two of the same clips, so new footage in one shows in both.",
+            {"flow": [
+                {"icon": "film", "title": "Select",
+                 "text": "the shared clip (its modes show in bold)"},
+                {"icon": "copy", "title": "Own copy",
+                 "text": "for the mode to change, under the list"},
+                {"icon": "check", "title": "Replace",
+                 "text": "the new row: only that mode plays it"}]},
+            "- The copy goes on the card as a new clip, so it needs an **image file** build "
+            "(a direct-SD write leaves it out); the other mode keeps the shared clip.\n"
+            "- **Back to the shared clip…** (under the list, or right-click the copy) undoes "
+            "it.",
+        ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "
          "**Load settings from a file…** puts them back, on this card or another. Slots "

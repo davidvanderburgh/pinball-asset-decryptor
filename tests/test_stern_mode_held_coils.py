@@ -196,6 +196,7 @@ def test_the_getter_builds_the_ports_device(name):
 OTHER_PORTS = {
     "king_kong_le-0.97": (("spider_magnet", 10), ("log_diverter", 13), ("ramp_diverter", 15)),
     "jaws_le-1.02": (("left_post", 14), ("right_post", 13)),
+    "king_kong_pro-0.97": (("spider_magnet", 10), ("river_diverter", 12)),   # PAD-420: its log diverter is device 12
 }
 ELVES = [os.environ.get("PAD_ELVES", ""), r"C:\tmp\PAD-363\elves", "/mnt/c/tmp/PAD-363/elves"]
 

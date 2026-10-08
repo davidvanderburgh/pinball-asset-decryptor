@@ -561,3 +561,16 @@ text block_rule_name_20    UI Bonus Screen
 # PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
 callout countdown         666   # One. / Two!
 callout time_up           670   # T / i
+
+# ---- PAD-420: held coils on Godzilla's ControlCoil route (as King Kong LE 0.97; PAD-394). The getters port_tool
+# placed strictly from King Kong LE's port; each builds its object with the device below (`mov r1, #dev` - the Pro's
+# log diverter, its river diverter, is device 12 where the LE's is 13); the powers are the objects' own. No center
+# ramp diverter on the Pro. Never here: the TrainLock post (it holds locked balls).
+value magnet_proc          13185
+text held_coils            spider_magnet river_diverter
+site spider_magnet_get     0x0007a9e8 0xe92d40f0 0xe3084374
+value spider_magnet_dev    10
+text spider_magnet_label   spider pit magnet
+site river_diverter_get    0x00076640 0xe92d40f0 0xe3074f38
+value river_diverter_dev   12
+text river_diverter_label  river diverter

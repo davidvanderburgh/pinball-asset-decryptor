@@ -51,9 +51,13 @@ in_use() {                        # <batch-out-dir>: staged paths ready and not 
 
 # Evict least-recently-used copies not in use until `need` more bytes fit
 # under the cap AND leave the disk 30 GB free.
+mounted() {                       # <stage-dir>: its cards a running rig has mounted (any batch's, PAD-420)
+    pgrep -a fuse2fs 2>/dev/null | grep -o "$1/[^ ]*" | sort -u
+}
+
 make_room() {                     # <stage-dir> <keep-bytes> <need-bytes> [<batch-out-dir>]
     local dir=$1 keep=$2 need=$3 out=${4:-} busy f free
-    busy=$( [ -n "$out" ] && in_use "$out")
+    busy=$( [ -n "$out" ] && in_use "$out"; mounted "$dir")
     while :; do
         free=$(( $(df -B1 --output=avail "$dir" | tail -1) ))
         if [ $(( $(staged_bytes "$dir") + need )) -le "$keep" ] && \
@@ -140,6 +144,7 @@ for i in $(seq 0 $((TOTAL - 1))); do
     rm -f "$P/$name"
     if copy "$card" "$P" && [ -f "$P/$name" ]; then
         mv -f "$P/$name" "$dest"
+        touch "$dest"             # robocopy keeps the source's date: a fresh copy must not look the oldest (evicted first)
         echo "$stamp" > "$dest.src"
         echo "$(date +%T) staged $name  $((size / 1048576)) MB in $(( $(date +%s) - t0 ))s"
         echo "$dest" > "$S/$i"

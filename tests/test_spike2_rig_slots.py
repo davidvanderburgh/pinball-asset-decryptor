@@ -652,6 +652,11 @@ def test_a_batchs_end_leaves_other_batches_copies_in_flight():
     own = '$(printf %s "$OUT" | md5sum | cut -c1-12)'
     assert 'P=$STAGE/.inflight/%s' % own in cs and 'copy "$card" "$P"' in cs and '"$STAGE/.partial"' not in cs
     assert 'rm -rf "$STAGE/.inflight/%s"' % own in rb and 'rm -rf "$STAGE/.partial"\n' not in rb
+    # and never evicts a card another batch's rig has mounted, nor a fresh copy first (robocopy keeps the source's
+    # date, which made a card staged a minute ago the oldest file: Jurassic Park Pro's, under a running job)
+    assert 'busy=$( [ -n "$out" ] && in_use "$out"; mounted "$dir")' in cs
+    assert 'pgrep -a fuse2fs 2>/dev/null | grep -o "$1/[^ ]*"' in cs
+    assert cs.index('mv -f "$P/$name" "$dest"') < cs.index('touch "$dest"             # robocopy keeps')
 
 
 def test_rigbatch_boots_staged_copies_and_reuses_them():

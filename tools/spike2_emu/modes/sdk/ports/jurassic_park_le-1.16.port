@@ -576,3 +576,45 @@ text block_name_22      Escape Nublar
 site block_start_23     0x00118fbc 0xe92d4038 0xe1a04000
 data block_obj_23       0x007393b0
 text block_name_23      Escape Nublar Hurry Up
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+site proc_exists          0x002993e0 0xe30e2a58 0xe3402073
+site proc_create          0x00298d90 0xe30eca58 0xe340c073
+site proc_sleep           0x00298ee0 0xe30e3a58 0xe3403073
+site adjustment           0x0047e590 0xe92d40f0 0xe2504000
+site coil_fire             0x00460e18 0xe3500000 0xe52de004
+data coil_count            0x007715d0
+data coil_table            0x007b51a4
+value magnet_proc          13185
+site coil_take            0x0007da04 0xe92d40f8 0xe30e7a5c
+site coil_give            0x0007dac8 0xe3510000 0xe92d4038
+text trex_magnet_label    T-Rex magnet
+value trex_magnet_dev     17
+value trex_magnet_ctl     40
+value trex_magnet_devoff  4
+value trex_magnet_off_slot 31
+site trex_magnet_get      0x001d0a28 0xe92d4010 0xe30c4174
+text raptor_post_label    Raptor up post
+value raptor_post_dev     15
+value raptor_post_ctl     40
+value raptor_post_devoff  4
+value raptor_post_off_slot 31
+site raptor_post_get      0x001cd174 0xe92d4010 0xe30c4010
+text orbit_post_label     Orbit up post
+value orbit_post_dev      13
+value orbit_post_ctl      40
+value orbit_post_devoff   4
+value orbit_post_off_slot 31
+site orbit_post_get       0x0007f0a8 0xe92d4030 0xe3064374
+text room_post_label      Control room up post
+value room_post_dev       14
+value room_post_ctl       40
+value room_post_devoff    4
+value room_post_off_slot  31
+site room_post_get        0x0007e42c 0xe92d4010 0xe30640f8
+text trex_magnet_drive    9 7 255 300 128
+text raptor_post_drive    9 5 255 128 64
+text orbit_post_drive     9 8 255 64 64
+text room_post_drive      9 6 255 64 64
+text held_coils            trex_magnet raptor_post orbit_post room_post

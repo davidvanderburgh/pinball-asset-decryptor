@@ -159,7 +159,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
-| Aerosmith 1.16 | ✓ | no | ✓ | shots |  |
+| Aerosmith 1.16 | ✓ | no | ✓ | shots | scoop |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
 | Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
@@ -171,7 +171,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
-| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
 | Elvira 1.13 | ✓ | no | not yet | shots |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
@@ -226,7 +226,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Venom Pro 1.07 | no | ✓ | ✓ | shots | scoop |
+| Venom Pro 1.07 | no | ✓ | ✓ | shots | scoop, mechanisms |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **Ball save not yet:** found in the game, not yet seen working.

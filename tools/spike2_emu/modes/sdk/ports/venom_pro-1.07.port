@@ -591,3 +591,13 @@ value scoop_event          2
 site scoop_handler         0x0014f9f8 0xe92d4070 0xe3a00006
 data scoop_slot           0x006a5a54
 value scoop_event_arg      1
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x007b64c4
+data coil_table            0x00767898
+value magnet_proc          13185
+text top_post_label       Top post
+text top_post_drive       9 7 255 64 128 1564
+text held_coils            top_post

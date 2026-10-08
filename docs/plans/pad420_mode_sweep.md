@@ -341,6 +341,22 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       C:/tmp/PAD-420/RERUNS.txt. Land: scoop `scoop_verdict.py --write`, C coils `c_verdict.py` + `c_land.py --write`,
       B coils `coil_verdict.py` + `coil_land.py --write`, stack `st3_verdict.py` + prove_set, media `land_all.sh`;
       scoop handler events: `scoop/scoop_events.py <key>` on outp/.
+    * Run 14: the test modes never said `game_modes`, so they took PAD-398's default (block), which refuses a start
+      while one of the GAME's modes runs ("not started (trigger file): one of the game's modes is running"). That is
+      why LZ LE/Pro's scoop runs never held (their first landing starts the game's own scoop mode; the probe shows the
+      handler does get event 2 ~0.8 s after landing, the same "settled" event as Godzilla) and why Sword of Rage LE's
+      media proof never started its mode. Every test mode now says `game_modes stack`: the 32 media proof modes
+      (try/set-modes, before round 3), fill_c.py / fill_b.py and King Kong Pro's stage; chain38 re-runs the scoop on
+      LZ LE/Pro, Star Wars LE/Pro and JB LE that way (scoop/stage3, scoop_job3.sh, out3; `scoop_verdict.py
+      --out=out3`).
+    * King Kong Pro 0.97's coils on Godzilla's ControlCoil route (as King Kong LE): port_tool placed the spider pit
+      magnet's and the log/river diverter's getters strictly from King Kong LE's port; the getters build devices 10
+      and 12 (LE: 10 and 13); no center ramp diverter on the Pro. chain37 (coils/k0, coil_job_k0.sh) proves them.
+    * Magnet part, the candidates the playfield layout gives (devicexy, the switch nearest the magnet coil): Avengers
+      LE's tower magnet sits at the TOWER OPTOs (distance 1; its port's four "Tower" shots are bits 32-35, which the
+      app writes into the mode line itself), Beatles' top magnet at its TOP MAGNET OPTO, King Kong LE's spider magnet
+      near the PIT TARGETs. Most other titles' magnets have no position. Each needs `magnet` named in its port and a
+      rig proof of a `magnet` line grabbing on that shot.
     * Metallica 1.04: a game IS on screen (PLAYER 1, credits taken) but mode.log never sees in_game - the port's
       `data mode_mask 0x07000012` / busy 0x210 stays busy, as on Jaws Pro. Added to chain33's mask probe (its port
       copied to C:/tmp/PAD-420/clean/). Every Metallica mode feature waits on this.

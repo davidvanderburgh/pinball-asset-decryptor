@@ -589,3 +589,10 @@ value magnet_proc          13185
 text loop_up_post_label   Loop up post
 text loop_up_post_drive   11 2 170 32 68 1032
 text held_coils            loop_up_post
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The RT EJECT's handler and its
+# slot as the mechanisms helper placed them (the process calls are above); seen holding in the emulator (see
+# SCOOP_PROVEN)
+site scoop_handler         0x0010b900 0xe2400002 0xe92d4070
+data scoop_slot           0x06f7ecf8
+value scoop_event          2

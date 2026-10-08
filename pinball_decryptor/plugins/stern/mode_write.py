@@ -1373,17 +1373,20 @@ def install_command(ex, image_path, payload, epoch):
             % (q(ex.to_exec_path(tools_dir())), int(epoch), " ".join(q(a) for a in args)))
 
 
-def install_p2(image_path, payload, epoch, log=None, executor=None, timeout=900):
+def install_p2(image_path, payload, epoch, log=None, executor=None, timeout=900, modes=True):
     """Put the payload on the card's system partition (mode_install.py: debugfs, e2fsck
-    before and after, a fresh read-back, game_monitor hooked). Returns its report line."""
+    before and after, a fresh read-back, game_monitor hooked). Returns its report line.
+    *modes* False (PAD-446): the card carries random clips and no mode, so the runtime keeps
+    no score off Insider Connected and the log does not say it does."""
     log = log or (lambda *a, **k: None)
     if executor is None:
         from ...core.executor import create_executor
         executor = create_executor()
     out = executor.run(install_command(executor, image_path, payload, epoch), timeout=timeout)
     line = next((l for l in out.splitlines() if l.startswith("[mode]")), out.strip())
-    log("Modes: %s" % line, "info")
-    log("Modes: %s" % MP.INSIDER_NOTE, "info")
+    log("%s: %s" % ("Modes" if modes else "Random clips", line), "info")
+    if modes:
+        log("Modes: %s" % MP.INSIDER_NOTE, "info")
     return line
 
 

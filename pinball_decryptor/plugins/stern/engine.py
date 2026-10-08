@@ -8620,7 +8620,7 @@ def _install_modes(output_path, modes, landed, planned, log):
         return None, False
     try:
         _MW.install_p2(output_path, modes["payload"], modes["p2_epoch"],
-                       log=log)
+                       log=log, modes=who == "Modes")
     except Exception as e:                   # the executor's CommandError too
         log("%s: the mode runtime could not be put on the card's system "
             "partition, so this card carries no %s: %s"

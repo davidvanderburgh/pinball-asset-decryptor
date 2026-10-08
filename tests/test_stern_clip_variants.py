@@ -424,6 +424,39 @@ def test_the_install_says_random_clips_not_modes(tmp_path, monkeypatch):
     assert _said(msgs2, "Random clips: not every file reached the card")
 
 
+def test_a_card_of_random_clips_only_keeps_insider_connected_out_of_the_log(tmp_path):
+    from pinball_decryptor.plugins.stern import mode_project as MPj
+    from pinball_decryptor.plugins.stern import mode_write as MW
+
+    class Ex:
+        def to_exec_path(self, p):
+            return "/x/" + os.path.basename(p)
+
+        def run(self, cmd, timeout=0):
+            return "[mode] installed clips.cfg, game.port, mode.so into /usr/local/padmode\n"
+    pay = {"so": "a/mode.so", "cfgs": [], "port": "a/game.port", "extras": ["a/clips.cfg"]}
+    said = []
+    MW.install_p2("C:/b/card.raw", pay, 1, lambda m, lvl="info": said.append(m), executor=Ex(),
+                  modes=False)
+    assert said == ["Random clips: [mode] installed clips.cfg, game.port, mode.so into "
+                    "/usr/local/padmode"]
+    said.clear()
+    MW.install_p2("C:/b/card.raw", pay, 1, lambda m, lvl="info": said.append(m), executor=Ex())
+    assert said[-1] == "Modes: %s" % MPj.INSIDER_NOTE
+
+
+def test_the_completion_summary_names_the_random_clips():
+    from pinball_decryptor.plugins.stern import pipeline
+    one = {"names": [], "variants": ["video/a.mov"]}
+    assert pipeline._write_summary_with_modes((0, 0, 0, 0), one) == \
+        "1 clip(s) that play one of several at random"
+    assert pipeline._write_summary_with_modes((0, 2, 0, 0), one) == \
+        "2 video(s) and 1 clip(s) that play one of several at random"
+    both = {"names": ["KAIJU RUSH"], "variants": ["video/a.mov", "video/b.mov"]}
+    assert pipeline._write_summary_with_modes((0, 0, 0, 0), both) == \
+        "1 mode(s) (KAIJU RUSH) and 2 clip(s) that play one of several at random"
+
+
 # ---- the runtime's own reader and pick, compiled out of pad_mode_runtime.c ------------------
 _HARNESS = r"""
 #include <stdio.h>

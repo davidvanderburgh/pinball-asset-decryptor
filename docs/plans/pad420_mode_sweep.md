@@ -196,6 +196,14 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     build whose job is running: it wipes coils/b/<key> (Avengers LE's first run was lost so). chain23 (replaced
     chain22) re-runs every build `coils/rerun_keys.py` finds not fully PROVEN, then the stack batch, then writes
     RIGS_DONE (after COILS_DONE); the transcription waits for RIGS_DONE.
+    Run 8, why games did not start in the rig jobs (coil, scoop, media, checks: "no game started after three
+    tries"): a first boot shows Guided Setup (`bs/guided.sh` leaves it by Save & Exit: Led Zeppelin LE needed it);
+    a loaded host brings the game's loop up late (Jurassic Park LE: 127 s), so wait for mode.log's "game: in_game"
+    first; and put credits in before Start (`plunge.py coin 8`). The coil and scoop jobs do all three now and keep
+    a frame (`nogame.png`) when no game starts; the media job leaves Guided Setup before its census. And the
+    [coildrive] lines need `PAD_COIL_PROBE=1` (the coil and scoop jobs export it).
+  - `t2/voices_speedup.py` (detached) restarts the transcription with four threads at normal priority once
+    RIGS_DONE appears.
   - Run 8: the transcription no longer waits. `t2/voices_all.py` runs NOW at Windows idle priority, its children too
     (creationflags IDLE_PRIORITY_CLASS) and one whisper thread (`T2_THREADS=1`, voices.py), so the rigs keep the CPU.
     Land each transcribed build with `t2/apply_new.sh`, tests, commit; t2/VOICES_DONE when all are done.

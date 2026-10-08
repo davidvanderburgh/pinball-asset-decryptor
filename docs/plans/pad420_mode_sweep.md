@@ -202,6 +202,10 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     first; and put credits in before Start (`plunge.py coin 8`). The coil and scoop jobs do all three now and keep
     a frame (`nogame.png`) when no game starts; the media job leaves Guided Setup before its census. And the
     [coildrive] lines need `PAD_COIL_PROBE=1` (the coil and scoop jobs export it).
+    And a slot's NVRAM for a title can go bad: Avengers Pro in slot 2 hit FATAL 246 ("NVMigration: REGISTERED_DATA
+    hash is NOT UNIQUE") and the game's watchdog ended it before any Start. The coil, scoop, media and stack jobs now
+    wipe the title's NVRAM in their slot (never slot 0) before booting; Guided Setup is then left by guided.sh.
+    chain26 (after chain25) runs one more round of coil re-runs (rerun_keys.py).
   - `t2/voices_speedup.py` (detached) restarts the transcription with four threads at normal priority once
     RIGS_DONE appears.
   - The two builds with no port, probes queued after RIGS_DONE (`C:/tmp/PAD-420/jawspro`): chain24 runs

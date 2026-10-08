@@ -182,7 +182,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, waits for multiballs only |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
-| Iron Maiden LE 1.18 | no | ✓ | ✓ | shots | scoop, mechanisms |
+| Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Iron Maiden Pro 1.18 | no | ✓ | ✓ | shots | mechanisms |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots |  |
 | James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
@@ -190,7 +190,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
 | John Wick LE 1.02 | no | no | ✓ | no | never waits |
-| John Wick Pro 1.02 | no | no | ✓ | no | never waits |
+| John Wick Pro 1.02 | no | no | ✓ | no |  |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots |  |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | never waits |

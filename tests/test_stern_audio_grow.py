@@ -905,3 +905,32 @@ def test_the_replace_tab_hands_a_longer_clip_to_the_build_whole(
     with wave.open(str(assets / "audio" / "idx1145.wav"), "rb") as w:
         assert w.getnframes() / w.getframerate() == pytest.approx(seconds,
                                                                   abs=0.02)
+
+
+def test_a_record_room_refusal_reaches_the_write_dialog_as_its_sentence(
+        tmp_path, monkeypatch):
+    """The Write Failed dialog says the refusal's sentence, logged once, with
+    no "Unexpected error" and no traceback: an answer, not a crash."""
+    from types import SimpleNamespace
+    from pinball_decryptor.plugins.stern import pipeline as sp
+    why = ("Modes: these modes need 69 new sound(s), and this card's sound "
+           "bank has room for 65 more")
+
+    def _write_image(*a, **k):
+        raise engine.BankRecordRoomError(why)
+    monkeypatch.setattr(sp, "detect_game", lambda p: "godzilla_le")
+    monkeypatch.setattr(sp, "display_for_key", lambda *a, **k: "Godzilla")
+    monkeypatch.setattr(sp, "engine", SimpleNamespace(
+        AVAILABLE=True, write_image=_write_image,
+        read_build_manifest=lambda p: {},
+        BankRecordRoomError=engine.BankRecordRoomError))
+    msgs, log = _capture()
+    done = []
+    pipe = sp.SternWritePipeline(
+        str(tmp_path / "orig.raw"), str(tmp_path), str(tmp_path / "o.raw"),
+        log, lambda *a: None, lambda *a, **k: None,
+        lambda ok, msg: done.append((ok, msg)))
+    pipe.run()
+    assert done == [(False, why)]
+    assert msgs.count(("error", why)) == 1
+    assert not _said(msgs, "Unexpected error") and not _said(msgs, "Traceback")

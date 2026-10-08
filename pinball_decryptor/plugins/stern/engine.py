@@ -14296,6 +14296,12 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
 PAST_FRAGMENTS_ENV = "PAD_STERN_PAST_FRAGMENTS"
 
 
+class BankRecordRoomError(RuntimeError):
+    """The modes' own sounds need more records than the sound bank has room
+    for (:func:`_grows_within_record_room`).  An answer, not a crash: its
+    message is the sentence the person reads."""
+
+
 def _bank_record_room(img_path):
     """``(room, fragments, sounds)``: how many more records the sound bank
     takes before its sounds word passes its fragment word, from the
@@ -14344,7 +14350,7 @@ def _grows_within_record_room(grows, user_grows, img_path, log, priority=None):
         return grows
     forced = {i: g for i, g in grows.items() if i not in user_grows}
     if len(forced) > room:
-        raise RuntimeError(
+        raise BankRecordRoomError(
             "Modes: these modes need %d new sound(s), and this card's sound "
             "bank has room for %d more (it holds %d of the %d sounds its game "
             "was built for). Take %d of the modes' own sounds out (a call, a "

@@ -457,6 +457,11 @@ class SternWritePipeline(BasePipeline):
                 self._log(msg, "error")
                 self.card_size_refusal = e
             raise PipelineError("Re-encode", msg) from e
+        except engine.BankRecordRoomError as e:
+            # PAD-445: more of the modes' own sounds than the sound bank has
+            # room for - the same kind of answer, logged once the same way
+            self._log(str(e), "error")
+            raise PipelineError("Re-encode", str(e)) from e
         self._set_phase(3)  # Patch image
         # Item 149: the modes this build put on the card, from its record.
         try:
@@ -574,11 +579,15 @@ class SternDirectSsdWritePipeline(BasePipeline):
                 "not a file path (got %r). Pick the card from the Game SD "
                 "dropdown." % self.device_path)
         _require_engine()
-        counts, audio_mode, valpatch_mode = engine.write_device(
-            self.device_path, self.assets_dir,
-            log=self._log, progress=self._progress,
-            cancel=lambda: self._cancelled, phase=self._set_phase,
-            partition_override=self.partition_override)
+        try:
+            counts, audio_mode, valpatch_mode = engine.write_device(
+                self.device_path, self.assets_dir,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled, phase=self._set_phase,
+                partition_override=self.partition_override)
+        except engine.BankRecordRoomError as e:
+            self._log(str(e), "error")
+            raise PipelineError("Re-encode", str(e)) from e
         self._done(True, "Wrote %s directly to the SD card.%s%s%s"
                    % (_write_summary(counts), _direct_sd_modes_note(self.assets_dir),
                       _audio_mode_note(audio_mode),

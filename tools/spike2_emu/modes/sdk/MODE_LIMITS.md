@@ -196,13 +196,13 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | King Kong Pro 0.97 | no | ✓ | ✓ | no | mechanisms, never waits |
-| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots |  |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Rush LE 1.19 | no | ✓ | ✓ | no | scoop |
-| Rush Pro 1.19 | no | ✓ | ✓ | no | scoop, never waits |
+| Rush Pro 1.19 | no | ✓ | ✓ | no | scoop |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | no | ✓ | ✓ | shots | mechanisms, never waits |

@@ -574,3 +574,18 @@ site block_start_8      0x000ae9d8 0xe30e1080 0xe3a000d2
 text block_name_8       Combo Mode (and Combo Challenge)
 site block_start_9      0x000a8b20 0xe92d47f0 0xe24dd010
 text block_name_9       Coffin Hurry-Up
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site proc_exists          0x001fdbec 0xe3062ca0 0xe34026ff
+site proc_create          0x001fd5bc 0xe306cca0 0xe340c6ff
+site proc_sleep           0x001fd6ec 0xe3063ca0 0xe34036ff
+site adjustment           0x00415a70 0xe92d40f0 0xe2504000
+site coil_fire             0x0014a1d0 0xe3500000 0xe52de004
+data coil_count            0x06ff816c
+data coil_table            0x06fcf26c
+value magnet_proc          13185
+text loop_up_post_label   Loop up post
+text loop_up_post_drive   11 2 170 32 68 1032
+text held_coils            loop_up_post

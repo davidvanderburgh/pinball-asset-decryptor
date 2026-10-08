@@ -856,6 +856,7 @@ HELD_COILS_PROVEN = frozenset({
     ("venom_pro-1.07", "top_post"),              # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 64 ms then 128 (the game's own, its ctop_post_device's - device 13 by its constructor), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("led_zeppelin_le-1.22", "electric_magic"),  # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 2000 ms then 64 (the game's own, its ElectricMagicMagnet's grab - device 17 by its static object), at most 2500 ms; held 2000 ms to its end (the draw alone: the board's hold phase empty); a mode stop 0.7 s in sent the game's OFF; no abort
     ("mando_le-1.45", "magnet_hold"),            # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 800 ms then 20 (the game's own, its cthe_child_magnet's grab - device 14 by its constructor; its hold runs 10 s, so the runtime's 5 s cap); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("metallica_spike-1.04", "loop_up_post"),    # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 11 coil 2, 170 for 32 ms then 68 (the game's own, its cdevice_loop_diverter's - device 22; the coins dropped one at a time, 1 s apart - Metallica counted 3 of 8 dropped 0.7 s apart), at most 1032 ms; held 1030 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 

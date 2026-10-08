@@ -488,10 +488,6 @@ site tower_post_get       0x0004fc0c 0xe92d4030 0xe3004524
 text tower_magnet_drive   9 0 255 300 100
 text tower_post_drive     9 5 255 128 64
 text held_coils            tower_magnet tower_post
-# PAD-420: Mode > Magnet holds the ball with the held coil tower_magnet, on a hit of the shot nearest it on the
-# playfield picture (Tower: every tower opto makes it, 1.4 px from the tower magnet)
-text magnet_coil           tower_magnet
-value magnet_shot          0x100000000
 
 # PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
 # build's own transcribed voice lines, tu_wide.py)

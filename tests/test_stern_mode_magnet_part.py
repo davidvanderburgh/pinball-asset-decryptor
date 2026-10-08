@@ -155,11 +155,9 @@ def test_the_docs_name_the_key_and_the_field():
 
 
 #: PAD-420: the builds whose magnet is one of their PROVEN held coils, and the shot nearest it on the playfield picture
+#: (not King Kong or Avengers: the game answers their one shot by the magnet with that magnet itself - King Kong pulses
+#: it 4 x 20 ms on a pit target hit, Avengers grabs the ball in its tower - so a mode's grab there adds nothing)
 MAGNET_COILS = {
-    "king_kong_pro-0.97": ("spider_magnet", "Pit target-bot"),
-    "king_kong_le-0.97": ("spider_magnet", "Pit target-bot"),
-    "avengers_infinity_le-1.10": ("tower_magnet", "Tower (0x100000000)"),
-    "avengers_infinity_pro-1.10": ("tower_magnet", "Tower (0x100000000)"),
     "jurassic_park_le-1.16": ("trex_magnet", "Left ramp enter opto"),
     "james_bond_le-1.06": ("jet_pack_magnet", "Tank hood target"),
 }

@@ -694,10 +694,6 @@ value magnet_proc          13185
 # LogDiverter, ramp_diverter = CenterRampDiverter. Never here: the TrainLock post (it holds locked balls),
 # the VUKs, the trough, flippers, slingshots and pops.
 text held_coils            spider_magnet log_diverter ramp_diverter
-# PAD-420: Mode > Magnet holds the ball with the held coil spider_magnet, on a hit of the shot nearest it on the
-# playfield picture (Pit target-bot, 23 px from the spider pit magnet)
-text magnet_coil           spider_magnet
-value magnet_shot          0x10000000
 site spider_magnet_get     0x0007b2bc 0xe92d40f0 0xe3004a2c
 value spider_magnet_dev    10
 text spider_magnet_label   spider magnet

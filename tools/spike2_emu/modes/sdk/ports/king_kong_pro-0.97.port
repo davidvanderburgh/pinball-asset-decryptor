@@ -568,10 +568,6 @@ callout time_up           670   # T / i
 # ramp diverter on the Pro. Never here: the TrainLock post (it holds locked balls).
 value magnet_proc          13185
 text held_coils            spider_magnet river_diverter
-# PAD-420: Mode > Magnet holds the ball with the held coil spider_magnet, on a hit of the shot nearest it on the
-# playfield picture (Pit target-bot, 23 px from the spider pit magnet)
-text magnet_coil           spider_magnet
-value magnet_shot          0x10000000
 site spider_magnet_get     0x0007a9e8 0xe92d40f0 0xe3084374
 value spider_magnet_dev    10
 text spider_magnet_label   spider pit magnet

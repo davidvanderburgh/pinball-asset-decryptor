@@ -1492,9 +1492,12 @@ take control `0x5079c` (coil, wait ticks), give control back `0x50860` (coil, 1)
 **A magnet that is one of the title's held coils** (PAD-420): `text magnet_coil spider_magnet` makes that held
 coil (its `_drive` or `_get` lines, below) the one `pm_magnet_grab` holds - one coil, one set of limits, whether a
 mode's `magnet` line or its `coil_hold` asks. `value magnet_shot` is then the shot whose switch is nearest the
-magnet on the playfield picture, as on Godzilla: King Kong's Pit target-bot (23 px from the spider pit magnet),
-Avengers' Tower (every tower opto makes it, 1.4 px), Jurassic Park LE's Left ramp enter opto (12 px from the
-T-Rex mouth magnet), James Bond LE's Tank hood target (17 px from the jet pack magnet).
+magnet on the playfield picture, as on Godzilla: Jurassic Park LE's Left ramp enter opto (12 px from the T-Rex
+mouth magnet), James Bond LE's Tank hood target (17 px from the jet pack magnet). Not where the game answers that
+shot with the magnet itself: King Kong pulses its spider pit magnet 4 x 20 ms on a pit target hit (each pulse ends
+a hold - the runtime's log still says held; `[coildrive]` shows it) and Avengers grabs the ball in its tower on a
+tower opto (the grab gives way at once), so a mode's grab adds nothing there. A port value is 32 bits on the
+machine: a shot past bit 31 reaches the `magnet` line only as its mask, which the Modes tab always writes.
 
 **From a mode file, and the Modes tab.** `magnet <ms> [mask]`: while the mode runs, every hit of the shot the
 magnet sits at holds the ball there for `<ms>`, the hit that starts the mode included, through `pm_magnet_grab`

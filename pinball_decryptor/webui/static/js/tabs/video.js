@@ -35,6 +35,9 @@ const T = {
   modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it.",
   modeFilter: "List only the clips one mode of the game plays.",
   modesBusy: "Reading which mode plays each clip…",
+  // PAD-453 (DragonRR)
+  undoNone: "Nothing to undo yet: choosing or clearing a replacement, Replace from folder, a clip's conversion, length, colors or random clips, and the boxes over the list each make a step.",
+  redoNone: "Nothing to redo: Redo does again what Undo just took back, until the next change.",
   qTitle: "Check the videos already on a card",
   qIntro: "Measures every clip on a built card image and lists the ones whose bitrate is low enough to look blocky — the same test a Write applies to a replacement, applied after the fact to what is actually on the card. This reads the card image only; nothing is written and nothing is extracted.",
 };
@@ -710,6 +713,7 @@ export default function VideoTab() {
   const rep = pv.rep || {};
   const q = s.quality || {};
   const best = s.best || {};
+  const undo = s.undo || {};
   const [sel, setSel] = useState(() => new Set());
   const anchor = useRef(null);
   const selectJob = useRef(null);
@@ -757,6 +761,28 @@ export default function VideoTab() {
     if (first) loadRow(first);
   }, [s.select && s.select.seq]);
   useEffect(() => () => { clearTimeout(selectJob.current); pauseAll(); }, []);
+  // PAD-453: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere on the tab undo or redo a change to the
+  // picks.  A text box keeps its own undo, the Colors bar its profile's, and a dialog or
+  // another tab is left alone.
+  const shellRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = (e.key || "").toLowerCase();
+      const redo = k === "y" || (k === "z" && e.shiftKey);
+      if (k !== "z" && !redo) return;
+      const el = e.target;
+      if (el && (el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "SELECT"
+          || (el.tagName === "INPUT" && !/^(range|checkbox|radio|button)$/.test(el.type)))) return;
+      if (el && el.closest && el.closest(".cpd")) return;
+      const box = shellRef.current;
+      if (!box || !box.getClientRects().length || document.querySelector(".scrim")) return;
+      e.preventDefault();
+      call("video.undo", redo);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const onSelect = (r, i, e) => {
     if (!r) return;
@@ -1020,7 +1046,7 @@ export default function VideoTab() {
   // ▶ on an empty pane: load the highlighted row and play that pane
   const emptyPlay = (side) => { if (currentRel) call("video.activate_pane", currentRel, side); };
 
-  const withBar = (page) => html`<div class="cpd-shell">${page}${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets"
+  const withBar = (page) => html`<div class="cpd-shell" ref=${shellRef}>${page}${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets"
     open=${colors} setOpen=${setColors} file=${colorFile} />` : null}</div>`;
   if (cmpOpen) {
     return withBar(html`<${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
@@ -1032,6 +1058,10 @@ export default function VideoTab() {
         <button type="button" class=${cx("vid-link", !s.project && "none")} onClick=${() => call("video.open_project_folder")}
           ...${tip(T.project)}>${s.project_text}</button></span>`}>
       ${s.status ? html`<${Chip} kind="acc">${s.status}<//>` : null}
+      <${Button} kind="ghost" icon="undo" cls="vid-undo" disabled=${!undo.undo || running} onClick=${() => call("video.undo")}
+        title=${{ head: "Undo", lines: [["Ctrl+Z", undo.undo ? "Undo " + undo.undo : T.undoNone]] }}>Undo<//>
+      <${Button} kind="ghost" icon="redo" cls="vid-redo" disabled=${!undo.redo || running} onClick=${() => call("video.undo", true)}
+        title=${{ head: "Redo", lines: [["Ctrl+Y", undo.redo ? "Redo " + undo.redo : T.redoNone], ["Ctrl+Shift+Z", "Redo as well"]] }}>Redo<//>
       <${Button} icon=${s.scanning ? "x" : "refresh"} onClick=${() => call(s.scanning ? "video.cancel_scan" : "video.scan")}>${s.scanning ? "Cancel scan" : "Scan"}<//>
       <${Button} icon="compare" cls="vid-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!currentRel}
         title=${T.compare}>Compare<//>

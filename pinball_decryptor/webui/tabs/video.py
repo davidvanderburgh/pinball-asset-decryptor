@@ -48,6 +48,7 @@ from .. import look_switches
 from .. import video_helpers as vh
 from ..video_best import BEST_TIP, BestQualityMixin
 from ..video_modes import ModesMixin
+from ..video_undo import UndoMixin, undoable
 from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
 STOCK_COLOURED = "With its color profile"
 
 
-class VideoTab(ModesMixin, BestQualityMixin, TabService):
+class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
     ns = "video"
     key = "Replace Video"
     label = "Video"
@@ -168,6 +169,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._q_clips = []
         self._q_card = ""
         self._m_init()                  # PAD-444: Played in (video_modes.py)
+        self._u_init()                  # PAD-453: Undo / Redo (video_undo.py)
         self._m_select_after = []
         for v in (self.video_search_var, self.video_change_filter_var):
             v.trace_add("write", lambda *_a: self._refresh_list())
@@ -219,6 +221,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._set_scan_ui(False, log_it=False)
         self._clear_preview()
         self._m_reset()
+        self._u_reset()
         try:
             note = (mfr.video_length_note() or "").strip()
         except Exception:                                   # noqa: BLE001
@@ -518,6 +521,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         except Exception:                                   # noqa: BLE001
             kept = {}
         staged_changes.save(assets_dir, kept)
+        self._u_reset()
 
     def refresh_after_revert(self):
         """The video part of MainWindow.refresh_after_revert."""
@@ -709,6 +713,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         if folder_changed:
             self._clear_preview()
             self._m_reset()
+            self._u_reset()
         # the modes the card's program names (read once per card; a card read
         # before publishes now, so the rows below carry them)
         self._m_kick(scan_dir)
@@ -1166,6 +1171,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                     and not self._color_stock and self._per_file_colour())
 
     @rpc
+    @undoable("Advanced")
     def set_color_stock(self, on):
         """The Advanced box (PAD-336): unlock the Color switch on the game's
         own clips.  Unticked, they lock again and any of them already built
@@ -1217,6 +1223,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                     log.exception("video colour %s.%s", ns, name)
 
     @rpc
+    @undoable("the colors of %s")
     def set_color(self, rel, value):
         """This clip's own colour switch (PAD-312): True / False, or None
         to follow the Color profile tab's box again."""
@@ -1479,6 +1486,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("Trim / pad")
     def set_trim(self, value):
         """MainWindow._on_video_trim_toggle."""
         self.video_trim_var.set(bool(value))
@@ -1487,6 +1495,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("Use my files as-is")
     def set_no_conversion(self, value):
         """MainWindow._video_on_no_conversion_toggle."""
         self.video_no_conversion_var.set(bool(value))
@@ -1592,6 +1601,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
     # picking a replacement
     # ==================================================================
     @rpc
+    @undoable("the pick for %s")
     def choose(self, rel):
         """MainWindow._video_assign_rel: the picker, the as-is gate, the
         pick, its log line."""
@@ -1652,6 +1662,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the conversion of %s")
     def set_asis(self, rel, value):
         """MainWindow._video_set_asis: this clip's own conversion setting
         (None = follow the box)."""
@@ -1677,6 +1688,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the length of %s")
     def set_length(self, rel, value):
         """This clip's own length (PAD-215): None follows the Trim / pad
         box, "stock" cuts or pads to the stock clip, "full" keeps the
@@ -1825,6 +1837,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                    "it goes" if one else "they go"))
 
     @rpc
+    @undoable("clearing %s", "clearing %d replacements")
     def clear(self, rels):
         """The row menu's "Clear replacement(s)": one row, or the selected
         rows (MainWindow._video_clear_selected /
@@ -1844,6 +1857,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return self._clear_picks(rels)
 
     @rpc
+    @undoable("Clear replacements")
     def clear_all(self):
         """The Clear replacements… button (MainWindow._clear_all_
         replacements("video"))."""
@@ -1873,6 +1887,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
 
     # ---- Replace from folder… (MainWindow._replace_from_folder) --------
     @rpc
+    @undoable("Replace from folder")
     def replace_from_folder(self):
         from ...core import folder_match
         if self._is_running():
@@ -2162,6 +2177,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._reselect([rel])
 
     @rpc
+    @undoable("the random clips of %s")
     def add_variants(self, rel):
         """PAD-446: more clips the game may play in this slot's place, one
         of them at random each time (the file picker takes several)."""
@@ -2209,6 +2225,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the random clips of %s")
     def remove_variant(self, rel, index):
         """PAD-446: take one random clip off the slot."""
         files = list(self._variants.get(rel) or [])
@@ -2226,6 +2243,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the random clips of %s")
     def clear_variants(self, rel):
         """PAD-446: the slot plays its one clip again."""
         if not self._variants.pop(rel, None):

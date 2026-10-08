@@ -25,6 +25,7 @@ import threading
 
 from . import compat
 from .rpc import rpc
+from .video_undo import undoable
 
 BEST_TIP = (
     "Convert every replacement at full quality instead of holding it to the "
@@ -146,6 +147,7 @@ class BestQualityMixin:
     # the option
     # ------------------------------------------------------------------
     @rpc
+    @undoable("Best quality")
     def set_best_quality(self, value):
         self.video_best_quality_var.set(bool(value))
         self._save_staged()
@@ -389,6 +391,7 @@ class BestQualityMixin:
         return False
 
     @rpc
+    @undoable("using the best-quality files")
     def best_apply(self):
         """Use best quality: the ticked files become the slots'
         replacements and the option goes on."""

@@ -374,7 +374,7 @@ class ColorTab(TabService):
         rels = self._file_rels()
         own_n = int(self._own() is not None)
         if len(rels) > 1:
-            m = self._raw(staged_changes.load(self._project),
+            m = self._raw(staged_changes.peek(self._project),
                           "files\n" + f["kind"])
             own_n = sum(1 for r in rels if isinstance(m, dict) and r in m)
         return {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
@@ -522,13 +522,13 @@ class ColorTab(TabService):
             data[key] = value
 
     def _stored_raw(self, key):
-        d = self._raw(staged_changes.load(self._project), key)
+        d = self._raw(staged_changes.peek(self._project), key)
         return json.dumps(d, sort_keys=True) if d is not None else None
 
     def _files_raw(self, mkey, rels):
         """PAD-439: ``{rel: own profile as stored, or None}`` of *rels* under
         *mkey* ("files\\n<kind>"), as an Undo step keeps it."""
-        m = self._raw(staged_changes.load(self._project), mkey)
+        m = self._raw(staged_changes.peek(self._project), mkey)
         m = m if isinstance(m, dict) else {}
         return json.dumps({r: m.get(r) for r in rels}, sort_keys=True)
 

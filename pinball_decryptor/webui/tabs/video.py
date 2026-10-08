@@ -1315,9 +1315,13 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         """The Color profile tab moved its "every replaced video" box."""
         from ...core import staged_changes
         folder = self._assets_path()
-        self._color_all = bool(folder and staged_changes.load(folder).get(
+        was = self._color_all
+        self._color_all = bool(folder and staged_changes.peek(folder).get(
             "color_all_videos"))
-        self._refresh_list()
+        if self._color_all != was:
+            # PAD-464: only the box moving changes the rows (the Colors bar
+            # tells every change, a slider's too)
+            self._refresh_list()
         self.publish_look()
 
     def _color_changed(self):

@@ -1099,9 +1099,14 @@ class ImagesTab(FindOriginalsMixin, TabService):
         """The Color profile tab moved its "every replaced picture" box."""
         from ...core import staged_changes
         folder = self._assets_dir()
-        self._color_all = bool(folder and staged_changes.load(folder).get(
+        was = self._color_all
+        self._color_all = bool(folder and staged_changes.peek(folder).get(
             "color_all_images"))
-        self._publish_chunks()
+        if self._color_all != was:
+            # PAD-464: the Colors bar tells every change, a slider's too; the
+            # rows show the switches alone, so only the box moving redraws
+            # them (thousands of rows, a tenth of a second a move)
+            self._publish_chunks()
         if self._current_rel:
             self._render_preview(self._current_rel)
         else:

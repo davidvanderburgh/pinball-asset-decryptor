@@ -329,13 +329,31 @@ def viewed(canvas, view):
     if view is None:
         return canvas
     import numpy as np
-    a = canvas[..., 3:4].astype(np.float32)
-    cov = np.maximum(a, 1.0)
-    straight = np.clip(canvas[..., :3].astype(np.float32) * 255.0 / cov + 0.5,
-                       0, 255).astype(np.uint8)
-    shown = np.asarray(view(straight), np.float32)
+    # PAD-464: the same numbers, worked out only where they can differ: an
+    # empty pixel comes back black whatever the view does (its colour times
+    # its cover, 0), a solid one is its straight colour already and comes
+    # back as the view shows it (x * 255 / 255 is x), and only a pixel with
+    # some cover works through the sums.  A selected layer is mostly empty.
+    canvas = np.ascontiguousarray(canvas, np.uint8)
+    src = canvas.reshape(-1, 4)
     out = canvas.copy()
-    out[..., :3] = np.clip(shown * a / 255.0 + 0.5, 0, 255).astype(np.uint8)
+    dst = out.reshape(-1, 4)
+    dst[:, :3] = 0
+    seen = np.flatnonzero(src[:, 3])
+    if not seen.size:
+        return out
+    px = src[seen]
+    straight = np.ascontiguousarray(px[:, :3])
+    part = np.flatnonzero(px[:, 3] != 255)
+    if part.size:
+        a = px[part, 3:4].astype(np.float32)
+        straight[part] = np.clip(px[part, :3].astype(np.float32) * 255.0
+                                 / np.maximum(a, 1.0) + 0.5, 0, 255).astype(np.uint8)
+    shown = np.array(view(straight), np.uint8)
+    if part.size:
+        shown[part] = np.clip(shown[part].astype(np.float32) * a / 255.0 + 0.5,
+                              0, 255).astype(np.uint8)
+    dst[seen, :3] = shown
     return out
 
 
@@ -780,7 +798,7 @@ def pending_pictures(assets_dir, bake=True):
     Individual files switch turned off (PAD-330): no picture gets its correction drawn in."""
     try:
         from ...core import staged_changes, colour_profile
-        data = staged_changes.load(assets_dir) or {}
+        data = staged_changes.peek(assets_dir) or {}
     except Exception:
         return {}
     keep = set(data.get("image_keep_size") or ())

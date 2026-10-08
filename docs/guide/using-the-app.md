@@ -258,6 +258,12 @@ replacement in it, and then only that mode plays yours. That mode's
 clip goes on the card as a new clip, so it takes an image build (not
 a direct SD write); clear the replacement and the row follows the
 first again.
+**Undo and Redo.** The *Undo* and *Redo* buttons at the top of the
+tab (Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z) take back, or make again, your
+last changes one step at a time: a pick, a clear, Replace from
+folder, a clip's own conversion, length, colors or random clips, and
+the boxes over the list. The history lasts until the app closes or
+another project opens.
 
 ## Write tab
 

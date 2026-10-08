@@ -506,3 +506,19 @@ site block_rule_11         0x000abb30 0xe92d4ff0 0xe24dd01c  # crule_u_turn_comb
 text block_rule_name_11    U Turn Combos
 site block_rule_12         0x000aed14 0xe92d47f0 0xe1c049d0  # crule_wheel_modes::v[23]
 text block_rule_name_12    Wheel Modes
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+data coil_count            0x006642c8
+data coil_table            0x00663738
+value magnet_proc          13185
+site coil_take            0x000b9714 0xe92d40f8 0xe3047d4c
+site coil_give            0x000b97d8 0xe3510000 0xe92d4038
+text control_gates_label  Orbit control gates
+value control_gates_dev   13
+value control_gates_ctl   32
+value control_gates_devoff 4
+value control_gates_off_slot 30
+data control_gates_obj   0x0062902c
+text control_gates_drive  9 0 255 64 96
+text held_coils            control_gates

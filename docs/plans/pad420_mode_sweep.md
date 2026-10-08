@@ -271,6 +271,34 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     chain23 (rig 2: stack batch) -> RIGS_DONE -> chain24 (Jaws Pro probe) -> chain25 (Batman probe) -> chain26
     (coil re-runs 2) -> chain27 (stack re-runs) -> chain28 (media round 3). Transcription: idle now, 4 threads after
     RIGS_DONE.
+  - **Run 12 (2026-10-08 01:15-) - why so many rig runs died, and the third rig.**
+    * "fail slot" 9 s in (JW Pro scoop, D&D Pro map): watch.sh REFUSING root-owned title NVRAM in slots 1, 3, 4
+      (1300+ entries each), left by `bs/crun4.sh`, which runs the game as root (the ball-save and early stack jobs).
+      Given back to david (watch.sh's own fix); no queued job uses crun4 now.
+    * The game dies AT START with a segv in libpthread (a mutex at null + 0x18): D&D Pro, Guardians, JB LE in the
+      scoop batch, and the stack batch's four. On D&D Pro the null is `dynamic_cast<RadiumScene*>` of a scene the game
+      looks up by id at game start: the scene was not loaded yet. scoop_job.sh and cmap/mapjob.sh (and proof_job2.sh
+      through media_job.sh) booted the ORIGINAL card on the spinning D: disk - their conf/json overrode the NVMe copy
+      rigbatch stages - so two or three rigs plus the stager read one disk and stalled (rigbatch's own warning). All
+      three now boot the staged copy (`CARD=${2:-$CARD}`; proof_job2's third argument). chain31 re-runs the scoop
+      builds whose game never started.
+    * Elvira 1.13 starts no game on the direct harness: glshot.sh fails on it, so guided.sh cannot see Guided Setup
+      (its earlier runs went through crun4). Open.
+    * A third rig (slot 3) beside the queue's two: chain29 (`cmap/`, every coil device's board address on the builds
+      whose ports had no coil table) and then chain30 (`coils/c/`, generation-C held coils: cgen.py stages, fill_c.py
+      on the rig, coil_job_c.sh, c_verdict.py), each started only while every held PAD-420 slot shows its holder active.
+    * Generation C, by the board address and no object: 21 builds whose coil_fire calls carry a CONSTANT device and a
+      hold (mechs/holds: Mandalorian's posts 255/64 then 128 for 1.5 s, Munsters' magnet 255/1200 then 18, Star Wars
+      LE's 255/500 then 56 ...); fill_c.py learns each coil's device from the first boot's coil list and takes that
+      device's own command; the eight older ports' process calls from port_tool (strict, Godzilla Pro 1.16 the
+      reference; `C:/tmp/PAD-420/procs`). The `_drive` line's new last word caps a hold at the game's own longest
+      command (commit 57e37eae). NOT on this route: the ControlGate class (Aerosmith LE's up/down gate, Guardians LE's
+      orbit gates): the game drives it through a 40-slot driver at FULL power in 250 ms chunks up to 187 x 16 = 2992 ms
+      (its activation's cap), which never touches the coil records - so "the game wins" would need the gate object's
+      own active flag (+0xc) and no OFF of ours when the game takes it. Next, per title.
+    * Voice: eight more builds' callouts from their own transcripts (ST LE's countdown by hand); a time-up line on
+      eleven builds that have no "time's up" (tu_wide.py): Avengers 635, Iron Maiden 315, JP 915, Mandalorian 768, SoR
+      LE 514, Foo Fighters 878. Sword of Rage Pro gets 514 once its transcript lands (its port still has 1.18's ids).
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

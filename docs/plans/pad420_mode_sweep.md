@@ -197,6 +197,19 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     hold a C coil by `coil_fire` until the powers that service uses are read (magnets do call `coil_fire`: Aerosmith
     LE's toy box magnet 255 for 1 s, then 16). Deadpool's scoop handler does take event 2 (its jump table), so
     the wrap of its slot never takes effect (its ball-device table is another generation: "Trough"): a call probe.
+  - Lights on the 11 builds still yellow for lights / lit shots (Avengers LE/Pro, Foo Fighters Pro, John Wick LE/Pro,
+    King Kong Pro, Mandalorian LE/Pro, Munsters Pro, Rush LE/Pro): their ports' lamp lines and shot ties are there
+    (Rush LE: 28 of 38 shots tied), but most of their inserts sit in device-table groups the rig has NO node for
+    (the slot's tables/<title>/group_node.txt: King Kong Pro group 1 = 288 LEDs and group 9 = 227, Rush LE group 1
+    = 288, all "drawn dark"), so the LED view never shows them and judge.py sees a handful of channels (King Kong
+    Pro 0 of 9 RGB). Iron Maiden LE's inserts are on nodes 8/9 and pass 42/42. Proving these needs the rig to
+    present those LED boards (emulator work, PAD-311's area), not port work.
+  - Stack on the mode-table titles (`C:/tmp/PAD-420/st3`, chain22 after the coil batch, one rig): run 6's starter
+    began with a MULTIBALL entry (Avengers' Thor Multiball), which the game switched off in 0.5 s. st3's
+    `stack_starter3.c` starts a BATTLE through the port's block starts (each mode's START slot, never a multiball)
+    and drops /dump/mode.start in the same tick; `st3_job.sh` follows item 164's order (WAITER started with nothing
+    running and stopped, then the battle and WAITER refused); `st3_verdict.py`. Land a pass with
+    `prove_set.py STACK_PROVEN st3/rb/results.tsv "<evidence>"`.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

@@ -613,4 +613,8 @@ data coil_table            0x0b687548
 value magnet_proc          13185
 text up_post_label        Up post
 text up_post_drive        8 6 a171 64 a172
-text held_coils            up_post
+text magnet_hold_label    Magnet
+# PAD-420 run 21: its TimeMachineMagnet (device 19), held at the GAME's own grab - seen in the magnet census when the
+# Lift ramp opto was made: 255 for 80 ms, then 100 (for 20 s; held at most 5 s)
+text magnet_hold_drive    9 7 255 80 100
+text held_coils            up_post magnet_hold

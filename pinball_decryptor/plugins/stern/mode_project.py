@@ -562,6 +562,7 @@ BALL_SAVE_PROVEN = frozenset({
     "batman-1.14",                       # PAD-420 2026-10-08 bs_job (stock card, hidden, muted; jackpot presses only, NOPF - its VUK and eject switches left alone): the save taken, the drain inside it served back (auto-launched), shots scored on it, the next drain ended the ball: END (ball ended): 14 shots, awarded 105000000
     "elvira3-1.13",                      # PAD-420 2026-10-08 bs_job (stock card, hidden, muted; fresh NVRAM, coins one at a time): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
     "jaws_pro-1.02",                     # PAD-420 2026-10-08 bs_job2 (stock card, hidden, muted; past Guided Setup, coins one at a time after the tech alerts): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 3 shots, awarded 6000000
+    "turtles_le-1.59",                   # PAD-420 2026-10-08 bs_job3 (stock card, hidden, muted, fresh NVRAM; the rig's van stocked with two balls - PAD_BALL_VAN_STOCK=2: the TMNT LE has 8, and the game serves a saved ball from the van): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
 })
 
 

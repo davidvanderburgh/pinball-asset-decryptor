@@ -1,4 +1,4 @@
-"""PAD-451 proof shots: a line of text in a font with colours of its own shares its palette.
+"""PAD-451 proof shots: a line of text in a font with colours of its own, one line at a time.
 
     python scripts/shot_pad451.py <repo> <out_dir> [--after]
 
@@ -10,11 +10,11 @@ font pictures) and photographs, under the same names before and after:
 - scenes_font_rows.png     the Layers list on the lines in that font, nothing hovered
 - scenes_font_tip.png      the Layers list, EBIRAH's palette hovered
 - scenes_font_colors.png   the Colors bar open on EBIRAH
-- images_font_page.png     the Images tab on the font's second picture (G, H, K, M-Z)
 
-Before (main) the palette is that of the font's first picture alone and reads like any
-other; after (the ticket branch) it is marked shared, names the font and what it reaches,
-lights the lines that share it, and switches every picture of the font.
+Before (main) EBIRAH's palette is its font's first picture's: every orange line turns green
+and grey together (and only that picture's letters would reach the card corrected); after
+(the ticket branch) it is EBIRAH's own: it alone is drawn through the profile, from its own
+copy of the font, and every other orange line keeps its colors.
 
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
@@ -28,7 +28,6 @@ sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 import shot_pad312 as base  # noqa: E402
 
-PAGE2 = "images/scene_textures/radimg_512x512_1a9486f2.png"
 
 
 def _layers(state):
@@ -106,16 +105,6 @@ def main():
                 time.sleep(3)
             print("color file:", (state().get("color") or {}).get("file"), flush=True)
             page.screenshot(path=out("scenes_font_colors.png"))
-            if handle:
-                handle.click()
-                time.sleep(1)
-            api("ui.select_tab", "images")
-            time.sleep(2)
-            api("ui.set", "images", "search", "1a9486f2")
-            time.sleep(2)
-            api("images.select", PAGE2)
-            time.sleep(3)
-            page.screenshot(path=out("images_font_page.png"))
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

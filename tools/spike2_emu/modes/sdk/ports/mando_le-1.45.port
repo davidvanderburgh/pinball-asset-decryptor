@@ -387,3 +387,7 @@ text block_rule_name_11    The Child
 # PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
 callout countdown         793   # ONE! / ONE!
 callout ten_seconds       718   # Hurry up! Your time is running out! / You need to hurry!
+
+# PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
+# build's own transcribed voice lines, tu_wide.py)
+callout time_up           768   # Time to go kid! / Time's up kid, we gotta get out of here.

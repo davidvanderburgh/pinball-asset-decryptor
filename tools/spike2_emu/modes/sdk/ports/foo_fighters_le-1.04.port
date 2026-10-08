@@ -755,3 +755,7 @@ site block_rule_15         0x001141fc 0xe92d43f0 0xe2028b01  # crule_van_mods::v
 text block_rule_name_15    Van Mods
 site block_rule_16         0x0012a40c 0xe92d4ff0 0xe24dd01c  # cskill_shot::v[34]
 text block_rule_name_16    Skill Shot
+
+# PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
+# build's own transcribed voice lines, tu_wide.py)
+callout time_up           878   # Better luck next time.

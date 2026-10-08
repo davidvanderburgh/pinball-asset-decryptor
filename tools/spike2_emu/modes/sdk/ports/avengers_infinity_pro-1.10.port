@@ -447,3 +447,7 @@ value switch_record_size    0x2c
 # PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
 callout countdown         569   # One! / Two!
 callout ten_seconds       571   # You are almost out of time. / Time is running out.
+
+# PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
+# build's own transcribed voice lines, tu_wide.py)
+callout time_up           635   # This fight is over, but there's still more battles to come.

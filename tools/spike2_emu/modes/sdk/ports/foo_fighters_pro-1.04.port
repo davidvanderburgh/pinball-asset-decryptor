@@ -412,3 +412,14 @@ callout ten_seconds       160   # Hurry up man! / Only a few seconds left!
 # PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
 # build's own transcribed voice lines, tu_wide.py)
 callout time_up           878   # Better luck next time.
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c3.sh: held 2000 ms as a mode started, ONE command at the game's own powers, ended on the board
+# by itself; let go early by a mode stop, the game's OFF). A Pro has one of Foo Fighters LE's three: the van up post,
+# device 12 - its command 0x80fd0 (255 for 32 ms, then 128) is the twin of the LE's van post call
+data coil_count            0x03be7b5c
+data coil_table            0x03bd7134
+value magnet_proc          13185
+text van_up_post_label    Van up post
+text van_up_post_drive    9 7 255 32 128
+text held_coils            van_up_post

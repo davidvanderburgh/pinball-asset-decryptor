@@ -175,7 +175,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
-| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots |  |
+| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |

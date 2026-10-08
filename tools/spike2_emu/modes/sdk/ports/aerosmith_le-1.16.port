@@ -318,3 +318,9 @@ data upper_gate_obj      0x0061eb38
 value upper_gate_ctl      12
 value upper_gate_off_slot 5
 text held_coils            upper_gate
+
+# PAD-420: the other modes' record ids, from aerosmith_le-1.15's proven port (the game's own ids; proven here by a stack run)
+value mode_records_1       0x00f500f3      # Super Scoring: ids 243..245 (the older build's + 4: its start's mov r0, #id)
+value mode_records_2       0x00f200f1      # Double Scoring: ids 241..242 (the older build's + 4: its start's mov r0, #id)
+value mode_records_3       0x00f700f6      # Upper Playfield Orbit Rule: ids 246..247 (the older build's + 4: its start's mov r0, #id)
+value mode_records_4       0x00f000ef      # Headphone Hurryup: ids 239..240 (the older build's 235..236 + 4; its start creates its record without asking first)

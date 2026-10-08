@@ -307,3 +307,9 @@ text block_name_1       Double Scoring
 # PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
 callout ten_seconds       246   # Time is running out!
 callout time_up           248   # Time to- / Time is up for you!
+
+# PAD-420: the other modes' record ids, from aerosmith_le-1.15's proven port (the game's own ids; proven here by a stack run)
+value mode_records_1       0x00f500f3      # Super Scoring: ids 243..245 (the older build's + 4: its start's mov r0, #id)
+value mode_records_2       0x00f200f1      # Double Scoring: ids 241..242 (the older build's + 4: its start's mov r0, #id)
+value mode_records_3       0x00f700f6      # Upper Playfield Orbit Rule: ids 246..247 (the older build's + 4: its start's mov r0, #id)
+value mode_records_4       0x00f000ef      # Headphone Hurryup: ids 239..240 (the older build's 235..236 + 4; its start creates its record without asking first)

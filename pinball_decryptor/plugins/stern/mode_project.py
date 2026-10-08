@@ -964,6 +964,8 @@ STACK_RECORDS_PROVEN = frozenset({
                                       # -> nothing, started
     "james_bond_60th_le-1.11",        # a Villain Mode (its start 0x9bb10 runs game timer 2, records 137..138):
                                       # named and refused; the framework's kill 137..138 -> nothing, started
+    "aerosmith-1.16",                 # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; Aerosmith LE 1.15's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 243..245) was named running and the mode refused
+    "aerosmith_le-1.16",              # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; Aerosmith LE 1.15's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 243..245) was named running and the mode refused
 })
 
 

@@ -81,6 +81,8 @@ class TitleProfile:
     hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
     magnet_shot: str = ""            # PAD-381: the shot whose hit is the ball over the magnet; "" = no magnet
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
+    coil_caps: tuple = ()            # PAD-420: ((name, ms), ...) a held coil's longest hold where the game's own
+    #                                  longest command on it is shorter than COIL_MAX_MS (its `_drive` line's last word)
     shield_rule: str = ""            # PAD-392: the game's own shield feature (the port's `text shield_rule`, one of
     #                                  game_rules): it turns the platform back while it counts shots
     game_shows: tuple = ()           # PAD-418: ((name, kind, secs), ...) the game's own light shows a mode can play
@@ -584,7 +586,8 @@ def _magnet_shot_name(port):
 
 #: PAD-420: a coil held by its BOARD ADDRESS (pad_mode_runtime.c "held coils on every generation"): the framework's
 #: coil call and its coil table, the process calls, and per coil `text <name>_drive <node> <coil> <pulse power>
-#: <pulse ms> <hold power>` (the game's own hold command for that coil; an `a<id>` is the operator's adjustment).
+#: <pulse ms> <hold power> [<longest ms>]` (the game's own hold command for that coil; an `a<id>` is the operator's
+#: adjustment; the last, when there, the longest ONE command of the game's own on it, which a hold never exceeds).
 COIL_ROUTE_NEEDS = (("coil_fire", "proc_exists", "proc_create", "proc_sleep"), ("coil_table", "coil_count"),
                     ("magnet_proc",))
 
@@ -595,8 +598,10 @@ def _drive_ok(port, name):
     if not port:
         return False
     sites, data, values = COIL_ROUTE_NEEDS
-    words = port["text"].get("%s_drive" % name, "").split()
-    if len(words) != 5 or not all(re.fullmatch(r"a?\d+", w) for w in words) or any(w.startswith("a") for w in words[:2]):
+    words = port["text"].get("%s_drive" % name, "").split("#")[0].split()
+    if len(words) not in (5, 6) or not all(re.fullmatch(r"a?\d+", w) for w in words[:5]) \
+            or any(w.startswith("a") for w in words[:2]) \
+            or (len(words) == 6 and not (words[5].isdigit() and int(words[5]) >= COIL_MIN_MS)):
         return False
     return (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
             and all(n in port["value"] for n in values))
@@ -758,6 +763,17 @@ def _held_coils(port):
             continue
         if _drive_ok(port, name) or (("%s_get" % name) in port["site"] and port["value"].get("%s_dev" % name)):
             out.append((name, port["text"].get("%s_label" % name, name)))
+    return tuple(out)
+
+
+def _coil_caps(port, names):
+    """PAD-420: ``((name, ms), ...)`` for the held coils whose `_drive` line names the game's own longest command
+    on the coil, where that is shorter than COIL_MAX_MS: a hold of it is never longer (pad_mode_runtime.c)."""
+    out = []
+    for name in names:
+        words = port["text"].get("%s_drive" % name, "").split("#")[0].split() if port else []
+        if len(words) == 6 and words[5].isdigit() and int(words[5]) < COIL_MAX_MS:
+            out.append((name, int(words[5])))
     return tuple(out)
 
 
@@ -1488,6 +1504,7 @@ def profile_from_port(path):
         hud_tree=measured.get("hud_tree", "auto_loaded"),
         magnet_shot=_magnet_shot_name(port),                 # PAD-381
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
+        coil_caps=_coil_caps(port, [n for n, _l in _held_coils(port) if (key, n) in HELD_COILS_PROVEN]),   # PAD-420
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         game_shows=_game_shows(port),                        # PAD-418
         absent=machine_absent(game),                         # PAD-420
@@ -3441,8 +3458,9 @@ def validate_coils(spec, p):
             out.append("%s has no mechanism called %r a mode can hold." % (p.label, name))
             continue
         n = _int_or_none(ms)
-        if n is None or not COIL_MIN_MS <= n <= COIL_MAX_MS:
-            out.append("The %s holds %g to %g seconds." % (label, COIL_MIN_MS / 1000, COIL_MAX_MS / 1000))
+        top = min(COIL_MAX_MS, dict(getattr(p, "coil_caps", ()) or ()).get(name, COIL_MAX_MS))   # PAD-420: the game's own
+        if n is None or not COIL_MIN_MS <= n <= top:
+            out.append("The %s holds %g to %g seconds." % (label, COIL_MIN_MS / 1000, top / 1000))
         if shot and shot not in shots:
             out.append("%s has no shot called %r to hold the %s on." % (p.label, shot, label))
     if spec.coil_holds and not p.can("coils"):

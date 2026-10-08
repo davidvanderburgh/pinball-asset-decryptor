@@ -3634,9 +3634,11 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  * waiting to be sent; the 0x60000 bits at +0x10 mark a coil linked to another).
  *
  * So a coil of any title may be held by its BOARD ADDRESS: `text <name>_drive <node> <coil> <pulse power>
- * <pulse ms> <hold power>` (each power or time a number, or `a<id>`: the operator's adjustment <id>, read
- * live). The runtime finds the one record with that address (or the coil is not armed), and holds it the
- * same way and with the same limits as above: ONE bounded command from a process of ours, never re-sent.
+ * <pulse ms> <hold power> [<longest ms>]` (each power or time a number, or `a<id>`: the operator's adjustment
+ * <id>, read live; the last, when there, the longest ONE command of the game's own on that coil - a hold is never
+ * longer, whatever the mode asks). The runtime finds the one record with that address (or the coil is not armed),
+ * and holds it the same way and with the same limits as above: ONE bounded command from a process of ours, never
+ * re-sent.
  *   - The game wins: a record busy with a command that is not ours (running or waiting) refuses the hold;
  *     a request of the game's for that coil while we hold (any: a fire, an OFF) replaces ours on the board,
  *     and the hold ends there without a command of ours. Its processes (`text <name>_procs`) refuse it too.
@@ -3675,6 +3677,7 @@ struct held_coil {
     unsigned node, coilno;                  /* route 1: the address the port names */
     unsigned drv[3];                        /* route 1: pulse power, pulse ms, hold power (or adjustment ids) */
     unsigned drv_adj;                       /* bit i: drv[i] is an adjustment id */
+    unsigned cap_ms;                        /* route 1: the game's own longest command on it (0 = MAGNET_MAX_MS) */
     unsigned rec;                           /* route 1: the game's coil record */
     unsigned req;                           /* route 1: the id of our command's request */
     unsigned ctl;                           /* the object's controlling-process offset; 0 = no object control */
@@ -3968,10 +3971,12 @@ int pm_coil_hold(const char *name, unsigned ms)
     unsigned long now = pm_ms();
     struct magnet_cmd cmd;
     const char *why;
+    unsigned asked = ms;
     if (!(can & PM_CAN_COILS) || !c || !coil_device_ok(c)) return 0;
     why = magnet_refusal(pm_running(), pm_in_game(), coil_disabled(c), coil_game_busy(c), c->until, c->ended, now,
                          c->starts);
     if (!why && proc_alive(c->id)) why = "the last hold's process is still ending";
+    if (c->route && c->cap_ms && ms > c->cap_ms) ms = c->cap_ms;   /* PAD-420: never longer than the game's own */
     if (!why && c->route)
         magnet_plan(ms, coil_drive(c, 0), coil_drive(c, 1), coil_drive(c, 2), &cmd, &why);
     else if (!why)
@@ -3994,7 +3999,7 @@ int pm_coil_hold(const char *name, unsigned ms)
     }
     c->starts[c->next++ % MAGNET_PER_MIN] = now;
     say("%s: HOLD for %u ms (asked %u) - process %u %s and sends ONE command", c->name, cmd.draw_ms + cmd.hold_ms,
-        ms, c->id, c->obj && c->ctl ? "takes control of it" : "drives it");
+        asked, c->id, c->obj && c->ctl ? "takes control of it" : "drives it");
     return 1;
 }
 
@@ -4080,17 +4085,20 @@ static void magnet_tick(void)
     }
 }
 
-/* route 1: `<node> <coil> <pulse power> <pulse ms> <hold power>`, each power or time a number or `a<id>` */
+/* route 1: `<node> <coil> <pulse power> <pulse ms> <hold power> [<longest ms>]`, each power or time a number or
+ * `a<id>`; the longest a plain number */
 static int coil_drive_parse(struct held_coil *c, const char *t)
 {
-    unsigned v[5], i, adj = 0, any;
-    for (i = 0; i < 5; i++) {
+    unsigned v[6], i, adj = 0, any;
+    for (i = 0; i < 6; i++) {
         while (*t == ' ') t++;
-        if (*t == 'a' && i >= 2) { adj |= 1u << (i - 2); t++; }
+        if (i == 5 && (!*t || *t == '#')) { v[5] = 0; break; }   /* no longest: the runtime's own cap */
+        if (*t == 'a' && i >= 2 && i < 5) { adj |= 1u << (i - 2); t++; }
         for (v[i] = 0, any = 0; *t >= '0' && *t <= '9'; t++, any = 1) v[i] = v[i] * 10 + (unsigned)(*t - '0');
         if (!any) return 0;
     }
-    if (v[0] > 127 || v[1] > 15) return 0;
+    if (v[0] > 127 || v[1] > 15 || (v[5] && v[5] < MAGNET_MIN_MS)) return 0;
+    c->cap_ms = v[5];
     c->node = v[0];
     c->coilno = v[1];
     c->drv[0] = v[2];

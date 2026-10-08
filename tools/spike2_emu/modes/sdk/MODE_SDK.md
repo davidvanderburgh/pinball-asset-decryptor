@@ -1598,6 +1598,17 @@ object's own powers (King Kong 255/500 then 30, 180/200 then 48, 255/64 then 48;
 OFF 2015-2016 ms on; a mode stop let all go with about 500 ms left; no abort. Which other titles can follow, and
 why the rest cannot yet: docs/plans/mode_coils_census.md.
 
+**By the board address (PAD-420).** Where a title's coil object is not Godzilla's, a coil is held through the
+framework's own coil call and its coil table (`site coil_fire`, `data coil_table`, `data coil_count`), named by
+where it sits on the boards: `text <name>_drive <node> <coil> <pulse power> <pulse ms> <hold power> [<longest
+ms>]`. The powers are always the GAME's own for that coil, read off its program (a number, or `a<id>`: the
+operator's adjustment, read live); the last word, when there, is the longest ONE command of the game's own on it
+(a post the game holds 128 for 1500 ms at most: `9 8 255 64 128 1500`), and a hold is cut to it whatever the mode
+asks - the Modes tab says "holds 0.1 to 1.5 seconds" for that coil. The game still wins: a command of its own on
+the coil (the record's latest request is not ours) refuses a hold and ends one. Where the game's code switches an
+uncontrolled coil off, the port also names its object (`site <name>_get` or `data <name>_obj`), where it keeps its
+controlling process (`value <name>_ctl`) and its "disabled" virtual (`value <name>_off_slot`).
+
 ## The scoop (PAD-381)
 
 A mode may hold a ball that lands in the scoop - while its screen or a callout plays - and nothing more:

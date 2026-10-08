@@ -86,6 +86,47 @@ def test_a_statically_built_coil_object_is_named_not_built_again():
     assert "if (obj && !maps_has(obj, 4, MAP_R)) obj = 0;" in ok
 
 
+def test_a_hold_is_never_longer_than_the_games_own_command(tmp_path):
+    """PAD-420: a `_drive` line's optional last word is the longest ONE command of the game's own on that coil (a
+    Mandalorian post: 128 for 1500 ms at most); the hold asked for is cut to it before it is planned, and a line
+    without it keeps the runtime's own cap. Lifted verbatim and compiled for the host."""
+    import shutil
+    import subprocess
+    src = RUNTIME.read_text(encoding="utf-8")
+    hold = _lift(src, "int pm_coil_hold(")
+    assert hold.index("ms = c->cap_ms;") < hold.index("magnet_plan(ms, coil_drive(c, 0)")
+    cc = shutil.which("gcc") or shutil.which("cc")
+    if not cc:
+        pytest.skip("no C compiler on this host")
+    code = "#include <stdio.h>\n" + re.search(r"^#define MAGNET_MIN_MS .*$", src, re.M).group(0) + """
+struct held_coil { unsigned node, coilno, drv[3], drv_adj, cap_ms; };
+""" + _lift(src, "static int coil_drive_parse(") + r"""
+static void t(const char *s)
+{
+    struct held_coil c = {0, 0, {0, 0, 0}, 0, 77};
+    int ok = coil_drive_parse(&c, s);
+    printf("%d %u %u %u %u %u %u %u|", ok, c.node, c.coilno, c.drv[0], c.drv[1], c.drv[2], c.drv_adj, c.cap_ms);
+}
+int main(void)
+{
+    t("9 0 255 300 100"); t("9 8 255 64 128 1500"); t("9 6 255 64 a171 20000"); t("9 8 255 64 128 50");
+    t("9 8 255 64 128 1500   # the game's own"); t("9 8 255 64"); t("9 8 255 64 128 a1500");
+    return 0;
+}
+"""
+    (tmp_path / "t.c").write_text(code)
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-o", str(tmp_path / "t"), str(tmp_path / "t.c")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    rows = subprocess.run([str(tmp_path / "t")], capture_output=True, text=True, timeout=30).stdout.split("|")
+    assert rows[0] == "1 9 0 255 300 100 0 0"           # five words: no longest, the runtime's cap
+    assert rows[1] == "1 9 8 255 64 128 0 1500"          # the game's own longest command
+    assert rows[2] == "1 9 6 255 64 171 4 20000"         # the hold power the operator's adjustment
+    assert rows[3].startswith("0 ")                      # under 100 ms: not a usable line
+    assert rows[4] == "1 9 8 255 64 128 0 1500"          # a trailing comment is not a word
+    assert rows[5].startswith("0 ") and rows[6].startswith("0 ")   # too short; an adjustment is no longest
+
+
 def test_the_interpreter_holds_on_its_shot_or_as_it_starts():
     src = (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert "if (coil_line(M, line)) return;" in src
@@ -223,6 +264,25 @@ def test_validate_names_each_problem(row, problem):
     assert any(problem in x for x in problems), problems
     from pinball_decryptor.webui.tabs.modes import problem_pages
     assert problem_pages(problems) == ["mode"] * len(problems)
+
+
+def test_a_coil_is_offered_up_to_the_games_own_longest_command():
+    """PAD-420: the profile carries a held coil's longest hold where the port's `_drive` line names one under 5 s,
+    and validation states that limit; a sixth word that is not a plain time keeps the coil off the route."""
+    port = {"text": {"post_drive": "9 8 255 64 128 1500", "bad_drive": "9 8 255 64 128 a1500",
+                     "short_drive": "9 8 255 64 128 50", "plain_drive": "9 0 255 300 100"},
+            "site": {n: (0, 0, 0) for n in MP.COIL_ROUTE_NEEDS[0]}, "data": {n: 1 for n in MP.COIL_ROUTE_NEEDS[1]},
+            "value": {n: 1 for n in MP.COIL_ROUTE_NEEDS[2]}}
+    assert MP._drive_ok(port, "post") and MP._drive_ok(port, "plain")
+    assert not MP._drive_ok(port, "bad") and not MP._drive_ok(port, "short")
+    assert MP._coil_caps(port, ["post", "plain"]) == (("post", 1500),)
+    capped = MP.replace(LE, coil_caps=(("bridge", 1500),))
+    spec = MP.blank_spec(capped, name="HELD")
+    spec.start_shot, spec.scoring_shots = "Godzilla target", ["Left ramp"]
+    spec.coil_holds = [["bridge", 2000, ""]]
+    assert any("The bridge holds 0.1 to 1.5 seconds." in x for x in MP.validate_coils(spec, capped))
+    spec.coil_holds = [["bridge", 1500, ""], ["mg_magnet", 4000, ""]]
+    assert MP.validate_coils(spec, capped) == []
 
 
 def test_the_field_round_trips(tmp_path):

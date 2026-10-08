@@ -95,7 +95,7 @@ def test_the_bar_loads_on_the_images_and_video_pages(tmp_path):
     (tmp_path / "core").mkdir()
     stubs = {}
     for name in ("color.js", "color_pane.js", "images.js", "video.js",
-                 "originals.js"):
+                 "video_gl.js", "originals.js"):
         src = _src(name)
         (tmp_path / "tabs" / name).write_text(src, encoding="utf-8")
         for m in re.finditer(r"import \{([^}]*)\}\s*from \"\.\./core/(\w+)\.js\"", src):

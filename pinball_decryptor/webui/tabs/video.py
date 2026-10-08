@@ -85,6 +85,9 @@ _SCAN_LABEL = "Video"             # MainWindow._SCAN_LABELS["video"]
 NO_PROJECT_TEXT = "Set the project folder on the Extract tab, then click Scan."
 COMPARE_MAX = 4                   # clips side by side in Compare (PAD-440)
 NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
+# a game's own clip with its color profile attached: the Replacement player's
+# title for it (PAD-336, PAD-448)
+STOCK_COLOURED = "With its color profile"
 
 
 class VideoTab(ModesMixin, BestQualityMixin, TabService):
@@ -150,6 +153,11 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._cmp = []                   # the Compare players (PAD-440)
         self._cmp_open = False
         self._cmp_ids = 0
+        # PAD-448: the players' colour tables still to build ({path: steps}),
+        # newest last, and whether a worker is on them
+        self._lut_lock = threading.Lock()
+        self._lut_want = {}
+        self._lut_busy = False
         self._play_seq = 0
         self._stop_seq = 0
         self._sel_seq = 0
@@ -250,7 +258,9 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         offered = self._per_file_colour()
         sw = dict(self._lsw)
         look = {"offered": offered, "on": any(sw.values()), "sw": sw, "parts": None,
-                "orig": [], "rep": []}
+                "orig": [], "rep": [], "lut": {"orig": None, "rep": None}}
+        with self._lut_lock:
+            self._lut_want.clear()
         folder = self._assets_path()
         if offered and folder and os.path.isdir(folder):
             try:
@@ -263,10 +273,15 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
             switch = self._color_state(rel) if rel else None
             try:
                 from ...core import colour_profile
+                kw = dict(overlay_on=sw["overlay"], files_on=sw["files"],
+                          screen_on=sw["screen"], rel=rel)
                 look.update(colour_profile.video_look(
-                    folder, switch, self._own_colours(),
-                    overlay_on=sw["overlay"], files_on=sw["files"],
-                    screen_on=sw["screen"], rel=rel))
+                    folder, switch, self._own_colours(), **kw))
+                exact = colour_profile.video_look_exact(
+                    folder, switch, self._own_colours(), **kw)
+                prev = (self.get("look") or {}).get("lut") or {}
+                look["lut"] = {side: self._lut(exact[side], prev.get(side))
+                               for side in ("orig", "rep")}
             except Exception:                           # noqa: BLE001
                 log.exception("video machine look")
         if look != self.get("look"):
@@ -283,6 +298,43 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
             return False if var is None else bool(var.get())
         except Exception:                               # noqa: BLE001
             return False
+
+    def _lut(self, steps, prev):
+        """The colour table a player draws *steps* through (PAD-448: the
+        exact maths, colour ranges too): its path once built, ``None`` for
+        no steps.  One not built yet is built on a worker and the player
+        keeps *prev* meanwhile, so a slider dragged in the Colors bar never
+        holds the page up."""
+        from ...core import colour_profile
+        path = colour_profile.look_lut_path(steps)
+        if path is None or os.path.isfile(path):
+            return path
+        with self._lut_lock:
+            self._lut_want.pop(path, None)
+            self._lut_want[path] = steps
+            if self._lut_busy:
+                return prev
+            self._lut_busy = True
+        threading.Thread(target=self._lut_work, daemon=True,
+                         name="video-lut").start()
+        return prev
+
+    def _lut_work(self):
+        """Build the wanted colour tables, newest first; each one built
+        redraws the players, which then find it."""
+        from ...core import colour_profile
+        while True:
+            with self._lut_lock:
+                if not self._lut_want:
+                    self._lut_busy = False
+                    return
+                _path, steps = self._lut_want.popitem()
+            try:
+                colour_profile.build_look_lut(steps)
+            except Exception:                           # noqa: BLE001
+                log.exception("video colour table")
+                continue
+            self.ctx.loop.post(self.publish_look)
 
     @rpc
     def set_look_part(self, part, on):
@@ -1136,6 +1188,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self.log("Replace Video: %s." % msg, "info")
         self._save_staged()
         self._refresh_list()
+        if self._current:
+            self._reload_rep_pane(self._current)
         self._color_changed()
         self.publish_look()
         return True
@@ -1207,6 +1261,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                 rel, " (its original file is back)" if back else ""), "info")
         self._save_staged()
         self._refresh_list()
+        self._reload_rep_pane(rel)
         self._color_changed()
         self.publish_look()
         return True
@@ -2401,9 +2456,22 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         return {"can_clear": bool(rel and self._targets([rel])),
                 "has_pick": bool(rel and self._assign.get(rel))}
 
+    def _stock_coloured(self, rel):
+        """A game's own clip with its color profile attached (Advanced,
+        PAD-336): the card gets its original through the profile."""
+        return bool(rel and not self._assign.get(rel)
+                    and self._color_state(rel))
+
     def _rep_pane(self, rel):
-        """MainWindow._video_load_rep_pane."""
+        """MainWindow._video_load_rep_pane.  A game's own clip with its
+        color profile attached has no replacement: this player shows its
+        original through the profile, as the card will get it (PAD-448:
+        nothing on the tab showed the profile on such a clip)."""
         from ...core import staged_originals
+        if self._stock_coloured(rel):
+            pane = self._orig_pane(rel)
+            pane.update(side="rep", title=STOCK_COLOURED)
+            return pane
         self._pane_seq += 1
         rpath = self._assign.get(rel) if rel else None
         if rpath and os.path.isfile(rpath):
@@ -2520,23 +2588,14 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
     # ==================================================================
     def _cmp_sides(self, rel):
         """What a Compare player can show of *rel*: ``[[side, label]]``."""
+        if self._stock_coloured(rel):
+            return [["orig", "Original"], ["rep", STOCK_COLOURED]]
         if self._rep_pane(rel).get("path"):
             return [["orig", "Original"], ["rep", "Replacement"]]
-        if self._color_state(rel):
-            # a game's own clip with the profile attached (Advanced,
-            # PAD-336): the card gets the original through its profile
-            return [["orig", "Original"], ["rep", "With its color profile"]]
         return [["orig", "Original"]]
 
     def _cmp_pane(self, rel, side):
-        if side != "rep":
-            return self._orig_pane(rel)
-        pane = self._rep_pane(rel)
-        if pane.get("path") or not self._color_state(rel):
-            return pane
-        pane = self._orig_pane(rel)
-        pane.update(side="rep", title="With its color profile")
-        return pane
+        return self._rep_pane(rel) if side == "rep" else self._orig_pane(rel)
 
     def _cmp_tile(self, tid):
         return next((t for t in self._cmp if t["id"] == tid), None)
@@ -2545,7 +2604,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._cmp_ids += 1
         tile = {"id": self._cmp_ids, "rel": rel, "side": side,
                 "sides": self._cmp_sides(rel),
-                "pane": self._cmp_pane(rel, side), "look": []}
+                "pane": self._cmp_pane(rel, side), "look": [], "lut": None}
         self._cmp.append(tile)
         self._cmp_load(tile)
 
@@ -2572,6 +2631,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                 and os.path.isdir(folder)):
             for t in self._cmp:
                 t["look"] = []
+                t["lut"] = None
             return
         from ...core import colour_profile
         sw, own, done = self._lsw, self._own_colours(), {}
@@ -2579,18 +2639,24 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
             rel = t["rel"]
             if rel not in done:
                 try:
-                    done[rel] = colour_profile.video_look(
-                        folder, self._color_state(rel), own,
-                        overlay_on=sw["overlay"], files_on=sw["files"],
-                        screen_on=sw["screen"], rel=rel)
+                    kw = dict(overlay_on=sw["overlay"], files_on=sw["files"],
+                              screen_on=sw["screen"], rel=rel)
+                    switch = self._color_state(rel)
+                    done[rel] = (
+                        colour_profile.video_look(folder, switch, own, **kw),
+                        colour_profile.video_look_exact(folder, switch, own,
+                                                        **kw))
                 except Exception:                       # noqa: BLE001
                     log.exception("video compare look")
-                    done[rel] = {}
-            t["look"] = done[rel].get(t["side"]) or []
+                    done[rel] = ({}, {})
+            steps, exact = done[rel]
+            t["look"] = steps.get(t["side"]) or []
+            t["lut"] = self._lut(exact.get(t["side"]), t.get("lut"))
 
     def _cmp_publish(self):
         st = {"open": self._cmp_open, "max": COMPARE_MAX, "tiles": [
-            {k: t[k] for k in ("id", "rel", "side", "sides", "pane", "look")}
+            {k: t[k] for k in ("id", "rel", "side", "sides", "pane", "look",
+                               "lut")}
             for t in self._cmp] if self._cmp_open else []}
         if st != self.get("compare"):
             self.set(compare=st)
@@ -2610,6 +2676,11 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
             sides = self._cmp_sides(rel)
             side = t["side"] if any(k == t["side"] for k, _l in sides) \
                 else "orig"
+            if len(t["sides"]) == 1 and len(sides) > 1:
+                # PAD-448: a profile just attached to a game's own clip (or
+                # a replacement just picked) is what the player was put up
+                # to show
+                side = sides[-1][0]
             pane = self._cmp_pane(rel, side)
             moved = moved or side != t["side"] or sides != t["sides"]
             t["sides"] = sides

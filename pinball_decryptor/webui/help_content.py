@@ -514,10 +514,13 @@ HELP_CONTENT = {
                 {"icon": "lock", "tone": "info", "title": "Blue lock",
                  "text": "The game's own clip, never changed. **Advanced** on the toolbar "
                          "gives it a palette; detaching puts the original back."}]},
+            "A game's own clip with its color profile attached shows it on the right-hand "
+            "player, **With its color profile**: the original as the card will get it.",
             "### Preview colors\n"
             "Switches above the players show the clips as the machine will (preview "
-            "only; no re-encode). All off is your PC's own colors; click a name to open "
-            "it on the Color profile tab.",
+            "only; no re-encode), drawn the same way Scenes draws a picture, color ranges "
+            "and curves included, while they play. All off is your PC's own colors; "
+            "click a name to open it on the Color profile tab.",
             {"flow": [
                 {"icon": "image", "title": "Whole screen", "text": "the overlay"},
                 {"icon": "palette", "title": "Individual files",
@@ -534,6 +537,10 @@ HELP_CONTENT = {
             "- The clip you clicked is the one you hear; the others are muted.\n"
             "- **Play all**, **From the start** (every clip from its first frame, in "
             "step) and **Loop**. Each clip can switch between Original and Replacement.\n"
+            "- A game's own clip is marked on its player: **Locked**, or with **Advanced** "
+            "ticked at the top of Compare, **Game's own clip** and a palette under it. "
+            "Attach its color profile there and the player turns to **With its color "
+            "profile**.\n"
             "- **Close** or Esc goes back to the list.",
         ]),
         ("Which mode plays a clip (Spike 2)", [

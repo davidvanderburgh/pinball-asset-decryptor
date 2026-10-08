@@ -9,6 +9,7 @@ import { html, useEffect, useMemo, useRef, useState, PageHead, Button, Field, Ch
 import { useNs } from "../core/store.js";
 import { LookRow } from "../core/look.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
+import { LookGL } from "./video_gl.js";
 
 export const css = true;
 
@@ -222,6 +223,7 @@ function LookFilter({ id, steps }) {
 
 function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const vref = useRef(null);
+  const [glLive, setGlLive] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
   const [failed, setFailed] = useState(false);
@@ -302,18 +304,23 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   else if (!playing && pos === 0 && pane.poster_note && !pane.poster) overlay = html`<div class="hint">${pane.poster_note}</div>`;
 
   const steps = look && look.on ? look[side] : null;
+  // PAD-448: the exact colour table where WebGL draws it, else the SVG filter
+  const lut = look && look.on && look.lut ? look.lut[side] : null;
   const fid = "vid-look-" + side;
-  const fstyle = steps && steps.length ? `filter: url(#${fid})` : undefined;
+  const fstyle = steps && steps.length && !glLive ? `filter: url(#${fid})` : undefined;
+  const mediaKey = pane.path && src ? pane.seq + ":" + src : "";
   return html`<div class="vid-pane">
     ${head}
     <${LookFilter} id=${fid} steps=${steps} />
     <div class="vid-screen">
-      ${pane.path && src ? html`<video key=${pane.seq + ":" + src} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
+      ${mediaKey ? html`<video key=${mediaKey} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
           poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="metadata" playsinline
           onPlay=${() => setPlaying(true)} onPause=${() => setPlaying(false)} onEnded=${onEnded}
           onTimeUpdate=${(e) => { if (!e.currentTarget.paused) setPos(e.currentTarget.currentTime); }} onError=${onError}
           onLoadedData=${onReady} onCanPlay=${onReady}></video>`
         : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" style=${fstyle} />` : null}
+      ${look && look.offered && pane.path ? html`<${LookGL} media=${vref} mediaKey=${mediaKey} poster=${pane.poster}
+        lut=${lut} onLive=${setGlLive} />` : null}
       ${overlay}
     </div>
     <div class="row vid-transport">
@@ -337,22 +344,37 @@ const cmpPlayers = new Map();          // tile id -> <video>
 const LOOP_KEY = "pad.video.compare.loop";
 const loopAtStart = () => { try { return localStorage.getItem(LOOP_KEY) !== "0"; } catch (e) { return true; } };
 
+// PAD-448: a game's own clip says so under its player: locked, or (Advanced) its palette,
+// so its color profile is attached from here as from the list
 function CmpColor({ t, row, cs }) {
   if (!row || (row.col == null && !row.col_lock)) return null;
-  if (t.side !== "rep") return html`<div class="row vcm-color"><span class="small muted">The original, as it is now.</span></div>`;
+  if (row.col_lock) return html`<div class="row vcm-color">
+    <span class="vid-color locked" ...${tip(colorTip(row, cs))}><${Icon} name="lock" /></span>
+    <span class="small ellip muted">The game's own clip, locked: tick Advanced to give it a color profile.</span>
+  </div>`;
+  if (t.side !== "rep" && !row.col_stock) return html`<div class="row vcm-color"><span class="small muted">The original, as it is now.</span></div>`;
   const line = profileLine(row, cs);
   return html`<div class="row vcm-color">
-    ${row.col_lock ? html`<span class="vid-color locked" ...${tip(colorTip(row, cs))}><${Icon} name="lock" /></span>`
-      : html`<button type="button" class=${cx("vid-color", row.col ? "on" : "off", row.col_own && "own")}
-        aria-pressed=${row.col ? "true" : "false"} aria-label="Attach or detach this clip's color profile" ...${tip(colorTip(row, cs))}
-        onClick=${(e) => { e.stopPropagation(); call("video.set_color", row.rel, !row.col); }}><${Icon} name="palette" /></button>`}
-    <span class="small ellip">${row.col ? html`Color profile: <span class="vcm-cp">${line ? line.profile : ""}</span>`
-      : "No color profile attached"}</span>
+    <button type="button" class=${cx("vid-color", row.col ? "on" : "off", row.col_own && "own")}
+      aria-pressed=${row.col ? "true" : "false"} aria-label="Attach or detach this clip's color profile" ...${tip(colorTip(row, cs))}
+      onClick=${(e) => { e.stopPropagation(); call("video.set_color", row.rel, !row.col); }}><${Icon} name="palette" /></button>
+    <span class="small ellip">${!row.col ? "No color profile attached"
+      : t.side !== "rep" ? "The original, as it is now."
+      : html`Color profile: <span class="vcm-cp">${line ? line.profile : ""}</span>`}</span>
   </div>`;
 }
 
-function CmpTile({ t, row, cs, active, onPick, stopSeq, loop, canRemove, onState }) {
+// PAD-448 (DragonRR): a clear mark on each clip in Compare that is the game's own, locked or not
+function CmpBadge({ row, cs }) {
+  if (!row) return null;
+  if (row.col_lock) return html`<span class="vcm-badge locked" ...${tip(colorTip(row, cs))}><${Icon} name="lock" />Locked</span>`;
+  if (row.col_stock) return html`<span class="vcm-badge unlocked" ...${tip(colorTip(row, cs))}><${Icon} name="unlock" />Game's own clip</span>`;
+  return null;
+}
+
+function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove, onState }) {
   const vref = useRef(null);
+  const [glLive, setGlLive] = useState(false);
   const pane = t.pane || {};
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
@@ -394,7 +416,8 @@ function CmpTile({ t, row, cs, active, onPick, stopSeq, loop, canRemove, onState
 
   const steps = t.look || [];
   const fid = "vcm-look-" + t.id;
-  const fstyle = steps.length ? `filter: url(#${fid})` : undefined;
+  const fstyle = steps.length && !glLive ? `filter: url(#${fid})` : undefined;
+  const mediaKey = pane.path && src ? pane.seq + ":" + src : "";
   const sides = (t.sides || []).map(([value, label]) => ({ value, label }));
   const name = (row && row.name) || t.rel.split("/").pop();
   return html`<div class=${cx("vcm-tile", active && "on")}>
@@ -411,12 +434,15 @@ function CmpTile({ t, row, cs, active, onPick, stopSeq, loop, canRemove, onState
         aria-label=${"Pick " + name + " for the Color profiles bar"}
         onClick=${onPick} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
         ...${tip(active ? "The clip the Color profiles bar changes, and the one you hear." : "Click: the Color profiles bar changes this clip's colors, and it is the one you hear.")}>
-      ${pane.path && src ? html`<video key=${pane.seq + ":" + src} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
+      ${mediaKey ? html`<video key=${mediaKey} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
           poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="auto" playsinline loop=${loop} muted=${!active}
           onPlay=${() => seen(true)} onPause=${() => seen(false)} onEnded=${() => seen(false)}
           onTimeUpdate=${(e) => setPos(e.currentTarget.currentTime)} onSeeked=${(e) => setPos(e.currentTarget.currentTime)}
           onError=${() => { if (!pane.proxy && src) { setFailed(true); asked.current = 0; } }}></video>`
         : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" style=${fstyle} />` : null}
+      ${offered && pane.path ? html`<${LookGL} media=${vref} mediaKey=${mediaKey} poster=${pane.poster}
+        lut=${t.lut || null} onLive=${setGlLive} />` : null}
+      <${CmpBadge} row=${row} cs=${cs} />
       ${overlay}
     </div>
     <div class="row vid-transport">
@@ -430,7 +456,7 @@ function CmpTile({ t, row, cs, active, onPick, stopSeq, loop, canRemove, onState
   </div>`;
 }
 
-function CompareView({ cmp, byRel, cs, look, active, setActive, stopSeq, onOpenColors }) {
+function CompareView({ cmp, byRel, cs, look, active, setActive, stopSeq, onOpenColors, colorOffered, colorStock }) {
   const tiles = cmp.tiles || [];
   const [loop, setLoopState] = useState(loopAtStart);
   const [anyPlaying, setAnyPlaying] = useState(false);
@@ -457,6 +483,8 @@ function CompareView({ cmp, byRel, cs, look, active, setActive, stopSeq, onOpenC
           <${Button} icon=${anyPlaying ? "pause" : "play"} onClick=${playAll}>${anyPlaying ? "Pause all" : "Play all"}<//>
           <${Button} icon="refresh" onClick=${fromStart} title="Play every clip from its first frame at once, so they keep in step">From the start<//>
           <${Check} checked=${loop} label="Loop" cls="small" title="Play each clip over and over" onChange=${setLoop} />
+          ${colorOffered ? html`<span class="vcm-adv" ...${tip(ADV_TIP)}><${Check} checked=${colorStock} label="Advanced" cls="small"
+            onChange=${(v) => call("video.set_color_stock", v)} /></span>` : null}
           <${Button} kind="ghost" icon="x" onClick=${close} title="Back to the list (Esc)">Close<//>
         </div>
         <div class="small muted">${look.offered
@@ -465,7 +493,7 @@ function CompareView({ cmp, byRel, cs, look, active, setActive, stopSeq, onOpenC
       </div>
       ${look.offered ? html`<div class="vcm-look"><${LookRow} look=${look} ns="video" onOpen=${onOpenColors} /></div>` : null}
       <div class=${cx("vcm-grid", "n" + Math.min(n, 4))}>
-        ${tiles.map((t) => html`<${CmpTile} key=${t.id} t=${t} row=${byRel.get(t.rel)} cs=${cs} active=${t.id === active}
+        ${tiles.map((t) => html`<${CmpTile} key=${t.id} t=${t} row=${byRel.get(t.rel)} cs=${cs} offered=${!!look.offered} active=${t.id === active}
           onPick=${() => setActive(t.id)} stopSeq=${stopSeq} loop=${loop} canRemove=${n > 1} onState=${onState} />`)}
       </div>
     </section>
@@ -997,7 +1025,7 @@ export default function VideoTab() {
   if (cmpOpen) {
     return withBar(html`<${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
       active=${activeTile ? activeTile.id : null} setActive=${setCmpActive} stopSeq=${s.stop_seq}
-      onOpenColors=${colorNs.has_project ? openColors : undefined} />`);
+      onOpenColors=${colorNs.has_project ? openColors : undefined} colorOffered=${!!s.color_offered} colorStock=${!!s.color_stock} />`);
   }
   return withBar(html`<div class="page vid-page">
     <${PageHead} title="Video" sub=${html`${T.intro}<span class="vid-project small"><span class="lbl0">Project folder:</span>

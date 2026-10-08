@@ -8618,18 +8618,20 @@ def _install_modes(output_path, modes, landed, planned, log):
                 "land), so do not use this card: fix the issue above and Write "
                 "again.", "error")
         else:
-            log("Random clips: not every file reached the card, so the mode "
-                "runtime that picks them was NOT put on the system partition. "
-                "The rewritten video bank may already be on it, so do not use "
-                "this card: fix the issue above and Write again.", "error")
+            # words a copy with the mode maker switched off may show (PAD-446)
+            log("Random clips: not every file reached the card, so the program "
+                "that picks them was NOT put on the system partition. The "
+                "rewritten video bank may already be on it, so do not use this "
+                "card: fix the issue above and Write again.", "error")
         return None, False
     try:
         _MW.install_p2(output_path, modes["payload"], modes["p2_epoch"],
                        log=log, modes=who == "Modes")
     except Exception as e:                   # the executor's CommandError too
-        log("%s: the mode runtime could not be put on the card's system "
-            "partition, so this card carries no %s: %s"
-            % (who, "modes" if who == "Modes" else "random clips", e), "error")
+        log("%s: the %s could not be put on the card's system partition, so "
+            "this card carries no %s: %s"
+            % (who, "mode runtime" if who == "Modes" else "program that picks them",
+               "modes" if who == "Modes" else "random clips", e), "error")
         return None, False
     for rel in modes.get("added") or ():
         log("%s: added %s." % (who, rel), "info")
@@ -8638,8 +8640,9 @@ def _install_modes(output_path, modes, landed, planned, log):
     for name in modes.get("p2") or ():
         log("%s: added %s/%s on the system partition." % (who, _MW.P2_DIR, name),
             "info")
-    log("%s: /etc/init.d/game_monitor now loads the mode runtime (port %s)."
-        % (who, modes.get("port")), "info")
+    log("%s: /etc/init.d/game_monitor now loads the %s (port %s)."
+        % (who, "mode runtime" if who == "Modes" else "program that picks them",
+           modes.get("port")), "info")
     snd = modes.get("end_sound")
     if snd:
         log("Modes: request %d (sound idx %d) plays %s's own end sound."

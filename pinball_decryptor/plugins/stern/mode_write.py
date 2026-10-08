@@ -873,7 +873,12 @@ def variants_plan(project, stock_bank, game_elf, scratch, prof, log=None, progre
     why = CV.title_refusal(prof)
     if why:
         raise ModeWriteError(why)
-    port = find_port(prof, game_elf)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        # neutral words: a copy with the mode maker switched off says this too
+        raise ModeWriteError("this card's game program is not the %s the app knows how to swap "
+                             "clips on" % prof.label) from None
     result = ModePlan(project=project, profile=prof, port=port, build=None)
     tree = os.path.join(scratch, "tree")
     os.makedirs(tree, exist_ok=True)

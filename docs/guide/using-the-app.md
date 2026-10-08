@@ -233,9 +233,9 @@ battles, awards, bonuses); a clip a scene plays on its own, like an
 attract loop, says *Why not this clip?* instead. The extra clips are
 converted to the slot's format like a replacement and added to the
 card as new files, so it takes an image build (not a direct SD
-write), and the card gets the small mode runtime that does the
-picking. With no modes on the card the runtime does nothing else,
-and the machine still reports its scores to Insider Connected.
+write), and the card gets a small program that does the picking.
+It does nothing else, and the machine still reports its scores to
+Insider Connected.
 
 ## Write tab
 

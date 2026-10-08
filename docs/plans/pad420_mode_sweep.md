@@ -396,6 +396,28 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       bus node (it joins on switch names) and the LED view draws them dark; the title's node directory has four
       ws2812node boards (King Kong Pro nodes 2, 7, 12, 14) they must belong to. Emulator work (the LED view, PAD-311's
       area): map an LED-only group to its ws2812 node by what the game sends each node.
+    * Run 15 (2026-10-08 05:30-): four rigs (one sometimes PAD-450's). Landed: Venom LE up post; James Bond LE/Pro
+      control gate and the LE's jet pack magnet; stack on King Kong Pro, Mandalorian LE/Pro, John Wick LE; media on
+      Foo Fighters Pro, John Wick LE/Pro, King Kong Pro.
+      - **Batman 66 1.14 has a port** (9ec8ce31). Its checks failed because Check this game pressed "Turntable Pos.
+        #2" / "Crane Pos. #5" (mechanism sensors, past the POSITION rule): the ball stayed in play for ever, a drain
+        filling the trough with no ball end and no serve. gamecheck.sh skips `POS\.` now and says each drain's own
+        answer (96f19732). chain45 runs its media, multiball, ball save, stack (ball count) and lights proofs; block,
+        magnet, scoop and coils need deriving (1.13's block sites are not on 1.14).
+      - **John Wick's locations are base play** (440aecb0, `text stack_base_names cmode_location_`): one runs for
+        nearly all of a ball, so a stack-no mode waiting for it would hardly ever start. LE and Pro re-proven on it
+        (Tick Tock refused the mode; the runtime named John Wick's House as base play).
+      - **Mode > Magnet by a held coil** (2b2ca35f, `text magnet_coil <coil>`, `value magnet_shot`): King Kong LE/Pro,
+        Avengers LE/Pro, Jurassic Park LE, James Bond LE - the shot nearest the magnet on the playfield picture
+        (`magnet/near.py`, lights/dxy). chain47 runs `magnet/magnet_job.sh` (two grabs and a stop mid-grab); land
+        each into MAGNET_PROVEN. Munsters' devices have no picture positions (its magnet shot is not picked yet).
+      - cardstage.sh stages a card only whole (1b52e9b1): a refused rename out of .inflight had left an EMPTY card
+        that Munsters Pro's multiball job booted. chain43 re-runs that job with TAKE=2 (four balls home): its two
+        runs went 2 -> 0 in play with four balls home, a four-ball game on the rig's six?
+      - Hung WSL interop wrappers (robocopy.exe, powershell.exe under killgame.sh) still happen; killing the
+        `/init /mnt/c/Windows/...` wrapper lets a batch go on (that build then fails staging and is re-run).
+      - `tests/test_spike2_rig_slots.py::test_rigbatch_boots_staged_copies_and_reuses_them` fails under Git Bash
+        (rigbatch.sh needs setsid); it passes in WSL - not a regression.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

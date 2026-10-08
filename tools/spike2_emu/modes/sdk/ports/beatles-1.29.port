@@ -497,3 +497,18 @@ value block_ret_1           0
 value block_ret_2           0
 value block_ret_3           0
 value block_ret_4           0
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c3.sh: held 2000 ms as a mode started, ONE command at the game's own powers - its TopMagnet's
+# hold, 190 for 1000 ms then 22 - ended on the board by itself; let go early by a mode stop, the game's OFF)
+site proc_exists          0x001ac098 0xe3052d00 0xe340205b
+site proc_create          0x001aba68 0xe305cd00 0xe340c05b
+site proc_sleep           0x001abb98 0xe3053d00 0xe340305b
+site adjustment           0x001a7f28 0xe92d40f0 0xe2504000
+site coil_fire             0x000c81e0 0xe3500000 0xe52de004
+data coil_count            0x005c1670
+data coil_table            0x00587120
+value magnet_proc          13185
+text magnet_top_label     Magnet top
+text magnet_top_drive     9 6 190 1000 22
+text held_coils            magnet_top

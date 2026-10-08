@@ -164,7 +164,25 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     commit. Aerosmith Pro 1.16 landed (frames looked at: the clip's title card and the boxed screen both up).
   - Order, so nothing starves the rigs (faster-whisper on several cores beside two rigs made the games hit their
     10 s watchdog): chain10's media batch, then chain18 (re-runs every build whose media verdict is not both
-    PROVEN, then writes media/RETRIES_DONE), then `t2/voices_after_media.py` starts the transcription.
+    PROVEN, then writes media/RETRIES_DONE), then chain19 (the scoop batch, `scoop/SCOOP_DONE`), then chain20 (the
+    generation-B held coils, `coils/COILS_DONE`), then `t2/voices_after_media.py` (it waits for COILS_DONE) starts
+    the transcription. Never edit a chain or job script while it runs: bash reads it as it goes (Guardians Pro's
+    first media run died on a mid-run edit of proof_job2.sh).
+  - Iron Maiden LE/Pro 1.18's clip: the port carried the game's own video getter (a demand-loaded bank's surface,
+    which has none of our clips), so the clip was never played; dropped (run 7), staged into both proof sets, and
+    chain18 re-proves it.
+  - chain19, the scoop (`C:/tmp/PAD-420/scoop`): `mkstage.py` stages the branch's port + only the scoop lines the
+    mechanisms helper placed (handler, slot, event, event argument, process calls; every site and slot checked
+    against the program), the pinned runtime and a 4 s hold; `scoop_job.sh` (rigbatch) times the game's kick with
+    no mode, in the mode, at a mode stop and after it. Land a build when the hold kick is ~4 s after the no-mode
+    one, the stop lets go at once, and mode.log says "let go after 4000 ms": add `scoop/stage/<key>.lines` to the
+    port (`coils/scoop_lines.py` does it from a stage port), `SCOOP_PROVEN`, recipes, limits table, tests, commit.
+  - chain20, held coils on generation B (`C:/tmp/PAD-420/coils`): `bderived.py <key>` reads each build's
+    `spike::ControlCoil` getters, devices, control offset, take/give and each subclass's own "on" (the game's own
+    hold command); `mkstage_b.py` stages them; `coil_job.sh` boots once with `value coil_list 1` for the board
+    addresses (`fill_b.py`), then again holding every coil 2000 ms as the mode starts, and once stopped 1.5 s in.
+    Land a coil when [coildrive] shows ONE command at its own powers on its address, the game's OFF ~2 s on, an
+    early OFF at the stop, and no abort: the `run/` port lines into the port, `HELD_COILS_PROVEN`, tests, commit.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.
@@ -203,7 +221,9 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
 | multiball, ball save, stack | the 32 new builds (plus Elvira, Venom LE, TMNT LE, Godzilla LE ball save) | `MULTIBALL_PROVEN`, `BALL_SAVE_PROVEN`, `STACK_BALLS_PROVEN`: `C:\tmp\pad_generic\mb\mb_batch.sh`, `bs\bs_job.sh` through `rigbatch.sh` |
 | lights | the new builds whose `lamp` lines are not yet tied (Pro siblings of an LE port), and `LAMPS_PROVEN` for all 32 | the lights helper's branch `ticket/PAD-420-lights` ties 15 shipped builds' inserts to their shots (desk; its emulator trials failed to boot, not yet proven) |
 | shows | every title but Godzilla Premium/LE | per title: the show processes in its registry, each played by `show_reel_mode.c` and measured at the LED view (MODE_SDK.md "The game's own light shows"); scratch in `C:\tmp\PAD-420\shows` |
-| magnet, scoop, held coils | every title outside generation A (census: docs/plans/mode_coils_census.md) | A' and B: align the ControlCoil vtable slots; C (the Device framework, most titles): `ticket/PAD-420-mechs` has an unbuilt, unproven WIP that holds a coil by its node-board address |
+| scoop | proven (run 7) on Avengers LE 1.10, D&D LE 1.10, Guardians LE 1.15, Iron Maiden LE 1.18, Aerosmith LE 1.16 (the mechanisms helper's runs); 25 more staged (chain19) | Deadpool LE/Pro and James Bond Pro: the handler never saw a settled ball (a call probe of the device's handler next); Aerosmith Pro, Batman, JB 60th: the job closed the wrong switch (fix `mechs_conf.SCOOP`) |
+| held coils | the runtime holds a coil by its board address (the helper's WIP, built and pinned run 7); generation B's coils read off the programs (`coils/bderived.py`): Iron Maiden LE/Pro up posts, the orbit/control gates of Deadpool LE/Pro, Led Zeppelin LE/Pro, Sword of Rage LE/Pro, Star Wars ELG; staged (chain20) | A' (Avengers, Jurassic Park LE) and C (the Device framework, most titles): each title's classes keep the control field elsewhere (Aerosmith LE's gate +0x18, its magnet +0x14); the same reading per title, then the same route. Every hold power must be the game's own (a mode file reaches real machines) |
+| magnet (Mode > Magnet) | Godzilla only | the magnet part also needs `magnet_shot`; a title's magnet can be offered as a held coil first |
 | shaker | none here | PAD-414 (awaiting approval) adds the shaker part; `ticket/PAD-420-shaker` is a duplicate and is not merged |
 | countdown | Aerosmith, John Wick, Elvira: the voice never says a number | `COUNTDOWN_NO_NUMBERS`: decide with David whether a countdown there is a number on screen only, with the section saying so in grey |
 

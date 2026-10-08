@@ -317,7 +317,9 @@ text upper_gate_drive     10 0 255 250 255 1488
 data upper_gate_obj      0x0061eb38
 value upper_gate_ctl      12
 value upper_gate_off_slot 5
-text held_coils            upper_gate
+text toy_box_magnet_label Toy box magnet
+text toy_box_magnet_drive 9 0 255 1000 16
+text held_coils            upper_gate toy_box_magnet
 
 # PAD-420: the other modes' record ids, from aerosmith_le-1.15's proven port (the game's own ids; proven here by a stack run)
 value mode_records_1       0x00f500f3      # Super Scoring: ids 243..245 (the older build's + 4: its start's mov r0, #id)

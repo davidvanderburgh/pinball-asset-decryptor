@@ -369,3 +369,6 @@ value scoop_event          2
 site lamp_free_owner      0x0033c880 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0xd0
 value proc_exit_slots      4
+# PAD-420: the game's kill by id (id, 0xffff), which stops a show of the runtime's - the same code as the
+# event_cancel of the 45 other ports that name it (shows/findcancel.py)
+site event_cancel     0x002f6644 0xe92d40f8 0xe3016480

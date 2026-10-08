@@ -123,7 +123,8 @@ case "$cmd" in
         # have a later stock run take THOSE out.
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
-              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/gamecheck.on "$DUMP"/census.mark
+              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/gamecheck.on \
+              "$DUMP"/census.mark
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
         # the Modes tab's Check this game: the object logs what the game sends (mode_file.c)
@@ -140,6 +141,10 @@ case "$cmd" in
         if [ -f "$S/stock.cfg" ]; then
             put "$S/stock.cfg" "$DUMP/stock.cfg" || die "could not copy stock.cfg"
         fi
+        # PAD-446: the clips that play one of several at random, read beside the mode files
+        if [ -f "$S/clips.cfg" ]; then
+            put "$S/clips.cfg" "$DUMP/clips.cfg" || die "could not copy clips.cfg"
+        fi
         a=0
         for f in "$S"/*.assets; do       # a code mode's own assets (the build's carriers)
             [ -f "$f" ] || continue
@@ -155,7 +160,7 @@ case "$cmd" in
         # game reads them as root), so it is said, not fatal.
         if [ "$(id -u)" = 0 ]; then
             given=("$LIB/pad_mode.so" "$DUMP/game.port")
-            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/gamecheck.on; do
+            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/gamecheck.on; do
                 [ -f "$f" ] && given+=("$f")
             done
             pad_give_back "${given[@]}"

@@ -29,7 +29,7 @@ SECTIONS = {
     "video": ("video", "video_asis_slots", "video_length_slots",
               "video_trim", "video_no_conversion", "video_best_quality",
               "video_color_slots", "color_all_videos", "video_color_stock",
-              "video_color_profiles"),
+              "video_color_profiles", "video_variants"),
 }
 #: The section holding each media tab's replacement picks.
 PICKS = {"images": "image", "audio": "audio", "video": "video"}

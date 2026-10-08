@@ -420,7 +420,7 @@ def test_an_install_with_neither_a_mode_file_nor_assets_or_a_bad_name_is_refused
 
     card = _mkcard(tmp_path)
     so, _cfg = _payload(tmp_path)
-    with pytest.raises(mk.Refused, match="no mode file and no code mode's assets"):
+    with pytest.raises(mk.Refused, match="no mode file, no code mode's assets and no clips.cfg"):
         mi.install(card, so, None)
     bad = tmp_path / "Bad Name.assets"
     bad.write_text("name X\n")
@@ -437,3 +437,28 @@ def test_cli_takes_asset_files_and_no_cfg(tmp_path):
     (a,) = _assets(tmp_path, "anguirus_assist")
     assert mi.main(["install", card, "--so", so, "--asset", a]) == 0
     assert set(mi.inspect(card)["files"]) == {"mode.so", "anguirus_assist.assets"}
+
+
+def test_a_card_of_clip_variants_only_needs_no_mode_file(tmp_path):
+    """PAD-446: clips.cfg (the clips that play one of several at random) is an install on its own,
+    and a later install without it takes it off again."""
+    import mkmulticard as mk
+    import mode_install as mi
+
+    card = _mkcard(tmp_path)
+    so, cfg = _payload(tmp_path)
+    port = tmp_path / "game.port"
+    port.write_text("game godzilla_pro\nversion 1.16\n")
+    clips = tmp_path / "clips.cfg"
+    clips.write_text("only\nclip\tMothra_godzilla_attack20\tMothra_godzilla_attack20__PadVar2\n")
+    names = mi.install(card, so, None, str(port), extras=[str(clips)])
+    assert names == ["clips.cfg", "game.port", "mode.so"]
+    ref, _off = mi._ref(card)
+    assert mk.debugfs_cat(ref, mi.MODE_DIR + "/clips.cfg") == clips.read_bytes()
+    assert mk.debugfs_stat(ref, mi.MODE_DIR + "/clips.cfg")["mode"] == 0o644
+    assert mk.e2fsck(ref)[0] == 0
+    # modes later, without variants: the table goes
+    mi.install(card, so, cfg, str(port))
+    assert set(mi.inspect(card)["files"]) == {"mode.so", "mode.cfg", "game.port"}
+    assert sorted(mi.remove(card)) == ["game.port", "mode.cfg", "mode.so"]
+    assert not mk.debugfs_exists(ref, mi.MODE_DIR)

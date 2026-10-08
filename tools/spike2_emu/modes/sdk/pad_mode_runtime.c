@@ -7063,6 +7063,199 @@ static int insider_arm(void)
     return 1;
 }
 
+/* ---- clip variants (PAD-446): one of the game's clips, one of several at random -------------------
+ * The Video tab lets a clip of the in-game video bank have more clips than its own. The build adds each
+ * extra one to the bank under a name of its own and lists them in clips.cfg beside the mode files
+ * (/usr/local/padmode/clips.cfg on a card, /dump/clips.cfg in the rig), one TAB-separated line each:
+ *
+ *     only                                     the card carries no modes: arm this and nothing else
+ *     clip <TAB> <the game's name> <TAB> <name> [<TAB> <name> ...]
+ *
+ * Every time the game asks for the clip, one of the line's clips plays: its own (the game's, or the
+ * replacement over it) or one of the names after it, at random and never the same one twice in a row.
+ * The game asks by NAME (clip_play's r0, a C string; on a clip v2 build surface_set_video's r1, a
+ * std::string, on the video bank's own surface only), so the swap is the name in the saved registers,
+ * the way on_sound_lookup swaps a sound key. Asking again for the clip that is still playing gets the
+ * same pick: the game does not start a playing clip again, and a new pick would.
+ *
+ * "only" is the build's word for a card of variants and nothing else: the score gate (insider_arm)
+ * keeps a MODE's points off Insider Connected, and a card whose only change is which clip plays has
+ * no points of ours to keep off, so the runtime arms this hook and returns. The file is read once, at
+ * start; no line, or no file, and nothing here is hooked. */
+#define CLIPV_FILE_MAX  32768
+#define CLIPV_SLOTS     512
+#define CLIPV_PICKS     16                  /* the game's own clip and up to 15 more */
+#define CLIPV_SAY_MAX   200
+static const char *const CLIPV_FILES[] = { "/usr/local/padmode/clips.cfg", "/dump/clips.cfg" };
+struct clipv {
+    const char *name[CLIPV_PICKS];          /* [0] the game's own name */
+    unsigned str[CLIPV_PICKS];              /* clip v2: each name as a std::string, made at first use */
+    unsigned n, last, plays;
+};
+static char clipv_raw[CLIPV_FILE_MAX + 1];
+static struct clipv clipv[CLIPV_SLOTS];
+static unsigned n_clipv, clipv_rng, clipv_says;
+static int clipv_only, clipv_dropped;
+static struct clipv *volatile clipv_now;    /* the clip the game asked for last */
+static volatile int clipv_in;               /* clip v2: inside our own surface lookup */
+
+/* one line, split in place at its TABs */
+static void clipv_line(char *s)
+{
+    char *f[CLIPV_PICKS + 2];
+    unsigned n = 0, k;
+    struct clipv *v;
+    while (*s == ' ') s++;
+    if (*s == '#' || !*s) return;
+    for (;;) {
+        if (n < CLIPV_PICKS + 2) f[n++] = s;
+        while (*s && *s != '\t') s++;
+        if (!*s) break;
+        *s++ = 0;
+    }
+    if (n == 1 && str_eq(f[0], "only")) { clipv_only = 1; return; }
+    if (!str_eq(f[0], "clip") || n < 3 || !*f[1]) return;
+    if (n_clipv >= CLIPV_SLOTS) { clipv_dropped++; return; }
+    v = &clipv[n_clipv];
+    for (k = 1; k < n && v->n < CLIPV_PICKS; k++)
+        if (*f[k]) v->name[v->n++] = f[k];
+    if (v->n < 2) { v->n = 0; return; }
+    v->last = CLIPV_PICKS;
+    n_clipv++;
+}
+
+static int clipv_read(void)
+{
+    long n = -1, i, start = 0;
+    unsigned k;
+    for (k = 0; k < sizeof CLIPV_FILES / sizeof CLIPV_FILES[0] && n < 0; k++)
+        n = pm_read_file(CLIPV_FILES[k], clipv_raw, CLIPV_FILE_MAX);
+    if (n <= 0) return 0;
+    clipv_raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || clipv_raw[i] == '\n' || clipv_raw[i] == '\r') {
+            clipv_raw[i] = 0;
+            clipv_line(clipv_raw + start);
+            start = i + 1;
+        }
+    return 1;
+}
+
+static struct clipv *clipv_find(const char *name)
+{
+    unsigned i;
+    if (!name || !*name) return 0;
+    for (i = 0; i < n_clipv; i++)
+        if (str_eq(clipv[i].name[0], name)) return &clipv[i];
+    return 0;
+}
+
+/* xorshift32, stirred with the clock at every pick: when the game asks varies with the play */
+static unsigned clipv_rand(void)
+{
+    struct { long s, ns; } t;
+    unsigned x;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    x = clipv_rng ^ (unsigned)t.ns ^ ((unsigned)t.s << 20);
+    if (!x) x = 0x9e3779b9u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return clipv_rng = x;
+}
+
+/* which of the slot's clips plays: any, the first time; after that any but the last one */
+static unsigned clipv_pick(struct clipv *v)
+{
+    unsigned k;
+    if (v->last >= v->n) return clipv_rand() % v->n;
+    k = clipv_rand() % (v->n - 1);
+    return k >= v->last ? k + 1 : k;
+}
+
+static int clipv_playing(void *surface)
+{
+    return surface && ((int (*)(void *))(unsigned long)fn("surface_state"))(surface)
+                      == (int)pm_port_value("surface_playing", 2);
+}
+
+/* the pick for a game's ask of `v` (0 = its own clip), the same one while that clip still plays */
+static unsigned clipv_choose(struct clipv *v, void *surface)
+{
+    unsigned k;
+    if (v == clipv_now && v->last < v->n && clipv_playing(surface)) return v->last;
+    k = clipv_pick(v);
+    v->last = k;
+    v->plays++;
+    clipv_now = v;
+    if (clipv_says < CLIPV_SAY_MAX || !(v->plays % 50)) {
+        clipv_says++;
+        say("clip variants: \"%s\" asked for (%u time(s)) - \"%s\" plays, %u of %u", v->name[0], v->plays,
+            v->name[k], k + 1, v->n);
+    }
+    return k;
+}
+
+/* clip_play(name, loop, crop): the name in r0 */
+static void on_clipv_play(unsigned *r)
+{
+    struct clipv *v = clipv_find((const char *)(unsigned long)r[0]);
+    unsigned k;
+    if (!v) { clipv_now = 0; return; }
+    k = clipv_choose(v, ((void *(*)(void))(unsigned long)fn("video_surface"))());
+    if (k) r[0] = (unsigned)(unsigned long)v->name[k];
+}
+
+/* clip v2: surface_set_video(surface, &name), on the bank's surface only (a scene's own surface
+ * may have a clip of the same name, and none of ours) */
+static void on_clipv_set_video(unsigned *r)
+{
+    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    struct clipv *v;
+    void *bank;
+    unsigned k;
+    if (clipv_in || !s) return;
+    v = clipv_find((const char *)(unsigned long)s[0]);
+    if (!v) return;
+    clipv_in = 1;
+    bank = clip2_surface();
+    clipv_in = 0;
+    if (!bank || (unsigned)(unsigned long)bank != r[0]) return;
+    k = clipv_choose(v, bank);
+    if (!k) return;
+    if (!v->str[k]) v->str[k] = std_string(v->name[k]);
+    if (v->str[k]) r[1] = (unsigned)(unsigned long)&v->str[k];
+}
+
+/* from the constructor, after the port gate: read clips.cfg and hook the game's ask */
+static void clipv_arm(void)
+{
+    static const char *const v1_s[] = { "clip_play", "video_surface", "surface_state", 0 };
+    static const char *const v2_s[] = { "surface_find", "surface_set_video", "surface_state", "string_new",
+                                        "resource_get", "dynamic_cast", 0 };
+    static const char *const v2_d[] = { "resource_manager", "typeinfo_resource", "typeinfo_scene_player", 0 };
+    static const char *const v2_v[] = { "scene_player_scene", 0 };
+    if (!clipv_read()) return;
+    if (clipv_dropped)
+        say("clip variants: %d line(s) not read - the table holds %d clips", clipv_dropped, CLIPV_SLOTS);
+    if (!n_clipv) {
+        say("clip variants: %s has no clip line - nothing hooked", "clips.cfg");
+        return;
+    }
+    if (have_sites(v1_s) && hook(fn("clip_play"), on_clipv_play)) {
+        say("clip variants: %u clip(s) play one of several at random (clip_play 0x%08x)", n_clipv, fn("clip_play"));
+    } else if (have_sites(v2_s) && have_data(v2_d) && have_values(v2_v)
+               && (pm_scene_id("video_bank") || site("video_surface"))
+               && hook(fn("surface_set_video"), on_clipv_set_video)) {
+        say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08x, the bank's "
+            "surface only)", n_clipv, fn("surface_set_video"));
+    } else {
+        n_clipv = 0;
+        say("clip variants: off - the port has no clip_play, and no clip v2 lines that match this build; "
+            "every clip plays the game's own");
+    }
+}
+
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -7083,6 +7276,11 @@ static void pad_mode_start(void)
             port.dropped, port.n_site, N_SITES, port.n_data, N_DATA, port.n_value, N_VALUES, port.n_shot, N_SHOTS,
             port.n_switch, N_SWITCHES);
     if (!port_gate()) return;
+    clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
+    if (clipv_only) {
+        say("armed: clip variants only (clips.cfg says the card has no modes) - nothing else is hooked");
+        return;
+    }
     if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */
     {
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };

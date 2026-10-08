@@ -479,3 +479,44 @@ def test_a_card_from_before_per_image_sets_gives_every_image_the_primarys(tmp_pa
     assert r.returncode == 0 and r.stdout.splitlines()[-1] == "/lib/pad_mode.so"
     assert (root / "lib" / "pad_mode.so").read_bytes() == OBJECT
     assert "[modes] this card carries 3 mode(s)" in r.stderr
+
+
+@needs_rig_tools
+def test_a_card_of_random_clips_only_runs_its_runtime_too(tmp_path):
+    """PAD-446: a card whose only change of ours is its random clips carries the object, the port and
+    clips.cfg, and no mode file. The emulator puts the table in the guest beside the port, says what
+    the card carries, and a later stock run takes it out with the rest."""
+    import mode_install as mi
+
+    card = _mkcard(tmp_path)
+    src = tmp_path / "payload"
+    src.mkdir()
+    (src / "mode.so").write_bytes(OBJECT)
+    (src / "game.port").write_text(PORT)
+    clips = src / "clips.cfg"
+    clips.write_text("# PAD-446\nonly\nclip\tEndOfBallBonus_BackgroundLoop\t"
+                     "EndOfBallBonus_BackgroundLoop__PadVar2\n")
+    mi.install(card, str(src / "mode.so"), None, str(src / "game.port"), extras=[str(clips)])
+    root = _guest(tmp_path)
+    r = _run(tmp_path, root, card)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[-1] == "/lib/pad_mode.so"
+    assert _dump(root) == ["cardmodes.from", "clips.cfg", "game.port"]
+    assert (root / "dump" / "clips.cfg").read_bytes() == clips.read_bytes()
+    said = [ln for ln in r.stderr.splitlines() if ln.startswith("[modes] ")]
+    assert said == ["[modes] this card carries 1 clip(s) that play one of several at random: "
+                    "their runtime runs in this game, as on the machine"]
+    stock = _mkcard(tmp_path, "stock")
+    r = _run(tmp_path, root, stock)
+    assert r.returncode == 0 and _dump(root) == []
+
+
+def test_tryit_install_carries_the_random_clips_table():
+    """PAD-446: tryit.sh install (the card's own set, Try it, the Emulate tab's override set) puts
+    clips.cfg beside the port, clears an earlier one first, and cardmodes.sh forgets it."""
+    tryit, cardmodes = _text("modes", "tryit.sh"), _text("modes", "cardmodes.sh")
+    install = tryit[tryit.index("    install)"):tryit.index("    start)")]
+    assert '"$DUMP"/clips.cfg' in install[:install.index('put "$S/pad_mode.so"')]
+    assert 'put "$S/clips.cfg" "$DUMP/clips.cfg"' in install
+    forget = cardmodes[cardmodes.index("forget() {"):cardmodes.index("names_of()")]
+    assert '"$DUMP/clips.cfg"' in forget

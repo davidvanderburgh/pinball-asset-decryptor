@@ -220,6 +220,38 @@ a file in the folder by what it looks like — names and file types
 don't matter, a colour clip is told from its black-and-white twin,
 and where the folder holds the same video more than once the best
 copy wins. Tick what you want and *Use these files at best quality*.
+**Random clips (Stern Spike 2, Godzilla Pro and Premium/LE 1.16).**
+Right-click a row and pick *Random clips → Add clips to play at
+random…* to give that slot more clips than its own: each time the
+game plays the slot's clip it plays one of them instead, at random,
+never the same one twice in a row. The slot's own clip (the game's,
+or your replacement) is one of the turn. The row shows a shuffle
+badge with how many extra clips it has, the note under the players
+names them, and the same menu takes each one off again. It works for
+the clips the game plays by name (the in-game video bank: modes,
+battles, awards, bonuses); a clip a scene plays on its own, like an
+attract loop, says *Why not this clip?* instead. The extra clips are
+converted to the slot's format like a replacement and added to the
+card as new files, so it takes an image build (not a direct SD
+write), and the card gets a small program that does the picking.
+It does nothing else, and the machine still reports its scores to
+Insider Connected.
+**Played in (Stern Spike 2 titles whose modes the app can tell apart,
+such as Godzilla).** The *Played in* column names the battles,
+multiballs and other modes of the game that play each clip, read from
+the card's game program, and the list beside *All / Changed /
+Unchanged* shows one mode's clips only. *Other parts of the game*
+are clips only main play, attract or the select screens use; *Not
+played* clips are ones nothing in the game asks for, so the machine
+never shows them and a replacement there changes nothing. A clip two
+modes share (on Godzilla 1.16: two clips of the Gigan battle and the
+Ghidorah and Gigan tag team, one of Battle vs Megalon and the Megalon
+and Gigan multiball) has a row for each mode: the second row, marked
+with an arrow, says *Same clip as* the first until you choose a
+replacement in it, and then only that mode plays yours. That mode's
+clip goes on the card as a new clip, so it takes an image build (not
+a direct SD write); clear the replacement and the row follows the
+first again.
 
 ## Write tab
 
@@ -303,6 +335,20 @@ was meant for. Scene pictures and font glyphs are named with a
 fingerprint of the card they came off, so copies from another card's
 extract never pair by name; **Transfer Mods to New Version** carries
 those over by content.
+**Find originals…**, beside it on the Audio and Images tabs, is the
+same search by content for your own files. Carrying a built card's
+mods into a project with *Transfer Mods to New Version* picks the
+card's own copy of every replaced sound and picture, which the build
+that made that card had already converted once. Point Find originals
+at the folder your own files are in and every pick on the tab is
+compared with every file in it by how it sounds or looks, so names,
+levels, sample rates, sizes and file types don't matter; where the
+folder has the same file twice, the better copy wins, and files that
+are part of an extract (copies off a card) are never offered. Each
+row shows the copy and the file found side by side (▶ for a sound, a
+thumbnail for a picture) and amber rows are worth a look. Tick what
+you want and *Use these files*: the next Write converts from your
+originals.
 
 ## Mod Pack tab
 

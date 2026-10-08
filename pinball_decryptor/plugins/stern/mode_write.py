@@ -556,6 +556,12 @@ class ModePlan:
     #: item 160: the "counts as" table for the game's own rules (``stock.cfg`` beside the mode
     #: files), or "" when the project has no rows
     stock_file: str = ""
+    #: PAD-446: the clips that play one of several at random (:mod:`.clip_variants`): their build
+    #: (None when the project has none) and ``clips.cfg`` beside the mode files ("" = none)
+    variants: object = None
+    clips_file: str = ""
+    #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
+    mode_names: list = field(default_factory=list)
 
     @property
     def jobs(self):
@@ -759,19 +765,28 @@ def mode_file_text(project, slug, spec, own_sounds):
 
 
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
-         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b""):
+         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"",
+         modes_on=True, variants=False, variants_prof=None, cancel=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
     settles it before the sound bank is staged); ``"choose"`` asks
     :func:`choose_end_sound`. *own_sounds* is the engine's list of the start sounds, shot
     sounds and music that went into the bank (each with its carrier ``request``): their
-    modes' files name the carriers. *progress* ``(done, total, words)`` follows the clips."""
+    modes' files name the carriers. *progress* ``(done, total, words)`` follows the clips.
+
+    PAD-446: *variants* adds the project's clips that play one of several at random
+    (:mod:`.clip_variants`) to the same bank, and ``clips.cfg`` beside the mode files. A
+    project with variants and no modes (or *modes_on* False: the build carries none) is a plan
+    of its own, for *variants_prof*, the title of the card being written."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
-    modes = card_modes(project, project_modes(project))
-    code = code_mode_list(project)          # the code modes' own assets travel too
+    modes = card_modes(project, project_modes(project)) if modes_on else []
+    code = code_mode_list(project) if modes_on else []   # the code modes' own assets travel too
     if not modes and not code:
+        if variants:
+            return variants_plan(project, stock_bank, game_elf, scratch, variants_prof, log=log,
+                                 progress=progress, cancel=cancel)
         return None
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -840,6 +855,73 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         code_plan(project, result, code, tree, prof, log=log)
         result.lines += describe_code(code, result, prof=prof, project=project)
     stock_plan(project, result, tree)
+    result.mode_names = [spec.name for _s, spec in modes] + [c.name for _s, c in code]
+    if variants:
+        variants_into(project, result, stock_bank, tree, only=False, log=log, progress=progress,
+                      cancel=cancel)
+    return result
+
+
+# ---- PAD-446: clips that play one of several at random -----------------------------------------
+def variants_plan(project, stock_bank, game_elf, scratch, prof, log=None, progress=None, cancel=None):
+    """A plan carrying only the project's random clips (:mod:`.clip_variants`): no mode; the
+    runtime and the title's port on p2 with a ``clips.cfg`` that says ``only``. ``None`` when
+    the project has none that can go on *prof*'s card."""
+    from . import clip_variants as CV
+    if prof is None:
+        raise ModeWriteError(CV.NO_TITLE)
+    why = CV.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        # neutral words: a copy with the mode maker switched off says this too
+        raise ModeWriteError("this card's game program is not the %s the app knows how to swap "
+                             "clips on" % prof.label) from None
+    result = ModePlan(project=project, profile=prof, port=port, build=None)
+    tree = os.path.join(scratch, "tree")
+    os.makedirs(tree, exist_ok=True)
+    variants_into(project, result, stock_bank, tree, only=True, log=log, progress=progress,
+                  cancel=cancel)
+    return result if result.variants is not None else None
+
+
+def variants_into(project, result, stock_bank, tree, only, log=None, progress=None, cancel=None):
+    """Add the project's random clips to *result*: onto the bank scene the modes were built
+    into (or the stock one), each added clip a new file, the bank a rewritten one, ``clips.cfg``
+    for p2. *only*: the card carries no mode."""
+    from . import clip_variants as CV
+    prof = result.profile
+    bank_card = CV.bank_scene(prof)
+    bank_src = ""
+    for card, src in result.replaced:
+        if card == bank_card:
+            bank_src = src
+    if bank_src:
+        with open(bank_src, "rb") as f:
+            bank = f.read()
+    else:
+        bank = stock_bank
+    if not bank:
+        raise ModeWriteError("the card's video bank (%s) was not read" % bank_card)
+    try:
+        vb = CV.build(project, prof, bank, os.path.join(tree, "variants"), only, log=log,
+                      progress=progress, cancel=cancel)
+    except CV.VariantError as e:
+        raise ModeWriteError("random clips: %s" % e) from None
+    if vb is None:
+        return result
+    if not bank_src:
+        bank_src = os.path.join(tree, "variants", *bank_card.split("/"))
+        os.makedirs(os.path.dirname(bank_src), exist_ok=True)
+        result.replaced.append((bank_card, bank_src))
+    with open(bank_src, "wb") as f:
+        f.write(vb.bank)
+    result.new.extend(vb.new)
+    result.variants = vb
+    result.clips_file = vb.cfg
+    result.lines += ["random clips: %s" % line for line in vb.lines]
     return result
 
 
@@ -1214,6 +1296,11 @@ def p2_payload(result, out_dir, project=None):
             dst = os.path.join(out_dir, SR.FILE_NAME)
             shutil.copyfile(result.stock_file, dst)
             extras.append(dst)
+        if getattr(result, "clips_file", ""):          # PAD-446: clips.cfg, the random clips
+            from . import clip_variants as CV
+            dst = os.path.join(out_dir, CV.CFG_NAME)
+            shutil.copyfile(result.clips_file, dst)
+            extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"
                              % e) from None
@@ -1291,17 +1378,20 @@ def install_command(ex, image_path, payload, epoch):
             % (q(ex.to_exec_path(tools_dir())), int(epoch), " ".join(q(a) for a in args)))
 
 
-def install_p2(image_path, payload, epoch, log=None, executor=None, timeout=900):
+def install_p2(image_path, payload, epoch, log=None, executor=None, timeout=900, modes=True):
     """Put the payload on the card's system partition (mode_install.py: debugfs, e2fsck
-    before and after, a fresh read-back, game_monitor hooked). Returns its report line."""
+    before and after, a fresh read-back, game_monitor hooked). Returns its report line.
+    *modes* False (PAD-446): the card carries random clips and no mode, so the runtime keeps
+    no score off Insider Connected and the log does not say it does."""
     log = log or (lambda *a, **k: None)
     if executor is None:
         from ...core.executor import create_executor
         executor = create_executor()
     out = executor.run(install_command(executor, image_path, payload, epoch), timeout=timeout)
     line = next((l for l in out.splitlines() if l.startswith("[mode]")), out.strip())
-    log("Modes: %s" % line, "info")
-    log("Modes: %s" % MP.INSIDER_NOTE, "info")
+    log("%s: %s" % ("Modes" if modes else "Random clips", line), "info")
+    if modes:
+        log("Modes: %s" % MP.INSIDER_NOTE, "info")
     return line
 
 

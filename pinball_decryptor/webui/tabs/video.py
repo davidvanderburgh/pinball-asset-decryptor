@@ -27,6 +27,12 @@ Store namespace ``video``:
              column_widths["video_web"]); the rest fit their content
   compare    {open, max, tiles: [{id, rel, side, sides, pane, look}]}: the
              Compare view's players (PAD-440), each with its colour steps
+
+A row's RANDOM CLIPS (PAD-446): more clips for one slot, the game playing
+one of them at random each time it plays the slot's clip.  Kept in the
+sidecar's ``video_variants`` ({rel: [file, ...]}); which slots can have them
+is the plugin's answer (``Manufacturer.video_variants_offer``), asked once
+per scan off the UI thread.
 """
 
 import csv
@@ -53,6 +59,20 @@ def _length_ok(choice):
     """A per-clip length choice worth keeping from a sidecar."""
     return choice in (LENGTH_STOCK, LENGTH_FULL) or bool(
         length_seconds(choice))
+
+
+def _variants_from(raw, by_rel):
+    """A sidecar's ``video_variants`` as ``{rel: [file, ...]}``, for the
+    slots this scan found (PAD-446)."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for rel, files in raw.items():
+        if rel in by_rel and isinstance(files, (list, tuple)):
+            keep = [f for f in files if isinstance(f, str) and f.strip()]
+            if keep:
+                out[rel] = keep
+    return out
 
 
 def _length_key(choice):
@@ -93,6 +113,10 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._asis = {}                  # rel -> per-clip as-is override
         self._length = {}                # rel -> per-clip length choice
         self._color = {}                 # rel -> per-clip colour switch (PAD-312)
+        self._variants = {}              # rel -> [extra clip, ...] (PAD-446)
+        # PAD-446: the plugin's {"why", "slots", "max"} for this scan, or None
+        # when it offers no random clips at all
+        self._var_offer = None
         # the Advanced box (PAD-336): the game's own clips get a switch too,
         # and these are the ones switched on
         self._color_stock = False
@@ -544,14 +568,23 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                 slots = []
             if self._scan_id != scan_id:
                 return
+            # PAD-446: which slots can play one of several clips at random
+            # (it may open the card image, so here and not on the UI thread)
+            try:
+                offer = (mfr.video_variants_offer(
+                    path, [sl.rel_path for sl in slots]) if mfr else None)
+            except Exception:                               # noqa: BLE001
+                offer = None
+            if self._scan_id != scan_id:
+                return
             self.ctx.loop.post(self._populate_after_scan, slots, scan_id,
-                               path)
+                               path, offer)
 
         self._set_scan_ui(True)
         threading.Thread(target=_work, daemon=True,
                          name="video-scan").start()
 
-    def _populate_after_scan(self, slots, scan_id, scan_dir):
+    def _populate_after_scan(self, slots, scan_id, scan_dir, offer=None):
         """MainWindow._populate_video_after_scan."""
         if self._scan_id != scan_id:
             return
@@ -559,6 +592,7 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         self._set_scan_ui(False)
         self._slots = slots
         self._by_rel = {s.rel_path: s for s in slots}
+        self._var_offer = offer if isinstance(offer, dict) else None
         if scan_dir != self._scan_dir:
             staged = self._load_staged(scan_dir)
             self._assign = staged_changes.live_assignments(
@@ -592,6 +626,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                                   and self._color_stock}
                 self._color = {rel: v for rel, v in self._color.items()
                                if self._assign.get(rel)}
+                self._variants = _variants_from(staged.get("video_variants"),
+                                                self._by_rel)
                 val = staged.get("video_change_filter")
                 if val in vh.CHANGE_FILTER_VALUES:
                     self.video_change_filter_var.set(val)
@@ -611,6 +647,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
             self._color = {rel: v for rel, v in self._color.items()
                            if rel in self._by_rel}
             self._stock_on = {rel for rel in self._stock_on
+                              if rel in self._by_rel}
+            self._variants = {rel: v for rel, v in self._variants.items()
                               if rel in self._by_rel}
         folder_changed = scan_dir != self._scan_dir
         self._scan_dir = scan_dir
@@ -1034,7 +1072,10 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         fmt = vh.fmt_cell(self._mfr_key(), s)
         conv = self._conv_cell(rel, rep)
         d = os.path.dirname(rel)
+        var = self._variants.get(rel) or []
         return {"rel": rel, "name": os.path.basename(rel),
+                # PAD-446: the slot's random clips, and the words for them
+                "var": len(var), "var_tip": self._variants_words(rel),
                 "dir": (d + "/") if d else "",
                 "len": self._length_cell(rel, length), "res": res,
                 "fmt": fmt, "fmt_bad": fmt.endswith("⚠"), "aud": aud,
@@ -1230,7 +1271,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         mode = self.video_change_filter_var.get()
         if mode not in ("Changed", "Unchanged"):
             return None
-        touched = set(self._assign) | self._changed
+        # PAD-446: a slot given random clips is a change a build makes too
+        touched = set(self._assign) | self._changed | set(self._variants)
         want = mode == "Changed"
         return lambda rel: (rel in touched) == want
 
@@ -1281,7 +1323,8 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         view = [self._index[s.rel_path] for s in slots
                 if s.rel_path in self._index]
         total = len(self._slots)
-        changed_total = len(set(self._assign) | self._changed)
+        changed_total = len(set(self._assign) | self._changed
+                            | set(self._variants))
         values = {"view": view, "sort": {"key": col, "desc": bool(desc)}}
         if total == 0:
             values["status"] = ""
@@ -1453,6 +1496,19 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
         data["video_asis_slots"] = {rel: bool(v)
                                     for rel, v in self._asis.items()}
         data["video_length_slots"] = dict(self._length)
+        # PAD-446: the slots' random clips, and one history line per slot
+        old_var = data.get("video_variants")
+        old_var = old_var if isinstance(old_var, dict) else {}
+        for rel in sorted(set(old_var) | set(self._variants)):
+            o, n = old_var.get(rel) or [], self._variants.get(rel) or []
+            if list(o) != list(n):
+                hist.append("video  %s  random clips: %s" % (
+                    rel, ", ".join(n) if n else "none"))
+        if self._variants:
+            data["video_variants"] = {rel: list(v) for rel, v
+                                      in self._variants.items() if v}
+        else:
+            data.pop("video_variants", None)
         slots = {rel: v for rel, v in self._color.items() if rel in self._assign}
         if self._color_stock:
             slots.update((rel, True) for rel in self._stock_on
@@ -1997,12 +2053,132 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                           self._color.get(rel)]),
             "color_follow": "corrected" if self._color_all else "own colors",
             "reveal": vh.reveal_menu_label(),
+            "variants": self._variant_menu(rel),
             "partition": bool(self.window.tab_visible("Partition Explorer")
                               and getattr(self.window, "find_in_partition",
                                           None) is not None),
             # PAD-444: a mode's own clip an earlier build made plays the shared one again
             "back": (self._m_preview(rel) or {}).get("back") or "",
         }
+
+    # -- random clips (PAD-446) ---------------------------------------------
+    def _variant_menu(self, rel):
+        """The row menu's "Random clips" part: ``{why, n, max, files}``, or
+        None where the plugin offers no random clips."""
+        offer = self._var_offer
+        files = self._variants.get(rel) or []
+        if offer is None and not files:
+            return None
+        offer = offer or {}
+        why = offer.get("why") or (offer.get("slots") or {}).get(rel, "")
+        if not why and rel in self._m_follow and not self._assign.get(rel):
+            # PAD-444: a mode's row that plays another mode's clip has no clip of its own
+            # to vary until it is given one; the clip it plays varies in that mode's row
+            why = ("this row plays the same clip as %s's; give it a replacement first, or "
+                   "add the random clips in that row" % self._m_label(self._m_follow[rel]))
+        elif rel in self._m_copy and rel not in ((self._m_clips.name_of if self._m_clips
+                                                   else {}) or {}):
+            why = ("this is %s's own clip, new to the card: random clips go on a clip the card "
+                   "already has, so build it onto the card first"
+                   % self._m_label(self._m_copy[rel]["mode"]))
+        return {"why": why or "", "n": len(files),
+                "max": int(offer.get("max") or 0),
+                "files": [{"i": i, "name": os.path.basename(f)}
+                          for i, f in enumerate(files)]}
+
+    def _variants_words(self, rel):
+        """What the row and the preview say of a slot's random clips, or
+        "" for a slot that has none."""
+        files = self._variants.get(rel) or []
+        if not files:
+            return ""
+        own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
+               else "the game's own clip")
+        return ("Plays one of %d clips at random each time, never the same "
+                "one twice in a row: %s, %s." % (
+                    1 + len(files), own,
+                    ", ".join(os.path.basename(f) for f in files)))
+
+    def _variants_changed(self, rel):
+        self._save_staged()
+        self._refresh_list()
+        if rel == self._current:
+            self._update_note(rel)
+        self._reselect([rel])
+
+    @rpc
+    def add_variants(self, rel):
+        """PAD-446: more clips the game may play in this slot's place, one
+        of them at random each time (the file picker takes several)."""
+        menu = self._variant_menu(rel) if rel in self._by_rel else None
+        if not menu or menu["why"]:
+            return False
+        files = list(self._variants.get(rel) or [])
+        room = menu["max"] - len(files)
+        if room <= 0:
+            self.log("Replace Video: %s already has %d random clips, the most "
+                     "a slot can have." % (rel, len(files)), "warning")
+            return False
+        if rel != self._current:
+            self._load_track(rel)
+        self.stop_all_preview_playback()
+        picked = self.window.ask_open(
+            "video_replacement",
+            "Choose clips the game can play at random in place of %s" % rel,
+            vh.PICK_FILETYPES, multiple=True)
+        if isinstance(picked, str):
+            picked = [picked] if picked else []
+        picked = [os.path.normpath(p) for p in (picked or ()) if p]
+        if not picked:
+            return False
+        if len(picked) > room:
+            self.log("Replace Video: %s can take %d more random clip(s); the "
+                     "first %d were added." % (rel, room, room), "warning")
+            picked = picked[:room]
+        files += picked
+        self._variants[rel] = files
+        self.log("Replace Video: %s ← %s, played at random (%d clips: the "
+                 "slot's own and %d more)."
+                 % (rel, ", ".join(os.path.basename(p) for p in picked),
+                    1 + len(files), len(files)), "info")
+        self._variants_changed(rel)
+        return True
+
+    @rpc
+    def variants_why(self, rel):
+        """PAD-446: why this slot cannot play other clips at random."""
+        menu = self._variant_menu(rel)
+        if not menu or not menu["why"]:
+            return False
+        compat.messagebox.showinfo("Random clips", menu["why"])
+        return True
+
+    @rpc
+    def remove_variant(self, rel, index):
+        """PAD-446: take one random clip off the slot."""
+        files = list(self._variants.get(rel) or [])
+        try:
+            gone = files.pop(int(index))
+        except (TypeError, ValueError, IndexError):
+            return False
+        if files:
+            self._variants[rel] = files
+        else:
+            self._variants.pop(rel, None)
+        self.log("Replace Video: %s no longer plays %s at random."
+                 % (rel, os.path.basename(gone)), "info")
+        self._variants_changed(rel)
+        return True
+
+    @rpc
+    def clear_variants(self, rel):
+        """PAD-446: the slot plays its one clip again."""
+        if not self._variants.pop(rel, None):
+            return False
+        self.log("Replace Video: %s plays one clip again (its random clips "
+                 "were taken off)." % rel, "info")
+        self._variants_changed(rel)
+        return True
 
     def _scene_browser(self):
         for name in ("_open_scene_browser", "open_scene_browser"):
@@ -2574,6 +2750,9 @@ class VideoTab(ModesMixin, BestQualityMixin, TabService):
                         "as-is\" for the lot, or pick a game-ready file."
                         % (conflict or ("%s can't play on the machine "
                                         "as it is" % os.path.basename(rep))))}
+            if note is None and self._variants.get(rel):
+                # PAD-446: the slot's random clips, where nothing is wrong
+                note = {"kind": "info", "text": self._variants_words(rel)}
         pv = self.get("preview") or {}
         modes = self._m_preview(rel)
         if pv.get("note") != note or pv.get("modes") != modes:

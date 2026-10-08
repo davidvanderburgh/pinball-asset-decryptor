@@ -178,6 +178,24 @@ HELP_CONTENT = {
          "**Clear replacements…** drops them.\n\n"
          "> Keep your files in their own folder OUTSIDE the project folder. The "
          "project folder, or anything inside it, is refused."),
+        ("Find originals",
+         "**Find originals…**, beside **Replace from folder…**, finds the files "
+         "your picks were made from in a folder of yours, by how they sound: the "
+         "names, the level, the sample rate and the file type don't matter.\n\n"
+         "- For picks that are copies off a card, like the ones **Transfer Mods to "
+         "New Version** takes from an extract of a built card. Those were converted "
+         "once already by the Write that built that card; with your own files "
+         "picked instead, the next Write converts from them.\n"
+         "- Every pick on the tab is looked for, and every slot a build changed on "
+         "disk with no pick left. Files inside an extract are copies off a card and "
+         "are never offered.\n"
+         "- Where the folder has the same sound twice (a WAV master and an MP3 "
+         "export), the better copy is used. A file longer than the copy was cut to "
+         "length by Trim / pad when the card was built, and is cut the same way "
+         "again.\n"
+         "- Amber rows are worth a listen: ▶ plays the copy and the file found. "
+         "Nothing changes until **Use these files**, and what comes back are "
+         "ordinary picks."),
         ("Clearing and undo",
          "Your picks are saved in the project folder itself, so they survive "
          "closing the app and changing the card. They never vanish on their own.\n\n"
@@ -328,6 +346,8 @@ HELP_CONTENT = {
          "ffmpeg command ([more](#what-the-machine-can-play)) |\n"
          "| This clip's length | how long this one clip plays ([more](#clip-length)) |\n"
          "| Show scene contents… | the Scenes tab, on the scene that plays it |\n"
+         "| Random clips | more clips for this slot, one played at random each time "
+         "([more](#random-clips)) |\n"
          "| Remove / revert | drops a pick, or puts back a file a build changed "
          "([more](#clearing-and-undoing)) |"),
         ("Clearing and undoing",
@@ -396,6 +416,16 @@ HELP_CONTENT = {
          "- **Original (stock)** shows the factory clip whenever its backup exists, and "
          "Convert measures your file against it, so a clip cut to the machine's real "
          "spec still reads As-is."),
+        ("Random clips",
+         "Spike 2, Godzilla Pro and Premium/LE 1.16. Right-click > **Random clips** > "
+         "**Add clips to play at random…** gives a slot more clips than its own: each "
+         "time the game plays it, one is picked at random, never the same twice in a "
+         "row, and the slot's own clip is one of them.\n\n"
+         "- The row shows a shuffle badge with the count; the same menu takes a clip "
+         "off.\n"
+         "- Only clips the game plays by name (modes, battles, awards, bonuses). A clip "
+         "a scene plays on its own says **Why not this clip?** instead.\n"
+         "- Needs an image build, not a direct SD write."),
         ("Clip length",
          "Right-click > **This clip's length**: follow the **Trim / pad** box (default), "
          "match the stock clip, keep your file's full length, or type seconds.\n\n"
@@ -717,6 +747,24 @@ HELP_CONTENT = {
             "name with another file.",
             {"note": "Keep your files outside the project folder. It holds the card's "
                      "own files, so choosing it, or anything inside it, is refused."},
+        ]),
+        ("Find originals", [
+            "**Find originals…**, beside **Replace from folder…**, finds the files "
+            "your picks were made from in a folder of yours, by how they look: the "
+            "names, the size and the file type don't matter.",
+            "- For picks that are copies off a card, like the ones **Transfer Mods to "
+            "New Version** takes from an extract of a built card. Those were squeezed "
+            "into the card's format once already; with your own files picked instead, "
+            "the next Write converts from them.\n"
+            "- Every pick on the tab is looked for, and every slot a build changed on "
+            "disk with no pick left. Files inside an extract are copies off a card and "
+            "are never offered.\n"
+            "- Where the folder has the same picture twice, the biggest best copy is "
+            "used. A colour picture is never taken for its black-and-white twin.\n"
+            "- Each row shows the copy and the file found side by side. Glance down "
+            "them: a look-alike (the next frame of an animation, the same letter "
+            "from another font) can stand in when the real file isn't in the folder. "
+            "Nothing changes until **Use these files**.",
         ]),
         ("Clearing and undo", [
             "Your picks are saved in the project folder itself, so they survive "

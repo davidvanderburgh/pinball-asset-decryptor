@@ -1,0 +1,17 @@
+/* "Find originals…" (PAD-443): a window over the Audio / Images tab, not a modal (no scrim),
+   like the Video tab's "Best quality…" */
+.modal.org-win { position: fixed; left: 50%; top: 50%; z-index: 40; width: min(1020px, calc(100% - 32px)); max-height: calc(100% - 48px); }
+.org-win:focus { outline: none; }
+.org-win > .bd { min-height: 0; }
+.org-hd { cursor: move; user-select: none; }
+.org-tbl { height: min(44vh, 420px); border: 1px solid var(--line); border-radius: 6px; }
+.org-tbl .tr.warn > .c { color: var(--warn); }
+.org-tbl .tr.warn > .c .muted { color: var(--warn); opacity: .8; }
+.org-tbl input[type="checkbox"] { margin: 0; }
+/* the copy picked now and the file found, side by side: a picture's own thumbnail, a sound's ▶ */
+.org-file { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.org-th { flex: none; width: 52px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 4px; background: repeating-conic-gradient(#2a2d33 0% 25%, #3a3e46 0% 50%) 50% / 10px 10px; overflow: hidden; }
+.org-th img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.org-play { all: unset; cursor: pointer; flex: none; display: inline-flex; color: var(--ink-2); border-radius: 4px; padding: 2px; }
+.org-play:hover { color: var(--accent); }

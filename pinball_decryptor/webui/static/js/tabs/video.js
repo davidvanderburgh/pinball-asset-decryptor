@@ -822,6 +822,17 @@ export default function VideoTab() {
         { label: "Attach the color profile", checked: info.color === "on", onClick: () => call("video.set_color", rel, true) },
         { label: "No color profile attached", checked: info.color === "off", onClick: () => call("video.set_color", rel, false) },
       ] },
+      // PAD-446: more clips for this slot, one of them played at random each time
+      info.variants && { label: info.variants.n ? `Random clips (${info.variants.n + 1} in turn)` : "Random clips", submenu: info.variants.why
+        ? [{ label: "Why not this clip?", onClick: () => call("video.variants_why", rel) },
+           ...info.variants.files.map((f) => ({ label: `Take off ${f.name}`, onClick: () => call("video.remove_variant", rel, f.i) }))]
+        : [
+          { label: info.variants.n ? "Add more clips to play at random…" : "Add clips to play at random…",
+            disabled: info.variants.n >= info.variants.max, onClick: () => call("video.add_variants", rel) },
+          ...(info.variants.n ? [{ sep: true }] : []),
+          ...info.variants.files.map((f) => ({ label: `Take off ${f.name}`, onClick: () => call("video.remove_variant", rel, f.i) })),
+          ...(info.variants.n > 1 ? [{ label: "Take them all off", onClick: () => call("video.clear_variants", rel) }] : []),
+        ] },
       { label: "This clip's length", submenu: [
         { label: `Follow the Trim / pad box (${info.length_follow})`, checked: info.length === "box", onClick: () => call("video.set_length", rel, null) },
         { label: "Match the stock clip", checked: info.length === "stock", onClick: () => call("video.set_length", rel, "stock") },
@@ -906,9 +917,11 @@ export default function VideoTab() {
     { key: "aud", label: "Audio", width: width("aud"), sort: "aud", render: (r) => html`<span class="dim">${r.aud}</span>` },
     // PAD-369 (DragonRR): the chosen file's name tells its color profile too
     { key: "rep", label: "Replacement", width: width("rep"), sort: "rep",
-      render: (r) => html`<button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}
+      render: (r) => html`<span class="vid-repcell"><button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}
         ...${tip(r.rep_cls && profileLine(r, colorNs) ? { head: r.rep, lines: [profileLine(r, colorNs)] } : r.rep)}
-        onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>` },
+        onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>${r.var
+        ? html`<span class="vid-var" aria-label=${`${r.var} more clips play at random`} ...${tip({ head: "Random clips", lines: [r.var_tip] })}><${Icon} name="shuffle" />+${r.var}</span>`
+        : null}</span>` },
     modesCol && { key: "modes", label: "Played in", width: width("modes"), title: T.modes,
       render: (r) => (r.unplayed
         ? html`<span class="vid-modes-cell unplayed" ...${tip({ head: "Not played", lines: [

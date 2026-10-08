@@ -331,6 +331,10 @@ text magnet_hold_label    Magnet
 text right_return_up_drive 8 7 a169 0 a169 1250
 text magnet_hold_drive    9 0 255 a182 82 1200
 text held_coils            right_return_up magnet_hold
+# PAD-420: Mode > Magnet holds the ball with the held coil magnet_hold, on a hit of the shot nearest it on the
+# playfield picture (Right ramp tgt, 67 px from the magnet; near.py)
+text magnet_coil           magnet_hold
+value magnet_shot          0x20
 
 # PAD-420: its modes' running bytes (object + 0x74), each object found through its own class's constructor as on
 # X-Men LE 0.98's proven port (coils/running_objs.py; Escape Nimrod's object not reached that way - left out)

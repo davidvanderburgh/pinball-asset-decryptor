@@ -411,4 +411,6 @@ text top_up_post_label    Top up post
 text center_ramp_gat_drive 9 5 255 64 128 1564
 text diverter_mini_p_drive 9 6 255 64 64 1564
 text top_up_post_drive    9 8 255 64 128 1564
-text held_coils            center_ramp_gat diverter_mini_p top_up_post
+text magnet_hold_label    Magnet
+text magnet_hold_drive    9 7 255 800 20
+text held_coils            center_ramp_gat diverter_mini_p top_up_post magnet_hold

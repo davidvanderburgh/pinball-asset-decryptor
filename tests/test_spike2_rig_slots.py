@@ -686,6 +686,18 @@ def test_a_copy_is_staged_only_whole():
     assert move.index("if [ ! -e") < move.index('touch "$dest"') < move.index('echo "$dest" > "$S/$i"')
 
 
+def test_a_copy_has_a_time_limit_and_a_cut_copy_counts_only_whole():
+    """PAD-420: WSL's interop wrapper sometimes never returns once robocopy.exe has gone - a copy held the shared copy
+    lock for 24 minutes with three rigs waiting for cards. robocopy runs under `timeout`; a copy the limit cut short
+    is done only when its last 4 MB are the card's (robocopy writes the file at its full size first)."""
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    c = cs[cs.index("copy_now() {"):]
+    c = c[:c.index("\n}\n")]
+    assert 'timeout "${PAD_STAGE_COPY_S:-1500}" "$ROBO"' in c
+    assert 'if [ $rc = 124 ] && cmp -s <(tail -c 4194304 "$1") <(tail -c 4194304 "$2/$(basename "$1")"); then' in c
+    assert c.index("local rc=$?") < c.index("[ $rc -lt 8 ]")
+
+
 def test_rigbatch_boots_staged_copies_and_reuses_them():
     """cardstage.sh: every rig boots a copy staged off the slow disk; a card
     that cannot be staged fails its build (not the batch); a second sweep

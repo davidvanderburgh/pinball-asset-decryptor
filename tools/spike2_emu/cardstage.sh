@@ -118,9 +118,17 @@ copy() {                          # <src> <dest-dir>
 copy_now() {                      # <src> <dest-dir>
     if [ "${PAD_STAGE_COPY:-robocopy}" = robocopy ] && [ -x "$ROBO" ] \
        && command -v wslpath >/dev/null 2>&1; then
-        "$ROBO" "$(wslpath -w "$(dirname "$1")")" "$(wslpath -w "$2")" \
+        # THE WRAPPER CAN OUTLIVE ROBOCOPY (PAD-420): WSL's interop wrapper sometimes never returns once
+        # robocopy.exe has gone - it held the copy lock for 24 minutes with three rigs waiting. So the copy has a
+        # time limit, and one the limit cut short is done only if its last 4 MB are the card's (robocopy writes
+        # the file at its full size first: the size proves nothing)
+        timeout "${PAD_STAGE_COPY_S:-1500}" "$ROBO" "$(wslpath -w "$(dirname "$1")")" "$(wslpath -w "$2")" \
             "$(basename "$1")" /J /NP /NFL /NDL /NJH /NJS > /dev/null 2>&1 < /dev/null
-        [ $? -lt 8 ]              # robocopy: 0-7 is success
+        local rc=$?
+        if [ $rc = 124 ] && cmp -s <(tail -c 4194304 "$1") <(tail -c 4194304 "$2/$(basename "$1")"); then
+            rc=0
+        fi
+        [ $rc -lt 8 ]             # robocopy: 0-7 is success
     else
         cp -f "$1" "$2/"
     fi

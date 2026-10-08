@@ -447,3 +447,7 @@ text magnet_hold_label    Magnet
 text up_post_drive        9 6 255 64 128 1564
 text magnet_hold_drive    9 2 255 64 128 864
 text held_coils            up_post magnet_hold
+# PAD-420: Mode > Magnet holds the ball with the held coil magnet_hold, on a hit of the shot nearest it on the
+# playfield picture (Bottom right orbit opto, 24.5 px from the magnet)
+text magnet_coil           magnet_hold
+value magnet_shot          0x400000

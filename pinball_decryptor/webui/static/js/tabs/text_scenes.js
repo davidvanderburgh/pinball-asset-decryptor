@@ -698,7 +698,7 @@ const colorTip = (l, cs) => {
     c.on ? "Its color profile is baked into this picture when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
       : "It goes on the card as it is.",
     c.stock ? "The game's own picture, unlocked: corrected from its original when you build, so never twice."
-      : c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
+      : c.own ? "Set for this picture." : c.on ? "Attached by the old Every replaced picture box, still ticked in this project." : null ] };
 };
 const UNLOCK_TIP = { head: "Advanced: unlock extracted images and text", lines: [
   "Off: the original extracted images and the game's own lines of text are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added, and lines you added, are not locked.",

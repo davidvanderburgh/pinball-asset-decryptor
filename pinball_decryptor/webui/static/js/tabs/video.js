@@ -113,7 +113,7 @@ const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "F
 const modesText = (r) => (r.unplayed ? "Not played" : r.other ? "Other parts of the game"
   : (r.modes || []).join(", "));
 // PAD-312: the chosen-files color profile, baked into this clip as it is converted
-const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build (it is re-encoded for that). Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own clip, never touched (tick Advanced to unlock it). A palette you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
+const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build (it is re-encoded for that). Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own clip, never touched (tick Advanced to unlock it). Click a palette to attach or detach it. Select several clips (Shift-click or Ctrl-click) and pick a profile in the Colors bar to give it to all of them.";
 // PAD-336: the Advanced box unlocks the game's own clips on this tab only
 const ADV_TIP = { head: "Advanced: unlock the game's own clips", lines: [
   "Gives the game's own clips a Color palette too, on this tab only (the Images tab has its own box for pictures, and Scenes keeps its locks).",
@@ -135,13 +135,13 @@ const colorTip = (r, cs) => (r.col_lock
       ["Click", r.col ? "detach the color profile" : "attach the color profile"],
       r.col ? "It is re-encoded from its original with its color profile when you build."
         : "Unlocked by Advanced. It stays as the game shipped it.",
-      "Set for this clip only: the Every replaced video box never reaches the game's own clips."] }
+      "Set for this clip only."] }
   : { head: r.col ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
       profileLine(r, cs),
       ["Click", r.col ? "detach the color profile" : "attach the color profile"],
       r.col ? "Its color profile is baked into this clip when you build (it is re-encoded for that). Open Colors with it selected to give it one of its own."
         : "It goes on the card as it is.",
-      r.col_own ? "Set for this clip." : "Follows the Color profile tab's box for every replaced video."] });
+      r.col_own ? "Set for this clip." : r.col ? "Attached by the old Every replaced video box, still ticked in this project." : null] });
 // The long-named columns share the width that is left over (more or less
 // of it); the others keep the width that fits them, so a narrow window
 // shortens names, never "MP4 h264 30fps" or a length.

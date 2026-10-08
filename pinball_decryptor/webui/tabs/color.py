@@ -51,7 +51,15 @@ on the file on show, switches and all.
 SEVERAL FILES AT ONCE (PAD-462, DragonRR).  With several clips selected on
 the Video tab the bar's Files mode is on all of them that are not locked
 (``set_file``'s *more*): a change gives each one the profile and attaches
-it, one Undo step, and the clip on the players is shown with it.
+it, one Undo step, and the clip on the players is shown with it.  PAD-463:
+the same for several pictures selected on the Images tab.
+
+ALL IMAGES / ALL VIDEOS (PAD-463, DragonRR).  The Which files card (this
+tab's Files mode, and the bar's with no file picked) had two boxes, "Every
+replaced picture" and "Every replaced video".  They are two buttons now:
+every image (or video) that is not locked gets the individual files profile,
+attached, after an "Are you sure?" (``apply_to_all`` with a *kind*), one
+Undo step.  The stored boxes still count where a project has them ticked.
 
 RECOMMENDED FOLLOWS THE SCREEN (PAD-346).  On Spike 2 the overlay's and the
 individual files' Recommended is the Machine screen on show, undone
@@ -762,8 +770,9 @@ class ColorTab(TabService):
         """PAD-462 (DragonRR): the clip on the Video tab's players whose
         profile was just changed is shown with it ("With its color profile"
         on the player of the file that has it: its Original for a game's own
-        clip, its Replacement for one replaced)."""
-        if kind != "videos":
+        clip, its Replacement for one replaced).  PAD-463: the picture on the
+        Images tab's panes the same way."""
+        if kind not in self._ALL_NS:
             return
         fn = getattr(self._all_service(kind), "profile_shown", None)
         if fn is None:
@@ -777,7 +786,8 @@ class ColorTab(TabService):
         """PAD-369 (DragonRR): an individual files profile picked (a starting
         point, a saved one or a Load) is meant to be seen, so the Preview
         colors switch for individual files goes on in Scenes and on the Video
-        players where it was off.  It stays on until it is turned off again.
+        players and the Images tab's panes (PAD-463) where it was off.  It
+        stays on until it is turned off again.
         Nothing is drawn here: the redraw that follows the pick does it."""
         from .. import look_switches
         try:
@@ -785,7 +795,8 @@ class ColorTab(TabService):
         except Exception:                               # noqa: BLE001
             scenes = None
         for where, svc in (("scenes", scenes),
-                           ("video", self.window.service("video"))):
+                           ("video", self.window.service("video")),
+                           ("images", self.window.service("images"))):
             try:
                 if where == "scenes":
                     sw = svc._look_sw() if svc is not None else None
@@ -894,7 +905,7 @@ class ColorTab(TabService):
                    "videos": "the game's own clips while Advanced is ticked"}
 
     @rpc
-    def apply_to_all(self, scope="profiled"):
+    def apply_to_all(self, scope="profiled", kind=None):
         """The file on show's color profile for other files of its kind,
         after an "Are you sure?".  *scope* (PAD-462, DragonRR): "profiled",
         every file with a color profile attached (``color_targets``), which
@@ -902,7 +913,18 @@ class ColorTab(TabService):
         (each replaced one, and the game's own ones unlocked), each attached.
         Each gets the same own profile (none, where this file has none, so
         all get the project's).  One Undo step on this file puts all of it
-        back (PAD-439)."""
+        back (PAD-439).
+
+        *kind* (PAD-463, DragonRR: the Which files card's All images / All
+        videos, in place of its Every replaced boxes): with no file on show,
+        every file of that kind that is not locked gets the individual files
+        profile on show, attached; the Undo step is that profile's."""
+        if kind is not None:
+            if not (kind in self._ALL_NS and self._assets_mode()
+                    and self._file_mode() is None and self._project
+                    and os.path.isdir(self._project)):
+                return False
+            return self._apply_to_every(kind)
         fm = self._file_mode()
         if fm is None:
             return False
@@ -989,6 +1011,73 @@ class ColorTab(TabService):
         self._tell_tabs()
         return True
 
+    def _apply_to_every(self, kind):
+        """All images / All videos (PAD-463): every file of *kind* that is not
+        locked drops a profile of its own, so it gets the individual files
+        profile on show, and is attached; after an "Are you sure?", one Undo
+        step on that profile (switches too)."""
+        one, many = self._ALL_WORDS[kind]
+        tab = "Video" if kind == "videos" else "Images"
+        fn = getattr(self._all_service(kind), "color_targets", None)
+        try:
+            targets = dict(fn("all") or {}) if fn is not None else {}
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile targets %s", kind)
+            targets = {}
+        if not targets:
+            self.toast("There are no %s to give it to: choose replacements "
+                       "on the %s tab, or unlock %s." % (
+                           many, tab, self._ALL_UNLOCK[kind]), "info")
+            return False
+        assets = self._project
+        mkey = "files\n" + kind
+        owns = self._raw(staged_changes.load(assets), mkey)
+        owns = dict(owns) if isinstance(owns, dict) else {}
+        change = [r for r in targets if r in owns]
+        attach = sorted(r for r, on in targets.items() if not on)
+        name = self._shown().label()
+        if not (change or attach):
+            self.toast("All %d %s that are not locked already have “%s”."
+                       % (len(targets), many, name), "info")
+            return False
+        msg = ("Are you sure?\n\nEvery %s that is not locked (each replaced "
+               "one, and %s), all %d of them, gets “%s”, the individual files "
+               "color profile, in place of the one each has now."
+               % (one, self._ALL_UNLOCK[kind], len(targets), name))
+        if change:
+            msg += (" %d of them lose a color profile of their own."
+                    % len(change) if len(change) > 1
+                    else " One of them loses a color profile of its own.")
+        if attach:
+            msg += (" It is attached to the %d that have none attached."
+                    % len(attach) if len(attach) > 1
+                    else " It is attached to the one that has none attached.")
+        msg += "\n\nUndo puts them all back."
+        if not compat.messagebox.askyesno("All %s" % many, msg):
+            return False
+        key = self._mode_key()
+        before = self._files_raw(mkey, targets)
+        try:
+            data = staged_changes.load(assets)
+            self._put_raw(data, mkey, dict.fromkeys(targets))
+            staged_changes.save(assets, data)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not save the files' profiles (%s)" % e])
+            return False
+        switched = self._put_switches(kind, {r: True for r in attach}) \
+            if attach else {}
+        self._last_move.pop(key, None)
+        self._remember_files(key, mkey, targets, before, switched)
+        self.log("Color profile: “%s” given to all %d %s%s." % (
+            name, len(targets), many,
+            " (attached to %d)" % len(switched) if switched else ""), "info")
+        self._files_preview_on()
+        self._show_on_players(kind, targets)
+        self._publish(problems=[])
+        self._changed(display=False)
+        self._tell_tabs()
+        return True
+
     def _tell_tabs(self):
         """The Images and Video tabs and an open Scenes editor show the
         chosen-files switches and the corrected pictures."""
@@ -1010,7 +1099,8 @@ class ColorTab(TabService):
         """An open Scenes editor draws again through the new screen, and the
         Video tab's players follow (PAD-330)."""
         for ns, name in (("text", "scenes_pictures_changed"),
-                         ("video", "publish_look")):
+                         ("video", "publish_look"),
+                         ("images", "publish_look")):
             try:
                 fn = getattr(self.window.service(ns), name, None)
             except Exception:                           # noqa: BLE001

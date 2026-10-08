@@ -510,8 +510,9 @@ HELP_CONTENT = {
         ]),
         ("Colors (Spike 2)", [
             "### The Color column\n"
-            "Each replaced clip shows a palette. The Color profile tab's **Every replaced "
-            "video** covers clips with no switch of their own.",
+            "Each replaced clip shows a palette: click it to attach or detach the color "
+            "profile. Select several clips and pick a profile in the **Colors** bar to give "
+            "it to all of them.",
             {"cards": [
                 {"icon": "palette", "tone": "ok", "title": "Green",
                  "text": "Color profile attached: the individual files profile is baked "
@@ -761,8 +762,14 @@ HELP_CONTENT = {
                 {"icon": "lock", "tone": "info", "title": "Blue lock",
                  "text": "The game's own picture: never changed."}]},
             "- The box under the preview does the same as the palette.\n"
-            "- The Color profile tab's **Every replaced picture** sets every picture "
-            "with no setting of its own.\n"
+            "- Select several pictures (Shift-click or Ctrl-click) and pick a profile in "
+            "the **Colors** bar: all of them get it, attached.\n"
+            "- **Preview colors** over the panes draws them as the machine shows them, "
+            "and each pane has **Original** / **With its color profile**. Only the "
+            "preview changes.\n"
+            "- **Compare** puts up to 4 selected pictures side by side beside the "
+            "**Colors** bar. Click one: the bar changes its colors while you see the "
+            "others.\n"
             "- Tick **Unlock extracted images** under Advanced to give the game's own "
             "pictures a palette too. Detaching one, or locking again, puts the "
             "original back.",
@@ -1031,9 +1038,11 @@ HELP_CONTENT = {
          "The overlay reaches the game's own art too, which Stern already made for "
          "that screen. **Individual files** is a second profile, baked only into the "
          "files it is attached to. It starts from Recommended.\n\n"
-         "- Attach it with **Every replaced picture** or **Every replaced video**, "
-         "or one file at a time in the Color column (Images, Video) or the palette "
-         "in the Scenes layers.\n"
+         "- Attach it one file at a time in the Color column (Images, Video) or the "
+         "palette in the Scenes layers, or to several selected at once.\n"
+         "- **All images…** / **All videos…** under Which files gives it to every "
+         "image or video that is not locked, attached. You are asked first; one "
+         "Undo puts them all back.\n"
          "- The game's own pictures show a blue lock until Advanced unlocks them "
          "on the Images or Video tab.\n"
          "- Both can be on: the overlay draws over the baked files like everything "

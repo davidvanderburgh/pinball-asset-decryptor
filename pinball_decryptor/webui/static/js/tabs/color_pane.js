@@ -28,6 +28,9 @@
 // profile attached, and "Apply to all videos", every one not locked, attached.  Several
 // clips selected on the Video tab are one target (file.count): a change gives them all
 // the profile, attached.
+// PAD-463 (DragonRR): the Images tab the same: several pictures selected are one target, and
+// its panes draw through the profiles, so the bar there has "Show it in this preview" too.
+// The Which files card's boxes are All images / All videos (color.js WhichFiles).
 
 import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -111,12 +114,11 @@ export function rememberBarOpen(open, host) {
 }
 
 // Where the bar hangs (PAD-364): which preview its "Show it in this preview" switch is, and
-// where the file switches are.  Images has no preview that draws through the profiles, so
-// the bar there has no such switch.
+// where the file switches are (PAD-463: the Images tab's panes draw through the profiles too).
 const HOSTS = {
-  scenes: { lookNs: "text_scenes", files: "switch files on below or in Layers, or move a slider." },
-  video: { lookNs: "video", files: "switch clips on below or in the Color column, or move a slider." },
-  images: { lookNs: null, files: "" },
+  scenes: { lookNs: "text_scenes", files: "switch files on below or in Layers, or move a slider.", what: "the scene" },
+  video: { lookNs: "video", files: "switch clips on below or in the Color column, or move a slider.", what: "the players" },
+  images: { lookNs: "images", files: "switch pictures on in the Color column, or move a slider.", what: "the pictures" },
 };
 
 // the hosts whose bar has opened on its startMode this page load (once each, so a bar
@@ -152,7 +154,7 @@ function ShowHere({ mode, look, host }) {
   const k = PART[mode];
   const part = look.parts[k] || {};
   const on = !!(look.sw || {})[k];
-  const what = host === "video" ? "the players" : "the scene";
+  const what = h.what;
   return html`<${Check} cls="small" checked=${!!(part.set && on)} disabled=${!part.set}
     label="Show it in this preview"
     title=${part.set ? `The same switch as under Preview colors: untick to see ${what} without it. The card is not changed.`

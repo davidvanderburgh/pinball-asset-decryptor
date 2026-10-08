@@ -5807,14 +5807,18 @@ def _kept_size_growth(row, sizes):
     return max(0, n - int(length))
 
 
-def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits):
+def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits, variants=None):
     """What the pre-flight counts for the big whole-file copies that are only
     made after the encode, from what is on disk before it: each mode's own
     clip (:data:`_MODE_CLIP_BYTES_PER_S` for as long as it can run), its own
-    screen (:data:`_MODE_SCREEN_BYTES`), and each picture kept at its own
-    size (:func:`_kept_size_growth`).  Each is an upper bound, so a build
-    that passes has room for them."""
+    screen (:data:`_MODE_SCREEN_BYTES`), each picture kept at its own
+    size (:func:`_kept_size_growth`), and (PAD-446) each clip a slot plays
+    at random (:func:`.clip_variants.size_bound`).  Each is an upper bound,
+    so a build that passes has room for them."""
     total = 0
+    if variants:
+        from . import clip_variants as _CV
+        total += _CV.size_bound(assets_dir, variants)
     if mode_list or code_list:
         from . import mode_project as _MP
 
@@ -6234,7 +6238,7 @@ class _SpaceCheck:
 
 def _space_check(space, disk_f, parts, assets_dir, video_edits, log,
                  mode_list=(), code_list=(), radimg_edits=(), margin=0,
-                 cancel=None):
+                 cancel=None, variants=None):
     """The build's :class:`_SpaceCheck`, with its videos counted and settled,
     or None when the build isn't measured (*space* is None) or can't be: a
     card the reader can't size is left to the copy-time check, and the log
@@ -6251,7 +6255,8 @@ def _space_check(space, disk_f, parts, assets_dir, video_edits, log,
     from . import card_size as _cs
     route = _cs.ROUTE_PINNED if sys.platform == "darwin" else _cs.ROUTE_MOUNT
     try:
-        unsized = _unsized_bytes(assets_dir, mode_list, code_list, ())
+        unsized = _unsized_bytes(assets_dir, mode_list, code_list, (),
+                                 variants=variants)
         chk = _SpaceCheck(space, disk_f, parts, route, unsized, margin, log,
                           cancel=cancel, scenes=_kept_size_scenes(radimg_edits))
         if video_edits:
@@ -6540,12 +6545,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     if _family and not mode_list and not code_list:
         for _line in _MW.stock_lines(assets_dir, carried=False):
             log("Modes: %s." % _line, "warning")
+    # PAD-446: the clips that play one of several at random ride the modes'
+    # delivery (the runtime, its port and clips.cfg on p2) but not the mode
+    # maker's preview switch: a card of random clips carries no mode.
+    variant_slots, variant_prof = _variants_for_build(
+        assets_dir, dest_is_device, log, **_mode_gate_kw)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
             and not text_edits and not color_edits and not layout_edits
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
+            and not variant_slots
             and not stock_mode_edits and shader_prof is None):
         raise NothingToWrite(
             "Nothing to write: " + _modes_left_out_clause(_modes_left_out)
@@ -6681,12 +6692,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     space = getattr(_BUILD_SPACE, "budget", None)
     space_chk = None
     if space is not None and not dest_is_device:
-        _modes_on = bool(mode_list or code_list)
+        _modes_on = bool(mode_list or code_list or variant_slots)
         space_chk = _space_check(
             space, disk_f, parts, assets_dir, video_edits, log,
             # the big files made after the encode, sized from their sources
             mode_list=mode_list, code_list=code_list,
-            radimg_edits=radimg_edits,
+            radimg_edits=radimg_edits, variants=variant_slots,
             # and the small ones (_SPACE_MARGIN)
             margin=(_SPACE_MARGIN if (text_edits or radimg_edits or _modes_on
                                       or shader_prof is not None
@@ -7530,22 +7541,28 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # clips are whole-file copies; the manifest is composed to match once
         # every other edit's record refresh is known (below).
         mode_plan = mode_payload = None
-        if mode_list or code_list:
+        _modes_on = bool(mode_list or code_list)
+        # PAD-446: a build of random clips and no mode says so in its own words
+        _who = "Modes" if _modes_on else "Random clips"
+        if _modes_on or variant_slots:
             t0 = time.monotonic()
             if progress:
-                progress(91, 100, "Building the project's modes...")
+                progress(91, 100, "Building the project's modes..." if _modes_on
+                         else "Adding the random clips to the video bank...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
                     _mprof = _MW.MP.profile(mode_list[0][1].title)
-                else:
+                elif code_list:
                     from . import code_modes as _CM
                     _mprof = _CM.profile_for(assets_dir, code_list)
                     if _mprof is None:
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
+                else:
+                    _mprof = variant_prof
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
-                    if not _rel:
+                    if not _rel or (not _modes_on and _rel != _MW.scene_rels(_mprof)[1]):
                         continue        # a part this title cannot do (item 148)
                     _mnodes[_rel] = _MW.lookup(reader, _rel)
                     if _mnodes[_rel] is None:
@@ -7556,6 +7573,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     raise _MW.ModeWriteError("the card's game program was not "
                                              "found")
                 _hud_rel, _bank_rel = _MW.scene_rels(_mprof)
+                if not _modes_on:
+                    _hud_rel = ""        # PAD-446: random clips change the bank only
                 # item 164: the system scene whose full font a HUD with too few glyphs
                 # takes for its screens' words (absent: the words keep the HUD's font)
                 from . import scene_write as _SWF
@@ -7577,7 +7596,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     stock_font=(bytes(reader.read_file_bytes(_font_node))
                                 if _font_node is not None else b""),
                     hud_font=(bytes(reader.read_file_bytes(_hudfont_node))
-                              if _hudfont_node is not None else b""))
+                              if _hudfont_node is not None else b""),
+                    modes_on=_modes_on, variants=bool(variant_slots),
+                    variants_prof=variant_prof, cancel=cancel)
+                if mode_plan is None:
+                    raise _MW.ModeWriteError("none of the project's random clips can go on "
+                                             "this card")
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
                           for p, _i, n in reader.iter_regular_files(
                               min_size=1, max_depth=20)}
@@ -7594,11 +7618,16 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 mode_payload = _MW.p2_payload(
                     mode_plan, os.path.join(grow_work, "modes", "p2"), project=assets_dir)
             except _MW.ModeWriteError as e:
-                raise RuntimeError("Modes: %s. Nothing was written." % e) \
+                raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
             for _line in mode_plan.lines:
-                log("Modes: %s." % _line, "info")
-            _stage_done(log, "building %d mode(s)" % (len(mode_list) + len(code_list)), t0)
+                log("%s: %s." % ("Modes" if _modes_on else "Random clips",
+                                 _line[len("random clips: "):]
+                                 if _line.startswith("random clips: ") and not _modes_on
+                                 else _line), "info")
+            _stage_done(log, ("building %d mode(s)" % (len(mode_list) + len(code_list))
+                              if _modes_on else "adding %d random clip(s)"
+                              % len(mode_plan.variants.new)), t0)
 
         video_patches = []     # (inode, payload bytes == inode size)
         video_grow_jobs = []   # (card_rel, source_file) — grown via ext4 driver
@@ -7779,7 +7808,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 if _man_node is None:
                     raise _MW.ModeWriteError(
                         "the card has no /spk/index/*.sidx manifest, so the "
-                        "modes' new files could not be indexed")
+                        "%s' new files could not be indexed"
+                        % ("modes" if _modes_on else "random clips"))
                 _folded, writes = _MW.fold_writes(
                     writes, reader.disk_ranges(_man_node, 0,
                                                _man_node["size"]))
@@ -7795,16 +7825,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 _p2_off = _MW.p2_offset(disk_f)
                 _p2_epoch = _MW.epoch_at(disk_f, _p2_off)
             except _MW.ModeWriteError as e:
-                raise RuntimeError("Modes: %s. Nothing was written." % e) \
+                raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
-            log("Modes: the SD-validation manifest gains %d record(s) (%s) "
+            log("%s: the SD-validation manifest gains %d record(s) (%s) "
                 "and %d in-place record refresh(es) are folded into it; it is "
                 "copied onto the card whole."
-                % (len(mode_plan.new), ", ".join(r for r, _s in mode_plan.new)
+                % (_who, len(mode_plan.new), ", ".join(r for r, _s in mode_plan.new)
                    or "none", len(_folded)), "info")
             mode_info = {
                 "names": ([s.name for _g, s in mode_list]
                           + [c.name for _g, c in code_list]),
+                # PAD-446: the slots that play one of several clips at random
+                "variants": ([v.rel for v in mode_plan.variants.slots]
+                             if mode_plan.variants is not None else []),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -8529,6 +8562,44 @@ def _drop_stale_p2_sidecar(output_path, log=None):
                     "warning")
 
 
+def _variants_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-446: ``(slots, profile)`` - the project's clips that play one of several at random
+    (:mod:`.clip_variants`) this build carries, and the title of the card they are for; ``({},
+    None)`` when it has none or they are left out (one warning says why). The modes' gate
+    without the mode maker's preview switch: an image file, a host that can add files to it
+    (not a Mac yet), and a title the swap was proven on."""
+    from . import clip_variants as _CV
+    from . import mode_write as _MW
+    slots = _CV.load(assets_dir)
+    if not slots:
+        return {}, None
+    if not _CV.enabled():
+        why = "%s=0 leaves them out" % _CV.GATE_ENV
+    elif dest_is_device:
+        why = ("a direct-SD write cannot add files to the card, and each random clip is "
+               "one; build an image file to carry them")
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _CV.project_title(assets_dir, probe=True)
+        why = _CV.title_refusal(prof)
+    if why:
+        log("Random clips: %d clip(s) set to play one of several at random are left out "
+            "of this build: %s." % (len(slots), why.rstrip(".")), "warning")
+        return {}, None
+    log("Found %d clip(s) that play one of several at random: %s."
+        % (len(slots), ", ".join(sorted(slots))), "info")
+    return slots, prof
+
+
 def _install_modes(output_path, modes, landed, planned, log):
     """Item 149: put the modes' runtime on the built card's system partition
     and say, file by file, what the modes added.  Only once every whole-file
@@ -8536,30 +8607,42 @@ def _install_modes(output_path, modes, landed, planned, log):
     make it would be a card that looks modded and is not.  Returns
     ``(record, ok)`` - *record* is what the build record keeps."""
     from . import mode_write as _MW
+    # PAD-446: a card of random clips and no mode
+    who = "Modes" if modes.get("names") or not modes.get("variants") else "Random clips"
     if landed < planned:
-        log("Modes: not every file reached the card, so the mode runtime was "
-            "NOT put on the system partition and no mode will run on this "
-            "card. Some of the modes' files may already be on it (the "
-            "rewritten HUD and bank scenes can name a clip that did not "
-            "land), so do not use this card: fix the issue above and Write "
-            "again.", "error")
+        if who == "Modes":
+            log("Modes: not every file reached the card, so the mode runtime was "
+                "NOT put on the system partition and no mode will run on this "
+                "card. Some of the modes' files may already be on it (the "
+                "rewritten HUD and bank scenes can name a clip that did not "
+                "land), so do not use this card: fix the issue above and Write "
+                "again.", "error")
+        else:
+            # words a copy with the mode maker switched off may show (PAD-446)
+            log("Random clips: not every file reached the card, so the program "
+                "that picks them was NOT put on the system partition. The "
+                "rewritten video bank may already be on it, so do not use this "
+                "card: fix the issue above and Write again.", "error")
         return None, False
     try:
         _MW.install_p2(output_path, modes["payload"], modes["p2_epoch"],
-                       log=log)
+                       log=log, modes=who == "Modes")
     except Exception as e:                   # the executor's CommandError too
-        log("Modes: the mode runtime could not be put on the card's system "
-            "partition, so this card carries no modes: %s" % e, "error")
+        log("%s: the %s could not be put on the card's system partition, so "
+            "this card carries no %s: %s"
+            % (who, "mode runtime" if who == "Modes" else "program that picks them",
+               "modes" if who == "Modes" else "random clips", e), "error")
         return None, False
     for rel in modes.get("added") or ():
-        log("Modes: added %s." % rel, "info")
+        log("%s: added %s." % (who, rel), "info")
     for rel in modes.get("rewritten") or ():
-        log("Modes: rewrote %s." % rel, "info")
+        log("%s: rewrote %s." % (who, rel), "info")
     for name in modes.get("p2") or ():
-        log("Modes: added %s/%s on the system partition." % (_MW.P2_DIR, name),
+        log("%s: added %s/%s on the system partition." % (who, _MW.P2_DIR, name),
             "info")
-    log("Modes: /etc/init.d/game_monitor now loads the mode runtime (port %s)."
-        % modes.get("port"), "info")
+    log("%s: /etc/init.d/game_monitor now loads the %s (port %s)."
+        % (who, "mode runtime" if who == "Modes" else "program that picks them",
+           modes.get("port")), "info")
     snd = modes.get("end_sound")
     if snd:
         log("Modes: request %d (sound idx %d) plays %s's own end sound."
@@ -8568,11 +8651,16 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("Modes: request %d (sound idx %d) plays %s's own %s."
             % (own["request"], own["idx"], own["name"],
                _MW.sound_words(own["key"])), "info")
-    log("Modes: %d mode(s) on the card: %s."
-        % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
-        "success")
+    if modes.get("names") or not modes.get("variants"):
+        log("Modes: %d mode(s) on the card: %s."
+            % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
+            "success")
+    if modes.get("variants"):
+        log("Random clips: %d clip(s) on the card play one of several at random "
+            "each time the game plays them: %s."
+            % (len(modes["variants"]), ", ".join(modes["variants"])), "success")
     rec = {k: modes.get(k) for k in ("names", "added", "rewritten", "port",
-                                     "p2", "end_sound")}
+                                     "p2", "end_sound", "variants")}
     if modes.get("own_sounds"):
         rec["own_sounds"] = modes.get("own_sounds")
     return rec, True

@@ -220,6 +220,22 @@ a file in the folder by what it looks like — names and file types
 don't matter, a colour clip is told from its black-and-white twin,
 and where the folder holds the same video more than once the best
 copy wins. Tick what you want and *Use these files at best quality*.
+**Random clips (Stern Spike 2, Godzilla Pro and Premium/LE 1.16).**
+Right-click a row and pick *Random clips → Add clips to play at
+random…* to give that slot more clips than its own: each time the
+game plays the slot's clip it plays one of them instead, at random,
+never the same one twice in a row. The slot's own clip (the game's,
+or your replacement) is one of the turn. The row shows a shuffle
+badge with how many extra clips it has, the note under the players
+names them, and the same menu takes each one off again. It works for
+the clips the game plays by name (the in-game video bank: modes,
+battles, awards, bonuses); a clip a scene plays on its own, like an
+attract loop, says *Why not this clip?* instead. The extra clips are
+converted to the slot's format like a replacement and added to the
+card as new files, so it takes an image build (not a direct SD
+write), and the card gets a small program that does the picking.
+It does nothing else, and the machine still reports its scores to
+Insider Connected.
 
 ## Write tab
 

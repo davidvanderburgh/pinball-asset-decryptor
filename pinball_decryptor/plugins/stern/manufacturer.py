@@ -806,6 +806,13 @@ class SternManufacturer(Manufacturer):
             dir_a, dir_b, special=("Sounds", owns_sound, folder_sound_rows),
             progress=progress, cancel=cancel)
 
+    def video_variants_offer(self, assets_dir, rels):
+        # PAD-446: the in-game video bank's clips, on a title the swap was
+        # proven on (clip_variants.PROVEN)
+        from .clip_variants import MAX_EXTRA, offer
+        why, slots = offer(assets_dir, rels, probe=True)
+        return {"why": why, "slots": slots, "max": MAX_EXTRA}
+
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games
         # partition, which neither a Whitestar ROM zip nor a Spike 1 card has.

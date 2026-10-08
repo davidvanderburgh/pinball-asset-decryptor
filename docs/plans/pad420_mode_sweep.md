@@ -176,6 +176,14 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   Tried next: the starter first had the game serve two more balls (`pm_multiball_add(2, 10)`: three in play), then
   started Thor Multiball: still off within 0.5 s. Calling a mode's start alone does not set what keeps it running;
   the remaining route is to qualify a multiball the way a player does (its lock shots), per title.
+- **Voice callouts on the new builds were copied, and can be wrong**: every new port's `callout` lines came from its
+  older build. Rush LE 1.19's moved by five (1.18's ten_seconds 318 says "Trio Combo!" on 1.19; time-up is 267 there,
+  not 262), fixed from its own transcripts. `C:/tmp/PAD-420/t2/voices_all.py` (detached) transcribes every new build's
+  candidate requests (item 163's voices.py, faster_whisper, this worktree's code); then `t2/apply_callouts.py
+  [--write]` sets each build's countdown / ten_seconds / time_up from its OWN lines (an old id kept only if its own
+  transcript says the role), then recipes, tests, commit. The same transcripts can give the builds with no time-up
+  callout one where the game has such a line. The media proof sets were built with the copied ids: their screen/clip
+  proof does not depend on them.
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

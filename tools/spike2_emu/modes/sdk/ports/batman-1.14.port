@@ -314,3 +314,20 @@ site block_start_20     0x0014aee8 0xe92d40f8 0xe1a05000
 text block_name_20      Mr Freeze (episodes 53-54)
 site block_start_21     0x00035a10 0xe92d40f8 0xebffffdf
 text block_name_21      Batturn Mania
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x008188e8
+data coil_table            0x0081a86c
+value magnet_proc          13185
+site coil_fire        0x002fd228 0xe3500000 0xe52de004
+site adjustment       0x004fd218 0xe92d40f0 0xe2504000
+site proc_exists      0x0046787c 0xe30023b8 0xe3402087
+site proc_create      0x0046722c 0xe300c3b8 0xe340c087
+site proc_sleep       0x0046737c 0xe30033b8 0xe3403087
+text diverter_power_label Diverter power
+text gate_label           Control gate
+text diverter_power_drive 9 6 255 64 16
+text gate_drive           9 7 255 64 96
+text held_coils            diverter_power gate

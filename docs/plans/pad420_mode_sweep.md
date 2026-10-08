@@ -199,6 +199,11 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   - Run 8: the transcription no longer waits. `t2/voices_all.py` runs NOW at Windows idle priority, its children too
     (creationflags IDLE_PRIORITY_CLASS) and one whisper thread (`T2_THREADS=1`, voices.py), so the rigs keep the CPU.
     Land each transcribed build with `t2/apply_new.sh`, tests, commit; t2/VOICES_DONE when all are done.
+  - The app's sound derive fails on D&D LE 1.10 ("registration did not reach band-build ... could not map this
+    firmware build's audio codec"); the media sets of D&D LE/Pro 1.10, Star Wars LE/Pro 1.31 and Avengers Pro 1.10
+    were built without sound for the same reason. That is the Audio tab's decoder on these builds, beyond modes;
+    retry their transcripts with `PAD_DERIVE_HOOKS=global` (the older, slower derive) after the main pass, and if
+    that fails too it is its own ticket.
   - Run 8 findings: John Wick LE/Pro 1.02's ports had the same wrong video getter as Iron Maiden 1.18 (John Wick
     LE 1.01's port says it answers 60ed7e50's surface): left off, both stages refreshed for chain18's retry.
     Generation C (the Device framework): each class has its own take/give (`coils/takegive.py`: control at +0x18 /

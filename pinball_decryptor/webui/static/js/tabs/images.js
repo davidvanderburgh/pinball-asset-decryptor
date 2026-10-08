@@ -8,6 +8,7 @@ import { html, useEffect, useLayoutEffect, useMemo, useRef, useState, PageHead, 
   from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
+import { OriginalsWindow } from "./originals.js";
 
 export const css = true;
 
@@ -24,6 +25,7 @@ const FONTS_TIP = "Preview any game font (type your own text, rendered from the 
 const MORE_TIP = "More: Export CSV, Clear replacements…, Save / load settings";
 const CSV_TIP = "Save every row of the list as a spreadsheet (CSV), exactly as it reads here.";
 const FOLDER_TIP = "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.";
+const ORIGINALS_TIP = "Find the files your replacements were made from in a folder of your own, by how they look: the names don't matter.\n\nFor picks that are copies off a card, like the ones \"Transfer Mods to New Version\" takes from an extract of a built card: those pictures were already squeezed into the card's format once by the Write that built that card. With your own files picked instead, the next Write converts from them. Nothing changes until you press Use.";
 const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.";
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
@@ -456,6 +458,7 @@ export default function ImagesTab() {
         ? html`<${Button} icon="x" onClick=${() => call("images.cancel_scan")}>Cancel scan<//>`
         : html`<${Button} icon="refresh" onClick=${() => call("images.scan")}>Scan<//>`}
       <${Button} icon="folder" onClick=${() => call("images.from_folder")} disabled=${running} title=${FOLDER_TIP}>Replace from folder…<//>
+      <${Button} icon="search" onClick=${() => call("images.originals_open")} disabled=${running} title=${ORIGINALS_TIP}>Find originals…<//>
       <${Button} kind="ghost" icon="text" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>
       <${Button} kind="ghost" icon="more" label="More" title=${MORE_TIP}
         onClick=${(e) => openMenu(e.currentTarget, [
@@ -528,6 +531,7 @@ export default function ImagesTab() {
 
     ${s.note ? html`<p class="small muted img-note">${s.note}</p>` : null}
     ${rename ? html`<${RenameModal} spec=${rename} onClose=${() => setRename(null)} />` : null}
+    ${s.originals && s.originals.open ? html`<${OriginalsWindow} ns="images" o=${s.originals} />` : null}
   </div>${colorNs.has_project ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors}
     file=${prevRel && p.color ? { kind: "images", rel: prevRel, label: p.rep_name || base(prevRel), on: !!p.color.on,
       attach: { ns: "images" } } : null} />` : null}</div>`;

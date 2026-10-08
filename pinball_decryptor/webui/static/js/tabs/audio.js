@@ -7,6 +7,7 @@
 import { html, useEffect, useMemo, useRef, useState, Button, Field, Select, Seg, Check, Card, Chip,
   Note, Table, Modal, openMenu, tip, Icon, PageHead, Spinner, mediaUrl, call, cx } from "../core/ui.js";
 import { useNs, useEvent, state } from "../core/store.js";
+import { OriginalsWindow } from "./originals.js";
 
 export const css = true;
 
@@ -15,6 +16,7 @@ export const css = true;
 const T = {
   intro: "Assign a replacement track to any slot — almost any audio format is accepted and auto-converted — then build the update on the Write tab.",
   folder: "The project folder — shared by every tab. It is set on the Extract tab. Click to open it.",
+  originals: "Find the files your replacements were made from in a folder of your own, by how they sound: the names don't matter.\n\nFor picks that are copies off a card, like the ones \"Transfer Mods to New Version\" takes from an extract of a built card: those sounds were already converted once by the Write that built that card. With your own files picked instead, the next Write converts from them. Nothing changes until you press Use.",
   fromFolder: "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.",
   clear: "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.",
   csv: "Save the whole audio table (every slot, not just the filtered view) as a CSV — name, length, format, type, replacement and changed-on-disk status — for tracking a big replacement project in a spreadsheet.",
@@ -636,6 +638,7 @@ export default function AudioTab() {
       ${s.status ? html`<${Chip} kind="acc">${s.status}<//>` : null}
       <${Button} onClick=${() => call("audio.scan")} icon=${s.scanning ? "x" : "refresh"}>${s.scanning ? "Cancel scan" : "Scan"}<//>
       <${Button} icon="folder" disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
+      <${Button} icon="search" disabled=${s.running} title=${T.originals} onClick=${() => call("audio.originals_open")}>Find originals…<//>
       ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
       <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
         title=${s.adv_cap ? "More: Export CSV, Clear replacements…, Save / load settings, Profile vs stock" : "More: Export CSV, Clear replacements…, Save / load settings"}
@@ -691,5 +694,6 @@ export default function AudioTab() {
     <//>
     ${props ? html`<${PropsModal} data=${props} onClose=${() => setProps(null)} />` : null}
     ${adv ? html`<${AdvancedModal} data=${adv} onClose=${() => setAdv(null)} />` : null}
+    ${s.originals && s.originals.open ? html`<${OriginalsWindow} ns="audio" o=${s.originals} />` : null}
   </div>`;
 }

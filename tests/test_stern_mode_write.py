@@ -306,6 +306,18 @@ def test_conflicts_name_the_scene_and_the_sound(tmp_path, monkeypatch):
     assert len(got) == 2 and "HUD scene" in got[0] and "sound idx 1560" in got[1]
 
 
+def test_a_scene_the_build_leaves_alone_is_no_conflict():
+    """PAD-469: random clips alone rewrite the video bank only, so an edit of the HUD scene
+    (its pictures, its text) goes on beside them; an edit of the bank they rewrite still stops
+    the Write."""
+    hud, bank = MW.scene_rels(GZ)
+    clips_only = MW.ModePlan(project="", profile=GZ, port="", build=None,
+                             replaced=[(bank, "/tmp/bank")])
+    assert MW.conflicts(clips_only, touched_rels=["/" + hud]) == []
+    got = MW.conflicts(clips_only, touched_rels=[hud, bank])
+    assert len(got) == 1 and "video bank scene (%s)" % bank in got[0]
+
+
 # ---- the manifest ---------------------------------------------------------------------------------
 def _manifest(paths_and_sizes, fmt="FI64"):
     from tests.test_stern_sidx_append import _build

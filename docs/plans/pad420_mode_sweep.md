@@ -196,6 +196,9 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     build whose job is running: it wipes coils/b/<key> (Avengers LE's first run was lost so). chain23 (replaced
     chain22) re-runs every build `coils/rerun_keys.py` finds not fully PROVEN, then the stack batch, then writes
     RIGS_DONE (after COILS_DONE); the transcription waits for RIGS_DONE.
+  - Run 8: the transcription no longer waits. `t2/voices_all.py` runs NOW at Windows idle priority, its children too
+    (creationflags IDLE_PRIORITY_CLASS) and one whisper thread (`T2_THREADS=1`, voices.py), so the rigs keep the CPU.
+    Land each transcribed build with `t2/apply_new.sh`, tests, commit; t2/VOICES_DONE when all are done.
   - Run 8 findings: John Wick LE/Pro 1.02's ports had the same wrong video getter as Iron Maiden 1.18 (John Wick
     LE 1.01's port says it answers 60ed7e50's surface): left off, both stages refreshed for chain18's retry.
     Generation C (the Device framework): each class has its own take/give (`coils/takegive.py`: control at +0x18 /

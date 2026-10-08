@@ -159,7 +159,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
-| Aerosmith 1.16 | no | no | ✓ | shots | waits for multiballs only |
+| Aerosmith 1.16 | ✓ | no | ✓ | shots | waits for multiballs only |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
 | Aerosmith LE 1.16 | no | no | ✓ | shots | waits for multiballs only |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |

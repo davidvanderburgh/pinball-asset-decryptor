@@ -164,8 +164,8 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     commit. Aerosmith Pro 1.16 landed (frames looked at: the clip's title card and the boxed screen both up).
   - Order, so nothing starves the rigs (faster-whisper on several cores beside two rigs made the games hit their
     10 s watchdog): chain10's media batch, then chain18 (re-runs every build whose media verdict is not both
-    PROVEN, then writes media/RETRIES_DONE), then chain19 (the scoop batch, `scoop/SCOOP_DONE`), then chain20 (the
-    generation-B held coils, `coils/COILS_DONE`), then `t2/voices_after_media.py` (it waits for COILS_DONE) starts
+    PROVEN, then writes media/RETRIES_DONE), then chain19 (the scoop batch, `scoop/SCOOP_DONE`), then chain21 (the
+    held coils, `coils/COILS_DONE`), then `t2/voices_after_media.py` (it waits for COILS_DONE) starts
     the transcription. Never edit a chain or job script while it runs: bash reads it as it goes (Guardians Pro's
     first media run died on a mid-run edit of proof_job2.sh).
   - Iron Maiden LE/Pro 1.18's clip: the port carried the game's own video getter (a demand-loaded bank's surface,
@@ -177,12 +177,26 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     no mode, in the mode, at a mode stop and after it. Land a build when the hold kick is ~4 s after the no-mode
     one, the stop lets go at once, and mode.log says "let go after 4000 ms": add `scoop/stage/<key>.lines` to the
     port (`coils/scoop_lines.py` does it from a stage port), `SCOOP_PROVEN`, recipes, limits table, tests, commit.
-  - chain20, held coils on generation B (`C:/tmp/PAD-420/coils`): `bderived.py <key>` reads each build's
-    `spike::ControlCoil` getters, devices, control offset, take/give and each subclass's own "on" (the game's own
-    hold command); `mkstage_b.py` stages them; `coil_job.sh` boots once with `value coil_list 1` for the board
-    addresses (`fill_b.py`), then again holding every coil 2000 ms as the mode starts, and once stopped 1.5 s in.
-    Land a coil when [coildrive] shows ONE command at its own powers on its address, the game's OFF ~2 s on, an
-    early OFF at the stop, and no abort: the `run/` port lines into the port, `HELD_COILS_PROVEN`, tests, commit.
+  - chain21 (replaced chain20, run 8: started at once on a third rig), held coils on generations B and A'
+    (`C:/tmp/PAD-420/coils`): `bderived.py <key>` reads each build's `spike::ControlCoil` getters, devices, control
+    offset, take/give and each subclass's own "on" (the game's own hold command); `aderived.py <key>` the same for
+    the 47-virtual ControlCoil (Avengers, Jurassic Park: the powers are the object's own fields as each getter
+    builds it); `offslot.py` the "disabled" virtual (B v[30], A' v[31]: `<name>_off_slot`). `mkstage_b.py` stages
+    13 builds; `coil_job.sh` boots once with `value coil_list 1` for the board addresses (`fill_b.py`), then again
+    holding every coil 2000 ms as the mode starts, and once stopped 1.5 s in. `coil_verdict.py <key>...` judges
+    ([coildrive] ONE command at its own powers on its address, the game's OFF ~2 s on, an early OFF at the stop,
+    the runtime's device check and hold lines, no abort); `coil_land.py --write <key>...` puts the proven coils'
+    lines in the port and their `HELD_COILS_PROVEN` entries; then recipes, limits table, tests, commit. A coil
+    name is at most 15 characters (the runtime's and mode file's name buffers are 16). chain21 writes
+    coils/COILS_DONE only after the scoop batch too: the transcription waits for it.
+  - Run 8 findings: John Wick LE/Pro 1.02's ports had the same wrong video getter as Iron Maiden 1.18 (John Wick
+    LE 1.01's port says it answers 60ed7e50's surface): left off, both stages refreshed for chain18's retry.
+    Generation C (the Device framework): each class has its own take/give (`coils/takegive.py`: control at +0x18 /
+    +0x1c / +0x20 per class), but its gates are driven through another service (Aerosmith LE ControlGate v[28]:
+    0x332c7c with a byte at +4, a time and a callback), not `coil_fire`, so their powers are not in the code; do not
+    hold a C coil by `coil_fire` until the powers that service uses are read (magnets do call `coil_fire`: Aerosmith
+    LE's toy box magnet 255 for 1 s, then 16). Deadpool's scoop handler does take event 2 (its jump table), so
+    the wrap of its slot never takes effect (its ball-device table is another generation: "Trough"): a call probe.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

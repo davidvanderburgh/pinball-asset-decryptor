@@ -298,6 +298,54 @@ def test_a_request_the_table_does_not_have_names_no_sound(monkeypatch):
     assert MW.request_sids(elf, b"", 1) == []
 
 
+def _bank_head(fragments, sounds):
+    """An image.bin header: its size word and the two count words (fragments @0x5c, sounds @0x60)."""
+    b = bytearray(0xB0)
+    struct.pack_into("<Q", b, 0, 0xB0)
+    struct.pack_into("<II", b, 0x5C, fragments, sounds)
+    return bytes(b)
+
+
+def test_request_sids_reads_a_grown_bank_past_its_fragments(monkeypatch):
+    """PAD-445: 11 code modes grow Godzilla 1.16's bank to 2603 sounds over 2599 fragments, and
+    the request table is still found with the fragment word as its sid ceiling."""
+    from pinball_decryptor.plugins.stern.spike2 import sound_requests as SR
+    asked = []
+    monkeypatch.setattr(SR, "locate_sound_requests",
+                        lambda elf, frag: (asked.append(frag), (None, None))[1])
+    MW.request_sids(b"\x00" * 64, _bank_head(2599, 2603), 125)
+    assert asked == [2599]
+
+
+GZ116_GAME = r"C:\tmp\kaiju_premium\stock\game"
+
+
+@pytest.mark.skipif(not os.path.exists(GZ116_GAME),
+                    reason="needs the Godzilla Premium 1.16 stock game ELF")
+def test_the_music_carrier_is_found_on_a_bank_grown_past_its_fragments():
+    """The Write's failure (PAD-445): 'the music carrier, request 125, plays 0 sound ids'."""
+    with open(GZ116_GAME, "rb") as f:
+        elf = f.read()
+    stock = MW.request_sids(elf, _bank_head(2599, 2534), 125)
+    assert len(stock) == 1
+    assert MW.request_sids(elf, _bank_head(2599, 2603), 125) == stock
+
+
+def test_a_bank_with_no_room_left_still_takes_every_new_sound(monkeypatch, tmp_path):
+    """PAD-445, no limit: a bank whose header has as many sounds as fragments still takes the
+    mode's own sound - nothing in a Write counts the records it appends."""
+    card, staged, project, encoded, _h = _mode_card(monkeypatch, tmp_path)
+    img = bytearray(card.data["img"])
+    img[:0xB0] = _bank_head(4, 4)                  # the card's 4 sounds, 4 fragments: room 0
+    card.data["img"] = card.img_node["_data"] = bytes(img)
+    msgs, log = _capture()
+    _writes, _counts, plan, _m, _v = _compute(project, log)
+    assert list(encoded) == [0] and staged["path"]
+    assert plan["modes"]["end_sound"] == {"name": "KAIJU RUSH", "request": 1295, "idx": 0}
+    assert not [m for lvl, m in msgs if lvl == "error"]
+    engine._rmtree_grow_plan(plan)
+
+
 @pytest.mark.parametrize("device,env,needle", [
     (True, None, "direct-SD write cannot add files"),
     (False, "0", "PAD_STERN_MODES=0"),

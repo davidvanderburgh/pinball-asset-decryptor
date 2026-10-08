@@ -14621,6 +14621,15 @@ def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
     record's geometry), so on its own it would sit there unplayed; the play
     tables are re-pointed at it afterwards (:func:`_repoint_descriptors`).
 
+    THERE IS NO LIMIT ON HOW MANY (PAD-445).  Each one is a record, so the
+    header's sounds word may pass its fragment word (Godzilla 1.16: 2599
+    fragments, 2534 sounds, and 11 code modes add 69).  The fragments are the
+    game's sound ids, which a grow never adds to - an appended record is
+    reached through a re-pointed id or the modes' key swap - and the game reads
+    the fragment word nowhere else; the emulator plays records past it.  The
+    one ceiling on the bank is its size
+    (:data:`~.spike2.emulator.MAX_IMAGE_BYTES`, :func:`_grows_within_bank_limit`).
+
     The appended body starts as the stock sound's own bytes, repeated to fill
     the new length.  It is a scaffold the encoder overwrites, but it has to be
     real card audio rather than zeros: the codec is driven over these bytes to

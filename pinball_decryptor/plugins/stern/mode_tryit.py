@@ -170,8 +170,11 @@ def check_title(prof, game_dir, version):
 
 # ---- the modes ---------------------------------------------------------------------
 def code_mode_sources(project):
-    """``[(slug, path)]`` of the project's CODE modes: ``modes/<slug>/<slug>.c``."""
+    """``[(slug, path)]`` of the project's CODE modes: ``modes/<slug>/<slug>.c``, a blocks mode's C made again
+    first when its blocks would now make it differently (PAD-457, :func:`.block_modes.refresh`)."""
+    from . import block_modes as BM
     out = []
+    BM.refresh(project)
     try:
         names = sorted(os.listdir(MP.modes_dir(project)))
     except OSError:
@@ -278,7 +281,9 @@ def code_modes_with_assets(project):
     clip, a screen, music or calls, :mod:`.code_modes`): those go through Write's set like a form
     mode. A code mode with none is only compiled in (:func:`code_mode_sources`). Raises
     :class:`TryItError` naming an assets.json that does not load."""
+    from . import block_modes as BM
     from . import code_modes as CM
+    BM.refresh(project)                     # PAD-457: blocks modes built from what their blocks make now
     try:
         return [(s, c) for s, c in CM.list_code(project) if c.has_assets()]
     except CM.CodeModeError as e:

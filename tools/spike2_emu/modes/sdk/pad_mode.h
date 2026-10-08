@@ -642,5 +642,11 @@ void pm_shake_outlast(void);
 int pm_game_wizard(int n, int how);
 int pm_game_wizard_named(const char *name, int how);
 int pm_game_wizards(void);
+/* PAD-457: claim one - this card's modes hand it out, so the game's own lighting (a part in all six films) leaves it
+ * unlit from now on and it lights only when a mode hands it over; the game still lights the unclaimed ones. A mode
+ * that hands one over claims it as it loads (a mode file's `game_wizard`, a blocks mode's init). 1 = claimed, 0 = not
+ * on this game, no such wizard, or the port names no `site wizard_light` (then the game lights it too). */
+int pm_game_wizard_claim(int n);
+int pm_game_wizard_claim_named(const char *name);
 
 #endif

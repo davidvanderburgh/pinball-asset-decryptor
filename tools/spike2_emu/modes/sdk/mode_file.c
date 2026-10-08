@@ -1976,10 +1976,12 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.n_shake)                         /* PAD-414 */
         pm_log("\"%s\": %u shake line(s)%s", cfg.name, cfg.n_shake,
                pm_can(PM_CAN_SHAKER) ? "" : " - this game's port has no shaker: no shake");
-    if (cfg.wizard[0])                       /* PAD-436 */
+    if (cfg.wizard[0]) {                     /* PAD-436 */
         pm_log("\"%s\": when it starts, the game's mini-wizard \"%s\" is %s instead - nothing of its own runs%s", cfg.name,
                cfg.wizard, cfg.wizard_start ? "started" : "lit for its start shot",
                pm_can(PM_CAN_GAME_WIZARDS) ? "" : " - this game's port names no mini-wizards: nothing happens");
+        pm_game_wizard_claim_named(cfg.wizard);   /* PAD-457: the game's own lighting leaves it to this mode */
+    }
     if (cfg.show_start[0] || cfg.show_end[0])   /* PAD-418 */
         pm_log("\"%s\": the game's light show \"%s\" at its start, \"%s\" at its end%s", cfg.name, cfg.show_start,
                cfg.show_end, pm_can(PM_CAN_GAME_SHOWS) ? "" : " - this game's port names no light shows: none plays");

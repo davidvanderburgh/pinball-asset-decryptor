@@ -72,6 +72,12 @@ check counts as in the way. The runtime now keeps the handed-over one the only o
 gives back what the game lit itself afterwards, retries a refused `start` that ball, and starts several in order.
 MODE_SDK.md "The one handed over is the one that starts" has the detail.
 
+Then (the same owner): every film handed out its own, Duel on the Disco Volante was played, and the Right ramp
+lit the next one with no film done - the game's own lighting runs again at every more henchman, villain or gadget
+once that part is in all six films, and the runtime gave back what the game had lit. "Instead of the current logic",
+left open above, is now the rule for any mini-wizard a mode hands out: the modes claim theirs as they load and the
+game's lighting (`site wizard_light`, vetoed) leaves a claimed one unlit; it still lights the unclaimed ones.
+
 The plan as it was written (PAD-428):
 
 What the user asked first: the game's mini-wizard (its own mode, music and screens) lit

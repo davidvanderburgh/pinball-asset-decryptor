@@ -1990,7 +1990,8 @@ the bit ORed into the lit mask, the refresh byte set. `PM_WIZARD_LIGHT` stops th
 starts it. `PM_WIZARD_START` then calls the game's start (`wizard_start`), so the game's own check decides: started
 (`PM_WIZARD_STARTED`), or left lit (`PM_WIZARD_LIT`) when one of its modes is in the way. Any mode may call it, running
 or not, in a game (the tick thread is the game's own logic thread, as the Right ramp's handler). One the player has
-played this game plays again. The game's own lighting carries on as before (a film hand-out is IN ADDITION, as asked).
+played this game plays again. The game's own lighting carries on for the ones no mode hands out; one a mode hands
+out it no longer lights (PAD-457, below - first written as IN ADDITION, as PAD-436 asked).
 
 **The one handed over is the one that starts (PAD-457).** A Bond owner set each film to start its mini-wizard,
 finished From Russia With Love, saw the Right ramp's inserts cycle as the game's own do, and the ramp started Duel on
@@ -2026,6 +2027,34 @@ again; the cycle and the Right ramp then started nothing else. Two of three runs
 Ahoy's intro clip under other rigs' load ("prepare waited 3261 ms for the host", then "host did not answer"; once long
 enough for the game's dispatch watchdog); a control with main's runtime, the game's own Right ramp starting Ahoy, logged
 the same "host did not answer", and the third run played the boat-chase intro clean.
+
+**A mini-wizard a mode hands out is that mode's (PAD-457, the owner's next report).** With every film handing
+out its own, the owner played Duel on the Disco Volante off Thunderball, then won another mode, and the Right ramp
+was lit for the next one with no film done. The game's lighting (`0x110cac`) is called from the collect each time a
+part's six-film count is 6 - for a henchman, villain or gadget not once but at EVERY more of that part (only Q Branch
+has a once flag, `0xae`) - and lights every one not played. And the runtime gave back what the game had lit itself
+once a hand-over started. Now:
+
+- `pm_game_wizard_claim(n)` / `pm_game_wizard_claim_named(name)`: this card's modes hand n out. A mode file with
+  `game_wizard` claims its one as it loads; a blocks mode claims each one its blocks name in its `on_init`.
+- The port's `site wizard_light 0x00110cac 0xe30a09ac 0xe3a01004` is hooked with a veto at the arm. Nothing
+  claimed: it runs as it always has. When it would light a claimed one for the player up, it is refused and our copy
+  lights only the unclaimed ones not played (one of them selected): `[pad] game wizards: the game would light 0x7 for
+  player 1 - 0x7 of them only this card's modes hand out: left unlit`.
+- Nothing claimed is owed or given back after a hand-over starts; unclaimed ones are, as before.
+- A blocks mode's C is written when its blocks are saved, so one saved by an older app had no claims: Write and Try
+  it translate every blocks mode again first when its blocks now make different C (`block_modes.refresh`), leaving
+  the blocks as they are.
+
+Proven in the emulator (2026-10-08, rig 4, the stock James Bond LE 1.06 card, muted): a blocks mode handing each of
+the four films' mini-wizards out (Light it) on its film event, PAD-428's instrument calling the game's collect - a
+henchman in five films, Thunderball's other three parts, then its henchman (that part now in all six films, and the
+film done), the Right ramp, then one more henchman. With main's runtime (v1.151.0) and the C main's translator writes:
+the game lit 0xf, Duel on the Disco Volante was pinned and started, and the runtime lit 0x7 again for player 1 the
+moment it started; the next henchman lit them again. With this runtime and the claiming C: four claims as the mode
+loaded, `the game would light 0xf ... left unlit` at Thunderball's last part, Disco Volante alone lit (0x8), started
+off the ramp (played 0x8, its intro on the glass), lit 0 after it, and `the game would light 0x7 ... left unlit` at
+the next henchman - nothing lit. No abort in either run.
 
 **With a mode of yours that holds the game's modes off.** Ahoy Mr. Bond's start (`block_start_6`) is one a mode of
 yours may refuse (PAD-363). The game's start code goes on after a refused start as if it began: it unlights them all

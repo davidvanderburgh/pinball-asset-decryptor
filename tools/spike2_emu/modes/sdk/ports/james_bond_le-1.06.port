@@ -473,6 +473,10 @@ event film_daf          site film_complete arg 5
 # game's is in the way (0x110c10), unlights them all and marks it played (1 = started, 0 = not). Starts: 0x92bd8,
 # 0x20530, 0xbd4dc, 0x7e0b0. The Right ramp inserts DR. NO, ROSA KLEBB, GOLDFINGER and LARGO are lamps 34, 35, 36, 43.
 site  wizard_start   0x00110d98 0xe92d4070 0xeb055daa
+# PAD-457: the game's own lighting (0x110cac, called from the collect when a part is in all six films - and again
+# for every more of that part): every one not played lit, one selected, the refresh byte set. Hooked with a veto so a
+# mini-wizard a mode of the card hands out (claimed as the modes load) stays unlit by it.
+site  wizard_light   0x00110cac 0xe30a09ac 0xe3a01004
 data  wizard_state   0x0081c3f4
 data  wizard_table   0x00625da0
 data  lamps_dirty    0x008268bc

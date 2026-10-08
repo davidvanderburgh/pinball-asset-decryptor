@@ -18,6 +18,12 @@ What is worth failing on:
     Disco Volante off the Right ramp. Until the game starts it, it is the only one lit and the one selected; the
     game's own are lit again after. A start the game refuses (the film's last part comes from a mode still running)
     starts the moment the game would, that ball; two handed over start in order; a new game drops them.
+  * A MINI-WIZARD A MODE HANDS OUT IS ITS MODE'S (PAD-457, then): the same owner played Duel on the Disco Volante off
+    Thunderball and the Right ramp lit the next one with no film done - once a part is in all six films, the game's
+    own lighting lights them all again at every more of it. The modes claim theirs as they load (a mode file's
+    `game_wizard`, a blocks mode's init), the game's lighting (`site wizard_light`, vetoed) leaves a claimed one
+    unlit and lights the rest, and nothing claimed is given back. A blocks mode saved by an older app is translated
+    again before a build, so its claims are in.
 """
 import json
 import os
@@ -107,6 +113,9 @@ def test_the_port_lines_match_the_game_program_when_it_is_here():
         starts.append(e[3])
     assert starts == [0x92bd8, 0x20530, 0xbd4dc, 0x7e0b0]
     assert "site block_start_6      0x00020530" in text            # Ahoy's start: a mode of ours may veto it
+    m = re.search(r"^site\s+wizard_light\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)", text, re.M)
+    addr, w0, w1 = (int(x, 16) for x in m.groups())
+    assert addr == 0x110cac and (word(addr), word(addr + 4)) == (w0, w1)
 
 
 # ---- the mode ----------------------------------------------------------------------------------
@@ -185,7 +194,9 @@ def _harness(tmp_path_factory):
     tail = anchor[anchor.index("int pm_block_game_modes"):]
     stubs = BLOCK_STUBS + [(tail, tail + "\nint pm_game_wizard_named(const char *name, int how) "
                             "{ printf(\"GAMEWIZARD %s how %d at %lu\\n\", name, how, now_ms); "
-                            "return how == PM_WIZARD_START ? PM_WIZARD_STARTED : PM_WIZARD_LIT; }")]
+                            "return how == PM_WIZARD_START ? PM_WIZARD_STARTED : PM_WIZARD_LIT; }"
+                            "\nint pm_game_wizard_claim_named(const char *name) "
+                            "{ printf(\"CLAIM %s at %lu\\n\", name, now_ms); return 1; }")]
     return _build(tmp_path_factory, stubs, "gamewizard")
 
 
@@ -225,6 +236,15 @@ def test_how_often_still_holds_and_light_is_light(harness_wizard, tmp_path):
     assert "the game's Ahoy Mr. Bond, lit for its start shot for player 1" in out
 
 
+def test_the_mode_file_claims_its_mini_wizard_as_it_loads(harness_wizard, tmp_path):
+    """PAD-457: before any shot or film - the game's own lighting must leave it alone from the game's start."""
+    out = _run(harness_wizard, tmp_path, AHOY, "tick", "30")
+    assert [ln.split(" at ")[0] for ln in out.splitlines() if ln.startswith("CLAIM ")] == ["CLAIM Ahoy Mr. Bond"]
+    assert "GAMEWIZARD" not in out
+    out = _run(harness_wizard, tmp_path, AHOY.replace("game_wizard start Ahoy Mr. Bond\n", "seconds 20\n"), "tick", "30")
+    assert "CLAIM" not in out
+
+
 def test_a_bad_how_is_skipped_and_the_file_is_not_valid(harness_wizard, tmp_path):
     out = _run(harness_wizard, tmp_path, AHOY.replace("game_wizard start", "game_wizard later"),
                "shot", "0x08000000", "tick", "30")
@@ -256,6 +276,7 @@ static unsigned state[12], table[4][8];
 static unsigned char dirty;
 static int ready = 1, in_game = 1, starts, run[4];
 static unsigned player = 1, stock_ball_ends, games;
+typedef int (*veto_fn)(unsigned *regs);
 static unsigned long now = 10000;
 static const struct pm_mode ours = { 1 }, *block_owner, *running;
 static char block_who[40] = "RUSH";
@@ -307,6 +328,7 @@ int main(int argc, char **argv)
         table[k][0] = (unsigned)k; table[k][1] = 1u << k; table[k][3] = 0x1000u + (unsigned)k;
         table[k][4] = (unsigned)(unsigned long)RUN[k];
     }
+    wiz_light_hooked = 1;
     for (i = 1; i < argc; i++) {
         const char *c = argv[i];
         if (!strcmp(c, "light") || !strcmp(c, "start")) {
@@ -335,6 +357,15 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "wait")) now += 300;
         else if (!strcmp(c, "new_game")) {      /* the game's player set-up (0x1109dc), then its game_start event */
             state[player - 1] = ~0u; state[4 + player - 1] = state[8 + player - 1] = 0; games++;
+        } else if (!strcmp(c, "claim")) {
+            printf("C %d\n", pm_game_wizard_claim_named(argv[++i]));
+        } else if (!strcmp(c, "unhooked")) wiz_light_hooked = 0;
+        else if (!strcmp(c, "game_light")) {   /* the game's 0x110cac through its hook: the veto first */
+            const char *sel = argv[++i];
+            if (!wizard_light_veto(0)) {
+                state[4 + player - 1] = ~state[8 + player - 1] & 0xfu;
+                state[player - 1] = (unsigned)atoi(sel);
+            }
         } else if (!strcmp(c, "tick")) wizards_tick();
         dirty = 0;
         printf("S p%u sel %u lit %x played %x starts %d\n", player, state[player - 1], state[4 + player - 1],
@@ -354,10 +385,12 @@ def _wiz(tmp_path, *args):
         "static void wizard_refused(unsigned start)\n{", "static int wizard_running(int n)",
         "static void wizard_pin(unsigned p)", "static void wizard_due_next(unsigned p)",
         "static void wizard_due_start(unsigned p)", "static void wizards_tick(void)",
-        "int pm_game_wizard(int n, int how)", "int pm_game_wizard_named(const char *name, int how)"))
+        "int pm_game_wizard(int n, int how)", "static int wizard_by_name(const char *name)",
+        "int pm_game_wizard_named(const char *name, int how)", "static int wizard_light_veto(unsigned *r)",
+        "int pm_game_wizard_claim(int n)", "int pm_game_wizard_claim_named(const char *name)"))
     due = re.search(r"#define WIZ_DUE_MAX \d+\n", src).group(0) + re.search(
-        r"static struct \{\n    unsigned char n\[WIZ_DUE_MAX\];.*?\} wiz_due\[4\];\nstatic unsigned wiz_game;", src,
-        re.S).group(0)
+        r"static struct \{\n    unsigned char n\[WIZ_DUE_MAX\];.*?\} wiz_due\[4\];\nstatic unsigned wiz_game;.*?"
+        r"\nstatic int wiz_light_hooked;", src, re.S).group(0)
     code = WIZ_HOST.replace("%(due)s", due).replace("%(lifted)s", lifted)
     out = _host_run(tmp_path, code, flags=("-no-pie", "-fno-pie"), args=args)
     return out.splitlines()
@@ -465,6 +498,55 @@ def test_a_new_game_drops_what_was_handed_over(tmp_path):
     assert s[5] == "S p1 sel 0 lit f played 0 starts 0"           # the game's own lighting, left alone
 
 
+CLAIM_ALL = ("claim", "Chaos at Crab Key", "claim", "Ahoy Mr. Bond", "claim", "Goldfinger's Jackpot",
+             "claim", "Duel on the Disco Volante")
+
+
+def test_a_played_film_wizard_is_not_followed_by_the_games_own_lighting(tmp_path):
+    """PAD-457, the second report: every film hands out its own, Thunderball done, Duel on the Disco Volante off the
+    Right ramp and over, then another henchman (a part already in all six films): nothing lit, the ramp starts
+    nothing."""
+    out = _wiz(tmp_path, *CLAIM_ALL, "light", "Duel on the Disco Volante", "ramp", "tick", "ends", "tick",
+               "game_light", "1", "tick", "ramp", "tick")
+    s = _states(out)
+    assert out.count("C 1") == 4
+    assert s[5] == "S p1 sel 3 lit 0 played 8 starts 400"           # Duel on the Disco Volante played
+    assert s[8] == "S p1 sel 3 lit 0 played 8 starts 400"           # the game's lighting left them all unlit
+    assert s[-1] == s[8]                                            # and the ramp started nothing
+    assert any("the game would light 0x7 for player 1 - 0x7 of them only this card's modes hand out: left unlit" in ln
+               for ln in out)
+    assert sum("handed out by this card's modes only" in ln for ln in out) == 4
+
+
+def test_the_game_still_lights_the_ones_no_mode_hands_out(tmp_path):
+    out = _wiz(tmp_path, "claim", "Ahoy Mr. Bond", "game_light", "1", "claim", "ahoy mr. bond", "game_light", "1")
+    s = _states(out)
+    assert s[1] == "S p1 sel 0 lit d played 0 starts 0"             # Ahoy left unlit, one of the others selected
+    assert sum("handed out by this card's modes only" in ln for ln in out) == 1   # a second claim says nothing new
+    out = _wiz(tmp_path, "game_light", "2")                         # nothing claimed: the game's lighting as it was
+    assert _states(out)[-1] == "S p1 sel 2 lit f played 0 starts 0"
+    assert not any("left unlit" in ln for ln in out)
+
+
+def test_nothing_claimed_is_given_back_after_a_hand_over(tmp_path):
+    """The game lit them all before the card's claims could stop it (or a port without the hook): a claimed one is
+    not owed, the unclaimed ones are."""
+    out = _wiz(tmp_path, "claim", "Ahoy Mr. Bond", "claim", "Goldfinger's Jackpot", "light_all", "0",
+               "light", "Ahoy Mr. Bond", "ramp", "tick")
+    s = _states(out)
+    assert s[-2] == "S p1 sel 1 lit 0 played 2 starts 200"
+    assert s[-1] == "S p1 sel 1 lit 9 played 2 starts 200"          # Chaos and Disco Volante back, not Goldfinger
+    assert any("the game lit 0x9 for player 1 as well" in ln for ln in out)
+
+
+def test_a_claim_needs_the_ports_lighting_site(tmp_path):
+    out = _wiz(tmp_path, "unhooked", "claim", "Ahoy Mr. Bond", "claim", "Nope", "game_light", "3")
+    assert out.count("C 0") == 2
+    assert any("this game's port names no wizard_light - the game's own lighting lights it too" in ln for ln in out)
+    assert any("\"Nope\": not one of this game's mini-wizards - nothing claimed" in ln for ln in out)
+    assert _states(out)[-1] == "S p1 sel 3 lit f played 0 starts 0"
+
+
 def test_the_runtime_refuses_with_no_game_or_no_such_wizard(tmp_path):
     out = _wiz(tmp_path, "nogame", "light", "Ahoy Mr. Bond", "ready", "light", "Nope")
     assert out.count("R 0") == 2 and out[-1] == "S p1 sel 0 lit 0 played 0 starts 0"
@@ -481,6 +563,10 @@ def test_the_runtime_keeps_a_refused_start_lit_and_lights_a_start_while_a_mode_b
     wiz = wiz[:wiz.index("\n}\n")]
     assert wiz.index("block_owner && running == block_owner") < wiz.index('fn("wizard_start")')
     assert "wizards_tick();" in src[src.index("static void on_tick(unsigned *r)"):]
+    arm = src[src.index("static void wizards_arm(void)"):]
+    arm = arm[:arm.index("\n}\n")]
+    assert 'hook_veto(fn("wizard_light"), wizard_light_veto)' in arm     # PAD-457: the game's own lighting
+    assert "pm_game_wizard_claim_named(cfg.wizard);" in (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert "wizards_arm();" in src and "PM_CAN_GAME_WIZARDS" in (SDK / "pad_mode.h").read_text(encoding="utf-8")
 
 
@@ -508,6 +594,41 @@ def test_the_block_hands_one_over_by_name_and_is_refused_where_there_is_none():
     assert 'game_wizard("Ahoy Mr. Bond", 1);' in c and 'game_wizard("Goldfinger\'s Jackpot", 0);' in c
     assert "pm_game_wizard_named(name, start ? PM_WIZARD_START : PM_WIZARD_LIGHT)" in c
     assert "pm_game_wizard_named" not in BM.to_c(BM.normalize({**PROG, "scripts": []}), "x")
+    init = c[c.index("static void on_init(void)"):]                 # PAD-457: claimed as the mode loads
+    init = init[:init.index("\n}\n")]
+    assert init.count("pm_game_wizard_claim_named(") == 2
+    assert 'pm_game_wizard_claim_named("Ahoy Mr. Bond");' in init
+    assert "pm_game_wizard_claim_named" not in BM.to_c(BM.normalize({**PROG, "scripts": []}), "x")
+
+
+def test_a_blocks_mode_saved_by_an_older_app_is_translated_again_before_a_build(tmp_path):
+    """Its C is written only when its blocks are saved: one saved before PAD-457 never claimed its mini-wizards."""
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    project = str(tmp_path)
+    slug, src = BM.new_blocks_mode(project, "FILM WIZARDS")
+    BM.save(project, slug, PROG)
+    fresh = pathlib.Path(src).read_text(encoding="utf-8")
+    old = fresh.replace('    pm_game_wizard_claim_named("Ahoy Mr. Bond");\n', "")
+    pathlib.Path(src).write_text(old, encoding="utf-8")
+    other = tmp_path / "modes" / "mine"                              # a code mode of its own: never touched
+    other.mkdir(parents=True)
+    (other / "mine.c").write_text("/* mine */\n", encoding="utf-8")
+    assert BM.refresh(project) == [slug]
+    assert pathlib.Path(src).read_text(encoding="utf-8") == fresh
+    assert BM.refresh(project) == []
+    pathlib.Path(src).write_text(old, encoding="utf-8")
+    assert [s for s, _p in MT.code_mode_sources(project)] == ["film_wizards", "mine"]
+    assert pathlib.Path(src).read_text(encoding="utf-8") == fresh
+    pathlib.Path(src).write_text(old, encoding="utf-8")
+    try:
+        MW.code_mode_list(project)
+    except MW.ModeWriteError:                                        # "mine" has no assets.json: refreshed first anyway
+        pass
+    assert pathlib.Path(src).read_text(encoding="utf-8") == fresh
+    assert (other / "mine.c").read_text(encoding="utf-8") == "/* mine */\n"
+    (tmp_path / "modes" / slug / BM.BLOCKS_FILE).write_text("{not json", encoding="utf-8")
+    assert BM.refresh(project) == []                                 # left for the build to report
 
 
 def test_the_blocks_c_builds_with_build_mode_sh(tmp_path):

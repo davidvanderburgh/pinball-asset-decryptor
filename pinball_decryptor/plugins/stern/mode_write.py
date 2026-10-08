@@ -1941,9 +1941,11 @@ def tryit_env(set_dir, guest_object="/lib/pad_mode.so"):
 def code_mode_list(project):
     """``[(slug, CodeAssets)]`` of the project's code modes. Raises :class:`ModeWriteError`
     naming a code mode whose assets.json does not load (never dropped quietly)."""
+    from . import block_modes as BM
     from . import code_modes as CM
     if not project:
         return []
+    BM.refresh(project)                     # PAD-457: blocks modes built from what their blocks make now
     try:
         return CM.list_code(project)
     except CM.CodeModeError as e:

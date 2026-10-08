@@ -541,6 +541,15 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         ElectricMagicMagnet (device 17, 255 for 2000 then 64 to 2500 ms; ELECTRIC MAGIC MAGNET OPTO), Aerosmith
         LE / Pro ToyBoxMagnet (device 17 / 16, 255 for 1000 then 16; the toy box switches). Staged by cgen PRESET,
         running (chain70, chain73). Rush's TimeMachineMagnet takes its device from its caller (not traced yet).
+      - Those magnets' results: Aerosmith LE toy box, Led Zeppelin LE Electric Magic and Mandalorian LE Child magnet
+        (cthe_child_magnet, device 14: 255 for 800 then 20) PROVEN and landed as held coils. Aerosmith Pro: the game
+        pulses its own toy box magnet during our hold (taken). Beatles: the game sends an OFF 0.3-0.5 s into the
+        first hold, twice - not landed. Staging lessons: the runtime reads the FIRST `text held_coils` line, so
+        fill_c.py now drops the stage A port's own line (a port that already held coils kept only those, and the
+        new magnets were never armed); `coils/c_verdict2.py` takes a hold the draw alone covers (the board's hold
+        phase `0/255 for 0 ms`) as ours. Mode > Magnet on Mandalorian LE runs with the Child opto (the switch named
+        for it; no place on the map) - chain77. Led Zeppelin LE's magnet opto is no port shot (its shots are the
+        game's shot table), Aerosmith's toy box switch for the magnet not picked yet.
       - Not reachable this run: Metallica (its stage already has the loop post's own commands; only the game start
         fails - credits not counted after Guided Setup), Elvira (no game on the direct harness), TMNT LE (no game
         after its reboot; its up post / van diverter are not object-driven like D&D's), Jaws Pro (the game never

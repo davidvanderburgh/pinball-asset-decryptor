@@ -414,3 +414,7 @@ text top_up_post_drive    9 8 255 64 128 1564
 text magnet_hold_label    Magnet
 text magnet_hold_drive    9 7 255 800 20
 text held_coils            center_ramp_gat diverter_mini_p top_up_post magnet_hold
+# PAD-420: Mode > Magnet holds the ball with the held coil magnet_hold (the Child's magnet), on a hit of the
+# Child opto - the switch named for it (the magnet has no place on the playfield picture)
+text magnet_coil           magnet_hold
+value magnet_shot          0x10000000

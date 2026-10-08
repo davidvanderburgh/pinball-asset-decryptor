@@ -173,6 +173,9 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   served), before the runtime's next look at the trigger file, so the waiting mode started. Next try: start the
   multiball from a state where it holds (balls in its lock first, or the game's own qualifying shots), or have the
   starter and the stack check run in the same tick.
+  Tried next: the starter first had the game serve two more balls (`pm_multiball_add(2, 10)`: three in play), then
+  started Thor Multiball: still off within 0.5 s. Calling a mode's start alone does not set what keeps it running;
+  the remaining route is to qualify a multiball the way a player does (its lock shots), per title.
 - Lamp lines read from each program (`lampmap.port_lines`, the lights helper's reader fix cherry-picked) for the 8
   builds that had none.
 

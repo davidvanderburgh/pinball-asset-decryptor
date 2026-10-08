@@ -322,6 +322,9 @@ class App:
         # (plugins/stern/card_size.py).  Mirrored to PAD_STERN_CARD_SIZE the
         # same way; the original's own size leaves the var unset.
         self._apply_card_size_env(self._card_size_setting())
+        # Write tab: "Make the image as small as it can be" (PAD-467), the
+        # same way: PAD_STERN_CARD_FIT, unset when it isn't ticked.
+        self._apply_card_fit_env(self._card_fit_setting())
         # PREVIEW FEATURES (the mode maker ships dark): the codes in settings.json
         # are checked ONCE, here, and the answer is cached for the whole run
         # (core/preview.py).  Before the window, whose Modes tab asks it.
@@ -466,6 +469,8 @@ class App:
             on_text_grow_change=self._on_text_grow_change,
             initial_card_size=self._card_size_setting(),
             on_card_size_change=self._on_card_size_change,
+            initial_card_fit=self._card_fit_setting(),
+            on_card_fit_change=self._on_card_fit_change,
             on_detected_game_change=self._on_detected_game_change,
             on_audio_profile=self._on_audio_profile_request,
             on_partition_image_opened=self._on_partition_image_opened,
@@ -2368,8 +2373,10 @@ class App:
         # before the pipeline reads it (belt and braces: it is also set at
         # startup and on every toggle).
         self._apply_text_grow_env(self.window.text_grow_enabled())
-        # The Write tab's SD card size, the same way.
+        # The Write tab's SD card size, the same way, and its "as small as
+        # it can be".
         self._apply_card_size_env(self.window.card_size_choice())
+        self._apply_card_fit_env(self.window.card_fit_enabled())
         if self._current_mfr.supports_build_update():
             write_kwargs["update"] = update
         self._chain_flash_after_build = (
@@ -6477,6 +6484,35 @@ class App:
         choice = self._norm_card_size(choice)
         self._settings[self._CARD_SIZE_KEY] = choice
         self._apply_card_size_env(choice)
+        self._save_settings()
+
+    #: Settings key for the Write tab's "Make the image as small as it can
+    #: be" (PAD-467, card_size.fit_image).  Default off.
+    _CARD_FIT_KEY = "card_fit"
+    #: card_size.FIT_ENV, spelled out as _CARD_SIZE_ENV is.
+    _CARD_FIT_ENV = "PAD_STERN_CARD_FIT"
+
+    def _card_fit_setting(self):
+        """The persisted "as small as it can be" (False when never set, and
+        always where a card can't be resized: macOS)."""
+        from .webui.tabs.write import card_size_supported
+        return (bool(self._settings.get(self._CARD_FIT_KEY))
+                and card_size_supported())
+
+    @classmethod
+    def _apply_card_fit_env(cls, on):
+        """Mirror "as small as it can be" into ``PAD_STERN_CARD_FIT``: "1"
+        when ticked, else UNSET, so a headless caller builds what it always
+        built (the SD card size's polarity rule)."""
+        if on:
+            os.environ[cls._CARD_FIT_ENV] = "1"
+        else:
+            os.environ.pop(cls._CARD_FIT_ENV, None)
+
+    def _on_card_fit_change(self, on):
+        """Persist + apply the Write tab's "as small as it can be"."""
+        self._settings[self._CARD_FIT_KEY] = bool(on)
+        self._apply_card_fit_env(bool(on))
         self._save_settings()
 
     def _apply_audio_preview_env(self, output_path):

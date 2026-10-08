@@ -87,6 +87,20 @@ CARD_SIZE_WAY_BACK = ("To build it at its own size, choose \"Same as the "
 CARD_SIZE_CHOICES = ("16S", "16G", "32G")
 #: the control's words for a size, where "<n> GB card" would not say it
 CARD_SIZE_LABELS = {"16S": "Smaller 16 GB card"}
+#: PAD-467: under SD card size, the finished build cut down to what is on it
+#: (plugins/stern/card_size.py fit_image).  "268 MB" is card_size.FIT_SPARE.
+CARD_FIT_LABEL = "Make the image as small as it can be"
+CARD_FIT_TIP = (
+    "Once everything is on the card, its games partition is cut down to "
+    "what it holds, with 268 MB of it left free, the two small partitions "
+    "that hold the machine's settings and logs move up behind it, and the "
+    "image file ends there. It is smaller to keep, share and flash, and it "
+    "still fits the SD card size above: the SD card size is the room the "
+    "build has while it runs. Building it takes a few minutes more, because "
+    "the files at the end of the games partition are moved further in, and "
+    "each build is made whole from the original. The machine only writes to "
+    "that partition to install a code update, so a card made this small may "
+    "not have the room for one.")
 EDITABLE_HINT = (
     "Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
     "files in pck/_EDITABLE ASSETS/ inside your Modified Assets "
@@ -255,7 +269,27 @@ def _probe_card_size(path):
     except OSError:
         return None
     room = _probe_room(path, layout, own, why)
-    return {"own": own, "size": size, "why": why, "room": room}
+    return {"own": own, "size": size, "why": why, "room": room,
+            "fit": _probe_fit(path, own)}
+
+
+def _probe_fit(path, own):
+    """PAD-467: ``{"size": bytes, "why": sentence}`` for "Make the image as
+    small as it can be": about how big the original at *path* comes out made
+    as small as it can be before a build adds to it (card_size.fit_estimate),
+    and why it can't be ("" when it can); ``None`` when the original isn't
+    laid out the way Stern lays a card out.  OFF the UI loop."""
+    if not own:
+        return None
+    from ...plugins.stern import card_size as cs
+    why = cs.fit_refusal(path)
+    size = None
+    if not why:
+        try:
+            size = cs.fit_estimate(path)
+        except Exception:  # noqa: BLE001 - not a filesystem this reads
+            log.debug("card size probe: no fit estimate", exc_info=True)
+    return {"size": size, "why": why}
 
 
 def _probe_room(path, layout, own, why):
@@ -382,7 +416,8 @@ class WriteTab(TabService):
         "write_version_date_var", "write_card_size_var",
         "write_version_override", "write_version_validation_error",
         "_target_write_path", "text_grow_enabled", "card_size_choice",
-        "card_size_problem", "set_flash_running",
+        "card_size_problem", "write_card_fit_var", "card_fit_enabled",
+        "set_flash_running",
         "begin_revert_view", "_remember_flashed_image", "_image_was_flashed",
         "_open_flash_dialog", "_has_pending_write_changes",
         "_scan_write_preview", "_maybe_rescan_write_preview",
@@ -405,6 +440,9 @@ class WriteTab(TabService):
             "text_grow", "bool", True if tg is None else bool(tg))
         self.write_card_size_var = self.var(
             "card_size", "str", _norm_card_size(cb.get("initial_card_size")))
+        self.write_card_fit_var = self.var(
+            "card_fit", "bool",
+            bool(cb.get("initial_card_fit")) and card_size_supported())
         self.write_version_auto_var = self.var("version_auto", "bool", True)
         self.write_version_date_var = self.var("version_date")
 
@@ -466,6 +504,8 @@ class WriteTab(TabService):
             "write", lambda *_a: self._on_text_grow_toggle())
         self.write_card_size_var.trace_add(
             "write", lambda *_a: self._on_card_size_change())
+        self.write_card_fit_var.trace_add(
+            "write", lambda *_a: self._on_card_fit_toggle())
         self.write_version_auto_var.trace_add(
             "write", lambda *_a: self._on_version_auto_toggle())
         self.write_version_date_var.trace_add(
@@ -484,7 +524,9 @@ class WriteTab(TabService):
                  card_size_cap=False, card_size_options=[],
                  card_size_shown="", card_size_note="",
                  card_size_note_kind="", card_size_label=CARD_SIZE_LABEL,
-                 card_size_tip=CARD_SIZE_TIP)
+                 card_size_tip=CARD_SIZE_TIP, card_fit_cap=False,
+                 card_fit_note="", card_fit_note_kind="",
+                 card_fit_label=CARD_FIT_LABEL, card_fit_tip=CARD_FIT_TIP)
         self._hook_mirrors()
 
     # ------------------------------------------------------------------
@@ -1275,6 +1317,31 @@ class WriteTab(TabService):
                 log.exception("card size change")
         self._publish_card_size()
 
+    def card_fit_enabled(self):
+        """Whether the next build is made as small as it can be (PAD-467,
+        what PAD_STERN_CARD_FIT mirrors); never where a card can't be
+        resized (macOS)."""
+        try:
+            return (bool(self.write_card_fit_var.get())
+                    and card_size_supported())
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _card_fits(self, probe):
+        """Whether the next build of the original *probe* read is made as
+        small as it can be: ticked, and an original it can be done to."""
+        fit = (probe or {}).get("fit")
+        return bool(self.card_fit_enabled() and fit and not fit.get("why"))
+
+    def _on_card_fit_toggle(self):
+        fn = self.window.cb.get("on_card_fit_change")
+        if fn is not None:
+            try:
+                fn(self.card_fit_enabled())
+            except Exception:                           # noqa: BLE001
+                log.exception("card fit change")
+        self._publish_card_size()
+
     def _card_size_applies(self):
         """A Stern Spike 2 build on a computer that can grow one: the only
         build card_size.py grows (not on macOS: see card_size_supported)."""
@@ -1404,6 +1471,10 @@ class WriteTab(TabService):
             choice, (None, "", None)) if choice else (None, "", None))
         if err:
             return None, None, err
+        if self._card_fits(probe):
+            # PAD-467: cut to what the build puts on it, so its size is
+            # known only once it is built (the flash checks the image then)
+            return builds_at, None, ""
         if builds_at and out:
             return builds_at, out, ""
         if not probe.get("own"):
@@ -1501,6 +1572,8 @@ class WriteTab(TabService):
             # the original can grow to it: can THIS computer grow a card?
             # (asked off the loop; this runs again when the answer is in)
             err = self._grow_here_problem(builds_at)
+        fit = self._card_fits(probe)
+        self._publish_card_fit(probe)
         if probe is None or (not offered and not err):
             # not a Stern-shaped card, one of the biggest class already, or
             # one that can't grow at all: nothing to choose
@@ -1528,7 +1601,12 @@ class WriteTab(TabService):
             if size > layout_size(own):
                 note += " in a %s file" % _fmt_size(size)
             note += "." + _room_words(probe.get("room") or {}, own, offered)
-            if builds_at == SMALL and (out or 0) <= layout_size(SMALL):
+            if builds_at and fit:
+                # PAD-467: the size is the room while the build runs
+                note += (" The games partition has that room while the build "
+                         "runs; then the image is made as small as it can "
+                         "be.")
+            elif builds_at == SMALL and (out or 0) <= layout_size(SMALL):
                 # PAD-465: made for a 16 GB card a little short of Stern's
                 note += (" The built image is %s, so it fits a 16 GB SD card "
                          "too small for Stern's own 16 GB image (%s)."
@@ -1551,6 +1629,30 @@ class WriteTab(TabService):
                  card_size_options=options, card_size_shown=shown,
                  card_size_note=note, card_size_note_kind=kind)
         self._update_write_filename()
+
+    def _publish_card_fit(self, probe):
+        """PAD-467: "Make the image as small as it can be" under SD card
+        size: shown for a Stern Spike 2 original laid out the way Stern lays
+        a card out (the probe's ``fit``), with a note saying about how big
+        that original comes out made as small as it can be, or, ticked for
+        an original that can't be, why its image keeps its size."""
+        from ...plugins.stern.card_size import size_words
+        fit = (probe or {}).get("fit")
+        if not fit or not self._card_size_applies():
+            self.set(card_fit_cap=False, card_fit_note="",
+                     card_fit_note_kind="")
+            return
+        note, kind = "", ""
+        if fit.get("why"):
+            if self.card_fit_enabled():
+                note, kind = ("This card's image keeps its size: %s."
+                              % fit["why"]), "err"
+        elif fit.get("size"):
+            note = ("Made as small as it can be, this card comes out about "
+                    "%s, plus what the build adds to it."
+                    % size_words(fit["size"]))
+        self.set(card_fit_cap=True, card_fit_note=note,
+                 card_fit_note_kind=kind)
 
     # ------------------------------------------------------------------
     # Modified Files: the scan

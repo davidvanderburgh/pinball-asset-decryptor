@@ -730,7 +730,18 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - Scans now: `shows/lane.sh` x3 (chainL1-3, `lane1-3.keys`, scanlog3.so = recorders + the fix, WAIT 10 s: a
         show still going at 10 s is offered for 8 s) over all 52 builds, the five light-language ones first. Then
         per build: `showname.py` (light-language builds), `lampname.py`, `finalname.py`, `landshows.py`, recipes,
-        tests, commit.
+        tests, commit. `shows/autoland.py` does the naming and landing of every finished scan; it also runs
+        `showsafe.py` (a candidate whose direct calls reach the game's sound / callout / score / award / clip /
+        coil / multiball / event sites is never offered: Godzilla LE's ten machine-tested shows reach none but a
+        settings read) and `sibling.py` (a Pro's candidates that are its LE's landed shows - the same light-runner
+        commands, or 75%+ of the same lights for as long - take the LE's names, so modes move between models;
+        Godzilla Pro takes eight of PAD-411's names by `cmdmatch.py`); crash candidates (crashers.txt) are left
+        out. Godzilla Pro's candidate 300 (Insert chase's match) killed the game during play: chainV1 replays it
+        and 268 three times each after the retry lane (laneR: Elvira and Jaws Pro with their saved NVRAM; Jaws Pro
+        started without it after all). Eight ports had no `site event_cancel` (no show could play: Avengers LE's
+        first scan was all refused): `findcancel.py` found it in each, 45 references agreeing. From 19:00 the scan
+        wait is 6 s (showlog4_job.sh), about a fifth faster; David asked about a GPU - no help, the shows play in
+        the game's own real time - and whether to take the 4th rig is his call.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

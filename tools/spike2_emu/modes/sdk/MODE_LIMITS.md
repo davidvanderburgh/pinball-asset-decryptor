@@ -180,7 +180,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, waits for multiballs only |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
-| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, waits for multiballs only |
+| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, waits for multiballs only |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
 | Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms |

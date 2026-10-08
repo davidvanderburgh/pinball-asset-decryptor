@@ -768,6 +768,7 @@ HELD_COILS_PROVEN = frozenset({
     ("iron_maiden_pro-1.18", "right_post"),      # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
     ("avengers_infinity_le-1.10", "tower_magnet"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 300 ms then 100 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
     ("avengers_infinity_le-1.10", "tower_post"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 120 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("guardians_le-1.15", "orbit_gates"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; when the game raised it mid-hold, let go with no OFF of its own; no abort
 })
 
 

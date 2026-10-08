@@ -210,9 +210,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars Pro 1.31 | no | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things 1.13 | no | ✓ | ✓ | shots | scoop, mechanisms, waits for multiballs only |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
-| Stranger Things LE 1.13 | no | ✓ | ✓ | shots | scoop, mechanisms, waits for multiballs only |
+| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, waits for multiballs only |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
-| Sword of Rage LE 1.19 | no | ✓ | ✓ | shots | scoop, mechanisms |
+| Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | TMNT LE 1.59 | ✓ | ✓ | not yet | shots |  |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |

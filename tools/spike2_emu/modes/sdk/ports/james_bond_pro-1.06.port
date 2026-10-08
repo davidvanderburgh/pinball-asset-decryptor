@@ -342,3 +342,11 @@ value gate_ctl            28
 value gate_off_slot       3
 value gate_devoff         18
 text held_coils            gate
+
+# PAD-420: the other modes' flags, from james_bond_le-1.06's proven port (the game's own ids; proven here by a stack run)
+value mode_flag_1           102
+value mode_flag_2           104
+value mode_flag_3           85
+value mode_flag_4           42
+value mode_flag_5           141
+value mode_flag_6           139

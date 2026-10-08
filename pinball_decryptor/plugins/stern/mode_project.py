@@ -939,6 +939,7 @@ STACK_FLAGS_PROVEN = frozenset({
     "stranger_things_le-1.12",        # Bust out (flag 78)
     "james_bond_le-1.06",             # Bust out (flag 102), and the flag cleared when it ended
     "batman-1.13",                    # Shame (flag 71, its start takes one argument), cleared when it ended
+    "james_bond_pro-1.06",            # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; James Bond LE 1.06's mode flags, the same version): Bullshit Scoring started through its block start set flag 141 and a stack no mode was refused for it; with nothing running it had started
 })
 
 

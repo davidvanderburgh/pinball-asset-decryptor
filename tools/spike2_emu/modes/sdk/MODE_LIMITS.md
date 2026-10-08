@@ -197,7 +197,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
 | King Kong Pro 0.97 | no | ✓ | ✓ | no | never waits |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots |  |
-| Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots |  |
+| Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots |  |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |

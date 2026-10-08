@@ -654,3 +654,24 @@ text block_name_20      Tour Mode Uk 1971
 site block_start_21     0x000e59d0 0xe5903000 0xe92d4070
 data block_obj_21       0x0424c374
 text block_name_21      Tour Mode Earls Court
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+site proc_exists          0x00309c78 0xe3042448 0xe3402428
+site proc_create          0x00309628 0xe304c448 0xe340c428
+site proc_sleep           0x00309778 0xe3043448 0xe3403428
+site adjustment           0x002b68b0 0xe92d40f0 0xe2504000
+site coil_fire             0x001d90ac 0xe3500000 0xe52de004
+data coil_count            0x0425ea30
+data coil_table            0x04255874
+value magnet_proc          13185
+site coil_take            0x000e11dc 0xe92d40f8 0xe304744c
+site coil_give            0x000e12a0 0xe3510000 0xe92d4038
+text control_gates_label  Orbit control gates
+value control_gates_dev   11
+value control_gates_ctl   32
+value control_gates_devoff 4
+value control_gates_off_slot 30
+data control_gates_obj   0x0424a918
+text control_gates_drive  9 5 255 64 96
+text held_coils            control_gates

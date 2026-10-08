@@ -320,6 +320,16 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       ball given back, the probe having hit no playfield switch (a saver that starts on the first switch never runs
       out). gamecheck.sh does hit three switches after a saved drain and waits 15 s, yet three checks never ended a
       ball; chain34 (batman_job2.sh) hits six playfield switches and waits 30 s before each drain.
+    * Generation C, first result (Guardians 1.15's orbit gates, node 9 coil 0, the ControlGate route): at the
+      first start the game was raising the gate itself (its 255 / 250 ms chunks) and the hold was REFUSED off the gate's
+      active flag (`_ctl 12`) - the game wins; the second start held ONE command, 255 for 250 ms then 255 for 1230 ms
+      (cut to the game's own 1488 ms), and the mode stop sent the game's OFF 500 ms in; no abort. No full hold yet
+      (the collision): coil_job_c.sh now waits 8 s after the plunge, and c_verdict.py finds OUR commands from the
+      runtime's "HOLD for" lines (a ControlGate's drive is the game's own chunk, so powers cannot tell them apart).
+      chain36 re-runs every C build with nothing proven once the batch is done.
+    * Metallica 1.04: a game IS on screen (PLAYER 1, credits taken) but mode.log never sees in_game - the port's
+      `data mode_mask 0x07000012` / busy 0x210 stays busy, as on Jaws Pro. Added to chain33's mask probe (its port
+      copied to C:/tmp/PAD-420/clean/). Every Metallica mode feature waits on this.
     * Lights (11 builds): their inserts sit in LED-only device-table groups (King Kong Pro group 1 = "EXPRESSIVE
       LIGHTING" 96 RGB, group 9 = 227 channels) with no connector named, so coilmap.group_node cannot join them to a
       bus node (it joins on switch names) and the LED view draws them dark; the title's node directory has four

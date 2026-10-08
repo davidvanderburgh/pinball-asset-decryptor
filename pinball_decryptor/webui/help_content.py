@@ -2083,6 +2083,8 @@ HELP_CONTENT = {
             "**+**, **SELECT** for the operator menu), a coin door open/close button "
             "(open cuts 48V, like the real interlock) and the ball trough, each "
             "position clickable.\n"
+            "- A click on a VUK, scoop or eject drops a ball in: it stays there until "
+            "the game kicks it out, as on the machine. Click it again to take it out.\n"
             "- The keyboard works with this window focused too.\n"
             "- It builds itself from the title, so every Spike 2 game gets one. The "
             "switches appear a minute or so into a run, once the game lists them.\n"

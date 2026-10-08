@@ -182,7 +182,7 @@ def describe_hit(ctl, hit):
     if kind == "coil":
         import coilact
         coil = ctl.view.coils[k]["name"]
-        held = coilact.hold_switch(coil)
+        held = coilact.hold_switch(coil, ctl.view.named_switches())
         return "COIL marker: %s (a press %s)" % (
             coil, "holds switch %d" % held if held is not None
             else "runs coilact.py - nothing to hold")

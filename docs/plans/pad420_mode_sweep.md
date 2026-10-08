@@ -444,6 +444,20 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         c_verdict.py counts that as nothing left to let go.
       - Card copies: a hung robocopy interop wrapper held the copy lock 24 min with three rigs idle; robocopy runs
         under `timeout` now (c8522077).
+      - Landed from the object-class drives: John Wick LE's ramp diverter (adj 209/150, adj 210: 150 and 16 on the
+        stock card), Rush LE's up post (adj 171/64, adj 172: 255 and 64), Batman 1.14's control gate and turntable
+        diverter. Munsters Pro's lights (5/5 RGB, 60/60 single). Rush Pro: no class drive (its ramp diverter and
+        magnet are a generic coil class with per-object powers) - left as "has not found".
+      - Stack routes: Aerosmith Pro 1.16 with LE 1.15's record ids - "none of the game's modes would start" (its
+        two block starts made no record the ids name): not proven, nothing landed. The other six run on (chain56).
+      - Scoop (9 left): six have no scoop lines (Aerosmith Pro, Batman 1.14, Deadpool LE/Pro, James Bond 60th and
+        Pro: their handler derivations failed before - the wrong switch, or no settled ball seen); King Kong Pro
+        crashes in scoop runs, Metallica's handler is wrong, Elvira has no game on the direct harness.
+      - Left running for the next run: chain57 (X-Men LE magnet/diverter/return post, X-Men Pro return post),
+        chain56 (stack routes: Aerosmith LE, Guardians, Guardians LE, JB Pro, ST, ST LE, X-Men Pro), check13 (Jaws
+        Pro event census), chain49 (media round 4). Land with c_verdict/c_land, st3_verdict + prove_set into
+        STACK_RECORDS/FLAGS/BYTES_PROVEN (and copy that build's lines from st3/ports16 into its port), the census
+        ids into jaws_pro's candidate port, media_verdict + scenes_prove (re-date round 4 by hand).
       - Batman 1.14's shots tied (33/43, autotie + 1.13's hand ties): 285861a8; chain55 proves light_shots.
       - Landed coils the C batch had proven but nobody landed: Foo Fighters LE (3), JP Pin gate, TMNT Pro pizza
         magnet (17f63898). Every PROVEN coil is in HELD_COILS_PROVEN now (checked).

@@ -37,7 +37,7 @@ class.  Nothing before p3's end moves: p1, p2 and p3's start are where they
 were, so every offset the build computed from the original is still right.
 
 A SMALLER 16 GB CARD (PAD-465).  Stern's 16 GB image is 15,494,807,552
-bytes, and plenty of SD cards sold as 16 GB hold a little less, so a build of
+bytes, and some SD cards sold as 16 GB hold a little less, so a build of
 a 16 GB original (James Bond 1.06, Jaws, Rush...) doesn't fit them.
 :data:`SMALL` is Stern's 16 GB layout with the games partition five block
 groups (640 MiB) shorter: a 14.82 GB image.  Five, because that is more than
@@ -349,8 +349,10 @@ def linux_parts(layout):
 def target_for(original_path, target=None):
     """The class a build of *original_path* comes out at when *target* (or
     the build option, when None) is asked for: the class name when the card
-    will actually grow, else ``None``.  Raises :class:`CardSizeError` when
-    the original can't be grown."""
+    will actually grow (or, for :data:`SMALL`, be made smaller: see
+    :func:`shrinks`), else ``None``.  Raises :class:`CardSizeError` when the
+    original can't be grown, or holds more than the smaller card has room
+    for."""
     target = target or requested()
     if not target:
         return None

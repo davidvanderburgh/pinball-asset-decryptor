@@ -70,7 +70,7 @@ CARD_SIZE_TIP = (
     "same, and a replacement that has to fit its original's space (a sound "
     "that isn't made longer, a video written straight to the card) still "
     "has to.\n\nSmaller 16 GB card is for a 16 GB SD card too small to take "
-    "Stern's own 16 GB image (15.49 GB; plenty of cards sold as 16 GB hold a "
+    "Stern's own 16 GB image (15.49 GB; some cards sold as 16 GB hold a "
     "little less): the built image is 14.82 GB, and the games partition "
     "gives up 671 MB of its free room for it. Building it takes a couple of "
     "minutes more, because the files at the end of that partition are moved "

@@ -110,8 +110,11 @@ HELP_CONTENT = {
                  "text": "Where available: `01m22s235 - idx0001.wav`, so the same "
                          "sounds sort together across firmware versions."}]},
             "Results also go to callouts.csv and music_titles.csv. Better call-out "
-            "names: raise **Voice recognition quality** in the ⚙ settings menu (slower; "
-            "bigger model).",
+            "names: pick a higher **Voice recognition quality** under these options "
+            "(slower; bigger model).",
+            "Extracted without them? **Auto-name now** names the sounds already in the "
+            "project folder, no new extract. Sounds that already have a name keep it, so "
+            "running it again names only what is left.",
         ]),
         ("Re-extracting", [
             {"note": "Extracting into a folder with files in it **overwrites your "
@@ -2965,7 +2968,7 @@ GENERAL_CONTENT = [
      "- light / dark theme\n"
      "- **Check for updates**, and **Check automatically**: at startup only, hourly, "
      "every 6 hours or daily\n"
-     "- disk-space management and voice recognition quality\n"
+     "- disk-space management, and clearing the downloaded voice models\n"
      "- the prerequisite tools: status, re-check, install\n"
      "- **View disclaimer…**, the first-launch disclaimer again"),
     ("Prerequisites",

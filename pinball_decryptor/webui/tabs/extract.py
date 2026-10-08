@@ -240,6 +240,7 @@ class ExtractTab(TabService):
                  deltas_show=False, deltas_help=H.DEFAULT_DELTAS_HELP,
                  deltas=[], opt_transcribe=False, opt_music=False,
                  opt_duration=False, autoname_enabled=True,
+                 autoname_reason="",
                  block_reason="", dmd=None, matrix=None,
                  project=None, recents=[], info=None, pinfo=False,
                  rc=None, platform=sys.platform)
@@ -884,10 +885,27 @@ class ExtractTab(TabService):
             self._done_key = None
             self._refresh_gate()
 
+    def _autoname_reason(self):
+        """Why Auto-name now can't run on the project folder's sounds ("" when
+        it can; PAD-460).  It names what an earlier extract left there, so it
+        needs that extract and one of the naming options ticked."""
+        if not (self.transcribe_var.get() or self.music_id_var.get()):
+            return "Tick Auto-name call-outs or Auto-name music first."
+        state = H.extract_state(self.extract_output_var.get())
+        if state is None:
+            return "Choose a project folder first."
+        if state["archived"]:
+            return ("This project is archived. Extract it again before "
+                    "naming its sounds.")
+        if not state["extracted"]:
+            return "This project folder holds no extract yet."
+        return ""
+
     def _refresh_gate(self):
         if self.mfr is None:
             return
-        self.set(block_reason=self._block_reason())
+        self.set(block_reason=self._block_reason(),
+                 autoname_reason=self._autoname_reason())
 
     def on_running(self, running, mode):
         if not running:
@@ -1013,6 +1031,17 @@ class ExtractTab(TabService):
         if self.window._is_running():
             return False
         cb = self.window.cb.get("on_extract")
+        if cb is not None:
+            cb()
+        return True
+
+    @rpc
+    def autoname_now(self):
+        """Auto-name now (PAD-460): the ticked naming options run over the
+        sounds already in the project folder, with no new extract."""
+        if self.window._is_running() or self._autoname_reason():
+            return False
+        cb = self.window.cb.get("on_autoname")
         if cb is not None:
             cb()
         return True

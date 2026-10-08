@@ -357,6 +357,17 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       app writes into the mode line itself), Beatles' top magnet at its TOP MAGNET OPTO, King Kong LE's spider magnet
       near the PIT TARGETs. Most other titles' magnets have no position. Each needs `magnet` named in its port and a
       rig proof of a `magnet` line grabbing on that shot.
+    * The two "no port" builds, run 14: Jaws Pro 1.02's mode mask reads 0x0010 in attract and 0x0110 in a game (the
+      probe, with the balls reset) - its bit 4 never clears - so the runtime gained `value mode_mask_game` (5d3776bc);
+      the candidate port (C:/tmp/PAD-420/merged2) says busy 0x200, game 0x100. Batman 1.14 (probe 2): with six
+      playfield switches hit and 30 s waited before each drain, its ball ended at once and its game after three, so
+      gamecheck.sh now waits a giving-back saver out longer each time (60abadb6). chain39 runs Check this game on both
+      (jobs/check_job3.sh: fresh NVRAM, balls reset); a pass lands each port (the port into ports/, its recipe, then
+      the parts like any new build).
+    * Metallica 1.04: its mode mask is right (the probe: 0x0010 in attract, 0x0000 in a game, in_game 1). Its failures
+      are elsewhere: after a fresh NVRAM's Guided Setup and reboot the screen reads CREDITS 3/4 - most of the job's
+      coins never counted, so Start is ignored (scoop, C coils); and its scoop runs' mode.log stops 8 s in, right after
+      the scoop handler is wrapped - the helper's scoop lines for it are not landed.
     * Metallica 1.04: a game IS on screen (PLAYER 1, credits taken) but mode.log never sees in_game - the port's
       `data mode_mask 0x07000012` / busy 0x210 stays busy, as on Jaws Pro. Added to chain33's mask probe (its port
       copied to C:/tmp/PAD-420/clean/). Every Metallica mode feature waits on this.

@@ -357,9 +357,10 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       app writes into the mode line itself), Beatles' top magnet at its TOP MAGNET OPTO, King Kong LE's spider magnet
       near the PIT TARGETs. Most other titles' magnets have no position. Each needs `magnet` named in its port and a
       rig proof of a `magnet` line grabbing on that shot.
-    * The two "no port" builds, run 14: Jaws Pro 1.02's mode mask reads 0x0010 in attract and 0x0110 in a game (the
-      probe, with the balls reset) - its bit 4 never clears - so the runtime gained `value mode_mask_game` (5d3776bc);
-      the candidate port (C:/tmp/PAD-420/merged2) says busy 0x200, game 0x100. Batman 1.14 (probe 2): with six
+    * The two "no port" builds, run 14: Jaws Pro 1.02's mode mask read 0x0010 in attract and 0x0110 "in a game" -
+      WRONG: that probe never had a game (its picture is the first boot's Guided Setup). Run 20 measured a real game:
+      0x0010 in attract, 0x0000 in a game, as Jaws LE, so its port keeps LE's busy 0x210 and `value mode_mask_game`
+      (5d3776bc) went back out of the runtime (16ebedb9). Batman 1.14 (probe 2): with six
       playfield switches hit and 30 s waited before each drain, its ball ended at once and its game after three, so
       gamecheck.sh now waits a giving-back saver out longer each time (60abadb6). chain39 runs Check this game on both
       (jobs/check_job3.sh: fresh NVRAM, balls reset); a pass lands each port (the port into ports/, its recipe, then
@@ -604,6 +605,20 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - Harness, next: TMNT LE's stage A game runs, its stage B boot (same NVRAM) shows CREDITS 10 1/2 and ignores
         Start (balls the game still counts in the van?); Metallica counts 3 of 8 coins after Guided Setup (coins
         120 ms closed, 0.7 s apart); Elvira has no game on the direct harness.
+      - **Every game now starts** with three harness rules, all in the scratch jobs (`*_job*.sh` with `wait_attract`):
+        (1) coins one at a time, 1 s apart; (2) no coin or Start until `status.sh` says attract - Jaws Pro and Elvira
+        show a tech-alert screen after each boot that ignores both for about a minute, and BACK / SELECT there opens
+        the operator menu; (3) a title whose Guided Setup is slow to appear (Jaws Pro: about a minute after the version
+        screen, its cursor pulsing) is left by `bs/guided.sh` retried every 15 s, or skipped: the NVRAM a passing run
+        left is kept in `/home/david/pad420_nv/<title>` (copied as root, the guest's modes unreadable to david, then
+        `chmod u+rwX`) and `jobs/seed2_then.sh` seeds a slot with it.
+      - **Jaws Pro 1.02 ships a port** (6364624c): its full check passed (23 of 24 shots, a tilt, three balls, all
+        seven events). Jaws LE's three upper-playfield shots are left out (a Pro has no upper playfield). Its inlane
+        up posts PROVEN (c884bc9f: Jaws LE's getters found on the Pro by their code, `coils/jawsposts.py`; devices 12
+        and 11). Its media, ball save, multiball, lights and stack runs go through `chain110` / `chain112`.
+      - **Elvira 1.13**: ball save PROVEN (4fb29522), its Crypt VUK scoop (a112d7b1), its control gate (273deb67: the
+        same 24-virtual ControlGate as James Bond's, its static object at +0x80 of 0x87ed04). Elvira's frame grab
+        works: the old note was wrong. Only shows and sound (David's questions) are yellow there now.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

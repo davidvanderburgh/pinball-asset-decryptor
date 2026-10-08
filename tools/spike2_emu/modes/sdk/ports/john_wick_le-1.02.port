@@ -149,6 +149,8 @@ value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
 value stock_mode_count      54
+# PAD-420: one of its locations runs for nearly all of every ball - the game's base play, never waited for
+text stack_base_names       cmode_location_
 value backdrop_video_at      0x54
 value backdrop_scene_at      0x18
 # value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)

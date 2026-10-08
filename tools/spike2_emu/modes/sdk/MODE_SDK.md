@@ -1114,6 +1114,11 @@ data typeinfo_vmi           0x006dfe78   # any multiple-inheritance typeinfo: it
   ball's start. The runtime notes every entry running from a ball's start until 2 s after its
   first score and does not count it until it is seen stopped. A ball is the player up plus the
   `ball_start` events (or the ball ends) seen so far.
+- **Base play the port names** (PAD-420): `text stack_base_names cmode_location_` - comma-separated
+  class-name prefixes the runtime never counts as one of the game's modes (never a multiball;
+  those are always waited for). John Wick's locations (`cmode_location_john_wicks_house`, ...)
+  start a few shots into a ball, past the window above, and one runs for nearly all of every ball:
+  a `stack no` mode that waited for them would hardly ever start.
 
 `stackport.py` (the item's scratch tool) derives all of these from the ELF.
 

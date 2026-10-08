@@ -392,3 +392,20 @@ def test_in_game_takes_the_bits_a_game_sets_as_well():
     body = body[:body.index("\n}\n") + 3]
     assert 'pm_port_value("mode_mask_game", 0)' in body
     assert "return pm_player() != 0 && (mask & busy) == 0 && (mask & game) == game;" in body
+
+
+def test_stack_no_never_waits_for_the_base_play_a_port_names():
+    """PAD-420: John Wick's locations (cmode_location_john_wicks_house, ...) start a few shots into a ball - past the
+    ball-start window that marks Venom's mini modes as base play - and one runs for nearly all of every ball, so a
+    `stack no` mode that waited for them would hardly ever start. `text stack_base_names` lists class-name prefixes
+    the generic route skips; a multiball is never skipped."""
+    src = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    body = src[src.index("static int stock_named_base(const char *nm)"):]
+    body = body[:body.index("\n}\n") + 3]
+    assert 'pm_port_text("stack_base_names")' in body and "*q != ','" in body
+    gen = src[src.index("static int stock_generic(unsigned kinds)"):]
+    gen = gen[:gen.index("\n}\n") + 3]
+    assert "if (c == 1 && stock_named_base(nm)) continue;" in gen
+    for key in ("john_wick_le-1.02", "john_wick_pro-1.02"):
+        port = open(os.path.join(SDK, "ports", key + ".port"), encoding="utf-8").read()
+        assert re.search(r"^text stack_base_names +cmode_location_$", port, re.M), key

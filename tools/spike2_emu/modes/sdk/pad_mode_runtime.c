@@ -2842,6 +2842,32 @@ static void stock_generic_tick(void)
     }
 }
 
+/* PAD-420: modes the PORT names as the game's base play (`text stack_base_names cmode_location_`, comma-separated
+ * class-name prefixes): John Wick's locations start a few shots into a ball - past the ball-start window above -
+ * and one runs for nearly all of every ball, so a stack-no mode that waited for them would hardly ever start
+ * (Beatles' songs, which the Modes tab notes instead). Never a multiball: those are always waited for. */
+static int stock_named_base(const char *nm)
+{
+    const char *p = pm_port_text("stack_base_names"), *q;
+    static int said;
+    long k;
+    if (!p || !nm) return 0;
+    while (*p) {
+        for (q = p; *q && *q != ','; q++) ;
+        for (k = 0; p + k < q && nm[k] == p[k]; k++) ;     /* nm starts with p[0 .. q) */
+        if (q > p && p + k == q) {
+            if (!said) {
+                said = 1;
+                say("stock modes: %s and the others the port names (%s) are the game's base play, never waited for",
+                    nm, pm_port_text("stack_base_names"));
+            }
+            return 1;
+        }
+        p = *q ? q + 1 : q;
+    }
+    return 0;
+}
+
 static int stock_generic(unsigned kinds)
 {
     const unsigned *tab = (const unsigned *)(unsigned long)data("stock_mode_table");
@@ -2857,6 +2883,7 @@ static int stock_generic(unsigned kinds)
             unsigned ti = ((const unsigned *)(unsigned long)o[0])[-1];
             const char *nm = ti ? (const char *)(unsigned long)((const unsigned *)(unsigned long)ti)[1] : 0;
             while (nm && *nm >= '0' && *nm <= '9') nm++;          /* the mangled name's length */
+            if (c == 1 && stock_named_base(nm)) continue;
             pm_snprintf(stock_generic_what, sizeof stock_generic_what, "%s (%s)",
                         c == 2 ? "a multiball" : "one of the game's modes", nm ? nm : "?");
             return c == 2 ? (int)PM_STOCK_MULTIBALL : (int)PM_STOCK_BATTLE;

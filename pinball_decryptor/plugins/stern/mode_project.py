@@ -835,6 +835,9 @@ HELD_COILS_PROVEN = frozenset({
     ("batman-1.14", "diverter_power"),           # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 16 (the game's own, its TurntableDiverter's - device 13 by its constructor); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("batman-1.14", "gate"),                     # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 64 ms then 96 (the game's own, its LeftControlGate's - device 16 by its constructor); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("uncanny_xmen_pro-0.98", "right_return_up"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 7, a169 for 0 ms then a169 (the game's own hold-only command - 0 for 0, then adj 169: 82 on the stock card), at most 1250 ms; held 1250 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("uncanny_xmen_le-0.98", "right_return_up"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 7, a169 for 0 ms then a169 (the game's own hold-only command: 82 on the stock card), at most 1250 ms; held 1250 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("uncanny_xmen_le-0.98", "magnet_hold"),     # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for a196 ms then 82 (the game's own; 1000 ms on the stock card), at most 2500 ms; held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("uncanny_xmen_le-0.98", "diverter"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 1, a163 for a164 ms then a165 (the game's own; 180 for 60 ms then 64 on the stock card), at most 1250 ms; held 1240 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 

@@ -270,3 +270,15 @@ def test_images_apply_to_all_reaches_the_unlocked_game_pictures(tmp_path):
         assert w.call("color.undo")
         assert cp.own_profile_names(assets)["images"] == {BANNER: "Custom red"}
         assert w.run(lambda: svc.color_targets("profiled")) == {BANNER: True}
+
+
+def test_apply_to_all_videos_tooltip_is_dragonrrs_own_words():
+    """Round 2: "Please replace the tool tip COMPLETELY, on Apply to all videos (with no
+    changes at all)"."""
+    pane = open(os.path.join(_TABS, "color_pane.js"), encoding="utf-8").read()
+    words = ("This will change all of your unlocked videos to the profile you have selected "
+             "below in this tab. This may mean that every single video existing and replaced "
+             "will be affected. You can undo this function")
+    tip_js = pane.split("const ALL_TIP = (one, many) => `", 1)[1].split("`;", 1)[0]
+    assert tip_js.replace("${many}", "videos").replace("${one}", "video") == words
+    assert 'title=${ALL_TIP(all[2], all[1])}>Apply to all ${all[1]}…<//>' in pane

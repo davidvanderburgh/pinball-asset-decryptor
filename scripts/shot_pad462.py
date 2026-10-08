@@ -34,6 +34,7 @@ import shot_pad448 as clips  # noqa: E402
 def main():
     repo, out_dir = sys.argv[1:3]
     after = "--after" in sys.argv
+    tip_only = "--tip" in sys.argv
     os.makedirs(out_dir, exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="pad462-")
     project = base._project(scratch)
@@ -129,7 +130,12 @@ def main():
                 btns.last.hover()
                 time.sleep(1.6)
             report("video_bar", page)
-            page.screenshot(path=out("video_bar.png"))
+            # --tip: this shot alone, as video_tip.png (DragonRR's tooltip words, round 2)
+            page.screenshot(path=out("video_tip.png" if tip_only else "video_bar.png"))
+            if tip_only:
+                print("page errors:", errors, flush=True)
+                browser.close()
+                return
             page.mouse.move(5, 990)
             time.sleep(0.5)
 

@@ -70,6 +70,8 @@ CH_FIELDS = ["req_gen", "ack_gen", "status",
              "write_idx", "read_idx", "playing", "eos"]
 CH_BYTES = len(CH_FIELDS) * 4 + PATH_MAX          # 564
 CH_BASE = 12
+# PAD-456: padvid.h's start_ms[CHANNELS], appended after the channels.
+START_BASE = CH_BASE + CHANNELS * CH_BYTES        # 4524
 
 # The guest sees /games/<title>; we see the same tree on the WSL side.
 #
@@ -166,6 +168,29 @@ def get(m, c, name):
 def put(m, c, name, v):
     struct.pack_into("<I", m, CH_BASE + c * CH_BYTES + CH_FIELDS.index(name) * 4,
                      v & 0xFFFFFFFF)
+
+
+def get_start_ms(m, c):
+    """Where in the clip channel c's request starts (PAD-456). 0 is the start,
+    and an older guest that never writes it reads as 0."""
+    return struct.unpack_from("<I", m, START_BASE + c * 4)[0]
+
+
+def decode_cmd(path, w, h, native, start_ms=0):
+    """The ffmpeg that turns `path` into raw I420 frames for the ring.
+
+    START_MS IS AN INPUT SEEK (-ss before -i). James Bond LE seeks its film
+    reels to where its own sound is - 3 to 39 s in, again and again - and this
+    used to answer every one of them from frame 0, so the picture ran up to
+    half a minute away from the effects and callouts (PAD-456). Before -i
+    ffmpeg jumps to the keyframe at or before the time and decodes forward,
+    discarding up to it, so the first frame out is the one AT the time, not
+    the keyframe's, and a long reel costs a jump instead of a decode from 0."""
+    seek = ["-ss", "%.3f" % (start_ms / 1000.0)] if start_ms else []
+    scale = ["-vf", "scale=%d:%d" % (w, h)] if (w, h) != native else []
+    return (["ffmpeg", "-hide_banner", "-loglevel", "error"] + seek
+            + ["-i", path, "-f", "rawvideo"] + scale
+            + ["-pix_fmt", "yuv420p", "-"])
 
 
 def get_path(m, c):
@@ -554,10 +579,14 @@ def _head_put(key, frames, complete):
         _HEAD_BYTES[0] += total
 
 
-def serve(m, c, path, w, h, native, gen, old_read):
+def serve(m, c, path, w, h, native, gen, old_read, start_ms=0):
     """Decode `path` into channel c's ring until the guest stops asking or
     ffmpeg ends. `native` is the file's own size; `w`,`h` is what was published
     to the guest, and they differ only when a test flag is rescaling.
+
+    `start_ms` is where the guest asked the clip to start (a seek, PAD-456).
+    The head cache holds a clip's FIRST frames, so a serve that starts
+    anywhere else neither reads nor fills it.
 
     `gen` is the request generation chan_loop noticed AND ACKED - it must
     never be re-read here. This function used to read req_gen fresh at its
@@ -581,14 +610,14 @@ def serve(m, c, path, w, h, native, gen, old_read):
     # Rescale whenever the size we published is not the file's own, which is
     # true for BOTH test flags. Asking _forced_size() alone would have served
     # native frames under a rescaled header the moment a second flag existed.
-    scale = ["-vf", "scale=%d:%d" % (w, h)] if (w, h) != native else []
-    cmd = (["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", path,
-            "-f", "rawvideo"] + scale + ["-pix_fmt", "yuv420p", "-"])
+    cmd = decode_cmd(path, w, h, native, start_ms)
     try:
         st = os.stat(path)
         hkey = (path, st.st_size, st.st_mtime_ns, w, h)
     except OSError:
         hkey = None
+    if start_ms:
+        hkey = None           # a mid-clip start is not the clip's head
     head = _head_get(hkey)
     # Collect the head on a MISS; None on a hit so the fill code stays dark.
     collect = [] if (hkey is not None and head is None) else None
@@ -865,10 +894,12 @@ def resume_serve(m, c):
     ring0 = HDR + c * SLOTS * SLOT_BYTES
     info = probe(full)
     native = (info[0], info[1]) if info else (w, h)
-    scale = ["-vf", "scale=%d:%d" % (w, h)] if (w, h) != native else []
-    cmd = (["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", full,
-            "-f", "rawvideo"] + scale + ["-pix_fmt", "yuv420p", "-"])
-    log("ch%d RESUME mid-clip at frame %d of %d: %s" % (c, produced, n, want))
+    # write_idx counts from where the request started, so the decode does too.
+    start_ms = get_start_ms(m, c)
+    cmd = decode_cmd(full, w, h, native, start_ms)
+    log("ch%d RESUME mid-clip at frame %d of %d%s: %s"
+        % (c, produced, n, " (request from %d ms)" % start_ms if start_ms else "",
+           want))
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=0)
     buf = bytearray(frame_bytes)
     view = memoryview(buf)
@@ -1029,6 +1060,7 @@ def chan_loop(m, c, resume=False):
         hot_until = time.monotonic() + 0.25
         want = get_path(m, c)
         full = host_path(want)
+        start_ms = get_start_ms(m, c)
         # BEFORE the reset: the last frame the previous request's guest
         # consumed. Its slot is what the game is still showing on screen,
         # and serve()'s display guard keeps the new decode off it.
@@ -1070,13 +1102,14 @@ def chan_loop(m, c, resume=False):
         # Log what was actually ASKED FOR. The basename of the parent directory
         # is "2.asset" for every video in the game, so the old form made two
         # different clips look like the same clip served twice.
-        log("ch%d serving %dx%d %d frames (acked %.1f ms after notice) %s%s%s"
+        log("ch%d serving %dx%d %d frames (acked %.1f ms after notice) %s%s%s%s"
             % (c, w, h, n, (time.monotonic() - t_notice) * 1000.0, want,
+               "  (from %d ms)" % start_ms if start_ms else "",
                "  (RESCALED from %dx%d)" % native if (w, h) != native else "",
                "  (your edit)" if from_edits(full) else ""))
         note_serve(c, want)
         try:
-            serve(m, c, full, w, h, native, req, old_read)
+            serve(m, c, full, w, h, native, req, old_read, start_ms)
         except Exception as exc:                    # noqa: BLE001
             log("ch%d decode failed: %s" % (c, exc))
             put(m, c, "eos", 1)

@@ -1080,16 +1080,26 @@ The playfield's status bar also carries the Emulate tab's **volume and Mute**
 (`PAD_AUDIO_CTL`, which watch.sh forwards to the window): both write the one
 control file the audio player polls, and the tab's slider follows it.
 
-**The player catches up instead of staying late (PAD-456).** The guest and
-the speaker both run at 1x, so a backlog that reaches `padplay.py` never
-drains by itself: a speaker or a socket that stalls for 20 s and then lets
-its bytes go at once leaves the sound 20 s behind the picture for the rest
-of the run. A tester's James Bond LE 1.06 (Windows 11) had effects and
-callouts 18-20 s behind the picture. On the rig the game requested and played
-every effect on time, card cached or read off the Windows drive, after a 20 s
-pause and capped at 12% of a core (`modes/sdk/sound_census.c` against the
-`audio.raw` capture), so this queue is the one place found that can hold the
-sound back that far. The player now watches the least its queue held over each 2 s
+**A seek starts the clip where the game asked (PAD-456).** A tester's James
+Bond LE 1.06 had its effects and callouts 18-20 s away from the picture while
+the music sounded fine. Their log had the cause: Bond keeps its film reels in
+step with its own sound by SEEKING them (a 264 s reel to 3, 6, 13, 23, 31 and
+39 s, each time to how long it had been on; 28.8 s loops to 2-28 s), and the
+bridge answered every seek from frame 0 (`seek to N ms requested; only rewind
+is supported`). The offset now rides with the request (`padvid.h` `start_ms`,
+appended without a version bump so a half the rig did not rebuild still plays
+from 0 as before), `padvidhost.py` starts ffmpeg there (`-ss` before `-i`, the
+frame AT the time, not the keyframe's), the position the game reads back counts
+from it, and the log says `seek to N ms: starting the clip there` and
+`serving ... (from N ms)`. The rig had never shown it: in a stock game without
+the film reels the game makes no forward seek at all.
+
+**The player catches up instead of staying late (PAD-456, the first
+suspect).** The guest and the speaker both run at 1x, so a backlog that
+reaches `padplay.py` never drains by itself: a speaker or a socket that stalls
+for 20 s and then lets its bytes go at once would leave the sound 20 s behind
+for the rest of the run. Not what the tester had, but nothing bounded it. The
+player now watches the least its queue held over each 2 s
 window. Above `PAD_AUDIO_MAX_LATE_MS` (default 750; the queue normally rests
 near 200) it drops the oldest audio back to the 350 ms cushion and logs
 `[padplay] queue stayed above N ms for 2 s - skipped M ms to catch up`. The

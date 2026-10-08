@@ -644,6 +644,30 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         coins). Its 32 GB card's staging failed once on a Windows lock at the move; the copy (head/tail md5 checked)
         was filed by hand. Munsters LE's magnet census had no game: 3 of 8 coins counted (CREDITS 3/4, coins a
         quarter each) with its state still techalerts after 3 min - a title needing more coins and a retry.
+    * Run 21 (2026-10-08 14:03-):
+      - Scoops are yellow on no newest build: James Bond 60th LE (f9026cfe: run 19's run read again on one clock -
+        the hold kept the game's kick back; run 19 had compared the job's 5.1 s with the control's 3.3 s) and King
+        Kong Pro (8cb33c65: its LE twin; run 18's segvs were the D: card stall, gone on the staged card). Star Wars LE
+        screen and clip PROVEN (57a4a0ab): its ball-start hero / path choice is confirmed with the Action Button
+        (`PRE_PRESS=34,34,34`); clips are yellow on no newest build either.
+      - **Magnet census 2** (`magnet/magcensus2_job.sh`: `BTN` held 2 s three times, then every playfield switch;
+        `magnet/magcensus.py <key> <node> <coil>` reads it; every [coildrive] line is kept): the GAME's own grabs -
+        * Batman 1.14: the Bat Phone Target (shot 0x8000000000) made it fire its magnet (9:0) 255 for 1000 ms, then 16
+          for 5000. The class's call asks for no draw (`coil_fire(dev, 0, 0, 16, 5000)`): the board uses the coil's own
+          configured draw - so the static reading of these classes (Guardians, Sword of Rage, Rush) shows no draw.
+        * Rush LE: the Lift ramp opto (0x400000) made it fire 9:7 255 for 80 ms, then 100 (for 20 s), OFF 2 s later.
+        * Munsters LE: the Herman opto (0x40000) made it pulse its magnet (9:7) - the magnet's shot.
+        * Sword of Rage LE / Pro, Led Zeppelin LE: only OFFs on the magnet (the magna-save is not lit at a game's
+          start). Guardians / LE: only 255-for-60 ms pulses on the top magnet (after the lockdown button and the right
+          scoop), no grab. TMNT LE / Pro: nothing on a single press (the pizza magnet is a feature's process: 0x129860,
+          started by 0x129164 from the process 0xf51dc).
+        cgen PRESET has Batman's and Rush's grabs; their held-coil runs (coil_job_c3) and then Mode > Magnet (Batman
+        on the Bat Phone Target, Rush on the Lift ramp, Munsters on the Herman opto) are chain127 / chain129 / chain128.
+      - bs_job2.sh's wait for attract comes BEFORE Guided Setup is left: on a fresh NVRAM its coins go in while the
+        menu is up (TMNT LE: no game). Use it only on seeded NVRAM; bs_job.sh otherwise. TMNT LE's ball save with two
+        balls stocked in the van (`PAD_BALL_VAN_STOCK=2`; the TMNT LE has 8 balls) is chain130.
+      - Own music on Beatles / Deadpool LE / Pro: their carrier census found no stereo music request the game never
+        plays (`mode_sounds._SWAP` music = ()): a game limit, with the sound question for David.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

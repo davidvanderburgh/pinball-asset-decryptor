@@ -376,3 +376,24 @@ site block_rule_10         0x001292dc 0xe590c000 0xe30811ac  # RuleWeapons::v[32
 text block_rule_name_10    Weapons
 site block_rule_11         0x0012a1b0 0xe2022010 0xe3a03000  # RuleWolverineSpinner::v[32]
 text block_rule_name_11    Wolverine Spinner
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+site proc_exists          0x0036934c 0xe30e2a60 0xe340206e
+site proc_create          0x00368cfc 0xe30eca60 0xe340c06e
+site proc_sleep           0x00368e4c 0xe30e3a60 0xe340306e
+site adjustment           0x0018ee00 0xe92d40f0 0xe2504000
+site coil_fire             0x001b627c 0xe3500000 0xe52de004
+data coil_count            0x006e54d0
+data coil_table            0x006e0a6c
+value magnet_proc          13185
+site coil_take            0x001340e8 0xe92d40f8 0xe30e7a64
+site coil_give            0x001341ac 0xe3510000 0xe92d4038
+text control_gate_label   Left control gate
+value control_gate_dev    15
+value control_gate_ctl    32
+value control_gate_devoff 4
+value control_gate_off_slot 30
+data control_gate_obj    0x006b3718
+text control_gate_drive   9 6 255 64 96
+text held_coils            control_gate

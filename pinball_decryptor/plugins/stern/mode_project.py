@@ -724,6 +724,7 @@ HELD_COILS_PROVEN = frozenset({
     ("sword_of_rage_le-1.19", "control_gates"),  # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
     ("sword_of_rage_pro-1.19", "control_gates"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
     ("deadpool_le-1.16", "control_gates"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("deadpool_pro-1.16", "control_gate"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
 })
 
 

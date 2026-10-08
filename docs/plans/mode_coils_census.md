@@ -158,5 +158,7 @@ bobj.py, takegive.py, mkstage_b.py, coil_job.sh, coil_verdict.py, coil_land.py).
 **C (the Device framework)**: each class has its own take/give at its own offset (Aerosmith LE: +0x18 for its gate and
 diverter classes, +0x14 for its toy box magnet), but the gates are driven through another service (ControlGate v[28]:
 a byte at +4, a time and a callback - run 9: that is a 40-slot TIMER service at 0x332c7c, not a coil driver; the gate's own commands go through a DRIVER object it holds at +0xc, by that object's v[4] (ControlGate v[27] at 0x238b6c), so the powers are that driver class's), not `coil_fire`. Do not hold a C gate by
-`coil_fire` until that service's powers are read. Its magnets do call `coil_fire` (Aerosmith LE's toy box magnet: 255
+`coil_fire` until that service's powers are read. **C, the route to its powers (next):** the gate's +4 byte is its slot in a 40-entry driver table (0x332c7c sets the slot's time, callback and flags; ControlGate v[26] stops it). Rather than read that table's powers statically, a probe in a game can call the gate's own activation once (its v[27]) and read the ONE command the board receives ([coildrive], PAD_COIL_PROBE=1): that is the game's own command for that coil, which the board-address route then repeats. The same for a C title's magnets.
+
+Its magnets do call `coil_fire` (Aerosmith LE's toy box magnet: 255
 for 1 s, then 16).

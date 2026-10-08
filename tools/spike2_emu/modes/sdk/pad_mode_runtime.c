@@ -3642,8 +3642,9 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  *     and the hold ends there without a command of ours. Its processes (`text <name>_procs`) refuse it too.
  *   - Letting go early is the game's own OFF (an all-zero coil_fire), sent only while the latest request
  *     on the record is still ours; at its time the command ends by itself.
- *   - `value <name>_off_adj` (an operator adjustment that is not 0 when the coil is disabled) or
- *     `value <name>_on_adj` (one that is 0 then) refuse it like Godzilla's v[40].
+ *   - The operator's "disabled": `value <name>_off_slot`, the object's own virtual that answers it (spike::ControlCoil
+ *     v[30], the 47-virtual ControlCoil v[31]); else `value <name>_off_adj` (an operator adjustment that is not 0
+ *     when the coil is disabled) or `value <name>_on_adj` (one that is 0 then). Each refuses it like Godzilla's v[40].
  *   - Where the game's own code switches an uncontrolled coil off (Godzilla's ControlCoil::v[38]), the coil
  *     needs its object taken: `site <name>_get` (the object), `value <name>_ctl` (where it keeps the id of
  *     the process controlling it), and the take/give calls (`site <name>_take` / `<name>_give`, or the
@@ -3726,12 +3727,16 @@ static unsigned coil_drive(const struct held_coil *c, int i)
     return ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(c->drv[i]);
 }
 
-/* Is the coil disabled by the operator? route 0: the object's v[40]; route 1: the port's adjustments */
+/* Is the coil disabled by the operator? route 0: the object's v[40]; route 1: the object's own "disabled" virtual
+ * (`value <name>_off_slot`: spike::ControlCoil's v[30], the 47-virtual ControlCoil's v[31]), else the port's
+ * adjustments */
 static int coil_disabled(const struct held_coil *c)
 {
     char key[40];
     long id;
     if (!c->route) return (coil_virtual(c->obj, 40) & 0xffu) != 0;
+    pm_snprintf(key, sizeof key, "%s_off_slot", c->name);
+    if (c->obj && (id = pm_port_value(key, 0)) > 0) return (coil_virtual(c->obj, (unsigned)id) & 0xffu) != 0;
     pm_snprintf(key, sizeof key, "%s_off_adj", c->name);
     if ((id = pm_port_value(key, 0)) > 0)
         return !fn("adjustment") || ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))((unsigned)id) != 0;

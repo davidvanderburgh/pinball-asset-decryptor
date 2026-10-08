@@ -65,6 +65,17 @@ def test_the_game_wins_for_every_coil():
     assert "for (i = 0; i < n_coils; i++) coil_let_go(&coils[i], why);" in lets   # a mode's end lets all go
 
 
+def test_an_operator_disabled_coil_is_refused_on_every_route():
+    """PAD-420: a coil held by its board address asks its own object whether the operator disabled it (the object's
+    "disabled" virtual, `<name>_off_slot`), before any adjustment the port names - as Godzilla's route asks v[40]."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    dis = _lift(src, "static int coil_disabled(")
+    assert "coil_virtual(c->obj, 40)" in dis
+    assert dis.index('"%s_off_slot"') < dis.index('"%s_off_adj"') < dis.index('"%s_on_adj"')
+    assert "c->obj && (id = pm_port_value(key, 0)) > 0) return (coil_virtual(c->obj, (unsigned)id)" in dis
+    assert "coil_disabled(c)" in _lift(src, "int pm_coil_hold(")
+
+
 def test_the_interpreter_holds_on_its_shot_or_as_it_starts():
     src = (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert "if (coil_line(M, line)) return;" in src

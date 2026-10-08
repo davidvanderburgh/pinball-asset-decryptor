@@ -586,3 +586,15 @@ callout time_up           267   # Better luck next time, dude! / Your time is up
 value scoop_event          2
 site scoop_handler         0x000f2d64 0xe2400002 0xe92d4030
 data scoop_slot           0x0b603560
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c3.sh: held 2000 ms as a mode started, ONE command at the game's own powers, ended on the board
+# by itself; let go early by a mode stop, the game's OFF). Its TimeMachineMagnet (device 15) takes its powers from
+# its object; the GAME's own grab was seen in the magnet census when the Center ramp opto was made: 255 for 80 ms,
+# then 100 (for 20 s; held at most 5 s)
+data coil_count            0x0b65483c
+data coil_table            0x0b664aa4
+value magnet_proc          13185
+text magnet_hold_label    Magnet
+text magnet_hold_drive    9 7 255 80 100
+text held_coils            magnet_hold

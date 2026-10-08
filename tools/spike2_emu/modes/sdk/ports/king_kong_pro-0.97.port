@@ -601,51 +601,51 @@ value proc_exit_slots      4
 # is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
 # moment).
 value show_proc            13200
-site show_1               0x0004bda4 0xe92d4010 0xeb0da914   # 492 lights in its lamp groups, 5 light-runner commands, no colour given, 4.4 s
+site show_1               0x0004bda4 0xe92d4010 0xeb0da914   # king_kong_le-0.97's Wide strobe: its light-runner commands 100% alike; 492 lights in its lamp groups, 5 light-runner commands, no colour given, 4.4 s
 text show_name_1          Wide strobe
 text show_kind_1          flashy
 value show_secs_1         4
-site show_2               0x0005943c 0xe92d4010 0xeb0d736e   # 488 lights in its lamp groups, 8 light-runner commands, red, 5.2 s
-text show_name_2          Wide red strobe
+site show_2               0x0028e310 0xe92d4ff0 0xe30f4b54   # king_kong_le-0.97's Strobe: its light-runner commands 100% alike; 216 lights in its lamp groups, 4 light-runner commands, no colour given, 11.7 s
+text show_name_2          Strobe
 text show_kind_2          flashy
-value show_secs_2         5
-site show_3               0x000c1094 0xe92d4ff0 0xe24dd03c   # 232 lights in its lamp groups, 0 light-runner commands, red, 2.8 s
-text show_name_3          Red strobe
+value show_secs_2         8
+site show_3               0x0028d6ac 0xe92d4ff0 0xe30f4b54   # king_kong_le-0.97's Fast strobe: its light-runner commands 100% alike; 168 lights in its lamp groups, 6 light-runner commands, no colour given, 11.7 s
+text show_name_3          Fast strobe
 text show_kind_3          flashy
-value show_secs_3         3
-site show_4               0x000a58fc 0xe92d4070 0xeb0c423e   # 228 lights in its lamp groups, 0 light-runner commands, no colour given, 4.8 s
-text show_name_4          Chase
+value show_secs_3         8
+site show_4               0x000a5604 0xe92d4070 0xeb0c42fc   # king_kong_le-0.97's Small white glow: its lit lights 91% alike; 129 lights in its lamp groups, 0 light-runner commands, white, 2.8 s
+text show_name_4          Small white glow
 text show_kind_4          flashy
-value show_secs_4         5
-site show_5               0x0028e310 0xe92d4ff0 0xe30f4b54   # 216 lights in its lamp groups, 4 light-runner commands, no colour given, 11.7 s
-text show_name_5          Strobe
+value show_secs_4         3
+site show_5               0x0005943c 0xe92d4010 0xeb0d736e   # 488 lights in its lamp groups, 8 light-runner commands, red, 5.2 s
+text show_name_5          Wide red strobe
 text show_kind_5          flashy
-value show_secs_5         8
-site show_6               0x0028d6ac 0xe92d4ff0 0xe30f4b54   # 168 lights in its lamp groups, 6 light-runner commands, no colour given, 11.7 s
-text show_name_6          Fast strobe
+value show_secs_5         5
+site show_6               0x000c1094 0xe92d4ff0 0xe24dd03c   # 232 lights in its lamp groups, 0 light-runner commands, red, 2.8 s
+text show_name_6          Red strobe
 text show_kind_6          flashy
-value show_secs_6         8
-site show_7               0x000f1a64 0xe92d4038 0xeb0b11e4   # 484 lights in its lamp groups, 88 light-runner commands, yellow, white, 4.0 s
+value show_secs_6         3
+site show_7               0x000f1a64 0xe92d4038 0xeb0b11e4   # king_kong_le-0.97's Wide yellow and white fade: its light-runner commands 100% alike; 484 lights in its lamp groups, 88 light-runner commands, yellow, white, 4.0 s
 text show_name_7          Wide yellow and white fade
 text show_kind_7          subdued
 value show_secs_7         4
-site show_8               0x001c625c 0xe92d4070 0xeb07bfe6   # 476 lights in its lamp groups, 50 light-runner commands, red, white, 6.1 s
+site show_8               0x001d15f0 0xe92d4070 0xeb079301   # king_kong_le-0.97's Wide red and white fade: its light-runner commands 100% alike; 476 lights in its lamp groups, 50 light-runner commands, red, white, 6.1 s
 text show_name_8          Wide red and white fade
 text show_kind_8          subdued
 value show_secs_8         6
-site show_9               0x0014bc48 0xe92d4010 0xeb09a96b   # 476 lights in its lamp groups, 8 light-runner commands, blue, white, 2.5 s
+site show_9               0x001c625c 0xe92d4070 0xeb07bfe6   # king_kong_le-0.97's Wide blue and white fade: its light-runner commands 100% alike; 476 lights in its lamp groups, 50 light-runner commands, red, white, 6.1 s
 text show_name_9          Wide blue and white fade
 text show_kind_9          subdued
-value show_secs_9         3
-site show_10              0x0013668c 0xe92d4010 0xeb09feda   # 348 lights in its lamp groups, 8 light-runner commands, magenta, 3.5 s
+value show_secs_9         6
+site show_10              0x0013668c 0xe92d4010 0xeb09feda   # king_kong_le-0.97's Magenta fade: its light-runner commands 100% alike; 348 lights in its lamp groups, 8 light-runner commands, magenta, 3.5 s
 text show_name_10         Magenta fade
 text show_kind_10         subdued
 value show_secs_10        4
-site show_11              0x000c0fa4 0xe92d4010 0xeb0bd494   # 496 lights in its lamp groups, 2 light-runner commands, white, 0.8 s
-text show_name_11         Wide white fade
+site show_11              0x0028b448 0xe92d4010 0xeb04ab6b   # king_kong_le-0.97's Wide green and white fade: its light-runner commands 100% alike; 494 lights in its lamp groups, 5 light-runner commands, green, white, 1.5 s
+text show_name_11         Wide green and white fade
 text show_kind_11         accent
 value show_secs_11        1
-site show_12              0x0028b448 0xe92d4010 0xeb04ab6b   # 494 lights in its lamp groups, 5 light-runner commands, green, white, 1.5 s
-text show_name_12         Wide green and white fade
+site show_12              0x0028b554 0xe92d4038 0xeb04ab28   # king_kong_le-0.97's Wide blue and white strobe: its lit lights 100% alike; 490 lights in its lamp groups, 0 light-runner commands, blue, white, 1.7 s
+text show_name_12         Wide blue and white strobe
 text show_kind_12         accent
-value show_secs_12        1
+value show_secs_12        2

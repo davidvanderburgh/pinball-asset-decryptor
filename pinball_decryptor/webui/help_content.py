@@ -903,8 +903,12 @@ HELP_CONTENT = {
          "log names them when you write.\n"
          "- **Back to the original layout** drops the edit. Nothing reaches the card "
          "until Write, which lists these with your other changes.\n"
-         "- The words are changed on Replace Text; the preview draws a typed "
-         "replacement (\"shows: …\", \"(not built yet)\")."),
+         "- The words: pick the line in the preview and type them in **Words** under "
+         "Selected, or change them on Replace Text. It is the same edit either way, and "
+         "the preview draws it at once (\"shows: …\", \"(not built yet)\").\n"
+         "- To proof-read every line, leave the search box empty and press its ▲ ▼ (or "
+         "the ones beside Words): each line of text of every scene is picked in turn, "
+         "where it sits. Typed words narrow it to the lines with them."),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and "
          "options in one small file. **Load settings from a file…** puts them back, "

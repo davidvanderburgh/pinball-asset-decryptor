@@ -932,7 +932,68 @@ class TreeEditMixin:
                 "hid_in": self._tree_hidden_in(man, nid, self._tree_hidden(card)),
                 "view_in": self._tree_hidden_in(man, nid, self._tree_view_hidden(card)),
                 "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n),
-                "font": self._tree_font_of(man, n, ops)}
+                "font": self._tree_font_of(man, n, ops),
+                "words": self._tree_words_of(card, man, n, ops)}
+
+    def _tree_words_of(self, card, man, n, ops):
+        """A line of text's words for the Words box (DragonRR, PAD-468): ``{"text": the words
+        it shows, "game": the card's own, "edited", "limit": the bytes it may take}`` for a line
+        of the game's, ``{"text", "added": True}`` for one added here; None for anything else,
+        and for a line the project's text list does not hold (nothing to change it in)."""
+        if _kind_of(man, n) != "Text":
+            return None
+        if n.get("added"):
+            op = _added_text_op(ops, n["id"])
+            return {"text": op.get("text") or "", "added": True} if op else None
+        from ..core import text_manifest
+        from . import text_rules
+        text = _text_of(man, n, "Text")
+        orig = text_manifest.escape_cell(text or "")
+        d = card.replace("\\", "/").rsplit("/", 1)[0]
+        if not orig.strip() or orig not in ((self._scenes.get(d) or {}).get("texts") or ()):
+            return None
+        rep = dict((self._load_text_changes() or {}).get(card) or ()).get(orig)
+        return {"text": rep or orig, "game": orig, "edited": bool(rep),
+                "limit": text_rules.row_budget({"path": card, "original": orig})}
+
+    @rpc
+    def tree_words(self, node, words=None):
+        """The Words box (DragonRR, PAD-468): new words for a line of text, ``None`` for the
+        game's own.  A line of the game's is changed as the Text tab changes it (the same edit,
+        listed there too, and kept to the length a line may be); a line added here keeps its
+        words in its own edit, so Undo takes a change back."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None or self._tman is None:
+            return False
+        got = scene_edit._man_index(self._tman).get(int(node))
+        if got is None or _kind_of(self._tman, got[0]) != "Text":
+            return False
+        n = got[0]
+        if n.get("added"):
+            words = (words or "").strip()
+            ops = self._tree_ops(card)
+            op = _added_text_op(ops, n["id"])
+            if op is None or not words or op.get("text") == words:
+                return False
+            op["text"] = words
+            try:
+                scene_edit.set_ops(self.assets_dir, card, ops)
+            except OSError as e:
+                compat.messagebox.showerror("Scene edit", str(e))
+                return False
+            self._tree_refresh()
+            return True
+        from ..core import text_manifest
+        orig = text_manifest.escape_cell(_text_of(self._tman, n, "Text") or "")
+        done = self.tab.set_scene_words(self.assets_dir, card, orig, words)
+        if done is None:
+            compat.messagebox.showinfo(
+                "Words",
+                "This line is not in the project's text list (text/strings.tsv), so its words "
+                "can't be changed here. Extract the card again with Text ticked to list it.")
+            return False
+        return bool(done)
 
     @staticmethod
     def _tree_text_align_of(man, n):
@@ -1054,6 +1115,7 @@ class TreeEditMixin:
         if self._sel:
             self._render_tree_preview(self._sel)
             self._live_kick()
+        self._find_sync()                            # a line added or taken away (PAD-468)
 
     # ------------------------------------------------------------------
     # the running emulator ("on the fly", PAD-251)
@@ -1192,6 +1254,7 @@ class TreeEditMixin:
         self._tsel = node
         self._tsels = [node] if node is not None else []
         self._tanchor = node
+        self._find_follow(node)                      # PAD-468: Previous / Next go on from it
         if node is not None and node == peeked:
             self._tpeek = node
             self._render_tree_preview(self._sel, quiet=True)
@@ -3061,6 +3124,12 @@ def _text_of(man, n, kind):
         if o.get("kind") == "Text" and o.get("text"):
             return o["text"]
     return None
+
+
+def _added_text_op(ops, node):
+    """The ``add_text`` edit that made added line *node*, or None."""
+    return next((op for op in ops or () if op.get("op") == "add_text"
+                 and op.get("id") is not None and int(op["id"]) == int(node)), None)
 
 
 def _kind_of(man, n):

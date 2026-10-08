@@ -136,6 +136,10 @@
 .tree-handle { fill: var(--accent); stroke: #000; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
 .tree-side { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .tree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* PAD-468: a line's Words, with Previous / Next through every line of text */
+.tree-words { display: flex; flex-direction: column; gap: 4px; }
+.tree-words > .tree-row:first-child { flex-wrap: nowrap; }
+.tree-words .field.grow { flex: 1 1 auto; min-width: 0; }
 .tree-num { display: flex; align-items: center; gap: 4px; }
 .tree-num .field { width: 76px; }
 .tree-num .lbl { width: auto; }

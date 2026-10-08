@@ -207,15 +207,22 @@ def test_container_counts():
     big = bytearray(_container_header(5832, 2991))
     struct.pack_into("<Q", big, 0, 0x4D0)
     assert container_counts(bytes(big)) == (5832, 2991)
-    # Unaligned/absurd header-size word, non-zero pad word, fragments <
-    # sounds, short buffer: all refuse rather than report a junk number.
+    # PAD-445: a grown bank reads more sounds than fragments (Godzilla 1.16's
+    # 2534 + 69 code-mode sounds past its 2599 fragments); its fragment word
+    # is still the card's, so the pair is reported, not refused.
+    assert container_counts(_container_header(2599, 2603)) == (2599, 2603)
+    # Unaligned/absurd header-size word, non-zero pad word, a sounds word no
+    # bank could hold, no counts, short buffer: all refuse rather than report
+    # a junk number.
     bad = bytearray(_container_header(578, 549))
     struct.pack_into("<Q", bad, 0, 0xB1)
     assert container_counts(bytes(bad)) == (None, None)
     bad = bytearray(_container_header(578, 549))
     struct.pack_into("<I", bad, 0x58, 7)
     assert container_counts(bytes(bad)) == (None, None)
-    assert container_counts(_container_header(10, 20)) == (None, None)
+    assert container_counts(_container_header(578, (1 << 16) + 1)) == (None, None)
+    assert container_counts(_container_header(0, 549)) == (None, None)
+    assert container_counts(_container_header(578, 0)) == (None, None)
     assert container_counts(b"\x01" * 2048) == (None, None)
     assert container_counts(b"") == (None, None)
 

@@ -790,6 +790,8 @@ HELD_COILS_PROVEN = frozenset({
     ("jurassic_park_pro-1.16", "inlane_post"),   # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 8 coil 6, 255 for 120 ms then 64 (its own); OFF 2016 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
     ("king_kong_pro-0.97", "spider_magnet"),  # PAD-420 2026-10-08 coil_job_k0 (stock card on its slot's own NVRAM, hidden, muted): node 9 coil 0, 255 for 500 ms then 30 (the object's own); held 2000 ms as the mode started, the game's OFF 2016 ms on; a mode stop 0.7 s into a second hold let go; no abort
     ("king_kong_pro-0.97", "river_diverter"), # PAD-420 2026-10-08 coil_job_k0 (stock card on its slot's own NVRAM, hidden, muted): node 9 coil 1, 180 for 200 ms then 48 (the object's own); held 2000 ms as the mode started, the game's OFF 2016 ms on; a mode stop 0.7 s into a second hold let go; no abort
+    ("star_wars_le-1.31", "gates"),              # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 5, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("star_wars_le-1.31", "outlane_gate"),       # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 8, 255 for 500 ms then 56 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 

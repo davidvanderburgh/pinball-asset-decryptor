@@ -205,7 +205,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush Pro 1.19 | no | ✓ | ✓ | no | scoop, never waits |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
-| Star Wars LE 1.31 | no | ✓ | ✓ | shots | never waits |
+| Star Wars LE 1.31 | no | ✓ | ✓ | shots | mechanisms, never waits |
 | Star Wars Pro 1.31 | no | ✓ | ✓ | shots | never waits |
 | Stranger Things 1.13 | no | ✓ | ✓ | shots | scoop, waits for multiballs only |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |

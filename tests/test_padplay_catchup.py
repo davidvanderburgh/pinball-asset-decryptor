@@ -12,7 +12,9 @@ and make no sound.
 """
 import importlib.util
 import os
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -20,9 +22,12 @@ import types
 
 import pytest
 
+from tests._watch_event_filter import event_filter
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PADPLAY = os.path.join(ROOT, "tools", "spike2_emu", "padplay.py")
 pytestmark = pytest.mark.skipif(not os.path.isfile(PADPLAY), reason="rig not present")
+AWK = shutil.which("awk")
 
 
 class _FakeStream:
@@ -122,3 +127,23 @@ def test_a_20_second_backlog_is_skipped_not_played_late(padplay, monkeypatch, ca
     skipped = sum(int(line.split("skipped ")[1].split(" ms")[0])
                   for line in out.splitlines() if "to catch up" in line)
     assert skipped >= 18000, out
+
+
+@pytest.mark.skipif(not AWK, reason="no awk")
+def test_the_log_the_user_sends_says_where_the_sound_stood():
+    """The report came with nothing in the app's log that could say whether the
+    game wrote late or the speaker played late. watch.sh's real [event] filter
+    now carries the player's catch-up and dead-feed lines and the guest's 30 s
+    audio summary; the player's 5 s queue line stays out of it."""
+    lines = [
+        "[padplay] queue stayed above 19840 ms for 2 s - skipped 19490 ms to catch up",
+        "[padplay] no data for 25 s - transport presumed dead, exiting for a fresh connection",
+        "[aud] --- 30117 ms --- writei calls=6487 frames=1173600 (26.6 s @ 44100 Hz x 2 ch)"
+        "  main played=564600 dropped=0  center=586800  gate=0  latency=186/185 ms  fifo=0 ms",
+        "[padplay] queue  204 ms  underruns    0  fed 15471200  played 15435176  skipped 0 ms",
+        "[aud] voice[0] stream=0x00000000 pos=0 queue=0x00000000 en=0 vol=0/0 ch=0",
+    ]
+    out = subprocess.run([AWK, event_filter()], input="\n".join(lines) + "\n",
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.splitlines() == ["[event] " + l for l in lines[:3]]

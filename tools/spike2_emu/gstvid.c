@@ -1715,6 +1715,11 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
     int ok;
     if (!s || !s->ready || !vshm || !s->location[0]) return 0;
     want = pos_ns > 0 ? (unsigned)(pos_ns / 1000000ll) : 0u;
+    /* A seek inside the first frames IS the start. Bond rewinds some clips
+     * with a 1 ms seek (40 of them in the tester's log), and a rewind has to
+     * stay a rewind: the head cache, the pre-arm and both absorbs below
+     * exist for exactly that request. */
+    if (want < 50) want = 0;
 
     /* ★ ITEM 43: A SEEK ON A TORN-DOWN PIPELINE IS REFUSED, exactly as real
      * GStreamer refuses a seek on a NULL-state pipeline. The turtles (System
@@ -1802,10 +1807,15 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
         unsigned long now = vid_us();
         long since = (long)(now - s->last_seek_us);
         int burst = s->last_seek_us != 0 && since >= 0 && since < 100000;
+        /* A storm asks for where the clip already is: a rewind storm repeats
+         * the start the running clip began at, and a game re-seeking a reel
+         * to "now" every tick (PAD-456) asks for about where it has got to.
+         * A burst seek anywhere else is a new place to play from and
+         * re-arms. */
+        long long off = (long long)want - s->pos_ns / 1000000ll;
+        int same = want == s->start_ms || (want && off > -150 && off < 150);
         s->last_seek_us = now;
-        /* A storm repeats ONE position; a burst seek to a different one
-         * (PAD-456) is a new place to play from and re-arms. */
-        if (burst && s->playing && want == s->start_ms
+        if (burst && s->playing && same
                 && str_eq(s->prep_path, s->location)) {
             s->seek_absorbed++;
             if (s->seek_absorbed == 1)

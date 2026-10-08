@@ -178,9 +178,24 @@ def test_only_a_rewind_can_be_absorbed_as_an_eos_reflex():
     assert re.search(r"s->eos_loop == 0 && !s->want_ms", prep)
 
 
-def test_a_burst_absorbs_only_a_repeat_of_the_same_position():
+def test_a_seek_inside_the_first_frames_stays_a_rewind():
+    """Bond rewinds some clips with a 1 ms seek (40 in the tester's log). Read
+    as a mid-clip start it would skip the head cache and the pre-arm and slip
+    past both absorbs - a rewind storm re-arming every tick again."""
     seek = _gst("int pad_vid_seek(void *pipeline, long long pos_ns)")
-    assert re.search(r"burst && s->playing && want == s->start_ms", seek)
+    i_want = seek.index("want = pos_ns > 0 ? (unsigned)(pos_ns / 1000000ll) : 0u;")
+    i_zero = seek.index("if (want < 50) want = 0;")
+    assert i_want < i_zero < seek.index("if (!want && !s->playing")
+
+
+def test_a_burst_absorbs_a_seek_to_where_the_clip_already_is():
+    """A rewind storm repeats the start; a reel re-sought to "now" every tick
+    asks for about where it has got to. Either is absorbed; a burst seek
+    anywhere else re-arms."""
+    seek = _gst("int pad_vid_seek(void *pipeline, long long pos_ns)")
+    assert "long long off = (long long)want - s->pos_ns / 1000000ll;" in seek
+    assert "int same = want == s->start_ms || (want && off > -150 && off < 150);" in seek
+    assert re.search(r"burst && s->playing && same\s*&& str_eq", seek)
 
 
 def test_prepare_publishes_the_offset_before_the_request():

@@ -432,7 +432,7 @@ class ModesMixin:
                 return {"rel": rel, "head": SOUNDS_HEAD, "items": [], "more": "",
                         "foot": "None found: %s." % reading.note}
             return None
-        # "function" (a call elsewhere in the code naming the clip) was right 7 times in 29
+        # "function" (a call elsewhere in the code naming the clip) was right 6 times in 28
         shown = [snd for snd in sounds if snd["how"] in SOUNDS_HOW]
         if not shown:
             return None

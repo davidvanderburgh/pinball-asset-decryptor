@@ -20,13 +20,13 @@ The links are in the game program, three ways:
   callers' constants there are request ids (:data:`IN_RANGE`). On all five port builds read
   (Godzilla Pro 1.15/1.16 and LE 1.16, Beatles, Deadpool) the request table alone finds every
   sound site the port names and the same calls;
-* ``name`` - the sound's Sound Test name ends with the clip's name (:func:`named`: "SE GZ FX
-  DE BRIDGEATTACK 1" for BridgeAttack_1);
+* ``name`` - the one sound whose Sound Test name ends with the clip's name (:func:`named`: "SE
+  GZ FX DE BRIDGEATTACK 1" for BridgeAttack_1);
 
 and ``function`` (the call is in that function, nearer another clip's name) is kept for the
 tools only. EMULATOR-PROVEN on Godzilla Premium/LE 1.16 (``docs/architecture/stern.md``):
 pairs whose clip showed and whose request fired within a second of it, record 38 of 38, next 16
-of 18, name 94 of 106; function 7 of 29, and the two kinds dropped here, a table's loader 1 of 23
+of 18, name 56 of 59; function 6 of 28, and the two kinds dropped here, a table's loader 1 of 23
 and the same mode's code 17 of 478.
 
 A request is named by the Sound Test (the menu's node id IS the request id, MODE_API.md item 150:
@@ -623,10 +623,12 @@ def records(prog, refs, count):
 
 
 def named(names, menu):
-    """``{clip: [request]}``: the sounds whose Sound Test name (*menu*, :func:`menu_names`) ends
+    """``{clip: [request]}``: the sound whose Sound Test name (*menu*, :func:`menu_names`) ends
     with the clip's name, from a word start, letters and digits only: "SE GZ FX DE BRIDGEATTACK
-    1" for BridgeAttack_1, "SE JAWS BOUNTYHUNT LOOP 1" for bountyhunt_loop_1. A clip's name
-    shorter than :data:`NAME_MIN` is not matched."""
+    1" for BridgeAttack_1, "SE JAWS BOUNTYHUNT LOOP 1" for bountyhunt_loop_1. Only a name ONE
+    sound ends with (the emulator census: 56 of 59 such pairs played with their clip, 4 of 13
+    where several did - intro3's "...INTRO 3" voice lines of other rules), and none shorter
+    than :data:`NAME_MIN`."""
     ends = {}
     for r, n in menu.items():
         words = re.findall(r"[A-Za-z0-9]+", n)
@@ -637,7 +639,7 @@ def named(names, menu):
     out = {}
     for c in names:
         got = ends.get(_norm(c))
-        if got:
+        if got and len(got) == 1:
             out[c] = sorted(got)
     return out
 

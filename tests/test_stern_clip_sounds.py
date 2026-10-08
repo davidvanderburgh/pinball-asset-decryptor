@@ -280,12 +280,13 @@ def test_a_display_effects_sound_getter_is_found_three_slots_past_its_name_gette
 
 
 def test_a_sound_named_after_a_clip_is_its_sound():
-    menu = {12: "SE GZ FX DE BRIDGEATTACK 1", 13: "SE GZ VO GAME BRIDGEATTACK 1",
-            14: "SE GZ FX DE BRIDGEATTACK 10", 15: "SE GZ FX MATCH",
-            16: "SE JAWS BOUNTYHUNT LOOP 1"}
-    # "match" is too short to trust; "attack_1" is no whole word of "BRIDGEATTACK 1"
-    assert CS.named(["BridgeAttack_1", "match", "bountyhunt_loop_1", "attack_1"], menu) == {
-        "BridgeAttack_1": [12, 13], "bountyhunt_loop_1": [16]}
+    menu = {12: "SE GZ FX DE BRIDGEATTACK 1", 14: "SE GZ FX DE BRIDGEATTACK 10",
+            15: "SE GZ FX MATCH", 16: "SE JAWS BOUNTYHUNT LOOP 1", 17: "SE GZ FX DE INTRO 3",
+            18: "SE GZ VO MONSTER ZERO INTRO 3"}
+    # "match" is too short to trust; "attack_1" is no whole word of "BRIDGEATTACK 1"; two
+    # sounds end with "intro 3" (the census: such a name was right 4 times in 13)
+    assert CS.named(["BridgeAttack_1", "match", "bountyhunt_loop_1", "attack_1", "intro_3"],
+                    menu) == {"BridgeAttack_1": [12], "bountyhunt_loop_1": [16]}
 
 
 def test_a_clips_record_names_the_sound_played_with_it_and_a_flag_column_names_none():
@@ -404,7 +405,7 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
         _scan(w, proj)
         snd = shown(w, INTRO)
         assert snd["head"] == VM.SOUNDS_HEAD
-        # the kinds the emulator proved, best first; "function" (7 in 29) is not shown
+        # the kinds the emulator proved, best first; "function" (6 in 28) is not shown
         assert [(i["text"], i["how"]) for i in snd["items"]] == [
             ("sound request 5", "kept with the clip"), ("SE GZ VO ROAR", "asked for right after it"),
             ("SE GZ FX DE INTRO", "named after it")]

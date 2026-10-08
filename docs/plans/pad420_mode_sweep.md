@@ -429,10 +429,21 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - test_stern_mode_ball_save had been red since 10-07 (Munsters Pro's ball save proven, its multiball not):
         now a named exception (6a2c155a). All 40 mode-related test files: 819 passed.
     * Run 16 (2026-10-08 07:30-):
-      - **Lights on 11 builds was the TEST, not the LED map**: King Kong Pro's light_all held its 205 inserts while a
-        layer of the game's own sat at priority 255 (the ball still in the shooter lane - the ball-start show), and
-        nothing of ours showed; light_shots 7.5 s later lit every tied insert. lights_job.sh launches the ball and
-        waits LIGHTS_SETTLE (15 s for these); chain54 re-runs the 11 on two rigs.
+      - **Lights on the 11 LED-heavy builds** (re-run with the ball launched and 15 s settled) - three causes, none
+        the runtime's lamp layer as such: (a) LED-only expressive-lighting chains the LED view cannot show (the
+        shim's padled plane is 96 channels a node; John Wick's group 1 is 86 RGB lamps, Foo Fighters Pro's group 6
+        23) - their SHOT lights are proven (King Kong Pro, John Wick LE/Pro: lit-shots PROVEN); (b) a game layer at
+        priority 255 over ours (Avengers Pro 2/36, King Kong Pro's light_all, Mando LE 1.45 - whose lamp ids ARE
+        its program's: 79/80 by lampmap; 1.44 passed 92/92 with the ball still in the lane). Next: the LED view for
+        long ws2812 chains (emulator); and a question for David - should a mode's lights sit above the game's own
+        top-priority layer (it would mean relinking the game's layer list)?
+      - **X-Men Pro's other modes**: its mode objects' running bytes, each object found through its own class's
+        constructor as on X-Men LE (`coils/running_objs.py`: 10 of 11; 9 shifted by the same 0xac88 the uniform
+        prediction gave) - in st3/ports16 (contiguous pairs: the runtime stops at the first missing N), chain56.
+      - James Bond 60th's gates landed (d9c59ae8): a 940 ms hold ends before the job's stop is read (~1 s in);
+        c_verdict.py counts that as nothing left to let go.
+      - Card copies: a hung robocopy interop wrapper held the copy lock 24 min with three rigs idle; robocopy runs
+        under `timeout` now (c8522077).
       - Batman 1.14's shots tied (33/43, autotie + 1.13's hand ties): 285861a8; chain55 proves light_shots.
       - Landed coils the C batch had proven but nobody landed: Foo Fighters LE (3), JP Pin gate, TMNT Pro pizza
         magnet (17f63898). Every PROVEN coil is in HELD_COILS_PROVEN now (checked).

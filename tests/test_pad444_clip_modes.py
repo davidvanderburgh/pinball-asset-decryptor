@@ -252,17 +252,27 @@ def _program_and_bank(card):
 
 @pytest.mark.parametrize("card", [PRO116, LE116], ids=["pro116", "le116"])
 def test_godzilla_116_shares_two_gigan_clips_between_its_two_gigan_battles(card):
+    """What the emulator showed on LE 1.16 (artifacts/PAD-444/emulator): the tag team and the Gigan
+    battle ask for gigan_ghidorah_vs_godzilla13 and 17, Battle vs Megalon and the Megalon and
+    Gigan multiball both ask for Megalon_gigan_jetjag_godzilla10."""
     pytest.importorskip("numpy")
     elf, names = _program_and_bank(card)
     r = CM.analyse(elf, names)
     shared = {n: r.modes_of(n) for n in r.refs if len(r.modes_of(n)) > 1}
     assert shared == {"gigan_ghidorah_vs_godzilla13": [TAG, GIGAN],
                       "gigan_ghidorah_vs_godzilla17": [TAG, GIGAN],
+                      "Megalon_gigan_jetjag_godzilla10": ["cmode_battle_vs_megalon",
+                                                          "cmode_battle_vs_megalon_and_gigan_mb"],
                       "PlanetX_Normal_Loop": ["cmode_o2_destroyer", "cmode_planet_x_multiball"]}
-    # the Megalon and Gigan tag team shares nothing with them
-    assert "cmode_battle_vs_megalon_and_gigan_mb" in r.labels
-    mg = {n for n in r.refs if "cmode_battle_vs_megalon_and_gigan_mb" in r.modes_of(n)}
-    assert mg and not any(len(r.modes_of(n)) > 1 for n in mg)
+    # the Gigan battle's ramp hits ask for 60, its name loaded by a movw/movt 8 instructions apart
+    assert r.modes_of("gigan_ghidorah_vs_godzilla60") == [GIGAN]
+    # main play's clips are no mode's: its initialiser follows one stray multiball virtual
+    assert r.modes_of("replay") == [] and r.elsewhere("replay")
+    # never played: nothing in the program names them, not even as a piece of a longer string
+    un = CM.unplayed(r, {n: ["/d", "x"] for n in names})
+    assert len(un) == 137 and "MonsterBattles_Gigan_Idle" in un and "big_loop1" in un
+    assert not [n for n in un if (b"\0" + n.encode() + b"\0") in elf]
+    assert "tilt" not in un and "game_over" not in un          # tails of longer strings
 
 
 def test_a_copy_on_the_real_program_moves_one_battle_and_comes_back(tmp_path):
@@ -315,6 +325,30 @@ def test_a_name_kept_as_the_tail_of_a_longer_string_is_still_found():
     spans, at = CM._spans(bytes(raw), ["clip_x", "shared_clip"])
     assert (0x341, "Alt clip_x") in spans and at[(0x341, 4)] == "clip_x"
     assert at[(0x301, 0)] == "shared_clip"
+
+
+def test_a_movw_and_movt_far_apart_still_name_a_clip_unless_the_register_changes():
+    pytest.importorskip("capstone")
+    from pinball_decryptor.plugins.stern import stock_scan as S
+    raw, name_va = _elf()
+    raw = bytearray(raw)
+    lo, hi = name_va & 0xFFFF, name_va >> 16
+    nop = 0xE1A00000
+    # 8 apart, other registers loaded between them (the Gigan battle's initialiser's shape)
+    struct.pack_into("<10I", raw, 0x180, _movw(6, lo), _movw(0, 0x10), _movw(1, 0x20), nop, nop,
+                     _movt(0, 0x63), _movt(1, 0x63), nop, _movt(6, hi), nop)
+    # the same, but r7 is written between its halves: not a pair
+    struct.pack_into("<6I", raw, 0x1c0, _movw(7, lo), nop, 0xE3A07000, nop, _movt(7, hi), nop)
+    raw = bytes(raw)
+    prog = S.Program(raw)
+    from pinball_decryptor.plugins.stern import progreloc
+    spans, at = CM._spans(raw, ["shared_clip"])
+    census = progreloc.reference_census(raw, spans)          # the pairs 1 apart, as analyse has it
+    before = sorted(r["offs"] for refs in census.values() for r in refs)
+    assert [0x180, 0x1a0] not in before
+    CM._wide_pairs(S, prog, raw, spans, at, census)
+    after = sorted(r["offs"] for refs in census.values() for r in refs)
+    assert [o for o in after if o not in before] == [[0x180, 0x1a0]]
 
 
 def test_a_bank_played_by_name_lists_the_clips_nothing_names():

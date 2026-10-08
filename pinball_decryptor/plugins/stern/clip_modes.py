@@ -53,7 +53,7 @@ import struct
 from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes; older cached readings are read again
-READ_REV = 2
+READ_REV = 3
 #: the most clip-name characters a project file keeps (engine._sanitize_title's cap)
 NAME_MAX = 64
 #: how far back from a table's pointer the table's start is looked for (words)
@@ -61,6 +61,11 @@ TABLE_BACK = 256
 #: how many of one mode's own virtuals in a row before a static initialiser make it that
 #: mode's file's (a mode's file has dozens; a stray one in another file stands alone)
 INIT_RUN = 3
+#: how far after a clip name's ``movw`` its ``movt`` is looked for (instructions): the
+#: reference census pairs within 6, and the Gigan battle's initialiser loads seven names with
+#: their halves 8 apart (LE 1.16 0x91528 / 0x91548, gigan_ghidorah_vs_godzilla60), which the
+#: emulator showed it plays
+WIDE_PAIR = 24
 #: the longest string a clip name is looked for at the end of: the linker keeps one copy of
 #: a name that ends a longer string (Godzilla's "tilt" is "Avertisseur de tilt" + 16)
 HOST_MAX = 256
@@ -275,6 +280,53 @@ def _spans(raw, names):
     return sorted(hosts.items()), at
 
 
+def _wide_pairs(S, prog, raw, spans, at_name, census):
+    """Add to *census* the ``movw``/``movt`` pairs naming a clip whose halves are further apart
+    than the census looks (:data:`WIDE_PAIR`): the same register, nothing between them writing
+    it, and no call between them when it is a register a call may change."""
+    import numpy as np
+    from . import progreloc
+    seen = {r["offs"][0] for refs in census.values() for r in refs}
+    want = {}                                       # VA -> (host offset, delta)
+    for off, _text in spans:
+        va = prog.off2va(off)
+        if va is None:
+            continue
+        for (h, d), _n in at_name.items():
+            if h == off:
+                want[va + d] = (off, d)
+    if not want:
+        return
+    lows = np.array(sorted({v & 0xFFFF for v in want}), dtype=np.uint32)
+    for seg in progreloc.load_segments(raw):
+        if not seg[4] & progreloc.PF_X:
+            continue
+        off0, n = seg[1], seg[2] // 4
+        a = np.frombuffer(raw[off0:off0 + n * 4], dtype="<u4")
+        cond_ok = (a >> 28) != 0xF
+        is_w = ((a & 0x0FF00000) == 0x03000000) & cond_ok
+        imm = ((a >> 4) & 0xF000) | (a & 0xFFF)
+        for i in np.flatnonzero(is_w & np.isin(imm, lows)).tolist():
+            if off0 + 4 * i in seen:
+                continue
+            rd = int((a[i] >> 12) & 0xF)
+            for j in range(i + 1, min(i + 1 + WIDE_PAIR, n)):
+                w = int(a[j])
+                if (w >> 28) != 0xF and (w & 0x0FF00000) == 0x03400000 and (w >> 12) & 0xF == rd:
+                    va = int(imm[i]) | (((w >> 4) & 0xF000 | (w & 0xFFF)) << 16)
+                    hit = want.get(va)
+                    if hit is not None:
+                        census.setdefault(hit[0], []).append(
+                            {"kind": progreloc.KIND_A32, "delta": hit[1],
+                             "offs": [off0 + 4 * i, off0 + 4 * j], "va": va})
+                    break
+                if (w & 0x0E000000) == 0x0A000000 and (w >> 28) != 0xF and rd in (0, 1, 2, 3, 12, 14):
+                    break                           # a call or branch may change it
+                regs = S._regs_at(prog, seg[0] + 4 * j)
+                if regs is None or rd in regs[1]:
+                    break                           # written between: not a pair
+
+
 def analyse(elf, names):
     """:class:`Reading` of the game program *elf* (bytes) for the clip *names*. Read-only."""
     from . import progreloc
@@ -293,6 +345,7 @@ def analyse(elf, names):
     owners = _Owners(S, prog, _anchors(S, prog, model, modes, layers), _inits(S, prog))
     spans, at_name = _spans(elf, sorted(set(names)))
     census = progreloc.reference_census(elf, spans)
+    _wide_pairs(S, prog, elf, spans, at_name, census)
     text_hi = prog.code_end
     for off, refs in census.items():
         for ref in refs:

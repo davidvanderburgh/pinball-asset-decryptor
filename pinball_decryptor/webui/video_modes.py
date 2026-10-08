@@ -25,6 +25,9 @@ Store keys (namespace ``video``):
   rows[i]      + modes (labels), pair (a row of a shared clip), follow (the lead mode's label: a
                follower), copy (a mode's own clip), unplayed, other
   preview      + modes: {rel, kind: lead|follow|copy|unplayed, text, back} or None
+               + sounds: {rel, head, items: [{text, how, tip}], more, foot} or None - the
+               sounds the clip's code asks for (:mod:`..plugins.stern.clip_sounds`, a
+               prototype), named by the extract's ``sound_requests.tsv`` and audio files
 """
 
 import os
@@ -58,6 +61,13 @@ BACK_TEXT = ("%s plays the same clip as %s again after the next Write. Choose a 
              "this row to keep a clip of its own.")
 UNPLAYED_TEXT = ("The game never plays this clip: nothing in its program asks for it by name, "
                  "so a replacement here changes nothing on the machine.")
+#: the callout's sounds part
+SOUNDS_HEAD = "Sounds the code playing this clip asks for (a reading of the game program):"
+SOUNDS_MAX = 8
+SOUNDS_HOW = {"next": "right after the clip", "function": "in the same code",
+              "table": "in the code that reads the clip's table"}
+SOUNDS_FOOT = ("Extract the card again to see which sound files these are: the extract writes "
+               "sound_requests.tsv.")
 
 
 def _and(words):
@@ -87,6 +97,8 @@ class ModesMixin:
         self._m_unplayed = set()
         self._m_other = set()
         self._m_of = {}               # follower / copy rel -> the shared clip's rel
+        self._m_sr = None             # clip_sounds.SoundReading of the card, read once
+        self._m_names = None          # (sound_requests.tsv rows, {idx: audio file}) of the project
 
     def _m_reset(self):
         self._m_run += 1
@@ -367,6 +379,75 @@ class ModesMixin:
         if rel in self._m_unplayed and not ms:
             return {"rel": rel, "kind": "unplayed", "back": "", "text": UNPLAYED_TEXT}
         return None
+
+    # -- the sounds a clip's code plays (a prototype) ----------------------------------------
+    def _m_sound_reading(self):
+        if self._m_sr is None and self._m_clips is not None:
+            self._m_sr = self._m_clips.sound_reading
+        return self._m_sr
+
+    def _m_sound_names(self):
+        """``(sound_requests.tsv rows, {idx: "audio/<file>"})`` of the project, read once."""
+        if self._m_names is None:
+            from ..plugins.stern import clip_sounds as CS
+            project = self._scan_dir or ""
+            self._m_names = (CS.read_requests(project), CS.audio_files(project))
+        return self._m_names
+
+    def _m_sound_words(self, snd):
+        """``(text, tip)`` for one of a clip's sounds: its audio file where the extract mapped
+        its request, else its Sound Test name, else its request number."""
+        req, audio = self._m_sound_names()
+        r = snd["request"]
+        row = req.get(r) or {}
+        files = [audio[i] for i in row.get("idx", ()) if i in audio]
+        name = snd["name"] or row.get("name", "")
+        if files:
+            text = os.path.basename(files[0])
+            if len(files) > 1:
+                text += " (+%d)" % (len(files) - 1)
+        else:
+            text = name or "sound request %d" % r
+        lines = ["Sound request %d" % r]
+        if name:
+            lines.append("Sound Test: %s" % name)
+        lines += [os.path.basename(f) for f in files]
+        if not files and row.get("idx"):
+            lines.append("idx " + ", ".join("%04d" % i for i in row["idx"]))
+        return text, {"head": text, "lines": lines}
+
+    def _m_sounds(self, rel):
+        """The callout's sounds part for the row on show, or None."""
+        if not rel or self._m_clips is None or not self._m_clips.sounds:
+            return None
+        reading = self._m_sound_reading()
+        names = self._m_clips.name_of
+        name = names.get(rel) or names.get(self._m_of.get(rel) or "")
+        if not name:
+            return None
+        sounds = reading.sounds_of(name)
+        if not sounds:
+            if reading.note and not reading.pairs and rel not in self._m_unplayed:
+                return {"rel": rel, "head": SOUNDS_HEAD, "items": [], "more": "",
+                        "foot": "None found: %s." % reading.note}
+            return None
+        strong = [snd for snd in sounds if snd["how"] in SOUNDS_HOW]
+        loose = [snd for snd in sounds if snd["how"] not in SOUNDS_HOW]
+        items = []
+        for snd in strong[:SOUNDS_MAX]:
+            text, tip = self._m_sound_words(snd)
+            items.append({"text": text, "how": SOUNDS_HOW[snd["how"]], "tip": tip})
+        more = []
+        if len(strong) > SOUNDS_MAX:
+            more.append("%d more in the same code" % (len(strong) - SOUNDS_MAX))
+        if loose:
+            modes = _and([self._m_label(m) for m in self._m_modes.get(rel) or ()]) or "its mode"
+            more.append("%d sound%s elsewhere in %s" % (len(loose), "" if len(loose) == 1 else "s",
+                                                         modes))
+        req, _audio = self._m_sound_names()
+        return {"rel": rel, "head": SOUNDS_HEAD, "items": items,
+                "more": ("And " + "; ".join(more) + ".") if more else "",
+                "foot": "" if req or not items else SOUNDS_FOOT}
 
     # -- the filter ------------------------------------------------------------------------
     @rpc

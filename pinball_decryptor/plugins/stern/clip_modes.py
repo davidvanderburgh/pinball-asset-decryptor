@@ -53,7 +53,8 @@ import struct
 from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes; older cached readings are read again
-READ_REV = 3
+#: (4: each clip's sounds, :mod:`.clip_sounds`)
+READ_REV = 4
 #: the most clip-name characters a project file keeps (engine._sanitize_title's cap)
 NAME_MAX = 64
 #: how far back from a table's pointer the table's start is looked for (words)
@@ -327,9 +328,10 @@ def _wide_pairs(S, prog, raw, spans, at_name, census):
                     break                           # written between: not a pair
 
 
-def analyse(elf, names):
-    """:class:`Reading` of the game program *elf* (bytes) for the clip *names*. Read-only."""
-    from . import progreloc
+def analyse(elf, names, ctx=None):
+    """:class:`Reading` of the game program *elf* (bytes) for the clip *names*. Read-only.
+    *ctx*, a dict when given, gets the ``prog`` and the mode ``owners`` it read, so
+    :mod:`.clip_sounds` reads the same program without building them again."""
     from . import stock_scan as S
     elf = bytes(elf)
     out = Reading(sha1=hashlib.sha1(elf).hexdigest())
@@ -337,16 +339,35 @@ def analyse(elf, names):
         prog = S.Program(elf)
     except S.ScanError:
         return out
+    if ctx is not None:
+        ctx["prog"] = prog
     model = S.class_model(prog)
     modes = _mode_classes(S, model)
     if not modes:
         return out
     layers = _layers(model, modes)
     owners = _Owners(S, prog, _anchors(S, prog, model, modes, layers), _inits(S, prog))
+    if ctx is not None:
+        ctx["owners"] = owners
+    out.refs = clip_refs(prog, elf, names, owners)
+    for rs in out.refs.values():
+        for r in rs:
+            if r.mode and r.mode not in out.labels:
+                out.labels[r.mode] = mode_label(r.mode)
+    return out
+
+
+def clip_refs(prog, elf, names, owners=None):
+    """``{clip name: [Ref]}``: every place in the game program *elf* (its
+    :class:`.stock_scan.Program` *prog*) that names one of *names*, in address order, each
+    given its mode by *owners* (none without: a title whose rules are plain C)."""
+    from . import progreloc
+    from . import stock_scan as S
     spans, at_name = _spans(elf, sorted(set(names)))
     census = progreloc.reference_census(elf, spans)
     _wide_pairs(S, prog, elf, spans, at_name, census)
     text_hi = prog.code_end
+    out = {}
     for off, refs in census.items():
         for ref in refs:
             name = at_name.get((off, ref["delta"]))
@@ -356,16 +377,13 @@ def analyse(elf, names):
             at = prog.off2va(first)
             if at is None:
                 continue
-            if ref["kind"] in (progreloc.KIND_A32, progreloc.KIND_T32) or (
-                    prog.tlo <= at < text_hi):
-                mode, how = owners.of_code(at)
-            else:
-                mode, how = owners.of_table(at)
-            out.refs.setdefault(name, []).append(
-                Ref(ref["kind"], list(ref["offs"]), at, mode, how))
-            if mode and mode not in out.labels:
-                out.labels[mode] = mode_label(mode)
-    for rs in out.refs.values():
+            mode, how = "", ""
+            if owners is not None:
+                code = ref["kind"] in (progreloc.KIND_A32, progreloc.KIND_T32) or (
+                    prog.tlo <= at < text_hi)
+                mode, how = owners.of_code(at) if code else owners.of_table(at)
+            out.setdefault(name, []).append(Ref(ref["kind"], list(ref["offs"]), at, mode, how))
+    for rs in out.values():
         rs.sort(key=lambda r: r.at)
     return out
 
@@ -684,6 +702,14 @@ class CardClips:
     note: str = ""                                  # why there is nothing, in words
     #: clips of a bank the game plays by name that nothing in the program names: never shown
     unplayed: list = field(default_factory=list)
+    #: the sounds each clip's code asks for (:class:`.clip_sounds.SoundReading`, a dict here
+    #: until :attr:`sound_reading` reads it)
+    sounds: dict = field(default_factory=dict)
+
+    @property
+    def sound_reading(self):
+        from .clip_sounds import SoundReading
+        return SoundReading.from_json(self.sounds)
 
     def modes_of_rel(self, rel):
         n = self.name_of.get(rel)
@@ -693,14 +719,14 @@ class CardClips:
         return {"rev": READ_REV, "card": self.card, "game": self.game, "version": self.version,
                 "reading": self.reading.to_json(), "name_of": dict(self.name_of),
                 "bank_of": dict(self.bank_of), "note": self.note,
-                "unplayed": list(self.unplayed)}
+                "unplayed": list(self.unplayed), "sounds": dict(self.sounds)}
 
     @classmethod
     def from_json(cls, d):
         return cls(d.get("card", ""), d.get("game", ""), d.get("version", ""),
                    Reading.from_json(d.get("reading") or {}), dict(d.get("name_of") or {}),
                    dict(d.get("bank_of") or {}), d.get("note", ""),
-                   list(d.get("unplayed") or ()))
+                   list(d.get("unplayed") or ()), dict(d.get("sounds") or {}))
 
 
 def manifest_rows(project):
@@ -769,9 +795,13 @@ def read_card(card, rows, cancel=None):
         return out
     out.game, out.version = game or "", version or ""
     names, banks = set(), {}
+    fragments = None
     try:
         with CardImage(card) as img:
             elf = img.preview(part, "/%s/game" % game, cap=256 << 20) if game else None
+            if game:
+                from .clip_sounds import card_fragments
+                fragments = card_fragments(img, part, game)
             for d in _bank_dirs(rows):
                 if cancel is not None and cancel():
                     return out
@@ -793,7 +823,9 @@ def read_card(card, rows, cancel=None):
         return out
     if cancel is not None and cancel():
         return out
-    out.reading = analyse(elf, names)
+    ctx = {}
+    out.reading = analyse(elf, names, ctx=ctx)
+    out.sounds = _sounds(elf, names, fragments, out, ctx)
     out.bank_of = {n: v for n, v in banks.items()}
     out.unplayed = unplayed(out.reading, banks)
     if not out.reading.labels:
@@ -808,6 +840,18 @@ def read_card(card, rows, cancel=None):
         except OSError:
             pass
     return out
+
+
+def _sounds(elf, names, fragments, clips, ctx):
+    """:func:`.clip_sounds.analyse`'s reading as a dict; a failure is its note, never the
+    modes' (a prototype rides along, it never breaks the tab)."""
+    from . import clip_sounds as CS
+    try:
+        got = CS.analyse(elf, names, fragments, game=clips.game, version=clips.version,
+                         refs=clips.reading.refs or None, ctx=ctx)
+    except Exception as e:                                  # noqa: BLE001
+        got = CS.SoundReading(note="the sounds could not be read (%s)" % e)
+    return got.to_json()
 
 
 def unplayed(reading, bank_of):

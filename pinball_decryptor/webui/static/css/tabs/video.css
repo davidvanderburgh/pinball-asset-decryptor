@@ -154,6 +154,8 @@ html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 
 .vid-modes-cell.pair { color: var(--accent); }
 .vid-modes-cell.unplayed, .vid-modes-cell.other { color: var(--ink-3); font-style: italic; }
 .vid-modes .note { align-items: center; }
+.vid-sound-list { margin: 4px 0 2px; padding-left: 18px; }
+.vid-sound-list li { overflow-wrap: anywhere; }
 /* a mode's own row of a clip another mode plays too, under that mode's row */
 .vid-pairmark { color: var(--accent); margin-right: 6px; }
 .vid-rep.follow { color: var(--ink-3); font-style: italic; }

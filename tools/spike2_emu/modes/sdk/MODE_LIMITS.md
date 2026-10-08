@@ -218,10 +218,10 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots |  |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
-| The Mandalorian LE 1.45 | no | ✓ | ✓ | no | never waits |
+| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | no | never waits |
 | The Mandalorian Pro 1.45 | no | ✓ | ✓ | no | never waits |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots |  |
-| The Munsters Pro 1.28 | no | ✓ | ✓ | no | never waits |
+| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | no | never waits |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots |  |
 | Uncanny X-Men Pro 0.98 | no | ✓ | ✓ | shots | waits for multiballs only |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots |  |

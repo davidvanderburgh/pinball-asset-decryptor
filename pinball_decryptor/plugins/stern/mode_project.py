@@ -654,6 +654,9 @@ SCOOP_PROVEN = frozenset({
     "mando_le-1.45",                   # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1715 ms after landing; scoop_hold 4000, 5708 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1195 ms later; after the mode, 1715 ms ([coildrive] node 9 coil 1, 200 for 30 ms); no abort
     "mando_pro-1.45",                  # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1711 ms after landing; scoop_hold 4000, 5700 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1039 ms later; after the mode, 1712 ms ([coildrive] node 9 coil 1, 200 for 30 ms); no abort
     "munsters_le-1.28",                # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1868 ms after landing; scoop_hold 4000, 5700 ms (held 4000); a mode stop 2.5 s into a hold, kicked 1090 ms later; after the mode, 1715 ms ([coildrive] node 9 coil 1, 196 for 40 ms); no abort
+    "munsters_pro-1.28",               # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 13993 ms after landing; scoop_hold 4000, 5709 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1195 ms later; after the mode, 1714 ms ([coildrive] node 9 coil 1, 196 for 40 ms); no abort
+    "rush_le-1.19",                    # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1453 ms after landing; scoop_hold 4000, 5336 ms (held 4000); a mode stop 2.5 s into a hold, kicked 834 ms later; after the mode, 1297 ms ([coildrive] node 9 coil 5, 185 for 60 ms); no abort
+    "rush_pro-1.19",                   # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1458 ms after landing; scoop_hold 4000, 5335 ms (held 4000); a mode stop 2.5 s into a hold, kicked 779 ms later; after the mode, 1295 ms ([coildrive] node 9 coil 5, 185 for 60 ms); no abort
 })
 
 

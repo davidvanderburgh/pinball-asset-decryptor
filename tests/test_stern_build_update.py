@@ -72,6 +72,9 @@ def card(monkeypatch, tmp_path):
     computation returns; ``state["copies"]`` collects what was handed to the
     ext4 driver; ``state["build_reader"]`` is how the BUILT file is read
     (the stock layout unless a test moves a file)."""
+    # builds at the original's size: an SD card size another test in this
+    # worker left in the environment would refuse this stand-in card
+    monkeypatch.delenv("PAD_STERN_CARD_SIZE", raising=False)
     reader = _Reader(CARD_TREE)
     stock = tmp_path / "turtles_pro-1_59_0.raw"
     stock.write_bytes(bytes(4096))

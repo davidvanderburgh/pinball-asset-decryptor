@@ -8390,6 +8390,11 @@ def build_update_reason(prev, original_path, output_path, assets_dir):
                     else "the original's card size")
         return ("it was built for %s, and this build is for %s"
                 % (_for(prev.get("card_size")), _for(want)))
+    if want and _cs.shrinks_card(original_path, want):
+        # PAD-465: making it smaller moved files the stock card's extent maps
+        # place elsewhere, which every in-place update is resolved through
+        return ("a build for a %s SD card is always made from the original"
+                % _cs.words(want))
     try:
         from . import mode_write as _MW
         if _mode_family_on() and _MW.enabled() and (
@@ -9098,13 +9103,25 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     # than after the encode.
     from . import card_size as _cs
     grow_to = _cs.preflight(original_path, _cs.requested(), tools=False)
-    if grow_to:
+    # PAD-465: the one size a card is made SMALLER for (a 16 GB card for a
+    # smaller 16 GB SD card).  resize2fs moves files to make it so, so it is
+    # done last, on the finished output (_shrink_card), never before a patch.
+    shrink = bool(grow_to) and _cs.shrinks_card(original_path, grow_to)
+    if shrink:
+        log("This build is for a %s SD card: once everything is on the card, "
+            "its games partition is made %s shorter, so the image comes out "
+            "%s instead of Stern's %s."
+            % (_cs.words(grow_to), _cs.size_words(_cs.SMALL_CUT * _cs.SECTOR),
+               _cs.size_words(_cs.layout_size(grow_to)),
+               _cs.size_words(_cs.CARD_SIZES["16G"])), "info")
+    elif grow_to:
         log("This build is for a %s SD card: the games partition is grown to "
             "fill it, so it needs an SD card of at least %s."
             % (_cs.words(grow_to), _cs.words(grow_to)), "info")
     elif _cs.requested():
-        # a card is never made smaller: say so rather than hand back a bigger
-        # image than the one the user thinks they asked for
+        # a card is never made smaller (but a 16 GB one for the smaller 16 GB
+        # card, above): say so rather than hand back a bigger image than the
+        # one the user thinks they asked for
         log("SD card size %s: the original is already a card that size or "
             "bigger, so this build keeps the original's size."
             % _cs.words(_cs.requested()), "info")
@@ -9232,9 +9249,12 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 copier.join()
                 if not copy_err:
                     # the original, at the SD card size this build is for
-                    if grow_to and not _expand_card(
+                    if grow_to and not shrink and not _expand_card(
                             original_path, output_path, parts, grow_to, log,
                             cancel):
+                        return (0, 0, 0, 0), None, None
+                    if shrink and not _shrink_card(
+                            original_path, output_path, grow_to, log, cancel):
                         return (0, 0, 0, 0), None, None
                     try:
                         os.utime(_lp(output_path), None)
@@ -9352,8 +9372,8 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 out.flush()
                 os.fsync(out.fileno())
             _stage_done(log, "writing the patched bytes into the image", t0)
-            if grow_to and not _expand_card(original_path, output_path,
-                                            parts, grow_to, log, cancel):
+            if grow_to and not shrink and not _expand_card(
+                    original_path, output_path, parts, grow_to, log, cancel):
                 return (0, 0, 0, 0), None, None     # cancelled
             # Grow the files that outgrew their slots (oversized videos kept at
             # full quality, and the rebuilt firmware when a blip-free build is
@@ -9412,6 +9432,11 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                                                 n_planned, log)
                 if not _mok:
                     complete = False
+            # PAD-465: a card made smaller for a smaller 16 GB SD card, now
+            # that every byte is on it (resize2fs moves files to do it)
+            if shrink and not _shrink_card(original_path, output_path,
+                                           grow_to, log, cancel):
+                return (0, 0, 0, 0), None, None     # cancelled
             # The record of what this build put on the card, for the next one
             # to update: every in-place write traced back to its file, every
             # whole-file copy that landed (they land in order) with its
@@ -10614,6 +10639,43 @@ def _expand_card(original_path, output_path, parts, target, log, cancel):
                 % (_cs.words(target), e, _cs.words(target))) from e
         raise
     _stage_done(log, "making the card a %s card" % _cs.words(target), t0)
+    return True
+
+
+def _shrink_card(original_path, output_path, target, log, cancel):
+    """PAD-465: make the FINISHED build at *output_path* fit a smaller
+    16 GB SD card (card_size.shrink_image), after every in-place patch and
+    whole-file copy is on it, since resize2fs moves the files at the end of
+    the games partition to do it.  Returns True when it shrank, False when
+    the user cancelled; a cancel or any failure discards the output, as
+    :func:`_expand_card` does: a card the user asked to fit a smaller SD
+    card is never handed back at Stern's size.  The clock is pinned as for a
+    grow."""
+    from ...core import ext4_grow
+    from . import card_size as _cs
+    t0 = time.monotonic()
+    try:
+        epoch = ext4_grow.partition_epoch(original_path,
+                                          _cs.P3_START * _cs.SECTOR)
+    except Exception:  # noqa: BLE001 - an unpinned resize is still a valid one
+        epoch = None
+    try:
+        _cs.shrink_image(output_path, target, log=log, cancel=cancel,
+                         epoch=epoch)
+    except _cs.Cancelled:
+        _discard_output(output_path)
+        log("Cancelled while making the card fit a %s SD card; nothing was "
+            "built." % _cs.words(target), "warning")
+        return False
+    except BaseException as e:
+        _discard_output(output_path)
+        if isinstance(e, (_cs.CardSizeError, OSError)):
+            raise _cs.CardSizeError(
+                "The card could not be made to fit a %s SD card, so nothing "
+                "was built: %s" % (_cs.words(target), e)) from e
+        raise
+    _stage_done(log, "making the card fit a %s SD card" % _cs.words(target),
+                t0)
     return True
 
 

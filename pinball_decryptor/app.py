@@ -3970,7 +3970,9 @@ class App:
         if asked:
             log_cb("Each ported card is built at its own original's size: "
                    "the SD card size on the Write tab (%s) is for this "
-                   "project's own card." % asked.replace("G", " GB"), "info")
+                   "project's own card." % (
+                       "smaller 16 GB" if asked == "16S"    # card_size.SMALL
+                       else asked.replace("G", " GB")), "info")
         try:
             results = mod_port.run_ports(
                 jobs, extract, transfer, stage, write, log_cb,
@@ -6426,16 +6428,17 @@ class App:
 
     #: Settings key for the Write tab's "SD card size" (Stern Spike 2,
     #: plugins/stern/card_size.py): "" builds at the original's size, "16G" /
-    #: "32G" grows the card's games partition to that class.
+    #: "32G" grows the card's games partition to that class, "16S" builds for
+    #: a 16 GB SD card a little short of Stern's 16 GB image (PAD-465).
     _CARD_SIZE_KEY = "card_size"
     #: card_size.ENV, spelled out so the setting is applied before (and
     #: without) the Stern plugin being imported.
     _CARD_SIZE_ENV = "PAD_STERN_CARD_SIZE"
-    _CARD_SIZES = ("16G", "32G")
+    _CARD_SIZES = ("16S", "16G", "32G")
 
     @classmethod
     def _norm_card_size(cls, val):
-        """A saved or chosen card size: "16G" / "32G", anything else "".
+        """A saved or chosen card size: "16S" / "16G" / "32G", anything else "".
         Always "" where a card can't be grown (macOS: no loop devices, and
         the Write tab doesn't offer the option there)."""
         from .webui.tabs.write import card_size_supported

@@ -1313,3 +1313,42 @@ def test_a_space_failure_points_at_making_room_not_at_switches(monkeypatch,
                                  None, lambda m, l="info": lines.append(m),
                                  no_space=True)
     assert "ran out of room" in lines[0] and "PAD_STERN" not in lines[0]
+
+
+def test_a_build_for_a_smaller_16g_card_is_made_smaller_last_and_whole(
+        rig, build, monkeypatch):
+    """PAD-465: a 16 GB original built for the smaller 16 GB card is never
+    grown; it is made smaller once everything is on it (resize2fs moves the
+    files at the end of the games partition, so nothing may be patched by an
+    offset after it), is measured at the smaller size, records the size it
+    was built for, and the next build is made whole from the original."""
+    orig = _stern_card(rig.tmp / "bond.raw", _tiny_fs(free=200), cls="16G")
+    monkeypatch.setenv(cs.ENV, "16S")
+    monkeypatch.setattr(cs, "check_tools", lambda target: None)
+    order, budgets = [], []
+
+    def compute(*a, **k):
+        budgets.append(engine._BUILD_SPACE.budget)
+        order.append("patches")
+        return [], (0, 0, 0, 0), None, None, None
+    monkeypatch.setattr(engine, "_compute_patches", compute)
+    monkeypatch.setattr(engine, "_expand_card",
+                        lambda *a, **k: order.append("grow") or True)
+    monkeypatch.setattr(engine, "_grow_video_slots",
+                        lambda *a, **k: order.append("copies") or 0)
+    monkeypatch.setattr(cs, "shrink_image", lambda path, target, **k: (
+        order.append(("shrink", os.path.basename(path), target))) or True)
+    out = build.out
+    engine.write_image(str(orig), str(rig.tmp), str(out), log=rig.log,
+                       update=False)
+    assert order == ["patches", "copies", ("shrink", "out.raw", "16S")]
+    assert budgets[0].grow_to == "16S"
+    said = [m for _l, m in rig.lines]
+    assert ("This build is for a smaller 16 GB SD card: once everything is on "
+            "the card, its games partition is made 671 MB shorter, so the "
+            "image comes out 14.82 GB instead of Stern's 15.49 GB." in said)
+    rec = engine.read_build_manifest(str(out))
+    assert rec["card_size"] == "16S" and rec["complete"]
+    assert engine.build_update_reason(rec, str(orig), str(out),
+                                      str(rig.tmp)) == (
+        "a build for a smaller 16 GB SD card is always made from the original")

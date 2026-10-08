@@ -104,6 +104,18 @@ pending() {
 }
 
 copy() {                          # <src> <dest-dir>
+    # ONE COPY AT A TIME ACROSS EVERY BATCH (PAD-420): batches staging at once each read the same spinning disk and
+    # every copy crawled; the lock makes them take turns, so the disk reads straight through
+    exec 9> /tmp/pad-cardstage-copy.lock   # on the Linux side: flock is sure there, and every batch shares it
+    flock 9
+    copy_now "$@"
+    local rc=$?
+    flock -u 9
+    exec 9>&-
+    return $rc
+}
+
+copy_now() {                      # <src> <dest-dir>
     if [ "${PAD_STAGE_COPY:-robocopy}" = robocopy ] && [ -x "$ROBO" ] \
        && command -v wslpath >/dev/null 2>&1; then
         "$ROBO" "$(wslpath -w "$(dirname "$1")")" "$(wslpath -w "$2")" \

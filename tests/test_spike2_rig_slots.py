@@ -659,6 +659,20 @@ def test_a_batchs_end_leaves_other_batches_copies_in_flight():
     assert cs.index('mv -f "$P/$name" "$dest"') < cs.index('touch "$dest"             # robocopy keeps')
 
 
+def test_a_running_job_keeps_its_slot_and_copies_take_turns():
+    """PAD-420: a worker refreshes its slot's lease while its JOB runs, not only while it waits for a card (a job longer
+    than the lease looked free and the next batch took its slot - its killgame killed the job's game); and the card
+    copies of every batch take turns (several at once off the one spinning disk made each crawl)."""
+    rb = open(os.path.join(RIG, "rigbatch.sh"), encoding="utf-8").read()
+    w = rb[rb.index("worker() {"):]
+    assert '"$key" "$card" > "$log" 2>&1 < /dev/null &' in w and 'while kill -0 "$jp"' in w and 'wait "$jp"' in w
+    loop = w[w.index('while kill -0 "$jp"'):w.index('wait "$jp"')]
+    assert 'riglock.sh" use "$slot" "$WHO"' in loop and "sleep 2" in loop
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    c = cs[cs.index("copy() {"):cs.index("copy_now() {")]
+    assert "exec 9> /tmp/pad-cardstage-copy.lock" in c and "flock 9" in c and 'copy_now "$@"' in c
+
+
 def test_rigbatch_boots_staged_copies_and_reuses_them():
     """cardstage.sh: every rig boots a copy staged off the slow disk; a card
     that cannot be staged fails its build (not the batch); a second sweep

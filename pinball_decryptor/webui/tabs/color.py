@@ -40,12 +40,18 @@ switch was off.  "Same as the other files" drops it again.  With no file
 picked, and always on the Color profile tab itself, Files is the project's
 individual files profile, which every file without its own gets.
 
-APPLY TO ALL (PAD-439, DragonRR).  On the Images and Video tabs the bar's
-file line has "Apply to all images / videos": after an "Are you sure?" every
-file of that kind the tab offers a color profile on (each replaced one, and
-any other already attached) gets what the file on show has, its own profile
-or none, and is attached (``apply_to_all``).  It is one Undo step on the file
-on show, switches and all.
+APPLY TO ALL (PAD-439, PAD-462, DragonRR).  On the Images and Video tabs the
+bar's file line has two: "Apply to all profiled images / videos", every file
+of that kind with a color profile attached, and "Apply to all images /
+videos", every one that is not locked (each replaced one, and the game's own
+ones unlocked), attached.  After an "Are you sure?" each gets what the file
+on show has, its own profile or none (``apply_to_all``).  It is one Undo step
+on the file on show, switches and all.
+
+SEVERAL FILES AT ONCE (PAD-462, DragonRR).  With several clips selected on
+the Video tab the bar's Files mode is on all of them that are not locked
+(``set_file``'s *more*): a change gives each one the profile and attaches
+it, one Undo step, and the clip on the players is shown with it.
 
 RECOMMENDED FOLLOWS THE SCREEN (PAD-346).  On Spike 2 the overlay's and the
 individual files' Recommended is the Machine screen on show, undone
@@ -170,6 +176,8 @@ class ColorTab(TabService):
         self._redo = {}
         self._last_move = {}         # {stored key: (slider, time)}: one drag = one step
         self._file = None            # PAD-368: {kind, rel, label, attach} the bar is on
+        #                              (PAD-462: "more", the other files selected with it)
+        self._switched = {}          # PAD-462: switches the last change to them attached
         self.set(sample="card", sample_url="", sample_path="", samples=[],
                  problems=[], rev=0, active=False, project="",
                  has_project=False, try_note="", mode="display",
@@ -222,6 +230,14 @@ class ColorTab(TabService):
                 and os.path.isdir(self._project)):
             return None
         return f["kind"], f["rel"]
+
+    def _file_rels(self):
+        """PAD-462: every file the bar's Files mode is on (several clips
+        selected together), the one on show first; ``[]`` with none."""
+        fm = self._file_mode()
+        if fm is None:
+            return []
+        return [fm[1]] + list(self._file.get("more") or [])
 
     def _own(self):
         """The file on show's own profile, or ``None`` (it gets the
@@ -347,8 +363,15 @@ class ColorTab(TabService):
         f = self._file
         if not f or self._file_mode() is None:
             return None
+        rels = self._file_rels()
+        own_n = int(self._own() is not None)
+        if len(rels) > 1:
+            m = self._raw(staged_changes.load(self._project),
+                          "files\n" + f["kind"])
+            own_n = sum(1 for r in rels if isinstance(m, dict) and r in m)
         return {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
-                "on": f.get("on"), "own": self._own() is not None}
+                "on": f.get("on"), "own": self._own() is not None,
+                "count": len(rels), "own_n": own_n}
 
     def _publish(self, problems=None):
         p = self._shown()
@@ -439,6 +462,9 @@ class ColorTab(TabService):
             return cp.SCREEN_KEY
         fm = self._file_mode()
         if fm is not None:
+            rels = self._file_rels()
+            if len(rels) > 1:                   # PAD-462: those files' own
+                return "group\n%s\n%s" % (fm[0], "\n".join(sorted(rels)))
             return "file\n%s\n%s" % fm            # PAD-368: one file's own
         return cp.ASSET_KEY if self._assets_mode() else cp.KEY
 
@@ -514,6 +540,28 @@ class ColorTab(TabService):
         steps.append(before)
         del steps[:-UNDO_MAX]
 
+    def _remember_files(self, key, mkey, rels, before, switched, group=None):
+        """:meth:`_remember` for a change to several files' own profiles
+        (Apply to all, PAD-439; files selected together, PAD-462): the Undo
+        step is a tuple of *mkey* ("files\\n<kind>"), *before* (their own
+        profiles as they were, :meth:`_files_raw`) and *switched* (the
+        switches the change attached, as each was)."""
+        if self._files_raw(mkey, rels) == before and not switched:
+            return
+        self._redo.pop(key, None)
+        now = time.monotonic()
+        last = self._last_move.get(key)
+        self._last_move[key] = (group, now)
+        steps = self._undo.setdefault(key, [])
+        if group and last and last[0] == group \
+                and now - last[1] < UNDO_GROUP_S and steps:
+            if switched and isinstance(steps[-1], tuple):
+                where, back, was = steps[-1]
+                steps[-1] = (where, back, dict(switched, **(was or {})))
+            return
+        steps.append((mkey, before, switched))
+        del steps[:-UNDO_MAX]
+
     def _publish_undo(self):
         key = self._mode_key()
         self.set(can_undo=bool(self._undo.get(key)),
@@ -565,6 +613,18 @@ class ColorTab(TabService):
                        "error")
             return False
         key = self._mode_key()
+        rels = self._file_rels()
+        if len(rels) > 1:
+            # PAD-462: several files selected: one step for all of them
+            mkey = "files\n" + self._file["kind"]
+            before = self._files_raw(mkey, rels)
+            self._switched = {}
+            done = self._store_mode(prof, rev, follow)
+            if done:
+                self._remember_files(key, mkey, rels, before, self._switched,
+                                     group)
+                self._publish_undo()
+            return done
         before = self._stored_raw(key)
         done = self._store_mode(prof, rev, follow)
         if done:
@@ -637,13 +697,19 @@ class ColorTab(TabService):
     def _store_own(self, prof, rev, follow=False):
         """PAD-368: the file on show gets a profile of its own (*follow*: the
         Recommended one), and the profile is attached to it."""
-        kind, rel = self._file_mode()
+        kind, _rel = self._file_mode()
+        rels = self._file_rels()
         try:
-            cp.store_own_profile(self._project, kind, rel, prof, follow=follow)
+            cp.store_own_profiles(self._project, kind, rels, prof,
+                                  follow=follow)
         except Exception as e:                          # noqa: BLE001
             self.set(problems=["could not save the file's profile (%s)" % e])
             return False
-        self._attach()
+        if len(rels) > 1:
+            self._switched = self._attach_all(kind, rels)
+        else:
+            self._attach()
+        self._show_on_players(kind, rels)
         if rev:
             self._rev += 1
             self._files_preview_on()
@@ -672,6 +738,40 @@ class ColorTab(TabService):
             return
         if done:
             f["on"] = True
+
+    def _attach_all(self, kind, rels):
+        """PAD-462 (DragonRR): a profile picked with several files selected
+        is meant for all of them: each one not locked whose switch is off is
+        switched on, at once.  Returns the switches as they were (the Undo
+        step's)."""
+        fn = getattr(self._all_service(kind), "color_targets", None)
+        try:
+            states = dict(fn("all") or {}) if fn is not None else {}
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile targets %s", kind)
+            states = {}
+        off = [r for r in rels if states.get(r) is False]
+        if not off:
+            return {}
+        switched = self._put_switches(kind, {r: True for r in off})
+        if self._file and self._file["rel"] in switched:
+            self._file["on"] = True
+        return switched
+
+    def _show_on_players(self, kind, rels):
+        """PAD-462 (DragonRR): the clip on the Video tab's players whose
+        profile was just changed is shown with it ("With its color profile"
+        on the player of the file that has it: its Original for a game's own
+        clip, its Replacement for one replaced)."""
+        if kind != "videos":
+            return
+        fn = getattr(self._all_service(kind), "profile_shown", None)
+        if fn is None:
+            return
+        try:
+            fn(list(rels))
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile players")
 
     def _files_preview_on(self):
         """PAD-369 (DragonRR): an individual files profile picked (a starting
@@ -704,10 +804,13 @@ class ColorTab(TabService):
                 log.exception("color profile preview switch %s", where)
 
     @rpc
-    def set_file(self, kind=None, rel=None, label="", on=None, attach=None):
+    def set_file(self, kind=None, rel=None, label="", on=None, attach=None,
+                 more=None):
         """The Color profiles bar is open beside a clicked file (PAD-368):
         its Files mode shows and changes that file's profile.  No *rel*:
-        back to the project's individual files profile."""
+        back to the project's individual files profile.  *more* (PAD-462):
+        the other files selected with it, not locked; a change gives every
+        one of them the profile, attached."""
         if kind not in cp.FILE_PROFILES_KEY or not rel or not self._on_display:
             if self._file is not None:
                 self._file = None
@@ -717,6 +820,9 @@ class ColorTab(TabService):
         f = {"kind": kind, "rel": str(rel), "label": str(label or "")[:120]
              or os.path.basename(str(rel)), "on": on,
              "attach": attach if isinstance(attach, dict) else None}
+        f["more"] = [r for r in dict.fromkeys(
+            str(r) for r in (more if isinstance(more, (list, tuple)) else ())
+            if r) if r != f["rel"]]
         same = (self._file is not None and self._file["kind"] == kind
                 and self._file["rel"] == f["rel"])
         self._file = f
@@ -734,13 +840,20 @@ class ColorTab(TabService):
         if fm is None:
             return False
         key = self._mode_key()
-        before = self._stored_raw(key)
+        rels = self._file_rels()
+        mkey = "files\n" + fm[0]
+        before = (self._files_raw(mkey, rels) if len(rels) > 1
+                  else self._stored_raw(key))
         try:
-            cp.store_own_profile(self._project, fm[0], fm[1], None)
+            cp.store_own_profiles(self._project, fm[0], rels, None)
         except Exception as e:                          # noqa: BLE001
             self.set(problems=["could not save the file's profile (%s)" % e])
             return False
-        self._remember(key, before)
+        if len(rels) > 1:
+            self._remember_files(key, mkey, rels, before, {})
+        else:
+            self._remember(key, before)
+        self._show_on_players(fm[0], rels)
         self._rev += 1
         self._publish(problems=[])
         self._publish_undo()
@@ -772,29 +885,47 @@ class ColorTab(TabService):
             log.exception("color profile switches %s", kind)
             return {}
 
+    #: PAD-462: what each Apply to all reaches, in the question it asks
+    _ALL_SCOPES = {
+        "profiled": "with a color profile attached",
+        "all": "that is not locked",
+    }
+    _ALL_UNLOCK = {"images": "the game's own pictures while they are unlocked",
+                   "videos": "the game's own clips while Advanced is ticked"}
+
     @rpc
-    def apply_to_all(self):
-        """PAD-439 (DragonRR): the file on show's color profile for every file
-        of its kind its tab offers one on (``color_targets``), after an "Are
-        you sure?".  Each gets the same own profile (none, where this file
-        has none, so all get the project's) and is attached.  One Undo step
-        on this file puts all of it back."""
+    def apply_to_all(self, scope="profiled"):
+        """The file on show's color profile for other files of its kind,
+        after an "Are you sure?".  *scope* (PAD-462, DragonRR): "profiled",
+        every file with a color profile attached (``color_targets``), which
+        each keeps attached; "all", every file of its kind that is not locked
+        (each replaced one, and the game's own ones unlocked), each attached.
+        Each gets the same own profile (none, where this file has none, so
+        all get the project's).  One Undo step on this file puts all of it
+        back (PAD-439)."""
         fm = self._file_mode()
         if fm is None:
             return False
+        if scope not in self._ALL_SCOPES:
+            scope = "profiled"
         kind, rel = fm
         one, many = self._ALL_WORDS[kind]
+        tab = "Video" if kind == "videos" else "Images"
         fn = getattr(self._all_service(kind), "color_targets", None)
         try:
-            targets = dict(fn() or {}) if fn is not None else {}
+            targets = dict(fn(scope) or {}) if fn is not None else {}
         except Exception:                               # noqa: BLE001
             log.exception("color profile targets %s", kind)
             targets = {}
         if not set(targets) - {rel}:
-            self.toast("There are no other %s to apply it to: choose "
-                       "replacements on the %s tab first."
-                       % (many, "Video" if kind == "videos" else "Images"),
-                       "info")
+            if scope == "profiled":
+                self.toast("No other %s has a color profile attached: attach "
+                           "one with its palette in the Color column, or use "
+                           "Apply to all %s." % (one, many), "info")
+            else:
+                self.toast("There are no other %s to apply it to: choose "
+                           "replacements on the %s tab, or unlock %s."
+                           % (many, tab, self._ALL_UNLOCK[kind]), "info")
             return False
         assets = self._project
         mkey = "files\n" + kind
@@ -805,19 +936,31 @@ class ColorTab(TabService):
         attach = sorted(r for r, on in targets.items() if not on)
         name = self._shown().label()
         if not (change or attach):
-            self.toast("All %d %s already have “%s”." % (
-                len(targets), many, name), "info")
+            self.toast("All %d %s %s already have “%s”." % (
+                len(targets), many, self._ALL_SCOPES[scope].replace(
+                    "is not", "are not"), name), "info")
             return False
-        msg = ("Are you sure?\n\nAll %d %s with a replacement or a color "
-               "profile attached get “%s”, this %s's color profile, in place "
-               "of the one each has now." % (len(targets), many, name, one))
-        if attach:
-            msg += (" It is attached to the %d that have none attached."
-                    % len(attach) if len(attach) > 1
-                    else " It is attached to the one that has none attached.")
+        if scope == "profiled":
+            msg = ("Are you sure?\n\nAll %d %s with a color profile attached "
+                   "get “%s”, this %s's color profile, in place of the one "
+                   "each has now. %s without a color profile attached are "
+                   "left as they are." % (len(targets), many, name, one,
+                                          many.capitalize()))
+        else:
+            msg = ("Are you sure?\n\nEvery %s that is not locked (each "
+                   "replaced one, and %s), all %d of them, gets “%s”, this "
+                   "%s's color profile, in place of the one each has now."
+                   % (one, self._ALL_UNLOCK[kind], len(targets), name, one))
+            if attach:
+                msg += (" It is attached to the %d that have none attached."
+                        % len(attach) if len(attach) > 1
+                        else " It is attached to the one that has none "
+                        "attached.")
         msg += "\n\nUndo in the Colors bar puts them all back."
         key = self._mode_key()
-        if not compat.messagebox.askyesno("Apply to all %s" % many, msg):
+        title = ("Apply to all profiled %s" if scope == "profiled"
+                 else "Apply to all %s") % many
+        if not compat.messagebox.askyesno(title, msg):
             return False
         # read again: the page went on turning while the question was up
         before = self._files_raw(mkey, targets)
@@ -833,15 +976,14 @@ class ColorTab(TabService):
             if attach else {}
         if rel in switched and self._file_mode() == (kind, rel):
             self._file["on"] = True
-        self._redo.pop(key, None)
         self._last_move.pop(key, None)
-        steps = self._undo.setdefault(key, [])
-        steps.append((mkey, before, switched))
-        del steps[:-UNDO_MAX]
-        self.log("Color profile: “%s” applied to all %d %s%s." % (
-            name, len(targets), many,
-            " (attached to %d)" % len(switched) if switched else ""), "info")
+        self._remember_files(key, mkey, targets, before, switched)
+        self.log("Color profile: “%s” applied to all %d %s%s%s." % (
+            name, len(targets), "profiled " if scope == "profiled" else "",
+            many, " (attached to %d)" % len(switched) if switched else ""),
+            "info")
         self._files_preview_on()
+        self._show_on_players(kind, targets)
         self._publish(problems=[])
         self._changed(display=False)
         self._tell_tabs()

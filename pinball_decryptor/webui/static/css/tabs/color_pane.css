@@ -68,8 +68,9 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
   border-radius: 6px; background: var(--panel-2, transparent); }
 .cpd-file-hd, .cpd-file-own { gap: 6px; align-items: center; min-width: 0; }
 .cpd-file-own .grow { flex: 1 1 auto; }
-/* PAD-439: Apply to all images / videos, on its own line under the file */
-.cpd-file-all { justify-content: flex-end; }
+/* PAD-439: Apply to all images / videos, on its own line under the file (PAD-462: and Apply
+   to all profiled ones beside it; a narrow bar puts them one over the other) */
+.cpd-file-all { justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .cpd-body .h3 { font-family: var(--cond); font-weight: 600; font-size: 14px; color: var(--ink); }
 
 /* the Color profile tab's cards, narrower: shorter sliders, smaller number boxes */

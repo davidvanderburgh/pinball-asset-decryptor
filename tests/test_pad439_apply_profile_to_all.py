@@ -1,6 +1,7 @@
 """PAD-439 (DragonRR): "Apply to all videos" / "Apply to all images" on the Colors bar.  The
 file on show's color profile goes to every file of its kind its tab offers one on, attached,
-after an "Are you sure?", and one Undo (or Redo) on that file takes all of it back."""
+after an "Are you sure?", and one Undo (or Redo) on that file takes all of it back.  (PAD-462:
+that is Apply to all's "all" now; the button with no scope is Apply to all profiled.)"""
 
 import os
 
@@ -49,16 +50,16 @@ def test_apply_to_all_videos_asks_first_and_undoes_as_one_step(tmp_path):
         assert w.call("color.undo") and w.call("color.undo", True)   # its own steps work
         # No: nothing changes
         w.answers.append("no")
-        assert w.call("color.apply_to_all") is False
+        assert w.call("color.apply_to_all", "all") is False
         q = w.asked[-1]
         assert q["title"] == "Apply to all videos"
         assert q["message"].startswith("Are you sure?")
-        assert "All 3 videos" in q["message"] and "“Custom red”" in q["message"]
+        assert "all 3 of them" in q["message"] and "“Custom red”" in q["message"]
         assert "attached to the 2 that have none" in q["message"]
         assert set(cp.own_profile_names(assets)["videos"]) == {CLIPS[0]}
         # Yes: every clip has it, attached
         w.answers.append("yes")
-        assert w.call("color.apply_to_all") is True
+        assert w.call("color.apply_to_all", "all") is True
         w.drain()
         assert cp.own_profile_names(assets)["videos"] == {r: "Custom red" for r in CLIPS}
         assert all(cp.own_profile(assets, "videos", r).gain == (1.3, 0.9, 0.9)
@@ -71,7 +72,7 @@ def test_apply_to_all_videos_asks_first_and_undoes_as_one_step(tmp_path):
         assert any("applied to all 3 videos (attached to 2)" in t for t in log)
         # nothing left to change: a note, no question
         n = len(w.asked)
-        assert w.call("color.apply_to_all") is False
+        assert w.call("color.apply_to_all", "all") is False
         assert len(w.asked) == n
         # a file it never reached, given its own since, is not Undo's business
         cp.store_own_profile(assets, "videos", "elsewhere.mp4", cp.Profile(name="Else"))
@@ -136,7 +137,7 @@ def test_apply_to_all_images_and_the_lone_file(tmp_path):
         w.drain()
         # the only replaced picture: nothing to apply it to, and nothing asked
         n = len(w.asked)
-        assert w.call("color.apply_to_all") is False
+        assert w.call("color.apply_to_all", "all") is False
         assert len(w.asked) == n
         w.answers = [os.path.join(reps, "backglass.jpg")]
         assert w.call("images.choose", PLAIN) == PLAIN
@@ -144,7 +145,7 @@ def test_apply_to_all_images_and_the_lone_file(tmp_path):
         w.call("color.set_file", "images", BANNER, "SpaceGodzilla.png", True, {"ns": "images"})
         w.drain()
         w.answers = ["yes"]
-        assert w.call("color.apply_to_all") is True
+        assert w.call("color.apply_to_all", "all") is True
         assert w.asked[-1]["title"] == "Apply to all images"
         assert cp.own_profile_names(assets)["images"] == {BANNER: "Custom red",
                                                           PLAIN: "Custom red"}
@@ -156,7 +157,9 @@ def test_apply_to_all_images_and_the_lone_file(tmp_path):
 
 def test_the_button_is_on_the_images_and_video_bars_only():
     pane = open(os.path.join(_TABS, "color_pane.js"), encoding="utf-8").read()
-    assert 'call("color.apply_to_all")' in pane
+    assert 'call("color.apply_to_all", "all")' in pane
+    assert 'call("color.apply_to_all", "profiled")' in pane
     assert "Apply to all ${all[1]}…" in pane
+    assert "Apply to all profiled ${all[1]}…" in pane
     assert 'ALL_HOSTS = { images: "images", video: "videos" }' in pane
     assert "<${FileLine} s=${s} host=${host} />" in pane

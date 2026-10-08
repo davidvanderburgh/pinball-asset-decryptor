@@ -521,12 +521,17 @@ HELP_CONTENT = {
                 {"icon": "lock", "tone": "info", "title": "Blue lock",
                  "text": "The game's own clip, never changed. **Advanced** on the toolbar "
                          "gives it a palette; detaching puts the original back."}]},
-            "A game's own clip with its color profile attached shows it on the right-hand "
-            "player, **With its color profile**: the original as the card will get it.",
             "Under each player, **Original** (or **Replacement**) and **With its color "
             "profile** switch that player between the clip as it is and the clip through "
             "its color profile, attached or not, as a Compare player does. Only the "
             "player changes; the palette is what attaches it.",
+            "The player of the file a profile is attached to opens on **With its color "
+            "profile**, and turns to it when you change that profile in the **Colors** "
+            "bar: the Replacement player for a replaced clip, the Original player for a "
+            "game's own clip (its Replacement player stays empty).",
+            "Select several rows (Ctrl-click, Shift-click) with the **Colors** bar open "
+            "and a profile you pick goes to every one of them that is not locked, each "
+            "attached.",
             "### Preview colors\n"
             "Switches above the players show the clips as the machine will (preview "
             "only; no re-encode), drawn the same way Scenes draws a picture, color ranges "
@@ -1037,10 +1042,13 @@ HELP_CONTENT = {
          "gets it as its own (and is attached if it was not).\n\n"
          "- **Same as the other files** drops it: the file then gets the individual "
          "files profile, the one this tab shows.\n"
-         "- **Apply to all images…** / **Apply to all videos…** (Images and Video "
-         "only) gives every file there with a replacement or a profile the shown "
-         "file's profile, attached. You are asked first; one Undo puts them all "
-         "back.\n"
+         "- **Apply to all profiled images…** / **videos…** (Images and Video "
+         "only) gives every file there with a profile attached the shown file's "
+         "profile. Files with none attached are left as they are.\n"
+         "- **Apply to all images…** / **videos…** gives it to every file there "
+         "that is not locked (each replaced one, and the game's own once "
+         "unlocked), attached. For both you are asked first; one Undo puts them "
+         "all back.\n"
          "- Hover a file or a Scenes layer to see its Color profile, or None."),
         ("Lines of text (Scenes)",
          "A line of text in the Scenes layers has a palette too, and its own "

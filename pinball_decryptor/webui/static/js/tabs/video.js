@@ -769,8 +769,14 @@ export default function VideoTab() {
   // Compare, the clip clicked there)
   const selRow = cmpOpen ? (activeTile ? byRel.get(activeTile.rel) : null)
     : firstSel ? rows.find((x) => x.rel === firstSel) : null;
-  const colorFile = selRow && selRow.col != null
-    ? { kind: "videos", rel: selRow.rel, label: selRow.name, on: !!selRow.col, attach: { ns: "video" } } : null;
+  // PAD-462 (DragonRR): several rows selected: the bar is on every one of them that is not
+  // locked (the first of those named), and a change gives them all the profile, attached
+  const selOpen = useMemo(() => (cmpOpen || sel.size < 2 ? []
+    : rows.filter((x) => sel.has(x.rel) && x.col != null)), [rows, sel, cmpOpen]);
+  const barRow = selRow && selRow.col != null ? selRow : selOpen[0] || null;
+  const colorFile = barRow
+    ? { kind: "videos", rel: barRow.rel, label: barRow.name, on: !!barRow.col, attach: { ns: "video" },
+        more: selOpen.filter((x) => x.rel !== barRow.rel).map((x) => x.rel) } : null;
 
   const loadRow = (rel, delay = 200) => {
     clearTimeout(selectJob.current);

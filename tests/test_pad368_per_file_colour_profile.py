@@ -190,7 +190,7 @@ def test_the_bar_on_a_clicked_file_changes_that_files_profile_only(tmp_path):
         s = w.state("color")
         assert s["mode"] == "assets"
         assert s["file"] == {"kind": "images", "rel": BANNER, "label": "SpaceGodzilla.png",
-                             "on": False, "own": False}
+                             "on": False, "own": False, "count": 1, "own_n": 0}
         assert s["name"] == "Recommended"
         # a change is the file's own, and attaches it (its switch was off)
         w.call("color.set_params", {"name": "Custom red", "gain": [1.3, 0.9, 0.9]})

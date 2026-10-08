@@ -677,11 +677,19 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - Mode > Magnet where the GAME uses the magnet at that shot (the runtime gives way - "the game wants it" / "the
         game sent the coil a command of its own" - safe, but no clean hold to prove): Munsters LE / Pro (the Herman
         opto: the game pulses it), Batman (both the Bat Phone Target and Joker target 1, nearest on the picture), Rush
-        Pro (the Center ramp opto; Rush LE's run happened to meet no grab - chain138 retries 30 s into the ball). Led
-        Zeppelin LE: a `switch 81` line for its magnet opto is hooked but never fires (its descriptor flags do not
-        broadcast it). Metallica: COFFIN MAGNET DOWN may hold the coffin, not a ball (grave marker / electric chair
-        fling) - a question for David whether its magnet section should be hidden. Foo Fighters LE's Overlord magnet
-        (device 16, 9:0, its powers in registers): census chain137.
+        Pro (the Center ramp opto; the retry 30 s into the ball met the same). Led Zeppelin LE: of its Electric Magic
+        optos only the spinner's is broadcast (a trial with switch lines 80-82), and on it the game sends the magnet an
+        OFF 1 ms after our grab - it keeps that magnet off outside its own feature. Metallica: COFFIN MAGNET DOWN may
+        hold the coffin, not a ball (grave marker / electric chair fling) - a question for David whether its magnet
+        section should be hidden.
+      - Run 22, the magnets used only inside a feature: Guardians / LE (OrbMagnet), Sword of Rage LE / Pro (the
+        MagnaSaveMagnet, a player's magna-save), TMNT LE / Pro (pizza magnet), Foo Fighters LE (Overlord magnet: no
+        command at all in a game's census). None has a place on the playfield picture, and the game never used them on
+        a single switch press or the lockdown button at a ball's start. Their classes' hold asks for no draw
+        (`coil_fire(dev, 0, 0, 16, 5000)`); Batman's identical call went out as 255 for 1000 ms, but neither the coil
+        record (coils/coilrec_probe.c: the 0x68-byte records carry no default) nor the boot configuration frames
+        (coils/bootcfg_job.sh, PAD_NB_TRACE: node 9 coil 0's is power 255, time 0) holds the 1000 ms, so the draw is
+        not read here for the others - each needs its feature run on the rig, or David's word on where the magnet sits.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

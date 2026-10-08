@@ -397,10 +397,19 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
         why = slot_refusal(prof, card)
         if not why and card not in names:
             why = NOT_BANK
+        # a clip the project names that is not on this PC (a project moved here: Project >
+        # Relink moved files... re-points them) is left out, as a gone replacement is
+        files = [f for f in variants[rel] if os.path.isfile(f)]
+        for f in variants[rel]:
+            if f not in files and not why:
+                log("Random clips: %s is not there any more, so %s plays without it"
+                    % (f, rel), "warning")
+        if not why and not files:
+            why = "none of its random clips is on this PC"
         if why:
             left.append((rel, why))
             continue
-        slots.append(Slot(rel=rel, card=card, stock=names[card], files=list(variants[rel])))
+        slots.append(Slot(rel=rel, card=card, stock=names[card], files=files))
     for rel, why in left:
         log("Random clips: %s is left out: %s" % (rel, why), "warning")
     if not slots:

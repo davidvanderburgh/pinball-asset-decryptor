@@ -188,6 +188,41 @@ def test_a_card_that_already_has_random_clips_is_refused(tmp_path, gz_proven):
         CV.build(project, GZ, stock, str(tmp_path / "out"), only=True, stage_fn=_fake_stage())
 
 
+def test_relink_repoints_the_random_clips_too(tmp_path):
+    """A project moved to another PC (Project > Relink moved files...): the random clips are paths on
+    the old PC too, and are found and re-pointed with the replacements."""
+    from pinball_decryptor.core import relink
+    new = tmp_path / "here" / "takes"
+    new.mkdir(parents=True)
+    for n in ("take2.mp4", "take3.mp4"):
+        (new / n).write_bytes(b"x")
+    staged = {"video": {"video/A.mov": r"Z:\old\takes\take2.mp4"},
+              CV.STAGED_KEY: {"video/B.mov": [r"Z:\old\takes\take2.mp4", r"Z:\old\takes\take3.mp4"]}}
+    assert set(relink.missing_sources(staged)) == {r"Z:\old\takes\take2.mp4", r"Z:\old\takes\take3.mp4"}
+    result = relink.plan(staged, str(tmp_path / "here"))
+    data, n_slots, n_files = relink.apply_plan(staged, result["found"])
+    assert data[CV.STAGED_KEY]["video/B.mov"] == [str(new / "take2.mp4"), str(new / "take3.mp4")]
+    assert data["video"]["video/A.mov"] == str(new / "take2.mp4")
+    assert (n_slots, n_files) == (2, 2)
+
+
+def test_a_random_clip_that_is_gone_is_left_out_not_the_build(tmp_path, gz_proven):
+    bank_dir = CV.bank_assets(GZ)
+    here = _clip_files(tmp_path, "b.mp4")
+    project = _project(tmp_path, {"video/Delta.mov": [str(tmp_path / "gone.mp4")] + here,
+                                  "video/zeta.mov": [str(tmp_path / "gone.mp4")]},
+                       [("Delta.mov", bank_dir + "2.asset/1.asset"),
+                        ("zeta.mov", bank_dir + "2.asset/2.asset")])
+    msgs = []
+    vb = CV.build(project, GZ, synthetic(("Alpha", "Delta", "zeta")), str(tmp_path / "out"), only=True,
+                  log=lambda m, lvl="info": msgs.append((lvl, m)), stage_fn=_fake_stage())
+    assert [(s.rel, s.files) for s in vb.slots] == [("video/Delta.mov", here)]
+    assert ("warning", "Random clips: %s is not there any more, so video/Delta.mov plays without it"
+            % (tmp_path / "gone.mp4")) in msgs
+    assert any(lvl == "warning" and "video/zeta.mov is left out: none of its random clips is on this PC"
+               in m for lvl, m in msgs)
+
+
 def test_no_variants_builds_nothing(tmp_path, gz_proven):
     project = _project(tmp_path, {}, [])
     assert CV.build(project, GZ, synthetic(), str(tmp_path / "out"), only=True) is None

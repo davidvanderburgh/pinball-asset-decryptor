@@ -170,7 +170,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
-| Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | shots | scoop |
+| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | scoop |
 | Dungeons & Dragons Pro 1.10 | no | ✓ | ✓ | shots | scoop |
 | Elvira 1.13 | ✓ | no | not yet | shots |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots |  |

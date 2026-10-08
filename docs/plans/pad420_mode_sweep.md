@@ -313,6 +313,18 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       `.inflight/<hash of its out dir>`); chain30 restarted on it. C: is ~98% full (the stage keeps 100 GB).
     * Yellow census after run 12's landings: shows 50, coils 34, magnet 28, stack 21, sound 18, scoop 15, film 15,
       clip 14, lights 11, screen 10, own_music 3, no port 2 (Batman 1.14, Jaws Pro: chain24/25 probes), ball_save 2.
+    * The two probes (chain24/25): Jaws Pro started NO game - the rig's trough read 0 of 6 ("a ball is in play", an
+      attract ball search), so its mask never moved (0x0010 throughout). Every queued job now runs `plunge.py reset`
+      (six balls home, the door shut) before its coins; chain33 runs the Jaws Pro probe again. Batman 1.14: a game,
+      and after each of three drains the game fired its trough eject again (node 8 coil 1 at 162, 190, 218 s) - the
+      ball given back, the probe having hit no playfield switch (a saver that starts on the first switch never runs
+      out). gamecheck.sh does hit three switches after a saved drain and waits 15 s, yet three checks never ended a
+      ball; chain34 (batman_job2.sh) hits six playfield switches and waits 30 s before each drain.
+    * Lights (11 builds): their inserts sit in LED-only device-table groups (King Kong Pro group 1 = "EXPRESSIVE
+      LIGHTING" 96 RGB, group 9 = 227 channels) with no connector named, so coilmap.group_node cannot join them to a
+      bus node (it joins on switch names) and the LED view draws them dark; the title's node directory has four
+      ws2812node boards (King Kong Pro nodes 2, 7, 12, 14) they must belong to. Emulator work (the LED view, PAD-311's
+      area): map an LED-only group to its ws2812 node by what the game sends each node.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

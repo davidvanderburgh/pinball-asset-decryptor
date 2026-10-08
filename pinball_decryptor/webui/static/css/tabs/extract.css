@@ -14,6 +14,11 @@
 .x-page .x-checks { gap: 4px 18px; }
 .x-page .x-chips { gap: 6px 8px; }
 .x-page .x-dur { gap: 6px; flex: 0 0 auto; }
+/* PAD-460: the voice quality under Auto-name call-outs, and Auto-name now */
+.x-page .x-voice { gap: 8px; margin-top: 4px; }
+.x-page .x-voice > .field { min-width: 0; max-width: 100%; }
+.x-page .x-autoname { gap: 10px; margin-top: 4px; }
+.x-page .x-autoname > .small { min-width: 0; }
 .x-page .x-pre { white-space: pre-line; }
 .x-page .x-wrapany, .x-float .x-wrapany { overflow-wrap: anywhere; word-break: break-word; }
 

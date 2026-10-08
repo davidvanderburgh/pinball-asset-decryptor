@@ -252,6 +252,13 @@ class TranscribePipeline(BasePipeline):
             name_memory.apply_saved_names(self.assets_dir, self._log)
 
         wavs = _find_wavs(self.assets_dir)
+        if not wavs and _has_named_wavs(self.assets_dir):
+            # Auto-name now over a folder that is named already (PAD-460)
+            self._log("  Every sound here already has a name.", "info")
+            self._done(True,
+                "Every sound in this folder already has a name, so there was "
+                "nothing left to transcribe.")
+            return
         if not wavs:
             raise PipelineError("Transcribe",
                 f"No .wav files under {self.assets_dir}.\n"
@@ -348,6 +355,10 @@ class TranscribePipeline(BasePipeline):
         self._set_phase(3 if self.rename_after else 2)
         out_path = os.path.join(self.assets_dir, CALLOUTS_CSV)
         self._log(f"Writing {CALLOUTS_CSV}...", "info")
+        # A run over a folder named before (Auto-name now, PAD-460) skips the
+        # files that already carry a name, so keep what the last run wrote
+        # about them; this run's rows win for the files it did transcribe.
+        rows = _keep_earlier_rows(self.assets_dir, rows)
         # folder + file split into their own columns and a numeric seconds
         # column (both plain sort keys in Excel — a tester: the combined
         # path drowned the filename, and the play length was only findable
@@ -380,9 +391,9 @@ class TranscribePipeline(BasePipeline):
                 f"marked 'error' in the CSV — they keep their original "
                 f"names. Almost always this is memory: close other heavy "
                 f"programs (a second copy of this app extracting at the same "
-                f"time will do it) and run Auto-name call-outs again on this "
-                f"folder. Settings ⚙ → Voice recognition quality "
-                f"→ a smaller model also needs less.")
+                f"time will do it) and press Auto-name now on the Extract "
+                f"tab to name the rest. A lower Voice recognition quality "
+                f"there also needs less.")
         self._log("Done.", "success")
         self._done(True,
             f"Transcribed {speech_count} speech sample(s); "
@@ -468,8 +479,7 @@ class TranscribePipeline(BasePipeline):
                 f"{self.model_size!r}: {err}\n\n"
                 f"Check your internet connection and try again — the "
                 f"model is downloaded once and cached. (Settings ⚙ → "
-                f"Voice recognition quality → Clear downloaded voice "
-                f"models resets the cache.)")
+                f"Clear downloaded voice models resets the cache.)")
 
     def _load_model(self):
         """Construct the single in-process WhisperModel (serial path) from
@@ -505,8 +515,8 @@ class TranscribePipeline(BasePipeline):
                     f"{e}\n\n"
                     f"The cached model may be incomplete or corrupt. Delete\n"
                     f"  {where}\n"
-                    f"(or use Settings ⚙ → Voice recognition quality → "
-                    f"Clear downloaded voice models) then try again with "
+                    f"(or use Settings ⚙ → Clear downloaded voice "
+                    f"models) then try again with "
                     f"internet available — the model is downloaded once "
                     f"and cached.")
 
@@ -948,6 +958,36 @@ def _heal_whisper_cache(model_size):
     return None
 
 
+def _keep_earlier_rows(assets_dir, rows):
+    """*rows* plus the rows an earlier ``callouts.csv`` in *assets_dir* holds
+    for files this run did not transcribe (they already carried a name) and
+    that are still there, sorted by path.  *rows* alone when there is no
+    earlier CSV or nothing in it to keep."""
+    path = os.path.join(assets_dir, CALLOUTS_CSV)
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            earlier = list(csv.DictReader(f))
+    except (OSError, ValueError, csv.Error):
+        return rows
+    seen = {rel for rel, _kind, _text in rows}
+    kept = []
+    for r in earlier:
+        fname = (r.get("file") or "").strip()
+        if not fname:
+            continue
+        folder = (r.get("folder") or "").strip()
+        rel = f"{folder}/{fname}" if folder else fname
+        if rel in seen or not os.path.isfile(
+                os.path.join(assets_dir, *rel.split("/"))):
+            continue
+        seen.add(rel)
+        kept.append((rel, r.get("classification") or "",
+                     r.get("text") or ""))
+    if not kept:
+        return rows
+    return sorted(list(rows) + kept, key=lambda r: r[0].lower())
+
+
 def _wav_seconds(path):
     """Play length of *path* in seconds (float), or None if unreadable."""
     import wave
@@ -982,6 +1022,16 @@ def _find_wavs(root):
                 found.append(os.path.join(dirpath, fn))
     found.sort()
     return found
+
+
+def _has_named_wavs(root):
+    """True if *root* holds a decode ``.wav`` that already carries a name (the
+    files :func:`_find_wavs` leaves out)."""
+    for _dirpath, _, filenames in os.walk(root):
+        for fn in filenames:
+            if not fn.startswith(".") and _NAMED_DECODE_RE.match(fn):
+                return True
+    return False
 
 
 # Characters not allowed in Windows filenames + the path separators that

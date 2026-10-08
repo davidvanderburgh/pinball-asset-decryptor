@@ -99,8 +99,8 @@ def test_stern_eras_keep_the_menu(tmp_path):
 
 
 def test_menu_choices():
-    """The gear menu's cascades: the voice models the transcriber knows,
-    and the update intervals the run logic normalises to."""
+    """The voice models the transcriber knows (the Extract tab's picker),
+    and the gear menu's update intervals the run logic normalises to."""
     from pinball_decryptor.core.transcribe import _MODEL_APPROX_MB
     from pinball_decryptor.webui import update_interval as ui
     from pinball_decryptor.webui.tabs import shell_extras as sx
@@ -119,8 +119,9 @@ def test_menu_choices():
 # ---------------------------------------------------------- gear menu
 def test_gear_menu_keeps_the_tk_cascades(tmp_path):
     """_build_settings_menu's order and cascades: Check automatically ▸,
-    Logs ▸, Voice recognition quality ▸ and the prerequisites summary ▸;
-    the plain entries stay top-level."""
+    Logs ▸ and the prerequisites summary ▸; the plain entries stay
+    top-level.  The voice recognition quality moved to the Extract tab
+    (PAD-460), and clearing the downloaded models stays here."""
     import sys
     with web_app(tmp_path, mfr="stern") as w:
         top = w.state("shell")["settings_items"]
@@ -131,7 +132,7 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
         if sys.platform == "win32":
             want.append("disk_space")
         want += ["Logs ▸", "toggle_scenes_own_colours", "sep",
-                 "Voice recognition quality ▸", "sep",
+                 "clear_voice_models", "sep",
                  "Prerequisites ▸", "sep", "preview_features",
                  "view_disclaimer"]
         assert shape == want
@@ -144,11 +145,9 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
         logs = cascade(w, "Logs")["submenu"]
         assert [it["id"] for it in logs] == [
             "log_history", "project_log", "toggle_log_history"]
-        vq = cascade(w, "Voice recognition quality")["submenu"]
-        assert [it.get("id") or "sep" for it in vq] == [
-            "voice_quality", "voice_quality", "voice_quality", "sep",
-            "clear_voice_models"]
-        assert vq[-1]["needs_idle"]
+        assert cascade(w, "Voice recognition quality") is None
+        assert item(w, "voice_quality") is None
+        assert item(w, "clear_voice_models")["needs_idle"]
         pre = cascade(w, "Prerequisites")
         assert pre["prereq_summary"]            # the page shows the summary
         ids = [it["id"] for it in pre["submenu"]]
@@ -174,10 +173,13 @@ def test_update_interval_and_voice_quality(tmp_path):
         assert settings_of(tmp_path)["update_check_hours"] == 1
         assert item(w, "update_interval", args=[1])["checked"]
         assert not item(w, "update_interval", args=[24])["checked"]
+        # the Extract tab's picker (PAD-460) goes through the same action
         w.call("ui.settings_action", "voice_quality", "medium.en")
         assert win.voice_quality_var.get() == "medium.en"
         assert settings_of(tmp_path)["voice_quality"] == "medium.en"
-        assert item(w, "voice_quality", args=["medium.en"])["checked"]
+        assert w.state("shellx")["voice_quality"] == "medium.en"
+        assert [c["value"] for c in w.state("shellx")["voice_choices"]] == [
+            "tiny.en", "small.en", "medium.en"]
 
 
 def test_update_check_busy_label(tmp_path):

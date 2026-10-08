@@ -464,7 +464,9 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         is `mov r0, #<its first record id>`, and on Guardians 1.15 / Aerosmith 1.16 every id is the older build's
         + 4 (Guardians LE 1.15's first run "passed" naming Super Scoring for a Headphone Hurryup it started) -
         route_transfer16.py shifts them; nothing lands until a run names the mode it started. chain58 re-runs the
-        failures, chain59 re-runs Guardians LE first.
+        failures, chain59 re-runs Guardians LE first. James Bond Pro PASSED with James Bond LE's flags (flag 141 set
+        by Bullshit Scoring's start): landed (19512b3f) with `st3/land_route.py <key> <SET> "<evidence>"`, which
+        copies that build's route block from st3/ports16 into its port and adds the proven-set entry.
       - Rush LE's clip is under its centre song video (its port lacks the clip frame hand-over lines - a full-screen
         clip is drawn from the tick); Star Wars LE's path/hero choice stayed through two switch presses (round 5:
         PRE_WAIT=15).

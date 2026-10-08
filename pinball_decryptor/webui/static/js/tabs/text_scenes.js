@@ -583,6 +583,21 @@ function inPoly(pts, x, y) {
   return inside;
 }
 
+// PAD-447 (DragonRR): a click whose mouse jiggles a pixel or two picks a picture or a line of
+// text without moving it.  A press moves, resizes or scales nothing until the pointer has gone
+// DRAG_SLOP px on the screen from where it went down; from then on it follows the pointer from
+// that spot, so what was grabbed stays under it.  *d* is the drag from the press (sx, sy: where
+// it went down on the screen; x0, y0: in stage units), (sx, sy) the pointer on the screen and
+// (x, y) in stage units; the same *d* back means it has not started.
+export const DRAG_SLOP = 5;
+export function dragTo(d, sx, sy, x, y) {
+  if (!d.go && Math.hypot(sx - d.sx, sy - d.sy) < DRAG_SLOP) return d;
+  if (d.mode === "move") return { ...d, go: true, dx: x - d.x0, dy: y - d.y0 };
+  // a text's box: the corner picked moves as the pointer does (it was only near the pointer)
+  if (d.mode === "box") return { ...d, go: true, x: d.mx + x - d.x0, y: d.my + y - d.y0 };
+  return { ...d, go: true, f: Math.max(0.05, Math.hypot(x - d.cx, y - d.cy) / d.d0) };
+}
+
 function TreeTop({ s, onMenu }) {
   const [view, setView] = useState("layers");
   return html`<div class="scenes-top">
@@ -1133,16 +1148,19 @@ function TreeCanvas({ s }) {
     flushNudge();
     const [x, y] = toStage(e);
     box.current.setPointerCapture(e.pointerId);
+    const at = { sx: e.clientX, sy: e.clientY, x0: x, y0: y };      // where it went down (PAD-447)
     if (corner(x, y) && p.kind === "Text") {
       // the corner across from the one picked stays put
-      const fx = Math.abs(x - selBox.x) < Math.abs(x - (selBox.x + selBox.w)) ? selBox.x + selBox.w : selBox.x;
-      const fy = Math.abs(y - selBox.y) < Math.abs(y - (selBox.y + selBox.h)) ? selBox.y + selBox.h : selBox.y;
-      setDrag({ mode: "box", node: p.id, fx, fy, x, y, x0: x, y0: y });
+      const left = Math.abs(x - selBox.x) < Math.abs(x - (selBox.x + selBox.w));
+      const top = Math.abs(y - selBox.y) < Math.abs(y - (selBox.y + selBox.h));
+      const fx = left ? selBox.x + selBox.w : selBox.x, fy = top ? selBox.y + selBox.h : selBox.y;
+      const mx = left ? selBox.x : selBox.x + selBox.w, my = top ? selBox.y : selBox.y + selBox.h;
+      setDrag({ mode: "box", node: p.id, fx, fy, mx, my, x: mx, y: my, ...at });
       return;
     }
     if (corner(x, y)) {
       const cx0 = selBox.x + selBox.w / 2, cy0 = selBox.y + selBox.h / 2;
-      setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1 });
+      setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1, ...at });
       return;
     }
     const h = pick(x, y);
@@ -1152,24 +1170,22 @@ function TreeCanvas({ s }) {
     // a picture already in a selection of several drags them all
     const ids = multi && sels.includes(h.id) ? sels : [h.id];
     if (!p || (ids.length === 1 && h.id !== p.id)) call("text_scenes.tree_select", h.id);
-    setDrag({ mode: "move", id: keyOf(ids), ids, x0: x, y0: y, dx: 0, dy: 0 });
+    setDrag({ mode: "move", id: keyOf(ids), ids, dx: 0, dy: 0, ...at });
   };
   const move = (e) => {
     const [x, y] = toStage(e);
     if (!drag) { const h = pick(x, y); setHover(h ? h.id : null); return; }
-    if (drag.mode === "move") setDrag({ ...drag, dx: x - drag.x0, dy: y - drag.y0 });
-    else if (drag.mode === "box") setDrag({ ...drag, x, y });
-    else setDrag({ ...drag, f: Math.max(0.05, Math.hypot(x - drag.cx, y - drag.cy) / drag.d0) });
+    setDrag((q) => q && dragTo(q, e.clientX, e.clientY, x, y));
   };
   const up = () => {
     const d = drag;
     setDrag(null);
-    if (!d) return;
+    if (!d || !d.go) return;                  // a click (PAD-447): it picked, it moves nothing
     if (d.mode === "move" && Math.abs(d.dx) + Math.abs(d.dy) >= 1) {
       const dx = Math.round(d.dx), dy = Math.round(d.dy);
       send(d.ids, { m: "move", dx, dy }, () => moveCall(d.ids, dx, dy));
     }
-    if (d.mode === "box" && Math.abs(d.x - d.x0) + Math.abs(d.y - d.y0) >= 1) {
+    if (d.mode === "box" && Math.abs(d.x - d.mx) + Math.abs(d.y - d.my) >= 1) {
       const b = boxOf(d);
       const r = { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) };
       setBoxPend({ node: d.node, box: r, rev: t.rev || 0 });

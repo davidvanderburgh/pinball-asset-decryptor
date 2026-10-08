@@ -417,6 +417,36 @@ def save(project, slug, program):
     return src
 
 
+def refresh(project):
+    """Every blocks mode's C brought up to what its blocks make NOW, before a build compiles it: the C is written
+    only when the blocks are saved, so a mode saved by an older app kept that app's translation (PAD-457: the claim
+    of the game's mini-wizards a mode hands out). Only a C that differs is written; the blocks are not touched, and
+    one that cannot be read is left for the build to report. Returns the slugs written."""
+    from . import code_modes as CM
+    out = []
+    for slug in CM.code_slugs(project) if project else []:
+        if not is_blocks(project, slug):
+            continue
+        try:
+            program = load(project, slug)
+            text = to_c(program, slug)
+        except Exception:                               # noqa: BLE001 - never a build broken by this
+            continue
+        folder = MP.mode_folder(project, slug)
+        src = os.path.join(folder, slug + ".c")
+        try:
+            with open(src, "r", encoding="utf-8") as f:
+                if f.read() == text:
+                    continue
+        except OSError:
+            pass
+        if program["hud"]["on"]:
+            _copy_kit(folder)
+        _write(src, text)
+        out.append(slug)
+    return out
+
+
 def _write(path, text):
     with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
@@ -1154,6 +1184,7 @@ class _Gen:
         self.mech = False               # PAD-395: a block holds or lets go of something (the helpers go in)
         self.game_show = False          # PAD-418: a block plays one of the game's own light shows
         self.game_wizard = False        # PAD-436: a block hands the player one of the game's own mini-wizards
+        self.wizard_names = []          # PAD-457: ... which ones: the mode claims them as it loads
 
     def var(self, i, p="P()"):
         """Variable ``i`` of player ``p``, as C: its own row, or the shared global."""
@@ -1410,6 +1441,8 @@ class _Gen:
                 name = b.get("name")
                 if name and isinstance(name, str):
                     self.game_wizard = True
+                    if name not in self.wizard_names:
+                        self.wizard_names.append(name)
                     out.append(pad + "game_wizard(%s, %d);" % (_c_str(name), 1 if b.get("how") == "start" else 0))
         return out
 
@@ -1957,6 +1990,8 @@ def to_c(program, slug):
              % len(g.shots))
     if media:
         L.append("    pa_load(&own);")
+    for name in g.wizard_names:                     # PAD-457: the game's own lighting leaves them to this mode
+        L.append("    pm_game_wizard_claim_named(%s);" % _c_str(name))
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
     L.append("")
@@ -2418,9 +2453,10 @@ UNUSED static void game_show(const char *name)
 
 #: PAD-436: the game's own mini-wizard by its port's name (MODE_SDK.md "The game's own mini-wizards")
 _GAME_WIZARD_C = r"""/* PAD-436: one of the game's own mini-wizards, by its port's name: lit for the game's start shot, or started at once
- * (lit instead when the game would not start one now, or while a mode of yours holds the game's modes off). The
- * runtime hands it over in a game, whether this mode runs or not; a game whose port names no such mini-wizard does
- * nothing. Each refusal is a line of the runtime's. */
+ * (lit until the game would start one, or while a mode of yours holds the game's modes off). The runtime hands it
+ * over in a game, whether this mode runs or not; a game whose port names no such mini-wizard does nothing. Each
+ * refusal is a line of the runtime's. The mode claims each one it names as it loads (on_init, PAD-457): the game's
+ * own lighting leaves those to it. */
 UNUSED static void game_wizard(const char *name, int start)
 {
     int r = pm_game_wizard_named(name, start ? PM_WIZARD_START : PM_WIZARD_LIGHT);

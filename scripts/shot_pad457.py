@@ -5,6 +5,7 @@
 The server runs from <repo> (default: this tree) against a scratch settings folder. The project holds FRWL WIZARD
 (From Russia With Love done -> the game's Ahoy Mr. Bond, started at once) and FILM WIZARDS, a blocks mode handing
 over Ahoy Mr. Bond on that film. Shots:
+  <before|after>_modes_handover_note.png FRWL WIZARD's Mode page, the note under the mini-wizard it hands out
   <before|after>_modes_start_tip.png   FRWL WIZARD's Mode page, the pointer on "Start it at once" (its tooltip)
   <before|after>_blocks_wizard_tip.png FILM WIZARDS' blocks, the pointer on the game's mini-wizard block
 """
@@ -100,6 +101,9 @@ def main():
                     time.sleep(2.5)
 
             open_mode("FRWL WIZARD")
+            page.mouse.move(5, 5)
+            time.sleep(1)
+            page.screenshot(path=os.path.join(outdir, "%s_modes_handover_note.png" % which))
             radio = page.get_by_text("Start it at once", exact=True)
             radio.first.scroll_into_view_if_needed()
             radio.first.hover()

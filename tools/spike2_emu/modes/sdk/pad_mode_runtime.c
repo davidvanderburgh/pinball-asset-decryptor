@@ -4907,7 +4907,11 @@ static void shake_arm(void)
  * finished From Russia With Love and the Right ramp gave Duel on the Disco Volante). Until it starts, it is the
  * only one lit and the one selected; what the game lit itself meanwhile is owed, and given back once it has
  * started. A `start` the game would not start then (a film's last part comes from a henchman, villain or Q
- * Branch mode that is still running, and those are in its way) is started the moment the game would, that ball. */
+ * Branch mode that is still running, and those are in its way) is started the moment the game would, that ball.
+ * PAD-457, then: a mini-wizard a mode of the card hands out is THAT mode's. The modes claim theirs when they load
+ * (pm_game_wizard_claim), and the game's own lighting (`site wizard_light`, hooked) leaves a claimed one unlit:
+ * once a part is in all six films, every more of that part lit them all again, so the same owner got the next
+ * one on the Right ramp with no film done. Nothing claimed is owed or given back. */
 #define WIZARDS_MAX 8
 #define WIZ_DUE_MAX 4
 static int wizards_n;
@@ -4921,6 +4925,8 @@ static struct {
     unsigned long tried;              /* n[0]'s last start (pm_ms) */
 } wiz_due[4];
 static unsigned wiz_game;             /* the game the hand-overs belong to (its game_start events) */
+static unsigned wiz_claimed;          /* PAD-457: the ones this card's modes hand out: the game's lighting leaves them */
+static int wiz_light_hooked;          /* ... `site wizard_light` is hooked, so a claim holds */
 
 int pm_game_wizards(void)
 {
@@ -4971,10 +4977,10 @@ static void wizard_pin(unsigned p)
     unsigned *st = (unsigned *)(unsigned long)data("wizard_state"), n = wiz_due[p - 1].n[0];
     unsigned bit = wizard_entry((int)n)[1], extra = st[4 + p - 1] & ~bit;
     if (!extra && (st[4 + p - 1] & bit) && st[p - 1] == n - 1) return;
-    if (extra) {
-        wiz_due[p - 1].owed |= extra;
+    if (extra & ~wiz_claimed) {
+        wiz_due[p - 1].owed |= extra & ~wiz_claimed;
         say("game wizard %u (%s): the game lit 0x%x for player %u as well - those wait until this one has started", n,
-            wizard_name((int)n), extra, p);
+            wizard_name((int)n), extra & ~wiz_claimed, p);
     }
     st[4 + p - 1] = bit;
     st[p - 1] = n - 1;
@@ -4996,7 +5002,7 @@ static void wizard_due_next(unsigned p)
         wizard_pin(p);
         return;
     }
-    back = wiz_due[p - 1].owed & ~st[8 + p - 1];
+    back = wiz_due[p - 1].owed & ~st[8 + p - 1] & ~wiz_claimed;
     wiz_due[p - 1].owed = 0;
     if (!back) return;
     st[4 + p - 1] |= back;
@@ -5125,20 +5131,79 @@ int pm_game_wizard(int n, int how)
     return PM_WIZARD_LIT;
 }
 
-/* by the port's name (`text wizard_name_<n>`, any case) */
-int pm_game_wizard_named(const char *name, int how)
+/* the number of the one the port calls `name` (`text wizard_name_<n>`, any case); 0 = none */
+static int wizard_by_name(const char *name)
 {
     char key[24];
     const char *t;
     int n, k;
-    if (!(can & PM_CAN_GAME_WIZARDS) || !name || !*name) return 0;
-    for (n = 1; n <= wizards_n; n++) {
+    for (n = 1; name && *name && n <= wizards_n; n++) {
         pm_snprintf(key, sizeof key, "wizard_name_%d", n);
         t = pm_port_text(key);
         for (k = 0; t && name[k] && t[k] && (name[k] | 0x20) == (t[k] | 0x20); k++) ;
-        if (t && !name[k] && !t[k]) return pm_game_wizard(n, how);
+        if (t && !name[k] && !t[k]) return n;
     }
+    return 0;
+}
+
+/* by the port's name */
+int pm_game_wizard_named(const char *name, int how)
+{
+    int n;
+    if (!(can & PM_CAN_GAME_WIZARDS) || !name || !*name) return 0;
+    if ((n = wizard_by_name(name)) != 0) return pm_game_wizard(n, how);
     say("game wizard \"%s\": not one of this game's mini-wizards", name);
+    return 0;
+}
+
+/* PAD-457: the game's own lighting (`site wizard_light`: every one not played lit, one of them selected) leaves a
+ * claimed one to its mode. It lights the rest as it would; refused (our copy ran instead) when it would light a
+ * claimed one. Nothing claimed: it runs as it always has. */
+static int wizard_light_veto(unsigned *r)
+{
+    unsigned p = pm_player(), *st, all, mine, keep, k;
+    (void)r;
+    if (!wiz_claimed || p < 1 || p > 4) return 0;
+    st = (unsigned *)(unsigned long)data("wizard_state");
+    all = (1u << wizards_n) - 1u;
+    mine = ~st[8 + p - 1] & all & wiz_claimed;          /* what it would light that a mode here hands out */
+    keep = ~st[8 + p - 1] & all & ~wiz_claimed;
+    if (!mine) return 0;
+    say("game wizards: the game would light 0x%x for player %u - 0x%x of them only this card's modes hand out: left "
+        "unlit%s", mine | keep, p, mine, keep ? ", the others lit" : "");
+    if (!keep) return 1;
+    st[4 + p - 1] |= keep;
+    if (st[p - 1] >= (unsigned)wizards_n || !(keep & (1u << st[p - 1]))) {   /* one of those it lit, selected */
+        for (k = 0; k < (unsigned)wizards_n && !(keep & (1u << k)); k++) ;
+        st[p - 1] = k;
+    }
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    return 1;
+}
+
+int pm_game_wizard_claim(int n)
+{
+    unsigned bit;
+    if (!(can & PM_CAN_GAME_WIZARDS) || n < 1 || n > wizards_n) return 0;
+    if (!wiz_light_hooked) {
+        say("game wizard %d (%s): this game's port names no wizard_light - the game's own lighting lights it too", n,
+            wizard_name(n));
+        return 0;
+    }
+    bit = 1u << (n - 1);
+    if (!(wiz_claimed & bit))
+        say("game wizard %d (%s): handed out by this card's modes only - the game's own lighting leaves it unlit", n,
+            wizard_name(n));
+    wiz_claimed |= bit;
+    return 1;
+}
+
+int pm_game_wizard_claim_named(const char *name)
+{
+    int n;
+    if (!(can & PM_CAN_GAME_WIZARDS) || !name || !*name) return 0;
+    if ((n = wizard_by_name(name)) != 0) return pm_game_wizard_claim(n);
+    say("game wizard \"%s\": not one of this game's mini-wizards - nothing claimed", name);
     return 0;
 }
 
@@ -5173,8 +5238,11 @@ static void wizards_arm(void)
         }
     }
     can |= PM_CAN_GAME_WIZARDS;
-    say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08x, start 0x%08x)", wizards_n,
-        data("wizard_state"), fn("wizard_start"));
+    if (site("wizard_light") && !(wiz_light_hooked = hook_veto(fn("wizard_light"), wizard_light_veto)))
+        say("game wizards: the game's own lighting (0x%08x) could not be hooked - it lights a mode's mini-wizards too",
+            fn("wizard_light"));
+    say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08x, start 0x%08x%s)", wizards_n,
+        data("wizard_state"), fn("wizard_start"), wiz_light_hooked ? ", its own lighting hooked" : "");
 }
 
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN

@@ -293,3 +293,13 @@ text block_name_2       Upper Playfield Orbit Rule
 # PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
 callout ten_seconds       246   # Time is running out!
 callout time_up           248   # Time to- / Time is up for you!
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+site proc_exists      0x0034bd88 0xe30f2b50 0xe3402064
+site proc_create      0x0034b738 0xe30fcb50 0xe340c064
+site proc_sleep       0x0034b888 0xe30f3b50 0xe3403064
+value scoop_event          2
+site scoop_handler         0x00087430 0xe2400002 0xe92d41f0
+data scoop_slot           0x005eac4c

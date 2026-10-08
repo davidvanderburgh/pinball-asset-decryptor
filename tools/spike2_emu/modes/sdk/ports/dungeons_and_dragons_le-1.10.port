@@ -525,3 +525,11 @@ site block_rule_16         0x001e5984 0xe92d4ff0 0xe30758b0  # ctrap::v[43]
 text block_rule_name_16    Trap
 site block_rule_17         0x001f51ec 0xe59012b0 0xe351001e  # ctreasure::v[43]
 text block_rule_name_17    Treasure
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+value scoop_event          2
+site scoop_handler         0x001a2bec 0xe92d4070 0xe30e4236
+data scoop_slot           0x00734588
+value scoop_event_arg      1

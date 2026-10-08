@@ -171,14 +171,16 @@ def test_one_command_per_grab_and_it_is_never_resent():
     assert 'return pm_coil_hold("magnet", ms);' in _lift(src, "int pm_magnet_grab(")
     assert proc.count("magnet_send(") == 1
     # the one send comes after control is taken, and the process gives control back on its way out
-    assert proc.index('fn("coil_take")') < proc.index("magnet_send(") < proc.index('fn("coil_give")')
+    assert proc.index('coil_call(c, "take")') < proc.index("magnet_send(") < proc.rindex('coil_call(c, "give")')
     assert 'fn("proc_sleep"))(1)' in proc                  # a tick at a time, never a busy wait
     assert "magnet_send" not in grab and 'fn("proc_create")' in grab and "coil_procs[c - coils], 0)" in grab
     assert "magnet_send" not in let_go and "c->release = 1;" in let_go   # a request, not a command
     # the powers are the coil object's own (what the game would fire it with), never a number of the mode's
-    for slot in ("coil_virtual(c->obj, 29)", "coil_virtual(c->obj, 30)", "coil_virtual(c->obj, 31)",
-                 "coil_virtual(c->obj, 40)"):
+    # (PAD-420: or, for a coil held by its board address, the port's copy of the game's own hold command)
+    for slot in ("coil_virtual(c->obj, 29)", "coil_virtual(c->obj, 30)", "coil_virtual(c->obj, 31)"):
         assert slot in grab, slot
+    assert "coil_disabled(c)" in grab and "coil_virtual(c->obj, 40)" in _lift(src, "static int coil_disabled(")
+    assert "coil_drive(c, 0), coil_drive(c, 1), coil_drive(c, 2)" in grab
     assert "magnet_send" not in tick                       # the tick only ever asks
     assert re.search(r"#define MAGNET_MAX_MS\s+5000u", src)
 

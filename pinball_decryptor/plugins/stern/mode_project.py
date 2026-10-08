@@ -566,15 +566,47 @@ MAGNET_PROVEN = frozenset({
 def _magnet_shot_name(port):
     """The name of the port's shot the magnet sits at (``value magnet_shot``), or "" when it has none."""
     mask = port["value"].get("magnet_shot", 0) if port else 0
-    return next((name for name, m in port["shot"] if m == mask), "") if mask else ""
+    if not mask:
+        return ""
+    return next((name for name, m in port["shot"] if m == mask), "") or next(   # PAD-420: shots from switches
+        (name for _sw, m, name in port.get("switch", ()) if m == mask), "")
+
+
+#: PAD-420: a coil held by its BOARD ADDRESS (pad_mode_runtime.c "held coils on every generation"): the framework's
+#: coil call and its coil table, the process calls, and per coil `text <name>_drive <node> <coil> <pulse power>
+#: <pulse ms> <hold power>` (the game's own hold command for that coil; an `a<id>` is the operator's adjustment).
+COIL_ROUTE_NEEDS = (("coil_fire", "proc_exists", "proc_create", "proc_sleep"), ("coil_table", "coil_count"),
+                    ("magnet_proc",))
+
+
+def _drive_ok(port, name):
+    """Does the port hold coil `name` by its board address: a parseable `<name>_drive` line and the calls and the
+    coil table the runtime needs for it?"""
+    if not port:
+        return False
+    sites, data, values = COIL_ROUTE_NEEDS
+    words = port["text"].get("%s_drive" % name, "").split()
+    if len(words) != 5 or not all(re.fullmatch(r"a?\d+", w) for w in words) or any(w.startswith("a") for w in words[:2]):
+        return False
+    return (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+            and all(n in port["value"] for n in values))
+
+
+def _magnet_ports(port):
+    """Does the port name the magnet the runtime can hold: Godzilla's ControlCoil route, or by its board address
+    (PAD-420)?"""
+    if not port:
+        return False
+    sites, values, texts = MAGNET_NEEDS
+    route0 = (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
+              and all(port["text"].get(n) for n in texts))
+    return route0 or _drive_ok(port, "magnet")
 
 
 def _magnet_cannot(key, label, port=None):
     """The ``cannot`` entry for holding the ball on the magnet on build ``key``, or () when it can: the port
-    names the magnet's calls, its device, its processes and its shot, and the build is proven."""
-    sites, values, texts = MAGNET_NEEDS
-    if not port or not (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
-                        and all(port["text"].get(n) for n in texts) and _magnet_shot_name(port)):
+    names the magnet's calls, its device or its board address, and its shot, and the build is proven."""
+    if not port or not (_magnet_ports(port) and _magnet_shot_name(port)):
         return (("magnet", "The app has not found how %s drives its magnet, so a mode of yours cannot "
                            "hold the ball on it." % label),)
     if key in MAGNET_PROVEN:
@@ -597,6 +629,11 @@ SCOOP_PROVEN = frozenset({
     "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: no mode, kicked 1782 ms after landing; scoop_hold 4000, 5776 ms (held 4016); the mode stopped 1.5 s in, let go then (2998 ms); no abort
     "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: 1785 / 5770 (held 4016) / let go at the mode's end (2591 ms); a TILT during a 10 s hold ended the ball, the hold let go and the game kicked the ball out, no abort
     "godzilla_pro-1.15",               # PAD-394 2026-10-05 rig 2, the stock card: no mode, kicked 1829 ms after landing; scoop_hold 4000, 5850 ms (held 4016); the mode stopped 3 s into a hold, let go then (the kick 912 ms later); after the mode ended, 1832 ms; no abort
+    "avengers_infinity_le-1.10",       # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): no mode, kicked 1988 ms after landing; scoop_hold 4000, 6003 ms (held 4016); the mode stopped 2.5 s into a hold, kicked 1149 ms later; after the mode, 1986 ms ([coildrive] node 8 coil 7, 200 for 60 ms); no abort
+    "dungeons_and_dragons_le-1.10",    # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): its handler takes the event in its second argument (value scoop_event_arg 1): no mode, 1674 ms; scoop_hold 4000, 5698 ms (held 4016); a mode stop 2.5 s in, kicked 996 ms later; after, 1677 ms ([coildrive] node 8 coil 8, 140 for 60 ms); no abort
+    "guardians_le-1.15",               # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): no mode, 6326 ms (the game's own first landing); scoop_hold 4000, 5701 ms (held 4000); a mode stop 2.5 s in, kicked 1402 ms later; after, 1713 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
+    "iron_maiden_le-1.18",             # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): no mode, 2924 ms; scoop_hold 4000, 6958 ms (held 4000); a mode stop 2.5 s in, kicked 2089 ms later; after, 2928 ms ([coildrive] node 9 coil 8, 255 for 60 ms); no abort
+    "aerosmith_le-1.16",               # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): the game's own first landings settle slowly (5776 ms with no mode); scoop_hold 4000: settled, held 4000, then kicked; a mode stop 2.5 s in, kicked 1311 ms later; after, 1728 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
 })
 
 
@@ -686,10 +723,13 @@ HELD_COILS_PROVEN = frozenset({
 
 
 def _held_coils(port):
-    """The port's held coils besides the magnet, ``((name, label), ...)``: each with its getter and device."""
+    """The port's held coils besides the magnet, ``((name, label), ...)``: each with its getter and device, or
+    (PAD-420) its board address and the game's own hold command."""
     out = []
     for name in (port["text"].get("held_coils", "") if port else "").split():
-        if name != "magnet" and ("%s_get" % name) in port["site"] and port["value"].get("%s_dev" % name):
+        if name == "magnet":
+            continue
+        if _drive_ok(port, name) or (("%s_get" % name) in port["site"] and port["value"].get("%s_dev" % name)):
             out.append((name, port["text"].get("%s_label" % name, name)))
     return tuple(out)
 

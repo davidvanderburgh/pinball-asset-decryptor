@@ -161,16 +161,16 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 |---|---|---|---|---|---|
 | Aerosmith 1.16 | ✓ | no | ✓ | shots | waits for multiballs only |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
-| Aerosmith LE 1.16 | no | no | ✓ | shots | waits for multiballs only |
+| Aerosmith LE 1.16 | no | no | ✓ | shots | scoop, waits for multiballs only |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
-| Avengers: Infinity Quest LE 1.10 | no | ✓ | ✓ | no | never waits |
+| Avengers: Infinity Quest LE 1.10 | no | ✓ | ✓ | no | scoop, never waits |
 | Avengers: Infinity Quest Pro 1.10 | no | ✓ | ✓ | no | never waits |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | never waits |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots |  |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
-| Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | shots | never waits |
+| Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | shots | scoop, never waits |
 | Dungeons & Dragons Pro 1.10 | no | ✓ | ✓ | shots | never waits |
 | Elvira 1.13 | ✓ | no | not yet | shots |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots |  |
@@ -180,9 +180,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Guardians of the Galaxy 1.15 | no | ✓ | ✓ | shots | waits for multiballs only |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
-| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
+| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, waits for multiballs only |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
-| Iron Maiden LE 1.18 | no | ✓ | ✓ | shots | never waits |
+| Iron Maiden LE 1.18 | no | ✓ | ✓ | shots | scoop, never waits |
 | Iron Maiden Pro 1.18 | no | ✓ | ✓ | shots | never waits |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots |  |
 | James Bond 007 Pro 1.06 | no | ✓ | ✓ | shots | waits for multiballs only |

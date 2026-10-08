@@ -66,7 +66,7 @@ def test_the_game_holds_first_and_the_mode_after():
     src = RUNTIME.read_text(encoding="utf-8")
     wrap = _lift(src, "static unsigned scoop_wrap(")
     body = wrap[wrap.index("{"):]
-    assert body.index("scoop.orig(ev, a1, a2, a3)") < body.index("ev != scoop.event")
+    assert body.index("scoop.orig(ev, a1, a2, a3)") < body.index("e != scoop.event")
     assert "return r;" in body                              # the game's own answer, unchanged
     loop = body[body.index("while ("):body.index('fn("proc_sleep"))(1);')]
     for cond in ("!scoop.release", "scoop.hold_ms", "running", "pm_in_game()", "pm_ms() < scoop.until"):

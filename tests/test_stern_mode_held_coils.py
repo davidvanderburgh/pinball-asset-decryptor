@@ -55,7 +55,8 @@ def test_every_held_coil_is_the_magnets_code():
 def test_the_game_wins_for_every_coil():
     src = RUNTIME.read_text(encoding="utf-8")
     busy = _lift(src, "static int coil_game_busy(")
-    assert "c->obj + 44" in busy and "ctl != c->id" in busy                  # a process of the game's controls it
+    assert "c->obj + c->ctl" in busy and "ctl != c->id" in busy              # a process of the game's controls it
+    assert "c->ctl = 44;" in _lift(src, "static void coils_arm(void)")       # +44 on Godzilla's ControlCoil
     assert "c->obj + 36" in busy                                              # the game asked for an on-time
     assert "_procs" in busy                                                   # the game's own processes the port names
     assert "coil_game_busy(c)" in _lift(src, "int pm_coil_hold(")

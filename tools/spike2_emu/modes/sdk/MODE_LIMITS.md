@@ -207,7 +207,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
-| Star Wars LE 1.31 | no | ✓ | ✓ | shots | scoop, mechanisms |
+| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |

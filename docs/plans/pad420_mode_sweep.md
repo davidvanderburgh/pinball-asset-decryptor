@@ -364,6 +364,26 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       gamecheck.sh now waits a giving-back saver out longer each time (60abadb6). chain39 runs Check this game on both
       (jobs/check_job3.sh: fresh NVRAM, balls reset); a pass lands each port (the port into ports/, its recipe, then
       the parts like any new build).
+    * Run 14 landings: held coils on Mandalorian LE/Pro (3 each), Munsters LE/Pro (post, magnet), Star Wars LE
+      (control gates, outlane gate), Star Wars Pro (gates), Stranger Things Pro/LE (left down post, 416 ms - its own
+      longest), Avengers Pro (tower magnet and post), Jurassic Park Pro (3 posts), King Kong Pro (spider pit magnet,
+      river diverter: Godzilla's ControlCoil route from King Kong LE's port, its slot's own NVRAM); the scoop on Led
+      Zeppelin LE/Pro and Star Wars LE/Pro; stack on Avengers LE/Pro, D&D Pro, JP Pro, Rush Pro, Star Wars LE/Pro, Venom
+      Pro. Census now: coils 24 (was 34 at run 12's start), scoop 9 (30), stack 15 (21).
+      c_verdict.py: our commands found from the runtime's "HOLD for" lines; PROVEN = a full hold plus a mode stop's OFF,
+      or a game takeover with no OFF of ours, or nothing more where the coil's own longest is under the 0.7 s stop.
+      scoop_verdict.py: an after-mode landing the game keeps itself (Star Wars: 12.7-15.5 s) passes when the runtime
+      held nothing once the mode had ended; the hold is then weighed against the no-mode kick. JB LE's game keeps a
+      landed ball ~8 s on its own, longer than the 4 s test hold: it needs a 10 s hold run.
+    * Stack, run 14: Mandalorian LE/Pro and John Wick LE start a mode of their own on the first shots that runs on
+      (bounty mission one; a location), so WAITER asked after the taps never started. st3_job.sh now asks for WAITER
+      right after the plunge (what runs from the ball's start is base play), then taps, then starts the game's mode;
+      chain40 re-runs them after media round 3.
+    * Fresh NVRAM: the jobs' `rm -rf .../nv/<title>` (added against a FATAL that was really root-owned NVRAM) and
+      Guided Setup break King Kong Pro (a null listener object at Start: segv 0x79de8 under hook_dispatch) and
+      Metallica (CREDITS 3/4 - coins lost). NOWIPE=1 on a list line keeps the slot's own NVRAM (coil_job_c.sh, coil_job
+      .sh, coil_job_k0.sh, scoop_job3.sh, st3_job.sh); King Kong Pro's coils proved that way. Media round 3 runs
+      without FRESH_NV.
     * Metallica 1.04: its mode mask is right (the probe: 0x0010 in attract, 0x0000 in a game, in_game 1). Its failures
       are elsewhere: after a fresh NVRAM's Guided Setup and reboot the screen reads CREDITS 3/4 - most of the job's
       coins never counted, so Start is ignored (scoop, C coils); and its scoop runs' mode.log stops 8 s in, right after

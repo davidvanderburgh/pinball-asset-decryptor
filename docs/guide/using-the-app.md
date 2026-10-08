@@ -236,6 +236,22 @@ card as new files, so it takes an image build (not a direct SD
 write), and the card gets a small program that does the picking.
 It does nothing else, and the machine still reports its scores to
 Insider Connected.
+**Played in (Stern Spike 2 titles whose modes the app can tell apart,
+such as Godzilla).** The *Played in* column names the battles,
+multiballs and other modes of the game that play each clip, read from
+the card's game program, and the list beside *All / Changed /
+Unchanged* shows one mode's clips only. *Other parts of the game*
+are clips only main play, attract or the select screens use; *Not
+played* clips are ones nothing in the game asks for, so the machine
+never shows them and a replacement there changes nothing. A clip two
+modes share (on Godzilla 1.16: two clips of the Gigan battle and the
+Ghidorah and Gigan tag team, one of Battle vs Megalon and the Megalon
+and Gigan multiball) has a row for each mode: the second row, marked
+with an arrow, says *Same clip as* the first until you choose a
+replacement in it, and then only that mode plays yours. That mode's
+clip goes on the card as a new clip, so it takes an image build (not
+a direct SD write); clear the replacement and the row follows the
+first again.
 
 ## Write tab
 

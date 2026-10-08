@@ -4415,6 +4415,13 @@ class App:
             assets_dir,
             "revert  all staged replacements/edits cleared and every "
             "modified file restored to the extract's original")
+        # PAD-444: a mode's own copy of a clip is a file the project made; it
+        # goes with the record of it (a copy the card already has stays)
+        try:
+            from .plugins.stern import clip_modes
+            clip_modes.remove_copies(assets_dir)
+        except Exception:
+            pass
         self.window.clear_replace_assignments(assets_dir)
         try:
             text_manifest.revert_all(assets_dir)

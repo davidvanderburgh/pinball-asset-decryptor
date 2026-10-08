@@ -164,14 +164,14 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Aerosmith LE 1.16 | no | no | ✓ | shots | scoop, waits for multiballs only |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | no | scoop, mechanisms |
-| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | no | never waits |
+| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | no |  |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | shots | scoop |
-| Dungeons & Dragons Pro 1.10 | no | ✓ | ✓ | shots | scoop, never waits |
+| Dungeons & Dragons Pro 1.10 | no | ✓ | ✓ | shots | scoop |
 | Elvira 1.13 | ✓ | no | not yet | shots |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots |  |
 | Foo Fighters Pro 1.04 | no | ✓ | ✓ | no |  |

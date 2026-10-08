@@ -22,7 +22,8 @@ site resource_get     0x003ddac0 0xe92d43f0 0xe1a04000
 site find_node        0x004adb94 0xe92d4070 0xe24dd008
 site find_text        0x004ad630 0xe92d4070 0xe24dd008
 site set_text         0x0049135c 0xe92d47f0 0xe1a06000
-site video_surface    0x000415b4 0xe304373c 0xe3403062
+# site video_surface: left off (PAD-420) - the game's own getter hands back a demand_loaded bank's surface, which
+# has no clip of ours; this title's clips go in the HUD's grafted Video (item 164, video_bank = hud below)
 site surface_state    0x004a08c0 0xe5900550 0xe2800008
 site player_advance   0x002f4524 0xe2501000 0x012fff1e
 site display_draw     0x00301358 0xe3520001 0x812fff1e

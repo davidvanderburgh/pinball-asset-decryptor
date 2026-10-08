@@ -193,7 +193,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | John Wick Pro 1.02 | no | no | ✓ | no | scoop |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots |  |
-| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | never waits |
+| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots |  |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | King Kong Pro 0.97 | no | ✓ | ✓ | no | never waits |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | mechanisms |

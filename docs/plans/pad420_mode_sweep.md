@@ -244,6 +244,11 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     and drops /dump/mode.start in the same tick; `st3_job.sh` follows item 164's order (WAITER started with nothing
     running and stopped, then the battle and WAITER refused); `st3_verdict.py`. Land a pass with
     `prove_set.py STACK_PROVEN st3/rb/results.tsv "<evidence>"`.
+    Run 9: the first two (Avengers LE/Pro) failed because nothing had scored on the ball yet - the battle's own start
+    was the ball's first score, so the runtime (rightly) took it for the game's base play (a mode running when the
+    ball first scores, plus 2 s, is not counted). st3_job now taps a few playfield switches after the plunge and
+    waits 6 s; Deadpool LE passed at once (Battle Mystique). chain27 re-runs the builds that did not pass once
+    chain26 and the stack batch are done.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

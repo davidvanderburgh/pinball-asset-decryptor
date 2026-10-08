@@ -575,6 +575,20 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - Stranger Things Pro / Venom Pro clips: the clip plays (clip v2) but never shows over the HUD; their HUD
         profiles have no Video class measured, so the graft (Batman's, Metallica's route) is not open to them yet.
         Star Wars LE: the ball-start "choose your path / choose a hero" screen stays up over everything.
+      - **Lights: the LED view, not the runtime.** On John Wick / King Kong Pro light_all missed inserts that a
+        small hold lit (King Kong Pro: light_insert of its 9 shot inserts in magenta 9/9; light_all in cyan 0/9 -
+        neither the colour, the mode's shots nor the cabinet lamp lines). A node-bus trace (`PAD_NB_TRACE=1`,
+        `lights/buscheck.py`) showed our colour ON THE WIRE on all 9 in both light_all windows: holding many inserts
+        makes the game send bulk frames the shim's padled plane does not publish. `lights/busjudge.py` judges from
+        the wire (each frame to nodes 8/9 through leddecode; the windows from the runtime's own hold lines, the same
+        clock; before / 1.5 s after) - the observable item mode-leds proved Godzilla's lights on. All eight left
+        PROVEN and landed (4ed6d076): Avengers LE / Pro, Foo Fighters Pro, John Wick LE / Pro, King Kong Pro,
+        Mandalorian LE / Pro. **Lights and lit shots are yellow on no newest build now.**
+      - Batman 1.14 media PROVEN (NOCENSUS: screen, and the clip in its HUD graft) and landed; Deadpool Pro's
+        scoop too (as the LE). Star Wars LE: the flippers drive its ball-start choice but nothing ends it.
+      - Harness, next: TMNT LE's stage A game runs, its stage B boot (same NVRAM) shows CREDITS 10 1/2 and ignores
+        Start (balls the game still counts in the van?); Metallica counts 3 of 8 coins after Guided Setup (coins
+        120 ms closed, 0.7 s apart); Elvira has no game on the direct harness.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

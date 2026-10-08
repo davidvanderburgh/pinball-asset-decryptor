@@ -219,7 +219,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | no | scoop, mechanisms, never waits |
-| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | no | scoop, never waits |
+| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | no | scoop, mechanisms, never waits |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | no | scoop |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots |  |

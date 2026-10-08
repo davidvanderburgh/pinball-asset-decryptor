@@ -7,6 +7,8 @@
 // scene carries, and a size it was not baked at is drawn by the game scaling the nearest one.
 // The line's box stays where it is and its words re-flow in it; sizes and spacings are in
 // pixels on the screen as the line is drawn now (webui/text_scenes_tree.py, tree_text_*).
+// Round 2 (DragonRR): Italic (a slant of the line's own matrix: the fonts have no italic),
+// the letters' width, and the drop shadow's Add / Remove, moved here from Selected.
 
 import { html, Button, Check, Icon, Select, Seg, tip, call, cx } from "../core/ui.js";
 
@@ -32,13 +34,14 @@ const px = (v) => `${Math.round(v * 10) / 10}`;
 const pxList = (sizes) => (sizes.length < 2 ? px(sizes[0] || 0)
   : `${sizes.slice(0, -1).map(px).join(", ")} and ${px(sizes[sizes.length - 1])}`);
 
-// a number in screen pixels, sent when it is committed (Enter, leaving the box, the arrows)
-function Num({ label, value, onCommit, title, step = 1 }) {
+// a number (screen pixels unless *unit* says), sent when it is committed (Enter, leaving
+// the box, the arrows)
+function Num({ label, value, onCommit, title, step = 1, unit = "px" }) {
   return html`<label class="fnt-num" ...${tip(title)}>
     <span class="lbl">${label}</span>
     <div class="field sm"><input type="number" step=${step} value=${value ?? ""}
       onChange=${(e) => { if (e.target.value !== "") onCommit(e.target.value); }} /></div>
-    <span class="small muted">px</span>
+    <span class="small muted">${unit}</span>
   </label>`;
 }
 
@@ -50,7 +53,7 @@ export function FontBar({ open, setOpen, t }) {
   return html`<div class=${cx("cpd fnt", open && "open")}>
     <button type="button" class="cpd-handle fnt-handle" aria-expanded=${open ? "true" : "false"} aria-controls="fnt-panel"
         aria-label="Font" onClick=${() => setOpen(!open)}
-        ...${tip({ head: "Font", lines: ["The selected line of text's font, size, letter and line spacing, wrapping and alignment, beside the scene."] })}>
+        ...${tip({ head: "Font", lines: ["The selected line of text's font, size, italic, letter width, spacing, wrapping, alignment and drop shadow, beside the scene."] })}>
       <span class="cpd-handle-ico"><${Icon} name="text" /></span>
       <span class="cpd-handle-txt">Font</span>
     </button>
@@ -99,6 +102,20 @@ function FontControls({ p, f }) {
       ${f.fit || f.game_layout ? html`<div class="small muted fnt-note">The words shrink to fit their box, so they are never drawn bigger than it lets them: make the box bigger for bigger words.</div>` : null}
     </div>
     <div class="fnt-sec">
+      <span class="eyebrow">Style</span>
+      <${Check} checked=${f.italic} label="Italic" cls="small"
+        onChange=${(v) => call("text_scenes.tree_text_italic", id, v)}
+        title=${{ head: "Italic", lines: ["Slants the letters, their tops to the right, the way a word processor slants a font that has no italic of its own (Stern's fonts have none).",
+          "The game draws it slanted too. Slant sets how far."] }} />
+      <div class="row fnt-row">
+        <${Num} label="Slant" value=${f.slant} unit="°" onCommit=${(v) => call("text_scenes.tree_text_slant", id, v)}
+          title=${{ head: "Slant", lines: ["How far the letters lean, in degrees: 0 = upright as shipped, 12 = Italic, below 0 leans them left."] }} />
+        <${Num} label="Width" value=${f.width} unit="%" onCommit=${(v) => call("text_scenes.tree_text_width", id, v)}
+          title=${{ head: "Letter width", lines: ["How wide the letters are, % of as shipped: below 100 is narrower (condensed), above wider. Their height stays.",
+            "The box stays where it is: the words re-flow in it."] }} />
+      </div>
+    </div>
+    <div class="fnt-sec">
       <span class="eyebrow">Spacing</span>
       <div class="row fnt-row">
         <${Num} label="Letters" value=${f.letter} onCommit=${(v) => call("text_scenes.tree_text_spacing", id, v, null)}
@@ -139,10 +156,25 @@ function FontControls({ p, f }) {
         <${Button} size="xs" disabled=${p.x == null}
           title="Shrink or grow this text's box to go round its words, with a small border. The words stay where they are."
           onClick=${() => call("text_scenes.tree_fit_text", id)}>Fit box to text<//>
-        <span class="sp"></span>
-        <${Button} size="xs" icon="undo" disabled=${!f.edited}
-          title="Put this line's font, size, spacing, wrapping and alignment back as the game shipped them. Its box and place are kept."
-          onClick=${() => call("text_scenes.tree_text_font_reset", id)}>Font as shipped<//>
       </div>
+    </div>
+    <div class="fnt-sec">
+      <span class="eyebrow">Drop shadow</span>
+      <div class="row fnt-row">
+        <${Button} size="xs" disabled=${(f.shadow || {}).has || (f.shadow || {}).is}
+          title=${(f.shadow || {}).is ? "This is a drop shadow." : (f.shadow || {}).has ? "This line has a drop shadow already."
+            : "A dark copy of this text just beneath it, a few pixels down and right. It is selected after, to move, tint or remove."}
+          onClick=${() => call("text_scenes.tree_shadow", id)}>Add a drop shadow<//>
+        <${Button} size="xs" disabled=${!(f.shadow || {}).has && !(f.shadow || {}).is}
+          title=${(f.shadow || {}).is ? "Take this drop shadow away; its line is selected after."
+            : "Take this line's drop shadow away, with any move or tint you gave it."}
+          onClick=${() => call("text_scenes.tree_shadow_remove", id)}>Remove drop shadow<//>
+      </div>
+    </div>
+    <div class="row fnt-row fnt-foot">
+      <span class="sp"></span>
+      <${Button} size="xs" icon="undo" disabled=${!f.edited}
+        title="Put this line's font, size, style, spacing, wrapping and alignment back as the game shipped them. Its box and place are kept, and so is a drop shadow."
+        onClick=${() => call("text_scenes.tree_text_font_reset", id)}>Font as shipped<//>
     </div>`;
 }

@@ -24,3 +24,4 @@ html.bp-1180 .cpd-shell { --fnt-w: 320px; }
 .fnt-num .field { width: 78px; }
 .fnt-num .lbl { min-width: 44px; }
 .fnt-note { line-height: 1.4; }
+.fnt-foot { padding-top: 10px; border-top: 1px solid var(--line); }

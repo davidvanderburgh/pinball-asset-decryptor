@@ -527,6 +527,25 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         coil is proven (X-Men LE/Pro, Munsters LE/Pro, TMNT Pro) but each also needs the shot its magnet sits at;
         Munsters' and TMNT's magnets have no place on the playfield map and X-Men's nearest switch is 67 px away,
         so their shot has to come from the switch the game's own magnet rule answers.
+      - Later in run 18, all landed: stack on Batman 1.14 (Catwoman's start set flag 51), Stranger Things Pro / LE
+        (Bullshit Scoring: flags 116 + 136), Guardians Pro, X-Men Pro (A Fiery Assault started with its object) -
+        **stack is yellow only on Beatles now** (a song always runs: a game limit). D&D Pro / LE held coils and
+        Mode > Magnet (the bottom right orbit opto, 24.5 px; `magnet/magnet_verdict2.py` allows the board's 10 ms
+        ticks - a 64 ms draw shows as 60 - and a magnet whose own longest ends before the 1 s stop). Venom Pro's
+        top post (ctop_post_device: the same post class code as D&D's). Scoops by their LE TWIN
+        (`scoop/twin.py <src key> <src handler> <dst key>`: same first words, same event jump table, the one data
+        word pointing at it): James Bond Pro (its game keeps a ball ~5 s itself, as the LE) and Aerosmith Pro.
+        King Kong Pro's scoop lines already were its LE's twin - its segv under hook_dispatch is something else.
+      - Magnets by their own classes (static objects: the device at +4, its own grab command): Beatles TopMagnet
+        (device 15, 190 for 1000 ms then 22; TOP MAGNET OPTO 25 px away for Mode > Magnet), Led Zeppelin LE
+        ElectricMagicMagnet (device 17, 255 for 2000 then 64 to 2500 ms; ELECTRIC MAGIC MAGNET OPTO), Aerosmith
+        LE / Pro ToyBoxMagnet (device 17 / 16, 255 for 1000 then 16; the toy box switches). Staged by cgen PRESET,
+        running (chain70, chain73). Rush's TimeMachineMagnet takes its device from its caller (not traced yet).
+      - Not reachable this run: Metallica (its stage already has the loop post's own commands; only the game start
+        fails - credits not counted after Guided Setup), Elvira (no game on the direct harness), TMNT LE (no game
+        after its reboot; its up post / van diverter are not object-driven like D&D's), Jaws Pro (the game never
+        serves a ball on the rig), Rush / Stranger Things Pro / Venom Pro clips (clip v2: the game draws the
+        surface and the frame hand-over needs the player route's sites, never found on these).
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

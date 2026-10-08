@@ -1103,8 +1103,8 @@ TITLE_SCENES = {
     "stranger_things_le-1.13": dict(screen_proven=False, hud="667b28929132f94722c28268ce559de8", bank="a6c50224ebf14f37444b84bb632c1b68", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our clip seen on the glass (magenta 70% clip, 69.5% screen, 0.0% before)
     "sword_of_rage_le-1.19": dict(screen_proven=False, hud="20774409779b6a580c751be1b10f1767", bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
     "sword_of_rage_pro-1.19": dict(screen_proven=False, hud="d21160f53c007b8147a3d1961efc498d", bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
-    "uncanny_xmen_pro-0.98": dict(screen_proven=False, hud="9d96a539bb3e5fda93d0429f3c7845ad", bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
-    "venom_pro-1.07": dict(screen_proven=False, hud="a9f8dc36cc2d7f144dcb00bd3e1adf71", bank="6a9b1862ee06252a137dacc7bb099d78", clip_proven=False),   # PAD-420: measured, not yet seen on the glass
+    "uncanny_xmen_pro-0.98": dict(screen_proven=True, hud="9d96a539bb3e5fda93d0429f3c7845ad", bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 44% clip, 44.0% screen, 0.0% before)
+    "venom_pro-1.07": dict(screen_proven=True, hud="a9f8dc36cc2d7f144dcb00bd3e1adf71", bank="6a9b1862ee06252a137dacc7bb099d78", clip_proven=False),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet
 }
 
 #: Titles whose callouts ran in the emulator but were never HEARD (the rig is always

@@ -223,7 +223,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots |  |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | no | never waits |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots |  |
-| Uncanny X-Men Pro 0.98 | no | ✓ | ✓ | shots | waits for multiballs only |
+| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots |  |
 | Venom Pro 1.07 | no | ✓ | ✓ | shots | never waits |
 

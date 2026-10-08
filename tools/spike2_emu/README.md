@@ -1084,9 +1084,12 @@ control file the audio player polls, and the tab's slider follows it.
 the speaker both run at 1x, so a backlog that reaches `padplay.py` never
 drains by itself: a speaker or a socket that stalls for 20 s and then lets
 its bytes go at once leaves the sound 20 s behind the picture for the rest
-of the run (James Bond LE 1.06 on a tester's Windows 11 machine; on the rig
-the guest wrote exactly 1x through a whole game, so the backlog came from
-downstream). The player now watches the least its queue held over each 2 s
+of the run. A tester's James Bond LE 1.06 (Windows 11) had effects and
+callouts 18-20 s behind the picture. On the rig the game requested and played
+every effect on time, card cached or read off the Windows drive, after a 20 s
+pause and capped at 12% of a core (`modes/sdk/sound_census.c` against the
+`audio.raw` capture), so this queue is the one place found that can hold the
+sound back that far. The player now watches the least its queue held over each 2 s
 window. Above `PAD_AUDIO_MAX_LATE_MS` (default 750; the queue normally rests
 near 200) it drops the oldest audio back to the 350 ms cushion and logs
 `[padplay] queue stayed above N ms for 2 s - skipped M ms to catch up`. The

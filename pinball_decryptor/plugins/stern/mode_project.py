@@ -831,6 +831,7 @@ HELD_COILS_PROVEN = frozenset({
     ("james_bond_60th_le-1.11", "left_gate"),    # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 40 ms then 96 (the game's own), at most 940 ms; held 940 ms to its end; the game's own longest ends before a mode stop could; no abort
     ("james_bond_60th_le-1.11", "right_gate"),   # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 5, 255 for 40 ms then 96 (the game's own), at most 940 ms; held 940 ms to its end; the game's own longest ends before a mode stop could; no abort
     ("john_wick_le-1.02", "diverter"),           # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, a209 for 150 ms then a210 (the game's own, its RampDiverter's; 150 and 16 on the stock card); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("rush_le-1.19", "up_post"),                 # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 6, a171 for 64 ms then a172 (the game's own, its DoubleUpPost's; 255 and 64 on the stock card); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 

@@ -604,3 +604,13 @@ callout time_up           267   # Better luck next time, dude. / Your time is up
 value scoop_event          2
 site scoop_handler         0x000f35bc 0xe2400002 0xe92d4030
 data scoop_slot           0x0b60d968
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x0b67f380
+data coil_table            0x0b687548
+value magnet_proc          13185
+text up_post_label        Up post
+text up_post_drive        8 6 a171 64 a172
+text held_coils            up_post

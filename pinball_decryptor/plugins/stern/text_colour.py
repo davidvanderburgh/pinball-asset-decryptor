@@ -288,7 +288,7 @@ def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
                      "added": True}, **art)
     if data is None:
         from ...core import staged_changes
-        data = staged_changes.load(assets_dir)
+        data = staged_changes.peek(assets_dir)
     if not data.get(cp.STOCK_IMAGES_KEY):
         return dict({"locked": True, "line": True}, **art)
     return dict({"line": True, "on": rel in cp.text_lines_on(assets_dir, data), "own": True,
@@ -328,7 +328,7 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
     if not assets_dir or man is None:
         return [], {}
     if data is None:
-        data = staged_changes.load(assets_dir)
+        data = staged_changes.peek(assets_dir)
     fonts = fonts if fonts is not None else fonts_by_key(assets_dir)
     if record is None:
         record = load_record(assets_dir)

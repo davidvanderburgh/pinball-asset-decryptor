@@ -146,7 +146,9 @@ def _fit_png(im, max_w, max_h, rgb_fn=None):
         bg.alpha_composite(im)
         im = bg
     buf = io.BytesIO()
-    im.save(buf, "PNG")
+    # PAD-464: a preview is shown and dropped: the fastest packing (a third
+    # of the time; the Scenes frames are written the same way)
+    im.save(buf, "PNG", compress_level=1)
     return buf.getvalue()
 
 

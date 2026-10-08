@@ -170,11 +170,11 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
-| Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | shots | scoop, never waits |
+| Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | shots | scoop |
 | Dungeons & Dragons Pro 1.10 | no | ✓ | ✓ | shots | never waits |
 | Elvira 1.13 | ✓ | no | not yet | shots |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots |  |
-| Foo Fighters Pro 1.04 | no | ✓ | ✓ | no | never waits |
+| Foo Fighters Pro 1.04 | no | ✓ | ✓ | no |  |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
@@ -182,8 +182,8 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, waits for multiballs only |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
-| Iron Maiden LE 1.18 | no | ✓ | ✓ | shots | scoop, mechanisms, never waits |
-| Iron Maiden Pro 1.18 | no | ✓ | ✓ | shots | mechanisms, never waits |
+| Iron Maiden LE 1.18 | no | ✓ | ✓ | shots | scoop, mechanisms |
+| Iron Maiden Pro 1.18 | no | ✓ | ✓ | shots | mechanisms |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots |  |
 | James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots |  |

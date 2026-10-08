@@ -190,8 +190,8 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots |  |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
-| John Wick LE 1.02 | no | no | ✓ | no | scoop, never waits |
-| John Wick Pro 1.02 | no | no | ✓ | no | scoop |
+| John Wick LE 1.02 | ✓ | no | ✓ | no | scoop, never waits |
+| John Wick Pro 1.02 | ✓ | no | ✓ | no | scoop |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots |  |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |

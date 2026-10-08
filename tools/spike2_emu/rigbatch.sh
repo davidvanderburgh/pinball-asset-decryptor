@@ -129,7 +129,7 @@ finish() {
         bash "$RIG/riglock.sh" release "$s" "$WHO" --force > /dev/null 2>&1 < /dev/null
     done
     if [ -n "$STAGE" ]; then
-        rm -rf "$STAGE/.partial/$(printf %s "$OUT" | md5sum | cut -c1-12)"   # its own copies in flight only (cardstage.sh)
+        rm -rf "$STAGE/.inflight/$(printf %s "$OUT" | md5sum | cut -c1-12)"   # its own copies in flight only (cardstage.sh)
         bash "$RIG/cardstage.sh" --trim "$STAGE" "$KEEP" >> "$OUT/stage.log" 2>&1 < /dev/null
     fi
 }

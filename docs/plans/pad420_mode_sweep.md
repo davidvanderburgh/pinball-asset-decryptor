@@ -158,8 +158,13 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
 - **In flight at the end of run 6** (detached WSL chains in `C:/tmp/PAD-420`, logs `chainN.log`; each writes a
   rigbatch `results.tsv`; commit passes with `prove_set.py <SET> <results.tsv> "<evidence>"`, then
   `limits_table.py`, the tests, and a commit):
-  - chain10: the media proofs (`media/rb`) once `media/BUILT2` exists (the sets are built by the detached
-    `media/build_all.py` + `build_retry.py`); judge with `media_verdict.py <key>...`, then `scenes_prove.py`.
+  - chain10 (running since 20:39): the media proofs (`media/rb`). Land them with `media_verdict.py <key>...` (clip: the
+    runtime logged our clip played and a clip frame is 25%+ magenta, as a clip plays inside the HUD's frame; screen:
+    logged found, the mode started, magenta while it ran and none before or after), then `scenes_prove.py`, tests,
+    commit. Aerosmith Pro 1.16 landed (frames looked at: the clip's title card and the boxed screen both up).
+  - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
+    `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
+    LE/Pro, Deadpool LE landed.
   - chain13: Munsters Pro multiball with KEEP (`mb/rb4`), Venom Pro multiball, Aerosmith Pro stack (`st/rb3`).
   - chain14 DONE: Check this game passed on all 15 ports that got block lines (`rb_blocks`, check7), the runtime
     logging each title's starts hooked ("block: on - a mode keeps N of the game's modes from starting").

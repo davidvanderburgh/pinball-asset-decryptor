@@ -398,3 +398,17 @@ callout time_up           768   # Time to go kid! / Time's up kid, we gotta get 
 value scoop_event          2
 site scoop_handler         0x001365c8 0xe30a367a 0xe2402002
 data scoop_slot           0x006a77c0
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x00719724
+data coil_table            0x00716310
+value magnet_proc          13185
+text center_ramp_gat_label Center ramp gate
+text diverter_mini_p_label Mini playfield diverter
+text top_up_post_label    Top up post
+text center_ramp_gat_drive 9 5 255 64 128 1564
+text diverter_mini_p_drive 9 6 255 64 64 1564
+text top_up_post_drive    9 8 255 64 128 1564
+text held_coils            center_ramp_gat diverter_mini_p top_up_post

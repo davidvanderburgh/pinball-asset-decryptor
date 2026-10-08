@@ -615,7 +615,9 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - **Jaws Pro 1.02 ships a port** (6364624c): its full check passed (23 of 24 shots, a tilt, three balls, all
         seven events). Jaws LE's three upper-playfield shots are left out (a Pro has no upper playfield). Its inlane
         up posts PROVEN (c884bc9f: Jaws LE's getters found on the Pro by their code, `coils/jawsposts.py`; devices 12
-        and 11). Its media, ball save, multiball, lights and stack runs go through `chain110` / `chain112`.
+        and 11). Then, each on the saved NVRAM: screen and clip (de669c71), stack (the table route, Cast N Catch 1),
+        ball save (4719715c), multiball (9507ec4e), lights and lit shots (492dd26c, the shots on the node bus). **Jaws
+        Pro is yellow only for shows now.**
       - **Elvira 1.13**: ball save PROVEN (4fb29522), its Crypt VUK scoop (a112d7b1), its control gate (273deb67: the
         same 24-virtual ControlGate as James Bond's, its static object at +0x80 of 0x87ed04). Elvira's frame grab
         works: the old note was wrong. Only shows and sound (David's questions) are yellow there now.

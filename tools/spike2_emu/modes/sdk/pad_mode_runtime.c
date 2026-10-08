@@ -6061,6 +6061,7 @@ static void note_thread(const char *what, int *said)
 }
 
 static void events_deliver(void);             /* the events section below */
+static void event_census(void);
 static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
 static void stock_tick(void);             /* item 160 */
@@ -6085,6 +6086,7 @@ static void on_tick(unsigned *r)
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
     sound_swaps_tick();                       /* item 163: swapped carrier keys come back */
     events_deliver();
+    event_census();                           /* PAD-420: `value event_census 1` */
     switches_deliver();
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
@@ -6489,6 +6491,29 @@ static void events_deliver(void)
         while (n--) EACH_MODE(m) if (m->event) { current = m; m->event(id); }
         current = 0;
     }
+}
+
+/* PAD-420, for whoever writes a port (`value event_census 1`): every 2 s, the bus ids the dispatch carried since the
+ * last look and how often - the ids a build's own rules use, where another build's are wrong (Jaws Pro 1.02: its
+ * dispatch ran, none of Jaws LE's named ids ever came). Off unless the port asks. */
+static void event_census(void)
+{
+    static unsigned seen[N_BUS_IDS];
+    static unsigned long next;
+    char line[300];
+    unsigned id, d;
+    int k = 0, n = 0;
+    if (!pm_port_value("event_census", 0) || pm_ms() < next) return;
+    next = pm_ms() + 2000;
+    line[0] = 0;
+    for (id = 0; id < N_BUS_IDS; id++) {
+        d = event_fired[id] - seen[id];
+        seen[id] = event_fired[id];
+        if (!d || k > 240) continue;
+        k += pm_snprintf(line + k, sizeof line - (unsigned)k, " 0x%x+%u", id, d);
+        n++;
+    }
+    if (n) say("event census (in_game %d):%s", pm_in_game(), line);
 }
 
 static void events_arm(void)

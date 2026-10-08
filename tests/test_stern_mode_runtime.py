@@ -410,3 +410,14 @@ def test_stack_no_never_waits_for_the_base_play_a_port_names():
     for key in ("john_wick_le-1.02", "john_wick_pro-1.02"):
         port = open(os.path.join(SDK, "ports", key + ".port"), encoding="utf-8").read()
         assert re.search(r"^text stack_base_names +cmode_location_$", port, re.M), key
+
+
+def test_a_port_can_ask_for_the_bus_ids_its_build_fires():
+    """PAD-420: `value event_census 1` logs, every 2 s, the dispatch's ids since the last look - how a port finds a
+    build's own event ids (Jaws Pro 1.02: its dispatch ran, none of Jaws LE's named ids came). Off unless asked."""
+    src = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    body = src[src.index("static void event_census(void)\n{"):]
+    body = body[:body.index("\n}\n") + 3]
+    assert 'if (!pm_port_value("event_census", 0) || pm_ms() < next) return;' in body
+    assert "d = event_fired[id] - seen[id];" in body
+    assert "event_census();                           /* PAD-420: `value event_census 1` */" in src

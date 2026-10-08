@@ -2046,6 +2046,16 @@ once a hand-over started. Now:
   it translate every blocks mode again first when its blocks now make different C (`block_modes.refresh`), leaving
   the blocks as they are.
 
+Proven in the emulator (2026-10-08, rig 4, the stock James Bond LE 1.06 card, muted): a blocks mode handing each of
+the four films' mini-wizards out (Light it) on its film event, PAD-428's instrument calling the game's collect - a
+henchman in five films, Thunderball's other three parts, then its henchman (that part now in all six films, and the
+film done), the Right ramp, then one more henchman. With main's runtime (v1.151.0) and the C main's translator writes:
+the game lit 0xf, Duel on the Disco Volante was pinned and started, and the runtime lit 0x7 again for player 1 the
+moment it started; the next henchman lit them again. With this runtime and the claiming C: four claims as the mode
+loaded, `the game would light 0xf ... left unlit` at Thunderball's last part, Disco Volante alone lit (0x8), started
+off the ramp (played 0x8, its intro on the glass), lit 0 after it, and `the game would light 0x7 ... left unlit` at
+the next henchman - nothing lit. No abort in either run.
+
 **With a mode of yours that holds the game's modes off.** Ahoy Mr. Bond's start (`block_start_6`) is one a mode of
 yours may refuse (PAD-363). The game's start code goes on after a refused start as if it began: it unlights them all
 and marks it played, so the player would lose it. When the veto refuses a mini-wizard's start, the runtime keeps the

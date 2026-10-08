@@ -699,6 +699,7 @@ SCOOP_PROVEN = frozenset({
     "aerosmith-1.16",                  # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; Aerosmith LE's handler found on the Pro by its code): no mode, kicked 4336 ms after landing; scoop_hold 4000, 5735 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1273 ms later; after the mode, 1700 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
     "batman-1.14",                     # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the Penguin VUK): no mode, kicked 785 ms after landing; scoop_hold 4000, 4840 ms (held 4017); a mode stop 2.5 s into a hold, kicked 262 ms later; after the mode, 782 ms ([coildrive] node 8 coil 6, 255 for 60 ms); no abort
     "deadpool_le-1.16",                # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the Hellhouse eject - the game keeps its first landing ~7.7 s itself): no mode, kicked 7716 ms after landing; scoop_hold 4000, 5293 ms (held 4000); a mode stop 2.5 s into a hold, kicked 781 ms later; after the mode, 1299 ms ([coildrive] node 8 coil 6, 255 for 60 ms); no abort
+    "deadpool_pro-1.16",               # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the Hellhouse eject - the game keeps its first landing ~7.7 s itself): no mode, kicked 7737 ms after landing; scoop_hold 4000, 5337 ms (held 4000); a mode stop 2.5 s into a hold, kicked 935 ms later; after the mode, 1298 ms ([coildrive] node 8 coil 6, 255 for 60 ms); no abort
 })
 
 

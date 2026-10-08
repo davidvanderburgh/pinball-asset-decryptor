@@ -169,7 +169,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Batman 66 1.14 | no | ✓ | ✓ | shots | scoop, mechanisms |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |

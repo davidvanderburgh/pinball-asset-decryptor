@@ -204,6 +204,13 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     [coildrive] lines need `PAD_COIL_PROBE=1` (the coil and scoop jobs export it).
   - `t2/voices_speedup.py` (detached) restarts the transcription with four threads at normal priority once
     RIGS_DONE appears.
+  - The two builds with no port, probes queued after RIGS_DONE (`C:/tmp/PAD-420/jawspro`): chain24 runs
+    `probe_job.sh` on Jaws Pro 1.02 (its candidate port, `clean/jaws_pro-1.02.port`, and `mask_probe.c` logging the
+    mode mask word and player in attract and in a game: "maskprobe:" in run/<key>/mode.log). The mask ADDRESS is
+    right (`coils/masktest.py`: the Pro tests 0x89e53e against #0x210 in the same two places the LE tests
+    0x874d0e), so it is the busy BITS the Pro sets in play; set `value mode_mask_busy` from the probe. chain25 runs
+    `batman_job.sh` on Batman 1.14 (frames after the plunge and each drain, the rig's padball.log, the coil log): the
+    ball never ends on a drain there.
   - Run 8: the transcription no longer waits. `t2/voices_all.py` runs NOW at Windows idle priority, its children too
     (creationflags IDLE_PRIORITY_CLASS) and one whisper thread (`T2_THREADS=1`, voices.py), so the rigs keep the CPU.
     Land each transcribed build with `t2/apply_new.sh`, tests, commit; t2/VOICES_DONE when all are done.

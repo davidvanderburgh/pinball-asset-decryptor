@@ -3645,6 +3645,9 @@ class App:
 
         tags_note = ("" if not res.get("group_tags")
                      else ", %d group name(s)" % res["group_tags"])
+        if res.get("video_variants"):
+            tags_note += (", %d slot(s) with random clips"
+                          % res["video_variants"])
         if res.get("defaults"):
             tags_note += ", %d staged default(s)" % res["defaults"]
         # An earlier transfer of the same mods onto this folder is replaced,
@@ -3728,6 +3731,12 @@ class App:
                         len(a["flagged"]), len(a["dropped"])))
         lines.append("Video:  %d matched, %d dropped"
                      % (len(v["matched"]), len(v["dropped"])))
+        vv = plan.get("video_variants") or {}
+        if vv.get("matched") or vv.get("dropped"):
+            # PAD-446: a slot's random clips go where its replacement would
+            lines.append("Random clips:  %d slot(s) matched, %d dropped"
+                         % (len(vv.get("matched", ())),
+                            len(vv.get("dropped", ()))))
         lines.append("Image:  %d matched, %d dropped"
                      % (len(i["matched"]), len(i["dropped"])))
         lines.append("Text:   %d matched, %d dropped"
@@ -3934,9 +3943,12 @@ class App:
                        % totals["flagged"], "warning")
             res = mod_transfer.apply_transfer(project, ws, plan,
                                               include_flagged=False)
-            return ("%d audio, %d video, %d image, %d text transferred"
+            return ("%d audio, %d video, %d image, %d text transferred%s"
                     % (res["audio"], res["video"], res["image"],
-                       res["text"]))
+                       res["text"],
+                       ("; %d slot(s) with random clips"
+                        % res["video_variants"])
+                       if res.get("video_variants") else ""))
 
         def stage(ws):
             pend_a = self._stage_pending_audio(ws)

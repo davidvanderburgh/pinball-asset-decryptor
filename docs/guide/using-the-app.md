@@ -429,7 +429,10 @@ stock extract, an *optional* clean extract of the old version (fill it
 to also carry audio and text and to avoid mistaking the factory's own
 between-version changes for your mods; leave it empty to compare old
 against new directly for images and video), and the new version's card
-image to build onto. Audio is matched by *sound content* so a
+image to build onto. A video slot's *random clips* (Video tab) go
+with the slot just as its replacement does, and a card that was
+built with random clips gives them back from its extract too.
+Audio is matched by *sound content* so a
 replacement follows its sound even if its index moved, and a slot that
 changed or vanished is flagged rather than silently mis-applied. From
 v0.147.1 that comparison reads each slot's saved pre-edit original, so

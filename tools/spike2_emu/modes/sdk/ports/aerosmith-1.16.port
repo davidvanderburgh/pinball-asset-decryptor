@@ -176,8 +176,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  11ce95fe13add22617598c5e7afbcc0f8356be9b
 
 # ---- callouts and text ----
-callout ten_seconds         241
-callout time_up             243
 text example_start_shot     Aerosmit(h) target
 text mode_records_name_1   Super Scoring
 text mode_records_name_2   Double Scoring
@@ -305,3 +303,7 @@ site block_start_0      0x000fa5d0 0xe92d4038 0xe3a000f3
 text block_name_0       Super Scoring
 site block_start_1      0x0003b6d4 0xe92d4038 0xe3a000f1
 text block_name_1       Double Scoring
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout ten_seconds       246   # Time is running out!
+callout time_up           248   # Time to- / Time is up for you!

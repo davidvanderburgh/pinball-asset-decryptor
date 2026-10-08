@@ -1,9 +1,9 @@
 """PAD-444: which of the game's own modes plays each in-game clip, and a mode's OWN copy of a
 clip it shares with another mode.
 
-DoomWalrus666 (Godzilla retheme): the battle vs Gigan and the Ghidorah and Gigan tag team play
-the same two clips, so whatever footage he puts in them shows in both battles. He asked to see
-the clips of each mode and to point a mode at new footage of its own.
+A field report (Godzilla retheme): the battle vs Gigan and the Ghidorah and Gigan tag team play
+the same two clips, so whatever footage a retheme puts in them shows in both battles. The ask was
+to see the clips of each mode and to point a mode at new footage of its own.
 
 HOW THE GAME PLAYS A CLIP. Every in-game clip is played by NAME (:mod:`.video_bank`): the
 in-game video bank maps a name to a clip file, and the code holds the ADDRESS of the name, a C

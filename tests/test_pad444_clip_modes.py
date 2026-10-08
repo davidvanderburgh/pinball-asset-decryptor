@@ -1,4 +1,4 @@
-"""PAD-444 (DoomWalrus666): which of the game's own modes plays each clip, and a mode's own copy
+"""PAD-444 (a field report): which of the game's own modes plays each clip, and a mode's own copy
 of a clip it shares with another (Godzilla's battle vs Gigan and the Ghidorah and Gigan tag
 team play the same two clips).
 

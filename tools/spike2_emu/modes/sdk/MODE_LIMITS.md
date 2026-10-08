@@ -218,7 +218,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | TMNT LE 1.59 | ✓ | ✓ | not yet | shots | mechanisms |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms |
-| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | mechanisms, waits for multiballs only |
+| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
 | The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |

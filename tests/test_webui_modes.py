@@ -483,7 +483,8 @@ def test_beatles_switch_shots_are_proven_and_its_countdown_heard(tmp_path, previ
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
         st = w.state("modes")
-        assert st["profile"]["label"] == "The Beatles 1.29" and len(st["profile"]["shots"]) == 35
+        # PAD-420: 36 with the Top magnet opto's switch line (Mode > Magnet's shot; its hit started the proof mode)
+        assert st["profile"]["label"] == "The Beatles 1.29" and len(st["profile"]["shots"]) == 36
         assert "shots from switches" not in st["title_note"]      # beatles-1.29 is in SWITCH_SHOTS_PROVEN
         w.call("modes.new")
         st = w.state("modes")
